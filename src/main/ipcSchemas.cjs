@@ -663,6 +663,14 @@ const agentsSavePersona = AgentPersonaSaveSchema;
 const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
+// Background macro job (macroJobIpc.cjs): press a built-in macro as a scheduler PRD inside an existing Epic.
+const macrosDispatchJob = z.object({
+  cwd: z.string().min(1).max(4096),
+  macroId: z.string().min(1).max(128),
+  epicId: z.string().min(1).max(200),
+  extraInstructions: z.string().max(4000).optional(),
+});
+const macrosJobStatus = z.object({ cwd: z.string().min(1).max(4096) });
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
@@ -1406,6 +1414,8 @@ module.exports = {
     macrosSave,
     macrosDelete,
     macrosSetProject,
+    macrosDispatchJob,
+    macrosJobStatus,
     agentsGetPersonaBody,
     agentsResolveModelInfo,
     modelsCatalog,

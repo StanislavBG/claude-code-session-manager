@@ -606,6 +606,16 @@ function broadcastMacrosChanged() {
   sendIfAlive(mainWindow, 'macros:changed', {});
 }
 ipcMain.handle('macros:list', () => macroLibrary.listMacros());
+// Background macro jobs: dispatch a built-in macro as a scheduler PRD inside an existing Epic.
+// createPrd is wired exactly as chat:create-prd (below) so its own reconcile request queues the row.
+require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, {
+  schemas,
+  validatePath: require('./config.cjs').validatePath,
+  readActiveIndex: require('./lib/epic/epicMint.cjs').readActiveIndex,
+  createPrd: (input) => prdCreate.createPrd(input, scheduler.remote),
+  loadJobs: async () => (await require('./lib/scheduler/queueStore.cjs').readMerged()).jobs || [],
+  archivePrd: (slug, cwd) => queueOps.archiveMany([slug], cwd),
+});
 ipcMain.handle('macros:save', validated(schemas.macrosSave, async (payload) => {
   const macro = await macroLibrary.saveMacro(payload);
   broadcastMacrosChanged();

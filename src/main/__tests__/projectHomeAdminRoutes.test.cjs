@@ -20,6 +20,7 @@ const {
   validateHomeHtml,
   validateDemoVideoHtml,
   injectCsp,
+  maxVideoBytes,
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,
@@ -78,37 +79,71 @@ const GOOD_HTML = '<!DOCTYPE html><html><head><style>body{background:url(data:im
 const GOOD_DEMO_VIDEO_HTML = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
   + '<body><canvas id="c"></canvas><script>const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
 
-test('registers exactly two routes: POST /admin/project-home/write and .../demo-video/write', () => {
+test('registers the two library routes and the two aliases', () => {
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
-  expect([...adminHttp.routes.keys()]).toEqual([
-    'POST /admin/project-home/write',
+  expect([...adminHttp.routes.keys()].sort()).toEqual([
     'POST /admin/project-home/demo-video/write',
-  ]);
+    'POST /admin/project-home/pages/write',
+    'POST /admin/project-home/videos/write',
+    'POST /admin/project-home/write',
+  ].sort());
 });
 
-test('valid html is written atomically to project-pages/home.html', async () => {
+const pagesRoot = (cwd) => path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages');
+
+test('/write alias writes knowledge/overview/ (index.html + meta.json)', async () => {
   const cwd = await mkProjectCwd();
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
   const { status, body } = await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: GOOD_HTML } });
   expect(status).toBe(200);
   expect(body.ok).toBe(true);
-  const target = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'home.html');
-  expect(body.path).toBe(target);
-  expect(fs.readFileSync(target, 'utf8')).toBe(GOOD_HTML);
-  // no per-lens / summary / manifest side files
-  expect(fs.readdirSync(path.dirname(target))).toEqual(['home.html']);
+  const dir = path.join(pagesRoot(cwd), 'knowledge', 'overview');
+  expect(body.path).toBe(path.join(dir, 'index.html'));
+  expect(typeof body.bytes).toBe('number');
+  expect(fs.readFileSync(body.path, 'utf8')).toBe(GOOD_HTML);
+  expect(fs.readdirSync(dir).sort()).toEqual(['index.html', 'meta.json']);
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+  expect(meta).toMatchObject({ id: 'overview', title: 'Overview', topic: 'overview' });
+  expect(Number.isNaN(Date.parse(meta.createdAt))).toBe(false);
 });
 
-test('a second write replaces the first', async () => {
+test('a second /write replaces the overview page only', async () => {
   const cwd = await mkProjectCwd();
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
+  await adminHttp.call('POST', '/admin/project-home/pages/write', { body: { cwd, pageId: 'other', title: 'Other', html: '<p>keep</p>' } });
   await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>one</p>' } });
   await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>two</p>' } });
-  const target = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'home.html');
-  expect(fs.readFileSync(target, 'utf8')).toBe('<p>two</p>');
+  const root = path.join(pagesRoot(cwd), 'knowledge');
+  expect(fs.readFileSync(path.join(root, 'overview', 'index.html'), 'utf8')).toBe('<p>two</p>');
+  expect(fs.readFileSync(path.join(root, 'other', 'index.html'), 'utf8')).toBe('<p>keep</p>');
+  expect(fs.readdirSync(root).sort()).toEqual(['other', 'overview']);
+});
+
+test('pages/write writes knowledge/<pageId>/ and rejects bad ids, schema and remote refs', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const route = '/admin/project-home/pages/write';
+  const ok = await adminHttp.call('POST', route, { body: { cwd, pageId: 'arch-notes', title: 'Arch', topic: 't', html: GOOD_HTML } });
+  expect(ok.status).toBe(200);
+  const dir = path.join(pagesRoot(cwd), 'knowledge', 'arch-notes');
+  expect(ok.body.path).toBe(path.join(dir, 'index.html'));
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'))).toMatchObject({ id: 'arch-notes', title: 'Arch', topic: 't' });
+  for (const bad of [
+    { pageId: '_character' },
+    { pageId: 'Bad Id' },
+    { pageId: '../x' },
+    { title: '' },
+    { extra: 1 },
+    { html: '<script src="x.js"></script>' },
+  ]) {
+    const r = await adminHttp.call('POST', route, { body: { cwd, pageId: 'p1', title: 'T', html: '<p>x</p>', ...bad } });
+    expect(r.status).toBe(400);
+  }
+  expect(fs.readdirSync(path.join(pagesRoot(cwd), 'knowledge')).sort()).toEqual(['arch-notes']);
 });
 
 test.each([
@@ -179,37 +214,115 @@ test('bad JSON, missing/relative cwd, non-project cwd, and unknown keys are 400s
   expect(res.body.error).toContain('not a Session Manager project');
 });
 
-test('one-file contract: project-pages holds exactly home.html after one write and after a regenerate', async () => {
-  const cwd = await mkProjectCwd();
-  const adminHttp = makeFakeAdminHttp();
-  registerAdminRoute(adminHttp);
-  const pagesDir = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages');
-  await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>first</p>' } });
-  expect(fs.readdirSync(pagesDir)).toEqual(['home.html']);
-  await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>second, different</p>' } });
-  expect(fs.readdirSync(pagesDir)).toEqual(['home.html']);
-  expect(fs.readFileSync(path.join(pagesDir, 'home.html'), 'utf8')).toBe('<p>second, different</p>');
-});
-
 // ───────────────────────────────── POST /admin/project-home/demo-video/write
 
-test('valid demo-video html is written atomically to project-pages/demo-video/index.html with the CSP injected, home.html untouched', async () => {
+const videoMeta = (over = {}) => ({
+  style: 'plain',
+  character: null,
+  sources: [],
+  report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [] },
+  macroVersion: 1,
+  seedVersion: 1,
+  model: 'm',
+  effort: 'low',
+  title: 'T',
+  kind: 'project-demo',
+  lengthS: 15,
+  ...over,
+});
+const videoBody = (cwd, over = {}) => ({ cwd, videoId: 'my-vid', title: 'My video', kind: 'project-demo', lengthS: 15, html: GOOD_DEMO_VIDEO_HTML, meta: videoMeta(), ...over });
+const durHtml = (n) => `<html><head><meta name="sm-demo-duration" content="${n}"></head><body>x</body></html>`;
+
+test('demo-video alias adds a new videos/vid-*/ entry with CSP + bridge; two calls leave two entries; overview untouched', async () => {
   const cwd = await mkProjectCwd();
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
   await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: GOOD_HTML } });
 
-  const { status, body } = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html: GOOD_DEMO_VIDEO_HTML } });
-  expect(status).toBe(200);
-  expect(body.ok).toBe(true);
-
-  const target = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'demo-video', 'index.html');
-  expect(body.path).toBe(target);
-  const written = fs.readFileSync(target, 'utf8');
+  const r1 = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html: GOOD_DEMO_VIDEO_HTML } });
+  const r2 = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html: GOOD_DEMO_VIDEO_HTML } });
+  expect(r1.status).toBe(200);
+  expect(r1.body.ok).toBe(true);
+  expect(typeof r1.body.path).toBe('string');
+  expect(typeof r1.body.bytes).toBe('number');
+  const vids = fs.readdirSync(path.join(pagesRoot(cwd), 'videos'));
+  expect(vids).toHaveLength(2);
+  for (const v of vids) expect(v).toMatch(/^vid-[a-z0-9]+$/);
+  const dir = path.dirname(r1.body.path);
+  expect(fs.readdirSync(dir).sort()).toEqual(['index.html', 'meta.json']);
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+  expect(meta).toMatchObject({ kind: 'project-demo', lengthS: 15, id: path.basename(dir) });
+  expect(meta.report.bytes).toBe(r1.body.bytes);
+  const written = fs.readFileSync(r1.body.path, 'utf8');
   expect(written.startsWith(`<!DOCTYPE html>${DEMO_VIDEO_CSP}`)).toBe(true);
+  expect(written).toContain('data-sm-player-bridge');
+  expect(fs.readFileSync(path.join(pagesRoot(cwd), 'knowledge', 'overview', 'index.html'), 'utf8')).toBe(GOOD_HTML);
+});
 
-  const homeTarget = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'home.html');
-  expect(fs.readFileSync(homeTarget, 'utf8')).toBe(GOOD_HTML);
+test('videos/write saves HTML with the CSP and the bridge, stamps id/createdAt/bytes, and replaces only that entry', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const route = '/admin/project-home/videos/write';
+  const a = await adminHttp.call('POST', route, { body: videoBody(cwd) });
+  expect(a.status).toBe(200);
+  await adminHttp.call('POST', route, { body: videoBody(cwd, { videoId: 'other-vid' }) });
+  const dir = path.join(pagesRoot(cwd), 'videos', 'my-vid');
+  expect(a.body.path).toBe(path.join(dir, 'index.html'));
+  const html = fs.readFileSync(a.body.path, 'utf8');
+  expect(html.startsWith(`<!DOCTYPE html>${DEMO_VIDEO_CSP}`)).toBe(true);
+  expect(html).toContain('data-sm-player-bridge');
+  expect(html.indexOf(DEMO_VIDEO_CSP)).toBeLessThan(html.indexOf('data-sm-player-bridge'));
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+  expect(meta).toMatchObject({ id: 'my-vid', title: 'My video', kind: 'project-demo', lengthS: 15 });
+  expect(meta.report.bytes).toBe(Buffer.byteLength(html, 'utf8'));
+  expect(Number.isNaN(Date.parse(meta.createdAt))).toBe(false);
+
+  const again = await adminHttp.call('POST', route, { body: videoBody(cwd, { title: 'Renamed' }) });
+  expect(again.status).toBe(200);
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')).title).toBe('Renamed');
+  expect(fs.readdirSync(path.join(pagesRoot(cwd), 'videos')).sort()).toEqual(['my-vid', 'other-vid']);
+});
+
+test('videos/write rejects schema errors, bad ids, duration mismatch and network APIs with 400', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const route = '/admin/project-home/videos/write';
+  for (const over of [
+    { videoId: '_character' },
+    { videoId: 'Bad' },
+    { kind: 'nope' },
+    { lengthS: 4 },
+    { lengthS: 61 },
+    { extra: 1 },
+    { lengthS: 20 }, // html declares 15
+    { html: GOOD_DEMO_VIDEO_HTML.replace('ctx.fillRect', 'fetch("/x");ctx.fillRect') },
+  ]) {
+    const r = await adminHttp.call('POST', route, { body: videoBody(cwd, over) });
+    expect(r.status).toBe(400);
+    expect(r.body.ok).toBe(false);
+  }
+  expect(fs.existsSync(path.join(pagesRoot(cwd), 'videos'))).toBe(false);
+});
+
+test('video size cap scales with length: 4 MiB at 60 s, 2 MiB at 30 s', async () => {
+  expect(maxVideoBytes(30)).toBe(2 * 1024 * 1024);
+  expect(maxVideoBytes(60)).toBe(4 * 1024 * 1024);
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const route = '/admin/project-home/videos/write';
+  const pad = (n, len) => durHtml(n).replace('x</body>', `<!--${'a'.repeat(len)}--></body>`);
+  const big = pad(60, 3 * 1024 * 1024);
+  const ok = await adminHttp.call('POST', route, { body: videoBody(cwd, { lengthS: 60, html: big }) });
+  expect(ok.status).toBe(200);
+  const tooBig30 = await adminHttp.call('POST', route, { body: videoBody(cwd, { videoId: 'v30', lengthS: 30, html: pad(30, 3 * 1024 * 1024) }) });
+  expect(tooBig30.status).toBe(400);
+  expect(tooBig30.body.error).toContain('limit');
+  const tooBig60 = await adminHttp.call('POST', route, { body: videoBody(cwd, { videoId: 'v60', lengthS: 60, html: pad(60, 4 * 1024 * 1024) }) });
+  expect(tooBig60.status).toBe(400);
+  expect(tooBig60.body.error).toContain('limit');
 });
 
 test('injectCsp always puts the CSP meta first after a fresh doctype, replacing any existing CSP meta and leading doctype', () => {
@@ -263,11 +376,11 @@ test.each([
   expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'project-pages', 'demo-video'))).toBe(false);
 });
 
-test('rejects demo-video html over 2MB', async () => {
+test('rejects a 30 s demo-video html over 2MB', async () => {
   const cwd = await mkProjectCwd();
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
-  const html = 'a'.repeat(MAX_DEMO_VIDEO_BYTES + 1);
+  const html = durHtml(30).replace('x</body>', `<!--${'a'.repeat(MAX_DEMO_VIDEO_BYTES)}--></body>`);
   const { status, body } = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html } });
   expect(status).toBe(400);
   expect(body.error).toContain('limit');

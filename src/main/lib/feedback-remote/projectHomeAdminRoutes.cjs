@@ -1,9 +1,10 @@
 /**
- * projectHomeAdminRoutes.cjs — the two admin routes behind the
- * project_home_write MCP tool and its demo-video sibling:
- *   POST /admin/project-home/write              {cwd, html} -> project-pages/home.html
- *   POST /admin/project-home/demo-video/write   {cwd, html} -> project-pages/demo-video/index.html
- * both owned by writer 'project-home' (see opsOwnership.cjs). Registered
+ * projectHomeAdminRoutes.cjs — admin routes behind Project Home's library:
+ *   POST /admin/project-home/pages/write        -> project-pages/knowledge/<pageId>/{index.html,meta.json}
+ *   POST /admin/project-home/videos/write       -> project-pages/videos/<videoId>/{index.html,meta.json}
+ *   POST /admin/project-home/write              alias: {cwd, html} -> knowledge/overview/
+ *   POST /admin/project-home/demo-video/write   alias: {cwd, html} -> a new videos/vid-<id>/ project-demo entry
+ * all owned by writer 'project-home' (see opsOwnership.cjs). Registered
  * against the same injected localAdminHttp.cjs transport as
  * prdAdminRoutes.cjs.
  *
@@ -22,11 +23,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
-const { schemas } = require('../../ipcSchemas.cjs');
+const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
+const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 
 const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
@@ -87,9 +90,9 @@ function validateHomeHtml(html) {
 }
 
 /** -> null when `html` is acceptable, else a human-readable rejection reason. */
-function validateDemoVideoHtml(html) {
+function validateDemoVideoHtml(html, maxBytes = MAX_DEMO_VIDEO_BYTES) {
   if (typeof html !== 'string' || html.trim().length === 0) return 'html must be a non-empty string';
-  if (Buffer.byteLength(html, 'utf8') > MAX_DEMO_VIDEO_BYTES) return `html exceeds the ${MAX_DEMO_VIDEO_BYTES}-byte limit`;
+  if (Buffer.byteLength(html, 'utf8') > maxBytes) return `html exceeds the ${maxBytes}-byte limit`;
   for (const { re, message } of REMOTE_REFERENCE_CHECKS) {
     if (re.test(html)) return `html must be self-contained: ${message}`;
   }
@@ -162,19 +165,20 @@ function resolveCwd(rawCwd) {
 }
 
 /**
- * Builds a POST handler shared by both routes: read+parse the body, validate
- * against `schema`, resolve cwd, run `validate(html)`, optionally `transform`
- * the html (CSP injection), then write it atomically as writer 'project-home'.
+ * Builds a POST handler shared by every route: read+parse the body, validate
+ * against `schema`, resolve cwd, then `build(input)` -> {error} | {dir, html,
+ * meta}. The entry folder gets index.html then meta.json, both atomically as
+ * writer 'project-home'. Responds {ok, path (index.html), bytes}.
  */
-function makeWriteHandler({ schema, maxBytes, validate, transform, targetPath }) {
+function makeWriteHandler({ schema, bodyLimit, build }) {
   return async (req, res) => {
-    // Allow headroom over maxBytes for JSON escaping; the html byte limit
-    // itself is enforced by `validate` below.
+    // Headroom over the html limit for JSON escaping; the html byte limit
+    // itself is enforced by `build`.
     let raw;
     try {
-      raw = await readBody(req, maxBytes * 2 + 4096);
+      raw = await readBody(req, bodyLimit * 2 + 4096);
     } catch (e) {
-      sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'} (html limit is ${maxBytes} bytes)` });
+      sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'} (html limit is ${bodyLimit} bytes)` });
       return;
     }
     let body;
@@ -196,42 +200,123 @@ function makeWriteHandler({ schema, maxBytes, validate, transform, targetPath })
       sendJson(res, resolved.status, { ok: false, error: resolved.error });
       return;
     }
-    const rejection = validate(input.html);
-    if (rejection) {
-      sendJson(res, 400, { ok: false, error: rejection });
+    const built = build(input);
+    if (built.error) {
+      sendJson(res, 400, { ok: false, error: built.error });
       return;
     }
     // Only a route that is actually about to write widens config.cjs's
     // write boundary to this project root.
     config.addAllowedRoot(resolved.cwd);
-    const finalHtml = transform ? transform(input.html) : input.html;
     try {
-      const abs = targetPath(resolved.cwd);
-      await fs.promises.mkdir(path.dirname(abs), { recursive: true });
-      await config.writeTextAtomic(abs, finalHtml, { writer: 'project-home' });
-      sendJson(res, 200, { ok: true, path: abs, bytes: Buffer.byteLength(finalHtml, 'utf8') });
+      const dir = opsPath(resolved.cwd, 'project-pages', ...built.dirParts);
+      await fs.promises.mkdir(dir, { recursive: true });
+      const abs = path.join(dir, 'index.html');
+      await config.writeTextAtomic(abs, built.html, { writer: 'project-home' });
+      await config.writeTextAtomic(path.join(dir, 'meta.json'), JSON.stringify(built.meta, null, 2) + '\n', { writer: 'project-home' });
+      sendJson(res, 200, { ok: true, path: abs, bytes: Buffer.byteLength(built.html, 'utf8'), id: built.meta.id });
     } catch (e) {
       sendJson(res, 500, { ok: false, error: e?.message ?? 'write failed' });
     }
   };
 }
 
+/** Size cap for a video of `lengthS` seconds: 2 MiB per started 30 s. */
+function maxVideoBytes(lengthS) {
+  return Math.ceil(lengthS / 30) * MAX_DEMO_VIDEO_BYTES;
+}
+
+function buildPage(input, { pageId, title, topic }) {
+  if (!ENTRY_ID_RE.test(pageId)) return { error: 'invalid pageId' };
+  const rejection = validateHomeHtml(input.html);
+  if (rejection) return { error: rejection };
+  return {
+    dirParts: ['knowledge', pageId],
+    html: input.html,
+    meta: schemas.projectPageMeta.parse({ id: pageId, title, topic, createdAt: new Date().toISOString(), model: '' }),
+  };
+}
+
+/** Shared video path. `meta` is the full video meta minus id/createdAt/report.bytes. */
+function buildVideo(input, { videoId, title, kind, lengthS, meta }) {
+  if (!ENTRY_ID_RE.test(videoId)) return { error: 'invalid videoId' };
+  const cap = maxVideoBytes(lengthS);
+  const rejection = validateDemoVideoHtml(input.html, cap);
+  if (rejection) return { error: rejection };
+  const declared = Number(input.html.match(DURATION_META_RE)[1]);
+  if (declared !== lengthS) return { error: `sm-demo-duration (${declared}) must equal lengthS (${lengthS})` };
+  const html = injectPlayerBridge(injectCsp(input.html));
+  const bytes = Buffer.byteLength(html, 'utf8');
+  return {
+    dirParts: ['videos', videoId],
+    html,
+    meta: schemas.projectVideoMeta.parse({
+      ...meta,
+      id: videoId,
+      title,
+      kind,
+      lengthS,
+      createdAt: new Date().toISOString(),
+      report: { ...meta.report, bytes },
+    }),
+  };
+}
+
+function newVideoId() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(3);
+  let rnd = '';
+  for (const b of bytes) rnd += alphabet[b % alphabet.length];
+  return `vid-${Date.now().toString(36)}${rnd}`;
+}
+
 function registerAdminRoute(adminHttp) {
-  // POST /admin/project-home/write {cwd, html}
-  adminHttp.registerRoute('POST', '/admin/project-home/write', makeWriteHandler({
-    schema: schemas.projectHomeAdminWriteBody,
-    maxBytes: MAX_HTML_BYTES,
-    validate: validateHomeHtml,
-    targetPath: (cwd) => opsPath(cwd, 'project-pages', 'home.html'),
+  // POST /admin/project-home/pages/write {cwd, pageId, title, topic?, html}
+  adminHttp.registerRoute('POST', '/admin/project-home/pages/write', makeWriteHandler({
+    schema: schemas.projectPageAdminWriteBody,
+    bodyLimit: MAX_HTML_BYTES,
+    build: (i) => buildPage(i, { pageId: i.pageId, title: i.title, topic: i.topic ?? '' }),
   }));
 
-  // POST /admin/project-home/demo-video/write {cwd, html}
+  // POST /admin/project-home/videos/write {cwd, videoId, title, kind, lengthS, html, meta}
+  adminHttp.registerRoute('POST', '/admin/project-home/videos/write', makeWriteHandler({
+    schema: schemas.projectVideoAdminWriteBody,
+    bodyLimit: maxVideoBytes(MAX_DEMO_DURATION_S),
+    build: (i) => buildVideo(i, i),
+  }));
+
+  // Alias: POST /admin/project-home/write {cwd, html} -> knowledge/overview/
+  adminHttp.registerRoute('POST', '/admin/project-home/write', makeWriteHandler({
+    schema: schemas.projectHomeAdminWriteBody,
+    bodyLimit: MAX_HTML_BYTES,
+    build: (i) => buildPage(i, { pageId: 'overview', title: 'Overview', topic: 'overview' }),
+  }));
+
+  // Alias: POST /admin/project-home/demo-video/write {cwd, html} -> a NEW videos/vid-*/ entry
   adminHttp.registerRoute('POST', '/admin/project-home/demo-video/write', makeWriteHandler({
     schema: schemas.projectDemoVideoAdminWriteBody,
-    maxBytes: MAX_DEMO_VIDEO_BYTES,
-    validate: validateDemoVideoHtml,
-    transform: injectCsp,
-    targetPath: (cwd) => opsPath(cwd, 'project-pages', 'demo-video', 'index.html'),
+    bodyLimit: maxVideoBytes(MAX_DEMO_DURATION_S),
+    build: (i) => {
+      const rejection = validateDemoVideoHtml(i.html, maxVideoBytes(MAX_DEMO_DURATION_S));
+      if (rejection) return { error: rejection };
+      const lengthS = Number(i.html.match(DURATION_META_RE)[1]);
+      return buildVideo(i, {
+        videoId: newVideoId(),
+        title: 'Demo video',
+        kind: 'project-demo',
+        lengthS,
+        meta: {
+          style: '',
+          character: null,
+          sources: [],
+          report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [] },
+          macroVersion: 0,
+          seedVersion: 0,
+          model: '',
+          effort: '',
+        },
+      });
+    },
   }));
 }
 
@@ -240,6 +325,7 @@ module.exports = {
   validateHomeHtml,
   validateDemoVideoHtml,
   injectCsp,
+  maxVideoBytes,
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,

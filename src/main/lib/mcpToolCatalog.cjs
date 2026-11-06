@@ -305,22 +305,64 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'project_home_write',
     group: 'project-home',
-    purpose: "Write this project's Project Home page — ONE self-contained HTML document — to "
+    purpose: "ALIAS of project_page_write for the Overview page: write this project's Project Home Overview page — ONE self-contained HTML document — to "
       + "session-manager-operations/project-pages/home.html via the session-manager app's admin API. "
-      + 'The only write path for Project Home.',
-    whenToUse: 'Use when asked to generate or refresh the project home page. Compose the whole page yourself '
-      + '(inline <style>/<script>, data: URIs for assets) from what is really true about the project, then '
+      + 'Prefer project_page_write for any new knowledge page.',
+    whenToUse: 'Use when asked to generate or refresh the project home Overview page. Compose the whole page yourself '
+      + '(inline <style> only — scripts never run in a page; data: URIs for assets) from what is really true about the project, then '
       + 'pass the full document as `html`.',
     whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
-      + 'document must be self-contained: the call is rejected for empty input, more than 1MB, any '
+      + 'document must be self-contained and script-free: the call is rejected for empty input, more than 1MB, any '
       + '<script src>, <link href="http…">, @import, or url(http…) — no network egress.',
-    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', html: '<!DOCTYPE html><html><body><h1>Example</h1></body></html>' },
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', html: '<!DOCTYPE html><html><head><style>body{font:16px sans-serif}</style></head><body><h1>Example</h1></body></html>' },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
+  },
+  {
+    name: 'project_page_write',
+    group: 'project-home',
+    purpose: "Write one knowledge page for this project's Project Home — ONE self-contained HTML document identified by `pageId` — "
+      + "via the session-manager app's admin API. Writing an existing pageId replaces that page.",
+    whenToUse: 'Use when asked to document a topic of the project as a page (architecture, how-to, status). Compose the whole page yourself '
+      + 'with inline <style> only — scripts never run in a page — from what is really true about the project, then pass it as `html` '
+      + 'or, for a large document, write it to a local .html file and pass its absolute path as `htmlPath`.',
+    whenNotToUse: 'Never fabricate content. Do not use for videos — use project_video_write. The call is rejected for empty input, more than 1MB, '
+      + 'any <script src>, <link href="http…">, @import, or url(http…) — no network egress.',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      pageId: 'architecture',
+      title: 'Architecture',
+      topic: 'How the app is put together',
+      html: '<!DOCTYPE html><html><head><style>body{font:16px sans-serif}</style></head><body><h1>Architecture</h1></body></html>',
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB read limit).',
+  },
+  {
+    name: 'project_video_write',
+    group: 'project-home',
+    purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "
+      + "via the session-manager app's admin API. Writing an existing videoId replaces that video.",
+    whenToUse: 'Use when asked to make a project video (demo, marketing). Compose the whole document yourself (inline <style>/<script>, '
+      + 'data: URIs for assets, CSS/JS-driven animation) from what is really true about the project, declare `kind` and `lengthS`, '
+      + 'then pass the document as `html` or — preferred when it embeds a base64 audio/image data URI — as an absolute `htmlPath`.',
+    whenNotToUse: 'Never fabricate content. Do not use for static knowledge pages — use project_page_write. The document must be self-contained '
+      + 'and non-network-capable: the call is rejected for empty input, more than 2MB, remote references, or network-capable APIs.',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      videoId: 'demo-30s',
+      title: 'Product demo',
+      kind: 'project-demo',
+      lengthS: 30,
+      html: '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="30"></head><body><h1>Example</h1></body></html>',
+      meta: {},
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB).',
   },
   {
     name: 'project_demo_video_write',
     group: 'project-home',
-    purpose: "Write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — to "
+    purpose: "ALIAS of project_video_write that adds a project-demo video: write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — to "
       + "session-manager-operations/project-pages/demo-video/index.html via the session-manager app's admin API. "
       + 'The only write path for the demo video.',
     whenToUse: 'Use when asked to generate or refresh the demo video. Compose the whole document yourself '

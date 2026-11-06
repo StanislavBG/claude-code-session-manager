@@ -13,6 +13,8 @@
  *
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
  *   project_demo_video_write({ cwd?, html? | htmlPath? }) -> POST /admin/project-home/demo-video/write
+ *   project_page_write({ cwd?, pageId, title, topic?, html? | htmlPath? }) -> POST /admin/project-home/pages/write
+ *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
  *   macro_save({ cwd?, id?, label, agentName, tag, prompt }) -> POST /admin/macros/save
@@ -72,6 +74,16 @@ async function readDemoVideoHtmlFile(p) {
   } catch (err) {
     return { error: `cannot read htmlPath: ${err && err.code ? err.code : 'read failed'}` };
   }
+}
+
+/** Resolves exactly one of html / htmlPath into { html } or { error }. */
+async function resolveHtmlArg(args) {
+  const hasHtml = !!args && args.html !== undefined && args.html !== null && args.html !== '';
+  const hasPath = !!args && args.htmlPath !== undefined && args.htmlPath !== null && args.htmlPath !== '';
+  if (hasHtml === hasPath) return { error: 'provide exactly one of html or htmlPath' };
+  if (hasPath) return readDemoVideoHtmlFile(args.htmlPath);
+  if (typeof args.html !== 'string') return { error: 'missing required argument: html' };
+  return { html: args.html };
 }
 
 function errorResult(text) {
@@ -477,7 +489,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
-        html: { type: 'string', description: 'The complete self-contained HTML document (<= 1MB; no <script src>, <link href=http*>, @import, or url(http*)).' },
+        html: { type: 'string', description: 'The complete self-contained HTML document (<= 1MB; inline <style> only — scripts never run in a page; no <script src>, <link href=http*>, @import, or url(http*)).' },
       },
       required: ['html'],
     },
@@ -503,6 +515,40 @@ const TOOLS = [
             + 'Prefer this when the document embeds a base64 narration/image data URI — the server reads the file, so the large payload never passes through the model. Give exactly one of html / htmlPath.',
         },
       },
+    },
+  },
+  {
+    name: 'project_page_write',
+    description: descriptionFor('project_page_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        pageId: { type: 'string', description: 'Stable id (kebab-case) of the knowledge page; writing the same id replaces that page.' },
+        title: { type: 'string', description: 'Human title shown in the page list.' },
+        topic: { type: 'string', description: 'Optional: one-line topic/summary of the page.' },
+        html: { type: 'string', description: 'The complete self-contained HTML document (<= 1MB). Inline <style> only; scripts never run in a page. No <script src>, <link href=http*>, @import, or url(http*).' },
+        htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (same rules as html). Give exactly one of html / htmlPath.' },
+      },
+      required: ['pageId', 'title'],
+    },
+  },
+  {
+    name: 'project_video_write',
+    description: descriptionFor('project_video_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        videoId: { type: 'string', description: 'Stable id (kebab-case) of the video; writing the same id replaces that video.' },
+        title: { type: 'string', description: 'Human title shown in the video list.' },
+        kind: { type: 'string', description: 'What the video is, e.g. project-demo or marketing.' },
+        lengthS: { type: 'number', description: 'Length of the video in seconds.' },
+        html: { type: 'string', description: 'The complete self-contained HTML/JS video document (<= 2MB; no remote references or network-capable APIs).' },
+        htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (<= 2MB). Prefer this for base64 data URIs. Give exactly one of html / htmlPath.' },
+        meta: { type: 'object', description: 'Optional: free-form metadata object stored with the video.' },
+      },
+      required: ['videoId', 'title', 'kind', 'lengthS'],
     },
   },
   {
@@ -874,6 +920,31 @@ async function handleCallTool(request) {
       }
       const cwd = resolveCwdArg(args);
       const result = await adminRequest('POST', '/admin/project-home/demo-video/write', { cwd, html });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_page_write') {
+      if (!args || typeof args.pageId !== 'string' || !args.pageId || typeof args.title !== 'string' || !args.title) {
+        return errorResult('missing required arguments: pageId, title');
+      }
+      const loaded = await resolveHtmlArg(args);
+      if (loaded.error) return errorResult(loaded.error);
+      const cwd = resolveCwdArg(args);
+      const body = { cwd, pageId: args.pageId, title: args.title, html: loaded.html };
+      if (typeof args.topic === 'string' && args.topic) body.topic = args.topic;
+      const result = await adminRequest('POST', '/admin/project-home/pages/write', body);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_video_write') {
+      if (!args || typeof args.videoId !== 'string' || !args.videoId || typeof args.title !== 'string' || !args.title
+        || typeof args.kind !== 'string' || !args.kind || typeof args.lengthS !== 'number' || !Number.isFinite(args.lengthS)) {
+        return errorResult('missing required arguments: videoId, title, kind, lengthS');
+      }
+      const loaded = await resolveHtmlArg(args);
+      if (loaded.error) return errorResult(loaded.error);
+      const cwd = resolveCwdArg(args);
+      const body = { cwd, videoId: args.videoId, title: args.title, kind: args.kind, lengthS: args.lengthS, html: loaded.html };
+      if (args.meta && typeof args.meta === 'object') body.meta = args.meta;
+      const result = await adminRequest('POST', '/admin/project-home/videos/write', body);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_list') {

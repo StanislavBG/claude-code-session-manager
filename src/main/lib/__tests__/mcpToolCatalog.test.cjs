@@ -78,8 +78,25 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
   expect(composeDescription(entry).length).toBeGreaterThan(0);
 });
 
-test('project-home group is project_home_write and project_demo_video_write', () => {
-  expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual(['project_home_write', 'project_demo_video_write']);
+test('project-home group lists the page/video tools and the two aliases', () => {
+  expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
+    'project_home_write', 'project_page_write', 'project_video_write', 'project_demo_video_write',
+  ]);
+});
+
+test('aliases say so and no page text invites <script>', () => {
+  const entry = (n) => MCP_TOOL_CATALOG.find((x) => x.name === n);
+  const textOf = (n) => composeDescription(entry(n));
+  expect(textOf('project_home_write')).toMatch(/ALIAS of project_page_write.*Overview page/);
+  expect(textOf('project_demo_video_write')).toMatch(/ALIAS of project_video_write.*adds a project-demo video/);
+  for (const n of ['project_home_write', 'project_page_write']) {
+    expect(textOf(n)).toContain('inline <style> only');
+    expect(textOf(n)).toContain('scripts never run');
+    expect(textOf(n)).not.toMatch(/<style>\/<script>/);
+    expect(textOf(n).replace(/<script src>/g, '')).not.toContain('<script');
+  }
+  expect(entry('project_page_write').exampleArgs).toHaveProperty('pageId');
+  expect(entry('project_video_write').exampleArgs).toHaveProperty('lengthS');
 });
 
 test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-another-project', () => {

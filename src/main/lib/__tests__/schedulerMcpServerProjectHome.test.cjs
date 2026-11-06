@@ -329,3 +329,81 @@ test('project_demo_video_write rejects an htmlPath over 2MB', async () => {
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toContain('exceeds');
 });
+
+test('project_page_write and project_video_write are listed with catalog descriptions and required fields', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const page = TOOLS.find((t) => t.name === 'project_page_write');
+  const video = TOOLS.find((t) => t.name === 'project_video_write');
+  expect(page.inputSchema.required).toEqual(['pageId', 'title']);
+  expect(video.inputSchema.required).toEqual(['videoId', 'title', 'kind', 'lengthS']);
+  for (const [tool, name] of [[page, 'project_page_write'], [video, 'project_video_write']]) {
+    expect(tool.inputSchema.properties.htmlPath.type).toBe('string');
+    expect(tool.description).toBe(composeDescription(MCP_TOOL_CATALOG.find((e) => e.name === name)));
+  }
+  expect(page.inputSchema.properties.html.description).toContain('scripts never run');
+  expect(video.inputSchema.properties.meta).toBeTruthy();
+  // aliases still present
+  expect(TOOLS.find((t) => t.name === 'project_home_write')).toBeTruthy();
+  expect(TOOLS.find((t) => t.name === 'project_demo_video_write')).toBeTruthy();
+});
+
+test('project_page_write posts to /admin/project-home/pages/write, reading htmlPath via the shared helper', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const dir = await mkTmp();
+  const file = path.join(dir, 'p.html');
+  await fsp.writeFile(file, '<p>é</p>', 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  let r = await callTool(handleCallTool, 'project_page_write', { cwd: '/proj', pageId: 'arch', title: 'Arch', topic: 't', html: '<p>x</p>' });
+  expect(r.isError).toBeFalsy();
+  r = await callTool(handleCallTool, 'project_page_write', { cwd: '/proj', pageId: 'arch', title: 'Arch', htmlPath: file });
+  expect(r.isError).toBeFalsy();
+  expect(requests.map((q) => q.url)).toEqual(['/admin/project-home/pages/write', '/admin/project-home/pages/write']);
+  expect(requests[0].body).toEqual({ cwd: '/proj', pageId: 'arch', title: 'Arch', topic: 't', html: '<p>x</p>' });
+  expect(requests[1].body).toEqual({ cwd: '/proj', pageId: 'arch', title: 'Arch', html: '<p>é</p>' });
+});
+
+test('project_page_write rejects missing fields and bad html/htmlPath without calling the admin API', async () => {
+  const homeDir = await mkTmp();
+  const { server, requests } = await startFakeAdminServer('t', { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token: 't' });
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  for (const args of [{ title: 'x', html: '<p/>' }, { pageId: 'a', html: '<p/>' }, { pageId: 'a', title: 'x' },
+    { pageId: 'a', title: 'x', html: '<p/>', htmlPath: '/a.html' }, { pageId: 'a', title: 'x', htmlPath: 'rel.html' }]) {
+    const r = await callTool(handleCallTool, 'project_page_write', args);
+    expect(r.isError).toBe(true);
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('project_video_write posts to /admin/project-home/videos/write with meta and htmlPath support', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const dir = await mkTmp();
+  const file = path.join(dir, 'v.html');
+  await fsp.writeFile(file, '<p>v</p>', 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const base = { cwd: '/proj', videoId: 'demo', title: 'Demo', kind: 'project-demo', lengthS: 30, meta: { a: 1 } };
+  let r = await callTool(handleCallTool, 'project_video_write', { ...base, html: '<p>x</p>' });
+  expect(r.isError).toBeFalsy();
+  r = await callTool(handleCallTool, 'project_video_write', { ...base, htmlPath: file });
+  expect(r.isError).toBeFalsy();
+  expect(requests.map((q) => q.url)).toEqual(['/admin/project-home/videos/write', '/admin/project-home/videos/write']);
+  expect(requests[0].body).toEqual({ ...base, html: '<p>x</p>' });
+  expect(requests[1].body).toEqual({ ...base, html: '<p>v</p>' });
+  for (const bad of [{ lengthS: 'x' }, { kind: '' }, { videoId: undefined }]) {
+    const e = await callTool(handleCallTool, 'project_video_write', { ...base, html: '<p>x</p>', ...bad });
+    expect(e.isError).toBe(true);
+  }
+  expect(requests).toHaveLength(2);
+});

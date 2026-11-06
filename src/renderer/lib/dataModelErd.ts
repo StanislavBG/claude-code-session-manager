@@ -700,12 +700,12 @@ export const ERD_ENTITIES: ErdEntity[] = [
     name: 'ProjectPagesOutput',
     group: 'brief',
     store: {
-      path: '<cwd>/session-manager-operations/project-pages/ (home.html)',
+      path: '<cwd>/session-manager-operations/project-pages/ (knowledge/<id>/, videos/<id>/, videos/_character/)',
       format: 'directory',
       writer: 'project-home',
-      definedIn: 'project_home_write MCP tool (src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs)',
+      definedIn: 'src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs (pages, videos and character routes)',
     },
-    summary: 'One self-contained overview page, written only via project_home_write.',
+    summary: 'The Project Home library: Knowledge Pages and Video Pages, each a folder holding index.html + meta.json.',
     fields: [
       { name: 'html', type: 'string | null' },
       { name: 'mtimeMs', type: 'number | null' },

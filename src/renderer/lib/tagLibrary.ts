@@ -65,7 +65,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     tag: 'project-home-builder',
     label: 'Project Home Builder',
     description:
-      'Reads a project and writes its one-page Project Home overview (home.html) via the project-home-builder local agent and the project_home_write tool. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
+      'Reads a project and writes Knowledge Pages for its Project Home via the project-home-builder local agent and the project_page_write tool (project_home_write for the Overview). Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
     developsVia: 'project-home-builder agent protocol (not /develop)',
   },

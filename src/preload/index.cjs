@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('app:reboot-session', listener);
       return () => ipcRenderer.removeListener('app:reboot-session', listener);
     },
+    onOpenFreeHour: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('app:open-free-hour', listener);
+      return () => ipcRenderer.removeListener('app:open-free-hour', listener);
+    },
   },
   pty: {
     spawn: (payload) => ipcRenderer.invoke('pty:spawn', payload),

@@ -1850,6 +1850,7 @@ export interface SessionManagerAPI {
     installSelfScheduleGuard: (cwd: string) => Promise<InstallGuardResult>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
+    onOpenFreeHour: (handler: () => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;
   };
   pty: {

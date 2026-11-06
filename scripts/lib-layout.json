@@ -1,4 +1,5 @@
 {
+  "demoVideoKitChecks": "demo-video-kit",
   "activeIndexMerge": "epic",
   "activeIndexRebuild": "epic",
   "adoptedRunSupervisor": "scheduler",

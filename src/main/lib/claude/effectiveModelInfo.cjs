@@ -281,23 +281,33 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     personaEffort: null,
     personaEffortSource: null,
   };
-  if (!cwd || !agentType) return miss;
+  if (!cwd) return miss;
 
   try {
     const { projectRootOf } = deps.activeSessions || require('../activeSessions.cjs');
     const normalizedCwd = projectRootOf(path.resolve(cwd));
     if (!normalizedCwd) return miss;
 
-    const { modelAlias, modelSource, provenance: personaProvenance } = await resolvePersonaModelAlias(normalizedCwd, agentType, deps);
-    const { effort: personaEffort, source: personaEffortSource } = (deps.agentEffortResolve || require('./agentEffortResolve.cjs'))
+    let { modelAlias, modelSource, provenance: personaProvenance } = agentType
+      ? await resolvePersonaModelAlias(normalizedCwd, agentType, deps)
+      : { modelAlias: null, modelSource: 'fallback', provenance: {} };
+    if (!modelAlias) {
+      // No persona model (agentless, inherit or dangling): the launch uses the Claude settings model.
+      const settingsModel = (deps.readSettingsModel || require('./modelCatalog.cjs').readSettingsModel)(normalizedCwd, deps);
+      if (settingsModel) { modelAlias = settingsModel; modelSource = 'settings'; }
+    }
+    const { effort: personaEffort, source: personaEffortSource } = !agentType ? { effort: null, source: null } : (deps.agentEffortResolve || require('./agentEffortResolve.cjs'))
       .resolveEpicEffort({ cwd: normalizedCwd, agentType, deps });
-    const result = { agentType, modelAlias, modelSource, personaProvenance, resolvedModelId: null, resolvedFrom: null, effortEnvReachable, personaEffort, personaEffortSource };
+    const result = { agentType: agentType || null, modelAlias, modelSource, personaProvenance, resolvedModelId: null, resolvedFrom: null, effortEnvReachable, personaEffort, personaEffortSource };
 
     if (isConcreteModelId(modelAlias)) {
       // Already a concrete pinned id — echo it back, fabricate no evidence.
       result.resolvedModelId = modelAlias;
       return result;
     }
+
+    // Agentless: no per-agent evidence to look up (it would match every agentless job).
+    if (!agentType) return result;
 
     // Evidence is never derived via historyAggregator.cjs's resolvePricingKey
     // (which buckets any unknown id to 'sonnet' with estimated:true) —

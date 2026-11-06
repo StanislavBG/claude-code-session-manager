@@ -33,6 +33,7 @@ const os = require('node:os');
 const { splitFrontmatter } = require('../prd/prdFrontmatter.cjs');
 const { readActiveIndex, resolvePersonaPaths } = require('../epic/epicMint.cjs');
 const { resolveMergedPersona, PERSONA_NAME_RE } = require('../persona-macro/personaMerge.cjs');
+const { readSettingsModel } = require('./modelCatalog.cjs');
 const configMgr = require('../../config.cjs');
 const { SHIPPED_PERSONA_SEEDS } = require('../persona-macro/shippedPersonaSeeds.cjs');
 
@@ -170,12 +171,13 @@ function resolveEpicModel({ cwd, claudeSessionId, fallbackModel = FALLBACK_MODEL
     const override = epicOverrideValue(epic, 'model');
     if (override && override !== 'inherit') return override;
     const agentType = epic?.agentType || null;
-    if (!agentType) return fallbackModel;
+    const settingsOrFallback = () => readSettingsModel(cwd, deps) || fallbackModel || FALLBACK_MODEL;
+    if (!agentType) return settingsOrFallback();
     const model = readOverlayAwarePersonaModel(agentType, { ...deps, cwd });
-    if (!model || model === 'inherit') return fallbackModel;
+    if (!model || model === 'inherit') return settingsOrFallback();
     return model;
   } catch {
-    return fallbackModel;
+    return fallbackModel || FALLBACK_MODEL;
   }
 }
 

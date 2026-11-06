@@ -132,6 +132,33 @@ function readAvailableModels(cwd, d, fsImpl) {
   return merged ? [...new Set(merged)] : null;
 }
 
+/**
+ * The `model` key of the user's Claude settings: first non-empty string from
+ * <projectRoot>/.claude/settings.local.json, <projectRoot>/.claude/settings.json,
+ * then ~/.claude/settings.json (local over project over user). Never throws; null when none.
+ */
+function readSettingsModel(cwd, deps = {}) {
+  try {
+    const d = deps || {};
+    const fsImpl = d.fs || fs;
+    const home = d.homeDir ? d.homeDir() : os.homedir();
+    const files = [];
+    if (cwd) {
+      let root;
+      try { root = (d.projectRootOf || require('../activeSessions.cjs').projectRootOf)(path.resolve(cwd)); } catch { root = path.resolve(cwd); }
+      if (root) files.push(path.join(root, '.claude', 'settings.local.json'), path.join(root, '.claude', 'settings.json'));
+    }
+    files.push(path.join(home, '.claude', 'settings.json'));
+    for (const f of files) {
+      try {
+        const m = JSON.parse(fsImpl.readFileSync(f, 'utf8')).model;
+        if (typeof m === 'string' && m.trim()) return m.trim();
+      } catch { /* missing/unreadable scope */ }
+    }
+  } catch { /* never throws */ }
+  return null;
+}
+
 function readCache(file, fsImpl) {
   try {
     const c = JSON.parse(fsImpl.readFileSync(file, 'utf8'));
@@ -240,4 +267,4 @@ function resolveModelCatalog({ cwd, force, deps } = {}) {
   return inFlight;
 }
 
-module.exports = { resolveModelCatalog, CATALOG_FLOOR, parseAliases, parseEffortLevels, scanModelIds };
+module.exports = { resolveModelCatalog, readSettingsModel, CATALOG_FLOOR, parseAliases, parseEffortLevels, scanModelIds };

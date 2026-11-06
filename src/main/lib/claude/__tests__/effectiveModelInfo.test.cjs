@@ -299,3 +299,42 @@ test('resolveEffectiveModelInfo surfaces effortEnvReachable alongside the model 
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'any' });
   expect(info.effortEnvReachable).toBe(false);
 });
+
+// ---------- agentless + settings source ----------
+
+test('an agentless Epic with a settings model reports modelSource "settings"', async () => {
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'settings.json'), JSON.stringify({ model: 'opus' }));
+  for (const agentType of [null, undefined]) {
+    const info = await resolveEffectiveModelInfo({ cwd, agentType });
+    expect(info.modelAlias).toBe('opus');
+    expect(info.modelSource).toBe('settings');
+    expect(info.agentType).toBeNull();
+  }
+});
+
+test('an agentless Epic with no settings model stays a fallback miss', async () => {
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: null });
+  expect(info.modelAlias).toBeNull();
+  expect(info.modelSource).toBe('fallback');
+});
+
+test('an inherit persona uses the project settings model over user settings, source "settings"', async () => {
+  writeGlobalPersona('inheriting2', ['model: inherit']);
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'settings.json'), JSON.stringify({ model: 'opus' }));
+  fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.claude', 'settings.json'), JSON.stringify({ model: 'haiku' }));
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'inheriting2' });
+  expect(info.modelAlias).toBe('haiku');
+  expect(info.modelSource).toBe('settings');
+});
+
+test('a persona model still wins over the settings model', async () => {
+  writeGlobalPersona('writer2', ['model: sonnet']);
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'settings.json'), JSON.stringify({ model: 'opus' }));
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'writer2' });
+  expect(info.modelAlias).toBe('sonnet');
+  expect(info.modelSource).toBe('persona');
+});

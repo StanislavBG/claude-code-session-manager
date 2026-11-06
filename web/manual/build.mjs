@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, cpSync, sta
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { askBilkoNoteHtml } from './askBilkoNote.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SOURCE = join(REPO, 'session-manager-operations', 'manual');
@@ -59,6 +60,12 @@ for (const c of src.chapters) {
   slugs.add(c.slug);
   if (!existsSync(join(SOURCE, 'chapters', c.file))) fail(`chapter ${c.slug} references missing file ${c.file}`);
 }
+
+// One source of copy for the closing note: the landing-v2 copy deck.
+const copyPath = join(REPO, 'session-manager-operations', 'design-mocks', 'landing-v2', 'copy.json');
+if (!existsSync(copyPath)) fail(`no copy deck at ${copyPath}`);
+const askBilko = JSON.parse(readFileSync(copyPath, 'utf-8'))?.book?.askBilko;
+if (!askBilko) fail(`book.askBilko missing from ${copyPath}`);
 
 // ── Compose the offline single-file edition ──────────────────────────────────
 
@@ -118,6 +125,9 @@ figcaption{padding:12px 16px;color:var(--muted);font-size:.9em;display:flex;flex
 nav.toc{border:1px solid var(--line);border-radius:8px;padding:16px 24px;background:#fafbfc}
 nav.toc h3{margin:1em 0 .3em}nav.toc h3:first-child{margin-top:0}
 nav.toc ol{margin:.3em 0 1em;padding-left:1.4em}
+.manual-askbilko{margin:3em 0 1em;padding:18px 22px;border:2px solid var(--accent);border-radius:8px;background:var(--accent-bg);break-inside:avoid;page-break-inside:avoid}
+.manual-askbilko h2{margin-top:0}
+.manual-askbilko__link{font-weight:700}
 @media print{
   body{font-size:12pt}
   .wrap{max-width:none;padding:0}
@@ -125,6 +135,7 @@ nav.toc ol{margin:.3em 0 1em;padding-left:1.4em}
   aside.manual-analogy,aside.manual-tip,aside.manual-note,aside.manual-warning,
   ol.manual-flow,div.manual-takeaways,table.manual-table{break-inside:avoid;page-break-inside:avoid}
   section{break-before:page;page-break-before:always}
+  a.manual-askbilko__link::after{content:" (bilko.run/book)"}
 }
 `.trim();
 
@@ -140,7 +151,8 @@ const tocHtml = tocGroups.map(g => `${g.part ? `<h3>${g.part}</h3>` : ''}<ol>${
   g.chapters.map(c => `<li><a href="#${c.slug}">${c.title}</a></li>`).join('')
 }</ol>`).join('');
 
-const offlineHtml = `<!DOCTYPE html>
+function composeOffline(edition) {
+  return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${src.title} — v${src.version}</title>
@@ -151,10 +163,13 @@ const offlineHtml = `<!DOCTYPE html>
 <p style="color:#44464b">Version ${src.version} · released ${src.releasedAt} · documents Session Manager v${src.documentsAppVersion}</p>
 <nav class="toc"><strong>Contents</strong>${tocHtml}</nav>
 ${chapterHtml.map(c => `<section id="${c.slug}">${c.html}</section>`).join('\n')}
+${askBilkoNoteHtml(askBilko, edition)}
 <hr style="border:0;border-top:1px solid #d8dbe0;margin:48px 0 24px"/>
 <p style="color:#44464b;font-size:.85em">© Bilko.run · ${src.title} is free, updates included —
 re-download the latest at bilko.run/manual.</p>
 </div></body></html>`;
+}
+const offlineHtml = composeOffline('offline');
 
 if (checkOnly) {
   console.log(`✓ manual v${src.version}: ${src.chapters.length} chapters, sources valid (nothing written)`);
@@ -208,7 +223,7 @@ async function main() {
     if (a.id === 'offline-html') {
       writeFileSync(join(outDir, a.file), offlineHtml, 'utf-8');
     } else if (a.id === 'pdf') {
-      writeFileSync(join(outDir, a.file), await renderPdf(offlineHtml));
+      writeFileSync(join(outDir, a.file), await renderPdf(composeOffline('pdf')));
     } else if (existsSync(join(SOURCE, 'assets', a.file))) {
       cpSync(join(SOURCE, 'assets', a.file), join(outDir, a.file));
     } else {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Toggle } from '../ui/Toggle'
 import { EmptyState } from '../ui/EmptyState'
-import { TelemetryNotice } from '../TelemetryNotice'
+import { TelemetryNotice, TELEMETRY_CHANGED_EVENT } from '../TelemetryNotice'
 import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
 import type {
@@ -273,6 +273,7 @@ function ProductTelemetrySection() {
       const res = await window.api.telemetry.setConfig(next)
       setCfg(res.config)
       setStatus(res.status)
+      window.dispatchEvent(new CustomEvent(TELEMETRY_CHANGED_EVENT, { detail: res.config }))
     } catch (e: unknown) {
       setSaveError(e instanceof Error ? e.message : String(e))
     }

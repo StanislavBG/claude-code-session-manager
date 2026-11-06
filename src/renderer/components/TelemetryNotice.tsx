@@ -3,7 +3,7 @@ import { Z } from '../lib/zLayers'
 import { toast } from '../state/toast'
 import type { TelemetryConfig, TelemetryStatus } from '../../preload/api'
 
-const CHANGED_EVENT = 'sm:telemetry-config-changed'
+export const TELEMETRY_CHANGED_EVENT = 'sm:telemetry-config-changed'
 
 interface NoticeProps {
   cfg: TelemetryConfig
@@ -17,13 +17,14 @@ export function TelemetryNotice({ cfg, onSaved }: NoticeProps) {
 
   const ack = async (turnOff: boolean) => {
     try {
+      const fresh = await window.api.telemetry.getConfig()
       const res = await window.api.telemetry.setConfig({
-        ...cfg,
-        enabled: turnOff ? false : cfg.enabled,
+        ...fresh,
+        enabled: turnOff ? false : fresh.enabled,
         noticeAckedAt: new Date().toISOString(),
       })
       onSaved?.(res.config, res.status)
-      window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: res.config }))
+      window.dispatchEvent(new CustomEvent(TELEMETRY_CHANGED_EVENT, { detail: res.config }))
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))
     }
@@ -69,10 +70,10 @@ export function TelemetryNoticeBanner() {
       console.warn('[product-telemetry] notice load failed:', e?.message)
     })
     const onChanged = (e: Event) => setCfg((e as CustomEvent<TelemetryConfig>).detail)
-    window.addEventListener(CHANGED_EVENT, onChanged)
+    window.addEventListener(TELEMETRY_CHANGED_EVENT, onChanged)
     return () => {
       cancelled = true
-      window.removeEventListener(CHANGED_EVENT, onChanged)
+      window.removeEventListener(TELEMETRY_CHANGED_EVENT, onChanged)
     }
   }, [])
 

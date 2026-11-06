@@ -39,12 +39,12 @@ test('builtin demo-video macro is v5 with the character + styles + length prompt
   expect(macro.prompt).toContain('Kokoro');
 });
 
-test('demo-video-builder persona is opus / max / seedVersion 7', () => {
+test('demo-video-builder persona is opus / max / seedVersion 8', () => {
   const raw = fs.readFileSync(personaPath, 'utf8');
   const fm = frontmatter(raw);
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('max');
-  expect(fm.seedVersion).toBe('7');
+  expect(fm.seedVersion).toBe('8');
 });
 
 function personaBody() {
@@ -92,6 +92,16 @@ test('persona is length-aware, slower, and has the whiteboard palette', () => {
   }
   for (const gone of ['content="30"', 'duration: 30', 'np.zeros(30 * sr', 'a 30-second animated demo']) {
     expect(body).not.toContain(gone);
+  }
+});
+
+test('persona absorbs the marketing-video rules and saves with project_video_write', () => {
+  const raw = fs.readFileSync(personaPath, 'utf8');
+  const body = personaBody();
+  expect(raw).toContain('mcp__session-manager-scheduler__project_video_write');
+  expect(raw).toContain('mcp__session-manager-scheduler__project_character_write');
+  for (const needle of ['project_video_write', 'demo-video-kit', 'Video kind', 'Entry id', '-14 LUFS', '1.2x', '_character']) {
+    expect(body).toContain(needle);
   }
 });
 

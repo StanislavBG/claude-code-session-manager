@@ -119,6 +119,8 @@ PRs welcome. Before authoring a scheduler PRD, read [`src/main/templates/PRD_AUT
 
 Enjoying Session Manager? [☕ Buy me a coffee](https://bilko.run/coffee) — the app stays free either way.
 
+Building something with agents? [Talk to Bilko for a free hour](https://bilko.run/book?utm_source=session-manager&utm_medium=readme).
+
 ## License
 
 MIT. Built by one person on evenings and weekends.

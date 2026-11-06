@@ -20,6 +20,10 @@ const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
 
 const DEMO_VIDEO_STYLES = ['Auto', 'Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography'] as const
+const DEMO_VIDEO_LENGTHS = [
+  { value: '30', label: '30 seconds' },
+  { value: '60', label: '1 minute' },
+] as const
 
 function macroButtonLabel(macro: Macro, hasHome: boolean, hasDemo: boolean): string {
   if (macro.id === 'builtin-project-home') return hasHome ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
@@ -78,6 +82,7 @@ function MacroButton({
 }) {
   const [extra, setExtra] = useState('')
   const [style, setStyle] = useState<string>('Auto')
+  const [length, setLength] = useState<string>('30')
   const building = status?.state === 'queued' || status?.state === 'running'
   const disabled = launching !== null || building
   const showExtraInput = hasHome || hasDemo
@@ -86,7 +91,8 @@ function MacroButton({
   const fire = () => {
     const trimmed = extra.trim()
     const styleLine = showStyle && style !== 'Auto' ? `Video style: ${style}` : ''
-    const combined = [styleLine, trimmed].filter(Boolean).join('\n')
+    const lengthLine = showStyle && length === '60' ? 'Video length: 60' : ''
+    const combined = [styleLine, lengthLine, trimmed].filter(Boolean).join('\n')
     onLaunch(macro, combined || undefined)
     setExtra('')
   }
@@ -105,6 +111,22 @@ function MacroButton({
           {DEMO_VIDEO_STYLES.map((s) => (
             <option key={s} value={s}>
               {s}
+            </option>
+          ))}
+        </select>
+      )}
+      {showStyle && (
+        <select
+          data-testid="project-home-demo-length"
+          aria-label="Video length"
+          value={length}
+          onChange={(e) => setLength(e.target.value)}
+          disabled={disabled}
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {DEMO_VIDEO_LENGTHS.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
             </option>
           ))}
         </select>

@@ -322,6 +322,73 @@ describe('ProjectPagesSection', () => {
       const el = mountPopulated(vi.fn(), 'builtin-demo-video')
       expect((el.querySelector(STYLE) as HTMLSelectElement).disabled).toBe(true)
     })
+
+    describe('video length select', () => {
+      const LENGTH = '[data-testid="project-home-demo-length"]'
+
+      it('defaults to 30 seconds with both options', () => {
+        const el = mountPopulated()
+        const select = el.querySelector(LENGTH) as HTMLSelectElement
+        expect(select.getAttribute('aria-label')).toBe('Video length')
+        expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['30 seconds', '1 minute'])
+        expect(select.value).toBe('30')
+        expect(select.previousElementSibling).toBe(el.querySelector(STYLE))
+      })
+
+      it('sends "Video length: 60" for 1 minute', () => {
+        const onLaunch = vi.fn()
+        const el = mountPopulated(onLaunch)
+        pick(el.querySelector(LENGTH) as HTMLSelectElement, '60')
+        act(() => demoButton(el).click())
+        expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video length: 60')
+      })
+
+      it('orders style, length, then extra text', () => {
+        const onLaunch = vi.fn()
+        const el = mountPopulated(onLaunch)
+        pick(el.querySelector(STYLE) as HTMLSelectElement, 'Animated whiteboard')
+        pick(el.querySelector(LENGTH) as HTMLSelectElement, '60')
+        const input = el.querySelector(
+          '[data-testid="project-home-macro-extra"][data-macro-id="builtin-demo-video"]',
+        ) as HTMLInputElement
+        const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+        act(() => {
+          setValue.call(input, 'shorter')
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        })
+        act(() => demoButton(el).click())
+        expect(onLaunch).toHaveBeenCalledWith(
+          DEMO_MACRO,
+          'Video style: Animated whiteboard\nVideo length: 60\nshorter',
+        )
+      })
+
+      it('is absent for the Project Home macro', () => {
+        const el = mountPopulated()
+        expect(el.querySelectorAll(LENGTH)).toHaveLength(1)
+        const home = el.querySelector('[data-testid="project-home-macro"][data-macro-id="builtin-project-home"]')
+        expect(home?.parentElement?.querySelector(LENGTH)).toBeNull()
+      })
+
+      it('is disabled while the demo job is queued or running', () => {
+        for (const state of ['queued', 'running'] as const) {
+          const el = mount(
+            <ProjectPagesSection
+              output={{ html: HTML, mtimeMs: Date.now() }}
+              demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() }}
+              loaded
+              macros={MACROS}
+              launching={null}
+              onLaunch={() => {}}
+              jobStatus={{
+                'builtin-demo-video': { state, status: state, startedAt: null, finishedAt: null, epicId: null, reason: null },
+              } as never}
+            />,
+          )
+          expect((el.querySelector(LENGTH) as HTMLSelectElement).disabled).toBe(true)
+        }
+      })
+    })
   })
 
   it('disables every macro button while launching', () => {

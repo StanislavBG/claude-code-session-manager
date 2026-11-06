@@ -111,6 +111,15 @@ function mcpAddArgv(serverPath) {
   return ['mcp', 'add', SERVER_NAME, '--scope', 'user', ...envFlags, '--', spec.command, ...spec.args];
 }
 
+/** The server definition (`{command,args,env?}`) shared by the seed and by
+ *  scheduler job spawns (--mcp-config). Same nodeSpawnSpec as mcpAddArgv. */
+function schedulerServerEntry(serverPath = serverScriptPath()) {
+  const spec = nodeSpawnSpec(serverPath);
+  const entry = { command: spec.command, args: [...spec.args] };
+  if (Object.keys(spec.env).length) entry.env = { ...spec.env };
+  return entry;
+}
+
 /** Run `claude mcp add session-manager-scheduler --scope user -- node <serverPath>`.
  *  No shell:true — argv array passed directly to spawn. */
 function runClaudeMcpAdd(serverPath) {
@@ -209,4 +218,4 @@ async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd, rem
   }
 }
 
-module.exports = { seedSchedulerMcp, writeMarker, runClaudeMcpAdd, runClaudeMcpRemove, mcpAddArgv, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME };
+module.exports = { seedSchedulerMcp, writeMarker, runClaudeMcpAdd, runClaudeMcpRemove, mcpAddArgv, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME, schedulerServerEntry };

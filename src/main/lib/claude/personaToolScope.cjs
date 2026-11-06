@@ -45,9 +45,12 @@ function buildPersonaToolScope(tools, { disallowed = [] } = {}) {
 
 /**
  * @param {{ tools: string[] }|null} scope result of buildPersonaToolScope
+ * @param {{ mcpServers?: Record<string, object> }} [opts] known MCP server
+ *   definitions by name. When EVERY mcp__ tool in scope names a server here,
+ *   only those servers are passed (--mcp-config <json> --strict-mcp-config).
  * @returns {string[]} argv fragment ([] when unscoped)
  */
-function personaToolScopeArgs(scope) {
+function personaToolScopeArgs(scope, { mcpServers } = {}) {
   if (!scope) return [];
   const def = {
     description: 'Headless run with a scheduler-enforced tool scope.',
@@ -60,8 +63,20 @@ function personaToolScopeArgs(scope) {
   ];
   // A scope naming no MCP tool never uses a server: with --strict-mcp-config and
   // no --mcp-config (variadic; would swallow later args) the CLI boots none.
-  if (!scope.tools.some((t) => String(t).startsWith('mcp__'))) {
+  const mcpTools = scope.tools.map(String).filter((t) => t.startsWith('mcp__'));
+  if (mcpTools.length === 0) {
     args.push('--strict-mcp-config');
+    return args;
+  }
+  // Server name = the segment between `mcp__` and the next `__`.
+  const named = new Set(mcpTools.map((t) => t.slice(5).split('__')[0]));
+  const known = mcpServers || {};
+  const allKnown = [...named].every((n) => n && Object.prototype.hasOwnProperty.call(known, n));
+  if (allKnown) {
+    const picked = {};
+    for (const n of named) picked[n] = known[n];
+    // --mcp-config is variadic: the caller must keep a `--flag` right after.
+    args.push('--mcp-config', JSON.stringify({ mcpServers: picked }), '--strict-mcp-config');
   }
   return args;
 }

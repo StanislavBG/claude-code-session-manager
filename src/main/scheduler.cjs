@@ -4498,13 +4498,20 @@ const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
  * and a large prompt failed with spawn E2BIG before the job started (the
  * 2026-10-26 incident). `claude -p` with no positional prompt reads stdin.
  */
+// MCP servers whose definition the scheduler knows. Lazy require: avoids a
+// load-order cycle with seedSchedulerMcp.cjs.
+function knownMcpServers() {
+  const seed = require('./seedSchedulerMcp.cjs');
+  return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
+}
+
 function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope }) {
   return [
     '-p',
     '--model', model,
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
-    ...personaToolScopeArgs(toolScope),
+    ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers() }),
     '--dangerously-skip-permissions',
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),

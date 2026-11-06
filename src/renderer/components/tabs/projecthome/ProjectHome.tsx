@@ -31,7 +31,7 @@ function ProjectHomeComponent() {
   const cwd = activeTab?.cwd ?? null
 
   // One fetch of session-manager-operations/project-pages/home.html (+ demo video).
-  const { output, demoVideo, loaded } = useProjectPagesOutput(cwd)
+  const { knowledge, videos, loaded } = useProjectPagesOutput(cwd)
   const jobStatus = useMacroJobStatus(cwd)
   const library = useMacros()
   const macros = macrosForProject(library, cwd, 'project-home')
@@ -49,8 +49,8 @@ function ProjectHomeComponent() {
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
         <ProjectPagesSection
-          output={output}
-          demoVideo={demoVideo}
+          knowledge={knowledge}
+          videos={videos}
           loaded={loaded}
           macros={macros}
           launching={launching}

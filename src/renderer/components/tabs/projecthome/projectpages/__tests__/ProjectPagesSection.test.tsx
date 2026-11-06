@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
 import type { Macro, MacroJobStatus } from '../../../../../../preload/api'
+
+const HTML = '<!DOCTYPE html><html><body>HOME</body></html>'
+
+beforeEach(() => {
+  ;(window as unknown as { api: unknown }).api = {
+    config: { readText: vi.fn(async () => ({ exists: true, text: HTML, mtimeMs: 1, error: null, truncated: false })) },
+  }
+})
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -42,214 +50,149 @@ const HOME_MACRO = macro()
 const DEMO_MACRO = macro({ id: 'builtin-demo-video', label: 'Demo Video', agentName: 'demo-video-builder' })
 const MACROS = [HOME_MACRO, DEMO_MACRO]
 
+const kEntry = (id: string, title: string, mtimeMs: number, meta = true): any => ({
+  id,
+  path: `/tmp/k/${id}/index.html`,
+  mtimeMs,
+  error: meta ? null : 'meta.json missing',
+  meta: meta ? { id, title, topic: 't', createdAt: new Date(mtimeMs).toISOString(), model: 'm' } : null,
+})
+const vEntry = (id: string, title: string, mtimeMs: number, over: any = {}, meta = true): any => ({
+  id,
+  path: `/tmp/v/${id}/index.html`,
+  mtimeMs,
+  error: meta ? null : 'bad meta',
+  meta: meta
+    ? {
+        id, title, kind: 'project-demo', style: 'Fun', lengthS: 30,
+        createdAt: new Date(mtimeMs).toISOString(), character: null, sources: [],
+        report: { lufs: -16.2, truePeakDb: -1, speechS: 20, readingGrade: 7.5, checks: [], bytes: 1 },
+        macroVersion: 1, seedVersion: 1, model: 'm', effort: 'x', ...over,
+      }
+    : null,
+})
+const NEW_K = kEntry('b', 'Newer page', 2000)
+const OLD_K = kEntry('a', 'Older page', 1000)
+const NEW_V = vEntry('v2', 'Newer video', 2000)
+const OLD_V = vEntry('v1', 'Older video', 1000, { kind: 'blog-post', lengthS: 60, report: { lufs: null, readingGrade: null, checks: [], bytes: 1 } })
+
+function props(over: Record<string, unknown> = {}) {
+  return { knowledge: [], videos: [], loaded: true, macros: MACROS, launching: null, onLaunch: () => {}, ...over } as any
+}
+const flush = () => act(async () => { await Promise.resolve() })
+const switchTo = (el: HTMLElement, page: string) =>
+  act(() => (el.querySelector(`[data-testid="project-home-page-switch"] [data-page="${page}"]`) as HTMLElement).click())
+const macroBtn = (el: HTMLElement, id: string) =>
+  el.querySelector(`[data-testid="project-home-macro"][data-macro-id="${id}"]`) as HTMLButtonElement
+
 describe('ProjectPagesSection', () => {
   it('renders nothing while loaded is false', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={null}
-        demoVideo={null}
-        loaded={false}
-        macros={MACROS}
-        launching={null}
-        onLaunch={() => {}}
-      />,
-    )
+    const el = mount(<ProjectPagesSection {...props({ loaded: false })} />)
     expect(el.textContent).toBe('')
   })
 
-  it('shows the empty state with one button per macro when nothing is generated', () => {
+  it('has a two-button page switch and no legacy view toggle', async () => {
+    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], videos: [NEW_V] })} />)
+    await flush()
+    expect(el.querySelector('[data-testid="project-home-view"]')).toBeNull()
+    const btns = Array.from(el.querySelectorAll('[data-testid="project-home-page-switch"] button'))
+    expect(btns.map((b) => b.textContent)).toEqual(['Knowledge Pages', 'Video Pages'])
+    expect(btns.map((b) => b.getAttribute('data-page'))).toEqual(['knowledge', 'videos'])
+  })
+
+  it('knowledge page lists entries in given (newest first) order and renders the selected in HtmlFrame', async () => {
+    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K, OLD_K] })} />)
+    await flush()
+    const items = Array.from(el.querySelectorAll('[data-testid="knowledge-page-item"]'))
+    expect(items.map((i) => i.textContent)).toEqual([expect.stringContaining('Newer page'), expect.stringContaining('Older page')])
+    expect(el.querySelector('iframe[title="Newer page"]')?.getAttribute('srcdoc')).toBe(HTML)
+    act(() => (items[1] as HTMLElement).click())
+    await flush()
+    expect(el.querySelector('iframe[title="Older page"]')).not.toBeNull()
+    // toolbar: only the project-home macro
+    expect(macroBtn(el, 'builtin-project-home').textContent).toContain('Regenerate Project Home')
+    expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
+  })
+
+  it('keeps the selection when the list refreshes', async () => {
+    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K, OLD_K] })} />)
+    await flush()
+    act(() => (el.querySelectorAll('[data-testid="knowledge-page-item"]')[1] as HTMLElement).click())
+    act(() => root!.render(<ProjectPagesSection {...props({ knowledge: [kEntry('c', 'Newest', 3000), NEW_K, OLD_K] })} />))
+    await flush()
+    expect(el.querySelector('iframe[title="Older page"]')).not.toBeNull()
+  })
+
+  it('video page lists videos with title, kind, length, created, LUFS and grade', async () => {
+    const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V, OLD_V] })} />)
+    await switchTo(el, 'videos')
+    const items = Array.from(el.querySelectorAll('[data-testid="video-item"]'))
+    expect(items).toHaveLength(2)
+    expect(items[0].textContent).toContain('Newer video')
+    expect(items[0].textContent).toContain('project-demo')
+    expect(items[0].textContent).toContain('30')
+    expect(items[0].textContent).toContain('-16.2')
+    expect(items[0].textContent).toContain('7.5')
+    expect(items[1].textContent).toContain('Older video')
+    expect(items[1].textContent).toContain('blog-post')
+    expect(items[1].querySelector('[data-col="lufs"]')?.textContent).toBe('-')
+    expect(items[1].querySelector('[data-col="grade"]')?.textContent).toBe('-')
+    expect(el.querySelector('[data-testid="video-player-frame"]')).not.toBeNull()
+    expect(macroBtn(el, 'builtin-demo-video')).not.toBeNull()
+    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
+  })
+
+  it('video entry with meta null shows its error line', async () => {
+    const el = mount(<ProjectPagesSection {...props({ videos: [vEntry('bad', '', 5, {}, false)] })} />)
+    await switchTo(el, 'videos')
+    expect(el.querySelector('[data-testid="video-item"]')?.textContent).toContain('bad meta')
+  })
+
+  it('each page has its own empty state with its generate button', async () => {
     const onLaunch = vi.fn()
-    const el = mount(
-      <ProjectPagesSection
-        output={null}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={onLaunch}
-      />,
-    )
+    const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
     expect(el.querySelector('iframe')).toBeNull()
-    expect(el.querySelector('[data-testid="project-home-view"]')).toBeNull()
-    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]'))
-    expect(buttons).toHaveLength(2)
-    expect(buttons[0].textContent).toContain('Generate Project Home')
-    expect(buttons[1].textContent).toContain('Generate Demo Video')
-    act(() => (buttons[0] as HTMLButtonElement).click())
+    expect(macroBtn(el, 'builtin-project-home').textContent).toContain('Generate Project Home')
+    expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
+    act(() => macroBtn(el, 'builtin-project-home').click())
     expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
+    await switchTo(el, 'videos')
+    expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Generate Demo Video')
+    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
+    expect(el.querySelector('[data-testid="project-home-demo-length"]')).not.toBeNull()
   })
 
-  it('shows Regenerate + home.html when only the overview exists, with no view switch', () => {
+  it('no extra-instructions input before anything exists; present once a page exists', async () => {
+    const empty = mount(<ProjectPagesSection {...props()} />)
+    expect(empty.querySelector('[data-testid="project-home-macro-extra"]')).toBeNull()
+    act(() => root!.render(<ProjectPagesSection {...props({ knowledge: [NEW_K] })} />))
+    await flush()
+    expect(empty.querySelector('[data-testid="project-home-macro-extra"]')).not.toBeNull()
+  })
+
+  it('submits Regenerate with extra instructions, then clears the field', async () => {
     const onLaunch = vi.fn()
-    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
-    const el = mount(
-      <ProjectPagesSection
-        output={{ html, mtimeMs: Date.now() - 3 * 60_000 }}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={onLaunch}
-      />,
-    )
-    expect(el.querySelector('[data-testid="project-home-view"]')).toBeNull()
-    const iframe = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframe.getAttribute('srcdoc')).toBe(html)
-    expect(el.querySelector('[data-testid="demo-video-frame"]')).toBeNull()
-    expect(el.textContent).toContain('generated 3m ago')
-    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]'))
-    expect(buttons[0].textContent).toContain('Regenerate Project Home')
-    expect(buttons[1].textContent).toContain('Generate Demo Video')
-    act(() => (buttons[1] as HTMLButtonElement).click())
-    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, undefined)
-  })
-
-  it('shows the demo video (not overview) when only a demo video exists', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={null}
-        demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() - 60_000 }}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={() => {}}
-      />,
-    )
-    expect(el.querySelector('[data-testid="demo-video-frame"]')).not.toBeNull()
-    expect(el.textContent).toContain('generated 1m ago')
-    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]'))
-    expect(buttons[0].textContent).toContain('Generate Project Home')
-    expect(buttons[1].textContent).toContain('Regenerate Demo Video')
-  })
-
-  it('switches between overview and demo video via the view switch when both exist', () => {
-    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
-    const el = mount(
-      <ProjectPagesSection
-        output={{ html, mtimeMs: Date.now() }}
-        demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() }}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={() => {}}
-      />,
-    )
-    expect(el.querySelector('iframe[title="Project Home"]')).not.toBeNull()
-    expect(el.querySelector('[data-testid="demo-video-frame"]')).toBeNull()
-
-    const switchEl = el.querySelector('[data-testid="project-home-view"]') as HTMLElement
-    const [overviewBtn, demoBtn] = Array.from(switchEl.querySelectorAll('button'))
-    expect(overviewBtn.textContent).toBe('Overview')
-    expect(demoBtn.textContent).toBe('Demo video')
-
-    act(() => demoBtn.click())
-    expect(el.querySelector('[data-testid="demo-video-frame"]')).not.toBeNull()
-    expect(el.querySelector('iframe[title="Project Home"]')).toBeNull()
-
-    act(() => overviewBtn.click())
-    expect(el.querySelector('iframe[title="Project Home"]')).not.toBeNull()
-  })
-
-  it('does not show the extra-instructions input on first-generation (no artifact yet)', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={null}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={() => {}}
-      />,
-    )
-    expect(el.querySelector('[data-testid="project-home-macro-extra"]')).toBeNull()
-  })
-
-  it('submits Regenerate with an empty extra-instructions field exactly as before', () => {
-    const onLaunch = vi.fn()
-    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
-    const el = mount(
-      <ProjectPagesSection
-        output={{ html, mtimeMs: Date.now() }}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={onLaunch}
-      />,
-    )
-    const input = el.querySelector('[data-testid="project-home-macro-extra"][data-macro-id="builtin-project-home"]')
-    expect(input).not.toBeNull()
-    const button = el.querySelector(
-      '[data-testid="project-home-macro"][data-macro-id="builtin-project-home"]',
-    ) as HTMLButtonElement
-    act(() => button.click())
-    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
-  })
-
-  it('submits Regenerate with extra instructions, then clears the field', () => {
-    const onLaunch = vi.fn()
-    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
-    const el = mount(
-      <ProjectPagesSection
-        output={{ html, mtimeMs: Date.now() }}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching={null}
-        onLaunch={onLaunch}
-      />,
-    )
-    const input = el.querySelector(
-      '[data-testid="project-home-macro-extra"][data-macro-id="builtin-project-home"]',
-    ) as HTMLInputElement
-    const button = el.querySelector(
-      '[data-testid="project-home-macro"][data-macro-id="builtin-project-home"]',
-    ) as HTMLButtonElement
-
+    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], onLaunch })} />)
+    await flush()
+    const input = el.querySelector('[data-testid="project-home-macro-extra"]') as HTMLInputElement
     const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
     act(() => {
       setValue.call(input, '  focus on the onboarding flow  ')
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    act(() => button.click())
+    act(() => macroBtn(el, 'builtin-project-home').click())
     expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'focus on the onboarding flow')
     expect(input.value).toBe('')
   })
 
-  it('disables the extra-instructions input while launching, matching the button', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{ html: '<!DOCTYPE html><html><body>HOME</body></html>', mtimeMs: Date.now() }}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching="builtin-project-home"
-        onLaunch={() => {}}
-      />,
-    )
-    const input = el.querySelector(
-      '[data-testid="project-home-macro-extra"][data-macro-id="builtin-project-home"]',
-    ) as HTMLInputElement
-    expect(input.disabled).toBe(true)
-  })
-
-  describe('demo video style picker', () => {
-    const HTML = '<!DOCTYPE html><html><body>HOME</body></html>'
+  describe('video toolbar selects', () => {
     const STYLE = '[data-testid="project-home-demo-style"]'
-
-    function mountPopulated(onLaunch = vi.fn(), launching: string | null = null) {
-      return mount(
-        <ProjectPagesSection
-          output={{ html: HTML, mtimeMs: Date.now() }}
-          demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() }}
-          loaded
-          macros={MACROS}
-          launching={launching}
-          onLaunch={onLaunch}
-        />,
-      )
+    const LENGTH = '[data-testid="project-home-demo-length"]'
+    async function mountVideos(onLaunch = vi.fn(), over: Record<string, unknown> = {}) {
+      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], onLaunch, ...over })} />)
+      await switchTo(el, 'videos')
+      return el
     }
-
     function pick(select: HTMLSelectElement, value: string) {
       const setValue = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
       act(() => {
@@ -258,153 +201,68 @@ describe('ProjectPagesSection', () => {
       })
     }
 
-    function demoButton(el: HTMLElement) {
-      return el.querySelector(
-        '[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]',
-      ) as HTMLButtonElement
-    }
-
-    it('renders the select only for the demo-video macro in the empty state', () => {
-      const el = mount(
-        <ProjectPagesSection output={null} demoVideo={null} loaded macros={MACROS} launching={null} onLaunch={() => {}} />,
-      )
-      const selects = el.querySelectorAll(STYLE)
-      expect(selects).toHaveLength(1)
-      const select = selects[0] as HTMLSelectElement
-      expect(select.getAttribute('aria-label')).toBe('Video style')
-      expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
-        'Auto',
-        'Professional',
-        'Fun',
-        'Animated whiteboard',
-        'Kinetic typography',
-      ])
-      expect(select.value).toBe('Auto')
-    })
-
-    it('renders the select only for the demo-video macro in the populated state', () => {
-      const el = mountPopulated()
-      expect(el.querySelectorAll(STYLE)).toHaveLength(1)
-    })
-
-    it('passes "Video style: Fun" when extra is empty', () => {
+    it('style select options and "Video style: Fun"', async () => {
       const onLaunch = vi.fn()
-      const el = mountPopulated(onLaunch)
-      pick(el.querySelector(STYLE) as HTMLSelectElement, 'Fun')
-      act(() => demoButton(el).click())
+      const el = await mountVideos(onLaunch)
+      const select = el.querySelector(STYLE) as HTMLSelectElement
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+        'Auto', 'Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography',
+      ])
+      pick(select, 'Fun')
+      act(() => macroBtn(el, 'builtin-demo-video').click())
       expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Fun')
     })
 
-    it('appends trimmed extra text after the style line', () => {
+    it('length select defaults to 30 and sends "Video length: 60" for 1 minute', async () => {
       const onLaunch = vi.fn()
-      const el = mountPopulated(onLaunch)
-      pick(el.querySelector(STYLE) as HTMLSelectElement, 'Animated whiteboard')
-      const input = el.querySelector(
-        '[data-testid="project-home-macro-extra"][data-macro-id="builtin-demo-video"]',
-      ) as HTMLInputElement
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-      act(() => {
-        setValue.call(input, '  shorter ')
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-      })
-      act(() => demoButton(el).click())
-      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Animated whiteboard\nshorter')
+      const el = await mountVideos(onLaunch)
+      const select = el.querySelector(LENGTH) as HTMLSelectElement
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['30 seconds', '1 minute'])
+      expect(select.value).toBe('30')
+      pick(select, '60')
+      act(() => macroBtn(el, 'builtin-demo-video').click())
+      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video length: 60')
     })
 
-    it('leaves args unchanged with Auto', () => {
+    it('orders style, length, then extra text', async () => {
       const onLaunch = vi.fn()
-      const el = mountPopulated(onLaunch)
-      act(() => demoButton(el).click())
+      const el = await mountVideos(onLaunch)
+      pick(el.querySelector(STYLE) as HTMLSelectElement, 'Animated whiteboard')
+      pick(el.querySelector(LENGTH) as HTMLSelectElement, '60')
+      const input = el.querySelector('[data-testid="project-home-macro-extra"]') as HTMLInputElement
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(input, 'shorter')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      act(() => macroBtn(el, 'builtin-demo-video').click())
+      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Animated whiteboard\nVideo length: 60\nshorter')
+    })
+
+    it('leaves args unchanged with Auto / 30', async () => {
+      const onLaunch = vi.fn()
+      const el = await mountVideos(onLaunch)
+      act(() => macroBtn(el, 'builtin-demo-video').click())
       expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, undefined)
     })
 
-    it('disables the select while launching', () => {
-      const el = mountPopulated(vi.fn(), 'builtin-demo-video')
+    it('disables selects while launching or building', async () => {
+      const el = await mountVideos(vi.fn(), { launching: 'builtin-demo-video' })
       expect((el.querySelector(STYLE) as HTMLSelectElement).disabled).toBe(true)
-    })
-
-    describe('video length select', () => {
-      const LENGTH = '[data-testid="project-home-demo-length"]'
-
-      it('defaults to 30 seconds with both options', () => {
-        const el = mountPopulated()
-        const select = el.querySelector(LENGTH) as HTMLSelectElement
-        expect(select.getAttribute('aria-label')).toBe('Video length')
-        expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['30 seconds', '1 minute'])
-        expect(select.value).toBe('30')
-        expect(select.previousElementSibling).toBe(el.querySelector(STYLE))
-      })
-
-      it('sends "Video length: 60" for 1 minute', () => {
-        const onLaunch = vi.fn()
-        const el = mountPopulated(onLaunch)
-        pick(el.querySelector(LENGTH) as HTMLSelectElement, '60')
-        act(() => demoButton(el).click())
-        expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video length: 60')
-      })
-
-      it('orders style, length, then extra text', () => {
-        const onLaunch = vi.fn()
-        const el = mountPopulated(onLaunch)
-        pick(el.querySelector(STYLE) as HTMLSelectElement, 'Animated whiteboard')
-        pick(el.querySelector(LENGTH) as HTMLSelectElement, '60')
-        const input = el.querySelector(
-          '[data-testid="project-home-macro-extra"][data-macro-id="builtin-demo-video"]',
-        ) as HTMLInputElement
-        const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-        act(() => {
-          setValue.call(input, 'shorter')
-          input.dispatchEvent(new Event('input', { bubbles: true }))
+      expect((el.querySelector(LENGTH) as HTMLSelectElement).disabled).toBe(true)
+      for (const state of ['queued', 'running']) {
+        const e2 = await mountVideos(vi.fn(), {
+          jobStatus: { 'builtin-demo-video': { state, status: state, startedAt: null, finishedAt: null, epicId: null, reason: null } },
         })
-        act(() => demoButton(el).click())
-        expect(onLaunch).toHaveBeenCalledWith(
-          DEMO_MACRO,
-          'Video style: Animated whiteboard\nVideo length: 60\nshorter',
-        )
-      })
-
-      it('is absent for the Project Home macro', () => {
-        const el = mountPopulated()
-        expect(el.querySelectorAll(LENGTH)).toHaveLength(1)
-        const home = el.querySelector('[data-testid="project-home-macro"][data-macro-id="builtin-project-home"]')
-        expect(home?.parentElement?.querySelector(LENGTH)).toBeNull()
-      })
-
-      it('is disabled while the demo job is queued or running', () => {
-        for (const state of ['queued', 'running'] as const) {
-          const el = mount(
-            <ProjectPagesSection
-              output={{ html: HTML, mtimeMs: Date.now() }}
-              demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() }}
-              loaded
-              macros={MACROS}
-              launching={null}
-              onLaunch={() => {}}
-              jobStatus={{
-                'builtin-demo-video': { state, status: state, startedAt: null, finishedAt: null, epicId: null, reason: null },
-              } as never}
-            />,
-          )
-          expect((el.querySelector(LENGTH) as HTMLSelectElement).disabled).toBe(true)
-        }
-      })
+        expect((e2.querySelector(LENGTH) as HTMLSelectElement).disabled).toBe(true)
+      }
     })
   })
 
-  it('disables every macro button while launching', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={null}
-        demoVideo={null}
-        loaded
-        macros={MACROS}
-        launching="builtin-project-home"
-        onLaunch={() => {}}
-      />,
-    )
-    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]')) as HTMLButtonElement[]
-    expect(buttons.every((b) => b.disabled)).toBe(true)
-    expect(buttons[0].textContent).toContain('Starting…')
+  it('disables the macro button while launching', () => {
+    const el = mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
+    expect(macroBtn(el, 'builtin-project-home').disabled).toBe(true)
+    expect(macroBtn(el, 'builtin-project-home').textContent).toContain('Starting…')
   })
 
   describe('job status', () => {
@@ -412,36 +270,33 @@ describe('ProjectPagesSection', () => {
       macroId: 'builtin-demo-video', epicId: 'epic-1', slug: 's', state: 'queued', status: 'queued',
       reason: null, startedAt: null, finishedAt: null, ...over,
     })
-    const render = (s: MacroJobStatus, onOpenSession = vi.fn()) =>
-      mount(
-        <ProjectPagesSection output={null} demoVideo={null} loaded macros={MACROS} launching={null}
-          onLaunch={() => {}} jobStatus={{ [s.macroId]: s }} onOpenSession={onOpenSession} />,
-      )
+    const render = async (s: MacroJobStatus, onOpenSession = vi.fn()) => {
+      const el = mount(<ProjectPagesSection {...props({ jobStatus: { [s.macroId]: s }, onOpenSession })} />)
+      await switchTo(el, 'videos')
+      return el
+    }
     const line = (el: HTMLElement) => el.querySelector('[data-testid="project-home-job-status"]') as HTMLElement
 
-    it('queued: label, disabled button, Open session', () => {
+    it('queued: label, disabled button, Open session', async () => {
       const onOpen = vi.fn()
-      const el = render(st({ state: 'queued' }), onOpen)
+      const el = await render(st({ state: 'queued' }), onOpen)
       expect(line(el).textContent).toBe('Queued')
-      expect(line(el).getAttribute('data-state')).toBe('queued')
-      const btn = el.querySelector('[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]') as HTMLButtonElement
-      expect(btn.disabled).toBe(true)
-      expect(btn.textContent).toContain('Building…')
+      expect(macroBtn(el, 'builtin-demo-video').disabled).toBe(true)
+      expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Building…')
       act(() => (el.querySelector('[data-testid="project-home-job-session"]') as HTMLButtonElement).click())
       expect(onOpen).toHaveBeenCalledWith('epic-1')
     })
-    it('running: Building… started ago, disabled', () => {
-      const el = render(st({ state: 'running', startedAt: new Date(Date.now() - 120_000).toISOString() }))
+    it('running: Building… started ago', async () => {
+      const el = await render(st({ state: 'running', startedAt: new Date(Date.now() - 120_000).toISOString() }))
       expect(line(el).textContent).toBe('Building… started 2m ago')
-      expect(el.querySelector<HTMLButtonElement>('[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]')!.disabled).toBe(true)
     })
-    it('done: Done ago, button enabled', () => {
-      const el = render(st({ state: 'done', finishedAt: new Date(Date.now() - 60_000).toISOString() }))
+    it('done: button enabled', async () => {
+      const el = await render(st({ state: 'done', finishedAt: new Date(Date.now() - 60_000).toISOString() }))
       expect(line(el).textContent).toBe('Done 1m ago')
-      expect(el.querySelector<HTMLButtonElement>('[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]')!.disabled).toBe(false)
+      expect(macroBtn(el, 'builtin-demo-video').disabled).toBe(false)
     })
-    it('failed: reason with role=alert, no session link without epicId', () => {
-      const el = render(st({ state: 'failed', reason: 'timed out after 30m', epicId: null }))
+    it('failed: reason with role=alert, no session link without epicId', async () => {
+      const el = await render(st({ state: 'failed', reason: 'timed out after 30m', epicId: null }))
       expect(line(el).textContent).toBe('Failed: timed out after 30m')
       expect(line(el).getAttribute('role')).toBe('alert')
       expect(el.querySelector('[data-testid="project-home-job-session"]')).toBeNull()

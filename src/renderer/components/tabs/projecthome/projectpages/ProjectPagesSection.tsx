@@ -1,19 +1,19 @@
 /**
- * Project Home's single-page view: one button per `surface: 'project-home'`
- * Macro (Generate/Regenerate, depending on whether that macro's own artifact
- * exists), plus — once at least one artifact exists — a two-view segmented
- * switch between the generated Overview (home.html) and the Demo video.
+ * Project Home's two pages: Knowledge Pages (list + the selected page in the
+ * static script-free HtmlFrame) and Video Pages (playlist + VideoPlayer). Each
+ * page has its own generate MacroButton, build-status line and empty state.
  *
- * `output`/`demoVideo`/`loaded` come from ProjectHome's single
+ * `knowledge`/`videos`/`loaded` come from ProjectHome's single
  * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
  * `useMacroLaunch` wiring. Purely presentational — no store access here.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { formatAgo } from '../../../../lib/formatTime'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { HtmlFrame } from './HtmlFrame'
-import { DemoVideoFrame } from './DemoVideoFrame'
-import type { ProjectPagesOutput, ProjectPagesDemoVideo } from '../../../../lib/projectPages/useProjectPagesOutput'
+import { VideoPlayer } from './VideoPlayer'
+import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
+import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../preload/api'
 
 const BUTTON_CLASS =
@@ -25,10 +25,8 @@ const DEMO_VIDEO_LENGTHS = [
   { value: '60', label: '1 minute' },
 ] as const
 
-function macroButtonLabel(macro: Macro, hasHome: boolean, hasDemo: boolean): string {
-  if (macro.id === 'builtin-project-home') return hasHome ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
-  if (macro.id === 'builtin-demo-video') return hasDemo ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
-  return macro.label
+function macroButtonLabel(macro: Macro, has: boolean): string {
+  return has ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
 }
 
 function JobStatusLine({ status, onOpenSession }: { status: MacroJobStatus; onOpenSession?: (epicId: string) => void }) {
@@ -65,16 +63,14 @@ function JobStatusLine({ status, onOpenSession }: { status: MacroJobStatus; onOp
 
 function MacroButton({
   macro,
-  hasHome,
-  hasDemo,
+  has,
   launching,
   onLaunch,
   status,
   onOpenSession,
 }: {
   macro: Macro
-  hasHome: boolean
-  hasDemo: boolean
+  has: boolean
   launching: string | null
   onLaunch: (macro: Macro, extraInstructions?: string) => void
   status?: MacroJobStatus
@@ -85,7 +81,7 @@ function MacroButton({
   const [length, setLength] = useState<string>('30')
   const building = status?.state === 'queued' || status?.state === 'running'
   const disabled = launching !== null || building
-  const showExtraInput = hasHome || hasDemo
+  const showExtraInput = has
   const showStyle = macro.id === 'builtin-demo-video'
 
   const fire = () => {
@@ -154,32 +150,34 @@ function MacroButton({
         <span className="inline-flex">
           <AlmanacIcon name="sparkle" size={14} />
         </span>
-        {building ? 'Building…' : launching === macro.id ? 'Starting…' : macroButtonLabel(macro, hasHome, hasDemo)}
+        {building ? 'Building…' : launching === macro.id ? 'Starting…' : macroButtonLabel(macro, has)}
       </button>
       {status && <JobStatusLine status={status} onOpenSession={onOpenSession} />}
     </div>
   )
 }
 
-type View = 'overview' | 'demo'
+type Page = 'knowledge' | 'videos'
 
-function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => void }) {
-  const options: { value: View; label: string }[] = [
-    { value: 'overview', label: 'Overview' },
-    { value: 'demo', label: 'Demo video' },
-  ]
+const PAGE_OPTIONS: { value: Page; label: string }[] = [
+  { value: 'knowledge', label: 'Knowledge Pages' },
+  { value: 'videos', label: 'Video Pages' },
+]
+
+function PageSwitch({ page, onChange }: { page: Page; onChange: (p: Page) => void }) {
   return (
     <div
-      data-testid="project-home-view"
+      data-testid="project-home-page-switch"
       className="flex gap-0.5 p-0.5 rounded bg-bg-elev shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] text-[11px]"
     >
-      {options.map((opt) => (
+      {PAGE_OPTIONS.map((opt) => (
         <button
           key={opt.value}
           type="button"
+          data-page={opt.value}
           onClick={() => onChange(opt.value)}
           className={`px-2 py-1 rounded whitespace-nowrap font-semibold ${
-            view === opt.value ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-faint hover:text-fg'
+            page === opt.value ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-faint hover:text-fg'
           }`}
         >
           {opt.label}
@@ -189,9 +187,79 @@ function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => voi
   )
 }
 
+/** Selected id, defaulting to the newest (first) entry; survives list refreshes while the id still exists. */
+function pickSelected<T extends { id: string }>(entries: T[], id: string | null): T | null {
+  return entries.find((e) => e.id === id) ?? entries[0] ?? null
+}
+
+function KnowledgeFrame({ entry }: { entry: ProjectKnowledgeEntry }) {
+  const [html, setHtml] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setHtml(null)
+    window.api.config
+      .readText(entry.path)
+      .then((res) => {
+        if (!cancelled) setHtml(res.exists ? res.text : '')
+      })
+      .catch(() => {
+        if (!cancelled) setHtml('')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [entry.path, entry.mtimeMs])
+  if (html === null) return null
+  return <HtmlFrame title={entry.meta?.title || entry.id} html={html} />
+}
+
+function fmt(n: number | null | undefined): string {
+  return n === null || n === undefined || !Number.isFinite(n) ? '-' : String(n)
+}
+
+function createdLabel(entry: { mtimeMs: number; meta: { createdAt: string } | null }): string {
+  const t = entry.meta ? Date.parse(entry.meta.createdAt) : NaN
+  return formatAgo(Number.isFinite(t) ? t : entry.mtimeMs, Date.now())
+}
+
+function knowledgeRow(e: ProjectKnowledgeEntry): LibraryRow {
+  return {
+    id: e.id,
+    content: e.meta ? (
+      <span className="flex flex-col gap-0.5">
+        <span className="font-semibold">{e.meta.title}</span>
+        <span className="font-mono text-[10.5px] text-fg-faint">{createdLabel(e)}</span>
+      </span>
+    ) : (
+      <span className="text-red-400">{e.id}: {e.error ?? 'unreadable meta'}</span>
+    ),
+  }
+}
+
+function videoRow(e: ProjectVideoEntry): LibraryRow {
+  const m = e.meta
+  return {
+    id: e.id,
+    content: m ? (
+      <span className="flex flex-col gap-0.5">
+        <span className="font-semibold">{m.title}</span>
+        <span className="flex flex-wrap gap-x-2 font-mono text-[10.5px] text-fg-faint">
+          <span data-col="kind">{m.kind}</span>
+          <span data-col="length">{m.lengthS}s</span>
+          <span data-col="created">{createdLabel(e)}</span>
+          <span>LUFS <span data-col="lufs">{fmt(m.report.lufs)}</span></span>
+          <span>grade <span data-col="grade">{fmt(m.report.readingGrade)}</span></span>
+        </span>
+      </span>
+    ) : (
+      <span className="text-red-400">{e.id}: {e.error ?? 'unreadable meta'}</span>
+    ),
+  }
+}
+
 export function ProjectPagesSection({
-  output,
-  demoVideo,
+  knowledge,
+  videos,
   loaded,
   macros,
   launching,
@@ -199,8 +267,8 @@ export function ProjectPagesSection({
   jobStatus,
   onOpenSession,
 }: {
-  output: ProjectPagesOutput | null
-  demoVideo: ProjectPagesDemoVideo
+  knowledge: ProjectKnowledgeEntry[]
+  videos: ProjectVideoEntry[]
   loaded: boolean
   macros: Macro[]
   launching: string | null
@@ -208,49 +276,80 @@ export function ProjectPagesSection({
   jobStatus?: Record<string, MacroJobStatus>
   onOpenSession?: (epicId: string) => void
 }) {
-  const [view, setView] = useState<View>('overview')
+  const [page, setPage] = useState<Page>('knowledge')
+  const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
+  const [videoId, setVideoId] = useState<string | null>(null)
 
   if (!loaded) return null
 
-  const hasHome = !!output
-  const hasDemo = !!demoVideo
+  const isKnowledge = page === 'knowledge'
+  const macro = macros.find((m) => m.id === (isKnowledge ? 'builtin-project-home' : 'builtin-demo-video'))
+  const entries = isKnowledge ? knowledge : videos
+  const has = entries.length > 0
+  const button = macro ? (
+    <MacroButton
+      macro={macro}
+      has={has}
+      launching={launching}
+      onLaunch={onLaunch}
+      status={jobStatus?.[macro.id]}
+      onOpenSession={onOpenSession}
+    />
+  ) : null
 
-  if (!hasHome && !hasDemo) {
-    return (
-      <div className="flex justify-center py-16">
-        <div className="flex flex-col items-center gap-2.5">
-          {macros.map((m) => (
-            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} status={jobStatus?.[m.id]} onOpenSession={onOpenSession} />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  const activeView: View = hasDemo && (!hasHome || view === 'demo') ? 'demo' : 'overview'
-  const chipMtimeMs = activeView === 'demo' ? demoVideo!.mtimeMs : output!.mtimeMs
+  const selectedK = pickSelected(knowledge, knowledgeId)
+  const selectedV = pickSelected(videos, videoId)
 
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-2.5">
-        {hasDemo ? <ViewSwitch view={activeView} onChange={setView} /> : <div />}
-        <div className="flex items-center gap-2.5">
-          <span className="font-mono text-[10.5px] text-fg-faint">generated {formatAgo(chipMtimeMs, Date.now())}</span>
-          {macros.map((m) => (
-            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} status={jobStatus?.[m.id]} onOpenSession={onOpenSession} />
-          ))}
+        <PageSwitch page={page} onChange={setPage} />
+        <div className="flex items-center gap-2.5">{button}</div>
+      </div>
+      {!has ? (
+        <div data-testid={isKnowledge ? 'knowledge-page-empty' : 'video-page-empty'} className="flex justify-center py-16">
+          <div className="flex flex-col items-center gap-2.5">
+            <span className="text-xs text-fg-faint">
+              {isKnowledge ? 'No knowledge pages yet.' : 'No videos yet.'}
+            </span>
+          </div>
         </div>
-      </div>
-      <div
-        className="overflow-hidden rounded-xl border border-line bg-bg-hi"
-        style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}
-      >
-        {activeView === 'overview' ? (
-          <HtmlFrame title="Project Home" html={output!.html} />
-        ) : (
-          <DemoVideoFrame path={demoVideo!.path} mtimeMs={demoVideo!.mtimeMs} />
-        )}
-      </div>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: '240px 1fr' }}>
+          {isKnowledge ? (
+            <ProjectLibraryList
+              label="Knowledge pages"
+              itemTestId="knowledge-page-item"
+              rows={knowledge.map(knowledgeRow)}
+              selectedId={selectedK?.id ?? null}
+              onSelect={setKnowledgeId}
+            />
+          ) : (
+            <ProjectLibraryList
+              label="Videos"
+              itemTestId="video-item"
+              rows={videos.map(videoRow)}
+              selectedId={selectedV?.id ?? null}
+              onSelect={setVideoId}
+            />
+          )}
+          <div
+            className="overflow-hidden rounded-xl border border-line bg-bg-hi"
+            style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}
+          >
+            {isKnowledge ? (
+              selectedK && <KnowledgeFrame entry={selectedK} />
+            ) : (
+              selectedV &&
+              (selectedV.meta ? (
+                <VideoPlayer path={selectedV.path} mtimeMs={selectedV.mtimeMs} />
+              ) : (
+                <p className="p-4 text-xs text-red-400">{selectedV.error ?? 'unreadable meta'}</p>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

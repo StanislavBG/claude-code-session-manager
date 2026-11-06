@@ -25,6 +25,8 @@ const DEMO_VIDEO_LENGTHS = [
   { value: '60', label: '1 minute' },
 ] as const
 
+const KNOWLEDGE_PAGE_KINDS = ['Overview', 'How it works', 'FAQ', 'Custom topic'] as const
+
 function macroButtonLabel(macro: Macro, has: boolean): string {
   return has ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
 }
@@ -79,22 +81,59 @@ function MacroButton({
   const [extra, setExtra] = useState('')
   const [style, setStyle] = useState<string>('Auto')
   const [length, setLength] = useState<string>('30')
+  const [pageKind, setPageKind] = useState<string>('Overview')
+  const [topic, setTopic] = useState('')
   const building = status?.state === 'queued' || status?.state === 'running'
   const disabled = launching !== null || building
   const showExtraInput = has
   const showStyle = macro.id === 'builtin-demo-video'
+  const showPageKind = macro.id === 'builtin-project-home'
 
   const fire = () => {
     const trimmed = extra.trim()
     const styleLine = showStyle && style !== 'Auto' ? `Video style: ${style}` : ''
     const lengthLine = showStyle && length === '60' ? 'Video length: 60' : ''
-    const combined = [styleLine, lengthLine, trimmed].filter(Boolean).join('\n')
+    let pageLine = ''
+    if (showPageKind && pageKind === 'Custom topic') {
+      const t = topic.trim()
+      pageLine = t ? `Page: Custom topic: ${t}` : ''
+    } else if (showPageKind && pageKind !== 'Overview') pageLine = `Page: ${pageKind}`
+    const combined = [pageLine, styleLine, lengthLine, trimmed].filter(Boolean).join('\n')
     onLaunch(macro, combined || undefined)
     setExtra('')
+    setTopic('')
   }
 
   return (
     <div className="inline-flex items-center gap-1.5">
+      {showPageKind && (
+        <select
+          data-testid="project-home-page-kind"
+          aria-label="Page"
+          value={pageKind}
+          onChange={(e) => setPageKind(e.target.value)}
+          disabled={disabled}
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {KNOWLEDGE_PAGE_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+      )}
+      {showPageKind && pageKind === 'Custom topic' && (
+        <input
+          type="text"
+          data-testid="project-home-page-topic"
+          aria-label="Custom topic"
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          disabled={disabled}
+          placeholder="Topic for this page"
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg placeholder:text-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+      )}
       {showStyle && (
         <select
           data-testid="project-home-demo-style"

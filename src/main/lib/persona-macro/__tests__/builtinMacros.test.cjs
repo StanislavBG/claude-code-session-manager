@@ -125,7 +125,12 @@ test('built-in macros declare a frozen background job', () => {
     expect(Object.isFrozen(m.job)).toBe(true);
     expect(Object.isFrozen(m.job.artifactPaths)).toBe(true);
   }
-  expect(home.builtinVersion).toBe(1);
+  expect(home.builtinVersion).toBe(2);
+  expect(home.priorPrompts).toHaveLength(1);
+  for (const m of [demo, home]) expect(m.builtinVersion).toBe(m.priorPrompts.length + 1);
+  expect(home.prompt).toContain('project_page_write');
+  expect(home.prompt).toContain("'Page:");
+  expect(home.prompt).toContain("'Entry id'");
   expect(demo.builtinVersion).toBe(5);
   expect(demo.priorPrompts).toHaveLength(4);
 });

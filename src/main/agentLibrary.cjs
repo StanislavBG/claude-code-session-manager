@@ -72,7 +72,28 @@ function decodeLine(s) {
  * unchanged (not Claude-Code-visible either) so a save from the Agent
  * Library editor never erases the stamp a hand-edit should keep intact.
  */
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, body }) {
+const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly']);
+
+/**
+ * Raw text lines of every top-level frontmatter key block in `raw` whose key
+ * is NOT in `managed` (key line + its continuation lines), verbatim.
+ */
+function extractUnmanagedLines(raw, managed) {
+  if (typeof raw !== 'string' || !raw.startsWith('---\n')) return [];
+  const end = raw.indexOf('\n---', 4);
+  if (end === -1) return [];
+  const out = [];
+  let keep = false;
+  for (const line of raw.slice(4, end).split('\n')) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:/);
+    if (m) keep = !managed.has(m[1]);
+    if (keep) out.push(line);
+  }
+  while (out.length && out[out.length - 1].trim() === '') out.pop();
+  return out;
+}
+
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, body, preservedLines }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
@@ -86,6 +107,7 @@ function serializePersona({ name, description, tools, model, effort, color, tags
   if (title) lines.push(`title: ${title}`);
   if (typeof seedVersion === 'number' && Number.isFinite(seedVersion)) lines.push(`seedVersion: ${seedVersion}`);
   if (executorOnly === true) lines.push('executorOnly: true');
+  if (Array.isArray(preservedLines) && preservedLines.length) lines.push(...preservedLines);
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
 }
@@ -104,26 +126,26 @@ async function saveOverlay({ name, projectName, model, effort, loadSessions, val
   const project = projects.find((p) => p.name === projectName);
   if (!project) throw new Error(`project not open: ${projectName}`);
   const target = validatePath(path.join(project.cwd, '.claude', 'agents', `${name}.md`));
-  let fm = {};
+  let preserved = [];
   try {
-    const existing = splitFrontmatter(await fsp.readFile(target, 'utf8'));
+    const rawExisting = await fsp.readFile(target, 'utf8');
+    const existing = splitFrontmatter(rawExisting);
     if (existing.body.trim() !== '') {
       throw new Error(`${name} has a full-body override in ${projectName} — edit ${target} directly; it is not converted to a frontmatter-only override`);
     }
-    fm = existing.fm;
+    preserved = extractUnmanagedLines(rawExisting, new Set(['model', 'effort']));
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
   }
-  const next = { ...fm };
+  const managedLines = [];
   for (const [k, v] of [['model', model], ['effort', effort]]) {
-    if (v && v !== 'inherit') next[k] = v;
-    else delete next[k];
+    if (v && v !== 'inherit') managedLines.push(`${k}: ${v}`);
   }
-  if (Object.keys(next).length === 0) {
+  if (managedLines.length === 0 && preserved.length === 0) {
     await removeOverride({ name, projectName, loadSessions, validatePath });
     return { ok: true, path: target, removed: true };
   }
-  const lines = ['---', ...Object.entries(next).map(([k, v]) => `${k}: ${v}`), '---', ''];
+  const lines = ['---', ...managedLines, ...preserved, '---', ''];
   await writeTextAtomic(target, lines.join('\n'));
   return { ok: true, path: target };
 }
@@ -176,6 +198,10 @@ async function savePersona({
   let resolvedAction = action;
   let resolvedActionLabel = actionLabel;
   let resolvedExecutorOnly = executorOnly;
+  let preservedLines = [];
+  try {
+    preservedLines = extractUnmanagedLines(fsSync.readFileSync(target, 'utf8'), MANAGED_PERSONA_KEYS);
+  } catch { /* no existing file — nothing to preserve */ }
   if ([seedVersion, title, projects, action, actionLabel, executorOnly].some((v) => v === undefined)) {
     try {
       const { fm } = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
@@ -190,7 +216,7 @@ async function savePersona({
       if (resolvedActionLabel === undefined && fm.actionLabel) resolvedActionLabel = decodeLine(fm.actionLabel);
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, body });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, body, preservedLines });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));

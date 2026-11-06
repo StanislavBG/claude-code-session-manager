@@ -20,6 +20,9 @@
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
 - `lib/telemetry/telemetrySettings.cjs` / `lib/machineProfile.cjs` / `lib/telemetry/telemetryClient.cjs` / `lib/telemetry/telemetryBacklog.cjs` — anonymous, on-by-default telemetry to bilko.run: consent + identity, machine-class profile, egress client, error-log backlog drainer. Detail: [`telemetry.md`](telemetry.md).
 - `lib/feedback-remote/customerFeedbackClient.cjs` / `lib/feedback-remote/customerFeedbackInbox.cjs` / `lib/feedback-remote/customerFeedbackIpc.cjs` / `lib/feedback-remote/customerFeedbackAdminRoutes.cjs` — in-app customer feedback: submit + status lookup, owner inbox, renderer IPC, admin routes behind the `customer_feedback_*` MCP tools. Detail: [`customer-feedback.md`](customer-feedback.md).
+- `lib/persona-macro/macroJobDispatch.cjs` — `dispatchMacroJob`: turns a built-in macro press into ONE artifact-only scheduler PRD (key `macroId`) inside an existing Epic; never mints an Epic. Chat path stays for revisions in that Epic.
+- `lib/persona-macro/macroJobStatus.cjs` — `macroJobStatuses`: read-only state of each macro's newest background job (live queue row, else bounded history tail).
+- `lib/persona-macro/macroJobIpc.cjs` — IPC `macros:dispatch-job` / `macros:job-status` (renderer: `window.api.macros.dispatchJob` / `jobStatus`). Rows carrying `macroId` skip the sweep validator and the PLAN SETTLED digest.
 - `queueOps.cjs` — scheduler PRD queue linter (unbounded-loop + post-AC overrun detection) + archive + retag.
 - `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9][a-z0-9\-/]*$/`, 5 min kill ceiling, single in-flight per slug.
 - `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool.

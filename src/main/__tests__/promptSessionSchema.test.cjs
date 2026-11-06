@@ -114,3 +114,21 @@ test('a source object missing its required producer fails', () => {
   };
   expect(() => assertValidPromptSession(badSource)).toThrow(/producer/);
 });
+
+const devLoopBase = { id: 'epic-dl000001', cwd: '/tmp/x', goalText: 'g', claudeSessionId: 'c1b2a3d4-0000-0000-0000-000000000000', status: 'proposed', createdAt: '2026-08-02T00:00:00.000Z', completedAt: null };
+
+test('developLoop false is kept', () => {
+  const r = PromptSessionSchema.safeParse({ ...devLoopBase, developLoop: false });
+  expect(r.success).toBe(true);
+  expect(r.data.developLoop).toBe(false);
+});
+
+test('developLoop as a string is rejected', () => {
+  expect(PromptSessionSchema.safeParse({ ...devLoopBase, developLoop: 'no' }).success).toBe(false);
+});
+
+test('a row without developLoop parses unchanged', () => {
+  const r = PromptSessionSchema.safeParse(devLoopBase);
+  expect(r.success).toBe(true);
+  expect('developLoop' in r.data).toBe(false);
+});

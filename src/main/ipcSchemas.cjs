@@ -226,6 +226,8 @@ const promptSessionsCreateEpic = z.object({
   // Per-Epic runtime overrides (New Session card) — absent = use the persona's own value.
   model: z.string().min(1).max(256).optional(),
   effort: z.string().min(1).max(64).optional(),
+  // false = develop loop off for this Epic's whole life; absent = on.
+  developLoop: z.boolean().optional(),
   source: EpicSourceSchema.optional(),
   // The full first-prompt body + its labeled sections (epicIntake.ts's
   // composeEpicIntake) — both optional, since not every mint caller (e.g. a

@@ -157,3 +157,9 @@ test('model/effort overrides persist on the minted Epic; without them the record
   expect('model' in plain.session).toBe(false);
   expect('effort' in plain.session).toBe(false);
 });
+
+test('promptSessionsCreateEpic schema accepts developLoop false and rejects a string', () => {
+  const base = { cwd: '/tmp/x', goalText: 'g', agentType: 'architect' };
+  expect(schemas.promptSessionsCreateEpic.parse({ ...base, developLoop: false }).developLoop).toBe(false);
+  expect(schemas.promptSessionsCreateEpic.safeParse({ ...base, developLoop: 'no' }).success).toBe(false);
+});

@@ -89,6 +89,9 @@ const PromptSessionSchema = z.object({
   // Per-Epic runtime overrides chosen on the New Session card; absent = the persona's own value.
   model: z.string().optional(),
   effort: z.string().optional(),
+  // false = started with the develop loop (/develop skill, delegation guard, PRD queueing) switched off;
+  // fixed for the life of its session; absent = on; only false is ever written.
+  developLoop: z.boolean().optional(),
   // Absent on Epics minted before this field existed — those fall back to
   // rendering the flat `openingPrompt` as a single block (see
   // ChatTranscriptTurn.tsx's EpicIntakeCard).

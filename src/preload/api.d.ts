@@ -2463,6 +2463,8 @@ export interface PromptSessionsCreateEpicPayload {
   /** Per-Epic model/effort overrides (New Session card); omitted = the persona's own. */
   model?: string;
   effort?: string;
+  /** Absent = develop loop on; false = started without it, fixed for the life of the session. */
+  developLoop?: boolean;
   source?: {
     producer: 'new-epic-ui' | 'scheduler-dispatch';
     prdSlug?: string;

@@ -38,7 +38,9 @@ function initRepo(dir) {
   git(['config', 'user.name', 'Test'], dir);
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
   git(['add', '-A'], dir);
-  git(['commit', '-q', '-m', 'initial'], dir);
+  // Backdate: a same-second fixture commit would fall inside the run window.
+  const past = new Date(Date.now() - 3600 * 1000).toISOString();
+  execFileSync('git', ['commit', '-q', '-m', 'initial'], { cwd: dir, env: { ...process.env, GIT_AUTHOR_DATE: past, GIT_COMMITTER_DATE: past } });
 }
 
 // readQueue()'s per-project discovery walks ~/.claude/projects/*/*.jsonl

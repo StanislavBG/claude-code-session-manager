@@ -6748,7 +6748,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           guardCwd,
           guardHeadBefore,
           headAtExit,
-          job.startedAt,
+          dispatchStartedAt,
           new Date().toISOString(),
         );
       let rangeCommits = [];
@@ -6758,7 +6758,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         rangeCommits = await gitTreeGuard.gitRangeCommits(guardCwd, guardHeadBefore, headAtExit);
         transcriptCommitShas = parseLog(path.join(runDir, `${job.slug}.log`)).transcriptCommitShas || [];
         const overlapState = await readQueue().catch(() => ({ jobs: [] }));
-        const myStart = Date.parse(job.startedAt) || 0;
+        const myStart = Date.parse(dispatchStartedAt) || 0;
         const myEnd = Date.now();
         siblingOverlap = (overlapState.jobs || []).some((j) => {
           if (j.slug === job.slug || (j.cwd || defaultCwd) !== guardCwd) return false;
@@ -6965,11 +6965,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         guardCwd,
         guardHeadBefore,
         guardHeadAtSigterm,
-        job.startedAt,
+        dispatchStartedAt,
         new Date().toISOString(),
       );
       if (guardHeadBefore && guardHeadAtSigterm && guardHeadAtSigterm !== guardHeadBefore) {
-        const verified = await resolveLandedCommitEvidence(guardCwd, guardHeadAtSigterm, job.startedAt);
+        const verified = await resolveLandedCommitEvidence(guardCwd, guardHeadAtSigterm, dispatchStartedAt);
         if (verified) sigtermLandedCommitEvidence = guardHeadAtSigterm;
       }
     }
@@ -7009,7 +7009,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     if (res.exitCode !== 0 && res.exitCode !== 143 && !res.rateLimited) {
       const headAtPlainExit = await gitTreeGuard.gitHead(guardCwd);
       if (guardHeadBefore && headAtPlainExit && headAtPlainExit !== guardHeadBefore) {
-        const verified = await resolveLandedCommitEvidence(guardCwd, headAtPlainExit, job.startedAt);
+        const verified = await resolveLandedCommitEvidence(guardCwd, headAtPlainExit, dispatchStartedAt);
         if (verified) plainExitLandedCommitEvidence = headAtPlainExit;
       }
     }

@@ -56,18 +56,23 @@ with two tabs for the same folder.</p>
 
 <h2>Give your agency its first job</h2>
 
-<p>Inside a project, open its Sessions view and click "+ New Session." A form opens asking for two
-things and a goal.</p>
+<p>Inside a project, open its Sessions view and click "+ New Session." A form opens asking for an
+Agent, a Mission, and a goal.</p>
 
 <ol class="manual-steps">
   <li>Pick an Agent — the "who." This is which member of your agency runs the session. The
-  architect, the project lead you met last chapter, is a solid first pick for almost anything.</li>
+  architect, the project lead you met last chapter, is a solid first pick for almost anything.
+  Choose None to talk to plain Claude with no agent persona.</li>
   <li>Pick a Mission — the "what kind of work." Feature is for building something new, Bug is for
   fixing something broken, and Discussion is for thinking something through before any code
-  changes.</li>
+  changes. Choose None and your goal is sent as written, with no task framing.</li>
   <li>Describe the outcome you want, in your own words, in the goal box.</li>
   <li>Click "Start Session."</li>
 </ol>
+
+<p>The form also has a "Develop loop" checkbox. Leave it on for the normal planning workflow. Turn it
+off for plain Claude: no /develop skill and no queued plans, so that session cannot hand work to
+the scheduler.</p>
 
 <p>Clicking "Start Session" sends your goal as the agent's very first instruction, and the session
 starts working right away.</p>

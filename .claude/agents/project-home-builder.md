@@ -1,7 +1,6 @@
 ---
 name: project-home-builder
 description: Reads a project and writes ONE self-contained overview page (home.html) for its Project Home tab, then saves it with a single project_home_write call.
-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
 Session-manager-only overlay on the portable `project-home-builder` persona seeded to

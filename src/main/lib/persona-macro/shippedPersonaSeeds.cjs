@@ -161,6 +161,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
     },
   ],
   "project-home-builder": [
+    // Not from src/seed git history: this body was written to ~/.claude/agents by this repo's own
+    // agent on 2026-08-02, before the seed file existed, so no seed commit ever contained it.
+    {
+      commit: "pre-seed-2026-08-02",
+      bodySha256: "ad9f77d1279b7e8b0856285c361f45d8b339369a63675307817d781e82588662",
+      fm: {
+        description: "Generates a project's static Project Home/Project Pages from that project's own saved component library and a computed project summary, if that pipeline exists there.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit",
+        tags: "project-home-builder",
+        title: "Platform — Docs Engineer",
+      },
+    },
     {
       commit: "e9f2f540",
       bodySha256: "e1c80f465179f814f1e9ea95529434309e5238facdc8c6664cb8f44f8302e148",

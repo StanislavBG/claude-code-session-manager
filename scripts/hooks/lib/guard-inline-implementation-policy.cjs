@@ -13,6 +13,10 @@
  * `git rev-parse` to resolve the ops root (see `resolveOpsRootCwd` below).
  * Calling it directly from a test still removes the outer CLI-process spawn
  * per case, exercising real filesystem/git behavior instead of mocking it.
+ *
+ * A developLoop:false Epic was started as a plain session (develop loop off)
+ * and may edit inline whatever its tag, like the allowInlineImplementation
+ * per-Epic escape hatch.
  */
 'use strict';
 
@@ -132,6 +136,12 @@ function decide(payload) {
     if (!epic) return buildAllow(); // unresolvable session — allow by construction
 
     if (epic.allowInlineImplementation) return buildAllow();
+    if (epic.developLoop === false) {
+      return {
+        continue: true,
+        reason: 'This Epic was started with the develop loop off (developLoop: false) as a plain session, so inline edits are allowed.',
+      };
+    }
     if (!DENY_TAGS.has(epic.tag)) return buildAllow();
 
     const reason = [

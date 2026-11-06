@@ -140,6 +140,34 @@ test('allows with the per-Epic allowInlineImplementation flag', () => {
   expect(parsed).toEqual({ continue: true });
 });
 
+test('allows a feature Epic started with the develop loop off (developLoop:false)', () => {
+  writeIndex({
+    'epic-1': { id: 'epic-1', claudeSessionId: 'sess-feature', tag: 'feature', developLoop: false },
+  });
+  const parsed = decide({
+    session_id: 'sess-feature',
+    tool_name: 'Write',
+    cwd: projectDir,
+    tool_input: { file_path: `${projectDir}/src/main/foo.cjs`, content: 'x' },
+  });
+  expect(parsed.continue).toBe(true);
+  expect(parsed.hookSpecificOutput).toBeUndefined();
+  expect(parsed.reason).toContain('develop loop');
+});
+
+test('still denies the same feature Epic when developLoop is absent', () => {
+  writeIndex({
+    'epic-1': { id: 'epic-1', claudeSessionId: 'sess-feature', tag: 'feature' },
+  });
+  const parsed = decide({
+    session_id: 'sess-feature',
+    tool_name: 'Write',
+    cwd: projectDir,
+    tool_input: { file_path: `${projectDir}/src/main/foo.cjs`, content: 'x' },
+  });
+  expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+});
+
 test('allows on an unresolvable session id', () => {
   writeIndex({
     'epic-1': { id: 'epic-1', claudeSessionId: 'sess-feature', tag: 'feature' },

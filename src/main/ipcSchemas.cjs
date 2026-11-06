@@ -846,6 +846,68 @@ const projectDemoVideoAdminWriteBody = z.object({
   html: z.string(),
 }).strict();
 
+// ──────────────────────────────────────────── Project Home library entries
+// One id rule for every library entry; '_character' starts with '_' so it can
+// never match.
+const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const entryId = z.string().regex(ENTRY_ID_RE);
+const projectVideoReportFields = {
+  lufs: z.number().nullable(),
+  truePeakDb: z.number().nullable(),
+  speechS: z.number().nullable(),
+  readingGrade: z.number().nullable(),
+  checks: z.array(z.object({
+    id: z.string().max(60),
+    ok: z.boolean(),
+    detail: z.string().max(300),
+  }).strict()).max(60),
+};
+const projectVideoMeta = z.object({
+  id: entryId,
+  title: z.string().min(1).max(120),
+  kind: z.enum(['project-demo', 'blog-post', 'feature']),
+  style: z.string().max(40),
+  lengthS: z.number().int().min(5).max(60),
+  createdAt: z.string().datetime(),
+  character: z.string().max(80).nullable(),
+  sources: z.array(z.object({
+    claim: z.string().max(300),
+    source: z.string().max(600),
+    ref: z.string().max(300),
+  }).strict()).max(40),
+  report: z.object({ ...projectVideoReportFields, bytes: z.number().int() }).strict(),
+  macroVersion: z.number().int().min(0),
+  seedVersion: z.number().int().min(0),
+  model: z.string().max(60),
+  effort: z.string().max(60),
+}).strict();
+const projectPageMeta = z.object({
+  id: entryId,
+  title: z.string().min(1).max(120),
+  topic: z.string().max(120),
+  createdAt: z.string().datetime(),
+  model: z.string().max(60),
+}).strict();
+const projectPageAdminWriteBody = z.object({
+  cwd: z.string().min(1).max(4096).optional(),
+  pageId: entryId,
+  title: z.string().min(1).max(120),
+  topic: z.string().max(120).optional(),
+  html: z.string(),
+}).strict();
+// Server stamps id, createdAt and report.bytes.
+const projectVideoAdminWriteBody = z.object({
+  cwd: z.string().min(1).max(4096).optional(),
+  videoId: entryId,
+  title: z.string().min(1).max(120),
+  kind: z.enum(['project-demo', 'blog-post', 'feature']),
+  lengthS: z.number().int().min(5).max(60),
+  html: z.string(),
+  meta: projectVideoMeta.omit({ id: true, createdAt: true }).extend({
+    report: z.object(projectVideoReportFields).strict(),
+  }),
+}).strict();
+
 const projectBriefSetPin = z.object({
   cwd: z.string().min(1).max(4096),
   block: PROJECT_BRIEF_BLOCK,
@@ -1295,6 +1357,7 @@ module.exports = {
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
   PRD_CREATE_SLUG_RE,
+  ENTRY_ID_RE,
   READ_COMMANDS,
   SAS_GATED_READS,
   MUTATE_COMMANDS,
@@ -1375,6 +1438,10 @@ module.exports = {
     projectPagesCwd,
     projectHomeAdminWriteBody,
     projectDemoVideoAdminWriteBody,
+    projectVideoMeta,
+    projectPageMeta,
+    projectPageAdminWriteBody,
+    projectVideoAdminWriteBody,
     projectBriefSetPin,
     projectBriefUpdate,
     promptSessionTranscriptAppend,

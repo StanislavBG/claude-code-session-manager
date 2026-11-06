@@ -161,7 +161,7 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
   fs.mkdirSync(psDir, { recursive: true });
   const mkEpic = (id: string, title: string, status: 'proposed' | 'active') => ({
     id, cwd: projectCwd, goalText: title, claudeSessionId: `claude-${id}`, status,
-    createdAt: new Date(1_700_000_000_000).toISOString(), completedAt: null, tag: 'feature', source: 'user',
+    createdAt: new Date(1_700_000_000_000).toISOString(), completedAt: null, tag: 'feature',
   });
   fs.writeFileSync(path.join(psDir, 'active-index.json'), JSON.stringify({
     sessions: {
@@ -343,6 +343,92 @@ describe('real chain: dist-web -> RemoteRenderer -> ws.ts -> relay -> webRemote.
       expect(ok, `${await diag(h)}\nframe text: ${dumped.slice(0, 800)}\nerrors: ${frameErrors.join(' | ')}`).toBe(true);
       expect(h.calls.some((c) => c.channel === 'promptSessions:load-active-index')).toBe(true);
       expect(frameErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
+  /** Open the project's Sessions list inside the frame (skips the tour), then return the frame + error log. */
+  async function openSessions(h: Harness) {
+    const frameErrors: string[] = [];
+    h.page.on('pageerror', (e) => frameErrors.push(`pageerror: ${e.message}`));
+    h.page.on('console', (m) => {
+      if (m.type() === 'error' && m.location().url && !m.location().url.startsWith('ws:')) frameErrors.push(`console: ${m.text()}`);
+    });
+    await h.page.addStyleTag({ content: 'iframe[data-testid=remote-renderer]{position:fixed;inset:0;width:100vw;height:100vh;border:0}' });
+    const frame = h.page.frameLocator('iframe[data-testid=remote-renderer]');
+    const row = (t: string) => frame.getByTestId('epic-queue-row').filter({ hasText: t }).first();
+    const deadline = Date.now() + 30_000;
+    let opened = false;
+    while (Date.now() < deadline) {
+      const skip = frame.getByTestId('tour-skip');
+      if (await skip.isVisible().catch(() => false)) await skip.click({ timeout: 2_000 }).catch(() => {});
+      if (!opened) {
+        const tab = frame.getByText('chain-proj', { exact: true }).first();
+        if (await tab.isVisible().catch(() => false)) {
+          await tab.click({ timeout: 2_000 }).catch(() => {});
+          const nav = frame.getByText('Sessions', { exact: true }).first();
+          if (await nav.isVisible().catch(() => false)) opened = await nav.click({ timeout: 2_000 }).then(() => true, () => false);
+        }
+      }
+      if (await row('Chain Proposed Epic').isVisible().catch(() => false) && await row('Chain Active Epic').isVisible().catch(() => false)) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { frame, row, frameErrors };
+  }
+  const indexPath = (h: Harness) => path.join(h.projectCwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  const readIndex = (h: Harness) => JSON.parse(fs.readFileSync(indexPath(h), 'utf8')) as { sessions: Record<string, { status: string }> };
+
+  it('approve on the proposed Epic round-trips to active-index.json', async () => {
+    const h = await start({ control: true });
+    try {
+      const { frame, row, frameErrors } = await openSessions(h);
+      await row('Chain Proposed Epic').click({ timeout: 10_000 });
+      await frame.getByTestId('epic-approve').click({ timeout: 15_000 });
+      const active = await waitFor(() => {
+        try { return readIndex(h).sessions['epic-proposed']?.status === 'active'; } catch { return false; }
+      }, 15_000);
+      expect(active, await diag(h)).toBe(true);
+      expect(readIndex(h).sessions['epic-active'].status).toBe('active');
+      expect(h.calls.some((c) => c.channel === 'promptSessions:merge-active-index'), await diag(h)).toBe(true);
+      expect(frameErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
+  it('Mark completed on the active Epic writes its archive and drops it from the index', async () => {
+    const h = await start({ control: true });
+    try {
+      const { frame, row, frameErrors } = await openSessions(h);
+      await row('Chain Active Epic').click({ timeout: 10_000 });
+      await frame.getByTestId('epic-mark-completed').click({ timeout: 15_000 });
+      const archive = path.join(h.projectCwd, 'session-manager-operations', 'prompt-sessions', 'epic-active.json');
+      const done = await waitFor(() => {
+        try { return fs.existsSync(archive) && !('epic-active' in readIndex(h).sessions); } catch { return false; }
+      }, 40_000);
+      expect(done, `${await diag(h)}
+errors: ${frameErrors.join(' | ')}`).toBe(true);
+      expect(JSON.parse(fs.readFileSync(archive, 'utf8')).session.id).toBe('epic-active');
+      expect(h.calls.some((c) => c.channel === 'promptSessions:write-archive'), await diag(h)).toBe(true);
+      expect(readIndex(h).sessions['epic-proposed'].status).toBe('proposed');
+      expect(frameErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
+  it('approve with remote control off shows a refusal toast and writes nothing', async () => {
+    const h = await start({ control: false });
+    try {
+      const { frame, row } = await openSessions(h);
+      const before = fs.readFileSync(indexPath(h));
+      await row('Chain Proposed Epic').click({ timeout: 10_000 });
+      await frame.getByTestId('epic-approve').click({ timeout: 15_000 });
+      await frame.getByTestId('toast').first().waitFor({ state: 'visible', timeout: 15_000 });
+      expect(await frame.getByTestId('toast').first().innerText()).toMatch(/Could not start/);
+      expect(Buffer.compare(fs.readFileSync(indexPath(h)), before)).toBe(0);
+      expect(h.calls.some((c) => c.channel === 'promptSessions:merge-active-index')).toBe(false);
     } finally {
       await h.stop();
     }

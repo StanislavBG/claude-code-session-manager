@@ -113,11 +113,13 @@ test('built-in macros declare a frozen background job', () => {
   const home = BUILTIN_MACROS.find((m) => m.id === 'builtin-project-home');
   expect(demo.job).toEqual({
     estimateMinutes: 60,
-    artifactPaths: ['session-manager-operations/project-pages/demo-video/index.html'],
+    entryKind: 'video',
+    artifactPaths: ['session-manager-operations/project-pages/videos/{id}/index.html'],
   });
   expect(home.job).toEqual({
     estimateMinutes: 20,
-    artifactPaths: ['session-manager-operations/project-pages/home.html'],
+    entryKind: 'knowledge',
+    artifactPaths: ['session-manager-operations/project-pages/knowledge/{id}/index.html'],
   });
   for (const m of [demo, home]) {
     expect(Object.isFrozen(m.job)).toBe(true);

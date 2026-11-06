@@ -25,16 +25,43 @@ test('builds the PRD input from the macro', async () => {
   const i = d.createPrd.mock.calls[0][0];
   expect(i).toMatchObject({
     agentType: 'demo-video-builder', tag: macro.tag, deliverable: 'artifact',
-    artifactPaths: macro.job.artifactPaths, files: macro.job.artifactPaths,
     estimateMinutes: 60, macroId: 'builtin-demo-video', sourcePromptId: 'epic-1', cwd: '/tmp/proj',
-    disposition: 'new-head', goal: macro.prompt,
+    disposition: 'new-head',
   });
+  const id1 = /Entry id: (vid-[0-9a-z]+)\. Save with videoId = \1\.$/.exec(i.goal)[1];
+  expect(i.goal.startsWith(macro.prompt)).toBe(true);
+  expect(i.artifactPaths).toEqual([`session-manager-operations/project-pages/videos/${id1}/index.html`]);
+  expect(i.files).toEqual(i.artifactPaths);
   expect(i.slug).toBe(r.slug);
   const r2 = await dispatchMacroJob(base, mk());
   expect(r2.slug).not.toBe(r.slug);
   const e = mk();
   await dispatchMacroJob({ ...base, extraInstructions: 'Video style: Fun' }, e);
-  expect(e.createPrd.mock.calls[0][0].goal).toBe(`${macro.prompt}\n\nAdditional instructions: Video style: Fun`);
+  expect(e.createPrd.mock.calls[0][0].goal).toMatch(/^[\s\S]*\n\nAdditional instructions: Video style: Fun\n\nEntry id: vid-/);
+});
+
+test('two dispatches get different video ids and gates', async () => {
+  const a = mk(); const b = mk();
+  await dispatchMacroJob(base, a);
+  await dispatchMacroJob(base, b);
+  const [x, y] = [a, b].map((d) => d.createPrd.mock.calls[0][0]);
+  expect(x.artifactPaths[0]).not.toBe(y.artifactPaths[0]);
+  expect(x.gate[0]).not.toBe(y.gate[0]);
+});
+
+test('knowledge ids follow the Page line', async () => {
+  const cases = [
+    [undefined, 'overview'], ['Page: How it works', 'how-it-works'], ['Page: FAQ', 'faq'],
+    ['Page: Custom topic: Billing & Plans', 'billing-plans'],
+  ];
+  for (const [extra, id] of cases) {
+    const d = mk();
+    await dispatchMacroJob({ ...base, macroId: 'builtin-project-home', extraInstructions: extra }, d);
+    const i = d.createPrd.mock.calls[0][0];
+    expect(i.artifactPaths).toEqual([`session-manager-operations/project-pages/knowledge/${id}/index.html`]);
+    expect(i.goal.endsWith(`Entry id: ${id}. Save with pageId = ${id}.`)).toBe(true);
+    expect(i.gate[0]).toContain(`/knowledge/${id}/index.html`);
+  }
 });
 
 test('gate is one quoted node entry with absolute path and baked time', async () => {
@@ -43,7 +70,7 @@ test('gate is one quoted node entry with absolute path and baked time', async ()
   const { gate } = d.createPrd.mock.calls[0][0];
   expect(gate).toHaveLength(1);
   expect(gate[0].startsWith("timeout 60 node -e '")).toBe(true);
-  expect(gate[0]).toContain(JSON.stringify(path.join('/tmp/proj', macro.job.artifactPaths[0])));
+  expect(gate[0]).toContain('/tmp/proj/session-manager-operations/project-pages/videos/vid-');
   expect(gate[0]).toContain('1700000000000');
   expect(gate[0].length).toBeLessThanOrEqual(500);
   const q = mk();

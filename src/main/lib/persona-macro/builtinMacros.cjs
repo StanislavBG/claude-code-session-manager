@@ -27,7 +27,8 @@ const BUILTIN_MACROS = Object.freeze([
     builtinVersion: 1,
     job: Object.freeze({
       estimateMinutes: 20,
-      artifactPaths: Object.freeze(['session-manager-operations/project-pages/home.html']),
+      entryKind: 'knowledge',
+      artifactPaths: Object.freeze(['session-manager-operations/project-pages/knowledge/{id}/index.html']),
     }),
     priorPrompts: Object.freeze([]),
     prompt:
@@ -43,7 +44,8 @@ const BUILTIN_MACROS = Object.freeze([
     builtinVersion: 5,
     job: Object.freeze({
       estimateMinutes: 60,
-      artifactPaths: Object.freeze(['session-manager-operations/project-pages/demo-video/index.html']),
+      entryKind: 'video',
+      artifactPaths: Object.freeze(['session-manager-operations/project-pages/videos/{id}/index.html']),
     }),
     priorPrompts: Object.freeze([
       'Generate a 30-second demo video for this project as one self-contained HTML/JavaScript animation that presents its main goals and key features, grounded only in what you read in the repository. Save it with a single project_demo_video_write call.',

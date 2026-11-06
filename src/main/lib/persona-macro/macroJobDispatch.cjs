@@ -23,6 +23,21 @@ function buildGate(absPath, nowMs) {
   return `timeout 60 node -e '${script}'`;
 }
 
+const PAGE_IDS = { 'how it works': 'how-it-works', faq: 'faq', overview: 'overview' };
+
+// Entry id: videos get a fresh one per press; knowledge pages are named by a
+// 'Page: <name>' line in the extra instructions (default 'overview').
+function entryIdFor(kind, extra, t) {
+  if (kind === 'video') return `vid-${t.toString(36)}${Math.random().toString(36).slice(2, 5).padEnd(3, '0')}`;
+  const m = /^\s*Page:\s*(.+?)\s*$/im.exec(extra || '');
+  if (!m) return 'overview';
+  const name = m[1];
+  const known = PAGE_IDS[name.toLowerCase()];
+  if (known) return known;
+  const custom = /^custom topic:\s*(.+)$/i.exec(name);
+  return kebabCase(custom ? custom[1] : name, { maxLen: 40, fallback: 'overview' });
+}
+
 async function dispatchMacroJob(
   { cwd, macroId, epicId, extraInstructions } = {},
   { createPrd, listRows, archivePrd, builtins = BUILTIN_MACROS, now = Date.now } = {},
@@ -33,7 +48,11 @@ async function dispatchMacroJob(
   if (typeof cwd !== 'string' || !cwd) return { ok: false, error: 'cwd is required' };
   if (typeof createPrd !== 'function') return { ok: false, error: 'createPrd is not available' };
 
-  const artifactPaths = [...macro.job.artifactPaths];
+  const t = now();
+  const extra = typeof extraInstructions === 'string' ? extraInstructions.trim() : '';
+  const entryKind = macro.job.entryKind;
+  const entryId = entryKind ? entryIdFor(entryKind, extra, t) : null;
+  const artifactPaths = macro.job.artifactPaths.map((p) => (entryId ? p.split('{id}').join(entryId) : p));
   const absPaths = artifactPaths.map((p) => path.join(cwd, p));
   for (const s of [cwd, ...absPaths]) {
     if (s.includes("'") || /[\r\n]/.test(s)) return { ok: false, error: "cwd or artifact path contains a character the gate cannot quote (single quote or newline)" };
@@ -56,10 +75,9 @@ async function dispatchMacroJob(
     try { await archivePrd(newest.slug, cwd); } catch { /* best effort */ }
   }
 
-  const t = now();
   const slug = `${kebabCase(macro.label, { maxLen: 30, fallback: 'macro' })}-build-${t.toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-  const extra = typeof extraInstructions === 'string' ? extraInstructions.trim() : '';
-  const goal = extra ? `${macro.prompt}\n\nAdditional instructions: ${extra}` : macro.prompt;
+  let goal = extra ? `${macro.prompt}\n\nAdditional instructions: ${extra}` : macro.prompt;
+  if (entryId) goal += `\n\nEntry id: ${entryId}. Save with ${entryKind === 'video' ? 'videoId' : 'pageId'} = ${entryId}.`;
 
   const input = {
     title: `${macro.label}: background build`,

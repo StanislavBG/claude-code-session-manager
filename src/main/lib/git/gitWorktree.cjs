@@ -795,6 +795,22 @@ async function reserveWorktreeSlot(kind) {
 }
 
 /**
+ * True when `dir` is a registered worktree of `cwd`'s repo checked out on
+ * `branch` (bare name, no refs/heads/). Any error → false, so callers fall
+ * back to the destructive-leftover path they had before.
+ */
+async function isRegisteredWorktreeOnBranch(cwd, dir, branch) {
+  try {
+    const out = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
+    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+    const want = real(dir);
+    return parseWorktreeListPorcelain(out).some((e) => e.worktree && e.branch === branch && real(e.worktree) === want);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Create a linked worktree on a fresh branch checked out from the main
  * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
  * carriedPaths, baseBranch }` on success (`baseBranch` is `cwd`'s branch at
@@ -857,6 +873,18 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
   let resolvedFromRefSha = null;
   if (typeof fromRef === 'string' && fromRef) {
     resolvedFromRefSha = await tryResolveCommit(cwd, `${fromRef}^{commit}`);
+  }
+
+  // Epic mint is idempotent: a live Epic checkout (registered on its own
+  // branch) is returned untouched — the leftover teardown below would delete
+  // a running session's worktree. Runs before the slot reservation so a
+  // reuse never changes the epic count.
+  if (kind === 'epic') {
+    const epicDir = worktreeDirFor(kind, cwd, key);
+    const epicBranch = branchNameFor(kind, key);
+    if (fs.existsSync(epicDir) && await isRegisteredWorktreeOnBranch(cwd, epicDir, epicBranch)) {
+      return { ok: true, dir: epicDir, branch: epicBranch, baseCwd: cwd, reused: true };
+    }
   }
 
   // Cap check + slot reservation as a single atomic step, per kind — see

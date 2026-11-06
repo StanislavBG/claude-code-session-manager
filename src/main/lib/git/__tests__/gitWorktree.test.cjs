@@ -815,6 +815,44 @@ test('[epic] a commit made inside an epic worktree integrates onto the main tree
   await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
+test('[epic] a second createEpicWorktree for the same epic reuses the live worktree untouched', async () => {
+  const epicId = 'epic-reuse';
+  const first = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  expect(first.ok).toBe(true);
+  const countAfterFirst = gitWorktree._getActiveWorktreeCountForTests('epic');
+  const tip = git(['rev-parse', first.branch], repoCwd).toString().trim();
+  const file = path.join(first.dir, 'untracked-live.txt');
+  fs.writeFileSync(file, 'live session output\n', 'utf8');
+
+  const second = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  expect(second.ok).toBe(true);
+  expect(second.reused).toBe(true);
+  expect(second.dir).toBe(first.dir);
+  expect(second.branch).toBe(first.branch);
+  expect(fs.readFileSync(file, 'utf8')).toBe('live session output\n');
+  expect(git(['rev-parse', second.branch], repoCwd).toString().trim()).toBe(tip);
+  expect(gitWorktree._getActiveWorktreeCountForTests('epic')).toBe(countAfterFirst);
+
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: first.dir, branch: first.branch });
+});
+
+test('[epic] a leftover dir that is not a registered worktree is still replaced', async () => {
+  const epicId = 'epic-leftover';
+  const probe = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  expect(probe.ok).toBe(true);
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: probe.dir, branch: probe.branch });
+  fs.mkdirSync(probe.dir, { recursive: true });
+  fs.writeFileSync(path.join(probe.dir, 'stale.txt'), 'stale\n', 'utf8');
+
+  const result = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  expect(result.ok).toBe(true);
+  expect(result.reused).toBeUndefined();
+  expect(fs.existsSync(path.join(result.dir, 'README.md'))).toBe(true);
+  expect(fs.existsSync(path.join(result.dir, 'stale.txt'))).toBe(false);
+
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});
+
 test('[epic] no premature cap eviction — many concurrent epic worktrees stay under the default epic cap', async () => {
   const created = [];
   // The job kind's default cap is 4; prove the epic kind doesn't inherit that

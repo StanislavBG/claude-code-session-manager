@@ -681,7 +681,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // formatter. `null` while loading or on IPC failure; the chip simply shows
   // no model detail in that case rather than a fabricated one.
   const agentType = promptSession.agentType
-  const runtimeInfo = useEffectiveModelInfo(agentType ? cwd : null, agentType ?? null, { model: promptSession.model, effort: promptSession.effort })
+  const developLoopOff = promptSession.developLoop === false
+  const runtimeInfo = useEffectiveModelInfo(cwd, agentType ?? null, { model: promptSession.model, effort: promptSession.effort })
 
   // Tab state resets to Discussion on every Epic change.
   useEffect(() => {
@@ -874,25 +875,38 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             <div className="mb-1.5 flex items-center gap-2 min-w-0" data-testid="epic-detail-tags">
               <EpicStatusChip status={status} />
               <EpicKindTag kind={promptSession.tag} />
-              {(agentType || branchText) && (
-                <span
-                  className="font-mono text-[11px] text-fg-dim truncate"
-                  data-testid="epic-detail-meta-line"
-                >
-                  {agentType && (
-                    <button
-                      type="button"
-                      onClick={() => openAgentLibrary(agentType)}
-                      title={`Agent: ${agentType}${runtimeInfo ? ` — ${formatEffectiveRuntimeLine(runtimeInfo).text}` : ''} — click to open in Agent Library`}
-                      data-testid="epic-agent-tag"
-                      className="hover:text-fg"
-                    >
-                      {runtimeInfo ? formatCompactRuntime(runtimeInfo) : agentType}
-                    </button>
-                  )}
-                  {branchText && (agentType ? ` · ${branchText}` : branchText)}
-                </span>
-              )}
+              <span
+                className="font-mono text-[11px] text-fg-dim truncate"
+                data-testid="epic-detail-meta-line"
+              >
+                {agentType && (
+                  <button
+                    type="button"
+                    onClick={() => openAgentLibrary(agentType)}
+                    title={`Agent: ${agentType}${runtimeInfo ? ` — ${formatEffectiveRuntimeLine(runtimeInfo).text}` : ''} — click to open in Agent Library`}
+                    data-testid="epic-agent-tag"
+                    className="hover:text-fg"
+                  >
+                    {runtimeInfo ? formatCompactRuntime(runtimeInfo) : agentType}
+                  </button>
+                )}
+                {!agentType && (
+                  <span data-testid="epic-no-agent-chip" className="rounded border border-line px-1.5 py-px text-fg-faint">
+                    No agent
+                  </span>
+                )}
+                {!agentType && runtimeInfo && (
+                  <span data-testid="epic-runtime-line" title={formatEffectiveRuntimeLine(runtimeInfo).text}>
+                    {` · ${formatCompactRuntime(runtimeInfo)}`}
+                  </span>
+                )}
+                {developLoopOff && (
+                  <span data-testid="epic-develop-loop-off-chip" className="ml-1.5 rounded border border-line px-1.5 py-px text-fg-faint">
+                    Develop loop off
+                  </span>
+                )}
+                {branchText && ` · ${branchText}`}
+              </span>
             </div>
             <div className="flex items-baseline gap-2">
               <EpicTitle epicId={epicId} title={title} goal={goal} />

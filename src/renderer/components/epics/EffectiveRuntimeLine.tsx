@@ -96,7 +96,8 @@ function compactModelText(info: EffectiveModelInfo): string {
  * caller's tooltip rather than folded in here.
  */
 export function formatCompactRuntime(info: EffectiveModelInfo): string {
-  const parts = [info.agentType, compactModelText(info)]
+  const parts = [compactModelText(info)]
+  if (info.agentType) parts.unshift(info.agentType)
   if (info.effortLevel) parts.push(`effort ${info.effortLevel}`)
   return parts.join(' · ')
 }

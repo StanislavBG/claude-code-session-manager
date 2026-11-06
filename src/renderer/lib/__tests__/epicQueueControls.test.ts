@@ -169,6 +169,17 @@ describe('groupEpics', () => {
     expect(groups.map((g) => g.key)).toEqual(['feature', 'bug'])
   })
 
+  it("puts tagless Epics in their own 'No mission' group after the tag groups, not under Discussion", () => {
+    const epics = [
+      makeEpic({ id: 'e-none', tag: undefined }),
+      makeEpic({ id: 'e-disc', tag: 'discussion' }),
+    ]
+    const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
+    const groups = groupEpics(epics, 'tag', snapshots, {}, NOW)
+    expect(groups.map((g) => g.key)).toEqual(['discussion', 'no-mission'])
+    expect(groups[1].items.map((e) => e.id)).toEqual(['e-none'])
+  })
+
   it('groups by recency buckets', () => {
     const epics = [
       makeEpic({ id: 'e-today', createdAt: new Date(NOW - 60_000).toISOString() }),

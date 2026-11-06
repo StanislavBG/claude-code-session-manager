@@ -20,6 +20,11 @@ export const PAGE_INCREMENT = 40
 
 export const STATUS_GROUP_ORDER: EpicDisplayStatus[] = ['proposed', 'failed', 'attention', 'running', 'needs', 'queued', 'active', 'completed']
 export { TAG_GROUP_ORDER }
+
+/** Group key for Epics with no tag (No mission) — sorts after the seven tag groups. */
+export const NO_MISSION_GROUP_KEY = 'no-mission'
+export const NO_MISSION_GROUP_LABEL = 'No mission'
+const TAG_GROUP_KEYS: ReadonlyArray<string> = [...TAG_GROUP_ORDER, NO_MISSION_GROUP_KEY]
 export const RECENCY_GROUP_ORDER: ReadonlyArray<string> = ['Today', 'This week', 'This month', 'Older']
 
 export interface EpicCounts {
@@ -142,7 +147,7 @@ export interface GroupedSection {
 
 function groupKeyOrder(groupBy: EpicGroupKey): ReadonlyArray<string> {
   if (groupBy === 'status') return STATUS_GROUP_ORDER
-  if (groupBy === 'tag') return TAG_GROUP_ORDER
+  if (groupBy === 'tag') return TAG_GROUP_KEYS
   return RECENCY_GROUP_ORDER
 }
 
@@ -160,7 +165,7 @@ export function groupEpics(
       groupBy === 'status'
         ? epicDisplayStatus(epic.id, snapshots)
         : groupBy === 'tag'
-          ? (epic.tag ?? 'discussion')
+          ? (epic.tag ?? NO_MISSION_GROUP_KEY)
           : recencyBucket(epic, events, now)
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key)!.push(epic)

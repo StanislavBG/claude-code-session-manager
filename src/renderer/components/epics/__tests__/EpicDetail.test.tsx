@@ -320,18 +320,35 @@ describe('EpicDetail (PRD 827)', () => {
 
     const metaLine = el.querySelector('[data-testid="epic-detail-meta-line"]')
     expect(metaLine).not.toBeNull()
-    expect(metaLine?.textContent).toBe('epic/contextual-chat')
+    expect(metaLine?.textContent).toContain('epic/contextual-chat')
+    expect(metaLine?.textContent).toContain('No agent')
   })
 
-  it('hides the compact meta line cleanly when there is no agent and useBranch resolves null', async () => {
-    installWindowApiMock({ branch: null })
+  it('shows a "No agent" chip plus the runtime line (overrides included) when there is no agent', async () => {
+    installWindowApiMock({ branch: null, runtimeInfo: { modelAlias: null, modelSource: 'inherit', resolvedModelId: null, resolvedFrom: null } })
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-branch-null', 'Ship it', 'feature')
+    const withOverride = { ...session, agentType: undefined, model: 'claude-opus-4-5', effort: 'high' } as typeof session
 
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    const el = mount(createElement(EpicDetail, { promptSession: withOverride }))
     await flushAsync(2)
 
-    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-agent-tag"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-no-agent-chip"]')?.textContent).toBe('No agent')
+    const runtime = el.querySelector('[data-testid="epic-runtime-line"]')
+    expect(runtime).not.toBeNull()
+    expect(runtime?.textContent).toContain('opus')
+    expect(runtime?.textContent).toContain('effort high')
+    expect(el.querySelector('[data-testid="epic-develop-loop-off-chip"]')).toBeNull()
+  })
+
+  it('shows a "Develop loop off" chip only when developLoop === false', async () => {
+    installWindowApiMock({ branch: null })
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-loop-off', 'Ship it', 'feature')
+
+    const off = mount(createElement(EpicDetail, { promptSession: { ...session, developLoop: false } }))
+    await flushAsync(2)
+    expect(off.querySelector('[data-testid="epic-develop-loop-off-chip"]')?.textContent).toBe('Develop loop off')
   })
 
   it('CORE: the compact meta line joins agent · model · effort · branch into one mono string, with the agent segment staying clickable', async () => {
@@ -382,7 +399,7 @@ describe('EpicDetail (PRD 827)', () => {
     const el = mount(createElement(EpicDetail, { promptSession: withWorktree }))
     await flushAsync(2)
 
-    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')?.textContent).toBe('sm-epic/foo (merge conflict)')
+    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')?.textContent).toContain('sm-epic/foo (merge conflict)')
   })
 
   it('CORE: the turns-ago caption counts only user+assistant turns, not transcript-feed event turns', async () => {

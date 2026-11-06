@@ -33,6 +33,8 @@ import {
   groupEpics,
   sortEpics,
   visibleOrder,
+  NO_MISSION_GROUP_KEY,
+  NO_MISSION_GROUP_LABEL,
   type EpicFilterKey,
   type EpicGroupKey,
   type EpicSortKey,
@@ -64,6 +66,9 @@ function sectionPresentation(groupBy: EpicGroupKey, key: string): { label: strin
   if (groupBy === 'status') {
     const status = key as EpicDisplayStatus
     return { label: epicStatusLabel(status), dotClass: epicStatusDotClass(status) }
+  }
+  if (groupBy === 'tag' && key === NO_MISSION_GROUP_KEY) {
+    return { label: NO_MISSION_GROUP_LABEL, dotClass: 'bg-fg-faint' }
   }
   if (groupBy === 'tag') {
     const kind = key as NonNullable<PromptSession['tag']>

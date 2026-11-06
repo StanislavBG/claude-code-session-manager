@@ -79,6 +79,20 @@ describe('computeGroundingBoard', () => {
     expect(projClaudeMd.present).toBe(false)
   })
 
+  it("says 'no persona' (not 'default persona') when no agent is chosen", async () => {
+    const groups = await computeGroundingBoard({
+      home: '/home/bilko',
+      cwd: '/home/bilko/Projects/alpha',
+      agentPersonaPath: null,
+      agentPersonaName: null,
+      openTerminalTabsInProject: 0,
+      otherEpicsInProject: 0,
+    })
+    const row = groups.find((g) => g.key === 'system')!.items.find((i) => i.name === 'agents/*.md')!
+    expect(row.detail).toContain('no persona')
+    expect(row.detail).not.toContain('default persona')
+  })
+
   it('marks the selected persona file as locked and required', async () => {
     installApi({
       readText: { '/home/bilko/.claude/agents/builder.md': { exists: true, text: 'You are the builder.' } },

@@ -127,7 +127,7 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
       userSkills,
       personaFile
         ? { name: `agents/${agentPersonaName}.md`, detail: 'system prompt for the selected role · required', tokK: estTokK(personaFile.text), present: personaFile.exists, locked: true }
-        : { name: 'agents/*.md', detail: 'no agent selected — default persona', tokK: 0, present: false },
+        : { name: 'agents/*.md', detail: 'no agent selected — no persona', tokK: 0, present: false },
     ],
   }
 

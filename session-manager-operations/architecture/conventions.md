@@ -64,6 +64,21 @@ videos used developer words.
 - **The persona body is over the 6000-char intake cap** (`AGENT_BODY_CHAR_CAP`). Its must-have rules sit above the
   cut, and the agent is told to read the whole file; both observed runs did. `builtinMacros.test.cjs` pins this.
 
+### Project Home library: Knowledge vs Video
+
+HTML pages explain, videos show. Folder contract, schemas, routes and migration:
+[`project-pages/README.md`](../project-pages/README.md#library-knowledge-pages--videos).
+
+| | Knowledge Page | Video |
+| --- | --- | --- |
+| Macro | `builtin-project-home` (Page select) | `builtin-demo-video` |
+| Persona | `project-home-builder` | `demo-video-builder` |
+| Artifact | one static, script-free HTML page | one self-contained HTML/JS animation |
+| Limits | <= 1 MB, no remote refs | <= 2 MB per 30 s, 5-60 s, `sm-demo-duration` = `lengthS`, no network APIs |
+| Write tool | `project_page_write` (alias `project_home_write`) | `project_video_write` (alias `project_demo_video_write`) |
+| Storage | `project-pages/knowledge/<id>/` | `project-pages/videos/<id>/` (+ `_character/`) |
+| Viewer | sandboxed frame | sandboxed `smfile://` iframe + player bridge |
+
 ## Avoid
 
 - Launching a `claude -p` process **without acquiring a slot from `lib/scheduler/sessionSlots.cjs`** first. That pool (default 5, user-adjustable [0,10] from the Home tab, `SM_SESSION_SLOTS` overrides) is the single machine-wide concurrency limit — scheduler jobs *and* chat runs draw from it. The scheduler's own `concurrencyCap` is **retired**: it was the exact per-consumer private cap sessionSlots.cjs was written to replace, and it silently ceilinged the queue at 3 while the Home tab reported 5. Do not reintroduce a private cap in any consumer. OOM protection is the *memory gate* in `tickQueue` (`RESERVED_HOST_MB` 3000 + `MIN_FREE_MB_PER_JOB` 2500), which is machine-aware — not a hardcoded job count; the 2026-06-10 five-parallel OOM is covered there.

@@ -20,6 +20,9 @@ export interface LaunchSessionInput {
   source: string
   /** The macro whose press launched this session; stamped on the Epic's source. */
   macroId?: string
+  /** 'job' queues the build via macros.dispatchJob instead of sending a chat turn. */
+  run?: 'chat' | 'job'
+  extraInstructions?: string
 }
 
 /**
@@ -41,7 +44,7 @@ export async function resolvePersonaBody(
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, run, extraInstructions } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
   if (!title) throw new Error('launchSession: title is required')
@@ -61,6 +64,12 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     .getState()
     .createPromptSession(cwd, goalText, tag, source, agentName, openingPrompt, sections, ...(macroId ? [{ macroId }] as const : []))
   usePromptSessions.getState().approveProposed(session.id, source)
+  if (run === 'job') {
+    if (!macroId) throw new Error("launchSession: run 'job' requires macroId")
+    const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions })
+    if (!res.ok) throw new Error(res.error)
+    return { epicId: session.id, claudeSessionId: session.claudeSessionId }
+  }
   useChat.getState().send({
     tabId: session.id,
     sessionId: session.claudeSessionId,

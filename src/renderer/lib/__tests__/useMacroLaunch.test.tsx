@@ -367,4 +367,48 @@ describe('useMacroLaunch', () => {
     expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalled()
   })
+
+  describe('job macros', () => {
+    const JOB = { estimateMinutes: 10, artifactPaths: [] }
+    const dispatchJob = vi.fn()
+    beforeEach(() => {
+      dispatchJob.mockReset()
+      ;(globalThis as any).window.api.macros = { dispatchJob }
+      ;(globalThis as any).window.api.agents = { getPersonaBody: vi.fn().mockResolvedValue(null) }
+    })
+
+    it('reuses an active Epic: no mint, no select, no chat turn, success toast', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'act1' })
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active' } as any },
+      })
+      const onSelect = vi.fn()
+      const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} macroOver={{ job: JOB }} extraInstructions="more" />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob).toHaveBeenCalledWith({ cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: 'more' })
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(useToast.getState().toasts.map((t) => t.message)).toContain('Sweep is building in the background')
+    })
+
+    it('mints when no active Epic, never selects, and toasts a refusal', async () => {
+      dispatchJob.mockResolvedValue({ ok: false, error: 'a build is already running' })
+      const onSelect = vi.fn()
+      const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} macroOver={{ job: JOB }} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(useToast.getState().toasts.map((t) => t.message)).toContain('a build is already running')
+    })
+
+    it('still runs the readiness check first', async () => {
+      ;(globalThis as any).window.api.app.delegationReadiness = vi.fn().mockResolvedValue({ ok: false, checks: [{ ok: false, label: 'hooks' }] })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} opts={{ requireReadiness: true }} macroOver={{ job: JOB }} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob).not.toHaveBeenCalled()
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    })
+  })
 })

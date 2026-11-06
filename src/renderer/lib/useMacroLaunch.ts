@@ -37,11 +37,13 @@ export function useMacroLaunch(
   const launch = async (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => {
     if (!activeTabCwd || launching) return
 
-    if (opts?.resumeActive) {
-      const sessions = usePromptSessions.getState().sessions
-      const existing = Object.values(sessions).find(
+    const findActive = () =>
+      Object.values(usePromptSessions.getState().sessions).find(
         (s) => s.cwd === activeTabCwd && s.tag === macro.tag && s.agentType === macro.agentName && s.status === 'active',
       )
+
+    if (opts?.resumeActive && !macro.job) {
+      const existing = findActive()
       if (existing) {
         onSelect(existing.id)
         return
@@ -90,6 +92,34 @@ export function useMacroLaunch(
       }
 
       const trimmedExtra = extraInstructions?.trim()
+      if (macro.job) {
+        // Background build: reuse the macro's active Epic, else mint; never a chat turn, never navigate.
+        const existing = findActive()
+        if (existing) {
+          const res = await window.api.macros.dispatchJob({
+            cwd: activeTabCwd,
+            macroId: macro.id,
+            epicId: existing.id,
+            extraInstructions: trimmedExtra || undefined,
+          })
+          if (!res.ok) throw new Error(res.error)
+        } else {
+          await launchSession({
+            cwd: activeTabCwd,
+            agentName: macro.agentName,
+            tag: macro.tag,
+            title: macro.label,
+            goal: rendered.prompt,
+            agentDescription: persona?.description ?? undefined,
+            source: `SessionActionsBar ${macro.agentName}`,
+            macroId: macro.id,
+            run: 'job',
+            extraInstructions: trimmedExtra || undefined,
+          })
+        }
+        toast.success(`${macro.label} is building in the background`)
+        return
+      }
       const goal = trimmedExtra ? `${rendered.prompt}\n\nAdditional instructions: ${trimmedExtra}` : rendered.prompt
       const result = await launchSession({
         cwd: activeTabCwd,

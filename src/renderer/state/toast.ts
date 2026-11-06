@@ -134,6 +134,7 @@ export const useToast = create<ToastState>((set, get) => ({
 export const toast = {
   info: (message: string) => useToast.getState().show('info', message),
   warn: (message: string) => useToast.getState().show('warn', message),
+  success: (message: string) => useToast.getState().show('info', message),
   error: (message: string) => useToast.getState().show('error', message),
   fromOutcome: (outcome: ActionOutcome) =>
     useToast.getState().show(outcome.kind ?? (outcome.ok ? 'info' : 'warn'), outcome.message),

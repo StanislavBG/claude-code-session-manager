@@ -154,7 +154,7 @@ const queueOps = require('./queueOps.cjs');
 const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prd/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epic/epicMint.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
-const { buildPersonaToolScope, personaToolScopeArgs } = require('./lib/claude/personaToolScope.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
@@ -4861,6 +4861,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // scheduler-mcp-server.cjs can refuse scheduler_create_prd from inside a
     // run (issue #11 list C1 — the PRD 460 self-queue incident). Only a
     // persona whose whole job is decomposition may still queue.
+    // SM_SCHEDULER_JOB_MCP_TOOLS tells scheduler-mcp-server.cjs which of its tools this job's
+    // persona admits (see personaToolScope.cjs).
     // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
     // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
     // being rejected — lib/scheduler/launchFailure.cjs); applied last so it wins.
@@ -4869,6 +4871,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       SM_PROJECT_ROOT: cwd,
       SM_SCHEDULER_JOB_SLUG: job.slug,
       SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
+      ...personaToolScopeEnv(personaToolScope),
       BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),

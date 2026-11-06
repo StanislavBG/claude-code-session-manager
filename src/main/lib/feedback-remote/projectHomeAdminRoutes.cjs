@@ -29,6 +29,7 @@ const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
 const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
+const { validateCharacterJson, validateCharacterJs, readCharacter, characterDir, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 
 const MAX_HTML_BYTES = 1024 * 1024;
@@ -318,6 +319,62 @@ function registerAdminRoute(adminHttp) {
       });
     },
   }));
+
+  // POST /admin/project-home/character/write {cwd, json, js, replace?} -> videos/_character/
+  adminHttp.registerRoute('POST', '/admin/project-home/character/write', characterWriteHandler);
+}
+
+async function characterWriteHandler(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req, MAX_CHARACTER_JS_BYTES * 2 + 64 * 1024);
+  } catch (e) {
+    sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'}` });
+    return;
+  }
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+    return;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    sendJson(res, 400, { ok: false, error: 'invalid payload' });
+    return;
+  }
+  const resolved = resolveCwd(body.cwd);
+  if (!resolved.ok) {
+    sendJson(res, resolved.status, { ok: false, error: resolved.error });
+    return;
+  }
+  const json = body.json;
+  const jsonObj = typeof json === 'string' ? (() => { try { return JSON.parse(json); } catch { return null; } })() : json;
+  const jsonErr = validateCharacterJson(jsonObj);
+  if (jsonErr) {
+    sendJson(res, 400, { ok: false, error: `character.json invalid: ${jsonErr}` });
+    return;
+  }
+  const jsErr = validateCharacterJs(body.js, [...REMOTE_REFERENCE_CHECKS, ...NETWORK_CHECKS]);
+  if (jsErr) {
+    sendJson(res, 400, { ok: false, error: jsErr });
+    return;
+  }
+  if (!body.replace && readCharacter(resolved.cwd)) {
+    sendJson(res, 409, { ok: false, error: 'a character already exists — pass replace: true to overwrite it' });
+    return;
+  }
+  config.addAllowedRoot(resolved.cwd);
+  try {
+    const dir = characterDir(resolved.cwd);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const jsPath = path.join(dir, 'character.js');
+    await config.writeTextAtomic(jsPath, body.js, { writer: 'project-home' });
+    await config.writeTextAtomic(path.join(dir, 'character.json'), JSON.stringify(jsonObj, null, 2) + '\n', { writer: 'project-home' });
+    sendJson(res, 200, { ok: true, path: dir, bytes: Buffer.byteLength(body.js, 'utf8') });
+  } catch (e) {
+    sendJson(res, 500, { ok: false, error: e?.message ?? 'write failed' });
+  }
 }
 
 module.exports = {

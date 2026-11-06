@@ -79,10 +79,11 @@ const GOOD_HTML = '<!DOCTYPE html><html><head><style>body{background:url(data:im
 const GOOD_DEMO_VIDEO_HTML = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
   + '<body><canvas id="c"></canvas><script>const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
 
-test('registers the two library routes and the two aliases', () => {
+test('registers the library routes, the aliases and the character route', () => {
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
   expect([...adminHttp.routes.keys()].sort()).toEqual([
+    'POST /admin/project-home/character/write',
     'POST /admin/project-home/demo-video/write',
     'POST /admin/project-home/pages/write',
     'POST /admin/project-home/videos/write',
@@ -479,4 +480,43 @@ test('injectCsp places the CSP meta immediately after the doctype even with a co
     + '<body><p>hello</p></body></html>';
   const result = injectCsp(decoy);
   expect(result.startsWith(`<!DOCTYPE html>${DEMO_VIDEO_CSP}`)).toBe(true);
+});
+
+const GOOD_CHARACTER = {
+  json: { name: 'Bit', palette: ['#fff', '#000'], voice: { engine: 'kokoro', id: 'af_heart' } },
+  js: 'window.character={mount(){},pose(){},mouth(){}};',
+};
+
+test('character/write: first write, refusal without replace, replace overwrites', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const url = '/admin/project-home/character/write';
+  const dir = path.join(pagesRoot(cwd), 'videos', '_character');
+
+  const first = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER } });
+  expect(first.status).toBe(200);
+  expect(fs.readFileSync(path.join(dir, 'character.js'), 'utf8')).toBe(GOOD_CHARACTER.js);
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).name).toBe('Bit');
+
+  const again = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, name: 'Two' } } });
+  expect(again.status).toBe(409);
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).name).toBe('Bit');
+
+  const replaced = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, name: 'Two' }, replace: true } });
+  expect(replaced.status).toBe(200);
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).name).toBe('Two');
+});
+
+test('character/write: rejects network js, oversized js and bad json', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const url = '/admin/project-home/character/write';
+  const net = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER, js: 'fetch("x")' } });
+  expect(net.status).toBe(400);
+  const big = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER, js: 'a'.repeat(300 * 1024 + 1) } });
+  expect(big.status).toBe(400);
+  const bad = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER, json: { name: 'x' } } });
+  expect(bad.status).toBe(400);
 });

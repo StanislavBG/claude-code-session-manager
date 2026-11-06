@@ -16,6 +16,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const config = require('../../config.cjs');
 const { opsPath, assertOpsWrite } = require('../opsOwnership.cjs');
+const { injectPlayerBridge } = require('./playerBridge.cjs');
 
 const WRITER = 'project-home';
 const MAX_ENTRIES = 500;
@@ -84,12 +85,12 @@ async function listLibrary(realCwd) {
   return { knowledge, videos };
 }
 
-/** Copy `src` into `destDir/index.html` + meta; true only after a byte-equal verified copy. */
-async function copyIntoEntry(src, srcBuf, destDir, meta) {
+/** Write `outBuf` into `destDir/index.html` + meta; true only after a byte-equal verified write. */
+async function copyIntoEntry(outBuf, destDir, meta) {
   const dest = path.join(destDir, 'index.html');
-  await config.writeTextAtomic(dest, srcBuf.toString('utf8'), { writer: WRITER });
+  await config.writeTextAtomic(dest, outBuf.toString('utf8'), { writer: WRITER });
   const back = await fsp.readFile(dest);
-  if (!back.equals(srcBuf)) return false;
+  if (!back.equals(outBuf)) return false;
   await config.writeTextAtomic(path.join(destDir, 'meta.json'), JSON.stringify(meta, null, 2) + '\n', { writer: WRITER });
   return true;
 }
@@ -137,7 +138,7 @@ async function migrateLegacy(realCwd) {
       createdAt: new Date(st.mtimeMs).toISOString(),
       model: 'unknown',
     };
-    if (await copyIntoEntry(home, homeBuf, overviewDir, meta)) await renameMigrated(home);
+    if (await copyIntoEntry(homeBuf, overviewDir, meta)) await renameMigrated(home);
   }
 
   // demo-video/index.html -> videos/legacy-<sha10>/
@@ -146,6 +147,8 @@ async function migrateLegacy(realCwd) {
   if (demoBuf) {
     const st = await fsp.stat(demo);
     const id = `legacy-${crypto.createHash('sha256').update(demoBuf).digest('hex').slice(0, 10)}`;
+    // Bridge goes into the migrated copy only; the id hashes the ORIGINAL bytes.
+    const bridgedBuf = Buffer.from(injectPlayerBridge(demoBuf.toString('utf8')), 'utf8');
     const meta = {
       id,
       title: 'Demo video',
@@ -155,13 +158,13 @@ async function migrateLegacy(realCwd) {
       createdAt: new Date(st.mtimeMs).toISOString(),
       character: null,
       sources: [],
-      report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [], bytes: demoBuf.length },
+      report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [], bytes: bridgedBuf.length },
       macroVersion: 0,
       seedVersion: 0,
       model: 'unknown',
       effort: 'unknown',
     };
-    if (await copyIntoEntry(demo, demoBuf, pagesPath(realCwd, 'videos', id), meta)) await renameMigrated(demo);
+    if (await copyIntoEntry(bridgedBuf, pagesPath(realCwd, 'videos', id), meta)) await renameMigrated(demo);
   }
 }
 

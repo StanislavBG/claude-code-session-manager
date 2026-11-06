@@ -15,6 +15,7 @@ const crypto = require('node:crypto');
 const config = require('../../../config.cjs');
 const { schemas } = require('../../../ipcSchemas.cjs');
 const { listLibrary, migrateLegacy } = require('../pagesLibrary.cjs');
+const { injectPlayerBridge } = require('../playerBridge.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -110,12 +111,16 @@ test('migrates legacy home.html and demo video, then renames them', async () => 
 
   const hex = crypto.createHash('sha256').update(demo).digest('hex').slice(0, 10);
   const vdir = path.join(dir, 'videos', `legacy-${hex}`);
-  expect(fs.readFileSync(path.join(vdir, 'index.html'), 'utf8')).toBe(demo);
+  const migratedVideo = fs.readFileSync(path.join(vdir, 'index.html'), 'utf8');
+  expect(migratedVideo.split('data-sm-player-bridge')).toHaveLength(2);
+  expect(migratedVideo).toBe(injectPlayerBridge(demo));
+  expect(fs.readFileSync(path.join(dir, 'demo-video', 'index.html.migrated'), 'utf8')).toBe(demo);
   const vm = JSON.parse(fs.readFileSync(path.join(vdir, 'meta.json'), 'utf8'));
   expect(schemas.projectVideoMeta.safeParse(vm).success).toBe(true);
   expect(vm).toMatchObject({ kind: 'project-demo', lengthS: 42 });
   expect(vm.report.checks).toEqual([]);
   expect(vm.report.lufs).toBeNull();
+  expect(vm.report.bytes).toBe(Buffer.byteLength(migratedVideo));
 
   expect(fs.existsSync(path.join(dir, 'home.html'))).toBe(false);
   expect(fs.existsSync(path.join(dir, 'home.html.migrated'))).toBe(true);
@@ -133,6 +138,10 @@ test('demo without duration meta defaults to 30s', async () => {
   fs.mkdirSync(path.join(pagesDir(cwd), 'demo-video'), { recursive: true });
   fs.writeFileSync(path.join(pagesDir(cwd), 'demo-video', 'index.html'), '<p>d</p>');
   await migrateLegacy(cwd);
+  const spy2 = vi.spyOn(config, 'writeTextAtomic');
+  await migrateLegacy(cwd);
+  expect(spy2).not.toHaveBeenCalled();
+  spy2.mockRestore();
   const [v] = (await listLibrary(cwd)).videos;
   expect(v.meta.lengthS).toBe(30);
 });

@@ -72,7 +72,7 @@ const NETWORK_CHECKS = [
 
 const DURATION_META_RE = /<meta\b[^>]*\bname\s*=\s*["']sm-demo-duration["'][^>]*\bcontent\s*=\s*["'](\d+)["'][^>]*>/i;
 const MIN_DEMO_DURATION_S = 5;
-const MAX_DEMO_DURATION_S = 30;
+const MAX_DEMO_DURATION_S = 60;
 
 const DEMO_VIDEO_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src \'none\'">';
 

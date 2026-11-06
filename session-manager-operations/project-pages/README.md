@@ -5,7 +5,7 @@ Project Home hosts two independently generated, self-contained documents:
 ```
 session-manager-operations/project-pages/
   home.html               — overview: what it is, who it's for, structure, how to run, key commands
-  demo-video/index.html   — a 30-second self-contained HTML/JS animation of the project's goals + features
+  demo-video/index.html   — a 30-second or 1-minute self-contained HTML/JS animation of the project's goals + features
 ```
 
 ## Who writes them
@@ -22,7 +22,7 @@ Both routes live in `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs` an
 Both documents must be self-contained: no `<script src>`, remote `<link>`, `@import`,
 or remote `url(...)`. The demo video is additionally validated because it runs inline
 JavaScript (the home page does not):
-- it must declare `<meta name="sm-demo-duration" content="N">` with `5 <= N <= 30`;
+- it must declare `<meta name="sm-demo-duration" content="N">` with `5 <= N <= 60`;
 - it is rejected if it references any network-capable API (`fetch`, `XMLHttpRequest`,
   `WebSocket`, `EventSource`, `sendBeacon`, dynamic `import(...)`, `importScripts`,
   `<iframe>`/`<object>`/`<embed>`, `window.open`, or any `src=`/`href=` pointing at

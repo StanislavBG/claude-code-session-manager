@@ -242,7 +242,7 @@ test.each([
   ['href= http', `<html><head><meta name="sm-demo-duration" content="10"></head><body><a href="https://example.com">x</a></body></html>`],
   ['src= protocol-relative', `<html><head><meta name="sm-demo-duration" content="10"></head><body><img src="//example.com/a.png"></body></html>`],
   ['missing duration meta', '<html><head></head><body><p>x</p></body></html>'],
-  ['duration 31 (above range)', '<html><head><meta name="sm-demo-duration" content="31"></head><body><p>x</p></body></html>'],
+  ['duration 61 (above range)', '<html><head><meta name="sm-demo-duration" content="61"></head><body><p>x</p></body></html>'],
   ['duration 4 (below range)', '<html><head><meta name="sm-demo-duration" content="4"></head><body><p>x</p></body></html>'],
   ['computed window["fetch"] access', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>window["fetch"]("/x")</script></body></html>`],
   ['Worker(', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new Worker("x.js")</script></body></html>`],
@@ -280,10 +280,11 @@ test('demo-video route: relative cwd is a 400', async () => {
   expect(res.status).toBe(400);
 });
 
-test('validateDemoVideoHtml accepts GOOD_DEMO_VIDEO_HTML and exact-boundary durations 5 and 30', () => {
+test('validateDemoVideoHtml accepts GOOD_DEMO_VIDEO_HTML and exact-boundary durations 5, 30 and 60', () => {
   expect(validateDemoVideoHtml(GOOD_DEMO_VIDEO_HTML)).toBeNull();
   expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="5"></head><body>x</body></html>')).toBeNull();
   expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="30"></head><body>x</body></html>')).toBeNull();
+  expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="60"></head><body>x</body></html>')).toBeNull();
 });
 
 test('validateDemoVideoHtml accepts a legitimate requestAnimationFrame/canvas demo', () => {

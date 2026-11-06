@@ -8,7 +8,7 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { seedDemoVideoKit, KIT_FILES } = require('../seedKit.cjs');
+const { seedDemoVideoKit, KIT_FILES, kitDestDir } = require('../seedKit.cjs');
 
 const tmp = [];
 afterEach(() => {
@@ -65,4 +65,16 @@ test('the kill-switch skips seeding', async () => {
 
 test('the real kit files exist beside the seeder', () => {
   for (const f of KIT_FILES) expect(fs.existsSync(path.join(__dirname, '..', f))).toBe(true);
+});
+
+test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
+  const prev = process.env.SM_SCHEDULER_HOME;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-home-'));
+  tmp.push(home);
+  process.env.SM_SCHEDULER_HOME = home;
+  try {
+    expect(kitDestDir()).toBe(path.join(home, 'demo-video-kit'));
+  } finally {
+    if (prev === undefined) delete process.env.SM_SCHEDULER_HOME; else process.env.SM_SCHEDULER_HOME = prev;
+  }
 });

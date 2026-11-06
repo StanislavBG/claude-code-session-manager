@@ -14,7 +14,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
+const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const { writeTextAtomic } = require('../util/atomicFs.cjs');
 
 const KIT_VERSION = '1';
@@ -22,7 +22,7 @@ const KIT_FILES = ['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'char
 const STAMP_FILE = 'KIT_VERSION';
 
 function kitDestDir() {
-  return path.join(os.homedir(), '.claude', 'session-manager', 'demo-video-kit');
+  return path.join(schedulerHome(), 'demo-video-kit');
 }
 
 async function seedDemoVideoKit({ logger = console, writeLog = () => {}, destDir = kitDestDir(), srcDir = __dirname, kitVersion = KIT_VERSION } = {}) {

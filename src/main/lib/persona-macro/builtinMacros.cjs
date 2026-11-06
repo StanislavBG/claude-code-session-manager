@@ -24,15 +24,17 @@ const BUILTIN_MACROS = Object.freeze([
     tag: 'project-home-builder',
     surface: 'project-home',
     projects: ['*'],
-    builtinVersion: 1,
+    builtinVersion: 2,
     job: Object.freeze({
       estimateMinutes: 20,
       entryKind: 'knowledge',
       artifactPaths: Object.freeze(['session-manager-operations/project-pages/knowledge/{id}/index.html']),
     }),
-    priorPrompts: Object.freeze([]),
-    prompt:
+    priorPrompts: Object.freeze([
       "Generate this project's Project Home page: one self-contained HTML overview (what it is, who it is for, key features, structure, how to run it, key commands), grounded only in what you read in the repository. Save it with a single project_home_write call.",
+    ]),
+    prompt:
+      "Generate ONE Knowledge Page for this project as one self-contained HTML page, grounded only in what you read in the repository. The page is named on a 'Page: <name>' line in the additional instructions: Overview (the default when there is no Page line: what it is, who it is for, key features, structure, how to run it, key commands), How it works (architecture and main flows), FAQ (common questions with answers), or 'Custom topic: <text>' (a page about that topic). Build only that page; other pages stay untouched. Save it with a single project_page_write call, passing pageId equal to the id on the 'Entry id' line.",
   }),
   Object.freeze({
     id: 'builtin-demo-video',

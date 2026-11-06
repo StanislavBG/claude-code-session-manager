@@ -260,6 +260,47 @@ describe('ProjectPagesSection', () => {
     })
   })
 
+  describe('knowledge page select', () => {
+    const KIND = '[data-testid="project-home-page-kind"]'
+    const TOPIC = '[data-testid="project-home-page-topic"]'
+    const setSel = (select: HTMLSelectElement, value: string) => {
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(select, value)
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+    it('lists the four kinds; Overview sends nothing', () => {
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
+      const select = el.querySelector(KIND) as HTMLSelectElement
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Overview', 'How it works', 'FAQ', 'Custom topic'])
+      expect(el.querySelector(TOPIC)).toBeNull()
+      act(() => macroBtn(el, 'builtin-project-home').click())
+      expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
+    })
+    it('sends "Page: How it works"', () => {
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
+      setSel(el.querySelector(KIND) as HTMLSelectElement, 'How it works')
+      act(() => macroBtn(el, 'builtin-project-home').click())
+      expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'Page: How it works')
+    })
+    it('Custom topic shows a topic input and sends "Page: Custom topic: <text>"', () => {
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
+      setSel(el.querySelector(KIND) as HTMLSelectElement, 'Custom topic')
+      const input = el.querySelector(TOPIC) as HTMLInputElement
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(input, ' billing ')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      act(() => macroBtn(el, 'builtin-project-home').click())
+      expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'Page: Custom topic: billing')
+    })
+  })
+
   it('disables the macro button while launching', () => {
     const el = mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
     expect(macroBtn(el, 'builtin-project-home').disabled).toBe(true)

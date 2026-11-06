@@ -176,7 +176,13 @@ export const useConfig = create<ConfigState>((set, get) => ({
       }
     }
     set({ files: { ...get().files, [path]: { ...cur, busy: true } } })
-    const res = await window.api.config.writeJson(path, parsed)
+    let res: { ok: boolean; error?: string }
+    try {
+      res = await window.api.config.writeJson(path, parsed)
+    } catch (e) {
+      set({ files: { ...get().files, [path]: { ...cur, busy: false } } })
+      return { ok: false, error: (e as Error)?.message ?? String(e) }
+    }
     if (!res.ok) {
       set({ files: { ...get().files, [path]: { ...cur, busy: false } } })
       return { ok: false, error: res.error }
@@ -201,7 +207,13 @@ export const useConfig = create<ConfigState>((set, get) => ({
       }
     }
     set({ files: { ...get().files, [path]: { ...cur, busy: true } } })
-    const res = await window.api.config.writeText(path, cur.draftRaw)
+    let res: { ok: boolean; error?: string }
+    try {
+      res = await window.api.config.writeText(path, cur.draftRaw)
+    } catch (e) {
+      set({ files: { ...get().files, [path]: { ...cur, busy: false } } })
+      return { ok: false, error: (e as Error)?.message ?? String(e) }
+    }
     if (!res.ok) {
       set({ files: { ...get().files, [path]: { ...cur, busy: false } } })
       return { ok: false, error: res.error }

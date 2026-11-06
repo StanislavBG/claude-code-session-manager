@@ -157,6 +157,10 @@ function validateWrite(realAbs) {
     let realRoot;
     try { realRoot = canon(root); } catch { realRoot = root; }
     if (within(realAbs, realRoot)) {
+      // Project-scope MCP servers live in <root>/.mcp.json — the one
+      // root-level file allowed (exact match on the realpath, so a symlink
+      // escaping the root resolves elsewhere and is refused).
+      if (realAbs === path.join(realRoot, '.mcp.json')) return;
       const claudeSub = path.join(realRoot, '.claude');
       if (within(realAbs, claudeSub)) {
         return;

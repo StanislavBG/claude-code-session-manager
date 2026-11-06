@@ -10,6 +10,7 @@
 import { memo } from 'react'
 import { useSessions } from '../../../state/sessions'
 import { useProjectPagesOutput } from '../../../lib/projectPages/useProjectPagesOutput'
+import { useMacroJobStatus } from '../../../lib/projectPages/useMacroJobStatus'
 import { useMacros, macrosForProject } from '../../../lib/useMacros'
 import { useAgentPersonas } from '../../../lib/useAgentPersonas'
 import { useMacroLaunch } from '../../../lib/useMacroLaunch'
@@ -31,6 +32,7 @@ function ProjectHomeComponent() {
 
   // One fetch of session-manager-operations/project-pages/home.html (+ demo video).
   const { output, demoVideo, loaded } = useProjectPagesOutput(cwd)
+  const jobStatus = useMacroJobStatus(cwd)
   const library = useMacros()
   const macros = macrosForProject(library, cwd, 'project-home')
   const personas = useAgentPersonas()
@@ -53,6 +55,8 @@ function ProjectHomeComponent() {
           macros={macros}
           launching={launching}
           onLaunch={launch}
+          jobStatus={jobStatus}
+          onOpenSession={navigateToEpic}
         />
       </div>
     </div>

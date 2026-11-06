@@ -14,7 +14,7 @@ import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { HtmlFrame } from './HtmlFrame'
 import { DemoVideoFrame } from './DemoVideoFrame'
 import type { ProjectPagesOutput, ProjectPagesDemoVideo } from '../../../../lib/projectPages/useProjectPagesOutput'
-import type { Macro } from '../../../../../preload/api'
+import type { Macro, MacroJobStatus } from '../../../../../preload/api'
 
 const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
@@ -27,22 +27,59 @@ function macroButtonLabel(macro: Macro, hasHome: boolean, hasDemo: boolean): str
   return macro.label
 }
 
+function JobStatusLine({ status, onOpenSession }: { status: MacroJobStatus; onOpenSession?: (epicId: string) => void }) {
+  const since = (iso: string | null) => (iso && Number.isFinite(Date.parse(iso)) ? formatAgo(Date.parse(iso), Date.now()) : 'just now')
+  let text: string
+  if (status.state === 'queued') text = 'Queued'
+  else if (status.state === 'running') text = `Building… started ${since(status.startedAt)}`
+  else if (status.state === 'done') text = `Done ${since(status.finishedAt)}`
+  else text = `Failed: ${status.reason ?? status.status}`
+  const failed = status.state === 'failed'
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        data-testid="project-home-job-status"
+        data-state={status.state}
+        role={failed ? 'alert' : undefined}
+        className={`font-mono text-[10.5px] ${failed ? 'text-red-400' : 'text-fg-faint'}`}
+      >
+        {text}
+      </span>
+      {status.epicId && onOpenSession && (
+        <button
+          type="button"
+          data-testid="project-home-job-session"
+          onClick={() => onOpenSession(status.epicId!)}
+          className="text-[10.5px] font-semibold text-accent underline cursor-pointer"
+        >
+          Open session
+        </button>
+      )}
+    </span>
+  )
+}
+
 function MacroButton({
   macro,
   hasHome,
   hasDemo,
   launching,
   onLaunch,
+  status,
+  onOpenSession,
 }: {
   macro: Macro
   hasHome: boolean
   hasDemo: boolean
   launching: string | null
   onLaunch: (macro: Macro, extraInstructions?: string) => void
+  status?: MacroJobStatus
+  onOpenSession?: (epicId: string) => void
 }) {
   const [extra, setExtra] = useState('')
   const [style, setStyle] = useState<string>('Auto')
-  const disabled = launching !== null
+  const building = status?.state === 'queued' || status?.state === 'running'
+  const disabled = launching !== null || building
   const showExtraInput = hasHome || hasDemo
   const showStyle = macro.id === 'builtin-demo-video'
 
@@ -95,8 +132,9 @@ function MacroButton({
         <span className="inline-flex">
           <AlmanacIcon name="sparkle" size={14} />
         </span>
-        {launching === macro.id ? 'Starting…' : macroButtonLabel(macro, hasHome, hasDemo)}
+        {building ? 'Building…' : launching === macro.id ? 'Starting…' : macroButtonLabel(macro, hasHome, hasDemo)}
       </button>
+      {status && <JobStatusLine status={status} onOpenSession={onOpenSession} />}
     </div>
   )
 }
@@ -136,6 +174,8 @@ export function ProjectPagesSection({
   macros,
   launching,
   onLaunch,
+  jobStatus,
+  onOpenSession,
 }: {
   output: ProjectPagesOutput | null
   demoVideo: ProjectPagesDemoVideo
@@ -143,6 +183,8 @@ export function ProjectPagesSection({
   macros: Macro[]
   launching: string | null
   onLaunch: (macro: Macro, extraInstructions?: string) => void
+  jobStatus?: Record<string, MacroJobStatus>
+  onOpenSession?: (epicId: string) => void
 }) {
   const [view, setView] = useState<View>('overview')
 
@@ -156,7 +198,7 @@ export function ProjectPagesSection({
       <div className="flex justify-center py-16">
         <div className="flex flex-col items-center gap-2.5">
           {macros.map((m) => (
-            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} />
+            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} status={jobStatus?.[m.id]} onOpenSession={onOpenSession} />
           ))}
         </div>
       </div>
@@ -173,7 +215,7 @@ export function ProjectPagesSection({
         <div className="flex items-center gap-2.5">
           <span className="font-mono text-[10.5px] text-fg-faint">generated {formatAgo(chipMtimeMs, Date.now())}</span>
           {macros.map((m) => (
-            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} />
+            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} status={jobStatus?.[m.id]} onOpenSession={onOpenSession} />
           ))}
         </div>
       </div>

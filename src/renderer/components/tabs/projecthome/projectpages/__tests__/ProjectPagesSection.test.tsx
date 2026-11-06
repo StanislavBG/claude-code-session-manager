@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
-import type { Macro } from '../../../../../../preload/api'
+import type { Macro, MacroJobStatus } from '../../../../../../preload/api'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -338,5 +338,46 @@ describe('ProjectPagesSection', () => {
     const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]')) as HTMLButtonElement[]
     expect(buttons.every((b) => b.disabled)).toBe(true)
     expect(buttons[0].textContent).toContain('Starting…')
+  })
+
+  describe('job status', () => {
+    const st = (over: Partial<MacroJobStatus>): MacroJobStatus => ({
+      macroId: 'builtin-demo-video', epicId: 'epic-1', slug: 's', state: 'queued', status: 'queued',
+      reason: null, startedAt: null, finishedAt: null, ...over,
+    })
+    const render = (s: MacroJobStatus, onOpenSession = vi.fn()) =>
+      mount(
+        <ProjectPagesSection output={null} demoVideo={null} loaded macros={MACROS} launching={null}
+          onLaunch={() => {}} jobStatus={{ [s.macroId]: s }} onOpenSession={onOpenSession} />,
+      )
+    const line = (el: HTMLElement) => el.querySelector('[data-testid="project-home-job-status"]') as HTMLElement
+
+    it('queued: label, disabled button, Open session', () => {
+      const onOpen = vi.fn()
+      const el = render(st({ state: 'queued' }), onOpen)
+      expect(line(el).textContent).toBe('Queued')
+      expect(line(el).getAttribute('data-state')).toBe('queued')
+      const btn = el.querySelector('[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]') as HTMLButtonElement
+      expect(btn.disabled).toBe(true)
+      expect(btn.textContent).toContain('Building…')
+      act(() => (el.querySelector('[data-testid="project-home-job-session"]') as HTMLButtonElement).click())
+      expect(onOpen).toHaveBeenCalledWith('epic-1')
+    })
+    it('running: Building… started ago, disabled', () => {
+      const el = render(st({ state: 'running', startedAt: new Date(Date.now() - 120_000).toISOString() }))
+      expect(line(el).textContent).toBe('Building… started 2m ago')
+      expect(el.querySelector<HTMLButtonElement>('[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]')!.disabled).toBe(true)
+    })
+    it('done: Done ago, button enabled', () => {
+      const el = render(st({ state: 'done', finishedAt: new Date(Date.now() - 60_000).toISOString() }))
+      expect(line(el).textContent).toBe('Done 1m ago')
+      expect(el.querySelector<HTMLButtonElement>('[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]')!.disabled).toBe(false)
+    })
+    it('failed: reason with role=alert, no session link without epicId', () => {
+      const el = render(st({ state: 'failed', reason: 'timed out after 30m', epicId: null }))
+      expect(line(el).textContent).toBe('Failed: timed out after 30m')
+      expect(line(el).getAttribute('role')).toBe('alert')
+      expect(el.querySelector('[data-testid="project-home-job-session"]')).toBeNull()
+    })
   })
 })

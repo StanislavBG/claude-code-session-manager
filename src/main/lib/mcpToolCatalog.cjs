@@ -385,6 +385,24 @@ const MCP_TOOL_CATALOG = [
       + 'The document is CSP-stamped after it is written, so the viewer sandbox is the real network fence — these checks are defence in depth.',
   },
   {
+    name: 'project_character_write',
+    group: 'project-home',
+    purpose: "Write this project's reusable video character — a `character.json` descriptor plus a `character.js` drawing module — to "
+      + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same mascot.",
+    whenToUse: 'Use once per project, before building character videos, to save the mascot you designed. Pass `json` (the descriptor object or its JSON text) '
+      + 'and the module as `js` or — preferred for large modules — an absolute `jsPath` to a local .js file. Pass `replace: true` only to deliberately overwrite an existing character.',
+    whenNotToUse: 'Never fabricate content. Do not use to write a video — use project_video_write. The call is rejected (409) when a character already exists and `replace` is not set, '
+      + 'and for invalid `json`, `js` over 300KB, or `js` with remote references or network-capable APIs.',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      json: { name: 'Bit', voice: 'af_heart' },
+      js: 'export function draw(ctx, t) {}',
+      replace: false,
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Give exactly one of `js` / `jsPath` (absolute .js file, <= 300KB).',
+  },
+  {
     name: 'customer_feedback_list',
     group: 'customer-feedback',
     purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "

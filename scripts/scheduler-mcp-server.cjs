@@ -14,6 +14,7 @@
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
  *   project_demo_video_write({ cwd?, html? | htmlPath? }) -> POST /admin/project-home/demo-video/write
  *   project_page_write({ cwd?, pageId, title, topic?, html? | htmlPath? }) -> POST /admin/project-home/pages/write
+ *   project_character_write({ cwd?, json, js? | jsPath?, replace? }) -> POST /admin/project-home/character/write
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
@@ -59,6 +60,23 @@ function withPointer(text) {
 }
 
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
+const MAX_CHARACTER_JS_BYTES = 300 * 1024;
+
+/** Reads a local .js file for project_character_write; errors carry only the reason, never file contents. */
+async function readCharacterJsFile(p) {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: 'jsPath must be an absolute path' };
+  if (!/\.(c|m)?js$/i.test(p)) return { error: 'jsPath must end in .js' };
+  try {
+    const st = await fsp.stat(p);
+    if (!st.isFile()) return { error: 'jsPath is not a regular file' };
+    if (st.size > MAX_CHARACTER_JS_BYTES) return { error: `jsPath file exceeds ${MAX_CHARACTER_JS_BYTES} bytes` };
+    const js = await fsp.readFile(p, 'utf8');
+    if (js.length === 0) return { error: 'jsPath file is empty' };
+    return { js };
+  } catch (err) {
+    return { error: `cannot read jsPath: ${err && err.code ? err.code : 'read failed'}` };
+  }
+}
 
 /** Reads a local .html/.htm file for project_demo_video_write; errors carry only the reason, never file contents. */
 async function readDemoVideoHtmlFile(p) {
@@ -495,6 +513,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_character_write',
+    description: descriptionFor('project_character_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        json: { description: 'The character descriptor: a JSON object (or its JSON text).' },
+        js: { type: 'string', description: 'The character drawing module source (<= 300KB; no remote references or network-capable APIs). Give exactly one of js / jsPath.' },
+        jsPath: { type: 'string', description: 'Absolute path to a local .js file holding the module (same rules as js; <= 300KB). Give exactly one of js / jsPath.' },
+        replace: { type: 'boolean', description: 'Overwrite an existing character. Without it an existing character is refused with 409.' },
+      },
+      required: ['json'],
+    },
+  },
+  {
     name: 'project_demo_video_write',
     description: descriptionFor('project_demo_video_write'),
     inputSchema: {
@@ -901,6 +934,28 @@ async function handleCallTool(request) {
       }
       const cwd = resolveCwdArg(args);
       const result = await adminRequest('POST', '/admin/project-home/write', { cwd, html: args.html });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_character_write') {
+      if (!args || args.json === undefined || args.json === null || args.json === '') {
+        return errorResult('missing required argument: json');
+      }
+      const hasJs = args.js !== undefined && args.js !== null && args.js !== '';
+      const hasJsPath = args.jsPath !== undefined && args.jsPath !== null && args.jsPath !== '';
+      if (hasJs === hasJsPath) return errorResult('provide exactly one of js or jsPath');
+      let js;
+      if (hasJsPath) {
+        const loaded = await readCharacterJsFile(args.jsPath);
+        if (loaded.error) return errorResult(loaded.error);
+        js = loaded.js;
+      } else {
+        if (typeof args.js !== 'string') return errorResult('missing required argument: js');
+        js = args.js;
+      }
+      const cwd = resolveCwdArg(args);
+      const body = { cwd, json: args.json, js };
+      if (args.replace === true) body.replace = true;
+      const result = await adminRequest('POST', '/admin/project-home/character/write', body);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_demo_video_write') {

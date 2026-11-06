@@ -1521,12 +1521,57 @@ export type ProjectBriefUpdateResult =
   | { ok: false; error: string };
 
 // ────────────────────────────────────────────── Project Pages (single home.html)
+export interface ProjectPageMeta {
+  id: string;
+  title: string;
+  topic: string;
+  createdAt: string;
+  model: string;
+}
+
+export interface ProjectVideoMeta {
+  id: string;
+  title: string;
+  kind: 'project-demo' | 'blog-post' | 'feature';
+  style: string;
+  lengthS: number;
+  createdAt: string;
+  character: string | null;
+  sources: { claim: string; source: string; ref: string }[];
+  report: {
+    lufs: number | null;
+    truePeakDb: number | null;
+    speechS: number | null;
+    readingGrade: number | null;
+    checks: { id: string; ok: boolean; detail: string }[];
+    bytes: number;
+  };
+  macroVersion: number;
+  seedVersion: number;
+  model: string;
+  effort: string;
+}
+
+/** One library folder (knowledge/<id>/ or videos/<id>/); `meta` is null when meta.json is missing/invalid (see `error`). */
+export interface ProjectLibraryEntry<M> {
+  id: string;
+  /** Absolute path of the entry's index.html — load via smfile://. */
+  path: string;
+  mtimeMs: number;
+  meta: M | null;
+  error: string | null;
+}
+
 export interface ProjectPagesGetResult {
-  /** Contents of session-manager-operations/project-pages/home.html, or null when it has not been generated. */
+  /** Knowledge pages, newest first. */
+  knowledge: ProjectLibraryEntry<ProjectPageMeta>[];
+  /** Videos, newest first. */
+  videos: ProjectLibraryEntry<ProjectVideoMeta>[];
+  /** Contents of the `overview` knowledge page, or null when there is none. */
   html: string | null;
-  /** home.html's mtime, or null when `html` is null. */
+  /** The overview page's mtime, or null when `html` is null. */
   mtimeMs: number | null;
-  /** project-pages/demo-video/index.html's absolute path + mtime, or null when it does not exist. Load it via smfile:// — never pass its HTML across IPC. */
+  /** The newest video's absolute path + mtime, or null when there is none. Load it via smfile:// — never pass its HTML across IPC. */
   demoVideo: { path: string; mtimeMs: number } | null;
 }
 

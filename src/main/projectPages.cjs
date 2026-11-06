@@ -19,6 +19,7 @@ const chokidar = require('chokidar');
 const config = require('./config.cjs');
 const { opsPath } = require('./lib/opsOwnership.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const { listLibrary, migrateLegacy } = require('./lib/project-pages/pagesLibrary.cjs');
 
 let mainWindow = null;
 function attachWindow(window) {
@@ -31,18 +32,6 @@ function homePath(cwd) {
 
 function demoVideoPath(cwd) {
   return opsPath(cwd, 'project-pages', 'demo-video', 'index.html');
-}
-
-/** -> { path: string, mtimeMs: number } | null */
-async function getDemoVideo(realCwd) {
-  const file = demoVideoPath(realCwd);
-  try {
-    const stat = await fs.promises.stat(file);
-    return { path: file, mtimeMs: stat.mtimeMs };
-  } catch (e) {
-    if (e.code === 'ENOENT') return null;
-    throw e;
-  }
 }
 
 /**
@@ -59,15 +48,47 @@ function tryHomePath(realCwd) {
   }
 }
 
-/** -> { html: string|null, mtimeMs: number|null, demoVideo: {path, mtimeMs}|null } */
+const EMPTY = () => ({ knowledge: [], videos: [], html: null, mtimeMs: null, demoVideo: null });
+
+/**
+ * -> { knowledge, videos, html, mtimeMs, demoVideo }. Runs the one-shot legacy
+ * migration first. html/mtimeMs come from the `overview` knowledge page and
+ * demoVideo from the newest video (both kept for the phone remote).
+ */
 async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
-  const { file, ephemeral } = tryHomePath(realCwd);
-  if (ephemeral) return { html: null, mtimeMs: null, demoVideo: null };
-  const res = await config.readText(file);
-  const demoVideo = await getDemoVideo(realCwd);
-  if (!res.exists) return { html: null, mtimeMs: null, demoVideo };
-  return { html: res.text, mtimeMs: res.mtimeMs, demoVideo };
+  const { ephemeral } = tryHomePath(realCwd);
+  if (ephemeral) return EMPTY();
+  await migrateLegacy(realCwd);
+  const { knowledge, videos } = await listLibrary(realCwd);
+  const overview = knowledge.find((k) => k.id === 'overview');
+  let html = null;
+  if (overview) {
+    try {
+      html = await fs.promises.readFile(overview.path, 'utf8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+  }
+  const newest = videos[0];
+  return {
+    knowledge,
+    videos,
+    html,
+    mtimeMs: html === null ? null : overview.mtimeMs,
+    demoVideo: newest ? { path: newest.path, mtimeMs: newest.mtimeMs } : null,
+  };
+}
+
+/** True for paths whose change should refresh the library (relative to project-pages/). */
+function isLibraryPath(rel) {
+  const parts = rel.split(path.sep);
+  if (parts.length === 1) return parts[0] === 'home.html';
+  if (parts.length === 2) return parts[0] === 'demo-video' && parts[1] === 'index.html';
+  if (parts.length === 3 && (parts[0] === 'knowledge' || parts[0] === 'videos')) {
+    return parts[1] !== '_character' && (parts[2] === 'index.html' || parts[2] === 'meta.json');
+  }
+  return false;
 }
 
 // ─── Push channel ─────────────────────────────────────────────────────────
@@ -110,13 +131,9 @@ async function watchOutput(cwd) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
 
-  const demoVideoFile = demoVideoPath(realCwd);
   const push = async (changedPath) => {
-    // Only home.html or demo-video/index.html — ignore every other sibling file.
-    if (changedPath) {
-      const resolved = path.resolve(changedPath);
-      if (resolved !== path.resolve(file) && resolved !== path.resolve(demoVideoFile)) return;
-    }
+    // Only library files (and the two legacy ones) — ignore everything else.
+    if (changedPath && !isLibraryPath(path.relative(dir, path.resolve(changedPath)))) return;
     let result;
     try {
       result = await get({ cwd: realCwd });
@@ -125,16 +142,15 @@ async function watchOutput(cwd) {
     }
     sendIfAlive(mainWindow, 'project-pages:changed', {
       cwd: realCwd,
-      html: result.html,
-      mtimeMs: result.mtimeMs,
-      demoVideo: result.demoVideo,
+      ...result,
     });
   };
 
   const watcher = chokidar.watch(dir, {
     ignoreInitial: true,
     persistent: true,
-    depth: 1,
+    depth: 3,
+    ignored: (p) => p.split(path.sep).includes('_character'),
     // Same 50ms/25ms shape config.cjs's generic watcher uses.
     awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
   });

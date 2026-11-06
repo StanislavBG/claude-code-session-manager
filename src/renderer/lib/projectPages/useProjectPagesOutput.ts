@@ -9,12 +9,18 @@
  */
 import { useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
-import type { ProjectPagesGetResult } from '../../../preload/api'
+import type { ProjectPagesGetResult, ProjectLibraryEntry, ProjectPageMeta, ProjectVideoMeta } from '../../../preload/api'
 
 export interface ProjectPagesOutput {
   html: string
   mtimeMs: number | null
 }
+
+export type ProjectKnowledgeEntry = ProjectLibraryEntry<ProjectPageMeta>
+export type ProjectVideoEntry = ProjectLibraryEntry<ProjectVideoMeta>
+
+const NO_KNOWLEDGE: ProjectKnowledgeEntry[] = []
+const NO_VIDEOS: ProjectVideoEntry[] = []
 
 export type ProjectPagesDemoVideo = { path: string; mtimeMs: number } | null
 
@@ -24,9 +30,17 @@ function toOutput(res: ProjectPagesGetResult): ProjectPagesOutput | null {
 
 export function useProjectPagesOutput(
   cwd: string | null,
-): { output: ProjectPagesOutput | null; demoVideo: ProjectPagesDemoVideo; loaded: boolean } {
+): {
+  output: ProjectPagesOutput | null
+  demoVideo: ProjectPagesDemoVideo
+  knowledge: ProjectKnowledgeEntry[]
+  videos: ProjectVideoEntry[]
+  loaded: boolean
+} {
   const [output, setOutput] = useState<ProjectPagesOutput | null>(null)
   const [demoVideo, setDemoVideo] = useState<ProjectPagesDemoVideo>(null)
+  const [knowledge, setKnowledge] = useState<ProjectKnowledgeEntry[]>(NO_KNOWLEDGE)
+  const [videos, setVideos] = useState<ProjectVideoEntry[]>(NO_VIDEOS)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -39,6 +53,8 @@ export function useProjectPagesOutput(
         if (cancelled) return
         setOutput(toOutput(res))
         setDemoVideo(res.demoVideo)
+        setKnowledge(res.knowledge)
+        setVideos(res.videos)
         setLoaded(true)
       })
       .catch((err) => {
@@ -58,6 +74,8 @@ export function useProjectPagesOutput(
       if (payload.cwd !== cwd) return
       setOutput(toOutput(payload))
       setDemoVideo(payload.demoVideo)
+      setKnowledge(payload.knowledge)
+      setVideos(payload.videos)
       setLoaded(true)
     })
     return () => {
@@ -66,5 +84,5 @@ export function useProjectPagesOutput(
     }
   }, [cwd])
 
-  return { output, demoVideo, loaded }
+  return { output, demoVideo, knowledge, videos, loaded }
 }

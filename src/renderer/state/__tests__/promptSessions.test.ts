@@ -132,6 +132,17 @@ describe('promptSessions.ts', () => {
     expect(session.id).not.toMatch(/^psess-/)
   })
 
+  it('createPromptSession sends developLoop false only when runtime.developLoop is false', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Loop off', undefined, undefined, undefined, undefined, undefined, { developLoop: false })
+    expect(api.promptSessions.create).toHaveBeenLastCalledWith(expect.objectContaining({ developLoop: false }))
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Loop default')
+    expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('developLoop')
+  })
+
   it('regression: createPromptSession called with no tag arg (the chat.ts:712 dispatch shape) still mints proposed, never active', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')

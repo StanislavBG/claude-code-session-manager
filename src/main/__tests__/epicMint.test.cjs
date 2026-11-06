@@ -56,6 +56,17 @@ function readAuditRecordsForCwd(auditLog, cwd) {
     .filter((record) => record && record.cwd === cwd);
 }
 
+test('ensureEpic persists developLoop only when exactly false', async () => {
+  const cwd = await mkCwd();
+  const off = await mint(cwd, { goalText: 'loop off', developLoop: false });
+  const on = await mint(cwd, { goalText: 'loop on', developLoop: true });
+  const none = await mint(cwd, { goalText: 'loop omitted' });
+  const sessions = readActiveIndex(cwd).sessions;
+  expect(sessions[off.epicId].developLoop).toBe(false);
+  expect('developLoop' in sessions[on.epicId]).toBe(false);
+  expect('developLoop' in sessions[none.epicId]).toBe(false);
+});
+
 // ─── SINGLE-CREATOR LAW ──────────────────────────────────────────────────────
 
 test('ensureEpic refuses to mint without mintAuthority, and appends an epic_mint_refused audit event', async () => {

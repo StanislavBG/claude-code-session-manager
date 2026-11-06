@@ -163,3 +163,14 @@ test('promptSessionsCreateEpic schema accepts developLoop false and rejects a st
   expect(schemas.promptSessionsCreateEpic.parse({ ...base, developLoop: false }).developLoop).toBe(false);
   expect(schemas.promptSessionsCreateEpic.safeParse({ ...base, developLoop: 'no' }).success).toBe(false);
 });
+
+test('developLoop false is forwarded and stored; true or omitted writes no key', async () => {
+  const cwd = await mkCwd();
+  const off = await createEpicViaIpc(cwd, { goalText: 'Loop off', agentType: 'architect', developLoop: false });
+  expect(off.session.developLoop).toBe(false);
+  expect(readActiveIndex(cwd).sessions[off.epicId].developLoop).toBe(false);
+  const on = await createEpicViaIpc(cwd, { goalText: 'Loop on', agentType: 'architect', developLoop: true });
+  expect('developLoop' in on.session).toBe(false);
+  const none = await createEpicViaIpc(cwd, { goalText: 'Loop omitted', agentType: 'architect' });
+  expect('developLoop' in none.session).toBe(false);
+});

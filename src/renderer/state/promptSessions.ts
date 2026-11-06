@@ -106,6 +106,8 @@ export interface PromptSession {
   model?: string
   /** Per-Epic effort override — twin of `model`; resolveEpicEffort ranks it above the persona's `effort:`. */
   effort?: string
+  /** false = started with the develop loop off, fixed for the life of the session; absent = on. */
+  developLoop?: boolean
   /** Labeled slices of `openingPrompt`, in the same order composeEpicIntake
    *  (epicIntake.ts) concatenates them: actor, injection(s), input, mission,
    *  goal, reference(s). Lets the Epic's first turn render a structured AIM
@@ -304,7 +306,7 @@ interface PromptSessionsState {
     openingPrompt?: string,
     sections?: EpicIntakeSection[],
     /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record. */
-    runtime?: { model?: string; effort?: string; macroId?: string },
+    runtime?: { model?: string; effort?: string; macroId?: string; developLoop?: boolean },
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -537,6 +539,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       cwd, goalText, tag, agentType, openingPrompt, sections,
       ...(runtime?.model ? { model: runtime.model } : {}),
       ...(runtime?.effort ? { effort: runtime.effort } : {}),
+      ...(runtime?.developLoop === false ? { developLoop: false } : {}),
       ...(runtime?.macroId ? { source: { producer: 'new-epic-ui' as const, macroId: runtime.macroId } } : {}),
     })
     // ensureEpic's response is the byte-identical record just written to

@@ -191,3 +191,13 @@ investigation probe that died identically.
   floor (Agent, Skill, ToolSearch, TodoWrite) is always added so the finish protocol's reviews and
   MCP tool discovery keep working; a persona with no `tools:` line or `*` spawns unscoped.
   `--allowedTools` was not used: it is a no-op under `--dangerously-skip-permissions`.
+  Scoping is focus, not containment. It decides what a job is offered. Every job runs as the
+  owner's OS user with `--dangerously-skip-permissions`, so a job with Bash can read
+  `admin-api.json` and call any admin route, start any MCP server, or run `claude` itself.
+  A scoped job must never reach a tool its scope leaves out: no self-started
+  `scheduler-mcp-server.cjs`, no direct admin API call, no hand-written tool output. A missing
+  tool is a launch bug to report, not something to work around.
+  Guardrail: the scheduler sets `SM_SCHEDULER_JOB_MCP_TOOLS` from the scope, and
+  `scheduler-mcp-server.cjs` then lists and serves only those tools. That stops a good-faith
+  workaround, but not a job that unsets the variable. Real containment would need an OS-level
+  sandbox for jobs, which is not planned.

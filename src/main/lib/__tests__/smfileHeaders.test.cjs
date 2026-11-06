@@ -41,6 +41,35 @@ describe('smfileResponseHeaders', () => {
     });
   });
 
+  it('attaches the CSP header for videos/<id>/index.html', () => {
+    const realPath = '/home/user/project/session-manager-operations/project-pages/videos/abc123/index.html';
+    expect(smfileResponseHeaders(realPath, 'text/html')).toEqual({
+      'content-type': 'text/html',
+      'content-security-policy': DEMO_VIDEO_CSP_HEADER,
+    });
+  });
+
+  it('attaches the CSP header for videos/_character/character.js', () => {
+    const realPath = '/home/user/project/session-manager-operations/project-pages/videos/_character/character.js';
+    expect(smfileResponseHeaders(realPath, 'text/javascript')).toEqual({
+      'content-type': 'text/javascript',
+      'content-security-policy': DEMO_VIDEO_CSP_HEADER,
+    });
+  });
+
+  it('attaches the CSP header for a win32 backslash videos path', () => {
+    const realPath = 'C:\\Users\\bilko\\project\\session-manager-operations\\project-pages\\videos\\abc\\index.html';
+    expect(smfileResponseHeaders(realPath, 'text/html')).toEqual({
+      'content-type': 'text/html',
+      'content-security-policy': DEMO_VIDEO_CSP_HEADER,
+    });
+  });
+
+  it('does not attach a CSP header for project-pages/knowledge/', () => {
+    const realPath = '/home/user/project/session-manager-operations/project-pages/knowledge/page.html';
+    expect(smfileResponseHeaders(realPath, 'text/html')).toEqual({ 'content-type': 'text/html' });
+  });
+
   it('exports the expected CSP header string', () => {
     expect(DEMO_VIDEO_CSP_HEADER).toBe(
       "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'"
@@ -112,6 +141,22 @@ describe('shouldBlockFrameNavigation', () => {
       currentUrl: demoVideoUrl,
       targetUrl: 'about:srcdoc',
     })).toBe(false);
+  });
+
+  it('blocks a videos/<id> subframe navigating externally, allows smfile', () => {
+    const url = 'smfile://local/home/user/project/session-manager-operations/project-pages/videos/abc/index.html';
+    expect(shouldBlockFrameNavigation({ isMainFrame: false, currentUrl: url, targetUrl: 'https://evil.example.com/x' })).toBe(true);
+    expect(shouldBlockFrameNavigation({ isMainFrame: false, currentUrl: url, targetUrl: 'smfile://local/x' })).toBe(false);
+  });
+
+  it('blocks a win32 backslash videos subframe navigating externally', () => {
+    const url = `smfile://local/${encodeURIComponent('C:\\Users\\u\\p\\session-manager-operations\\project-pages\\videos\\abc\\index.html')}`;
+    expect(shouldBlockFrameNavigation({ isMainFrame: false, currentUrl: url, targetUrl: 'https://evil.example.com/x' })).toBe(true);
+  });
+
+  it('does not block a knowledge/ subframe', () => {
+    const url = 'smfile://local/home/user/project/session-manager-operations/project-pages/knowledge/p.html';
+    expect(shouldBlockFrameNavigation({ isMainFrame: false, currentUrl: url, targetUrl: 'https://evil.example.com/x' })).toBe(false);
   });
 
   it('blocks a demo-video subframe on a Windows-style (backslash) path navigating externally', () => {

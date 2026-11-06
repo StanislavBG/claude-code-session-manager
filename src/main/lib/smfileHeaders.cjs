@@ -15,6 +15,14 @@ const DEMO_VIDEO_CSP_HEADER = [
 ].join('; ');
 
 const DEMO_VIDEO_PATH_MARKER = '/session-manager-operations/project-pages/demo-video/';
+const VIDEOS_PATH_MARKER = '/session-manager-operations/project-pages/videos/';
+// Legacy demo-video marker stays until the videos/ migration has run everywhere.
+const PATH_MARKERS = [DEMO_VIDEO_PATH_MARKER, VIDEOS_PATH_MARKER];
+
+/** @param {string} normalised forward-slash path */
+function matchesFence(normalised) {
+  return PATH_MARKERS.some((m) => normalised.includes(m));
+}
 
 /**
  * Response headers for a file served over the smfile:// protocol. A file
@@ -27,7 +35,7 @@ const DEMO_VIDEO_PATH_MARKER = '/session-manager-operations/project-pages/demo-v
 function smfileResponseHeaders(realPath, contentType) {
   const normalised = String(realPath).replace(/\\/g, '/');
   const headers = { 'content-type': contentType };
-  if (normalised.includes(DEMO_VIDEO_PATH_MARKER)) {
+  if (matchesFence(normalised)) {
     headers['content-security-policy'] = DEMO_VIDEO_CSP_HEADER;
   }
   return headers;
@@ -55,7 +63,7 @@ function shouldBlockFrameNavigation({ isMainFrame, currentUrl, targetUrl }) {
   } catch {
     return false;
   }
-  if (!pathname.includes(DEMO_VIDEO_PATH_MARKER)) return false;
+  if (!matchesFence(pathname)) return false;
 
   if (typeof targetUrl !== 'string') return false;
   if (targetUrl.startsWith('smfile:')) return false;
@@ -79,4 +87,4 @@ function smfileUrlToPath(pathname, platform = process.platform) {
   return require('node:path').win32.normalize(stripped);
 }
 
-module.exports = { DEMO_VIDEO_CSP_HEADER, smfileResponseHeaders, shouldBlockFrameNavigation, smfileUrlToPath };
+module.exports = { DEMO_VIDEO_CSP_HEADER, VIDEOS_PATH_MARKER, smfileResponseHeaders, shouldBlockFrameNavigation, smfileUrlToPath };

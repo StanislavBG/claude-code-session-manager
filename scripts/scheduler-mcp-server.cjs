@@ -491,11 +491,11 @@ const TOOLS = [
         cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
         html: {
           type: 'string',
-          description: 'The complete self-contained HTML/JS document for a 30-second-or-less demo video (<= 2MB). '
+          description: 'The complete self-contained HTML/JS document for a demo video of 60 seconds or less (<= 2MB). '
             + 'It is rejected for: being empty; <script src>, <link href=http*>, @import, or url(http*) (no remote references); '
             + 'fetch/XMLHttpRequest/WebSocket/EventSource/sendBeacon/dynamic import/importScripts/<iframe>/<object>/<embed>/window.open/'
             + 'any http(s)/// src or href (no network-capable APIs — the document is CSP-fenced after it is written); '
-            + 'or missing a <meta name="sm-demo-duration" content="N"> tag with 5 <= N <= 30.',
+            + 'or missing a <meta name="sm-demo-duration" content="N"> tag with 5 <= N <= 60.',
         },
         htmlPath: {
           type: 'string',

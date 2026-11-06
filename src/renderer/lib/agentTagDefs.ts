@@ -53,7 +53,7 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   },
   'project-home-builder': {
     description:
-      'Produces a Project Home artifact for this project — the overview page or the 30-second ' +
+      'Produces a Project Home artifact for this project — the overview page or the ' +
       'demo video — whichever the Actor persona defines.',
     initialPromptTemplate:
       "You are producing a Project Home artifact. Read the real project first — its manifest, " +

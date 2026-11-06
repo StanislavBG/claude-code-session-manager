@@ -320,12 +320,12 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'project_demo_video_write',
     group: 'project-home',
-    purpose: "Write this project's 30-second demo video — ONE self-contained HTML/JS document — to "
+    purpose: "Write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — to "
       + "session-manager-operations/project-pages/demo-video/index.html via the session-manager app's admin API. "
       + 'The only write path for the demo video.',
     whenToUse: 'Use when asked to generate or refresh the demo video. Compose the whole document yourself '
       + '(inline <style>/<script>, data: URIs for assets, CSS/JS-driven animation) from what is really true about '
-      + 'the project, declare its length with <meta name="sm-demo-duration" content="N"> (5-30 seconds), then '
+      + 'the project, declare its length with <meta name="sm-demo-duration" content="N"> (5-60 seconds), then '
       + 'pass the document as `html` or — preferred when it embeds a base64 audio/image data URI — write it to a '
       + 'local .html file and pass its absolute path as `htmlPath`.',
     whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '

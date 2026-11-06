@@ -150,3 +150,9 @@ test('scheduler_create_prd files/estimateMinutes wording reflects files-overlap 
   expect(files).toMatch(/real output or order dependencies/);
   expect(tool.inputSchema.properties.estimateMinutes.description).toMatch(/defaultEstimateMinutes.*45-minute/);
 });
+
+test('project_demo_video_write whenToUse advertises 5-60 seconds', () => {
+  const demo = MCP_TOOL_CATALOG.find((x) => x.name === 'project_demo_video_write');
+  expect(demo.whenToUse).toContain('5-60 seconds');
+  expect(demo.whenToUse).not.toContain('5-30');
+});

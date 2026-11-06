@@ -196,6 +196,16 @@ test('project_demo_video_write is listed in TOOLS with html/htmlPath optional an
   expect(tool.inputSchema.required ?? []).not.toContain('html');
 });
 
+test('project_demo_video_write html description advertises 5 <= N <= 60', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const tool = TOOLS.find((t) => t.name === DEMO_VIDEO_TOOL_NAME);
+  const d = tool.inputSchema.properties.html.description;
+  expect(d).toContain('5 <= N <= 60');
+  expect(d).not.toContain('30-second');
+  expect(d).not.toContain('<= 30');
+});
+
 test('project_demo_video_write description equals the catalog-composed string', async () => {
   const homeDir = await mkTmp();
   const { TOOLS } = requireServerWithHome(homeDir);

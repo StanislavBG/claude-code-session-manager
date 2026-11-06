@@ -53,8 +53,8 @@ export function useProjectPagesOutput(
         if (cancelled) return
         setOutput(toOutput(res))
         setDemoVideo(res.demoVideo)
-        setKnowledge(res.knowledge)
-        setVideos(res.videos)
+        setKnowledge(Array.isArray(res.knowledge) ? res.knowledge : NO_KNOWLEDGE)
+        setVideos(Array.isArray(res.videos) ? res.videos : NO_VIDEOS)
         setLoaded(true)
       })
       .catch((err) => {
@@ -74,8 +74,8 @@ export function useProjectPagesOutput(
       if (payload.cwd !== cwd) return
       setOutput(toOutput(payload))
       setDemoVideo(payload.demoVideo)
-      setKnowledge(payload.knowledge)
-      setVideos(payload.videos)
+      setKnowledge(Array.isArray(payload.knowledge) ? payload.knowledge : NO_KNOWLEDGE)
+      setVideos(Array.isArray(payload.videos) ? payload.videos : NO_VIDEOS)
       setLoaded(true)
     })
     return () => {

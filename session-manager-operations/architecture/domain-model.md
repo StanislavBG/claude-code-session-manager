@@ -15,7 +15,7 @@ scoping scheme.
   opens on that cwd. The app owns its contents; the namespace enumeration is in
   [`../CLAUDE.md`](../CLAUDE.md).
 - **EPIC = one small unit of work within the Main Project**, implemented as `PromptSession`
-  (`state/promptSessions.ts`). It carries an `agentType`, a `tag` and its `goalText`. The tag also sets how
+  (`state/promptSessions.ts`). It carries an optional `agentType`, an optional `tag` and its `goalText`. The tag also sets how
   eagerly `/develop` fires inside the Epic's session (the `session-manager-dev:develop` skill's "Tag-aware
   default"): `feature`/`bug` treat PRD decomposition as the expected next step, `discussion` keeps it
   available but never assumed.
@@ -45,7 +45,7 @@ scoping scheme.
 
 - **Epic creation is two independent selections.** `agentType` (Actor — an Agent Library persona,
   `~/.claude/agents/*.md`) and `tag` (Mission — what the Epic is for) are separate axes on `PromptSession`.
-  The `tag` taxonomy is a closed union; both libraries are full CRUD editors (`AgentLibrary.tsx` via
+  Either may be None (see [Plain sessions](#plain-sessions)). The `tag` taxonomy is a closed union; both libraries are full CRUD editors (`AgentLibrary.tsx` via
   `agentLibrary.cjs`'s `savePersona`/`deletePersona`/`removeOverride`; `TagLibrary.tsx`), never read-only
   directories — don't describe them as read-only in docs or copy.
 - **Persona↔tag membership is many-to-many with one source of truth:** each persona's `tags:` frontmatter
@@ -217,3 +217,15 @@ by skipping the same-PR registration of a new folder.
   manual's own README.
 - **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI Settings → Phone remote. The relay,
   its routes, and the product-page copy in `~/Projects/Bilko/` are not decommissioned.
+
+## Plain sessions
+
+A "plain" session is the closest thing to running a bare `claude`: only the System/Project/Local settings
+context plus the chosen model/effort.
+
+- **Agent None** — `agentType` absent; no persona is injected.
+- **Mission None** — `tag` absent ("No mission"). The 7-tag union is unchanged; None is absence, not an 8th tag.
+- **`developLoop?: false`** — fixed for the life of the session. It disables the dev plugin in Chat and
+  Terminal launches, skips the delegate-implementation injection, makes the PRD API refuse PRDs for the Epic,
+  and lets the inline-implementation guard allow edits. Absent/true = the normal develop loop.
+- **Model** — an agentless Epic's model falls back to the Claude settings model (no persona frontmatter to win).

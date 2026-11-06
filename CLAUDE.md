@@ -64,8 +64,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   `epicId`/`epic-*` testids/on-disk paths stay the code name — don't "finish" the rename into identifiers.
 - **EPIC : claude-session = 1:1.** Chat and Terminal are two VIEWS over one session — switching hands off the
   session, never mints a new sessionId. Active Epics run in their own `git worktree` (branch `sm-epic/<id>`).
-- **Epic creation is two independent selections:** `agentType` (Actor — who) + `tag` (Mission — what). Both
-  libraries are full CRUD editors, not read-only. `tag`'s 7-tag taxonomy is a closed union.
+- **Epic creation is two independent selections:** `agentType` (Actor) + `tag` (Mission); either may be None
+  (absent). `tag` stays a closed 7-tag union. A `developLoop:false` Epic takes no PRDs.
 - **The opening prompt is AIM — Actor, Input, Mission, in that order**, composed only by
   `lib/epicIntake.ts`'s `composeEpicIntake`. It is framing, never a second source of truth for what the CLI loads.
 - **An Epic's title + objective are fixed for the life of its session.** Iterate in follow-up messages; start a

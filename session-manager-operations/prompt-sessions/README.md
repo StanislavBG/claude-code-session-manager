@@ -99,10 +99,11 @@ interface PromptSession {
   createdAt: string
   completedAt: string | null
   resumedFromId?: string | null          // LEGACY: written only by the retired resumeArchived(); reopenEpic never sets it
-  tag?: 'feature' | 'bug' | 'discussion' // Epic-level MISSION (Tag Library) — the "what"
+  tag?: EpicTag                          // Epic-level MISSION (Tag Library), full closed 7-tag union — the "what"; absent = No mission
   openingPrompt?: string | null          // full first-prompt body, when it differs from goalText
   source?: EpicSource                    // which automated producer minted this Epic (absent if human-created)
-  agentType?: string                     // Agent Library persona name chosen to run this Epic — the "who" (named to match Claude Code's own agent_type/subagent_type vocabulary, not a new one)
+  agentType?: string                     // Agent Library persona name chosen to run this Epic — the "who"; absent = None (named to match Claude Code's own agent_type/subagent_type vocabulary, not a new one)
+  developLoop?: false                    // false = plain session: dev plugin off, no PRDs accepted, inline edits allowed; fixed for the session
 }
 ```
 

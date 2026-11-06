@@ -89,11 +89,61 @@ export interface EpicIntakeFields {
  * thing that produced this section's text (persona name / injection key /
  * tag / reference path) where one exists, for a card subtitle.
  */
+export type AimSlot = 'actor' | 'input' | 'mission'
+export const AIM_SLOT_ORDER: readonly AimSlot[] = ['actor', 'input', 'mission']
+export type AimPart = 'persona' | 'grounding' | 'injection' | 'reference' | 'job-type' | 'goal'
+
 export interface EpicIntakeSection {
+  /** New Epics emit kind = AIM slot plus `part`. 'persona-body' | 'injection' |
+   *  'goal' | 'reference' (and actor/input/mission without a part) are the
+   *  pre-AIM shape still stored by existing Epics — read-only, always read
+   *  through toAimSections. */
   kind: 'actor' | 'persona-body' | 'injection' | 'input' | 'mission' | 'goal' | 'reference'
+  /** Which part of its AIM slot this entry is. Absent on pre-AIM records. */
+  part?: AimPart
   label: string
   text: string
   source?: string
+}
+
+export type AimSection = EpicIntakeSection & { kind: AimSlot; part: AimPart }
+
+const LEGACY_KIND: Record<EpicIntakeSection['kind'], { kind: AimSlot; part: AimPart }> = {
+  actor: { kind: 'actor', part: 'persona' },
+  'persona-body': { kind: 'actor', part: 'persona' },
+  injection: { kind: 'input', part: 'injection' },
+  input: { kind: 'input', part: 'grounding' },
+  reference: { kind: 'input', part: 'reference' },
+  mission: { kind: 'mission', part: 'job-type' },
+  goal: { kind: 'mission', part: 'goal' },
+}
+
+const PART_SLOT: Record<AimPart, AimSlot> = {
+  persona: 'actor',
+  grounding: 'input',
+  injection: 'input',
+  reference: 'input',
+  'job-type': 'mission',
+  goal: 'mission',
+}
+
+const has = (o: object, k: unknown): boolean =>
+  typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k)
+
+/** Normalize stored sections (legacy 7-kind or AIM) into exactly AIM's three
+ *  slots, each entry tagged with its part, stably ordered by slot. Never throws. */
+export function toAimSections(sections: readonly EpicIntakeSection[] | null | undefined): AimSection[] {
+  if (!Array.isArray(sections)) return []
+  const out: AimSection[] = []
+  for (const entry of sections) {
+    if (!entry || typeof entry !== 'object') continue
+    if (has(PART_SLOT, entry.part)) {
+      out.push({ ...entry, kind: PART_SLOT[entry.part as AimPart], part: entry.part as AimPart })
+    } else if (entry.part === undefined && has(LEGACY_KIND, entry.kind)) {
+      out.push({ ...entry, ...LEGACY_KIND[entry.kind as EpicIntakeSection['kind']] })
+    }
+  }
+  return out.sort((a, b) => AIM_SLOT_ORDER.indexOf(a.kind) - AIM_SLOT_ORDER.indexOf(b.kind))
 }
 
 export interface EpicIntake {

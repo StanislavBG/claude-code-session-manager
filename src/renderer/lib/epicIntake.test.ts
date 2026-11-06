@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { composeEpicIntake, joinSections } from './epicIntake'
+import { composeEpicIntake, joinSections, toAimSections, type EpicIntakeSection } from './epicIntake'
 import { agentTagDef, AGENT_TAG_DEFS } from './agentTagDefs'
 import { CONTEXT_INJECTIONS } from './contextInjections'
 
@@ -279,5 +279,37 @@ describe('composeEpicIntake plain composition', () => {
     expect(
       composeEpicIntake({ title: 'T', goal: 'G', inputSummary: 'I', agentName: 'a', agentDescription: 'd' }).sections.map((s) => s.kind),
     ).toContain('input')
+  })
+})
+
+describe('toAimSections', () => {
+  const e = (kind: string, text = kind): EpicIntakeSection => ({ kind, label: kind, text }) as EpicIntakeSection
+  it('normalizes the 8-entry legacy shape into AIM slots and parts', () => {
+    const legacy = [
+      e('actor'), e('persona-body'), e('injection', 'general-behavior'), e('injection', 'delegate-implementation'),
+      e('input'), { ...e('mission'), source: 'bug' }, e('goal'), e('reference'),
+    ]
+    const out = toAimSections(legacy)
+    expect(out.map((s) => s.kind)).toEqual(['actor', 'actor', 'input', 'input', 'input', 'input', 'mission', 'mission'])
+    expect(out.map((s) => s.part)).toEqual([
+      'persona', 'persona', 'injection', 'injection', 'grounding', 'reference', 'job-type', 'goal',
+    ])
+    expect(out[6].source).toBe('bug')
+  })
+  it('returns an already-AIM array deep-equal', () => {
+    const aim = [
+      { kind: 'actor', part: 'persona', label: 'a', text: 'a' },
+      { kind: 'input', part: 'grounding', label: 'i', text: 'i' },
+      { kind: 'mission', part: 'goal', label: 'g', text: 'g' },
+    ] as EpicIntakeSection[]
+    expect(toAimSections(aim)).toEqual(aim)
+  })
+  it('handles null, undefined and empty', () => {
+    expect(toAimSections(null)).toEqual([])
+    expect(toAimSections(undefined)).toEqual([])
+    expect(toAimSections([])).toEqual([])
+  })
+  it('drops unknown kinds and parts', () => {
+    expect(toAimSections([e('bogus'), e('goal'), { ...e('actor'), part: 'nope' } as never])).toHaveLength(1)
   })
 })

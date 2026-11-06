@@ -103,6 +103,7 @@ const queueOps = require('./queueOps.cjs');
 const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const { seedAgentPersonas } = require('./seedAgentPersonas.cjs');
+const { seedDemoVideoKit } = require('./lib/demo-video-kit/seedKit.cjs');
 const { seedSchedulerMcp } = require('./seedSchedulerMcp.cjs');
 const { runSeedersSerially } = require('./lib/runSeeders.cjs');
 const { getSeedStatus } = require('./seedStatus.cjs');
@@ -1533,6 +1534,8 @@ app.whenReady().then(async () => {
   bootSeedingPromise = runSeedersSerially([
     { name: 'dev-plugin', run: () => seedDevPlugin({ logger: console, writeLog: logs.writeLine }) },
     { name: 'agent-personas', run: () => seedAgentPersonas({ logger: console, writeLog: logs.writeLine }) },
+    // Demo-video kit -> ~/.claude/session-manager/demo-video-kit/ (stamp-gated). SM_SEED_DEMO_VIDEO_KIT_DISABLE=1 to opt out.
+    { name: 'demo-video-kit', run: () => seedDemoVideoKit({ logger: console, writeLog: logs.writeLine }) },
     { name: 'scheduler-mcp', run: () => seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }) },
   ]).catch((e) => {
     logs.writeLine({ scope: 'seed', level: 'error', message: 'seed chain failed', meta: { error: e?.message } });

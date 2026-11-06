@@ -80,7 +80,7 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
 
 test('project-home group lists the page/video tools and the two aliases', () => {
   expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
-    'project_home_write', 'project_page_write', 'project_video_write', 'project_demo_video_write',
+    'project_home_write', 'project_page_write', 'project_video_write', 'project_demo_video_write', 'project_character_write',
   ]);
 });
 

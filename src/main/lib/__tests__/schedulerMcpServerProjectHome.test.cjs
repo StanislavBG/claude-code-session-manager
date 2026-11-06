@@ -407,3 +407,63 @@ test('project_video_write posts to /admin/project-home/videos/write with meta an
   }
   expect(requests).toHaveLength(2);
 });
+
+const CHARACTER_TOOL = 'project_character_write';
+
+test('project_character_write is listed with json required, js/jsPath/replace/cwd optional', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const tool = TOOLS.find((t) => t.name === CHARACTER_TOOL);
+  expect(tool).toBeTruthy();
+  expect(tool.inputSchema.required).toEqual(['json']);
+  for (const k of ['cwd', 'json', 'js', 'jsPath', 'replace']) expect(tool.inputSchema.properties[k]).toBeTruthy();
+});
+
+test('project_character_write dispatches POST /admin/project-home/character/write', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const json = { name: 'Bit' };
+  const result = await callTool(handleCallTool, CHARACTER_TOOL, { cwd: '/p', json, js: 'x', replace: true });
+  expect(result.isError).toBeFalsy();
+  expect(requests[0].url).toBe('/admin/project-home/character/write');
+  expect(requests[0].body).toEqual({ cwd: '/p', json, js: 'x', replace: true });
+});
+
+test('project_character_write reads jsPath verbatim and omits replace when unset', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const jsPath = path.join(homeDir, 'character.js');
+  await fsp.writeFile(jsPath, 'module.exports = 1;', 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const result = await callTool(handleCallTool, CHARACTER_TOOL, { cwd: '/p', json: '{"name":"Bit"}', jsPath });
+  expect(result.isError).toBeFalsy();
+  expect(requests[0].body).toEqual({ cwd: '/p', json: '{"name":"Bit"}', js: 'module.exports = 1;' });
+});
+
+test('project_character_write rejects bad argument combinations without calling the admin API', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const noJson = await callTool(handleCallTool, CHARACTER_TOOL, { js: 'x' });
+  expect(noJson.isError).toBe(true);
+  const neither = await callTool(handleCallTool, CHARACTER_TOOL, { json: {} });
+  expect(neither.isError).toBe(true);
+  const both = await callTool(handleCallTool, CHARACTER_TOOL, { json: {}, js: 'x', jsPath: '/a.js' });
+  expect(both.isError).toBe(true);
+  const relative = await callTool(handleCallTool, CHARACTER_TOOL, { json: {}, jsPath: 'a.js' });
+  expect(relative.isError).toBe(true);
+  expect(requests).toHaveLength(0);
+});

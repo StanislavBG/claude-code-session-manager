@@ -26,6 +26,11 @@ export interface TagLibraryEntry {
    * doesn't exist yet — see agentTagDefs.ts's template for that tag).
    */
   developsVia: string
+  /**
+   * True when the Mission's opening template instructs queuing via /develop, so
+   * it contradicts a session started with the develop loop off.
+   */
+  requiresDevelopLoop: boolean
 }
 
 export const TAG_LIBRARY: TagLibraryEntry[] = [
@@ -36,6 +41,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'The tag also sets how eagerly /develop should fire inside that Epic\'s session — see the session-manager-dev:develop skill\'s "Tag-aware default": feature/bug treat PRD decomposition as the expected next step.',
     developEagerness: 'expected-default',
     developsVia: '/develop',
+    requiresDevelopLoop: true,
   },
   {
     tag: 'bug',
@@ -44,6 +50,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'The tag also sets how eagerly /develop should fire inside that Epic\'s session — see the session-manager-dev:develop skill\'s "Tag-aware default": feature/bug treat PRD decomposition as the expected next step.',
     developEagerness: 'expected-default',
     developsVia: '/develop',
+    requiresDevelopLoop: true,
   },
   {
     tag: 'discussion',
@@ -52,6 +59,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'discussion keeps /develop available but never assumed until whether-to-build is actually settled.',
     developEagerness: 'available-not-assumed',
     developsVia: '/develop',
+    requiresDevelopLoop: false,
   },
   {
     tag: 'build',
@@ -60,6 +68,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       "A build Epic's whole point is to run the Builder skill — decomposition into PRDs (or a direct build run) is the expected next step, the same as feature/bug.",
     developEagerness: 'expected-default',
     developsVia: '/builder (not /develop)',
+    requiresDevelopLoop: false,
   },
   {
     tag: 'project-home-builder',
@@ -68,6 +77,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'Reads a project and writes Knowledge Pages for its Project Home via the project-home-builder local agent and the project_page_write tool (project_home_write for the Overview). Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
     developsVia: 'project-home-builder agent protocol (not /develop)',
+    requiresDevelopLoop: false,
   },
   {
     tag: 'art',
@@ -76,6 +86,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'Blender modeling, rigging, skinning and animation work whose source of truth is a .blend file. Decomposition into PRDs executed by an art persona is the expected next step, same as feature/bug.',
     developEagerness: 'expected-default',
     developsVia: '/develop (PRDs executed by an art persona, e.g. agentType blender-artist)',
+    requiresDevelopLoop: true,
   },
   {
     tag: 'portfolio',
@@ -84,6 +95,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       "A cross-project review of the owner's whole portfolio (money, influence, online presence) that judges past decisions and routes at most a few changes to the projects that own them. Like discussion it never decomposes into PRDs here; decided changes leave via send-feedback (feedback_open_session) as proposed Epics in the owning project.",
     developEagerness: 'available-not-assumed',
     developsVia: 'send-feedback / feedback_open_session to the owning project (never /develop here)',
+    requiresDevelopLoop: false,
   },
 ]
 
@@ -93,4 +105,14 @@ export function tagLibraryEntry(tag: EpicTag): TagLibraryEntry {
   const found = TAG_LIBRARY.find((entry) => entry.tag === tag)
   if (!found) throw new Error(`unknown tag: ${tag}`)
   return found
+}
+
+/** A missing tag is how an Epic records No mission — it is NOT an eighth EpicTag. */
+export const NO_MISSION = {
+  label: 'None',
+  description: 'No mission — your goal is sent as written, with no task framing.',
+} as const
+
+export function missionLabel(tag: EpicTag | null | undefined): string {
+  return tag ? tagLibraryEntry(tag).label : NO_MISSION.label
 }

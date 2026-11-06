@@ -213,6 +213,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "medium",
       },
     },
+    {
+      commit: "seed-v4",
+      bodySha256: "525ba0b41d540bea5804b9c34765e05566555fb8447659a3b3c6579814c4a563",
+      fm: {
+        description: "Reads a project and writes ONE Knowledge Page (Overview by default, or How it works, FAQ, or a custom topic) for its Project Home tab, then saves it with a single project_page_write call.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write, mcp__session-manager-scheduler__project_page_write",
+        title: "Project Home — Builder",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
   "validator": [
     {

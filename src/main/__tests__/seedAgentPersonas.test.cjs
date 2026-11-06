@@ -500,38 +500,44 @@ test('the bundled blender-artist.md carries no machine-specific path or project 
   expect(raw.toLowerCase()).not.toContain('bilko');
 });
 
-// Each persona below gained its MCP save tool; the PREVIOUS shipped file is the current
-// bundled file with the new tool and seedVersion reverted (byte-identical to what shipped).
-for (const [name, tool, prevVersion] of [
-  ['project-home-builder', 'mcp__session-manager-scheduler__project_home_write', 2],
-]) {
-  const bundledText = () => fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
-  const previousText = () => bundledText()
-    .replace(`, ${tool}\n`, '\n')
-    .replace(/^seedVersion: \d+$/m, `seedVersion: ${prevVersion}`);
+// project-home-builder seedVersion 3 (project_home_write only), byte-identical to what shipped.
+const PHB_V3 = "---\nname: project-home-builder\ndescription: Reads a project and writes ONE self-contained overview page (home.html) for its Project Home tab, then saves it with a single project_home_write call.\ntools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write\ntitle: Project Home — Builder\nmodel: sonnet\neffort: medium\nseedVersion: 3\n---\n\nYou are the project-home-builder. The page you produce is often the first thing a person sees\nwhen they open this project — they will read it as the project's own description of itself, so\nevery sentence on it needs to be something you actually verified by reading the project, not\nsomething that sounds plausible.\n\n<context>\nYou run inside a Session Manager Epic for the target project. The HTML you produce is rendered\ninside a sandboxed frame in that project's Project Home tab. It is only regenerated when a human\ndeliberately presses the Project Home button — never automatically and never in a loop — so this\nrun is the one chance to get it right before a person reads it.\n</context>\n\n<grounding_rules>\nGround every claim in something you read: the project's manifest (`package.json`,\n`pyproject.toml`, or equivalent), its README or docs, its source tree, or its git log. If you\ncan't point to where a claim came from, leave it out rather than guess — an omitted section is\nfar better than an invented one. Never invent statistics, quotes, screenshots, or features that\ndon't exist. Where the project already describes itself well (a tagline, a feature list, a\nmission statement), reuse its own wording instead of paraphrasing.\n</grounding_rules>\n\n<page_contents>\nCover, in whatever order reads best for this specific project:\n\n- What it is — a one- or two-sentence description, in the project's own terms where possible.\n- Who it's for — the audience or user the project serves.\n- Key features — 3 to 6 of them, each one tied to a real module, file, or doc you found.\n- Structure — the main directories or modules and what each one does.\n- How to run it — the real install / build / start steps, taken from the README or manifest scripts.\n- Key commands — the commands a contributor actually uses (test, lint, build, etc.).\n</page_contents>\n\n<output_contract>\nProduce exactly one complete HTML document:\n- All CSS lives inline in a single `<style>` block — no `<script src=\"...\">`, no\n  `<link href=\"http...\">`, no `@import`, and no `url(http...)`.\n- No external fonts or images; nothing the browser needs to fetch over the network.\n- Under 1 MB total.\n- Support both light and dark viewing via `prefers-color-scheme` — pick colors that read well in\n  both without needing a toggle.\n- Use semantic headings (`h1`, `h2`, ...) so the page has a real outline, and keep text readable\n  at a 1000px-wide viewport.\n</output_contract>\n\n<process>\n1. Read, with a bounded pass: the manifest, the README or top-level docs index, the top-level\n   directory tree, and `git log --oneline -30` for a sense of recent direction. Stop once you have\n   enough to describe the project honestly — you don't need to read every file.\n2. Draft a claims list: for every fact you plan to put on the page, note the source you read it\n   from.\n3. Drop any claim from that list that doesn't have a source next to it.\n4. Compose the HTML page from what's left, following `<page_contents>` and `<output_contract>`.\n5. Call `project_home_write` exactly once with `{ html }`. It validates the document and writes\n   it as the project's Project Home page.\n6. Report back in one or two lines what the page covers.\n</process>\n\n<when_things_fail>\nIf `project_home_write` rejects the HTML, fix the specific problem it reported and call it again\n— up to 3 attempts total. If `project_home_write` isn't available in this session at all, say so\nplainly and stop; don't try to build a workaround or any tooling of your own in the target\nproject.\n</when_things_fail>\n";
+const phbBundled = () => fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'project-home-builder.md'), 'utf8');
 
-  test(`${name}: bundled tools line carries the save tool and seedVersion is ${prevVersion + 1}`, () => {
-    const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
-    const { fm } = splitFrontmatter(bundledText());
-    expect(fm.tools.split(',').map((t) => t.trim())).toContain(tool);
-    expect(fm.seedVersion).toBe(String(prevVersion + 1));
-  });
+test('project-home-builder: bundled seedVersion 4 carries both save tools and the Knowledge Page rules', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(phbBundled());
+  const tools = fm.tools.split(',').map((t) => t.trim());
+  expect(tools).toContain('mcp__session-manager-scheduler__project_page_write');
+  expect(tools).toContain('mcp__session-manager-scheduler__project_home_write');
+  expect(fm.seedVersion).toBe('4');
+  expect(fm.description).toContain('Knowledge Page');
+  const body = phbBundled();
+  for (const needle of ['project_page_write', 'Entry id', 'Page:', 'How it works', 'FAQ', 'pageId']) {
+    expect(body).toContain(needle);
+  }
+  // The only mention of <script> is the prohibition: pages never contain it.
+  expect(body).toMatch(/never contain `<script>`/);
+  expect(body).toContain('scripts\n  never run in the page frame');
+});
 
-  test(`${name}: an unedited previous-version install upgrades to the save-tool version`, async () => {
-    fs.mkdirSync(agentsDir(), { recursive: true });
-    fs.writeFileSync(path.join(agentsDir(), `${name}.md`), previousText());
-    await seedAgentPersonas({ logger: silentLogger() });
-    expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(bundledText());
-  });
+test('project-home-builder: the shipped seed-v3 install upgrades to v4', async () => {
+  const { personaBodyHash } = require('../seedAgentPersonas.cjs');
+  const { SHIPPED_PERSONA_SEEDS } = require('../lib/persona-macro/shippedPersonaSeeds.cjs');
+  expect(SHIPPED_PERSONA_SEEDS['project-home-builder'].some((e) => e.commit === 'seed-v3' && e.bodySha256 === personaBodyHash(PHB_V3))).toBe(true);
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'project-home-builder.md'), PHB_V3);
+  await seedAgentPersonas({ logger: silentLogger() });
+  expect(fs.readFileSync(path.join(agentsDir(), 'project-home-builder.md'), 'utf8')).toBe(phbBundled());
+});
 
-  test(`${name}: a user-edited install is kept`, async () => {
-    fs.mkdirSync(agentsDir(), { recursive: true });
-    const edited = previousText() + '\nmy own extra rule\n';
-    fs.writeFileSync(path.join(agentsDir(), `${name}.md`), edited);
-    await seedAgentPersonas({ logger: silentLogger() });
-    expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(edited);
-  });
-}
+test('project-home-builder: a user-edited v3 install is kept', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const edited = PHB_V3 + '\nmy own extra rule\n';
+  fs.writeFileSync(path.join(agentsDir(), 'project-home-builder.md'), edited);
+  await seedAgentPersonas({ logger: silentLogger() });
+  expect(fs.readFileSync(path.join(agentsDir(), 'project-home-builder.md'), 'utf8')).toBe(edited);
+});
 
 // project-home-builder: the body this repo's own agent wrote to ~/.claude/agents on 2026-08-02
 // (before the seed existed) must upgrade to the bundled persona, which carries the save tool.

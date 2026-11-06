@@ -25,8 +25,11 @@
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
- * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin server IS the
- * security boundary; this file stays on the client side of it.
+ * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin API (loopback +
+ * bearer token) is the boundary against other users and remote callers, not
+ * against a job running as the same user (it can read admin-api.json). The env
+ * refusals in this file (job tool scope, headless queue, macro delete) are
+ * guardrails for agents acting in good faith, not containment.
  */
 
 'use strict';
@@ -672,6 +675,36 @@ const TOOLS = [
   },
 ];
 
+// SM_SCHEDULER_JOB_MCP_TOOLS: JSON array of full mcp__<server>__<tool> names a
+// scoped job may use. Unset = no filter. Malformed = fail closed. Guardrail only.
+function jobToolScope() {
+  const raw = process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  if (raw === undefined) return null;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return { names: new Set(), malformed: true }; }
+  if (!Array.isArray(parsed) || !parsed.every((e) => typeof e === 'string')) {
+    return { names: new Set(), malformed: true };
+  }
+  const names = new Set();
+  for (const entry of parsed) {
+    if (!entry.startsWith('mcp__')) continue;
+    const i = entry.indexOf('__', 5);
+    if (i > 0) names.add(entry.slice(i + 2));
+  }
+  return { names, malformed: false };
+}
+
+function jobToolScopeRefusal(toolName) {
+  const scope = jobToolScope();
+  if (!scope || (!scope.malformed && scope.names.has(toolName))) return null;
+  const text = scope.malformed
+    ? `refused: ${toolName} was not run because SM_SCHEDULER_JOB_MCP_TOOLS is malformed (expected a JSON array of tool-name strings). `
+      + 'Say in your final result that the tool scope is malformed and stop.'
+    : `refused: ${toolName} is outside the tool scope of headless scheduled job '${process.env.SM_SCHEDULER_JOB_SLUG || '(unknown)'}' — its persona does not list it. `
+      + "Starting this server yourself does not widen a job's scope. Say in your final result which tool was missing and stop.";
+  return { content: [{ type: 'text', text }], isError: true };
+}
+
 // A macro is a human's button and its delete cannot be undone, so this runs
 // only in a session a human is attached to. headlessQueueRefusal does not fit:
 // it lets an architect job through.
@@ -721,6 +754,8 @@ function withCreateOrigin(payload) {
 
 async function handleCallTool(request) {
   const { name, arguments: args } = request.params;
+  const scopeRefusal = jobToolScopeRefusal(name);
+  if (scopeRefusal) return scopeRefusal;
   try {
     if (name === 'scheduler_reset_job') {
       const slug = args && typeof args.slug === 'string' ? args.slug : null;
@@ -1095,7 +1130,10 @@ async function main() {
   createStdioServer({
     name: 'session-manager-scheduler',
     version: '1.0.0',
-    listTools: () => TOOLS,
+    listTools: () => {
+      const scope = jobToolScope();
+      return scope ? TOOLS.filter((t) => scope.names.has(t.name)) : TOOLS;
+    },
     callTool: (params) => handleCallTool({ params }),
   }).start();
 }

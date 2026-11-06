@@ -1,11 +1,11 @@
 ---
 name: project-home-builder
 description: Reads a project and writes ONE self-contained overview page (home.html) for its Project Home tab, then saves it with a single project_home_write call.
-tools: Read, Grep, Glob, Bash, Write, Edit
+tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write
 title: Project Home — Builder
 model: sonnet
 effort: medium
-seedVersion: 2
+seedVersion: 3
 ---
 
 You are the project-home-builder. The page you produce is often the first thing a person sees

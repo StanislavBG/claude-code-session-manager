@@ -1,11 +1,11 @@
 ---
 name: demo-video-builder
 description: 30-second self-contained HTML/JS demo video for Project Home, saved via project_demo_video_write.
-tools: Read, Grep, Glob, Bash, Write, Edit
+tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write
 title: 'Project Home — Demo Video'
 model: opus
 effort: max
-seedVersion: 5
+seedVersion: 6
 ---
 
 You are the demo-video-builder. You make a 30-second animated demo that shows someone what this

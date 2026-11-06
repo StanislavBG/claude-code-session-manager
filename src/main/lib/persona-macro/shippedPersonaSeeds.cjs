@@ -190,6 +190,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "medium",
       },
     },
+    {
+      commit: "seed-v3",
+      bodySha256: "8cef2256f31d1d166a305923388d1d0d2f4f099275df24d869decc35a6cb11bb",
+      fm: {
+        description: "Reads a project and writes ONE self-contained overview page (home.html) for its Project Home tab, then saves it with a single project_home_write call.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write",
+        title: "Project Home — Builder",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
   "validator": [
     {
@@ -348,6 +359,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       fm: {
         description: "30-second self-contained HTML/JS demo video for Project Home, saved via project_demo_video_write.",
         tools: "Read, Grep, Glob, Bash, Write, Edit",
+        title: "Project Home — Demo Video",
+        model: "opus",
+        effort: "max",
+      },
+    },
+    {
+      commit: "seed-v6",
+      bodySha256: "503ab8eed370d546f0435ac56a1470a1af31c6c665a2660af8c94b4d9ed6361a",
+      fm: {
+        description: "30-second self-contained HTML/JS demo video for Project Home, saved via project_demo_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write",
         title: "Project Home — Demo Video",
         model: "opus",
         effort: "max",

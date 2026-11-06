@@ -499,3 +499,37 @@ test('the bundled blender-artist.md carries no machine-specific path or project 
   expect(raw).not.toContain('/home/');
   expect(raw.toLowerCase()).not.toContain('bilko');
 });
+
+// Each persona below gained its MCP save tool; the PREVIOUS shipped file is the current
+// bundled file with the new tool and seedVersion reverted (byte-identical to what shipped).
+for (const [name, tool, prevVersion] of [
+  ['demo-video-builder', 'mcp__session-manager-scheduler__project_demo_video_write', 5],
+  ['project-home-builder', 'mcp__session-manager-scheduler__project_home_write', 2],
+]) {
+  const bundledText = () => fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
+  const previousText = () => bundledText()
+    .replace(`, ${tool}\n`, '\n')
+    .replace(/^seedVersion: \d+$/m, `seedVersion: ${prevVersion}`);
+
+  test(`${name}: bundled tools line carries the save tool and seedVersion is ${prevVersion + 1}`, () => {
+    const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+    const { fm } = splitFrontmatter(bundledText());
+    expect(fm.tools.split(',').map((t) => t.trim())).toContain(tool);
+    expect(fm.seedVersion).toBe(String(prevVersion + 1));
+  });
+
+  test(`${name}: an unedited previous-version install upgrades to the save-tool version`, async () => {
+    fs.mkdirSync(agentsDir(), { recursive: true });
+    fs.writeFileSync(path.join(agentsDir(), `${name}.md`), previousText());
+    await seedAgentPersonas({ logger: silentLogger() });
+    expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(bundledText());
+  });
+
+  test(`${name}: a user-edited install is kept`, async () => {
+    fs.mkdirSync(agentsDir(), { recursive: true });
+    const edited = previousText() + '\nmy own extra rule\n';
+    fs.writeFileSync(path.join(agentsDir(), `${name}.md`), edited);
+    await seedAgentPersonas({ logger: silentLogger() });
+    expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(edited);
+  });
+}

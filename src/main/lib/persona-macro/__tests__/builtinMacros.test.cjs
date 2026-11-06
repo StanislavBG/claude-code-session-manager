@@ -41,7 +41,7 @@ test('demo-video-builder persona is opus / max / seedVersion 5', () => {
   const fm = frontmatter(raw);
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('max');
-  expect(fm.seedVersion).toBe('5');
+  expect(fm.seedVersion).toBe('6');
 });
 
 function personaBody() {

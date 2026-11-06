@@ -76,3 +76,22 @@ describe('personaToolScope', () => {
     assert.ok(!args.includes('--mcp-config'));
   });
 });
+
+describe('seed personas that save through an MCP tool', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { splitFrontmatter } = require('../../prd/prdFrontmatter.cjs');
+  const cases = [
+    ['demo-video-builder', 'mcp__session-manager-scheduler__project_demo_video_write'],
+    ['project-home-builder', 'mcp__session-manager-scheduler__project_home_write'],
+  ];
+  for (const [name, tool] of cases) {
+    it(`${name} scope contains its save tool and boots MCP`, () => {
+      const raw = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
+      const tools = splitFrontmatter(raw).fm.tools.split(',').map((t) => t.trim());
+      const scope = buildPersonaToolScope(tools);
+      assert.ok(scope.tools.includes(tool));
+      assert.ok(!personaToolScopeArgs(scope).includes('--strict-mcp-config'));
+    });
+  }
+});

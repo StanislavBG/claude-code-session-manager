@@ -1016,3 +1016,28 @@ test('createPrd gate-validation refusal returns applied:false and writes no file
   expect(result.applied).toBe(false);
   expect(fs.readdirSync(prdsDir)).toEqual([]);
 });
+
+test('createPrd emits macroId frontmatter when valid and the parser reads it back', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const result = await createPrd(validCreateBody({ macroId: 'demo-video.v1' }), remote);
+  expect(result.ok).toBe(true);
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/^macroId: demo-video\.v1$/m);
+  const { parsePrdFile } = require('../lib/prd/prdFrontmatter.cjs');
+  expect(parsePrdFile(written).frontmatter.macroId).toBe('demo-video.v1');
+});
+
+test('createPrd refuses an invalid macroId with 400 before burning a number', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const allocSpy = vi.fn(remote.allocateParallelGroup);
+  remote.allocateParallelGroup = allocSpy;
+  for (const bad of ['has space', '-lead', 'a\nb', '', 42, 'x'.repeat(129)]) {
+    const result = await createPrd(validCreateBody({ macroId: bad }), remote);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(400);
+  }
+  expect(allocSpy).not.toHaveBeenCalled();
+  expect(fs.readdirSync(prdsDir)).toEqual([]);
+});

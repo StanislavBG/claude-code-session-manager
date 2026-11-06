@@ -77,8 +77,9 @@ function splitFrontmatter(raw) {
  * never emitted, which is how `scheduler_update_prd` clears a dependency.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId'];
+const MACRO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -193,6 +194,10 @@ function applyKey(fm, key, after) {
       // Artifact-only PRD declaration — only the literal `artifact` is
       // recognized; anything else is dropped so a typo can never opt in.
       if (v === 'artifact') fm.deliverable = v;
+      return;
+    case 'macroId':
+      // Id of the macro whose press dispatched this PRD; anything off-pattern is dropped.
+      if (typeof v === 'string' && MACRO_ID_RE.test(v.trim())) fm.macroId = v.trim();
       return;
     case 'artifactPaths': {
       // Inline `[a, b]` list, same shape as dependsOn.

@@ -39,12 +39,12 @@ test('builtin demo-video macro is v5 with the character + styles + length prompt
   expect(macro.prompt).toContain('Kokoro');
 });
 
-test('demo-video-builder persona is opus / max / seedVersion 5', () => {
+test('demo-video-builder persona is opus / max / seedVersion 7', () => {
   const raw = fs.readFileSync(personaPath, 'utf8');
   const fm = frontmatter(raw);
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('max');
-  expect(fm.seedVersion).toBe('6');
+  expect(fm.seedVersion).toBe('7');
 });
 
 function personaBody() {
@@ -80,8 +80,19 @@ test('plain language and close rules sit above the intake cut', () => {
   const { AGENT_BODY_CHAR_CAP } = require('../../claude/agentModelResolve.cjs');
   const head = personaBody().slice(0, AGENT_BODY_CHAR_CAP);
   expect(head).toContain('</audience_and_language>');
+  expect(head).toContain('</length_and_pacing>');
   expect(head).toContain('</call_to_action>');
   expect(head).toContain('truncation notice');
+});
+
+test('persona is length-aware, slower, and has the whiteboard palette', () => {
+  const body = personaBody();
+  for (const needle of ['Video length: 60', 'content="D"', 'duration: D', 'np.zeros(D * sr', 'at least 5 s', 'at least 1.0 s', 'at least 6 marker-drawn elements', '#D62828', '#E4471C', '#F77F00']) {
+    expect(body).toContain(needle);
+  }
+  for (const gone of ['content="30"', 'duration: 30', 'np.zeros(30 * sr', 'a 30-second animated demo']) {
+    expect(body).not.toContain(gone);
+  }
 });
 
 test('script_first no longer closes on a command', () => {

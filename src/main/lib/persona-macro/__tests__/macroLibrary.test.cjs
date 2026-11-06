@@ -663,3 +663,30 @@ test('removeMacroFromProject and saveMacro run concurrently without loss', async
   expect(r.ok).toBe(true);
   expect(await lib.listMacros(opts)).toEqual([created]);
 });
+
+test('listMacros returns job on built-in entries, live, even for an edited stored copy', async () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const stored = {
+    id: demo.id, label: 'Edited', agentName: demo.agentName, tag: demo.tag, prompt: 'my own prompt',
+    projects: ['*'], surface: 'project-home', builtin: true, builtinVersion: 1,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-02-02T00:00:00.000Z',
+    job: { estimateMinutes: 1, artifactPaths: ['x'] },
+  };
+  const user = { ...stored, id: 'user-one', builtin: undefined, job: { estimateMinutes: 1, artifactPaths: ['x'] } };
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [stored, user] }));
+  const list = await lib.listMacros(opts);
+  expect(list.find((m) => m.id === demo.id).job).toEqual(demo.job);
+  expect('job' in list.find((m) => m.id === 'user-one')).toBe(false);
+  // never persisted
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  expect(onDisk.macros.every((m) => !('job' in m) || m.job.estimateMinutes === 1)).toBe(true);
+});
+
+test('saveMacro never writes a job key', async () => {
+  const created = await lib.saveMacro({ ...base(), job: { estimateMinutes: 5, artifactPaths: ['a'] } }, opts);
+  expect('job' in created).toBe(false);
+  await lib.saveMacro({ ...base(), id: created.id, job: { estimateMinutes: 5, artifactPaths: ['a'] } }, opts);
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  expect(onDisk.macros.some((m) => 'job' in m)).toBe(false);
+});

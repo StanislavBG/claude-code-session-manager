@@ -93,3 +93,23 @@ test('narration recipe normalizes loudness', () => {
   expect(body).toContain('loudnorm=I=-14');
   expect(body).toContain("'-af', LOUDNESS");
 });
+
+test('built-in macros declare a frozen background job', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const home = BUILTIN_MACROS.find((m) => m.id === 'builtin-project-home');
+  expect(demo.job).toEqual({
+    estimateMinutes: 60,
+    artifactPaths: ['session-manager-operations/project-pages/demo-video/index.html'],
+  });
+  expect(home.job).toEqual({
+    estimateMinutes: 20,
+    artifactPaths: ['session-manager-operations/project-pages/home.html'],
+  });
+  for (const m of [demo, home]) {
+    expect(Object.isFrozen(m.job)).toBe(true);
+    expect(Object.isFrozen(m.job.artifactPaths)).toBe(true);
+  }
+  expect(home.builtinVersion).toBe(1);
+  expect(demo.builtinVersion).toBe(4);
+  expect(demo.priorPrompts).toHaveLength(3);
+});

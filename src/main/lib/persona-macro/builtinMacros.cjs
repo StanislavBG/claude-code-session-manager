@@ -25,6 +25,10 @@ const BUILTIN_MACROS = Object.freeze([
     surface: 'project-home',
     projects: ['*'],
     builtinVersion: 1,
+    job: Object.freeze({
+      estimateMinutes: 20,
+      artifactPaths: Object.freeze(['session-manager-operations/project-pages/home.html']),
+    }),
     priorPrompts: Object.freeze([]),
     prompt:
       "Generate this project's Project Home page: one self-contained HTML overview (what it is, who it is for, key features, structure, how to run it, key commands), grounded only in what you read in the repository. Save it with a single project_home_write call.",
@@ -37,6 +41,10 @@ const BUILTIN_MACROS = Object.freeze([
     surface: 'project-home',
     projects: ['*'],
     builtinVersion: 4,
+    job: Object.freeze({
+      estimateMinutes: 60,
+      artifactPaths: Object.freeze(['session-manager-operations/project-pages/demo-video/index.html']),
+    }),
     priorPrompts: Object.freeze([
       'Generate a 30-second demo video for this project as one self-contained HTML/JavaScript animation that presents its main goals and key features, grounded only in what you read in the repository. Save it with a single project_demo_video_write call.',
       'Generate a 30-second demo video for this project as one self-contained HTML/JavaScript animation that presents its main goals and key features, grounded only in what you read in the repository, with a matching on-device narration track per the audio policy in the persona. Save it with a single project_demo_video_write call.',

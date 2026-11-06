@@ -481,8 +481,24 @@ async function loadStore(filePath, opts) {
 
 // --- public API -------------------------------------------------------------
 
+/**
+ * Decorate built-in entries with their live `job` declaration from BUILTIN_MACROS.
+ * Never persisted: `job` is read at list time so a stored copy cannot freeze it.
+ */
+function withBuiltinJobs(macros) {
+  return macros.map((m) => {
+    const { job: _stale, ...rest } = m;
+    const b = BUILTIN_MACROS.find((x) => x.id === m.id);
+    return b && b.job ? { ...rest, job: b.job } : rest;
+  });
+}
+
 /** @returns {Promise<Macro[]>} */
 async function listMacros(opts = {}) {
+  return withBuiltinJobs(await listMacrosRaw(opts));
+}
+
+async function listMacrosRaw(opts) {
   const filePath = resolvePath(opts);
   const first = await readStore(filePath);
   if (first.state === 'ok') {

@@ -132,6 +132,19 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
     if (!settle.settled) return { action: 'none', reason: 'not-settled' };
     if (!settle.hasContent) return { action: 'none', reason: 'no-content' };
 
+    // Macro builds (rows carrying macroId): the artifact check and gate are the
+    // done-check; no sweep validator, no digest chat turn.
+    const macroSlugs = new Set();
+    let epicRows = 0;
+    for (const r of [...jobs, ...history]) {
+      if (!_rowInEpic(r, epicId)) continue;
+      epicRows++;
+      if (typeof r.macroId === 'string' && r.macroId.trim()) macroSlugs.add(bareSlug(r.slug));
+    }
+    if (epicRows > 0 && [...jobs, ...history].every((r) => !_rowInEpic(r, epicId) || (typeof r.macroId === 'string' && r.macroId.trim()))) {
+      return { action: 'none', reason: 'macro-build' };
+    }
+
     let newestDigest = null;
     for (const e of events) if (e && e.outcome === 'digest') newestDigest = e;
     if (newestDigest && newestDigest.digestKey === settle.digestKey) {
@@ -146,7 +159,10 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
         if (!_rowInEpic(r, epicId) || !isSweepValidatorSlug(r.slug) || !Array.isArray(r.dependsOn)) continue;
         for (const d of r.dependsOn) swept.add(bareSlug(d));
       }
-      const candidates = settle.uncovered.filter((u) => !swept.has(u.bareSlug || bareSlug(u.slug)));
+      const candidates = settle.uncovered.filter((u) => {
+        const b = u.bareSlug || bareSlug(u.slug);
+        return !swept.has(b) && !macroSlugs.has(b);
+      });
       if (candidates.length) {
         const byBare = new Map();
         for (const h of history) {

@@ -458,3 +458,42 @@ test('runEpicSettle: a parked planner validator gets one sized sweep, then a dig
   expect(d2.createPrd).not.toHaveBeenCalled();
   expect(d2.sendPrompt).toHaveBeenCalledTimes(1);
 });
+
+
+// ─── macro builds stay quiet ────────────────────────────────────────────────
+
+test('runEpicSettle: a macro row (job or history macroId) is never a sweep candidate', async () => {
+  const deps = settleDeps([checkin('900-m', 1), checkin('901-o', 2)], {
+    loadJobs: vi.fn(async () => [{ slug: '900-m', epicId: EPIC, cwd: '/c', status: 'completed', macroId: 'demo-video' }]),
+    loadHistory: vi.fn(async () => [{ slug: '901-o', cwd: '/c', epicId: EPIC, landedCommit: 'abc', finishedAt: at(2) }]),
+  });
+  const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+  expect(res.action).toBe('sweep-queued');
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+  expect(deps.createPrd.mock.calls[0][0].dependsOn).toEqual(['o']);
+  expect(deps.sendPrompt).not.toHaveBeenCalled();
+});
+
+test('runEpicSettle: every Epic row carries a macroId → none/macro-build, no sweep and no digest', async () => {
+  const deps = settleDeps([checkin('910-m', 1), checkin('911-n', 2)], {
+    loadJobs: vi.fn(async () => [{ slug: '910-m', epicId: EPIC, cwd: '/c', status: 'completed', macroId: 'demo-video' }]),
+    loadHistory: vi.fn(async () => [{ slug: '911-n', cwd: '/c', sourcePromptId: EPIC, finishedAt: at(2), macroId: 'demo-video' }]),
+  });
+  const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+  expect(res).toEqual({ action: 'none', reason: 'macro-build' });
+  expect(deps.createPrd).not.toHaveBeenCalled();
+  expect(deps.sendPrompt).not.toHaveBeenCalled();
+  expect(deps.appendResponseEvent).not.toHaveBeenCalled();
+});
+
+test('runEpicSettle: one macro row + one ordinary uncovered row still sweeps the ordinary row only', async () => {
+  const deps = settleDeps([checkin('920-m', 1), checkin('921-o', 2)], {
+    loadHistory: vi.fn(async () => [
+      { slug: '920-m', cwd: '/c', epicId: EPIC, finishedAt: at(1), macroId: 'x' },
+      { slug: '921-o', cwd: '/c', epicId: EPIC, finishedAt: at(2) },
+    ]),
+  });
+  const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+  expect(res.action).toBe('sweep-queued');
+  expect(deps.createPrd.mock.calls[0][0].dependsOn).toEqual(['o']);
+});

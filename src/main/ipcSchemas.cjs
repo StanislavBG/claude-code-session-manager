@@ -807,7 +807,7 @@ const agentsGetPersonaBody = z.object({
 // ──────────────────────────────────────────── Effective model info (PRD: what-will-this-run-as)
 const agentsResolveModelInfo = z.object({
   cwd: z.string().min(1).max(4096),
-  agentType: z.string().min(1).max(200),
+  agentType: z.string().min(1).max(200).optional(),
 }).strict();
 
 // ──────────────────────────────────────────── Live model/effort catalog (modelCatalog.cjs)

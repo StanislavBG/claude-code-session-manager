@@ -104,13 +104,13 @@ export function useEffectiveModelInfo(cwd: string | null, agentType: string | nu
   const [mainHalf, setMainHalf] = useState<MainModelHalf | null>(null)
 
   useEffect(() => {
-    if (!cwd || !agentType) {
+    if (!cwd) {
       setMainHalf(null)
       return
     }
     let cancelled = false
     setMainHalf(null)
-    window.api.agents.resolveModelInfo({ cwd, agentType }).then(
+    window.api.agents.resolveModelInfo(agentType ? { cwd, agentType } : { cwd }).then(
       (result) => { if (!cancelled) setMainHalf(result) },
       () => { if (!cancelled) setMainHalf(null) }
     )
@@ -119,6 +119,6 @@ export function useEffectiveModelInfo(cwd: string | null, agentType: string | nu
     }
   }, [cwd, agentType])
 
-  if (!cwd || !agentType || !mainHalf) return null
+  if (!cwd || !mainHalf) return null
   return composeEffectiveModelInfo(mainHalf, node, overrides)
 }

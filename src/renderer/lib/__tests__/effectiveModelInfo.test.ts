@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * effectiveModelInfo.test.ts — the renderer half of "what will this Epic
  * actually run as": composeEffectiveModelInfo layers the effort-level scope
@@ -10,9 +11,17 @@
  * Run: timeout 120 npx vitest run src/renderer/lib/__tests__/effectiveModelInfo.test.ts
  */
 
-import { describe, test, expect } from 'vitest'
-import { composeEffectiveModelInfo, formatEffortSegment, type MainModelHalf } from '../effectiveModelInfo'
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
+import { describe, test, expect, vi } from 'vitest'
+import { composeEffectiveModelInfo, formatEffortSegment, useEffectiveModelInfo, type EffectiveModelInfo, type MainModelHalf } from '../effectiveModelInfo'
 import { mergeScopes, type ScopeInput } from '../mergeScopes'
+
+vi.mock('../useEffectiveSettings', async (orig) => ({
+  ...(await orig<object>()),
+  useEffectiveSettingsFor: () => mergeScopes([]),
+}))
 
 function node(inputs: ScopeInput[]) {
   return mergeScopes(inputs)
@@ -119,5 +128,37 @@ describe('persona effort', () => {
     expect(formatEffortSegment('high', 'persona-overlay')).toBe('effort high (project persona)')
     expect(formatEffortSegment('high', 'user')).toBe('effort high (user settings.json)')
     expect(formatEffortSegment(null, null)).toBe('effort — (model default)')
+  })
+})
+
+describe('useEffectiveModelInfo with no agent', () => {
+  function run(resolve: () => Promise<unknown>, agent: string | null) {
+    const resolveModelInfo = vi.fn((_p: { cwd: string; agentType?: string }) => resolve())
+    ;(window as unknown as { api: unknown }).api = { agents: { resolveModelInfo } }
+    const seen: Array<EffectiveModelInfo | null> = []
+    function Probe() {
+      seen.push(useEffectiveModelInfo('/proj', agent))
+      return null
+    }
+    const root = createRoot(document.createElement('div'))
+    return { resolveModelInfo, seen, root, Probe }
+  }
+
+  test('a null agent calls the IPC without agentType and returns its result', async () => {
+    const half = { ...BASE_MAIN_HALF, agentType: null, modelAlias: 'opus', modelSource: 'settings' }
+    const { resolveModelInfo, seen, root, Probe } = run(() => Promise.resolve(half), null)
+    await act(async () => { root.render(createElement(Probe)) })
+    expect(resolveModelInfo).toHaveBeenCalledWith({ cwd: '/proj' })
+    expect(resolveModelInfo.mock.calls[0][0]).not.toHaveProperty('agentType')
+    expect(seen[0]).toBeNull()
+    expect(seen[seen.length - 1]).toMatchObject({ modelAlias: 'opus', modelSource: 'settings' })
+    act(() => root.unmount())
+  })
+
+  test('IPC failure still yields null', async () => {
+    const { seen, root, Probe } = run(() => Promise.reject(new Error('x')), null)
+    await act(async () => { root.render(createElement(Probe)) })
+    expect(seen.every((v) => v === null)).toBe(true)
+    act(() => root.unmount())
   })
 })

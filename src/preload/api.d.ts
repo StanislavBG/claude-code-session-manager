@@ -1921,7 +1921,7 @@ export interface SessionManagerAPI {
      *  with the renderer's `useEffectiveSettings.ts` scope-chain reader for
      *  the effortLevel/effortSource half — this call only covers the parts
      *  that need main-process filesystem access. */
-    resolveModelInfo: (payload: { cwd: string; agentType: string }) => Promise<{
+    resolveModelInfo: (payload: { cwd: string; agentType?: string }) => Promise<{
       agentType: string;
       modelAlias: string | null;
       modelSource: 'persona' | 'persona-overlay' | 'inherit' | 'fallback';

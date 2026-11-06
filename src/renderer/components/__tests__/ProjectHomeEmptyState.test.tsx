@@ -11,7 +11,15 @@ let root: Root | null = null
 beforeEach(() => {
   useSessions.setState({ tabs: [], activeTabId: null })
   ;(globalThis as any).window.api = {
-    schedule: { listPrds: vi.fn().mockResolvedValue([]) },
+    schedule: {
+      listPrds: vi.fn().mockResolvedValue([]),
+      onState: vi.fn().mockReturnValue(() => {}),
+    },
+    macros: {
+      list: vi.fn().mockResolvedValue([]),
+      onChanged: vi.fn().mockReturnValue(() => {}),
+      jobStatus: vi.fn().mockResolvedValue([]),
+    },
     projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
     agents: { listPersonas: vi.fn().mockResolvedValue([]) },
   }

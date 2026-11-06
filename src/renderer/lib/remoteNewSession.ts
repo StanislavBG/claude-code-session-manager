@@ -17,7 +17,23 @@ export function registerRemoteNewSession(): () => void {
       } catch {
         // persona lookup is best-effort; a thinner opening prompt beats no session
       }
-      await launchSession({ cwd, agentName, tag, title, goal: prompt, agentDescription, source: 'WebRemote ' + agentName, ...(macroId ? { macroId } : {}) })
+      let isJob = false
+      if (macroId) {
+        try {
+          isJob = !!(await window.api.macros.list()).find((m) => m.id === macroId)?.job
+        } catch {
+          // macro lookup is best-effort; fall back to the chat path
+        }
+      }
+      const marker = '\n\nAdditional instructions: '
+      const at = prompt.indexOf(marker)
+      const extra = isJob && at >= 0 ? prompt.slice(at + marker.length) : ''
+      await launchSession({
+        cwd, agentName, tag, title, goal: prompt, agentDescription, source: 'WebRemote ' + agentName,
+        ...(macroId ? { macroId } : {}),
+        ...(isJob ? { run: 'job' as const } : {}),
+        ...(extra ? { extraInstructions: extra } : {}),
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       toast.error(`Phone session start failed: ${msg}`)

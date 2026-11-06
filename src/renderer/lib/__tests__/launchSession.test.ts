@@ -33,9 +33,10 @@ const input = {
 }
 
 const getPersonaBody = vi.fn()
+const dispatchJob = vi.fn()
 
 beforeEach(() => {
-  ;(globalThis as unknown as { window: unknown }).window = { api: { agents: { getPersonaBody } } }
+  ;(globalThis as unknown as { window: unknown }).window = { api: { agents: { getPersonaBody }, macros: { dispatchJob } } }
   getPersonaBody.mockResolvedValue(null)
   calls.length = 0
   vi.clearAllMocks()
@@ -118,6 +119,21 @@ describe('launchSession', () => {
     createPromptSession.mockRejectedValueOnce(new Error('boom'))
     await expect(launchSession(input)).rejects.toThrow('boom')
     expect(approveProposed).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it("run 'job': mints + approves, dispatches the job, never sends a chat turn", async () => {
+    dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e1' })
+    const out = await launchSession({ ...input, macroId: 'm9', run: 'job', extraInstructions: 'x' })
+    expect(calls).toEqual(['compose', 'create', 'approve'])
+    expect(dispatchJob).toHaveBeenCalledWith({ cwd: '/p', macroId: 'm9', epicId: 'e1', extraInstructions: 'x' })
+    expect(send).not.toHaveBeenCalled()
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+  })
+
+  it("run 'job': an { ok: false } result throws its error text", async () => {
+    dispatchJob.mockResolvedValue({ ok: false, error: 'already building' })
+    await expect(launchSession({ ...input, macroId: 'm9', run: 'job' })).rejects.toThrow('already building')
     expect(send).not.toHaveBeenCalled()
   })
 })

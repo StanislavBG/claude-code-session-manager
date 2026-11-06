@@ -11,6 +11,11 @@
  * prompt, CLAUDE.md, `--append-system-prompt` and `--disallowedTools` keep
  * working.
  *
+ * Scoping is focus, not containment: the scope decides which tools a job is
+ * offered. Every headless job runs as the owner's OS user with
+ * --dangerously-skip-permissions, so a job with Bash can still start an MCP
+ * server or call the admin API itself.
+ *
  * Pure: no fs, and no require of scheduler.cjs (cycle) — the caller passes its
  * HEADLESS_DISALLOWED_TOOLS list in.
  */
@@ -81,7 +86,25 @@ function personaToolScopeArgs(scope, { mcpServers } = {}) {
   return args;
 }
 
+const JOB_MCP_TOOLS_ENV = 'SM_SCHEDULER_JOB_MCP_TOOLS';
+
+/**
+ * Env fragment a scoped job carries so an out-of-process MCP server can tell
+ * which MCP tools the scope admits. scripts/scheduler-mcp-server.cjs reads it
+ * to list and serve only in-scope tools. The value is always a JSON array
+ * string; '[]' means no MCP tool.
+ * @param {{ tools: string[] }|null|undefined} scope
+ * @returns {Record<string, string>} {} when unscoped
+ */
+function personaToolScopeEnv(scope) {
+  if (!scope) return {};
+  const mcp = scope.tools.map(String).filter((t) => t.startsWith('mcp__'));
+  return { [JOB_MCP_TOOLS_ENV]: JSON.stringify(mcp) };
+}
+
 module.exports = {
+  JOB_MCP_TOOLS_ENV,
+  personaToolScopeEnv,
   HEADLESS_TOOL_FLOOR,
   HEADLESS_SCOPE_AGENT_NAME,
   buildPersonaToolScope,

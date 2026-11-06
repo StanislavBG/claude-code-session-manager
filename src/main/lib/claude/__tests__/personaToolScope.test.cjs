@@ -8,7 +8,32 @@ const {
   HEADLESS_SCOPE_AGENT_NAME,
   buildPersonaToolScope,
   personaToolScopeArgs,
+  personaToolScopeEnv,
+  JOB_MCP_TOOLS_ENV,
 } = require('../personaToolScope.cjs');
+
+describe('personaToolScopeEnv', () => {
+  it('names the env var', () => {
+    assert.equal(JOB_MCP_TOOLS_ENV, 'SM_SCHEDULER_JOB_MCP_TOOLS');
+  });
+
+  it('returns {} for an unscoped job', () => {
+    assert.deepEqual(personaToolScopeEnv(null), {});
+  });
+
+  it("returns '[]' when the scope names no MCP tool", () => {
+    assert.deepEqual(personaToolScopeEnv({ tools: ['Read', 'Bash', 'Agent'] }), {
+      SM_SCHEDULER_JOB_MCP_TOOLS: '[]',
+    });
+  });
+
+  it('returns every mcp__ entry in scope order, nothing else', () => {
+    const t = 'mcp__session-manager-scheduler__project_demo_video_write';
+    assert.deepEqual(personaToolScopeEnv({ tools: ['Read', t, 'Agent'] }), {
+      SM_SCHEDULER_JOB_MCP_TOOLS: JSON.stringify([t]),
+    });
+  });
+});
 
 describe('personaToolScope', () => {
   it('exports the frozen floor and agent name', () => {

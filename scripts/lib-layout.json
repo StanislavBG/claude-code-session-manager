@@ -34,6 +34,7 @@
   "depSlugResolve": "prd",
   "dispatchLoop": "scheduler",
   "dodDrainHook": "scheduler",
+  "developLoopSpawn": "epic",
   "effectiveModelInfo": "claude",
   "encodeCwd": "util",
   "epicContextDigest": "epic",

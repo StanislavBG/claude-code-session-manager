@@ -48,6 +48,7 @@ const sessionSlots = require('./lib/scheduler/sessionSlots.cjs');
 const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
@@ -631,6 +632,12 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // effortArgs() yields NO tokens for inherit/absent/dangling.
     const effortFlags = effortArgs(resolveEpicEffort({ cwd, claudeSessionId: sessionId }).effort);
 
+    // Develop-loop-off Epics launch with the dev plugin disabled for this session only.
+    let loopOffArgs = [];
+    try {
+      loopOffArgs = developLoopOffSettingsArgs(agentModelResolve.findEpicByClaudeSessionId(cwd, sessionId));
+    } catch { /* lookup failure = launch as today */ }
+
     // Main is authoritative about --resume vs --session-id AND the spawn cwd, and it decides
     // them TOGETHER (epicSpawnPlan.cjs): a transcript under an encoding the spawn cwd cannot see
     // must never yield a claimed flag. Unreachable / closed Epics are refused before any spawn.
@@ -665,6 +672,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         '--model', model,
         ...effortFlags,
         '--dangerously-skip-permissions',
+        ...loopOffArgs,
         '--output-format', 'stream-json',
         '--verbose',
       ];

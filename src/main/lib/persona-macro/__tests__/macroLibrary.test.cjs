@@ -409,7 +409,26 @@ test('the real demo-video v2 copy with a late updatedAt upgrades to the shipped 
   });
   const listed = await lib.listMacros({ filePath, listPersonas: async () => [], builtins: BUILTIN_MACROS });
   const m = listed.find((x) => x.id === real.id);
-  expect(m.builtinVersion).toBe(4);
+  expect(m.builtinVersion).toBe(real.builtinVersion);
+  expect(m.prompt).toBe(real.prompt);
+});
+
+test('the real demo-video v4 copy with a late updatedAt upgrades to v5', async () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  const real = BUILTIN_MACROS.find((b) => b.id === 'builtin-demo-video');
+  seedStored({
+    id: real.id,
+    label: real.label,
+    agentName: real.agentName,
+    tag: real.tag,
+    prompt: real.priorPrompts[3],
+    builtinVersion: 4,
+    createdAt: '2026-10-03T19:04:10.519Z',
+    updatedAt: '2026-10-04T19:35:19.725Z',
+  });
+  const listed = await lib.listMacros({ filePath, listPersonas: async () => [], builtins: BUILTIN_MACROS });
+  const m = listed.find((x) => x.id === real.id);
+  expect(m.builtinVersion).toBe(5);
   expect(m.prompt).toBe(real.prompt);
 });
 

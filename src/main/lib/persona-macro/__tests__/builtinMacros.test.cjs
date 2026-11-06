@@ -23,9 +23,12 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v4 with the character + styles prompt', () => {
+test('builtin demo-video macro is v5 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(4);
+  expect(macro.builtinVersion).toBe(5);
+  expect(macro.priorPrompts).toHaveLength(4);
+  expect(macro.prompt).toContain('Video length: 60');
+  expect(macro.prompt).not.toContain('30-second');
   expect(macro.prompt).toContain('Generate a character and cute animated JavaScript video');
   for (const style of ['Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography']) {
     expect(macro.prompt).toContain(style);
@@ -110,6 +113,6 @@ test('built-in macros declare a frozen background job', () => {
     expect(Object.isFrozen(m.job.artifactPaths)).toBe(true);
   }
   expect(home.builtinVersion).toBe(1);
-  expect(demo.builtinVersion).toBe(4);
-  expect(demo.priorPrompts).toHaveLength(3);
+  expect(demo.builtinVersion).toBe(5);
+  expect(demo.priorPrompts).toHaveLength(4);
 });

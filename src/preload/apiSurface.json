@@ -1324,6 +1324,20 @@
  },
  {
   "ns": "projectPages",
+  "method": "rename",
+  "channel": "project-pages:rename",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectPages",
+  "method": "delete",
+  "channel": "project-pages:delete",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectPages",
   "method": "onChanged",
   "channel": "project-pages:changed",
   "kind": "on",

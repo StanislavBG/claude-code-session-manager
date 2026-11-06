@@ -30,6 +30,7 @@ const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
 const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
 const { validateCharacterJson, validateCharacterJs, readCharacter, characterDir, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
+const { checkHtmlLimits } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 
 const MAX_HTML_BYTES = 1024 * 1024;
@@ -283,7 +284,14 @@ function registerAdminRoute(adminHttp) {
   adminHttp.registerRoute('POST', '/admin/project-home/videos/write', makeWriteHandler({
     schema: schemas.projectVideoAdminWriteBody,
     bodyLimit: maxVideoBytes(MAX_DEMO_DURATION_S),
-    build: (i) => buildVideo(i, i),
+    build: (i) => {
+      // Cheap kit checks re-run server-side; the alias route is exempt (Burrow sends no report).
+      const failed = (i.meta?.report?.checks ?? []).find((c) => c.ok === false);
+      if (failed) return { error: `report.checks failed: ${failed.id}${failed.detail ? ` (${failed.detail})` : ''}` };
+      const limits = checkHtmlLimits({ html: i.html, lengthS: i.lengthS });
+      if (!limits.ok) return { error: `${limits.id} check failed: ${limits.detail}` };
+      return buildVideo(i, i);
+    },
   }));
 
   // Alias: POST /admin/project-home/write {cwd, html} -> knowledge/overview/

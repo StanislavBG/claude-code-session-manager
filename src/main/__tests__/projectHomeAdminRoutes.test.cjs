@@ -77,7 +77,7 @@ function makeFakeAdminHttp() {
 const GOOD_HTML = '<!DOCTYPE html><html><head><style>body{background:url(data:image/png;base64,AAAA)}</style></head><body><script>1+1</script></body></html>';
 
 const GOOD_DEMO_VIDEO_HTML = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
-  + '<body><canvas id="c"></canvas><script>const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
+  + '<body><canvas id="c"></canvas><script>window.smDemo = { scenes: [] }; const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
 
 test('registers the library routes, the aliases and the character route', () => {
   const adminHttp = makeFakeAdminHttp();
@@ -307,6 +307,31 @@ test('videos/write rejects schema errors, bad ids, duration mismatch and network
   expect(fs.existsSync(path.join(pagesRoot(cwd), 'videos'))).toBe(false);
 });
 
+test('videos/write re-runs kit checks: htmlLimits and failed report.checks refuse with 400 naming the check', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const route = '/admin/project-home/videos/write';
+  const noScenes = GOOD_DEMO_VIDEO_HTML.replace('window.smDemo = { scenes: [] };', '');
+  const r1 = await adminHttp.call('POST', route, { body: videoBody(cwd, { html: noScenes }) });
+  expect(r1.status).toBe(400);
+  expect(JSON.stringify(r1.body)).toContain('htmlLimits');
+  const bad = videoMeta({ report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [{ id: 'captions', ok: true, detail: '' }, { id: 'blankFrames', ok: false, detail: 'blank' }] } });
+  const r2 = await adminHttp.call('POST', route, { body: videoBody(cwd, { meta: bad }) });
+  expect(r2.status).toBe(400);
+  expect(JSON.stringify(r2.body)).toContain('blankFrames');
+  expect(fs.existsSync(path.join(pagesRoot(cwd), 'videos'))).toBe(false);
+});
+
+test('demo-video alias is exempt from the kit checks (no smDemo, no report)', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const html = GOOD_DEMO_VIDEO_HTML.replace('window.smDemo = { scenes: [] };', '');
+  const r = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html } });
+  expect(r.status).toBe(200);
+});
+
 test('video size cap scales with length: 4 MiB at 60 s, 2 MiB at 30 s', async () => {
   expect(maxVideoBytes(30)).toBe(2 * 1024 * 1024);
   expect(maxVideoBytes(60)).toBe(4 * 1024 * 1024);
@@ -314,16 +339,16 @@ test('video size cap scales with length: 4 MiB at 60 s, 2 MiB at 30 s', async ()
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
   const route = '/admin/project-home/videos/write';
-  const pad = (n, len) => durHtml(n).replace('x</body>', `<!--${'a'.repeat(len)}--></body>`);
+  const pad = (n, len) => durHtml(n).replace('x</body>', `<script>window.smDemo={scenes:[]}</script><!--${'a'.repeat(len)}--></body>`);
   const big = pad(60, 3 * 1024 * 1024);
   const ok = await adminHttp.call('POST', route, { body: videoBody(cwd, { lengthS: 60, html: big }) });
   expect(ok.status).toBe(200);
   const tooBig30 = await adminHttp.call('POST', route, { body: videoBody(cwd, { videoId: 'v30', lengthS: 30, html: pad(30, 3 * 1024 * 1024) }) });
   expect(tooBig30.status).toBe(400);
-  expect(tooBig30.body.error).toContain('limit');
+  expect(tooBig30.body.error).toMatch(/limit|cap/);
   const tooBig60 = await adminHttp.call('POST', route, { body: videoBody(cwd, { videoId: 'v60', lengthS: 60, html: pad(60, 4 * 1024 * 1024) }) });
   expect(tooBig60.status).toBe(400);
-  expect(tooBig60.body.error).toContain('limit');
+  expect(tooBig60.body.error).toMatch(/limit|cap/);
 });
 
 test('injectCsp always puts the CSP meta first after a fresh doctype, replacing any existing CSP meta and leading doctype', () => {

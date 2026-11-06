@@ -61,13 +61,23 @@ scoping scheme.
   (whether-to-build is unsettled), a PRD's never is (`PRD_WORK_TYPES` = `WORK_TYPES` minus `discussion`).
   `prdCreate.cjs` passes `tag` straight to frontmatter with no lookup against the parent Epic.
 - **The opening prompt is AIM — Actor, Input, Mission, in that order** — composed only by
-  `lib/epicIntake.ts`'s `composeEpicIntake` into `openingPrompt` (never `goalText`). Actor is the persona line
-  (`agentName`/`agentDescription`); Input is `lib/groundingBoard.ts`'s `summarizeGroundingBoard` over the real
-  System/Project/Local inventory (computed fresh by `computeGroundingBoard` at submit if the board wasn't
-  opened — never a second fetch path); Mission is the tag's `initialPromptTemplate` followed by the human's
-  goal. Each input is independently optional and omits its line when absent. It is framing only: Input stays
-  real-data-derived and display-only, and never becomes a second source of truth for what the `claude` CLI
-  loads.
+  `lib/epicIntake.ts`'s `composeEpicIntake` into `openingPrompt` (never `goalText`). Three slots, parts in
+  emission order: **Actor** = persona (identity line + body; the frontmatter description only when there is no
+  body); **Input** = grounding line (`lib/groundingBoard.ts`'s `summarizeGroundingBoard` over the real
+  System/Project/Local inventory, computed fresh by `computeGroundingBoard` at submit if the board wasn't
+  opened), Context Injections, attached references; **Mission** = the tag's job-type framing
+  (`initialPromptTemplate`), then the human's goal (one slot, not separate blocks). Every part is independently
+  optional and omitted when absent; an Epic with neither an Actor nor a Mission gets no grounding line.
+  Framing only: Input stays real-data-derived and never becomes a second source of truth for what the `claude`
+  CLI loads.
+  - **Persistence:** sections store as `kind` = slot plus part (`EpicIntakeSection` in
+    `src/renderer/lib/epicIntake.ts`). Epics stored with the 7 pre-AIM kinds stay valid and render through
+    `toAimSections`. **Never narrow the stored kind enum** — `dropInvalidSessions` drops a whole Epic that fails
+    the schema.
+  - **Where the Actor comes from:** `~/.claude/agents/<name>.md` merged with the project overlay by
+    `personaMerge.cjs`'s `resolveMergedPersona` — the frontmatter description and the markdown body. The body is
+    pasted into the opening prompt because Claude Code loads an agent file's body only when it runs as a
+    subagent.
 - **The grounding board is an inspector, not a control.** `NewEpicCard.tsx`'s "advanced" flip shows what the
   session will load; it has no toggle-what-loads controls because session-manager cannot tell the CLI to skip a
   file it would otherwise discover.

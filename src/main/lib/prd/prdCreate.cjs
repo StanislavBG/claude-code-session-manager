@@ -313,6 +313,21 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     if (fallback) input = { ...input, sourcePromptId: fallback };
   }
 
+  // Develop-loop-off Epics never receive PRDs (so no check-ins, digests or
+  // validation sweeps either). Safety refusal — deliberately no bypass.
+  if (input.sourcePromptId) {
+    const { sessions } = readActiveIndex(cwd);
+    const row = Object.prototype.hasOwnProperty.call(sessions, input.sourcePromptId)
+      ? sessions[input.sourcePromptId] : null;
+    if (row && row.developLoop === false) {
+      return {
+        ok: false, applied: false, status: 409,
+        error: `Epic ${input.sourcePromptId} was started with the develop loop off, so it cannot queue PRDs. `
+          + 'Start a new session with the develop loop on to queue this work.',
+      };
+    }
+  }
+
   // Wave-disposition decision point (scheduler wave-disposition PRD): only
   // matters for a PRD that would become a ROOT of its own wave — one the
   // caller didn't already give an explicit dependsOn (that already fixes

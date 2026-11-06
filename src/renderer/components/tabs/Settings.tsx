@@ -126,16 +126,20 @@ function SettingsComponent() {
     const targetScope = intoScope ?? scope
     const target = scopePaths[targetScope]
     if (!target) return
-    setSaveError(null)
     const draft = files[target]?.draftRaw ?? ''
     let current: unknown = {}
     if (draft.trim()) {
       try {
         current = JSON.parse(draft)
-      } catch {
-        current = {}
+      } catch (e) {
+        // Refuse: writing back only this key would replace the whole file on Save.
+        setSaveError(
+          `${target} is not valid JSON (${e instanceof Error ? e.message : String(e)}) — fix it in Raw before using Guided/Tree edits.`
+        )
+        return
       }
     }
+    setSaveError(null)
     const next = setAtPath(current, path, value)
     setDraft(target, JSON.stringify(next, null, 2) + '\n')
   }

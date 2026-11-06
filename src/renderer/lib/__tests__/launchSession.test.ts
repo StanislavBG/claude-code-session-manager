@@ -14,7 +14,7 @@ vi.mock('../../state/chat', () => ({
 vi.mock('../epicIntake', () => ({
   composeEpicIntake: vi.fn((f: unknown) => {
     calls.push('compose')
-    return { goalText: 'GOAL', openingPrompt: 'OPEN', sections: [{ kind: 'goal', label: 'g', text: 't' }], f }
+    return { goalText: 'GOAL', openingPrompt: 'OPEN', sections: [{ kind: 'mission', part: 'goal', label: 'g', text: 't' }], f }
   }),
 }))
 
@@ -57,7 +57,7 @@ describe('launchSession', () => {
       contextInjections: { 'general-behavior': true, 'delegate-implementation': true },
     })
     expect(createPromptSession).toHaveBeenCalledWith(
-      '/p', 'GOAL', 'feature', 'src', 'dev-lead', 'OPEN', [{ kind: 'goal', label: 'g', text: 't' }],
+      '/p', 'GOAL', 'feature', 'src', 'dev-lead', 'OPEN', [{ kind: 'mission', part: 'goal', label: 'g', text: 't' }],
     )
     expect(approveProposed).toHaveBeenCalledWith('e1', 'src')
     expect(send).toHaveBeenCalledWith({ tabId: 'e1', sessionId: 'c1', cwd: '/p', prompt: 'OPEN' })
@@ -72,7 +72,7 @@ describe('launchSession', () => {
     expect(createPromptSession.mock.calls[0]).toHaveLength(7)
   })
 
-  it('includes persona-body section when persona readable', async () => {
+  it('passes the persona body to composeEpicIntake when persona readable', async () => {
     getPersonaBody.mockResolvedValueOnce({ path: '/a/dev-lead.md', text: 'BODY' })
     await launchSession(input)
     expect(getPersonaBody).toHaveBeenCalledWith({ cwd: '/p', name: 'dev-lead' })

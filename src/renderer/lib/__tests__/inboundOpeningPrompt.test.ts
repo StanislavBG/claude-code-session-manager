@@ -31,17 +31,20 @@ describe('composeInboundOpening', () => {
     vi.stubGlobal('window', { api: { agents: { listPersonas, getPersonaBody } } })
   })
 
-  it('emits actor, persona-body, injection, input, mission, goal, reference in order', async () => {
+  it('emits the Actor, Input then Mission slots in order, with their parts', async () => {
     const out = await composeInboundOpening(epic())
     expect(out).not.toBeNull()
     const kinds = out!.sections.map((s) => s.kind)
-    const order = ['actor', 'persona-body', 'injection', 'input', 'mission', 'goal', 'reference']
+    const order = ['actor', 'input', 'mission']
     const idx = kinds.map((k) => order.indexOf(k))
     expect(idx).toEqual([...idx].sort((a, b) => a - b))
     expect(kinds[0]).toBe('actor')
-    expect(kinds).toContain('persona-body')
+    expect(kinds).toContain('input')
     expect(kinds).toContain('mission')
-    expect(kinds[kinds.length - 1]).toBe('reference')
+    const parts = out!.sections.map((s) => s.part)
+    expect(parts).toContain('persona')
+    expect(parts).toContain('job-type')
+    expect(parts[parts.length - 1]).toBe('goal')
     expect(out!.openingPrompt).toContain('PERSONA RULES')
     expect(out!.openingPrompt).toContain('Goal: t\n\ndetails')
     expect(out!.openingPrompt).not.toContain('Goal: Goal:')

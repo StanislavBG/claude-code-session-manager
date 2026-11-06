@@ -26,13 +26,13 @@ function mount(el: React.ReactElement) {
 }
 
 const FULL_SECTIONS: EpicIntakeSection[] = [
-  { kind: 'actor', label: 'Actor', text: 'You are acting as the "debugger" agent: Diagnoses failures.', source: 'debugger' },
-  { kind: 'injection', label: 'General behaviour', text: 'Work concisely and verify before claiming done.', source: 'general-behavior' },
-  { kind: 'input', label: 'Input', text: 'Grounding: System (CLAUDE.md) · Project (skills)' },
-  { kind: 'mission', label: 'Mission', text: 'You are diagnosing a reported bug.', source: 'bug' },
-  { kind: 'goal', label: 'Goal', text: 'Goal: Fix the flaky test\n\nThe CI run fails intermittently.' },
-  { kind: 'reference', label: 'Reference', text: 'Reference: /tmp/log.txt', source: '/tmp/log.txt' },
-  { kind: 'reference', label: 'Reference', text: 'Reference: /tmp/trace.txt', source: '/tmp/trace.txt' },
+  { kind: 'actor', part: 'persona', label: 'Actor', text: 'You are acting as the "debugger" agent: Diagnoses failures.', source: 'debugger' },
+  { kind: 'input', part: 'grounding', label: 'Grounding', text: 'Grounding: System (CLAUDE.md) · Project (skills)' },
+  { kind: 'input', part: 'injection', label: 'General behaviour', text: 'Work concisely and verify before claiming done.', source: 'general-behavior' },
+  { kind: 'mission', part: 'job-type', label: 'Job type', text: 'You are diagnosing a reported bug.', source: 'bug' },
+  { kind: 'mission', part: 'goal', label: 'Goal', text: 'Goal: Fix the flaky test\n\nThe CI run fails intermittently.' },
+  { kind: 'input', part: 'reference', label: 'Reference', text: 'Reference: /tmp/log.txt', source: '/tmp/log.txt' },
+  { kind: 'input', part: 'reference', label: 'Reference', text: 'Reference: /tmp/trace.txt', source: '/tmp/trace.txt' },
 ]
 
 // The wire-identical string a real composeEpicIntake would send — deliberately

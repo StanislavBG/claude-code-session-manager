@@ -10,7 +10,9 @@
  *                       what they just entered.
  *
  * The title is the session's GOAL; the sub-header (goal field) is the FIRST
- * INSTRUCTION. References are appended as trailing lines to both.
+ * INSTRUCTION. References are appended as trailing lines to `goalText`; in the
+ * opening prompt they sit in the Input slot. The opening prompt is AIM: Actor,
+ * Input, Mission.
  */
 
 import { agentTagDef } from './agentTagDefs'
@@ -46,9 +48,9 @@ export interface EpicIntakeFields {
    * only loads when the file runs as a subagent, never for an Epic's main
    * loop. Without this, only `agentDescription`'s one-liner ever reaches the
    * session, so a persona's central rules (e.g. "never implement inline,
-   * queue via /develop") are written down and delivered nowhere. Emitted as
-   * its own `persona-body` section right after `actor`, with its YAML
-   * frontmatter block stripped and whitespace trimmed, capped at 6000
+   * queue via /develop") are written down and delivered nowhere. Becomes the
+   * Actor entry's text (after a one-line 'acting as' intro; the frontmatter
+   * description is not restated), with its YAML frontmatter block stripped and whitespace trimmed, capped at 6000
    * characters with an explicit truncation notice. Omitted entirely when the
    * stripped/trimmed body is empty.
    */
@@ -61,9 +63,8 @@ export interface EpicIntakeFields {
   /**
    * AIM's "Input" axis, stated explicitly: one line naming what's grounding
    * this session (System/Project/Local CLAUDE.md, skills, mcp servers, etc.),
-   * from `groundingBoard.ts`'s `summarizeGroundingBoard`. Placed after the
-   * Actor line and before the Mission template — who, then what they're
-   * standing on, then what they're here to do. Omitted entirely when absent
+   * from `groundingBoard.ts`'s `summarizeGroundingBoard`. First entry of
+   * the Input slot, ahead of Context Injections and references. Omitted entirely when absent
    * (e.g. callers that never computed a grounding board, e.g. resumed
    * Epics). Also omitted when there is neither an Actor (persona) nor a
    * Mission tag: no AIM framing means no Input line.
@@ -72,9 +73,8 @@ export interface EpicIntakeFields {
   /**
    * Context Injections (contextInjections.ts) — Session-Manager-authored
    * text, independent of Actor/Input/Mission, each an explicit on/off toggle
-   * in the New Epic card's advanced grounding board. `true` includes that
-   * key's `text` right after the Actor line (extends "who's acting" with
-   * "how they generally behave" before Input/Mission). Defaults to omitted
+   * in the New Epic card's advanced grounding board. `true` adds that
+   * key's `text` to the Input slot, after the grounding line. Defaults to omitted
    * (no injection) for callers that don't pass it — e.g. hot-key
    * macro launches (SessionActionsBar).
    */
@@ -149,13 +149,11 @@ export function toAimSections(sections: readonly EpicIntakeSection[] | null | un
 export interface EpicIntake {
   goalText: string
   openingPrompt: string
-  /** Same kinds composeEpicIntake already concatenates, emitted in that same
-   *  order: actor, persona-body, injection(s), input, mission, goal,
-   *  reference(s). Each input is independently optional, so a caller
-   *  supplying none of
-   *  agentName/agentDescription/agentBody/inputSummary/tag/contextInjections
-   *  still gets a valid (shorter) array — never an error. */
-  sections: EpicIntakeSection[]
+  /** AIM slots in order — Actor (persona), Input (grounding, injections,
+   *  references), Mission (job type, goal) — each entry carrying its `part`.
+   *  Every input is independently optional; only the goal entry is always
+   *  present, so the array is never empty. */
+  sections: AimSection[]
 }
 
 /** File names are user/filesystem controlled and can contain newlines — strip
@@ -200,18 +198,18 @@ function buildPersonaBodyText(agentBody: string, agentPath: string | undefined):
 /**
  * Re-joins the emitted sections back into the exact flat string
  * composeEpicIntake produced before sections existed. Every boundary is a
- * blank line ('\n\n') EXCEPT between two consecutive `reference` sections,
+ * blank line ('\n\n') EXCEPT between two consecutive `reference` parts,
  * which join with a single '\n' — reference lines were always one visual
  * block (`withReferences`' `lines.join('\n')`), never separated. This is the
  * only special case; recovering it here (rather than a generic '\n\n' join)
  * is what makes byte-identity with the pre-sections output structural
  * instead of merely tested.
  */
-export function joinSections(sections: EpicIntakeSection[]): string {
+export function joinSections(sections: readonly EpicIntakeSection[]): string {
   return sections.reduce((out, s, i) => {
     if (i === 0) return s.text
     const prev = sections[i - 1]
-    const sep = s.kind === 'reference' && prev.kind === 'reference' ? '\n' : '\n\n'
+    const sep = s.part === 'reference' && prev.part === 'reference' ? '\n' : '\n\n'
     return out + sep + s.text
   }, '')
 }
@@ -241,55 +239,62 @@ export function composeEpicIntake({
   // reads it as the objective rather than as the first line of the request.
   const promptBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
 
-  // AIM order: Actor, then the persona's own body (its operating rules),
-  // then Context Injections (extending "who's acting" with "how they
-  // generally behave"), then Input, then Mission, then the human's own goal,
-  // then any attached references — who is running this Epic, what its rules
-  // are, what it's standing on, what it's here to do, what it opened with.
-  const sections: EpicIntakeSection[] = []
+  // AIM slots, in order: Actor (the persona), Input (grounding, Context
+  // Injections, references), Mission (the job type, then the human's goal).
+  const actor: AimSection[] = []
+  const input: AimSection[] = []
+  const mission: AimSection[] = []
 
-  if (agentName && agentDescription) {
-    sections.push({
+  const personaBody = agentBody ? buildPersonaBodyText(agentBody, agentPath) : null
+  if (personaBody) {
+    actor.push({
       kind: 'actor',
+      part: 'persona',
+      label: 'Actor',
+      text: (agentName ? `You are acting as the "${singleLine(agentName)}" agent.\n\n` : '') + personaBody,
+      source: agentName,
+    })
+  } else if (agentName && agentDescription) {
+    actor.push({
+      kind: 'actor',
+      part: 'persona',
       label: 'Actor',
       text: `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}`,
       source: agentName,
     })
   }
 
-  if (agentBody) {
-    const text = buildPersonaBodyText(agentBody, agentPath)
-    if (text) {
-      sections.push({ kind: 'persona-body', label: 'Persona notes', text, source: agentName })
-    }
+  // No Actor and no Mission tag = no AIM framing, so no grounding line
+  // (plain-claude composition).
+  if (inputSummary && (actor.length > 0 || tag)) {
+    input.push({ kind: 'input', part: 'grounding', label: 'Grounding', text: singleLine(inputSummary) })
   }
 
-  // Each enabled injection is its own section, in CONTEXT_INJECTIONS' own key
+  // Each enabled injection is its own entry, in CONTEXT_INJECTIONS' own key
   // order — not the order the caller happened to list them in.
   for (const key of Object.keys(CONTEXT_INJECTIONS) as (keyof typeof CONTEXT_INJECTIONS)[]) {
     if (!contextInjections?.[key]) continue
     const def = CONTEXT_INJECTIONS[key]
-    sections.push({ kind: 'injection', label: def.label, text: def.text, source: key })
+    input.push({ kind: 'input', part: 'injection', label: def.label, text: def.text, source: key })
   }
 
-  // No Actor, no persona body and no Mission = no AIM framing at all, so the
-  // Input line is omitted too (plain-claude composition).
-  const hasAim = sections.some((s) => s.kind === 'actor' || s.kind === 'persona-body') || !!tag
-  if (inputSummary && hasAim) {
-    sections.push({ kind: 'input', label: 'Input', text: singleLine(inputSummary) })
+  for (const p of referencePaths) {
+    input.push({ kind: 'input', part: 'reference', label: 'Reference', text: `Reference: ${singleLine(p)}`, source: p })
   }
 
   if (tag) {
-    sections.push({ kind: 'mission', label: 'Mission', text: agentTagDef(tag).initialPromptTemplate, source: tag })
+    mission.push({
+      kind: 'mission',
+      part: 'job-type',
+      label: 'Job type',
+      text: agentTagDef(tag).initialPromptTemplate,
+      source: tag,
+    })
   }
+  // Always present — goalText/openingPrompt's pure-objective floor.
+  mission.push({ kind: 'mission', part: 'goal', label: 'Goal', text: promptBody })
 
-  // Always present — goalText/openingPrompt's pure-objective floor, same as
-  // pre-sections composeEpicIntake always contributing `promptBody`.
-  sections.push({ kind: 'goal', label: 'Goal', text: promptBody })
-
-  for (const p of referencePaths) {
-    sections.push({ kind: 'reference', label: 'Reference', text: `Reference: ${singleLine(p)}`, source: p })
-  }
+  const sections: AimSection[] = [...actor, ...input, ...mission]
 
   return {
     goalText: withReferences(body, referencePaths),

@@ -406,9 +406,9 @@ describe('NewEpicCard', () => {
     const [, , , , , persistedOpeningPrompt, persistedSections] = createPromptSessionSpy.mock.calls[0]
     expect(persistedOpeningPrompt).toBe(args.prompt)
     expect(Array.isArray(persistedSections)).toBe(true)
-    const sections = persistedSections as Array<{ kind: string; source?: string }>
-    expect(sections[0]).toMatchObject({ kind: 'actor', source: 'builder' })
-    expect(sections.some((s) => s.kind === 'goal')).toBe(true)
+    const sections = persistedSections as Array<{ kind: string; part?: string; source?: string }>
+    expect(sections[0]).toMatchObject({ kind: 'actor', part: 'persona', source: 'builder' })
+    expect(sections.some((s) => s.kind === 'mission' && s.part === 'goal')).toBe(true)
   })
 
   it('leaves the agentType arg undefined and the prompt un-grounded (no actor section) when the Agent Library is empty', async () => {
@@ -525,7 +525,7 @@ describe('NewEpicCard', () => {
     expect((window.api.config.readText as ReturnType<typeof vi.fn>).mock.calls.length).toBe(readTextCallsBeforeSubmit)
 
     const [, , , , , persistedOpeningPrompt, persistedSections] = createPromptSessionSpy.mock.calls[0]
-    const inputSection = (persistedSections as Array<{ kind: string; text: string }>).find((s) => s.kind === 'input')
+    const inputSection = (persistedSections as Array<{ kind: string; part?: string; text: string }>).find((s) => s.part === 'grounding')
     expect(inputSection).toBeTruthy()
     expect(persistedOpeningPrompt).toContain(inputSection!.text)
   })
@@ -635,7 +635,7 @@ describe('NewEpicCard', () => {
 
       expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
       const [, , , , , , persistedSections] = createPromptSessionSpy.mock.calls[0]
-      const inputSection = (persistedSections as Array<{ kind: string; text: string }>).find((s) => s.kind === 'input')
+      const inputSection = (persistedSections as Array<{ kind: string; part?: string; text: string }>).find((s) => s.part === 'grounding')
       expect(inputSection!.text).not.toContain('delegation-ready')
       expect(inputSection!.text).toBe('Grounding: Local (working tree, Epic isolation)')
     })
@@ -665,7 +665,7 @@ describe('NewEpicCard', () => {
       await act(async () => {})
 
       const [, , , , , , persistedSections] = createPromptSessionSpy.mock.calls[0]
-      const inputSection = (persistedSections as Array<{ kind: string; text: string }>).find((s) => s.kind === 'input')
+      const inputSection = (persistedSections as Array<{ kind: string; part?: string; text: string }>).find((s) => s.part === 'grounding')
       expect(inputSection!.text).toContain('NOT delegation-ready')
       expect(inputSection!.text).toContain('Scheduler MCP server registered')
     })

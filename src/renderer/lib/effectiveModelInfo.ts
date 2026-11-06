@@ -110,7 +110,13 @@ export function useEffectiveModelInfo(cwd: string | null, agentType: string | nu
     }
     let cancelled = false
     setMainHalf(null)
-    window.api.agents.resolveModelInfo(agentType ? { cwd, agentType } : { cwd }).then(
+    const resolveFn = (window as { api?: { agents?: { resolveModelInfo?: unknown } } }).api?.agents?.resolveModelInfo
+    if (typeof resolveFn !== 'function') {
+      return
+    }
+    const args = agentType ? { cwd, agentType } : { cwd }
+    // Promise.resolve().then(...) routes a synchronous throw into the rejection handler.
+    Promise.resolve().then(() => window.api.agents.resolveModelInfo(args)).then(
       (result) => { if (!cancelled) setMainHalf(result) },
       () => { if (!cancelled) setMainHalf(null) }
     )

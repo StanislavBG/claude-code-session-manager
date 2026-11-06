@@ -155,6 +155,35 @@ describe('useEffectiveModelInfo with no agent', () => {
     act(() => root.unmount())
   })
 
+  test('a missing agents namespace yields null and throws nothing', async () => {
+    ;(window as unknown as { api: unknown }).api = {}
+    const seen: Array<EffectiveModelInfo | null> = []
+    function Probe() {
+      seen.push(useEffectiveModelInfo('/proj', null))
+      return null
+    }
+    const root = createRoot(document.createElement('div'))
+    await act(async () => { root.render(createElement(Probe)) })
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((v) => v === null)).toBe(true)
+    act(() => root.unmount())
+  })
+
+  test('a synchronously throwing resolveModelInfo yields null', async () => {
+    const resolveModelInfo = vi.fn(() => { throw new Error('sync') })
+    ;(window as unknown as { api: unknown }).api = { agents: { resolveModelInfo } }
+    const seen: Array<EffectiveModelInfo | null> = []
+    function Probe() {
+      seen.push(useEffectiveModelInfo('/proj', 'dev-lead'))
+      return null
+    }
+    const root = createRoot(document.createElement('div'))
+    await act(async () => { root.render(createElement(Probe)) })
+    expect(resolveModelInfo).toHaveBeenCalledWith({ cwd: '/proj', agentType: 'dev-lead' })
+    expect(seen.every((v) => v === null)).toBe(true)
+    act(() => root.unmount())
+  })
+
   test('IPC failure still yields null', async () => {
     const { seen, root, Probe } = run(() => Promise.reject(new Error('x')), null)
     await act(async () => { root.render(createElement(Probe)) })

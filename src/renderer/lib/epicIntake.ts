@@ -65,7 +65,8 @@ export interface EpicIntakeFields {
    * Actor line and before the Mission template — who, then what they're
    * standing on, then what they're here to do. Omitted entirely when absent
    * (e.g. callers that never computed a grounding board, e.g. resumed
-   * Epics).
+   * Epics). Also omitted when there is neither an Actor (persona) nor a
+   * Mission tag: no AIM framing means no Input line.
    */
   inputSummary?: string
   /**
@@ -221,7 +222,10 @@ export function composeEpicIntake({
     sections.push({ kind: 'injection', label: def.label, text: def.text, source: key })
   }
 
-  if (inputSummary) {
+  // No Actor, no persona body and no Mission = no AIM framing at all, so the
+  // Input line is omitted too (plain-claude composition).
+  const hasAim = sections.some((s) => s.kind === 'actor' || s.kind === 'persona-body') || !!tag
+  if (inputSummary && hasAim) {
     sections.push({ kind: 'input', label: 'Input', text: singleLine(inputSummary) })
   }
 

@@ -63,3 +63,26 @@ export function defaultContextInjectionsForTag(tag: EpicTag): Record<ContextInje
     CONTEXT_INJECTION_ORDER.map((k) => [k, k === 'delegate-implementation' ? tag === 'feature' || tag === 'bug' : true]),
   ) as Record<ContextInjectionKey, boolean>
 }
+
+/**
+ * Resolves each Context Injection's final on/off state. Defaults derive from the
+ * Mission (`tag`, null = none), whether an Agent was chosen (`agentless`) and
+ * whether the develop loop is on; the human's `overrides` win over the defaults.
+ * Exception: `delegate-implementation` is always off when the develop loop is
+ * off — its text tells the session to queue work via /develop, which a
+ * develop-loop-off session cannot do.
+ */
+export function resolveContextInjections(opts: {
+  tag: EpicTag | null
+  agentless: boolean
+  developLoop: boolean
+  overrides?: Partial<Record<ContextInjectionKey, boolean>>
+}): Record<ContextInjectionKey, boolean> {
+  const defaults: Record<ContextInjectionKey, boolean> = {
+    'general-behavior': !(opts.agentless && opts.tag === null),
+    'delegate-implementation': opts.developLoop && (opts.tag === 'feature' || opts.tag === 'bug'),
+  }
+  const merged = { ...defaults, ...opts.overrides }
+  if (!opts.developLoop) merged['delegate-implementation'] = false
+  return merged
+}

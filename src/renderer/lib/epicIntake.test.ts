@@ -265,3 +265,19 @@ describe('composeEpicIntake', () => {
     })
   })
 })
+
+describe('composeEpicIntake plain composition', () => {
+  it('omits the input section with no actor, persona body or tag', () => {
+    const r = composeEpicIntake({ title: 'T', goal: 'G', inputSummary: 'I' })
+    expect(r.openingPrompt).toBe('Goal: T\n\nG')
+    expect(r.sections.map((s) => s.kind)).toEqual(['goal'])
+    const withRef = composeEpicIntake({ title: 'T', goal: 'G', inputSummary: 'I', referencePaths: ['/a'] })
+    expect(withRef.sections.map((s) => s.kind)).toEqual(['goal', 'reference'])
+  })
+  it('keeps the input section when a tag or actor is present', () => {
+    expect(composeEpicIntake({ title: 'T', goal: 'G', inputSummary: 'I', tag: 'bug' }).sections.map((s) => s.kind)).toContain('input')
+    expect(
+      composeEpicIntake({ title: 'T', goal: 'G', inputSummary: 'I', agentName: 'a', agentDescription: 'd' }).sections.map((s) => s.kind),
+    ).toContain('input')
+  })
+})

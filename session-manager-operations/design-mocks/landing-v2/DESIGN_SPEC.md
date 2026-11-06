@@ -351,8 +351,12 @@ ALPHA reads as the text "ALPHA".
 
 **Deviation — tip link (not in the Claude Design mock):** the header also renders
 `header.coffeeLink` linking to `header.coffeeHref` (`/coffee`, i.e. `bilko.run/coffee`), a host
-Fastify route that 302s to the live $5 Stripe payment link (Bilko PRD 1235). It is the one
-`*Href` exempt from the `/products/session-manager/` pin above; the host test skips it by key.
+Fastify route that 302s to the live $5 Stripe payment link (Bilko PRD 1235). It is exempt from
+the `/products/session-manager/` pin above; the host test skips it by key.
+
+**Deviation — free-hour link (not in the mock):** `header.freeHourLink` → `header.freeHourHref`
+(`/book?…`). It and the other two `/book?` hrefs are the pin's only other exemptions. See
+[2026-11-06](#2026-11-06--free-hour-link-host-originated-d-2026-11-06-01).
 
 ### Account chip
 
@@ -1063,3 +1067,42 @@ bilko-run commit 5e96bba1).
 - The "Send me occasional updates" consent checkbox is off by default.
 - It never gates content: the page and every Field Manual chapter stay free and readable without an account.
 - Collect only: signup source + opt-in consent with a timestamp. No newsletter sending is in scope.
+
+## 2026-11-06 — free-hour link (host-originated, D-2026-11-06-01)
+
+Self decision D-2026-11-06-01 (goal: 3 free hours booked by Nov 30) puts a free-hour link on every Session Manager
+surface. **Host-originated:** bilko-run commit 4e26e5d3 shipped it first, and `copy.json` mirrors that commit's
+`copy.ts`. This is the same host-first pattern as `coffeeLink` (6e004c26) and `signinPrompt` (8ce22144). None of the
+three elements is in the Claude Design mock.
+
+| Element | Keys | `href` |
+| --- | --- | --- |
+| Header link "Free hour" | `header.freeHourLink`, `freeHourHref`, `aria.freeHour` | `/book?utm_source=session-manager&utm_medium=header`; `Header.tsx` appends `&utm_content=landing` or `manual` |
+| Hero line under the two CTAs (one italic line) | `hero.hireLead`, `hireLink`, `hireHref` | `/book?utm_source=session-manager&utm_medium=product-page` |
+| The manual's closing note "Ask Bilko" | `book.askBilko.{title,body,link,href}` | `/book?utm_source=session-manager&utm_medium=manual` |
+
+- **No price on these pages** (D-2026-10-20-12). The free hour is a link, never a price, paywall or checkout. Its
+  price lives on `/book` and `/pricing` only, and the app's `$0` stays the only price on the page.
+- In reflow, the header link is hidden below 760px on the landing and at every width on the manual. Those headers
+  have no room for it.
+- `ManualPage.tsx` renders the closing note host-side, after the last chapter (the Glossary today). It is not in the
+  release bundle, so it survives every manual release. **Field Manual chapter sources must not add a second "Ask
+  Bilko"** for the web reader.
+- The host note never reaches the PDF or offline HTML editions. Session Manager adds its own note to those editions in
+  `web/manual/build.mjs`, never in the chapter sources.
+- Host guard: bilko `tests/session-manager-urls.test.ts` allows exactly these three `/book?` hrefs and requires
+  `utm_source=session-manager` on each.
+
+### copy.json re-synced with the host's installer-era strings (bilko, 2026-10-05 to 10-08)
+
+The free-hour mirror also surfaced older host drift. `copy.json` (minus `$comment`) now matches `copy.ts` key for key
+and value for value. `copy.ts`'s one `//` line cannot live in JSON.
+
+- `priceTag.aria.region` is "Price and download", and `priceTag.aria.downloads` is "Download the installer" (6d0e26f7).
+- Added `priceTag.platformsWindowsSoon`, `priceTag.aria.platformsWindowsSoon`, and `downloads.windows.windowsAvailable`
+  + `comingSoonLabel` (909fbee4). `windowsAvailable` is a host feature flag, not copy. It has been `true` since
+  39beb438 and is carried here so that a regeneration keeps it.
+- Removed the end card's `copyLabel`, `copiedLabel` and `copyFailedLabel`. The end card shows the installer downloads
+  (909fbee4) and stays installer-only (see 2026-10-10 above).
+- Whole-kit bullet 3 is now "Free, and stays free — download, double-click, done" (655a04b5). This supersedes its row
+  under [Changed lines](#changed-lines).

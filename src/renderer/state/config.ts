@@ -122,7 +122,16 @@ export const useConfig = create<ConfigState>((set, get) => ({
   loadJson: async (path) => {
     const existing = get().files[path]
     set({ files: { ...get().files, [path]: { ...(existing ?? blank(path)), busy: true } } })
-    const r = await window.api.config.readJson(path)
+    let r: ReadJsonResult
+    try {
+      r = await window.api.config.readJson(path)
+    } catch (err) {
+      // The web (remote) UI denies config:readJson. Callers fire loadJson without awaiting it, so a rejection
+      // here was an unhandled one; surface it as the file's loadError instead.
+      const cur = get().files[path] ?? blank(path)
+      set({ files: { ...get().files, [path]: { ...cur, busy: false, loadError: err instanceof Error ? err.message : String(err) } } })
+      return
+    }
     const cur = get().files[path] ?? blank(path)
     set({ files: { ...get().files, [path]: applyJsonRead(cur, r, false) } })
   },

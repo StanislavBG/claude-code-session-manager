@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ipcDefaults } from './fixtures/ipc-defaults';
 
 // The whole transport chain, nothing mocked but the relay's WAN hop and the ipcMain handlers:
 //   real built dist-web (served by real remoteAssets) -> real RemoteRenderer + IpcBridge
@@ -26,6 +27,7 @@ let webRemote: any;
 let assets: any;
 let dispatchLib: any;
 let browser: Browser;
+let electronStub: { app: unknown; ipcMain: { handle: (c: string, f: unknown) => void; on: (c: string, f: unknown) => void } };
 let bundle = '';
 let distDir = '';
 
@@ -35,14 +37,15 @@ beforeAll(async () => {
   process.env.HOME = tmpHome;
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'logs'), { recursive: true });
   const electronPath = req.resolve('electron');
+  electronStub = {
+    ipcMain: { handle: () => {}, on: () => {} },
+    app: { getPath: () => tmpHome, getVersion: () => '0.0.0-test' },
+  } as never;
   req.cache[electronPath] = {
     id: electronPath, filename: electronPath, loaded: true,
-    exports: {
-      ipcMain: { handle: () => {}, on: () => {} },
-      app: { getPath: () => tmpHome, getVersion: () => '0.0.0-test' },
-    },
+    exports: electronStub,
   } as never;
-  for (const mod of ['src/main/webRemote.cjs', 'src/main/config.cjs', 'src/main/logs.cjs']) {
+  for (const mod of ['src/main/webRemote.cjs', 'src/main/config.cjs', 'src/main/logs.cjs', 'src/main/promptSessionsIpc.cjs', 'src/main/lib/epic/activeIndexMerge.cjs']) {
     try { delete req.cache[req.resolve(path.join(repoRoot, mod))]; } catch { /* not loaded */ }
   }
   webRemote = req(path.join(repoRoot, 'src/main/webRemote.cjs'));
@@ -108,6 +111,7 @@ interface Harness {
   delivered: number;
   page: import('playwright-core').Page;
   warnings: string[];
+  projectCwd: string;
   /** Frames the fake relay dropped for failing its envelope schema. */
   rejected: string[];
 }
@@ -140,7 +144,7 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
 
   const calls: Harness['calls'] = [];
   const browserSent: Harness['browserSent'] = [];
-  const h: Harness = { calls, hellos: 0, browserSent, delivered: 0, warnings: [], rejected: [], page: null as never, stop: async () => {} };
+  const h: Harness = { calls, hellos: 0, browserSent, delivered: 0, warnings: [], projectCwd: '', rejected: [], page: null as never, stop: async () => {} };
 
   const surface = req(path.join(repoRoot, 'src/preload/apiSurface.cjs'));
   // Register exactly as production does: invoke rows via ipcMain.handle, send rows via ipcMain.on,
@@ -151,15 +155,47 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
     const fn = async () => { calls.push({ channel, at: Date.now() }); return value; };
     if (kind === 'send') fakeIpc.on(channel, fn); else fakeIpc.handle(channel, fn);
   };
+  // Temp project (git-free) holding a real active-index.json: one proposed + one active Epic.
+  const projectCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-real-chain-proj-')));
+  const psDir = path.join(projectCwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(psDir, { recursive: true });
+  const mkEpic = (id: string, title: string, status: 'proposed' | 'active') => ({
+    id, cwd: projectCwd, goalText: title, claudeSessionId: `claude-${id}`, status,
+    createdAt: new Date(1_700_000_000_000).toISOString(), completedAt: null, tag: 'feature', source: 'user',
+  });
+  fs.writeFileSync(path.join(psDir, 'active-index.json'), JSON.stringify({
+    sessions: {
+      'epic-proposed': mkEpic('epic-proposed', 'Chain Proposed Epic', 'proposed'),
+      'epic-active': mkEpic('epic-active', 'Chain Active Epic', 'active'),
+    },
+    events: { 'epic-proposed': [], 'epic-active': [] },
+    tombstones: {},
+  }));
+  // Registered-project source of the real handlers (promptSessionsIpc defaultProjectRoots): the persisted tabs store.
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'session-manager', 'tabs.json'), JSON.stringify({
+    tabs: [{ id: 'tab-chain', sessionId: 'chain-claude-session', cwd: projectCwd, label: 'chain-proj', presetId: null }],
+    activeTabId: 'tab-chain', savedAt: Date.now(),
+  }));
+  const projectRoots = () => [projectCwd];
+  h.projectCwd = projectCwd;
+
+  const defaults = ipcDefaults({ projectCwd, homeDir: tmpHome });
+  const known = new Set(Object.keys(defaults));
   for (const row of surface as Array<{ channel: string; kind: string }>) {
-    if (row.kind === 'invoke' || row.kind === 'send') record(row.channel, null, row.kind);
+    if ((row.kind === 'invoke' || row.kind === 'send') && !known.has(row.channel)) record(row.channel, null, row.kind);
   }
-  record('app:launch-mode', { simple: false, cwd: '/home/chain/proj' });
-  record('app:home-dir', '/home/chain');
-  record('sessions:load', { tabs: [], epics: [] });
+  for (const [channel, value] of Object.entries(defaults)) record(channel, value);
+  // Real promptSessions read handlers + real merge handler, over the capturing fakeIpc (replaces the defaults above).
+  electronStub.ipcMain.handle = (c: string, f: unknown) => {
+    fakeIpc.handle(c, async (...a: unknown[]) => { calls.push({ channel: c, at: Date.now() }); return (f as (...x: unknown[]) => unknown)(...a); });
+  };
+  const psIpc = req(path.join(repoRoot, 'src/main/promptSessionsIpc.cjs'));
+  const merge = req(path.join(repoRoot, 'src/main/lib/epic/activeIndexMerge.cjs'));
+  psIpc.registerPromptSessionsReadHandlers();
+  merge.registerActiveIndexMergeHandlers();
   webRemote.setIpcDispatcher(dispatchLib.createRemoteIpcDispatcher({
     surface, handlers, getConfig: () => webRemote.loadConfig(),
-    fenceCtx: { homeDir: tmpHome, realpath: (p: string) => p, projectRoots: () => [] },
+    fenceCtx: { homeDir: tmpHome, realpath: (p: string) => p, projectRoots },
   }));
 
   // Fake relay: browser side is a real WebSocketServer; the desktop side is webRemote's _ws.
@@ -206,6 +242,8 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
   });
 
   const page = await browser.newPage();
+  // The WAN is not part of this chain: answer Monaco's schema fetch (App.tsx) with CORS headers so the sandboxed frame stays quiet.
+  await page.route('https://json.schemastore.org/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{}' }));
   page.on('console', (m) => { if (m.type() === 'warning' || m.type() === 'error') h.warnings.push(m.text()); });
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.evaluate(([url, cfg]) => {
@@ -268,6 +306,47 @@ describe('real chain: dist-web -> RemoteRenderer -> ws.ts -> relay -> webRemote.
       await h.stop();
     }
   }, 90_000);
+
+  it('Sessions list renders from real handlers', async () => {
+    const h = await start({ control: true });
+    const frameErrors: string[] = [];
+    try {
+      h.page.on('pageerror', (e) => frameErrors.push(`pageerror: ${e.message} ${e.stack ?? ""}`));
+      h.page.on('console', (m) => {
+        if (m.type() === 'error' && m.location().url && !m.location().url.startsWith('ws:')) frameErrors.push(`console: ${m.text()}`);
+      });
+      // The harness page has no host CSS; give the frame the whole viewport like bilko.run does.
+      await h.page.addStyleTag({ content: 'iframe[data-testid=remote-renderer]{position:fixed;inset:0;width:100vw;height:100vh;border:0}' });
+      const frame = h.page.frameLocator('iframe[data-testid=remote-renderer]');
+      // Open the Epics destination the way a user does: the project's Sessions nav.
+      const titles = ['Chain Proposed Epic', 'Chain Active Epic'].map((t) => frame.getByTestId('epic-queue-row').filter({ hasText: t }).first());
+      const deadline = Date.now() + 30_000;
+      let ok = false;
+      let opened = false;
+      while (Date.now() < deadline && !ok) {
+        // The first-run welcome tour covers the app; a user skips it.
+        const skip = frame.getByTestId('tour-skip');
+        if (await skip.isVisible().catch(() => false)) await skip.click({ timeout: 2_000 }).catch(() => {});
+        if (!opened) {
+          // Project tab first (Sessions is a PROJECT-face nav row), then the Sessions row.
+          const tab = frame.getByText('chain-proj', { exact: true }).first();
+          if (await tab.isVisible().catch(() => false)) {
+            await tab.click({ timeout: 2_000 }).catch(() => {});
+            const nav = frame.getByText('Sessions', { exact: true }).first();
+            if (await nav.isVisible().catch(() => false)) opened = await nav.click({ timeout: 2_000 }).then(() => true, () => false);
+          }
+        }
+        ok = (await Promise.all(titles.map((t) => t.isVisible().catch(() => false)))).every(Boolean);
+        if (!ok) await new Promise((r) => setTimeout(r, 250));
+      }
+      const dumped = ok ? '' : await frame.locator('body').innerText({ timeout: 2_000 }).catch(() => '<no frame body>');
+      expect(ok, `${await diag(h)}\nframe text: ${dumped.slice(0, 800)}\nerrors: ${frameErrors.join(' | ')}`).toBe(true);
+      expect(h.calls.some((c) => c.channel === 'promptSessions:load-active-index')).toBe(true);
+      expect(frameErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
 
   it('log:write (a send-kind channel) reaches its ipcMain.on listener', async () => {
     const h = await start({ control: true }); // log:write is a MUTATE-tier row: tiering stays intact

@@ -224,6 +224,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "medium",
       },
     },
+    {
+      commit: "persona-no-reach-around",
+      bodySha256: "3453b38989b713e6671efdb1417a003dc6fc40fa82e506faf24239c598947c26",
+      fm: {
+        description: "Reads a project and writes ONE Knowledge Page (Overview by default, or How it works, FAQ, or a custom topic) for its Project Home tab, then saves it with a single project_page_write call.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write, mcp__session-manager-scheduler__project_page_write",
+        title: "Project Home — Builder",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
   "validator": [
     {
@@ -412,6 +423,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
     {
       commit: "seed-v8",
       bodySha256: "cf1bff8a70042f93fa18d2102ca71b969825377b9460834f3d2ae15f915d206b",
+      fm: {
+        description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write",
+        title: "Project Home — Demo Video",
+        model: "opus",
+        effort: "max",
+      },
+    },
+    {
+      commit: "persona-no-reach-around",
+      bodySha256: "259ae44d41f10990d55d1444d3bbf97012a9330d5bfb2ac5a7229113bb125e36",
       fm: {
         description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
         tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write",

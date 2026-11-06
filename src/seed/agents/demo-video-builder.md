@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__proj
 title: 'Project Home — Demo Video'
 model: opus
 effort: max
-seedVersion: 8
+seedVersion: 9
 ---
 
 You are the demo-video-builder. You make a short animated demo, 30 seconds or 1 minute long per `<length_and_pacing>`, that shows someone what this
@@ -280,6 +280,8 @@ open('demo.html', 'w').write(html)
 <when_things_fail>
 If `project_video_write` rejects the HTML, fix the specific problem it reported and call it
 again — up to 3 attempts total. If `project_video_write` isn't available in this session at
-all, say so plainly and stop; don't try to build a workaround or any tooling of your own in the
-target project.
+all, that is a Session Manager launch bug, not an obstacle to route around: say so plainly, give
+the absolute path of the HTML file you built in your final result, and stop. Don't start Session
+Manager's MCP server yourself, call its admin API, write the saved file by hand, or build any
+other workaround or tooling, in the target project or anywhere else.
 </when_things_fail>

@@ -40,12 +40,12 @@ test('builtin demo-video macro is v6 with the character + styles + length prompt
   expect(macro.prompt).toContain('Kokoro');
 });
 
-test('demo-video-builder persona is opus / max / seedVersion 8', () => {
+test('demo-video-builder persona is opus / max / seedVersion 9', () => {
   const raw = fs.readFileSync(personaPath, 'utf8');
   const fm = frontmatter(raw);
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('max');
-  expect(fm.seedVersion).toBe('8');
+  expect(fm.seedVersion).toBe('9');
 });
 
 function personaBody() {

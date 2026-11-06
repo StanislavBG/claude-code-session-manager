@@ -528,12 +528,18 @@ test('validateFeedbackInput bounds humanRequestQuote and types autoStart', async
 // Composition
 // ---------------------------------------------------------------------------
 
-test('composeFeedbackIntake emits no `mission` section — a tag\'s meaning is never re-typed here', () => {
-  const { sections } = composeFeedbackIntake({
+test('composeFeedbackIntake emits AIM kind+part, references before the goal, no job-type part', () => {
+  const { sections, openingPrompt } = composeFeedbackIntake({
     fromCwd: '/from', title: 'T', body: 'B',
     agentName: 'architect', agentDescription: 'desc',
+    referencePaths: ['/a.ts', '/b.ts'],
   });
-  expect(sections.map((s) => s.kind)).toEqual(['actor', 'input', 'goal']);
+  expect(sections.map((s) => [s.kind, s.part])).toEqual([
+    ['actor', 'persona'], ['input', 'grounding'], ['input', 'reference'], ['input', 'reference'], ['mission', 'goal'],
+  ]);
+  expect(sections[1].label).toBe('Grounding');
+  expect(sections[4].label).toBe('Goal');
+  expect(openingPrompt.indexOf('Reference: /b.ts')).toBeLessThan(openingPrompt.indexOf('Goal: T'));
 });
 
 test('composeFeedbackIntake joins references as one block, matching epicIntake.ts', () => {
@@ -555,7 +561,7 @@ test('composeFeedbackIntake strips newlines from a crafted reference path so it 
 
 test('composeFeedbackIntake omits the actor line unless BOTH name and description are known', () => {
   const { sections } = composeFeedbackIntake({ fromCwd: '/from', title: 'T', body: 'B', agentName: 'architect' });
-  expect(sections.map((s) => s.kind)).toEqual(['input', 'goal']);
+  expect(sections.map((s) => s.kind)).toEqual(['input', 'mission']);
 });
 
 // ---------------------------------------------------------------------------

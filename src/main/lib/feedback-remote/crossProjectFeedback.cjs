@@ -186,23 +186,20 @@ function seriesLine(series) {
  *   → { goalText, openingPrompt, sections }
  *
  * Pure. Mirrors the renderer's `composeEpicIntake` (lib/epicIntake.ts) —
- * same `EpicIntakeSection` shape, same emission order, same '\n\n' joins — so
- * the receiving Epic's first turn renders the identical AIM briefing card as a
- * hand-created one. It cannot import that module (TS, renderer-side), so it
- * deliberately emits only the section kinds whose text it OWNS:
+ * same `EpicIntakeSection` shape: kind = AIM slot (actor | input | mission)
+ * plus `part`. It cannot import that module (TS, renderer-side), so it emits
+ * only the parts whose text it OWNS, in AIM order:
  *
- *   actor  — the persona line, same sentence template as composeEpicIntake
- *   input  — AIM's Input axis: what grounds this session. For an inbound
- *            report that is literally "an external report from Project-A",
- *            which is this module's own fact to state.
- *   goal   — the report itself.
- *   reference — attached paths.
+ *   actor   / persona   — the persona line, same sentence template
+ *   input   / grounding — "an external report from Project-A", this module's fact
+ *   input   / reference — attached paths (before the report)
+ *   mission / goal      — the report itself
  *
- * There is NO `mission` section, on purpose. A mission section's text is the
- * tag's `initialPromptTemplate`, which lives in agentTagDefs.ts; re-typing it
- * here would be a second, drifting copy of a tag's meaning — the exact thing
- * CLAUDE.md forbids. The Epic still carries its `tag` field, so every surface
- * that renders a tag's meaning keeps reading it through `agentTagDef(tag)`.
+ * There is NO job-type part, on purpose. Its text is the tag's
+ * `initialPromptTemplate`, which lives in renderer-only agentTagDefs.ts;
+ * re-typing it here would be a second, drifting copy of a tag's meaning, and
+ * the auto-start path recomposes the full prompt through composeEpicIntake.
+ * The Epic still carries its `tag` field.
  *
  * Complexity: O(n) in the number of references.
  */
@@ -228,6 +225,7 @@ function composeFeedbackIntake({
   if (agentName && agentDescription) {
     sections.push({
       kind: 'actor',
+      part: 'persona',
       label: 'Actor',
       text: `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}`,
       source: agentName,
@@ -242,7 +240,8 @@ function composeFeedbackIntake({
   const askClause = originAsk ? ` It was raised while working on: ${singleLine(originAsk)}.` : '';
   sections.push({
     kind: 'input',
-    label: 'Input',
+    part: 'grounding',
+    label: 'Grounding',
     text:
       `This session is INBOUND FEEDBACK from another project: ${origin}.${askClause} `
       + 'Nobody in this project wrote the report below — an agent working in that project did, and it '
@@ -263,18 +262,19 @@ function composeFeedbackIntake({
   blocks.push(`## Details\n${trimmedBody}`);
   const structured = blocks.join('\n\n');
 
-  const goalBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${structured}` : structured;
-  sections.push({ kind: 'goal', label: 'Goal', text: goalBody });
-
   for (const p of referencePaths) {
-    sections.push({ kind: 'reference', label: 'Reference', text: `Reference: ${singleLine(p)}`, source: p });
+    sections.push({ kind: 'input', part: 'reference', label: 'Reference', text: `Reference: ${singleLine(p)}`, source: p });
   }
 
+  const goalBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${structured}` : structured;
+  sections.push({ kind: 'mission', part: 'goal', label: 'Goal', text: goalBody });
+
+  // Part names are string literals: keep in step with AimPart in src/renderer/lib/epicIntake.ts.
   // Same join rule as epicIntake.ts's joinSections: '\n\n' everywhere except
   // between two consecutive reference lines, which stay one visual block.
   const openingPrompt = sections.reduce((out, s, i) => {
     if (i === 0) return s.text;
-    const sep = s.kind === 'reference' && sections[i - 1].kind === 'reference' ? '\n' : '\n\n';
+    const sep = s.part === 'reference' && sections[i - 1].part === 'reference' ? '\n' : '\n\n';
     return out + sep + s.text;
   }, '');
 

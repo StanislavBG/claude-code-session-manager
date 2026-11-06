@@ -1467,6 +1467,19 @@ app.whenReady().then(async () => {
         { role: 'selectAll' },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Book a Free Hour with Bilko',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              sendIfAlive(mainWindow, 'app:open-free-hour');
+            }
+          },
+        },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 

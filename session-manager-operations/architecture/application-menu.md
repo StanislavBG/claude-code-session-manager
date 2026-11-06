@@ -6,7 +6,7 @@ Vocabulary used below and in code comments:
   window via `Menu.setApplicationMenu`. There is exactly one, built once in
   `src/main/index.cjs` before `createWindow()`.
 - **Menu** — one top-level entry in the application menu (a `submenu`
-  container). Today: `Session Manager`, `Dev`, `Edit`.
+  container). Today: `Session Manager`, `Dev`, `Edit`, `Help`.
 - **Menu item** — one row inside a menu's `submenu` array. Two kinds (see
   below).
 - **Accelerator** — the keyboard shortcut string Electron attaches to a menu
@@ -30,7 +30,8 @@ Every menu item is one of two kinds:
   the label and the behavior. Every item in the `Session Manager` and `Dev`
   menus is a click item (except `Quit`, which is a role item with an
   explicit `label:` override, and the conditional heap-snapshot item, which
-  is a click item).
+  is a click item). The `Help` menu's single item is also a click item (no
+  accelerator, no role).
 
 ## Current inventory
 
@@ -44,6 +45,7 @@ Every menu item is one of two kinds:
 | Dev | Reload App Window | CmdOrCtrl+R | role (`reload`) | Reloads the renderer (`dist/index.html` or the dev server URL) | Electron-native |
 | Dev | Take Heap Snapshot (renderer) | none | click, conditional (`SM_HEAP_SNAPSHOT=1` only) | Captures a `.heapsnapshot` of the renderer process | `src/main/heapSnapshot.cjs` `buildMenuItem()` — see `heap-snapshot-diagnostics.md` |
 | Edit | Undo / Redo / Cut / Copy / Paste / Select All | OS default | role | Standard text-editing commands, native to whichever input has focus | Electron-native |
+| Help | Book a Free Hour with Bilko | none | click | Opens https://bilko.run/book?utm_source=session-manager&utm_medium=app in the system browser | `src/main/index.cjs` click handler → `mainWindow.webContents.send('app:open-free-hour')` → `src/preload/index.cjs` `onOpenFreeHour` → `src/renderer/App.tsx` → `openFreeHour()` in `src/renderer/lib/freeHour.ts`, the same helper the Feedback panel link calls |
 
 ## Rules
 
@@ -94,3 +96,7 @@ PTY. Since **TAB = file location = Main Project** in this app's domain
 model, the picker item now takes the project noun ("Open / Start Project…",
 matching the sidebar button that runs the same `createPickedSession()`) and
 the PTY item takes the terminal noun ("Restart Terminal in Active Tab").
+
+## Why a Help menu
+
+Added 2026-11-06 by explicit human approval of the Epic "Add the free hour with Bilko to the README and the app's Help menu (a link, no price)", the decision rule 8 requires. Its one item is a shortcut to the Feedback panel's free-hour link, as rule 3 requires. It is passive and names no price, per CLAUDE.md's open-core law.

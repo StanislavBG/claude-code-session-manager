@@ -26,6 +26,7 @@ import { startBillingPolling } from './state/billing'
 import { startSchedulePolling } from './state/scheduleState'
 import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
 import { createPickedSession } from './lib/createPickedSession'
+import { openFreeHour } from './lib/freeHour'
 import { StartProjectDialog } from './components/StartProjectDialog'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
@@ -375,6 +376,9 @@ export function App() {
       })
     })
 
+    // Menu → Help → Book a Free Hour with Bilko: same helper as the Feedback panel link.
+    const offFreeHour = window.api.app.onOpenFreeHour(() => openFreeHour())
+
     // Menu → Restart Terminal in Active Tab: kill active tab's PTY, respawn with fresh session.
     const offReboot = window.api.app.onRebootSession(() => {
       const { activeTabId } = useSessions.getState()
@@ -475,7 +479,7 @@ export function App() {
     }
 
     return () => {
-      off(); offNewSession(); offReboot(); offCfg(); offHotkey()
+      off(); offNewSession(); offReboot(); offFreeHour(); offCfg(); offHotkey()
       window.removeEventListener('beforeunload', onBeforeUnload)
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.removeEventListener) {
         navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)

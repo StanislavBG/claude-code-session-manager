@@ -2483,6 +2483,8 @@ export interface PromptSessionsCreateEpicPayload {
     label: string;
     text: string;
     source?: string;
+    /** Which part of its AIM slot this entry is; absent on Epics minted before AIM sections. */
+    part?: 'persona' | 'grounding' | 'injection' | 'reference' | 'job-type' | 'goal';
   }>;
 }
 

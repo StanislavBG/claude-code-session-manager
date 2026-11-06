@@ -59,6 +59,11 @@ const EpicIntakeSectionSchema = z.object({
   label: z.string(),
   text: z.string(),
   source: z.string().optional(),
+  // Mirrors AimPart in src/renderer/lib/epicIntake.ts (main cannot import the
+  // renderer module). Optional because Epics minted before AIM sections carry
+  // none. NEVER narrow the kind enum above — dropInvalidSessions in
+  // ipcSchemas.cjs drops a whole stored Epic whose record fails this schema.
+  part: z.enum(['persona', 'grounding', 'injection', 'reference', 'job-type', 'goal']).optional(),
 });
 
 // Mirrors PromptSession's `worktree` field (src/renderer/state/

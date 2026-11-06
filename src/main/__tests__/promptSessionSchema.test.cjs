@@ -132,3 +132,30 @@ test('a row without developLoop parses unchanged', () => {
   expect(r.success).toBe(true);
   expect('developLoop' in r.data).toBe(false);
 });
+
+const partBase = {
+  id: 'epic-abc12345',
+  cwd: '/home/bilko/Projects/session-manager',
+  goalText: 'g',
+  claudeSessionId: 'c1b2a3d4-0000-0000-0000-000000000000',
+  status: 'proposed',
+  createdAt: '2026-08-02T00:00:00.000Z',
+  completedAt: null,
+};
+const sec = (extra) => ({ ...partBase, sections: [{ kind: 'goal', label: 'Goal', text: 't', ...extra }] });
+
+test('a section part is kept, not stripped', () => {
+  const r = PromptSessionSchema.safeParse(sec({ part: 'goal' }));
+  expect(r.success).toBe(true);
+  expect(r.data.sections[0].part).toBe('goal');
+});
+
+test('a section without part still parses', () => {
+  const r = PromptSessionSchema.safeParse(sec({}));
+  expect(r.success).toBe(true);
+  expect('part' in r.data.sections[0]).toBe(false);
+});
+
+test('a section with part bogus fails', () => {
+  expect(PromptSessionSchema.safeParse(sec({ part: 'bogus' })).success).toBe(false);
+});

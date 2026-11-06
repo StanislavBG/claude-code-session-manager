@@ -107,4 +107,11 @@ describe('InboundProposalCard', () => {
     const el = await mount(epic({}, null))
     expect(q(el, 'inbound-proposal-report')!.textContent).toBe('FULL OPENING PROMPT BODY')
   })
+
+  it('AIM: reads the report from a { kind: mission, part: goal } section', async () => {
+    const el = await mount(
+      epic({ sections: [{ kind: 'mission', part: 'goal', label: 'Goal', text: 'AIM GOAL TEXT' }] }, null),
+    )
+    expect(q(el, 'inbound-proposal-report')!.textContent).toBe('AIM GOAL TEXT')
+  })
 })

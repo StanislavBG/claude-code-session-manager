@@ -6,7 +6,7 @@
  * Deliberately does not import launchSession.ts (import cycle via state/chat).
  */
 import type { PromptSession } from '../state/promptSessions'
-import { composeEpicIntake, type EpicIntakeSection } from './epicIntake'
+import { composeEpicIntake, toAimSections, type EpicIntakeSection } from './epicIntake'
 import { defaultContextInjectionsForTag } from './contextInjections'
 
 export interface InboundOpening {
@@ -19,11 +19,12 @@ export async function composeInboundOpening(epic: PromptSession): Promise<Inboun
   try {
     const stored = epic.sections
     if (!stored || stored.length === 0) return null
-    const goal = stored.find((s) => s.kind === 'goal')?.text
+    const aim = toAimSections(stored)
+    const goal = aim.find((s) => s.part === 'goal')?.text
     if (!goal) return null
-    const inputSummary = stored.find((s) => s.kind === 'input')?.text
-    const referencePaths = stored
-      .filter((s) => s.kind === 'reference')
+    const inputSummary = aim.find((s) => s.part === 'grounding')?.text
+    const referencePaths = aim
+      .filter((s) => s.part === 'reference')
       .map((s) => s.source ?? s.text.replace(/^Reference:\s*/, ''))
 
     let agentName: string | undefined

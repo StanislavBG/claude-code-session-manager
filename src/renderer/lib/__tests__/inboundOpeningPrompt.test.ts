@@ -47,6 +47,22 @@ describe('composeInboundOpening', () => {
     expect(out!.openingPrompt).not.toContain('Goal: Goal:')
   })
 
+  it('AIM-shaped stored sections compose the same result as the legacy fixture', async () => {
+    const legacy = await composeInboundOpening(epic())
+    const aim = await composeInboundOpening(
+      epic({
+        sections: [
+          { kind: 'input', part: 'grounding', label: 'Input', text: 'INBOUND FEEDBACK' },
+          { kind: 'input', part: 'reference', label: 'Reference', text: 'Reference: /a/b', source: '/a/b' },
+          { kind: 'mission', part: 'goal', label: 'Goal', text: 'Goal: t\n\ndetails' },
+        ],
+      } as Partial<PromptSession>),
+    )
+    expect(aim).not.toBeNull()
+    expect(aim!.openingPrompt).toBe(legacy!.openingPrompt)
+    expect(aim!.sections).toEqual(legacy!.sections)
+  })
+
   it('returns null with no stored sections', async () => {
     expect(await composeInboundOpening(epic({ sections: undefined }))).toBeNull()
     expect(await composeInboundOpening(epic({ sections: [] }))).toBeNull()

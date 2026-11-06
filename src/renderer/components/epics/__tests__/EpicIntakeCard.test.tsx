@@ -59,20 +59,42 @@ describe('EpicIntakeCard', () => {
     expect(el.querySelector('[data-testid="epic-intake-badge"]')?.textContent).toBe('Launch briefing')
     expect(el.textContent).toContain('Sent to the agent at start — not part of the conversation')
 
-    // 6 groups: two 'reference' sections collapse into one group/chip.
+    // 3 AIM slots: actor, input, mission.
     const expectedTokens = Math.ceil(OPENING_PROMPT_STAND_IN.length / 4)
-    expect(el.textContent).toContain(`6 sections · ${expectedTokens.toLocaleString()} tok`)
+    expect(el.textContent).toContain(`3 sections · ${expectedTokens.toLocaleString()} tok`)
   })
 
-  it('CORE: one chip per section group, in the same order composeEpicIntake emits them, with persona-body labeled "Persona"', async () => {
+  it('CORE: the 8-entry legacy fixture yields exactly 3 chips in AIM order; an AIM-shaped fixture yields the same', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
-    const sections: EpicIntakeSection[] = [
-      ...FULL_SECTIONS,
+    const legacy: EpicIntakeSection[] = [
+      ...FULL_SECTIONS.slice(0, 1),
       { kind: 'persona-body', label: 'Persona notes', text: 'Be terse.' },
+      { kind: 'injection', label: 'General behaviour', text: 'Work concisely.', source: 'general-behavior' },
+      ...FULL_SECTIONS.slice(1, 6),
     ]
-    const el = mount(createElement(EpicIntakeCard, { sections, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
+    expect(legacy).toHaveLength(8)
+    const el = mount(createElement(EpicIntakeCard, { sections: legacy, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
     const chips = Array.from(el.querySelectorAll('[data-testid="epic-intake-chip"]'))
-    expect(chips.map((c) => c.textContent)).toEqual(['Actor', 'Injections', 'Input', 'Mission', 'Goal', 'References', 'Persona'])
+    expect(chips.map((c) => c.getAttribute('data-chip-kind'))).toEqual(['actor', 'input', 'mission'])
+    expect(chips.map((c) => c.textContent)).toEqual(['Actor', 'Input', 'Mission'])
+    act(() => (el.querySelector('[data-testid="epic-intake-toggle"]') as HTMLButtonElement).click())
+    const actor = el.querySelector('[data-section-kind="actor"]')!
+    expect(actor.textContent).toContain('Be terse.')
+    expect(actor.textContent).toContain('Persona')
+    act(() => (el.querySelector('[data-chip-kind="input"]') as HTMLButtonElement).click())
+    const input = el.querySelector('[data-section-kind="input"]')!
+    expect(input.textContent).toContain('General behaviour · general-behavior')
+    expect(input.textContent).toContain('Reference · /tmp/log.txt')
+
+    act(() => root!.unmount())
+    container!.remove()
+    const aim: EpicIntakeSection[] = [
+      { kind: 'actor', part: 'persona', label: 'Actor', text: 'You are X' },
+      { kind: 'input', part: 'grounding', label: 'Input', text: 'Grounding' },
+      { kind: 'mission', part: 'goal', label: 'Goal', text: 'Fix it' },
+    ]
+    const el2 = mount(createElement(EpicIntakeCard, { sections: aim, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
+    expect(Array.from(el2.querySelectorAll('[data-testid="epic-intake-chip"]')).map((c) => c.getAttribute('data-chip-kind'))).toEqual(['actor', 'input', 'mission'])
   })
 
   it('CORE: collapsed by default — no section body or chip-triggered content renders until Show or a chip is clicked', async () => {
@@ -94,11 +116,8 @@ describe('EpicIntakeCard', () => {
     const cards = Array.from(el.querySelectorAll('[data-testid="epic-intake-section"]'))
     expect(cards.map((c) => c.getAttribute('data-section-kind'))).toEqual([
       'actor',
-      'injection',
       'input',
       'mission',
-      'goal',
-      'reference',
     ])
   })
 
@@ -106,13 +125,13 @@ describe('EpicIntakeCard', () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
 
-    const injectionChip = el.querySelector('[data-chip-kind="injection"]') as HTMLButtonElement
+    const injectionChip = el.querySelector('[data-chip-kind="input"]') as HTMLButtonElement
     await act(async () => {
       injectionChip.click()
       await Promise.resolve()
     })
 
-    const injectionSection = el.querySelector('[data-section-kind="injection"]')!
+    const injectionSection = el.querySelector('[data-section-kind="input"]')!
     expect(injectionSection.querySelector('[data-testid="epic-intake-section-body"]')).toBeTruthy()
     expect(injectionSection.textContent).toContain('Work concisely and verify before claiming done.')
   })
@@ -128,7 +147,7 @@ describe('EpicIntakeCard', () => {
     )
     const chips = el.querySelectorAll('[data-testid="epic-intake-chip"]')
     expect(chips).toHaveLength(1)
-    expect(chips[0].textContent).toBe('Goal')
+    expect(chips[0].textContent).toBe('Mission')
   })
 
   it('CORE: never falls back to prose-parsing openingPrompt — rendered text comes only from `sections`', async () => {

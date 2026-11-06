@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { EpicIntakeSection } from '../../lib/epicIntake'
+import {
+  AIM_SLOT_ORDER,
+  toAimSections,
+  type AimPart,
+  type AimSection,
+  type AimSlot,
+  type EpicIntakeSection,
+} from '../../lib/epicIntake'
 import { estimateTokens } from '../../lib/estimateTokens'
 
 /**
@@ -15,46 +22,45 @@ import { estimateTokens } from '../../lib/estimateTokens'
  * otherwise (an Epic minted before this field existed).
  */
 
-const GROUP_LABEL: Record<EpicIntakeSection['kind'], string> = {
+const GROUP_LABEL: Record<AimSlot, string> = {
   actor: 'Actor',
-  'persona-body': 'Persona',
-  injection: 'Injections',
   input: 'Input',
   mission: 'Mission',
-  goal: 'Goal',
-  reference: 'References',
 }
 
-// actor/mission are the load-bearing "who + what this Epic is for" lines —
-// open by default once the card is expanded. injection/input are ambient
-// framing the human rarely needs to re-read — collapsed to a one-line
-// summary with a count. goal is the human's own ask, so it opens too;
-// reference is metadata like injection/input.
-const DEFAULT_EXPANDED: Record<EpicIntakeSection['kind'], boolean> = {
+// Actor + Mission are the load-bearing "who + what this Epic is for" lines —
+// open by default once the card is expanded. Input is ambient framing.
+const DEFAULT_EXPANDED: Record<AimSlot, boolean> = {
   actor: true,
-  'persona-body': false,
-  injection: false,
   input: false,
   mission: true,
-  goal: true,
-  reference: false,
+}
+
+const PART_LABEL: Record<Exclude<AimPart, 'injection'>, string> = {
+  persona: 'Persona',
+  grounding: 'Grounding',
+  reference: 'Reference',
+  'job-type': 'Job type',
+  goal: 'Goal',
+}
+
+function entryLabel(item: AimSection): string {
+  const base = item.part === 'injection' ? item.label : PART_LABEL[item.part]
+  return item.source ? `${base} · ${item.source}` : base
 }
 
 interface SectionGroup {
-  kind: EpicIntakeSection['kind']
-  items: EpicIntakeSection[]
+  kind: AimSlot
+  items: AimSection[]
 }
 
-/** Sections of the same kind are always emitted contiguously by
- *  composeEpicIntake (e.g. every 'injection' entry together, every
- *  'reference' entry together) — grouping adjacent-same-kind runs turns the
- *  flat six-kind-ordered list into exactly one card per kind present. */
-function groupSections(sections: EpicIntakeSection[]): SectionGroup[] {
+/** One group per AIM slot present, in Actor, Input, Mission order. */
+function groupSections(sections: readonly EpicIntakeSection[]): SectionGroup[] {
+  const aim = toAimSections(sections)
   const groups: SectionGroup[] = []
-  for (const s of sections) {
-    const last = groups[groups.length - 1]
-    if (last && last.kind === s.kind) last.items.push(s)
-    else groups.push({ kind: s.kind, items: [s] })
+  for (const kind of AIM_SLOT_ORDER) {
+    const items = aim.filter((s) => s.kind === kind)
+    if (items.length > 0) groups.push({ kind, items })
   }
   return groups
 }
@@ -71,11 +77,11 @@ const SUMMARY_MAX = 96
  */
 const LONG_SECTION_CHARS = 400
 
-function groupChars(items: EpicIntakeSection[]): number {
+function groupChars(items: AimSection[]): number {
   return items.reduce((n, s) => n + s.text.length, 0)
 }
 
-function oneLineSummary(items: EpicIntakeSection[]): string {
+function oneLineSummary(items: AimSection[]): string {
   if (items.length === 1) {
     const t = items[0].text.replace(/\s+/g, ' ').trim()
     return t.length > SUMMARY_MAX ? `${t.slice(0, SUMMARY_MAX)}…` : t
@@ -132,8 +138,7 @@ function SectionCard({
             <div key={i} className="min-w-0 text-sm leading-relaxed whitespace-pre-wrap text-fg">
               {group.items.length > 1 && (
                 <div className="mb-0.5 font-mono text-[10px] text-fg-faint">
-                  {item.label}
-                  {item.source ? ` · ${item.source}` : ''}
+                  {entryLabel(item)}
                 </div>
               )}
               {item.text}
@@ -150,16 +155,16 @@ export function EpicIntakeCard({
   at: _at,
   openingPrompt,
 }: {
-  sections: EpicIntakeSection[]
+  sections: readonly EpicIntakeSection[]
   at: number
   openingPrompt: string
 }) {
   const groups = groupSections(sections)
   const tokens = estimateTokens(openingPrompt)
   const [expanded, setExpanded] = useState(false)
-  const [openKinds, setOpenKinds] = useState<Partial<Record<EpicIntakeSection['kind'], boolean>>>({})
-  const [focusKind, setFocusKind] = useState<EpicIntakeSection['kind'] | null>(null)
-  const sectionRefs = useRef<Partial<Record<EpicIntakeSection['kind'], HTMLDivElement>>>({})
+  const [openKinds, setOpenKinds] = useState<Partial<Record<AimSlot, boolean>>>({})
+  const [focusKind, setFocusKind] = useState<AimSlot | null>(null)
+  const sectionRefs = useRef<Partial<Record<AimSlot, HTMLDivElement>>>({})
 
   useEffect(() => {
     if (!focusKind) return
@@ -187,7 +192,7 @@ export function EpicIntakeCard({
     setExpanded((prev) => !prev)
   }
 
-  function handleChipClick(kind: EpicIntakeSection['kind']) {
+  function handleChipClick(kind: AimSlot) {
     setExpanded(true)
     setOpenKinds((prev) => ({ ...prev, [kind]: true }))
     setFocusKind(kind)

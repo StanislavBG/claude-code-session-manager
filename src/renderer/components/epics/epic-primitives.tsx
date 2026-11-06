@@ -5,6 +5,7 @@
  * consumed by EpicQueue (left pane) and the detail pane PRDs sibling.
  */
 import type { PromptSession } from '../../state/promptSessions'
+import { toAimSections } from '../../lib/epicIntake'
 import type { EpicDisplayStatus } from '../../lib/epicDerive'
 import { inboundFeedbackOrigin, type InboundFeedbackOrigin, type inboundSeriesSiblings } from '../../lib/epicOrigin'
 
@@ -183,7 +184,7 @@ export function InboundProposalCard({
   const rootCls = 'mb-3 max-w-[760px] space-y-2.5 rounded-md border border-line bg-bg-hi px-3.5 py-3'
 
   if (!proposal) {
-    const goal = epic.sections?.find((s) => s.kind === 'goal')?.text
+    const goal = toAimSections(epic.sections).find((s) => s.part === 'goal')?.text
     const report = goal || epic.openingPrompt || epic.goalText
     return (
       <section data-testid="inbound-proposal-card" className={rootCls}>

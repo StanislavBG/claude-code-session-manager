@@ -145,6 +145,7 @@
   "validationSentinels": "scheduler",
   "watchdogHelpers": "scheduler",
   "winSpawn": "process",
+  "pagesLibrary": "project-pages",
   "withTimeout": "util",
   "workTypeLibrary": "prd",
   "worktreeDeps": "git",

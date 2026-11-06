@@ -146,6 +146,7 @@
   "watchdogHelpers": "scheduler",
   "winSpawn": "process",
   "pagesLibrary": "project-pages",
+  "playerBridge": "project-pages",
   "withTimeout": "util",
   "workTypeLibrary": "prd",
   "worktreeDeps": "git",

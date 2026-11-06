@@ -27,13 +27,15 @@ new work. **report** = your final message to the human.
       (`$SM_PROJECT_ROOT`, or the first `git worktree list` path). Why: a worktree copy is
       frozen at branch time and often lacks this Epic.
    3. The `sessions` entry whose `claudeSessionId` matches is this Epic: its `id` is
-      `<epic-id>`, its `tag` drives rule 2.
+      `<epic-id>`, its `tag` and `developLoop` drive rule 2.
    4. No match: stop and say so. Tell the human to open an Epic with the New Epic card and run
       /develop there. Never mint an Epic or write a PRD without one. Why: only a human creates
       an Epic.
 2. **Tag-aware default.** On a `feature`, `bug` or `art` Epic, PRDs are the expected path once scope
    is clear; start unasked. On a `discussion` Epic it stays available, but wait until the
-   human settles that code is wanted.
+   human settles that code is wanted. An Epic with no tag (No mission) is treated like `discussion`.
+   If `developLoop` is `false`, do not author PRDs (the API refuses them): tell the human this
+   session was started without the develop loop and a new session with it on is needed to queue work. Stop.
 3. **Never hand-implement in this session**, even when the plan is agreed. Why: this session
    runs an expensive planner model; a cheaper executor runs each PRD as a headless `claude -p`
    job.

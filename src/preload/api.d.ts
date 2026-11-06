@@ -2268,6 +2268,10 @@ export interface SessionManagerAPI {
     watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;
     /** Stop pushing `onChanged` events for this cwd — must be paired 1:1 with a prior `watch` call. */
     unwatch: (cwd: string) => Promise<{ ok: boolean }>;
+    /** Rewrite one library entry's meta.json title. Rejects on a bad id, missing entry or invalid meta. */
+    rename: (cwd: string, kind: 'knowledge' | 'video', id: string, title: string) => Promise<{ ok: true; title: string }>;
+    /** Remove exactly one library entry folder. Rejects on a bad id or missing entry. */
+    delete: (cwd: string, kind: 'knowledge' | 'video', id: string) => Promise<{ ok: true }>;
     /** Fires whenever a watched cwd's home.html is added/changed/removed, carrying the freshly read result. */
     onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
   };

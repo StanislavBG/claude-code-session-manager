@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
+import { useToast } from '../../../../../state/toast'
 import type { Macro, MacroJobStatus } from '../../../../../../preload/api'
 
 const HTML = '<!DOCTYPE html><html><body>HOME</body></html>'
@@ -300,6 +301,92 @@ describe('ProjectPagesSection', () => {
       expect(line(el).textContent).toBe('Failed: timed out after 30m')
       expect(line(el).getAttribute('role')).toBe('alert')
       expect(el.querySelector('[data-testid="project-home-job-session"]')).toBeNull()
+    })
+  })
+
+  describe('rename and delete', () => {
+    const rename = vi.fn()
+    const del = vi.fn()
+    beforeEach(() => {
+      rename.mockReset().mockResolvedValue({ ok: true, title: 'x' })
+      del.mockReset().mockResolvedValue({ ok: true })
+      ;(window as any).api.projectPages = { rename, delete: del }
+      useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+    })
+    const mountK = async () => {
+      const el = mount(<ProjectPagesSection {...props({ cwd: '/proj', knowledge: [NEW_K, OLD_K] })} />)
+      await flush()
+      return el
+    }
+    const row = (el: HTMLElement, i: number) => el.querySelectorAll('li')[i] as HTMLElement
+    const tid = (r: HTMLElement, id: string) => r.querySelector(`[data-testid="${id}"]`) as HTMLElement
+    const typeTitle = (input: HTMLInputElement, v: string) => {
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(input, v)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+    const enter = (input: HTMLInputElement) =>
+      act(async () => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        await Promise.resolve()
+      })
+
+    it('Enter saves the inline title edit via projectPages.rename', async () => {
+      const el = await mountK()
+      act(() => tid(row(el, 1), 'entry-rename').click())
+      const input = tid(row(el, 1), 'entry-rename-input') as HTMLInputElement
+      expect(input.value).toBe('Older page')
+      typeTitle(input, '  Renamed  ')
+      await enter(input)
+      expect(rename).toHaveBeenCalledWith('/proj', 'knowledge', 'a', 'Renamed')
+      expect(tid(row(el, 1), 'entry-rename-input')).toBeNull()
+    })
+
+    it('Delete asks to confirm, then calls projectPages.delete', async () => {
+      const el = await mountK()
+      act(() => tid(row(el, 0), 'entry-delete').click())
+      expect(del).not.toHaveBeenCalled()
+      await act(async () => {
+        tid(row(el, 0), 'entry-delete-confirm').click()
+        await Promise.resolve()
+      })
+      expect(del).toHaveBeenCalledWith('/proj', 'knowledge', 'b')
+    })
+
+    it('cancel leaves the entry alone', async () => {
+      const el = await mountK()
+      act(() => tid(row(el, 0), 'entry-delete').click())
+      act(() => tid(row(el, 0), 'entry-delete-cancel').click())
+      expect(del).not.toHaveBeenCalled()
+      expect(tid(row(el, 0), 'entry-delete')).not.toBeNull()
+    })
+
+    it('failures surface as an error toast', async () => {
+      rename.mockRejectedValue(new Error('meta.json invalid'))
+      del.mockRejectedValue(new Error('entry not found'))
+      const el = await mountK()
+      act(() => tid(row(el, 0), 'entry-rename').click())
+      const input = tid(row(el, 0), 'entry-rename-input') as HTMLInputElement
+      typeTitle(input, 'New')
+      await enter(input)
+      act(() => tid(row(el, 1), 'entry-delete').click())
+      await act(async () => {
+        tid(row(el, 1), 'entry-delete-confirm').click()
+        await Promise.resolve()
+      })
+      const msgs = useToast.getState().toasts.map((t) => [t.kind, t.message])
+      expect(msgs).toEqual([
+        ['error', 'Rename failed: meta.json invalid'],
+        ['error', 'Delete failed: entry not found'],
+      ])
+    })
+
+    it('shows no actions without a cwd', async () => {
+      const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K] })} />)
+      await flush()
+      expect(el.querySelector('[data-testid="entry-rename"]')).toBeNull()
     })
   })
 })

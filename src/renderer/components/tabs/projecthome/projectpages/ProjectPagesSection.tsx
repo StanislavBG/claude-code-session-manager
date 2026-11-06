@@ -225,6 +225,7 @@ function createdLabel(entry: { mtimeMs: number; meta: { createdAt: string } | nu
 function knowledgeRow(e: ProjectKnowledgeEntry): LibraryRow {
   return {
     id: e.id,
+    title: e.meta?.title,
     content: e.meta ? (
       <span className="flex flex-col gap-0.5">
         <span className="font-semibold">{e.meta.title}</span>
@@ -240,6 +241,7 @@ function videoRow(e: ProjectVideoEntry): LibraryRow {
   const m = e.meta
   return {
     id: e.id,
+    title: m?.title,
     content: m ? (
       <span className="flex flex-col gap-0.5">
         <span className="font-semibold">{m.title}</span>
@@ -258,6 +260,7 @@ function videoRow(e: ProjectVideoEntry): LibraryRow {
 }
 
 export function ProjectPagesSection({
+  cwd,
   knowledge,
   videos,
   loaded,
@@ -267,6 +270,7 @@ export function ProjectPagesSection({
   jobStatus,
   onOpenSession,
 }: {
+  cwd?: string | null
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
   loaded: boolean
@@ -320,6 +324,8 @@ export function ProjectPagesSection({
             <ProjectLibraryList
               label="Knowledge pages"
               itemTestId="knowledge-page-item"
+              cwd={cwd}
+              kind="knowledge"
               rows={knowledge.map(knowledgeRow)}
               selectedId={selectedK?.id ?? null}
               onSelect={setKnowledgeId}
@@ -328,6 +334,8 @@ export function ProjectPagesSection({
             <ProjectLibraryList
               label="Videos"
               itemTestId="video-item"
+              cwd={cwd}
+              kind="video"
               rows={videos.map(videoRow)}
               selectedId={selectedV?.id ?? null}
               onSelect={setVideoId}

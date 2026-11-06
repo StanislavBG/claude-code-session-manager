@@ -49,6 +49,7 @@ function ProjectHomeComponent() {
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
         <ProjectPagesSection
+          cwd={cwd}
           knowledge={knowledge}
           videos={videos}
           loaded={loaded}

@@ -382,6 +382,8 @@ contextBridge.exposeInMainWorld('api', {
     get: (cwd) => ipcRenderer.invoke('project-pages:get', { cwd }),
     watch: (cwd) => ipcRenderer.invoke('project-pages:watch', { cwd }),
     unwatch: (cwd) => ipcRenderer.invoke('project-pages:unwatch', { cwd }),
+    rename: (cwd, kind, id, title) => ipcRenderer.invoke('project-pages:rename', { cwd, kind, id, title }),
+    delete: (cwd, kind, id) => ipcRenderer.invoke('project-pages:delete', { cwd, kind, id }),
     onChanged: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('project-pages:changed', listener);

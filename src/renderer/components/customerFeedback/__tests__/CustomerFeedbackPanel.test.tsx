@@ -146,6 +146,33 @@ describe('CustomerFeedbackPanel', () => {
     expect(q('customer-feedback-list')!.textContent).toContain('shipped')
   })
 
+  it('free-hour link opens the booking URL and does not submit or close', async () => {
+    const open = vi.fn(async () => ({ ok: true }))
+    const submit = vi.fn(async () => {})
+    useCustomerFeedback.setState({ submit })
+    ;(window as unknown as { api: unknown }).api = { shell: { open } }
+    await mount()
+    await act(async () => {
+      q('customer-feedback-free-hour-link')!.click()
+    })
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(open).toHaveBeenCalledWith({
+      as: 'external',
+      url: 'https://bilko.run/book?utm_source=session-manager&utm_medium=app',
+    })
+    expect(submit).not.toHaveBeenCalled()
+    expect(spies.closePanel).not.toHaveBeenCalled()
+  })
+
+  it('free-hour line carries no price text', async () => {
+    await mount()
+    expect(q('customer-feedback-free-hour')).not.toBeNull()
+    const text = q('customer-feedback-panel')!.textContent ?? ''
+    expect(text).not.toContain('$')
+    expect(text).not.toContain('per hour')
+    expect(text).not.toContain('pricing')
+  })
+
   it('renders a <script> title as literal text', async () => {
     useCustomerFeedback.setState({ items: [item({ title: '<script>alert(1)</script>' })] })
     await mount()

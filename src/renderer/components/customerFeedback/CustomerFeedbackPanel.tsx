@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Z } from '../../lib/zLayers'
 import { useCustomerFeedback } from '../../state/customerFeedback'
+import { openFreeHour } from '../../lib/freeHour'
 import { CustomerFeedbackInbox } from './CustomerFeedbackInbox'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
@@ -175,6 +176,18 @@ export function CustomerFeedbackPanel() {
               {submitting ? 'Sending…' : 'Submit'}
             </button>
           </form>
+
+          <p className="m-0 text-[12.5px] text-fg-dim" data-testid="customer-feedback-free-hour">
+            Rather talk it through?{' '}
+            <button
+              type="button"
+              className="font-semibold text-accent hover:underline"
+              data-testid="customer-feedback-free-hour-link"
+              onClick={openFreeHour}
+            >
+              Book a free hour with Bilko
+            </button>
+          </p>
 
           <section className="grid gap-2" data-testid="customer-feedback-list">
             <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-dim">Your feedback</h3>

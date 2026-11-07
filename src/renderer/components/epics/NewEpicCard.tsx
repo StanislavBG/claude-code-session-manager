@@ -22,6 +22,7 @@ import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
+import { draftFieldsFromEpic, hasDraftContent, isEditableDraft } from '../../lib/epicDraft'
 
 const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
 
@@ -94,12 +95,22 @@ const GUARD_RESTART_MESSAGE =
 export function NewEpicCard({
   onCreated,
   onCancel,
+  draftEpic,
+  onDraftSaved,
 }: {
   onCreated: (id: string) => void
   onCancel: () => void
+  /** A saved 'proposed' draft to reopen: every field is prefilled from it. */
+  draftEpic?: PromptSession
+  onDraftSaved?: (id: string) => void
 }) {
   const createPromptSession = usePromptSessions((s) => s.createPromptSession)
   const approveProposed = usePromptSessions((s) => s.approveProposed)
+  const updateProposedDraft = usePromptSessions((s) => s.updateProposedDraft)
+  const markCompleted = usePromptSessions((s) => s.markCompleted)
+  // Edit mode only for a human-saved proposed draft; fields seeded once on mount.
+  const editDraft = draftEpic && isEditableDraft(draftEpic) ? draftEpic : null
+  const [seed] = useState(() => (editDraft ? draftFieldsFromEpic(editDraft) : null))
   const allEpics = usePromptSessions((s) => s.sessions)
   const { projects } = useKnownProjects()
   const tabs = useSessions((s) => s.tabs)
@@ -111,27 +122,33 @@ export function NewEpicCard({
   // "projects" to hydrate Epics for. See lib/knownProjectAggregate.ts.
   const knownCwds = useMemo(() => projects.map((p) => p.cwd), [projects])
 
-  const [cwd, setCwd] = useState('')
-  const [title, setTitle] = useState('')
-  const [goal, setGoal] = useState('')
-  const [tag, setTag] = useState<EpicTag | null>('feature')
+  const [cwd, setCwd] = useState(editDraft?.cwd ?? '')
+  const [title, setTitle] = useState(seed?.title ?? '')
+  const [goal, setGoal] = useState(seed?.goal ?? '')
+  const [tag, setTag] = useState<EpicTag | null>(seed ? ((seed.tag as EpicTag | null) ?? null) : 'feature')
+  // Reference paths already saved on the draft; removable, merged ahead of new attachments.
+  const [savedRefs, setSavedRefs] = useState<string[]>(seed?.referencePaths ?? [])
   // '' only until the Agent Library resolves (or when it is genuinely empty) —
   // there is no "Default" pseudo-agent, the real 'architect' persona is the
   // default pick, so the pinned "who is working" tile always names a real one.
-  const [agentName, setAgentName] = useState('')
+  const [agentName, setAgentName] = useState(seed?.agentName ?? '')
   const { personas: agents } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load Agent Library'))
   // Tracks whether the human has clicked an Agent chip, so the async
   // 'architect' default (set once listPersonas() resolves) never clobbers
   // a manual pick made before or after that resolution.
-  const agentTouchedRef = useRef(false)
+  const agentTouchedRef = useRef(Boolean(seed))
   const att = useAttachments()
   const [creating, setCreating] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [advanced, setAdvanced] = useState(false)
   // Per-Epic runtime overrides ('' = use the agent's own). Re-seeded to '' whenever the agent changes.
-  const [modelOverride, setModelOverride] = useState('')
-  const [effortOverride, setEffortOverride] = useState('')
+  const [modelOverride, setModelOverride] = useState(seed?.model ?? '')
+  const [effortOverride, setEffortOverride] = useState(seed?.effort ?? '')
+  // Only a real agent CHANGE re-seeds the overrides — the mount run must not wipe a draft's.
+  const prevAgentRef = useRef(agentName)
   useEffect(() => {
+    if (prevAgentRef.current === agentName) return
+    prevAgentRef.current = agentName
     setModelOverride('')
     setEffortOverride('')
   }, [agentName])
@@ -159,9 +176,9 @@ export function NewEpicCard({
   // there is one source of truth per key instead of a stored value plus a
   // synchronization effect fighting over it — a tag change simply changes
   // what an UNtouched key falls back to.
-  const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>({})
+  const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>(seed?.injections ?? {})
   // null = the human has not touched the Develop loop checkbox; once set, it always wins.
-  const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(null)
+  const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(seed ? seed.developLoop : null)
 
   // Default the Actor once the personas first resolve (never after a human pick).
   useEffect(() => {
@@ -220,6 +237,7 @@ export function NewEpicCard({
   })
   const trimmedGoal = goal.trim()
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
+  const canSaveDraft = Boolean(effectiveCwd) && hasDraftContent({ title, goal, referenceCount: savedRefs.length + att.items.length })
   effectiveCwdRef.current = effectiveCwd
 
   // Read-only "what will this Agent actually run as" readout for the mono
@@ -318,28 +336,17 @@ export function NewEpicCard({
     setBoard(null)
     setInjectionOverrides({})
     setDevelopLoopOverride(null)
+    setSavedRefs([])
     att.clear()
   }
 
-  const handleCreate = async () => {
-    if (!canCreate || creating) return
-    setCreating(true)
-    try {
-    // goalText and the opening prompt come from one composer (lib/epicIntake)
-    // so the Epic's stored identity and the message the agent actually reads
-    // can't drift. Both are written exactly once: an Epic's title/objective
-    // are fixed for the life of its session by design — iteration happens in
-    // follow-up messages, not by rewriting the goal.
-    // Pasted-clipboard images have no filesystem path until they are saved,
-    // so resolve every attachment to a real path BEFORE folding it into the
-    // goal text — otherwise the reference line names a file that never
-    // existed (PRD 865).
-    const referencePaths = await resolveAttachmentPaths(att.items, effectiveCwd)
-    // AIM's "Input" line: reuse the cached grounding board if "advanced" was
-    // already opened; otherwise compute it fresh here (same real fs/IPC
-    // reads the board UI performs, no separate code path) so every Epic
-    // states what it's grounded in, not just the ones where the human
-    // happened to flip the card open.
+  // The ONE intake builder shared by Start, Save draft and edit-mode Start, so
+  // the three can never drift: resolve references, grounding, persona body,
+  // then compose. Saved draft references come first, new attachments after.
+  const buildIntake = async () => {
+    // Pasted images have no path until saved — resolve before folding into goalText (PRD 865).
+    const referencePaths = [...savedRefs, ...(await resolveAttachmentPaths(att.items, effectiveCwd))]
+    // AIM's "Input" line: reuse the cached board, else compute the same reads fresh.
     const groundingForPrompt =
       board ??
       (home
@@ -352,16 +359,11 @@ export function NewEpicCard({
             otherEpicsInProject: Object.values(allEpics).filter((e) => e.cwd === effectiveCwd).length,
           }).catch(() => null)
         : null)
-    // The persona's own operating rules — Claude Code only loads a persona's
-    // markdown BODY when the file runs as a subagent, never for an Epic's
-    // main loop, so without this only agentDescription's one-liner ever
-    // reaches the session. Resolved with project-overlay-then-global
-    // precedence for effectiveCwd (unlike selectedAgent.body, which is
-    // global-dir only), best-effort — a read failure just omits the section.
+    // Claude Code only loads a persona's BODY for subagents, so inject it here (best-effort).
     const personaBody = selectedAgent
       ? await window.api.agents.getPersonaBody({ cwd: effectiveCwd, name: selectedAgent.name }).catch(() => null)
       : null
-    const { goalText, openingPrompt, sections } = composeEpicIntake({
+    const intake = composeEpicIntake({
       title,
       goal,
       referencePaths,
@@ -373,25 +375,85 @@ export function NewEpicCard({
       inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt, readiness) : undefined,
       contextInjections: contextInjectionsOn,
     })
-    // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
-    // Submitting this form is not a second kind of creation — it is the one
-    // 'proposed -> active' transition, the same one EpicApprovalBar's
-    // Approve & start takes. createPromptSession can only ever mint
-    // 'proposed', so this call and the approveProposed below are what perform
-    // that transition.
-    // See prompt-sessions/README.md#lifecycle.
-    // openingPrompt/sections are persisted on the Epic (not just sent into
-    // chat below) so its first turn can render as a structured AIM briefing
-    // card rather than only a flat prose bubble — see EpicIntakeCard.
     const runtime = { model: modelOverride || undefined, effort: effortOverride || undefined, ...(developLoop ? {} : { developLoop: false }) }
-    const session = selectedAgent
-      ? await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard', selectedAgent.name, openingPrompt, sections, runtime)
-      : await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard', undefined, openingPrompt, sections, runtime)
-    approveProposed(session.id, 'NewEpicCard')
-    // Send the objective straight into the Epic's session, so it opens already
-    // waiting on the agent — the user has just typed the goal, there is
-    // nothing further for them to enter. Chat (not PRD dispatch) on purpose:
-    // the first turn is the agent's response, which the user then acts on.
+    return { ...intake, runtime }
+  }
+
+  // Edit-mode write: re-save the draft in place (never mints). Null clears a key.
+  const saveEditedDraft = async (draft: PromptSession, intake: Awaited<ReturnType<typeof buildIntake>>) => {
+    await updateProposedDraft(draft.id, {
+      goalText: intake.goalText,
+      tag: tag ?? null,
+      agentType: selectedAgent?.name ?? null,
+      model: modelOverride || null,
+      effort: effortOverride || null,
+      developLoop,
+      openingPrompt: intake.openingPrompt,
+      sections: intake.sections,
+    }, 'NewEpicCard')
+  }
+
+  const handleSaveDraft = async () => {
+    if (!canSaveDraft || creating) return
+    setCreating(true)
+    try {
+      const intake = await buildIntake()
+      let id: string
+      if (editDraft) {
+        await saveEditedDraft(editDraft, intake)
+        id = editDraft.id
+      } else {
+        // Born 'proposed' and left there: no approveProposed, no chat send.
+        const { goalText, openingPrompt, sections, runtime } = intake
+        const session = selectedAgent
+          ? await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard save-draft', selectedAgent.name, openingPrompt, sections, runtime)
+          : await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard save-draft', undefined, openingPrompt, sections, runtime)
+        id = session.id
+      }
+      toast.success('Draft saved')
+      resetForm()
+      onDraftSaved?.(id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDiscard = async () => {
+    if (!editDraft || creating) return
+    setCreating(true)
+    try {
+      await markCompleted(editDraft.id, 'NewEpicCard discard draft')
+      resetForm()
+      onCancel()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleCreate = async () => {
+    if (!canCreate || creating) return
+    setCreating(true)
+    try {
+    // Every Epic is BORN 'proposed'; Start is the one 'proposed -> active'
+    // transition (approveProposed). A reopened draft is already minted, so it
+    // is re-saved and approved under the same id. See prompt-sessions/README.md#lifecycle.
+    const intake = await buildIntake()
+    const { goalText, openingPrompt, sections, runtime } = intake
+    let session: { id: string; claudeSessionId: string }
+    if (editDraft) {
+      await saveEditedDraft(editDraft, intake)
+      session = editDraft
+    } else {
+      session = selectedAgent
+        ? await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard', selectedAgent.name, openingPrompt, sections, runtime)
+        : await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard', undefined, openingPrompt, sections, runtime)
+    }
+    approveProposed(session.id, 'NewEpicCard', editDraft ? { openingPrompt, sections } : undefined)
+    // Chat (not PRD dispatch): the first turn is the agent's response.
     useChat.getState().send({
       tabId: session.id,
       sessionId: session.claudeSessionId,
@@ -659,6 +721,28 @@ export function NewEpicCard({
                 references{att.items.length ? ` · ${att.items.length}` : ''}
               </span>
             </div>
+            {savedRefs.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="new-epic-saved-refs">
+                {savedRefs.map((p) => (
+                  <span
+                    key={p}
+                    data-testid="new-epic-saved-ref"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg px-2 py-1 font-mono text-[11px] text-fg-dim"
+                  >
+                    {p}
+                    <button
+                      type="button"
+                      data-testid="new-epic-saved-ref-remove"
+                      aria-label={`Remove reference ${p}`}
+                      onClick={() => setSavedRefs((prev) => prev.filter((x) => x !== p))}
+                      className="text-fg-faint hover:text-fg"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <AttachTray att={att} testId="new-epic-attach-tray" />
             </div>
 
@@ -673,6 +757,17 @@ export function NewEpicCard({
                 ⤺ Grounding{board ? ` · ${sourceCount} sources` : ''}
               </button>
               <span className="ml-auto flex gap-1.5">
+                {editDraft && (
+                  <button
+                    type="button"
+                    data-testid="new-epic-discard-draft"
+                    onClick={() => void handleDiscard()}
+                    disabled={creating}
+                    className="rounded-md border border-line bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-40"
+                  >
+                    Discard draft
+                  </button>
+                )}
                 <button
                   type="button"
                   data-testid="new-epic-cancel"
@@ -680,6 +775,15 @@ export function NewEpicCard({
                   className="rounded-md border border-line bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-epic-save-draft"
+                  onClick={() => void handleSaveDraft()}
+                  disabled={!canSaveDraft || creating}
+                  className="rounded-md border border-accent-muted bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-accent hover:bg-bg-elev disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save draft
                 </button>
                 <button
                   type="button"
@@ -858,12 +962,30 @@ export function NewEpicCard({
               </button>
               <span className="ml-auto flex items-center gap-2.5">
                 <span className="font-mono text-[11px] text-fg-faint">{sourceCount} sources · {tokenTotal.toFixed(1)}k</span>
+                {editDraft && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDiscard()}
+                    disabled={creating}
+                    className="rounded-md border border-line bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-40"
+                  >
+                    Discard draft
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleCancel}
                   className="rounded-md border border-line bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveDraft()}
+                  disabled={!canSaveDraft || creating}
+                  className="rounded-md border border-accent-muted bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-accent hover:bg-bg-elev disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save draft
                 </button>
                 <button
                   type="button"

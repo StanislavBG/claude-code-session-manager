@@ -164,11 +164,8 @@ Missing numbers show `-`.
 
 - Pages / videos: `window.api.projectPages.get` (unchanged) via `useProjectPagesOutput`;
   rename / delete via the existing `projectPages.rename` / `projectPages.delete`.
-- Builds: `window.api.macros.dispatchJob({ cwd, macroId, epicId, extraInstructions,
-  replaceEntryId? })` — **new optional `replaceEntryId`** (validated `^[a-z0-9][a-z0-9-]{0,63}$`,
-  else refused) makes `Regenerate…` rebuild that entry in place (both writers already replace an
-  existing id); the result gains `entryId`. Job state: `macros.jobStatus` (unchanged).
-- Link map: **new** `window.api.projectHome.mdNetwork({ cwd })` → `MdNetworkResult`:
+- Builds: the existing `onLaunch(macro, extraInstructions)` → `useMacroLaunch` → background job (unchanged API). `Regenerate…` appends a `Replace entry: <id>` line; `macroJobDispatch.cjs` `entryIdFor` uses it as the entry id when it matches `^[a-z0-9][a-z0-9-]{0,63}$` (else ignores it), so the rebuild replaces that entry in place (both writers already replace an existing id). Job state: `macros.jobStatus` (unchanged).
+- Link map: **new** `window.api.projectPages.mdNetwork({ cwd })` (IPC `project-pages:md-network`) → `MdNetworkResult`:
   `{ ok: true, root: 'CLAUDE.md', nodes: MdNode[], edges: MdEdge[], findings: MdFinding[],
   docs: number, links: number, scopes: string[] } | { ok: false, error: string }` computed by
   `src/main/lib/mdNetworkScan.cjs` from `git ls-files` `*.md` (≤ 2000 files, ≤ 256 KB each read),

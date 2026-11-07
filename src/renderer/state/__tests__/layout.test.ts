@@ -69,8 +69,8 @@ describe('layout.ts useLayout store', () => {
 
   it('openPanel focuses an already-registered panel', () => {
     useLayout.setState({ focusedPanelId: null })
-    useLayout.getState().openPanel('skills')
-    expect(useLayout.getState().focusedPanelId).toBe('skills')
+    useLayout.getState().openPanel('extensions')
+    expect(useLayout.getState().focusedPanelId).toBe('extensions')
   })
 
   it('openPanel is a no-op for an unregistered id', () => {
@@ -93,7 +93,7 @@ describe('layout.ts focusToken (Workbench regression: openPanel-same-id must sti
     // no token bump), then re-opens 'terminal' from the sidebar — this must
     // still bump the token so Workbench's mount effect re-fires, even though
     // focusedPanelId ends up back at 'terminal' either way.
-    useLayout.getState().focusPanel('skills')
+    useLayout.getState().focusPanel('extensions')
     useLayout.getState().openPanel('terminal')
     expect(useLayout.getState().focusToken).toBeGreaterThan(afterFirst)
     expect(useLayout.getState().focusedPanelId).toBe('terminal')
@@ -108,9 +108,9 @@ describe('layout.ts focusToken (Workbench regression: openPanel-same-id must sti
 
   it('focusPanel (dockview-mirrored activation) does not bump focusToken', () => {
     const before = useLayout.getState().focusToken
-    useLayout.getState().focusPanel('skills')
+    useLayout.getState().focusPanel('extensions')
     expect(useLayout.getState().focusToken).toBe(before)
-    expect(useLayout.getState().focusedPanelId).toBe('skills')
+    expect(useLayout.getState().focusedPanelId).toBe('extensions')
   })
 
   it('openPanel/focusPanel for an unregistered id leaves focusToken unchanged', () => {
@@ -186,12 +186,12 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
     }
   })
 
-  // PRD 963: system-prompt/skills/mcp/hooks/permissions/settings moved to
+  // PRD 963: system-prompt/extensions/settings moved to
   // HOME-only. A face-agnostic entry point (CommandPalette's nav:* commands)
   // can still call openPanel for one of these while navFace is 'project' —
   // it must land on the Home face, not leave the Project sidebar showing
   // while a Home-only screen renders.
-  it.each(['system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings'])(
+  it.each(['system-prompt', 'extensions', 'settings', 'app-settings'])(
     'openPanel("%s") asserts navFace "home" even from "project"',
     (key) => {
       useLayout.setState({ navFace: 'project' })
@@ -224,10 +224,10 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
     useLayout.getState().focusPanel('scheduler')
     expect(useLayout.getState().navFace).toBe('project')
 
-    // 'skills' is now HOME-only (navGroups.ts, PRD 963) — focusing it must
+    // 'extensions' is now HOME-only (navGroups.ts, PRD 963) — focusing it must
     // assert navFace: 'home' even from 'project', same as 'overview'.
     useLayout.setState({ navFace: 'project' })
-    useLayout.getState().focusPanel('skills')
+    useLayout.getState().focusPanel('extensions')
     expect(useLayout.getState().navFace).toBe('home')
   })
 
@@ -246,17 +246,17 @@ describe('layout.ts panel-focus predicate (backs usePanelFocus)', () => {
   it('is true only for the currently focused panel id', () => {
     const isFocused = (id: string) => useLayout.getState().focusedPanelId === id
     expect(isFocused('terminal')).toBe(true)
-    expect(isFocused('skills')).toBe(false)
+    expect(isFocused('extensions')).toBe(false)
   })
 
   it('transitions when focusedPanelId changes via openPanel or focusPanel', () => {
     const isFocused = (id: string) => useLayout.getState().focusedPanelId === id
-    useLayout.getState().openPanel('skills')
+    useLayout.getState().openPanel('extensions')
     expect(isFocused('terminal')).toBe(false)
-    expect(isFocused('skills')).toBe(true)
+    expect(isFocused('extensions')).toBe(true)
 
     useLayout.getState().focusPanel('editor')
-    expect(isFocused('skills')).toBe(false)
+    expect(isFocused('extensions')).toBe(false)
     expect(isFocused('editor')).toBe(true)
   })
 })

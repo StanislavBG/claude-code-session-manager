@@ -201,7 +201,7 @@ describe('AlmanacSidebar', () => {
       const text = container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
       expect(text).toContain('Workspace')
       expect(text).toContain('Where you do the work — sessions, files, and everything currently running.')
-      expect(text).toContain('Configure')
+      expect(text).toContain('Claude Code')
       expect(text).toContain('How Claude behaves — changes here apply to every session you start.')
     } finally {
       act(() => root.unmount())
@@ -209,7 +209,7 @@ describe('AlmanacSidebar', () => {
     }
   })
 
-  it('shows the Tools group with Voice on the home face', () => {
+  it('shows the Session Manager group with App Settings on the home face', () => {
     useLayout.setState({ navFace: 'home' })
     const { container, root } = mount()
     try {
@@ -217,10 +217,9 @@ describe('AlmanacSidebar', () => {
       expect(nav).not.toBeNull()
       const text = nav?.textContent ?? ''
 
-      expect(text).toContain('Tools')
-      expect(text).toContain('One-off utilities — not configuration, just things you reach for sometimes.')
-      expect(text).toContain('Voice')
-      expect(text).toContain('On-device transcription + push-to-talk')
+      expect(text).toContain('Session Manager')
+      expect(text).toContain('App Settings')
+      expect(text).toContain('Voice, appearance, telemetry, phone remote, updates, storage map')
     } finally {
       act(() => root.unmount())
       container.remove()

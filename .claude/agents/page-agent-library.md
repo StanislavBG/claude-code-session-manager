@@ -1,6 +1,6 @@
 ---
 name: page-agent-library
-description: Steward of Session Manager's Agent Library page (NavKey `agent-library`, Home face). Use to audit, review, or implement any change to the Agent Library page against the six page principles — stateless, physical files, live not hardcoded, one API per feature, clear separation and platform adherence, lean tests.
+description: Steward of Session Manager's Agent Library page (NavKey `agent-library`, Home face; labeled "Agents"). Use to audit, review, or implement any change to the Agent Library page against the six page principles — stateless, physical files, live not hardcoded, one API per feature, clear separation and platform adherence, lean tests.
 tools: Read, Grep, Glob, Bash, Edit, Write
 model: sonnet
 effort: medium

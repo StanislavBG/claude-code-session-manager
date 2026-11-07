@@ -5,14 +5,12 @@
  *
  * Two row layouts over the same `getNavItemsForFace(navFace)` list:
  * the HOME face renders the three collapsible nav groups (Workspace /
- * Configure / Tools); the PROJECT face — and rail mode on either face —
+ * Claude Code / Session Manager); the PROJECT face — and rail mode on either face —
  * renders one flat list in NAV_ITEMS order, since a handful of rows doesn't
  * warrant three section headers.
  *
- * Click handlers come in via props. Workspace + Configure items navigate via
- * `onNavigate(NavKey)` (these render as full pages in MainPane). Tools items
- * open existing modals via dedicated callbacks the same way the old Header
- * wired them, so no modal logic needs to change.
+ * Click handlers come in via props: every row navigates via `onNavigate(NavKey)`
+ * (each renders as a full page in MainPane).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -26,7 +24,7 @@ import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
-import { NAV_GROUP_DESCRIPTIONS, getNavItemsForFace, type NavGroupItem } from '../../lib/navGroups'
+import { NAV_GROUP_DESCRIPTIONS, getNavItemsForFace, type NavGroupItem, type NavGroupLabel } from '../../lib/navGroups'
 import type { NavFace } from '../../lib/navFace'
 import {
   useUiChromePrefs,
@@ -34,38 +32,19 @@ import {
   SIDEBAR_WIDTH_DEFAULT,
 } from '../../state/uiChromePrefs'
 
-// v0.13.1 — Tools are now full pages too. We still keep them in a separate
-// group below Configure so users see them as workflow surfaces (not
-// configuration). Same NavKey type as Workspace/Configure rows.
-type ToolKey = Extract<NavKey,
-  | 'voice'
->
 void useBilling; void useMemo // (kept for future signal additions)
-
-interface ToolItem {
-  key: ToolKey
-  label: string
-  icon: AlmanacIconName
-  hint?: string
-}
-
-function toolItems(items: NavGroupItem[]): ToolItem[] {
-  return items
-    .filter((item): item is NavGroupItem & { key: ToolKey } => item.group === 'Tools')
-    .map(({ key, label, icon, hint }) => ({ key, label, icon, hint }))
-}
 
 // Rail (collapsed) sidebar — fixed icon-only width, persisted across launches.
 const RAIL_WIDTH = 52
 
-// Collapsible nav groups. Each section header (Workspace / Configure / Tools)
+// Collapsible nav groups. Each section header (Workspace / Claude Code / Session Manager)
 // can be folded away independently; the set of collapsed group names is
 // persisted as a JSON array through `uiChromePrefs`.
-type GroupName = 'Workspace' | 'Configure' | 'Tools'
+type GroupName = NavGroupLabel
 
 function toGroupNameSet(groups: string[]): Set<GroupName> {
   return new Set(groups.filter((s): s is GroupName =>
-    s === 'Workspace' || s === 'Configure' || s === 'Tools'))
+    s === 'Workspace' || s === 'Claude Code' || s === 'Session Manager'))
 }
 
 function useLiveIndicators() {
@@ -131,8 +110,8 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   const navFace: NavFace = useLayout((s) => s.navFace)
   const items = getNavItemsForFace(navFace)
   const workspace = items.filter((item) => item.group === 'Workspace')
-  const configure = items.filter((item) => item.group === 'Configure')
-  const tools = toolItems(items)
+  const claudeCode = items.filter((item) => item.group === 'Claude Code')
+  const sessionManager = items.filter((item) => item.group === 'Session Manager')
   // Section headers are a HOME-face affordance only. The Project face is a
   // short flat list; rail mode has never rendered headers either.
   const sectioned = navFace === 'home' && !rail
@@ -197,26 +176,16 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
           // cost more chrome than they buy; grouping still exists in
           // navGroups.ts and still drives the page eyebrow.
           <div className="pt-2">
-            {items.map((item) =>
-              item.group === 'Tools' ? (
-                <ToolRow
-                  key={item.key}
-                  tool={{ key: item.key as ToolKey, label: item.label, icon: item.icon, hint: item.hint }}
-                  active={active === item.key}
-                  onClick={() => onNavigate(item.key)}
-                  rail={rail}
-                />
-              ) : (
-                <NavRow
-                  key={item.key}
-                  item={item}
-                  active={active === item.key}
-                  live={item.liveKind ? indicators[item.liveKind] : false}
-                  onClick={() => onNavigate(item.key)}
-                  rail={rail}
-                />
-              ),
-            )}
+            {items.map((item) => (
+              <NavRow
+                key={item.key}
+                item={item}
+                active={active === item.key}
+                live={item.liveKind ? indicators[item.liveKind] : false}
+                onClick={() => onNavigate(item.key)}
+                rail={rail}
+              />
+            ))}
           </div>
         ) : (
           // Sectioned list — HOME face, expanded. `sectioned` already excludes
@@ -241,13 +210,13 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
             ))}
 
             <NavGroupHeader
-              label="Configure"
-              desc={NAV_GROUP_DESCRIPTIONS.Configure}
-              collapsed={collapsed.has('Configure')}
-              count={configure.length}
-              onToggle={() => toggleGroup('Configure')}
+              label="Claude Code"
+              desc={NAV_GROUP_DESCRIPTIONS['Claude Code']}
+              collapsed={collapsed.has('Claude Code')}
+              count={claudeCode.length}
+              onToggle={() => toggleGroup('Claude Code')}
             />
-            {!collapsed.has('Configure') && configure.map((item) => (
+            {!collapsed.has('Claude Code') && claudeCode.map((item) => (
               <NavRow
                 key={item.key}
                 item={item}
@@ -258,21 +227,20 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               />
             ))}
 
-            {tools.length > 0 && (
-              <NavGroupHeader
-                label="Tools"
-                desc={NAV_GROUP_DESCRIPTIONS.Tools}
-                collapsed={collapsed.has('Tools')}
-                count={tools.length}
-                onToggle={() => toggleGroup('Tools')}
-              />
-            )}
-            {tools.length > 0 && !collapsed.has('Tools') && tools.map((tool) => (
-              <ToolRow
-                key={tool.key}
-                tool={tool}
-                active={active === tool.key}
-                onClick={() => onNavigate(tool.key)}
+            <NavGroupHeader
+              label="Session Manager"
+              desc={NAV_GROUP_DESCRIPTIONS['Session Manager']}
+              collapsed={collapsed.has('Session Manager')}
+              count={sessionManager.length}
+              onToggle={() => toggleGroup('Session Manager')}
+            />
+            {!collapsed.has('Session Manager') && sessionManager.map((item) => (
+              <NavRow
+                key={item.key}
+                item={item}
+                active={active === item.key}
+                live={false}
+                onClick={() => onNavigate(item.key)}
                 rail={false}
               />
             ))}
@@ -488,42 +456,6 @@ function NavRow({
       )}
       {rail && live && (
         <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="live activity" />
-      )}
-    </button>
-  )
-}
-
-function ToolRow({ tool, active, onClick, rail }: { tool: ToolItem; active: boolean; onClick: () => void; rail: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      title={tool.hint}
-      className={`relative w-full flex items-center rounded-[10px] text-left mb-0.5 transition-colors ${
-        rail ? 'justify-center px-0 py-[7px]' : 'gap-3 px-3.5 py-[7px] text-[13px]'
-      } ${
-        active
-          ? 'bg-bg-hi text-fg font-semibold border border-line'
-          : 'text-fg-dim hover:bg-bg-hi/50 hover:text-fg border border-transparent'
-      }`}
-    >
-      {active && (
-        <span
-          aria-hidden
-          className={`absolute top-1.5 bottom-1.5 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
-        />
-      )}
-      <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
-        <AlmanacIcon name={tool.icon} size={15} stroke={1.6} />
-      </span>
-      {!rail && (
-        <span className="flex-1 min-w-0">
-          <span className="block truncate">{tool.label}</span>
-          {tool.hint && (
-            <span className="block text-[11px] leading-[1.3] text-fg-faint/80 font-normal truncate">
-              {tool.hint}
-            </span>
-          )}
-        </span>
       )}
     </button>
   )

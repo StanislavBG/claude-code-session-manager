@@ -335,7 +335,7 @@ function checkDevPlugin({ homeDir }) {
       ...base,
       ok: false,
       detail: `${DEV_PLUGIN_ENABLED_KEY} missing from ~/.claude/settings.json enabledPlugins`,
-      fix: 'Turn on the switch for session-manager-dev in Plugins → Installed (writes ~/.claude/settings.json enabledPlugins)',
+      fix: 'Turn on the switch for session-manager-dev in Extensions › Plugins (writes ~/.claude/settings.json enabledPlugins)',
     };
   }
 
@@ -410,7 +410,7 @@ function checkAgentPersonas({ cwd, homeDir }) {
     detail: ok
       ? `${count} persona(s) across ~/.claude/agents/ and ${cwd}/.claude/agents/`
       : `no .md personas in ~/.claude/agents/ or ${cwd}/.claude/agents/`,
-    fix: ok ? null : 'Create a persona in the Agent Library tab',
+    fix: ok ? null : 'Create a persona on the Agents page',
   };
 }
 
@@ -542,7 +542,7 @@ function checkGuard(def, { cwd, homeDir = os.homedir() }) {
     detail,
     fix: ok
       ? null
-      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching ${def.matcher} that runs ${nodeShellCommand(guardShimPath(def.scriptBasename, homeDir))}${def.nudge ? ' (a nudge, not a hard gate)' : ''}`,
+      : `Add a PreToolUse hook (Settings › Hooks) to ${cwd}/.claude/settings.json matching ${def.matcher} that runs ${nodeShellCommand(guardShimPath(def.scriptBasename, homeDir))}${def.nudge ? ' (a nudge, not a hard gate)' : ''}`,
     fixAction: ok ? null : def.fixActionId,
   };
 }

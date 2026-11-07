@@ -4,7 +4,7 @@ import type { NavFace } from './navFace'
 
 /**
  * Single source of truth for the three-way nav taxonomy (Workspace /
- * Configure / Tools) over `NavKey`. Drives both AlmanacSidebar's grouped
+ * Claude Code / Session Manager) over `NavKey`. Drives both AlmanacSidebar's grouped
  * rows and MainPane's per-page eyebrow — a `NavKey` can only be assigned to
  * one group here, so the sidebar section and the page eyebrow can never
  * disagree.
@@ -21,7 +21,7 @@ import type { NavFace } from './navFace'
  * — the two used to share the label "Home", which was confusing since they
  * are different screens reachable from different tab faces.
  */
-export type NavGroupLabel = 'Workspace' | 'Configure' | 'Tools'
+export type NavGroupLabel = 'Workspace' | 'Claude Code' | 'Session Manager'
 
 export interface NavGroupItem {
   key: NavKey
@@ -67,23 +67,15 @@ export const NAV_ITEMS: NavGroupItem[] = [
   // screen. Reachable from the Home face only.
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Spend, tokens and time across every project', faces: HOME },
 
-  // Configure
-  { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Your ~/.claude/CLAUDE.md — house rules for every session on this machine', faces: HOME },
-  { key: 'skills',        group: 'Configure', label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads', faces: HOME },
-  { key: 'plugins',       group: 'Configure', label: 'Plugins',        icon: 'plugins',        hint: 'Extensions for Claude Code', faces: HOME },
-  { key: 'mcp',            group: 'Configure', label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations', faces: HOME },
-  { key: 'hooks',          group: 'Configure', label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events', faces: HOME },
-  { key: 'memory',         group: 'Configure', label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store', faces: PROJECT },
-  { key: 'permissions',    group: 'Configure', label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules', faces: HOME },
-  { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window — per-session model lives in Agent Library', faces: HOME },
-  { key: 'agent-library',  group: 'Configure', label: 'Agent Library',  icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
-  { key: 'tag-library',    group: 'Configure', label: 'Tag Library',    icon: 'target',         hint: 'Session intent tags and their /develop behavior', faces: HOME },
+  // Claude Code — files the claude CLI itself reads
+  { key: 'system-prompt', group: 'Claude Code', label: 'CLAUDE.md', icon: 'system-prompt', hint: 'Your ~/.claude/CLAUDE.md — house rules for every session on this machine', faces: HOME },
+  { key: 'memory',         group: 'Claude Code', label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store', faces: PROJECT },
+  { key: 'settings',       group: 'Claude Code', label: 'Settings',       icon: 'settings',       hint: 'settings.json — permissions, hooks, env and every other key, per scope', faces: HOME },
+  { key: 'extensions',     group: 'Claude Code', label: 'Extensions',     icon: 'plugins',        hint: 'Skills, MCP servers and plugins', faces: HOME },
+  { key: 'agent-library',  group: 'Claude Code', label: 'Agents',         icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
 
-  // Tools
-  { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'On-device transcription + push-to-talk', faces: HOME },
-  // Data Model is HOME-only: it diagrams the APPLICATION's own persisted
-  // shapes, identical for every project — same precedent as History above.
-  { key: 'data-model', group: 'Tools', label: 'Data Model', icon: 'compass',   hint: 'ERD of what Session Manager actually persists, and how it joins', faces: HOME },
+  // Session Manager — this app's own preferences
+  { key: 'app-settings', group: 'Session Manager', label: 'App Settings', icon: 'compass', hint: 'Voice, appearance, telemetry, phone remote, updates, storage map', faces: HOME },
 ]
 
 /**
@@ -134,6 +126,6 @@ export function isProjectOnlyNavKey(key: NavKey): boolean {
 
 export const NAV_GROUP_DESCRIPTIONS: Record<NavGroupLabel, string> = {
   Workspace: 'Where you do the work — sessions, files, and everything currently running.',
-  Configure: 'How Claude behaves — changes here apply to every session you start.',
-  Tools: 'One-off utilities — not configuration, just things you reach for sometimes.',
+  'Claude Code': 'How Claude behaves — changes here apply to every session you start.',
+  'Session Manager': 'This app\'s own preferences — voice, appearance, telemetry, updates.',
 }

@@ -4,10 +4,12 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TelemetryNotice } from '../TelemetryNotice'
+import { toast } from '../../state/toast'
 import type { TelemetryConfig } from '../../../preload/api'
 
 const base = { enabled: true, installId: 'x', noticeAckedAt: null } as unknown as TelemetryConfig
 const setConfig = vi.fn()
+const getConfig = vi.fn()
 let host: HTMLDivElement
 let root: Root
 
@@ -24,7 +26,9 @@ beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   setConfig.mockReset()
   setConfig.mockImplementation(async (c: TelemetryConfig) => ({ config: c, status: {} }))
-  ;(window as unknown as { api: unknown }).api = { telemetry: { setConfig } }
+  getConfig.mockReset()
+  getConfig.mockResolvedValue(base)
+  ;(window as unknown as { api: unknown }).api = { telemetry: { setConfig, getConfig } }
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -62,5 +66,15 @@ describe('TelemetryNotice', () => {
     const saved = setConfig.mock.calls[0][0]
     expect(saved.enabled).toBe(false)
     expect(typeof saved.noticeAckedAt).toBe('string')
+  })
+
+  it('surfaces a toast and does not save when getConfig rejects', async () => {
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => undefined as never)
+    getConfig.mockRejectedValue(new Error('boom'))
+    mount(base)
+    await click('OK')
+    expect(setConfig).not.toHaveBeenCalled()
+    expect(err).toHaveBeenCalledWith('boom')
+    err.mockRestore()
   })
 })

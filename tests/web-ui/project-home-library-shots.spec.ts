@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url)
 
 // Real Chromium (never Electron). Renders the real Project Home document (the
-// ProjectHomeKeyButtons + ProjectPagesSection shell) with CSS from the built web renderer (dist-web/app.css) and a stub
+// ProjectHomeKeyButtons + ProjectPagesSection shell, whose Pages tab is PagesPane) with CSS from the built web renderer (dist-web/app.css) and a stub
 // window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs for the validation record.
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation
 // plus an inverted render of the same page.
@@ -53,6 +53,12 @@ test('Project Home screenshots: knowledge + videos, light + dark', async () => {
       if (scheme === 'dark') await page.addStyleTag({ content: 'html{filter:invert(1) hue-rotate(180deg)}' })
 
       await expect(page.getByTestId('knowledge-page-item')).toHaveCount(2)
+      // Pages = PagesPane: Generate page + Regenerate…; the pages MacroButton and its kind/topic/extra inputs are gone.
+      await expect(page.getByTestId('project-home-generate')).toBeVisible()
+      await expect(page.getByTestId('project-home-regenerate')).toBeVisible()
+      await expect(
+        page.locator('[data-testid="project-home-macro"], [data-testid="project-home-page-kind"], [data-testid="project-home-page-topic"], [data-testid="project-home-macro-extra"]'),
+      ).toHaveCount(0)
       await page.frameLocator('iframe[title]').first().locator('h1').waitFor()
       await page.screenshot({ path: path.join(OUT, `knowledge-${scheme}.png`) })
 

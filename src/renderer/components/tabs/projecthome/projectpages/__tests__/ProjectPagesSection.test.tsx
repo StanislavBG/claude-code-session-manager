@@ -89,6 +89,20 @@ const show = async (over: Record<string, unknown>) => {
 }
 const macroBtn = (el: HTMLElement, id: string) =>
   el.querySelector(`[data-testid="project-home-macro"][data-macro-id="${id}"]`) as HTMLButtonElement
+/** PagesPane's controls; the Generate composer portals into document.body. */
+const byTestId = (id: string, scope: ParentNode = document) => scope.querySelector<HTMLElement>(`[data-testid="${id}"]`)
+const generateBtn = () => byTestId('project-home-generate') as HTMLButtonElement | null
+const typeInto = (el: HTMLElement | null, v: string) => {
+  const field = el as HTMLInputElement | HTMLTextAreaElement
+  const proto = field instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+  const setValue = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
+  act(() => {
+    setValue.call(field, v)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+/** The Overview template's default composer lines, joined. */
+const OVERVIEW_LINES = 'Page: Overview\nAudience: Newcomers\nLength: Standard\nRead from: README & docs, Source tree, Git log'
 
 describe('ProjectPagesSection', () => {
   it('while loading shows a loading body, no page switch, empty state or page button', () => {
@@ -98,6 +112,7 @@ describe('ProjectPagesSection', () => {
     expect(el.querySelector('[data-testid="knowledge-page-empty"]')).toBeNull()
     expect(el.querySelector('[data-testid="video-page-empty"]')).toBeNull()
     expect(macroBtn(el, 'builtin-project-home')).toBeNull()
+    expect(generateBtn()).toBeNull()
   })
 
   it('loaded with no entries shows each empty state', async () => {
@@ -171,9 +186,13 @@ describe('ProjectPagesSection', () => {
     act(() => (items[1] as HTMLElement).click())
     await flush()
     expect(el.querySelector('iframe[title="Older page"]')).not.toBeNull()
-    // toolbar: only the project-home macro
-    expect(macroBtn(el, 'builtin-project-home').textContent).toContain('Regenerate Project Home')
+    expect(items[1].getAttribute('aria-current')).toBe('true')
+    expect(byTestId('project-home-page-title', el)?.textContent).toBe('Older page')
+    // no toolbar MacroButton: PagesPane's Generate page + Regenerate… launch pages
+    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
     expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
+    expect(generateBtn()?.textContent).toBe('Generate page')
+    expect(byTestId('project-home-regenerate', el)?.textContent).toBe('Regenerate…')
   })
 
   it('keeps the selection when the list refreshes', async () => {
@@ -182,6 +201,17 @@ describe('ProjectPagesSection', () => {
     act(() => (el.querySelectorAll('[data-testid="knowledge-page-item"]')[1] as HTMLElement).click())
     act(() => root!.render(<ProjectPagesSection {...props({ knowledge: [kEntry('c', 'Newest', 3000), NEW_K, OLD_K] })} />))
     await flush()
+    expect(el.querySelector('iframe[title="Older page"]')).not.toBeNull()
+  })
+
+  it('keeps the page selection across key-button switches', async () => {
+    const over = { knowledge: [NEW_K, OLD_K], videos: [NEW_V] }
+    const el = mount(<ProjectPagesSection {...props(over)} />)
+    await flush()
+    act(() => (el.querySelectorAll('[data-testid="knowledge-page-item"]')[1] as HTMLElement).click())
+    await show({ ...over, tab: 'videos' })
+    await show({ ...over, tab: 'pages' })
+    expect(el.querySelector('[data-testid="knowledge-page-item"][aria-current="true"]')?.getAttribute('data-id')).toBe('a')
     expect(el.querySelector('iframe[title="Older page"]')).not.toBeNull()
   })
 
@@ -214,36 +244,39 @@ describe('ProjectPagesSection', () => {
     const onLaunch = vi.fn()
     const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
     expect(el.querySelector('iframe')).toBeNull()
-    expect(macroBtn(el, 'builtin-project-home').textContent).toContain('Generate Project Home')
+    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
     expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
-    act(() => macroBtn(el, 'builtin-project-home').click())
-    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
+    act(() => byTestId('project-home-generate', byTestId('knowledge-page-empty', el)!)!.click())
+    act(() => byTestId('composer-generate')!.click())
+    expect(onLaunch.mock.calls).toEqual([[HOME_MACRO, OVERVIEW_LINES]])
     await show({ onLaunch, tab: 'videos' })
+    expect(generateBtn()).toBeNull()
     expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Generate Demo Video')
     expect(macroBtn(el, 'builtin-project-home')).toBeNull()
     expect(el.querySelector('[data-testid="project-home-demo-length"]')).not.toBeNull()
   })
 
-  it('no extra-instructions input before anything exists; present once a page exists', async () => {
-    const empty = mount(<ProjectPagesSection {...props()} />)
-    expect(empty.querySelector('[data-testid="project-home-macro-extra"]')).toBeNull()
-    act(() => root!.render(<ProjectPagesSection {...props({ knowledge: [NEW_K] })} />))
-    await flush()
-    expect(empty.querySelector('[data-testid="project-home-macro-extra"]')).not.toBeNull()
+  it('pages render none of the old toolbar controls; videos keep the extra input once a video exists', async () => {
+    const gone = ['project-home-macro', 'project-home-page-kind', 'project-home-page-topic', 'project-home-macro-extra']
+    const present = (el: HTMLElement) => gone.filter((id) => el.querySelector(`[data-testid="${id}"]`))
+    const el = mount(<ProjectPagesSection {...props()} />)
+    expect(present(el)).toEqual([])
+    await show({ knowledge: [NEW_K] })
+    expect(present(el)).toEqual([])
+    await show({ tab: 'videos' })
+    expect(el.querySelector('[data-testid="project-home-macro-extra"]')).toBeNull()
+    await show({ videos: [NEW_V], tab: 'videos' })
+    expect(el.querySelector('[data-testid="project-home-macro-extra"]')).not.toBeNull()
   })
 
-  it('submits Regenerate with extra instructions, then clears the field', async () => {
+  it('submits the video Regenerate with extra instructions, then clears the field', async () => {
     const onLaunch = vi.fn()
-    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], onLaunch })} />)
+    const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], onLaunch, tab: 'videos' })} />)
     await flush()
     const input = el.querySelector('[data-testid="project-home-macro-extra"]') as HTMLInputElement
-    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-    act(() => {
-      setValue.call(input, '  focus on the onboarding flow  ')
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    act(() => macroBtn(el, 'builtin-project-home').click())
-    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'focus on the onboarding flow')
+    typeInto(input, '  focus on the onboarding flow  ')
+    act(() => macroBtn(el, 'builtin-demo-video').click())
+    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'focus on the onboarding flow')
     expect(input.value).toBe('')
   })
 
@@ -337,44 +370,67 @@ describe('ProjectPagesSection', () => {
     })
   })
 
-  describe('knowledge page select', () => {
-    const KIND = '[data-testid="project-home-page-kind"]'
-    const TOPIC = '[data-testid="project-home-page-topic"]'
-    const setSel = (select: HTMLSelectElement, value: string) => {
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
-      act(() => {
-        setValue.call(select, value)
-        select.dispatchEvent(new Event('change', { bubbles: true }))
-      })
-    }
-    it('lists the four kinds; Overview sends nothing', () => {
+  describe('pages launch through the Generate composer', () => {
+    it('Generate page opens the composer and launches builtin-project-home with its lines', async () => {
       const onLaunch = vi.fn()
-      const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
-      const select = el.querySelector(KIND) as HTMLSelectElement
-      expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Overview', 'How it works', 'FAQ', 'Custom topic'])
-      expect(el.querySelector(TOPIC)).toBeNull()
-      act(() => macroBtn(el, 'builtin-project-home').click())
-      expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
+      const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K, OLD_K], onLaunch })} />)
+      await flush()
+      act(() => generateBtn()!.click())
+      expect(byTestId('composer-title')?.textContent).toBe('Generate page')
+      act(() => (document.querySelector('[data-testid="composer-template"][data-tpl="how"]') as HTMLElement).click())
+      act(() => byTestId('composer-generate')!.click())
+      expect(onLaunch.mock.calls).toEqual([
+        [HOME_MACRO, 'Page: How it works\nAudience: Contributors\nLength: In-depth\nRead from: README & docs, Source tree'],
+      ])
+      expect(byTestId('project-home-composer')).toBeNull()
+      expect(el.querySelector('[data-testid="project-home-library"]')).not.toBeNull()
     })
-    it('sends "Page: How it works"', () => {
+
+    it('Regenerate… rebuilds the selected page in place: its lines end with Replace entry: <id>', async () => {
       const onLaunch = vi.fn()
-      const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
-      setSel(el.querySelector(KIND) as HTMLSelectElement, 'How it works')
-      act(() => macroBtn(el, 'builtin-project-home').click())
-      expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'Page: How it works')
+      const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K, OLD_K], onLaunch })} />)
+      await flush()
+      act(() => (el.querySelectorAll('[data-testid="knowledge-page-item"]')[1] as HTMLElement).click())
+      act(() => byTestId('project-home-regenerate', el)!.click())
+      expect(byTestId('composer-title')?.textContent).toBe('Regenerate “Older page”')
+      // id 'a' is no built-in kind, so it rebuilds as a Custom topic carrying meta.topic
+      expect((byTestId('composer-topic') as HTMLInputElement).value).toBe('t')
+      act(() => byTestId('composer-generate')!.click())
+      expect(onLaunch.mock.calls).toEqual([
+        [HOME_MACRO, 'Page: Custom topic: t\nAudience: Users\nLength: Standard\nRead from: README & docs, Source tree, Git log\nReplace entry: a'],
+      ])
     })
-    it('Custom topic shows a topic input and sends "Page: Custom topic: <text>"', () => {
+
+    it('keeps the launched instructions within the 4000-char IPC cap by cutting Focus first', async () => {
       const onLaunch = vi.fn()
-      const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
-      setSel(el.querySelector(KIND) as HTMLSelectElement, 'Custom topic')
-      const input = el.querySelector(TOPIC) as HTMLInputElement
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-      act(() => {
-        setValue.call(input, ' billing ')
-        input.dispatchEvent(new Event('input', { bubbles: true }))
+      mount(<ProjectPagesSection {...props({ knowledge: [kEntry('overview', 'Overview', 1000)], onLaunch })} />)
+      await flush()
+      act(() => byTestId('project-home-regenerate')!.click())
+      typeInto(byTestId('composer-focus'), 'focus '.repeat(1000))
+      act(() => byTestId('composer-generate')!.click())
+      const sent = onLaunch.mock.calls[0][1] as string
+      expect(sent.length).toBeLessThanOrEqual(4000)
+      expect(sent.startsWith(`${OVERVIEW_LINES}\nfocus focus`)).toBe(true)
+      expect(sent.endsWith('\nReplace entry: overview')).toBe(true)
+    })
+
+    it('gives PagesPane the page macro\'s job: a queued page build disables Generate page, a video build does not', async () => {
+      const job = (macroId: string): MacroJobStatus => ({
+        macroId, epicId: null, slug: 's', state: 'queued', status: 'queued', reason: null, startedAt: null, finishedAt: null,
       })
-      act(() => macroBtn(el, 'builtin-project-home').click())
-      expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'Page: Custom topic: billing')
+      const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], jobStatus: { 'builtin-demo-video': job('builtin-demo-video') } })} />)
+      await flush()
+      expect(generateBtn()!.disabled).toBe(false)
+      expect(el.querySelector('[data-testid="project-home-job-status"]')).toBeNull()
+      await show({ knowledge: [NEW_K], jobStatus: { 'builtin-project-home': job('builtin-project-home') } })
+      expect(generateBtn()!.disabled).toBe(true)
+      expect(el.querySelector('[data-testid="project-home-job-status"]')?.textContent).toBe('Queued')
+    })
+
+    it('without the builtin-project-home macro Generate page stays disabled', async () => {
+      mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], macros: [DEMO_MACRO] })} />)
+      await flush()
+      expect(generateBtn()!.disabled).toBe(true)
     })
   })
 
@@ -430,10 +486,13 @@ describe('ProjectPagesSection', () => {
     })
   })
 
-  it('disables the macro button while launching', () => {
+  it('disables Generate page and the video macro button while launching', async () => {
     const el = mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
-    expect(macroBtn(el, 'builtin-project-home').disabled).toBe(true)
-    expect(macroBtn(el, 'builtin-project-home').textContent).toContain('Starting…')
+    expect(generateBtn()!.disabled).toBe(true)
+    expect(generateBtn()!.textContent).toBe('Starting…')
+    await show({ launching: 'builtin-demo-video', tab: 'videos' })
+    expect(macroBtn(el, 'builtin-demo-video').disabled).toBe(true)
+    expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Starting…')
   })
 
   describe('job status', () => {
@@ -503,8 +562,20 @@ describe('ProjectPagesSection', () => {
         await Promise.resolve()
       })
 
+    it('shows Rename and Delete under the selected row only', async () => {
+      const el = await mountK()
+      expect(el.querySelectorAll('[data-testid="entry-rename"]')).toHaveLength(1)
+      expect(tid(row(el, 0), 'entry-rename')).not.toBeNull()
+      expect(tid(row(el, 1), 'entry-rename')).toBeNull()
+      act(() => (el.querySelectorAll('[data-testid="knowledge-page-item"]')[1] as HTMLElement).click())
+      expect(tid(row(el, 0), 'entry-rename')).toBeNull()
+      expect(tid(row(el, 1), 'entry-rename')).not.toBeNull()
+      expect(tid(row(el, 1), 'entry-delete')).not.toBeNull()
+    })
+
     it('Enter saves the inline title edit via projectPages.rename', async () => {
       const el = await mountK()
+      act(() => (el.querySelectorAll('[data-testid="knowledge-page-item"]')[1] as HTMLElement).click())
       act(() => tid(row(el, 1), 'entry-rename').click())
       const input = tid(row(el, 1), 'entry-rename-input') as HTMLInputElement
       expect(input.value).toBe('Older page')
@@ -517,6 +588,7 @@ describe('ProjectPagesSection', () => {
     it('Delete asks to confirm, then calls projectPages.delete', async () => {
       const el = await mountK()
       act(() => tid(row(el, 0), 'entry-delete').click())
+      expect(row(el, 0).textContent).toContain('Delete this page?')
       expect(del).not.toHaveBeenCalled()
       await act(async () => {
         tid(row(el, 0), 'entry-delete-confirm').click()
@@ -541,6 +613,8 @@ describe('ProjectPagesSection', () => {
       const input = tid(row(el, 0), 'entry-rename-input') as HTMLInputElement
       typeTitle(input, 'New')
       await enter(input)
+      // the failed rename keeps row 0's input open: select row 1 by id
+      act(() => (el.querySelector('[data-testid="knowledge-page-item"][data-id="a"]') as HTMLElement).click())
       act(() => tid(row(el, 1), 'entry-delete').click())
       await act(async () => {
         tid(row(el, 1), 'entry-delete-confirm').click()

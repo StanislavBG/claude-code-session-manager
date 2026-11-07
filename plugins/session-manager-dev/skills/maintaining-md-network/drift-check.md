@@ -3,6 +3,7 @@
 ## Contents
 
 - [Running the script](#running-the-script)
+- [Path conventions](#path-conventions)
 - [First run: exclude machine records](#first-run-exclude-machine-records)
 - [Drift check mode](#drift-check-mode)
 - [Review record](#review-record)
@@ -56,7 +57,19 @@ Rules the script applies:
 
 - Path candidate: a code span is checked only if it has a slash, no spaces or glob/placeholder characters, no leading tilde, slash or at-sign, no URL scheme, and no domain-like first segment. It is then checked only if it is anchored: its last segment has a file extension, it ends in a slash, or its first segment exists at the repo root. A span like foo/bar with none of these is skipped. A trailing line suffix such as :12 or :12-20 is dropped first.
 - Site route: a link starting with a single slash that does not exist under the repo root is treated as a website route and skipped. `--strict-paths` turns that skip off.
+- Ignore marker: a line that contains the marker `<!-- drift-check-ignore -->` is skipped by the link and path checks.
+- Ellipsis rule: a span with a `...` segment, such as src/.../x.ts, is a placeholder and is skipped.
 - Map detection: without `--map`, the script looks for the maintainer comment in the root CLAUDE.md and AGENTS.md, then in the `.md` files they import with at-sign imports. The first file with the comment is the map.
+
+## Path conventions
+
+A backticked path claims the file exists in this repo. The script checks every such span, so write paths that legitimately do not exist here in a form it skips:
+
+- A path in another repo: use a repo prefix and colon, such as Bilko:server/x.ts. The script skips it like a URL scheme. A ~/Projects/<repo>/ path also works, because a leading tilde is skipped.
+- A retired or forbidden path named on purpose: write it in plain text, without backticks. Or end its line with the `<!-- drift-check-ignore -->` marker.
+- A placeholder: a span with a `...` segment is skipped.
+
+Write examples in plain text, not backticks, unless the path really exists.
 
 ## First run: exclude machine records
 

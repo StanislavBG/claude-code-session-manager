@@ -17,6 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { savePersona, listPersonas, getPersonaBody } = require('../agentLibrary.cjs');
 const { resolvePrdPersonaForSpawn } = require('../lib/claude/agentModelResolve.cjs');
+const configMgr = require('../config.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -28,6 +29,13 @@ const overlayOf = (cwd) => path.join(cwd, '.claude', 'agents', 'dev-lead.md');
 
 function mkTmp(prefix) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(d);
+  return d;
+}
+
+// Under the per-run sandbox HOME (vitest globalSetup), so the REAL validatePath accepts it.
+function mkHomeTmp(prefix) {
+  const d = fs.mkdtempSync(path.join(os.homedir(), prefix));
   tmpDirs.push(d);
   return d;
 }
@@ -94,6 +102,41 @@ test('an unknown or empty projectCwd throws "project not open" and writes nothin
   await expect(save({ projectCwd: null, model: 'opus' })).rejects.toThrow(/project not open/);
   expect(fs.readFileSync(globalFile, 'utf8')).toBe(before);
   expect(fs.existsSync(overlayFile)).toBe(false);
+});
+
+// No validatePath/writeTextAtomic stubs below: these go through config.cjs's real write boundary,
+// which only allows `<root>/.claude/` under a root registered via addAllowedRoot — and a dormant tab
+// (no terminal ever spawned, e.g. every tab restored after a restart) has none.
+test('a dormant open project (root never registered) is overridden through the real config writer', async () => {
+  const cwd = mkHomeTmp('sm-ov-dormant-');
+  expect(configMgr.getAllowedRoots()).not.toContain(fs.realpathSync(cwd));
+  const { globalDir, globalFile } = globalFixture();
+  const before = fs.readFileSync(globalFile);
+  await savePersona({
+    name: 'dev-lead', projectCwd: cwd, description: '', tools: [], color: '', tags: [], body: '', model: 'opus',
+    globalDir, loadSessions: async () => ({ tabs: [{ cwd }] }),
+  });
+  expect(fs.readFileSync(overlayOf(cwd), 'utf8')).toBe('---\nmodel: opus\n---\n');
+  expect(fs.readFileSync(globalFile)).toEqual(before);
+});
+
+test('a not-open or empty cwd under HOME is refused with "project not open" before any root is registered', async () => {
+  const openCwd = mkHomeTmp('sm-ov-open-');
+  const notOpen = mkHomeTmp('sm-ov-not-open-');
+  const { globalDir, globalFile } = globalFixture();
+  const before = fs.readFileSync(globalFile);
+  const rootsBefore = configMgr.getAllowedRoots();
+  const save = (projectCwd) => savePersona({
+    name: 'dev-lead', projectCwd, description: '', tools: [], color: '', tags: [], body: '', model: 'opus',
+    globalDir, loadSessions: async () => ({ tabs: [{ cwd: openCwd }] }),
+  });
+  await expect(save(notOpen)).rejects.toThrow(`project not open: ${notOpen}`);
+  await expect(save('')).rejects.toThrow(/project not open/);
+  expect(configMgr.getAllowedRoots()).not.toContain(notOpen);
+  expect(configMgr.getAllowedRoots()).not.toContain(fs.realpathSync(notOpen));
+  expect(configMgr.getAllowedRoots()).toEqual(rootsBefore);
+  expect(fs.existsSync(overlayOf(notOpen))).toBe(false);
+  expect(fs.readFileSync(globalFile)).toEqual(before);
 });
 
 test('a projectCwd with a trailing or doubled slash resolves to the same open project', async () => {

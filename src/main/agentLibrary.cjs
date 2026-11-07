@@ -148,9 +148,20 @@ async function findOpenProject(projectCwd, loadSessions) {
  * overlay are preserved; an existing overlay that has a BODY is refused so a
  * full-body overlay is never silently converted. Both keys unset removes the
  * file (same as `removeOverride`) rather than leaving an empty overlay.
+ *
+ * Registers the open project's root via `addAllowedRoot` before touching the
+ * overlay: config.cjs's validateWrite allows `<root>/.claude/` writes only under
+ * a registered root, and a dormant tab (no terminal running — every tab
+ * restored after a restart) has no pty-registered one. The cwd has already
+ * passed validatePath, so this widens nothing a terminal spawn in that project
+ * would not (same precedent as projectBrief.cjs's `allowBriefWrites`). An
+ * unknown or empty `projectCwd` throws in findOpenProject first, so nothing is
+ * registered for it.
  */
-async function saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic }) {
+async function saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic, addAllowedRoot }) {
   const project = await findOpenProject(projectCwd, loadSessions);
+  // Dormant tab = no pty-registered root; see JSDoc + projectBrief.cjs allowBriefWrites.
+  addAllowedRoot(validatePath(project.cwd));
   const target = validatePath(path.join(project.cwd, '.claude', 'agents', `${name}.md`));
   let preserved = [];
   try {
@@ -208,12 +219,13 @@ async function savePersona({
   loadSessions = sessionsStore.load,
   validatePath = configMgr.validatePath,
   writeTextAtomic = configMgr.writeTextAtomic,
+  addAllowedRoot = configMgr.addAllowedRoot,
 } = {}) {
   if (!PERSONA_NAME_RE.test(name || '')) {
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
   }
   if (projectCwd !== undefined) {
-    return saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic });
+    return saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic, addAllowedRoot });
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
   // A caller that omits seedVersion/title/projects/action/actionLabel (the

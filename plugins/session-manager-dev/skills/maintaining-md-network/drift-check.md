@@ -45,7 +45,7 @@ One JSON object on stdout:
 
 | Kind | Fields | Raised when |
 | --- | --- | --- |
-| `broken-link` | file, line, target | A markdown link to a file does not resolve, relative to the doc or to the repo root. URLs and `#anchors` are skipped. |
+| `broken-link` | file, line, target | A markdown link to a file does not resolve, relative to the doc or to the repo root. URLs and `#anchors` are skipped. A missing target that git ignores (runtime state) is not reported, the same exemption the paths check has. |
 | `missing-path` | file, line, target | An inline code span that is a path candidate does not exist (relative to the root or the doc), no tracked file matches it as a suffix, and git does not ignore it. |
 | `unanchored-path` | file, line, target, matches | Only with `--strict-paths`. The span does not resolve from the root or the doc, but tracked files match it as a path suffix or folder. The doc names the path without its full prefix. |
 | `over-line-limit` | file, lines, expandedLines, limit | A CLAUDE.md, AGENTS.md or unscoped `.claude/rules` file has more than 200 lines, or the map has more than 70. `expandedLines` counts the file plus every `.md` it pulls in with an at-sign import (up to 4 hops, each file once); the limit applies to `expandedLines`. |

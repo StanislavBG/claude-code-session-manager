@@ -64,6 +64,49 @@ test('knowledge ids follow the Page line', async () => {
   }
 });
 
+const inputFor = async (extraInstructions, macroId = 'builtin-demo-video') => {
+  const d = mk();
+  expect((await dispatchMacroJob({ ...base, macroId, extraInstructions }, d)).ok).toBe(true);
+  return d.createPrd.mock.calls[0][0];
+};
+
+test('a valid Replace entry line rebuilds the same video on every press', async () => {
+  for (const id of ['vid-mh1abc2def', 'a'.repeat(64)]) {
+    for (let press = 0; press < 2; press++) {
+      const i = await inputFor(`Video style: Fun\nReplace entry: ${id}`);
+      expect(i.artifactPaths).toEqual([`session-manager-operations/project-pages/videos/${id}/index.html`]);
+      expect(i.goal.endsWith(`Entry id: ${id}. Save with videoId = ${id}.`)).toBe(true);
+      expect(i.gate[0]).toContain(`/videos/${id}/index.html`);
+    }
+  }
+});
+
+test('a valid Replace entry line overrides the Page line for knowledge', async () => {
+  for (const extra of ['Page: FAQ\nReplace entry: billing-plans', '  Replace entry:  billing-plans  \nPage: How it works']) {
+    const i = await inputFor(extra, 'builtin-project-home');
+    expect(i.artifactPaths).toEqual(['session-manager-operations/project-pages/knowledge/billing-plans/index.html']);
+    expect(i.goal.endsWith('Entry id: billing-plans. Save with pageId = billing-plans.')).toBe(true);
+    expect(i.gate[0]).toContain('/knowledge/billing-plans/index.html');
+  }
+});
+
+test('an invalid Replace entry value is ignored and never becomes the id', async () => {
+  for (const bad of ['../x', 'A B', 'vid_1', 'a'.repeat(65)]) {
+    const video = await inputFor(`Replace entry: ${bad}`);
+    const id = /Entry id: (vid-[0-9a-z]+)\. Save with videoId = \1\.$/.exec(video.goal)?.[1];
+    expect(id).toBeTruthy();
+    expect(video.artifactPaths).toEqual([`session-manager-operations/project-pages/videos/${id}/index.html`]);
+    const page = await inputFor(`Page: FAQ\nReplace entry: ${bad}`, 'builtin-project-home');
+    expect(page.artifactPaths).toEqual(['session-manager-operations/project-pages/knowledge/faq/index.html']);
+    expect(page.goal.endsWith('Entry id: faq. Save with pageId = faq.')).toBe(true);
+    for (const i of [video, page]) {
+      expect(i.artifactPaths[0]).not.toContain(bad);
+      expect(i.gate[0]).not.toContain(bad);
+      expect(i.goal.slice(i.goal.lastIndexOf('\n\nEntry id: '))).not.toContain(bad);
+    }
+  }
+});
+
 test('gate is one quoted node entry with absolute path and baked time', async () => {
   const d = mk();
   await dispatchMacroJob(base, d);

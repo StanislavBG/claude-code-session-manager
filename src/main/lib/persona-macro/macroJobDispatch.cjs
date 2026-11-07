@@ -24,10 +24,17 @@ function buildGate(absPath, nowMs) {
 }
 
 const PAGE_IDS = { 'how it works': 'how-it-works', faq: 'faq', overview: 'overview' };
+// Same rule as ENTRY_ID_RE in ipcSchemas.cjs. The id becomes a path segment in
+// artifactPaths, so an id taken from free text must pass it first.
+const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-// Entry id: videos get a fresh one per press; knowledge pages are named by a
-// 'Page: <name>' line in the extra instructions (default 'overview').
+// Entry id: a valid 'Replace entry: <id>' line in the extra instructions
+// (Regenerate) rebuilds that entry in place, for either kind; an invalid one
+// is ignored. Otherwise videos get a fresh id per press and knowledge pages
+// are named by a 'Page: <name>' line (default 'overview').
 function entryIdFor(kind, extra, t) {
+  const replace = /^\s*Replace entry:\s*(\S+)\s*$/im.exec(extra || '');
+  if (replace && ENTRY_ID_RE.test(replace[1])) return replace[1];
   if (kind === 'video') return `vid-${t.toString(36)}${Math.random().toString(36).slice(2, 5).padEnd(3, '0')}`;
   const m = /^\s*Page:\s*(.+?)\s*$/im.exec(extra || '');
   if (!m) return 'overview';

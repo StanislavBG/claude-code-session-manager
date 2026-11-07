@@ -330,15 +330,21 @@ function isShippedCopy(stored, builtin) {
   );
 }
 
+function copyInputs(inputs) {
+  return inputs.map((i) => ({ ...i, ...(i.options ? { options: i.options.slice() } : {}) }));
+}
+
 function ensureBuiltins(macros, builtins) {
-  if (!builtins || builtins.length === 0) return { macros, changed: false };
+  /** @type {string[]} */
+  const retired = [];
+  if (!builtins || builtins.length === 0) return { macros, changed: false, retired };
   let changed = false;
-  const next = macros.slice();
+  let next = macros.slice();
   const now = new Date().toISOString();
   for (const b of builtins) {
     const idx = next.findIndex((m) => m.id === b.id);
     if (idx === -1) {
-      next.push({
+      const seeded = {
         id: b.id,
         label: b.label,
         agentName: b.agentName,
@@ -350,8 +356,20 @@ function ensureBuiltins(macros, builtins) {
         builtinVersion: b.builtinVersion,
         createdAt: now,
         updatedAt: now,
-      });
+      };
+      if (b.inputs) seeded.inputs = copyInputs(b.inputs);
+      next.push(seeded);
       changed = true;
+      if (Array.isArray(b.supersedes) && b.supersedes.length > 0) {
+        const gone = new Set(b.supersedes);
+        next = next.filter((m) => {
+          if (gone.has(m.id) && m.builtin !== true) {
+            retired.push(m.id);
+            return false;
+          }
+          return true;
+        });
+      }
       continue;
     }
     const stored = next[idx];
@@ -368,21 +386,28 @@ function ensureBuiltins(macros, builtins) {
         builtinVersion: b.builtinVersion,
         updatedAt: stored.createdAt,
       };
+      if (b.inputs) next[idx].inputs = copyInputs(b.inputs);
+      else delete next[idx].inputs;
       changed = true;
     }
   }
-  return { macros: next, changed };
+  return { macros: next, changed, retired };
 }
 
 /** Apply builtin seeding/upgrades, writing only when something changed. */
 async function applyBuiltins(filePath, macros, opts) {
-  const { macros: next, changed } = ensureBuiltins(macros, resolveBuiltins(opts));
+  const builtins = resolveBuiltins(opts);
+  const { macros: next, changed, retired } = ensureBuiltins(macros, builtins);
   if (!changed) return { macros, failed: false };
   try {
     await writeStore(filePath, next);
   } catch (err) {
     console.warn('[macroLibrary] could not persist built-in macro seeding:', err && err.message);
     return { macros, failed: false };
+  }
+  for (const id of retired) {
+    const by = (builtins || []).find((b) => Array.isArray(b.supersedes) && b.supersedes.includes(id));
+    console.info(`[macroLibrary] retired macro ${id}, superseded by built-in ${by ? by.id : 'unknown'}`);
   }
   return { macros: next, failed: false };
 }

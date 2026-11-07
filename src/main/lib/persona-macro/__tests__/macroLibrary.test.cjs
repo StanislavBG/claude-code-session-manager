@@ -364,7 +364,7 @@ test('an unchanged Save through saveMacro does not stop the next upgrade', async
   expect(m).toMatchObject({ prompt: 'v2 prompt', builtinVersion: 2 });
 });
 
-test('an upgrade keeps projects, inputs and autoStartTargets', async () => {
+test('an upgrade keeps projects and autoStartTargets, and drops inputs the built-in no longer declares', async () => {
   const inputs = [{ name: 'x', label: 'X' }];
   const autoStartTargets = ['/tmp/some-project'];
   seedStored({ projects: ['/a', '/b'], inputs, autoStartTargets });
@@ -372,7 +372,7 @@ test('an upgrade keeps projects, inputs and autoStartTargets', async () => {
   const m = listed.find((x) => x.id === 'builtin-test-one');
   expect(m.prompt).toBe('v2 prompt');
   expect(m.projects).toEqual(['/a', '/b']);
-  expect(m.inputs).toEqual(inputs);
+  expect(m.inputs).toBeUndefined();
   expect(m.autoStartTargets).toEqual(autoStartTargets);
 });
 
@@ -719,4 +719,55 @@ test('saveMacro never writes a job key', async () => {
   await lib.saveMacro({ ...base(), id: created.id, job: { estimateMinutes: 5, artifactPaths: ['a'] } }, opts);
   const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   expect(onDisk.macros.some((m) => 'job' in m)).toBe(false);
+});
+
+// --- built-in inputs + supersedes -------------------------------------------
+
+const inBuiltin = (o = {}) => ({
+  id: 'bi-inputs', label: 'Inputs', agentName: 'builder', tag: 'build',
+  prompt: 'Do {{kind}} work', projects: ['*'], surface: 'project-home', builtinVersion: 1,
+  inputs: [{ name: 'kind', label: 'Kind', options: ['a', 'b'], default: 'a' }],
+  ...o,
+});
+
+test('ensureBuiltins seeds inputs as a deep copy that renders', () => {
+  const b = inBuiltin();
+  const { macros } = lib.ensureBuiltins([], [b]);
+  const m = macros[0];
+  expect(m.inputs).toEqual(b.inputs);
+  expect(m.inputs).not.toBe(b.inputs);
+  expect(m.inputs[0].options).not.toBe(b.inputs[0].options);
+  expect(lib.MacroSchema.safeParse(m).success).toBe(true);
+  expect(lib.renderMacroPrompt(m.prompt, m.inputs, lib.defaultMacroValues(m.inputs)).ok).toBe(true);
+});
+
+test('ensureBuiltins upgrade replaces/deletes inputs only on unedited copies', () => {
+  const v1 = lib.ensureBuiltins([], [inBuiltin()]).macros;
+  const up = lib.ensureBuiltins(v1, [inBuiltin({ builtinVersion: 2, prompt: 'Plain', inputs: undefined })]);
+  expect(up.changed).toBe(true);
+  expect('inputs' in up.macros[0]).toBe(false);
+  const up2 = lib.ensureBuiltins(v1, [inBuiltin({ builtinVersion: 2, inputs: [{ name: 'kind', label: 'K' }] })]);
+  expect(up2.macros[0].inputs).toEqual([{ name: 'kind', label: 'K' }]);
+  const edited = [{ ...v1[0], prompt: 'mine {{kind}}', updatedAt: '2099-01-01T00:00:00.000Z' }];
+  const kept = lib.ensureBuiltins(edited, [inBuiltin({ builtinVersion: 2, inputs: undefined })]);
+  expect(kept.macros[0].inputs).toEqual(v1[0].inputs);
+});
+
+test('supersedes retires non-builtin macros on first seed only', async () => {
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const mk = (id, builtin) => ({ ...base(), id, createdAt: 't', updatedAt: 't', ...(builtin ? { builtin: true, builtinVersion: 1 } : {}) });
+  const stored = [mk('old-one'), mk('old-builtin', true), mk('keep')];
+  const b = inBuiltin({ supersedes: ['old-one', 'old-builtin'] });
+  const r = lib.ensureBuiltins(stored, [b]);
+  expect(r.retired).toEqual(['old-one']);
+  expect(r.macros.map((m) => m.id).sort()).toEqual(['bi-inputs', 'keep', 'old-builtin']);
+  // already stored: no-op, nothing removed
+  const again = lib.ensureBuiltins([...r.macros, mk('old-one')], [b]);
+  expect(again.changed).toBe(false);
+  expect(again.retired).toEqual([]);
+  expect(again.macros.some((m) => m.id === 'old-one')).toBe(true);
+  // applyBuiltins logs per retired id
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [mk('old-one')] }));
+  await lib.listMacros({ ...opts, builtins: [b] });
+  expect(info).toHaveBeenCalledWith('[macroLibrary] retired macro old-one, superseded by built-in bi-inputs');
 });

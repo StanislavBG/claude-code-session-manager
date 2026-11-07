@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { nextServerName, serialize } from '../McpServers'
+import { nextServerName, serialize, diffServerPatches } from '../McpServers'
+import { buildInstallEntry, mcpPatchTarget } from '../Library'
 
 describe('nextServerName', () => {
   it('picks server-1 for an empty set', () => {
@@ -33,5 +34,32 @@ describe('serialize', () => {
     expect(out.mcpServers.a).toEqual({ command: 'x' })
     expect(out.mcpServers.b).toEqual({ url: 'u' })
     expect(out.other).toBe(1)
+  })
+})
+
+describe('diffServerPatches', () => {
+  it('add: patches only the new key', () => {
+    expect(diffServerPatches({ a: { command: 'x' } }, { a: { command: 'x' }, b: { type: 'stdio', command: '' } }))
+      .toEqual([{ name: 'b', value: { type: 'stdio', command: '' } }])
+  })
+  it('rename: new name first, then old name to undefined', () => {
+    const p = diffServerPatches({ old: { command: 'x' } }, { fresh: { command: 'x' } })
+    expect(p).toEqual([
+      { name: 'fresh', value: { command: 'x' } },
+      { name: 'old', value: undefined },
+    ])
+  })
+})
+
+describe('McpLibrary install payload', () => {
+  it('writes URL entries with type http', () => {
+    expect(buildInstallEntry({ url: 'https://x/mcp', headers: { a: 'b' } })).toEqual({ url: 'https://x/mcp', headers: { a: 'b' }, type: 'http' })
+  })
+  it('keeps a declared type', () => {
+    expect(buildInstallEntry({ url: 'https://x/sse', type: 'sse' } as never).type).toBe('sse')
+  })
+  it('targets the page scope', () => {
+    expect(mcpPatchTarget('project', '/p')).toEqual({ fileId: 'mcpJson', scope: 'project', cwd: '/p' })
+    expect(mcpPatchTarget('user', '/p')).toEqual({ fileId: 'claudeJson', scope: 'user' })
   })
 })

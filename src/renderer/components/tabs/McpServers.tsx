@@ -13,7 +13,7 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
 import type { Scope } from '../../lib/scopes'
-import { McpLibrary, ViewSwitcher } from './Library'
+import { McpLibrary, ViewSwitcher, mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
 import { distinctPlaceholders } from '../../lib/mcpPlaceholders'
 import { deriveMcpConnectionState, type McpConnectionInfo } from '../../lib/mcpConnectionState'
@@ -91,6 +91,24 @@ export function serialize(full: Record<string, unknown>, servers: Record<string,
   return JSON.stringify({ ...full, mcpServers: clean }, null, 2) + '\n'
 }
 
+export interface ServerPatch { name: string; value: McpServer | undefined }
+
+/**
+ * Per-key patches turning the on-disk `mcpServers` into the draft: changed/added
+ * first, removals last — so a rename patches the new name, then the old name to undefined.
+ */
+export function diffServerPatches(disk: Record<string, McpServer>, draft: Record<string, McpServer>): ServerPatch[] {
+  const out: ServerPatch[] = []
+  for (const [name, srv] of Object.entries(draft)) {
+    if (JSON.stringify(srv) === JSON.stringify(disk[name])) continue
+    const { enabled: _drop, ...rest } = srv as McpServer & { enabled?: unknown }
+    void _drop
+    out.push({ name, value: rest })
+  }
+  for (const name of Object.keys(disk)) if (!(name in draft)) out.push({ name, value: undefined })
+  return out
+}
+
 /**
  * Next default name for a new server — `server-N` where N starts at
  * count+1 and increments until it doesn't collide with an existing key.
@@ -148,7 +166,6 @@ function McpServersComponent() {
   const files = useConfig((s) => s.files)
   const loadJson = useConfig((s) => s.loadJson)
   const setDraft = useConfig((s) => s.setDraft)
-  const saveJson = useConfig((s) => s.saveJson)
   const revert = useConfig((s) => s.revert)
   const watchFile = useConfig((s) => s.watchFile)
   const unwatchFile = useConfig((s) => s.unwatchFile)
@@ -198,7 +215,7 @@ function McpServersComponent() {
           <ViewSwitcher active={view} onChange={setView} />
         }
       >
-        <McpLibrary />
+        <McpLibrary scope={scope} cwd={cwd} />
       </Panel>
     )
   }
@@ -301,8 +318,18 @@ function McpServersComponent() {
                   return
                 }
               }
-              const r = await saveJson(path)
-              if (!r.ok) setSaveError(r.error ?? 'save failed')
+              try {
+                for (const p of diffServerPatches(disk as Record<string, McpServer>, servers)) {
+                  await window.api.claudeConfig.patch({
+                    ...mcpPatchTarget(scope, cwd),
+                    keyPath: ['mcpServers', p.name],
+                    value: p.value,
+                  })
+                }
+                await loadJson(path)
+              } catch (e) {
+                setSaveError((e as Error).message || 'save failed')
+              }
             }}
             onRevert={() => {
               setSaveError(null)

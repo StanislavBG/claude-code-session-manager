@@ -43,7 +43,21 @@ function matches(q: string, ...fields: string[]): boolean {
 
 /* ----------------------------------------------------------- MCP library */
 
-export function McpLibrary() {
+/** Config-file target for an MCP scope: ~/.claude.json (user) or <cwd>/.mcp.json (project). */
+export function mcpPatchTarget(scope: 'user' | 'project' | 'local', cwd: string | null) {
+  return scope === 'user'
+    ? { fileId: 'claudeJson' as const, scope: 'user' as const }
+    : { fileId: 'mcpJson' as const, scope: 'project' as const, cwd }
+}
+
+/** Entry written on install: stdio gets type 'stdio', URL entries type 'http' unless the catalog declares one. */
+export function buildInstallEntry(config: CatalogMcp['config']): Record<string, unknown> {
+  const declared = (config as { type?: string }).type
+  if ('command' in config) return { type: 'stdio', ...config }
+  return { ...config, type: declared ?? 'http' }
+}
+
+export function McpLibrary({ scope = 'user', cwd = null }: { scope?: 'user' | 'project' | 'local'; cwd?: string | null } = {}) {
   const home = useHomeDir()
   const [installed, setInstalled] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
@@ -52,17 +66,25 @@ export function McpLibrary() {
   const [query, setQuery] = useState('')
   // Catalog entry awaiting values for its `<token>` placeholders (nothing written yet).
   const [pending, setPending] = useState<{ m: CatalogMcp; fields: Placeholder[]; values: Record<string, string> } | null>(null)
+  const scopeReady = scope === 'user' || !!cwd
 
   const refresh = async () => {
-    if (!home) return
-    const r = await window.api.config.readJson(`${home}/.claude.json`)
-    const servers = (r.data as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
-    setInstalled(new Set(Object.keys(servers)))
+    if (!home || !scopeReady) {
+      setInstalled(new Set())
+      return
+    }
+    try {
+      const r = await window.api.claudeConfig.read(mcpPatchTarget(scope, cwd))
+      const servers = (r.data as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
+      setInstalled(new Set(Object.keys(servers)))
+    } catch {
+      setInstalled(new Set())
+    }
   }
 
   useEffect(() => {
     refresh()
-  }, [home])
+  }, [home, scope, cwd])
 
   const items = useMemo(
     () => CATALOG_MCP.filter((m) => matches(query, m.id, m.name, m.description)),
@@ -79,40 +101,39 @@ export function McpLibrary() {
     return writeInstall(m, m.config)
   }
 
+  const patchServer = async (id: string, value: unknown) => {
+    try {
+      await window.api.claudeConfig.patch({ ...mcpPatchTarget(scope, cwd), keyPath: ['mcpServers', id], value })
+      return null
+    } catch (e) {
+      return (e as Error).message || 'write failed'
+    }
+  }
+
   const writeInstall = async (m: CatalogMcp, config: CatalogMcp['config']) => {
-    if (!home) return
+    if (!home || !scopeReady) return
     setBusy(m.id)
     setError(null)
-    const path = `${home}/.claude.json`
-    const r = await window.api.config.readJson(path)
-    const full = (r.data && typeof r.data === 'object' ? (r.data as Record<string, unknown>) : {}) ?? {}
-    const servers = { ...((full.mcpServers as Record<string, unknown>) ?? {}) }
-    servers[m.id] = { ...('command' in config ? { type: 'stdio' } : {}), ...config }
-    const write = await window.api.config.writeJson(path, { ...full, mcpServers: servers })
+    const err = await patchServer(m.id, buildInstallEntry(config))
     setBusy(null)
-    if (!write.ok) {
-      setError(write.error ?? 'write failed')
+    if (err) {
+      setError(err)
       return
     }
     setPending(null)
-    setFlash(`installed ${m.id}`)
+    setFlash(`installed ${m.id} (${scope})`)
     setTimeout(() => setFlash(null), 4000)
     refresh()
   }
 
   const uninstall = async (id: string) => {
-    if (!home) return
+    if (!home || !scopeReady) return
     setBusy(id)
     setError(null)
-    const path = `${home}/.claude.json`
-    const r = await window.api.config.readJson(path)
-    const full = (r.data && typeof r.data === 'object' ? (r.data as Record<string, unknown>) : {}) ?? {}
-    const servers = { ...((full.mcpServers as Record<string, unknown>) ?? {}) }
-    delete servers[id]
-    const write = await window.api.config.writeJson(path, { ...full, mcpServers: servers })
+    const err = await patchServer(id, undefined)
     setBusy(null)
-    if (!write.ok) {
-      setError(write.error ?? 'write failed')
+    if (err) {
+      setError(err)
       return
     }
     refresh()

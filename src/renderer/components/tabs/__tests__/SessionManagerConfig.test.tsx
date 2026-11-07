@@ -48,14 +48,13 @@ function mount() {
   return container
 }
 
-describe('SessionManagerConfig — Behavior toggle', () => {
-  it('renders unchecked when app-prefs.json has no openToHomeOnLaunch entry', async () => {
+describe('SessionManagerConfig', () => {
+  it('no longer renders the open-to-Home toggle (moved to AppSettings › Startup)', async () => {
     installApi({})
     const el = mount()
     await flushAsync()
-    const toggle = el.querySelector('button[role="switch"]') as HTMLButtonElement
-    expect(toggle).toBeTruthy()
-    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(el.querySelector('button[role="switch"]')).toBeNull()
+    expect(el.textContent).not.toContain('Open to Home on launch')
   })
 
   it('shows the resolved worktree base in the On disk list', async () => {
@@ -63,44 +62,5 @@ describe('SessionManagerConfig — Behavior toggle', () => {
     const el = mount()
     await flushAsync()
     expect(el.querySelector('[data-testid="worktree-base-path"]')?.textContent).toContain('/home/u/.local/state/session-manager/session-manager-epic-worktrees/')
-  })
-
-  it('renders checked when app-prefs.json has openToHomeOnLaunch:true', async () => {
-    installApi({ openToHomeOnLaunch: true })
-    const el = mount()
-    await flushAsync()
-    const toggle = el.querySelector('button[role="switch"]') as HTMLButtonElement
-    expect(toggle.getAttribute('aria-checked')).toBe('true')
-  })
-
-  it('clicking the toggle writes openToHomeOnLaunch through config.writeJson and flips checked state', async () => {
-    const { writeJson } = installApi({})
-    const el = mount()
-    await flushAsync()
-    const toggle = el.querySelector('button[role="switch"]') as HTMLButtonElement
-    expect(toggle.getAttribute('aria-checked')).toBe('false')
-
-    act(() => { toggle.click() })
-    await flushAsync()
-
-    expect(toggle.getAttribute('aria-checked')).toBe('true')
-    expect(writeJson).toHaveBeenCalledWith(
-      '~/.claude/session-manager/app-prefs.json',
-      expect.objectContaining({ openToHomeOnLaunch: true }),
-    )
-  })
-
-  it('rolls back the toggle when the write fails', async () => {
-    installApi({})
-    ;(globalThis as any).window.api.config.writeJson = vi.fn().mockRejectedValue(new Error('disk full'))
-    const el = mount()
-    await flushAsync()
-    const toggle = el.querySelector('button[role="switch"]') as HTMLButtonElement
-    expect(toggle.getAttribute('aria-checked')).toBe('false')
-
-    act(() => { toggle.click() })
-    await flushAsync()
-
-    expect(toggle.getAttribute('aria-checked')).toBe('false')
   })
 })

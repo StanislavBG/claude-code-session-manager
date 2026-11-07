@@ -20,9 +20,6 @@ import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { toast } from '../../state/toast'
-import { SettingsTelemetry } from './SettingsTelemetry'
-import { SettingsRemote } from './SettingsRemote'
-import { SettingsAppPrefs } from './SettingsAppPrefs'
 import { SettingsEpicIsolation } from './SettingsEpicIsolation'
 
 /**
@@ -103,7 +100,7 @@ function SettingsComponent() {
   const prevNavFaceRef = useRef(navFace)
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
-  const [view, setView] = useState<'general' | 'permissions' | 'hooks' | 'raw' | 'telemetry' | 'remote' | 'app'>('general')
+  const [view, setView] = useState<'general' | 'permissions' | 'hooks' | 'raw'>('general')
 
   // Settings is now HOME-only in the sidebar (navGroups.ts), and every nav
   // path that focuses it asserts navFace: 'home' — but a background split
@@ -119,18 +116,6 @@ function SettingsComponent() {
     }
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
   }, [navFace, cwd])
-
-  // 'telemetry' (~/.claude/session-manager/otel.json) and 'app' (Session
-  // Manager native prefs, localStorage) are both machine-wide only — no
-  // cwd/scope input anywhere in SettingsTelemetry/SettingsAppPrefs, so they
-  // render byte-identical regardless of navFace. Project face never offers
-  // them (see the ViewTabs options below); this effect just bounces the view
-  // back to 'general' if you land on the Project face while one of them
-  // was already selected, so the toolbar never shows an active tab that's no
-  // longer in its own options list.
-  useEffect(() => {
-    if (navFace === 'project' && (view === 'telemetry' || view === 'remote' || view === 'app')) setView('general')
-  }, [navFace, view])
 
   const handleScopeChange = (next: Scope) => {
     manuallyTouchedRef.current = true
@@ -194,17 +179,11 @@ function SettingsComponent() {
               { key: 'permissions', label: 'Permissions' },
               { key: 'hooks', label: 'Hooks' },
               { key: 'raw', label: 'Raw' },
-              // Machine-wide only — see the reset effect above for why these
-              // are hidden on the Project face rather than just left visible
-              // with identical content.
-              ...(navFace === 'home'
-                ? [{ key: 'telemetry', label: 'Telemetry' }, { key: 'remote', label: 'Phone remote' }, { key: 'app', label: 'Session Manager' }] as const
-                : []),
             ]}
             active={view}
             onChange={setView}
           />
-          {view !== 'telemetry' && view !== 'remote' && view !== 'app' && (
+          {(
             <>
               <span className="mx-2 text-fg-faint">·</span>
               <ScopeSwitcher
@@ -256,13 +235,7 @@ function SettingsComponent() {
         ) : null
       }
     >
-      {view === 'telemetry' ? (
-        <SettingsTelemetry />
-      ) : view === 'remote' ? (
-        <SettingsRemote />
-      ) : view === 'app' ? (
-        <SettingsAppPrefs />
-      ) : (
+      {(
         <>
           <div
             data-testid="settings-scope-note"

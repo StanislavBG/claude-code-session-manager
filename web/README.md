@@ -18,7 +18,7 @@ repo. This directory only holds the tooling that *produces* what Bilko serves:
 
 `web/manual/build.mjs` and `web/manual/capture-figures.mjs` are the only manual builders.
 
-Archived web-remote ADRs: see `docs/README.md` (link target may not exist yet).
+Archived web-remote ADRs: see docs/README.md (link target may not exist yet).
 
 ## Staged for extraction
 
@@ -27,6 +27,6 @@ split has NOT happened yet — this PRD only collected the partition under one p
 becomes mechanical later. Before actually running it, the human still needs to decide:
 
 - **Reverse edge into `src/renderer`.** `web/manual/__tests__/figure-captures.test.cjs` imports
-  `src/renderer/lib/navGroups`, so `web/` is not self-contained — undecided (the remaining blocker).
+  `src/renderer/lib/navGroups.ts`, so `web/` is not self-contained — undecided (the remaining blocker).
 - `web-remote/relay/` is dead code that was deliberately NOT moved here — it stays where it is
   pending a separate decision on whether to delete it.

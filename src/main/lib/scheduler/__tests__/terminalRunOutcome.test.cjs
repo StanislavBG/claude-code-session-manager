@@ -7,14 +7,19 @@
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, beforeEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
   latestTerminalOutcomeForSlug,
   MAX_DIRS_SCANNED,
+  __resetRunIndexForTests,
 } = require('../terminalRunOutcome.cjs');
+
+beforeEach(() => {
+  __resetRunIndexForTests();
+});
 
 function mkTmpRunsDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'terminal-run-outcome-'));
@@ -127,7 +132,10 @@ test('stats at most the newest few run dirs (bound enforced)', () => {
 
 function memFs(files) {
   return {
-    readdirSync: (d) => Object.keys(files[d] ?? {}),
+    readdirSync: (d) => {
+      if (files[d]) return Object.keys(files[d]);
+      return Object.keys(files[path.dirname(d)]?.[path.basename(d)] ?? {});
+    },
     existsSync: (p) => {
       const dir = path.dirname(p);
       const base = path.basename(p);
@@ -197,4 +205,44 @@ test('every candidate being unreadable still yields null (no invented outcome)',
     '2026-08-14T01-00-00-000Z': { [`${SLUG}.meta.json`]: '{ also nope' },
   }));
   expect(latestTerminalOutcomeForSlug(SLUG, { runsDir: RUNS, fsImpl })).toBeNull();
+});
+
+// ─── run-dir index (PRD 2798) ───────────────────────────────────────────────
+
+test('missing-slug lookups over 2,000 old run dirs never existsSync and list each dir at most once', () => {
+  const runsDir = mkTmpRunsDir();
+  const names = [];
+  for (let i = 0; i < 2000; i++) {
+    const n = `2025-01-01T00-${String(Math.floor(i / 60)).padStart(2, "0")}-${String(i % 60).padStart(2, "0")}-000Z`;
+    names.push(n);
+    fs.mkdirSync(path.join(runsDir, n));
+    fs.writeFileSync(path.join(runsDir, n, 'other.meta.json'), '{}');
+  }
+  let exists = 0;
+  const listed = new Map();
+  const fsImpl = {
+    readdirSync: (p) => {
+      listed.set(p, (listed.get(p) ?? 0) + 1);
+      return fs.readdirSync(p);
+    },
+    existsSync: (p) => { exists++; return fs.existsSync(p); },
+    readFileSync: (...a) => fs.readFileSync(...a),
+  };
+  for (let i = 0; i < 50; i++) {
+    expect(latestTerminalOutcomeForSlug(`missing-${i}`, { runsDir, fsImpl })).toBeNull();
+  }
+  expect(exists).toBe(0);
+  for (const n of names) expect(listed.get(path.join(runsDir, n)) ?? 0).toBeLessThanOrEqual(1);
+  expect(listed.get(runsDir)).toBe(50);
+});
+
+test('a meta.json added to a run dir younger than 24h after a null lookup is found next call', () => {
+  const runsDir = mkTmpRunsDir();
+  const runId = new Date().toISOString().replace(/[:.]/g, '-');
+  fs.mkdirSync(path.join(runsDir, runId));
+  expect(latestTerminalOutcomeForSlug('my-slug', { runsDir })).toBeNull();
+  fs.writeFileSync(path.join(runsDir, runId, 'my-slug.meta.json'), JSON.stringify({ exitCode: 1, finishedAt: 7 }));
+  expect(latestTerminalOutcomeForSlug('my-slug', { runsDir })).toEqual({
+    status: 'failed', runId, finishedAt: new Date(7).toISOString(),
+  });
 });

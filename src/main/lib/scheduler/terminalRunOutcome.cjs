@@ -28,6 +28,64 @@ const COMPLETED_EQUIVALENT_VERDICTS = new Set([
 // the full runs/ directory (which can hold thousands of entries).
 const MAX_DIRS_SCANNED = 5;
 
+// runsDir -> { dirFiles: Map<dirName, Set<slug>> } — slugs whose
+// <slug>.meta.json exists in that run dir. Dirs older than IMMUTABLE_AFTER_MS
+// are listed once and cached for good; younger ones are re-listed each call.
+const indexes = new Map();
+const IMMUTABLE_AFTER_MS = 24 * 60 * 60 * 1000;
+const META_SUFFIX = '.meta.json';
+
+/** Run-dir name (ISO with ':'/'.' -> '-') to epoch ms, or NaN. */
+function runDirTime(name) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(name);
+  if (!m) return NaN;
+  return Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`);
+}
+
+function isYoung(name, now) {
+  const t = runDirTime(name);
+  return Number.isNaN(t) || now - t < IMMUTABLE_AFTER_MS;
+}
+
+function refreshIndex(runsDir, fsImpl) {
+  const names = fsImpl.readdirSync(runsDir); // throws -> caller returns null
+  if (!Array.isArray(names)) return new Map();
+  let idx = indexes.get(runsDir);
+  if (!idx) {
+    idx = { dirFiles: new Map() };
+    indexes.set(runsDir, idx);
+  }
+  const present = new Set(names);
+  for (const cached of idx.dirFiles.keys()) {
+    if (!present.has(cached)) idx.dirFiles.delete(cached);
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (idx.dirFiles.has(name) && !isYoung(name, now)) continue;
+    const slugs = new Set();
+    try {
+      for (const f of fsImpl.readdirSync(path.join(runsDir, name))) {
+        if (typeof f === 'string' && f.endsWith(META_SUFFIX)) slugs.add(f.slice(0, -META_SUFFIX.length));
+      }
+    } catch {
+      // unlistable dir (e.g. a stray file) — treat as having no runs
+    }
+    idx.dirFiles.set(name, slugs);
+  }
+  return idx.dirFiles;
+}
+
+function matchingDirs(slug, runsDir, fsImpl) {
+  const dirFiles = refreshIndex(runsDir, fsImpl);
+  const out = [];
+  for (const [name, slugs] of dirFiles) if (slugs.has(slug)) out.push(name);
+  return out;
+}
+
+function __resetRunIndexForTests() {
+  indexes.clear();
+}
+
 /**
  * Returns { status: 'completed'|'failed', runId, finishedAt } for the newest
  * run directory containing a `<slug>.meta.json`, or null if none is found or
@@ -36,24 +94,12 @@ const MAX_DIRS_SCANNED = 5;
  */
 function latestTerminalOutcomeForSlug(slug, { runsDir, fsImpl = fs } = {}) {
   if (!slug || !runsDir) return null;
-  let dirs;
+  let matches;
   try {
-    dirs = fsImpl.readdirSync(runsDir);
+    matches = matchingDirs(slug, runsDir, fsImpl);
   } catch {
     return null;
   }
-  if (!Array.isArray(dirs) || dirs.length === 0) return null;
-
-  // Filter (cheap existence check) to dirs that actually have a run for this
-  // slug, mirroring resolveRunId's existing pattern in scheduler.cjs — this
-  // is a stat, not a read+parse.
-  const matches = dirs.filter((d) => {
-    try {
-      return fsImpl.existsSync(path.join(runsDir, d, `${slug}.meta.json`));
-    } catch {
-      return false;
-    }
-  });
   if (!matches.length) return null;
 
   // Dir names are ISO timestamps with `:`/`.` replaced by `-` — lexical
@@ -110,4 +156,4 @@ function latestTerminalOutcomeForSlug(slug, { runsDir, fsImpl = fs } = {}) {
   return null;
 }
 
-module.exports = { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS, MAX_DIRS_SCANNED };
+module.exports = { latestTerminalOutcomeForSlug, __resetRunIndexForTests, COMPLETED_EQUIVALENT_VERDICTS, MAX_DIRS_SCANNED };

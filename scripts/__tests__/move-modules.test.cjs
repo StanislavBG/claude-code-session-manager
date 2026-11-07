@@ -84,6 +84,19 @@ test('--dry-run reports and writes nothing', () => {
   expect(fs.existsSync(path.join(root, `${L}/alpha.cjs`))).toBe(true);
 });
 
+test('a "." entry is a top-level module: it stays put while the others move', () => {
+  fs.writeFileSync(mapFile(), JSON.stringify({ alpha: 'core', gamma: '.' }));
+  const r = run(mapFile(), root);
+  expect(r.status).toBe(0);
+  expect(fs.existsSync(path.join(root, `${L}/gamma.cjs`))).toBe(true);
+  expect(read(`${L}/gamma.cjs`)).toContain("require('./core/alpha.cjs')");
+  expect(read(`${L}/core/alpha.cjs`)).toContain("require('../gamma')");
+  fs.writeFileSync(mapFile(), JSON.stringify({ nope: '.' }));
+  const missing = run(mapFile(), root);
+  expect(missing.status).toBe(1);
+  expect(missing.stderr).toContain('nope');
+});
+
 test('exits 1 when a mapped module is missing', () => {
   fs.writeFileSync(mapFile(), JSON.stringify({ nope: 'core' }));
   const r = run(mapFile(), root);

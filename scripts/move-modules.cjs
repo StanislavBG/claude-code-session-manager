@@ -3,7 +3,9 @@
 
 // Partition codemod for src/main/lib. Usage:
 //   node scripts/move-modules.cjs <mapping.json> [root] [--dry-run]
-// mapping.json = {"<moduleBasename>": "<subfolder>"}. For each entry it git-mvs
+// mapping.json = {"<moduleBasename>": "<subfolder>"}; "." marks a top-level
+// module, listed so the layout records it and never moved (it must exist at
+// src/main/lib/<m>.cjs). For each other entry it git-mvs
 // src/main/lib/<m>.cjs -> lib/<sub>/<m>.cjs (and lib/__tests__/<m>.test.cjs ->
 // lib/<sub>/__tests__/<m>.test.cjs), then rewrites in every tracked
 // .cjs/.ts/.tsx/.mjs/.json/.md/.yml file:
@@ -22,6 +24,7 @@ const { execFileSync } = require('child_process')
 const EXTS = new Set(['.cjs', '.ts', '.tsx', '.mjs', '.json', '.md', '.yml'])
 const CODE_EXTS = new Set(['.cjs', '.ts', '.tsx', '.mjs'])
 const LIB = 'src/main/lib'
+const TOP_LEVEL = '.'
 const SPEC_RE = /(\b(?:require|require\.resolve|import|vi\.mock|vi\.doMock|vi\.importActual|vi\.importMock)\s*\(\s*|\bfrom\s+)(['"`])(\.{1,2}(?:\/[^'"`\n]*)?)\2/g
 const STR_RE = /(?<![\w.-])((?:src\/main\/)?lib\/)(?:(__tests__\/)([\w.-]+)\.test|([\w.-]+))\.cjs(?![\w-])/g
 
@@ -44,6 +47,10 @@ function main(argv) {
   const testSubOf = new Map()
   for (const [m, sub] of Object.entries(mapping)) {
     const from = path.join(libDir, `${m}.cjs`)
+    if (sub === TOP_LEVEL) {
+      if (!fs.existsSync(from)) errors.push(`mapped module does not exist: ${m} (${posix(path.relative(root, from))})`)
+      continue
+    }
     const to = path.join(libDir, sub, `${m}.cjs`)
     if (fs.existsSync(from)) {
       if (fs.existsSync(to)) errors.push(`target already exists: ${posix(path.relative(root, to))}`)

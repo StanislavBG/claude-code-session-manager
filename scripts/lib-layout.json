@@ -82,6 +82,7 @@
   "macroAdminRoutes": "feedback-remote",
   "macroLibrary": "persona-macro",
   "mainHeapSnapshot": "telemetry",
+  "mdNetworkScan": ".",
   "memoryScope": "process",
   "modelCatalog": "claude",
   "needsReviewLedger": "scheduler",

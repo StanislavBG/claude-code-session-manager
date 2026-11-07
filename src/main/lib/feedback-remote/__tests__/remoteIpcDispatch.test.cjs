@@ -7,6 +7,7 @@ const {
   chunkFrames,
   joinFrames,
   remoteArgFence,
+  PATH_FENCED_CHANNELS,
 } = require('../remoteIpcDispatch.cjs')
 
 const surface = [
@@ -203,6 +204,50 @@ describe('remoteArgFence', () => {
     expect(fn).not.toHaveBeenCalled()
     expect((await d.invoke(authed, 'files:read', [{ path: '/home/u/proj/a' }])).ok).toBe(true)
   })
+
+  // Project Home > Tools > Review MD network: the REAL apiSurface row + fence entry.
+  describe('project-pages:md-network is a fenced read through the real surface', () => {
+    const realSurface = require('../../../../preload/apiSurface.cjs')
+    const ch = 'project-pages:md-network'
+    const viewOnly = { remoteEnabled: true, remoteControlEnabled: false }
+    const mkD = (cfg = viewOnly) => {
+      const fn = vi.fn(async (_e, { cwd }) => ({ ok: true, root: cwd }))
+      const d = createRemoteIpcDispatcher({ surface: realSurface, handlers: new Map([[ch, fn]]), getConfig: () => cfg, fenceCtx: mk() })
+      return { fn, d }
+    }
+    it('fences its cwd field to a registered project root', () => {
+      expect(PATH_FENCED_CHANNELS[ch]).toEqual({ field: 'cwd', mode: 'root' })
+    })
+    it('runs with remote control off for a cwd inside a registered root', async () => {
+      const { fn, d } = mkD()
+      expect(await d.invoke(authed, ch, [{ cwd: '/home/u/proj' }])).toEqual({ ok: true, result: { ok: true, root: '/home/u/proj' } })
+      expect(await d.invoke(authed, ch, [{ cwd: '/home/u/proj/docs' }])).toEqual({ ok: true, result: { ok: true, root: '/home/u/proj/docs' } })
+      expect(fn).toHaveBeenCalledTimes(2)
+      expect(fn).toHaveBeenCalledWith({ sender: null, remoteClientId: 'c1' }, { cwd: '/home/u/proj' })
+    })
+    it('refuses a cwd outside every registered root, with remote control off or on', async () => {
+      for (const cfg of [viewOnly, fullCfg]) {
+        const { fn, d } = mkD(cfg)
+        for (const args of [[{ cwd: '/home/u' }], [{ cwd: '/home/u/other' }], [{ cwd: '/tmp/x' }], [{}], []]) {
+          expect(await d.invoke(authed, ch, args)).toEqual(fenced)
+        }
+        expect(fn).not.toHaveBeenCalled()
+      }
+    })
+    it('refuses a secret path, including one inside a root or reached by symlink', async () => {
+      const { fn, d } = mkD()
+      for (const cwd of ['/home/u/.ssh', '/home/u/proj/.ssh', '/home/u/proj/link']) {
+        expect(await d.invoke(authed, ch, [{ cwd }])).toEqual(fenced)
+      }
+      expect(fn).not.toHaveBeenCalled()
+    })
+    it('refuses a client that is not E2E-authenticated', async () => {
+      const { fn, d } = mkD()
+      expect(await d.invoke(unauthed, ch, [{ cwd: '/home/u/proj' }])).toEqual({ ok: false, reason: 'e2e_not_authenticated' })
+      expect(fn).not.toHaveBeenCalled()
+    })
+  })
+
   describe('home / ancestor roots are ignored', () => {
     const withRoots = (roots) => ({ ...mk(), projectRoots: () => roots })
     it('home registered as a root does not expose ~/notes.txt', () => {

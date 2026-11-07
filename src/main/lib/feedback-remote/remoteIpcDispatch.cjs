@@ -60,6 +60,8 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'promptSessions:list-archived': { field: 'cwd', mode: 'root' },
   'promptSessions:read-archived': { field: 'cwd', mode: 'root' },
   'promptSessions:read-session-transcript': { field: 'cwd', mode: 'root' },
+  // Project Home > Tools > Review MD network link map (main/projectPages.cjs): cwd inside a registered root.
+  'project-pages:md-network': { field: 'cwd', mode: 'root' },
 })
 
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker', '.password-store', '.azure', '.terraform.d'])

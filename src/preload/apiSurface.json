@@ -1376,7 +1376,7 @@
   "method": "mdNetwork",
   "channel": "project-pages:md-network",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "read"
  },
  {
   "ns": "projectPages",

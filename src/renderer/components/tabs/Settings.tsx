@@ -13,9 +13,10 @@ import { useLayout } from '../../state/layout'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
-import { mergeScopes, setAtPath } from '../../lib/mergeScopes'
+import { mergeScopes } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
+import { toast } from '../../state/toast'
 import { SettingsTelemetry } from './SettingsTelemetry'
 import { SettingsRemote } from './SettingsRemote'
 import { SettingsAppPrefs } from './SettingsAppPrefs'
@@ -127,12 +128,11 @@ function SettingsComponent() {
     const target = scopePaths[targetScope]
     if (!target) return
     const draft = files[target]?.draftRaw ?? ''
-    let current: unknown = {}
     if (draft.trim()) {
       try {
-        current = JSON.parse(draft)
+        JSON.parse(draft)
       } catch (e) {
-        // Refuse: writing back only this key would replace the whole file on Save.
+        // Refuse: an unparseable Raw draft means the user is mid-edit; fix it in Raw first.
         setSaveError(
           `${target} is not valid JSON (${e instanceof Error ? e.message : String(e)}) — fix it in Raw before using Guided/Tree edits.`
         )
@@ -140,8 +140,9 @@ function SettingsComponent() {
       }
     }
     setSaveError(null)
-    const next = setAtPath(current, path, value)
-    setDraft(target, JSON.stringify(next, null, 2) + '\n')
+    window.api.claudeConfig
+      .patch({ fileId: 'settings', scope: targetScope, cwd, keyPath: path, value })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 
   if (!home) return <EmptyState title="loading…" />

@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
-import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
@@ -12,7 +11,7 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { ViewTabs } from '../ui/ViewTabs'
 import { EffectiveTree } from '../ui/EffectiveTree'
-import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
+import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { toast } from '../../state/toast'
@@ -101,11 +100,12 @@ function PermissionsComponent() {
   const scopePaths = useScopedConfigFiles(PERMISSIONS_SCOPES, home, cwd)
   const activePath = scopePaths[scope] ?? null
   const files = useConfig((s) => s.files)
-  const setDraft = useConfig((s) => s.setDraft)
-  const saveJson = useConfig((s) => s.saveJson)
-  const revert = useConfig((s) => s.revert)
 
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const patchKey = (keyPath: string[], value: unknown) => {
+    window.api.claudeConfig
+      .patch({ fileId: 'settings', scope, cwd, keyPath, value })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
+  }
 
   const viewTabs = (
     <ViewTabs
@@ -127,15 +127,12 @@ function PermissionsComponent() {
   const overrideInto = (path: string[], value: unknown) => {
     const target = scopePaths[scope]
     if (!target) return
-    const { full: current, err: draftErr } = parsePerms(files[target]?.draftRaw ?? '')
+    const { err: draftErr } = parsePerms(files[target]?.draftRaw ?? '')
     if (draftErr) {
       toast.error(INVALID_JSON_MSG)
       return
     }
-    setSaveError(null)
-    const nextPerms = setAtPath(current.permissions ?? {}, path, value)
-    const next = { ...current, permissions: nextPerms }
-    setDraft(target, JSON.stringify(next, null, 2) + '\n')
+    patchKey(['permissions', ...path], value)
   }
 
   if (!home) return <EmptyState title="loading…" />
@@ -150,14 +147,13 @@ function PermissionsComponent() {
   const file = activePath ? files[activePath] : null
   const { perms, full, err } = file ? parsePerms(file.draftRaw) : { perms: {}, full: {}, err: null }
 
-  const updatePerms = (next: PermissionsShape) => {
+  const updatePerm = (key: string, value: unknown) => {
     if (!activePath) return
     if (err) {
       toast.error(INVALID_JSON_MSG)
       return
     }
-    setSaveError(null)
-    setDraft(activePath, serialize(full, next))
+    patchKey(['permissions', key], value)
   }
 
   const addRule = (list: PermissionList, value: string) => {
@@ -165,11 +161,11 @@ function PermissionsComponent() {
     if (!v) return
     const cur = perms[list] ?? []
     if (cur.includes(v)) return
-    updatePerms({ ...perms, [list]: [...cur, v] })
+    updatePerm(list, [...cur, v])
   }
   const removeRule = (list: PermissionList, idx: number) => {
     const cur = perms[list] ?? []
-    updatePerms({ ...perms, [list]: cur.filter((_, i) => i !== idx) })
+    updatePerm(list, cur.filter((_, i) => i !== idx))
   }
 
   return (
@@ -202,25 +198,6 @@ function PermissionsComponent() {
           </a>
         </>
       }
-      footer={
-        activePath && file ? (
-          <SaveBar
-            dirty={file.dirty}
-            busy={file.busy}
-            parseError={saveError || err || file.parseError}
-            lastSavedAt={file.lastSavedAt}
-            onSave={async () => {
-              setSaveError(null)
-              const res = await saveJson(activePath)
-              if (!res.ok) setSaveError(res.error ?? 'save failed')
-            }}
-            onRevert={() => {
-              setSaveError(null)
-              revert(activePath)
-            }}
-          />
-        ) : null
-      }
     >
       {scopeNeedsCwd(scope) ? (
         <EmptyState
@@ -244,7 +221,7 @@ function PermissionsComponent() {
           )}
           <ModeSelector
             value={perms.defaultMode ?? 'default'}
-            onChange={(mode) => updatePerms({ ...perms, defaultMode: mode })}
+            onChange={(mode) => updatePerm('defaultMode', mode)}
           />
           {LISTS.map((list) => (
             <RuleList
@@ -259,7 +236,7 @@ function PermissionsComponent() {
           <AdditionalDirs
             dirs={perms.additionalDirectories ?? []}
             disabled={!!err}
-            onChange={(dirs) => updatePerms({ ...perms, additionalDirectories: dirs })}
+            onChange={(dirs) => updatePerm('additionalDirectories', dirs)}
           />
         </div>
       ) : (

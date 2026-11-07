@@ -11,6 +11,7 @@ const USER_PATH = `${HOME}/.claude/settings.json`
 
 function installWindowApiMock() {
   const api = {
+    claudeConfig: { patch: vi.fn().mockResolvedValue({ ok: true, path: '', data: {} }) },
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
     config: {
       readJson: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -29,6 +30,7 @@ function installWindowApiMock() {
 }
 
 function seedDraft(raw: string): ReturnType<typeof vi.fn> {
+  const patchMock = (window as unknown as { api: { claudeConfig: { patch: ReturnType<typeof vi.fn> } } }).api.claudeConfig.patch
   const file: FileState = {
     path: USER_PATH,
     diskRaw: raw,
@@ -53,7 +55,7 @@ function seedDraft(raw: string): ReturnType<typeof vi.fn> {
     watchFile: vi.fn(),
     unwatchFile: vi.fn(),
   })
-  return setDraft
+  return patchMock
 }
 
 function typeInto(input: HTMLInputElement, value: string) {
@@ -70,19 +72,19 @@ describe('Permissions no-clobber on bad draft', () => {
   })
 
   async function openRules(raw: string) {
-    const setDraft = seedDraft(raw)
+    const patch = seedDraft(raw)
     const el = await mount()
     await act(async () => {
       clickViewTab(el, 'Rules')
       await Promise.resolve()
     })
-    return { el, setDraft }
+    return { el, patch }
   }
 
   const errorToasts = () => useToast.getState().toasts.filter((t) => t.kind === 'error')
 
-  it('invalid JSON draft: inputs disabled, no setDraft, error toast', async () => {
-    const { el, setDraft } = await openRules('{ "model": "opus", "permissions": { ')
+  it('invalid JSON draft: inputs disabled, no patch, error toast', async () => {
+    const { el, patch } = await openRules('{ "model": "opus", "permissions": { ')
     const inputs = Array.from(el.querySelectorAll('input'))
     expect(inputs.length).toBeGreaterThan(0)
     expect(inputs.every((i) => i.disabled)).toBe(true)
@@ -94,30 +96,30 @@ describe('Permissions no-clobber on bad draft', () => {
       mode?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })
-    expect(setDraft).not.toHaveBeenCalled()
+    expect(patch).not.toHaveBeenCalled()
     expect(errorToasts().some((t) => /invalid JSON/i.test(t.message))).toBe(true)
   })
 
   it('array draft is refused like invalid JSON', async () => {
-    const { el, setDraft } = await openRules('[1, 2]')
+    const { el, patch } = await openRules('[1, 2]')
     expect(Array.from(el.querySelectorAll('input')).every((i) => i.disabled)).toBe(true)
     const mode = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'plan')
     await act(async () => {
       mode?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })
-    expect(setDraft).not.toHaveBeenCalled()
+    expect(patch).not.toHaveBeenCalled()
     expect(errorToasts().length).toBeGreaterThan(0)
   })
 
-  it('valid draft keeps hooks, env and model after adding an allow rule', async () => {
+  it('valid draft patches only permissions.allow when adding a rule', async () => {
     const original = {
       hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] }] },
       env: { FOO: 'bar' },
       model: 'opus',
       permissions: { allow: ['Read(*)'] },
     }
-    const { el, setDraft } = await openRules(JSON.stringify(original, null, 2))
+    const { el, patch } = await openRules(JSON.stringify(original, null, 2))
     const input = el.querySelector('input') as HTMLInputElement
     expect(input.disabled).toBe(false)
     await act(async () => {
@@ -128,24 +130,24 @@ describe('Permissions no-clobber on bad draft', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
       await Promise.resolve()
     })
-    expect(setDraft).toHaveBeenCalledTimes(1)
-    const [path, raw] = setDraft.mock.calls[0] as [string, string]
-    expect(path).toBe(USER_PATH)
-    const next = JSON.parse(raw)
-    expect(next.hooks).toEqual(original.hooks)
-    expect(next.env).toEqual(original.env)
-    expect(next.model).toBe('opus')
-    expect(next.permissions.allow).toEqual(['Read(*)', 'Bash(ls:*)'])
+    expect(patch).toHaveBeenCalledTimes(1)
+    expect(patch).toHaveBeenCalledWith({
+      fileId: 'settings',
+      scope: 'user',
+      cwd: null,
+      keyPath: ['permissions', 'allow'],
+      value: ['Read(*)', 'Bash(ls:*)'],
+    })
     expect(errorToasts()).toHaveLength(0)
   })
 
   it('mode options equal the schema enum; unknown current value is kept', async () => {
-    const { el, setDraft } = await openRules(JSON.stringify({ permissions: { defaultMode: 'futureMode' } }))
+    const { el, patch } = await openRules(JSON.stringify({ permissions: { defaultMode: 'futureMode' } }))
     const section = Array.from(el.querySelectorAll('section')).find((x) => /Default Mode/i.test(x.textContent ?? ''))!
     const labels = Array.from(section.querySelectorAll('button')).map((b) => b.textContent?.trim())
     const modes = settingsSchema().at(['permissions', 'defaultMode'])!.enum as string[]
     expect(modes.length).toBeGreaterThan(4)
     expect(labels).toEqual([...modes, 'futureMode'])
-    expect(setDraft).not.toHaveBeenCalled()
+    expect(patch).not.toHaveBeenCalled()
   })
 })

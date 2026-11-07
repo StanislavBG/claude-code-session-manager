@@ -17,9 +17,11 @@ vi.mock('../../ui/EffectiveCards', () => ({
 
 const USER_PATH = `${HOME}/.claude/settings.json`
 
+let patchMock: ReturnType<typeof vi.fn>
 function installApi() {
   const raw = '{}\n'
   const api = {
+    claudeConfig: { patch: vi.fn().mockResolvedValue({ ok: true, path: '', data: {} }) },
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
     config: {
       readJson: vi.fn().mockResolvedValue({ raw, data: {}, exists: true, mtimeMs: 0, parseError: null, error: null }),
@@ -33,6 +35,7 @@ function installApi() {
       onChanged: vi.fn(() => () => {}),
     },
   }
+  patchMock = api.claudeConfig.patch
   ;(window as unknown as { api: typeof api }).api = api
   return api
 }
@@ -58,15 +61,18 @@ describe('Settings overrideInto with an unparseable draft', () => {
     expect(useConfig.getState().files[USER_PATH].draftRaw).toBe(bad)
     expect(el.textContent).toContain(USER_PATH)
     expect(el.textContent).toContain('fix it in Raw')
+    expect(patchMock).not.toHaveBeenCalled()
   })
 
-  it('a valid draft gains the key', async () => {
+  it('a valid draft patches just the key', async () => {
     await mount()
     await setRaw('{"a":1}')
     await act(async () => {
       captured.onOverride!(['model'], 'opus')
       await Promise.resolve()
     })
-    expect(JSON.parse(useConfig.getState().files[USER_PATH].draftRaw)).toEqual({ a: 1, model: 'opus' })
+    expect(patchMock).toHaveBeenCalledWith(
+      expect.objectContaining({ fileId: 'settings', scope: 'user', keyPath: ['model'], value: 'opus' })
+    )
   })
 })

@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
-import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { Modal } from '../ui/Modal'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
@@ -15,7 +14,7 @@ import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { HooksLibrary } from './Library'
 import { ViewTabs } from '../ui/ViewTabs'
 import { EffectiveTree } from '../ui/EffectiveTree'
-import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
+import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import rawSettingsSchema from '../../data/claude-settings-schema.json'
@@ -212,11 +211,12 @@ function HooksComponent() {
   const path = scopePaths[scope] ?? null
 
   const files = useConfig((s) => s.files)
-  const setDraft = useConfig((s) => s.setDraft)
-  const saveJson = useConfig((s) => s.saveJson)
-  const revert = useConfig((s) => s.revert)
 
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const patchKey = (keyPath: string[], value: unknown) => {
+    window.api.claudeConfig
+      .patch({ fileId: 'settings', scope, cwd, keyPath, value })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
+  }
   const [testFire, setTestFire] = useState<{
     event: HookEvent
     matcher: string
@@ -243,15 +243,12 @@ function HooksComponent() {
   const overrideInto = (nodePath: string[], value: unknown) => {
     const target = scopePaths[scope]
     if (!target) return
-    const { full: current, err: draftErr } = parseFull(files[target]?.draftRaw ?? '')
+    const { err: draftErr } = parseFull(files[target]?.draftRaw ?? '')
     if (draftErr) {
       toast.error(INVALID_JSON_MSG)
       return
     }
-    setSaveError(null)
-    const nextHooks = setAtPath(current.hooks ?? {}, nodePath, value)
-    const next = { ...current, hooks: nextHooks }
-    setDraft(target, JSON.stringify(next, null, 2) + '\n')
+    patchKey(['hooks', ...nodePath], value)
   }
 
   if (!home) return <EmptyState title="loading…" />
@@ -291,30 +288,26 @@ function HooksComponent() {
     0,
   )
 
-  const updateHooks = (next: HooksConfig) => {
+  const updateEvent = (event: HookEvent, next: HookGroup[]) => {
     if (err) {
       toast.error(INVALID_JSON_MSG)
       return
     }
-    setSaveError(null)
-    setDraft(path, serialize(full, next))
+    patchKey(['hooks', event], next)
   }
 
   const groups = hooks[selectedEvent] ?? []
 
   const addGroup = () => {
-    updateHooks({
-      ...hooks,
-      [selectedEvent]: [...groups, { matcher: '', hooks: [{ type: 'command', command: '' }] }],
-    })
+    updateEvent(selectedEvent, [...groups, { matcher: '', hooks: [{ type: 'command', command: '' }] }])
   }
   const updateGroup = (idx: number, g: HookGroup) => {
     const next = groups.slice()
     next[idx] = g
-    updateHooks({ ...hooks, [selectedEvent]: next })
+    updateEvent(selectedEvent, next)
   }
   const removeGroup = (idx: number) => {
-    updateHooks({ ...hooks, [selectedEvent]: groups.filter((_, i) => i !== idx) })
+    updateEvent(selectedEvent, groups.filter((_, i) => i !== idx))
   }
 
   return (
@@ -337,25 +330,6 @@ function HooksComponent() {
             hook reference ↗
           </a>
         </>
-      }
-      footer={
-        file ? (
-          <SaveBar
-            dirty={file.dirty}
-            busy={file.busy}
-            parseError={saveError || err || file.parseError}
-            lastSavedAt={file.lastSavedAt}
-            onSave={async () => {
-              setSaveError(null)
-              const r = await saveJson(path)
-              if (!r.ok) setSaveError(r.error ?? 'save failed')
-            }}
-            onRevert={() => {
-              setSaveError(null)
-              revert(path)
-            }}
-          />
-        ) : null
       }
     >
       {view === 'effective' ? (
@@ -482,6 +456,35 @@ function HooksComponent() {
 // Memoized: no props; own data comes from store/IPC hooks inside the component.
 export const Hooks = memo(HooksComponent)
 
+type CommitInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  value: string
+  onCommit: (v: string) => void
+  onDraft?: (v: string) => void
+}
+
+/** Text input that holds a local draft and commits on blur / Enter — a keystroke never writes. */
+function CommitInput({ value, onCommit, onDraft, ...rest }: CommitInputProps) {
+  const [text, setText] = useState(value)
+  useEffect(() => setText(value), [value])
+  const commit = () => {
+    if (text !== value) onCommit(text)
+  }
+  return (
+    <input
+      {...rest}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value)
+        onDraft?.(e.target.value)
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit()
+      }}
+    />
+  )
+}
+
 function HookGroupEditor({
   group,
   jsonInvalid,
@@ -512,10 +515,10 @@ function HookGroupEditor({
     <div className="border border-line rounded p-3 bg-bg-elev space-y-2">
       <div className="flex items-center gap-2">
         <span className="text-xs text-fg-faint w-16">matcher</span>
-        <input
+        <CommitInput
           value={group.matcher ?? ''}
           disabled={jsonInvalid}
-          onChange={(e) => onChange({ ...group, matcher: e.target.value })}
+          onCommit={(v) => onChange({ ...group, matcher: v })}
           placeholder="tool name regex or exact match (optional)"
           className="flex-1 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg font-mono"
         />
@@ -604,7 +607,6 @@ function HookRuleEditor({
             : 'agent'
   const value = (rule[valueKey] as string | undefined) ?? ''
   const argsText = (rule.args ?? []).join(' ')
-  const [timeoutText, setTimeoutText] = useState(rule.timeout != null ? String(rule.timeout) : '')
   const [timeoutError, setTimeoutError] = useState<string | null>(null)
   const tDefault = hookTimeoutDefault(rule.type)
   const provInput = {
@@ -630,10 +632,10 @@ function HookRuleEditor({
           ))}
         </select>
         <ProvenanceBadge interactive={false} input={provInput} />
-        <input
+        <CommitInput
           value={value}
           disabled={jsonInvalid}
-          onChange={(e) => onChange({ ...rule, [valueKey]: e.target.value })}
+          onCommit={(v) => onChange({ ...rule, [valueKey]: v })}
           placeholder={placeholderFor(rule.type)}
           className={`flex-1 bg-bg border rounded px-2 py-0.5 text-xs text-fg font-mono ${
             jsonInvalid ? 'border-red-500/70' : !value.trim() ? 'border-yellow-600/50' : 'border-line'
@@ -647,27 +649,26 @@ function HookRuleEditor({
             × invalid
           </span>
         ) : null}
-        <input
-          value={timeoutText}
+        <CommitInput
+          value={rule.timeout != null ? String(rule.timeout) : ''}
           disabled={jsonInvalid}
           aria-label="timeout (seconds)"
           aria-invalid={timeoutError ? true : undefined}
           title={timeoutError ?? 'Timeout in seconds'}
-          onChange={(e) => {
-            const raw = e.target.value
-            setTimeoutText(raw)
+          onDraft={(raw) => {
+            setTimeoutError(
+              !raw.trim() || parseHookTimeout(raw) != null
+                ? null
+                : 'Timeout must be a positive whole number of seconds',
+            )
+          }}
+          onCommit={(raw) => {
             if (!raw.trim()) {
-              setTimeoutError(null)
               onChange({ ...rule, timeout: undefined })
               return
             }
             const n = parseHookTimeout(raw)
-            if (n == null) {
-              setTimeoutError('Timeout must be a positive whole number of seconds')
-              return
-            }
-            setTimeoutError(null)
-            onChange({ ...rule, timeout: n })
+            if (n != null) onChange({ ...rule, timeout: n })
           }}
           placeholder={tDefault != null ? `${tDefault} (seconds)` : 'seconds'}
           className={`w-24 bg-bg border rounded px-2 py-0.5 text-xs text-fg ${timeoutError ? 'border-red-500/70' : 'border-line'}`}
@@ -694,15 +695,13 @@ function HookRuleEditor({
       {rule.type === 'command' ? (
         <div className="flex items-center gap-2 pl-[3.75rem]">
           <span className="text-xs text-fg-faint w-12">args</span>
-          <input
+          <CommitInput
             value={argsText}
             disabled={jsonInvalid}
-            onChange={(e) =>
+            onCommit={(v) =>
               onChange({
                 ...rule,
-                args: e.target.value.trim()
-                  ? e.target.value.split(/\s+/).filter(Boolean)
-                  : undefined,
+                args: v.trim() ? v.split(/\s+/).filter(Boolean) : undefined,
               })
             }
             placeholder="argv array (v2.1.139+ exec form, no shell)"
@@ -712,12 +711,10 @@ function HookRuleEditor({
       ) : null}
       <div className="flex items-center gap-2 pl-[3.75rem]">
         <span className="text-xs text-fg-faint w-12">term</span>
-        <input
+        <CommitInput
           value={rule.terminalSequence ?? ''}
           disabled={jsonInvalid}
-          onChange={(e) =>
-            onChange({ ...rule, terminalSequence: e.target.value || undefined })
-          }
+          onCommit={(v) => onChange({ ...rule, terminalSequence: v || undefined })}
           placeholder="terminalSequence — e.g. \\a (bell), v2.1.141+"
           className="flex-1 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg font-mono"
         />

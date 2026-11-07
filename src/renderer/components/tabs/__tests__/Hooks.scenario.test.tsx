@@ -13,6 +13,7 @@ const PROJECT_PATH = `${PROJECT_CWD}/.claude/settings.json`
 
 function installWindowApiMock() {
   const api = {
+    claudeConfig: { patch: vi.fn().mockResolvedValue({ ok: true, path: '', data: {} }) },
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
     config: {
       readJson: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -58,7 +59,8 @@ function seedDrafts(drafts: Record<string, string>) {
     watchFile: vi.fn(),
     unwatchFile: vi.fn(),
   })
-  return { setDraft, saveJson }
+  const patch = (window as unknown as { api: { claudeConfig: { patch: ReturnType<typeof vi.fn> } } }).api.claudeConfig.patch
+  return { setDraft: patch, saveJson }
 }
 
 const click = (el: Element | undefined | null) =>
@@ -115,7 +117,7 @@ describe('Hooks no-clobber on bad draft', () => {
     expect(errorToasts().some((t) => /invalid JSON/i.test(t.message))).toBe(true)
   })
 
-  it('valid draft keeps permissions, env and model after adding a hook group', async () => {
+  it('valid draft patches only hooks.<event> when adding a group', async () => {
     const original = {
       permissions: { allow: ['Read(*)'] },
       env: { FOO: 'bar' },
@@ -126,13 +128,13 @@ describe('Hooks no-clobber on bad draft', () => {
     expect(add?.disabled).toBe(false)
     await click(add)
     expect(setDraft).toHaveBeenCalledTimes(1)
-    const [path, raw] = setDraft.mock.calls[0] as [string, string]
-    expect(path).toBe(USER_PATH)
-    const next = JSON.parse(raw)
-    expect(next.permissions).toEqual(original.permissions)
-    expect(next.env).toEqual(original.env)
-    expect(next.model).toBe('opus')
-    expect(next.hooks.PreToolUse).toHaveLength(1)
+    expect(setDraft).toHaveBeenCalledWith({
+      fileId: 'settings',
+      scope: 'user',
+      cwd: null,
+      keyPath: ['hooks', 'PreToolUse'],
+      value: [{ matcher: '', hooks: [{ type: 'command', command: '' }] }],
+    })
     expect(errorToasts()).toHaveLength(0)
   })
 })
@@ -166,13 +168,23 @@ describe('Hooks timeout field (seconds)', () => {
     expect(input.placeholder).toBe('600 (seconds)')
     expect(el.textContent).not.toMatch(/timeout ms/i)
     await type(input, '45')
-    const last = setDraft.mock.calls.at(-1) as [string, string]
-    expect(JSON.parse(last[1]).hooks.PreToolUse[0].hooks[0].timeout).toBe(45)
+    expect(setDraft).not.toHaveBeenCalled()
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      await Promise.resolve()
+    })
+    const last = setDraft.mock.calls.at(-1)![0] as { keyPath: string[]; value: Array<{ hooks: Array<{ timeout: number }> }> }
+    expect(last.keyPath).toEqual(['hooks', 'PreToolUse'])
+    expect(last.value[0].hooks[0].timeout).toBe(45)
   })
 
   it.each(['0', '-5', '1.5'])('rejects %s with an inline error and no write', async (v) => {
     const { el, input, setDraft } = await openRule()
     await type(input, v)
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      await Promise.resolve()
+    })
     expect(setDraft).not.toHaveBeenCalled()
     expect(el.querySelector('[role="alert"]')?.textContent).toMatch(/positive whole number/i)
   })

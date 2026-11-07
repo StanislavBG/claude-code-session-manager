@@ -95,6 +95,15 @@ function installWindowApiMock() {
   return api
 }
 
+/**
+ * Proposed, never-started Epics are drafts and open NewEpicCard edit mode
+ * (PRD 2774). Fixtures that need the detail pane use a started (active) Epic.
+ */
+async function createStartedEpic(cwd: string, goal: string) {
+  const proposed = await usePromptSessions.getState().createPromptSession(cwd, goal)
+  return usePromptSessions.getState().approveProposed(proposed.id) ?? proposed
+}
+
 let container: HTMLDivElement | null = null
 let root: Root | null = null
 
@@ -132,8 +141,8 @@ describe('EpicsWorkspace', () => {
   it('renders queue rows for known epics and opens the detail pane on select', async () => {
     installWindowApiMock()
     await act(async () => {
-      await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
-      await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'fix the flaky test')
+      await createStartedEpic('/home/bilko/Projects/alpha', 'ship the widget')
+      await createStartedEpic('/home/bilko/Projects/alpha', 'fix the flaky test')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -199,7 +208,7 @@ describe('EpicsWorkspace', () => {
     const api = installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
     await act(async () => {
-      session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
+      session = await createStartedEpic('/home/bilko/Projects/alpha', 'ship the widget')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -257,7 +266,7 @@ describe('EpicsWorkspace', () => {
     installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
     await act(async () => {
-      session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
+      session = await createStartedEpic('/home/bilko/Projects/alpha', 'ship the widget')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -281,7 +290,7 @@ describe('EpicsWorkspace', () => {
     expect(el.querySelector('[data-testid="epic-detail"]')).toBeNull()
 
     // Hydration lands the Epic afterwards — the held deep link resolves.
-    const session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'late arriving epic')
+    const session = await createStartedEpic('/home/bilko/Projects/alpha', 'late arriving epic')
     act(() => {
       usePromptSessions.setState((s) => {
         const { [session.id]: created, ...rest } = s.sessions
@@ -363,8 +372,8 @@ describe('EpicsWorkspace', () => {
       let older: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
       let newer: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
       await act(async () => {
-        older = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'older alpha epic')
-        newer = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'newer alpha epic')
+        older = await createStartedEpic('/home/bilko/Projects/alpha', 'older alpha epic')
+        newer = await createStartedEpic('/home/bilko/Projects/alpha', 'newer alpha epic')
       })
       // Force a deterministic activity ordering regardless of same-millisecond createdAt.
       act(() => {

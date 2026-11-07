@@ -53,7 +53,10 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
+const { OPS_ROOT_DIR, RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+
+// Runtime ops state is live data owned by the main checkout, never carried WIP.
+const RUNTIME_CARRY_EXCLUDES = RUNTIME_NAMESPACES.map((ns) => `:(exclude)${OPS_ROOT_DIR}/${ns}`);
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 const sharedGitExec = require('./gitExec.cjs');
 
@@ -560,7 +563,7 @@ async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
 async function captureAndCarryBaseDiff({ cwd, dir }) {
   let paths = [];
   try {
-    const nameOut = await execGit(['diff', 'HEAD', '--name-only'], { cwd, timeout: 15_000 });
+    const nameOut = await execGit(['diff', 'HEAD', '--name-only', '--', '.', ...RUNTIME_CARRY_EXCLUDES], { cwd, timeout: 15_000 });
     paths = nameOut.split('\n').map((l) => l.trim()).filter(Boolean);
   } catch (e) {
     return { ok: false, reason: `listing changed paths failed: ${(e && (e.stderrText || e.message)) || e}` };
@@ -573,7 +576,7 @@ async function captureAndCarryBaseDiff({ cwd, dir }) {
   const patchFile = path.join(dir, `.sm-worktree-carry-${crypto.randomBytes(8).toString('hex')}.patch`);
   try {
     try {
-      await execGit(['diff', 'HEAD', '--binary', `--output=${patchFile}`], { cwd, timeout: 120_000 });
+      await execGit(['diff', 'HEAD', '--binary', `--output=${patchFile}`, '--', '.', ...RUNTIME_CARRY_EXCLUDES], { cwd, timeout: 120_000 });
     } catch (e) {
       return { ok: false, reason: `capturing base diff failed: ${(e && (e.stderrText || e.message)) || e}` };
     }

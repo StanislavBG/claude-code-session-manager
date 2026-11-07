@@ -100,6 +100,7 @@ function blankCode(line) {
   return line.replace(/`[^`]*`/g, (m) => ' '.repeat(m.length));
 }
 
+const IGNORE_MARKER = '<!-- drift-check-ignore -->';
 const DOMAIN_RE = /^([a-z0-9-]+\.)+[a-z]{2,}$/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -108,6 +109,8 @@ function isRepoPathCandidate(span) {
   if (/[\s*?<>{}|=$]/.test(span)) return false;
   if (/^[~/@]/.test(span)) return false;
   if (SCHEME_RE.test(span)) return false;
+  if (/(\.\.\.|…)$/.test(span)) return false;
+  if (span.split('/').some((seg) => seg === '...' || seg === '…')) return false;
   const first = span.split('/')[0];
   if (DOMAIN_RE.test(first)) return false;
   return true;
@@ -119,6 +122,7 @@ function parseDoc(text) {
   const links = [];
   const spans = [];
   const importTokens = [];
+  const ignoredLines = new Set();
   let fence = null;
   let inComment = false;
   rawLines.forEach((raw, idx) => {
@@ -131,6 +135,7 @@ function parseDoc(text) {
       return;
     }
     if (fence !== null) return;
+    if (raw.includes(IGNORE_MARKER)) ignoredLines.add(lineNo);
     // strip HTML comments (possibly spanning lines)
     let line = '';
     let rest = raw;
@@ -161,7 +166,7 @@ function parseDoc(text) {
     const spanRe = /`([^`]+)`/g;
     while ((m = spanRe.exec(line))) spans.push({ line: lineNo, span: m[1].trim() });
   });
-  return { lines: rawLines, links, spans, importTokens };
+  return { lines: rawLines, links, spans, importTokens, ignoredLines };
 }
 
 const MAX_IMPORT_HOPS = 4;
@@ -283,6 +288,7 @@ function runDriftCheck(options) {
 
     if (checks.has('links')) {
       for (const l of parsed.links) {
+        if (parsed.ignoredLines.has(l.line)) continue;
         let t = l.target;
         if (t.startsWith('#') || t.startsWith('//') || SCHEME_RE.test(t)) continue;
         t = t.replace(/[#?].*$/, '');
@@ -299,6 +305,7 @@ function runDriftCheck(options) {
 
     if (checks.has('paths')) {
       for (const s of parsed.spans) {
+        if (parsed.ignoredLines.has(s.line)) continue;
         if (!isRepoPathCandidate(s.span)) continue;
         const t = s.span.replace(/:\d+(?:-\d+)?$/, '');
         if (!t || !t.includes('/')) continue;

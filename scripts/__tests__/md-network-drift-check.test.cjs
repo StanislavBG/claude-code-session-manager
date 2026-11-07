@@ -224,3 +224,37 @@ test('emails, code spans, fences, home paths and outside-root targets are not im
   const { json } = run(dir, '--checks', 'limits');
   expect(json.findings).toEqual([]);
 });
+
+test('ellipsis spans are not path candidates; real missing paths still flagged', () => {
+  const dir = repo({ 'README.md': '`src/main/...` `scripts/…` `src/a...` `src/main/missing.cjs`\n', 'src/x.js': '' });
+  const t = run(dir).json.findings.map((f) => f.target);
+  expect(t).toEqual(['src/main/missing.cjs']);
+});
+
+test('drift-check-ignore marker suppresses link and path findings on its line only', () => {
+  const dir = repo({
+    'README.md': [
+      '[a](gone.md) `data/prds/x.md` <!-- drift-check-ignore -->',
+      '[b](gone2.md) `data/prds/y.md`',
+      '',
+    ].join('\n'),
+    'src/x.js': '',
+  });
+  for (const extra of [[], ['--strict-paths']]) {
+    const f = run(dir, ...extra).json.findings;
+    expect(f.every((x) => x.line === 2)).toBe(true);
+    expect(f.map((x) => x.kind).sort()).toEqual(['broken-link', 'missing-path']);
+  }
+});
+
+test('marker does not affect limit counts and has no effect inside a fence', () => {
+  const dir = repo({
+    'CLAUDE.md': '<!-- drift-check-ignore -->\n' + lines(205),
+    'README.md': ['```', '`fenced/a.md` <!-- drift-check-ignore -->', '```', '`out/b.md` <!-- drift-check-ignore -->', '`out/c.md`', ''].join('\n'),
+  });
+  const f = run(dir).json.findings;
+  expect(f.filter((x) => x.kind === 'over-line-limit')).toHaveLength(1);
+  expect(f.filter((x) => x.kind === 'missing-path').map((x) => x.target)).toEqual(['out/c.md']);
+  const dir2 = repo({ 'README.md': ['```', '<!-- drift-check-ignore -->', '```', '[x](gone.md)', ''].join('\n') });
+  expect(run(dir2).json.findings.map((x) => x.kind)).toEqual(['broken-link']);
+});

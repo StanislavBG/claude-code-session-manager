@@ -1142,4 +1142,139 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
     expect('developLoop' in (createPromptSessionSpy.mock.calls[0][7] as object)).toBe(false)
     expect(createPromptSessionSpy.mock.calls[0][2]).toBe('feature')
   })
+
+  describe('save draft / edit mode', () => {
+    const architect = { name: 'architect', description: 'plans', tools: [], tags: ['feature'], path: '/a.md', body: '' } as unknown as AgentPersona
+    const approveSpy = vi.fn()
+    const updateSpy = vi.fn()
+    const completedSpy = vi.fn(async () => {})
+
+    function click(el: HTMLElement, id: string) {
+      act(() => (el.querySelector(`[data-testid="${id}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    }
+
+    async function makeDraft() {
+      const { composeEpicIntake } = await import('../../../lib/epicIntake')
+      const intake = composeEpicIntake({
+        title: 'Draft title',
+        goal: 'Draft goal',
+        referencePaths: ['/refs/one.png'],
+        tag: undefined,
+        agentName: 'architect',
+        contextInjections: { 'delegate-implementation': false } as never,
+      })
+      return {
+        id: 'draft-1',
+        cwd: '/home/bilko/Projects/alpha',
+        goalText: intake.goalText,
+        claudeSessionId: 'claude-sess-1',
+        status: 'proposed',
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+        agentType: 'architect',
+        model: 'opus',
+        effort: 'high',
+        developLoop: false,
+        openingPrompt: intake.openingPrompt,
+        sections: intake.sections,
+        source: 'NewEpicCard',
+      } as never
+    }
+
+    beforeEach(() => {
+      approveSpy.mockClear()
+      updateSpy.mockReset()
+      updateSpy.mockImplementation(async () => ({}))
+      completedSpy.mockClear()
+      listPersonasSpy.mockResolvedValue([architect])
+      usePromptSessions.setState({ approveProposed: approveSpy, updateProposedDraft: updateSpy, markCompleted: completedSpy } as never)
+    })
+
+    it('disables Save draft on empty content', () => {
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      const save = el.querySelector('[data-testid="new-epic-save-draft"]') as HTMLButtonElement
+      expect(save.disabled).toBe(true)
+      act(() => setNativeValue(el.querySelector('[data-testid="new-epic-title"]') as HTMLInputElement, 'x'))
+      expect(save.disabled).toBe(false)
+    })
+
+    it('new-mode Save draft mints proposed without approve or send', async () => {
+      const onDraftSaved = vi.fn()
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} onDraftSaved={onDraftSaved} />)
+      act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'Half-written'))
+      click(el, 'new-epic-save-draft')
+      await act(async () => {})
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][3]).toBe('NewEpicCard save-draft')
+      expect(approveSpy).not.toHaveBeenCalled()
+      expect(sendSpy).not.toHaveBeenCalled()
+      const created = Object.values(usePromptSessions.getState().sessions)[0]
+      expect(created.status).toBe('proposed')
+      expect(onDraftSaved).toHaveBeenCalledWith(created.id)
+    })
+
+    it('edit mode prefills every field', async () => {
+      const draft = await makeDraft()
+      const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+      expect((el.querySelector('[data-testid="new-epic-title"]') as HTMLInputElement).value).toBe('Draft title')
+      expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('Draft goal')
+      expect(el.querySelector('[data-testid="new-epic-kind-none"]')?.getAttribute('aria-pressed')).toBe('true')
+      expect((el.querySelector('[data-testid="new-epic-develop-loop"]') as HTMLInputElement).checked).toBe(false)
+      expect(el.querySelector('[data-testid="new-epic-saved-ref"]')?.textContent).toContain('/refs/one.png')
+      expect(el.querySelector('[data-testid="new-epic-discard-draft"]')).not.toBeNull()
+    })
+
+    it('edit-mode Save calls updateProposedDraft with the saved references and never mints', async () => {
+      const draft = await makeDraft()
+      const onDraftSaved = vi.fn()
+      const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} onDraftSaved={onDraftSaved} />)
+      await act(async () => {})
+      act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'Draft goal v2'))
+      click(el, 'new-epic-save-draft')
+      await act(async () => {})
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(updateSpy).toHaveBeenCalledTimes(1)
+      const [id, patch] = updateSpy.mock.calls[0] as unknown as [string, { goalText: string; model: string }]
+      expect(id).toBe('draft-1')
+      expect(patch.goalText).toContain('Draft goal v2')
+      expect(patch.goalText).toContain('Reference: /refs/one.png')
+      expect(patch.model).toBe('opus')
+      expect(onDraftSaved).toHaveBeenCalledWith('draft-1')
+    })
+
+    it('Start from a draft approves the same id and sends once', async () => {
+      const draft = await makeDraft()
+      const onCreated = vi.fn()
+      const el = mount(<NewEpicCard draftEpic={draft} onCreated={onCreated} onCancel={vi.fn()} />)
+      await act(async () => {})
+      click(el, 'new-epic-create')
+      await act(async () => {})
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(updateSpy).toHaveBeenCalledTimes(1)
+      expect(approveSpy).toHaveBeenCalledWith('draft-1', 'NewEpicCard', expect.objectContaining({ openingPrompt: expect.any(String) }))
+      expect(sendSpy).toHaveBeenCalledTimes(1)
+      expect(sendSpy.mock.calls[0][0]).toMatchObject({ tabId: 'draft-1', sessionId: 'claude-sess-1' })
+      expect(onCreated).toHaveBeenCalledWith('draft-1')
+    })
+
+    it('Discard archives the draft', async () => {
+      const draft = await makeDraft()
+      const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      click(el, 'new-epic-discard-draft')
+      await act(async () => {})
+      expect(completedSpy).toHaveBeenCalledWith('draft-1', 'NewEpicCard discard draft')
+    })
+
+    it('a failed save toasts and keeps the typed fields', async () => {
+      const draft = await makeDraft()
+      updateSpy.mockRejectedValue(new Error('disk full'))
+      const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+      click(el, 'new-epic-save-draft')
+      await act(async () => {})
+      expect(useToast.getState().toasts.some((t) => t.kind === 'error' && /disk full/.test(t.message))).toBe(true)
+      expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('Draft goal')
+    })
+  })
 })

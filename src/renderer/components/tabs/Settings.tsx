@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
-import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
 import { JsonEditor } from '../ui/JsonEditor'
 import { EmptyState } from '../ui/EmptyState'
@@ -12,7 +11,7 @@ import { EffectiveCards } from '../ui/EffectiveCards'
 import { ViewTabs } from '../ui/ViewTabs'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
-import { useLayout, usePanelTabHint } from '../../state/layout'
+import { usePanelTabHint } from '../../state/layout'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
@@ -82,48 +81,17 @@ function OwnedSummaries({
   )
 }
 
-function SettingsComponent() {
+function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
   const home = useHomeDir()
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const cwd = activeTab?.cwd ?? null
 
-  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
-  // -> 'user', Project face -> 'project' (falling back to 'user' when no
-  // active-tab cwd resolves). Mirrors Permissions/Hooks/Skills' manuallyTouchedRef
-  // + prevNavFaceRef pattern so the default only re-applies on an actual face
-  // transition, never on a same-face re-render, and never once the user has
-  // manually changed the scope since the last transition.
-  const navFace = useLayout((s) => s.navFace)
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-
-  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'general' | 'permissions' | 'hooks' | 'raw'>('general')
   usePanelTabHint('settings', (t) => {
     if (t === 'general' || t === 'permissions' || t === 'hooks' || t === 'raw') setView(t)
   })
-
-  // Settings is now HOME-only in the sidebar (navGroups.ts), and every nav
-  // path that focuses it asserts navFace: 'home' — but a background split
-  // (Workbench's `renderer: 'always'`) can keep this screen mounted while a
-  // TabBar click elsewhere calls openProjectPanel, flipping navFace to
-  // 'project' without unmounting this component — so this branch is live.
-  useEffect(() => {
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setScope(navFace === 'project' && cwd ? 'project' : 'user')
-  }, [navFace, cwd])
-
-  const handleScopeChange = (next: Scope) => {
-    manuallyTouchedRef.current = true
-    setScope(next)
-  }
 
   // Resolve + load + watch every scope path so the switcher annotations stay live.
   const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
@@ -188,19 +156,6 @@ function SettingsComponent() {
           />
           {(
             <>
-              <span className="mx-2 text-fg-faint">·</span>
-              <ScopeSwitcher
-                scopes={SETTINGS_SCOPES.scopes}
-                active={scope}
-                onChange={handleScopeChange}
-                annotate={(s) => {
-                  if (scopeNeedsCwd(s)) return { exists: false }
-                  const p = scopePaths[s]
-                  if (!p) return null
-                  const f = files[p]
-                  return { exists: f?.exists ?? false, dirty: f?.dirty ?? false }
-                }}
-              />
               <span className="ml-3 text-fg-faint truncate">
                 {view === 'general' ? `overrides → ${activePath ?? '—'}` : activePath ?? '—'}
               </span>

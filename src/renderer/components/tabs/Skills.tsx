@@ -4,13 +4,11 @@ import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
-import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { Toggle } from '../ui/Toggle'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
-import { useLayout } from '../../state/layout'
 import { listSkillEntries, type SkillListError } from '../../lib/listSkills'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { Scope } from '../../lib/scopes'
@@ -44,23 +42,11 @@ interface Item {
   description?: string
 }
 
-function SkillsComponent({ onAdd }: { onAdd?: () => void } = {}) {
+function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
 
-  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
-  // -> 'user', Project face -> 'project' (falling back to 'user' when no
-  // active-tab cwd resolves). Mirrors SystemPrompt/HistoryDashboard/
-  // Scheduler's manuallyTouchedRef + prevNavFaceRef pattern so the default
-  // only re-applies on an actual face transition, never on a same-face
-  // re-render, and never once the user has manually changed the scope since
-  // the last transition.
-  const navFace = useLayout((s) => s.navFace)
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-
-  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [items, setItems] = useState<Item[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -73,21 +59,6 @@ function SkillsComponent({ onAdd }: { onAdd?: () => void } = {}) {
     if (!home) return null
     return roots(home, cwd)
   }, [home, cwd])
-
-  // Skills is now HOME-only in the sidebar (navGroups.ts), and every nav
-  // path that focuses it asserts navFace: 'home' — but a background split
-  // (Workbench's `renderer: 'always'`) can keep this screen mounted while a
-  // TabBar click elsewhere calls openProjectPanel, flipping navFace to
-  // 'project' without unmounting this component — so this branch is live.
-  useEffect(() => {
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setScope(navFace === 'project' && cwd ? 'project' : 'user')
-  }, [navFace, cwd])
 
   // Current scope's roots — also the set of directories watched below, so
   // both derive from the same scope/scopeRoots pair.
@@ -280,7 +251,6 @@ function SkillsComponent({ onAdd }: { onAdd?: () => void } = {}) {
       <Panel
         toolbar={
           <>
-            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           </>
         }
       >
@@ -299,7 +269,6 @@ function SkillsComponent({ onAdd }: { onAdd?: () => void } = {}) {
     <Panel
       toolbar={
         <>
-          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           <span className="ml-3 text-fg-faint">
             {items.length} {items.length === 1 ? 'item' : 'items'}
           </span>

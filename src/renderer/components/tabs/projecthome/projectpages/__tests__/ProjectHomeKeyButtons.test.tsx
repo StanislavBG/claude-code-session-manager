@@ -255,16 +255,16 @@ describe('ProjectHome wiring', () => {
     expect(badge(key(el, 'tools'))).toBeNull()
   })
 
-  it('switches the section with the keys: Tools shows the hot-key strip, Videos the video list', async () => {
+  it('switches the section with the keys: Tools shows the tools list, Videos the video list', async () => {
     const el = await mountHome()
     act(() => key(el, 'tools').click())
     expect(key(el, 'tools').getAttribute('aria-pressed')).toBe('true')
     expect(key(el, 'pages').getAttribute('aria-pressed')).toBe('false')
     expect(el.querySelector('[data-testid="knowledge-page-item"]')).toBeNull()
-    const hotkeys = Array.from(el.querySelectorAll('[data-testid="project-home-hotkey"]'))
-    expect(hotkeys.map((b) => b.getAttribute('data-macro-id'))).toEqual(['review-md'])
+    const tools = Array.from(el.querySelectorAll('[data-testid="project-home-tool"]'))
+    expect(tools.map((b) => b.getAttribute('data-macro-id'))).toEqual(['review-md'])
     act(() => key(el, 'videos').click())
     expect(el.querySelectorAll('[data-testid="video-item"]')).toHaveLength(1)
-    expect(el.querySelector('[data-testid="project-home-hotkeys"]')).toBeNull()
+    expect(el.querySelector('[data-testid="project-home-tool"]')).toBeNull()
   })
 })

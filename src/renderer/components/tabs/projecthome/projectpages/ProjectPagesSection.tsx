@@ -4,8 +4,8 @@
  * selected page in the static script-free HtmlFrame. `videos`: the video list
  * beside the VideoPlayer. Both keep their generate MacroButton, build-status
  * line and empty state; the content pane fills the remaining height. `tools`:
- * the hot-key strip — one button per other project-home macro (macros with
- * inputs open MacroInputsForm first).
+ * ToolsPane — the same list | content layout, Review MD network first, then
+ * every other project-home macro (there is no hot-key strip any more).
  *
  * `knowledge`/`videos`/`loaded` come from ProjectHome's single
  * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
@@ -14,10 +14,10 @@
 import { useEffect, useState } from 'react'
 import { formatAgo } from '../../../../lib/formatTime'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
-import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { HtmlFrame } from './HtmlFrame'
 import { VideoPlayer } from './VideoPlayer'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
+import { ToolsPane, type LaunchFn } from './ToolsPane'
 import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
 import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../preload/api'
@@ -238,49 +238,6 @@ function MacroButton({
   )
 }
 
-type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
-
-const PAGE_MACRO_IDS = ['builtin-project-home', 'builtin-demo-video']
-
-function HotKeyStrip({ macros, launching, onLaunch }: { macros: Macro[]; launching: string | null; onLaunch: LaunchFn }) {
-  const [pending, setPending] = useState<Macro | null>(null)
-  if (macros.length === 0) return null
-  return (
-    <div data-testid="project-home-hotkeys" className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {macros.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            data-testid="project-home-hotkey"
-            data-macro-id={m.id}
-            disabled={launching !== null}
-            onClick={() => {
-              if (m.inputs && m.inputs.length > 0) setPending(m)
-              else onLaunch(m)
-            }}
-            className="rounded-lg border border-line bg-bg-hi px-3 py-2 text-xs font-semibold text-fg cursor-pointer hover:border-accent disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {launching === m.id ? 'Starting…' : m.label}
-          </button>
-        ))}
-      </div>
-      {pending && (
-        <MacroInputsForm
-          key={pending.id}
-          macro={pending}
-          onCancel={() => setPending(null)}
-          onSubmit={(values) => {
-            const m = pending
-            setPending(null)
-            onLaunch(m, undefined, values)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
 /** Selected id, defaulting to the newest (first) entry; survives list refreshes while the id still exists. */
 function pickSelected<T extends { id: string }>(entries: T[], id: string | null): T | null {
   return entries.find((e) => e.id === id) ?? entries[0] ?? null
@@ -384,16 +341,9 @@ export function ProjectPagesSection({
   const [videoId, setVideoId] = useState<string | null>(null)
 
   if (tab === 'tools') {
-    const hotKeys = macros.filter((m) => !PAGE_MACRO_IDS.includes(m.id))
     return (
-      <div data-testid="project-home-section" data-tab={tab} className="min-h-0 flex-1 overflow-auto">
-        {hotKeys.length > 0 ? (
-          <HotKeyStrip macros={hotKeys} launching={launching} onLaunch={onLaunch} />
-        ) : (
-          <p data-testid="project-home-tools-empty" className="text-xs text-fg-faint">
-            No tools yet. Any macro saved with Surface: Project Home shows up here.
-          </p>
-        )}
+      <div data-testid="project-home-section" data-tab={tab} className="flex min-h-0 flex-1 flex-col">
+        <ToolsPane cwd={cwd} macros={macros} launching={launching} onLaunch={onLaunch} />
       </div>
     )
   }

@@ -2,6 +2,8 @@
  * MacroEditor — inline create/edit card for one hot-key Macro (label, agent,
  * tag, initial prompt). Rendered below the strip buttons in the narrow sidebar
  * rail, so every field stacks vertically. Saves through `window.api.macros`.
+ * Project Home's Tools pane mounts it for "Add a tool" with `defaultSurface`
+ * 'project-home'.
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentPersona, Macro, MacroInput } from '../../../preload/api'
@@ -30,17 +32,21 @@ export interface MacroEditorProps {
   /** Live library copy of `macro` (by id). Save takes `projects` from it so a
    *  manage-panel toggle made while the editor is open isn't reverted. */
   latest?: Macro | null
+  /** "Shown on" preset for a NEW macro (edit mode keeps the macro's own). Default 'sessions'. */
+  defaultSurface?: Macro['surface']
   onClose: () => void
 }
 
-export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditorProps) {
+export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClose }: MacroEditorProps) {
   const [label, setLabel] = useState(macro?.label ?? '')
   const [agentName, setAgentName] = useState(macro?.agentName ?? agents[0]?.name ?? '')
   const [tag, setTag] = useState<string>(macro?.tag ?? '')
   const [prompt, setPrompt] = useState(macro?.prompt ?? '')
   const initialEverywhere = macro ? macro.projects.includes('*') : false
   const [everywhere, setEverywhere] = useState(initialEverywhere)
-  const [surface, setSurface] = useState<'sessions' | 'project-home'>(macro?.surface ?? 'sessions')
+  const [surface, setSurface] = useState<Macro['surface']>(
+    macro ? (macro.surface ?? 'sessions') : (defaultSurface ?? 'sessions'),
+  )
   const [inputs, setInputs] = useState<MacroInput[]>(macro?.inputs ?? [])
   const storedTargets = macro?.autoStartTargets
   const [autoMode, setAutoMode] = useState<'off' | 'all' | 'selected'>(
@@ -305,7 +311,7 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
             <option value="project-home">Project Home</option>
           </select>
           <div className="text-[11px] text-fg-faint">
-            Project Home shows it as a button on that project&apos;s Project Home page.
+            Project Home lists it under Tools on that project&apos;s Project Home page.
           </div>
         </div>
       )}

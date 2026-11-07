@@ -250,4 +250,32 @@ describe('MacroEditor', () => {
     await act(async () => { q('macro-save').click() })
     expect('surface' in save.mock.calls[0][0]).toBe(false)
   })
+
+  describe('defaultSurface', () => {
+    it("presets a new macro's surface and saves it", async () => {
+      mount({ defaultSurface: 'project-home' })
+      expect((q('macro-surface') as HTMLSelectElement).value).toBe('project-home')
+      act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ surface: 'project-home', projects: [CWD] }))
+    })
+
+    it('stays changeable before save', async () => {
+      mount({ defaultSurface: 'project-home' })
+      act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+      pickSurface('sessions')
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].surface).toBe('sessions')
+    })
+
+    it("never overrides an edited macro's own surface", () => {
+      mount({ macro: mac({ surface: 'sessions' }), defaultSurface: 'project-home' })
+      expect((q('macro-surface') as HTMLSelectElement).value).toBe('sessions')
+    })
+
+    it('absent: a new macro still starts on Sessions', () => {
+      mount()
+      expect((q('macro-surface') as HTMLSelectElement).value).toBe('sessions')
+    })
+  })
 })

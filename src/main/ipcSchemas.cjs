@@ -1273,6 +1273,15 @@ const pluginsInstall = z.object({
 const pluginsAbort = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
 }).passthrough();
+const pluginsList = z.object({}).strict();
+const pluginsSetEnabled = z.object({
+  key: z.string().regex(/^[a-z0-9][a-z0-9._\-]*@[a-z0-9][a-z0-9._\-]*$/i).max(256),
+  enabled: z.boolean(),
+}).strict();
+const pluginsUninstall = z.object({
+  slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
+  marketplaceName: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
+}).strict();
 
 // ──────────────────────────────────────────── Product telemetry (bilko.run)
 // Mirrors telemetrySettings.cjs's own isValid() shape — the renderer always
@@ -1451,6 +1460,9 @@ module.exports = {
     repoAnalyze,
     pluginsInstall,
     pluginsAbort,
+    pluginsList,
+    pluginsSetEnabled,
+    pluginsUninstall,
     memoryList,
     memoryRead,
     memoryWrite,

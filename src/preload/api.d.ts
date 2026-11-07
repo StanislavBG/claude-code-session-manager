@@ -1630,6 +1630,17 @@ export interface PluginInstallResult {
   error?: string;
 }
 
+/** One entry of ~/.claude/plugins/installed_plugins.json joined with user-scope enabledPlugins. */
+export interface InstalledPlugin {
+  key: string;
+  name: string;
+  marketplace: string;
+  version: string | null;
+  scope: string | null;
+  installPath: string | null;
+  enabled: boolean;
+}
+
 export interface PluginInstallProgressEvent {
   slug: string;
   line: string;
@@ -2222,6 +2233,12 @@ export interface SessionManagerAPI {
       marketplace?: { add: string; name: string };
     }) => Promise<PluginInstallResult>;
     onInstallProgress: (handler: (ev: PluginInstallProgressEvent) => void) => () => void;
+    /** Installed plugins (installed_plugins.json) with user-scope enabled flag; key = name@marketplace. */
+    list: () => Promise<InstalledPlugin[]>;
+    /** Writes ~/.claude/settings.json enabledPlugins[key] via claudeConfig.patch. */
+    setEnabled: (payload: { key: string; enabled: boolean }) => Promise<{ ok: boolean; error?: string }>;
+    /** Runs `claude plugin uninstall <slug>@<marketplaceName>` in the hidden pty. */
+    uninstall: (payload: { slug: string; marketplaceName: string }) => Promise<PluginInstallResult>;
   };
   clipboard: {
     /** Ctrl+V image paste — reads OS clipboard, saves any image to a temp

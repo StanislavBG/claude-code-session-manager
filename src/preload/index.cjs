@@ -349,6 +349,9 @@ contextBridge.exposeInMainWorld('api', {
   plugins: {
     install: (payload) => ipcRenderer.invoke('plugins:install', payload),
     abort: (slug) => ipcRenderer.invoke('plugins:abort', slug),
+    list: () => ipcRenderer.invoke('plugins:list', {}),
+    setEnabled: (payload) => ipcRenderer.invoke('plugins:set-enabled', payload),
+    uninstall: (payload) => ipcRenderer.invoke('plugins:uninstall', payload),
     onInstallProgress: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('plugins:install-progress', listener);

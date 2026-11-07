@@ -34,6 +34,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs'
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
+const claudeConfig = require('./lib/claudeConfig.cjs');
 
 // Must start with an alphanumeric so a leading `-` can't smuggle a CLI flag into
 // `claude plugin install <slug>` (argv flag injection).
@@ -255,6 +256,84 @@ async function update({ slug, marketplaceName }) {
   }
 }
 
+// ── Installed-plugin truth: ONE definition ────────────────────────────────
+// A plugin is "installed" iff ~/.claude/plugins/installed_plugins.json has an
+// entry under key `name@marketplace`. "Enabled" is user-scope
+// ~/.claude/settings.json enabledPlugins[key] === true (same meaning as
+// delegationReadiness's check).
+const PLUGIN_KEY_RE = /^[a-z0-9][a-z0-9._\-]*@[a-z0-9][a-z0-9._\-]*$/i;
+
+/** @param {string} [home] */
+function listInstalled(home) {
+  const h = home || os.homedir();
+  let installed = {};
+  let enabledMap = {};
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(h, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'));
+    if (raw && typeof raw.plugins === 'object' && raw.plugins && !Array.isArray(raw.plugins)) installed = raw.plugins;
+  } catch { /* missing/invalid => none installed */ }
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(h, '.claude', 'settings.json'), 'utf8'));
+    if (st && typeof st.enabledPlugins === 'object' && st.enabledPlugins) enabledMap = st.enabledPlugins;
+  } catch { /* none enabled */ }
+  return Object.keys(installed).map((key) => {
+    const at = key.lastIndexOf('@');
+    const rec = Array.isArray(installed[key]) ? installed[key][0] : installed[key];
+    return {
+      key,
+      name: at > 0 ? key.slice(0, at) : key,
+      marketplace: at > 0 ? key.slice(at + 1) : '',
+      version: rec && typeof rec.version === 'string' ? rec.version : null,
+      scope: rec && typeof rec.scope === 'string' ? rec.scope : null,
+      installPath: rec && typeof rec.installPath === 'string' ? rec.installPath : null,
+      enabled: enabledMap[key] === true,
+    };
+  });
+}
+
+/** @param {string} key  name@marketplace @param {string} [home] */
+function isInstalled(key, home) {
+  return listInstalled(home).some((p) => p.key === key);
+}
+
+/** Write enabledPlugins[key] in user settings.json via claudeConfig.patch. */
+async function setEnabled({ key, enabled, home }) {
+  if (typeof key !== 'string' || !PLUGIN_KEY_RE.test(key) || key.length > 256 || typeof enabled !== 'boolean') {
+    return { ok: false, error: 'invalid plugin key' };
+  }
+  try {
+    await claudeConfig.patch({ fileId: 'settings', scope: 'user', home, keyPath: ['enabledPlugins', key], value: enabled });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+/**
+ * Uninstall `<slug>@<marketplaceName>` through the same runStep pty runner.
+ * `runner` is injectable for tests; defaults to runStep.
+ */
+async function uninstall({ slug, marketplaceName, runner }) {
+  if (typeof slug !== 'string' || !SLUG_RE.test(slug) || slug.length > 128 ||
+      typeof marketplaceName !== 'string' || !MKT_NAME_RE.test(marketplaceName) || marketplaceName.length > 128) {
+    return { ok: false, exitCode: -1, error: 'invalid slug or marketplace' };
+  }
+  if (inFlight.has(slug)) {
+    return { ok: false, exitCode: -1, error: 'install already in progress' };
+  }
+  inFlight.set(slug, null);
+  try {
+    return await (runner || runStep)({
+      slug,
+      args: ['plugin', 'uninstall', `${slug}@${marketplaceName}`],
+      register: (proc) => inFlight.set(slug, proc),
+      unregister: () => inFlight.set(slug, null),
+    });
+  } finally {
+    inFlight.delete(slug);
+  }
+}
+
 function registerPluginInstallHandlers() {
   ipcMain.handle('plugins:install', async (_e, payload) => {
     // safeParse to preserve the existing `{ ok:false, exitCode:-1, error }`
@@ -265,6 +344,23 @@ function registerPluginInstallHandlers() {
       return { ok: false, exitCode: -1, error: 'invalid slug' };
     }
     return install({ slug: parsed.data.slug, marketplace: parsed.data.marketplace });
+  });
+
+  ipcMain.handle('plugins:list', async (_e, payload) => {
+    schemas.pluginsList.parse(payload ?? {});
+    return listInstalled();
+  });
+
+  ipcMain.handle('plugins:set-enabled', async (_e, payload) => {
+    const parsed = schemas.pluginsSetEnabled.safeParse(payload);
+    if (!parsed.success) return { ok: false, error: 'invalid plugin key' };
+    return setEnabled(parsed.data);
+  });
+
+  ipcMain.handle('plugins:uninstall', async (_e, payload) => {
+    const parsed = schemas.pluginsUninstall.safeParse(payload);
+    if (!parsed.success) return { ok: false, exitCode: -1, error: 'invalid slug or marketplace' };
+    return uninstall(parsed.data);
   });
 
   // plugins:abort — send SIGKILL to a stuck install and release the inFlight
@@ -283,4 +379,7 @@ function registerPluginInstallHandlers() {
   });
 }
 
-module.exports = { registerPluginInstallHandlers, attachWindow, install, update, bundledMarketplaceDir };
+module.exports = {
+  registerPluginInstallHandlers, attachWindow, install, update, bundledMarketplaceDir,
+  listInstalled, isInstalled, setEnabled, uninstall,
+};

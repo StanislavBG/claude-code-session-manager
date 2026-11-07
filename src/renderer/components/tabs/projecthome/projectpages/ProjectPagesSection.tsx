@@ -6,10 +6,13 @@
  * `knowledge`/`videos`/`loaded` come from ProjectHome's single
  * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
  * `useMacroLaunch` wiring. Purely presentational — no store access here.
+ * The section also hosts a hot-key strip: one button per other project-home macro
+ * (macros with inputs open MacroInputsForm first).
  */
 import { useEffect, useState } from 'react'
 import { formatAgo } from '../../../../lib/formatTime'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
+import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { HtmlFrame } from './HtmlFrame'
 import { VideoPlayer } from './VideoPlayer'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
@@ -232,6 +235,49 @@ function MacroButton({
   )
 }
 
+type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
+
+const PAGE_MACRO_IDS = ['builtin-project-home', 'builtin-demo-video']
+
+function HotKeyStrip({ macros, launching, onLaunch }: { macros: Macro[]; launching: string | null; onLaunch: LaunchFn }) {
+  const [pending, setPending] = useState<Macro | null>(null)
+  if (macros.length === 0) return null
+  return (
+    <div data-testid="project-home-hotkeys" className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {macros.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            data-testid="project-home-hotkey"
+            data-macro-id={m.id}
+            disabled={launching !== null}
+            onClick={() => {
+              if (m.inputs && m.inputs.length > 0) setPending(m)
+              else onLaunch(m)
+            }}
+            className="rounded-lg border border-line bg-bg-hi px-3 py-2 text-xs font-semibold text-fg cursor-pointer hover:border-accent disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {launching === m.id ? 'Starting…' : m.label}
+          </button>
+        ))}
+      </div>
+      {pending && (
+        <MacroInputsForm
+          key={pending.id}
+          macro={pending}
+          onCancel={() => setPending(null)}
+          onSubmit={(values) => {
+            const m = pending
+            setPending(null)
+            onLaunch(m, undefined, values)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
 type Page = 'knowledge' | 'videos'
 
 const PAGE_OPTIONS: { value: Page; label: string }[] = [
@@ -351,7 +397,7 @@ export function ProjectPagesSection({
   loaded: boolean
   macros: Macro[]
   launching: string | null
-  onLaunch: (macro: Macro, extraInstructions?: string) => void
+  onLaunch: LaunchFn
   jobStatus?: Record<string, MacroJobStatus>
   onOpenSession?: (epicId: string) => void
 }) {
@@ -363,6 +409,7 @@ export function ProjectPagesSection({
 
   const isKnowledge = page === 'knowledge'
   const macro = macros.find((m) => m.id === (isKnowledge ? 'builtin-project-home' : 'builtin-demo-video'))
+  const hotKeys = macros.filter((m) => !PAGE_MACRO_IDS.includes(m.id))
   const entries = isKnowledge ? knowledge : videos
   const has = entries.length > 0
   const button = macro ? (
@@ -383,7 +430,10 @@ export function ProjectPagesSection({
     <div>
       <div className="mb-2 flex items-center justify-between gap-2.5">
         <PageSwitch page={page} onChange={setPage} />
-        <div className="flex items-center gap-2.5">{button}</div>
+        <div className="flex items-start gap-2.5">
+          <HotKeyStrip macros={hotKeys} launching={launching} onLaunch={onLaunch} />
+          {button}
+        </div>
       </div>
       {!has ? (
         <div data-testid={isKnowledge ? 'knowledge-page-empty' : 'video-page-empty'} className="flex justify-center py-16">

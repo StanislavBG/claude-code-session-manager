@@ -36,4 +36,4 @@
 ## Build
 
 `node web/manual/build.mjs --out ~/Projects/Bilko/data/manual/releases` emits
-`data/manual/releases/2.0.1/` (13 chapters, all free, offline HTML + PDF).
+`Bilko:data/manual/releases/2.0.1/` (13 chapters, all free, offline HTML + PDF).

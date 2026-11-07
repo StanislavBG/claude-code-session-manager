@@ -78,7 +78,7 @@ describe('dataModelErd', () => {
         'project', 'tab', 'epic', 'epicEvent', 'epicTranscriptTurn', 'epicArchive',
         'epicWorktreeConfig', 'exchange',
         'prd', 'scheduleJob', 'scheduleJobStatusHistory', 'scheduleHistoryEntry',
-        'scheduleConfig', 'runLog', 'agentPersona', 'tag', 'memoryEntry',
+        'scheduleConfig', 'runLog', 'agentPersona', 'tag', 'macro', 'appPrefs', 'memoryEntry',
         'memoryCluster', 'agentMemoryEntry', 'claudeTranscript', 'transcriptEvent',
         'historyRollupDay', 'billingUsage', 'projectBrief', 'projectPages',
         'settingsScope', 'layoutEnvelope', 'opsNamespace',

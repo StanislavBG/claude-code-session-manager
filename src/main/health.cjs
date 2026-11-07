@@ -25,6 +25,7 @@ const { REVERIFY_INTERVAL_MS } = require('./scheduler/reviewLadder.cjs');
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
 const { checkMainDependencyHealth } = require('./lib/git/depHealth.cjs');
+const { findTrackedRuntimeState } = require('./lib/git/runtimeStateUntrack.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
 const { computeReport, isRetentionEnabled, liveKeysFromJobs, resolveRetentionConfig } = require('./lib/scheduler/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -1362,6 +1363,26 @@ async function check(opts = {}) {
     } catch (e) {
       status.components.main_dep_links = { ok: true, error: e.message };
     }
+  }
+
+  // 6.76. Tracked runtime state: projects that committed Session Manager
+  // runtime namespaces. Warning only (never flips ok) — untrack via
+  // runtimeStateUntrack.untrackRuntimeState from the project's main checkout.
+  try {
+    const roots = [...new Set(allProjectCwds())].slice(0, 100).filter((cwd) => fs.existsSync(cwd));
+    const hits = [];
+    for (const cwd of roots) {
+      const n = (await findTrackedRuntimeState(cwd)).length;
+      if (n > 0) hits.push({ cwd, count: n });
+    }
+    status.components.tracked_runtime_state = hits.length === 0
+      ? { ok: true }
+      : { ok: true, warn: true, projects: hits };
+    for (const h of hits) {
+      status.issues.push(`warn: ${h.cwd} tracks ${h.count} Session Manager runtime-state file(s) in git — untrack from its main checkout`);
+    }
+  } catch (e) {
+    status.components.tracked_runtime_state = { ok: true, error: e.message };
   }
 
   // 6.8. Credential health (informational-but-loud): is the Claude OAuth token

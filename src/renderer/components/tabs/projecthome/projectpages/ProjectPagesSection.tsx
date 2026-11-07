@@ -385,6 +385,8 @@ export function ProjectPagesSection({
   knowledge,
   videos,
   loaded,
+  error,
+  onRetry,
   macros,
   launching,
   onLaunch,
@@ -395,6 +397,8 @@ export function ProjectPagesSection({
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
   loaded: boolean
+  error?: string | null
+  onRetry?: () => void
   macros: Macro[]
   launching: string | null
   onLaunch: LaunchFn
@@ -405,14 +409,13 @@ export function ProjectPagesSection({
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
 
-  if (!loaded) return null
-
   const isKnowledge = page === 'knowledge'
   const macro = macros.find((m) => m.id === (isKnowledge ? 'builtin-project-home' : 'builtin-demo-video'))
   const hotKeys = macros.filter((m) => !PAGE_MACRO_IDS.includes(m.id))
   const entries = isKnowledge ? knowledge : videos
   const has = entries.length > 0
-  const button = macro ? (
+  const failed = typeof error === 'string' && error !== ''
+  const button = macro && loaded && !failed ? (
     <MacroButton
       macro={macro}
       has={has}
@@ -435,7 +438,25 @@ export function ProjectPagesSection({
           {button}
         </div>
       </div>
-      {!has ? (
+      {failed ? (
+        <div data-testid="project-home-load-error" className="flex justify-center py-16">
+          <div className="flex flex-col items-center gap-2.5">
+            <span className="text-xs text-red-400">Could not load pages: {error}</span>
+            <button
+              type="button"
+              data-testid="project-home-retry"
+              onClick={() => onRetry?.()}
+              className="px-2 py-1 rounded text-[11px] font-semibold bg-bg-elev text-fg hover:bg-bg-hi"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      ) : !loaded ? (
+        <div data-testid="project-home-loading" className="flex justify-center py-16">
+          <span className="text-xs text-fg-faint">Loading pages…</span>
+        </div>
+      ) : !has ? (
         <div data-testid={isKnowledge ? 'knowledge-page-empty' : 'video-page-empty'} className="flex justify-center py-16">
           <div className="flex flex-col items-center gap-2.5">
             <span className="text-xs text-fg-faint">

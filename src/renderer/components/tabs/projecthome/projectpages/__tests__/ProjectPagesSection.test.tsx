@@ -87,9 +87,39 @@ const macroBtn = (el: HTMLElement, id: string) =>
   el.querySelector(`[data-testid="project-home-macro"][data-macro-id="${id}"]`) as HTMLButtonElement
 
 describe('ProjectPagesSection', () => {
-  it('renders nothing while loaded is false', () => {
+  it('while loading shows the switch and a loading body, no empty state or page button', () => {
     const el = mount(<ProjectPagesSection {...props({ loaded: false })} />)
-    expect(el.textContent).toBe('')
+    expect(el.querySelector('[data-testid="project-home-page-switch"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="project-home-loading"]')?.textContent).toBe('Loading pages…')
+    expect(el.querySelector('[data-testid="knowledge-page-empty"]')).toBeNull()
+    expect(el.querySelector('[data-testid="video-page-empty"]')).toBeNull()
+    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
+  })
+
+  it('loaded with no entries shows each empty state', async () => {
+    const el = mount(<ProjectPagesSection {...props()} />)
+    expect(el.querySelector('[data-testid="knowledge-page-empty"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="project-home-loading"]')).toBeNull()
+    await switchTo(el, 'videos')
+    expect(el.querySelector('[data-testid="video-page-empty"]')).not.toBeNull()
+  })
+
+  it('loaded with entries shows knowledge-page-item and video-item', async () => {
+    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], videos: [NEW_V] })} />)
+    await flush()
+    expect(el.querySelector('[data-testid="knowledge-page-item"]')).not.toBeNull()
+    await switchTo(el, 'videos')
+    expect(el.querySelector('[data-testid="video-item"]')).not.toBeNull()
+  })
+
+  it('error shows the message and Retry calls onRetry, with no empty state', () => {
+    const onRetry = vi.fn()
+    const el = mount(<ProjectPagesSection {...props({ error: 'boom', onRetry })} />)
+    expect(el.querySelector('[data-testid="project-home-load-error"]')?.textContent).toContain('boom')
+    expect(el.querySelector('[data-testid="knowledge-page-empty"]')).toBeNull()
+    expect(el.querySelector('[data-testid="video-page-empty"]')).toBeNull()
+    act(() => (el.querySelector('[data-testid="project-home-retry"]') as HTMLElement).click())
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
   it('has a two-button page switch and no legacy view toggle', async () => {

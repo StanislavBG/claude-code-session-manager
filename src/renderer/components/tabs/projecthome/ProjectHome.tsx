@@ -31,7 +31,7 @@ function ProjectHomeComponent() {
   const cwd = activeTab?.cwd ?? null
 
   // One fetch of session-manager-operations/project-pages/home.html (+ demo video).
-  const { knowledge, videos, loaded } = useProjectPagesOutput(cwd)
+  const { knowledge, videos, loaded, error, reload } = useProjectPagesOutput(cwd)
   const jobStatus = useMacroJobStatus(cwd)
   const library = useMacros()
   const macros = macrosForProject(library, cwd, 'project-home')
@@ -50,6 +50,8 @@ function ProjectHomeComponent() {
           knowledge={knowledge}
           videos={videos}
           loaded={loaded}
+          error={error}
+          onRetry={reload}
           macros={macros}
           launching={launching}
           onLaunch={launch}

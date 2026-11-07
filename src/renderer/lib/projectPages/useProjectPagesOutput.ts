@@ -7,7 +7,7 @@
  * updates live. A cwd the main process can't watch resolves `{ok:false}` —
  * silently no-op.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
 import type { ProjectPagesGetResult, ProjectLibraryEntry, ProjectPageMeta, ProjectVideoMeta } from '../../../preload/api'
 
@@ -36,17 +36,23 @@ export function useProjectPagesOutput(
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
   loaded: boolean
+  error: string | null
+  reload: () => void
 } {
   const [output, setOutput] = useState<ProjectPagesOutput | null>(null)
   const [demoVideo, setDemoVideo] = useState<ProjectPagesDemoVideo>(null)
   const [knowledge, setKnowledge] = useState<ProjectKnowledgeEntry[]>(NO_KNOWLEDGE)
   const [videos, setVideos] = useState<ProjectVideoEntry[]>(NO_VIDEOS)
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
+  const reload = useCallback(() => setReloadTick((n) => n + 1), [])
 
   useEffect(() => {
     if (!cwd) return
     let cancelled = false
     setLoaded(false)
+    setError(null)
     window.api.projectPages
       .get(cwd)
       .then((res) => {
@@ -55,17 +61,20 @@ export function useProjectPagesOutput(
         setDemoVideo(res.demoVideo)
         setKnowledge(Array.isArray(res.knowledge) ? res.knowledge : NO_KNOWLEDGE)
         setVideos(Array.isArray(res.videos) ? res.videos : NO_VIDEOS)
+        setError(null)
         setLoaded(true)
       })
       .catch((err) => {
         if (cancelled) return
+        const msg = err instanceof Error ? err.message : String(err)
+        setError(msg || 'Unknown error')
         setLoaded(true)
-        toast.error(`Could not load Project Pages: ${err instanceof Error ? err.message : String(err)}`)
+        toast.error(`Could not load Project Pages: ${msg}`)
       })
     return () => {
       cancelled = true
     }
-  }, [cwd])
+  }, [cwd, reloadTick])
 
   useEffect(() => {
     if (!cwd) return
@@ -76,6 +85,7 @@ export function useProjectPagesOutput(
       setDemoVideo(payload.demoVideo)
       setKnowledge(Array.isArray(payload.knowledge) ? payload.knowledge : NO_KNOWLEDGE)
       setVideos(Array.isArray(payload.videos) ? payload.videos : NO_VIDEOS)
+      setError(null)
       setLoaded(true)
     })
     return () => {
@@ -84,5 +94,5 @@ export function useProjectPagesOutput(
     }
   }, [cwd])
 
-  return { output, demoVideo, knowledge, videos, loaded }
+  return { output, demoVideo, knowledge, videos, loaded, error, reload }
 }

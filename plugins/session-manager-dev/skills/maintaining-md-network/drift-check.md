@@ -3,6 +3,7 @@
 ## Contents
 
 - [Running the script](#running-the-script)
+- [First run: exclude machine records](#first-run-exclude-machine-records)
 - [Drift check mode](#drift-check-mode)
 - [Review record](#review-record)
 - [The map's maintainer comment](#the-maps-maintainer-comment)
@@ -24,6 +25,7 @@ node <skill base dir>/scripts/drift-check.cjs --root <repo>
 | `--file <path>` | Check only this file. Repeat for each file. Default: every tracked `.md` file (all `.md` files outside `.git` and `node_modules` when the repo is not git). |
 | `--exclude <prefix>` | Skip files whose repo-relative path starts with the prefix. Repeat as needed. |
 | `--checks <list>` | Comma list from `links`, `paths`, `limits`, `contents`. Default: all four. |
+| `--strict-paths` | Report `unanchored-path` findings, and treat a link starting with `/` that matches no file as broken. Off by default. |
 
 A flag that needs a value fails if the value is missing or starts with `--`.
 
@@ -33,6 +35,7 @@ One JSON object on stdout:
 
 - `root`: the resolved repo root.
 - `map`: the map file used, or null.
+- `notes`: plain-text caveats, such as `no md-network-map comment found; the 70-line map limit was not applied`. Read it: an empty map means the map limit never ran.
 - `checkedFiles`: the repo-relative files checked.
 - `findings`: a list, sorted by file then line.
 - `counts`: findings per kind.
@@ -42,11 +45,28 @@ One JSON object on stdout:
 | Kind | Fields | Raised when |
 | --- | --- | --- |
 | `broken-link` | file, line, target | A markdown link to a file does not resolve, relative to the doc or to the repo root. URLs and `#anchors` are skipped. |
-| `missing-path` | file, line, target | An inline code span that looks like a repo path does not exist, and git does not ignore it. |
-| `over-line-limit` | file, lines, limit | A CLAUDE.md, AGENTS.md or unscoped `.claude/rules` file has more than 200 lines, or the map has more than 70. |
+| `missing-path` | file, line, target | An inline code span that is a path candidate does not exist (relative to the root or the doc), no tracked file matches it as a suffix, and git does not ignore it. |
+| `unanchored-path` | file, line, target, matches | Only with `--strict-paths`. The span does not resolve from the root or the doc, but tracked files match it as a path suffix or folder. The doc names the path without its full prefix. |
+| `over-line-limit` | file, lines, expandedLines, limit | A CLAUDE.md, AGENTS.md or unscoped `.claude/rules` file has more than 200 lines, or the map has more than 70. `expandedLines` counts the file plus every `.md` it pulls in with an at-sign import (up to 4 hops, each file once); the limit applies to `expandedLines`. |
 | `no-contents-list` | file, lines | A doc over 100 lines has no Contents heading and no list of anchor links near the top. |
 
 Links and code spans inside fenced code blocks and HTML comments are ignored.
+
+Rules the script applies:
+
+- Path candidate: a code span is checked only if it has a slash, no spaces or glob/placeholder characters, no leading tilde, slash or at-sign, no URL scheme, and no domain-like first segment. It is then checked only if it is anchored: its last segment has a file extension, it ends in a slash, or its first segment exists at the repo root. A span like foo/bar with none of these is skipped. A trailing line suffix such as :12 or :12-20 is dropped first.
+- Site route: a link starting with a single slash that does not exist under the repo root is treated as a website route and skipped. `--strict-paths` turns that skip off.
+- Map detection: without `--map`, the script looks for the maintainer comment in the root CLAUDE.md and AGENTS.md, then in the `.md` files they import with at-sign imports. The first file with the comment is the map.
+
+## First run: exclude machine records
+
+Machine-written records and runtime folders (job logs, archived PRDs, review records, generated reports) hold thousands of stale path mentions and drown real findings. On the first Full review:
+
+1. From the census, list every machine-record and runtime folder.
+2. Pass each one as its own `--exclude` prefix, for example `--exclude <folder>/`.
+3. Run the script. If findings still come mostly from one folder, exclude it too.
+4. Write the exact flags into the review record's Drift-check command line.
+5. Drift check mode reuses those flags unchanged.
 
 ### Exit codes
 
@@ -80,7 +100,7 @@ Replace the placeholder with the script's installed location. The step fails on 
 Drift check mode reviews only what changed since the last review.
 
 1. Find the newest record: the file with the latest date among session-manager-operations/reviews/docs/<date>-md-network.md, or the project's own reviews folder. Read its Base commit, Map and Drift-check command.
-2. If there is no record, stop and run a Full review instead.
+2. If there is no record, stop and run a Full review instead. Also run a Full review when the record is stale by restructure: its Verdicts table names docs that no longer exist, or its Base commit is not an ancestor of HEAD (check with `git merge-base --is-ancestor <base> HEAD`). A diff from such a base is not a trustworthy list of changes.
 3. List the changed files: `git diff --name-only <base>..HEAD`. Keep only the `.md` files that still exist.
 4. Run the script with one `--file` per changed `.md` file, plus the `--map` and `--exclude` flags the record used:
    `node <skill base dir>/scripts/drift-check.cjs --root <repo> --file <changed.md> --map <map> --exclude <prefix>`
@@ -92,7 +112,7 @@ Drift check mode reviews only what changed since the last review.
 
 Every review, Full or Drift check, ends with one dated record, committed with the work. It is the next drift check's baseline.
 
-Path: session-manager-operations/reviews/docs/<YYYY-MM-DD>-md-network.md (or the project's own reviews folder). Use one record per day. Commit it last, so Base commit is the commit just before it.
+Path: session-manager-operations/reviews/docs/<YYYY-MM-DD>-md-network.md (or the project's own reviews folder). Use one record per day; a second record on the same date takes a -2 suffix (and -3, and so on). Commit it last, so Base commit is the commit just before it.
 
 Template:
 

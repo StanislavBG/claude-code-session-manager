@@ -1,6 +1,6 @@
 /**
  * Shared disk-backed file for small, unrelated-but-machine-wide UI settings —
- * the raw-session default model (`lib/rawSessionModel.ts`), the terminal
+ * the terminal
  * appearance theme/font size (`lib/terminalSettings.ts`), the Editor scene's
  * prefs (`state/editorPrefs.ts`), the History screen's analytics/budget
  * prefs (`lib/historyAnalyticsPrefs.ts`), and the Files sidebar's hidden-file
@@ -21,7 +21,6 @@
 import { appSettingsFile } from './appSettingsFile'
 
 export interface UiSettingsPrefs {
-  rawSessionModel?: string
   terminal?: { theme: string; fontSize: number }
   editor?: {
     fontSize: number

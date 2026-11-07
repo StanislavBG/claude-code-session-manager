@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import type { PersistedTab } from '../../preload/api'
 import { shellQuote, findPreset, renderCommand } from '../lib/presets'
-import { getRawSessionModel, type RawModel } from '../lib/rawSessionModel'
 import { transcriptExists } from '../lib/transcriptExists'
 import { useChat } from './chat'
 import { toast } from './toast'
@@ -50,7 +49,7 @@ interface SessionsState {
   reorderTab: (fromIndex: number, toIndex: number) => void
   restoreTabs: (tabs: SessionTab[], activeTabId: string | null) => void
   /** Transition a dormant tab to spawning, resolving the startup command. */
-  wakeTab: (id: string, modelOverride?: RawModel) => Promise<void>
+  wakeTab: (id: string, modelOverride?: string) => Promise<void>
   /** Kill the running PTY and return a tab to dormant/chat mode, preserving the tab row. */
   sleepTab: (id: string) => void
   /** Mint a fresh sessionId for the tab, starting a brand-new session. */
@@ -73,6 +72,17 @@ function labelFromCwd(cwd: string): string {
   return parts[parts.length - 1] || cwd
 }
 
+/** Model a raw tab launches with: main's `resolveEpicModel` (same as agentless Epics). Never rejects; --model is always pinned. */
+async function resolveRawModel(cwd: string, claudeSessionId: string): Promise<string> {
+  try {
+    const m = await window.api.agents.resolveEpicModel({ cwd, claudeSessionId })
+    if (typeof m === 'string' && m) return m
+  } catch (e) {
+    console.warn('[sessions] model resolve failed; falling back to sonnet:', e)
+  }
+  return 'sonnet'
+}
+
 /**
  * Resolves whether a tab should resume an existing transcript or start fresh,
  * returning the definitive sessionId and the startup command string.
@@ -87,7 +97,7 @@ function labelFromCwd(cwd: string): string {
 export async function resolveStartupCommand(
   p: { cwd: string; sessionId: string },
   freshStart = false,
-  model: RawModel = getRawSessionModel(),
+  modelOverride?: string,
 ): Promise<{ sessionId: string; startupCommand: string }> {
   let useResume = !freshStart
   if (useResume) {
@@ -104,6 +114,9 @@ export async function resolveStartupCommand(
   // existing sessionId is already authoritative (avoids UUID churn on
   // repeated wakeTab calls for tabs that never had a transcript).
   const sessionId = freshStart && !useResume ? crypto.randomUUID() : p.sessionId
+  // No override → the agentless-Epic resolver (settings.json model, pinned) via its
+  // existing IPC; a raw tab has no Epic, so it takes the settings/fallback branch.
+  const model = modelOverride ?? (await resolveRawModel(p.cwd, sessionId))
   const startupCommand = useResume
     ? `claude --dangerously-skip-permissions --resume ${shellQuote(sessionId)} --model ${shellQuote(model)}`
     : `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)} --model ${shellQuote(model)}`
@@ -239,7 +252,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const { sessionId, startupCommand } = await resolveStartupCommand(
       { cwd: tab.cwd, sessionId: tab.sessionId },
       false,
-      modelOverride ?? getRawSessionModel(),
+      modelOverride,
     )
     set({
       tabs: get().tabs.map((t) =>

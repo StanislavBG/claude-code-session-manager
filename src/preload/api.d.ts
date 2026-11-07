@@ -1959,6 +1959,8 @@ export interface SessionManagerAPI {
     delete: (payload: { id: string }) => Promise<{ ok: boolean }>;
     /** Add/remove one project cwd. A macro shown in every project (`'*'`) cannot be narrowed: `{ ok: false, error: 'macro is shown in every project' }`. */
     setProject: (payload: { id: string; cwd: string; enabled: boolean }) => Promise<{ ok: true; macro: Macro } | { ok: false; error: string }>;
+    /** This project only gives up the macro (same library call as the macro_delete MCP route); deleted when it was the last project. */
+    removeFromProject: (payload: { id: string; cwd: string }) => Promise<{ ok: true; deleted: boolean; macro: Macro } | { ok: false; error: string }>;
     /** Dispatch a built-in macro's background build as a scheduler job. */
     dispatchJob: (payload: MacroJobDispatchInput) => Promise<MacroJobDispatchResult>;
     /** Status of this project's macro background builds. */

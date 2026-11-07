@@ -55,6 +55,7 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
     return Array.from(new Set([...open, ...extra]))
   }, [tabs, cwd, storedTargets])
   const [saving, setSaving] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Agents load asynchronously — adopt the first once they arrive.
@@ -98,6 +99,18 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
   const valid = trimmedLabel.length > 0 && trimmedPrompt.length > 0 && agentName !== '' && inputsValid
   const patchInput = (idx: number, patch: Partial<MacroInput>) =>
     setInputs((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+
+  const deleteEverywhere = async () => {
+    if (!macro) return
+    setError(null)
+    try {
+      await window.api.macros.delete({ id: macro.id })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setConfirmingDelete(false)
+    }
+  }
 
   const save = async () => {
     if (!valid || saving) return
@@ -327,6 +340,25 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
       )}
 
       <div className="flex items-center justify-end gap-1.5">
+        {macro && !macro.builtin && (
+          <div className="mr-auto flex items-center gap-1.5 text-[11.5px]">
+            {confirmingDelete ? (
+              <>
+                <span className="text-fg-dim">Delete from every project?</span>
+                <button type="button" data-testid="macro-delete-everywhere-yes" onClick={() => void deleteEverywhere()} className="font-semibold text-red-500">
+                  Yes
+                </button>
+                <button type="button" data-testid="macro-delete-everywhere-no" onClick={() => setConfirmingDelete(false)} className="text-fg-dim hover:text-fg">
+                  No
+                </button>
+              </>
+            ) : (
+              <button type="button" data-testid="macro-delete-everywhere" onClick={() => setConfirmingDelete(true)} className="font-semibold text-fg-dim hover:text-red-500">
+                Delete everywhere
+              </button>
+            )}
+          </div>
+        )}
         <button
           type="button"
           data-testid="macro-cancel"

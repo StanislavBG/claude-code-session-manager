@@ -632,9 +632,9 @@ export function EpicQueue({
           <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Hot keys</span>
           <span
             className="font-mono text-[10px] text-fg-faint"
-            title="Per project: hot keys are + New Session plus this project's Macros (macro library)."
+            title="Per project: hot keys are + New Session plus this project's Macros (macro library). Delete removes a hot key from this project only; editing a macro changes it on every project that shows it."
           >
-            per project
+            per project · edits apply on every project
           </span>
         </div>
         <SessionActionsBar onNew={onNew} onSelect={onSelect} />

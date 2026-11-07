@@ -37,6 +37,7 @@ const listPersonas = vi.fn(async (): Promise<AgentPersona[]> => [persona({ tags:
 const save = vi.fn(async (i: any) => macro({ ...i, id: i.id ?? 'new1' }))
 const setProject = vi.fn(async () => ({ ok: true as const, macro: macro() }))
 const del = vi.fn(async () => undefined)
+const removeFromProject = vi.fn(async () => ({ ok: true as const, deleted: false, macro: macro() }))
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const approveProposedSpy = vi.fn()
 const sendSpy = vi.fn()
@@ -45,7 +46,7 @@ const sendSpy = vi.fn()
   agents: { listPersonas, onChanged: vi.fn(() => () => {}) },
   macros: {
     list: vi.fn(async () => library),
-    save, setProject, delete: del,
+    save, setProject, delete: del, removeFromProject,
     onChanged: vi.fn((h: () => void) => { changed = h; return () => { changed = null } }),
   },
   promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
@@ -202,7 +203,8 @@ describe('SessionActionsBar', () => {
     expect(del).not.toHaveBeenCalled()
     act(() => q(el, 'hotkey-delete')!.click())
     await act(async () => { q(el, 'hotkey-delete-yes')!.click() })
-    expect(del).toHaveBeenCalledWith({ id: 'm1' })
+    expect(del).not.toHaveBeenCalled()
+    expect(removeFromProject).toHaveBeenCalledWith({ id: 'm1', cwd: CWD })
   })
 
   it('edit prefills and preserves the id and projects', async () => {

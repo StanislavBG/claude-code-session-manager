@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('macros:list'),
     save: (payload) => ipcRenderer.invoke('macros:save', payload),
     delete: (payload) => ipcRenderer.invoke('macros:delete', payload),
+    removeFromProject: (payload) => ipcRenderer.invoke('macros:remove-from-project', payload),
     setProject: (payload) => ipcRenderer.invoke('macros:set-project', payload),
     dispatchJob: (payload) => ipcRenderer.invoke('macros:dispatch-job', payload),
     jobStatus: (payload) => ipcRenderer.invoke('macros:job-status', payload),

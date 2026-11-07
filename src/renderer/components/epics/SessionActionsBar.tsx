@@ -56,7 +56,9 @@ function ManagePanel({
   const remove = async (m: Macro) => {
     setConfirming(null)
     try {
-      await window.api.macros.delete({ id: m.id })
+      if (!cwd) return
+      const r = await window.api.macros.removeFromProject({ id: m.id, cwd })
+      if (!r.ok) toast.error(r.error)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
@@ -83,7 +85,7 @@ function ManagePanel({
             </label>
             {confirming === m.id ? (
               <>
-                <span className="text-fg-dim">Delete?</span>
+                <span className="text-fg-dim">Remove from this project?</span>
                 <button type="button" data-testid="hotkey-delete-yes" onClick={() => void remove(m)} className="font-semibold text-red-500">
                   Yes
                 </button>

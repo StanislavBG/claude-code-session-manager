@@ -13,7 +13,7 @@ const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionS
 const { PrdWorkTypeSchema } = require('./lib/prd/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
-const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
+const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroRemoveFromProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 const { MAX_SLOTS } = require('./lib/scheduler/sessionSlots.cjs');
 
 // ──────────────────────────────────────────── PTY
@@ -666,6 +666,7 @@ const agentsSavePersona = AgentPersonaSaveSchema;
 const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
+const macrosRemoveFromProject = MacroRemoveFromProjectSchema;
 // Background macro job (macroJobIpc.cjs): press a built-in macro as a scheduler PRD inside an existing Epic.
 const macrosDispatchJob = z.object({
   cwd: z.string().min(1).max(4096),
@@ -1498,6 +1499,7 @@ module.exports = {
     macrosSave,
     macrosDelete,
     macrosSetProject,
+    macrosRemoveFromProject,
     macrosDispatchJob,
     macrosJobStatus,
     agentsGetPersonaBody,

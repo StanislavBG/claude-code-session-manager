@@ -627,6 +627,11 @@ ipcMain.handle('macros:delete', validated(schemas.macrosDelete, async (payload) 
   broadcastMacrosChanged();
   return result;
 }));
+ipcMain.handle('macros:remove-from-project', validated(schemas.macrosRemoveFromProject, async (payload) => {
+  const result = await macroLibrary.removeMacroFromProject(payload);
+  if (result.ok) broadcastMacrosChanged();
+  return result;
+}));
 ipcMain.handle('macros:set-project', validated(schemas.macrosSetProject, async (payload) => {
   const result = await macroLibrary.setMacroProject(payload);
   if (result.ok) broadcastMacrosChanged();

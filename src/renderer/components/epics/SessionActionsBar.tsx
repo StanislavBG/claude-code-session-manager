@@ -121,7 +121,7 @@ export interface SessionActionsBarProps {
 export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
   const personas = useAgentPersonas()
   const { launch, launching, cwd } = useMacroLaunch(onSelect, personas)
-  const library = useMacros()
+  const { macros: library, loaded } = useMacros()
   const macros = macrosForProject(library, cwd)
   const [editor, setEditor] = useState<{ macro: Macro | null } | null>(null)
   const [managing, setManaging] = useState(false)
@@ -138,6 +138,12 @@ export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
         >
           + New Session
         </button>
+
+        {!loaded && (
+          <span data-testid="hotkey-loading" className={`${SECONDARY} opacity-60 cursor-default`}>
+            Loading hot keys…
+          </span>
+        )}
 
         {macros.map((m) => (
           <button

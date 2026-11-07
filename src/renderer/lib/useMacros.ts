@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { Macro } from '../../preload/api'
+import { toast } from '../state/toast'
 import { normalizeCwd } from './knownProjectAggregate'
 
 const EMPTY: Macro[] = []
@@ -26,8 +27,19 @@ export function macrosForProject(
     .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()))
 }
 
-export function useMacros(): Macro[] {
-  const [macros, setMacros] = useState<Macro[]>(EMPTY)
+// Last list main handed us. Seeds every mount so a busy main process (slow or
+// rejected macros:list) never makes the HOT KEYS strip look empty.
+let lastKnown: Macro[] | null = null
+let failing = false
+
+export function __resetMacrosCacheForTests(): void {
+  lastKnown = null
+  failing = false
+}
+
+export function useMacros(): { macros: Macro[]; loaded: boolean } {
+  const [macros, setMacros] = useState<Macro[]>(lastKnown ?? EMPTY)
+  const [loaded, setLoaded] = useState<boolean>(lastKnown !== null)
   useEffect(() => {
     let cancelled = false
     const load = () => {
@@ -35,10 +47,16 @@ export function useMacros(): Macro[] {
       if (!list) return
       list()
         .then((l) => {
-          if (!cancelled) setMacros(l)
+          lastKnown = l
+          failing = false
+          if (cancelled) return
+          setMacros(l)
+          setLoaded(true)
         })
-        .catch(() => {
-          if (!cancelled) setMacros(EMPTY)
+        .catch((err: unknown) => {
+          if (failing) return
+          failing = true
+          toast.error('Could not load hot keys: ' + (err instanceof Error ? err.message : String(err)))
         })
     }
     load()
@@ -48,5 +66,5 @@ export function useMacros(): Macro[] {
       off?.()
     }
   }, [])
-  return macros
+  return { macros, loaded }
 }

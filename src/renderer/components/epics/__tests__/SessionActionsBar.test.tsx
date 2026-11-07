@@ -8,6 +8,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { SessionActionsBar } from '../SessionActionsBar'
+import { __resetMacrosCacheForTests } from '../../../lib/useMacros'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
@@ -72,6 +73,7 @@ function setValue(input: HTMLInputElement | HTMLTextAreaElement, value: string) 
 }
 
 beforeEach(() => {
+  __resetMacrosCacheForTests()
   library = []
   usePromptSessions.setState({ sessions: {}, events: {} })
   usePromptSessions.setState({ createPromptSession: createPromptSessionSpy, approveProposed: approveProposedSpy })
@@ -89,6 +91,20 @@ afterEach(() => {
 })
 
 describe('SessionActionsBar', () => {
+  it('pending list on first mount shows hotkey-loading; resolving renders buttons', async () => {
+    library = [macro()]
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const listMock = (globalThis as any).window.api.macros.list as ReturnType<typeof vi.fn>
+    listMock.mockImplementationOnce(async () => { await gate; return library })
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    expect(q(el, 'hotkey-loading')?.textContent).toBe('Loading hot keys…')
+    expect(q(el, 'hotkey-macro')).toBeNull()
+    await act(async () => { release(); await gate })
+    expect(qa(el, 'hotkey-macro').length).toBe(1)
+    expect(q(el, 'hotkey-loading')).toBeNull()
+  })
+
   it('fresh install: exactly "+ New Session" and "New Macro", no manage button', async () => {
     const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
     const labels = Array.from(el.querySelectorAll('button')).map((b) => b.textContent)

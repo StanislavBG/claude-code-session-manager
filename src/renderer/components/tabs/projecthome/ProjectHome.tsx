@@ -33,7 +33,7 @@ function ProjectHomeComponent() {
   // One fetch of session-manager-operations/project-pages/home.html (+ demo video).
   const { knowledge, videos, loaded, error, reload } = useProjectPagesOutput(cwd)
   const jobStatus = useMacroJobStatus(cwd)
-  const library = useMacros()
+  const { macros: library } = useMacros()
   const macros = macrosForProject(library, cwd, 'project-home')
   const personas = useAgentPersonas()
   const { launch, launching } = useMacroLaunch(navigateToEpic, personas)

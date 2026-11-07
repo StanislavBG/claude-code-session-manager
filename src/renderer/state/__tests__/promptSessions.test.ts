@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { PromptSession } from '../promptSessions'
 import { fakePromptSessionsCreate } from '../../testUtils/fakePromptSessionsCreate'
 
@@ -1727,6 +1727,76 @@ describe('audit log emission (PRD 940)', () => {
       )
     })
     warnSpy.mockRestore()
+  })
+})
+
+describe('approveProposed persist failure keeps a started Epic active (PRD 2735)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function setup() {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { toast } = await import('../toast')
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    api.promptSessions.mergeActiveIndex.mockClear()
+    const toastErrorSpy = vi.spyOn(toast, 'error')
+    return { api, usePromptSessions, proposed, toastErrorSpy }
+  }
+
+  it('retries once and keeps active when the first persist rejects then resolves', async () => {
+    const { api, usePromptSessions, proposed, toastErrorSpy } = await setup()
+    api.promptSessions.mergeActiveIndex
+      .mockRejectedValueOnce(new Error('stall'))
+      .mockResolvedValue({ sessions: {}, events: {} })
+    const approved = usePromptSessions.getState().approveProposed(proposed.id)
+    expect(approved?.status).toBe('active')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(usePromptSessions.getState().sessions[proposed.id].status).toBe('active')
+    expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalledTimes(2)
+    expect(toastErrorSpy).not.toHaveBeenCalled()
+  })
+
+  it('tries 3 times, stays active and toasts once when every persist rejects', async () => {
+    const { api, usePromptSessions, proposed, toastErrorSpy } = await setup()
+    api.promptSessions.mergeActiveIndex.mockRejectedValue(new Error('stall'))
+    usePromptSessions.getState().approveProposed(proposed.id)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(usePromptSessions.getState().sessions[proposed.id].status).toBe('active')
+    expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalledTimes(3)
+    expect(toastErrorSpy).toHaveBeenCalledTimes(1)
+    const text = toastErrorSpy.mock.calls[0][0] as string
+    expect(text).toContain('running but its approval was not saved')
+    expect(text).toContain('stall')
+    expect(text).not.toContain('Reopened for review')
+  })
+
+  it('a second approve after the failure returns null and createWorktree ran once', async () => {
+    const { api, usePromptSessions, proposed } = await setup()
+    api.promptSessions.mergeActiveIndex.mockRejectedValue(new Error('stall'))
+    expect(usePromptSessions.getState().approveProposed(proposed.id)).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(usePromptSessions.getState().approveProposed(proposed.id)).toBeNull()
+    expect(api.promptSessions.createWorktree).toHaveBeenCalledTimes(1)
+  })
+
+  it('markCompleted during the retry window stops further approve persists', async () => {
+    const { api, usePromptSessions, proposed, toastErrorSpy } = await setup()
+    api.promptSessions.mergeActiveIndex.mockRejectedValueOnce(new Error('stall'))
+    usePromptSessions.getState().approveProposed(proposed.id)
+    await vi.advanceTimersByTimeAsync(10)
+    await usePromptSessions.getState().markCompleted(proposed.id)
+    expect(usePromptSessions.getState().sessions[proposed.id].status).toBe('completed')
+    api.promptSessions.mergeActiveIndex.mockClear()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.promptSessions.mergeActiveIndex).not.toHaveBeenCalled()
+    expect(toastErrorSpy).not.toHaveBeenCalled()
   })
 })
 

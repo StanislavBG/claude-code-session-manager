@@ -574,19 +574,29 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // Kept synchronous (not awaited/async) because every caller relies on
     // getting the approved session back immediately to start its chat send
     // in the same tick. The persist below still gets the honest-contract
-    // treatment: on rejection, roll the flip back to 'proposed' (unless
-    // something else already moved this Epic further, e.g. markCompleted)
-    // and toast — the row never keeps showing 'active' once we know disk
-    // doesn't have it.
+    // contract: the session is already running once approveProposed returns,
+    // so 'active' is the truth. A save failure is retried (3 attempts total,
+    // ~1 s then ~3 s backoff, against the CURRENT store state) and, if every
+    // attempt fails, surfaced in one toast — never rolled back (rollback
+    // re-opened a live Epic for a second approve that re-sent its opening
+    // prompt). Retries stop silently if the Epic is no longer 'active'.
     const { title } = splitTitleAndGoal(session.goalText)
-    persistActiveIndex(session.cwd, sessions, get().events, [], [promptSessionId]).catch((err: unknown) => {
-      const current = get().sessions[promptSessionId]
-      if (current && current.status === 'active') {
-        set({ sessions: { ...get().sessions, [promptSessionId]: { ...current, status: 'proposed' } } })
-      }
-      const msg = err instanceof Error ? err.message : String(err)
-      toast.error(`Could not start "${title}" — ${msg}. Reopened for review.`)
-    })
+    const retryDelaysMs = [1000, 3000]
+    const attemptPersist = (attempt: number, nextSessions: Parameters<typeof persistActiveIndex>[1], nextEvents: Parameters<typeof persistActiveIndex>[2]): void => {
+      persistActiveIndex(session.cwd, nextSessions, nextEvents, [], [promptSessionId]).catch((err: unknown) => {
+        if (attempt >= retryDelaysMs.length) {
+          const msg = err instanceof Error ? err.message : String(err)
+          toast.error(`"${title}" is running but its approval was not saved: ${msg}`)
+          return
+        }
+        setTimeout(() => {
+          const current = get().sessions[promptSessionId]
+          if (!current || current.status !== 'active') return
+          attemptPersist(attempt + 1, get().sessions, get().events)
+        }, retryDelaysMs[attempt])
+      })
+    }
+    attemptPersist(0, sessions, get().events)
     emitAuditEvent('epic_approve', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
     // Fire-and-forget: creates this Epic's isolated git worktree (main-side
     // gitWorktree.cjs's createEpicWorktree, PRD 1033) so its Terminal/Chat

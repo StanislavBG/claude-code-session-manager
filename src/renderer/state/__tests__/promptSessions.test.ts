@@ -1946,3 +1946,76 @@ describe('markCompleted merge-before-archive checkpoint (PRD 1034)', () => {
     expect(api.promptSessions.mergeToMain).not.toHaveBeenCalled()
   })
 })
+
+describe('updateProposedDraft', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+  const patch = (extra: Record<string, unknown> = {}) => ({
+    goalText: 'T2\n\nG2',
+    openingPrompt: 'open2',
+    sections: [],
+    ...extra,
+  }) as any
+
+  it('applies the patch, keeps identity fields, persists and audits', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const s = await usePromptSessions.getState().createPromptSession('/proj', 'T\n\nG')
+    api.promptSessions.mergeActiveIndex.mockClear()
+    api.auditLog.append.mockClear()
+    const out = await usePromptSessions.getState().updateProposedDraft(
+      s.id, patch({ tag: 'bug', agentType: 'architect', model: 'opus', effort: 'high', developLoop: false }), 'Draft')
+    const got = usePromptSessions.getState().sessions[s.id]
+    expect(got).toEqual(out)
+    expect(got).toMatchObject({
+      goalText: 'T2\n\nG2', openingPrompt: 'open2', tag: 'bug', agentType: 'architect',
+      model: 'opus', effort: 'high', developLoop: false,
+      id: s.id, claudeSessionId: s.claudeSessionId, cwd: s.cwd, status: 'proposed', createdAt: s.createdAt,
+    })
+    expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled()
+    expect(api.auditLog.append).toHaveBeenCalledTimes(1)
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_draft_update', { cwd: '/proj', epicId: s.id, source: 'Draft' })
+  })
+
+  it('refuses an active Epic and leaves the store unchanged', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const s = await usePromptSessions.getState().createPromptSession('/proj', 'T\n\nG')
+    usePromptSessions.getState().approveProposed(s.id)
+    const before = usePromptSessions.getState().sessions[s.id]
+    await expect(usePromptSessions.getState().updateProposedDraft(s.id, patch())).rejects.toThrow()
+    expect(usePromptSessions.getState().sessions[s.id]).toBe(before)
+  })
+
+  it('refuses an unknown id', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    await expect(usePromptSessions.getState().updateProposedDraft('nope', patch())).rejects.toThrow()
+  })
+
+  it('removes keys on null and developLoop true', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const s = await usePromptSessions.getState().createPromptSession('/proj', 'T\n\nG')
+    await usePromptSessions.getState().updateProposedDraft(
+      s.id, patch({ tag: 'bug', agentType: 'a', model: 'm', effort: 'e', developLoop: false }))
+    await usePromptSessions.getState().updateProposedDraft(
+      s.id, patch({ tag: null, agentType: null, model: null, effort: null, developLoop: true }))
+    const got = usePromptSessions.getState().sessions[s.id]
+    for (const k of ['tag', 'agentType', 'model', 'effort', 'developLoop']) expect(k in got).toBe(false)
+  })
+
+  it('rolls back and rethrows when the persist rejects', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const s = await usePromptSessions.getState().createPromptSession('/proj', 'T\n\nG')
+    const before = usePromptSessions.getState().sessions[s.id]
+    api.promptSessions.mergeActiveIndex.mockRejectedValue(new Error('disk'))
+    api.auditLog.append.mockClear()
+    await expect(usePromptSessions.getState().updateProposedDraft(s.id, patch())).rejects.toThrow('disk')
+    expect(usePromptSessions.getState().sessions[s.id]).toEqual(before)
+    expect(api.auditLog.append).not.toHaveBeenCalled()
+  })
+})

@@ -806,6 +806,64 @@ export function PromptPresetsLibrary() {
   )
 }
 
+/**
+ * Toolbar "Insert preset" menu for the System Prompt editor. Toggles a preset's
+ * managed block inside the SAME useConfig draft the editor is showing (no
+ * separate write path) — the user reviews it and saves with the SaveBar.
+ * Locked while unmanaged sections that collide with presets exist.
+ */
+export function InsertPresetMenu({ path, disabled = false }: { path: string; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const draft = useConfig((s) => s.files[path]?.draftRaw ?? '')
+  const setDraft = useConfig((s) => s.setDraft)
+  const activeIds = useMemo(() => new Set(readActivePresetIds(draft)), [draft])
+  const conflicts = useMemo(() => findUnmanagedConflicts(draft, CATALOG_PROMPT_PRESETS), [draft])
+  const locked = conflicts.length > 0
+  const off = disabled || locked
+
+  return (
+    <div className="relative" data-testid="insert-preset-menu">
+      <button
+        type="button"
+        data-testid="insert-preset-button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className="px-2 py-0.5 text-xs rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50"
+        title={locked ? 'Locked: unmanaged sections collide with presets' : 'Insert a preset into CLAUDE.md'}
+      >
+        Insert preset ▾
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-80 max-h-96 overflow-auto rounded border border-line bg-bg-elev shadow-lg">
+          {locked && (
+            <div data-testid="insert-preset-locked" className="px-3 py-2 text-[11px] text-yellow-500/90 border-b border-line">
+              Locked — unmanaged sections collide with presets: {conflicts.map((h) => `# ${h}`).join(' · ')}.
+              Remove them from the document first.
+            </div>
+          )}
+          {CATALOG_PROMPT_PRESETS.map((p) => {
+            const on = activeIds.has(p.id)
+            return (
+              <button
+                key={p.id}
+                type="button"
+                data-testid={`insert-preset-${p.id}`}
+                disabled={off}
+                onClick={() => setDraft(path, togglePreset(draft, p.id, CATALOG_PROMPT_PRESETS))}
+                className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-bg-hi disabled:opacity-50 disabled:hover:bg-transparent"
+                title={p.description}
+              >
+                <span className="flex-1 truncate text-fg">{p.name}</span>
+                <span className={on ? 'text-accent' : 'text-fg-faint'}>{on ? 'on' : 'off'}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PresetCategorySection({
   title,
   presets,

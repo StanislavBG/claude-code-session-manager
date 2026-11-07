@@ -7,6 +7,8 @@ import { useConfig } from '../../../state/config'
 import { useToast } from '../../../state/toast'
 import { flushAsync } from '../../../testUtils/domFlush'
 import { estimateTokens } from '../../../lib/estimateTokens'
+import { CATALOG_PROMPT_PRESETS } from '../../../data/catalog'
+import { readActivePresetIds } from '../../../lib/presetBlock'
 
 /**
  * System Prompt is a document SET — `~/.claude/CLAUDE.md` plus every file it
@@ -259,5 +261,25 @@ describe('SystemPrompt renders its document set through the shared document view
       expect(rows(el)).toHaveLength(0)
       expect(pane(el).getAttribute('data-path')).toBe(ROOT)
     })
+  })
+})
+
+describe('SystemPrompt Insert preset menu', () => {
+  it('has no Editor/Presets toggle, shows a SourceChip, and inserts a preset into the same draft', async () => {
+    const el = await mount()
+    const labels = Array.from(el.querySelectorAll('button')).map((b) => b.textContent?.trim())
+    expect(labels).not.toContain('Presets')
+    expect(labels).not.toContain('Editor')
+    expect(el.textContent).toContain('~/.claude/CLAUDE.md')
+
+    const preset = CATALOG_PROMPT_PRESETS[0]
+    await click(el.querySelector('[data-testid="insert-preset-button"]') as HTMLElement)
+    await click(el.querySelector(`[data-testid="insert-preset-${preset.id}"]`) as HTMLElement)
+
+    const draft = useConfig.getState().files[ROOT].draftRaw
+    expect(readActivePresetIds(draft)).toEqual([preset.id])
+    expect(draft).toContain('# root')
+    expect(useConfig.getState().files[ROOT].dirty).toBe(true)
+    expect(pane(el).textContent).toBe(draft)
   })
 })

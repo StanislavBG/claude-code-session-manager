@@ -6,7 +6,8 @@ import { ReferencedFilesPanel } from './ReferencedFilesPanel'
 import { DocumentEditorPane } from './editor/DocumentEditorPane'
 import { useConfig } from '../../state/config'
 import { CLAUDE_MD_SCOPES } from '../../lib/scopes'
-import { PromptPresetsLibrary, ViewSwitcher } from './Library'
+import { InsertPresetMenu } from './Library'
+import { SourceChip } from '../ui/SourceChip'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { estimateTokens } from '../../lib/estimateTokens'
 import type { ImportRef } from '../../../preload/api'
@@ -47,7 +48,6 @@ const USER_SCOPE_NOTE = {
 
 function SystemPromptComponent() {
   const home = useHomeDir()
-  const [view, setView] = useState<'installed' | 'library'>('installed')
 
   // Single scope, single path. `home` is null only for the first tick before
   // useHomeDir resolves, which the loading EmptyState below covers.
@@ -113,13 +113,6 @@ function SystemPromptComponent() {
   }, [])
 
   if (!home) return <EmptyState title="loading…" />
-  if (view === 'library') {
-    return (
-      <Panel toolbar={<ViewSwitcher active={view} onChange={setView} installedLabel="Editor" libraryLabel="Presets" />}>
-        <PromptPresetsLibrary />
-      </Panel>
-    )
-  }
 
   const rootFile = activePath ? files[activePath] : null
   // The document actually on screen — the root file, or the selected import.
@@ -141,10 +134,11 @@ function SystemPromptComponent() {
     <Panel
       toolbar={
         <>
-          <ViewSwitcher active={view} onChange={setView} installedLabel="Editor" libraryLabel="Presets" />
+          {activePath && <InsertPresetMenu path={activePath} disabled={!!selectedRef} />}
           <span className="mx-2 text-fg-faint">·</span>
           <span className="text-fg-dim">User scope</span>
           <span className="ml-3 text-fg-faint truncate">{docPath ?? '—'}</span>
+          {activePath && <span className="ml-3"><SourceChip path={activePath} /></span>}
           <div className="flex-1" />
           <span className="text-fg-faint">
             {chars.toLocaleString()} chars · ~{tokens.toLocaleString()} tokens

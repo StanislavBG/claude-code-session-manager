@@ -171,7 +171,7 @@ Epic's stage reads this field.
 
 | Status | Meaning | Entered by | Spends tokens |
 | --- | --- | --- | --- |
-| `proposed` | Not started — the human opened the Epic, or a cross-project finding was routed here, but it has not started. | One of the two declared mint authorities (`lib/epic/epicMint.cjs`'s `MINT_AUTHORITIES`), both going through `ensureEpic(..., { mintAuthority })`: the New Epic IPC handler (`lib/epic/promptSessionsCreateEpic.cjs`, `mintAuthority: 'new-epic-ui'`), or `src/main/lib/feedback-remote/crossProjectFeedback.cjs` (`mintAuthority: 'cross-project-feedback'`) landing feedback from another project | No |
+| `proposed` | Not started — the human opened the Epic (including a draft they saved or switched away from, still editable), or a cross-project finding was routed here, but it has not started. | One of the two declared mint authorities (`lib/epic/epicMint.cjs`'s `MINT_AUTHORITIES`), both going through `ensureEpic(..., { mintAuthority })`: the New Epic IPC handler (`lib/epic/promptSessionsCreateEpic.cjs`, `mintAuthority: 'new-epic-ui'`), or `src/main/lib/feedback-remote/crossProjectFeedback.cjs` (`mintAuthority: 'cross-project-feedback'`) landing feedback from another project | No |
 | `active` | The Epic's session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start**, or finishes the draft — the same transition | Yes |
 | `completed` | Archived. The session and its transcript are kept, so **Resume / Reopen** can bring the same Epic back to `active`. | `markCompleted()`, or **Discard** on a proposal | No |
 
@@ -210,6 +210,14 @@ This is what makes "no `draft` state" work without losing anything. The New Epic
 minimal `proposed` row up front and fill fields in as they are typed: what is *not* persisted is a
 separate draft **state**, not the Epic itself. There is still one birth state and one start path,
 and a human Epic can be parked as a proposal indefinitely without being started.
+
+**Human drafts.** A human parks unfinished work as this same `proposed` row, filled in as typed — no
+new state, flag or field. `NewEpicCard`'s **Save draft** button saves it, and leaving the card
+(switch-out) auto-saves it. `EpicsWorkspace` reopens it in the card's edit mode when
+`isEditableDraft` (`src/renderer/lib/epicDraft.ts`) says so. Edits go through `updateProposedDraft`,
+legal only while the Epic is `proposed`. **Start Session** is the one `proposed → active` transition
+(see above); **Discard draft** is `markCompleted`. Title and objective become fixed when the
+session starts, not when the draft is saved.
 
 Because such a row is legitimate, **nothing about a `proposed` Epic is ever erased** — a
 persister that cannot see a use for a sparse row must still keep it (`persistActiveIndex` keeps

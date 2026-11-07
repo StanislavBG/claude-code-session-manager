@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url)
 
 // Real Chromium (never Electron). Renders the real Project Home document (the
-// ProjectHomeKeyButtons + ProjectPagesSection shell, whose Pages tab is PagesPane) with CSS from the built web renderer (dist-web/app.css) and a stub
+// ProjectHomeKeyButtons + ProjectPagesSection shell, whose Pages tab is PagesPane and Videos tab is VideosPane) with CSS from the built web renderer (dist-web/app.css) and a stub
 // window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs for the validation record.
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation
 // plus an inverted render of the same page.
@@ -64,7 +64,17 @@ test('Project Home screenshots: knowledge + videos, light + dark', async () => {
 
       await page.locator('[data-testid="project-home-key"][data-tab="videos"]').click()
       await expect(page.getByTestId('video-item')).toHaveCount(2)
-      await page.frameLocator('iframe').first().locator('h1').waitFor()
+      await expect(page.getByTestId('video-thumb')).toHaveCount(2)
+      // Videos = VideosPane: Generate video + Regenerate…, SOURCES + QUALITY REPORT under the player;
+      // the video MacroButton and its kind/target/style/length selects are gone.
+      await expect(page.locator('[data-testid="project-home-generate"][data-kind="video"]')).toBeVisible()
+      await expect(page.getByTestId('project-home-regenerate')).toBeVisible()
+      await expect(page.getByTestId('video-sources')).toBeAttached()
+      await expect(page.getByTestId('video-report')).toBeAttached()
+      await expect(
+        page.locator('[data-testid="project-home-macro"], [data-testid="project-home-macro-extra"], [data-testid="project-home-demo-kind"], [data-testid="project-home-demo-target"], [data-testid="project-home-demo-style"], [data-testid="project-home-demo-length"]'),
+      ).toHaveCount(0)
+      await page.frameLocator('[data-testid="video-player-frame"]').first().locator('h1').waitFor()
       await page.waitForTimeout(500)
       await page.screenshot({ path: path.join(OUT, `videos-${scheme}.png`) })
       await ctx.close()

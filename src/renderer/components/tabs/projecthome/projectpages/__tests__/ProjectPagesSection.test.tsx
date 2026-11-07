@@ -103,6 +103,20 @@ const typeInto = (el: HTMLElement | null, v: string) => {
 }
 /** The Overview template's default composer lines, joined. */
 const OVERVIEW_LINES = 'Page: Overview\nAudience: Newcomers\nLength: Standard\nRead from: README & docs, Source tree, Git log'
+/** The Project demo video template's default composer lines, joined. */
+const DEMO_LINES = 'Video kind: Project demo\nVideo style: Auto\nVideo length: 30\nCharacter: on'
+/** Every control the old video / page toolbar MacroButton rendered. */
+const OLD_TOOLBAR = [
+  'project-home-macro',
+  'project-home-macro-extra',
+  'project-home-page-kind',
+  'project-home-page-topic',
+  'project-home-demo-kind',
+  'project-home-demo-target',
+  'project-home-demo-style',
+  'project-home-demo-length',
+]
+const oldToolbar = (el: HTMLElement) => OLD_TOOLBAR.filter((id) => el.querySelector(`[data-testid="${id}"]`))
 
 describe('ProjectPagesSection', () => {
   it('while loading shows a loading body, no page switch, empty state or page button', () => {
@@ -229,9 +243,48 @@ describe('ProjectPagesSection', () => {
     expect(items[1].textContent).toContain('blog-post')
     expect(items[1].querySelector('[data-col="lufs"]')?.textContent).toBe('-')
     expect(items[1].querySelector('[data-col="grade"]')?.textContent).toBe('-')
+    expect(items[0].querySelector('[data-testid="video-thumb"]')?.textContent).toContain('Newer video')
+    expect(items[0].querySelector('[data-testid="video-duration"]')?.textContent).toBe('0:30')
+    expect(items[1].querySelector('[data-testid="video-duration"]')?.textContent).toBe('1:00')
+    expect(items[0].getAttribute('aria-current')).toBe('true')
     expect(el.querySelector('[data-testid="video-player-frame"]')).not.toBeNull()
-    expect(macroBtn(el, 'builtin-demo-video')).not.toBeNull()
-    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
+    expect(byTestId('project-home-video-title', el)?.textContent).toBe('Newer video')
+    // VideosPane's Generate video + Regenerate… launch videos: no toolbar MacroButton, no selects
+    expect(oldToolbar(el)).toEqual([])
+    expect(generateBtn()?.getAttribute('data-kind')).toBe('video')
+    expect(generateBtn()?.textContent).toBe('Generate video')
+    expect(byTestId('project-home-regenerate', el)?.textContent).toBe('Regenerate…')
+  })
+
+  it('shows the selected video\'s SOURCES and QUALITY REPORT, "-" for null numbers and a cross for a failing check', async () => {
+    const checked = vEntry('v3', 'Checked video', 3000, {
+      sources: [{ claim: 'Runs locally', source: 'README.md', ref: 'Privacy' }],
+      report: {
+        lufs: null, truePeakDb: -1.2, speechS: null, readingGrade: 6,
+        checks: [
+          { id: 'net', ok: false, detail: 'Opens a WebSocket' },
+          { id: 'len', ok: true, detail: 'Length matches (30s)' },
+        ],
+        bytes: 1,
+      },
+    })
+    const el = mount(<ProjectPagesSection {...props({ videos: [checked, NEW_V], tab: 'videos' })} />)
+    await flush()
+    expect(byTestId('video-sources-count', el)?.textContent).toBe('1 claim')
+    const source = byTestId('video-source', el)!
+    expect(source.textContent).toContain('Runs locally')
+    expect(source.textContent).toContain('README.md › Privacy')
+    const report = byTestId('video-report', el)!
+    expect(Array.from(report.querySelectorAll('[data-stat]')).map((s) => s.querySelector('[data-col="value"]')?.textContent)).toEqual([
+      '-', '-1.2', '-', '6',
+    ])
+    const checks = Array.from(report.querySelectorAll('[data-testid="video-check"]'))
+    expect(checks.map((c) => [c.getAttribute('data-ok'), c.textContent])).toEqual([
+      ['false', 'Opens a WebSocket'],
+      ['true', 'Length matches (30s)'],
+    ])
+    expect(checks[0].querySelector('[data-testid="video-check-icon"]')?.className).toContain('text-accent')
+    expect(checks[1].querySelector('[data-testid="video-check-icon"]')?.className).toContain('text-sage-dark')
   })
 
   it('video entry with meta null shows its error line', async () => {
@@ -250,123 +303,88 @@ describe('ProjectPagesSection', () => {
     act(() => byTestId('composer-generate')!.click())
     expect(onLaunch.mock.calls).toEqual([[HOME_MACRO, OVERVIEW_LINES]])
     await show({ onLaunch, tab: 'videos' })
-    expect(generateBtn()).toBeNull()
-    expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Generate Demo Video')
-    expect(macroBtn(el, 'builtin-project-home')).toBeNull()
-    expect(el.querySelector('[data-testid="project-home-demo-length"]')).not.toBeNull()
+    const empty = byTestId('video-page-empty', el)!
+    expect(empty.textContent).toContain('No videos yet.')
+    expect(oldToolbar(el)).toEqual([])
+    act(() => byTestId('project-home-generate', empty)!.click())
+    expect(byTestId('composer-title')?.textContent).toBe('Generate video')
+    act(() => byTestId('composer-generate')!.click())
+    expect(onLaunch.mock.calls).toEqual([[HOME_MACRO, OVERVIEW_LINES], [DEMO_MACRO, DEMO_LINES]])
   })
 
-  it('pages render none of the old toolbar controls; videos keep the extra input once a video exists', async () => {
-    const gone = ['project-home-macro', 'project-home-page-kind', 'project-home-page-topic', 'project-home-macro-extra']
-    const present = (el: HTMLElement) => gone.filter((id) => el.querySelector(`[data-testid="${id}"]`))
+  it('neither pages nor videos render the old toolbar MacroButton, its selects or its extra input', async () => {
     const el = mount(<ProjectPagesSection {...props()} />)
-    expect(present(el)).toEqual([])
+    expect(oldToolbar(el)).toEqual([])
     await show({ knowledge: [NEW_K] })
-    expect(present(el)).toEqual([])
+    expect(oldToolbar(el)).toEqual([])
     await show({ tab: 'videos' })
-    expect(el.querySelector('[data-testid="project-home-macro-extra"]')).toBeNull()
-    await show({ videos: [NEW_V], tab: 'videos' })
-    expect(el.querySelector('[data-testid="project-home-macro-extra"]')).not.toBeNull()
+    expect(oldToolbar(el)).toEqual([])
+    await show({ videos: [NEW_V, OLD_V], tab: 'videos' })
+    expect(el.querySelectorAll('[data-testid="video-item"]')).toHaveLength(2)
+    expect(oldToolbar(el)).toEqual([])
   })
 
-  it('submits the video Regenerate with extra instructions, then clears the field', async () => {
-    const onLaunch = vi.fn()
-    const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], onLaunch, tab: 'videos' })} />)
-    await flush()
-    const input = el.querySelector('[data-testid="project-home-macro-extra"]') as HTMLInputElement
-    typeInto(input, '  focus on the onboarding flow  ')
-    act(() => macroBtn(el, 'builtin-demo-video').click())
-    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'focus on the onboarding flow')
-    expect(input.value).toBe('')
-  })
-
-  describe('video toolbar selects', () => {
-    const STYLE = '[data-testid="project-home-demo-style"]'
-    const LENGTH = '[data-testid="project-home-demo-length"]'
-    async function mountVideos(onLaunch = vi.fn(), over: Record<string, unknown> = {}) {
-      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], onLaunch, tab: 'videos', ...over })} />)
+  describe('videos launch through the Generate composer', () => {
+    it('Generate video opens the video composer and launches builtin-demo-video with its lines', async () => {
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V, OLD_V], onLaunch, tab: 'videos' })} />)
       await flush()
-      return el
-    }
-    function pick(select: HTMLSelectElement, value: string) {
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
-      act(() => {
-        setValue.call(select, value)
-        select.dispatchEvent(new Event('change', { bubbles: true }))
-      })
-    }
-
-    it('style select options and "Video style: Fun"', async () => {
-      const onLaunch = vi.fn()
-      const el = await mountVideos(onLaunch)
-      const select = el.querySelector(STYLE) as HTMLSelectElement
-      expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
-        'Auto', 'Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography',
+      act(() => generateBtn()!.click())
+      expect(byTestId('composer-title')?.textContent).toBe('Generate video')
+      act(() => (document.querySelector('[data-testid="composer-template"][data-tpl="blog"]') as HTMLElement).click())
+      typeInto(byTestId('composer-target'), 'blog/launch.md')
+      act(() => byTestId('composer-generate')!.click())
+      expect(onLaunch.mock.calls).toEqual([
+        [DEMO_MACRO, 'Video kind: Blog post\nVideo target: blog/launch.md\nVideo style: Professional\nVideo length: 60\nCharacter: off'],
       ])
-      pick(select, 'Fun')
-      act(() => macroBtn(el, 'builtin-demo-video').click())
-      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Fun')
+      expect(byTestId('project-home-composer')).toBeNull()
+      expect(el.querySelector('[data-testid="project-home-library"]')).not.toBeNull()
     })
 
-    it('length select defaults to 30 and sends "Video length: 60" for 1 minute', async () => {
+    it('Regenerate… rebuilds the selected video in place from its meta: its lines end with Replace entry: <id>', async () => {
       const onLaunch = vi.fn()
-      const el = await mountVideos(onLaunch)
-      const select = el.querySelector(LENGTH) as HTMLSelectElement
-      expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['30 seconds', '1 minute'])
-      expect(select.value).toBe('30')
-      pick(select, '60')
-      act(() => macroBtn(el, 'builtin-demo-video').click())
-      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video length: 60')
+      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V, OLD_V], onLaunch, tab: 'videos' })} />)
+      await flush()
+      act(() => (el.querySelectorAll('[data-testid="video-item"]')[1] as HTMLElement).click())
+      act(() => byTestId('project-home-regenerate', el)!.click())
+      expect(byTestId('composer-title')?.textContent).toBe('Regenerate “Older video”')
+      expect(byTestId('composer-eyebrow')?.textContent).toBe('REBUILDING · v1')
+      act(() => byTestId('composer-generate')!.click())
+      // OLD_V: blog-post · Fun · 60s · no character
+      expect(onLaunch.mock.calls).toEqual([
+        [DEMO_MACRO, 'Video kind: Blog post\nVideo style: Fun\nVideo length: 60\nCharacter: off\nReplace entry: v1'],
+      ])
     })
 
-    it('orders style, length, then extra text', async () => {
-      const onLaunch = vi.fn()
-      const el = await mountVideos(onLaunch)
-      pick(el.querySelector(STYLE) as HTMLSelectElement, 'Animated whiteboard')
-      pick(el.querySelector(LENGTH) as HTMLSelectElement, '60')
-      const input = el.querySelector('[data-testid="project-home-macro-extra"]') as HTMLInputElement
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-      act(() => {
-        setValue.call(input, 'shorter')
-        input.dispatchEvent(new Event('input', { bubbles: true }))
+    it('gives VideosPane the video macro\'s job: a queued video build disables Generate video, a page build does not', async () => {
+      const job = (macroId: string): MacroJobStatus => ({
+        macroId, epicId: null, slug: 's', state: 'queued', status: 'queued', reason: null, startedAt: null, finishedAt: null,
       })
-      act(() => macroBtn(el, 'builtin-demo-video').click())
-      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Animated whiteboard\nVideo length: 60\nshorter')
+      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], tab: 'videos', jobStatus: { 'builtin-project-home': job('builtin-project-home') } })} />)
+      await flush()
+      expect(generateBtn()!.disabled).toBe(false)
+      expect(el.querySelector('[data-testid="project-home-job-status"]')).toBeNull()
+      await show({ videos: [NEW_V], tab: 'videos', jobStatus: { 'builtin-demo-video': job('builtin-demo-video') } })
+      expect(generateBtn()!.disabled).toBe(true)
+      expect((byTestId('project-home-regenerate', el) as HTMLButtonElement).disabled).toBe(true)
+      expect(el.querySelector('[data-testid="project-home-job-status"]')?.textContent).toBe('Queued')
     })
 
-    it('kind select and target input send "Video kind" / "Video target" lines', async () => {
-      const onLaunch = vi.fn()
-      const el = await mountVideos(onLaunch)
-      const kind = el.querySelector('[data-testid="project-home-demo-kind"]') as HTMLSelectElement
-      expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(['Project demo', 'Blog post', 'Feature'])
-      pick(kind, 'Blog post')
-      const input = el.querySelector('[data-testid="project-home-demo-target"]') as HTMLInputElement
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-      act(() => {
-        setValue.call(input, 'blog/post.md')
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-      })
-      act(() => macroBtn(el, 'builtin-demo-video').click())
-      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video kind: Blog post\nVideo target: blog/post.md')
+    it('without the builtin-demo-video macro Generate video stays disabled', async () => {
+      mount(<ProjectPagesSection {...props({ videos: [NEW_V], macros: [HOME_MACRO], tab: 'videos' })} />)
+      await flush()
+      expect(generateBtn()!.disabled).toBe(true)
     })
 
-    it('leaves args unchanged with Auto / 30', async () => {
-      const onLaunch = vi.fn()
-      const el = await mountVideos(onLaunch)
-      act(() => macroBtn(el, 'builtin-demo-video').click())
-      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, undefined)
-    })
-
-    it('disables selects while launching or building', async () => {
-      const el = await mountVideos(vi.fn(), { launching: 'builtin-demo-video' })
-      expect((el.querySelector(STYLE) as HTMLSelectElement).disabled).toBe(true)
-      expect((el.querySelector(LENGTH) as HTMLSelectElement).disabled).toBe(true)
-      for (const state of ['queued', 'running']) {
-        const e2 = await mountVideos(vi.fn(), {
-          jobStatus: { 'builtin-demo-video': { state, status: state, startedAt: null, finishedAt: null, epicId: null, reason: null } },
-        })
-        expect((e2.querySelector(LENGTH) as HTMLSelectElement).disabled).toBe(true)
-      }
+    it('keeps the video selection across key-button switches', async () => {
+      const over = { knowledge: [NEW_K], videos: [NEW_V, OLD_V] }
+      const el = mount(<ProjectPagesSection {...props({ ...over, tab: 'videos' })} />)
+      await flush()
+      act(() => (el.querySelectorAll('[data-testid="video-item"]')[1] as HTMLElement).click())
+      await show({ ...over, tab: 'pages' })
+      await show({ ...over, tab: 'videos' })
+      expect(el.querySelector('[data-testid="video-item"][aria-current="true"]')?.getAttribute('data-id')).toBe('v1')
+      expect(byTestId('project-home-video-title', el)?.textContent).toBe('Older video')
     })
   })
 
@@ -486,13 +504,14 @@ describe('ProjectPagesSection', () => {
     })
   })
 
-  it('disables Generate page and the video macro button while launching', async () => {
-    const el = mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
+  it('disables Generate page and Generate video while launching', async () => {
+    mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
     expect(generateBtn()!.disabled).toBe(true)
     expect(generateBtn()!.textContent).toBe('Starting…')
     await show({ launching: 'builtin-demo-video', tab: 'videos' })
-    expect(macroBtn(el, 'builtin-demo-video').disabled).toBe(true)
-    expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Starting…')
+    expect(generateBtn()!.getAttribute('data-kind')).toBe('video')
+    expect(generateBtn()!.disabled).toBe(true)
+    expect(generateBtn()!.textContent).toBe('Starting…')
   })
 
   describe('job status', () => {
@@ -507,12 +526,13 @@ describe('ProjectPagesSection', () => {
     }
     const line = (el: HTMLElement) => el.querySelector('[data-testid="project-home-job-status"]') as HTMLElement
 
-    it('queued: label, disabled button, Open session', async () => {
+    it('queued: label, disabled Generate video, Open session', async () => {
       const onOpen = vi.fn()
       const el = await render(st({ state: 'queued' }), onOpen)
       expect(line(el).textContent).toBe('Queued')
-      expect(macroBtn(el, 'builtin-demo-video').disabled).toBe(true)
-      expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Building…')
+      expect(byTestId('video-page-empty', el)?.contains(line(el))).toBe(true)
+      expect(generateBtn()!.disabled).toBe(true)
+      expect(generateBtn()!.textContent).toBe('Generate video')
       act(() => (el.querySelector('[data-testid="project-home-job-session"]') as HTMLButtonElement).click())
       expect(onOpen).toHaveBeenCalledWith('epic-1')
     })
@@ -523,7 +543,7 @@ describe('ProjectPagesSection', () => {
     it('done: button enabled', async () => {
       const el = await render(st({ state: 'done', finishedAt: new Date(Date.now() - 60_000).toISOString() }))
       expect(line(el).textContent).toBe('Done 1m ago')
-      expect(macroBtn(el, 'builtin-demo-video').disabled).toBe(false)
+      expect(generateBtn()!.disabled).toBe(false)
     })
     it('failed: reason with role=alert, no session link without epicId', async () => {
       const el = await render(st({ state: 'failed', reason: 'timed out after 30m', epicId: null }))
@@ -625,6 +645,19 @@ describe('ProjectPagesSection', () => {
         ['error', 'Rename failed: meta.json invalid'],
         ['error', 'Delete failed: entry not found'],
       ])
+    })
+
+    it('video rows ask "Delete this video?" and delete through projectPages.delete with kind video', async () => {
+      const el = mount(<ProjectPagesSection {...props({ cwd: '/proj', videos: [NEW_V, OLD_V], tab: 'videos' })} />)
+      await flush()
+      const first = el.querySelector('ul[aria-label="Videos"] > li') as HTMLElement
+      act(() => tid(first, 'entry-delete').click())
+      expect(first.textContent).toContain('Delete this video?')
+      await act(async () => {
+        tid(first, 'entry-delete-confirm').click()
+        await Promise.resolve()
+      })
+      expect(del).toHaveBeenCalledWith('/proj', 'video', 'v2')
     })
 
     it('shows no actions without a cwd', async () => {

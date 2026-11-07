@@ -61,7 +61,7 @@ A namespace declares an old flat layout "RETIRED and auto-consolidated" at boot,
 counts under the flat path don't shrink between runs. **Detection**: a nonzero flat-layout file
 count that doesn't shrink between app restarts is the signal; cross-reference against the
 namespace's own in-flight state (queue/history) before treating any of it as cleanup work —
-`scripts/audit-ops-hygiene.cjs` implements this for `scheduler/prds/` vs `scheduler/prds-archived/`.
+`scripts/audit-ops-hygiene.cjs` implements this for scheduler/prds/ vs scheduler/prds-archived/.
 **Action**: investigate before touching — a nonzero count can be legitimate in-flight work, not
 stuck debt.
 
@@ -70,7 +70,7 @@ A top-level archived record (e.g. `prompt-sessions/*.json`) has no matching subd
 namespace it should have minted (e.g. `scheduler/epics/<id>/`). **Detection**: has to be scripted,
 not eyeballed — inspect the record's own event chain for dispatch evidence, then search dependent
 namespaces for a match under a *different* auto-minted id before concluding anything is lost;
-`scripts/audit-ops-hygiene.cjs` implements this for `prompt-sessions/` vs `scheduler/epics/`.
+`scripts/audit-ops-hygiene.cjs` implements this for `prompt-sessions/` vs scheduler/epics/.
 **Action**: a record with no dispatch evidence and no match elsewhere is a genuine never-worked
 artifact, safe to age out under a retention policy; a record *with* dispatch evidence but no
 matching dir indicates real data loss and must never be deleted, only escalated.
@@ -81,7 +81,7 @@ matching dir indicates real data loss and must never be deleted, only escalated.
 so cross-references between this doc and that script's comments could mean two different things
 under the same letter. Renamed to the next free letter, G, so the two never collide again.)*
 
-Any namespace that archives completed work (an `archived/`, `processed/`, or `-archived` subfolder)
+Any namespace that archives completed work (an archived/, processed/, or `-archived` subfolder)
 needs an explicit answer, in that namespace's own README, to "how long do we keep this, and
 who/what prunes it." Silence isn't neutral — it's how an archive folder grows unbounded with
 nobody able to say whether any of it is safe to remove. **Detection**: `scripts/ops-sweep.cjs`'s
@@ -124,7 +124,7 @@ report shape and does not emit any of these `type` values.
 | `UNDOCUMENTED` | Namespace name never mentioned anywhere in the ownership doc. | B |
 | `CONTRADICTION` | The ownership doc contains both "retired/gone" and "owner/owns" language for the same namespace, or the namespace's own README and the ownership doc disagree on retired-vs-active status. | A |
 | `NO_RETENTION_POLICY` | Namespace has an archived/processed subfolder with files but no retention/prune/expire language in its README. | G |
-| `EPIC_INDEX_ORPHAN_ROWS` | `prompt-sessions/active-index.json` has a row with no matching `prompt-sessions/<id>.json` file — reuses `src/main/health.cjs`'s `computeEpicIndexDrift` so the two never disagree. | — |
+| `EPIC_INDEX_ORPHAN_ROWS` | prompt-sessions/active-index.json has a row with no matching `prompt-sessions/<id>.json` file — reuses `src/main/health.cjs`'s `computeEpicIndexDrift` so the two never disagree. | — |
 | `CLAUDE_MD_OVER_BUDGET` | The target's root `CLAUDE.md` exceeds its own self-declared SIZE BUDGET header. | — |
 | `OPS_PATH_LITERAL` | A `.cjs` file under `src/main/` (outside `lib/opsOwnership.cjs` itself) spells the `session-manager-operations` literal instead of building the path via `opsPath()`/`resolveOpsRoot()`. Only meaningful when the swept target IS the session-manager repo. | — |
 | `NESTED_CLAUDE_MD_OVER_BUDGET` | Any `CLAUDE.md` strictly below the repo root (excluding `node_modules`/`.git`) exceeds the fixed 4000-byte nested-doc cap. | — |
@@ -144,7 +144,7 @@ Retention sweeps and `prompt-sessions/README.md` → Retention policy):
 
 | Artifact | Measured |
 | --- | --- |
-| `runs/` (run logs) | 3.5 GB |
+| runs/ (run logs) | 3.5 GB |
 | Archived Epic transcripts | ~700 MB across projects |
-| `state/history.jsonl` | up to 11.7 MB per project |
+| state/history.jsonl | up to 11.7 MB per project |
 | `prds/.reserved-NN` markers | up to 3,163 per project |

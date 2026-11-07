@@ -39,8 +39,9 @@ JavaScript (the home page does not):
 `src/main/projectPages.cjs` is read-only: `project-pages:get` returns `home.html`'s
 content plus `demo-video/index.html`'s `{ path, mtimeMs }` (or `null` if absent), and a
 per-cwd watcher pushes `project-pages:changed` with both whenever either file is
-added/changed/removed. Project Home shows `home.html` in a sandboxed frame and, when
-present, plays the demo video via `DemoVideoFrame`.
+added/changed/removed. Project Home shows a knowledge page in `HtmlFrame` (a `srcDoc`
+iframe sandboxed to `allow-same-origin`, so no script runs) and plays a video in
+`VideoPlayer` (an `allow-scripts`-only sandboxed iframe over `smfile://`).
 
 **The demo video only plays for projects under `$HOME`.** The player loads the file
 over the `smfile://` scheme, which `assertInsideHome` (`src/main/index.cjs`) enforces —
@@ -49,14 +50,100 @@ outside `$HOME` never renders a demo video even if `demo-video/index.html` exist
 
 ## Who triggers generation
 
-Project Home's two buttons are the built-in Macros in
-`src/main/lib/persona-macro/builtinMacros.cjs`, launched through the same `useMacroLaunch` authority
-the Sessions HOT KEYS strip uses:
+Project Home is `src/renderer/components/tabs/projecthome/ProjectHome.tsx`; every other
+component named below sits in its `projectpages/` folder. It opens on three key buttons
+(`ProjectHomeKeyButtons.tsx`) that switch the section below them:
 
-- `builtin-project-home` — agent `project-home-builder`, writes via `project_home_write`.
-- `builtin-demo-video` — agent `demo-video-builder`, writes via `project_demo_video_write`.
+- **Pages** — the knowledge-page library (`PagesPane.tsx`). Badge = ready + building pages;
+  meta line `Nothing generated yet`, `<n> building · <m> ready` while a build is queued or
+  running, else `<n> pages · latest <ago>`.
+- **Videos** — the video library (`VideosPane.tsx`), with the same badge and meta line.
+- **Tools** — `ToolsPane.tsx`. Meta line `Review MD network`; once Tools has scanned this
+  project, ` · <n> findings` and an accent badge carry the last link-map scan's findings
+  count (hidden until then, and after a failed scan).
 
-A project with neither artifact shows an empty state offering these actions.
+Every press goes through `useMacroLaunch` (`src/renderer/lib/useMacroLaunch.ts`), the
+authority the Sessions HOT KEYS strip uses. Pages and Videos build with the two library
+Macros in `src/main/lib/persona-macro/builtinMacros.cjs`:
+
+- `builtin-project-home` — agent `project-home-builder`, writes `knowledge/<id>/` via `project_page_write`.
+- `builtin-demo-video` — agent `demo-video-builder`, writes `videos/<id>/` via `project_video_write`.
+
+Both declare a `job`, so a press is a background build: after a delegation-readiness check,
+`macros.dispatchJob` (`lib/persona-macro/macroJobDispatch.cjs`) queues one artifact-only
+scheduler PRD in the macro's active Epic (`launchSession` mints that Epic first when there is
+none), and Project Home stays where it is. While the job is queued or running the list shows a
+building row (`BuildingPanel.tsx`) — for a Regenerate from this window, the entry's own row —
+and a `“<title>” is ready` toast fires when it is done.
+
+### Generate composer
+
+`Generate page` / `Generate video` open `GenerateComposer.tsx` on that kind's templates
+(`composerTemplates.ts`): Overview, How it works, FAQ, Getting started, What’s new and Custom
+topic for pages; Project demo, Feature spotlight, Blog post, Whiteboard explainer and Custom for
+videos. Picking a template resets every setting to its defaults; Focus is free text with
+`+ <chip>` suggestions. `pagePromptLines` / `videoPromptLines` turn the form into the builder's
+prompt lines, which the pane sends, joined with `\n`, as the macro's `extraInstructions`:
+
+```text
+Page: Overview | How it works | FAQ | Custom topic: <topic>
+Audience: Newcomers | Users | Contributors           (the composer's "Written for")
+Length: Brief | Standard | In-depth
+Read from: <README & docs, Source tree, Git log — the selected ones, in this order> | nothing selected
+<Focus text, when set>
+```
+
+```text
+Video kind: Project demo | Blog post | Feature
+Video target: <post path or URL | feature name>      (Blog post / Feature only, when set)
+Video style: Auto | Professional | Fun | Animated whiteboard | Kinetic typography
+Video length: 30 | 60
+Character: on | off
+<Focus text, when set>
+```
+
+Both library macro prompts read these lines. `fitInstructions` (`PagesPane.tsx`) keeps the
+joined text within the 4000-character `extraInstructions` cap (`src/main/ipcSchemas.cjs`),
+cutting Focus first. A Custom topic page cannot be generated until it has a topic
+(`canGenerate`).
+
+An empty library (nothing written, nothing building) shows `LibraryEmptyState.tsx`: one
+starter card per template. A card's Generate sends that template's default lines at once
+(`pageDefaults` / `videoDefaults`); Customize opens the composer on it; the page Custom topic
+card reads `Name a topic` and opens the composer.
+
+### Regenerate
+
+`Regenerate…` in the selected entry's title bar opens the composer settings-only, pre-filled
+from that entry (`pageCfgFromEntry`: the mapped template's defaults, plus `meta.topic` for a
+custom topic; `videoCfgFromEntry`: kind, style, length and Character from `meta.json`, target
+empty). The pane then appends one last line, which `fitInstructions` never cuts:
+
+```text
+Replace entry: <id>
+```
+
+`entryIdFor` in `macroJobDispatch.cjs` takes a valid `Replace entry: <id>` as the job's entry
+id, so the build rewrites that entry in place. Without one, a video gets a fresh `vid-…` id and
+a page is named by its `Page:` line (`overview`, `how-it-works`, `faq`, or the kebab-cased
+custom topic). The dispatcher adds an `Entry id: <id>` line to the job's goal, which tells the
+builder to save under that id.
+
+### Tools
+
+`ToolsPane.tsx` lists `builtin-review-md-network` (agent `architect`) first, then every other
+macro saved with Surface: Project Home (the macro editor's `Shown on: Project Home`, i.e.
+`surface: 'project-home'`) that `macrosForProject` returns for this project — except the two
+library macros above, which Pages and Videos launch. `Add a tool` opens `MacroEditor` with that
+surface preset. Review MD network shows a Scope select, a Mode control (`Full review` |
+`Drift check`) and `Run review`, over one `project-pages:md-network` scan
+(`src/main/lib/mdNetworkScan.cjs`, drawn by `MdLinkMap.tsx`) fetched when its view first shows
+and again on `Refresh`, never polled. Any other tool shows its inputs form, or a plain `Run`.
+No Tools macro has a `job` (`lib/persona-macro/macroLibrary.cjs` attaches `job` only to the
+built-ins that declare one), so each press mints a new Epic and opens it — the same act as New
+Session.
+
+Per-file notes: [`code-map.md`](../architecture/code-map.md).
 
 ## Library: Knowledge Pages + Videos
 
@@ -128,5 +215,5 @@ demo-video/index.html.migrated; do not delete or restore them.
 `_character`, a missing entry, and any entry whose realpath is not a direct child of its
 kind folder (symlink escape).
 
-The sections above describe the legacy single-file layout up to "Who triggers generation";
+The sections before "Who triggers generation" describe the legacy single-file layout;
 where they differ, this section wins.

@@ -23,16 +23,48 @@ export interface LearningContent {
 
 export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'project-home': {
-    headline: 'The Brief — what this project is, and what is in flight',
+    headline: 'Pages, Videos and Tools — this project\'s generated library and its tools',
     intro:
-      'Home for a project tab is a synthesized brief: what the project is for, how it is structured, and what is currently in flight across its Epics. Content is scaffolded for now — the synthesis pipeline lands in a later update.',
+      'Project Home is this project\'s own library, written by builder agents from what they read in the repository. Three key buttons at the top switch the area below them: Pages holds Knowledge Pages (static HTML pages that explain a topic), Videos holds short self-contained HTML/JS videos that show the project, and Tools holds one-press tools for the project, led by Review MD network.',
     sections: [
       {
-        title: 'What you see',
+        title: 'The key buttons',
         items: [
-          { body: 'A header naming the active project, resolved from the active tab\'s working directory.' },
+          { term: 'Pages', body: 'Opens the knowledge-page library. The badge counts ready pages plus any page being built; the line under the name reads “Nothing generated yet”, “<n> building · <m> ready” while a build runs, or the page count and how long ago the newest page was made.' },
+          { term: 'Videos', body: 'The same, for the video library.' },
+          { term: 'Tools', body: 'Opens the tool list. Once you have opened Tools for this project, an accent badge shows how many findings Review MD network\'s link map found.' },
         ],
       },
+      {
+        title: 'Pages and Videos',
+        items: [
+          { term: 'The list', body: 'One row per page or video; a video row adds a thumbnail, its length, its loudness (LUFS) and its reading grade. Select a row to open it — a page shows in a sandboxed frame where no script runs, a video plays in its player above its SOURCES and QUALITY REPORT cards. Rename and Delete sit under the selected row.' },
+          { term: 'Generate page / Generate video', body: 'Opens the Generate composer. Start from a template — Overview, How it works, FAQ, Getting started, What’s new or Custom topic (you name the topic) for a page; Project demo, Feature spotlight, Blog post, Whiteboard explainer or Custom for a video — then adjust it. A page takes Written for (Newcomers, Users or Contributors), Length (Brief, Standard or In-depth) and Read from (README & docs, Source tree, Git log); a video takes Kind, a Feature or Post target, Style, Length (30 or 60 seconds) and Character on or off. Both take an optional Focus note. Your choices reach the builder as plain lines such as “Audience: Users” or “Video length: 60”.' },
+          { term: 'Regenerate…', body: 'In the selected page\'s or video\'s title bar. Opens the composer pre-filled from that entry and rebuilds it in place: the builder also gets a “Replace entry: <id>” line, so you end up with one updated entry, not a second copy.' },
+          { term: 'While it builds', body: 'A build runs in the background as a scheduler job in the builder\'s Session, so Project Home stays put. A building row sits at the top of the list (or the regenerated entry\'s own row turns building); select it to see its progress and, for a build started in this window, what was sent to the builder. Open session jumps to that Session. When the build finishes, a toast says “<title>” is ready; a failed build shows its reason in that row\'s place.' },
+          { term: 'Empty library', body: 'With nothing generated yet, the tab shows a starter gallery with one card per template. A card\'s Generate builds that template\'s defaults straight away; Customize opens the composer on it (the Custom topic card asks you to name a topic first).' },
+        ],
+      },
+      {
+        title: 'Tools',
+        items: [
+          { term: 'Review MD network', body: 'Always listed first. Its LINK MAP draws CLAUDE.md and the docs its links lead to; FINDINGS lists broken links and docs no link path from CLAUDE.md reaches. Pick a Scope and a Mode (Full review or Drift check), then Run review opens an architect Session that reports first and changes no files until you approve. The map is scanned when you first open it and again on Refresh — never on a timer.' },
+          { term: 'Your tools', body: 'Every macro saved with Shown on: Project Home for this project is listed after it. A tool with inputs shows its form; otherwise press Run. Each press starts a new Session and opens it, the same as pressing a hot key.' },
+          { term: 'Add a tool', body: 'Opens the macro editor with Shown on already set to Project Home.' },
+        ],
+      },
+      {
+        title: 'Behaviors this affects',
+        items: [
+          { body: 'Pages and videos are folders under session-manager-operations/project-pages/ (knowledge/<id>/ and videos/<id>/). Rename changes only the title in the entry\'s meta.json; Delete removes the entry\'s folder.' },
+          { body: 'A build needs delegation to be ready; if it is not, the press shows why in a toast and nothing is queued. Each library builds one entry at a time — Generate and Regenerate stay disabled while a build is queued or running.' },
+        ],
+      },
+    ],
+    tips: [
+      'To refresh an out-of-date page or video, use Regenerate… on it — it replaces that entry instead of adding another.',
+      'Videos play only for projects inside your home folder.',
+      'The Tools badge stays hidden until you open Tools for this project — Project Home never scans on its own.',
     ],
   },
   'overview': {

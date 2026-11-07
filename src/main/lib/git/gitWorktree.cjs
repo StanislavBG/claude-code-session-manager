@@ -1535,8 +1535,11 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
       cwd, targetRef: `refs/heads/${expectedBranch}`, branch, message: mergeMessage,
     });
     if (refResult.ok) {
-      // Spread refResult first so a fast-forward keeps `fastForward: true`
-      // and a merge commit keeps `mergeCommit: true` — this used to
+      // Spread refResult first so the landing's own shape passes through
+      // untouched: a fast-forward keeps `fastForward: true`, the normal
+      // diverged case keeps `linear: true` + `replayedCommits` (the branch
+      // replayed onto the ref tip, no merge commit), and only the merge
+      // fallback carries `mergeCommit: true` + `linearFallback`. This used to
       // hard-code `fastForward: false` on every success, misreporting a
       // plain fast-forward as a merge.
       return { ...refResult, viaRef: true, sha: refResult.sha || refBranchHead };
@@ -2225,10 +2228,13 @@ const REPLAY_MAX_COMMITS = 200;
  * Checkout-free linear replay: rebuilds `branch`'s non-merge commits on top of
  * `ontoSha` purely in the object database (`git merge-tree --write-tree` +
  * `git commit-tree`). Touches no checkout, index, HEAD or ref — the caller
- * decides what to do with the returned `tipSha`. It exists so scheduler-job and
- * Epic landings can be linear: `integrateBranch` / `attemptIntegrateOntoRef`
- * create "merge ..." commits, and Bilko's scripts/sync-local-main.sh refuses a
- * local main carrying merge commits origin lacks.
+ * decides what to do with the returned `tipSha`. It is the linear step of both
+ * landing paths — `integrateBranch` in the checkout and `attemptIntegrateOntoRef`
+ * onto a bare ref: fast-forward first, then this replay, and a two-parent
+ * "merge ..." commit only as their logged fallback (git too old, a replay
+ * conflict, or SM_LINEAR_LANDING_DISABLE=1). Landings stay linear because
+ * Bilko's scripts/sync-local-main.sh refuses a local main carrying merge
+ * commits origin lacks.
  *
  * Original author name/email/date and the full message are preserved; commits
  * whose patch is already in `ontoSha`'s history (cherry-pick equivalence) or
@@ -2364,13 +2370,23 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
 }
 
 /**
- * One computation attempt for `integrateOntoRef` — resolves both tips fresh,
- * decides ff vs merge-commit vs no-op, and lands the result via a
+ * One computation attempt for `integrateOntoRef` — resolves both tips fresh
+ * and decides, in order: no-op (`integrated: false`); fast-forward when
+ * `targetRef` is an ancestor of `branch` (`fastForward: true`); otherwise a
+ * linear replay of the branch's commits onto the ref tip via
+ * `replayBranchOnto` (`linear: true`, `replayedCommits`). Only when
+ * SM_LINEAR_LANDING_DISABLE=1 or the replay fails with `git_too_old` /
+ * `content_conflict` does it console.warn and fall back to a two-parent merge
+ * commit (`git merge-tree --write-tree` + `git commit-tree`, parents
+ * [ref tip, branch tip]) reported as `mergeCommit: true` with
+ * `linearFallback` naming why; any other replay failure is
+ * `failureKind: 'other'` with the ref untouched. Every outcome lands via a
  * compare-and-swap `git update-ref`. Returns `{ retry: true }` (never `ok`)
  * when the CAS lost a race against a concurrent ref update — the caller
  * recomputes from scratch, since a stale `oldSha` invalidates everything
- * derived from it (the ff-vs-merge decision, the merge-tree/commit-tree
- * inputs). Every other return is terminal: a real `{ ok: true/false, ... }`.
+ * derived from it (the ff/replay/merge decision, the replayed commits, the
+ * merge-tree/commit-tree inputs). Every other return is terminal: a real
+ * `{ ok: true/false, ... }`.
  */
 async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
   const branchSha = await tryResolveCommit(cwd, `${branch}^{commit}`);
@@ -2436,6 +2452,32 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
     return { ok: true, integrated: true, fastForward: true, sha: branchSha };
   }
 
+  // Diverged: replay the branch's commits onto the ref tip and land the
+  // replayed tip through the same CAS — the in-checkout path's linear landing
+  // (PRD 2743), done checkout-free. `branchSha`, never the name, reaches the
+  // replay so it rebuilds exactly the commits resolved above. A two-parent
+  // merge is only the logged fallback for what a replay cannot do.
+  let linearFallback = '';
+  if (process.env.SM_LINEAR_LANDING_DISABLE === '1') {
+    linearFallback = 'disabled';
+  } else {
+    const r = await replayBranchOnto({ cwd, ontoSha: oldSha, branch: branchSha });
+    if (r.ok) {
+      const outcome = await updateRefOrClassify([targetRef, r.tipSha, oldSha]);
+      if (outcome.retry) return { retry: true };
+      if (!outcome.ok) return outcome;
+      return {
+        ok: true, integrated: true, linear: true, sha: r.tipSha, replayedCommits: r.replayed.length,
+        ...(r.autoResolved ? { autoResolved: r.autoResolved, resolvedPaths: r.resolvedPaths } : {}),
+      };
+    }
+    if (r.failureKind !== 'git_too_old' && r.failureKind !== 'content_conflict') {
+      return { ok: false, failureKind: 'other', reason: r.reason };
+    }
+    linearFallback = r.failureKind;
+  }
+  console.warn(`[gitWorktree] linear landing of ${branch} onto ${targetRef} fell back to a merge commit (${linearFallback})`);
+
   const mergeTreeResult = await runMergeTreeWriteTree({ cwd, oldSha, branchSha });
   if (!mergeTreeResult.ok) return mergeTreeResult;
 
@@ -2461,29 +2503,9 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
   const outcome = await updateRefOrClassify([targetRef, newSha, oldSha]);
   if (outcome.retry) return { retry: true };
   if (!outcome.ok) return outcome;
-  return { ok: true, integrated: true, mergeCommit: true, sha: newSha };
+  return { ok: true, integrated: true, mergeCommit: true, sha: newSha, linearFallback };
 }
 
-/**
- * Lands `branch` onto `targetRef` WITHOUT touching any working tree, index,
- * or HEAD — no `git checkout`, no `git merge`, nothing in any human's or
- * job's own checkout ever moves. Fast-forwards via a compare-and-swap `git
- * update-ref` when `targetRef` is an ancestor of `branch`; otherwise builds a
- * merge commit entirely in the object database (`git merge-tree --write-tree`
- * + `git commit-tree`) and lands IT via the same CAS. This is the foundation
- * for a per-Epic `sm-land/<epicId>` integration branch that scheduler jobs
- * can land onto regardless of what the human's own checkout is doing.
- *
- * Refuses up front (`failureKind: 'target_checked_out'`, nothing touched) if
- * `targetRef` is checked out in ANY worktree of this repo — updating a
- * checked-out branch's ref out from under `git worktree list` would desync
- * that working tree's HEAD from its own index, which no compare-and-swap can
- * detect or prevent (a worktree's HEAD isn't a ref-race participant here).
- *
- * A CAS loss (the ref moved between our read and our write — a sibling
- * caller landed first) retries the WHOLE computation, up to 3 attempts total,
- * before giving up with `failureKind: 'ref_race'`.
- */
 /**
  * Normalizes `targetRef` to a full `refs/heads/...` name: a short name like
  * `sm-land/x` becomes `refs/heads/sm-land/x`; a value already under
@@ -2598,6 +2620,33 @@ async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
   return { ok: true };
 }
 
+/**
+ * Lands `branch` onto `targetRef` WITHOUT touching any working tree, index,
+ * or HEAD — no `git checkout`, no `git merge`, nothing in any human's or
+ * job's own checkout ever moves. Fast-forwards via a compare-and-swap `git
+ * update-ref` when `targetRef` is an ancestor of `branch`; otherwise replays
+ * the branch's commits onto the ref tip entirely in the object database
+ * (`replayBranchOnto`) and lands the replayed tip via the same CAS
+ * (`linear: true` — no merge commit, so tooling that refuses merge commits,
+ * like Bilko's scripts/sync-local-main.sh, keeps working). Only when
+ * SM_LINEAR_LANDING_DISABLE=1, or the replay needs a newer git or conflicts
+ * on one of the branch's commits, does it fall back — with a console.warn —
+ * to a two-parent merge commit (`git merge-tree --write-tree` + `git
+ * commit-tree`, `message` as its text) landed via the same CAS and reported
+ * as `mergeCommit: true` + `linearFallback`. This is the foundation for a
+ * per-Epic `sm-land/<epicId>` integration branch that scheduler jobs can land
+ * onto regardless of what the human's own checkout is doing.
+ *
+ * Refuses up front (`failureKind: 'target_checked_out'`, nothing touched) if
+ * `targetRef` is checked out in ANY worktree of this repo — updating a
+ * checked-out branch's ref out from under `git worktree list` would desync
+ * that working tree's HEAD from its own index, which no compare-and-swap can
+ * detect or prevent (a worktree's HEAD isn't a ref-race participant here).
+ *
+ * A CAS loss (the ref moved between our read and our write — a sibling
+ * caller landed first) retries the WHOLE computation, up to 3 attempts total,
+ * before giving up with `failureKind: 'ref_race'`.
+ */
 async function integrateOntoRef({ cwd, targetRef, branch, message }) {
   if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
   if (!targetRef || typeof targetRef !== 'string') return { ok: false, reason: 'no targetRef provided' };

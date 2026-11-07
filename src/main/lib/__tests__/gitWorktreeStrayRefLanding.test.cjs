@@ -26,6 +26,7 @@ let tmpRoot;
 let repoCwd;
 let originalWorktreeRoot;
 let originalRefLandingDisable;
+let originalLinearLandingDisable;
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -51,6 +52,8 @@ beforeEach(() => {
   process.env.SM_WORKTREE_ROOT = path.join(tmpRoot, 'worktrees');
   originalRefLandingDisable = process.env.SM_REF_LANDING_DISABLE;
   delete process.env.SM_REF_LANDING_DISABLE;
+  originalLinearLandingDisable = process.env.SM_LINEAR_LANDING_DISABLE;
+  delete process.env.SM_LINEAR_LANDING_DISABLE;
   gitWorktree._resetActiveWorktreeCountForTests('job', 0);
   gitWorktree._resetObservedWorktreeCountCacheForTests();
 });
@@ -59,6 +62,7 @@ afterEach(() => {
   const restore = (name, val) => { if (val === undefined) delete process.env[name]; else process.env[name] = val; };
   restore('SM_WORKTREE_ROOT', originalWorktreeRoot);
   restore('SM_REF_LANDING_DISABLE', originalRefLandingDisable);
+  restore('SM_LINEAR_LANDING_DISABLE', originalLinearLandingDisable);
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -392,8 +396,14 @@ test('carried-WIP-only branch refuses to land via ref, keeping the branch for re
   git(['branch', '-D', worktree.branch], repoCwd);
 });
 
-test('a non-fast-forward ref landing builds a real merge commit, parents in order [old main, branch head]', async () => {
-  const slug = 'ref-landing-merge-commit';
+/**
+ * Shared setup for the non-fast-forward ref landings below: a one-commit job
+ * branch off main, the checkout moved onto a `stray` branch with uncommitted
+ * work in it, and main advanced on a DIFFERENT file via a temp worktree
+ * (never checking main out in repoCwd) — a real divergence, not just
+ * "behind." `oldMain` is main's tip right before the landing.
+ */
+async function setUpDivergedStrayLanding(slug) {
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug, fromRef: 'main' });
   fs.writeFileSync(path.join(worktree.dir, 'from-job-e.txt'), 'job output\n', 'utf8');
   git(['add', '-A'], worktree.dir);
@@ -404,15 +414,54 @@ test('a non-fast-forward ref landing builds a real merge commit, parents in orde
   fs.writeFileSync(path.join(repoCwd, 'stray-wip.txt'), 'uncommitted work\n', 'utf8');
   const statusBefore = git(['status', '--porcelain'], repoCwd);
 
-  // main advances on a DIFFERENT file via a temp worktree, never checking
-  // main out in repoCwd — a real divergence, not just "behind."
   const wt2Dir = path.join(tmpRoot, 'wt2');
   git(['worktree', 'add', '-q', wt2Dir, 'main'], repoCwd);
   fs.writeFileSync(path.join(wt2Dir, 'other.txt'), 'from main\n', 'utf8');
   git(['add', '-A'], wt2Dir);
   git(['commit', '-q', '-m', 'main edits other.txt'], wt2Dir);
   git(['worktree', 'remove', '--force', wt2Dir], repoCwd);
-  const mainNew = git(['rev-parse', 'main'], repoCwd).trim();
+  const oldMain = git(['rev-parse', 'main'], repoCwd).trim();
+  return { worktree, branchHead, statusBefore, oldMain };
+}
+
+/** The stray checkout never moved, and its uncommitted file is unchanged. */
+async function expectStrayCheckoutUntouched(statusBefore) {
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe('stray');
+  expect(git(['status', '--porcelain'], repoCwd)).toBe(statusBefore);
+  expect(fs.readFileSync(path.join(repoCwd, 'stray-wip.txt'), 'utf8')).toBe('uncommitted work\n');
+}
+
+test('a non-fast-forward ref landing replays the branch linearly onto main: no merge commit, parent is the old main tip', async () => {
+  const slug = 'ref-landing-linear';
+  const { worktree, branchHead, statusBefore, oldMain } = await setUpDivergedStrayLanding(slug);
+
+  const outcome = await gitWorktree.integrateBranch({
+    cwd: repoCwd, branch: worktree.branch, key: slug, kind: 'job', allowRefLanding: true,
+  });
+
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.viaRef).toBe(true);
+  expect(outcome.linear).toBe(true);
+  expect('mergeCommit' in outcome).toBe(false);
+  const mainAfter = git(['rev-parse', 'main'], repoCwd).trim();
+  expect(outcome.sha).toBe(mainAfter);
+  expect(mainAfter).not.toBe(branchHead);
+  expect(git(['log', '-1', '--format=%P', 'main'], repoCwd).trim()).toBe(oldMain);
+  expect(git(['rev-list', '--merges', `${oldMain}..main`], repoCwd).trim()).toBe('');
+  expect(git(['log', '--format=%s', 'main'], repoCwd).split('\n')).toContain('job commit');
+  expect(git(['show', 'main:from-job-e.txt'], repoCwd)).toBe('job output\n');
+  expect(git(['show', 'main:other.txt'], repoCwd)).toBe('from main\n');
+
+  await expectStrayCheckoutUntouched(statusBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('with SM_LINEAR_LANDING_DISABLE=1 a non-fast-forward ref landing builds a real merge commit, parents in order [old main, branch head]', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1';
+  const slug = 'ref-landing-merge-commit';
+  const { worktree, branchHead, statusBefore, oldMain } = await setUpDivergedStrayLanding(slug);
 
   const outcome = await gitWorktree.integrateBranch({
     cwd: repoCwd, branch: worktree.branch, key: slug, kind: 'job', allowRefLanding: true,
@@ -422,14 +471,12 @@ test('a non-fast-forward ref landing builds a real merge commit, parents in orde
   expect(outcome.integrated).toBe(true);
   expect(outcome.viaRef).toBe(true);
   expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.linearFallback).toBe('disabled');
   const mainAfter = git(['rev-parse', 'main'], repoCwd).trim();
   expect(outcome.sha).toBe(mainAfter);
-  expect(git(['log', '-1', '--format=%P', mainAfter], repoCwd).trim()).toBe(`${mainNew} ${branchHead}`);
+  expect(git(['log', '-1', '--format=%P', mainAfter], repoCwd).trim()).toBe(`${oldMain} ${branchHead}`);
 
-  // The checkout never moved, and its uncommitted file is unchanged.
-  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe('stray');
-  expect(git(['status', '--porcelain'], repoCwd)).toBe(statusBefore);
-  expect(fs.readFileSync(path.join(repoCwd, 'stray-wip.txt'), 'utf8')).toBe('uncommitted work\n');
+  await expectStrayCheckoutUntouched(statusBefore);
 
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });

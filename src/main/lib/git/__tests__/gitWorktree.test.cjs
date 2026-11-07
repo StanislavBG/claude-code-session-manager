@@ -1801,7 +1801,77 @@ test('[integrateOntoRef] fast-forwards targetRef when it is an ancestor of branc
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });
 
-test('[integrateOntoRef] builds a real merge commit when target and branch diverged on different files', async () => {
+/** `git patch-id --stable` of one commit's own diff — equal ids mean the same change. */
+function patchIdOf(sha) {
+  return execFileSync('git', ['patch-id', '--stable'], { input: git(['show', sha], repoCwd), encoding: 'utf8' }).split(' ')[0];
+}
+
+/** Parent SHAs of one commit, in order (empty for a root commit). */
+function parentsOf(sha) {
+  return git(['log', '-1', '--format=%P', sha], repoCwd).trim().split(' ').filter(Boolean);
+}
+
+/** Runs `fn` with console.warn captured (and silenced); returns its result plus every warning line. */
+async function withWarnSpy(fn) {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const result = await fn();
+    return { result, warnings: warn.mock.calls.map((args) => args.map(String).join(' ')) };
+  } finally {
+    warn.mockRestore();
+  }
+}
+
+test('[integrateOntoRef] replays a two-commit branch linearly onto a diverged target: no merge commit, subjects/authors/patches kept', async () => {
+  const baseSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const targetTip = advanceDetachedBranch('sm-land/linear-test', { 'target-only.txt': 'target content\n' }, 'target advances');
+
+  const slug = 'test-integrate-linear';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  // An author distinct from the repo's configured committer, so "author kept"
+  // cannot pass by accident through the identity a replay would default to.
+  const author = 'Job Author <job-author@example.com>';
+  fs.writeFileSync(path.join(worktree.dir, 'job-one.txt'), 'job one\n', 'utf8');
+  git(['add', 'job-one.txt'], worktree.dir);
+  git(['commit', '-q', '--author', author, '-m', 'job first commit'], worktree.dir);
+  fs.writeFileSync(path.join(worktree.dir, 'job-two.txt'), 'job two\n', 'utf8');
+  git(['add', 'job-two.txt'], worktree.dir);
+  git(['commit', '-q', '--author', author, '-m', 'job second commit'], worktree.dir);
+  const originals = git(['rev-list', '--reverse', `${baseSha}..HEAD`], worktree.dir).trim().split('\n');
+  expect(originals).toHaveLength(2);
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/linear-test', branch: worktree.branch, message: 'linear test',
+  });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.linear).toBe(true);
+  expect(outcome.replayedCommits).toBe(2);
+  expect('mergeCommit' in outcome).toBe(false);
+  expect('linearFallback' in outcome).toBe(false);
+  expect(git(['rev-parse', 'refs/heads/sm-land/linear-test'], repoCwd).trim()).toBe(outcome.sha);
+
+  expect(git(['rev-list', '--merges', `${targetTip}..${outcome.sha}`], repoCwd).trim()).toBe('');
+  const replayed = git(['rev-list', '--reverse', `${targetTip}..${outcome.sha}`], repoCwd).trim().split('\n');
+  expect(replayed).toHaveLength(2);
+  for (const sha of replayed) expect(parentsOf(sha)).toHaveLength(1);
+  expect(parentsOf(replayed[0])).toEqual([targetTip]);
+  const meta = (sha) => git(['log', '-1', '--format=%s%n%an%n%ae', sha], repoCwd);
+  replayed.forEach((sha, i) => {
+    expect(sha).not.toBe(originals[i]);
+    expect(meta(sha)).toBe(meta(originals[i]));
+    expect(patchIdOf(sha)).toBe(patchIdOf(originals[i]));
+  });
+  expect(meta(replayed[0])).toBe('job first commit\nJob Author\njob-author@example.com\n');
+  expect(git(['show', `${outcome.sha}:target-only.txt`], repoCwd)).toBe('target content\n');
+  expect(git(['show', `${outcome.sha}:job-one.txt`], repoCwd)).toBe('job one\n');
+  expect(git(['show', `${outcome.sha}:job-two.txt`], repoCwd)).toBe('job two\n');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] SM_LINEAR_LANDING_DISABLE=1 still builds the two-parent merge [targetTip, branchTip] with linearFallback disabled', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1';
   const targetTip = advanceDetachedBranch('sm-land/merge-test', { 'target-only.txt': 'target content\n' }, 'target advances');
 
   const slug = 'test-integrate-merge';
@@ -1811,19 +1881,57 @@ test('[integrateOntoRef] builds a real merge commit when target and branch diver
   git(['commit', '-q', '-m', 'job advances'], worktree.dir);
   const branchTip = git(['rev-parse', 'HEAD'], worktree.dir).trim();
 
-  const outcome = await gitWorktree.integrateOntoRef({
+  const { result: outcome, warnings } = await withWarnSpy(() => gitWorktree.integrateOntoRef({
     cwd: repoCwd, targetRef: 'refs/heads/sm-land/merge-test', branch: worktree.branch, message: 'merge test',
-  });
+  }));
   expect(outcome.ok).toBe(true);
   expect(outcome.integrated).toBe(true);
   expect(outcome.mergeCommit).toBe(true);
-  expect(outcome.sha).toBeTruthy();
+  expect(outcome.linearFallback).toBe('disabled');
+  expect('linear' in outcome).toBe(false);
+  expect(warnings.some((w) => w.includes(worktree.branch) && w.includes('refs/heads/sm-land/merge-test') && w.includes('disabled'))).toBe(true);
 
   expect(git(['rev-parse', 'refs/heads/sm-land/merge-test'], repoCwd).trim()).toBe(outcome.sha);
-  const parents = git(['log', '-1', '--format=%P', outcome.sha], repoCwd).trim().split(' ');
-  expect(parents.sort()).toEqual([targetTip, branchTip].sort());
+  expect(parentsOf(outcome.sha)).toEqual([targetTip, branchTip]);
+  expect(git(['log', '-1', '--format=%s', outcome.sha], repoCwd).trim()).toBe('merge test');
   expect(git(['show', `${outcome.sha}:target-only.txt`], repoCwd)).toBe('target content\n');
   expect(git(['show', `${outcome.sha}:job-only.txt`], repoCwd)).toBe('job content\n');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a replay conflict whose net change merges cleanly falls back to a merge commit with linearFallback content_conflict', async () => {
+  const targetTip = advanceDetachedBranch('sm-land/replay-conflict-test', { 'README.md': 'target edit\n' }, 'target edits README');
+
+  const slug = 'test-integrate-replay-conflict';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  // Commit 1 rewrites README.md — replayed alone onto the target it conflicts
+  // with the target's own README edit. Commit 2 restores README.md and adds a
+  // new file, so the branch's NET change never touches README.md and a
+  // two-parent merge of the tips is clean.
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job rewrite\n', 'utf8');
+  git(['add', 'README.md'], worktree.dir);
+  git(['commit', '-q', '-m', 'job rewrites README'], worktree.dir);
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'hello\n', 'utf8');
+  fs.writeFileSync(path.join(worktree.dir, 'job-new.txt'), 'job new\n', 'utf8');
+  git(['add', 'README.md', 'job-new.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job restores README and adds job-new.txt'], worktree.dir);
+  const branchTip = git(['rev-parse', 'HEAD'], worktree.dir).trim();
+
+  const { result: outcome, warnings } = await withWarnSpy(() => gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/replay-conflict-test', branch: worktree.branch, message: 'replay conflict test',
+  }));
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.linearFallback).toBe('content_conflict');
+  expect('linear' in outcome).toBe(false);
+  expect(warnings.some((w) => w.includes(worktree.branch) && w.includes('refs/heads/sm-land/replay-conflict-test') && w.includes('content_conflict'))).toBe(true);
+
+  expect(git(['rev-parse', 'refs/heads/sm-land/replay-conflict-test'], repoCwd).trim()).toBe(outcome.sha);
+  expect(parentsOf(outcome.sha)).toEqual([targetTip, branchTip]);
+  expect(git(['show', `${outcome.sha}:README.md`], repoCwd)).toBe('target edit\n');
+  expect(git(['show', `${outcome.sha}:job-new.txt`], repoCwd)).toBe('job new\n');
 
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });
@@ -2023,7 +2131,7 @@ test('[integrateOntoRef] the human checkout working tree, index, and HEAD are by
   });
   expect(outcome.ok).toBe(true);
   expect(outcome.integrated).toBe(true);
-  expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.linear).toBe(true);
 
   const statusAfter = git(['status', '--porcelain'], repoCwd);
   const headAfter = git(['rev-parse', 'HEAD'], repoCwd).trim();

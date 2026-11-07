@@ -2676,3 +2676,126 @@ test('[replay] a branch whose name starts with "-" is treated as a name, not an 
   expect(r.replayed.map((x) => x.from)).toEqual([c]);
   expect(git(['rev-list', '--merges', `${onto}..${r.tipSha}`], repoCwd)).toBe('');
 });
+
+// ──────────────────────────────────────────── a merge commit inside the branch (validator finding I-1)
+
+/**
+ * Validator finding I-1's shape on a fresh job branch: commit b1 on the branch,
+ * the base advances (m1) and is merged into the branch, then the base advances
+ * again (m2) so the landing cannot fast-forward. With `evil` the merge's
+ * resolution also adds file `g` and hand-edits README.md's line — content no
+ * non-merge commit carries, so a replay of the branch's non-merge commits
+ * cannot reproduce it; without it the merge is a plain clean one.
+ * `advanceBase(file, content, message)` commits onto the base and returns its
+ * new tip; `baseRef` names the base for the merge.
+ */
+async function jobBranchWithBaseMerge({ slug, baseRef, advanceBase, evil }) {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  rpCommit(worktree.dir, 'b1.txt', 'b1\n', 'b1');
+  advanceBase('m1.txt', 'm1\n', 'base m1');
+  git(['merge', '-q', '--no-ff', '--no-commit', baseRef], worktree.dir);
+  if (evil) {
+    fs.writeFileSync(path.join(worktree.dir, 'g'), 'g\n', 'utf8');
+    fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'hello, hand-edited in the merge\n', 'utf8');
+    git(['add', '-A'], worktree.dir);
+  }
+  git(['commit', '-q', '--no-edit'], worktree.dir);
+  const branchTip = git(['rev-parse', 'HEAD'], worktree.dir).trim();
+  expect(parentsOf(branchTip)).toHaveLength(2);
+  const baseTip = advanceBase('m2.txt', 'm2\n', 'base m2');
+  return { worktree, branchTip, baseTip };
+}
+
+/** The same shape with the checked-out branch of `repoCwd` as the base (the in-checkout landing). */
+function inCheckoutBaseMerge(slug, evil) {
+  return jobBranchWithBaseMerge({
+    slug, evil, baseRef: rpMain(repoCwd), advanceBase: (f, c, m) => rpCommit(repoCwd, f, c, m),
+  });
+}
+
+test('[replay] I-1: a branch merge whose resolution added content refuses with branch_has_merges, nothing touched', async () => {
+  const { worktree, baseTip } = await inCheckoutBaseMerge('i1-replay', true);
+  const snap = rpSnap(repoCwd);
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: baseTip, branch: worktree.branch });
+  expect(r.ok).toBe(false);
+  expect(r.failureKind).toBe('branch_has_merges');
+  expect(r.reason).toMatch(/\b1 merge commit\b/);
+  expect(rpSnap(repoCwd)).toEqual(snap);
+});
+
+test('[replay] a clean merge of the base inside the branch still returns the normal linear result', async () => {
+  const { worktree, baseTip } = await inCheckoutBaseMerge('i1-replay-clean', false);
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: baseTip, branch: worktree.branch });
+  expect(r.ok).toBe(true);
+  expect(r.replayed).toHaveLength(1);
+  expect(git(['log', '-1', '--format=%s', r.tipSha], repoCwd).trim()).toBe('b1');
+  expect(parentsOf(r.tipSha)).toEqual([baseTip]);
+  expect(git(['ls-tree', '--name-only', r.tipSha], repoCwd).split('\n').filter(Boolean).sort())
+    .toEqual(['README.md', 'b1.txt', 'm1.txt', 'm2.txt']);
+});
+
+test('[linear] I-1: integrateJobBranch falls back to a merge commit (branch_has_merges) and lands g and the hand edit', async () => {
+  const slug = 'i1-in-checkout';
+  const { worktree, branchTip, baseTip } = await inCheckoutBaseMerge(slug, true);
+  const { result: outcome, warnings } = await withWarnSpy(() => gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug }));
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.linearFallback).toBe('branch_has_merges');
+  expect('linear' in outcome).toBe(false);
+  expect(warnings).toContain(`[gitWorktree] linear landing of ${worktree.branch} fell back to a merge commit (branch_has_merges)`);
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(outcome.sha);
+  expect(parentsOf(outcome.sha)).toEqual([baseTip, branchTip]);
+  expect(git(['show', `${outcome.sha}:g`], repoCwd)).toBe('g\n');
+  expect(git(['show', `${outcome.sha}:README.md`], repoCwd)).toBe('hello, hand-edited in the merge\n');
+  expect(git(['show', `${outcome.sha}:b1.txt`], repoCwd)).toBe('b1\n');
+  expect(git(['show', `${outcome.sha}:m2.txt`], repoCwd)).toBe('m2\n');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[linear] a clean merge of the base inside the branch still lands linear: true after the base moves', async () => {
+  const slug = 'i1-in-checkout-clean';
+  const { worktree, baseTip } = await inCheckoutBaseMerge(slug, false);
+  const { result: outcome, warnings } = await withWarnSpy(() => gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug }));
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.linear).toBe(true);
+  expect(outcome.replayedCommits).toBe(1);
+  expect('mergeCommit' in outcome).toBe(false);
+  expect('linearFallback' in outcome).toBe(false);
+  expect(warnings.filter((w) => w.includes('fell back to a merge commit'))).toEqual([]);
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(outcome.sha);
+  expect(git(['rev-list', '--merges', `${baseTip}..HEAD`], repoCwd).trim()).toBe('');
+  for (const f of ['b1.txt', 'm1.txt', 'm2.txt']) expect(fs.existsSync(path.join(repoCwd, f))).toBe(true);
+  expect(fs.readFileSync(path.join(repoCwd, 'README.md'), 'utf8')).toBe('hello\n');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[integrateOntoRef] I-1: the lossy shape falls back with linearFallback branch_has_merges and g at the new ref tip', async () => {
+  const targetRef = 'refs/heads/sm-land/i1-test';
+  const { worktree, branchTip, baseTip } = await jobBranchWithBaseMerge({
+    slug: 'i1-onto-ref',
+    evil: true,
+    baseRef: 'sm-land/i1-test',
+    advanceBase: (f, c, m) => advanceDetachedBranch('sm-land/i1-test', { [f]: c }, m),
+  });
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const { result: outcome, warnings } = await withWarnSpy(() => gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef, branch: worktree.branch, message: 'i1 onto-ref test',
+  }));
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.linearFallback).toBe('branch_has_merges');
+  expect('linear' in outcome).toBe(false);
+  expect(warnings).toContain(`[gitWorktree] linear landing of ${worktree.branch} onto ${targetRef} fell back to a merge commit (branch_has_merges)`);
+  expect(git(['rev-parse', targetRef], repoCwd).trim()).toBe(outcome.sha);
+  expect(parentsOf(outcome.sha)).toEqual([baseTip, branchTip]);
+  expect(git(['show', `${outcome.sha}:g`], repoCwd)).toBe('g\n');
+  expect(git(['show', `${outcome.sha}:README.md`], repoCwd)).toBe('hello, hand-edited in the merge\n');
+  expect(git(['show', `${outcome.sha}:b1.txt`], repoCwd)).toBe('b1\n');
+  expect(git(['show', `${outcome.sha}:m2.txt`], repoCwd)).toBe('m2\n');
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});

@@ -1617,7 +1617,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
       const headSha = await readHeadSha(cwd);
       const r = await replayBranchOnto({ cwd, ontoSha: headSha, branch: branchHead });
       if (!r.ok) {
-        if (r.failureKind === 'git_too_old' || r.failureKind === 'content_conflict') {
+        if (REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
           linearFallback = r.failureKind;
           break;
         }
@@ -2225,6 +2225,13 @@ async function runMergeTreeWriteTree({ cwd, oldSha, branchSha }) {
 const REPLAY_MAX_COMMITS = 200;
 
 /**
+ * The `replayBranchOnto` failure kinds both landing paths answer with their
+ * logged two-parent merge fallback (`linearFallback` = the kind); every other
+ * replay failure lands nothing.
+ */
+const REPLAY_MERGE_FALLBACK_KINDS = new Set(['git_too_old', 'content_conflict', 'branch_has_merges']);
+
+/**
  * Checkout-free linear replay: rebuilds `branch`'s non-merge commits on top of
  * `ontoSha` purely in the object database (`git merge-tree --write-tree` +
  * `git commit-tree`). Touches no checkout, index, HEAD or ref — the caller
@@ -2232,13 +2239,19 @@ const REPLAY_MAX_COMMITS = 200;
  * landing paths — `integrateBranch` in the checkout and `attemptIntegrateOntoRef`
  * onto a bare ref: fast-forward first, then this replay, and a two-parent
  * "merge ..." commit only as their logged fallback (git too old, a replay
- * conflict, or SM_LINEAR_LANDING_DISABLE=1). Landings stay linear because
- * Bilko's scripts/sync-local-main.sh refuses a local main carrying merge
- * commits origin lacks.
+ * conflict, a branch merge the replay cannot reproduce, or
+ * SM_LINEAR_LANDING_DISABLE=1). Landings stay linear because Bilko's
+ * scripts/sync-local-main.sh refuses a local main carrying merge commits
+ * origin lacks.
  *
  * Original author name/email/date and the full message are preserved; commits
  * whose patch is already in `ontoSha`'s history (cherry-pick equivalence) or
- * that become empty are listed in `skipped`. Merge commits are never replayed.
+ * that become empty are listed in `skipped`. Merge commits are never replayed,
+ * so a merge's resolution (e.g. a conflict resolved with `git merge` in an Epic
+ * worktree) can hold content no replayed commit carries: when the replayed
+ * range holds a merge commit, the replayed tip's tree must equal the tree
+ * `git merge-tree --write-tree <onto> <branch>` writes (real merge base), or
+ * it fails `branch_has_merges` rather than drop that content.
  * Needs git >= 2.40 (`merge-tree --merge-base`). Never throws.
  *
  * @returns {Promise<{ok:true, tipSha:string, replayed:{from:string,to:string}[], skipped:string[], fastForward?:true}
@@ -2361,6 +2374,34 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
       replayed.push({ from: c, to: newSha });
       tip = newSha;
     }
+
+    // Validator finding I-1: a merge commit's resolution never reaches the
+    // replay above, so prove the replay reproduced the branch's content — the
+    // tree a real merge of the two tips writes — before calling it linear.
+    const mergeCount = Number.parseInt((await execGit(
+      ['rev-list', '--count', '--merges', `${onto}..${tipIn}`],
+      { cwd, timeout: 30_000 },
+    )).trim(), 10);
+    if (mergeCount > 0) {
+      let mergedTree = '';
+      try {
+        const out = await execGit(['merge-tree', '--write-tree', '--no-messages', onto, tipIn], { cwd, timeout: 30_000 });
+        mergedTree = (out.split('\n')[0] || '').trim();
+      } catch {
+        // Any non-zero exit, a conflict included, leaves no tree to prove the replay against.
+      }
+      const replayedTree = (await execGit(['rev-parse', `${tip}^{tree}`], { cwd, timeout: 10_000 })).trim();
+      if (!mergedTree || mergedTree !== replayedTree) {
+        const merges = `${mergeCount} merge commit${mergeCount === 1 ? '' : 's'}`;
+        return {
+          ok: false,
+          failureKind: 'branch_has_merges',
+          reason: mergedTree
+            ? `branch holds ${merges} whose content a linear replay does not reproduce (replayed tree ${replayedTree}, merged tree ${mergedTree})`
+            : `branch holds ${merges} and git merge-tree of ${onto} and ${tipIn} wrote no clean tree to check the replay against`,
+        };
+      }
+    }
     const result = { ok: true, tipSha: tip, replayed, skipped };
     if (autoResolved) { result.autoResolved = autoResolved; result.resolvedPaths = Array.from(resolvedSet).sort(); }
     return result;
@@ -2375,9 +2416,10 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
  * `targetRef` is an ancestor of `branch` (`fastForward: true`); otherwise a
  * linear replay of the branch's commits onto the ref tip via
  * `replayBranchOnto` (`linear: true`, `replayedCommits`). Only when
- * SM_LINEAR_LANDING_DISABLE=1 or the replay fails with `git_too_old` /
- * `content_conflict` does it console.warn and fall back to a two-parent merge
- * commit (`git merge-tree --write-tree` + `git commit-tree`, parents
+ * SM_LINEAR_LANDING_DISABLE=1 or the replay fails with one of
+ * `REPLAY_MERGE_FALLBACK_KINDS` (`git_too_old` / `content_conflict` /
+ * `branch_has_merges`) does it console.warn and fall back to a two-parent
+ * merge commit (`git merge-tree --write-tree` + `git commit-tree`, parents
  * [ref tip, branch tip]) reported as `mergeCommit: true` with
  * `linearFallback` naming why; any other replay failure is
  * `failureKind: 'other'` with the ref untouched. Every outcome lands via a
@@ -2471,7 +2513,7 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
         ...(r.autoResolved ? { autoResolved: r.autoResolved, resolvedPaths: r.resolvedPaths } : {}),
       };
     }
-    if (r.failureKind !== 'git_too_old' && r.failureKind !== 'content_conflict') {
+    if (!REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
       return { ok: false, failureKind: 'other', reason: r.reason };
     }
     linearFallback = r.failureKind;
@@ -2629,8 +2671,9 @@ async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
  * (`replayBranchOnto`) and lands the replayed tip via the same CAS
  * (`linear: true` — no merge commit, so tooling that refuses merge commits,
  * like Bilko's scripts/sync-local-main.sh, keeps working). Only when
- * SM_LINEAR_LANDING_DISABLE=1, or the replay needs a newer git or conflicts
- * on one of the branch's commits, does it fall back — with a console.warn —
+ * SM_LINEAR_LANDING_DISABLE=1, or the replay needs a newer git, conflicts
+ * on one of the branch's commits, or cannot reproduce a merge commit inside
+ * the branch (`branch_has_merges`), does it fall back — with a console.warn —
  * to a two-parent merge commit (`git merge-tree --write-tree` + `git
  * commit-tree`, `message` as its text) landed via the same CAS and reported
  * as `mergeCommit: true` + `linearFallback`. This is the foundation for a

@@ -269,7 +269,9 @@ Every job and Epic branch lands on its base branch (`baseBranch`, else `resolveD
 (Bilko's `scripts/sync-local-main.sh` exits 3 on any merge commit in `origin/main..main`). Both paths' linear
 step is `replayBranchOnto`: a checkout-free replay (`git merge-tree --merge-base` + `git commit-tree`) of the
 branch's **non-merge commits only** (`rev-list --no-merges`) onto the base tip — author and message kept,
-already-applied or emptied commits skipped, more than 200 refused. A merge commit in the branch is never replayed.
+already-applied or emptied commits skipped, more than 200 refused. A merge commit in the branch is never replayed, so
+when the replayed range holds one the replayed tip's tree must equal the tree `git merge-tree --write-tree <base> <branch>`
+writes, or the replay refuses with `branch_has_merges` rather than drop that merge's content.
 
 **In-checkout — `integrateBranch`, when `cwd`'s HEAD is on the base branch.** Callers: the scheduler job first-pass
 integrate (`finalizeJobWorktree` → `integrateJobBranch`), the Epic `markCompleted` merge (`epicWorktreeMerge.cjs` →
@@ -315,7 +317,8 @@ to Electron's stderr, which the launcher saves as `electron-stderr.log` in the a
 | git older than 2.40 (the replay needs `merge-tree --merge-base`) | `'git_too_old'` | In-checkout: the `merge --no-ff` fallback. Onto-ref: the merge fallback, which itself needs git 2.38 or newer (`merge-tree --write-tree`); on older git nothing lands |
 | A replay conflict the pure-addition auto-resolve (`resolvePureAdditionInTree`; off under `SM_PURE_ADDITION_MERGE_DISABLE=1`) cannot settle | `'content_conflict'` | A merge commit when the whole-branch merge is clean (in-checkout, also when its pure-addition concat settles it); otherwise abort-and-flag or the `content_conflict` refusal |
 | In-checkout only: HEAD moved under all 3 replay attempts | `'ref_race'` | The `merge --no-ff` fallback (an onto-ref `ref_race` lands nothing) |
-| A merge commit already inside the branch — e.g. a conflict resolved with `git merge` in an Epic worktree after the "merging it is yours to do in git" banner | The base is an ancestor of the branch tip: `fastForward: true`, no `linearFallback`, no warn | The fast-forward carries it as-is, both paths. Check `git log --merges <base>..<branch>` before landing |
+| A merge commit already inside the branch — e.g. a conflict resolved with `git merge` in an Epic worktree after the "merging it is yours to do in git" banner | The base is an ancestor of the branch tip: `fastForward: true`, no `linearFallback`, no warn | A fast-forward carries it as-is, both paths. A moved base now falls back (next row) instead of replaying the merge away. Check `git log --merges <base>..<branch>` before landing |
+| The base moved and the branch holds merge commits whose content a linear replay would not reproduce: the replayed tip's tree differs from `git merge-tree --write-tree <base> <branch>`'s, or that merge-tree conflicts | `'branch_has_merges'` | The merge fallback, both paths, after the warn line: in-checkout the `merge --no-ff`, onto-ref the two-parent merge. A merge whose content the replay reproduces exactly (e.g. a clean merge of the base) still lands `linear: true` |
 
 **Consumer check.** `git log --merges origin/main..main` stays empty unless a `fell back to a merge commit` line was
 logged, a fast-forwarded branch already held a merge commit, or someone merged by hand in the checkout. A fallback

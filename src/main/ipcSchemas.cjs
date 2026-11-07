@@ -1001,6 +1001,7 @@ const AUDIT_LOG_KIND = z.enum([
   'epic_delete',
   'epic_resume',
   'epic_duplicate',
+  'epic_draft_update',
 ]);
 const auditLogAppend = z.object({
   kind: AUDIT_LOG_KIND,

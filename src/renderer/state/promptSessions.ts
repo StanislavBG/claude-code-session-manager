@@ -335,6 +335,26 @@ interface PromptSessionsState {
    *  through the same active-index write path as every other mutation here.
    *  Throws if title.trim() is empty. */
   renameEpic: (promptSessionId: string, title: string, goal: string) => Promise<void>
+  /** Re-save a human draft. Legal ONLY while status is 'proposed'
+   *  (prompt-sessions/README.md#lifecycle) — once a session starts, title +
+   *  objective are fixed, so any other status (or unknown id) throws and leaves
+   *  the store unchanged. null tag/agentType/model/effort removes the key;
+   *  developLoop true removes it (absent = on). Persists like renameEpic and
+   *  restores the previous record if the write rejects. */
+  updateProposedDraft: (
+    promptSessionId: string,
+    patch: {
+      goalText: string
+      tag?: PromptSession['tag'] | null
+      agentType?: string | null
+      model?: string | null
+      effort?: string | null
+      developLoop?: boolean
+      openingPrompt: string
+      sections: EpicIntakeSection[]
+    },
+    source?: string,
+  ) => Promise<PromptSession>
   /** Mints a brand-new Epic from the source Epic's cwd/goalText/tag via the
    *  existing createPromptSession — fresh id + claudeSessionId, no PRDs/
    *  thread history/scheduler jobs carried over. Mirrors a hand-created Epic
@@ -383,6 +403,7 @@ type AuditEventKind =
   | 'epic_delete'
   | 'epic_resume'
   | 'epic_duplicate'
+  | 'epic_draft_update'
 
 /** Fire-and-forget: an IPC failure logs a console warning and never blocks or
  *  rejects the store mutation it accompanies. `source` traces which renderer
@@ -826,6 +847,38 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       set({ sessions: { ...get().sessions, [promptSessionId]: session } })
       throw err
     }
+  },
+  updateProposedDraft: async (promptSessionId, patch, source) => {
+    const session = get().sessions[promptSessionId]
+    if (!session) {
+      throw new Error(`updateProposedDraft: no PromptSession with id "${promptSessionId}"`)
+    }
+    if (session.status !== 'proposed') {
+      throw new Error(`updateProposedDraft: Epic "${promptSessionId}" is ${session.status}, only a proposed draft can be edited`)
+    }
+    const { tag, agentType, model, effort, developLoop, ...rest } = session
+    void tag; void agentType; void model; void effort; void developLoop
+    const updated: PromptSession = {
+      ...rest,
+      goalText: patch.goalText,
+      openingPrompt: patch.openingPrompt,
+      sections: patch.sections,
+      ...(patch.tag ? { tag: patch.tag } : {}),
+      ...(patch.agentType ? { agentType: patch.agentType } : {}),
+      ...(patch.model ? { model: patch.model } : {}),
+      ...(patch.effort ? { effort: patch.effort } : {}),
+      ...(patch.developLoop === false ? { developLoop: false } : {}),
+    }
+    const sessions = { ...get().sessions, [promptSessionId]: updated }
+    set({ sessions })
+    try {
+      await persistActiveIndex(session.cwd, sessions, get().events, [], [promptSessionId])
+    } catch (err) {
+      set({ sessions: { ...get().sessions, [promptSessionId]: session } })
+      throw err
+    }
+    emitAuditEvent('epic_draft_update', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
+    return updated
   },
   duplicateEpic: async (promptSessionId, source) => {
     const sourceSession = get().sessions[promptSessionId]

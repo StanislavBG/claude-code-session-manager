@@ -3,7 +3,6 @@ import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
-import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { Badge } from '../ui/Badge'
 import { StatusDot } from '../ui/StatusDot'
@@ -11,7 +10,6 @@ import type { ProvenanceInput } from '../../lib/provenance'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
-import { useLayout } from '../../state/layout'
 import type { Scope } from '../../lib/scopes'
 import { mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
@@ -128,39 +126,13 @@ export function nextServerName(servers: Record<string, McpServer>): string {
 
 export interface McpAddContext { scope: Scope; cwd: string | null }
 
-function McpServersComponent({ onAdd }: { onAdd?: (ctx: McpAddContext) => void } = {}) {
+function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddContext) => void; scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
 
-  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
-  // -> 'user', Project face -> 'project' (falling back to 'user' when no
-  // active-tab cwd resolves). Mirrors SystemPrompt/Skills/HistoryDashboard's
-  // manuallyTouchedRef + prevNavFaceRef pattern so the default only re-applies
-  // on an actual face transition, never on a same-face re-render, and never
-  // once the user has manually changed the scope since the last transition.
-  const navFace = useLayout((s) => s.navFace)
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-
-  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
-
-  // MCP Servers is now HOME-only in the sidebar (navGroups.ts), and every
-  // nav path that focuses it asserts navFace: 'home' — but a background
-  // split (Workbench's `renderer: 'always'`) can keep this screen mounted
-  // while a TabBar click elsewhere calls openProjectPanel, flipping navFace
-  // to 'project' without unmounting this component — so this branch is live.
-  useEffect(() => {
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setScope(navFace === 'project' && cwd ? 'project' : 'user')
-  }, [navFace, cwd])
 
   const path = useMemo(() => (home ? pathFor(scope, home, cwd) : null), [home, scope, cwd])
 
@@ -214,7 +186,6 @@ function McpServersComponent({ onAdd }: { onAdd?: (ctx: McpAddContext) => void }
       <Panel
         toolbar={
           <>
-            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           </>
         }
       >
@@ -260,7 +231,6 @@ function McpServersComponent({ onAdd }: { onAdd?: (ctx: McpAddContext) => void }
     <Panel
       toolbar={
         <>
-          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           <span className="ml-3 px-1.5 py-0.5 text-[10px] rounded border border-line text-fg-faint">
             {names.length} server{names.length === 1 ? '' : 's'}
           </span>

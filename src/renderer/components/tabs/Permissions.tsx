@@ -1,6 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
-import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { EmptyState } from '../ui/EmptyState'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
@@ -48,38 +47,13 @@ function serialize(full: Record<string, unknown>, perms: PermissionsShape): stri
   return JSON.stringify(next, null, 2) + '\n'
 }
 
-function PermissionsComponent() {
+function PermissionsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
 
-  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
-  // -> 'user', Project face -> 'project' (falling back to 'user' when no
-  // active-tab cwd resolves). Mirrors Hooks/Skills/SystemPrompt/McpServers'
-  // manuallyTouchedRef + prevNavFaceRef pattern so the default only re-applies
-  // on an actual face transition, never on a same-face re-render, and never
-  // once the user has manually changed the scope since the last transition.
   const navFace = useLayout((s) => s.navFace)
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-
-  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'rules' | 'presets'>('rules')
-
-  // Permissions is now HOME-only in the sidebar (navGroups.ts), and every
-  // nav path that focuses it asserts navFace: 'home' — but a background
-  // split (Workbench's `renderer: 'always'`) can keep this screen mounted
-  // while a TabBar click elsewhere calls openProjectPanel, flipping navFace
-  // to 'project' without unmounting this component — so this branch is live.
-  useEffect(() => {
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setScope(navFace === 'project' && cwd ? 'project' : 'user')
-  }, [navFace, cwd])
 
   // 'presets' (PermissionsPresetsLibrary, in ./Library.tsx) is a static
   // reference catalog with no cwd/scope input anywhere — identical on both
@@ -88,11 +62,6 @@ function PermissionsComponent() {
   useEffect(() => {
     if (navFace === 'project' && view === 'presets') setView('rules')
   }, [navFace, view])
-
-  const handleScopeChange = (next: Scope) => {
-    manuallyTouchedRef.current = true
-    setScope(next)
-  }
 
   const scopePaths = useScopedConfigFiles(PERMISSIONS_SCOPES, home, cwd)
   const activePath = scopePaths[scope] ?? null
@@ -125,19 +94,6 @@ function PermissionsComponent() {
       toolbar={
         <>
           {viewTabs}
-          <span className="mx-2 text-fg-faint">·</span>
-          <ScopeSwitcher
-            scopes={PERMISSIONS_SCOPES.scopes}
-            active={scope}
-            onChange={handleScopeChange}
-            annotate={(s) => {
-              if (scopeNeedsCwd(s)) return { exists: false }
-              const p = scopePaths[s]
-              if (!p) return null
-              const f = files[p]
-              return { exists: f?.exists ?? false, dirty: f?.dirty ?? false }
-            }}
-          />
           <span className="ml-3 text-fg-faint truncate">{activePath ?? '—'}</span>
           <div className="flex-1" />
           <a

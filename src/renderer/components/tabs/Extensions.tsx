@@ -55,8 +55,8 @@ function ExtensionsComponent() {
         )}
       </div>
       <div className="flex-1 min-h-0">
-        {tab === 'skills' && <Skills onAdd={add} />}
-        {tab === 'mcp' && <McpServers onAdd={addMcp} />}
+        {tab === 'skills' && <Skills onAdd={add} scope="user" />}
+        {tab === 'mcp' && <McpServers onAdd={addMcp} scope="user" />}
         {tab === 'plugins' && <Plugins onAdd={add} />}
       </div>
       <HomeSessionDrawer open={drawer} onClose={closeDrawer} title={DRAWER_TITLE[tab]} keyVals={[]}>

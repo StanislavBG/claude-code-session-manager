@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { createElement } from 'react'
+import { createElement, type ComponentType } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { Extensions } from '../Extensions'
+import { McpServers } from '../McpServers'
 import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
 import { useConfig } from '../../../state/config'
@@ -77,13 +78,12 @@ describe('Extensions', () => {
     expect(document.querySelector('[data-testid="home-drawer"]')).not.toBeNull()
   })
 
-  it('MCP project scope patches disabledMcpjsonServers and enableAllProjectMcpServers on <cwd>/.claude/settings.json', async () => {
+  it('McpServers scope="project" prop patches disabledMcpjsonServers and enableAllProjectMcpServers on <cwd>/.claude/settings.json', async () => {
     await act(async () => {
       useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
-      btn('MCP Servers').click()
+      root.render(createElement(McpServers as ComponentType<{ scope?: 'user' | 'project' }>, { scope: 'project' }))
     })
     await flush()
-    await act(async () => { btn('Project').click() }); await flush()
     const target = { fileId: 'settings', scope: 'project', cwd: PROJECT_CWD }
     const gate = container.querySelector('[data-testid="mcp-gate-srv"]') as HTMLInputElement
     expect(gate).not.toBeNull()

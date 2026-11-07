@@ -3,7 +3,6 @@ import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
 import { Modal } from '../ui/Modal'
-import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
@@ -156,38 +155,13 @@ function countFor(hooks: HooksConfig, ev: HookEvent): number {
   return (hooks[ev] ?? []).reduce((acc, g) => acc + (g.hooks?.length ?? 0), 0)
 }
 
-function HooksComponent() {
+function HooksComponent({ scope = 'user' }: { scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
 
-  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
-  // -> 'user', Project face -> 'project' (falling back to 'user' when no
-  // active-tab cwd resolves). Mirrors Skills/SystemPrompt/McpServers'
-  // manuallyTouchedRef + prevNavFaceRef pattern so the default only re-applies
-  // on an actual face transition, never on a same-face re-render, and never
-  // once the user has manually changed the scope since the last transition.
   const navFace = useLayout((s) => s.navFace)
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-
-  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'events' | 'library'>('events')
-
-  // Hooks is now HOME-only in the sidebar (navGroups.ts), and every nav path
-  // that focuses it asserts navFace: 'home' — but a background split
-  // (Workbench's `renderer: 'always'`) can keep this screen mounted while a
-  // TabBar click elsewhere calls openProjectPanel, flipping navFace to
-  // 'project' without unmounting this component — so this branch is live.
-  useEffect(() => {
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setScope(navFace === 'project' && cwd ? 'project' : 'user')
-  }, [navFace, cwd])
 
   // 'library' (HooksLibrary, in ./Library.tsx) is a static reference catalog
   // with no cwd/scope input anywhere — identical on both faces. Project face
@@ -196,11 +170,6 @@ function HooksComponent() {
   useEffect(() => {
     if (navFace === 'project' && view === 'library') setView('events')
   }, [navFace, view])
-
-  const handleScopeChange = (next: Scope) => {
-    manuallyTouchedRef.current = true
-    setScope(next)
-  }
 
   const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
   const path = scopePaths[scope] ?? null
@@ -230,8 +199,6 @@ function HooksComponent() {
         toolbar={
           <>
             {viewTabs}
-            <span className="mx-2 text-fg-faint">·</span>
-            <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={handleScopeChange} />
           </>
         }
       >
@@ -246,8 +213,6 @@ function HooksComponent() {
       toolbar={
         <>
           {viewTabs}
-          <span className="mx-2 text-fg-faint">·</span>
-          <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={handleScopeChange} />
           <span className="ml-3 text-fg-faint truncate">{path}</span>
           <div className="flex-1" />
           <a

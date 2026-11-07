@@ -76,7 +76,7 @@ const {
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
   readSpawnedPidFromLog, readLogMtimeMs, isClaudeArgv,
 } = require('./lib/scheduler/reaperHelpers.cjs');
-const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
+const { resolveProjectRoot, ensureRuntimeIgnores } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
@@ -1655,6 +1655,16 @@ async function reconcilePass(state) {
   if (shouldRunFlatSweep(phaseStartMs, lastFlatSweepMs, FLAT_SWEEP_INTERVAL_MS)) {
     lastFlatSweepMs = phaseStartMs;
     await prdPaths.consolidateAllFlatPrds(allProjectCwds(), skipCwds);
+    // Runtime namespaces self-ignore (once per project root; throttled with the sweep).
+    try {
+      const roots = new Set();
+      for (const c of allProjectCwds()) {
+        try { roots.add(resolveProjectRoot(c)); } catch { /* ephemeral/invalid cwd */ }
+      }
+      for (const r of roots) {
+        try { ensureRuntimeIgnores(r); } catch { /* best-effort */ }
+      }
+    } catch { /* best-effort */ }
     phaseMs.flatPrdSweep = Date.now() - phaseStartMs;
   } else {
     phaseMs.flatPrdSweep = 0;

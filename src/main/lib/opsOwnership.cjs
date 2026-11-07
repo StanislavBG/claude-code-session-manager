@@ -30,6 +30,7 @@
  * Renderer callers declare their writer id through the IPC payload.
  */
 
+const fs = require('node:fs');
 const path = require('node:path');
 
 const OPS_ROOT_DIR = 'session-manager-operations';
@@ -72,12 +73,30 @@ const OWNERS = Object.freeze({
 });
 
 /**
+ * Machine-local RUNTIME namespaces: regenerable/ephemeral state that must never
+ * be committed. Mirrors this repo's root .gitignore. Everything else in OWNERS
+ * (reviews, architecture, project-brief, project-pages, ...) is authored.
+ * `feedback` has no OWNERS entry (nothing writes it through the gate) but is
+ * runtime state all the same, so it lives only in this set.
+ */
+const RUNTIME_NAMESPACES = Object.freeze([
+  'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters',
+]);
+
+/** Writer id for the per-namespace self-ignore file. */
+const RUNTIME_IGNORE_WRITER = 'runtime-ignore';
+
+/**
  * Narrow, explicit exceptions to single-writer. Each entry names a second
  * writer, the exact file it may touch, and why the owner can't do it itself.
  * Anything not listed here is refused — a delegation must be argued for in
  * code review, not discovered later in a race.
  */
-const DELEGATIONS = Object.freeze({
+const DELEGATIONS_BASE = {
+  // Each runtime namespace carries its own `.gitignore` (content `*`) so the
+  // project's root .gitignore needs no edit. Only that one file, only
+  // ensureRuntimeIgnores writes it.
+  ...Object.fromEntries(RUNTIME_NAMESPACES.map((ns) => [ns, []])),
   'prompt-sessions': Object.freeze([
     Object.freeze({
       writer: 'scheduler',
@@ -91,7 +110,20 @@ const DELEGATIONS = Object.freeze({
         + 'perform them. Serialized per-path by each module\'s own write lock.',
     }),
   ]),
-});
+};
+for (const ns of RUNTIME_NAMESPACES) {
+  DELEGATIONS_BASE[ns] = Object.freeze([
+    ...DELEGATIONS_BASE[ns],
+    Object.freeze({
+      writer: RUNTIME_IGNORE_WRITER,
+      file: '.gitignore',
+      reason:
+        'Self-ignore so machine-local runtime state is never captured by a '
+        + 'sweeping `git add` in a managed project (ensureRuntimeIgnores).',
+    }),
+  ]);
+}
+const DELEGATIONS = Object.freeze(DELEGATIONS_BASE);
 
 /**
  * Split an absolute path into { inOps, namespace, relative }.
@@ -294,7 +326,36 @@ function opsPath(cwd, ...segments) {
   return path.join(resolveOpsRoot(cwd), ...segments);
 }
 
+/**
+ * ensureRuntimeIgnores(projectRoot) → string[] of `.gitignore` paths written.
+ * For each runtime namespace dir that already exists under the project's ops
+ * root and has no `.gitignore`, write one containing `*` (which also ignores
+ * itself). Never creates a namespace dir, never runs git. Idempotent.
+ * `projectRoot` must already be resolved (resolveProjectRoot/projectRootOf).
+ */
+function ensureRuntimeIgnores(projectRoot) {
+  const { writeTextAtomicSync } = require('./util/atomicFs.cjs');
+  const opsRoot = path.join(projectRoot, OPS_ROOT_DIR);
+  const written = [];
+  for (const ns of RUNTIME_NAMESPACES) {
+    const dir = path.join(opsRoot, ns);
+    let isDir = false;
+    try { isDir = fs.statSync(dir).isDirectory(); } catch { /* absent */ }
+    if (!isDir) continue;
+    const file = path.join(dir, '.gitignore');
+    if (fs.existsSync(file)) continue;
+    const verdict = checkOpsWrite(file, RUNTIME_IGNORE_WRITER);
+    if (!verdict.ok) throw new Error(verdict.error);
+    writeTextAtomicSync(file, '*\n');
+    written.push(file);
+  }
+  return written;
+}
+
 module.exports = {
+  RUNTIME_NAMESPACES,
+  RUNTIME_IGNORE_WRITER,
+  ensureRuntimeIgnores,
   OPS_ROOT_DIR,
   OWNERS,
   DELEGATIONS,

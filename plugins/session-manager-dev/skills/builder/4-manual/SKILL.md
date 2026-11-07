@@ -117,8 +117,8 @@ Report, in this order:
 
 - Not a screenshot pipeline. Capturing and annotating real app screenshots is its own PRD;
   until it lands, figures are placed by hand and unplaced slots render as honest placeholders.
-- Not a marketing-copy editor. The product page (`src/pages/session-manager-landing/` in the Bilko repo) is
+- Not a marketing-copy editor. The product page (`Bilko:src/pages/session-manager-landing/` in the Bilko repo) is
   separate from the manual it links to.
 - Not a pricing or entitlement change. The manual is free. The legacy `session_manager` SKU and
-  the `MANUAL_PRODUCT_KEY` mapping in `shared/manual-catalog.ts` stay wired only so late payments
+  the `MANUAL_PRODUCT_KEY` mapping in `Bilko:shared/manual-catalog.ts` stay wired only so late payments
   resolve and past buyers keep their rows — removing either is an explicit decision, not a step.

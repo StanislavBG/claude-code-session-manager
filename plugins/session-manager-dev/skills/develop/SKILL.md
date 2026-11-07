@@ -295,7 +295,7 @@ Rules:
 
 ## Never
 
-- Write a PRD by hand, or anywhere the API does not. `data/prds/`, `docs/prds/`,
+- Write a PRD by hand, or anywhere the API does not. data/prds/, docs/prds/,
   `~/.claude/session-manager/scheduled-plans/prds/` and the retired flat
   `session-manager-operations/scheduler/prds/` never run.
 - Combine unrelated features in one PRD.

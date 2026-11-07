@@ -434,7 +434,8 @@ const MCP_TOOL_CATALOG = [
     name: 'macro_list',
     group: 'macros',
     purpose: "List this project's HOT KEYS macros — the saved (agent, tag, prompt) one-click buttons shown "
-      + "in the Sessions tab's HOT KEYS strip, via the session-manager app's admin API.",
+      + "in the Sessions tab's HOT KEYS strip or the Project Home button row, via the session-manager app's admin API. "
+      + "Each macro's `surface` tells where it shows: 'sessions' = Sessions HOT KEYS strip, 'project-home' = Project Home button row.",
     whenToUse: 'Use to see what macros already exist for this project (including machine-wide `*` macros and '
       + 'built-ins) before deciding whether to add, update or delete one.',
     whenNotToUse: 'WHEN NOT TO USE IT: macros are scoped to the caller\'s own project — this only ever returns '
@@ -455,7 +456,8 @@ const MCP_TOOL_CATALOG = [
       + '`id` resolves to a macro not visible to this project. Built-in macros (`id` starting with `builtin-`) '
       + "cannot be edited through this route. A macro is a HUMAN's one-click button, not a task runner — never "
       + 'create or update one unless the human has actually asked for that macro to exist. '
-      + 'To remove a macro use macro_delete; never rewrite it into a placeholder.',
+      + 'To remove a macro use macro_delete; never rewrite it into a placeholder. '
+      + 'Never pass `projects` unless the human asked for every project in this chat; quote their words in `humanRequestQuote`.',
     exampleArgs: {
       cwd: '/home/bilko/Projects/session-manager',
       label: 'Publish git + npm',
@@ -466,6 +468,10 @@ const MCP_TOOL_CATALOG = [
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or "
       + 'process.cwd()) when omitted. label, agentName, tag and prompt are all required strings. '
+      + "`surface` is optional: 'sessions' = Sessions HOT KEYS strip, 'project-home' = Project Home button row. "
+      + '`projects: ["*"]` shows the macro in every project; it needs `humanRequestQuote`, the words the human typed in '
+      + 'this chat that ask for every/all projects, and is refused in a scheduled job or outside a Session Manager session. '
+      + 'Without `projects` the macro stays scoped to this project. '
       + '`inputs` is an optional array of { name, label, default, required, options } fields the human fills in '
       + 'when pressing the macro; reference each in the prompt as {{name}}. Omitting `inputs` on update keeps '
       + 'the existing inputs; `[]` clears them.',

@@ -136,3 +136,44 @@ describe('Hooks no-clobber on bad draft', () => {
     expect(errorToasts()).toHaveLength(0)
   })
 })
+
+describe('Hooks timeout field (seconds)', () => {
+  const { mount } = useNavfaceHarness(Hooks, installWindowApiMock)
+
+  async function openRule() {
+    const raw = JSON.stringify({ hooks: { PreToolUse: [{ matcher: '', hooks: [{ type: 'command', command: 'echo hi' }] }] } })
+    const mocks = seedDrafts({ [USER_PATH]: raw })
+    const el = await mount()
+    await act(async () => {
+      clickViewTab(el, 'Events')
+      await Promise.resolve()
+    })
+    const input = el.querySelector('input[aria-label="timeout (seconds)"]') as HTMLInputElement
+    return { el, input, ...mocks }
+  }
+
+  const type = (input: HTMLInputElement, v: string) =>
+    act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      set.call(input, v)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await Promise.resolve()
+    })
+
+  it('labels seconds, shows the schema default, and writes a valid value', async () => {
+    const { el, input, setDraft } = await openRule()
+    expect(input).toBeTruthy()
+    expect(input.placeholder).toBe('600 (seconds)')
+    expect(el.textContent).not.toMatch(/timeout ms/i)
+    await type(input, '45')
+    const last = setDraft.mock.calls.at(-1) as [string, string]
+    expect(JSON.parse(last[1]).hooks.PreToolUse[0].hooks[0].timeout).toBe(45)
+  })
+
+  it.each(['0', '-5', '1.5'])('rejects %s with an inline error and no write', async (v) => {
+    const { el, input, setDraft } = await openRule()
+    await type(input, v)
+    expect(setDraft).not.toHaveBeenCalled()
+    expect(el.querySelector('[role="alert"]')?.textContent).toMatch(/positive whole number/i)
+  })
+})

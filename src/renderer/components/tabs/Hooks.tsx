@@ -18,6 +18,7 @@ import { EffectiveTree } from '../ui/EffectiveTree'
 import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
+import rawSettingsSchema from '../../data/claude-settings-schema.json'
 import { Tooltip } from '../ui/Tooltip'
 import { toast } from '../../state/toast'
 import { HOOK_EVENT_DOCS } from '../../data/hookEventDocs'
@@ -548,6 +549,29 @@ function HookGroupEditor({
   )
 }
 
+/**
+ * Default hook timeout (seconds) for a hook type, from the bundled settings schema.
+ * The resolver doesn't descend into the hookCommand anyOf, so we read the variant
+ * whose `type` const matches and parse "(default: N" out of the timeout description.
+ */
+export function hookTimeoutDefault(type: HookType): number | null {
+  const variants = (rawSettingsSchema as { $defs?: Record<string, { anyOf?: unknown[] }> }).$defs?.hookCommand?.anyOf ?? []
+  for (const v of variants) {
+    const props = (v as { properties?: Record<string, { const?: unknown; description?: string; default?: unknown }> }).properties
+    if (props?.type?.const !== type) continue
+    const t = props.timeout
+    if (typeof t?.default === 'number') return t.default
+    const m = /default:\s*(\d+)/.exec(t?.description ?? '')
+    return m ? Number(m[1]) : null
+  }
+  return null
+}
+
+/** Valid hook timeout: positive integer seconds. */
+export function parseHookTimeout(raw: string): number | null {
+  return /^\d+$/.test(raw.trim()) && Number(raw) > 0 ? Number(raw) : null
+}
+
 function HookRuleEditor({
   rule,
   jsonInvalid,
@@ -580,6 +604,9 @@ function HookRuleEditor({
             : 'agent'
   const value = (rule[valueKey] as string | undefined) ?? ''
   const argsText = (rule.args ?? []).join(' ')
+  const [timeoutText, setTimeoutText] = useState(rule.timeout != null ? String(rule.timeout) : '')
+  const [timeoutError, setTimeoutError] = useState<string | null>(null)
+  const tDefault = hookTimeoutDefault(rule.type)
   const provInput = {
     type: 'hook' as const,
     name: value || rule.type,
@@ -621,14 +648,35 @@ function HookRuleEditor({
           </span>
         ) : null}
         <input
-          value={rule.timeout ?? ''}
+          value={timeoutText}
           disabled={jsonInvalid}
-          onChange={(e) =>
-            onChange({ ...rule, timeout: e.target.value ? Number(e.target.value) : undefined })
-          }
-          placeholder="timeout ms"
-          className="w-20 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
+          aria-label="timeout (seconds)"
+          aria-invalid={timeoutError ? true : undefined}
+          title={timeoutError ?? 'Timeout in seconds'}
+          onChange={(e) => {
+            const raw = e.target.value
+            setTimeoutText(raw)
+            if (!raw.trim()) {
+              setTimeoutError(null)
+              onChange({ ...rule, timeout: undefined })
+              return
+            }
+            const n = parseHookTimeout(raw)
+            if (n == null) {
+              setTimeoutError('Timeout must be a positive whole number of seconds')
+              return
+            }
+            setTimeoutError(null)
+            onChange({ ...rule, timeout: n })
+          }}
+          placeholder={tDefault != null ? `${tDefault} (seconds)` : 'seconds'}
+          className={`w-24 bg-bg border rounded px-2 py-0.5 text-xs text-fg ${timeoutError ? 'border-red-500/70' : 'border-line'}`}
         />
+        {timeoutError ? (
+          <span role="alert" className="text-red-400 text-xs">
+            {timeoutError}
+          </span>
+        ) : null}
         {rule.type === 'command' ? (
           <button
             onClick={onTestFire}

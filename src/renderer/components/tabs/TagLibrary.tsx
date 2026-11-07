@@ -6,6 +6,7 @@ import { TAG_LIBRARY, type TagLibraryEntry } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { agentTagDef } from '../../lib/agentTagDefs'
 import { toast } from '../../state/toast'
+import { useAgentPersonasState } from '../../lib/useAgentPersonas'
 import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
 import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
 import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
@@ -34,32 +35,12 @@ import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
  */
 function TagLibraryComponent() {
   const [selectedTag, setSelectedTag] = useState<TagLibraryEntry['tag']>(TAG_LIBRARY[0].tag)
-  const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
+  const { personas, refresh } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load agent personas'))
   const [adding, setAdding] = useState(false)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
-  // Guards against an out-of-order resolution: the mount effect, the
-  // agents:changed echo, and the directory watch below can all fire load()
-  // in close succession — a stale response must never clobber a fresher one.
-  const loadSeq = useRef(0)
-  const load = async () => {
-    const seq = ++loadSeq.current
-    try {
-      const list = await window.api.agents.listPersonas()
-      if (mounted.current && loadSeq.current === seq) setPersonas(list)
-    } catch (e) {
-      if (!mounted.current || loadSeq.current !== seq) return
-      setPersonas([])
-      toast.error((e as Error).message || 'failed to load agent personas')
-    }
-  }
-
-  useEffect(() => { load() }, [])
-  // Agent Library writes to the same persona files (assign/unassign a tag
-  // from its own side) — refresh here too so this panel never shows a stale
-  // snapshot if it's already mounted when that happens.
-  useEffect(() => window.api.agents.onChanged(() => load()), [])
+  const load = refresh
 
   // agents:changed only fires as a write-echo from this app's OWN save — an
   // external edit to ~/.claude/agents/*.md is otherwise invisible. This page

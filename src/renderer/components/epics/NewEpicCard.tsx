@@ -15,6 +15,7 @@ import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
 import { tagLibraryEntry, NO_MISSION, type EpicTag } from '../../lib/tagLibrary'
+import { useAgentPersonasState } from '../../lib/useAgentPersonas'
 import { missionTagsForAgent } from '../../lib/missionTags'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, resolveContextInjections, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
@@ -118,7 +119,7 @@ export function NewEpicCard({
   // there is no "Default" pseudo-agent, the real 'architect' persona is the
   // default pick, so the pinned "who is working" tile always names a real one.
   const [agentName, setAgentName] = useState('')
-  const [agents, setAgents] = useState<AgentPersona[] | null>(null)
+  const { personas: agents } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load Agent Library'))
   // Tracks whether the human has clicked an Agent chip, so the async
   // 'architect' default (set once listPersonas() resolves) never clobbers
   // a manual pick made before or after that resolution.
@@ -162,26 +163,13 @@ export function NewEpicCard({
   // null = the human has not touched the Develop loop checkbox; once set, it always wins.
   const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(null)
 
+  // Default the Actor once the personas first resolve (never after a human pick).
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const list = await window.api.agents.listPersonas()
-        if (!cancelled) {
-          setAgents(list)
-          if (!agentTouchedRef.current && list.length === 0) setAgentName(NO_AGENT)
-          const preferred = list.find((a) => a.name === 'architect') ?? list[0]
-          if (!agentTouchedRef.current && preferred) setAgentName(preferred.name)
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setAgents([])
-          toast.error((e as Error).message || 'failed to load Agent Library')
-        }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
+    if (!agents) return
+    if (!agentTouchedRef.current && agents.length === 0) setAgentName(NO_AGENT)
+    const preferred = agents.find((a) => a.name === 'architect') ?? agents[0]
+    if (!agentTouchedRef.current && preferred) setAgentName(preferred.name)
+  }, [agents])
 
   useEffect(() => {
     let cancelled = false

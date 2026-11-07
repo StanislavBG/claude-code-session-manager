@@ -1965,6 +1965,74 @@ async function isBranchMergedIntoHead(cwd, branch) {
   }
 }
 
+/**
+ * True when `branch`'s CONTENT is already in `base`, by any of three proofs,
+ * cheapest first. Linear landing (PRDs 2743, 2825) replays a branch, so its
+ * original commits never become ancestors of the base, and the ancestry-only
+ * `isBranchMergedIntoHead` reads a landed branch as unmerged (validator
+ * finding I-2).
+ *   1. Ancestry: the branch tip is an ancestor of (or equal to) base.
+ *   2. Patch-ids: `rev-list --right-only --cherry-pick --no-merges --count
+ *      <base>...<branch>` prints 0. Every non-merge branch commit has a
+ *      patch-equivalent commit on base, as a clean replay leaves. This proof
+ *      never sees a merge commit's own resolution.
+ *   3. Merged tree: `merge-tree --write-tree <base> <branch>` exits 0 with
+ *      base's own tree. Merging the branch would change nothing. This catches
+ *      a replay whose diff context shifted, which changes the patch-id but
+ *      not the content.
+ * Returns null when `branch` or `base` does not resolve to a commit. Returns
+ * false otherwise, including a merge-tree conflict, a git too old for
+ * `--write-tree` (< 2.38), or any other git failure, so an unreadable answer
+ * never reads as landed. Never throws. Both names resolve to SHAs first and
+ * only SHAs reach git. A name starting with '-' resolves only via
+ * `refs/heads/`, as in replayBranchOnto.
+ *
+ * @param {{ cwd?: string, base?: string, branch?: string }} [opts]
+ * @returns {Promise<boolean|null>}
+ */
+async function isBranchContentLanded({ cwd, base = 'HEAD', branch } = {}) {
+  try {
+    if (typeof cwd !== 'string' || !cwd) return null;
+    const resolveName = async (name) => {
+      if (typeof name !== 'string' || !name) return null;
+      return (name.startsWith('-') ? null : await tryResolveCommit(cwd, `${name}^{commit}`))
+        || tryResolveCommit(cwd, `refs/heads/${name}^{commit}`);
+    };
+    const baseSha = await resolveName(base);
+    const tipSha = await resolveName(branch);
+    if (!baseSha || !tipSha) return null;
+
+    try {
+      await execGit(['merge-base', '--is-ancestor', tipSha, baseSha], { cwd, timeout: 10_000 });
+      return true;
+    } catch {
+      // Exit 1 = not an ancestor. On any other failure, try the content proofs.
+    }
+
+    try {
+      const out = await execGit(
+        ['rev-list', '--right-only', '--cherry-pick', '--no-merges', '--count', `${baseSha}...${tipSha}`],
+        { cwd, timeout: 30_000 },
+      );
+      if (Number.parseInt(out.trim(), 10) === 0) return true;
+    } catch {
+      // Fall through to the merged-tree proof.
+    }
+
+    try {
+      const out = await execGit(['merge-tree', '--write-tree', '--no-messages', baseSha, tipSha], { cwd, timeout: 30_000 });
+      const mergedTree = (out.split('\n')[0] || '').trim();
+      const baseTree = (await execGit(['rev-parse', '--verify', `${baseSha}^{tree}`], { cwd, timeout: 10_000 })).trim();
+      return mergedTree !== '' && mergedTree === baseTree;
+    } catch {
+      // Exit 1 = conflict, 129 = git < 2.38. Neither proves the content landed.
+      return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
 // Alias — the real implementation now lives in gitExec.cjs
 // (parseWorktreePorcelain) so it can be shared below both this module and
 // scheduler.cjs in the require graph. Name kept for the many existing
@@ -3024,6 +3092,7 @@ module.exports = {
   salvageWorktreeDiff,
   salvageDirtyDelta,
   isBranchMergedIntoHead,
+  isBranchContentLanded,
   parseWorktreeListPorcelain,
   listCwdHolders,
   hasLiveHolder,

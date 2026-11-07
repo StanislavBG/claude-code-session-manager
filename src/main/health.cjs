@@ -26,7 +26,7 @@ const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_
 const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
 const { checkMainDependencyHealth } = require('./lib/git/depHealth.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
-const { computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/scheduler/runLogRetention.cjs');
+const { computeReport, isRetentionEnabled, liveKeysFromJobs, resolveRetentionConfig } = require('./lib/scheduler/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 const { scanEpicTranscripts } = require('./lib/epic/epicTranscriptDiagnostic.cjs');
 
@@ -1271,27 +1271,7 @@ async function check(opts = {}) {
   // model. schedulerRunLogRetention lives in scheduler-machine.json's
   // `config`, same home as every other scheduler machine setting.
   try {
-    const retentionCfg = queueState?.config?.schedulerRunLogRetention;
-    const runsDir = schedulerPaths.runsDir();
-    const liveKeys = liveKeysFromJobs(queueState?.jobs || [], { runsDir });
-    const report = computeReport(
-      runsDir,
-      retentionCfg?.policy || {},
-      { liveKeys }
-    );
-    status.components.run_log_retention = {
-      ok: true,
-      path: runsDir,
-      totalBytes: report.usage.totalBytes,
-      dirCount: report.usage.dirCount,
-      runCount: report.usage.runCount,
-      oldestRunAt: report.usage.oldestRunAt,
-      policyConfigured: !!retentionCfg?.policy,
-      retentionEnabled: isRetentionEnabled(queueState?.config || {}),
-      wouldRemoveCount: report.eligibleSummary.count,
-      wouldRemoveBytes: report.eligibleSummary.bytes,
-      wouldRemoveDirs: report.removableDirs.length,
-    };
+    status.components.run_log_retention = evaluateRunLogRetention(queueState);
   } catch (e) {
     status.components.run_log_retention = { ok: true, error: e.message };
   }
@@ -1420,8 +1400,34 @@ if (require.main === module) {
   })();
 }
 
+/**
+ * Run-log retention component. Resolves the policy through runLogRetention.cjs's
+ * resolveRetentionConfig (ops-retention.json first, as the runtime does).
+ */
+function evaluateRunLogRetention(queueState) {
+  const retentionCfg = resolveRetentionConfig(queueState?.config || {});
+  const runsDir = schedulerPaths.runsDir();
+  const liveKeys = liveKeysFromJobs(queueState?.jobs || [], { runsDir });
+  const report = computeReport(runsDir, retentionCfg?.policy || {}, { liveKeys });
+  return {
+    ok: true,
+    path: runsDir,
+    totalBytes: report.usage.totalBytes,
+    dirCount: report.usage.dirCount,
+    runCount: report.usage.runCount,
+    oldestRunAt: report.usage.oldestRunAt,
+    policyConfigured: !!retentionCfg?.policy,
+    retentionEnabled: isRetentionEnabled(queueState?.config || {}),
+    policy: retentionCfg?.policy || null,
+    wouldRemoveCount: report.eligibleSummary.count,
+    wouldRemoveBytes: report.eligibleSummary.bytes,
+    wouldRemoveDirs: report.removableDirs.length,
+  };
+}
+
 module.exports = {
   check,
+  evaluateRunLogRetention,
   evaluateTickLiveness,
   readFreshHeartbeat,
   lastTickFromHeartbeat,

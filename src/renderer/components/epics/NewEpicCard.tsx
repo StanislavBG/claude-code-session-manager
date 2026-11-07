@@ -79,6 +79,17 @@ const GUARD_INSTALL_LOG_PREFIX = '[NewEpicCard.installGuard]'
 // with (see this PRD's header for the four-Electron-instances incident).
 const NO_HANDLER_RE = /No handler registered/i
 
+const AUTOSAVE_DEBOUNCE_MS = 800
+
+/** One render's view of the form, kept in a ref so autosave never reads a stale closure. */
+interface AutosaveSnap {
+  cwd: string
+  sig: string
+  title: string
+  hasContent: boolean
+  run: () => Promise<void>
+}
+
 const GUARD_RESTART_MESSAGE =
   'This window is running an older Session Manager than the app files on disk — restart Session Manager'
 
@@ -169,6 +180,18 @@ export function NewEpicCard({
   // lands after the user switched tabs can't stamp the old project's checks
   // onto the new one (the useEffect probe below has the same cancel guard).
   const effectiveCwdRef = useRef<string | null>(null)
+  // Autosave plumbing: Cancel/Start/Save/Discard set `handledRef` so leaving the
+  // card afterwards never writes; `snapRef` is the latest render's closure so an
+  // unmount cleanup reads current values, not a stale one.
+  const handledRef = useRef(false)
+  const lastSavedSigRef = useRef<string | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const snapRef = useRef<AutosaveSnap | null>(null)
+  const cwdChangedFromRef = useRef<AutosaveSnap | null>(null)
+  const markHandled = () => {
+    handledRef.current = true
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null }
+  }
   // Context Injections (contextInjections.ts) — Session-Manager-authored
   // text, independent of Actor/Input/Mission, each its own on/off toggle.
   // Only an explicit human toggle is stored; the displayed/used value is
@@ -396,6 +419,7 @@ export function NewEpicCard({
   const handleSaveDraft = async () => {
     if (!canSaveDraft || creating) return
     setCreating(true)
+    markHandled()
     try {
       const intake = await buildIntake()
       let id: string
@@ -414,6 +438,7 @@ export function NewEpicCard({
       resetForm()
       onDraftSaved?.(id)
     } catch (err) {
+      handledRef.current = false
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setCreating(false)
@@ -423,11 +448,13 @@ export function NewEpicCard({
   const handleDiscard = async () => {
     if (!editDraft || creating) return
     setCreating(true)
+    markHandled()
     try {
       await markCompleted(editDraft.id, 'NewEpicCard discard draft')
       resetForm()
       onCancel()
     } catch (err) {
+      handledRef.current = false
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setCreating(false)
@@ -437,6 +464,7 @@ export function NewEpicCard({
   const handleCreate = async () => {
     if (!canCreate || creating) return
     setCreating(true)
+    markHandled()
     try {
     // Every Epic is BORN 'proposed'; Start is the one 'proposed -> active'
     // transition (approveProposed). A reopened draft is already minted, so it
@@ -463,6 +491,7 @@ export function NewEpicCard({
     resetForm()
     onCreated(session.id)
     } catch (err) {
+      handledRef.current = false
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setCreating(false)
@@ -470,9 +499,76 @@ export function NewEpicCard({
   }
 
   const handleCancel = () => {
+    markHandled()
     resetForm()
     onCancel()
   }
+
+  // ---- Autosave: leaving the card never throws typed work away ----
+  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides])
+  if (editDraft && lastSavedSigRef.current === null) lastSavedSigRef.current = sig
+  const snap: AutosaveSnap = {
+    cwd: effectiveCwd,
+    sig,
+    title,
+    hasContent: canSaveDraft,
+    run: async () => {
+      const intake = await buildIntake()
+      if (editDraft) {
+        await saveEditedDraft(editDraft, intake)
+        return
+      }
+      const { goalText, openingPrompt, sections, runtime } = intake
+      if (selectedAgent) {
+        await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard autosave', selectedAgent.name, openingPrompt, sections, runtime)
+      } else {
+        await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard autosave', undefined, openingPrompt, sections, runtime)
+      }
+    },
+  }
+  if (snapRef.current && !editDraft && snapRef.current.cwd !== snap.cwd) cwdChangedFromRef.current = snapRef.current
+  snapRef.current = snap
+
+  const runAutosave = (s: AutosaveSnap) => {
+    if (handledRef.current || !s.hasContent || s.sig === lastSavedSigRef.current) return
+    lastSavedSigRef.current = s.sig
+    void (async () => {
+      try {
+        await s.run()
+      } catch (err) {
+        if (lastSavedSigRef.current === s.sig) lastSavedSigRef.current = null
+        toast.error(`Could not auto-save draft "${s.title.trim() || 'Untitled session'}": ${err instanceof Error ? err.message : String(err)}`)
+      }
+    })()
+  }
+
+  // Project switched under a typed card: save into the cwd the typing happened in.
+  useEffect(() => {
+    const from = cwdChangedFromRef.current
+    if (!from) return
+    cwdChangedFromRef.current = null
+    runAutosave(from)
+  }, [effectiveCwd])
+
+  // Edit mode: debounced re-save of the open draft while typing.
+  useEffect(() => {
+    if (!editDraft || handledRef.current || sig === lastSavedSigRef.current) return
+    const t = setTimeout(() => {
+      debounceRef.current = null
+      if (snapRef.current) runAutosave(snapRef.current)
+    }, AUTOSAVE_DEBOUNCE_MS)
+    debounceRef.current = t
+    return () => {
+      clearTimeout(t)
+      if (debounceRef.current === t) debounceRef.current = null
+    }
+  }, [sig])
+
+  // Unmount: flush any pending edit now / mint the typed new-mode draft.
+  useEffect(() => () => {
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null }
+    if (snapRef.current) runAutosave(snapRef.current)
+  }, [])
 
   const selectedTagMission = tag ? agentTagDef(tag).description : NO_MISSION.description
   const sourceCount = board ? board.reduce((n, g) => n + g.items.filter((i) => i.present).length, 0) : 0

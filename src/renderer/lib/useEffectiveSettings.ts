@@ -1,52 +1,22 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useConfig } from '../state/config'
 import { useSessions } from '../state/sessions'
 import { useHomeDir } from './useHomeDir'
 import { SETTINGS_SCOPES, type Scope } from './scopes'
 import { mergeScopes, getAtPath, type EffectiveNode } from './mergeScopes'
 import { parseScopedJson } from './parseScopedJson'
-
-const SETTINGS_REFRESH_MS = 30_000
+import { useScopedConfigFiles } from './useScopedConfigFiles'
 
 /**
  * Returns the merged-scope view of user/project/local settings.json for an
- * explicit `cwd`, with a 30s self-refresh + chokidar watch on each scope
- * path. Chokidar watchers are refcounted, so it's safe to mount this
- * alongside the Settings tab (which watches the same paths) or any other
- * consumer keyed off a different cwd.
+ * explicit `cwd`. Path resolution, load and watch are delegated to
+ * `useScopedConfigFiles`; external edits arrive via the config:changed
+ * listener (`installConfigChangeListener`) that refreshes the shared store.
  */
 export function useEffectiveSettingsFor(cwd: string | null) {
   const home = useHomeDir()
-
-  const scopePaths = useMemo(() => {
-    if (!home) return {}
-    const out: Partial<Record<Scope, string>> = {}
-    for (const s of SETTINGS_SCOPES.scopes) {
-      const p = SETTINGS_SCOPES.resolve(s, home, cwd)
-      if (p) out[s] = p
-    }
-    return out
-  }, [home, cwd])
-
   const files = useConfig((s) => s.files)
-  const loadJson = useConfig((s) => s.loadJson)
-  const watchFile = useConfig((s) => s.watchFile)
-  const unwatchFile = useConfig((s) => s.unwatchFile)
-
-  useEffect(() => {
-    const paths = Object.values(scopePaths).filter(Boolean) as string[]
-    paths.forEach((p) => {
-      if (!files[p]) loadJson(p)
-      watchFile(p)
-    })
-    const timer = window.setInterval(() => {
-      paths.forEach((p) => loadJson(p))
-    }, SETTINGS_REFRESH_MS)
-    return () => {
-      clearInterval(timer)
-      paths.forEach((p) => unwatchFile(p))
-    }
-  }, [JSON.stringify(scopePaths)])
+  const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
 
   return useMemo(
     () => mergeScopes(parseScopedJson(files, scopePaths)),

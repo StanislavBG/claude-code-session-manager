@@ -22,6 +22,7 @@ import { modelFamily } from '../../lib/prettyModel'
 import { modelSupportsEffort } from '../../lib/effortSupport'
 import { useSessions } from '../../state/sessions'
 import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
+import { normalizeCwd } from '../../lib/knownProjectAggregate'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
@@ -80,14 +81,13 @@ function toDraft(p: AgentPersona): Draft {
 
 const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '' }
 
-/** Tooltip for the list's override badge: per project, which keys a frontmatter-only overlay sets, or "full body". */
+/** Tooltip for the list's override badge: per project, which keys a frontmatter-only overlay sets, or "full body".
+ *  One line per overrideDetails entry (one per open cwd), so two projects sharing a folder name stay two lines. */
 function overrideSummary(p: AgentPersona): string {
-  return p.overridingProjects
-    .map((name) => {
-      const d = p.overrideDetails?.find((x) => x.project === name)
-      if (!d) return name
+  return (p.overrideDetails ?? [])
+    .map((d) => {
       const parts = [...d.fields.filter((f) => f !== 'name'), ...(d.bodyOverridden ? ['full body'] : [])]
-      return `${name}: ${parts.join(', ') || 'overlay'}`
+      return `${d.project}: ${parts.join(', ') || 'overlay'}`
     })
     .join('\n')
 }
@@ -245,29 +245,32 @@ function AgentLibraryComponent() {
     }
   }
 
-  const dropOverride = async (projectName: string) => {
+  // `cwd` is an overrideDetails entry's key (its open project's cwd); `label` is only its folder name.
+  const dropOverride = async (cwd: string, label: string) => {
     if (!saved) return
     try {
-      await window.api.agents.removeOverride({ name: saved.name, projectName })
-      toast.info(`removed ${projectName}'s override of ${saved.name}`)
+      await window.api.agents.removeOverride({ name: saved.name, projectCwd: cwd })
+      toast.info(`removed ${label}'s override of ${saved.name}`)
       await load(saved.name)
     } catch (e) {
       toast.error((e as Error).message || 'failed to remove override')
     }
   }
 
-  // Writes the ACTIVE project's frontmatter-only overlay through the same savePersona IPC (projectName
+  // Writes the ACTIVE project's frontmatter-only overlay through the same savePersona IPC (projectCwd
   // set = overlay, never the global file); clearing both keys drops the overlay via removeOverride.
+  // Keyed by the active tab's normalized cwd, never its folder name (two open projects can share one).
   const saveOverride = async (patch: { model: string; effort: string }) => {
-    if (!saved || !activeProject) return
+    if (!saved || !activeCwd || !activeProject) return
+    const projectCwd = normalizeCwd(activeCwd)
     setBusy(true)
     try {
       if (patch.model === 'inherit' && patch.effort === 'inherit') {
-        await window.api.agents.removeOverride({ name: saved.name, projectName: activeProject })
+        await window.api.agents.removeOverride({ name: saved.name, projectCwd })
         toast.info(`cleared ${activeProject}'s override of ${saved.name}`)
       } else {
         await window.api.agents.savePersona({
-          name: saved.name, projectName: activeProject, description: '', tools: [], color: '', tags: [], body: '',
+          name: saved.name, projectCwd, description: '', tools: [], color: '', tags: [], body: '',
           model: patch.model, effort: patch.effort,
         })
         toast.info(`saved ${activeProject}'s override of ${saved.name}`)
@@ -427,7 +430,7 @@ function AgentPersonaEditor({
   onRevert: () => void
   onSave: () => void
   onDelete: () => void
-  onDropOverride: (projectName: string) => void
+  onDropOverride: (cwd: string, label: string) => void
   activeProject: string | null
   activeCwd: string | null
   onSaveOverride: (patch: { model: string; effort: string }) => void
@@ -534,12 +537,12 @@ function AgentPersonaEditor({
         </Field>
 
         <Field label="project overrides" hint="Open projects that shadow this definition with a local copy.">
-          {saved && saved.overridingProjects.length > 0 ? (
+          {saved && (saved.overrideDetails ?? []).length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {saved.overridingProjects.map((p) => (
-                <span key={p} className="inline-flex items-center gap-1.5 bg-bg-elev border border-line rounded px-2 py-0.5 text-[11px] font-mono text-fg-dim">
-                  {p}
-                  <button onClick={() => onDropOverride(p)} title="Drop the local copy" className="text-fg-faint hover:text-fg">×</button>
+              {(saved.overrideDetails ?? []).map((d) => (
+                <span key={d.cwd} className="inline-flex items-center gap-1.5 bg-bg-elev border border-line rounded px-2 py-0.5 text-[11px] font-mono text-fg-dim">
+                  {d.project}
+                  <button onClick={() => onDropOverride(d.cwd, d.project)} title="Drop the local copy" className="text-fg-faint hover:text-fg">×</button>
                 </span>
               ))}
             </div>
@@ -719,7 +722,7 @@ function ProjectOverrideBlock({ saved, activeProject, activeCwd, busy, onSave }:
   busy: boolean
   onSave: (patch: { model: string; effort: string }) => void
 }) {
-  if (!activeProject) {
+  if (!activeProject || !activeCwd) {
     return (
       <div data-testid="project-override-none" className="border border-dashed border-line rounded p-3 text-[11px] text-fg-faint">
         <div className="text-[10.5px] font-semibold uppercase tracking-wide mb-1 font-mono">project override</div>
@@ -727,7 +730,9 @@ function ProjectOverrideBlock({ saved, activeProject, activeCwd, busy, onSave }:
       </div>
     )
   }
-  const detail = saved.overrideDetails?.find((d) => d.project === activeProject)
+  // By cwd, not folder name: two open projects sharing a name must not read each other's overlay.
+  const activeKey = normalizeCwd(activeCwd)
+  const detail = saved.overrideDetails?.find((d) => d.cwd === activeKey)
   const fullBody = !!detail?.bodyOverridden
   const model = detail?.values?.model ?? 'inherit'
   const effort = detail?.values?.effort ?? 'inherit'

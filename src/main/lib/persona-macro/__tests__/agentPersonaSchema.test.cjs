@@ -17,6 +17,8 @@ import { test, expect } from 'vitest';
 const {
   AgentPersonaSaveSchema,
   assertValidAgentPersonaSave,
+  PersonaNameSchema,
+  ProjectCwdSchema,
 } = require('../agentPersonaSchema.cjs');
 
 function validPersona(overrides = {}) {
@@ -76,4 +78,33 @@ test('executorOnly is an optional boolean and survives parsing', () => {
   expect(assertValidAgentPersonaSave(validPersona({ executorOnly: true })).executorOnly).toBe(true);
   expect(assertValidAgentPersonaSave(validPersona()).executorOnly).toBeUndefined();
   expect(() => assertValidAgentPersonaSave(validPersona({ executorOnly: 'yes' }))).toThrow(/executorOnly/);
+});
+
+test('a save payload carrying projectName is rejected', () => {
+  // The retired override key. .strict() REJECTS it instead of stripping it — a stripped override
+  // key used to fall through to the GLOBAL write with the override call's blank description/body.
+  const stale = validPersona({ projectName: 'alpha' });
+  expect(AgentPersonaSaveSchema.safeParse(stale).success).toBe(false);
+  expect(() => assertValidAgentPersonaSave(stale)).toThrow(/projectName/);
+  expect(() => assertValidAgentPersonaSave(validPersona({ notAField: 1 }))).toThrow(/notAField/);
+});
+
+test('a relative projectCwd is rejected', () => {
+  expect(() => assertValidAgentPersonaSave(validPersona({ projectCwd: 'work/alpha' }))).toThrow(/projectCwd/);
+  expect(() => assertValidAgentPersonaSave(validPersona({ projectCwd: 'alpha' }))).toThrow(/projectCwd/);
+  expect(() => assertValidAgentPersonaSave(validPersona({ projectCwd: '' }))).toThrow(/projectCwd/);
+});
+
+test('an absolute projectCwd parses and survives; omitted stays undefined', () => {
+  expect(assertValidAgentPersonaSave(validPersona({ projectCwd: '/work/alpha' })).projectCwd).toBe('/work/alpha');
+  expect(assertValidAgentPersonaSave(validPersona()).projectCwd).toBeUndefined();
+});
+
+test('PersonaNameSchema and ProjectCwdSchema are exported for the other agents:* payloads', () => {
+  expect(PersonaNameSchema.safeParse('dev-lead').success).toBe(true);
+  expect(PersonaNameSchema.safeParse('../dev-lead').success).toBe(false);
+  expect(ProjectCwdSchema.safeParse('/work/alpha').success).toBe(true);
+  expect(ProjectCwdSchema.safeParse('alpha').success).toBe(false);
+  expect(ProjectCwdSchema.safeParse('').success).toBe(false);
+  expect(ProjectCwdSchema.safeParse(`/${'a'.repeat(4096)}`).success).toBe(false);
 });

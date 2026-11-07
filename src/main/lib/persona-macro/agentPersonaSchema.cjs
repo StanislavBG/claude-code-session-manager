@@ -46,10 +46,21 @@ const ProjectEntrySchema = z.string().refine(
   `must be "${ALL_PROJECTS}" or an absolute path`,
 );
 
+// An OPEN project's absolute cwd — the key a per-project override is written
+// and removed by (agentLibrary.cjs resolves it against openProjects by
+// normalized cwd). Never a folder name: two open projects can share one.
+const ProjectCwdSchema = z.string().min(1).max(4096).refine(
+  (/** @type {string} */ v) => isAbsoluteForPlatform(v),
+  'must be an absolute path',
+);
+
 // Mirrors AgentPersonaSaveInput (src/preload/api.d.ts). `tags` is the
 // Epic-mission WorkType union, NOT a free-form string list — the same
 // concept as PromptSessionSchema's `tag` / scheduleRetagPrd's `tag`, just
 // plural here since a persona can be associated with more than one mission.
+// `.strict()`: an unknown key (e.g. the retired `projectName`) is REJECTED,
+// not stripped — a stripped override key used to fall through to the GLOBAL
+// write with the override call's blank description/tools/body.
 const AgentPersonaSaveSchema = z.object({
   name: PersonaNameSchema,
   // Previous filename, when renaming an existing persona. Omit when creating.
@@ -72,18 +83,18 @@ const AgentPersonaSaveSchema = z.object({
   action: z.string().max(20000).optional(),
   actionLabel: BoundedString.optional(),
   title: BoundedString.optional(),
-  // Set = write this project's frontmatter-only override (model/effort only) instead of the global file.
-  projectName: BoundedString.optional(),
+  // Set (an OPEN project's absolute cwd) = write that project's frontmatter-only
+  // override (model/effort only) instead of the global file.
+  projectCwd: ProjectCwdSchema.optional(),
   // Bundled-persona version stamp (seedAgentPersonas.cjs). Omit to carry over
   // the existing file's stamp unchanged — see agentLibrary.cjs's savePersona.
-  // Without this field zod's default "strip unknown keys" behavior would
-  // silently drop it from a save payload that did carry one.
+  // Without this field `.strict()` would reject a save payload that carried one.
   seedVersion: z.number().int().optional(),
   // Executor-only persona (e.g. dev-lead): New Epic warns when picked as the planning Actor. Never blocks.
   executorOnly: z.boolean().optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
-});
+}).strict();
 
 /**
  * Throws a clear, descriptive error (not a raw ZodError dump) when `persona`
@@ -106,4 +117,6 @@ module.exports = {
   AgentPersonaSaveSchema,
   assertValidAgentPersonaSave,
   isAbsoluteForPlatform,
+  PersonaNameSchema,
+  ProjectCwdSchema,
 };

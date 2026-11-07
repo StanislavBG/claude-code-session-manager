@@ -1,7 +1,9 @@
 /**
  * agentOverlayWrite.test.cjs — Agent Library's per-project OVERRIDE write path
- * (savePersona with `projectName`): frontmatter-only overlay, removal on clear,
- * full-body refusal, and end-to-end resolution for a scheduled PRD.
+ * (savePersona with `projectCwd`, an OPEN project's absolute cwd):
+ * frontmatter-only overlay, removal on clear, full-body refusal, resolution by
+ * cwd (never by folder name — two open projects can share one), fail-closed on
+ * an unknown/empty cwd, and end-to-end resolution for a scheduled PRD.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/agentOverlayWrite.test.cjs
  */
@@ -21,18 +23,35 @@ afterEach(async () => {
   while (tmpDirs.length) await fsp.rm(tmpDirs.pop(), { recursive: true, force: true });
 });
 
-function setup() {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-ov-cwd-'));
-  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-ov-global-'));
-  tmpDirs.push(cwd, globalDir);
+const writeTextAtomic = async (p, t) => { await fsp.mkdir(path.dirname(p), { recursive: true }); await fsp.writeFile(p, t); };
+const overlayOf = (cwd) => path.join(cwd, '.claude', 'agents', 'dev-lead.md');
+
+function mkTmp(prefix) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(d);
+  return d;
+}
+
+function globalFixture() {
+  const globalDir = mkTmp('sm-ov-global-');
   const globalFile = path.join(globalDir, 'dev-lead.md');
   fs.writeFileSync(globalFile, '---\nname: dev-lead\ndescription: d\nmodel: sonnet\n---\nGlobal body.\n');
-  const overlayFile = path.join(cwd, '.claude', 'agents', 'dev-lead.md');
-  const deps = { globalDir, loadSessions: async () => ({ tabs: [{ cwd }] }), validatePath: (p) => p,
-    writeTextAtomic: async (p, t) => { await fsp.mkdir(path.dirname(p), { recursive: true }); await fsp.writeFile(p, t); } };
-  const projectName = path.basename(cwd);
-  const save = (over) => savePersona({ name: 'dev-lead', projectName, description: '', tools: [], color: '', tags: [], body: '', ...over, ...deps });
-  return { cwd, globalFile, overlayFile, deps, save, projectName };
+  return { globalDir, globalFile };
+}
+
+// `cwds` are the open tabs; `save(projectCwd, over)` is the Agent Library's override call shape
+// (dummy description/tools/body — exactly what would blank the global file on a fallthrough).
+function fixture(cwds) {
+  const { globalDir, globalFile } = globalFixture();
+  const deps = { globalDir, loadSessions: async () => ({ tabs: cwds.map((cwd) => ({ cwd })) }), validatePath: (p) => p, writeTextAtomic };
+  const save = (projectCwd, over) => savePersona({ name: 'dev-lead', projectCwd, description: '', tools: [], color: '', tags: [], body: '', ...over, ...deps });
+  return { globalFile, deps, save };
+}
+
+function setup() {
+  const cwd = mkTmp('sm-ov-cwd-');
+  const { globalFile, deps, save } = fixture([cwd]);
+  return { cwd, globalFile, overlayFile: overlayOf(cwd), deps, save: (over) => save(cwd, over) };
 }
 
 test('setting a model writes a frontmatter-only overlay with only that key; global untouched', async () => {
@@ -67,18 +86,53 @@ test('a full-body overlay is refused, not rewritten', async () => {
   expect(fs.readFileSync(overlayFile, 'utf8')).toBe(full);
 });
 
-test('unknown project is rejected', async () => {
-  const { save } = setup();
-  await expect(save({ projectName: 'nope', model: 'opus' })).rejects.toThrow(/project not open/);
+test('an unknown or empty projectCwd throws "project not open" and writes nothing — never a global fallthrough', async () => {
+  const { overlayFile, globalFile, save } = setup();
+  const before = fs.readFileSync(globalFile, 'utf8');
+  await expect(save({ projectCwd: '/nope/not-open', model: 'opus' })).rejects.toThrow('project not open: /nope/not-open');
+  await expect(save({ projectCwd: '', model: 'opus' })).rejects.toThrow(/project not open/);
+  await expect(save({ projectCwd: null, model: 'opus' })).rejects.toThrow(/project not open/);
+  expect(fs.readFileSync(globalFile, 'utf8')).toBe(before);
+  expect(fs.existsSync(overlayFile)).toBe(false);
+});
+
+test('a projectCwd with a trailing or doubled slash resolves to the same open project', async () => {
+  const { cwd, overlayFile, save } = setup();
+  await save({ projectCwd: `${cwd}/`, model: 'opus' });
+  expect(fs.readFileSync(overlayFile, 'utf8')).toBe('---\nmodel: opus\n---\n');
+  await save({ projectCwd: cwd.replace(/\//g, '//'), model: 'opus', effort: 'high' });
+  expect(fs.readFileSync(overlayFile, 'utf8')).toBe('---\nmodel: opus\neffort: high\n---\n');
+});
+
+test('two open projects with the same folder name: saving for the second cwd writes only the second overlay, and listPersonas reports two details with distinct cwd', async () => {
+  const first = path.join(mkTmp('sm-ov-a-'), 'proj');
+  const second = path.join(mkTmp('sm-ov-b-'), 'proj');
+  fs.mkdirSync(first);
+  fs.mkdirSync(second);
+  const { globalFile, deps, save } = fixture([first, second]);
+  const before = fs.readFileSync(globalFile, 'utf8');
+
+  await save(second, { model: 'claude-opus-4-6' });
+  expect(fs.existsSync(overlayOf(first))).toBe(false);
+  expect(fs.readFileSync(overlayOf(second), 'utf8')).toBe('---\nmodel: claude-opus-4-6\n---\n');
+  expect(fs.readFileSync(globalFile, 'utf8')).toBe(before);
+
+  await save(first, { model: 'haiku' });
+  expect(fs.readFileSync(overlayOf(second), 'utf8')).toBe('---\nmodel: claude-opus-4-6\n---\n');
+  const [p] = await listPersonas(deps);
+  expect(p.overridingProjects).toEqual(['proj', 'proj']);
+  expect(p.overrideDetails).toHaveLength(2);
+  expect(p.overrideDetails[0]).toMatchObject({ project: 'proj', cwd: first, values: { model: 'haiku' } });
+  expect(p.overrideDetails[1]).toMatchObject({ project: 'proj', cwd: second, values: { model: 'claude-opus-4-6' } });
 });
 
 test('listPersonas counts a frontmatter-only overlay and reports global → project values', async () => {
-  const { save, deps, projectName } = setup();
+  const { cwd, save, deps } = setup();
   await save({ model: 'claude-opus-4-6' });
   const [p] = await listPersonas(deps);
   expect(p.model).toBe('sonnet');
-  expect(p.overridingProjects).toEqual([projectName]);
-  expect(p.overrideDetails[0]).toMatchObject({ fields: ['model'], values: { model: 'claude-opus-4-6' }, bodyOverridden: false });
+  expect(p.overridingProjects).toEqual([path.basename(cwd)]);
+  expect(p.overrideDetails[0]).toMatchObject({ project: path.basename(cwd), cwd, fields: ['model'], values: { model: 'claude-opus-4-6' }, bodyOverridden: false });
 });
 
 test('scheduled-PRD model resolution returns the overlay model; global persona stays sonnet', async () => {

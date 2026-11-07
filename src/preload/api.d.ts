@@ -404,10 +404,13 @@ export interface AgentPersona {
   executorOnly?: boolean;
   path: string;
   body: string;
-  /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
+  /** Project names (basename of cwd) whose currently-open tab overlays this agent. Display-only and never a key —
+   *  two open projects can share a folder name; key on `overrideDetails[].cwd`. */
   overridingProjects: string[];
-  /** Per open project with an overlay: which frontmatter keys / body the overlay overrides (merged view provenance). */
-  overrideDetails?: { project: string; fields: string[]; values?: Record<string, string>; bodyOverridden: boolean; issue: string | null }[];
+  /** Per open project with an overlay: which frontmatter keys / body the overlay overrides (merged view provenance).
+   *  `cwd` is the open project's normalized absolute cwd — the key for `savePersona`'s `projectCwd` and
+   *  `removeOverride`; `project` is its folder name, a display label only. */
+  overrideDetails?: { project: string; cwd: string; fields: string[]; values?: Record<string, string>; bodyOverridden: boolean; issue: string | null }[];
 }
 
 /** Payload for `agents.savePersona` — creates or overwrites a global persona file. */
@@ -430,8 +433,9 @@ export interface AgentPersonaSaveInput {
   actionLabel?: string;
   /** Omit to keep the existing file's value. */
   title?: string;
-  /** Open project name: write that project's frontmatter-only override (only `model`/`effort` are used) instead of the global file. */
-  projectName?: string;
+  /** An OPEN project's absolute cwd: write that project's frontmatter-only override (only `model`/`effort` are used)
+   *  instead of the global file. A cwd that is not open is rejected — never a global write. */
+  projectCwd?: string;
   /** Bundled-persona version stamp (seedAgentPersonas.cjs). Omit to carry over the existing file's stamp unchanged. */
   seedVersion?: number;
   /** Omit to keep the existing file's value. */
@@ -1941,7 +1945,8 @@ export interface SessionManagerAPI {
     listPersonas: () => Promise<AgentPersona[]>;
     savePersona: (payload: AgentPersonaSaveInput) => Promise<{ ok: boolean; path: string }>;
     deletePersona: (payload: { name: string }) => Promise<{ ok: boolean }>;
-    removeOverride: (payload: { name: string; projectName: string }) => Promise<{ ok: boolean }>;
+    /** Drops the overlay of the OPEN project at `projectCwd` (an `overrideDetails[].cwd`). */
+    removeOverride: (payload: { name: string; projectCwd: string }) => Promise<{ ok: boolean }>;
     /** Raw persona `.md` text for the New Epic AIM composer (epicIntake.ts's `agentBody`),
      *  resolved with project-overlay-then-global precedence for `cwd` — unlike
      *  `listPersonas` above, which only reads the global directory. Null when neither

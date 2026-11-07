@@ -48,19 +48,22 @@ test('parseTools splits + trims a comma-separated tools frontmatter value', () =
   expect(parseTools(undefined)).toEqual([]);
 });
 
-test('openProjects dedups by cwd and uses the last path segment as name', async () => {
+test('openProjects dedups by normalized cwd, returns that cwd, and uses the last path segment as name', async () => {
   const loadSessions = async () => ({
     tabs: [
       { cwd: '/home/u/Projects/alpha' },
-      { cwd: '/home/u/Projects/beta/' },
+      { cwd: '/home/u/Projects/beta/' }, // trailing slash — stripped
       { cwd: '/home/u/Projects/alpha' }, // duplicate — should collapse
+      { cwd: '/home/u//Projects/alpha/' }, // same project, un-normalized — should collapse too
+      { cwd: '/' }, // root keeps its slash
       { cwd: null }, // malformed — should be skipped
     ],
   });
   const projects = await openProjects({ loadSessions });
   expect(projects).toEqual([
     { cwd: '/home/u/Projects/alpha', name: 'alpha' },
-    { cwd: '/home/u/Projects/beta/', name: 'beta' },
+    { cwd: '/home/u/Projects/beta', name: 'beta' },
+    { cwd: '/', name: '/' },
   ]);
 });
 
@@ -118,8 +121,11 @@ test('listPersonas parses frontmatter and reports overridingProjects for open ta
   expect(byName.builder.tools).toEqual(['Read', 'Grep', 'Glob', 'Bash']);
   expect(byName.builder.body).toContain('You are the Builder agent.');
   expect(byName.builder.overridingProjects).toEqual([path.basename(projectWithOverlay)]);
+  // Every detail carries the open project's normalized cwd — the override key; `project` is display-only.
+  expect(byName.builder.overrideDetails.map((d) => [d.project, d.cwd])).toEqual([[path.basename(projectWithOverlay), projectWithOverlay]]);
 
   expect(byName.debugger.overridingProjects).toEqual([]);
+  expect(byName.debugger.overrideDetails).toEqual([]);
 });
 
 test('listPersonas skips a project cwd that validatePath rejects, rather than throwing', async () => {
@@ -263,19 +269,28 @@ test('deletePersona removes the file, and is a no-op when it is already gone', a
   await expect(deletePersona({ name: 'gone-soon', globalDir, validatePath: identityValidatePath })).resolves.toEqual({ ok: true });
 });
 
-test('removeOverride deletes a project overlay resolved by project name, and rejects an unknown project', async () => {
+test('removeOverride deletes a project overlay resolved by projectCwd (a trailing-slash cwd too), and rejects an unknown or empty cwd', async () => {
   const project = await mkTmp('sm-agent-library-override-');
   await fsp.mkdir(path.join(project, '.claude', 'agents'), { recursive: true });
   const overlayPath = path.join(project, '.claude', 'agents', 'builder.md');
   await fsp.writeFile(overlayPath, 'overlay\n');
   const loadSessions = async () => ({ tabs: [{ cwd: project }] });
+  const remove = (key) => removeOverride({ name: 'builder', ...key, loadSessions, validatePath: identityValidatePath });
 
-  await removeOverride({ name: 'builder', projectName: path.basename(project), loadSessions, validatePath: identityValidatePath });
+  await remove({ projectCwd: project });
   expect(fs.existsSync(overlayPath)).toBe(false);
 
-  await expect(
-    removeOverride({ name: 'builder', projectName: 'not-open', loadSessions, validatePath: identityValidatePath }),
-  ).rejects.toThrow(/project not open/);
+  await fsp.writeFile(overlayPath, 'overlay\n');
+  await remove({ projectCwd: `${project}/` });
+  expect(fs.existsSync(overlayPath)).toBe(false);
+
+  // The folder name is display-only, never a key — and the retired key resolves nothing.
+  await fsp.writeFile(overlayPath, 'overlay\n');
+  await expect(remove({ projectCwd: path.basename(project) })).rejects.toThrow(/project not open/);
+  await expect(remove({ projectName: path.basename(project) })).rejects.toThrow(/project not open/);
+  await expect(remove({ projectCwd: '/not/open' })).rejects.toThrow('project not open: /not/open');
+  await expect(remove({ projectCwd: '' })).rejects.toThrow(/project not open/);
+  expect(fs.existsSync(overlayPath)).toBe(true);
 });
 
 test('projects/action/actionLabel round-trip through savePersona -> listPersonas, with newlines preserved', async () => {

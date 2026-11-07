@@ -24,6 +24,7 @@ const PERSONAS: AgentPersona[] = [
     path: '/home/bilko/.claude/agents/builder.md',
     body: 'You are the Builder agent.',
     overridingProjects: ['session-manager'],
+    overrideDetails: [{ project: 'session-manager', cwd: '/home/bilko/Projects/session-manager', fields: [], bodyOverridden: true, issue: null }],
   },
   {
     name: 'debugger',
@@ -35,6 +36,7 @@ const PERSONAS: AgentPersona[] = [
     path: '/home/bilko/.claude/agents/debugger.md',
     body: 'You are the Debugger agent.',
     overridingProjects: [],
+    overrideDetails: [],
   },
 ]
 
@@ -51,6 +53,7 @@ const PINNED_MODEL_PERSONA: AgentPersona = {
   path: '/home/bilko/.claude/agents/pinned-model-agent.md',
   body: 'You are pinned to a concrete model.',
   overridingProjects: [],
+  overrideDetails: [],
 }
 
 function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {

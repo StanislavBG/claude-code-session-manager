@@ -78,28 +78,51 @@ describe('AgentLibrary project override', () => {
     expect(el.querySelector('[data-testid="project-override-none"]')!.textContent).toContain('No active project')
   })
 
-  it('setting a project model writes a project-scoped overlay call, never a global one', async () => {
+  it('setting a project model writes a project-scoped overlay call keyed by the active cwd, never a global one', async () => {
     const el = await mount([], '/work/alpha')
     await click(within(el, 'override-model-row', 'opus'))
     expect(savePersona).toHaveBeenCalledTimes(1)
-    expect(savePersona.mock.calls[0][0]).toMatchObject({ name: 'dev-lead', projectName: 'alpha', model: 'opus', effort: 'inherit' })
+    expect(savePersona.mock.calls[0][0]).toMatchObject({ name: 'dev-lead', projectCwd: '/work/alpha', model: 'opus', effort: 'inherit' })
+    expect(savePersona.mock.calls[0][0]).not.toHaveProperty('projectName')
+  })
+
+  it('sends the active cwd normalized (trailing slash stripped)', async () => {
+    const el = await mount([], '/work/alpha/')
+    await click(within(el, 'override-model-row', 'opus'))
+    expect(savePersona.mock.calls[0][0]).toMatchObject({ projectCwd: '/work/alpha' })
   })
 
   it('adding effort keeps the existing model and sends the effort', async () => {
-    const el = await mount([{ project: 'alpha', fields: ['model'], values: { model: 'opus' }, bodyOverridden: false, issue: null }], '/work/alpha')
+    const el = await mount([{ project: 'alpha', cwd: '/work/alpha', fields: ['model'], values: { model: 'opus' }, bodyOverridden: false, issue: null }], '/work/alpha')
     await click(within(el, 'override-effort-row', 'high'))
-    expect(savePersona.mock.calls[0][0]).toMatchObject({ projectName: 'alpha', model: 'opus', effort: 'high' })
+    expect(savePersona.mock.calls[0][0]).toMatchObject({ projectCwd: '/work/alpha', model: 'opus', effort: 'high' })
   })
 
   it('clearing both goes through removeOverride, not savePersona', async () => {
-    const el = await mount([{ project: 'alpha', fields: ['model'], values: { model: 'opus' }, bodyOverridden: false, issue: null }], '/work/alpha')
+    const el = await mount([{ project: 'alpha', cwd: '/work/alpha', fields: ['model'], values: { model: 'opus' }, bodyOverridden: false, issue: null }], '/work/alpha')
     await click(within(el, 'override-model-row', 'use global'))
-    expect(removeOverride).toHaveBeenCalledWith({ name: 'dev-lead', projectName: 'alpha' })
+    expect(removeOverride).toHaveBeenCalledWith({ name: 'dev-lead', projectCwd: '/work/alpha' })
     expect(savePersona).not.toHaveBeenCalled()
   })
 
+  it('two open projects sharing a folder name: the block reads the active cwd, the badge tooltip lists both, and each chip × drops its own cwd', async () => {
+    const el = await mount([
+      { project: 'proj', cwd: '/a/proj', fields: ['model'], values: { model: 'haiku' }, bodyOverridden: false, issue: null },
+      { project: 'proj', cwd: '/b/proj', fields: ['model', 'effort'], values: { model: 'claude-opus-4-6', effort: 'high' }, bodyOverridden: false, issue: null },
+    ], '/b/proj')
+    expect(el.querySelector('[data-testid="override-provenance-model"]')!.textContent).toContain('claude-opus-4-6')
+    const badge = Array.from(el.querySelectorAll('span[title]')).find((s) => /2 overrides/.test(s.textContent ?? ''))!
+    expect(badge.getAttribute('title')).toBe('proj: model\nproj: model, effort')
+    const drops = () => Array.from(el.querySelectorAll('button')).filter((b) => b.title === 'Drop the local copy')
+    expect(drops()).toHaveLength(2)
+    await click(drops()[1])
+    expect(removeOverride).toHaveBeenLastCalledWith({ name: 'dev-lead', projectCwd: '/b/proj' })
+    await click(drops()[0])
+    expect(removeOverride).toHaveBeenLastCalledWith({ name: 'dev-lead', projectCwd: '/a/proj' })
+  })
+
   it('a full-body overlay is flagged and its pickers are disabled (never converted)', async () => {
-    const el = await mount([{ project: 'alpha', fields: ['model'], values: { model: 'haiku' }, bodyOverridden: true, issue: null }], '/work/alpha')
+    const el = await mount([{ project: 'alpha', cwd: '/work/alpha', fields: ['model'], values: { model: 'haiku' }, bodyOverridden: true, issue: null }], '/work/alpha')
     expect(el.querySelector('[data-testid="project-override-fullbody"]')).toBeTruthy()
     const b = within(el, 'override-model-row', 'opus')
     expect(b.matches(':disabled')).toBe(true)
@@ -108,7 +131,7 @@ describe('AgentLibrary project override', () => {
   })
 
   it('renders provenance as global → project', async () => {
-    const el = await mount([{ project: 'alpha', fields: ['model'], values: { model: 'claude-opus-4-6' }, bodyOverridden: false, issue: null }], '/work/alpha')
+    const el = await mount([{ project: 'alpha', cwd: '/work/alpha', fields: ['model'], values: { model: 'claude-opus-4-6' }, bodyOverridden: false, issue: null }], '/work/alpha')
     const t = el.querySelector('[data-testid="override-provenance-model"]')!.textContent!
     expect(t).toContain('sonnet')
     expect(t).toContain('claude-opus-4-6')
@@ -116,11 +139,12 @@ describe('AgentLibrary project override', () => {
     expect(el.querySelector('[data-testid="override-provenance-effort"]')!.textContent).toContain('not overridden')
   })
 
-  it('the global model row keeps writing the global persona (no projectName)', async () => {
+  it('the global model row keeps writing the global persona (no projectCwd)', async () => {
     const el = await mount([], '/work/alpha')
     await click(within(el, 'model-row', 'opus'))
     const save = Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? ''))!
     await click(save)
-    expect(savePersona.mock.calls[0][0].projectName).toBeUndefined()
+    expect(savePersona.mock.calls[0][0].projectCwd).toBeUndefined()
+    expect(savePersona.mock.calls[0][0]).not.toHaveProperty('projectName')
   })
 })

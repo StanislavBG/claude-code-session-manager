@@ -113,25 +113,51 @@ function serializePersona({ name, description, tools, model, effort, color, tags
 }
 
 /**
+ * The cwd form every override key is compared in: repeated `/` collapsed,
+ * trailing `/` stripped, root kept as `/`. Same rule as the renderer's
+ * `normalizeCwd` (src/renderer/lib/knownProjectAggregate.ts — main must not
+ * import renderer code) minus its `trim()`: a cwd with edge whitespace then
+ * fails closed as "project not open" instead of resolving to a sibling dir.
+ */
+function normalizeCwd(cwd) {
+  const collapsed = String(cwd).replace(/\/{2,}/g, '/');
+  if (collapsed === '/') return '/';
+  return collapsed.replace(/\/+$/, '');
+}
+
+/**
+ * The open project (`{ cwd, name }` from `openProjects`) whose normalized cwd
+ * equals `projectCwd`'s. Matched by cwd, never by folder name — two open
+ * projects can share one (`/a/proj`, `/b/proj`). Throws
+ * `project not open: <cwd>` for an unknown, empty or non-string value, so an
+ * override call can never land in some other project's (or the global) file.
+ */
+async function findOpenProject(projectCwd, loadSessions) {
+  const key = typeof projectCwd === 'string' && projectCwd !== '' ? normalizeCwd(projectCwd) : null;
+  const project = key === null ? undefined : (await openProjects({ loadSessions })).find((p) => p.cwd === key);
+  if (!project) throw new Error(`project not open: ${projectCwd}`);
+  return project;
+}
+
+/**
  * Project OVERRIDE write: a frontmatter-only overlay at
- * `<cwd>/.claude/agents/<name>.md` carrying ONLY the overridden `model` /
+ * `<projectCwd>/.claude/agents/<name>.md` carrying ONLY the overridden `model` /
  * `effort` keys and no body (lib/persona-macro/personaMerge.cjs inherits everything else
- * from the global persona). Keys already in an existing frontmatter-only
+ * from the global persona). `projectCwd` must be an OPEN project's cwd (see
+ * findOpenProject). Keys already in an existing frontmatter-only
  * overlay are preserved; an existing overlay that has a BODY is refused so a
  * full-body overlay is never silently converted. Both keys unset removes the
  * file (same as `removeOverride`) rather than leaving an empty overlay.
  */
-async function saveOverlay({ name, projectName, model, effort, loadSessions, validatePath, writeTextAtomic }) {
-  const projects = await openProjects({ loadSessions });
-  const project = projects.find((p) => p.name === projectName);
-  if (!project) throw new Error(`project not open: ${projectName}`);
+async function saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic }) {
+  const project = await findOpenProject(projectCwd, loadSessions);
   const target = validatePath(path.join(project.cwd, '.claude', 'agents', `${name}.md`));
   let preserved = [];
   try {
     const rawExisting = await fsp.readFile(target, 'utf8');
     const existing = splitFrontmatter(rawExisting);
     if (existing.body.trim() !== '') {
-      throw new Error(`${name} has a full-body override in ${projectName} — edit ${target} directly; it is not converted to a frontmatter-only override`);
+      throw new Error(`${name} has a full-body override in ${project.name} — edit ${target} directly; it is not converted to a frontmatter-only override`);
     }
     preserved = extractUnmanagedLines(rawExisting, new Set(['model', 'effort']));
   } catch (e) {
@@ -142,7 +168,7 @@ async function saveOverlay({ name, projectName, model, effort, loadSessions, val
     if (v && v !== 'inherit') managedLines.push(`${k}: ${v}`);
   }
   if (managedLines.length === 0 && preserved.length === 0) {
-    await removeOverride({ name, projectName, loadSessions, validatePath });
+    await removeOverride({ name, projectCwd: project.cwd, loadSessions, validatePath });
     return { ok: true, path: target, removed: true };
   }
   const lines = ['---', ...managedLines, ...preserved, '---', ''];
@@ -154,9 +180,12 @@ async function saveOverlay({ name, projectName, model, effort, loadSessions, val
  * Writes a global persona `.md` file — `~/.claude/agents/<name>.md`. Pass
  * `originalName` when renaming an existing persona so the old file is
  * removed once the new one is written (no-op if names match). Pass
- * `projectName` (an open project) to instead write that project's
- * frontmatter-only OVERRIDE of the persona — see saveOverlay; only `model` and
- * `effort` are read in that mode.
+ * `projectCwd` (an OPEN project's absolute cwd) to instead write that
+ * project's frontmatter-only OVERRIDE of the persona — see saveOverlay; only
+ * `model` and `effort` are read in that mode. Routing is on
+ * `projectCwd !== undefined`, not truthiness: an empty/null cwd throws
+ * `project not open` rather than falling through to the global write with the
+ * override call's blank description/tools/body.
  */
 async function savePersona({
   name,
@@ -174,7 +203,7 @@ async function savePersona({
   seedVersion,
   executorOnly,
   body,
-  projectName,
+  projectCwd,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
   loadSessions = sessionsStore.load,
   validatePath = configMgr.validatePath,
@@ -183,8 +212,8 @@ async function savePersona({
   if (!PERSONA_NAME_RE.test(name || '')) {
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
   }
-  if (projectName) {
-    return saveOverlay({ name, projectName, model, effort, loadSessions, validatePath, writeTextAtomic });
+  if (projectCwd !== undefined) {
+    return saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic });
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
   // A caller that omits seedVersion/title/projects/action/actionLabel (the
@@ -245,19 +274,19 @@ async function deletePersona({
 }
 
 /**
- * Drops a project's local override (`<cwd>/.claude/agents/<name>.md`) so the
- * global definition applies there again. `projectName` is resolved against
- * currently-open tabs (same source `listPersonas` uses for overridingProjects).
+ * Drops a project's local override (`<projectCwd>/.claude/agents/<name>.md`)
+ * so the global definition applies there again. `projectCwd` is resolved by
+ * normalized cwd against currently-open tabs (findOpenProject — the same
+ * `openProjects` source `listPersonas` reports each overrideDetails `cwd` from);
+ * an unknown or empty cwd throws `project not open` and deletes nothing.
  */
 async function removeOverride({
   name,
-  projectName,
+  projectCwd,
   loadSessions = sessionsStore.load,
   validatePath = configMgr.validatePath,
 } = {}) {
-  const projects = await openProjects({ loadSessions });
-  const project = projects.find((p) => p.name === projectName);
-  if (!project) throw new Error(`project not open: ${projectName}`);
+  const project = await findOpenProject(projectCwd, loadSessions);
   const target = validatePath(path.join(project.cwd, '.claude', 'agents', `${name}.md`));
   try {
     await fsp.unlink(target);
@@ -268,9 +297,10 @@ async function removeOverride({
 }
 
 /**
- * Currently-open project tabs, deduped by cwd, as `{ cwd, name }` — `name`
- * is the last path segment (matches the `projectNameFromCwd` convention used
- * by the Scheduler's ProjectTag primitive). `loadSessions` is injectable
+ * Currently-open project tabs, deduped by NORMALIZED cwd (normalizeCwd), as
+ * `{ cwd, name }` — `cwd` is that normalized form (the override key callers
+ * match on); `name` is the last path segment, display-only and never a key
+ * (two open projects can share it). `loadSessions` is injectable
  * (mirrors scheduler.cjs's notifyOriginatingTab) so tests can exercise the
  * dedup/naming logic without touching the real persisted tabs.json.
  */
@@ -279,9 +309,11 @@ async function openProjects({ loadSessions = sessionsStore.load } = {}) {
   const seen = new Set();
   const projects = [];
   for (const t of tabs ?? []) {
-    if (!t || typeof t.cwd !== 'string' || !t.cwd || seen.has(t.cwd)) continue;
-    seen.add(t.cwd);
-    projects.push({ cwd: t.cwd, name: path.basename(t.cwd.replace(/\/+$/, '')) || t.cwd });
+    if (!t || typeof t.cwd !== 'string' || !t.cwd) continue;
+    const cwd = normalizeCwd(t.cwd);
+    if (seen.has(cwd)) continue;
+    seen.add(cwd);
+    projects.push({ cwd, name: path.basename(cwd) || cwd });
   }
   return projects;
 }
@@ -340,7 +372,8 @@ async function listPersonas({
       const merged = resolveMergedPersona(p.cwd, path.basename(file, '.md'), { validatePath, globalDir });
       const fields = merged ? Object.keys(merged.provenance).filter((k) => merged.provenance[k] === 'overlay') : [];
       overrideDetails.push({
-        project: p.name,
+        project: p.name, // display label only
+        cwd: p.cwd, // the override key (removeOverride / savePersona's projectCwd)
         fields,
         // The project's value for each overridden key (the UI renders global → project).
         values: merged ? Object.fromEntries(fields.map((k) => [k, merged.fm[k]])) : {},

@@ -459,7 +459,7 @@ test('setMacroProject on a built-in keeps the wildcard behaviour', async () => {
 test('real BUILTIN_MACROS seed as expected', async () => {
   const o = { filePath, listPersonas: async () => [] };
   const listed = await lib.listMacros(o);
-  expect(listed.map((m) => m.id).sort()).toEqual(['builtin-demo-video', 'builtin-project-home']);
+  expect(listed.map((m) => m.id).sort()).toEqual(['builtin-demo-video', 'builtin-project-home', 'builtin-review-md-network']);
   const projectHome = listed.find((m) => m.id === 'builtin-project-home');
   expect(projectHome).toMatchObject({ label: 'Project Home', agentName: 'project-home-builder', tag: 'project-home-builder', surface: 'project-home' });
 });

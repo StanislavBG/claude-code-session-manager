@@ -13,6 +13,13 @@
  * prompt means moving the OLD prompt into `priorPrompts` (oldest first) and
  * bumping `builtinVersion`; `builtinVersion === priorPrompts.length + 1`.
  *
+ * Optional fields: `inputs` (MacroInput[] — `{ name, label, default?, options?,
+ * required? }`, one per `{{name}}` placeholder in the prompt; the hot key asks for
+ * them before launching, and `ensureBuiltins` copies them into the seeded macro) and
+ * `supersedes` (ids of custom, non-built-in macros retired from the library when
+ * this built-in is first seeded, so the owner sees one button, not two). A built-in
+ * with no `job` is never a background job; pressing it opens an Epic.
+ *
  * Plain Node, no Electron imports.
  */
 
@@ -58,6 +65,29 @@ const BUILTIN_MACROS = Object.freeze([
     ]),
     prompt:
       "Generate a character and cute animated JavaScript video as one self-contained HTML/JavaScript animation, 60 seconds long when the additional instructions carry a 'Video length: 60' line and 30 seconds otherwise. The video kind is named on a 'Video kind: <name>' line in the additional instructions: Blog post (a video that presents the blog post named on the 'Video target:' line — a post path in this repository or a URL; read it and tell its real content) or Feature (a video about the feature named on the 'Video target:' line, found in the repository); with no Video kind line, make a Project demo of the whole project's main goals and key features. Ground everything in what you read in the repository (and the target) — invent an original mascot character whose look, name and personality match the subject's theme and purpose, and tell its real story through it. Write the narration script first (hook, problem, solution, key points, call to action), then build every keystone to match its lines, with the pacing and fun dynamic elements per the persona. Use the style named on a 'Video style: <name>' line in the additional instructions — Professional, Fun, Animated whiteboard, or Kinetic typography — otherwise pick the one that best fits. Narrate with Kokoro (kokoro-onnx) using a natural female (af_heart) or male (am_michael) voice per the audio policy in the persona. Save it with a single project_video_write call passing the htmlPath and the id on the 'Entry id' line.",
+  }),
+  Object.freeze({
+    id: 'builtin-review-md-network',
+    label: 'Review MD network',
+    agentName: 'architect',
+    tag: 'discussion',
+    surface: 'project-home',
+    projects: ['*'],
+    builtinVersion: 1,
+    inputs: Object.freeze([
+      Object.freeze({ name: 'scope', label: 'Scope', default: 'the whole project', required: true }),
+      Object.freeze({
+        name: 'mode',
+        label: 'Mode',
+        options: Object.freeze(['Full review', 'Drift check']),
+        default: 'Full review',
+        required: true,
+      }),
+    ]),
+    supersedes: Object.freeze(['review-md-network-d38ffd']),
+    priorPrompts: Object.freeze([]),
+    prompt:
+      "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}.",
   }),
 ]);
 

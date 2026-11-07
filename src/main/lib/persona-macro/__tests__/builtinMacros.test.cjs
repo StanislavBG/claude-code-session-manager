@@ -146,3 +146,50 @@ test('built-in macros declare a frozen background job', () => {
   expect(demo.builtinVersion).toBe(6);
   expect(demo.priorPrompts).toHaveLength(5);
 });
+
+test('builtin-review-md-network is a job-less project-home macro with scope + mode inputs', () => {
+  const crypto = require('node:crypto');
+  const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
+  const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
+  expect(sha('builtin-project-home')).toBe('a6862158c0eabe4381f5a121193109ddb45f8e24a945435a617ad83ea57d956b');
+  expect(sha('builtin-demo-video')).toBe('e74120a2cd3621b4e4828a99d1f03e0c1da92ab82d52734e7a390e5dfe537e10');
+
+  const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');
+  expect(b).toBeTruthy();
+  expect(Object.isFrozen(b)).toBe(true);
+  expect(b.label).toBe('Review MD network');
+  expect(b.agentName).toBe('architect');
+  expect(b.tag).toBe('discussion');
+  expect(b.surface).toBe('project-home');
+  expect(b.projects).toEqual(['*']);
+  expect(b.builtinVersion).toBe(1);
+  expect(b.priorPrompts).toEqual([]);
+  expect(b.supersedes).toEqual(['review-md-network-d38ffd']);
+  expect('job' in b).toBe(false);
+  expect(b.inputs).toEqual([
+    { name: 'scope', label: 'Scope', default: 'the whole project', required: true },
+    { name: 'mode', label: 'Mode', options: ['Full review', 'Drift check'], default: 'Full review', required: true },
+  ]);
+  expect(b.prompt).toBe(
+    "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}.",
+  );
+
+  const stamp = '2026-01-01T00:00:00.000Z';
+  const parsed = MacroSchema.safeParse({ ...b, builtin: true, createdAt: stamp, updatedAt: stamp });
+  expect(parsed.success).toBe(true);
+
+  const r = renderMacroPrompt(b.prompt, b.inputs, defaultMacroValues(b.inputs));
+  expect(r.ok).toBe(true);
+  expect(r.prompt).toContain('Scope: the whole project.');
+  expect(r.prompt).toContain('Mode: Full review.');
+
+  const custom = {
+    id: 'review-md-network-d38ffd', label: 'Review MD network', agentName: 'architect', tag: 'discussion',
+    prompt: 'x', projects: ['*'], surface: 'project-home', createdAt: stamp, updatedAt: stamp,
+  };
+  const out = ensureBuiltins([custom], [b]);
+  expect(out.retired).toEqual(['review-md-network-d38ffd']);
+  const seeded = out.macros.find((m) => m.id === 'builtin-review-md-network');
+  expect(seeded.inputs).toEqual(b.inputs);
+  expect(out.macros.find((m) => m.id === 'review-md-network-d38ffd')).toBeUndefined();
+});

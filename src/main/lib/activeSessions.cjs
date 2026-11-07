@@ -448,6 +448,10 @@ function deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots) {
   const cutoffMs = Date.now() - maxAgeMin * 60 * 1000;
   const seen = new Set();
   const result = [];
+  // Read once per call: the TMP_DROP_ROOTS getters do mkdirSync work, so
+  // reading them per record cost ~66% of each allProjectCwds() call.
+  const prefixDropRoots = tmpDropRoots.prefixDropRoots;
+  const exactDropCwds = tmpDropRoots.exactDropCwds;
 
   function addCwd(rawCwd) {
     if (!rawCwd || typeof rawCwd !== 'string') return;
@@ -470,8 +474,8 @@ function deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots) {
     // worktree-scratch root after projectRootOf's normalization is one
     // worktreeMainRootOf could not resolve to a main tree — never a real
     // project.
-    if (tmpDropRoots.exactDropCwds.includes(cwd)) return;
-    const isUnderPrefixDropRoot = tmpDropRoots.prefixDropRoots.some((root) => {
+    if (exactDropCwds.includes(cwd)) return;
+    const isUnderPrefixDropRoot = prefixDropRoots.some((root) => {
       if (cwd === root) return true;
       const rel = path.relative(root, cwd);
       return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);

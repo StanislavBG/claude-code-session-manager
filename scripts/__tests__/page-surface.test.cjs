@@ -23,10 +23,11 @@ describe('real repo', () => {
   const byKey = Object.fromEntries(pages.map((p) => [p.key, p]));
 
   test('listPages resolves faces and entries from the nav registry', () => {
-    expect(byKey.skills.entry).toBe('src/renderer/components/tabs/Skills.tsx');
-    expect(byKey.skills.faces).toEqual(['home']);
+    expect(byKey.extensions.entry).toBe('src/renderer/components/tabs/Extensions.tsx');
+    expect(byKey.extensions.faces).toEqual(['home']);
     expect(byKey.overview.entry).toBe('src/renderer/components/tabs/Home.tsx');
-    expect(byKey.voice.entry).toBe('src/renderer/components/layout/VoiceModal.tsx');
+    expect(byKey['project-home'].entry).toBe('src/renderer/components/tabs/projecthome/ProjectHome.tsx');
+    expect(byKey.skills).toBeUndefined();
     expect(byKey.terminal.entry).toBeNull();
     expect(byKey.projects.faces).toEqual(['home', 'project']);
     expect(byKey.editor).toBeUndefined();
@@ -34,8 +35,8 @@ describe('real repo', () => {
 
   test('classifyPages splits owned from shared', () => {
     const c = classifyPages(ROOT);
-    const skills = c.skills;
-    expect(skills.owned).toContain('src/renderer/components/tabs/Skills.tsx');
+    const skills = c.extensions;
+    expect(skills.owned).toContain('src/renderer/components/tabs/Extensions.tsx');
     const sharedFiles = skills.shared.map((s) => s.file);
     expect(skills.owned).not.toContain('src/renderer/components/tabs/Hooks.tsx');
     expect(sharedFiles).not.toContain('src/renderer/components/tabs/Hooks.tsx');
@@ -56,10 +57,10 @@ describe('real repo', () => {
 
   test('classifyPages attaches api usage per page', () => {
     const c = classifyPages(ROOT);
-    const skills = [...c.skills.api, ...c.skills.sharedApi].find((a) => a.method === 'config.listDir');
+    const skills = [...c.extensions.api, ...c.extensions.sharedApi].find((a) => a.method === 'config.listDir');
     expect(skills).toBeTruthy();
     expect(skills.main).toContain('src/main/config.cjs');
-    expect(c.skills.unresolvedApiRefs).toEqual(expect.any(Number));
+    expect(c.extensions.unresolvedApiRefs).toEqual(expect.any(Number));
     expect(c['agent-library'].api.map((a) => a.method)).toContain('agents.savePersona');
   });
 });
@@ -115,25 +116,26 @@ describe('tests + duplicates', () => {
     for (const p of Object.values(c)) expect(p.tests.map((t) => t.file)).toEqual(p.tests.map((t) => t.file).slice().sort());
   });
 
-  test('duplicates lists agents.savePersona across both library pages', () => {
+  test('duplicates lists shell.open across the pages that share it', () => {
     const d = duplicates(c);
-    const hit = d.find((x) => x.method === 'agents.savePersona');
-    expect(hit.channel).toBe('agents:save-persona');
-    expect(hit.pages).toEqual(expect.arrayContaining(['agent-library', 'tag-library']));
+    expect(d.some((x) => x.method === 'agents.savePersona')).toBe(false);
+    const hit = d.find((x) => x.method === 'shell.open');
+    expect(hit.channel).toBe('shell:open');
+    expect(hit.pages).toEqual(expect.arrayContaining(['extensions', 'memory', 'projects']));
     for (let i = 1; i < d.length; i++) expect(d[i - 1].pages.length).toBeGreaterThanOrEqual(d[i].pages.length);
   });
 });
 
 describe('cli', () => {
   test('<key> --json has owned, api and tests', () => {
-    const r = JSON.parse(cli('skills', '--json'));
+    const r = JSON.parse(cli('extensions', '--json'));
     expect(Array.isArray(r.owned)).toBe(true);
     expect(Array.isArray(r.api)).toBe(true);
     expect(Array.isArray(r.tests)).toBe(true);
   }, 60000);
 
-  test('--duplicates --json includes agents.savePersona', () => {
-    expect(JSON.parse(cli('--duplicates', '--json')).some((d) => d.method === 'agents.savePersona')).toBe(true);
+  test('--duplicates --json includes shell.open', () => {
+    expect(JSON.parse(cli('--duplicates', '--json')).some((d) => d.method === 'shell.open')).toBe(true);
   }, 60000);
 
   test('unknown key exits 2', () => {

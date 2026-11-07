@@ -471,6 +471,36 @@ async function attemptMergeToMainInternal(
 // happens to share an id" (must never be overridden) — see its own comment.
 const indexBackedIds = new Set<string>()
 
+// A cwd whose hydrate/list IPC main (desktop fence) or the web-remote
+// dispatcher (path_fenced) refused is not re-sent for this long. The renderer's
+// known cwds come from transcript folders (lib/knownProjectAggregate.ts) while
+// main's registered roots drop tmp and worktree prefixes; honoring the refusal
+// covers any such mismatch without copying main's drop rules here.
+const REFUSED_CWD_RETRY_MS = 5 * 60_000
+const refusedCwdUntil = new Map<string, number>()
+
+function isRefusalError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('not a registered project root') || msg.includes('path_fenced')
+}
+
+function isRefusedCwd(cwd: string): boolean {
+  const until = refusedCwdUntil.get(cwd)
+  if (until === undefined) return false
+  if (Date.now() < until) return true
+  refusedCwdUntil.delete(cwd)
+  return false
+}
+
+/** Marks the cwd refused; warns only when this creates a new mark. */
+function noteRefusal(cwd: string, what: string): void {
+  const wasMarked = refusedCwdUntil.has(cwd)
+  refusedCwdUntil.set(cwd, Date.now() + REFUSED_CWD_RETRY_MS)
+  if (!wasMarked) {
+    window.api?.logs?.write('promptSessions', 'warn', `${what} refused for ${cwd}: not a registered project; skipping it for 5 min`)
+  }
+}
+
 /** Persists a cwd's active-session slice — called after every mutation so a
  *  reload never loses in-progress work. Sends only THIS renderer's own
  *  in-memory contribution to the main-process merge IPC
@@ -939,11 +969,13 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   },
   hydrate: async (cwd) => {
     if (typeof window === 'undefined' || !window.api?.promptSessions?.loadActiveIndex) return
+    if (isRefusedCwd(cwd)) return
     try {
       const path = promptSessionActiveIndexPath(cwd)
       // Read-tier IPC (fenced to this project's prompt-sessions dir) — works
       // for the remote web UI, unlike the deny-tier config:readJson.
       const result = await window.api.promptSessions.loadActiveIndex({ cwd })
+      refusedCwdUntil.delete(cwd)
       const disk = (result.exists && result.data ? result.data : {}) as Partial<PromptSessionActiveIndex>
       const diskSessions = disk.sessions ?? {}
       const diskEvents = disk.events ?? {}
@@ -1011,12 +1043,14 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       if (!changed) return
       set({ sessions, events })
     } catch (err) {
+      if (isRefusalError(err)) return noteRefusal(cwd, 'hydrate')
       const msg = err instanceof Error ? err.message : String(err)
       window.api?.logs?.write('promptSessions', 'warn', `hydrate failed for ${cwd}: ${msg}`)
     }
   },
   hydrateArchived: async (cwd) => {
     if (typeof window === 'undefined' || !window.api?.promptSessions?.listArchived || !window.api?.promptSessions?.readArchived) return
+    if (isRefusedCwd(cwd)) return
     try {
       const result = await window.api.promptSessions.listArchived({ cwd })
       if (!result.ok) return
@@ -1062,6 +1096,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
         persistActiveIndex(cwd, sessions, events, staleReconciled).catch(() => {})
       }
     } catch (err) {
+      if (isRefusalError(err)) return noteRefusal(cwd, 'hydrateArchived')
       const msg = err instanceof Error ? err.message : String(err)
       window.api?.logs?.write('promptSessions', 'warn', `hydrateArchived failed for ${cwd}: ${msg}`)
     }
@@ -1113,4 +1148,5 @@ if (typeof window !== 'undefined' && window.api?.promptSessions) {
  *  (EpicDetail.test.tsx). */
 export function _resetForTests(): void {
   usePromptSessions.setState({ sessions: {}, events: {}, focusedEpicId: null })
+  refusedCwdUntil.clear()
 }

@@ -41,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.SM_LINEAR_LANDING_DISABLE;
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -60,6 +61,7 @@ test('fast-forward path returns sha === branch tip', async () => {
 });
 
 test('merge-commit path returns the new merge commit whose 2nd parent is the branch tip', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   branchWithCommit('sm-job/mc', 'mc.txt');
   const tip = git(['rev-parse', 'sm-job/mc']);
   commitFile('base-advance.txt', 'x\n', 'base advanced');
@@ -79,6 +81,7 @@ test('no-new-commits path carries no sha', async () => {
 });
 
 test('commit-msg hook rejection on the merge commit yields hook_rejected and leaves no MERGE_HEAD', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   branchWithCommit('sm-job/hook', 'hook.txt');
   commitFile('base-advance.txt', 'x\n', 'base advanced');
   const hook = path.join(repo, '.git', 'hooks', 'commit-msg');

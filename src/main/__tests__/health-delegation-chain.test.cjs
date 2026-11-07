@@ -123,3 +123,20 @@ test('end-to-end: check() reports delegation_chain ok with the chain installed i
   expect(checks.filter((c) => !c.ok).map((c) => c.id)).toEqual([]);
   expect(status.components.delegation_chain.ok).toBe(true);
 }, 90_000);
+
+test('dev-plugin fix text names the Plugins Installed switch, not a vague tab', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { checkDevPlugin } = require('../lib/epic/delegationReadiness.cjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-devplugin-fix-'));
+  try {
+    const r = checkDevPlugin({ homeDir: home });
+    expect(r.ok).toBe(false);
+    expect(r.fix).toContain('switch');
+    expect(r.fix).toContain('Plugins → Installed');
+    expect(r.fix).not.toContain('Enable in Plugins tab');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

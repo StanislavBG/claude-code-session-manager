@@ -335,7 +335,7 @@ function checkDevPlugin({ homeDir }) {
       ...base,
       ok: false,
       detail: `${DEV_PLUGIN_ENABLED_KEY} missing from ~/.claude/settings.json enabledPlugins`,
-      fix: 'Enable in Plugins tab: session-manager-dev (Session Manager)',
+      fix: 'Turn on the switch for session-manager-dev in Plugins → Installed (writes ~/.claude/settings.json enabledPlugins)',
     };
   }
 

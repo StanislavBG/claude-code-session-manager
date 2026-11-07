@@ -12,7 +12,7 @@ import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 import { parseSkillMeta } from '../../lib/skillFrontmatter'
 import { SkillHomePage } from './plugins/PluginSkillBrowser'
-import { toast } from '../../state/toast'
+import { toast, useToast } from '../../state/toast'
 
 type PluginsView = 'installed' | 'library'
 
@@ -50,6 +50,10 @@ interface PluginRow {
   marketplace?: string
   /** `scope` of this install in `installed_plugins.json` (user / project / local). */
   scope?: string
+  /** `name@marketplace` key shared with `plugins.list` / settings.json `enabledPlugins`. */
+  key?: string
+  /** User-scope enabled flag from `window.api.plugins.list`. */
+  enabled?: boolean
   /** Set when inspecting this plugin's directory threw; the row is listed with this marker instead of failing the list. */
   error?: string
 }
@@ -77,8 +81,8 @@ const pluginProvInput = (r: PluginRow): ProvenanceInput => ({
  * Installed plugins come from `~/.claude/plugins/installed_plugins.json` (written by the `claude` CLI; installs
  * happen via the Library view or `claude plugin install`). Each entry's `installPath` bundles skills,
  * subagents, and hooks. We show its manifest + contents
- * as a read-only inspector for now (plugin editing would duplicate the Skills/
- * Subagents/Hooks tabs' UI — out of scope here).
+ * as an inspector, with a per-row enable switch (settings.json enabledPlugins) and Uninstall.
+ * Editing a plugin's components would duplicate the Skills/Subagents/Hooks tabs — out of scope.
  */
 function PluginsComponent() {
   const home = useHomeDir()
@@ -89,6 +93,8 @@ function PluginsComponent() {
   const [view, setView] = useState<PluginsView>('installed')
   const [seedStatus, setSeedStatus] = useState<SeedStatus | null>(null)
   const [dismissedSeeders, setDismissedSeeders] = useState<Set<string>>(new Set())
+  const showToast = useToast((s) => s.show)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -137,6 +143,13 @@ function PluginsComponent() {
             jobs.push({ name, marketplace, entry })
           }
         }
+        let enabledByKey = new Map<string, boolean>()
+        try {
+          const listed = (await window.api.plugins?.list?.()) ?? []
+          enabledByKey = new Map(listed.map((p) => [p.key, p.enabled]))
+        } catch {
+          /* enabled flags unavailable — rows render as off until the next list */
+        }
         next = await mapWithConcurrency(jobs, INSPECT_CONCURRENCY, async ({ name, marketplace, entry }) => {
           const dirEntry: DirEntry = {
             name,
@@ -157,6 +170,8 @@ function PluginsComponent() {
           }
           row.marketplace = marketplace
           row.scope = entry.scope
+          row.key = marketplace ? `${name}@${marketplace}` : name
+          row.enabled = enabledByKey.get(row.key) === true
           return row
         })
       }
@@ -184,7 +199,60 @@ function PluginsComponent() {
 
   useConfigDirWatch(home ? [`${home}/.claude/plugins/installed_plugins.json`] : [], loadRows)
 
+  const onToggle = async (r: PluginRow) => {
+    if (!r.key) return
+    setBusyKey(r.key)
+    try {
+      const res = await window.api.plugins.setEnabled({ key: r.key, enabled: !r.enabled })
+      if (!res.ok) showToast('error', `Could not ${r.enabled ? 'disable' : 'enable'} ${r.name}: ${res.error ?? 'unknown error'}`)
+    } catch (err) {
+      showToast('error', `Could not update ${r.name}: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusyKey(null)
+      await loadRows()
+    }
+  }
+
+  const onUninstall = async (r: PluginRow) => {
+    if (!r.marketplace) return
+    if (!window.confirm(`Uninstall plugin "${r.name}"?`)) return
+    setBusyKey(r.key ?? r.name)
+    try {
+      const res = await window.api.plugins.uninstall({ slug: r.name, marketplaceName: r.marketplace })
+      if (!res.ok) showToast('error', `Uninstall ${r.name} failed: ${res.error ?? `exit ${res.exitCode}`}`)
+    } catch (err) {
+      showToast('error', `Uninstall ${r.name} failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusyKey(null)
+      await loadRows()
+    }
+  }
+
   const columns: Column<PluginRow>[] = [
+    {
+      key: 'enabled',
+      header: 'on',
+      render: (r) => (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={r.enabled === true}
+          aria-label={`${r.enabled ? 'Disable' : 'Enable'} ${r.name}`}
+          data-testid="plugin-enabled-switch"
+          disabled={!r.key || busyKey === r.key}
+          onClick={(e) => {
+            e.stopPropagation()
+            void onToggle(r)
+          }}
+          className={`w-8 h-4 rounded-full relative transition-colors ${r.enabled ? 'bg-accent' : 'bg-bg-hi border border-line'}`}
+        >
+          <span
+            className={`absolute top-0.5 w-3 h-3 rounded-full bg-fg transition-all ${r.enabled ? 'left-4' : 'left-0.5'}`}
+          />
+        </button>
+      ),
+      width: '3.5rem',
+    },
     {
       key: 'name',
       header: 'name',
@@ -250,6 +318,25 @@ function PluginsComponent() {
       key: 'path',
       header: 'path',
       render: (r) => <span className="font-mono text-fg-faint truncate">{r.path}</span>,
+    },
+    {
+      key: 'actions',
+      header: '',
+      render: (r) => (
+        <button
+          type="button"
+          data-testid="plugin-uninstall"
+          disabled={!r.marketplace || busyKey === (r.key ?? r.name)}
+          onClick={(e) => {
+            e.stopPropagation()
+            void onUninstall(r)
+          }}
+          className="text-xs text-red-300 hover:underline disabled:opacity-40"
+        >
+          Uninstall
+        </button>
+      ),
+      width: '5rem',
     },
   ]
 

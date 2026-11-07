@@ -318,17 +318,13 @@ export function PluginsLibrary() {
     // Legacy signal: a top-level dir under ~/.claude/plugins named for the id.
     const r = await window.api.config.listDir(`${home}/.claude/plugins`, { dirsOnly: true })
     for (const e of r.entries) ids.add(e.name)
-    // Authoritative signal: settings.json `enabledPlugins` keyed `id@marketplace`.
+    // Authoritative signal: plugins.list (installed_plugins.json joined with enabledPlugins).
     try {
-      const s = await window.api.config.readJson(`${home}/.claude/settings.json`)
-      const enabled = (s.data as { enabledPlugins?: Record<string, boolean> })?.enabledPlugins
-      if (enabled) {
-        for (const [key, on] of Object.entries(enabled)) {
-          if (on) ids.add(key.split('@')[0])
-        }
+      for (const p of (await window.api.plugins?.list?.()) ?? []) {
+        if (p.enabled) ids.add(p.name)
       }
     } catch {
-      /* settings.json absent/unreadable — dir signal still stands */
+      /* list unavailable — dir signal still stands */
     }
     setInstalled(ids)
   }

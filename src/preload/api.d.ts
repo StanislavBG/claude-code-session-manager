@@ -23,6 +23,14 @@ export type AutoUpdaterState =
   | 'unsupported' | 'disabled' | 'idle' | 'checking'
   | 'downloading' | 'ready' | 'deferred' | 'error';
 
+export type UpdateCheckResult = {
+  current: string;
+  latest: string | null;
+  behind: boolean;
+  channel?: 'npm' | 'installer';
+  downloadUrl?: string | null;
+};
+
 export type AutoUpdaterStatus = {
   state: AutoUpdaterState;
   current: string;
@@ -32,6 +40,8 @@ export type AutoUpdaterStatus = {
   busyReason: string | null;
   lastCheckedAt: number | null;
   enabled: boolean;
+  /** Latest-version probe result; present on `updater.status()` only (pushes omit it). */
+  check?: UpdateCheckResult;
 };
 
 export interface PrereqItem {
@@ -1835,7 +1845,6 @@ export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
     /** Published-`latest` probe (cached 6h, opt-out SM_UPDATE_CHECK=0). Never rejects; offline → latest null. */
-    updateStatus: () => Promise<{ current: string; latest: string | null; behind: boolean }>;
     homeDir: () => Promise<string>;
     cwd: () => Promise<string>;
     engageRulesPath: () => Promise<string | null>;

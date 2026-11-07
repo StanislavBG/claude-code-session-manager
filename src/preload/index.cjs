@@ -13,7 +13,6 @@ function memoryTarget(target) {
 contextBridge.exposeInMainWorld('api', {
   app: {
     version: () => ipcRenderer.invoke('app:version'),
-    updateStatus: () => ipcRenderer.invoke('app:update-status'),
     homeDir: () => ipcRenderer.invoke('app:home-dir'),
     cwd: () => ipcRenderer.invoke('app:cwd'),
     engageRulesPath: () => ipcRenderer.invoke('app:engage-rules-path'),

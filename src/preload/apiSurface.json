@@ -8,13 +8,6 @@
  },
  {
   "ns": "app",
-  "method": "updateStatus",
-  "channel": "app:update-status",
-  "kind": "invoke",
-  "remote": "read"
- },
- {
-  "ns": "app",
   "method": "homeDir",
   "channel": "app:home-dir",
   "kind": "invoke",

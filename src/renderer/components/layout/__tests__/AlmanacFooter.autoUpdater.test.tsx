@@ -12,7 +12,7 @@ import { __resetAutoUpdaterForTests } from '../../../lib/useAutoUpdater'
 /**
  * The footer version chip is the always-visible restart prompt once the
  * in-app auto-updater has a downloaded update; otherwise it falls back to
- * the npm/installer chip from useUpdateStatus.
+ * the npm/installer chip from the status `check`.
  */
 
 let container: HTMLDivElement
@@ -49,14 +49,14 @@ function setApi(opts: {
   ;(window as unknown as { api: unknown }).api = {
     app: {
       gitBranch: vi.fn().mockResolvedValue(null),
-      updateStatus: vi.fn().mockResolvedValue(
-        opts.updateCheck ?? { current: '1.0.0', latest: '1.1.0', behind: true, channel: 'installer', downloadUrl: 'https://x/y' },
-      ),
     },
     schedule: undefined,
     shell: { open: vi.fn().mockResolvedValue(undefined) },
     updater: {
-      status: vi.fn().mockResolvedValue(opts.status),
+      status: vi.fn().mockResolvedValue({
+        ...opts.status,
+        check: opts.updateCheck ?? { current: '1.0.0', latest: '1.1.0', behind: true, channel: 'installer', downloadUrl: 'https://x/y' },
+      }),
       onStatus: vi.fn().mockReturnValue(() => {}),
       install: opts.install ?? vi.fn().mockResolvedValue({ ok: true }),
     },

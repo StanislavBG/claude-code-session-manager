@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AutoUpdaterStatus } from '../../preload/api'
 
 /**
- * Module-level cached singleton (same shape as useUpdateStatus.ts): one
+ * Module-level cached singleton (same shape as useSessionSlots.ts): one
  * `window.api.updater.status()` fetch on first mount plus one `onStatus`
  * subscription shared by all consumers, torn down when the last unmounts.
  * The snapshot is replaced only when a new status arrives.
@@ -13,8 +13,12 @@ let activeConsumers = 0
 let unsubscribeStatus: (() => void) | null = null
 let started = false
 
+const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 function publish(next: AutoUpdaterStatus) {
-  snapshot = next
+  // Pushed statuses omit the latest-version probe (`check`); keep the last one.
+  snapshot = next.check || !snapshot?.check ? next : { ...next, check: snapshot.check }
   subscribers.forEach((fn) => fn())
 }
 
@@ -22,13 +26,21 @@ function start() {
   if (started) return
   started = true
   unsubscribeStatus = window.api.updater.onStatus(publish)
-  window.api.updater.status().then(publish).catch(() => {
-    // passive surface: no toast, no error state
-  })
+  const poll = () => {
+    window.api.updater.status().then(publish).catch(() => {
+      // passive surface: no toast, no error state
+    })
+  }
+  poll()
+  pollTimer = setInterval(poll, POLL_INTERVAL_MS)
 }
 
 function stop() {
   started = false
+  if (pollTimer != null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
   if (unsubscribeStatus) {
     unsubscribeStatus()
     unsubscribeStatus = null

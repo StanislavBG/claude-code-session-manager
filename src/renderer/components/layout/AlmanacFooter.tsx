@@ -4,7 +4,7 @@
  * last activity · todos · session-slot dots · version chip (amber "Update ready —
  * restart to install" button when the in-app auto-updater has a downloaded update, via
  * lib/useAutoUpdater.ts; otherwise amber `v<cur> → v<latest>` / `Download v<latest>`
- * when the running build is behind npm `latest`, via lib/useUpdateStatus.ts).
+ * when the running build is behind npm `latest`, via the `check` field of lib/useAutoUpdater.ts).
  *
  * Both usage pills read the same windows Home's UsageMeters render
  * (`five_hour` = "Session", `seven_day` = "Weekly · all models") and share its
@@ -26,7 +26,6 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useBranch } from '../../lib/useBranch'
 import { usageTitle, utilPercent } from '../../lib/usageWindow'
 import { useSessionSlots } from '../../lib/useSessionSlots'
-import { useUpdateStatus } from '../../lib/useUpdateStatus'
 import { useAutoUpdater } from '../../lib/useAutoUpdater'
 import { useToast } from '../../state/toast'
 import { SlotDots } from '../ui/SlotDots'
@@ -46,8 +45,8 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const schedPaused = useScheduleState((s) => s.snapshot?.paused ?? null)
   const branch = useBranch(tab?.cwd ?? null)
   const slots = useSessionSlots()
-  const update = useUpdateStatus()
   const auto = useAutoUpdater()
+  const update = auto?.check ?? null
   const showToast = useToast((s) => s.show)
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)

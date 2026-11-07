@@ -65,7 +65,7 @@ Plan the work with `/develop`, in this order:
 2. **One PRD per owner doc.** Each PRD moves that doc's facts into it and removes the same facts from the entry files in the same commit.
 3. **Rewrite the map and entry files.** This PRD depends on all of step 2.
 4. **Change any tool that serves docs.** Add the drift-check script as a gate or CI step.
-5. **Validate.** Re-run the drift-check script and open each audience's entry point to confirm it reaches its owner docs.
+5. **Validate.** Re-run the drift-check script and record the flags you used in the review record. Run `git grep -n -F -e "<old name>" -e "<old path>"` with no file-type filter for every deleted or renamed doc, so code strings, scripts and tool descriptions are covered, not only markdown links. Open each audience's entry point to confirm it reaches its owner docs.
 
 Links must resolve for every audience. Tools that return text verbatim need repo-root paths. Commit a dated review record in the format drift-check.md defines, as the next drift check's baseline.
 

@@ -59,7 +59,14 @@ Record these fields for each file:
 
 Do the lines and dates in one pass over the file list, not one command per file by hand. Find the writer of a suspect file with `git grep -n "<file name>" -- '*.js' '*.cjs' '*.ts' '*.py' '*.sh'`.
 
-Then report the share of markdown that is machine-written records or runtime state: files and lines of that kind, divided by all markdown files and lines. Records and state are not docs. Keep them out of the owner-doc plan, and never propose deleting state that a program reads.
+Then report the share of markdown that is machine-written records or runtime state: files and lines of that kind, divided by all markdown files and lines. The drift-check script does not compute this share. Compute it by hand, per top-level folder:
+
+```
+git ls-files -- '*.md' | cut -d/ -f1 | sort | uniq -c
+git ls-files -z -- '*.md' | xargs -0 wc -l | sort -n
+```
+
+The first command counts tracked markdown files per top-level folder (files in the repo root show as their own name). In the second, sum the lines per folder and read the last `total` line for all markdown. Mark each folder as docs, records or state by the writer check above, then divide. Run the same two commands with `--others --exclude-standard` for untracked files. Records and state are not docs. Keep them out of the owner-doc plan, and never propose deleting state that a program reads.
 
 ## 2. Audiences and entry points
 
@@ -99,15 +106,31 @@ Record the consumer kinds for each doc. A doc with no consumer and no live link 
 
 **Headings cited by name must not change.** Search for every `#anchor` and every quoted heading, in docs, code and tests. When a consumer cites a heading, keep the heading text exactly, or change the citation in the same commit.
 
+After any restructure, search for every deleted or renamed doc name across all file types, not only markdown links. Code strings, scripts, tool descriptions and error messages cite doc names too, and a link checker never sees them:
+
+```
+git grep -n -F -e "<old file name>" -e "<old path>"
+```
+
+Run it with no `-- '*.md'` filter, once per deleted or renamed doc, and fix or justify every hit.
+
 Run the link check once over the whole tree, so you do not check links by hand: use the project's drift-check script if it has one.
 
 ## 4. Truth check
+
+First look for **duplicate facts**, the same fact kept in two docs. Take 3-5 distinctive lines from each always-loaded file (a command with its flags, a number, a rule stated in a unique phrase) and search the other docs for each one:
+
+```
+git grep -n -F -e "<distinctive line 1>" -e "<distinctive line 2>" -- '*.md'
+```
+
+A hit outside the file the line came from is a duplicate. Name one owner for the fact and report the other copies as removals.
 
 Verify each claim in the docs against code and config. Cite `file:line` for every finding, both the doc line and the line that proves or disproves it. Check these kinds of claim:
 
 - **Paths.** Does the file or folder exist, and is it spelled right?
 - **Commands.** Does the script exist in `package.json`, a Makefile or a task runner? Do the flags exist?
-- **Counts.** "12 endpoints", "7 tags", "4 hooks": count them in code.
+- **Counts.** "12 endpoints", "7 tags", "4 hooks": count them in code. Worked example: a README says "exposes 9 MCP tools" and lists them. Count the registrations, for example `git grep -c -E "registerTool|server\.tool\(" -- src`, then compare both the number and the names with the README list. Cite the README line and the registering line. A mismatch in either is a finding.
 - **Versions.** Runtime, framework and package versions against the manifest and lockfile.
 - **Endpoints.** Routes, methods and ports against the route table or server code.
 - **Prices.** Plan names and amounts against billing config and the pricing page source.

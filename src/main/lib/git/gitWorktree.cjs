@@ -1231,6 +1231,85 @@ function joinSegments(segments) {
 }
 
 /**
+ * Blob-spec sibling of renderStagesDiff3: renders `git merge-file -p --diff3`
+ * over three blob specs (`<rev>:<path>`), reading only objects — no index or
+ * working tree. Returns null when any blob is missing, not valid UTF-8, or git
+ * errors. Never throws.
+ */
+async function renderBlobsDiff3({ cwd, oursSpec, baseSpec, theirsSpec }) {
+  let tmp = null;
+  try {
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mergefile-'));
+    const files = [];
+    let i = 0;
+    for (const spec of [oursSpec, baseSpec, theirsSpec]) { // merge-file's argument order
+      const content = await execGit(['cat-file', 'blob', spec], { cwd, timeout: 10_000 });
+      if (content.includes('\uFFFD')) return null;
+      const f = path.join(tmp, `blob${i++}`);
+      await fsp.writeFile(f, content, 'utf8');
+      files.push(f);
+    }
+    try {
+      return await execGit(['merge-file', '-p', '--diff3', '-L', 'ours', '-L', 'base', '-L', 'theirs', ...files], { cwd, timeout: 10_000 });
+    } catch (e) {
+      if (e && typeof e.code === 'number' && e.code >= 1 && e.code <= 127 && typeof e.stdoutText === 'string') return e.stdoutText;
+      return null;
+    }
+  } catch {
+    return null;
+  } finally {
+    if (tmp) { try { await fsp.rm(tmp, { recursive: true, force: true }); } catch { /* best effort */ } }
+  }
+}
+
+/**
+ * Replay-side pure-addition resolution. `treeOid` is the merge-tree result
+ * (conflict markers in the conflicted paths). When every path is an
+ * AUTO_RESOLVE_EXTENSIONS file whose diff3 hunks all have an empty base,
+ * builds a tree with each path replaced by ours+theirs concatenation (same rule
+ * as resolveByConcatenation). Only writes objects plus a temp index under
+ * os.tmpdir(), always removed. Returns the resolved tree oid, or null on any
+ * doubt/error. Never throws.
+ */
+async function resolvePureAdditionInTree({ cwd, treeOid, paths, parent, tip, commit }) {
+  if (process.env.SM_PURE_ADDITION_MERGE_DISABLE === '1') return null;
+  if (!Array.isArray(paths) || !paths.length) return null;
+  if (!paths.every((p) => AUTO_RESOLVE_EXTENSIONS.has(path.extname(p).toLowerCase()))) return null;
+  let tmp = null;
+  try {
+    const rendered = [];
+    for (const p of paths) {
+      if (p.startsWith('"')) return null; // git-quoted path: don't guess
+      const out = await renderBlobsDiff3({ cwd, baseSpec: `${parent}:${p}`, oursSpec: `${tip}:${p}`, theirsSpec: `${commit}:${p}` });
+      if (out === null) return null;
+      const segments = parseDiff3Output(out);
+      if (!segments) return null;
+      const hunks = segments.filter((s) => s.hunk);
+      if (!hunks.length || hunks.some((s) => s.hunk.base.length !== 0)) return null;
+      rendered.push({ p, text: joinSegments(segments) });
+    }
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-replay-idx-'));
+    const env = { GIT_INDEX_FILE: path.join(tmp, 'index') };
+    await execGit(['read-tree', treeOid], { cwd, timeout: 15_000, env });
+    let n = 0;
+    for (const { p, text } of rendered) {
+      const f = path.join(tmp, `res${n++}`);
+      await fsp.writeFile(f, text, 'utf8');
+      const blob = (await execGit(['hash-object', '-w', f], { cwd, timeout: 10_000 })).trim();
+      const lsOut = await execGit(['ls-tree', '-z', tip, '--', p], { cwd, timeout: 10_000 });
+      const mode = (lsOut.split(' ')[0] || '').trim();
+      await execGit(['update-index', '--add', '--cacheinfo', `${/^100(644|755)$/.test(mode) ? mode : '100644'},${blob},${p}`], { cwd, timeout: 10_000, env });
+    }
+    const resolved = (await execGit(['write-tree'], { cwd, timeout: 15_000, env })).trim();
+    return /^[0-9a-f]{40,64}$/.test(resolved) ? resolved : null;
+  } catch {
+    return null;
+  } finally {
+    if (tmp) { try { await fsp.rm(tmp, { recursive: true, force: true }); } catch { /* best effort */ } }
+  }
+}
+
+/**
  * Resolves `cwd`'s default branch, without ever hardcoding `main`: prefers
  * the remote-tracked default (`origin/HEAD`, set by `git clone`/`git remote
  * set-head`), falls back to the repo's own `init.defaultBranch` config, then
@@ -2125,6 +2204,8 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
 
     let tip = onto;
     const replayed = [];
+    let autoResolved = null;
+    const resolvedSet = new Set();
     for (const c of kept) {
       let parent;
       try {
@@ -2133,6 +2214,7 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
         return { ok: false, failureKind: 'other', reason: `commit ${c} has no parent to replay from` };
       }
       let treeOid;
+      let conflictResolved = false;
       try {
         const out = await execGit(
           ['merge-tree', '--write-tree', '--name-only', '--no-messages', `--merge-base=${parent}`, tip, c],
@@ -2146,21 +2228,31 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
           const conflictedPaths = Array.from(new Set(
             stdoutText.split('\n').slice(1).map((l) => l.trim()).filter(Boolean),
           )).sort();
-          return {
-            ok: false,
-            failureKind: 'content_conflict',
-            conflictedPaths,
-            reason: `replay of ${c} conflicts on: ${conflictedPaths.join(', ')}`,
-          };
+          const resolvedTree = await resolvePureAdditionInTree({ cwd, treeOid: (stdoutText.split('\n')[0] || '').trim(), paths: conflictedPaths, parent, tip, commit: c });
+          if (resolvedTree) {
+            treeOid = resolvedTree;
+            autoResolved = 'pure_addition_concat';
+            for (const p of conflictedPaths) resolvedSet.add(p);
+            conflictResolved = true;
+          } else {
+            return {
+              ok: false,
+              failureKind: 'content_conflict',
+              conflictedPaths,
+              reason: `replay of ${c} conflicts on: ${conflictedPaths.join(', ')}`,
+            };
+          }
         }
-        if ((e && e.code === 129) || /unknown option|usage:/i.test(stderrText)) {
-          return {
-            ok: false,
-            failureKind: 'git_too_old',
-            reason: `git merge-tree --merge-base is unsupported by this git (need >= 2.40): ${stderrText || (e && e.message)}`,
-          };
+        if (!conflictResolved) {
+          if ((e && e.code === 129) || /unknown option|usage:/i.test(stderrText)) {
+            return {
+              ok: false,
+              failureKind: 'git_too_old',
+              reason: `git merge-tree --merge-base is unsupported by this git (need >= 2.40): ${stderrText || (e && e.message)}`,
+            };
+          }
+          return { ok: false, failureKind: 'other', reason: `git merge-tree failed: ${stderrText || (e && e.message)}` };
         }
-        return { ok: false, failureKind: 'other', reason: `git merge-tree failed: ${stderrText || (e && e.message)}` };
       }
 
       const tipTree = (await execGit(['rev-parse', `${tip}^{tree}`], { cwd, timeout: 10_000 })).trim();
@@ -2194,7 +2286,9 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
       replayed.push({ from: c, to: newSha });
       tip = newSha;
     }
-    return { ok: true, tipSha: tip, replayed, skipped };
+    const result = { ok: true, tipSha: tip, replayed, skipped };
+    if (autoResolved) { result.autoResolved = autoResolved; result.resolvedPaths = Array.from(resolvedSet).sort(); }
+    return result;
   } catch (e) {
     return { ok: false, failureKind: 'other', reason: `replayBranchOnto failed: ${(e && (e.stderrText || e.message)) || e}` };
   }

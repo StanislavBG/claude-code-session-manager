@@ -2374,6 +2374,63 @@ test('[replay] a conflicting commit reports content_conflict and leaves status, 
   expect(rpSnap(repoCwd)).toEqual(snap);
 });
 
+async function rpAppendConflict(file, baseText, oursAdd, theirsAdd) {
+  const main = rpMain(repoCwd);
+  rpCommit(repoCwd, file, baseText, 'base doc');
+  git(['checkout', '-q', '-b', 'feat'], repoCwd);
+  rpCommit(repoCwd, file, baseText + theirsAdd, 'feat append');
+  git(['checkout', '-q', main], repoCwd);
+  return rpCommit(repoCwd, file, baseText + oursAdd, 'main append');
+}
+const rpIdxDirs = () => require('node:fs').readdirSync(require('node:os').tmpdir()).filter((n) => n.startsWith('sm-replay-idx-') || n.startsWith('sm-mergefile-')).sort();
+
+test('[replay] pure-addition .md conflict resolves by concatenation (ours then theirs), main checkout untouched, temp files cleaned', async () => {
+  const onto = await rpAppendConflict('notes.md', 'one\n', 'from main\n', 'from feat\n');
+  const snap = rpSnap(repoCwd);
+  const tmpBefore = rpIdxDirs();
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+  expect(r.ok).toBe(true);
+  expect(r.autoResolved).toBe('pure_addition_concat');
+  expect(r.resolvedPaths).toEqual(['notes.md']);
+  expect(git(['show', `${r.tipSha}:notes.md`], repoCwd)).toBe('one\nfrom main\nfrom feat\n');
+  expect(git(['rev-parse', `${r.tipSha}^`], repoCwd).trim()).toBe(onto);
+  expect(rpSnap(repoCwd)).toEqual(snap);
+  expect(rpIdxDirs()).toEqual(tmpBefore);
+});
+
+test('[replay] pure-addition: non-addition .md conflict and non-allowlisted extension still content_conflict', async () => {
+  const main = rpMain(repoCwd);
+  rpCommit(repoCwd, 'doc.md', 'line\n', 'base');
+  git(['checkout', '-q', '-b', 'feat'], repoCwd);
+  rpCommit(repoCwd, 'doc.md', 'theirs edit\n', 'feat edit');
+  git(['checkout', '-q', main], repoCwd);
+  const onto = rpCommit(repoCwd, 'doc.md', 'ours edit\n', 'main edit');
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+  expect(r.ok).toBe(false);
+  expect(r.failureKind).toBe('content_conflict');
+  expect(rpIdxDirs().filter((n) => n.startsWith('sm-replay-idx-'))).toEqual([]);
+});
+
+test('[replay] pure-addition: pure appends to a .js path are not auto-resolved', async () => {
+  const onto = await rpAppendConflict('code.js', 'a;\n', 'ours;\n', 'theirs;\n');
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+  expect(r.ok).toBe(false);
+  expect(r.failureKind).toBe('content_conflict');
+});
+
+test('[replay] pure-addition: SM_PURE_ADDITION_MERGE_DISABLE=1 yields content_conflict', async () => {
+  const onto = await rpAppendConflict('notes.md', 'one\n', 'from main\n', 'from feat\n');
+  const prev = process.env.SM_PURE_ADDITION_MERGE_DISABLE;
+  process.env.SM_PURE_ADDITION_MERGE_DISABLE = '1';
+  try {
+    const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+    expect(r.ok).toBe(false);
+    expect(r.failureKind).toBe('content_conflict');
+  } finally {
+    if (prev === undefined) delete process.env.SM_PURE_ADDITION_MERGE_DISABLE; else process.env.SM_PURE_ADDITION_MERGE_DISABLE = prev;
+  }
+});
+
 test('[replay] never throws on bad input', async () => {
   const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: 'nope', branch: 'nope' });
   expect(r.ok).toBe(false);

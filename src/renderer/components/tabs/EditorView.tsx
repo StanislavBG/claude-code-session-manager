@@ -34,6 +34,7 @@ import {
 } from '../../state/editor'
 import { useEditorPrefs } from '../../state/editorPrefs'
 import { toast } from '../../state/toast'
+import { useConfig } from '../../state/config'
 import { usePanelFocusRef } from '../../lib/panelFocus'
 import { FileTabBar } from '../layout/FileTabBar'
 import { CodeEditorPane } from './editor/CodeEditorPane'
@@ -72,6 +73,24 @@ function omitKeys<T>(obj: Record<string, T>, keys: string[]): Record<string, T> 
     if (!drop.has(k)) out[k] = v
   }
   return out
+}
+
+/**
+ * True for Claude Code config files, which the editor routes through the config
+ * store (mtime-checked save, shared draft with the config pages) instead of
+ * files:write: ~/.claude/settings*.json, <root>/.claude/settings*.json,
+ * ~/.claude.json, <root>/.mcp.json, CLAUDE.md, CLAUDE.local.md, SKILL.md and
+ * ~/.claude/agents/*.md. Purely path-shaped so it needs no home/cwd lookup.
+ */
+export function isClaudeConfigPath(p: string): boolean {
+  const parts = p.replace(/\\/g, '/').split('/')
+  const base = parts[parts.length - 1] ?? ''
+  const dir = parts[parts.length - 2] ?? ''
+  if (base === 'CLAUDE.md' || base === 'CLAUDE.local.md' || base === 'SKILL.md') return true
+  if (base === '.claude.json' || base === '.mcp.json') return true
+  if (dir === '.claude' && /^settings(\.[^/]+)?\.json$/.test(base)) return true
+  if (dir === 'agents' && parts[parts.length - 3] === '.claude' && base.endsWith('.md')) return true
+  return false
 }
 
 /** A file whose bytes the renderer never reads as text (own pane handles it). */
@@ -118,6 +137,12 @@ function EditorViewComponent() {
   // selection at a time.
   const docEdit = useDocEdit(activeFilePath ?? '', buffers[activeFilePath ?? ''] ?? '')
 
+  // Buffer edits mirror into the config store for Claude config files so pages share one draft.
+  const editBuffer = useCallback((p: string, text: string) => {
+    setBuffer(p, text)
+    if (isClaudeConfigPath(p)) useConfig.getState().setDraft(p, text)
+  }, [setBuffer])
+
   const registerEditor = useCallback((ed: editor.IStandaloneCodeEditor | null) => { monacoRef.current = ed }, [])
   const getEditor = useCallback(() => monacoRef.current, [])
 
@@ -141,6 +166,22 @@ function EditorViewComponent() {
     }
     let cancelled = false
     setLoadState((s) => ({ ...s, [path]: 'loading' }))
+    if (isClaudeConfigPath(path)) {
+      void (async () => {
+        // keepDirty: a page may already hold an unsaved draft for this file — adopt it.
+        await useConfig.getState().loadText(path, true)
+        if (cancelled) return
+        const f = useConfig.getState().files[path]
+        if (!f || (f.loadError && !f.exists)) {
+          setLoadState((s) => ({ ...s, [path]: { error: f?.loadError ?? 'failed to read' } }))
+          return
+        }
+        loadBuffer(path, f.diskRaw)
+        if (f.dirty) useEditor.getState().setBuffer(path, f.draftRaw)
+        setLoadState((s) => ({ ...s, [path]: 'ready' }))
+      })()
+      return () => { cancelled = true }
+    }
     window.api.files.read(path).then((r) => {
       if (cancelled) return
       if (r.binary) {
@@ -162,7 +203,20 @@ function EditorViewComponent() {
     const text = useEditor.getState().buffers[path]
     if (text == null) return
     if (silent) setSaving(true)
-    const r = await window.api.files.write(path, text)
+    const isConfig = isClaudeConfigPath(path)
+    let r: { ok: boolean; error?: string | null }
+    if (isConfig) {
+      const cfg = useConfig.getState()
+      cfg.setDraft(path, text)
+      r = await cfg.saveText(path)
+      // The store already toasted the conflict; don't double up.
+      if (!r.ok && r.error === 'conflict') {
+        if (silent) setSaving(false)
+        return
+      }
+    } else {
+      r = await window.api.files.write(path, text)
+    }
     if (r.ok) {
       markSaved(path)
       setReloadTokens((t) => ({ ...t, [path]: (t[path] ?? 0) + 1 }))
@@ -178,7 +232,8 @@ function EditorViewComponent() {
   useEffect(() => {
     if (!prefs.autosave) return
     const path = activeFilePath
-    if (!path || isMediaPath(path) || !dirty[path]) return
+    // Config files save explicitly (mtime-checked) — never autosave them.
+    if (!path || isMediaPath(path) || isClaudeConfigPath(path) || !dirty[path]) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => { void save(path, true) }, 1200)
     return () => window.clearTimeout(saveTimer.current)
@@ -332,14 +387,14 @@ function EditorViewComponent() {
       path={path}
       name={name}
       value={buffers[path] ?? ''}
-      onChange={(text) => setBuffer(path, text)}
+      onChange={(text) => editBuffer(path, text)}
       onSave={() => void save(path)}
       onReady={registerEditor}
       onCursor={setCursor}
     />
   )
 
-  const savedLabel = saving ? 'Saving…' : path && dirty[path] ? (prefs.autosave ? 'Editing…' : 'Unsaved') : 'All changes saved'
+  const savedLabel = saving ? 'Saving…' : path && dirty[path] ? (prefs.autosave && !isClaudeConfigPath(path) ? 'Editing…' : 'Unsaved') : 'All changes saved'
 
   return (
     <div className="relative flex flex-col h-full bg-bg">
@@ -431,7 +486,7 @@ function EditorViewComponent() {
             <div className="p-6 text-xs text-fg-faint">loading…</div>
           ) : effMode === 'wysiwyg' && isMarkdown(path) ? (
             <Suspense fallback={<div className="p-6 text-xs text-fg-faint">Loading editor…</div>}>
-              <TiptapBody key={path} value={buffers[path] ?? ''} onChange={(text) => setBuffer(path, text)} />
+              <TiptapBody key={path} value={buffers[path] ?? ''} onChange={(text) => editBuffer(path, text)} />
             </Suspense>
           ) : effMode === 'split' && isMarkdown(path) ? (
             <div className="flex h-full">
@@ -462,7 +517,7 @@ function EditorViewComponent() {
                   onCancel={docEdit.cancel}
                   onAccept={() => {
                     const result = docEdit.accept(buffers[path] ?? '')
-                    if (result.ok) setBuffer(path, result.next)
+                    if (result.ok) editBuffer(path, result.next)
                   }}
                   onReject={docEdit.cancel}
                   onRetry={docEdit.retry}
@@ -493,7 +548,7 @@ function EditorViewComponent() {
                   onCancel={docEdit.cancel}
                   onAccept={() => {
                     const result = docEdit.accept(buffers[path] ?? '')
-                    if (result.ok) setBuffer(path, result.next)
+                    if (result.ok) editBuffer(path, result.next)
                   }}
                   onReject={docEdit.cancel}
                   onRetry={docEdit.retry}
@@ -539,7 +594,7 @@ function EditorViewComponent() {
             onRetry={docEdit.retry}
             onAccept={() => {
               const result = docEdit.accept(buffers[path] ?? '')
-              if (result.ok) setBuffer(path, result.next)
+              if (result.ok) editBuffer(path, result.next)
             }}
           />
         </div>

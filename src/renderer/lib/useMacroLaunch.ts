@@ -5,17 +5,13 @@
  * (PRD 1459) so Project Home can press macros through the same authority
  * instead of re-deriving it.
  *
- * Two opt-in behaviours, ported from the old Project Home "Generate" action
- * (useBuilderEpic.ts, removed by project-home-macro-buttons):
- *   - `resumeActive` — resume an already-active Epic for the same
- *     (cwd, agentName, tag) instead of minting a duplicate.
- *   - `requireReadiness` — refuse to mint when the persona is missing or
- *     `window.api.app.delegationReadiness` reports not-ready.
- * Both default off, so SessionActionsBar's own byte-for-byte behaviour is
- * unaffected by their existence.
+ * Job macros (Project Home background builds) are gated on delegation readiness and a
+ * strict missing-persona check, and reuse their active Epic. Job-less macros behave
+ * identically on every surface — the same act as New Session (SINGLE-CREATOR LAW: born
+ * proposed, approved by the press), always minting a new Epic.
  *
  * A persona at xhigh/max effort needs a window.confirm (macroCostWarning) before
- * minting; cancelling mints nothing. Resuming an active Epic never prompts.
+ * minting; cancelling mints nothing.
  */
 import { useState } from 'react'
 import { usePromptSessions } from '../state/promptSessions'
@@ -29,7 +25,6 @@ import type { AgentPersona, Macro } from '../../preload/api'
 export function useMacroLaunch(
   onSelect: (id: string) => void,
   personas: AgentPersona[],
-  opts?: { resumeActive?: boolean; requireReadiness?: boolean },
 ) {
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const [launching, setLaunching] = useState<string | null>(null)
@@ -42,20 +37,12 @@ export function useMacroLaunch(
         (s) => s.cwd === activeTabCwd && s.tag === macro.tag && s.agentType === macro.agentName && s.status === 'active',
       )
 
-    if (opts?.resumeActive && !macro.job) {
-      const existing = findActive()
-      if (existing) {
-        onSelect(existing.id)
-        return
-      }
-    }
-
     const persona = personas.find((p) => p.name === macro.agentName)
     // Empty list = personas still loading (or none): proceed with a thinner
     // prompt rather than block. Once loaded, a missing agent must not mint.
-    // requireReadiness tightens this: a missing persona blocks even while
-    // the list is still empty, since that path must never mint on a guess.
-    if (!persona && (personas.length > 0 || opts?.requireReadiness)) {
+    // Job macros tighten this: a missing persona blocks even while the list
+    // is still empty, since that path must never mint on a guess.
+    if (!persona && (personas.length > 0 || !!macro.job)) {
       toast.error(`Agent ${macro.agentName} not found — edit the macro`)
       return
     }
@@ -71,7 +58,7 @@ export function useMacroLaunch(
 
     setLaunching(macro.id)
     try {
-      if (opts?.requireReadiness) {
+      if (macro.job) {
         let readiness: Awaited<ReturnType<typeof window.api.app.delegationReadiness>>
         try {
           readiness = await window.api.app.delegationReadiness(activeTabCwd)

@@ -33,6 +33,10 @@ function installWindowApiMock() {
       unwatch: vi.fn(),
       onChanged: vi.fn(() => () => {}),
     },
+    claudeConfig: {
+      read: vi.fn().mockResolvedValue({ path: '', data: {} }),
+      patch: vi.fn().mockResolvedValue({ ok: true, path: '', data: {} }),
+    },
     files: {
       delete: vi.fn().mockResolvedValue({ ok: true }),
     },

@@ -13,7 +13,7 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
 import type { Scope } from '../../lib/scopes'
-import { McpLibrary, ViewSwitcher, mcpPatchTarget } from './Library'
+import { mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
 import { distinctPlaceholders } from '../../lib/mcpPlaceholders'
 import { deriveMcpConnectionState, type McpConnectionInfo } from '../../lib/mcpConnectionState'
@@ -126,7 +126,9 @@ export function nextServerName(servers: Record<string, McpServer>): string {
   return name
 }
 
-function McpServersComponent() {
+export interface McpAddContext { scope: Scope; cwd: string | null }
+
+function McpServersComponent({ onAdd }: { onAdd?: (ctx: McpAddContext) => void } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -143,7 +145,6 @@ function McpServersComponent() {
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [selectedName, setSelectedName] = useState<string | null>(null)
-  const [view, setView] = useState<'installed' | 'library'>('installed')
   const [filter, setFilter] = useState('')
 
   // MCP Servers is now HOME-only in the sidebar (navGroups.ts), and every
@@ -208,24 +209,11 @@ function McpServersComponent() {
   }, [])
 
   if (!home) return <EmptyState title="loading…" />
-  if (view === 'library') {
-    return (
-      <Panel
-        toolbar={
-          <ViewSwitcher active={view} onChange={setView} />
-        }
-      >
-        <McpLibrary scope={scope} cwd={cwd} />
-      </Panel>
-    )
-  }
   if (scope === 'project' && !cwd) {
     return (
       <Panel
         toolbar={
           <>
-            <ViewSwitcher active={view} onChange={setView} />
-            <span className="mx-2 text-fg-faint">·</span>
             <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           </>
         }
@@ -272,8 +260,6 @@ function McpServersComponent() {
     <Panel
       toolbar={
         <>
-          <ViewSwitcher active={view} onChange={setView} />
-          <span className="mx-2 text-fg-faint">·</span>
           <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           <span className="ml-3 px-1.5 py-0.5 text-[10px] rounded border border-line text-fg-faint">
             {names.length} server{names.length === 1 ? '' : 's'}
@@ -289,6 +275,12 @@ function McpServersComponent() {
             className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50 mr-2"
           >
             {probing ? 'checking…' : '⟳ test connections'}
+          </button>
+          <button
+            onClick={() => onAdd?.({ scope, cwd })}
+            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi mr-2"
+          >
+            Add…
           </button>
           <button
             onClick={addServer}
@@ -339,11 +331,7 @@ function McpServersComponent() {
         ) : null
       }
     >
-      {scope === 'project' && (
-        <div className="px-3 py-1 text-xs text-fg-faint border-b border-line">
-          Project servers are switched on/off by disabledMcpjsonServers in the project&apos;s .claude/settings.json.
-        </div>
-      )}
+      {scope === 'project' && cwd && <McpProjectGating cwd={cwd} names={names} />}
       <ListDetail
         sidebar={
           <div className="py-2">
@@ -714,6 +702,79 @@ function KVEditor({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Project gating for .mcp.json servers: `disabledMcpjsonServers` (per server)
+ * and `enableAllProjectMcpServers`, both in <cwd>/.claude/settings.json,
+ * written through claudeConfig.patch (key-scoped, never a whole-file write).
+ */
+function McpProjectGating({ cwd, names }: { cwd: string; names: string[] }) {
+  const target = { fileId: 'settings' as const, scope: 'project' as const, cwd }
+  const [disabled, setDisabled] = useState<string[]>([])
+  const [enableAll, setEnableAll] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      window.api.claudeConfig
+        .read(target)
+        .then((r) => {
+          if (!alive) return
+          const d = r.data as { disabledMcpjsonServers?: unknown; enableAllProjectMcpServers?: unknown } | null
+          setDisabled(Array.isArray(d?.disabledMcpjsonServers) ? (d!.disabledMcpjsonServers as string[]) : [])
+          setEnableAll(d?.enableAllProjectMcpServers === true)
+        })
+        .catch(() => {})
+    load()
+    const off = window.api.config?.onChanged?.(() => { load() })
+    return () => { alive = false; off?.() }
+  }, [cwd])
+
+  const patch = async (key: string, value: unknown) => {
+    setBusy(true)
+    try {
+      await window.api.claudeConfig.patch({ ...target, keyPath: [key], value })
+    } catch (e) {
+      toast.error((e as Error).message || 'save failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const toggleServer = async (n: string, on: boolean) => {
+    const next = on ? disabled.filter((d) => d !== n) : [...new Set([...disabled, n])]
+    setDisabled(next)
+    await patch('disabledMcpjsonServers', next.length ? next : undefined)
+  }
+
+  return (
+    <div className="px-3 py-1 text-xs text-fg-faint border-b border-line flex flex-wrap items-center gap-x-4 gap-y-1" data-testid="mcp-gating">
+      <span>Gating · {cwd}/.claude/settings.json</span>
+      <label className="flex items-center gap-1">
+        <input
+          type="checkbox"
+          data-testid="mcp-enable-all"
+          checked={enableAll}
+          disabled={busy}
+          onChange={(e) => { setEnableAll(e.target.checked); patch('enableAllProjectMcpServers', e.target.checked ? true : undefined) }}
+        />
+        enableAllProjectMcpServers
+      </label>
+      {names.map((n) => (
+        <label key={n} className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            data-testid={`mcp-gate-${n}`}
+            checked={!disabled.includes(n)}
+            disabled={busy}
+            onChange={(e) => toggleServer(n, e.target.checked)}
+          />
+          {n}
+        </label>
+      ))}
     </div>
   )
 }

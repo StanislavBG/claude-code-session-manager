@@ -15,7 +15,6 @@ import { listSkillEntries, type SkillListError } from '../../lib/listSkills'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
-import { SkillsLibrary, ViewSwitcher } from './Library'
 import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
 
@@ -45,7 +44,7 @@ interface Item {
   description?: string
 }
 
-function SkillsComponent() {
+function SkillsComponent({ onAdd }: { onAdd?: () => void } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -64,7 +63,6 @@ function SkillsComponent() {
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [items, setItems] = useState<Item[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [view, setView] = useState<'installed' | 'library'>('installed')
   const [filter, setFilter] = useState('')
   // Paths that failed to list on the latest load — drives the inline error state.
   const [loadErrors, setLoadErrors] = useState<SkillListError[]>([])
@@ -277,22 +275,11 @@ function SkillsComponent() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   if (!home) return <EmptyState title="loading…" />
-  if (view === 'library') {
-    return (
-      <Panel
-        toolbar={<ViewSwitcher active={view} onChange={setView} installedLabel="Installed" libraryLabel="Library" />}
-      >
-        <SkillsLibrary />
-      </Panel>
-    )
-  }
   if (scope === 'project' && !cwd) {
     return (
       <Panel
         toolbar={
           <>
-            <ViewSwitcher active={view} onChange={setView} />
-            <span className="mx-2 text-fg-faint">·</span>
             <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           </>
         }
@@ -312,13 +299,17 @@ function SkillsComponent() {
     <Panel
       toolbar={
         <>
-          <ViewSwitcher active={view} onChange={setView} />
-          <span className="mx-2 text-fg-faint">·</span>
           <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           <span className="ml-3 text-fg-faint">
             {items.length} {items.length === 1 ? 'item' : 'items'}
           </span>
           <div className="flex-1" />
+          <button
+            onClick={onAdd}
+            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
+          >
+            Add…
+          </button>
           {selectedItem && (
             <ProvenanceBadge
               scope={selectedItem.scope}

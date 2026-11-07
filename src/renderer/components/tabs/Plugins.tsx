@@ -8,13 +8,10 @@ import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { DirEntry, SeedStatus } from '../../../preload/api'
-import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 import { parseSkillMeta } from '../../lib/skillFrontmatter'
 import { SkillHomePage } from './plugins/PluginSkillBrowser'
 import { toast, useToast } from '../../state/toast'
-
-type PluginsView = 'installed' | 'library'
 
 interface PluginManifest {
   name?: string
@@ -84,13 +81,12 @@ const pluginProvInput = (r: PluginRow): ProvenanceInput => ({
  * as an inspector, with a per-row enable switch (settings.json enabledPlugins) and Uninstall.
  * Editing a plugin's components would duplicate the Skills/Subagents/Hooks tabs — out of scope.
  */
-function PluginsComponent() {
+function PluginsComponent({ onAdd }: { onAdd?: () => void } = {}) {
   const home = useHomeDir()
   const [rows, setRows] = useState<PluginRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
-  const [view, setView] = useState<PluginsView>('installed')
   const [seedStatus, setSeedStatus] = useState<SeedStatus | null>(null)
   const [dismissedSeeders, setDismissedSeeders] = useState<Set<string>>(new Set())
   const showToast = useToast((s) => s.show)
@@ -353,18 +349,9 @@ function PluginsComponent() {
         seeders={exhaustedSeeders}
         seedStatus={seedStatus!}
         onDismiss={(id) => setDismissedSeeders((prev) => new Set(prev).add(id))}
-        onOpenLibrary={() => setView('library')}
+        onOpenLibrary={() => onAdd?.()}
       />
     ) : null
-
-  if (view === 'library') {
-    return (
-      <Panel toolbar={<PluginsViewTabs active={view} onChange={setView} />}>
-        {seedBanner}
-        <PluginsLibrary />
-      </Panel>
-    )
-  }
 
   const selectedRow = selected ? rows.find((r) => r.path === selected) ?? null : null
 
@@ -372,11 +359,14 @@ function PluginsComponent() {
     <Panel
       toolbar={
         <>
-          <PluginsViewTabs active={view} onChange={setView} />
-          <span className="mx-2 text-fg-faint">·</span>
           <span className="text-fg-faint">{rows.length} plugins</span>
           <div className="flex-1" />
-          <span className="text-fg-faint font-mono truncate">~/.claude/plugins/installed_plugins.json</span>
+          <button
+            onClick={onAdd}
+            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
+          >
+            Add…
+          </button>
         </>
       }
     >
@@ -404,7 +394,7 @@ function PluginsComponent() {
                 <>
                   no plugins installed
                   <div className="mt-2 text-fg-faint">
-                    install one from the Library view or run <code>claude plugin install</code>
+                    use Add… or run <code>claude plugin install</code>
                   </div>
                 </>
               }
@@ -468,40 +458,6 @@ function SeedStatusBanner({
             ✕
           </button>
         </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * 2-way tab switcher: Installed / Library, matching the ViewSwitcher pattern
- * used by Skills / MCP Servers.
- */
-function PluginsViewTabs({
-  active,
-  onChange,
-}: {
-  active: PluginsView
-  onChange: (v: PluginsView) => void
-}) {
-  const items: Array<[PluginsView, string]> = [
-    ['installed', 'Installed'],
-    ['library', 'Library'],
-  ]
-  return (
-    <div className="flex rounded border border-line overflow-hidden" role="tablist" aria-label="Plugins view">
-      {items.map(([key, label]) => (
-        <button
-          key={key}
-          onClick={() => onChange(key)}
-          role="tab"
-          aria-selected={active === key}
-          className={`px-2 py-0.5 text-xs ${
-            active === key ? 'bg-bg-hi text-fg' : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-          }`}
-        >
-          {label}
-        </button>
       ))}
     </div>
   )

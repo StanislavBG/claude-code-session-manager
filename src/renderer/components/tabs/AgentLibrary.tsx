@@ -12,6 +12,7 @@ import { TAG_LIBRARY } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
 import { useModelCatalog } from '../../lib/useModelCatalog'
+import { useAgentPersonasState } from '../../lib/useAgentPersonas'
 import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
 import { modelFamily } from '../../lib/prettyModel'
 import { modelSupportsEffort } from '../../lib/effortSupport'
@@ -89,7 +90,7 @@ function overrideSummary(p: AgentPersona): string {
 }
 
 function AgentLibraryComponent() {
-  const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
+  const { personas, refresh } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load agent personas'))
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -103,30 +104,12 @@ function AgentLibraryComponent() {
   const activeCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const activeProject = activeCwd ? activeCwd.replace(/\/+$/, '').split('/').pop() || activeCwd : null
 
-  // Guards against an out-of-order resolution: the mount effect, the
-  // agents:changed echo, and the directory watch below can all fire load()
-  // in close succession (e.g. one filesystem event per file in a multi-file
-  // git checkout) — a stale response must never clobber a fresher one.
-  const loadSeq = useRef(0)
+  // Re-read after this page's own save; optionally select the saved persona.
+  // (Mount + agents:changed refresh live in useAgentPersonasState.)
   const load = async (selectAfter?: string) => {
-    const seq = ++loadSeq.current
-    try {
-      const list = await window.api.agents.listPersonas()
-      if (!mounted.current || loadSeq.current !== seq) return
-      setPersonas(list)
-      setSelectedName((cur) => selectAfter ?? cur ?? list[0]?.name ?? null)
-    } catch (e) {
-      if (!mounted.current || loadSeq.current !== seq) return
-      setPersonas([])
-      toast.error((e as Error).message || 'failed to load agent personas')
-    }
+    const list = await refresh()
+    if (list && selectAfter) setSelectedName(selectAfter)
   }
-
-  useEffect(() => { load() }, [])
-  // Tag Library writes to the same persona files (assign/unassign a tag from
-  // its own side) — refresh here too so this panel never shows a stale
-  // snapshot if it's already mounted when that happens.
-  useEffect(() => window.api.agents.onChanged(() => load()), [])
 
   // agents:changed only fires as a write-echo from this app's OWN save/delete
   // (agentLibrary.cjs) — an external edit to ~/.claude/agents/*.md (or the

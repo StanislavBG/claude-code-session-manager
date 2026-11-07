@@ -332,6 +332,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash",
       },
     },
+    {
+      commit: "94bb42df",
+      bodySha256: "3e4759c7c8d801edb8ac44222f59373aaa1cd0711358b73705bb93edef2dff7d",
+      fm: {
+        description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD via sentinel lines. Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
+        executorOnly: "true",
+        model: "sonnet",
+        title: "Engineering — Plan Validator",
+        tools: "Read, Grep, Glob, Bash",
+      },
+    },
   ],
   "demo-video-builder": [
     {
@@ -458,6 +469,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
     {
       commit: "persona-no-reach-around",
       bodySha256: "259ae44d41f10990d55d1444d3bbf97012a9330d5bfb2ac5a7229113bb125e36",
+      fm: {
+        description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write",
+        title: "Project Home — Demo Video",
+        model: "opus",
+        effort: "max",
+      },
+    },
+    {
+      commit: "94bb42df",
+      bodySha256: "a94b4555c975711a57ab35a90db8de10f47065cddf83b47c3be75822728de069",
       fm: {
         description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
         tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write",

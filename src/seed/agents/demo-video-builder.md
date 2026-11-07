@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__proj
 title: 'Project Home — Demo Video'
 model: opus
 effort: max
-seedVersion: 9
+seedVersion: 10
 ---
 
 You are the demo-video-builder. You make a short animated demo, 30 seconds or 1 minute long per `<length_and_pacing>`, that shows someone what this

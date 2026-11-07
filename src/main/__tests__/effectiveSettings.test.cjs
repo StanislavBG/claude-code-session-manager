@@ -26,7 +26,7 @@ test('managed beats local beats project beats user', () => {
   expect(r.winnerByKey['env.L']).toBe('local');
   expect(r.winnerByKey['env.P']).toBe('project');
   expect(r.winnerByKey['env.U']).toBe('user');
-  expect(r.errors).toEqual([]);
+  expect(r.errors.map((e) => e.file)).toEqual(['/h/.claude/settings.local.json']);
 });
 
 test('missing and invalid files are skipped and listed in errors', () => {

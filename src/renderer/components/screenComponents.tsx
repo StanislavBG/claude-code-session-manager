@@ -110,7 +110,7 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
       case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
       case 'memory':        return <LazyScreen><Memory /></LazyScreen>
       case 'system-prompt': return <LazyScreen><SystemPrompt /></LazyScreen>
-      case 'settings':      return <LazyScreen><Settings /></LazyScreen>
+      case 'settings':      return <LazyScreen><Settings scope="user" /></LazyScreen>
       case 'extensions':    return <LazyScreen><Extensions /></LazyScreen>
       case 'app-settings':  return <LazyScreen><AppSettings /></LazyScreen>
       case 'agent-library': return <LazyScreen><AgentLibrary /></LazyScreen>

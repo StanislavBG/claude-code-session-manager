@@ -38,13 +38,15 @@ afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
 
 const headSha = () => g('rev-parse', 'HEAD');
 
-async function expectRefusal(opts, match) {
+async function refusal(opts) {
   const sha = headSha();
   const r = await untrackRuntimeState(root, opts);
-  expect(r.ok).toBe(false);
-  expect(r.reason).toMatch(match);
-  expect(headSha()).toBe(sha);
-  expect(g('ls-files', `${OPS}/scheduler`).split('\n').length).toBeGreaterThan(1);
+  return {
+    ok: r.ok,
+    reason: r.reason,
+    headUnchanged: headSha() === sha,
+    stillTracked: g('ls-files', `${OPS}/scheduler`).split('\n').length > 1,
+  };
 }
 
 test('findTrackedRuntimeState excludes README.md and authored namespaces', async () => {
@@ -70,32 +72,62 @@ test('refuses in a linked worktree', async () => {
 
 test('refuses when HEAD is not the default branch', async () => {
   g('checkout', '-q', '-b', 'feature');
-  await expectRefusal(idle, /not the default branch/);
+  expect(await refusal(idle)).toMatchObject({
+    ok: false,
+    reason: expect.stringMatching(/not the default branch/),
+    headUnchanged: true,
+    stillTracked: true,
+  });
 });
 
 test('refuses during a merge in progress', async () => {
   fs.writeFileSync(path.join(root, '.git', 'MERGE_HEAD'), headSha() + '\n');
-  await expectRefusal(idle, /in progress/);
+  expect(await refusal(idle)).toMatchObject({
+    ok: false,
+    reason: expect.stringMatching(/in progress/),
+    headUnchanged: true,
+    stillTracked: true,
+  });
 });
 
 test('refuses during a rebase in progress', async () => {
   fs.mkdirSync(path.join(root, '.git', 'rebase-merge'));
-  await expectRefusal(idle, /in progress/);
+  expect(await refusal(idle)).toMatchObject({
+    ok: false,
+    reason: expect.stringMatching(/in progress/),
+    headUnchanged: true,
+    stillTracked: true,
+  });
 });
 
 test('refuses during a cherry-pick in progress', async () => {
   fs.writeFileSync(path.join(root, '.git', 'CHERRY_PICK_HEAD'), headSha() + '\n');
-  await expectRefusal(idle, /in progress/);
+  expect(await refusal(idle)).toMatchObject({
+    ok: false,
+    reason: expect.stringMatching(/in progress/),
+    headUnchanged: true,
+    stillTracked: true,
+  });
 });
 
 test('refuses when the index has staged changes', async () => {
   write('b.txt');
   g('add', 'b.txt');
-  await expectRefusal(idle, /staged/);
+  expect(await refusal(idle)).toMatchObject({
+    ok: false,
+    reason: expect.stringMatching(/staged/),
+    headUnchanged: true,
+    stillTracked: true,
+  });
 });
 
 test('refuses when a job is running', async () => {
-  await expectRefusal({ isProjectBusy: async () => true }, /job is running/);
+  expect(await refusal({ isProjectBusy: async () => true })).toMatchObject({
+    ok: false,
+    reason: expect.stringMatching(/job is running/),
+    headUnchanged: true,
+    stillTracked: true,
+  });
 });
 
 test('success: files stay on disk, runtime paths untracked, reviews tracked', async () => {

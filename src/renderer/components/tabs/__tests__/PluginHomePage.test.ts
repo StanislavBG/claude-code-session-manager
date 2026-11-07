@@ -119,6 +119,21 @@ function installWindowApiMock() {
         return () => {}
       }),
     },
+    plugins: {
+      list: vi.fn(async () =>
+        Object.entries(INSTALLED_MANIFEST.plugins).map(([key, [e]]) => ({
+          key,
+          name: key.split('@')[0],
+          marketplace: key.split('@')[1],
+          version: e.version,
+          scope: e.scope,
+          installPath: e.installPath,
+          enabled: true,
+        })),
+      ),
+      setEnabled: vi.fn().mockResolvedValue({ ok: true }),
+      uninstall: vi.fn().mockResolvedValue({ ok: true, exitCode: 0 }),
+    },
     shell: {
       open: vi.fn().mockResolvedValue({ ok: true }),
     },
@@ -171,7 +186,7 @@ describe('Plugins drill-in page', () => {
     const bareRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
       r.textContent?.includes('bare'),
     ) as HTMLElement
-    expect(bareRow.querySelector('td')?.textContent).toBe('bare')
+    expect(bareRow.querySelectorAll('td')[1]?.textContent).toBe('bare')
     expect(bareRow.querySelector('td div.truncate.text-fg-faint')).toBeFalsy()
 
     act(() => {

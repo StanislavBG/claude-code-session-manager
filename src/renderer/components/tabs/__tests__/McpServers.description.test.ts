@@ -32,13 +32,21 @@ const CONFIG = {
 
 function installWindowApiMock() {
   let raw = JSON.stringify(CONFIG, null, 2) + '\n'
-  const writeJson = vi.fn(async (path: string, data: unknown) => {
-    if (path === CLAUDE_JSON_PATH) raw = JSON.stringify(data, null, 2) + '\n'
-    return { ok: true, mtimeMs: 0 }
+  const patch = vi.fn(async (p: { keyPath: string[]; value?: unknown }) => {
+    const next = JSON.parse(raw) as Record<string, unknown>
+    let cur = next
+    for (const k of p.keyPath.slice(0, -1)) cur = (cur[k] ??= {}) as Record<string, unknown>
+    cur[p.keyPath[p.keyPath.length - 1]] = p.value
+    raw = JSON.stringify(next, null, 2) + '\n'
+    return { ok: true, path: CLAUDE_JSON_PATH, data: next }
   })
   const api = {
     app: { homeDir: vi.fn().mockResolvedValue('/home/test') },
     mcp: { status: vi.fn().mockResolvedValue({ ok: true, servers: [] }) },
+    claudeConfig: {
+      read: vi.fn(async () => ({ path: CLAUDE_JSON_PATH, data: JSON.parse(raw) })),
+      patch,
+    },
     config: {
       readJson: vi.fn(async (path: string) => {
         if (path === CLAUDE_JSON_PATH) {
@@ -50,7 +58,7 @@ function installWindowApiMock() {
         if (path === CLAUDE_JSON_PATH) return { exists: true, raw, mtimeMs: 0, error: null }
         return { exists: false, raw: '', mtimeMs: 0, error: null }
       }),
-      writeJson,
+      writeJson: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),
       writeText: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),
       listDir: vi.fn().mockResolvedValue({ ok: true, error: null, entries: [] }),
       exists: vi.fn().mockResolvedValue(true),
@@ -140,7 +148,12 @@ describe('McpServers sidebar + editor description', () => {
       await flush()
     }
 
-    expect(api.config.writeJson).toHaveBeenCalled()
+    expect(api.claudeConfig.patch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keyPath: ['mcpServers', 'no-desc'],
+        value: expect.objectContaining({ description: 'A freshly-added description.' }),
+      }),
+    )
     expect(getRaw()).toContain('A freshly-added description.')
 
     act(() => root.unmount())

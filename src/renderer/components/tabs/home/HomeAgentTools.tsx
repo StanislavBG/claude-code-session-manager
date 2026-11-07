@@ -7,15 +7,19 @@
  */
 import { useState } from 'react'
 import { useMcpCatalog } from '../../../lib/useMcpAgentTools'
-import type { McpToolCatalogEntry } from '../../../../preload/api'
 
-const GROUP_ORDER: McpToolCatalogEntry['group'][] = ['scheduler', 'chat', 'feedback', 'help']
-const GROUP_LABELS: Record<McpToolCatalogEntry['group'], string> = {
+// Mirrors the group enum in src/main/lib/mcpToolCatalog.cjs. The preload type
+// still narrows `group` to 4 values, so groups are handled as plain strings here.
+const GROUP_LABELS: Record<string, string> = {
   scheduler: 'Scheduler',
   chat: 'Chat',
   feedback: 'Feedback',
   help: 'Help',
+  'project-home': 'Project Home',
+  macros: 'Macros',
+  'customer-feedback': 'Customer feedback',
 }
+const GROUP_ORDER = Object.keys(GROUP_LABELS)
 
 export function HomeAgentTools() {
   const { tools, loaded, error } = useMcpCatalog()
@@ -34,9 +38,15 @@ export function HomeAgentTools() {
     )
   }
 
-  const grouped = GROUP_ORDER
-    .map((group) => ({ group, tools: tools.filter((t) => t.group === group) }))
-    .filter((g) => g.tools.length > 0)
+  const present = new Set<string>(tools.map((t) => t.group as string))
+  const groupKeys = [
+    ...GROUP_ORDER.filter((g) => present.has(g)),
+    ...Array.from(present).filter((g) => !GROUP_ORDER.includes(g)),
+  ]
+  const grouped = groupKeys.map((group) => ({
+    group,
+    tools: tools.filter((t) => (t.group as string) === group),
+  }))
 
   return (
     <section className="mb-6" data-testid="home-agent-tools">
@@ -55,9 +65,9 @@ export function HomeAgentTools() {
       {open && (
         <div className="mt-3 grid gap-3 border border-line rounded-xl bg-bg-hi px-5 py-4">
           {grouped.map(({ group, tools: groupTools }) => (
-            <div key={group} className="min-w-0">
+            <div key={group} className="min-w-0" data-testid={`home-agent-group-${group}`}>
               <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-faint">
-                {GROUP_LABELS[group]}
+                {GROUP_LABELS[group] ?? group}
               </div>
               {groupTools.map((tool) => (
                 <div

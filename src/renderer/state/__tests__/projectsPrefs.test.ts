@@ -58,12 +58,9 @@ describe('projectsPrefs', () => {
     expect(useProjectsPrefs.getState()).toMatchObject({ hydrated: true, pinned: { '/a': true } })
   })
 
-  it('a read failure warns and still marks hydrated', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('a read failure still marks hydrated with no pins', async () => {
     readJson.mockRejectedValueOnce(new Error('EACCES'))
     await useProjectsPrefs.getState().hydrate()
-    expect(warn).toHaveBeenCalled()
-    expect(useProjectsPrefs.getState().hydrated).toBe(true)
-    warn.mockRestore()
+    expect(useProjectsPrefs.getState()).toMatchObject({ hydrated: true, pinned: {} })
   })
 })

@@ -3,11 +3,12 @@ import type { EpicGroupKey, EpicSortKey } from '../lib/epicQueueControls'
 import { readUiPrefs, writeUiPrefsPatch } from '../lib/uiPrefs'
 import { knownEpicIdsForCwd } from '../lib/epicIdsForCwd'
 import { toast } from './toast'
+import { appSettingsFile } from '../lib/appSettingsFile'
 
 /**
  * Persisted Epic-queue control-layer prefs — pins, sort, group, compact.
  * Follows the `projectsPrefs.ts` pattern: zustand store + tmp+rename JSON
- * file via `window.api.config.writeJson`, hydrated once on mount.
+ * file via `appSettingsFile`, hydrated once on mount.
  *
  * `group`/`sort`/`compact` are personal display defaults (how you like the
  * queue laid out) and stay machine-wide, in the file below. `pins` is
@@ -38,7 +39,7 @@ const FILE = '~/.claude/session-manager/epics-prefs.json'
 function persist(get: () => EpicsPrefsState): void {
   const s = get()
   const payload: PersistedEpicsPrefs = { group: s.group, sort: s.sort, compact: s.compact }
-  window.api.config.writeJson(FILE, payload).catch(() => {})
+  appSettingsFile<PersistedEpicsPrefs>(FILE).patch(payload).catch(() => {})
 }
 
 /**
@@ -49,13 +50,7 @@ function persist(get: () => EpicsPrefsState): void {
  * place, untouched — this only ever reads it.
  */
 async function migratePins(cwd: string): Promise<Record<string, boolean>> {
-  let legacy: Record<string, boolean> = {}
-  try {
-    const r = await window.api.config.readJson(FILE)
-    if (r.exists && r.data && typeof r.data === 'object') {
-      legacy = (r.data as { pins?: Record<string, boolean> }).pins ?? {}
-    }
-  } catch { /* first run / unreadable legacy file — nothing to migrate */ }
+  const legacy = (await appSettingsFile<{ pins?: Record<string, boolean> }>(FILE).read()).pins ?? {}
   const knownIds = await knownEpicIdsForCwd(cwd)
   const seeded: Record<string, boolean> = {}
   for (const [epicId, pinned] of Object.entries(legacy)) {
@@ -79,17 +74,14 @@ export const useEpicsPrefs = create<EpicsPrefsState>((set, get) => ({
 
   hydrate: async (cwd) => {
     if (!get().hydrated) {
-      try {
-        const r = await window.api.config.readJson(FILE)
-        if (r.exists && r.data && typeof r.data === 'object') {
-          const d = r.data as Partial<PersistedEpicsPrefs>
-          set({
-            group: d.group ?? 'status',
-            sort: d.sort ?? 'recent',
-            compact: d.compact ?? false,
-          })
-        }
-      } catch { /* first run / unreadable file — fall through to defaults */ }
+      const d = await appSettingsFile<Partial<PersistedEpicsPrefs>>(FILE).read()
+      if (Object.keys(d).length > 0) {
+        set({
+          group: d.group ?? 'status',
+          sort: d.sort ?? 'recent',
+          compact: d.compact ?? false,
+        })
+      }
       set({ hydrated: true })
     }
 

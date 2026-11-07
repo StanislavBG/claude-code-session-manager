@@ -4,23 +4,16 @@
  * app UI behavior). Read by layout.ts at boot to pick the initial focused
  * panel, written by SessionManagerConfig.tsx's "Behavior" section.
  */
+import { appSettingsFile } from './appSettingsFile'
+
 export interface AppPrefs {
   openToHomeOnLaunch?: boolean
 }
 
 export const APP_PREFS_FILE = '~/.claude/session-manager/app-prefs.json'
 
-export async function readAppPrefs(): Promise<AppPrefs> {
-  if (typeof window === 'undefined' || !window.api?.config?.readJson) return {}
-  try {
-    const r = await window.api.config.readJson(APP_PREFS_FILE)
-    if (r?.exists && r.data && typeof r.data === 'object') return r.data as AppPrefs
-  } catch { /* diagnostic surface only */ }
-  return {}
-}
+const file = appSettingsFile<AppPrefs>(APP_PREFS_FILE)
 
-export async function writeAppPrefs(patch: AppPrefs): Promise<void> {
-  if (typeof window === 'undefined' || !window.api?.config?.writeJson) return
-  const current = await readAppPrefs()
-  await window.api.config.writeJson(APP_PREFS_FILE, { ...current, ...patch })
-}
+export const readAppPrefs = (): Promise<AppPrefs> => file.read()
+
+export const writeAppPrefs = (patch: AppPrefs): Promise<void> => file.patch(patch)

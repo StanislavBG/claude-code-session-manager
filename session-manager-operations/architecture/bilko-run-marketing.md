@@ -16,7 +16,7 @@ is our own multi-project *hosting platform* — the App-Store-style host for bil
 third-party service, so issues with the product page are ours to fix, just in that repo.
 
 Key files in `~/Projects/Bilko/` for session-manager's listing:
-- `src/pages/SessionManagerPage.tsx` + `src/pages/session-manager-landing/` — the product page. It sells
+- `src/pages/session-manager-landing/` (`SessionManagerPage.tsx` inside) — the product page. It sells
   nothing: no checkout, and the only price on it is the app's `$0`. Since 2026-11-06 (D-2026-11-06-01) its
   header, hero and the manual link to the free hour at `/book` — a link, never a price. Since the owner decision of 2026-10-20
   (reversing 2026-09-25's no-form rule) it and the manual show an optional, dismissable bilko.run sign-in

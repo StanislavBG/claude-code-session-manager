@@ -92,6 +92,9 @@ const macroBtn = (el: HTMLElement, id: string) =>
 /** PagesPane's controls; the Generate composer portals into document.body. */
 const byTestId = (id: string, scope: ParentNode = document) => scope.querySelector<HTMLElement>(`[data-testid="${id}"]`)
 const generateBtn = () => byTestId('project-home-generate') as HTMLButtonElement | null
+/** The building row's `Queued` / `Building… started <ago>` meta, when a build shows. */
+const buildingMeta = (el: ParentNode) =>
+  el.querySelector('[data-testid="project-home-building-row"] [data-col="meta"]')?.textContent ?? undefined
 const typeInto = (el: HTMLElement | null, v: string) => {
   const field = el as HTMLInputElement | HTMLTextAreaElement
   const proto = field instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
@@ -363,11 +366,13 @@ describe('ProjectPagesSection', () => {
       const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], tab: 'videos', jobStatus: { 'builtin-project-home': job('builtin-project-home') } })} />)
       await flush()
       expect(generateBtn()!.disabled).toBe(false)
-      expect(el.querySelector('[data-testid="project-home-job-status"]')).toBeNull()
+      expect(buildingMeta(el)).toBeUndefined()
       await show({ videos: [NEW_V], tab: 'videos', jobStatus: { 'builtin-demo-video': job('builtin-demo-video') } })
       expect(generateBtn()!.disabled).toBe(true)
-      expect((byTestId('project-home-regenerate', el) as HTMLButtonElement).disabled).toBe(true)
-      expect(el.querySelector('[data-testid="project-home-job-status"]')?.textContent).toBe('Queued')
+      expect(buildingMeta(el)).toBe('Queued')
+      // The building row is selected, so the title bar offers Open session instead of Regenerate….
+      expect(byTestId('project-home-regenerate', el)).toBeNull()
+      expect(byTestId('project-home-open-session', el)).not.toBeNull()
     })
 
     it('without the builtin-demo-video macro Generate video stays disabled', async () => {
@@ -439,10 +444,31 @@ describe('ProjectPagesSection', () => {
       const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], jobStatus: { 'builtin-demo-video': job('builtin-demo-video') } })} />)
       await flush()
       expect(generateBtn()!.disabled).toBe(false)
-      expect(el.querySelector('[data-testid="project-home-job-status"]')).toBeNull()
+      expect(buildingMeta(el)).toBeUndefined()
       await show({ knowledge: [NEW_K], jobStatus: { 'builtin-project-home': job('builtin-project-home') } })
       expect(generateBtn()!.disabled).toBe(true)
-      expect(el.querySelector('[data-testid="project-home-job-status"]')?.textContent).toBe('Queued')
+      expect(buildingMeta(el)).toBe('Queued')
+    })
+
+    it('passes the page macro\'s last launch to PagesPane and reports new launches through onLaunched', async () => {
+      const onLaunched = vi.fn()
+      const launch = { title: 'Getting started', lines: ['Page: Custom topic: Getting started'], at: Date.now() }
+      const job: MacroJobStatus = {
+        macroId: 'builtin-project-home', epicId: 'e', slug: 's', state: 'queued', status: 'pending', reason: null, startedAt: null, finishedAt: null,
+      }
+      const el = mount(
+        <ProjectPagesSection
+          {...props({ knowledge: [NEW_K], onLaunched, launches: { 'builtin-project-home': launch }, jobStatus: { 'builtin-project-home': job } })}
+        />,
+      )
+      await flush()
+      expect(el.querySelector('[data-testid="project-home-building-row"] [data-col="title"]')?.textContent).toBe('Getting started')
+      await show({ knowledge: [NEW_K], onLaunched, launches: { 'builtin-project-home': launch } })
+      act(() => generateBtn()!.click())
+      act(() => byTestId('composer-generate')!.click())
+      expect(onLaunched.mock.calls).toEqual([
+        ['builtin-project-home', { title: 'Overview', lines: OVERVIEW_LINES.split('\n'), at: expect.any(Number) }],
+      ])
     })
 
     it('without the builtin-project-home macro Generate page stays disabled', async () => {
@@ -526,23 +552,28 @@ describe('ProjectPagesSection', () => {
     }
     const line = (el: HTMLElement) => el.querySelector('[data-testid="project-home-job-status"]') as HTMLElement
 
-    it('queued: label, disabled Generate video, Open session', async () => {
+    it('queued: the first video builds as a selected building row with the BuildingPanel; Generate video disabled', async () => {
       const onOpen = vi.fn()
       const el = await render(st({ state: 'queued' }), onOpen)
-      expect(line(el).textContent).toBe('Queued')
-      expect(byTestId('video-page-empty', el)?.contains(line(el))).toBe(true)
+      expect(byTestId('video-page-empty', el)).toBeNull()
+      expect(buildingMeta(el)).toBe('Queued')
+      expect(byTestId('project-home-building', el)?.getAttribute('data-state')).toBe('queued')
+      expect(line(el)).toBeNull()
       expect(generateBtn()!.disabled).toBe(true)
       expect(generateBtn()!.textContent).toBe('Generate video')
-      act(() => (el.querySelector('[data-testid="project-home-job-session"]') as HTMLButtonElement).click())
-      expect(onOpen).toHaveBeenCalledWith('epic-1')
+      act(() => byTestId('project-home-building-session', el)!.click())
+      expect(onOpen.mock.calls).toEqual([['epic-1']])
     })
     it('running: Building… started ago', async () => {
       const el = await render(st({ state: 'running', startedAt: new Date(Date.now() - 120_000).toISOString() }))
-      expect(line(el).textContent).toBe('Building… started 2m ago')
+      expect(buildingMeta(el)).toBe('Building… started 2m ago')
+      expect(byTestId('project-home-building-elapsed', el)?.textContent).toBe('Started 2m ago')
     })
-    it('done: button enabled', async () => {
+    it('done: button enabled, nothing building and no status line', async () => {
       const el = await render(st({ state: 'done', finishedAt: new Date(Date.now() - 60_000).toISOString() }))
-      expect(line(el).textContent).toBe('Done 1m ago')
+      expect(line(el)).toBeNull()
+      expect(buildingMeta(el)).toBeUndefined()
+      expect(byTestId('video-page-empty', el)).not.toBeNull()
       expect(generateBtn()!.disabled).toBe(false)
     })
     it('failed: reason with role=alert, no session link without epicId', async () => {

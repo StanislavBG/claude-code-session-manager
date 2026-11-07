@@ -11,18 +11,37 @@
  * the entry (`videoCfgFromEntry`, §8.3 — an entry with unreadable meta starts from the Project demo
  * defaults). Either way the composer's prompt lines reach `onLaunch` as the builtin-demo-video
  * macro's extraInstructions — Regenerate adds `Replace entry: <id>` last, so the job rebuilds that
- * entry in place (§7) — fitted under the IPC cap by PagesPane's `fitInstructions`.
+ * entry in place (§7) — fitted under the IPC cap by PagesPane's `fitInstructions` — and `onLaunched`
+ * hands ProjectHome the launch (title, sent lines, entry replaced) to keep.
  *
- * Presentational: entries, macro, launch state and job status come from ProjectHome through
- * ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
+ * Building (§4, render 04-video-building): while the video job is queued / running, a building row
+ * (`· · ·` thumbnail) sits at the top of the list (or the regenerated video's own row turns
+ * building) and is selected after a launch or when nothing else is picked; selected, BuildingPanel
+ * takes the player's place and the title bar offers Open session. A failed job shows its reason in
+ * the building row's place until the next launch.
+ *
+ * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
+ * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
 import { useState } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { VideoPlayer } from './VideoPlayer'
-import { JobStatusLine, createdLabel, fitInstructions } from './PagesPane'
+import { createdLabel, fitInstructions } from './PagesPane'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
-import { VIDEO_STYLES, videoCfgFromEntry, videoDefaults, type VideoStyle } from './composerTemplates'
+import { VIDEO_STYLES, VIDEO_TEMPLATES, videoCfgFromEntry, videoDefaults, type VideoStyle } from './composerTemplates'
+import {
+  BUILDING_ROW_ID,
+  BuildFailedRow,
+  BuildingMeta,
+  BuildingPanel,
+  IndeterminateBar,
+  JobStatusLine,
+  failureShown,
+  isBuilding,
+  sentValue,
+  type BuildLaunch,
+} from './BuildingPanel'
 import type { ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus, ProjectVideoMeta } from '../../../../../preload/api'
 
@@ -35,6 +54,10 @@ const REGENERATE_CLASS =
 const CARD_CLASS = 'flex min-w-0 flex-col rounded-xl border border-rule-structural bg-bg-hi px-4 py-3.5'
 
 const LABEL_CLASS = 'font-mono text-[10.5px] tracking-[.1em] text-fg-faint'
+
+/** The thumbnail's `m:ss` badge; the resets keep a style's uppercase / italic / weight off it. */
+const DURATION_CLASS =
+  'absolute bottom-[3px] right-[3px] rounded-[3px] bg-fg/80 px-1 font-mono text-[9.5px] font-normal normal-case not-italic leading-[1.4] tracking-normal text-bg'
 
 /** Composer template Regenerate starts from when an entry's meta is unreadable (it records no settings). */
 const FALLBACK_TEMPLATE = 'demo'
@@ -70,6 +93,39 @@ function splitFocus(lines: string[]): { fixed: string[]; focus: string } {
   return at < 0 ? { fixed: lines, focus: '' } : { fixed: lines.slice(0, at + 1), focus: lines.slice(at + 1).join('\n') }
 }
 
+/** `Video length: <n>` from the sent lines, in seconds; null when unknown (no launch from this window). */
+function sentLength(lines: readonly string[] | undefined): number | null {
+  const n = Number(sentValue(lines, 'Video length'))
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/**
+ * A new video's building title (prototype `create`): `<target> spotlight` for a Feature, a Blog
+ * post's file name, else the name of the kind's template.
+ */
+function videoBuildTitle(lines: readonly string[]): string {
+  const kind = sentValue(lines, 'Video kind') ?? ''
+  const target = (sentValue(lines, 'Video target') ?? '').trim()
+  if (target && kind === 'Feature') return `${target} spotlight`
+  if (target && kind === 'Blog post') {
+    const file = target.split('/').pop() ?? target
+    return file.replace(/\.[a-z]+$/i, '').replace(/[-_]+/g, ' ').trim() || target
+  }
+  return VIDEO_TEMPLATES.find((t) => t.kind === kind)?.name ?? (kind || 'New video')
+}
+
+/** A building video's title-bar sub (prototype): `<kind> · <len>s · <style>` from the sent lines. */
+function videoBuildSub(lines: readonly string[] | undefined): string {
+  const len = sentLength(lines)
+  return [
+    sentValue(lines, 'Video kind')?.toLowerCase().replace(/\s+/g, '-'),
+    len === null ? null : `${len}s`,
+    sentValue(lines, 'Video style')?.toLowerCase(),
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 /** Title-bar sub: `<kind> · <len>s · <style> · <ago>`; just `<ago>` for an entry with unreadable meta. */
 function videoSub(entry: ProjectVideoEntry): string {
   const m = entry.meta
@@ -92,13 +148,42 @@ function Thumbnail({ entry }: { entry: ProjectVideoEntry }) {
         {m?.title || entry.id}
       </span>
       {m && (
-        <span
-          data-testid="video-duration"
-          className="absolute bottom-[3px] right-[3px] rounded-[3px] bg-fg/80 px-1 font-mono text-[9.5px] font-normal normal-case not-italic leading-[1.4] tracking-normal text-bg"
-        >
+        <span data-testid="video-duration" className={DURATION_CLASS}>
           {clock(m.lengthS)}
         </span>
       )}
+    </span>
+  )
+}
+
+/** A building row's content (§1, render 04): `· · ·` thumbnail, title, accent build state, a 3px bar. */
+function VideoBuildingRow({ title, lengthS, status }: { title: string; lengthS: number | null; status: MacroJobStatus }) {
+  return (
+    <span data-testid="project-home-building-row" data-state={status.state} className="flex items-start gap-[11px]">
+      <span
+        data-testid="video-thumb"
+        data-style="building"
+        aria-hidden="true"
+        className="relative flex aspect-video w-[86px] flex-none items-center justify-center overflow-hidden rounded-md bg-rule-inner px-1.5 py-1 text-fg-faint"
+      >
+        <span data-col="thumb-title" className="text-center text-[10.5px] leading-[1.1]">
+          · · ·
+        </span>
+        {lengthS !== null && (
+          <span data-testid="video-duration" className={DURATION_CLASS}>
+            {clock(lengthS)}
+          </span>
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
+        <span data-col="title" className="truncate text-[13px] font-semibold">
+          {title}
+        </span>
+        <BuildingMeta status={status} />
+        <span className="block pt-[3px]">
+          <IndeterminateBar size="row" />
+        </span>
+      </span>
     </span>
   )
 }
@@ -223,12 +308,16 @@ export interface VideosPaneProps {
   macro: Macro | undefined
   launching: string | null
   onLaunch: (macro: Macro, extraInstructions?: string) => void
-  /** The video macro's job. Queued / running disables both buttons (the building UI is PRD ph2-building-state). */
+  /** The video macro's job. Queued / running disables both buttons and shows the building row; failed shows its reason. */
   jobStatus?: MacroJobStatus
   onOpenSession?: (epicId: string) => void
   /** Controlled selection — ProjectPagesSection keeps it across key-button switches. Without `onSelect` the pane keeps its own. */
   selectedId?: string | null
   onSelect?: (id: string) => void
+  /** This window's last launch of the video macro (ProjectHome); absent after an app reload. */
+  lastLaunch?: BuildLaunch
+  /** Reports each launch so ProjectHome can keep it as the macro's `lastLaunch`. */
+  onLaunched?: (macroId: string, launch: BuildLaunch) => void
 }
 
 export function VideosPane({
@@ -241,22 +330,47 @@ export function VideosPane({
   onOpenSession,
   selectedId,
   onSelect,
+  lastLaunch,
+  onLaunched,
 }: VideosPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
   // Open composer: `{}` = Generate video, `{ regen }` = Regenerate… (mounted per open — it reads its props once).
   const [composer, setComposer] = useState<{ regen?: ComposerRegen } | null>(null)
   const select = onSelect ?? setOwnId
   const pickedId = onSelect ? (selectedId ?? null) : ownId
-  // Newest (first) entry by default; a pick survives list refreshes while its entry still exists.
-  const selected = entries.find((e) => e.id === pickedId) ?? entries[0] ?? null
-  const building = jobStatus?.state === 'queued' || jobStatus?.state === 'running'
-  const busy = !macro || launching !== null || building
+  const build = isBuilding(jobStatus) ? jobStatus : undefined
+  // A Regenerate… from this window rebuilds its video in place; any other build gets a new row on top.
+  const replaceId = lastLaunch?.replaceEntryId
+  const replacingId = build && replaceId && entries.some((e) => e.id === replaceId) ? replaceId : null
+  const buildRowId = build ? (replacingId ?? BUILDING_ROW_ID) : null
+  // A pick survives list refreshes while its row still exists; else the building row, else the newest (first) entry.
+  const shownId =
+    pickedId !== null && (pickedId === buildRowId || entries.some((e) => e.id === pickedId))
+      ? pickedId
+      : (buildRowId ?? entries[0]?.id ?? null)
+  const buildingShown = build !== undefined && shownId === buildRowId
+  const selected = buildingShown ? null : (entries.find((e) => e.id === shownId) ?? null)
+  // After an app reload there is no launch from this window: the macro label stands in.
+  const buildTitle = lastLaunch?.title ?? macro?.label ?? 'New video'
+  const buildLength = sentLength(lastLaunch?.lines)
+  const failed = failureShown(jobStatus, lastLaunch) ? jobStatus : undefined
+  const busy = !macro || launching !== null || build !== undefined
 
   const launch = (lines: string[], replaceEntryId?: string) => {
     setComposer(null)
     if (!macro) return
     const { fixed, focus } = splitFocus(lines)
-    onLaunch(macro, fitInstructions(fixed, focus, replaceEntryId ? [`Replace entry: ${replaceEntryId}`] : []))
+    const extra = fitInstructions(fixed, focus, replaceEntryId ? [`Replace entry: ${replaceEntryId}`] : [])
+    const entry = replaceEntryId ? entries.find((e) => e.id === replaceEntryId) : undefined
+    onLaunched?.(macro.id, {
+      title: entry ? entry.meta?.title || entry.id : videoBuildTitle(lines),
+      lines: extra.split('\n'),
+      ...(replaceEntryId ? { replaceEntryId } : {}),
+      at: Date.now(),
+    })
+    // The build shows in this row once its job is queued.
+    select(replaceEntryId ?? BUILDING_ROW_ID)
+    onLaunch(macro, extra)
   }
 
   const regenerate = (entry: ProjectVideoEntry) => {
@@ -269,7 +383,6 @@ export function VideosPane({
   const composerNode = composer && (
     <GenerateComposer kind="video" regen={composer.regen} onClose={() => setComposer(null)} onGenerate={launch} />
   )
-  const statusLine = jobStatus && <JobStatusLine status={jobStatus} onOpenSession={onOpenSession} />
   const generateButton = (fullWidth: boolean) => (
     <button
       type="button"
@@ -285,10 +398,26 @@ export function VideosPane({
     </button>
   )
 
+  const rows: LibraryRow[] = entries.map((e) =>
+    build && e.id === replacingId
+      ? {
+          id: e.id,
+          title: e.meta?.title,
+          content: <VideoBuildingRow title={buildTitle} lengthS={buildLength ?? e.meta?.lengthS ?? null} status={build} />,
+        }
+      : videoRow(e),
+  )
+  if (build && !replacingId) {
+    rows.unshift({ id: BUILDING_ROW_ID, content: <VideoBuildingRow title={buildTitle} lengthS={buildLength} status={build} /> })
+  }
+  const title = buildingShown ? buildTitle : selected ? selected.meta?.title || selected.id : ''
+  const sub = buildingShown ? videoBuildSub(lastLaunch?.lines) : selected ? videoSub(selected) : ''
+  const epicId = build?.epicId ?? null
+
   // Both branches share one composer slot, so the first video landing while the composer is open keeps its form.
   return (
     <>
-      {selected ? (
+      {shownId !== null ? (
         <div
           data-testid="project-home-library"
           className="grid min-h-0 flex-1 gap-[20px]"
@@ -296,23 +425,24 @@ export function VideosPane({
         >
           <div className="flex min-h-0 flex-col gap-3">
             {generateButton(true)}
-            {statusLine && <div className="flex-none px-0.5">{statusLine}</div>}
             <div
               data-testid="project-home-videos-header"
               className="flex flex-none items-baseline justify-between px-0.5 pt-0.5 font-mono text-[10.5px] text-fg-faint"
             >
               <span className="tracking-[.1em]">VIDEOS</span>
-              <span data-testid="project-home-videos-count">{entries.length}</span>
+              <span data-testid="project-home-videos-count">{rows.length}</span>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto p-px">
+            <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto p-px">
+              {failed && <BuildFailedRow status={failed} onOpenSession={onOpenSession} />}
+              {/* No cwd while the building row is shown: Rename · Delete sit under a selected, non-building row only (§1). */}
               <ProjectLibraryList
                 layout="v2"
                 label="Videos"
                 itemTestId="video-item"
-                cwd={cwd}
+                cwd={buildingShown ? null : cwd}
                 kind="video"
-                rows={entries.map(videoRow)}
-                selectedId={selected.id}
+                rows={rows}
+                selectedId={shownId}
                 onSelect={select}
               />
             </div>
@@ -324,24 +454,49 @@ export function VideosPane({
                   data-testid="project-home-video-title"
                   className="m-0 break-words font-serif text-[22px] font-semibold leading-[1.15] text-fg"
                 >
-                  {selected.meta?.title || selected.id}
+                  {title}
                 </h2>
                 <span data-testid="project-home-video-sub" className="font-mono text-[11px] text-fg-faint">
-                  {videoSub(selected)}
+                  {sub}
                 </span>
               </div>
-              <button
-                type="button"
-                data-testid="project-home-regenerate"
-                disabled={busy}
-                onClick={() => regenerate(selected)}
-                className={REGENERATE_CLASS}
-              >
-                <AlmanacIcon name="reload" size={14} />
-                Regenerate…
-              </button>
+              {buildingShown ? (
+                <button
+                  type="button"
+                  data-testid="project-home-open-session"
+                  disabled={!epicId || !onOpenSession}
+                  onClick={() => {
+                    if (epicId) onOpenSession?.(epicId)
+                  }}
+                  className={REGENERATE_CLASS}
+                >
+                  Open session
+                </button>
+              ) : (
+                selected && (
+                  <button
+                    type="button"
+                    data-testid="project-home-regenerate"
+                    disabled={busy}
+                    onClick={() => regenerate(selected)}
+                    className={REGENERATE_CLASS}
+                  >
+                    <AlmanacIcon name="reload" size={14} />
+                    Regenerate…
+                  </button>
+                )
+              )}
             </div>
-            {selected.meta ? (
+            {build && buildingShown ? (
+              <BuildingPanel
+                kind="video"
+                title={buildTitle}
+                lines={lastLaunch?.lines}
+                agentName={macro?.agentName}
+                jobStatus={build}
+                onOpenSession={onOpenSession}
+              />
+            ) : selected?.meta ? (
               <>
                 <div className="flex-none overflow-hidden rounded-xl border border-rule-structural bg-bg-hi">
                   <VideoPlayer path={selected.path} mtimeMs={selected.mtimeMs} />
@@ -356,12 +511,14 @@ export function VideosPane({
                 </div>
               </>
             ) : (
-              <p
-                data-testid="project-home-video-error"
-                className="m-0 flex-none rounded-xl border border-rule-structural bg-bg-hi p-4 text-xs text-red-400"
-              >
-                {selected.error ?? 'unreadable meta'}
-              </p>
+              selected && (
+                <p
+                  data-testid="project-home-video-error"
+                  className="m-0 flex-none rounded-xl border border-rule-structural bg-bg-hi p-4 text-xs text-red-400"
+                >
+                  {selected.error ?? 'unreadable meta'}
+                </p>
+              )
             )}
           </div>
         </div>
@@ -370,7 +527,7 @@ export function VideosPane({
           <div className="flex flex-col items-center gap-2.5">
             <span className="text-xs text-fg-faint">No videos yet.</span>
             {generateButton(false)}
-            {statusLine}
+            {failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
           </div>
         </div>
       )}

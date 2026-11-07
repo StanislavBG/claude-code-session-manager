@@ -7,10 +7,16 @@
  * Generate page opens GenerateComposer on its template list; Regenerate… opens it pre-filled from
  * the entry (`pageCfgFromEntry`, §8.3). Either way the composer's prompt lines reach `onLaunch` as
  * the builtin-project-home macro's extraInstructions — Regenerate adds `Replace entry: <id>` last,
- * so the job rebuilds that entry in place (§7) — fitted under the IPC cap by `fitInstructions`.
+ * so the job rebuilds that entry in place (§7) — fitted under the IPC cap by `fitInstructions` —
+ * and `onLaunched` hands ProjectHome the launch (title, sent lines, entry replaced) to keep.
  *
- * Presentational: entries, macro, launch state and job status come from ProjectHome through
- * ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
+ * Building (§4): while the page job is queued / running, a building row sits at the top of the list
+ * (or the regenerated entry's own row turns building) and is selected after a launch or when nothing
+ * else is picked; selected, it shows BuildingPanel with Open session in the title bar. A failed job
+ * shows its reason in the building row's place until the next launch.
+ *
+ * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
+ * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
 import { useEffect, useState } from 'react'
 import { formatAgo } from '../../../../lib/formatTime'
@@ -19,6 +25,18 @@ import { HtmlFrame } from './HtmlFrame'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
 import { pageCfgFromEntry, pageTemplate, type PageKind } from './composerTemplates'
+import {
+  BUILDING_ROW_ID,
+  BuildFailedRow,
+  BuildingMeta,
+  BuildingPanel,
+  IndeterminateBar,
+  JobStatusLine,
+  failureShown,
+  isBuilding,
+  sentValue,
+  type BuildLaunch,
+} from './BuildingPanel'
 import type { ProjectKnowledgeEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../preload/api'
 
@@ -77,37 +95,21 @@ export function createdLabel(entry: { mtimeMs: number; meta: { createdAt: string
   return formatAgo(Number.isFinite(t) ? t : entry.mtimeMs, Date.now())
 }
 
-/** A library macro's background job, as one status line (+ Open session when it has an Epic). */
-export function JobStatusLine({ status, onOpenSession }: { status: MacroJobStatus; onOpenSession?: (epicId: string) => void }) {
-  const since = (iso: string | null) => (iso && Number.isFinite(Date.parse(iso)) ? formatAgo(Date.parse(iso), Date.now()) : 'just now')
-  let text: string
-  if (status.state === 'queued') text = 'Queued'
-  else if (status.state === 'running') text = `Building… started ${since(status.startedAt)}`
-  else if (status.state === 'done') text = `Done ${since(status.finishedAt)}`
-  else text = `Failed: ${status.reason ?? status.status}`
-  const failed = status.state === 'failed'
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span
-        data-testid="project-home-job-status"
-        data-state={status.state}
-        role={failed ? 'alert' : undefined}
-        className={`font-mono text-[10.5px] ${failed ? 'text-red-400' : 'text-fg-faint'}`}
-      >
-        {text}
-      </span>
-      {status.epicId && onOpenSession && (
-        <button
-          type="button"
-          data-testid="project-home-job-session"
-          onClick={() => onOpenSession(status.epicId!)}
-          className="text-[10.5px] font-semibold text-accent underline cursor-pointer"
-        >
-          Open session
-        </button>
-      )}
-    </span>
-  )
+/** A new page's building title (prototype `create`): the template's page, or a custom topic up to its first `:`. */
+function pageBuildTitle(lines: readonly string[]): string {
+  const page = sentValue(lines, 'Page') ?? ''
+  const custom = 'Custom topic: '
+  if (!page.startsWith(custom)) return page || 'New page'
+  return page.slice(custom.length).split(':')[0].trim() || 'Untitled topic'
+}
+
+/** A building page's title-bar sub (prototype): `<kind> · <audience> · <length>` from the sent lines. */
+function pageBuildSub(lines: readonly string[] | undefined): string {
+  const page = sentValue(lines, 'Page')
+  const kind = page?.startsWith('Custom topic') ? 'Custom topic' : page
+  return [kind, sentValue(lines, 'Audience')?.toLowerCase(), sentValue(lines, 'Length')?.toLowerCase()]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function KnowledgeFrame({ entry }: { entry: ProjectKnowledgeEntry }) {
@@ -129,6 +131,19 @@ function KnowledgeFrame({ entry }: { entry: ProjectKnowledgeEntry }) {
   }, [entry.path, entry.mtimeMs])
   if (html === null) return null
   return <HtmlFrame title={entry.meta?.title || entry.id} html={html} />
+}
+
+/** A building row's content (§1): title, accent `Queued` / `Building… started <ago>`, a 3px bar. */
+function PageBuildingRow({ title, status }: { title: string; status: MacroJobStatus }) {
+  return (
+    <span data-testid="project-home-building-row" data-state={status.state} className="flex min-w-0 flex-col gap-[5px]">
+      <span data-col="title" className="truncate text-[13.5px] font-semibold">
+        {title}
+      </span>
+      <BuildingMeta status={status} />
+      <IndeterminateBar size="row" />
+    </span>
+  )
 }
 
 function pageRow(e: ProjectKnowledgeEntry): LibraryRow {
@@ -162,12 +177,16 @@ export interface PagesPaneProps {
   macro: Macro | undefined
   launching: string | null
   onLaunch: (macro: Macro, extraInstructions?: string) => void
-  /** The page macro's job. Queued / running disables Generate (the building UI is PRD ph2-building-state). */
+  /** The page macro's job. Queued / running disables Generate and shows the building row; failed shows its reason. */
   jobStatus?: MacroJobStatus
   onOpenSession?: (epicId: string) => void
   /** Controlled selection — ProjectPagesSection keeps it across key-button switches. Without `onSelect` the pane keeps its own. */
   selectedId?: string | null
   onSelect?: (id: string) => void
+  /** This window's last launch of the page macro (ProjectHome); absent after an app reload. */
+  lastLaunch?: BuildLaunch
+  /** Reports each launch so ProjectHome can keep it as the macro's `lastLaunch`. */
+  onLaunched?: (macroId: string, launch: BuildLaunch) => void
 }
 
 export function PagesPane({
@@ -180,22 +199,46 @@ export function PagesPane({
   onOpenSession,
   selectedId,
   onSelect,
+  lastLaunch,
+  onLaunched,
 }: PagesPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
   // Open composer: `{}` = Generate page, `{ regen }` = Regenerate… (mounted per open — it reads its props once).
   const [composer, setComposer] = useState<{ regen?: ComposerRegen } | null>(null)
   const select = onSelect ?? setOwnId
   const pickedId = onSelect ? (selectedId ?? null) : ownId
-  // Newest (first) entry by default; a pick survives list refreshes while its entry still exists.
-  const selected = entries.find((e) => e.id === pickedId) ?? entries[0] ?? null
-  const building = jobStatus?.state === 'queued' || jobStatus?.state === 'running'
-  const busy = !macro || launching !== null || building
+  const build = isBuilding(jobStatus) ? jobStatus : undefined
+  // A Regenerate… from this window rebuilds its entry in place; any other build gets a new row on top.
+  const replaceId = lastLaunch?.replaceEntryId
+  const replacingId = build && replaceId && entries.some((e) => e.id === replaceId) ? replaceId : null
+  const buildRowId = build ? (replacingId ?? BUILDING_ROW_ID) : null
+  // A pick survives list refreshes while its row still exists; else the building row, else the newest (first) entry.
+  const shownId =
+    pickedId !== null && (pickedId === buildRowId || entries.some((e) => e.id === pickedId))
+      ? pickedId
+      : (buildRowId ?? entries[0]?.id ?? null)
+  const buildingShown = build !== undefined && shownId === buildRowId
+  const selected = buildingShown ? null : (entries.find((e) => e.id === shownId) ?? null)
+  // After an app reload there is no launch from this window: the macro label stands in.
+  const buildTitle = lastLaunch?.title ?? macro?.label ?? 'New page'
+  const failed = failureShown(jobStatus, lastLaunch) ? jobStatus : undefined
+  const busy = !macro || launching !== null || build !== undefined
 
   const launch = (lines: string[], replaceEntryId?: string) => {
     setComposer(null)
     if (!macro) return
     const tail = replaceEntryId ? [`Replace entry: ${replaceEntryId}`] : []
-    onLaunch(macro, fitInstructions(lines.slice(0, PAGE_FIXED_LINES), lines.slice(PAGE_FIXED_LINES).join('\n'), tail))
+    const extra = fitInstructions(lines.slice(0, PAGE_FIXED_LINES), lines.slice(PAGE_FIXED_LINES).join('\n'), tail)
+    const entry = replaceEntryId ? entries.find((e) => e.id === replaceEntryId) : undefined
+    onLaunched?.(macro.id, {
+      title: entry ? entry.meta?.title || entry.id : pageBuildTitle(lines),
+      lines: extra.split('\n'),
+      ...(replaceEntryId ? { replaceEntryId } : {}),
+      at: Date.now(),
+    })
+    // The build shows in this row once its job is queued.
+    select(replaceEntryId ?? BUILDING_ROW_ID)
+    onLaunch(macro, extra)
   }
 
   const regenerate = (entry: ProjectKnowledgeEntry) => {
@@ -206,7 +249,6 @@ export function PagesPane({
   const composerNode = composer && (
     <GenerateComposer kind="page" regen={composer.regen} onClose={() => setComposer(null)} onGenerate={launch} />
   )
-  const statusLine = jobStatus && <JobStatusLine status={jobStatus} onOpenSession={onOpenSession} />
   const generateButton = (fullWidth: boolean) => (
     <button
       type="button"
@@ -222,14 +264,25 @@ export function PagesPane({
     </button>
   )
 
-  const sub = selected
-    ? [pageKind(selected.id), selected.meta?.model, createdLabel(selected)].filter(Boolean).join(' · ')
-    : ''
+  const rows: LibraryRow[] = entries.map((e) =>
+    build && e.id === replacingId
+      ? { id: e.id, title: e.meta?.title, content: <PageBuildingRow title={buildTitle} status={build} /> }
+      : pageRow(e),
+  )
+  if (build && !replacingId) rows.unshift({ id: BUILDING_ROW_ID, content: <PageBuildingRow title={buildTitle} status={build} /> })
+
+  const title = buildingShown ? buildTitle : selected ? selected.meta?.title || selected.id : ''
+  const sub = buildingShown
+    ? pageBuildSub(lastLaunch?.lines)
+    : selected
+      ? [pageKind(selected.id), selected.meta?.model, createdLabel(selected)].filter(Boolean).join(' · ')
+      : ''
+  const epicId = build?.epicId ?? null
 
   // Both branches share one composer slot, so the first page landing while the composer is open keeps its form.
   return (
     <>
-      {selected ? (
+      {shownId !== null ? (
         <div
           data-testid="project-home-library"
           className="grid min-h-0 flex-1 gap-[20px]"
@@ -237,23 +290,24 @@ export function PagesPane({
         >
           <div className="flex min-h-0 flex-col gap-3">
             {generateButton(true)}
-            {statusLine && <div className="flex-none px-0.5">{statusLine}</div>}
             <div
               data-testid="project-home-pages-header"
               className="flex flex-none items-baseline justify-between px-0.5 pt-0.5 font-mono text-[10.5px] text-fg-faint"
             >
               <span className="tracking-[.1em]">KNOWLEDGE PAGES</span>
-              <span data-testid="project-home-pages-count">{entries.length}</span>
+              <span data-testid="project-home-pages-count">{rows.length}</span>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto p-px">
+            <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto p-px">
+              {failed && <BuildFailedRow status={failed} onOpenSession={onOpenSession} />}
+              {/* No cwd while the building row is shown: Rename · Delete sit under a selected, non-building row only (§1). */}
               <ProjectLibraryList
                 layout="v2"
                 label="Knowledge pages"
                 itemTestId="knowledge-page-item"
-                cwd={cwd}
+                cwd={buildingShown ? null : cwd}
                 kind="knowledge"
-                rows={entries.map(pageRow)}
-                selectedId={selected.id}
+                rows={rows}
+                selectedId={shownId}
                 onSelect={select}
               />
             </div>
@@ -265,28 +319,55 @@ export function PagesPane({
                   data-testid="project-home-page-title"
                   className="m-0 break-words font-serif text-[22px] font-semibold leading-[1.15] text-fg"
                 >
-                  {selected.meta?.title || selected.id}
+                  {title}
                 </h2>
                 <span data-testid="project-home-page-sub" className="font-mono text-[11px] text-fg-faint">
                   {sub}
                 </span>
               </div>
-              <button
-                type="button"
-                data-testid="project-home-regenerate"
-                disabled={busy}
-                onClick={() => regenerate(selected)}
-                className={REGENERATE_CLASS}
-              >
-                <AlmanacIcon name="reload" size={14} />
-                Regenerate…
-              </button>
+              {buildingShown ? (
+                <button
+                  type="button"
+                  data-testid="project-home-open-session"
+                  disabled={!epicId || !onOpenSession}
+                  onClick={() => {
+                    if (epicId) onOpenSession?.(epicId)
+                  }}
+                  className={REGENERATE_CLASS}
+                >
+                  Open session
+                </button>
+              ) : (
+                selected && (
+                  <button
+                    type="button"
+                    data-testid="project-home-regenerate"
+                    disabled={busy}
+                    onClick={() => regenerate(selected)}
+                    className={REGENERATE_CLASS}
+                  >
+                    <AlmanacIcon name="reload" size={14} />
+                    Regenerate…
+                  </button>
+                )
+              )}
             </div>
             <div
               data-testid="project-home-content"
-              className="min-h-0 flex-1 overflow-auto rounded-xl border border-rule-structural bg-bg-hi"
+              className={`min-h-0 flex-1 overflow-auto rounded-xl border border-rule-structural ${buildingShown ? 'bg-bg-elev' : 'bg-bg-hi'}`}
             >
-              <KnowledgeFrame entry={selected} />
+              {build && buildingShown ? (
+                <BuildingPanel
+                  kind="page"
+                  title={buildTitle}
+                  lines={lastLaunch?.lines}
+                  agentName={macro?.agentName}
+                  jobStatus={build}
+                  onOpenSession={onOpenSession}
+                />
+              ) : (
+                selected && <KnowledgeFrame entry={selected} />
+              )}
             </div>
           </div>
         </div>
@@ -295,7 +376,7 @@ export function PagesPane({
           <div className="flex flex-col items-center gap-2.5">
             <span className="text-xs text-fg-faint">No knowledge pages yet.</span>
             {generateButton(false)}
-            {statusLine}
+            {failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
           </div>
         </div>
       )}

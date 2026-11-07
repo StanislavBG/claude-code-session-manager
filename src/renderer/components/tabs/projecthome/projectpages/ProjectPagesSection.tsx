@@ -10,7 +10,9 @@
  *
  * `knowledge`/`videos`/`loaded` come from ProjectHome's single
  * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
- * `useMacroLaunch` wiring. Purely presentational — no store access here; the
+ * `useMacroLaunch` wiring; `launches`/`onLaunched` are its per-macro record of
+ * this window's last Pages / Videos launch, which the panes' building state
+ * shows (title, sent lines). Purely presentational — no store access here; the
  * page and video selections live here so they survive key-button switches.
  */
 import { useState } from 'react'
@@ -18,6 +20,7 @@ import { PagesPane } from './PagesPane'
 import { VideosPane } from './VideosPane'
 import { ToolsPane, type LaunchFn } from './ToolsPane'
 import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
+import type { BuildLaunch } from './BuildingPanel'
 import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../preload/api'
 
@@ -34,6 +37,8 @@ export function ProjectPagesSection({
   onLaunch,
   jobStatus,
   onOpenSession,
+  launches,
+  onLaunched,
 }: {
   tab: ProjectHomeTab
   cwd?: string | null
@@ -47,6 +52,9 @@ export function ProjectPagesSection({
   onLaunch: LaunchFn
   jobStatus?: Record<string, MacroJobStatus>
   onOpenSession?: (epicId: string) => void
+  /** This window's last launch per macro id (ProjectHome); empty after an app reload. */
+  launches?: Record<string, BuildLaunch>
+  onLaunched?: (macroId: string, launch: BuildLaunch) => void
 }) {
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
@@ -92,6 +100,8 @@ export function ProjectPagesSection({
           onOpenSession={onOpenSession}
           selectedId={knowledgeId}
           onSelect={setKnowledgeId}
+          lastLaunch={launches?.['builtin-project-home']}
+          onLaunched={onLaunched}
         />
       ) : (
         <VideosPane
@@ -104,6 +114,8 @@ export function ProjectPagesSection({
           onOpenSession={onOpenSession}
           selectedId={videoId}
           onSelect={setVideoId}
+          lastLaunch={launches?.['builtin-demo-video']}
+          onLaunched={onLaunched}
         />
       )}
     </div>

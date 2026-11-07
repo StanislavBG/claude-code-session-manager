@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { VideosPane, type VideosPaneProps } from '../VideosPane'
 import { EXTRA_INSTRUCTIONS_CAP } from '../PagesPane'
+import { BUILDING_ROW_ID, type BuildLaunch } from '../BuildingPanel'
 import { VIDEO_STYLES } from '../composerTemplates'
 import { useToast } from '../../../../../state/toast'
 import type { ProjectVideoEntry } from '../../../../../lib/projectPages/useProjectPagesOutput'
@@ -159,6 +160,26 @@ const styleClass = (id: string) => VIDEO_STYLES.find((s) => s.id === id)!.classN
 const stats = () =>
   Array.from(tid('video-report')!.querySelectorAll('[data-stat]')).map((s) => [col(s, 'value'), col(s, 'label')])
 const follows = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+const isoAgo = (ms: number) => new Date(Date.now() - ms).toISOString()
+const ids = () => rows().map((r) => r.getAttribute('data-id'))
+const current = () => rows().map((r) => r.getAttribute('aria-current'))
+const texts = (id: string, scope: ParentNode = document) => tids(id, scope).map((n) => n.textContent)
+
+/** This window's last Generate video launch (the whiteboard look of render 04), as ProjectHome keeps it. */
+const WHITEBOARD_LAUNCH: BuildLaunch = {
+  title: 'How it works, on a whiteboard',
+  lines: ['Video kind: Project demo', 'Video style: Animated whiteboard', 'Video length: 60', 'Character: on', 'Draw the main process and renderer'],
+  at: Date.now() - 5_000,
+}
+/** This window's last Regenerate… of Product tour. */
+const TOUR_REGEN: BuildLaunch = {
+  title: 'Product tour',
+  lines: [...TOUR_LINES.split('\n'), 'Replace entry: product-tour'],
+  replaceEntryId: 'product-tour',
+  at: Date.now() - 5_000,
+}
+const VIDEO_TEXT_60 =
+  'The demo-video-builder agent is writing a one-minute animation. Before it’s saved it is checked for length, loudness and any network access.'
 
 describe('VideosPane list column', () => {
   it('lists every video under VIDEOS and the count: title, "<kind> · <len>s · <ago>" and "LUFS <x> · grade <y>"', () => {
@@ -436,25 +457,53 @@ describe('VideosPane Generate and Regenerate', () => {
     expect((onLaunch.mock.calls[0][1] as string).length).toBe(EXTRA_INSTRUCTIONS_CAP)
   })
 
-  it.each(['queued', 'running'] as const)('disables both buttons while the video job is %s, with the status line under Generate', (state) => {
-    const onOpenSession = vi.fn()
-    mount({ jobStatus: status({ state, status: state }), onOpenSession })
-    const gen = tid('project-home-generate') as HTMLButtonElement
-    expect(gen.disabled).toBe(true)
-    expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(true)
-    const line = tid('project-home-job-status')!
-    expect(line.textContent).toBe(state === 'queued' ? 'Queued' : 'Building… started just now')
-    expect(follows(gen, line)).toBe(true)
-    expect(follows(line, tid('project-home-videos-header')!)).toBe(true)
-    click(tid('project-home-job-session'))
-    expect(onOpenSession).toHaveBeenCalledWith('epic-1')
+  it('records each launch through onLaunched: the template name or video target as title, the sent lines, the entry it replaces', () => {
+    const onLaunched = vi.fn()
+    mount({ onLaunched })
+    click(tid('project-home-generate'))
+    click(tid('composer-generate'))
+    click(tid('project-home-generate'))
+    click(document.querySelector<HTMLElement>('[data-testid="composer-template"][data-tpl="feature"]'))
+    click(tid('composer-generate'))
+    click(tid('project-home-generate'))
+    click(document.querySelector<HTMLElement>('[data-testid="composer-template"][data-tpl="blog"]'))
+    type(tid('composer-target'), 'docs/blog/the-big-launch.md')
+    click(tid('composer-generate'))
+    click(tid('project-home-regenerate'))
+    click(tid('composer-generate'))
+    expect(onLaunched.mock.calls).toEqual([
+      ['builtin-demo-video', { title: 'Project demo', lines: DEMO_LINES.split('\n'), at: expect.any(Number) }],
+      [
+        'builtin-demo-video',
+        {
+          title: 'Scheduler / PRD queue spotlight',
+          lines: ['Video kind: Feature', 'Video target: Scheduler / PRD queue', 'Video style: Kinetic typography', 'Video length: 30', 'Character: off'],
+          at: expect.any(Number),
+        },
+      ],
+      [
+        'builtin-demo-video',
+        {
+          title: 'the big launch',
+          lines: ['Video kind: Blog post', 'Video target: docs/blog/the-big-launch.md', 'Video style: Professional', 'Video length: 60', 'Character: off'],
+          at: expect.any(Number),
+        },
+      ],
+      [
+        'builtin-demo-video',
+        { title: 'Product tour', lines: [...TOUR_LINES.split('\n'), 'Replace entry: product-tour'], replaceEntryId: 'product-tour', at: expect.any(Number) },
+      ],
+    ])
   })
 
-  it('re-enables once the job is done and keeps its status line', () => {
-    mount({ jobStatus: status({ state: 'done', status: 'completed', finishedAt: new Date(Date.now() - 60_000).toISOString() }) })
+  it('done: both buttons enabled, no building row and no status line under Generate', () => {
+    mount({ jobStatus: status({ state: 'done', status: 'completed', finishedAt: isoAgo(60_000) }), lastLaunch: WHITEBOARD_LAUNCH })
     expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
     expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(false)
-    expect(tid('project-home-job-status')?.textContent).toBe('Done 1m ago')
+    expect(rows().map((r) => r.getAttribute('data-id'))).toEqual(['product-tour', 'release-notes', 'broken'])
+    expect(tid('project-home-building-row')).toBeNull()
+    expect(tid('project-home-building')).toBeNull()
+    expect(tid('project-home-job-status')).toBeNull()
   })
 
   it('shows a failed job with its reason in the empty state too', () => {
@@ -479,6 +528,131 @@ describe('VideosPane Generate and Regenerate', () => {
     mount({ macro: undefined })
     expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(true)
     expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('VideosPane build state', () => {
+  it.each([
+    ['queued', 'pending', null, 'Queued', 'Waiting to start'],
+    ['running', 'running', 60_000, 'Building… started 1m ago', 'Started 1m ago'],
+  ] as const)('%s: a selected building row on top, the BuildingPanel in a dashed 16:9 box, Open session in the title bar', (state, raw, startedMs, meta, elapsed) => {
+    const onOpenSession = vi.fn()
+    mount({
+      jobStatus: status({ state, status: raw, startedAt: startedMs === null ? null : isoAgo(startedMs) }),
+      lastLaunch: WHITEBOARD_LAUNCH,
+      onOpenSession,
+    })
+    expect(ids()).toEqual([BUILDING_ROW_ID, 'product-tour', 'release-notes', 'broken'])
+    expect(current()).toEqual(['true', null, null, null])
+    expect(tid('project-home-videos-count')?.textContent).toBe('4')
+    const row = tid('project-home-building-row', rows()[0])!
+    expect(row.getAttribute('data-state')).toBe(state)
+    const thumb = tid('video-thumb', row)!
+    expect(thumb.getAttribute('data-style')).toBe('building')
+    expect(col(thumb, 'thumb-title')).toBe('· · ·')
+    expect(tid('video-duration', thumb)?.textContent).toBe('1:00')
+    expect(col(row, 'title')).toBe('How it works, on a whiteboard')
+    expect(col(row, 'meta')).toBe(meta)
+    expect(row.querySelector('[data-col="meta"]')?.className).toContain('text-accent-dark')
+    expect(col(row, 'report')).toBeUndefined()
+    expect(tid('project-home-building-bar', row)?.className).toContain('h-[3px]')
+    expect(tid('entry-rename')).toBeNull()
+    expect(tid('project-home-video-title')?.textContent).toBe('How it works, on a whiteboard')
+    expect(tid('project-home-video-sub')?.textContent).toBe('project-demo · 60s · animated whiteboard')
+    expect(tid('project-home-regenerate')).toBeNull()
+    const panel = tid('project-home-building', tid('project-home-content')!)!
+    expect(panel.getAttribute('data-state')).toBe(state)
+    expect(panel.className).toContain('aspect-video')
+    expect(panel.className).toContain('border-dashed')
+    expect(tid('project-home-building-text', panel)?.textContent).toBe(VIDEO_TEXT_60)
+    expect(texts('project-home-building-line', panel)).toEqual(WHITEBOARD_LAUNCH.lines)
+    expect(tid('project-home-building-elapsed', panel)?.textContent).toBe(elapsed)
+    expect(tid('video-player-frame')).toBeNull()
+    expect(tid('video-sources')).toBeNull()
+    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(true)
+    expect(tid('project-home-job-status')).toBeNull()
+    click(tid('project-home-open-session'))
+    expect(onOpenSession.mock.calls).toEqual([['epic-1']])
+  })
+
+  it('regenerating in place turns that video\'s row into the building row with the new length', () => {
+    mount({ jobStatus: status({ state: 'running', status: 'running', startedAt: isoAgo(120_000) }), lastLaunch: TOUR_REGEN })
+    expect(ids()).toEqual(['product-tour', 'release-notes', 'broken'])
+    expect(current()).toEqual(['true', null, null])
+    expect(tid('project-home-videos-count')?.textContent).toBe('3')
+    expect(tids('project-home-building-row')).toHaveLength(1)
+    const row = tid('project-home-building-row', rows()[0])!
+    expect(col(row, 'title')).toBe('Product tour')
+    expect(col(row, 'meta')).toBe('Building… started 2m ago')
+    expect(tid('video-duration', row)?.textContent).toBe('0:30')
+    expect(tid('project-home-video-sub')?.textContent).toBe('project-demo · 30s · kinetic typography')
+    expect(tid('project-home-building-text')?.textContent).toBe(VIDEO_TEXT_60.replace('a one-minute', 'a 30-second'))
+    expect(tid('video-sources')).toBeNull()
+  })
+
+  it('another video opens while building, with its player and Regenerate… disabled', () => {
+    mount({ jobStatus: status({ state: 'queued' }), lastLaunch: WHITEBOARD_LAUNCH })
+    click(rows()[1])
+    expect(tid('project-home-building')).toBeNull()
+    expect(tid('project-home-video-title')?.textContent).toBe('Product tour')
+    expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(true)
+    expect(tid('video-sources')).not.toBeNull()
+    click(rows()[0])
+    expect(tid('project-home-building')).not.toBeNull()
+  })
+
+  it('after an app reload (no launch from this window) the building row uses the macro label and the panel has no lines box', () => {
+    mount({ jobStatus: status({ state: 'running', status: 'running', startedAt: isoAgo(60_000) }) })
+    const row = tid('project-home-building-row', rows()[0])!
+    expect(col(row, 'title')).toBe('Demo Video')
+    expect(tid('video-duration', row)).toBeNull()
+    expect(tid('project-home-video-title')?.textContent).toBe('Demo Video')
+    expect(tid('project-home-video-sub')?.textContent).toBe('')
+    expect(tid('project-home-building-lines')).toBeNull()
+    expect(tid('project-home-building-text')?.textContent).toBe(VIDEO_TEXT_60.replace('a one-minute', 'an'))
+  })
+
+  it('a first build with no videos yet shows the library with only the building row', () => {
+    mount({ entries: [], jobStatus: status({ state: 'queued' }), lastLaunch: WHITEBOARD_LAUNCH })
+    expect(tid('video-page-empty')).toBeNull()
+    expect(ids()).toEqual([BUILDING_ROW_ID])
+    expect(tid('project-home-building')?.getAttribute('data-state')).toBe('queued')
+  })
+
+  it('launching selects the row the build shows in', () => {
+    mount()
+    click(rows()[1])
+    click(tid('project-home-generate'))
+    click(tid('composer-generate'))
+    rerender({ jobStatus: status({ state: 'queued' }), lastLaunch: WHITEBOARD_LAUNCH })
+    expect(current()).toEqual(['true', null, null, null])
+    expect(tid('project-home-building')).not.toBeNull()
+  })
+
+  it('failed: the job reason with Open session sits in the building row\'s place and Generate is enabled again', () => {
+    const onOpenSession = vi.fn()
+    mount({
+      jobStatus: status({ state: 'failed', status: 'needs_review', reason: 'Calls fetch() at 0:12', finishedAt: isoAgo(60_000) }),
+      onOpenSession,
+    })
+    const failed = tid('project-home-build-failed')!
+    expect(follows(tid('project-home-videos-header')!, failed)).toBe(true)
+    expect(follows(failed, rows()[0])).toBe(true)
+    const line = tid('project-home-job-status', failed)!
+    expect(line.textContent).toBe('Failed: Calls fetch() at 0:12')
+    expect(line.getAttribute('role')).toBe('alert')
+    click(tid('project-home-job-session', failed))
+    expect(onOpenSession.mock.calls).toEqual([['epic-1']])
+    expect(ids()).toEqual(['product-tour', 'release-notes', 'broken'])
+    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('a later launch from this window hides the failure', () => {
+    const failedJob = status({ state: 'failed', status: 'failed', reason: 'boom', finishedAt: isoAgo(60_000) })
+    mount({ jobStatus: failedJob, lastLaunch: { ...WHITEBOARD_LAUNCH, at: Date.now() - 120_000 } })
+    expect(tid('project-home-build-failed')).not.toBeNull()
+    rerender({ jobStatus: failedJob, lastLaunch: { ...WHITEBOARD_LAUNCH, at: Date.now() } })
+    expect(tid('project-home-build-failed')).toBeNull()
   })
 })
 

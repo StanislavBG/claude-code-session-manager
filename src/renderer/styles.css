@@ -13,6 +13,13 @@
   );
 }
 
+/* Indeterminate progress slide — Project Home's building rows and BuildingPanel bar
+   (`animate-[sm-indeterminate_1.4s_ease-in-out_infinite]` on a 38%-wide fill). */
+@keyframes sm-indeterminate {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(270%); }
+}
+
 /* Tiptap WYSIWYG editor content typography — paper-warm Almanac palette. */
 .tiptap-content h1 { font-size: 1.5rem; font-weight: 600; margin: 0.75rem 0 0.5rem; line-height: 1.3; color: #2a221a; font-family: 'Newsreader', Georgia, serif; }
 .tiptap-content h2 { font-size: 1.25rem; font-weight: 600; margin: 0.75rem 0 0.4rem; line-height: 1.3; color: #2a221a; font-family: 'Newsreader', Georgia, serif; }

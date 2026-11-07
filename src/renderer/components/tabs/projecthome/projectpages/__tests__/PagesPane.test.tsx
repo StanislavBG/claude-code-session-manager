@@ -3,9 +3,19 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { EXTRA_INSTRUCTIONS_CAP, PagesPane, fitInstructions, type PagesPaneProps } from '../PagesPane'
+import { BUILDING_ROW_ID, type BuildLaunch } from '../BuildingPanel'
+import { ProjectHome } from '../../ProjectHome'
 import { useToast } from '../../../../../state/toast'
+import { useSessions } from '../../../../../state/sessions'
+import { __resetMacrosCacheForTests } from '../../../../../lib/useMacros'
 import type { ProjectKnowledgeEntry } from '../../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../../preload/api'
+
+// ProjectHome's launches go through this spy instead of the real dispatch path (only ProjectHome imports it).
+const launchSpy = vi.hoisted(() => vi.fn())
+vi.mock('../../../../../lib/useMacroLaunch', () => ({
+  useMacroLaunch: () => ({ launch: launchSpy, launching: null, cwd: '/proj' }),
+}))
 
 const HTML = '<!DOCTYPE html><html><body>PAGE</body></html>'
 const HOUR = 3_600_000
@@ -110,6 +120,36 @@ const status = (over: Partial<MacroJobStatus>): MacroJobStatus => ({
   finishedAt: null,
   ...over,
 })
+const isoAgo = (ms: number) => new Date(Date.now() - ms).toISOString()
+const texts = (id: string, scope: ParentNode = document) =>
+  Array.from(scope.querySelectorAll(`[data-testid="${id}"]`)).map((n) => n.textContent)
+const ids = () => rows().map((r) => r.getAttribute('data-id'))
+const current = () => rows().map((r) => r.getAttribute('aria-current'))
+
+/** This window's last launch of the Getting started template (a custom topic), as ProjectHome keeps it. */
+const NEW_LAUNCH: BuildLaunch = {
+  title: 'Getting started',
+  lines: [
+    'Page: Custom topic: Getting started: install, first run, key commands',
+    'Audience: Newcomers',
+    'Length: Brief',
+    'Read from: README & docs, Source tree',
+  ],
+  at: Date.now() - 5_000,
+}
+/** This window's last Regenerate… of How it works. */
+const REGEN_LAUNCH: BuildLaunch = {
+  title: 'How it works',
+  lines: [
+    'Page: How it works',
+    'Audience: Contributors',
+    'Length: In-depth',
+    'Read from: README & docs, Source tree',
+    'Replace entry: how-it-works',
+  ],
+  replaceEntryId: 'how-it-works',
+  at: Date.now() - 5_000,
+}
 
 describe('PagesPane list column', () => {
   it('lists every entry with its title and "<kind> · <ago>" under KNOWLEDGE PAGES and the count', async () => {
@@ -294,24 +334,32 @@ describe('PagesPane Generate and Regenerate', () => {
     expect((onLaunch.mock.calls[0][1] as string).length).toBe(EXTRA_INSTRUCTIONS_CAP)
   })
 
-  it.each(['queued', 'running'] as const)('disables both buttons while the page job is %s, with the status line under Generate', (state) => {
-    const onOpenSession = vi.fn()
-    mount({ jobStatus: status({ state, status: state }), onOpenSession })
-    const gen = tid('project-home-generate') as HTMLButtonElement
-    expect(gen.disabled).toBe(true)
-    expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(true)
-    const line = tid('project-home-job-status')!
-    expect(line.textContent).toBe(state === 'queued' ? 'Queued' : 'Building… started just now')
-    expect(gen.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    click(tid('project-home-job-session'))
-    expect(onOpenSession).toHaveBeenCalledWith('epic-1')
+  it('records each launch through onLaunched: the template name or custom topic as title, the sent lines, the entry it replaces', () => {
+    const onLaunched = vi.fn()
+    mount({ onLaunched })
+    click(tid('project-home-generate'))
+    click(tid('composer-generate'))
+    click(tid('project-home-generate'))
+    click(document.querySelector<HTMLElement>('[data-testid="composer-template"][data-tpl="start"]'))
+    click(tid('composer-generate'))
+    click(rows()[1])
+    click(tid('project-home-regenerate'))
+    click(tid('composer-generate'))
+    expect(onLaunched.mock.calls).toEqual([
+      ['builtin-project-home', { title: 'Overview', lines: OVERVIEW_LINES.split('\n'), at: expect.any(Number) }],
+      ['builtin-project-home', { ...NEW_LAUNCH, at: expect.any(Number) }],
+      ['builtin-project-home', { ...REGEN_LAUNCH, at: expect.any(Number) }],
+    ])
   })
 
-  it('re-enables once the job is done and keeps its status line', () => {
-    mount({ jobStatus: status({ state: 'done', status: 'completed', finishedAt: new Date(Date.now() - 60_000).toISOString() }) })
+  it('done: both buttons enabled, no building row and no status line under Generate', () => {
+    mount({ jobStatus: status({ state: 'done', status: 'completed', finishedAt: isoAgo(60_000) }), lastLaunch: NEW_LAUNCH })
     expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
     expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(false)
-    expect(tid('project-home-job-status')?.textContent).toBe('Done 1m ago')
+    expect(ids()).toEqual(['overview', 'how-it-works', 'faq', 'billing-flow'])
+    expect(tid('project-home-building-row')).toBeNull()
+    expect(tid('project-home-building')).toBeNull()
+    expect(tid('project-home-job-status')).toBeNull()
   })
 
   it('disables both buttons while any macro launches, labelling its own launch Starting…', () => {
@@ -410,6 +458,235 @@ describe('PagesPane rename and delete', () => {
     mount({ cwd: null })
     expect(tid('entry-rename')).toBeNull()
     expect(tid('entry-delete')).toBeNull()
+  })
+})
+
+describe('PagesPane build state', () => {
+  it.each([
+    ['queued', 'pending', null, 'Queued', 'Waiting to start'],
+    ['running', 'running', 60_000, 'Building… started 1m ago', 'Started 1m ago'],
+  ] as const)('%s: a selected building row on top, the BuildingPanel with the sent lines, Open session in the title bar', (state, raw, startedMs, meta, elapsed) => {
+    const onOpenSession = vi.fn()
+    mount({
+      jobStatus: status({ state, status: raw, startedAt: startedMs === null ? null : isoAgo(startedMs) }),
+      lastLaunch: NEW_LAUNCH,
+      onOpenSession,
+    })
+    expect(ids()).toEqual([BUILDING_ROW_ID, 'overview', 'how-it-works', 'faq', 'billing-flow'])
+    expect(current()).toEqual(['true', null, null, null, null])
+    expect(tid('project-home-pages-count')?.textContent).toBe('5')
+    const row = tid('project-home-building-row', rows()[0])!
+    expect(row.getAttribute('data-state')).toBe(state)
+    expect(col(row, 'title')).toBe('Getting started')
+    expect(col(row, 'meta')).toBe(meta)
+    expect(row.querySelector('[data-col="meta"]')?.className).toContain('text-accent-dark')
+    expect(tid('project-home-building-bar', row)?.className).toContain('h-[3px]')
+    // Rename · Delete sit under the selected, non-building row only.
+    expect(tid('entry-rename')).toBeNull()
+    expect(tid('project-home-page-title')?.textContent).toBe('Getting started')
+    expect(tid('project-home-page-sub')?.textContent).toBe('Custom topic · newcomers · brief')
+    expect(tid('project-home-regenerate')).toBeNull()
+    const panel = tid('project-home-building', tid('project-home-content')!)!
+    expect(panel.getAttribute('data-state')).toBe(state)
+    expect(tid('project-home-building-title', panel)?.textContent).toBe('Getting started')
+    expect(texts('project-home-building-line', panel)).toEqual(NEW_LAUNCH.lines)
+    expect(tid('project-home-building-elapsed', panel)?.textContent).toBe(elapsed)
+    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(true)
+    expect(tid('project-home-job-status')).toBeNull()
+    const open = tid('project-home-open-session') as HTMLButtonElement
+    expect(open.textContent).toBe('Open session')
+    click(open)
+    expect(onOpenSession.mock.calls).toEqual([['epic-1']])
+  })
+
+  it('regenerating in place turns that entry\'s row into the building row instead of adding one', () => {
+    mount({ jobStatus: status({ state: 'running', status: 'running', startedAt: isoAgo(120_000) }), lastLaunch: REGEN_LAUNCH })
+    expect(ids()).toEqual(['overview', 'how-it-works', 'faq', 'billing-flow'])
+    expect(current()).toEqual([null, 'true', null, null])
+    expect(tid('project-home-pages-count')?.textContent).toBe('4')
+    expect(texts('project-home-building-row')).toHaveLength(1)
+    const row = tid('project-home-building-row', rows()[1])!
+    expect(col(row, 'title')).toBe('How it works')
+    expect(col(row, 'meta')).toBe('Building… started 2m ago')
+    expect(tid('entry-rename')).toBeNull()
+    expect(tid('project-home-page-title')?.textContent).toBe('How it works')
+    expect(tid('project-home-page-sub')?.textContent).toBe('How it works · contributors · in-depth')
+    expect(texts('project-home-building-line', tid('project-home-building')!)).toEqual(REGEN_LAUNCH.lines)
+  })
+
+  it('another row opens while building (Regenerate… disabled, its actions back); the building row brings the panel back', async () => {
+    mount({ jobStatus: status({ state: 'queued' }), lastLaunch: NEW_LAUNCH })
+    click(rows()[2])
+    await flush()
+    expect(tid('project-home-building')).toBeNull()
+    expect(tid('project-home-page-title')?.textContent).toBe('How it works')
+    expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(true)
+    expect(tid('entry-rename', items()[2])).not.toBeNull()
+    click(rows()[0])
+    expect(tid('project-home-building')).not.toBeNull()
+    expect(tid('entry-rename')).toBeNull()
+  })
+
+  it('after an app reload (no launch from this window) the building row uses the macro label and the panel has no lines box', () => {
+    mount({ jobStatus: status({ state: 'queued' }) })
+    expect(col(tid('project-home-building-row', rows()[0])!, 'title')).toBe('Project Home')
+    expect(tid('project-home-page-title')?.textContent).toBe('Project Home')
+    expect(tid('project-home-page-sub')?.textContent).toBe('')
+    expect(tid('project-home-building-title')?.textContent).toBe('Project Home')
+    expect(tid('project-home-building-lines')).toBeNull()
+  })
+
+  it('a first build with no pages yet shows the library with only the building row', () => {
+    mount({ entries: [], jobStatus: status({ state: 'queued' }), lastLaunch: NEW_LAUNCH })
+    expect(tid('knowledge-page-empty')).toBeNull()
+    expect(ids()).toEqual([BUILDING_ROW_ID])
+    expect(tid('project-home-pages-count')?.textContent).toBe('1')
+    expect(tid('project-home-building')?.getAttribute('data-state')).toBe('queued')
+  })
+
+  it('a Regenerate… whose entry is gone builds as a new row', () => {
+    mount({ entries: [OVERVIEW], jobStatus: status({ state: 'queued' }), lastLaunch: REGEN_LAUNCH })
+    expect(ids()).toEqual([BUILDING_ROW_ID, 'overview'])
+    expect(col(rows()[0], 'title')).toBe('How it works')
+  })
+
+  it('launching selects the row the build shows in', () => {
+    mount()
+    click(rows()[2])
+    click(tid('project-home-generate'))
+    click(tid('composer-generate'))
+    rerender({ jobStatus: status({ state: 'queued' }), lastLaunch: NEW_LAUNCH })
+    expect(current()).toEqual(['true', null, null, null, null])
+    expect(tid('project-home-building')).not.toBeNull()
+  })
+
+  it('failed: the job reason with Open session sits in the building row\'s place and Generate is enabled again', () => {
+    const onOpenSession = vi.fn()
+    mount({
+      jobStatus: status({ state: 'failed', status: 'failed', reason: 'Timed out at the 30-minute job budget', finishedAt: isoAgo(60_000) }),
+      lastLaunch: { ...NEW_LAUNCH, at: Date.now() - 120_000 },
+      onOpenSession,
+    })
+    const failed = tid('project-home-build-failed')!
+    expect(failed.compareDocumentPosition(rows()[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const line = tid('project-home-job-status', failed)!
+    expect(line.textContent).toBe('Failed: Timed out at the 30-minute job budget')
+    expect(line.getAttribute('role')).toBe('alert')
+    click(tid('project-home-job-session', failed))
+    expect(onOpenSession.mock.calls).toEqual([['epic-1']])
+    expect(ids()).toEqual(['overview', 'how-it-works', 'faq', 'billing-flow'])
+    expect(tid('project-home-building')).toBeNull()
+    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
+    expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('the next launch clears the failure; its job then shows as building', () => {
+    const failedJob = status({ state: 'failed', status: 'failed', reason: 'boom', finishedAt: isoAgo(60_000) })
+    mount({ jobStatus: failedJob })
+    expect(tid('project-home-build-failed')).not.toBeNull()
+    const relaunch = { ...NEW_LAUNCH, at: Date.now() }
+    rerender({ jobStatus: failedJob, lastLaunch: relaunch })
+    expect(tid('project-home-build-failed')).toBeNull()
+    rerender({ jobStatus: status({ state: 'queued', slug: 's2' }), lastLaunch: relaunch })
+    expect(tid('project-home-build-failed')).toBeNull()
+    expect(col(tid('project-home-building-row')!, 'meta')).toBe('Queued')
+  })
+
+  it('a failure with no pages yet shows under the empty state Generate button', () => {
+    mount({ entries: [], jobStatus: status({ state: 'failed', status: 'failed', reason: 'boom', epicId: null }) })
+    const line = tid('project-home-job-status', tid('knowledge-page-empty')!)!
+    expect(line.textContent).toBe('Failed: boom')
+    expect(tid('project-home-job-session')).toBeNull()
+    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+describe('ProjectHome page builds', () => {
+  const PAGES = { knowledge: ENTRIES, videos: [], html: null, mtimeMs: null, demoVideo: null }
+  const changed = new Set<(payload: unknown) => void>()
+  let jobRows: MacroJobStatus[] = []
+
+  beforeEach(() => {
+    jobRows = []
+    changed.clear()
+    launchSpy.mockReset()
+    __resetMacrosCacheForTests()
+    useSessions.setState({ tabs: [{ id: 't1', cwd: '/proj' } as never], activeTabId: 't1' })
+    ;(window as unknown as { api: unknown }).api = {
+      config: { readText },
+      schedule: { listPrds: vi.fn(async () => []), onState: vi.fn(() => () => {}) },
+      macros: { list: vi.fn(async () => [HOME]), onChanged: vi.fn(() => () => {}), jobStatus: vi.fn(async () => jobRows) },
+      projectPages: {
+        get: vi.fn(async () => PAGES),
+        watch: vi.fn(async () => undefined),
+        unwatch: vi.fn(async () => undefined),
+        onChanged: vi.fn((cb: (payload: unknown) => void) => {
+          changed.add(cb)
+          return () => changed.delete(cb)
+        }),
+        rename,
+        delete: del,
+      },
+      agents: { listPersonas: vi.fn(async () => []) },
+    }
+  })
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  async function mountHome() {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root!.render(<ProjectHome />)
+      await settle()
+    })
+  }
+  /** A project-pages change for the cwd: useMacroJobStatus re-reads the job rows at once (no throttle). */
+  async function push(next: MacroJobStatus[]) {
+    jobRows = next
+    await act(async () => {
+      for (const cb of changed) cb({ cwd: '/proj', ...PAGES })
+      await settle()
+    })
+  }
+  const ready = (title: string) => useToast.getState().toasts.filter((t) => t.message === `“${title}” is ready`)
+
+  it('shows this window\'s launch as the building row, then toasts “<title>” is ready exactly once when the job is done', async () => {
+    await mountHome()
+    click(tid('project-home-generate'))
+    click(tid('composer-generate'))
+    expect(launchSpy.mock.calls).toEqual([[HOME, OVERVIEW_LINES]])
+    const job = status({ slug: 'project-home-build-1', status: 'pending' })
+    await push([job])
+    expect(ids()[0]).toBe(BUILDING_ROW_ID)
+    expect(col(rows()[0], 'title')).toBe('Overview')
+    expect(texts('project-home-building-line')).toEqual(OVERVIEW_LINES.split('\n'))
+    await push([{ ...job, state: 'running', status: 'running', startedAt: isoAgo(2_000) }])
+    expect(tid('project-home-building')?.getAttribute('data-state')).toBe('running')
+    expect(ready('Overview')).toHaveLength(0)
+    const done = { ...job, state: 'done' as const, status: 'completed', finishedAt: new Date().toISOString() }
+    await push([done])
+    await push([{ ...done }])
+    expect(ready('Overview')).toHaveLength(1)
+    expect(tid('project-home-building-row')).toBeNull()
+    expect(tid('project-home-building')).toBeNull()
+  })
+
+  it('after a reload the building row and the ready toast fall back to the macro label', async () => {
+    jobRows = [status({ slug: 'project-home-build-2', state: 'running', status: 'running', startedAt: isoAgo(60_000) })]
+    await mountHome()
+    expect(col(rows()[0], 'title')).toBe('Project Home')
+    expect(tid('project-home-building-lines')).toBeNull()
+    await push([{ ...jobRows[0], state: 'done', status: 'completed', finishedAt: new Date().toISOString() }])
+    expect(ready('Project Home')).toHaveLength(1)
+  })
+
+  it('a job already done when the page opens never toasts', async () => {
+    jobRows = [status({ slug: 'project-home-build-3', state: 'done', status: 'completed', finishedAt: isoAgo(60_000) })]
+    await mountHome()
+    await push([...jobRows])
+    expect(tid('project-home-library')).not.toBeNull()
+    expect(useToast.getState().toasts).toEqual([])
   })
 })
 

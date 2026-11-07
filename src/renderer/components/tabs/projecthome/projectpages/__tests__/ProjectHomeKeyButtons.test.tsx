@@ -10,6 +10,7 @@ import {
   type ProjectHomeTab,
 } from '../ProjectHomeKeyButtons'
 import { ProjectHome } from '../../ProjectHome'
+import { BUILDING_ROW_ID } from '../BuildingPanel'
 import { useSessions } from '../../../../../state/sessions'
 import { __resetMacrosCacheForTests } from '../../../../../lib/useMacros'
 import type { Macro, MacroJobStatus } from '../../../../../../preload/api'
@@ -264,7 +265,11 @@ describe('ProjectHome wiring', () => {
     const tools = Array.from(el.querySelectorAll('[data-testid="project-home-tool"]'))
     expect(tools.map((b) => b.getAttribute('data-macro-id'))).toEqual(['review-md'])
     act(() => key(el, 'videos').click())
-    expect(el.querySelectorAll('[data-testid="video-item"]')).toHaveLength(1)
+    // The running demo-video job is the building row on top of the one ready video (DESIGN_SPEC §4).
+    expect(Array.from(el.querySelectorAll('[data-testid="video-item"]')).map((r) => r.getAttribute('data-id'))).toEqual([
+      BUILDING_ROW_ID,
+      'v1',
+    ])
     expect(el.querySelector('[data-testid="project-home-tool"]')).toBeNull()
   })
 })

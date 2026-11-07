@@ -46,3 +46,11 @@ describe('fillPlaceholders', () => {
     expect(fillPlaceholders({ args: ['<a>'] }, { '<a>': "$&$1" }).args).toEqual(['$&$1'])
   })
 })
+
+describe('distinctPlaceholders with pinned sdk arg', () => {
+  it('does not treat mcp<2 as a placeholder', () => {
+    expect(
+      distinctPlaceholders({ command: 'uvx', args: ['--with', 'mcp<2', 'mcp-server-sqlite', '--db-path', '<path>'] }),
+    ).toEqual([{ token: '<path>', label: '--db-path <path>' }])
+  })
+})

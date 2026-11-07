@@ -342,3 +342,43 @@ test('macro_delete turns an admin { ok: false, error } into an error result', as
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toContain('macro not listed for this project');
 });
+
+const SAVE_ARGS = { label: 'L', agentName: 'builder', tag: 'feature', prompt: 'p' };
+
+test('macro_save forwards surface, projects, humanRequestQuote and originClaudeSessionId', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, TOOLS, requests } = await deleteHarness({ ok: true, macro: { id: 'm1' } });
+  const tool = TOOLS.find((t) => t.name === 'macro_save');
+  expect(tool.inputSchema.properties.surface.enum).toEqual(['sessions', 'project-home']);
+  expect(tool.inputSchema.properties.projects.type).toBe('array');
+  expect(tool.inputSchema.properties.humanRequestQuote.type).toBe('string');
+  const result = await callTool(handleCallTool, 'macro_save', {
+    ...SAVE_ARGS, surface: 'project-home', projects: ['*'], humanRequestQuote: 'show it in all projects',
+  });
+  expect(result.isError).toBeFalsy();
+  expect(requests[0].body).toMatchObject({
+    surface: 'project-home',
+    projects: ['*'],
+    humanRequestQuote: 'show it in all projects',
+    originClaudeSessionId: 'chat-123',
+  });
+});
+
+test('macro_save with projects refuses in a job or outside a session, without HTTP', async () => {
+  const { handleCallTool, requests } = await deleteHarness({ ok: true });
+  setDeleteEnv({ chat: 'chat-123', slug: 'some-job' });
+  let result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, projects: ['*'] });
+  expect(result.isError).toBe(true);
+  setDeleteEnv({});
+  result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, projects: ['*'] });
+  expect(result.isError).toBe(true);
+  expect(requests).toHaveLength(0);
+});
+
+test('macro_save turns an admin { ok: false, error } into an error result', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool } = await deleteHarness({ ok: false, error: 'quote not found in chat' });
+  const result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, projects: ['*'], humanRequestQuote: 'x' });
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('quote not found in chat');
+});

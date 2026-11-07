@@ -18,7 +18,7 @@
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
- *   macro_save({ cwd?, id?, label, agentName, tag, prompt }) -> POST /admin/macros/save
+ *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
  *   macro_delete({ id }) -> POST /admin/macros/delete
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
@@ -609,6 +609,9 @@ const TOOLS = [
         agentName: { type: 'string', description: 'Persona to run the macro as (e.g. "builder").' },
         tag: { type: 'string', description: 'Mission tag for the macro.' },
         prompt: { type: 'string', description: 'The opening prompt the macro sends. Write input placeholders as {{name}}; each is filled from the matching entry in `inputs` when the macro is pressed.' },
+        surface: { type: 'string', enum: ['sessions', 'project-home'], description: "Where the macro shows: 'sessions' = Sessions HOT KEYS strip, 'project-home' = Project Home button row." },
+        projects: { type: 'array', items: { type: 'string' }, description: 'Optional: only ["*"] is accepted, to show the macro in every project. Needs humanRequestQuote and a Session Manager chat session.' },
+        humanRequestQuote: { type: 'string', description: 'With projects ["*"]: the exact words the human typed in this chat that ask for every/all projects.' },
         inputs: {
           type: 'array',
           description: 'Optional input fields the human fills in before the macro runs. Prompt placeholders are written as {{name}}. Omit on update to keep the existing inputs; pass [] to clear them.',
@@ -708,14 +711,18 @@ function jobToolScopeRefusal(toolName) {
 // A macro is a human's button and its delete cannot be undone, so this runs
 // only in a session a human is attached to. headlessQueueRefusal does not fit:
 // it lets an architect job through.
-function macroDeleteRefusal() {
+function humanSessionRefusal(message) {
   if (process.env.SM_SCHEDULER_JOB_SLUG || !process.env.SM_CHAT_SESSION_ID) {
-    return errorResult(
-      'refused: macro_delete runs only in a Session Manager chat or terminal session, because a macro goes only when a human asks. '
-      + 'Say in your final result which macro should go; the human can remove it from the HOT KEYS panel.',
-    );
+    return errorResult(message);
   }
   return null;
+}
+
+function macroDeleteRefusal() {
+  return humanSessionRefusal(
+    'refused: macro_delete runs only in a Session Manager chat or terminal session, because a macro goes only when a human asks. '
+    + 'Say in your final result which macro should go; the human can remove it from the HOT KEYS panel.',
+  );
 }
 
 // Named + exported (see module.exports below) so mcpToolCatalog.test.cjs's
@@ -1049,11 +1056,23 @@ async function handleCallTool(request) {
       if (missing.length > 0) {
         return errorResult(`missing or invalid required argument(s): ${missing.join(', ')}`);
       }
+      if (args.projects !== undefined) {
+        const refusal = humanSessionRefusal(
+          'refused: a macro shown in every project is saved only in a Session Manager chat session where the human asked for it. '
+          + 'Say in your final result that the human can set Show in every project in the macro editor.',
+        );
+        if (refusal) return refusal;
+      }
       const cwd = resolveCwdArg(args);
       const payload = { cwd, label: args.label, agentName: args.agentName, tag: args.tag, prompt: args.prompt };
       if (typeof args.id === 'string' && args.id) payload.id = args.id;
       if (Array.isArray(args.inputs)) payload.inputs = args.inputs;
+      if (typeof args.surface === 'string') payload.surface = args.surface;
+      if (Array.isArray(args.projects)) payload.projects = args.projects;
+      if (typeof args.humanRequestQuote === 'string') payload.humanRequestQuote = args.humanRequestQuote;
+      payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
       const result = await adminRequest('POST', '/admin/macros/save', payload);
+      if (result?.ok === false) return errorResult(result.error ?? 'macro_save failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_delete') {

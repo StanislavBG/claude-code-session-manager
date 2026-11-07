@@ -396,6 +396,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   projectPages: {
     get: (cwd) => ipcRenderer.invoke('project-pages:get', { cwd }),
+    mdNetwork: (payload) => ipcRenderer.invoke('project-pages:md-network', payload),
     watch: (cwd) => ipcRenderer.invoke('project-pages:watch', { cwd }),
     unwatch: (cwd) => ipcRenderer.invoke('project-pages:unwatch', { cwd }),
     rename: (cwd, kind, id, title) => ipcRenderer.invoke('project-pages:rename', { cwd, kind, id, title }),

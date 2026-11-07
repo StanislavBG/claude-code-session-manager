@@ -1601,6 +1601,84 @@ export interface ProjectPagesGetResult {
   demoVideo: { path: string; mtimeMs: number } | null;
 }
 
+// ────────────────────────────────────────────── Project Pages: markdown link network
+// Mirrors the JSDoc typedefs of the same names in src/main/lib/mdNetworkScan.cjs.
+// Every path is repo-relative POSIX.
+
+/** 'hub' = the root CLAUDE.md; 'owner' = a CLAUDE.md / README.md / AGENTS.md one link from it; 'doc' = any other doc. */
+export type MdNetworkNodeType = 'hub' | 'owner' | 'doc';
+
+/** One doc reachable by links from the root CLAUDE.md. */
+export interface MdNetworkNode {
+  /** Same as `path`. */
+  id: string;
+  path: string;
+  /** Links from the root along the shortest path (0 = the root). */
+  depth: number;
+  type: MdNetworkNodeType;
+  /** Edges out of this doc, broken ones included. */
+  linksOut: number;
+  /** Edges into this doc. */
+  linkedFrom: number;
+}
+
+/** One per distinct (from, to) pair; a self link, or a link to a present non-doc target (code file, folder), makes no edge. */
+export interface MdNetworkEdge {
+  from: string;
+  /** For a broken edge, the missing (or outside-the-project) resolved target — not a node. */
+  to: string;
+  broken?: boolean;
+}
+
+/** A link whose target does not exist or is outside the project. */
+export interface MdNetworkBrokenLink {
+  type: 'broken-link';
+  /** The linking doc. */
+  file: string;
+  /** 1-based line of the link in `file`. */
+  line: number;
+  /** The target as written, `#fragment` / `?query` stripped. */
+  target: string;
+  /** `target` resolved against `file`'s folder. */
+  to: string;
+  /** `${file}:${line} → ${target}` */
+  where: string;
+  detail: string;
+}
+
+/** Docs that no link path from the root reaches, grouped by top-level folder. */
+export interface MdNetworkOrphan {
+  type: 'orphan';
+  /** The top-level folder with a trailing slash (`./` for root-level docs). */
+  where: string;
+  count: number;
+  paths: string[];
+  detail: string;
+}
+
+/** Broken links come first (in walk order), then orphan groups (by folder). */
+export type MdNetworkFinding = MdNetworkBrokenLink | MdNetworkOrphan;
+
+/** A project's markdown link network, mapped from its root CLAUDE.md. */
+export interface MdNetwork {
+  ok: true;
+  /** The root doc, 'CLAUDE.md'. */
+  root: string;
+  /** Breadth-first from the root. */
+  nodes: MdNetworkNode[];
+  edges: MdNetworkEdge[];
+  findings: MdNetworkFinding[];
+  /** Docs read — at most 2000; past that cap, docs no link reaches are dropped first. */
+  docs: number;
+  /** `edges.length`. */
+  links: number;
+  /** Top-level folders holding reachable docs, each with a trailing slash, sorted. */
+  scopes: string[];
+}
+
+/** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */
+export type MdNetworkResult = MdNetwork | { ok: false; error: string };
+
 // ────────────────────────────────────────────── Git status (richer than app:git-branch)
 
 /** Mirrors the status returned by src/main/git.cjs mapStatus(). */
@@ -2321,6 +2399,8 @@ export interface SessionManagerAPI {
   projectPages: {
     /** Read the project-pages library (knowledge/<id>/ pages and videos/<id>/ videos, each with its meta) as a `ProjectPagesGetResult`; empty lists if nothing exists yet. Never fires an LLM call. */
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
+    /** Map the project's markdown link network from its root CLAUDE.md (read-only, bounded, no LLM) for the Tools pane. Scans on every call — no watcher, no cache. `ok:false` (with `error`) for a cwd `get` answers with empty lists (tmpdir / linked worktree), a folder that is not a git repo, or no root CLAUDE.md; rejects on an invalid cwd, like `get`. */
+    mdNetwork: (payload: { cwd: string }) => Promise<MdNetworkResult>;
     /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */
     watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;
     /** Stop pushing `onChanged` events for this cwd — must be paired 1:1 with a prior `watch` call. */

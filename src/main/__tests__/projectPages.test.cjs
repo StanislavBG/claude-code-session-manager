@@ -1,7 +1,8 @@
 /**
  * projectPages.test.cjs — projectPages.cjs's read-only surface: get() of the
- * single project-pages/home.html ({html|null, mtimeMs}) plus the refcounted
- * watcher that pushes `project-pages:changed`.
+ * single project-pages/home.html ({html|null, mtimeMs}), the refcounted
+ * watcher that pushes `project-pages:changed`, and the on-demand
+ * `project-pages:md-network` handler.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/projectPages.test.cjs
  */
@@ -13,7 +14,21 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const Module = require('node:module');
+const { execFileSync } = require('node:child_process');
+
+// Capture the real ipcMain.handle registrations, so the md-network case runs
+// the registered handler (schema + body). Must precede the requires below.
+const ipcHandlers = new Map();
+const electronPath = require.resolve('electron');
+const electronStub = new Module(electronPath);
+electronStub.filename = electronPath;
+electronStub.loaded = true;
+electronStub.exports = { ipcMain: { handle: (channel, fn) => ipcHandlers.set(channel, fn) } };
+require.cache[electronPath] = electronStub;
+
 const config = require('../config.cjs');
+const { scanMdNetwork } = require('../lib/mdNetworkScan.cjs');
 const {
   get,
   renameEntry,
@@ -22,6 +37,7 @@ const {
   watchOutput,
   unwatchOutput,
   closeAllOutputWatchers,
+  registerProjectPagesIpc,
   _outputWatchers,
 } = require('../projectPages.cjs');
 
@@ -305,4 +321,44 @@ test('renameEntry refuses an invalid title and a corrupt meta.json', async () =>
   await expect(renameEntry({ cwd, kind: 'knowledge', id: 'alpha', title: '' })).rejects.toThrow();
   fs.writeFileSync(path.join(dir, 'meta.json'), '{"nope":1}');
   await expect(renameEntry({ cwd, kind: 'knowledge', id: 'alpha', title: 'ok' })).rejects.toThrow(/meta/);
+});
+
+// ─── md-network ───────────────────────────────────────────────────────────
+
+/** A git repo: CLAUDE.md links docs/a.md and a missing doc; docs/orphan.md is unlinked. */
+async function mkFixtureRepo() {
+  const cwd = await mkTmpCwd();
+  fs.mkdirSync(path.join(cwd, 'docs'));
+  fs.writeFileSync(path.join(cwd, 'CLAUDE.md'), '# Root\n\nSee [a](docs/a.md) and [gone](docs/gone.md).\n');
+  fs.writeFileSync(path.join(cwd, 'docs', 'a.md'), '# A\n\nBack to [root](../CLAUDE.md).\n');
+  fs.writeFileSync(path.join(cwd, 'docs', 'orphan.md'), '# Orphan\n');
+  execFileSync('git', ['init', '-q'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['add', '-A'], { cwd, stdio: 'pipe' });
+  return cwd;
+}
+
+test('project-pages:md-network returns the scanner result for a repo cwd and refuses a tmpdir cwd', async () => {
+  registerProjectPagesIpc();
+  const mdNetwork = ipcHandlers.get('project-pages:md-network');
+  expect(typeof mdNetwork).toBe('function');
+
+  const cwd = await mkFixtureRepo();
+  const result = await mdNetwork({}, { cwd });
+  expect(result).toEqual(await scanMdNetwork(fs.realpathSync(cwd)));
+  expect(result.ok).toBe(true);
+  expect(result.root).toBe('CLAUDE.md');
+  expect(result.nodes.map((n) => n.id)).toEqual(['CLAUDE.md', 'docs/a.md']);
+  expect(result.edges).toEqual([
+    { from: 'CLAUDE.md', to: 'docs/a.md' },
+    { from: 'CLAUDE.md', to: 'docs/gone.md', broken: true },
+    { from: 'docs/a.md', to: 'CLAUDE.md' },
+  ]);
+  expect(result.findings.map((f) => [f.type, f.where])).toEqual([
+    ['broken-link', 'CLAUDE.md:3 → docs/gone.md'],
+    ['orphan', 'docs/'],
+  ]);
+
+  config.addAllowedRoot(os.tmpdir());
+  const refused = await mdNetwork({}, { cwd: os.tmpdir() });
+  expect(refused).toEqual({ ok: false, error: expect.stringMatching(/ephemeral/) });
 });

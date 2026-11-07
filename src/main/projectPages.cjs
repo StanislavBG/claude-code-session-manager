@@ -10,6 +10,8 @@
  * home.html's content plus the demo video's { path, mtimeMs }, and a
  * refcounted per-cwd watcher pushes `project-pages:changed` for either. It
  * never writes content (watch()'s mkdir creates an empty directory only).
+ * mdNetwork() maps the project's markdown link network on demand
+ * (lib/mdNetworkScan.cjs) for the Tools pane.
  */
 
 const { ipcMain } = require('electron');
@@ -17,9 +19,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const chokidar = require('chokidar');
 const config = require('./config.cjs');
-const { opsPath, assertOpsWrite } = require('./lib/opsOwnership.cjs');
+const { opsPath, assertOpsWrite, resolveProjectRoot } = require('./lib/opsOwnership.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { listLibrary, migrateLegacy } = require('./lib/project-pages/pagesLibrary.cjs');
+const { scanMdNetwork } = require('./lib/mdNetworkScan.cjs');
 
 let mainWindow = null;
 function attachWindow(window) {
@@ -35,17 +38,23 @@ function demoVideoPath(cwd) {
 }
 
 /**
- * Resolve `cwd`'s home.html path, treating the opsOwnership "ephemeral cwd"
- * throw (a tmpdir/linked-worktree project root) as "no path available"
+ * Resolve `realCwd`'s project root, treating the opsOwnership "ephemeral cwd"
+ * throw (a tmpdir/linked-worktree project root) as "no root available"
  * rather than letting it propagate.
  */
-function tryHomePath(realCwd) {
+function tryProjectRoot(realCwd) {
   try {
-    return { file: homePath(realCwd), ephemeral: false };
+    return { root: resolveProjectRoot(realCwd), ephemeral: false };
   } catch (e) {
-    if (e.ephemeral) return { file: null, ephemeral: true };
+    if (e.ephemeral) return { root: null, ephemeral: true };
     throw e;
   }
+}
+
+/** `realCwd`'s home.html path, or no path where tryProjectRoot finds no root. */
+function tryHomePath(realCwd) {
+  const { root, ephemeral } = tryProjectRoot(realCwd);
+  return { file: ephemeral ? null : homePath(root), ephemeral };
 }
 
 const EMPTY = () => ({ knowledge: [], videos: [], html: null, mtimeMs: null, demoVideo: null });
@@ -57,7 +66,7 @@ const EMPTY = () => ({ knowledge: [], videos: [], html: null, mtimeMs: null, dem
  */
 async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
-  const { ephemeral } = tryHomePath(realCwd);
+  const { ephemeral } = tryProjectRoot(realCwd);
   if (ephemeral) return EMPTY();
   await migrateLegacy(realCwd);
   const { knowledge, videos } = await listLibrary(realCwd);
@@ -78,6 +87,20 @@ async function get({ cwd }) {
     mtimeMs: html === null ? null : overview.mtimeMs,
     demoVideo: newest ? { path: newest.path, mtimeMs: newest.mtimeMs } : null,
   };
+}
+
+const MD_NETWORK_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project to scan';
+
+/**
+ * -> MdNetworkResult: the project's markdown link network from its root
+ * CLAUDE.md, scanned once per call (no watcher, no cache). `cwd` is validated
+ * like get() (an invalid path rejects); a cwd get() answers with EMPTY() gets
+ * `{ ok: false, error }`.
+ */
+async function mdNetwork({ cwd }) {
+  const { root, ephemeral } = tryProjectRoot(config.validatePath(cwd));
+  if (ephemeral) return { ok: false, error: MD_NETWORK_EPHEMERAL };
+  return scanMdNetwork(root);
 }
 
 /** True for paths whose change should refresh the library (relative to project-pages/). */
@@ -251,6 +274,7 @@ async function deleteEntry(input) {
 function registerProjectPagesIpc() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('project-pages:get', v(s.projectPagesCwd, get));
+  ipcMain.handle('project-pages:md-network', v(s.projectPagesCwd, mdNetwork));
   ipcMain.handle('project-pages:watch', v(s.projectPagesCwd, ({ cwd }) => watchOutput(cwd)));
   ipcMain.handle('project-pages:rename', v(s.projectPagesRename, renameEntry));
   ipcMain.handle('project-pages:delete', v(s.projectPagesDelete, deleteEntry));
@@ -264,6 +288,7 @@ module.exports = {
   attachWindow,
   registerProjectPagesIpc,
   get,
+  mdNetwork,
   renameEntry,
   deleteEntry,
   watchOutput,

@@ -1373,6 +1373,13 @@
  },
  {
   "ns": "projectPages",
+  "method": "mdNetwork",
+  "channel": "project-pages:md-network",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectPages",
   "method": "watch",
   "channel": "project-pages:watch",
   "kind": "invoke",

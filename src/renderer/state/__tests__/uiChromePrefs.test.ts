@@ -70,26 +70,26 @@ describe('uiChromePrefs', () => {
     expect(useUiChromePrefs.getState().hydrated).toBe(true)
   })
 
-  it('setSidebarWidth clamps to [180, 480] and persists via writeJson', () => {
+  it('setSidebarWidth clamps to [180, 480] and persists via writeJson', async () => {
     const writeJson = vi.fn().mockResolvedValue(undefined)
     installApi({ readJson: vi.fn(), writeJson })
     useUiChromePrefs.getState().setSidebarWidth(999)
     expect(useUiChromePrefs.getState().sidebarWidth).toBe(480)
-    expect(writeJson).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(writeJson).toHaveBeenCalledWith(
       '~/.claude/session-manager/ui-chrome-prefs.json',
       expect.objectContaining({ sidebarWidth: 480 }),
-    )
+    ))
   })
 
-  it('setDensity updates state and persists', () => {
+  it('setDensity updates state and persists', async () => {
     const writeJson = vi.fn().mockResolvedValue(undefined)
     installApi({ readJson: vi.fn(), writeJson })
     useUiChromePrefs.getState().setDensity('compact')
     expect(useUiChromePrefs.getState().density).toBe('compact')
-    expect(writeJson).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(writeJson).toHaveBeenCalledWith(
       '~/.claude/session-manager/ui-chrome-prefs.json',
       expect.objectContaining({ density: 'compact' }),
-    )
+    ))
   })
 
   it('setTourCompletedAt persists a timestamp or null', () => {
@@ -130,7 +130,7 @@ describe('uiChromePrefs', () => {
     resolveRead({ exists: true, data: { collapsedGroups: ['Tools'] } })
     await hydrating
 
-    expect(writeJson).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(writeJson).toHaveBeenCalledTimes(1))
     expect(writeJson).toHaveBeenCalledWith(
       '~/.claude/session-manager/ui-chrome-prefs.json',
       expect.objectContaining({ collapsedGroups: ['Tools'], density: 'compact' }),

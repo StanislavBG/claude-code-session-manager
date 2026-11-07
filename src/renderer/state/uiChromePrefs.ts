@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { appSettingsFile } from '../lib/appSettingsFile'
 
 /**
  * Persisted renderer-only chrome/navigation prefs — sidebar width/collapse,
@@ -29,6 +30,7 @@ interface UiChromePrefsState extends PersistedUiChromePrefs {
 }
 
 const FILE = '~/.claude/session-manager/ui-chrome-prefs.json'
+const file = appSettingsFile<PersistedUiChromePrefs>(FILE)
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 480
@@ -71,7 +73,7 @@ function persist(get: () => UiChromePrefsState): void {
       tourCompletedAt: s.tourCompletedAt,
       density: s.density,
     }
-    window.api.config.writeJson(FILE, payload).catch(() => {})
+    file.patch(payload).catch(() => {})
   }
   // Defer the write until the in-flight hydrate() read resolves so it
   // persists the full merged state (disk values + this change) instead of
@@ -102,9 +104,8 @@ export const useUiChromePrefs = create<UiChromePrefsState>((set, get) => ({
     if (hydratePromise) return hydratePromise
     hydratePromise = (async () => {
       try {
-        const r = await window.api.config.readJson(FILE)
-        if (r.exists && r.data && typeof r.data === 'object') {
-          const d = r.data as Partial<PersistedUiChromePrefs>
+        const d = (await file.read()) as Partial<PersistedUiChromePrefs>
+        if (Object.keys(d).length > 0) {
           set({
             sidebarWidth: typeof d.sidebarWidth === 'number' ? clampWidth(d.sidebarWidth) : DEFAULTS.sidebarWidth,
             sidebarCollapsed: d.sidebarCollapsed ?? DEFAULTS.sidebarCollapsed,

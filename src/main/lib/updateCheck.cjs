@@ -7,7 +7,7 @@
  * against the latest GitHub Release; npx/dev builds against the npm registry). Never throws/rejects; any failure
  * (offline, DNS, non-200, bad JSON, timeout) → { current, latest: null, behind: false, channel }.
  * The request is a bare GET (only a static User-Agent; no cookies/query/body) so it carries nothing that
- * identifies the user or machine. Disabled by SM_UPDATE_CHECK=0 or E2E mode (SM_E2E=1).
+ * identifies the user or machine. Disabled by SM_UPDATE_CHECK=0, E2E mode (SM_E2E=1), or the auto-update toggle being off.
  */
 
 const https = require('node:https');
@@ -91,6 +91,11 @@ async function getUpdateStatus({ deps } = {}) {
     channel = packaged ? 'installer' : 'npm';
     const env = d.env || process.env;
     if (env.SM_UPDATE_CHECK === '0' || env.SM_E2E === '1') return { current, latest: null, behind: false, channel };
+    // The in-app auto-update toggle (updaterSettings) also gates the probe: off = no network request.
+    const autoUpdateOn = d.isAutoUpdateEnabled
+      ? await d.isAutoUpdateEnabled()
+      : (await require('./updaterSettings.cjs').load()).enabled !== false;
+    if (!autoUpdateOn) return { current, latest: null, behind: false, channel };
 
     const now = (d.now || Date.now)();
     const write = d.writeJson || require('../config.cjs').writeJson;

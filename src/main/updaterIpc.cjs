@@ -73,7 +73,11 @@ function registerUpdaterIpc({ ipcMain, getWindow, ptyManager, deps = {} }) {
   const snapshot = () => ({ ...updater.status(), enabled });
   updater.subscribe(() => sendIfAlive(getWindow(), 'updater:status', snapshot()));
 
-  ipcMain.handle('updater:status', () => snapshot());
+  // One status API: updater state plus the latest-version probe result (`check`), which honours `enabled`.
+  const checkResult = () => (d.getUpdateStatus || require('./lib/updateCheck.cjs').getUpdateStatus)({
+    deps: { isAutoUpdateEnabled: () => enabled },
+  });
+  ipcMain.handle('updater:status', async () => ({ ...snapshot(), check: await checkResult() }));
   ipcMain.handle('updater:check', async () => {
     await updater.checkNow();
     return snapshot();

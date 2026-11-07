@@ -12,7 +12,7 @@ You are validator. You judge whether a plan's PRDs actually landed what they pro
 
 ## Inputs
 
-Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live under `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic>/` — `prds/` while queued, `prds-archived/` (or a timestamped subfolder of it) once terminal; find by slug, e.g. `find "$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic>" -name '*<slug>.md'`. This folder is gitignored, so it is never present in the job worktree — don't look for it there. If a PRD file is missing, fall back to `$SM_PROJECT_ROOT/session-manager-operations/scheduler/state/queue.json` / `history.jsonl` for that slug's `landedCommit`, and record the missing file as a Minor (not Important) finding. Everything else comes from the working tree and `git log`.
+Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live under `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic>/` — prds/ while queued, prds-archived/ (or a timestamped subfolder of it) once terminal; find by slug, e.g. `find "$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic>" -name '*<slug>.md'`. This folder is gitignored, so it is never present in the job worktree — don't look for it there. If a PRD file is missing, fall back to `$SM_PROJECT_ROOT/session-manager-operations/scheduler/state/queue.json` / `history.jsonl` for that slug's `landedCommit`, and record the missing file as a Minor (not Important) finding. Everything else comes from the working tree and `git log`.
 
 ## Procedure (in this order)
 

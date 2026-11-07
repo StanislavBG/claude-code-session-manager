@@ -100,7 +100,7 @@ Use the shared kit in `~/.claude/session-manager/demo-video-kit/`. It needs only
 - `sound.cjs`: `node sound.cjs spec.json` with `{ narrationWav, cues, style, lengthS, out }` builds a music bed and sound effects, ducks them under the narration, and normalizes the mix to -14 LUFS. Use the mix as the audio track.
 - `frames.cjs`: `sampleFrames({ htmlPath, lengthS })` seeks the finished document and returns per-frame stats plus a contact sheet. Look at the sheet; no blank frame may last past 0.5 s.
 - `checks.cjs`: `node checks.cjs input.json` with `{ captions, narration, closing, lines, speechS, lengthS, frames, html }` must exit 0 before you save. Fix every failing check and run it again.
-- `_character`: reuse the mascot in the project's `session-manager-operations/project-pages/videos/_character/` when it exists (read `character.json` and `character.js`). Otherwise design one per `<character>` and save it once with `project_character_write`.
+- `_character`: reuse the mascot in the project's session-manager-operations/project-pages/videos/_character/ when it exists (read `character.json` and `character.js`). Otherwise design one per `<character>` and save it once with `project_character_write`.
 If a kit tool fails, report its exact command and error; do not skip the check silently.
 </kit>
 

@@ -163,6 +163,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.send('log:write', { scope, level, message, meta, ...ctx }),
     dir: () => ipcRenderer.invoke('log:dir'),
   },
+  claudeConfig: {
+    read: (payload) => ipcRenderer.invoke('claudeConfig:read', payload),
+    patch: (payload) => ipcRenderer.invoke('claudeConfig:patch', payload),
+  },
   config: {
     readJson: (path) => ipcRenderer.invoke('config:read-json', { path }),
     readText: (path, opts) => ipcRenderer.invoke('config:read-text', { path, maxBytes: opts?.maxBytes }),

@@ -617,6 +617,20 @@ require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, {
   loadJobs: async () => (await require('./lib/scheduler/queueStore.cjs').readMerged()).jobs || [],
   archivePrd: (slug, cwd) => queueOps.archiveMany([slug], cwd),
 });
+// claudeConfig (lib/claudeConfig.cjs): key-scoped read/patch of Claude's JSON config files.
+// A successful patch broadcasts `config:changed` so renderer state refreshes.
+ipcMain.handle('claudeConfig:read', validated(schemas.claudeConfigRead, async (p) => {
+  if (p.cwd) configMgr.validatePath(p.cwd);
+  return require('./lib/claudeConfig.cjs').read(p);
+}));
+ipcMain.handle('claudeConfig:patch', validated(schemas.claudeConfigPatch, async (p) => {
+  if (p.cwd) configMgr.validatePath(p.cwd);
+  const result = await require('./lib/claudeConfig.cjs').patch(p);
+  let mtimeMs = 0;
+  try { mtimeMs = (await require('node:fs/promises').stat(result.path)).mtimeMs; } catch { /* ignore */ }
+  sendIfAlive(mainWindow, 'config:changed', { path: result.path, mtimeMs, kind: 'change' });
+  return result;
+}));
 ipcMain.handle('macros:save', validated(schemas.macrosSave, async (payload) => {
   const macro = await macroLibrary.saveMacro(payload);
   broadcastMacrosChanged();

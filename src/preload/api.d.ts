@@ -340,6 +340,18 @@ export interface Macro {
 }
 
 /** Omit `id` to create; set it to update an existing macro. */
+export interface ClaudeConfigReadInput {
+  fileId: 'settings' | 'claudeJson' | 'mcpJson';
+  scope: 'user' | 'project' | 'local';
+  cwd?: string | null;
+}
+export interface ClaudeConfigPatchInput extends ClaudeConfigReadInput {
+  /** 1–8 non-empty segments. */
+  keyPath: string[];
+  /** Any JSON value; omit to delete the key. */
+  value?: unknown;
+}
+
 export interface MacroSaveInput {
   id?: string;
   label: string;
@@ -1997,6 +2009,11 @@ export interface SessionManagerAPI {
       ctx?: { cwd?: string; tabId?: string; epicId?: string; tags?: string[] },
     ) => void;
     dir: () => Promise<string>;
+  };
+  claudeConfig: {
+    read: (payload: ClaudeConfigReadInput) => Promise<{ path: string; data: Record<string, unknown> }>;
+    /** Sets one key path; omit `value` to delete it. Broadcasts `config:changed`. */
+    patch: (payload: ClaudeConfigPatchInput) => Promise<{ ok: true; path: string; data: Record<string, unknown> }>;
   };
   config: {
     readJson: (path: string) => Promise<ReadJsonResult>;

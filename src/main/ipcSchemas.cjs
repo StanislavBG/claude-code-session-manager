@@ -663,6 +663,21 @@ const setSessionSlotsSchema = z.object({
 // Full field-level rules live in lib/persona-macro/agentPersonaSchema.cjs, mirroring
 // AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
 const agentsSavePersona = AgentPersonaSaveSchema;
+// claudeConfig:read / claudeConfig:patch — mirrors ClaudeConfigReadInput /
+// ClaudeConfigPatchInput (src/preload/api.d.ts). fileId comes from the registry in
+// lib/claudeConfig.cjs; `value` absent => delete the key.
+const CLAUDE_CONFIG_FILE_IDS = /** @type {[string, ...string[]]} */ (Object.keys(require('./lib/claudeConfig.cjs').REGISTRY));
+const claudeConfigBase = {
+  fileId: z.enum(CLAUDE_CONFIG_FILE_IDS),
+  scope: z.enum(['user', 'project', 'local']),
+  cwd: z.string().min(1).max(4096).nullish(),
+};
+const claudeConfigRead = z.object(claudeConfigBase).strict();
+const claudeConfigPatch = z.object({
+  ...claudeConfigBase,
+  keyPath: z.array(z.string().min(1).max(256)).min(1).max(8),
+  value: z.unknown().optional(),
+}).strict();
 const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
@@ -1496,6 +1511,8 @@ module.exports = {
     remoteSessionPrds,
     exchangesList,
     agentsSavePersona,
+    claudeConfigRead,
+    claudeConfigPatch,
     macrosSave,
     macrosDelete,
     macrosSetProject,

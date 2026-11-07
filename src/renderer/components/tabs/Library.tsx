@@ -9,6 +9,7 @@ import { listMarketplacePlugins, type MarketplacePlugin } from '../../lib/plugin
 import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
 import { useConfig } from '../../state/config'
+import { Z } from '../../lib/zLayers'
 import {
   CATALOG_MCP,
   CATALOG_SKILLS,
@@ -834,7 +835,7 @@ export function InsertPresetMenu({ path, disabled = false }: { path: string; dis
         Insert preset ▾
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-80 max-h-96 overflow-auto rounded border border-line bg-bg-elev shadow-lg">
+        <div className={`absolute left-0 top-full mt-1 ${Z.dialog} w-80 max-h-96 overflow-auto rounded border border-line bg-bg-elev shadow-lg`}>
           {locked && (
             <div data-testid="insert-preset-locked" className="px-3 py-2 text-[11px] text-yellow-500/90 border-b border-line">
               Locked — unmanaged sections collide with presets: {conflicts.map((h) => `# ${h}`).join(' · ')}.

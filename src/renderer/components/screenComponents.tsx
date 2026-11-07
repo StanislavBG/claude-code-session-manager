@@ -59,7 +59,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'settings':      { title: 'Settings',                  intro: 'Claude Code\'s settings.json — permissions, hooks, env and every other key, per scope, with schema validation.' },
   'extensions':    { title: 'Extensions',                intro: 'Skills, MCP servers and plugins — each tab edits the real file Claude Code reads.' },
   'app-settings':  { title: 'App Settings',              intro: 'Session Manager\'s own preferences — voice, appearance, telemetry, phone remote, updates and the storage map.' },
-  'agent-library': { title: 'Agents',                 intro: 'Agents are the ACTOR of the AIM framework every session opens with — "you are acting as …". Every persona on this machine lives here: global definitions in ~/.claude/agents, plus which currently-open projects override them locally. Give a persona a project scope and an opening instruction and it also becomes an Action — a one-click button in that project’s Sessions toolbar that starts a session already grounded on it. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
+  'agent-library': { title: 'Agents',                 intro: 'Agents are the ACTOR of the AIM framework every session opens with — "you are acting as …". Global personas live in ~/.claude/agents, and any open project, picked in a persona’s project override, can get its own model or effort. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
 }
 
 /**

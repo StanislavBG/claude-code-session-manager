@@ -29,7 +29,8 @@ Reads:
 Writes:
 - `~/.claude/agents/<name>.md`: save and delete, through `agents:save-persona` and `agents:delete-persona`
 - `<cwd>/.claude/agents/<name>.md`: frontmatter-only model/effort overlay via `agents:save-persona` with
-  `projectName`, and removal via `agents:remove-override`; the page never creates a full-body overlay
+  `projectCwd` (an open project chosen in the page's project picker), and removal via `agents:remove-override`
+  with `{ name, projectCwd }`; the page never creates a full-body overlay
 
 ## Page invariants
 
@@ -38,6 +39,9 @@ Writes:
 - The page is a full CRUD editor, not read-only (root `CLAUDE.md`, domain law). Every write goes through
   `window.api.agents.savePersona` / `deletePersona` / `removeOverride`, handled in `src/main/agentLibrary.cjs`
   and serialized by `serializePersona` there.
+- The page is Home-face and never derives a project from the active tab. An override's project is only the one
+  chosen in the page's project picker (every open project, one per unique tab cwd, none preselected), sent as
+  `projectCwd` (domain law: `session-manager-operations/architecture/domain-model.md`).
 - Live refresh uses the `agents:changed` event plus the directory watch in `src/renderer/lib/useAgentsDirWatch.ts`,
   so edits made outside the app (and from Tag Library) show up without a reload.
 - Seeded personas come from `src/seed/agents/` via `src/main/seedAgentPersonas.cjs`, which upgrades by

@@ -125,10 +125,14 @@ scoping scheme.
   context, so a project switcher could only dead-end or silently follow whichever project owned the active top
   tab; `<cwd>/CLAUDE.md` is contextual and discovered by the CLI from the session's cwd. Don't re-add the
   switcher.
-- **That screen is a document set** rendered through `components/tabs/editor/DocumentEditorPane.tsx`: the root
-  file plus every `@`-import in a selection-only left rail. Imports are editable through the same dirty-tracked
-  store and SaveBar as the root (they are part of the prompt the CLI loads); only an unresolved import is
-  read-only. The pane deliberately omits the Document Experience popover / Assistant rail, which spawn a
+- **The Agents page (`AgentLibrary.tsx`) is Home-face too, so for the same reason it never reads the active
+  tab.** A persona's project override names its project explicitly from a picker of every open project (one per
+  unique tab cwd), written via `agents.savePersona` with `projectCwd` and dropped via
+  `agents.removeOverride({ name, projectCwd })`; no project is preselected or special.
+- **The System Prompt screen is a document set** rendered through `components/tabs/editor/DocumentEditorPane.tsx`:
+  the root file plus every `@`-import in a selection-only left rail. Imports are editable through the same
+  dirty-tracked store and SaveBar as the root (they are part of the prompt the CLI loads); only an unresolved import
+  is read-only. The pane deliberately omits the Document Experience popover / Assistant rail, which spawn a
   background claude session via `useDocEdit` — a cost a config screen must not inherit.
 
 ## Lifecycle and creation

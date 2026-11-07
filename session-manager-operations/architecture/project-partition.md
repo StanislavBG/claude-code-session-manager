@@ -35,7 +35,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `.claude-plugin/` | AGENT LAYER | Marketplace manifest for the `session-manager-dev` plugin. |
 | `.mcp.json` | AGENT LAYER | Empty today. The scheduler MCP server (`scripts/scheduler-mcp-server.cjs`) is registered at user scope in `~/.claude.json` (installed by `scripts/install-scheduler-mcp-user-scope.sh`), not here. |
 | `web/` | WEB PRESENCE | Physical home of the partition's producers (`project-pages/`, `manual/`, `remote-app/`) — see [`web/README.md`](../../web/README.md). |
-| `web-remote/` | WEB PRESENCE | `app/` moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
+| `web-remote/` | WEB PRESENCE | app/ moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
 | `bilko.listing.json` | WEB PRESENCE | bilko.run card listing (full `listing` object, incl. `shareImage` → `web/remote-app/public/og.png`); synced into the Bilko registry on every `publish_static_project`. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
 | `README.md` | DESKTOP HARNESS | Also shipped in the npm `files` array as end-user install docs. |
@@ -48,7 +48,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | --- | --- | --- |
 | `src/main/` | DESKTOP HARNESS | **Except** `projectPages.cjs` → WEB PRESENCE (producer of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/scheduler/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
 | `src/preload/` | DESKTOP HARNESS | |
-| `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by `web/project-pages/build-renderer.mjs`; `web/project-pages/generate-font-data.mjs` writes `library/fontData.ts` there). |
+| `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by web/project-pages/build-renderer.mjs; web/project-pages/generate-font-data.mjs writes library/fontData.ts there). |
 | `src/seed/` | DESKTOP HARNESS | |
 
 **Ambiguous case, resolved:** `src/main/scheduler.cjs` is DESKTOP HARNESS runtime (it is the app's job
@@ -71,9 +71,9 @@ in `scripts/` is AGENT LAYER + DESKTOP HARNESS only.
 
 | Entry | Partition | Note |
 | --- | --- | --- |
-| `project-pages/` (`render.cjs`, `renderer/`, `logic/`, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, `generate-font-data.mjs`, `__tests__/publish-gate.test.cjs`) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. |
-| `manual/` (`build.mjs`, `capture-figures.mjs`, `__tests__/`) | WEB PRESENCE | Field Manual build/capture tooling, formerly `scripts/build-manual.mjs` + `scripts/capture-manual-figures.mjs`. Reads/writes `session-manager-operations/manual/` (OPERATIONS STATE, unmoved) and writes into `~/Projects/Bilko`. |
-| `remote-app/` | WEB PRESENCE | The phone-remote PWA, formerly `web-remote/app/`. |
+| `project-pages/` (`render.cjs`, `renderer/`, logic/, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, `generate-font-data.mjs`, __tests__/publish-gate.test.cjs) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. |
+| `manual/` (`build.mjs`, `capture-figures.mjs`, `__tests__/`) | WEB PRESENCE | Field Manual build/capture tooling, formerly scripts/build-manual.mjs + scripts/capture-manual-figures.mjs. Reads/writes `session-manager-operations/manual/` (OPERATIONS STATE, unmoved) and writes into `~/Projects/Bilko`. |
+| `remote-app/` | WEB PRESENCE | The phone-remote PWA, formerly web-remote/app/. |
 
 ## `package.json`'s `files` array, cross-checked
 
@@ -85,10 +85,10 @@ together, since `npm install` is the single distribution mechanism for the whole
   `scripts/scheduler-mcp-server.cjs`, `scripts/hooks/guard-prd-writes.cjs`,
   `scripts/hooks/guard-destructive-git.cjs`, `scripts/hooks/guard-inline-implementation.cjs`,
   `scripts/hooks/guard-self-schedule.cjs`.
-- **WEB PRESENCE** entries: `web/project-pages/render.cjs`,
+- **WEB PRESENCE** entries: web/project-pages/render.cjs,
   `web/project-pages/renderer/dist/`, `web/project-pages/logic/dist/`,
-  `web/project-pages/validate-summary.cjs`.
-- **DESKTOP HARNESS** entries (the rest): `bin/`, `scripts/postinstall.cjs`,
+  web/project-pages/validate-summary.cjs.
+- **DESKTOP HARNESS** entries (the rest): `bin/`, scripts/postinstall.cjs,
   `src/main/`, `src/preload/`, `src/seed/`, `dist/index.html`, `dist/assets/`, `dist/vad/`,
   `README.md`.
 

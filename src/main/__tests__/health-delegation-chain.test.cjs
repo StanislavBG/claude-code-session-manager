@@ -134,7 +134,7 @@ test('dev-plugin fix text names the Plugins Installed switch, not a vague tab', 
     const r = checkDevPlugin({ homeDir: home });
     expect(r.ok).toBe(false);
     expect(r.fix).toContain('switch');
-    expect(r.fix).toContain('Plugins → Installed');
+    expect(r.fix).toContain('Extensions › Plugins');
     expect(r.fix).not.toContain('Enable in Plugins tab');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

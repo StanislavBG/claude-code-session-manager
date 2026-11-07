@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useLayout } from '../../../state/layout'
 import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
@@ -103,11 +104,12 @@ describe('GlobalControlsSection', () => {
     expect(text).toContain('0 skill(s) installed')
   })
 
-  it('clicking a card calls navigate with the corresponding NavKey', async () => {
+  it('clicking a card calls navigate with the page that now owns it, and pre-selects its tab', async () => {
     const navigate = vi.fn()
     const el = await mount(navigate)
     const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('MCP Servers'))
     ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(navigate).toHaveBeenCalledWith('mcp')
+    expect(navigate).toHaveBeenCalledWith('extensions')
+    expect(useLayout.getState().panelTabHint).toEqual({ id: 'extensions', tab: 'mcp' })
   })
 })

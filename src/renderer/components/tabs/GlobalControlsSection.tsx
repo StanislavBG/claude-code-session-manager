@@ -3,6 +3,7 @@ import { useConfig } from '../../state/config'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { SETTINGS_SCOPES, CLAUDE_MD_SCOPES } from '../../lib/scopes'
 import { listSkillEntries } from '../../lib/listSkills'
+import { useLayout } from '../../state/layout'
 import type { NavKey } from '../../lib/navKey'
 
 /**
@@ -38,6 +39,8 @@ function countPermissions(perms: PermissionsShape | undefined): number {
 
 interface Card {
   key: NavKey
+  /** Tab to pre-select on the destination page. */
+  tab?: string
   title: string
   summary: string
 }
@@ -125,7 +128,8 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
           : 'not configured'),
     },
     {
-      key: 'permissions',
+      key: 'settings',
+      tab: 'permissions',
       title: 'Permissions',
       summary:
         settingsStatus ??
@@ -134,7 +138,8 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
           : 'not configured'),
     },
     {
-      key: 'hooks',
+      key: 'settings',
+      tab: 'hooks',
       title: 'Hooks',
       summary:
         settingsStatus ??
@@ -143,7 +148,8 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
           : 'not configured'),
     },
     {
-      key: 'mcp',
+      key: 'extensions',
+      tab: 'mcp',
       title: 'MCP Servers',
       summary:
         mcpStatus ??
@@ -159,7 +165,8 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
         : 'not set',
     },
     {
-      key: 'skills',
+      key: 'extensions',
+      tab: 'skills',
       title: 'Skills',
       summary: skillsCount === null ? 'loading…' : `${skillsCount} skill(s) installed`,
     },
@@ -175,9 +182,12 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {cards.map((c) => (
           <button
-            key={c.key}
+            key={c.tab ?? c.key}
             type="button"
-            onClick={() => navigate?.(c.key)}
+            onClick={() => {
+              if (c.tab) useLayout.getState().openPanel(c.key, c.tab)
+              navigate?.(c.key)
+            }}
             className="text-left border border-line rounded-lg bg-bg px-3 py-2.5 hover:border-accent transition-colors"
           >
             <div className="text-[13px] font-medium text-fg">{c.title}</div>

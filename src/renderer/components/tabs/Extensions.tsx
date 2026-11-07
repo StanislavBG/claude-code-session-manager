@@ -6,6 +6,7 @@
 import { memo, useCallback, useState } from 'react'
 import { ViewTabs } from '../ui/ViewTabs'
 import { SourceChip } from '../ui/SourceChip'
+import { usePanelTabHint } from '../../state/layout'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { HomeSessionDrawer } from './home/HomeSessionDrawer'
 import { Skills } from './Skills'
@@ -30,6 +31,9 @@ const DRAWER_TITLE: Record<ExtTab, string> = {
 function ExtensionsComponent() {
   const home = useHomeDir()
   const [tab, setTab] = useState<ExtTab>('skills')
+  usePanelTabHint('extensions', (t) => {
+    if (t === 'skills' || t === 'mcp' || t === 'plugins') { setTab(t); setDrawer(false) }
+  })
   const [drawer, setDrawer] = useState(false)
   const [mcpCtx, setMcpCtx] = useState<McpAddContext>({ scope: 'user', cwd: null })
 

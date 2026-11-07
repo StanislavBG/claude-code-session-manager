@@ -18,21 +18,14 @@ export const SCREEN_KEYS: NavKey[] = [
   'terminal',
   'scheduler',
   'history',
-  // Configure
-  'skills',
-  'plugins',
-  'mcp',
-  'hooks',
+  // Claude Code
   'memory',
   'projects',
   'system-prompt',
-  'permissions',
   'settings',
   'agent-library',
-  'tag-library',
-  // Tools (promoted from modal in v0.13.1)
-  'voice',
-  'data-model',
+  'extensions',
+  'app-settings',
   // In-app file editor (Files sidebar / terminal links route here).
   'editor',
 ]

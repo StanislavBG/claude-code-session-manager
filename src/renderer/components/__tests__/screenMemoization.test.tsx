@@ -4,10 +4,10 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { renderScreenComponent, type ScreenRenderCtx } from '../screenComponents'
-import { Skills } from '../tabs/Skills'
+import { Extensions } from '../tabs/Extensions'
 import { Settings } from '../tabs/Settings'
 import { Memory } from '../tabs/Memory'
-import { TagLibrary } from '../tabs/TagLibrary'
+import { AppSettings } from '../tabs/AppSettings'
 import { AgentLibrary } from '../tabs/AgentLibrary'
 import type { NavKey } from '../../lib/navKey'
 import { useLayout } from '../../state/layout'
@@ -63,7 +63,7 @@ describe('renderScreenComponent element memoization', () => {
   it('caches independently per NavKey — a different id under the same ctx is not confused with a cached sibling', () => {
     const ctx: ScreenRenderCtx = { onNavigate: () => {} }
     const overview = renderScreenComponent('overview', ctx)
-    const skills = renderScreenComponent('skills', ctx)
+    const skills = renderScreenComponent('extensions', ctx)
     expect(Object.is(overview, skills)).toBe(false)
     // Re-requesting 'overview' with the same ctx still hits its own cache slot.
     expect(Object.is(renderScreenComponent('overview', ctx), overview)).toBe(true)
@@ -84,16 +84,16 @@ const renderCounts = vi.hoisted(() => ({ counts: {} as Record<string, number> })
  * must be literal top-level statements (vitest hoists them by static
  * analysis of the call site) — hence one per screen rather than a loop.
  */
-function countedWrap(real: { type: (props: unknown) => ReactNode }, key: string) {
+function countedWrap(real: { type: (props: unknown) => ReactNode } | ((props: unknown) => ReactNode), key: string) {
   return memo((props: unknown) => {
     renderCounts.counts[key] = (renderCounts.counts[key] ?? 0) + 1
-    return real.type(props)
+    return typeof real === 'function' ? real(props) : real.type(props)
   })
 }
 
-vi.mock('../tabs/Skills', async (importOriginal) => {
+vi.mock('../tabs/Extensions', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
-  return { ...actual, Skills: countedWrap(actual.Skills as never, 'skills') }
+  return { ...actual, Extensions: countedWrap(actual.Extensions as never, 'extensions') }
 })
 vi.mock('../tabs/Settings', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -103,9 +103,9 @@ vi.mock('../tabs/Memory', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
   return { ...actual, Memory: countedWrap(actual.Memory as never, 'memory') }
 })
-vi.mock('../tabs/TagLibrary', async (importOriginal) => {
+vi.mock('../tabs/AppSettings', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
-  return { ...actual, TagLibrary: countedWrap(actual.TagLibrary as never, 'tag-library') }
+  return { ...actual, AppSettings: countedWrap(actual.AppSettings as never, 'app-settings') }
 })
 vi.mock('../tabs/AgentLibrary', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -123,7 +123,7 @@ vi.mock('../ui/JsonEditor', () => ({
   JsonEditor: (props: { value: string }) => createElement('pre', { 'data-testid': 'json-editor' }, props.value),
 }))
 
-const FIVE_IDS: NavKey[] = ['skills', 'settings', 'memory', 'tag-library', 'agent-library']
+const FIVE_IDS: NavKey[] = ['extensions', 'settings', 'memory', 'app-settings', 'agent-library']
 
 function installBroadWindowApiMock() {
   const changedHandlers: Array<() => void> = []
@@ -193,10 +193,10 @@ function installBroadWindowApiMock() {
  * path Suspense doesn't honor.
  */
 const FIVE_SCREENS: Record<string, (props: object) => ReactNode> = {
-  skills: Skills,
+  extensions: Extensions,
   settings: Settings,
   memory: Memory,
-  'tag-library': TagLibrary,
+  'app-settings': AppSettings,
   'agent-library': AgentLibrary,
 }
 
@@ -427,7 +427,7 @@ describe('lazy screen boundary (screenComponents.tsx React.lazy + Suspense)', ()
   it('navigating to the lazily-loaded "skills" screen renders its real content', async () => {
     const ctx: ScreenRenderCtx = {}
     await act(async () => {
-      root.render(createElement('div', null, renderScreenComponent('skills', ctx)))
+      root.render(createElement('div', null, renderScreenComponent('extensions', ctx)))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -436,7 +436,7 @@ describe('lazy screen boundary (screenComponents.tsx React.lazy + Suspense)', ()
     // The page title from PAGE_META only appears once the lazy Skills
     // component (wrapped by SectionFrame) has actually resolved and
     // mounted — the Suspense fallback ("Loading…") carries no such text.
-    expect(container.textContent).toContain('Reusable instructions')
+    expect(container.textContent).toContain('Skills, MCP servers and plugins')
     expect(container.textContent).not.toContain('Loading…')
   })
 

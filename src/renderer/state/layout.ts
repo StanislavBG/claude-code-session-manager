@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { create } from 'zustand'
 import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 import { readAppPrefs } from '../lib/appPrefs'
@@ -30,8 +31,17 @@ export const DEFAULT_LAYOUT: PanelDefinition[] = SCREEN_KEYS.map((id) => ({
   component: 'screen',
 }))
 
+/** One-shot request to pre-select a tab inside a multi-tab page (see usePanelTabHint). */
+export interface PanelTabHint {
+  id: string
+  tab: string
+}
+
 interface LayoutState {
   panels: PanelDefinition[]
+  /** Set by `openPanel(id, tab)`; consumed (cleared) by the page via `usePanelTabHint`. */
+  panelTabHint: PanelTabHint | null
+  clearPanelTabHint: () => void
   focusedPanelId: string | null
   /**
    * Bumped on every `openPanel` call, including ones that leave
@@ -105,7 +115,7 @@ interface LayoutState {
    * NavKey (`isHomeOnlyNavKey`); leaves navFace untouched for every other id
    * (see `navFace` above / `openProjectPanel` below).
    */
-  openPanel: (id: string) => void
+  openPanel: (id: string, tab?: string) => void
   /**
    * Like `openPanel`, but also asserts `navFace: 'project'`. Use this at the
    * genuine "the user selected/activated a project tab" sites (TabBar tab
@@ -152,16 +162,19 @@ export const useLayout = create<LayoutState>((set, get) => ({
   panels: [...DEFAULT_LAYOUT],
   focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
   focusToken: 0,
+  panelTabHint: null,
+  clearPanelTabHint: () => set({ panelTabHint: null }),
   resetToken: 0,
   epicsWorkspaceOpen: false,
   setEpicsWorkspaceOpen: (open: boolean) => set({ epicsWorkspaceOpen: open }),
   navFace: 'home',
   setNavFace: (face: NavFace) => set({ navFace: face }),
-  openPanel: (id: string) => {
+  openPanel: (id: string, tab?: string) => {
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
     set((s) => ({
       focusedPanelId: id,
+      panelTabHint: tab ? { id, tab } : s.panelTabHint,
       focusToken: s.focusToken + 1,
       ...navFacePatch(id),
     }))
@@ -227,4 +240,19 @@ export function needsProjectsPanelReconciliation(
 /** True when `panelId` is the workbench's currently active panel. */
 export function usePanelFocus(panelId: string): boolean {
   return useLayout((s) => s.focusedPanelId === panelId)
+}
+
+/**
+ * Pre-select a tab of page `panelId` when something called `openPanel(panelId, tab)`.
+ * Applies the hint once (on mount or when it arrives) and clears it, so a later
+ * remount never snaps back to a stale tab. `apply` must ignore unknown tab names.
+ */
+export function usePanelTabHint(panelId: string, apply: (tab: string) => void): void {
+  const hint = useLayout((s) => s.panelTabHint)
+  useEffect(() => {
+    if (!hint || hint.id !== panelId) return
+    apply(hint.tab)
+    useLayout.getState().clearPanelTabHint()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hint, panelId])
 }

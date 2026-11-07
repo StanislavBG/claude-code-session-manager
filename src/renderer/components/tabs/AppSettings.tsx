@@ -14,6 +14,7 @@ import { useDensity } from '../../lib/useDensity'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { readAppPrefs, writeAppPrefs, APP_PREFS_FILE } from '../../lib/appPrefs'
 import { UI_SETTINGS_PREFS_FILE } from '../../lib/uiSettingsPrefs'
+import { usePanelTabHint } from '../../state/layout'
 import { toast } from '../../state/toast'
 
 const TABS = [
@@ -106,6 +107,9 @@ const CHIPS: Record<TabKey, Array<{ path: string; keyPath?: string[] }>> = {
 /** Session Manager's own settings — one page, one tab per owning file. */
 export function AppSettings() {
   const [tab, setTab] = useState<TabKey>('voice')
+  usePanelTabHint('app-settings', (t) => {
+    if (TABS.some((x) => x.key === t)) setTab(t as TabKey)
+  })
   return (
     <div className="flex flex-col h-full min-h-0" data-testid="app-settings">
       <div className="flex items-center px-4 pt-3">

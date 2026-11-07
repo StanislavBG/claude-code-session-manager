@@ -3,7 +3,6 @@ import type { NavKey } from '../lib/navKey'
 import { Home } from './tabs/Home'
 import { ProjectHome } from './tabs/projecthome/ProjectHome'
 import { EditorView } from './tabs/EditorView'
-import { VoiceModal } from './layout/VoiceModal'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
 import { SectionFrame } from './layout/SectionFrame'
 import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
@@ -16,19 +15,14 @@ import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 // blank app. Home / the terminal path / EditorView / VoiceModal stay eager
 // (boot destination / privacy-critical recording path / already-lazy Tiptap
 // body / recording indicator).
-const Skills = lazy(() => import('./tabs/Skills').then((m) => ({ default: m.Skills })))
 const History = lazy(() => import('./tabs/History').then((m) => ({ default: m.History })))
 const Scheduler = lazy(() => import('./tabs/Scheduler').then((m) => ({ default: m.Scheduler })))
 const Settings = lazy(() => import('./tabs/Settings').then((m) => ({ default: m.Settings })))
-const Permissions = lazy(() => import('./tabs/Permissions').then((m) => ({ default: m.Permissions })))
 const SystemPrompt = lazy(() => import('./tabs/SystemPrompt').then((m) => ({ default: m.SystemPrompt })))
 const Memory = lazy(() => import('./tabs/Memory').then((m) => ({ default: m.Memory })))
-const Plugins = lazy(() => import('./tabs/Plugins').then((m) => ({ default: m.Plugins })))
-const McpServers = lazy(() => import('./tabs/McpServers').then((m) => ({ default: m.McpServers })))
-const Hooks = lazy(() => import('./tabs/Hooks').then((m) => ({ default: m.Hooks })))
+const Extensions = lazy(() => import('./tabs/Extensions').then((m) => ({ default: m.Extensions })))
+const AppSettings = lazy(() => import('./tabs/AppSettings').then((m) => ({ default: m.AppSettings })))
 const AgentLibrary = lazy(() => import('./tabs/AgentLibrary').then((m) => ({ default: m.AgentLibrary })))
-const TagLibrary = lazy(() => import('./tabs/TagLibrary').then((m) => ({ default: m.TagLibrary })))
-const DataModel = lazy(() => import('./tabs/DataModel').then((m) => ({ default: m.DataModel })))
 
 const SCREEN_LOADING_FALLBACK = <div className="p-6 text-xs text-fg-faint">Loading…</div>
 
@@ -56,26 +50,17 @@ interface PageConfig {
 }
 
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
-  'skills':        { title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
   'history':       { title: 'Spend, tokens and time',    intro: 'Estimated spend, tokens, prompts and active time across every project — by project, model and day. Export any range to CSV.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
-  'plugins':       { title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
-  'mcp':           { title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
-  'hooks':         { title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
   'memory':        { title: 'Memory',                    intro: 'Claude Code\'s own memory files for this project and its subagents — a MEMORY.md index plus topic files. Stored locally, nothing leaves your machine.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
-  'permissions':   { title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
-  'settings':      { title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
-  'agent-library': { title: 'Agent Library',                 intro: 'Agents are the ACTOR of the AIM framework every session opens with — "you are acting as …". Every persona on this machine lives here: global definitions in ~/.claude/agents, plus which currently-open projects override them locally. Give a persona a project scope and an opening instruction and it also becomes an Action — a one-click button in that project’s Sessions toolbar that starts a session already grounded on it. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
-  'tag-library':   { title: 'Tag Library',                   intro: 'Every session intent tag, its meaning, and its /develop-eagerness default. Assign or remove which agent personas carry each tag.' },
-  // Tools — promoted from modals in v0.13.1.
-  'voice':            { title: 'Voice & microphone',  intro: 'On-device transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
-  'data-model':       { title: 'Data Model',           intro: 'A hand-maintained ERD of what Session Manager actually persists — storage paths, single-writer owners, and how entities relate.' },
+  'settings':      { title: 'Settings',                  intro: 'Claude Code\'s settings.json — permissions, hooks, env and every other key, per scope, with schema validation.' },
+  'extensions':    { title: 'Extensions',                intro: 'Skills, MCP servers and plugins — each tab edits the real file Claude Code reads.' },
+  'app-settings':  { title: 'App Settings',              intro: 'Session Manager\'s own preferences — voice, appearance, telemetry, phone remote, updates and the storage map.' },
+  'agent-library': { title: 'Agents',                 intro: 'Agents are the ACTOR of the AIM framework every session opens with — "you are acting as …". Every persona on this machine lives here: global definitions in ~/.claude/agents, plus which currently-open projects override them locally. Give a persona a project scope and an opening instruction and it also becomes an Action — a one-click button in that project’s Sessions toolbar that starts a session already grounded on it. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
 }
-
-const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
 
 /**
  * Per-NavKey element cache backing `renderScreenComponent`'s memoization.
@@ -121,23 +106,14 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
   const meta = PAGE_META[active]
   const body = (() => {
     switch (active) {
-      case 'skills':        return <LazyScreen><Skills /></LazyScreen>
       case 'history':       return <LazyScreen><History /></LazyScreen>
       case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
-      case 'plugins':       return <LazyScreen><Plugins /></LazyScreen>
-      case 'mcp':           return <LazyScreen><McpServers /></LazyScreen>
-      case 'hooks':         return <LazyScreen><Hooks /></LazyScreen>
       case 'memory':        return <LazyScreen><Memory /></LazyScreen>
       case 'system-prompt': return <LazyScreen><SystemPrompt /></LazyScreen>
-      case 'permissions':   return <LazyScreen><Permissions /></LazyScreen>
       case 'settings':      return <LazyScreen><Settings /></LazyScreen>
+      case 'extensions':    return <LazyScreen><Extensions /></LazyScreen>
+      case 'app-settings':  return <LazyScreen><AppSettings /></LazyScreen>
       case 'agent-library': return <LazyScreen><AgentLibrary /></LazyScreen>
-      case 'tag-library':   return <LazyScreen><TagLibrary /></LazyScreen>
-      case 'data-model':    return <LazyScreen><DataModel /></LazyScreen>
-      // Former-modal tools rendered with variant="page" so they paint inline
-      // with no overlay/portal. Pass a noop onClose since the route owns
-      // visibility; the navigate-away action effectively closes them.
-      case 'voice':             return <VoiceModal open={true} onClose={noop} variant="page" />
       default: return null
     }
   })()

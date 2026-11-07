@@ -185,19 +185,34 @@ export function buildCommands(): Command[] {
     { id: 'nav:project-home', label: 'Go to Home', section: 'nav', emitOnly: true },
     { id: 'nav:terminal', label: 'Go to Terminal', section: 'nav', emitOnly: true },
     { id: 'nav:settings', label: 'Go to Settings', section: 'nav', emitOnly: true },
-    { id: 'nav:permissions', label: 'Go to Permissions', section: 'nav', emitOnly: true },
-    { id: 'nav:skills', label: 'Go to Skills', section: 'nav', emitOnly: true },
-    { id: 'nav:plugins', label: 'Go to Plugins', section: 'nav', emitOnly: true },
-    { id: 'nav:mcp', label: 'Go to MCP Servers', section: 'nav', emitOnly: true },
-    { id: 'nav:hooks', label: 'Go to Hooks', section: 'nav', emitOnly: true },
     { id: 'nav:scheduler', label: 'Go to Scheduler', section: 'nav', emitOnly: true },
     { id: 'nav:memory', label: 'Go to Memory', section: 'nav', emitOnly: true },
     { id: 'nav:projects', label: 'Go to File Explorer', section: 'nav', emitOnly: true },
     { id: 'nav:history', label: 'Go to History', section: 'nav', emitOnly: true },
-    { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
-    { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },
-    { id: 'nav:agent-library', label: 'Go to Agent Library', section: 'nav', emitOnly: true },
-    { id: 'nav:tag-library', label: 'Go to Tag Library', section: 'nav', emitOnly: true },
+    { id: 'nav:system-prompt', label: 'Go to CLAUDE.md', section: 'nav', emitOnly: true },
+    { id: 'nav:agent-library', label: 'Go to Agents', section: 'nav', emitOnly: true },
+    { id: 'nav:extensions', label: 'Go to Extensions', section: 'nav', emitOnly: true },
+    { id: 'nav:app-settings', label: 'Go to App Settings', section: 'nav', emitOnly: true },
+    // Retired pages: each now opens its new home with the matching tab selected.
+    ...(
+      [
+        ['permissions', 'Permissions', 'settings', 'Settings › Permissions'],
+        ['hooks', 'Hooks', 'settings', 'Settings › Hooks'],
+        ['skills', 'Skills', 'extensions', 'Extensions › Skills'],
+        ['mcp', 'MCP Servers', 'extensions', 'Extensions › MCP Servers'],
+        ['plugins', 'Plugins', 'extensions', 'Extensions › Plugins'],
+        ['voice', 'Voice', 'app-settings', 'App Settings › Voice'],
+        ['data-model', 'Data Model', 'app-settings', 'App Settings › Storage map'],
+      ] as const
+    ).map(([tab, , page, label]): Command => ({
+      id: `go:${page}:${tab}`,
+      label: `Go to ${label}`,
+      section: 'nav',
+      run: () => {
+        useLayout.getState().setEpicsWorkspaceOpen(false)
+        useLayout.getState().openPanel(page, tab === 'data-model' ? 'storage' : tab)
+      },
+    })),
   ]
   return cmds
 }

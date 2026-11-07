@@ -19,9 +19,8 @@ describe('navGroups Home swap', () => {
 
 describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
-    'overview', 'plugins', 'voice', 'agent-library', 'tag-library',
-    'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
-    'history', 'data-model',
+    'overview', 'history', 'system-prompt', 'settings', 'extensions',
+    'agent-library', 'app-settings',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'scheduler']
   const BOTH = ['projects']
@@ -36,7 +35,7 @@ describe('getNavItemsForFace', () => {
     expect(new Set(keys)).toEqual(new Set([...PROJECT_ONLY, ...BOTH]))
   })
 
-  it('preserves NAV_ITEMS group order (Workspace, Configure, Tools)', () => {
+  it('preserves NAV_ITEMS group order (Workspace, Claude Code, Session Manager)', () => {
     const homeKeys = getNavItemsForFace('home').map((item) => item.key)
     const allKeysInOrder = NAV_ITEMS.map((item) => item.key)
     const expected = allKeysInOrder.filter((k) => homeKeys.includes(k))
@@ -75,23 +74,6 @@ describe('project-home is project-only', () => {
   it('project face includes project-home', () => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
     expect(keys).toContain('project-home')
-  })
-})
-
-describe('plugins is home-only', () => {
-  it('NAV_ITEMS tags plugins with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'plugins')
-    expect(item?.faces).toEqual(['home'])
-  })
-
-  it('project face excludes plugins', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('plugins')
-  })
-
-  it('home face includes plugins', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('plugins')
   })
 })
 
@@ -194,46 +176,8 @@ describe('scheduler is project-only (removed from the Home face), retired standa
   })
 })
 
-describe('voice is home-only', () => {
-  it('NAV_ITEMS tags voice with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'voice')
-    expect(item?.faces).toEqual(['home'])
-  })
-
-  it('project face excludes voice', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('voice')
-  })
-
-  it('home face includes voice', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('voice')
-  })
-})
-
-describe('data-model is home-only', () => {
-  it('NAV_ITEMS tags data-model with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'data-model')
-    expect(item?.faces).toEqual(['home'])
-  })
-
-  it('project face excludes data-model', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('data-model')
-  })
-
-  it('home face includes data-model', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('data-model')
-  })
-
-  it('isHomeOnlyNavKey(data-model) is true, so face-agnostic routes assert the home face', () => {
-    expect(isHomeOnlyNavKey('data-model')).toBe(true)
-  })
-})
-
 describe('settings-shaped editors are HOME-only (consolidated from BOTH)', () => {
-  const MOVED_KEYS = ['system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings'] as const
+  const MOVED_KEYS = ['system-prompt', 'extensions', 'settings', 'app-settings'] as const
 
   it.each(MOVED_KEYS)('NAV_ITEMS tags %s with faces: [home]', (key) => {
     const item = NAV_ITEMS.find((i) => i.key === key)
@@ -322,5 +266,27 @@ describe('NAV_ITEMS face-coverage invariant', () => {
     const covered = new Set([...homeKeys, ...projectKeys])
     const allKeys = NAV_ITEMS.map((item) => item.key)
     expect(covered).toEqual(new Set(allKeys))
+  })
+})
+
+describe('Home-face registry (14 → 8 consolidation)', () => {
+  it('home face lists exactly the 8 consolidated pages, in order', () => {
+    expect(getNavItemsForFace('home').map((i) => i.key)).toEqual([
+      'overview', 'projects', 'history', 'system-prompt', 'settings', 'extensions', 'agent-library', 'app-settings',
+    ])
+  })
+
+  it('groups are labeled Workspace / Claude Code / Session Manager', () => {
+    expect(new Set(NAV_ITEMS.map((i) => i.group))).toEqual(new Set(['Workspace', 'Claude Code', 'Session Manager']))
+  })
+
+  it('relabels System Prompt → CLAUDE.md and Agent Library → Agents', () => {
+    expect(NAV_ITEMS.find((i) => i.key === 'system-prompt')?.label).toBe('CLAUDE.md')
+    expect(NAV_ITEMS.find((i) => i.key === 'agent-library')?.label).toBe('Agents')
+  })
+
+  it('Settings hint no longer promises theme, voice or billing window', () => {
+    const hint = NAV_ITEMS.find((i) => i.key === 'settings')?.hint ?? ''
+    expect(hint).not.toMatch(/theme|voice|billing/i)
   })
 })

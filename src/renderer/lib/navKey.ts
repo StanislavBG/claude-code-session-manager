@@ -16,11 +16,6 @@ export type NavKey =
   | 'terminal'
   | 'system-prompt'
   | 'settings'
-  | 'permissions'
-  | 'skills'
-  | 'plugins'
-  | 'mcp'
-  | 'hooks'
   | 'memory'
   | 'projects'
   | 'history'
@@ -35,12 +30,13 @@ export type NavKey =
   // v0.13.1 — pop-ups promoted to full pages. Every former Tools-group modal
   // also gets a NavKey + MainPane screen. Screens render the same modal
   // components with variant="page" so the body content is unchanged.
-  | 'voice'
   // Read-only directory of global + per-project agent personas (Home face only).
   | 'agent-library'
+  // Skills / MCP Servers / Plugins as tabs of one page (Home face only).
+  | 'extensions'
+  // Voice, appearance, telemetry, phone remote, updates, startup, storage map (Home face only).
+  | 'app-settings'
   // Read-only directory of the Epic intent-tag taxonomy (Home face only).
-  | 'tag-library'
   // Static ERD of the app's OWN persisted data model — entities, storage
   // paths, relations. Machine-wide (identical for every project), so Home
   // face only. See lib/dataModelErd.ts + components/tabs/DataModel.tsx.
-  | 'data-model'

@@ -83,7 +83,10 @@ export function App() {
   // which (via Workbench's context value) fanned out into every mounted
   // PanelHost. `navigate` above is already stable; these two just close over
   // it as their sole dependency.
-  const handleOpenVoice = useCallback(() => navigate('voice'), [navigate])
+  const handleOpenVoice = useCallback(() => {
+    useLayout.getState().setEpicsWorkspaceOpen(false)
+    useLayout.getState().openPanel('app-settings', 'voice')
+  }, [])
   const handleOpenScheduler = useCallback(() => navigate('scheduler'), [navigate])
 
   // Open a file in the main-space Editor scene and route there. Used by the

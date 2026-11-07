@@ -12,7 +12,7 @@ import { EffectiveCards } from '../ui/EffectiveCards'
 import { ViewTabs } from '../ui/ViewTabs'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
-import { useLayout } from '../../state/layout'
+import { useLayout, usePanelTabHint } from '../../state/layout'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
@@ -101,6 +101,9 @@ function SettingsComponent() {
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'general' | 'permissions' | 'hooks' | 'raw'>('general')
+  usePanelTabHint('settings', (t) => {
+    if (t === 'general' || t === 'permissions' || t === 'hooks' || t === 'raw') setView(t)
+  })
 
   // Settings is now HOME-only in the sidebar (navGroups.ts), and every nav
   // path that focuses it asserts navFace: 'home' — but a background split

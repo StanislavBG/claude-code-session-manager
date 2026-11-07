@@ -4,7 +4,7 @@
  * drift-check.cjs — dependency-free drift check for a repo's markdown network.
  *
  *   node drift-check.cjs [--root <dir>] [--map <path>] [--file <path>]...
- *                        [--exclude <prefix>]... [--checks links,paths,limits,contents]
+ *                        [--exclude <prefix>]... [--checks links,paths,limits,contents] [--strict-paths]
  *
  * Prints one JSON object { root, map, checkedFiles, findings, counts } to stdout.
  * Exit 0 = no findings, 1 = findings, 2 = usage error / missing root.
@@ -23,7 +23,7 @@ const CONTENTS_WINDOW = 60;
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const opts = { root: null, map: null, files: [], excludes: [], checks: ALL_CHECKS.slice() };
+  const opts = { root: null, map: null, files: [], excludes: [], checks: ALL_CHECKS.slice(), strictPaths: false };
   const needValue = (i, flag) => {
     if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
       throw new UsageError(`missing value for ${flag}`);
@@ -36,6 +36,7 @@ function parseArgs(argv) {
     else if (a === '--map') opts.map = needValue(i++, a);
     else if (a === '--file') opts.files.push(needValue(i++, a));
     else if (a === '--exclude') opts.excludes.push(needValue(i++, a));
+    else if (a === '--strict-paths') opts.strictPaths = true;
     else if (a === '--checks') {
       const list = needValue(i++, a).split(',').map((s) => s.trim()).filter(Boolean);
       for (const c of list) {
@@ -62,6 +63,25 @@ function walk(root, dir, out) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) walk(root, full, out);
     else if (e.isFile() && e.name.endsWith('.md')) out.push(toPosix(path.relative(root, full)));
+  }
+}
+
+function listTracked(root) {
+  const r = spawnSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (!r.error && r.status === 0) return r.stdout.split('\0').filter(Boolean);
+  const out = [];
+  walkAll(root, root, out);
+  return out;
+}
+
+function walkAll(root, dir, out) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (e.name === '.git' || e.name === 'node_modules') continue;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) walkAll(root, full, out);
+    else if (e.isFile()) out.push(toPosix(path.relative(root, full)));
   }
 }
 
@@ -158,7 +178,7 @@ function hasPathsFrontmatter(text) {
 }
 
 function runDriftCheck(options) {
-  const opts = Object.assign({ root: null, map: null, files: [], excludes: [], checks: ALL_CHECKS }, options);
+  const opts = Object.assign({ root: null, map: null, files: [], excludes: [], checks: ALL_CHECKS, strictPaths: false }, options);
   const root = path.resolve(opts.root || process.cwd());
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     throw new UsageError(`root is not a directory: ${root}`);
@@ -191,6 +211,8 @@ function runDriftCheck(options) {
     }
   }
 
+  let trackedList = null;
+  const tracked = () => (trackedList || (trackedList = listTracked(root)));
   const findings = [];
   const missing = []; // { file, line, target, cands }
 
@@ -211,6 +233,8 @@ function runDriftCheck(options) {
         if (!t) continue;
         try { t = decodeURI(t); } catch { /* keep raw */ }
         const fromRoot = path.resolve(root, t.replace(/^\/+/, ''));
+        const siteRoute = /^\/(?!\/)/.test(t) && !fs.existsSync(fromRoot);
+        if (siteRoute && !opts.strictPaths) continue;
         if (!fs.existsSync(path.resolve(docDir, t)) && !fs.existsSync(fromRoot)) {
           findings.push({ kind: 'broken-link', file: rel, line: l.line, target: l.target });
         }
@@ -225,6 +249,18 @@ function runDriftCheck(options) {
         const a = path.resolve(root, t);
         const b = path.resolve(docDir, t);
         if (fs.existsSync(a) || fs.existsSync(b)) continue;
+        const segs = t.split('/').filter(Boolean);
+        const last = segs[segs.length - 1] || '';
+        const anchored = /\.[A-Za-z0-9]+$/.test(last) || t.endsWith('/') || fs.existsSync(path.join(root, segs[0] || ''));
+        if (!anchored) continue;
+        const tt = t.replace(/\/+$/, '');
+        const matches = tracked().filter((f) => f === tt || f.endsWith('/' + tt) || f.startsWith(tt + '/') || f.includes('/' + tt + '/'));
+        if (matches.length) {
+          if (opts.strictPaths) {
+            findings.push({ kind: 'unanchored-path', file: rel, line: s.line, target: s.span, matches: matches.slice(0, 3) });
+          }
+          continue;
+        }
         const cands = [a, b]
           .map((p) => toPosix(path.relative(root, p)) + (t.endsWith('/') ? '/' : ''))
           .filter((p) => p && !p.startsWith('..'));

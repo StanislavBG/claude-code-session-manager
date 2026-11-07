@@ -140,3 +140,36 @@ test('bad --root and bad flags exit 2', () => {
   expect(run(dir, '--bogus').code).toBe(2);
   expect(run(dir, '--checks', 'nope').code).toBe(2);
 });
+
+test('path candidates need an extension, a trailing slash, or an existing first segment', () => {
+  const dir = repo({
+    'README.md': '`origin/main` `ageMin/Max` `feature/x` `docs/missing.md` `src/nope/` `src/nope2`\n',
+    'src/keep.js': '',
+  });
+  const t = run(dir).json.findings.filter((f) => f.kind === 'missing-path').map((f) => f.target);
+  expect(t.sort()).toEqual(['docs/missing.md', 'src/nope/', 'src/nope2']);
+});
+
+test('suffix-of-tracked-file paths are quiet by default, unanchored-path with --strict-paths', () => {
+  const dir = repo({
+    'README.md': '`lib/util.js`\n',
+    'src/lib/util.js': '',
+    'src/a/lib/util.js': '',
+  });
+  expect(run(dir).json.findings).toEqual([]);
+  const { json } = run(dir, '--strict-paths');
+  expect(json.findings).toEqual([
+    { kind: 'unanchored-path', file: 'README.md', line: 1, target: 'lib/util.js', matches: ['src/a/lib/util.js', 'src/lib/util.js'] },
+  ]);
+});
+
+test('site-route links are quiet by default, broken-link with --strict-paths', () => {
+  const dir = repo({
+    'README.md': '[r](/projects/git-viewer/) [ok](/docs/a.md)\n',
+    'docs/a.md': '# A\n',
+  });
+  expect(run(dir).json.findings).toEqual([]);
+  expect(run(dir, '--strict-paths').json.findings).toEqual([
+    { kind: 'broken-link', file: 'README.md', line: 1, target: '/projects/git-viewer/' },
+  ]);
+});

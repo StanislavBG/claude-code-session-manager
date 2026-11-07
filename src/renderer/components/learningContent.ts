@@ -159,7 +159,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
           title: 'Scope precedence',
           items: [
             { body: 'Local overrides Project overrides User. A Project-scoped setting beats a User-scoped one when you work in that repo, and your personal Local file beats both. Project and Local require an open project tab — with no working directory, only User is editable.' },
-            { body: 'Lists merge (allow + allow), but objects do not — a Project-scoped { permissions: { allow: [...] } } REPLACES the user-scoped object wholesale unless you copy the entries you want to keep.' },
+            { body: 'Merging is per key: Local beats Project beats User. Objects merge key by key, so a Project-scoped { permissions: { allow: [...] } } adds to the user-scoped permissions object instead of replacing it. Lists merge too (allow + allow), and for a plain value the more specific scope wins.' },
           ],
         },
       ],

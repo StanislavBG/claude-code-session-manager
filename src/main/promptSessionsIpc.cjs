@@ -36,10 +36,48 @@ function defaultProjectRoots() {
   return roots;
 }
 
+/**
+ * Short-lived Set of registered roots. Rebuilds when older than ttlMs; a miss
+ * rebuilds at most once per missRefreshMs before answering false. Holds only
+ * roots from source(), never caller-supplied strings.
+ */
+function makeRegisteredRootsCache(source, { ttlMs = 10000, missRefreshMs = 1000, now = Date.now } = {}) {
+  let set = null;
+  let builtAt = 0;
+  function rebuild() {
+    const { projectRootOf } = require('./lib/activeSessions.cjs');
+    const next = new Set();
+    for (const r of source() || []) {
+      if (typeof r !== 'string' || !r) continue;
+      next.add(norm(r));
+      next.add(norm(projectRootOf(r) || r));
+    }
+    set = next;
+    builtAt = now();
+  }
+  return {
+    has(cwd) {
+      if (!set || now() - builtAt >= ttlMs) rebuild();
+      if (set.has(cwd)) return true;
+      if (now() - builtAt < missRefreshMs) return false;
+      rebuild();
+      return set.has(cwd);
+    },
+  };
+}
+
+let defaultRootsCache = null;
+function __resetRegisteredRootsCacheForTests() { defaultRootsCache = null; }
+
 function assertRegistered(cwd, projectRoots) {
   if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) throw new Error('cwd must be an absolute project path');
   const { projectRootOf } = require('./lib/activeSessions.cjs');
   const want = norm(projectRootOf(cwd) || cwd);
+  if (projectRoots === defaultProjectRoots) {
+    if (!defaultRootsCache) defaultRootsCache = makeRegisteredRootsCache(defaultProjectRoots);
+    if (defaultRootsCache.has(want)) return;
+    throw new Error('cwd is not a registered project root');
+  }
   for (const r of projectRoots() || []) {
     if (typeof r !== 'string' || !r) continue;
     if (norm(r) === want || norm(projectRootOf(r) || r) === want) return;
@@ -128,4 +166,4 @@ function registerPromptSessionsReadHandlers() {
   ipcMain.handle('promptSessions:read-session-transcript', v(s.promptSessionsReadSessionTranscript, ({ cwd, sessionId }) => readSessionTranscript(cwd, sessionId)));
 }
 
-module.exports = { loadActiveIndex, listArchived, readArchived, readSessionTranscript, writeArchive, registerPromptSessionsReadHandlers };
+module.exports = { makeRegisteredRootsCache, __resetRegisteredRootsCacheForTests, loadActiveIndex, listArchived, readArchived, readSessionTranscript, writeArchive, registerPromptSessionsReadHandlers };

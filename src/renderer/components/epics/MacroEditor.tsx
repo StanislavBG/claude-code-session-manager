@@ -40,6 +40,7 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
   const [prompt, setPrompt] = useState(macro?.prompt ?? '')
   const initialEverywhere = macro ? macro.projects.includes('*') : false
   const [everywhere, setEverywhere] = useState(initialEverywhere)
+  const [surface, setSurface] = useState<'sessions' | 'project-home'>(macro?.surface ?? 'sessions')
   const [inputs, setInputs] = useState<MacroInput[]>(macro?.inputs ?? [])
   const storedTargets = macro?.autoStartTargets
   const [autoMode, setAutoMode] = useState<'off' | 'all' | 'selected'>(
@@ -130,6 +131,7 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
         tag: activeTag as Macro['tag'],
         prompt: trimmedPrompt,
         projects,
+        ...(macro?.builtin ? {} : { surface }),
         autoStartTargets: autoMode === 'all' ? ['*'] : autoMode === 'selected' ? autoSelected : [],
         ...(hadInputs || inputs.length > 0
           ? {
@@ -288,6 +290,25 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
           Add input
         </button>
       </div>
+
+      {!macro?.builtin && (
+        <div className="flex flex-col gap-1">
+          <label className={LABEL} htmlFor="macro-surface">Shown on</label>
+          <select
+            id="macro-surface"
+            data-testid="macro-surface"
+            className={FIELD}
+            value={surface}
+            onChange={(e) => setSurface(e.target.value as 'sessions' | 'project-home')}
+          >
+            <option value="sessions">Sessions</option>
+            <option value="project-home">Project Home</option>
+          </select>
+          <div className="text-[11px] text-fg-faint">
+            Project Home shows it as a button on that project&apos;s Project Home page.
+          </div>
+        </div>
+      )}
 
       <label className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
         <input

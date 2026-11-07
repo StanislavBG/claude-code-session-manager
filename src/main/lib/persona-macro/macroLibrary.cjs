@@ -538,6 +538,9 @@ async function saveMacro(input, opts = {}) {
     if (parsed.id) {
       const idx = macros.findIndex((m) => m.id === parsed.id);
       if (idx === -1) throw new Error(`macro not found: ${parsed.id}`);
+      if (macros[idx].builtin && parsed.surface !== undefined && parsed.surface !== macros[idx].surface) {
+        throw new Error('built-in macro surface cannot be changed');
+      }
       const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : macros[idx].projects;
       saved = {
         ...macros[idx],

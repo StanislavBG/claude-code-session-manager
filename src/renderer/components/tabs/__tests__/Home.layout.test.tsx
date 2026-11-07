@@ -15,7 +15,8 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 beforeEach(() => {
-  ;(window as unknown as { api: unknown }).api = new Proxy({}, { get: () => new Proxy(() => Promise.resolve(null), { get: () => () => Promise.resolve(null) }) })
+  const EMPTY_JSON = { ok: true, exists: false, raw: '', data: null, parseError: null, error: null, mtimeMs: 0 }
+  ;(window as unknown as { api: unknown }).api = new Proxy({}, { get: () => new Proxy(() => Promise.resolve(null), { get: (_t, m) => (m === 'readJson' ? () => Promise.resolve(EMPTY_JSON) : () => Promise.resolve(null)) }) })
 })
 
 afterEach(async () => {

@@ -27,6 +27,10 @@ function installApi(stored: Record<string, unknown>) {
       unwatch: vi.fn(),
       onChanged: vi.fn(() => () => {}),
     },
+    claudeConfig: {
+      read: vi.fn().mockResolvedValue({ path: CLAUDE_JSON, data: { mcpServers: stored } }),
+      patch: vi.fn().mockResolvedValue({ ok: true, path: CLAUDE_JSON, data: {} }),
+    },
     files: { delete: vi.fn().mockResolvedValue({ ok: true }) },
     mcp: { status: vi.fn().mockResolvedValue({ ok: true, error: null, servers: [] }) },
   }
@@ -97,7 +101,7 @@ describe('McpLibrary install with placeholders', () => {
     const api = installApi({})
     const el = await mount(createElement(McpLibrary))
     await click(buttonIn(rowFor(el, 'SQLite'), 'install'))
-    expect(api.config.writeJson).not.toHaveBeenCalled()
+    expect(api.claudeConfig.patch).not.toHaveBeenCalled()
 
     const form = el.querySelector('[data-testid="mcp-placeholder-form"]') as HTMLElement
     expect(form.textContent).toContain('--db-path <path>')
@@ -108,10 +112,10 @@ describe('McpLibrary install with placeholders', () => {
     expect(buttonIn(form, 'install').disabled).toBe(false)
     await click(buttonIn(form, 'install'))
 
-    expect(api.config.writeJson).toHaveBeenCalledTimes(1)
-    const [path, data] = api.config.writeJson.mock.calls[0]
-    expect(path).toBe(CLAUDE_JSON)
-    expect((data as { mcpServers: Record<string, { args: string[] }> }).mcpServers.sqlite.args).toEqual([
+    expect(api.claudeConfig.patch).toHaveBeenCalledTimes(1)
+    const [payload] = api.claudeConfig.patch.mock.calls[0]
+    expect(payload).toMatchObject({ fileId: 'claudeJson', scope: 'user', keyPath: ['mcpServers', 'sqlite'] })
+    expect((payload.value as { args: string[] }).args).toEqual([
       'mcp-server-sqlite',
       '--db-path',
       '/tmp/x.db',
@@ -123,7 +127,7 @@ describe('McpLibrary install with placeholders', () => {
     const api = installApi({})
     const el = await mount(createElement(McpLibrary))
     await click(buttonIn(rowFor(el, 'Fetch'), 'install'))
-    expect(api.config.writeJson).toHaveBeenCalledTimes(1)
+    expect(api.claudeConfig.patch).toHaveBeenCalledTimes(1)
     expect(el.querySelector('[data-testid="mcp-placeholder-form"]')).toBeNull()
   })
 })
@@ -147,7 +151,7 @@ describe('McpServers placeholder surfacing', () => {
       )
     })
     await click(buttonIn(el, 'Save'))
-    expect(api.config.writeJson).not.toHaveBeenCalled()
+    expect(api.claudeConfig.patch).not.toHaveBeenCalled()
     const errs = useToast.getState().toasts.filter((t) => t.kind === 'error')
     expect(errs).toHaveLength(1)
     expect(errs[0].message).toContain('<path>')

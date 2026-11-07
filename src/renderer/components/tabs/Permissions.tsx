@@ -24,7 +24,7 @@ interface PermissionsShape {
   allow?: string[]
   deny?: string[]
   ask?: string[]
-  defaultMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+  defaultMode?: string
   additionalDirectories?: string[]
 }
 
@@ -277,14 +277,12 @@ function ModeSelector({
   onChange,
 }: {
   value: PermissionsShape['defaultMode']
-  onChange: (m: NonNullable<PermissionsShape['defaultMode']>) => void
+  onChange: (m: string) => void
 }) {
-  const modes: NonNullable<PermissionsShape['defaultMode']>[] = [
-    'default',
-    'acceptEdits',
-    'plan',
-    'bypassPermissions',
-  ]
+  const enumModes = settingsSchema().at(['permissions', 'defaultMode'])?.enum
+  const schemaModes = (enumModes ?? []).filter((m): m is string => typeof m === 'string')
+  // A current value outside the enum is shown as-is, never reset.
+  const modes = value && !schemaModes.includes(value) ? [...schemaModes, value] : schemaModes
   return (
     <section>
       <h3 className="text-xs text-fg uppercase tracking-wider mb-2">Default Mode</h3>

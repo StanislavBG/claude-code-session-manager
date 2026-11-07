@@ -4,6 +4,7 @@ import { act } from 'react-dom/test-utils'
 import { Permissions } from '../Permissions'
 import { useConfig, type FileState } from '../../../state/config'
 import { useToast } from '../../../state/toast'
+import { settingsSchema } from '../../../lib/settingsSchema'
 import { HOME, useNavfaceHarness, clickViewTab } from './_navfaceHarness'
 
 const USER_PATH = `${HOME}/.claude/settings.json`
@@ -136,5 +137,15 @@ describe('Permissions no-clobber on bad draft', () => {
     expect(next.model).toBe('opus')
     expect(next.permissions.allow).toEqual(['Read(*)', 'Bash(ls:*)'])
     expect(errorToasts()).toHaveLength(0)
+  })
+
+  it('mode options equal the schema enum; unknown current value is kept', async () => {
+    const { el, setDraft } = await openRules(JSON.stringify({ permissions: { defaultMode: 'futureMode' } }))
+    const section = Array.from(el.querySelectorAll('section')).find((x) => /Default Mode/i.test(x.textContent ?? ''))!
+    const labels = Array.from(section.querySelectorAll('button')).map((b) => b.textContent?.trim())
+    const modes = settingsSchema().at(['permissions', 'defaultMode'])!.enum as string[]
+    expect(modes.length).toBeGreaterThan(4)
+    expect(labels).toEqual([...modes, 'futureMode'])
+    expect(setDraft).not.toHaveBeenCalled()
   })
 })

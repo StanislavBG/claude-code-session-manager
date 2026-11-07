@@ -108,12 +108,7 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
   switch (active) {
     case 'overview':
       return (
-        <Home
-          onNavigate={ctx.onNavigate}
-          onNewSession={ctx.onNewSession}
-          onOpenVoice={ctx.onOpenVoice}
-          onOpenScheduler={ctx.onOpenScheduler}
-        />
+        <Home onNavigate={ctx.onNavigate} />
       )
     case 'project-home':
       return <ProjectHome />

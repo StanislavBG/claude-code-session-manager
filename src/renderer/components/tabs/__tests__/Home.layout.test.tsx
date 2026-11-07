@@ -48,6 +48,7 @@ describe('Home layout', () => {
     expect(ref).toBeTruthy()
     expect(ref.open).toBe(false)
     expect(ref.querySelector('[data-testid="home-agent-tools"]')).toBeTruthy()
-    expect(ref.querySelector('[data-testid="home-data-model-card"]')).toBeTruthy()
+    expect(ref.querySelector('[data-testid="home-data-model-card"]')).toBeNull()
+    expect(ref.textContent).not.toContain('Terminal')
   })
 })

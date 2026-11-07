@@ -16,7 +16,10 @@
  *      against running scheduler jobs / chat runs for context.
  *   5. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
  *      History tab) and shows the 5 most-recent.
- *   6. Agent tools — collapsed MCP tool catalog (name + one-line purpose).
+ *   6. Reference (collapsed) — Agent tools (MCP tool catalog) + Agents.
+ *
+ * Display-only: the slot cap is edited solely by the Scheduler's concurrency
+ * stepper; terminal appearance lives on App settings; Data Model has its own nav row.
  *
  * Data sources are all existing zustand stores; nothing new on the backend.
  */
@@ -40,20 +43,18 @@ import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { runSchedulerNow } from '../../lib/schedulerActions'
 import { projectColorFor } from '../../lib/projectColor'
 import { openProjectTab } from '../../lib/homeOpenProject'
-import { useSessionSlots, setSessionSlots, type SlotSnapshot } from '../../lib/useSessionSlots'
+import { useSessionSlots } from '../../lib/useSessionSlots'
 import { usePagedList } from '../../lib/usePagedList'
 import { Pager } from '../ui/Pager'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
 import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopover'
-import { TerminalAppearanceCard } from './home/TerminalAppearanceCard'
 import { HomeAgentTools } from './home/HomeAgentTools'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
 import { useEffectiveSettingsFor, readLeafWithSource } from '../../lib/useEffectiveSettings'
 import { formatEffortSegment } from '../../lib/effectiveModelInfo'
-import { ERD_ENTITIES } from '../../lib/dataModelErd'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
 import { formatAgo } from '../../lib/formatTime'
@@ -65,9 +66,6 @@ const EMPTY_JOBS: ScheduleJob[] = []
 
 interface HomeProps {
   onNavigate?: (k: NavKey) => void
-  onNewSession?: () => void
-  onOpenVoice?: () => void
-  onOpenScheduler?: () => void
 }
 
 function HomeComponent({ onNavigate }: HomeProps) {
@@ -118,15 +116,10 @@ function HomeComponent({ onNavigate }: HomeProps) {
         </div>
         <details data-testid="home-reference" className="mb-6">
           <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-3">
-            Reference &amp; appearance
+            Reference
           </summary>
           <HomeAgentTools />
           <AgentsCard />
-          <DataModelCard onNavigate={onNavigate} />
-          {/* App-wide terminal theme + font size. Lives here, not in a gear
-           *  popover inside a Terminal pane, because it is machine-wide state —
-           *  see lib/terminalSettings.ts for exactly what it reaches. */}
-          <TerminalAppearanceCard />
         </details>
       </div>
       <NewEpicProjectDrawer
@@ -234,32 +227,6 @@ export function AgentsCard() {
           )
         })}
       </div>
-    </section>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Data Model — reference-only entry point into the app's own ERD
-// (lib/dataModelErd.ts / tabs/DataModel.tsx). Not a live signal, so it sits
-// beside Agents/Terminal Appearance rather than in the top grid or Needs you.
-// ────────────────────────────────────────────────────────────────────
-export function DataModelCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
-  return (
-    <section className="mb-6">
-      <button
-        type="button"
-        data-testid="home-data-model-card"
-        onClick={() => onNavigate?.('data-model')}
-        className="w-full text-left bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] flex items-center justify-between hover:bg-bg-elev/40 transition-colors"
-      >
-        <span>
-          <span className="block font-serif text-[16px] font-medium text-fg">Data Model</span>
-          <span className="block text-[12.5px] text-fg-dim">
-            {ERD_ENTITIES.length} entities — what Session Manager persists, and how it joins
-          </span>
-        </span>
-        <span className="font-mono text-[11px] text-accent shrink-0">Open →</span>
-      </button>
     </section>
   )
 }
@@ -667,45 +634,6 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Session slot cap control — 0 (pause all new launches) to 10 (max
-// allowed), default 5. Shared by ActiveSessionsCard below.
-// ────────────────────────────────────────────────────────────────────
-function SessionSlotCapControl({ slots }: { slots: SlotSnapshot | null }) {
-  const min = slots?.min ?? 0
-  const max = slots?.max ?? 10
-  const total = slots?.total ?? 5
-  const envOverride = slots?.envOverride ?? false
-  const [pending, setPending] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-  const value = pending ?? total
-
-  const commit = (n: number) => {
-    setPending(n)
-    setSaving(true)
-    setSessionSlots(n)
-      .catch((err) => { toast.error(`Could not set session slots: ${err instanceof Error ? err.message : String(err)}`) })
-      .finally(() => { setSaving(false); setPending(null) })
-  }
-
-  return (
-    <span className="flex items-center gap-2.5 shrink-0" title={envOverride ? 'Pinned by SM_SESSION_SLOTS env var' : 'Max concurrent claude -p sessions on this machine (0 pauses new launches)'}>
-      <span className="font-mono text-[11px] text-fg-faint">Max slots</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={1}
-        value={value}
-        disabled={envOverride || saving}
-        onChange={(e) => commit(Number(e.target.value))}
-        className="w-24 accent-accent disabled:opacity-40 disabled:cursor-not-allowed"
-      />
-      <span className="font-mono text-[12px] font-semibold text-fg w-4 text-right">{value}</span>
-    </span>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────
 // Billing meters — Session 5-hour + Weekly windows (moved from the
 // now-removed Usage tab; same useBilling store Home already read from).
 // ────────────────────────────────────────────────────────────────────
@@ -989,10 +917,9 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
         <h2 className="m-0 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint font-normal">Active sessions</h2>
         <span className="flex items-center gap-4">
           <span className="font-mono text-[12px] text-fg-faint">
-            {inUse} of {total} slots in use
+            {inUse} of {total} busy
             {constraint && <span className="ml-2 text-amber-400/90">· {constraint}</span>}
           </span>
-          <SessionSlotCapControl slots={slots} />
         </span>
       </div>
       {rows.length === 0 ? (

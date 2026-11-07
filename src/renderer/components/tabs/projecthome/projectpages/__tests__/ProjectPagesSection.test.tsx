@@ -50,6 +50,7 @@ function macro(over: Partial<Macro> = {}): Macro {
 const HOME_MACRO = macro()
 const DEMO_MACRO = macro({ id: 'builtin-demo-video', label: 'Demo Video', agentName: 'demo-video-builder' })
 const MACROS = [HOME_MACRO, DEMO_MACRO]
+const REVIEW = macro({ id: 'review-md', label: 'Review MD network' })
 
 const kEntry = (id: string, title: string, mtimeMs: number, meta = true): any => ({
   id,
@@ -78,18 +79,21 @@ const NEW_V = vEntry('v2', 'Newer video', 2000)
 const OLD_V = vEntry('v1', 'Older video', 1000, { kind: 'blog-post', lengthS: 60, report: { lufs: null, readingGrade: null, checks: [], bytes: 1 } })
 
 function props(over: Record<string, unknown> = {}) {
-  return { knowledge: [], videos: [], loaded: true, macros: MACROS, launching: null, onLaunch: () => {}, ...over } as any
+  return { tab: 'pages', knowledge: [], videos: [], loaded: true, macros: MACROS, launching: null, onLaunch: () => {}, ...over } as any
 }
 const flush = () => act(async () => { await Promise.resolve() })
-const switchTo = (el: HTMLElement, page: string) =>
-  act(() => (el.querySelector(`[data-testid="project-home-page-switch"] [data-page="${page}"]`) as HTMLElement).click())
+/** Re-render the mounted section with new props (e.g. another `tab`), as ProjectHome does on a key press. */
+const show = async (over: Record<string, unknown>) => {
+  act(() => root!.render(<ProjectPagesSection {...props(over)} />))
+  await flush()
+}
 const macroBtn = (el: HTMLElement, id: string) =>
   el.querySelector(`[data-testid="project-home-macro"][data-macro-id="${id}"]`) as HTMLButtonElement
 
 describe('ProjectPagesSection', () => {
-  it('while loading shows the switch and a loading body, no empty state or page button', () => {
+  it('while loading shows a loading body, no page switch, empty state or page button', () => {
     const el = mount(<ProjectPagesSection {...props({ loaded: false })} />)
-    expect(el.querySelector('[data-testid="project-home-page-switch"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="project-home-page-switch"]')).toBeNull()
     expect(el.querySelector('[data-testid="project-home-loading"]')?.textContent).toBe('Loading pages…')
     expect(el.querySelector('[data-testid="knowledge-page-empty"]')).toBeNull()
     expect(el.querySelector('[data-testid="video-page-empty"]')).toBeNull()
@@ -100,15 +104,16 @@ describe('ProjectPagesSection', () => {
     const el = mount(<ProjectPagesSection {...props()} />)
     expect(el.querySelector('[data-testid="knowledge-page-empty"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="project-home-loading"]')).toBeNull()
-    await switchTo(el, 'videos')
+    await show({ tab: 'videos' })
     expect(el.querySelector('[data-testid="video-page-empty"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="knowledge-page-empty"]')).toBeNull()
   })
 
   it('loaded with entries shows knowledge-page-item and video-item', async () => {
     const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], videos: [NEW_V] })} />)
     await flush()
     expect(el.querySelector('[data-testid="knowledge-page-item"]')).not.toBeNull()
-    await switchTo(el, 'videos')
+    await show({ knowledge: [NEW_K], videos: [NEW_V], tab: 'videos' })
     expect(el.querySelector('[data-testid="video-item"]')).not.toBeNull()
   })
 
@@ -122,13 +127,39 @@ describe('ProjectPagesSection', () => {
     expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
-  it('has a two-button page switch and no legacy view toggle', async () => {
-    const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], videos: [NEW_V] })} />)
+  it('the tab prop picks what renders; there is no page switch or legacy view toggle', async () => {
+    const over = { knowledge: [NEW_K], videos: [NEW_V], macros: [...MACROS, REVIEW] }
+    const el = mount(<ProjectPagesSection {...props(over)} />)
     await flush()
+    expect(el.querySelector('[data-testid="project-home-page-switch"]')).toBeNull()
     expect(el.querySelector('[data-testid="project-home-view"]')).toBeNull()
-    const btns = Array.from(el.querySelectorAll('[data-testid="project-home-page-switch"] button'))
-    expect(btns.map((b) => b.textContent)).toEqual(['Knowledge Pages', 'Video Pages'])
-    expect(btns.map((b) => b.getAttribute('data-page'))).toEqual(['knowledge', 'videos'])
+    expect(el.querySelector('[data-page]')).toBeNull()
+    const visible = () => ({
+      knowledge: el.querySelectorAll('[data-testid="knowledge-page-item"]').length,
+      videos: el.querySelectorAll('[data-testid="video-item"]').length,
+      hotkeys: el.querySelectorAll('[data-testid="project-home-hotkey"]').length,
+    })
+    expect(visible()).toEqual({ knowledge: 1, videos: 0, hotkeys: 0 })
+    await show({ ...over, tab: 'videos' })
+    expect(visible()).toEqual({ knowledge: 0, videos: 1, hotkeys: 0 })
+    await show({ ...over, tab: 'tools' })
+    expect(visible()).toEqual({ knowledge: 0, videos: 0, hotkeys: 1 })
+  })
+
+  it('lays pages and videos out as a 252px list column beside a content pane that fills the height', async () => {
+    for (const tab of ['pages', 'videos']) {
+      const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], videos: [NEW_V], tab })} />)
+      await flush()
+      const grid = el.querySelector('[data-testid="project-home-library"]') as HTMLElement
+      expect(grid.style.gridTemplateColumns.replace(/\s/g, '')).toBe('252pxminmax(0,1fr)')
+      expect(grid.className).toContain('gap-[20px]')
+      const pane = el.querySelector('[data-testid="project-home-content"]') as HTMLElement
+      expect(pane.style.height).toBe('')
+      expect(pane.getAttribute('style') ?? '').not.toContain('100vh')
+      act(() => root?.unmount())
+      container?.remove()
+      root = null
+    }
   })
 
   it('knowledge page lists entries in given (newest first) order and renders the selected in HtmlFrame', async () => {
@@ -155,8 +186,8 @@ describe('ProjectPagesSection', () => {
   })
 
   it('video page lists videos with title, kind, length, created, LUFS and grade', async () => {
-    const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V, OLD_V] })} />)
-    await switchTo(el, 'videos')
+    const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V, OLD_V], tab: 'videos' })} />)
+    await flush()
     const items = Array.from(el.querySelectorAll('[data-testid="video-item"]'))
     expect(items).toHaveLength(2)
     expect(items[0].textContent).toContain('Newer video')
@@ -174,8 +205,8 @@ describe('ProjectPagesSection', () => {
   })
 
   it('video entry with meta null shows its error line', async () => {
-    const el = mount(<ProjectPagesSection {...props({ videos: [vEntry('bad', '', 5, {}, false)] })} />)
-    await switchTo(el, 'videos')
+    const el = mount(<ProjectPagesSection {...props({ videos: [vEntry('bad', '', 5, {}, false)], tab: 'videos' })} />)
+    await flush()
     expect(el.querySelector('[data-testid="video-item"]')?.textContent).toContain('bad meta')
   })
 
@@ -187,7 +218,7 @@ describe('ProjectPagesSection', () => {
     expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
     act(() => macroBtn(el, 'builtin-project-home').click())
     expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
-    await switchTo(el, 'videos')
+    await show({ onLaunch, tab: 'videos' })
     expect(macroBtn(el, 'builtin-demo-video').textContent).toContain('Generate Demo Video')
     expect(macroBtn(el, 'builtin-project-home')).toBeNull()
     expect(el.querySelector('[data-testid="project-home-demo-length"]')).not.toBeNull()
@@ -220,8 +251,8 @@ describe('ProjectPagesSection', () => {
     const STYLE = '[data-testid="project-home-demo-style"]'
     const LENGTH = '[data-testid="project-home-demo-length"]'
     async function mountVideos(onLaunch = vi.fn(), over: Record<string, unknown> = {}) {
-      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], onLaunch, ...over })} />)
-      await switchTo(el, 'videos')
+      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V], onLaunch, tab: 'videos', ...over })} />)
+      await flush()
       return el
     }
     function pick(select: HTMLSelectElement, value: string) {
@@ -347,10 +378,9 @@ describe('ProjectPagesSection', () => {
     })
   })
 
-  describe('hot-key strip', () => {
+  describe('tools tab hot-key strip', () => {
     const STRIP = '[data-testid="project-home-hotkeys"]'
     const KEY = '[data-testid="project-home-hotkey"]'
-    const REVIEW = macro({ id: 'review-md', label: 'Review MD network', surface: 'project-home' })
     const WITH_INPUTS = macro({
       id: 'with-inputs',
       label: 'Ask',
@@ -360,22 +390,38 @@ describe('ProjectPagesSection', () => {
     const keyBtn = (el: HTMLElement, id: string) =>
       el.querySelector(`${KEY}[data-macro-id="${id}"]`) as HTMLButtonElement
 
-    it('is absent with only the builtins', () => {
-      const el = mount(<ProjectPagesSection {...props()} />)
+    it('is absent with only the builtins, leaving a one-line hint', () => {
+      const el = mount(<ProjectPagesSection {...props({ tab: 'tools' })} />)
       expect(el.querySelector(STRIP)).toBeNull()
+      expect(el.querySelector('[data-testid="project-home-tools-empty"]')?.textContent).toContain('Surface: Project Home')
     })
 
-    it('never lists the builtins, on both pages', async () => {
-      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], videos: [NEW_V] })} />)
+    it('lists every macro but the two builtins, only on the tools tab, with no generate button there', async () => {
+      const over = { macros: [...MACROS, REVIEW], videos: [NEW_V] }
+      const el = mount(<ProjectPagesSection {...props({ ...over, tab: 'tools' })} />)
       const ids = () => Array.from(el.querySelectorAll(KEY)).map((b) => b.getAttribute('data-macro-id'))
       expect(ids()).toEqual(['review-md'])
-      await switchTo(el, 'videos')
-      expect(ids()).toEqual(['review-md'])
+      expect(el.querySelector('[data-testid="project-home-tools-empty"]')).toBeNull()
+      expect(macroBtn(el, 'builtin-project-home')).toBeNull()
+      expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
+      await show({ ...over, tab: 'videos' })
+      expect(ids()).toEqual([])
+      await show({ ...over, tab: 'pages' })
+      expect(ids()).toEqual([])
+    })
+
+    it('does not wait on or report the pages load', () => {
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], tab: 'tools', loaded: false })} />)
+      expect(el.querySelector('[data-testid="project-home-loading"]')).toBeNull()
+      expect(el.querySelector(STRIP)).not.toBeNull()
+      act(() => root!.render(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], tab: 'tools', error: 'boom' })} />))
+      expect(el.querySelector('[data-testid="project-home-load-error"]')).toBeNull()
+      expect(el.querySelector(STRIP)).not.toBeNull()
     })
 
     it('a no-input macro calls onLaunch once', () => {
       const onLaunch = vi.fn()
-      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], onLaunch })} />)
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], onLaunch, tab: 'tools' })} />)
       act(() => keyBtn(el, 'review-md').click())
       expect(onLaunch).toHaveBeenCalledTimes(1)
       expect(onLaunch).toHaveBeenCalledWith(REVIEW)
@@ -383,7 +429,7 @@ describe('ProjectPagesSection', () => {
 
     it('an input macro opens the form; submit passes values, cancel does not launch', () => {
       const onLaunch = vi.fn()
-      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, WITH_INPUTS], onLaunch })} />)
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, WITH_INPUTS], onLaunch, tab: 'tools' })} />)
       act(() => keyBtn(el, 'with-inputs').click())
       expect(onLaunch).not.toHaveBeenCalled()
       expect(el.querySelector('[data-testid="macro-inputs-form"]')).not.toBeNull()
@@ -403,7 +449,7 @@ describe('ProjectPagesSection', () => {
     })
 
     it('disables while launching and shows Starting…', () => {
-      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], launching: 'review-md' })} />)
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], launching: 'review-md', tab: 'tools' })} />)
       expect(keyBtn(el, 'review-md').disabled).toBe(true)
       expect(keyBtn(el, 'review-md').textContent).toContain('Starting…')
     })
@@ -421,8 +467,8 @@ describe('ProjectPagesSection', () => {
       reason: null, startedAt: null, finishedAt: null, ...over,
     })
     const render = async (s: MacroJobStatus, onOpenSession = vi.fn()) => {
-      const el = mount(<ProjectPagesSection {...props({ jobStatus: { [s.macroId]: s }, onOpenSession })} />)
-      await switchTo(el, 'videos')
+      const el = mount(<ProjectPagesSection {...props({ jobStatus: { [s.macroId]: s }, onOpenSession, tab: 'videos' })} />)
+      await flush()
       return el
     }
     const line = (el: HTMLElement) => el.querySelector('[data-testid="project-home-job-status"]') as HTMLElement

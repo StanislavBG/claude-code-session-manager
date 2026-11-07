@@ -15,6 +15,11 @@ describe('navGroups Home swap', () => {
     const item = NAV_ITEMS.find((i) => i.key === 'project-home')
     expect(item?.label).toBe('Project Home')
   })
+
+  it('project-home hint names its three key buttons', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'project-home')
+    expect(item?.hint).toBe('Pages, videos and tools for this project')
+  })
 })
 
 describe('getNavItemsForFace', () => {

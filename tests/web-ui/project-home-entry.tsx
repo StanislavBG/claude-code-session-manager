@@ -1,7 +1,14 @@
 // Bundle entry for the real-Chromium Project Home screenshot spec. Mounts the real
-// ProjectPagesSection (the whole Project Home document) with a stub window.api.
+// key buttons + ProjectPagesSection (the whole Project Home document, laid out as
+// ProjectHome lays it out) with a stub window.api.
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ProjectPagesSection } from '../../src/renderer/components/tabs/projecthome/projectpages/ProjectPagesSection'
+import {
+  ProjectHomeKeyButtons,
+  libraryKeyStats,
+  type ProjectHomeTab,
+} from '../../src/renderer/components/tabs/projecthome/projectpages/ProjectHomeKeyButtons'
 
 const now = Date.now()
 const iso = (agoMin: number) => new Date(now - agoMin * 60_000).toISOString()
@@ -30,8 +37,20 @@ const page = (t: string, body: string) =>
 const macro = (id: string, label: string) => ({ id, label, agentName: 'x', tag: 'discussion', prompt: '', projects: ['*'], surface: 'project-home', builtin: true, createdAt: iso(1), updatedAt: iso(1) })
 const macros = [macro('builtin-project-home', 'Project Home'), macro('builtin-demo-video', 'Demo Video')] as any
 
-createRoot(document.getElementById('root')!).render(
-  <div style={{ maxWidth: 1080, margin: '0 auto', padding: '26px 34px' }} className="text-fg">
-    <ProjectPagesSection cwd="/fx" knowledge={knowledge as any} videos={videos as any} loaded macros={macros} launching={null} onLaunch={() => {}} />
-  </div>,
-)
+function Shell() {
+  const [tab, setTab] = useState<ProjectHomeTab>('pages')
+  return (
+    <div style={{ height: '100vh' }} className="flex min-h-0 flex-col gap-[18px] overflow-hidden px-[28px] pt-[22px] pb-[20px] text-fg">
+      <ProjectHomeKeyButtons
+        tab={tab}
+        onTabChange={setTab}
+        pages={libraryKeyStats(knowledge, undefined)}
+        videos={libraryKeyStats(videos, undefined)}
+        findingsCount={null}
+      />
+      <ProjectPagesSection tab={tab} cwd="/fx" knowledge={knowledge as any} videos={videos as any} loaded macros={macros} launching={null} onLaunch={() => {}} />
+    </div>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(<Shell />)

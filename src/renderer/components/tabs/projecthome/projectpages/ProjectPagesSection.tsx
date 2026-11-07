@@ -1,13 +1,15 @@
 /**
- * Project Home's two pages: Knowledge Pages (list + the selected page in the
- * static script-free HtmlFrame) and Video Pages (playlist + VideoPlayer). Each
- * page has its own generate MacroButton, build-status line and empty state.
+ * Project Home's section area under the key buttons; ProjectHome's `tab` picks
+ * what it shows. `pages`: the knowledge-page list (252px column) beside the
+ * selected page in the static script-free HtmlFrame. `videos`: the video list
+ * beside the VideoPlayer. Both keep their generate MacroButton, build-status
+ * line and empty state; the content pane fills the remaining height. `tools`:
+ * the hot-key strip — one button per other project-home macro (macros with
+ * inputs open MacroInputsForm first).
  *
  * `knowledge`/`videos`/`loaded` come from ProjectHome's single
  * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
  * `useMacroLaunch` wiring. Purely presentational — no store access here.
- * The section also hosts a hot-key strip: one button per other project-home macro
- * (macros with inputs open MacroInputsForm first).
  */
 import { useEffect, useState } from 'react'
 import { formatAgo } from '../../../../lib/formatTime'
@@ -16,6 +18,7 @@ import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { HtmlFrame } from './HtmlFrame'
 import { VideoPlayer } from './VideoPlayer'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
+import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
 import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../preload/api'
 
@@ -278,36 +281,6 @@ function HotKeyStrip({ macros, launching, onLaunch }: { macros: Macro[]; launchi
   )
 }
 
-type Page = 'knowledge' | 'videos'
-
-const PAGE_OPTIONS: { value: Page; label: string }[] = [
-  { value: 'knowledge', label: 'Knowledge Pages' },
-  { value: 'videos', label: 'Video Pages' },
-]
-
-function PageSwitch({ page, onChange }: { page: Page; onChange: (p: Page) => void }) {
-  return (
-    <div
-      data-testid="project-home-page-switch"
-      className="flex gap-0.5 p-0.5 rounded bg-bg-elev shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] text-[11px]"
-    >
-      {PAGE_OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          data-page={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`px-2 py-1 rounded whitespace-nowrap font-semibold ${
-            page === opt.value ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-faint hover:text-fg'
-          }`}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 /** Selected id, defaulting to the newest (first) entry; survives list refreshes while the id still exists. */
 function pickSelected<T extends { id: string }>(entries: T[], id: string | null): T | null {
   return entries.find((e) => e.id === id) ?? entries[0] ?? null
@@ -381,6 +354,7 @@ function videoRow(e: ProjectVideoEntry): LibraryRow {
 }
 
 export function ProjectPagesSection({
+  tab,
   cwd,
   knowledge,
   videos,
@@ -393,6 +367,7 @@ export function ProjectPagesSection({
   jobStatus,
   onOpenSession,
 }: {
+  tab: ProjectHomeTab
   cwd?: string | null
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
@@ -405,13 +380,26 @@ export function ProjectPagesSection({
   jobStatus?: Record<string, MacroJobStatus>
   onOpenSession?: (epicId: string) => void
 }) {
-  const [page, setPage] = useState<Page>('knowledge')
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
 
-  const isKnowledge = page === 'knowledge'
+  if (tab === 'tools') {
+    const hotKeys = macros.filter((m) => !PAGE_MACRO_IDS.includes(m.id))
+    return (
+      <div data-testid="project-home-section" data-tab={tab} className="min-h-0 flex-1 overflow-auto">
+        {hotKeys.length > 0 ? (
+          <HotKeyStrip macros={hotKeys} launching={launching} onLaunch={onLaunch} />
+        ) : (
+          <p data-testid="project-home-tools-empty" className="text-xs text-fg-faint">
+            No tools yet. Any macro saved with Surface: Project Home shows up here.
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  const isKnowledge = tab === 'pages'
   const macro = macros.find((m) => m.id === (isKnowledge ? 'builtin-project-home' : 'builtin-demo-video'))
-  const hotKeys = macros.filter((m) => !PAGE_MACRO_IDS.includes(m.id))
   const entries = isKnowledge ? knowledge : videos
   const has = entries.length > 0
   const failed = typeof error === 'string' && error !== ''
@@ -430,16 +418,10 @@ export function ProjectPagesSection({
   const selectedV = pickSelected(videos, videoId)
 
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-2.5">
-        <PageSwitch page={page} onChange={setPage} />
-        <div className="flex items-start gap-2.5">
-          <HotKeyStrip macros={hotKeys} launching={launching} onLaunch={onLaunch} />
-          {button}
-        </div>
-      </div>
+    <div data-testid="project-home-section" data-tab={tab} className="flex min-h-0 flex-1 flex-col gap-3">
+      {button && <div className="flex flex-none flex-wrap items-start justify-end gap-2.5">{button}</div>}
       {failed ? (
-        <div data-testid="project-home-load-error" className="flex justify-center py-16">
+        <div data-testid="project-home-load-error" className="flex min-h-0 flex-1 justify-center overflow-auto py-16">
           <div className="flex flex-col items-center gap-2.5">
             <span className="text-xs text-red-400">Could not load pages: {error}</span>
             <button
@@ -453,11 +435,14 @@ export function ProjectPagesSection({
           </div>
         </div>
       ) : !loaded ? (
-        <div data-testid="project-home-loading" className="flex justify-center py-16">
+        <div data-testid="project-home-loading" className="flex min-h-0 flex-1 justify-center overflow-auto py-16">
           <span className="text-xs text-fg-faint">Loading pages…</span>
         </div>
       ) : !has ? (
-        <div data-testid={isKnowledge ? 'knowledge-page-empty' : 'video-page-empty'} className="flex justify-center py-16">
+        <div
+          data-testid={isKnowledge ? 'knowledge-page-empty' : 'video-page-empty'}
+          className="flex min-h-0 flex-1 justify-center overflow-auto py-16"
+        >
           <div className="flex flex-col items-center gap-2.5">
             <span className="text-xs text-fg-faint">
               {isKnowledge ? 'No knowledge pages yet.' : 'No videos yet.'}
@@ -465,31 +450,37 @@ export function ProjectPagesSection({
           </div>
         </div>
       ) : (
-        <div className="grid gap-3" style={{ gridTemplateColumns: '240px 1fr' }}>
-          {isKnowledge ? (
-            <ProjectLibraryList
-              label="Knowledge pages"
-              itemTestId="knowledge-page-item"
-              cwd={cwd}
-              kind="knowledge"
-              rows={knowledge.map(knowledgeRow)}
-              selectedId={selectedK?.id ?? null}
-              onSelect={setKnowledgeId}
-            />
-          ) : (
-            <ProjectLibraryList
-              label="Videos"
-              itemTestId="video-item"
-              cwd={cwd}
-              kind="video"
-              rows={videos.map(videoRow)}
-              selectedId={selectedV?.id ?? null}
-              onSelect={setVideoId}
-            />
-          )}
+        <div
+          data-testid="project-home-library"
+          className="grid min-h-0 flex-1 gap-[20px]"
+          style={{ gridTemplateColumns: '252px minmax(0,1fr)', gridTemplateRows: 'minmax(0,1fr)' }}
+        >
+          <div className="min-h-0 overflow-y-auto">
+            {isKnowledge ? (
+              <ProjectLibraryList
+                label="Knowledge pages"
+                itemTestId="knowledge-page-item"
+                cwd={cwd}
+                kind="knowledge"
+                rows={knowledge.map(knowledgeRow)}
+                selectedId={selectedK?.id ?? null}
+                onSelect={setKnowledgeId}
+              />
+            ) : (
+              <ProjectLibraryList
+                label="Videos"
+                itemTestId="video-item"
+                cwd={cwd}
+                kind="video"
+                rows={videos.map(videoRow)}
+                selectedId={selectedV?.id ?? null}
+                onSelect={setVideoId}
+              />
+            )}
+          </div>
           <div
-            className="overflow-hidden rounded-xl border border-line bg-bg-hi"
-            style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}
+            data-testid="project-home-content"
+            className="min-h-0 overflow-auto rounded-xl border border-line bg-bg-hi"
           >
             {isKnowledge ? (
               selectedK && <KnowledgeFrame entry={selectedK} />

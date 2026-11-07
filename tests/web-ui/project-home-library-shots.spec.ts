@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url)
 
-// Real Chromium (never Electron). Renders the real Project Home document
-// (ProjectPagesSection) with CSS from the built web renderer (dist-web/app.css) and a stub
+// Real Chromium (never Electron). Renders the real Project Home document (the
+// ProjectHomeKeyButtons + ProjectPagesSection shell) with CSS from the built web renderer (dist-web/app.css) and a stub
 // window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs for the validation record.
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation
 // plus an inverted render of the same page.
@@ -56,7 +56,7 @@ test('Project Home screenshots: knowledge + videos, light + dark', async () => {
       await page.frameLocator('iframe[title]').first().locator('h1').waitFor()
       await page.screenshot({ path: path.join(OUT, `knowledge-${scheme}.png`) })
 
-      await page.locator('[data-page="videos"]').click()
+      await page.locator('[data-testid="project-home-key"][data-tab="videos"]').click()
       await expect(page.getByTestId('video-item')).toHaveCount(2)
       await page.frameLocator('iframe').first().locator('h1').waitFor()
       await page.waitForTimeout(500)

@@ -37,7 +37,7 @@ scoping scheme.
   step (`epicWorktreeMerge.cjs`'s `integrateEpicBranch`: ff-only → merge-commit → abort-and-flag). A real
   conflict sets `worktree.status` to `needs_merge_resolution` (EpicDetail's banner, "Resolve in Terminal")
   rather than blocking anything. Settings' project scope holds the per-project opt-out.
-- **Persistence:** active Epics in `prompt-sessions/active-index.json`; completed ones archived one JSON per
+- **Persistence:** active Epics in `session-manager-operations/prompt-sessions/active-index.json`; completed ones archived one JSON per
   Epic in the same folder. Resume reopens the same Epic in place (same id and
   claudeSessionId, full history) — see [lifecycle](../prompt-sessions/README.md#lifecycle).
 
@@ -198,10 +198,10 @@ scoping scheme.
   built. Home still reports queue state, and those links route through `openPanel`, which asserts
   `navFace: 'project'` for any PROJECT-only NavKey (`isProjectOnlyNavKey`).
 - On disk, per project: PRD sources in `scheduler/epics/<epic-id>/prds/` (every new PRD mints or joins an Epic
-  via `epicMint.cjs`), queue + history shards in `scheduler/state/` (`queueStore.cjs`). A flat `scheduler/prds/`
-  is auto-consolidated into `prds-archived/` at the top of every `reconcile()` pass, so a file dropped there
+  via `epicMint.cjs`), queue + history shards in `session-manager-operations/scheduler/state/` (`queueStore.cjs`). A flat scheduler/prds/
+  is auto-consolidated into `session-manager-operations/scheduler/prds-archived/` at the top of every `reconcile()` pass, so a file dropped there
   while the app runs is swept before it can become a queue row. Machine-level state is runtime only:
-  `~/.claude/session-manager/scheduler-machine.json`, run logs under `scheduled-plans/runs/`, and the session
+  `~/.claude/session-manager/scheduler-machine.json`, run logs under `~/.claude/session-manager/scheduled-plans/runs/`, and the session
   slot pool (`lib/scheduler/sessionSlots.cjs`) — the one machine-wide pool every scheduler job and chat run acquires from.
 - **PRD authoring is API-only.** `scheduler_create_prd` validates frontmatter, atomically allocates `NN`, and
   enforces the Epic-join rule. A hand-written PRD is never sanctioned (`audit-ops-hygiene.cjs` and `ops-sweep`

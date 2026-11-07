@@ -247,15 +247,16 @@ describe('VideosPane list column', () => {
     expect(tid('video-report')).toBeNull()
   })
 
-  it('with no entries keeps the video-page-empty element with a Generate video button that launches', () => {
+  it('with no entries keeps the video-page-empty element: the starter gallery, whose Project demo Generate launches', () => {
     const onLaunch = vi.fn()
     const el = mount({ entries: [], onLaunch })
     const empty = tid('video-page-empty', el)!
-    expect(empty.textContent).toContain('No videos yet.')
+    expect(tid('library-empty-eyebrow', empty)?.textContent).toBe('NO VIDEOS YET')
     expect(tid('project-home-library')).toBeNull()
     expect(tid('project-home-regenerate')).toBeNull()
-    click(tid('project-home-generate', empty))
-    click(tid('composer-generate'))
+    expect(tid('project-home-generate')).toBeNull()
+    click(tid('template-card-quick', empty.querySelector('[data-tpl="demo"]')!))
+    expect(tid('project-home-composer')).toBeNull()
     expect(onLaunch.mock.calls).toEqual([[DEMO, DEMO_LINES]])
   })
 
@@ -511,7 +512,7 @@ describe('VideosPane Generate and Regenerate', () => {
     const line = tid('project-home-job-status', tid('video-page-empty')!)!
     expect(line.textContent).toBe('Failed: timed out after 30m')
     expect(line.getAttribute('role')).toBe('alert')
-    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
+    expect((tid('template-card-quick') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('disables both buttons while any macro launches, labelling its own launch Starting…', () => {

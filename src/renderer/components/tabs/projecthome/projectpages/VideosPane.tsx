@@ -20,6 +20,11 @@
  * takes the player's place and the title bar offers Open session. A failed job shows its reason in
  * the building row's place until the next launch.
  *
+ * Empty (§4): no videos and nothing building shows LibraryEmptyState — one starter card per video
+ * template, previewed in its style's colours. Its Generate launches that template's defaults
+ * (`videoPromptLines` of `videoDefaults`) straight through `launch`; Customize opens the composer on
+ * the template. A failed job's reason shows above the cards; the TIP link calls `onGoTools`.
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
@@ -29,7 +34,15 @@ import { VideoPlayer } from './VideoPlayer'
 import { createdLabel, fitInstructions } from './PagesPane'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
-import { VIDEO_STYLES, VIDEO_TEMPLATES, videoCfgFromEntry, videoDefaults, type VideoStyle } from './composerTemplates'
+import { LibraryEmptyState } from './LibraryEmptyState'
+import {
+  VIDEO_STYLES,
+  VIDEO_TEMPLATES,
+  videoCfgFromEntry,
+  videoDefaults,
+  videoPromptLines,
+  type VideoStyle,
+} from './composerTemplates'
 import {
   BUILDING_ROW_ID,
   BuildFailedRow,
@@ -61,6 +74,8 @@ const DURATION_CLASS =
 
 /** Composer template Regenerate starts from when an entry's meta is unreadable (it records no settings). */
 const FALLBACK_TEMPLATE = 'demo'
+
+const NO_MACRO_TITLE = 'The built-in Demo Video macro is not available for this project'
 
 /** QUALITY REPORT's four numbers (§5), in display order. */
 const REPORT_STATS = [
@@ -318,6 +333,8 @@ export interface VideosPaneProps {
   lastLaunch?: BuildLaunch
   /** Reports each launch so ProjectHome can keep it as the macro's `lastLaunch`. */
   onLaunched?: (macroId: string, launch: BuildLaunch) => void
+  /** Switches Project Home to Tools — the empty state's `Review MD network` link. */
+  onGoTools?: () => void
 }
 
 export function VideosPane({
@@ -332,10 +349,12 @@ export function VideosPane({
   onSelect,
   lastLaunch,
   onLaunched,
+  onGoTools,
 }: VideosPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
-  // Open composer: `{}` = Generate video, `{ regen }` = Regenerate… (mounted per open — it reads its props once).
-  const [composer, setComposer] = useState<{ regen?: ComposerRegen } | null>(null)
+  // Open composer: `{}` = Generate video, `{ tplId }` = an empty-state card, `{ regen }` = Regenerate…
+  // (mounted per open — it reads its props once).
+  const [composer, setComposer] = useState<{ regen?: ComposerRegen; tplId?: string } | null>(null)
   const select = onSelect ?? setOwnId
   const pickedId = onSelect ? (selectedId ?? null) : ownId
   const build = isBuilding(jobStatus) ? jobStatus : undefined
@@ -381,17 +400,23 @@ export function VideosPane({
   }
 
   const composerNode = composer && (
-    <GenerateComposer kind="video" regen={composer.regen} onClose={() => setComposer(null)} onGenerate={launch} />
+    <GenerateComposer
+      kind="video"
+      regen={composer.regen}
+      initialTplId={composer.tplId}
+      onClose={() => setComposer(null)}
+      onGenerate={launch}
+    />
   )
-  const generateButton = (fullWidth: boolean) => (
+  const generateButton = (
     <button
       type="button"
       data-testid="project-home-generate"
       data-kind="video"
       disabled={busy}
-      title={macro ? undefined : 'The built-in Demo Video macro is not available for this project'}
+      title={macro ? undefined : NO_MACRO_TITLE}
       onClick={() => setComposer({})}
-      className={`${GENERATE_CLASS} ${fullWidth ? 'w-full' : 'px-4'}`}
+      className={`${GENERATE_CLASS} w-full`}
     >
       <AlmanacIcon name="plus" size={14} stroke={2} />
       {macro && launching === macro.id ? 'Starting…' : 'Generate video'}
@@ -424,7 +449,7 @@ export function VideosPane({
           style={{ gridTemplateColumns: '252px minmax(0,1fr)', gridTemplateRows: 'minmax(0,1fr)' }}
         >
           <div className="flex min-h-0 flex-col gap-3">
-            {generateButton(true)}
+            {generateButton}
             <div
               data-testid="project-home-videos-header"
               className="flex flex-none items-baseline justify-between px-0.5 pt-0.5 font-mono text-[10.5px] text-fg-faint"
@@ -523,13 +548,16 @@ export function VideosPane({
           </div>
         </div>
       ) : (
-        <div data-testid="video-page-empty" className="flex min-h-0 flex-1 justify-center overflow-auto py-16">
-          <div className="flex flex-col items-center gap-2.5">
-            <span className="text-xs text-fg-faint">No videos yet.</span>
-            {generateButton(false)}
-            {failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
-          </div>
-        </div>
+        <LibraryEmptyState
+          kind="video"
+          onQuick={(tplId) => launch(videoPromptLines(videoDefaults(tplId)))}
+          onCustomize={(tplId) => setComposer({ tplId })}
+          onGoTools={onGoTools}
+          disabled={busy}
+          disabledTitle={macro ? undefined : NO_MACRO_TITLE}
+          starting={macro !== undefined && launching === macro.id}
+          notice={failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
+        />
       )}
       {composerNode}
     </>

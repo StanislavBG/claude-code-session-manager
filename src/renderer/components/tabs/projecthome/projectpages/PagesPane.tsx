@@ -15,6 +15,11 @@
  * else is picked; selected, it shows BuildingPanel with Open session in the title bar. A failed job
  * shows its reason in the building row's place until the next launch.
  *
+ * Empty (§4): no pages and nothing building shows LibraryEmptyState — one starter card per page
+ * template. Its Generate launches that template's defaults (`pagePromptLines` of `pageDefaults`)
+ * straight through `launch`; Customize, and Custom topic's `Name a topic`, open the composer on the
+ * template. A failed job's reason shows above the cards; the TIP link calls `onGoTools`.
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
@@ -24,7 +29,8 @@ import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { HtmlFrame } from './HtmlFrame'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
-import { pageCfgFromEntry, pageTemplate, type PageKind } from './composerTemplates'
+import { LibraryEmptyState } from './LibraryEmptyState'
+import { pageCfgFromEntry, pageDefaults, pagePromptLines, pageTemplate, type PageKind } from './composerTemplates'
 import {
   BUILDING_ROW_ID,
   BuildFailedRow,
@@ -45,6 +51,8 @@ export const EXTRA_INSTRUCTIONS_CAP = 4000
 
 /** `pagePromptLines` opens with Page, Audience, Length and Read from; any line after them is the Focus text. */
 const PAGE_FIXED_LINES = 4
+
+const NO_MACRO_TITLE = 'The built-in Project Home macro is not available for this project'
 
 const GENERATE_CLASS =
   'flex h-[38px] flex-none items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-semibold text-bg-hi cursor-pointer enabled:hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
@@ -187,6 +195,8 @@ export interface PagesPaneProps {
   lastLaunch?: BuildLaunch
   /** Reports each launch so ProjectHome can keep it as the macro's `lastLaunch`. */
   onLaunched?: (macroId: string, launch: BuildLaunch) => void
+  /** Switches Project Home to Tools — the empty state's `Review MD network` link. */
+  onGoTools?: () => void
 }
 
 export function PagesPane({
@@ -201,10 +211,12 @@ export function PagesPane({
   onSelect,
   lastLaunch,
   onLaunched,
+  onGoTools,
 }: PagesPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
-  // Open composer: `{}` = Generate page, `{ regen }` = Regenerate… (mounted per open — it reads its props once).
-  const [composer, setComposer] = useState<{ regen?: ComposerRegen } | null>(null)
+  // Open composer: `{}` = Generate page, `{ tplId }` = an empty-state card, `{ regen }` = Regenerate…
+  // (mounted per open — it reads its props once).
+  const [composer, setComposer] = useState<{ regen?: ComposerRegen; tplId?: string } | null>(null)
   const select = onSelect ?? setOwnId
   const pickedId = onSelect ? (selectedId ?? null) : ownId
   const build = isBuilding(jobStatus) ? jobStatus : undefined
@@ -247,17 +259,23 @@ export function PagesPane({
   }
 
   const composerNode = composer && (
-    <GenerateComposer kind="page" regen={composer.regen} onClose={() => setComposer(null)} onGenerate={launch} />
+    <GenerateComposer
+      kind="page"
+      regen={composer.regen}
+      initialTplId={composer.tplId}
+      onClose={() => setComposer(null)}
+      onGenerate={launch}
+    />
   )
-  const generateButton = (fullWidth: boolean) => (
+  const generateButton = (
     <button
       type="button"
       data-testid="project-home-generate"
       data-kind="page"
       disabled={busy}
-      title={macro ? undefined : 'The built-in Project Home macro is not available for this project'}
+      title={macro ? undefined : NO_MACRO_TITLE}
       onClick={() => setComposer({})}
-      className={`${GENERATE_CLASS} ${fullWidth ? 'w-full' : 'px-4'}`}
+      className={`${GENERATE_CLASS} w-full`}
     >
       <AlmanacIcon name="plus" size={14} stroke={2} />
       {macro && launching === macro.id ? 'Starting…' : 'Generate page'}
@@ -289,7 +307,7 @@ export function PagesPane({
           style={{ gridTemplateColumns: '252px minmax(0,1fr)', gridTemplateRows: 'minmax(0,1fr)' }}
         >
           <div className="flex min-h-0 flex-col gap-3">
-            {generateButton(true)}
+            {generateButton}
             <div
               data-testid="project-home-pages-header"
               className="flex flex-none items-baseline justify-between px-0.5 pt-0.5 font-mono text-[10.5px] text-fg-faint"
@@ -372,13 +390,16 @@ export function PagesPane({
           </div>
         </div>
       ) : (
-        <div data-testid="knowledge-page-empty" className="flex min-h-0 flex-1 justify-center overflow-auto py-16">
-          <div className="flex flex-col items-center gap-2.5">
-            <span className="text-xs text-fg-faint">No knowledge pages yet.</span>
-            {generateButton(false)}
-            {failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
-          </div>
-        </div>
+        <LibraryEmptyState
+          kind="page"
+          onQuick={(tplId) => launch(pagePromptLines(tplId, pageDefaults(tplId)))}
+          onCustomize={(tplId) => setComposer({ tplId })}
+          onGoTools={onGoTools}
+          disabled={busy}
+          disabledTitle={macro ? undefined : NO_MACRO_TITLE}
+          starting={macro !== undefined && launching === macro.id}
+          notice={failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
+        />
       )}
       {composerNode}
     </>

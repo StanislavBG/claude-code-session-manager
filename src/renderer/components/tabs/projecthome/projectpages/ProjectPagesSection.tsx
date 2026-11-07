@@ -6,7 +6,9 @@
  * build through the Generate composer (Generate page|video, Regenerate…).
  * `tools`: ToolsPane — the same list | content layout, Review MD network first,
  * then every other project-home macro (there is no hot-key strip any more).
- * The loading / load-error states cover pages and videos.
+ * The loading / load-error states cover pages and videos. With no entries,
+ * each pane shows its starter gallery (LibraryEmptyState), whose TIP link
+ * calls `onGoTools` — ProjectHome switches to the Tools tab.
  *
  * `knowledge`/`videos`/`loaded` come from ProjectHome's single
  * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
@@ -39,6 +41,7 @@ export function ProjectPagesSection({
   onOpenSession,
   launches,
   onLaunched,
+  onGoTools,
 }: {
   tab: ProjectHomeTab
   cwd?: string | null
@@ -55,6 +58,8 @@ export function ProjectPagesSection({
   /** This window's last launch per macro id (ProjectHome); empty after an app reload. */
   launches?: Record<string, BuildLaunch>
   onLaunched?: (macroId: string, launch: BuildLaunch) => void
+  /** Switches Project Home to its Tools tab (ProjectHome's `onTabChange('tools')`) — the empty states' TIP link. */
+  onGoTools?: () => void
 }) {
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
@@ -102,6 +107,7 @@ export function ProjectPagesSection({
           onSelect={setKnowledgeId}
           lastLaunch={launches?.['builtin-project-home']}
           onLaunched={onLaunched}
+          onGoTools={onGoTools}
         />
       ) : (
         <VideosPane
@@ -116,6 +122,7 @@ export function ProjectPagesSection({
           onSelect={setVideoId}
           lastLaunch={launches?.['builtin-demo-video']}
           onLaunched={onLaunched}
+          onGoTools={onGoTools}
         />
       )}
     </div>

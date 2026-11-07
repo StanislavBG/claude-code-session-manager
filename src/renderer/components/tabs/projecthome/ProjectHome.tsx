@@ -105,6 +105,7 @@ function ProjectHomeComponent() {
         onOpenSession={navigateToEpic}
         launches={cwdLaunches}
         onLaunched={recordLaunch}
+        onGoTools={() => setTab('tools')}
       />
     </div>
   )

@@ -186,22 +186,23 @@ describe('PagesPane list column', () => {
     expect(tid('project-home-page-sub')?.textContent).toBe('FAQ · 2h ago')
   })
 
-  it('with no entries keeps the knowledge-page-empty element with a Generate page button that launches', () => {
+  it('with no entries keeps the knowledge-page-empty element: the starter gallery, whose Overview Generate launches', () => {
     const onLaunch = vi.fn()
     const el = mount({ entries: [], onLaunch })
     const empty = tid('knowledge-page-empty', el)!
-    expect(empty.textContent).toContain('No knowledge pages yet.')
+    expect(tid('library-empty-eyebrow', empty)?.textContent).toBe('NO PAGES YET')
     expect(tid('project-home-library')).toBeNull()
     expect(tid('project-home-regenerate')).toBeNull()
-    click(tid('project-home-generate', empty))
-    click(tid('composer-generate'))
+    expect(tid('project-home-generate')).toBeNull()
+    click(tid('template-card-quick', empty.querySelector('[data-tpl="overview"]')!))
+    expect(tid('project-home-composer')).toBeNull()
     expect(onLaunch.mock.calls).toEqual([[HOME, OVERVIEW_LINES]])
   })
 
   it('an open composer keeps its form when the first page lands under it', async () => {
     const onLaunch = vi.fn()
     mount({ entries: [], onLaunch })
-    click(tid('project-home-generate'))
+    click(tid('template-card-customize', document.querySelector('[data-testid="template-card"][data-tpl="overview"]')!))
     type(tid('composer-focus'), 'keep me')
     rerender({ entries: [OVERVIEW], onLaunch })
     await flush()
@@ -592,12 +593,12 @@ describe('PagesPane build state', () => {
     expect(col(tid('project-home-building-row')!, 'meta')).toBe('Queued')
   })
 
-  it('a failure with no pages yet shows under the empty state Generate button', () => {
+  it('a failure with no pages yet shows in the empty state, its starter cards still enabled', () => {
     mount({ entries: [], jobStatus: status({ state: 'failed', status: 'failed', reason: 'boom', epicId: null }) })
     const line = tid('project-home-job-status', tid('knowledge-page-empty')!)!
     expect(line.textContent).toBe('Failed: boom')
     expect(tid('project-home-job-session')).toBeNull()
-    expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
+    expect((tid('template-card-quick') as HTMLButtonElement).disabled).toBe(false)
   })
 })
 

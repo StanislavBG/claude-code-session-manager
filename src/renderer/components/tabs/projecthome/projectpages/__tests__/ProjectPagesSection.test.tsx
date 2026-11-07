@@ -296,20 +296,20 @@ describe('ProjectPagesSection', () => {
     expect(el.querySelector('[data-testid="video-item"]')?.textContent).toContain('bad meta')
   })
 
-  it('each page has its own empty state with its generate button', async () => {
+  it('each page has its own empty state with its starter cards', async () => {
     const onLaunch = vi.fn()
     const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)
     expect(el.querySelector('iframe')).toBeNull()
     expect(macroBtn(el, 'builtin-project-home')).toBeNull()
     expect(macroBtn(el, 'builtin-demo-video')).toBeNull()
-    act(() => byTestId('project-home-generate', byTestId('knowledge-page-empty', el)!)!.click())
-    act(() => byTestId('composer-generate')!.click())
+    const pages = byTestId('knowledge-page-empty', el)!
+    act(() => byTestId('template-card-quick', pages.querySelector('[data-tpl="overview"]')!)!.click())
     expect(onLaunch.mock.calls).toEqual([[HOME_MACRO, OVERVIEW_LINES]])
     await show({ onLaunch, tab: 'videos' })
     const empty = byTestId('video-page-empty', el)!
-    expect(empty.textContent).toContain('No videos yet.')
+    expect(byTestId('library-empty-eyebrow', empty)?.textContent).toBe('NO VIDEOS YET')
     expect(oldToolbar(el)).toEqual([])
-    act(() => byTestId('project-home-generate', empty)!.click())
+    act(() => byTestId('template-card-customize', empty.querySelector('[data-tpl="demo"]')!)!.click())
     expect(byTestId('composer-title')?.textContent).toBe('Generate video')
     act(() => byTestId('composer-generate')!.click())
     expect(onLaunch.mock.calls).toEqual([[HOME_MACRO, OVERVIEW_LINES], [DEMO_MACRO, DEMO_LINES]])
@@ -531,10 +531,11 @@ describe('ProjectPagesSection', () => {
   })
 
   it('disables Generate page and Generate video while launching', async () => {
-    mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
+    const lists = { knowledge: [NEW_K], videos: [NEW_V] }
+    mount(<ProjectPagesSection {...props({ ...lists, launching: 'builtin-project-home' })} />)
     expect(generateBtn()!.disabled).toBe(true)
     expect(generateBtn()!.textContent).toBe('Starting…')
-    await show({ launching: 'builtin-demo-video', tab: 'videos' })
+    await show({ ...lists, launching: 'builtin-demo-video', tab: 'videos' })
     expect(generateBtn()!.getAttribute('data-kind')).toBe('video')
     expect(generateBtn()!.disabled).toBe(true)
     expect(generateBtn()!.textContent).toBe('Starting…')
@@ -574,7 +575,7 @@ describe('ProjectPagesSection', () => {
       expect(line(el)).toBeNull()
       expect(buildingMeta(el)).toBeUndefined()
       expect(byTestId('video-page-empty', el)).not.toBeNull()
-      expect(generateBtn()!.disabled).toBe(false)
+      expect((byTestId('template-card-quick', el) as HTMLButtonElement).disabled).toBe(false)
     })
     it('failed: reason with role=alert, no session link without epicId', async () => {
       const el = await render(st({ state: 'failed', reason: 'timed out after 30m', epicId: null }))

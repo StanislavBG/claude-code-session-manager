@@ -60,7 +60,12 @@ describe('ProjectHome with no active tab', () => {
     await act(async () => {
       mount(<ProjectHome />)
     })
-    const text = container?.textContent ?? ''
+    // The starter gallery's template cards preview what each page covers (How it works covers
+    // "Agent tools"); that is template data, not a live block, so the titles are checked outside them.
+    expect(container?.querySelector('[data-testid="knowledge-page-empty"] [data-testid="template-card"]')).not.toBeNull()
+    const outsideCards = container!.cloneNode(true) as HTMLElement
+    outsideCards.querySelectorAll('[data-testid="template-card"]').forEach((card) => card.remove())
+    const text = outsideCards.textContent ?? ''
     expect(text).not.toContain('What is in flight')
     expect(text).not.toContain('Waiting on you')
     expect(text).not.toContain('Agent tools')

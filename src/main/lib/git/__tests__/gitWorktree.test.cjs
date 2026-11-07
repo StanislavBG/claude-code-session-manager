@@ -64,6 +64,7 @@ beforeEach(() => {
   originalJobMax = process.env.SM_JOB_WORKTREE_MAX;
   originalEpicDisable = process.env.SM_EPIC_WORKTREE_DISABLE;
   originalEpicMax = process.env.SM_EPIC_WORKTREE_MAX;
+  delete process.env.SM_LINEAR_LANDING_DISABLE;
   delete process.env.SM_JOB_WORKTREE_DISABLE;
   delete process.env.SM_JOB_WORKTREE_MAX;
   delete process.env.SM_EPIC_WORKTREE_DISABLE;
@@ -75,6 +76,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   const restore = (name, val) => { if (val === undefined) delete process.env[name]; else process.env[name] = val; };
+  delete process.env.SM_LINEAR_LANDING_DISABLE;
   restore('SM_JOB_WORKTREE_DISABLE', originalJobDisable);
   restore('SM_JOB_WORKTREE_MAX', originalJobMax);
   restore('SM_EPIC_WORKTREE_DISABLE', originalEpicDisable);
@@ -163,6 +165,7 @@ test('[job] a real merge conflict surfaces as an explicit integration failure an
 
 test('[job] merge-commit message text is byte-for-byte unchanged from the pre-generalization jobWorktree.cjs', async () => {
   const slug = 'test-slug-merge-message';
+  process.env.SM_LINEAR_LANDING_DISABLE = '1';
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
 
   fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job edit\n', 'utf8');
@@ -179,7 +182,117 @@ test('[job] merge-commit message text is byte-for-byte unchanged from the pre-ge
 
   const lastMessage = git(['log', '-1', '--format=%s'], repoCwd).trim();
   expect(lastMessage).toBe(`merge scheduler job ${slug}`);
+  expect(outcome.linearFallback).toBe('disabled');
 
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[linear] diverged job branch lands as linear commits with no merge commit', async () => {
+  const slug = 'test-slug-linear';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job.txt'), 'job\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job linear commit'], worktree.dir);
+  fs.writeFileSync(path.join(repoCwd, 'other.txt'), 'main\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main moves'], repoCwd);
+  const oldHead = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.linear).toBe(true);
+  expect('mergeCommit' in outcome).toBe(false);
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(outcome.sha);
+  expect(git(['rev-list', '--merges', `${oldHead}..HEAD`], repoCwd).trim()).toBe('');
+  expect(git(['log', '--first-parent', '--format=%s'], repoCwd)).toContain('job linear commit');
+  expect(fs.existsSync(path.join(repoCwd, 'job.txt'))).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[linear] diverged epic branch lands linearly too', async () => {
+  const epicId = 'linear-epic-1';
+  const worktree = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  fs.writeFileSync(path.join(worktree.dir, 'epic.txt'), 'epic\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'epic linear commit'], worktree.dir);
+  fs.writeFileSync(path.join(repoCwd, 'other.txt'), 'main\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main moves'], repoCwd);
+  const oldHead = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const outcome = await gitWorktree.integrateEpicBranch({ cwd: repoCwd, branch: worktree.branch, epicId });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.linear).toBe(true);
+  expect(git(['rev-list', '--merges', `${oldHead}..HEAD`], repoCwd).trim()).toBe('');
+  expect(git(['log', '--first-parent', '--format=%s'], repoCwd)).toContain('epic linear commit');
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[linear] two sequential diverged siblings both land linearly (replay recomputed onto the new HEAD)', async () => {
+  const a = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'lin-a' });
+  const b = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'lin-b' });
+  for (const [w, f] of [[a, 'a.txt'], [b, 'b.txt']]) {
+    fs.writeFileSync(path.join(w.dir, f), f, 'utf8');
+    git(['add', '-A'], w.dir);
+    git(['commit', '-q', '-m', `add ${f}`], w.dir);
+  }
+  const oldHead = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const ra = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: a.branch, slug: 'lin-a' });
+  const rb = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: b.branch, slug: 'lin-b' });
+  expect(ra.linear || ra.fastForward).toBe(true);
+  expect(rb.linear).toBe(true);
+  expect(git(['rev-list', '--merges', `${oldHead}..HEAD`], repoCwd).trim()).toBe('');
+  expect(git(['rev-list', '--count', `${oldHead}..HEAD`], repoCwd).trim()).toBe('2');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: a.dir, branch: a.branch });
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: b.dir, branch: b.branch });
+});
+
+test('[linear] a content conflict falls back to the merge path and reports the conflict', async () => {
+  const slug = 'lin-conflict';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job edit\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job edits README'], worktree.dir);
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'main edit\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main edits README'], repoCwd);
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('content_conflict');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[linear] SM_LINEAR_LANDING_DISABLE=1 keeps the merge-commit path with linearFallback', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1';
+  const slug = 'lin-disabled';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'j.txt'), 'j\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'j'], worktree.dir);
+  fs.writeFileSync(path.join(repoCwd, 'other.txt'), 'm\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'm'], repoCwd);
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.linearFallback).toBe('disabled');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[linear] a fast-forward blocked by an identical untracked file is auto-resolved; an ignored one refuses', async () => {
+  const slug = 'lin-blocked';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'dup.txt'), 'same\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'adds dup'], worktree.dir);
+  fs.writeFileSync(path.join(repoCwd, 'other.txt'), 'm\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'm'], repoCwd);
+  fs.writeFileSync(path.join(repoCwd, 'dup.txt'), 'same\n', 'utf8'); // untracked duplicate
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.linear).toBe(true);
+  expect(outcome.autoResolved).toBe('identical_working_tree_duplicates');
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
@@ -1141,6 +1254,7 @@ test('[job] reconcileWorktreesOnBoot logs a one-shot report line with reclaimed 
 // ──────────────────────────────────────────── PRD 1125: auto-resolve identical-duplicate merge blocks
 
 test('[job] integrateBranch auto-resolves when every blocking path (tracked + untracked) is byte-identical to the branch', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   const slug = 'test-slug-identical-duplicates';
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
   expect(worktree.ok).toBe(true);
@@ -1175,6 +1289,7 @@ test('[job] integrateBranch auto-resolves when every blocking path (tracked + un
 });
 
 test('[job] integrateBranch does NOT auto-resolve when one blocking path differs from the branch — same reason as today', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   const slug = 'test-slug-one-differing-path';
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
   expect(worktree.ok).toBe(true);
@@ -1448,6 +1563,7 @@ test('[guard][epic] integrateEpicBranch inherits the same guard and still merges
 // ── integrateBranch failure subtype classification (mc-01) ──
 
 test('[job] integrateBranch classifies a dirty different tracked file as failureKind blocking_paths', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   const slug = 'test-slug-kind-blocking';
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
   expect(worktree.ok).toBe(true);
@@ -1543,6 +1659,7 @@ async function conflictScenario(slug, { base, side, main }) {
 const MARKER_RE = /^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)/m;
 
 test('[job] integrateBranch auto-resolves a pure-addition .md conflict by concatenating ours then theirs', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   const slug = 'test-slug-pure-add';
   const worktree = await conflictScenario(slug, {
     base: { 'd.md': '# Doc\n\nintro\n' },
@@ -1564,6 +1681,7 @@ test('[job] integrateBranch auto-resolves a pure-addition .md conflict by concat
 });
 
 test('[job] integrateBranch reports hook_rejected when a commit-msg hook rejects the auto-resolve commit', async () => {
+  process.env.SM_LINEAR_LANDING_DISABLE = '1'; // exercises the --no-ff fallback path
   const slug = 'test-slug-pure-add-hook';
   const worktree = await conflictScenario(slug, {
     base: { 'd.md': '# Doc\n\nintro\n' },

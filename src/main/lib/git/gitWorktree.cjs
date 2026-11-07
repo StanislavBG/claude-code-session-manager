@@ -1601,11 +1601,79 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     return { ok: true, integrated: true, fastForward: true, sha: await tryResolveCommit(cwd, `${branch}^{commit}`) };
   } catch {
     // Main tree advanced since the worktree branched (a sibling job/Epic
-    // merged first) — a real merge commit still lands the branch's commit(s).
+    // merged first) — replay the branch linearly onto HEAD; a merge commit is
+    // only the documented fallback.
   }
+  let linearFallback = '';
+  if (process.env.SM_LINEAR_LANDING_DISABLE === '1') {
+    linearFallback = 'disabled';
+  } else {
+    const MAX_LINEAR_ATTEMPTS = 3;
+    let landed = null;
+    for (let attempt = 0; attempt < MAX_LINEAR_ATTEMPTS; attempt++) {
+      const headSha = await readHeadSha(cwd);
+      const r = await replayBranchOnto({ cwd, ontoSha: headSha, branch: branchHead });
+      if (!r.ok) {
+        if (r.failureKind === 'git_too_old' || r.failureKind === 'content_conflict') {
+          linearFallback = r.failureKind;
+          break;
+        }
+        return { ok: false, reason: r.reason, failureKind: 'other', baseHeadSha: headSha };
+      }
+      const success = {
+        ok: true, integrated: true, linear: true, sha: r.tipSha, replayedCommits: r.replayed.length,
+        ...(r.autoResolved ? { autoResolved: r.autoResolved, resolvedPaths: r.resolvedPaths } : {}),
+      };
+      try {
+        await execGit(['merge', '--ff-only', '--no-overwrite-ignore', r.tipSha], { cwd, timeout: 30_000 });
+        landed = success;
+        break;
+      } catch (ffErr) {
+        if ((await readHeadSha(cwd)) !== headSha) continue; // base moved — replay again
+        const ffText = (ffErr && (ffErr.stderrText || ffErr.message)) || String(ffErr);
+        const blocking = parseBlockingMergePaths(ffText);
+        if (!blocking) {
+          return { ok: false, reason: `linear landing failed: ${ffText}`, failureKind: 'other', baseHeadSha: headSha };
+        }
+        const allPaths = [...blocking.tracked, ...blocking.untracked];
+        const ignoredBlock = await filterIgnoredPaths({ cwd, paths: allPaths });
+        if (ignoredBlock.length) {
+          return {
+            ok: false,
+            reason: `merge blocked: refusing to delete git-ignored path(s) in the main checkout: ${ignoredBlock.join(', ')}`,
+            failureKind: 'other',
+            ignoredLivePaths: ignoredBlock,
+            baseHeadSha: headSha,
+          };
+        }
+        if (!(await pathsIdenticalToBranch({ cwd, branch: r.tipSha, paths: allPaths }))) {
+          return { ok: false, reason: `linear landing failed: ${ffText}`, failureKind: 'other', baseHeadSha: headSha };
+        }
+        try {
+          if (blocking.tracked.length) {
+            await execGit(['checkout', '--', ...blocking.tracked], { cwd, timeout: 30_000 });
+          }
+          for (const p of blocking.untracked) {
+            await fsp.rm(path.join(cwd, p), { force: true });
+          }
+          await execGit(['merge', '--ff-only', '--no-overwrite-ignore', r.tipSha], { cwd, timeout: 30_000 });
+          landed = { ...success, autoResolved: 'identical_working_tree_duplicates', resolvedPaths: allPaths };
+          break;
+        } catch (retryErr) {
+          if ((await readHeadSha(cwd)) !== headSha) continue;
+          const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
+          return { ok: false, reason: `linear landing failed: ${retryText}`, failureKind: 'other', baseHeadSha: headSha };
+        }
+      }
+    }
+    if (landed) return landed;
+    if (!linearFallback) linearFallback = 'ref_race';
+  }
+  console.warn(`[gitWorktree] linear landing of ${branch} fell back to a merge commit (${linearFallback})`);
+  const fb = { linearFallback };
   try {
     await execGit(['merge', '--no-ff', '--no-overwrite-ignore', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
-    return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd) };
+    return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd), ...fb };
   } catch (e) {
     const stderrText = (e && (e.stderrText || e.message)) || String(e);
     // git refuses this class of merge before ever touching MERGE_HEAD, so
@@ -1641,6 +1709,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
             sha: await readHeadSha(cwd),
             autoResolved: 'identical_working_tree_duplicates',
             resolvedPaths: allPaths,
+            ...fb,
           };
         } catch (retryErr) {
           const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
@@ -1666,7 +1735,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
           await resolveByConcatenation({ cwd, paths });
           await execGit(['add', ...paths], { cwd, timeout: 30_000 });
           await execGit(['commit', '-m', mergeMessage], { cwd, timeout: 30_000 });
-          return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd), autoResolved: 'pure_addition_concat', resolvedPaths: paths };
+          return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd), autoResolved: 'pure_addition_concat', resolvedPaths: paths, ...fb };
         }
       } catch (autoErr) {
         const autoText = [autoErr && autoErr.stderrText, autoErr && autoErr.stdoutText, autoErr && autoErr.message].filter(Boolean).join('\n');

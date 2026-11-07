@@ -6069,7 +6069,7 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
       console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
     } else if (integration.integrated) {
       integratedSha = integration.sha || null;
-      console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
+      console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.linear ? ' (linear replay)' : integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
       if (integration.autoResolved) {
         mergeAutoResolved = integration.autoResolved;
         mergeAutoResolvedPaths = integration.resolvedPaths || [];

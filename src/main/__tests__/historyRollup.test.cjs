@@ -9,7 +9,7 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -81,6 +81,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   process.env.HOME = realHome;
   purgeRequireCache();
   fs.rmSync(tmpHome, { recursive: true, force: true });
@@ -279,6 +280,11 @@ test('rollup v1 lines default activeMinutes to 0 and v to 1 at read time', async
 });
 
 test('refreshIntradayToday: upserts a provisional (non-finalized) line for today; a second run replaces it after compact', async () => {
+  // Pin the clock (Date only — fs/async timers stay real) mid-day so the
+  // fixture's "today" and refreshIntradayToday's "today" can never straddle
+  // local midnight, whatever time the suite runs.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 10, 7, 12, 0, 0, 0));
   const now = new Date();
   const today = now.toLocaleDateString('en-CA');
   const cwd = '/tmp/projintraday';
@@ -287,7 +293,7 @@ test('refreshIntradayToday: upserts a provisional (non-finalized) line for today
     userLine(new Date(now.getTime() - 5 * 60_000).toISOString()),
     assistantLine(new Date(now.getTime() - 5 * 60_000).toISOString(), 'claude-sonnet-5', { in: 10, out: 5 }),
     assistantLine(now.toISOString(), 'claude-sonnet-5', { in: 3, out: 1 }),
-  ]);
+  ], now);
 
   const first = await historyAggregator.refreshIntradayToday();
   expect(first.date).toBe(today);
@@ -312,6 +318,38 @@ test('refreshIntradayToday: upserts a provisional (non-finalized) line for today
     return obj.date === today && obj.projectDir === encodeCwd(cwd) && obj.modelId === historyRollup.TOTALS_MODEL_ID;
   });
   expect(matchingLines.length).toBe(1);
+});
+
+test('refreshIntradayToday: a line written just before local midnight is not silently lost when refresh runs after midnight', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const written = new Date(2026, 10, 7, 23, 59, 59, 900);
+  vi.setSystemTime(written);
+  const writtenDay = written.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projmidnight';
+  writeTranscript(cwd, 'sess-midnight', [
+    userLine(new Date(written.getTime() - 1000).toISOString()),
+    assistantLine(written.toISOString(), 'claude-sonnet-5', { in: 7, out: 3 }),
+  ], written);
+
+  // Cross local midnight before the refresh runs.
+  vi.setSystemTime(new Date(2026, 10, 8, 0, 0, 0, 500));
+  const nextDay = new Date().toLocaleDateString('en-CA');
+  expect(nextDay).not.toBe(writtenDay);
+
+  // Documented: refreshIntradayToday only ever writes the CURRENT local day,
+  // so the pre-midnight line is not today's (0 provisional rows) ...
+  const r = await historyAggregator.refreshIntradayToday();
+  expect(r.date).toBe(nextDay);
+  expect(r.projectsUpdated).toBe(0);
+
+  // ... but it is not lost: the closed-day finalize pass picks it up under
+  // the day it was written.
+  const fin = await historyAggregator.finalizeClosedDays();
+  expect(fin.finalizedDates).toContain(writtenDay);
+  const map = await historyRollup.readRollup(writtenDay, writtenDay);
+  const bucket = map.get(historyRollup.rollupKey(writtenDay, encodeCwd(cwd), historyRollup.TOTALS_MODEL_ID));
+  expect(bucket).toBeTruthy();
+  expect(bucket.promptCount).toBeGreaterThanOrEqual(1);
 });
 
 test('history:aggregate PARSE_BUDGET_MS truncation only affects today; finalized closed days come back complete', async () => {

@@ -21,6 +21,7 @@ import { EpicDetail } from './EpicDetail'
 import { EpicComposer, canCompose } from './EpicComposer'
 import { EpicApprovalBar } from './EpicApprovalBar'
 import { NewEpicCard } from './NewEpicCard'
+import { isEditableDraft } from '../../lib/epicDraft'
 import { EmptyState } from '../ui/EmptyState'
 
 const EMPTY_JOBS: ScheduleJob[] = []
@@ -283,7 +284,15 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
       </div>
 
       {showNewEpic ? (
-        <NewEpicCard onCreated={handleCreated} onCancel={() => setShowNewEpic(false)} />
+        <NewEpicCard onCreated={handleCreated} onDraftSaved={handleCreated} onCancel={() => setShowNewEpic(false)} />
+      ) : selectedEpic && isEditableDraft(selectedEpic) ? (
+        <NewEpicCard
+          key={selectedEpic.id}
+          draftEpic={selectedEpic}
+          onCreated={handleCreated}
+          onDraftSaved={handleSelect}
+          onCancel={() => setSelectedId(null)}
+        />
       ) : selectedEpic ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <EpicDetail promptSession={selectedEpic} onQuote={setQuote} />

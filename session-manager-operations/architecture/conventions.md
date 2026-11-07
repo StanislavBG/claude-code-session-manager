@@ -76,7 +76,7 @@ HTML pages explain, videos show. Folder contract, schemas, routes and migration:
 | Artifact | one static, script-free HTML page | one self-contained HTML/JS animation |
 | Limits | <= 1 MB, no remote refs | <= 2 MB per 30 s, 5-60 s, `sm-demo-duration` = `lengthS`, no network APIs |
 | Write tool | `project_page_write` (alias `project_home_write`) | `project_video_write` (alias `project_demo_video_write`) |
-| Storage | `project-pages/knowledge/<id>/` | `project-pages/videos/<id>/` (+ `session-manager-operations/project-pages/videos/_character/`) |
+| Storage | `project-pages/knowledge/<id>/` | `project-pages/videos/<id>/` (+ the videos/_character/ folder) |
 | Viewer | sandboxed frame | sandboxed `smfile://` iframe + player bridge |
 
 ## Avoid

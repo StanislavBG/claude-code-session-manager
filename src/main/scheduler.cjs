@@ -9409,9 +9409,14 @@ function applyRcaClassification(job, report) {
  *     independent of whether it appears in `pathCommits` — it is definitionally
  *     this job's own work, not something discovered by scanning history.
  *  2. 'job branch' — a path-overlapping commit reachable from (an ancestor of
- *     or equal to) this job's own `sm-job/<slug>` branch tip. Still
- *     job-specific even though it IS a `git log` scan: a sibling's commit can
- *     never be an ancestor of THIS job's own branch ref. In practice this
+ *     or equal to) this job's own `sm-job/<slug>` branch tip, or a copy of
+ *     one of that branch's commits that linear landing replayed onto the
+ *     base: same author name, author email, author date and message as a
+ *     commit in `git log <sha>..sm-job/<slug>`, at most 200 of them read
+ *     (gitTreeGuard.commitsReplayedFromBranch). Still job-specific even
+ *     though it IS a `git log` scan: a sibling's commit can never be an
+ *     ancestor of THIS job's own branch ref, nor share all four of those
+ *     fields with one of its commits. In practice this
  *     branch is deleted on successful integration (gitWorktree.cjs's
  *     `cleanupWorktree`), so this mainly fires when integration failed and
  *     the branch was deliberately kept for recovery, or reverify runs before
@@ -9437,13 +9442,19 @@ async function attributeLandedCommits(job, pathCommits, cwd) {
   }
 
   const branch = `sm-job/${job?.slug}`;
-  const branchCommits = [];
+  const ancestors = new Set();
   for (const sha of pathCommits) {
     try {
       await execGitAt(cwd, ['merge-base', '--is-ancestor', sha, branch], { timeout: 10_000 });
-      branchCommits.push(sha);
+      ancestors.add(sha);
     } catch { /* not an ancestor of this job's own branch, or branch doesn't exist */ }
   }
+  // Linear landing put this job's own commits on the base as replayed copies,
+  // which are never ancestors of the branch.
+  const replayed = await gitTreeGuard.commitsReplayedFromBranch(
+    cwd, pathCommits.filter((sha) => !ancestors.has(sha)), branch,
+  );
+  const branchCommits = pathCommits.filter((sha) => ancestors.has(sha) || replayed.has(sha));
   if (branchCommits.length) return { commits: branchCommits, rule: 'job branch' };
 
   if (job?.slug) {

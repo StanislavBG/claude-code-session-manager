@@ -1947,30 +1947,40 @@ async function salvageDirtyDelta({ cwd, paths, outFile }) {
 }
 
 /**
- * True when every commit on `branch` is already an ancestor of (or equal to)
- * `cwd`'s current HEAD — i.e. the branch holds no work that isn't already
- * landed. Used by the stranded-branch sweep (branchSweep.cjs) to tell a
- * genuinely stranded `sm-job/*` branch from one that's already a no-op.
+ * True when `branch` holds no work that isn't already landed on `cwd`'s
+ * current HEAD: its tip is an ancestor of (or equal to) HEAD, or, failing
+ * that, `isBranchContentLanded({ cwd, base: 'HEAD', branch })` proves its
+ * content is there. Linear landing (PRDs 2743, 2825) replays a branch, so a
+ * landed branch's own commits never become ancestors of HEAD. Ancestry alone
+ * made the stranded-branch sweep (branchSweep.cjs) re-integrate such a branch
+ * once per process lifetime, and `reclaimTerminalJobOrphans` keep its checkout
+ * (validator finding I-2). Used by both to tell a genuinely stranded
+ * `sm-job/*` branch from one that's already a no-op.
  * Never throws; a branch that doesn't exist, or any other git failure, is
  * conservatively reported as NOT merged so a caller never treats an
  * unreadable branch as safe to skip.
  */
 async function isBranchMergedIntoHead(cwd, branch) {
+  let branchHead;
   try {
-    const branchHead = (await execGit(['rev-parse', '--verify', branch], { cwd, timeout: 10_000 })).trim();
-    const mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
-    return mergeBase !== '' && mergeBase === branchHead;
+    branchHead = (await execGit(['rev-parse', '--verify', branch], { cwd, timeout: 10_000 })).trim();
   } catch {
     return false;
   }
+  try {
+    const mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    if (mergeBase !== '' && mergeBase === branchHead) return true;
+  } catch {
+    // No merge base, or git failed: ancestry proves nothing, so the content check decides.
+  }
+  return (await isBranchContentLanded({ cwd, base: 'HEAD', branch })) === true;
 }
 
 /**
  * True when `branch`'s CONTENT is already in `base`, by any of three proofs,
  * cheapest first. Linear landing (PRDs 2743, 2825) replays a branch, so its
- * original commits never become ancestors of the base, and the ancestry-only
- * `isBranchMergedIntoHead` reads a landed branch as unmerged (validator
- * finding I-2).
+ * original commits never become ancestors of the base, and an ancestry-only
+ * check reads a landed branch as unmerged (validator finding I-2).
  *   1. Ancestry: the branch tip is an ancestor of (or equal to) base.
  *   2. Patch-ids: `rev-list --right-only --cherry-pick --no-merges --count
  *      <base>...<branch>` prints 0. Every non-merge branch commit has a
@@ -2059,10 +2069,12 @@ function keyFromBranch(kind, branch) {
  *
  * Never assumes it's safe to delete — proves it, two ways, for each
  * candidate:
- *   1. `isBranchMergedIntoHead`: the branch holds ZERO commits that aren't
- *      already on `cwd`'s HEAD (equivalently, zero commits ahead of main) —
- *      so integrating it again could add nothing, and removing it loses no
- *      committed work.
+ *   1. `isBranchMergedIntoHead`: the branch holds no work that isn't already
+ *      on `cwd`'s HEAD (zero commits ahead of main, or its commits landed
+ *      there as a linear replay) — so integrating it again could add
+ *      nothing, and removing it loses no committed work
+ *      (`deleteBranchKeepingUniqueCommits` still pins a tip no other ref
+ *      holds).
  *   2. Every path still dirty in the checkout itself (`git status
  *      --porcelain` run with cwd = the checkout dir) lives under
  *      `session-manager-operations/` — i.e. it's carried-over ops-folder

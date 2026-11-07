@@ -513,11 +513,18 @@ function gitRangeCommits(cwd, before, after) {
 }
 
 /**
- * Read-only check: is a job's `sm-job/<slug>` worktree branch already fully
- * integrated into `cwd`'s current HEAD — i.e. every commit on the branch is
- * an ancestor of (or equal to) HEAD? Mirrors gitWorktree.cjs's own
- * integrateBranch() no-op detection (`mergeBase === branchHead`) exactly, but
- * deliberately never calls integrateBranch itself: this is used by
+ * Read-only check: is a job's `sm-job/<slug>` worktree branch already
+ * integrated into `cwd`'s current HEAD? Two proofs, cheapest first:
+ *  1. Ancestry: the branch tip is an ancestor of (or equal to) HEAD, the
+ *     same `mergeBase === branchHead` test as integrateBranch()'s no-op
+ *     detection.
+ *  2. Content: `gitWorktree.isBranchContentLanded({ cwd, base: 'HEAD', branch })`.
+ *     Linear landing (PRDs 2743, 2825) replays the branch onto the base, so a
+ *     landed branch's own commits never become ancestors of HEAD. Proof 1
+ *     alone made the reaper park a landed job as "still holds unintegrated
+ *     work — never merged" (validator finding I-2). The helper also accepts
+ *     patch-equivalent commits on HEAD, or a merge that would change nothing.
+ * Deliberately never calls integrateBranch itself: this is used by
  * reapDeadRunningJobs to PROVE a dead job's work already landed, never to
  * perform the landing — attempting a real merge from an audit check is a
  * mutating action with its own conflict/timing risk, and "land the still-
@@ -527,13 +534,13 @@ function gitRangeCommits(cwd, before, after) {
  * conservative failure direction here is needs_review, never a silent merge.
  *
  * Returns:
- *  - true  — branch exists and is fully contained in HEAD (already
- *    integrated by a prior pass, or a genuine no-op branch that never
- *    diverged from its base — both cases legitimately "landed").
- *  - false — branch exists and still holds commits not in HEAD (a real
- *    stranded deliverable, e.g. the PRD 1118 shape).
+ *  - true  — branch exists and its content is already in HEAD (integrated by
+ *    a prior pass, landed as a linear replay, or a genuine no-op branch that
+ *    never diverged from its base — all legitimately "landed").
+ *  - false — branch exists and still holds work HEAD lacks (a real stranded
+ *    deliverable, e.g. the PRD 1118 shape), or neither proof could be read.
  *  - null  — branch does not exist at all (never a worktree run — an
- *    in-place run, or SM_JOB_WORKTREE_DISABLE), or the git calls errored.
+ *    in-place run, or SM_JOB_WORKTREE_DISABLE), or `rev-parse` errored.
  * Never throws.
  */
 function isBranchAlreadyIntegrated(cwd, branch) {
@@ -550,12 +557,77 @@ function isBranchAlreadyIntegrated(cwd, branch) {
           { timeout: 10_000, windowsHide: true },
           (mbErr, mbOut) => {
             const mergeBase = mbErr ? '' : String(mbOut || '').trim();
-            resolve(mergeBase !== '' && mergeBase === branchHead);
+            if (mergeBase !== '' && mergeBase === branchHead) { resolve(true); return; }
+            gitWorktree.isBranchContentLanded({ cwd, base: 'HEAD', branch })
+              .then((landed) => resolve(landed === true), () => resolve(false));
           },
         );
       },
     );
   });
+}
+
+// replayBranchOnto (gitWorktree.cjs) copies exactly these four fields onto
+// each commit it replays. With `-z` every record ends in a NUL, and no field
+// can hold one, so a record is always exactly four fields.
+const COMMIT_IDENTITY_FORMAT = '%an%x00%ae%x00%aI%x00%B';
+const REPLAY_MATCH_MAX_COMMITS = 200;
+const REPLAY_MATCH_MAX_BUFFER = 16 * 1024 * 1024;
+
+/** `git log -z --format=COMMIT_IDENTITY_FORMAT` output → one comparable key per commit. */
+function parseCommitIdentityLog(out) {
+  const fields = String(out || '').split('\0');
+  const keys = [];
+  for (let i = 0; i + 3 < fields.length; i += 4) {
+    // The message loses its trailing newlines, as replayBranchOnto trims the one it copies.
+    keys.push(JSON.stringify([fields[i], fields[i + 1], fields[i + 2], fields[i + 3].replace(/\n+$/, '')]));
+  }
+  return keys;
+}
+
+/**
+ * The subset of `shas` that linear landing copied off `branch`.
+ * replayBranchOnto (gitWorktree.cjs) re-creates each commit it replays with
+ * `commit-tree`, keeping its author name, author email, author date and
+ * message (trailing newlines trimmed). The copy on the base is therefore never
+ * an ancestor of the branch. A sha counts when those four fields equal those
+ * of a commit in `git log <sha>..<branch>` (the branch commits the sha does
+ * not already contain), reading at most REPLAY_MATCH_MAX_COMMITS of them.
+ * The branch is resolved once. A sha that is not a hex object name, or a
+ * branch name starting with '-', never reaches git. Never throws: a missing
+ * branch, an unresolvable sha or any git failure means no match.
+ *
+ * @param {string} cwd
+ * @param {string[]} shas
+ * @param {string} branch
+ * @returns {Promise<Set<string>>}
+ */
+async function commitsReplayedFromBranch(cwd, shas, branch) {
+  const replayed = new Set();
+  if (!cwd || typeof branch !== 'string' || !branch || branch.startsWith('-') || !Array.isArray(shas)) return replayed;
+  const candidates = shas.filter((sha) => typeof sha === 'string' && /^[0-9a-f]{4,64}$/i.test(sha));
+  if (!candidates.length) return replayed;
+  try {
+    await sharedGitExec.execGit(cwd, ['rev-parse', '--verify', '--quiet', `${branch}^{commit}`], { timeout: 10_000 });
+  } catch {
+    return replayed; // no such branch, so nothing on it was replayed
+  }
+  const opts = { timeout: 10_000, maxBuffer: REPLAY_MATCH_MAX_BUFFER };
+  for (const sha of candidates) {
+    try {
+      const branchKeys = new Set(parseCommitIdentityLog(await sharedGitExec.execGit(
+        cwd,
+        ['log', '-z', `--max-count=${REPLAY_MATCH_MAX_COMMITS}`, `--format=${COMMIT_IDENTITY_FORMAT}`, `${sha}..${branch}`, '--'],
+        opts,
+      )));
+      if (!branchKeys.size) continue;
+      const [own] = parseCommitIdentityLog(await sharedGitExec.execGit(
+        cwd, ['log', '-z', '-1', `--format=${COMMIT_IDENTITY_FORMAT}`, sha, '--'], opts,
+      ));
+      if (own !== undefined && branchKeys.has(own)) replayed.add(sha);
+    } catch { /* unresolvable sha, or git failed: no match */ }
+  }
+  return replayed;
 }
 
 /**
@@ -713,6 +785,7 @@ module.exports = {
   strandedCommitVerdict,
   gitRangeCommits,
   isBranchAlreadyIntegrated,
+  commitsReplayedFromBranch,
   classifySigtermWithCommit,
   evaluateFinalizeDrop,
   evaluateDispatchSidecarReconcile,

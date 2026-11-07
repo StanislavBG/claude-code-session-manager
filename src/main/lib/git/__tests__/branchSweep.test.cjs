@@ -16,6 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { sweepStrandedJobBranches } = require('../branchSweep.cjs');
+const gitWorktree = require('../gitWorktree.cjs');
 
 let tmpRoot;
 let repoCwd;
@@ -87,6 +88,30 @@ test('branch already merged into HEAD is a silent no-op', async () => {
   const { results } = await sweepStrandedJobBranches({ cwd: repoCwd, jobs, attemptedBranches: new Set() });
   const r = results.find((x) => x.branch === branch);
   expect(r.action).toBe('no-op-merged');
+});
+
+test('branch already landed as a linear replay is a silent no-op, never re-integrated', async () => {
+  // Linear landing (PRDs 2743, 2825) replays the branch onto a moved HEAD, so
+  // the branch's own commit never becomes an ancestor of HEAD (validator
+  // finding I-2) — only its content landed.
+  const branch = makeStrandedBranch(repoCwd, 'hotel');
+  fs.writeFileSync(path.join(repoCwd, 'main-moves-on.txt'), 'main\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main moves on'], repoCwd);
+  const replay = await gitWorktree.replayBranchOnto({
+    cwd: repoCwd, ontoSha: git(['rev-parse', 'HEAD'], repoCwd).trim(), branch,
+  });
+  expect(replay.ok).toBe(true);
+  expect(replay.replayed).toHaveLength(1);
+  git(['merge', '-q', '--ff-only', replay.tipSha], repoCwd);
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  expect(() => git(['merge-base', '--is-ancestor', branch, 'HEAD'], repoCwd)).toThrow();
+
+  const jobs = [{ slug: 'hotel', status: 'completed' }];
+  const { results } = await sweepStrandedJobBranches({ cwd: repoCwd, jobs, attemptedBranches: new Set() });
+  const r = results.find((x) => x.branch === branch);
+  expect(r.action).toBe('no-op-merged');
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
 });
 
 test('branch checked out in a live worktree is skipped entirely', async () => {

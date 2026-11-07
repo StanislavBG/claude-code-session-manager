@@ -52,7 +52,8 @@ process.env.HOME = tmpHome;
 process.env.SM_AUTOFIX_DISABLE = '1';
 
 const schedulerModule = require('../scheduler.cjs');
-const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = schedulerModule;
+const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain, attributeLandedCommits } = schedulerModule;
+const gitWorktree = require('../lib/git/gitWorktree.cjs');
 const { resolveEpicPrdWriteDir } = require('../lib/prd/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
 
@@ -571,4 +572,47 @@ test('this job\'s OWN attributable commit (landedCommit) still produces looksDon
   const outcome = applyNeedsReviewAutoResolve(jobA);
   assert.equal(outcome, 'completed', 'strong, attributable evidence must still promote the row');
   assert.equal(jobA.status, 'completed');
+});
+
+test('a base commit that linear landing replayed off this job\'s still-existing branch is attributed with rule \'job branch\'', async () => {
+  // Linear landing (PRDs 2743, 2825) replays the branch's commits onto the
+  // base with their author name/email/date and message kept, so the commit on
+  // main is never an ancestor of `sm-job/<slug>` (validator finding I-2).
+  const projectCwd = path.join(tmpHome, 'proj-linear-landed-attribution');
+  initRepoOnMain(projectCwd);
+  registerActiveProject(projectCwd, 'proj-linear-landed-attribution-slug');
+  const slug = '2832-linear-job';
+  const branch = `sm-job/${slug}`;
+  writePrd(projectCwd, slug, [
+    '# Implementation notes',
+    'Edit `src/main/scheduler.cjs` and `src/main/sibling.cjs`.',
+  ].join('\n'));
+
+  // In the past, so the replay's own (real-time) committer date is in range.
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  git(['checkout', '-q', '-b', branch], projectCwd);
+  commitFile(projectCwd, 'src/main/scheduler.cjs', 'job change\n', 'fix(scheduler): the job\'s own change', afterSecs(startedAt, 2));
+  git(['checkout', '-q', 'main'], projectCwd);
+  // A sibling lands on a declared path first, so this job lands as a replay.
+  commitFile(projectCwd, 'src/main/sibling.cjs', 'sibling change\n', 'feat(sibling): sibling work', afterSecs(startedAt, 3));
+  const siblingSha = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const replay = await gitWorktree.replayBranchOnto({ cwd: projectCwd, ontoSha: siblingSha, branch });
+  assert.equal(replay.ok, true);
+  assert.equal(replay.replayed.length, 1);
+  git(['merge', '-q', '--ff-only', replay.tipSha], projectCwd);
+  const replayedSha = replay.tipSha;
+  assert.throws(() => git(['merge-base', '--is-ancestor', replayedSha, branch], projectCwd));
+
+  const job = { slug, cwd: projectCwd, status: 'needs_review', startedAt };
+  assert.deepEqual(
+    await attributeLandedCommits(job, [replayedSha, siblingSha], projectCwd),
+    { commits: [replayedSha], rule: 'job branch' },
+    'the replayed commit is this job\'s own; the sibling\'s commit on a declared path is not',
+  );
+
+  const looksDone = await computeLooksDone(job);
+  assert.ok(looksDone, 'the replayed commit on main is attributable evidence');
+  assert.equal(looksDone.rule, 'job branch');
+  assert.ok(looksDone.commits.includes(replayedSha), 'the commit that actually landed on main must be cited');
+  assert.ok(!looksDone.commits.includes(siblingSha), 'a sibling\'s commit is never cited');
 });

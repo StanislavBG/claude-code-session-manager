@@ -1502,8 +1502,18 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     return { ok: true, integrated: false, reason: 'carried-wip-only' };
   }
 
+  const clobber = await findIgnoredLivePaths({ cwd, branch, mergeBase });
+  if (clobber.length) {
+    return {
+      ok: false,
+      reason: `refusing to integrate: branch touches ignored path(s) that exist on disk in the main checkout: ${clobber.join(', ')}`,
+      failureKind: 'other',
+      ignoredLivePaths: clobber,
+      baseHeadSha: await readHeadSha(cwd),
+    };
+  }
   try {
-    await execGit(['merge', '--ff-only', branch], { cwd, timeout: 30_000 });
+    await execGit(['merge', '--ff-only', '--no-overwrite-ignore', branch], { cwd, timeout: 30_000 });
     // The branch tip we fast-forwarded to, read from the branch ref (not HEAD,
     // which a concurrent writer may already have moved).
     return { ok: true, integrated: true, fastForward: true, sha: await tryResolveCommit(cwd, `${branch}^{commit}`) };
@@ -1512,7 +1522,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     // merged first) — a real merge commit still lands the branch's commit(s).
   }
   try {
-    await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
+    await execGit(['merge', '--no-ff', '--no-overwrite-ignore', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
     return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd) };
   } catch (e) {
     const stderrText = (e && (e.stderrText || e.message)) || String(e);
@@ -1522,6 +1532,16 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     const blocking = parseBlockingMergePaths(stderrText);
     if (blocking) {
       const allPaths = [...blocking.tracked, ...blocking.untracked];
+      const ignoredBlock = await filterIgnoredPaths({ cwd, paths: allPaths });
+      if (ignoredBlock.length) {
+        return {
+          ok: false,
+          reason: `merge blocked: refusing to delete git-ignored path(s) in the main checkout: ${ignoredBlock.join(', ')}`,
+          failureKind: 'other',
+          ignoredLivePaths: ignoredBlock,
+          baseHeadSha: await readHeadSha(cwd),
+        };
+      }
       const identical = await pathsIdenticalToBranch({ cwd, branch, paths: allPaths });
       if (identical) {
         try {
@@ -1531,7 +1551,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
           for (const p of blocking.untracked) {
             await fsp.rm(path.join(cwd, p), { force: true });
           }
-          await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
+          await execGit(['merge', '--no-ff', '--no-overwrite-ignore', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
           return {
             ok: true,
             integrated: true,
@@ -1579,6 +1599,53 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
     return { ok: false, reason: mergeFailureReason(failureClass.failureKind, stderrText), ...failureClass, baseHeadSha: await readHeadSha(cwd) };
   }
+}
+
+/**
+ * Subset of `paths` that `git check-ignore` reports ignored in `cwd` (tracked
+ * paths are never reported). Fails closed: a git error returns every path.
+ * @param {{cwd: string, paths: string[]}} a
+ * @returns {Promise<string[]>}
+ */
+async function filterIgnoredPaths({ cwd, paths }) {
+  if (!paths.length) return [];
+  try {
+    const out = await new Promise((resolve, reject) => {
+      const cp = require('node:child_process').spawn('git', ['check-ignore', '-z', '--stdin'], { cwd });
+      let buf = '';
+      cp.stdout.on('data', (d) => { buf += d; });
+      cp.on('error', reject);
+      cp.on('close', (code) => (code === 0 || code === 1 ? resolve(buf) : reject(new Error(`check-ignore exit ${code}`))));
+      cp.stdin.on('error', () => {});
+      cp.stdin.end(paths.join('\0') + '\0');
+    });
+    return out.split('\0').filter(Boolean);
+  } catch {
+    return paths.slice();
+  }
+}
+
+/**
+ * Paths the branch changed since the merge base that are git-ignored AND
+ * present on disk in `cwd` — the live files a merge would overwrite (git's
+ * default --overwrite-ignore) or a later `merge --abort` would delete.
+ * @param {{cwd: string, branch: string, mergeBase: string}} a
+ * @returns {Promise<string[]>}
+ */
+async function findIgnoredLivePaths({ cwd, branch, mergeBase }) {
+  let changed;
+  try {
+    const out = await execGit(['diff', '--name-only', '-z', `${mergeBase || 'HEAD'}..${branch}`], { cwd, timeout: 15_000 });
+    changed = out.split('\0').filter(Boolean);
+  } catch {
+    return [];
+  }
+  const ignored = await filterIgnoredPaths({ cwd, paths: changed });
+  const live = [];
+  for (const p of ignored) {
+    try { await fsp.lstat(path.join(cwd, p)); live.push(p); } catch { /* absent — safe */ }
+  }
+  return live;
 }
 
 /**

@@ -58,6 +58,11 @@ function ozoneArgs(args) {
   return choice ? [`--ozone-platform=${choice}`] : [];
 }
 
+// The child's 'close' waits for every holder of its stderr pipe, and Electron's
+// chrome_crashpad_handler inherits that pipe as fd 2 and can outlive the main process — so
+// 'close' may never fire. Decide on 'exit'; wait this long for 'close' to flush the stderr tail.
+const CLOSE_GRACE_MS = 2000;
+
 function launch() {
   const startedAt = Date.now();
   const userArgs = process.argv.slice(2);
@@ -72,10 +77,16 @@ function launch() {
       sup.appendStderr(dir, chunk);
     });
   }
-  child.on('close', (code, signal) => {
+  // Record the exit, then respawn or exit — exactly once per child.
+  let settled = false;
+  function settle(code, signal, exitedAt) {
+    if (settled) return;
+    settled = true;
+    // An orphaned holder of the pipe must not keep this launcher alive.
+    try { if (child.stderr) child.stderr.destroy(); } catch { /* ignore */ }
     try {
       sup.recordExit(dir, {
-        ts: new Date().toISOString(), pid: child.pid, code, signal, uptimeMs: Date.now() - startedAt,
+        ts: new Date(exitedAt).toISOString(), pid: child.pid, code, signal, uptimeMs: exitedAt - startedAt,
       });
     } catch { /* best-effort */ }
     let again = false;
@@ -94,6 +105,12 @@ function launch() {
     }
     if (signal) process.kill(process.pid, signal);
     else process.exit(code ?? 0);
+  }
+
+  child.on('exit', (code, signal) => {
+    const exitedAt = Date.now();
+    const grace = setTimeout(() => settle(code, signal, exitedAt), CLOSE_GRACE_MS);
+    child.once('close', () => { clearTimeout(grace); settle(code, signal, exitedAt); });
   });
 }
 

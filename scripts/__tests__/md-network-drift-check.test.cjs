@@ -258,3 +258,22 @@ test('marker does not affect limit counts and has no effect inside a fence', () 
   const dir2 = repo({ 'README.md': ['```', '<!-- drift-check-ignore -->', '```', '[x](gone.md)', ''].join('\n') });
   expect(run(dir2).json.findings.map((x) => x.kind)).toEqual(['broken-link']);
 });
+
+test('placeholder link targets are skipped, plain missing links still flagged', () => {
+  const md = [
+    '[issues]({{REPO_URL}}/issues) [b](${BASE}/x.md) [r](<repo>/docs/x.md) [e](a}}b.md)',
+    '[gone](missing.md)',
+    '',
+  ].join('\n');
+  for (const extra of [[], ['--strict-paths']]) {
+    const dir = repo({ 'README.md': md });
+    const f = run(dir, '--checks', 'links', ...extra).json.findings;
+    expect(f).toEqual([{ kind: 'broken-link', file: 'README.md', line: 2, target: 'missing.md' }]);
+  }
+});
+
+test('a normal broken link on the same line as a placeholder link is still flagged', () => {
+  const dir = repo({ 'README.md': '[i]({{REPO_URL}}/issues) [gone](nope.md)\n' });
+  const f = run(dir, '--checks', 'links').json.findings;
+  expect(f.map((x) => x.target)).toEqual(['nope.md']);
+});

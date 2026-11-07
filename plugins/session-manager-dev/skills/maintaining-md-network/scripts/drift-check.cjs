@@ -291,6 +291,7 @@ function runDriftCheck(options) {
         if (parsed.ignoredLines.has(l.line)) continue;
         let t = l.target;
         if (t.startsWith('#') || t.startsWith('//') || SCHEME_RE.test(t)) continue;
+        if (/\{\{|\}\}|\$\{|<[^>]*>/.test(t)) continue; // template placeholder, not a path
         t = t.replace(/[#?].*$/, '');
         if (!t) continue;
         try { t = decodeURI(t); } catch { /* keep raw */ }

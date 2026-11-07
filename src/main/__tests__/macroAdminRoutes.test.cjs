@@ -423,3 +423,122 @@ test('delete: refusals return 400 with no onChanged and no audit event', async (
   const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd: other } });
   expect(list.body.macros.map((m) => m.id)).toContain(foreign.id);
 });
+
+// --- surface / '*' projects / verified human request ------------------------
+
+const humanLedger = require('../lib/feedback-remote/humanPromptLedger.cjs');
+const { quoteNamesEveryProject } = require('../lib/feedback-remote/macroAdminRoutes.cjs');
+
+function saveEvents(id) {
+  return readTail(1_000_000)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.kind === 'admin_macro_save' && e.macroId === id);
+}
+
+const MAC = { label: 'Review', agentName: 'builder', tag: 'build', prompt: 'x' };
+const HUMAN_TEXT = 'please show the Review macro in every project on Project Home';
+const HUMAN_QUOTE = 'show the Review macro in every project';
+
+test('quoteNamesEveryProject matches every/all/each projects and everywhere only', () => {
+  for (const q of ['in every project', 'for all my projects', 'each of the projects', 'every-project', 'show everywhere']) {
+    expect(quoteNamesEveryProject(q)).toBe(true);
+  }
+  for (const q of ['in this project', 'all proj', 'everyprojects', '', 42]) {
+    expect(quoteNamesEveryProject(q)).toBe(false);
+  }
+});
+
+test('surface is accepted on create and update; projects unchanged on update', async () => {
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const created = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, surface: 'project-home' } });
+  expect(created.status).toBe(200);
+  expect(created.body.macro.surface).toBe('project-home');
+  expect(created.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
+  const id = created.body.macro.id;
+  const upd = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, id, ...MAC, surface: 'sessions' } });
+  expect(upd.status).toBe(200);
+  expect(upd.body.macro.surface).toBe('sessions');
+  expect(upd.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
+  expect(getChangedCount()).toBe(2);
+});
+
+test('projects other than exactly ["*"] is refused with 400', async () => {
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  for (const projects of [['/work/other'], [], ['*', '/x'], '*', ['*', '*']]) {
+    const res = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, projects } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('["*"]');
+  }
+  expect(getChangedCount()).toBe(0);
+});
+
+test("'*' create is refused without a verified human request; no write, onChanged or audit", async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const origin = 'sess-star-refuse';
+  humanLedger.recordHumanPrompt(origin, 'please keep the Review macro available for this project only');
+  const cases = [
+    {},
+    { humanRequestQuote: HUMAN_QUOTE },
+    { humanRequestQuote: HUMAN_QUOTE, originClaudeSessionId: origin },
+    { humanRequestQuote: 'keep the Review macro available for this project only', originClaudeSessionId: origin },
+  ];
+  for (const extra of cases) {
+    const res = await adminHttp.call('POST', '/admin/macros/save', {
+      body: { cwd, ...MAC, label: 'StarRefused', projects: ['*'], ...extra },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Show in every project');
+  }
+  expect(getChangedCount()).toBe(0);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  expect(list.body.macros.map((m) => m.label)).not.toContain('StarRefused');
+  humanLedger._resetForTests();
+});
+
+test("'*' create and '*' update are accepted with a verified quote; audit written on success only", async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const other = await mkProjectCwd();
+  const origin = 'sess-star-ok';
+  humanLedger.recordHumanPrompt(origin, HUMAN_TEXT);
+  const verified = { humanRequestQuote: HUMAN_QUOTE, originClaudeSessionId: origin };
+
+  const created = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, ...MAC, projects: ['*'], surface: 'project-home', ...verified },
+  });
+  expect(created.status).toBe(200);
+  expect(created.body.macro.projects).toEqual(['*']);
+  expect(created.body.macro.surface).toBe('project-home');
+  const id = created.body.macro.id;
+  let ev = saveEvents(id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({
+    route: '/admin/macros/save', cwd: fs.realpathSync(cwd), projects: ['*'], surface: 'project-home',
+    created: true, humanRequestQuote: HUMAN_QUOTE, originClaudeSessionId: origin,
+  });
+
+  // update a '*' macro from a different project: needs a verified quote, reachable via macroVisibleIn
+  const refused = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd: other, id, ...MAC, label: 'nope' } });
+  expect(refused.status).toBe(400);
+  expect(saveEvents(id)).toHaveLength(1);
+  const upd = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd: other, id, ...MAC, label: 'Renamed', ...verified } });
+  expect(upd.status).toBe(200);
+  expect(upd.body.macro.label).toBe('Renamed');
+  expect(upd.body.macro.projects).toEqual(['*']);
+  ev = saveEvents(id);
+  expect(ev).toHaveLength(2);
+  expect(ev[1].created).toBe(false);
+  expect(getChangedCount()).toBe(2);
+  humanLedger._resetForTests();
+});
+
+test('a plain create writes one audit event with a null quote', async () => {
+  const { cwd, adminHttp } = await setupDelete();
+  const created = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'Plain' } });
+  const ev = saveEvents(created.body.macro.id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0].humanRequestQuote).toBeNull();
+  expect(ev[0].originClaudeSessionId).toBeNull();
+  expect(ev[0].created).toBe(true);
+});

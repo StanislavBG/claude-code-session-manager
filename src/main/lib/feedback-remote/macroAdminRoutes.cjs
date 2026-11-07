@@ -12,14 +12,23 @@
  * event on success; every refusal is a 400 with no onChanged and no audit.
  *
  * cwd resolution matches projectHomeAdminRoutes.cjs's resolveCwd exactly
- * (reused, not copied). A create always stores `projects: [resolvedCwd]`,
- * `surface: 'sessions'`; an update is refused (400) if the resolved cwd is
- * not already in the macro's `projects` (no cross-project hijack), if `id`
- * starts with `builtin-`, or if `id` is not found. Field validation reuses
- * macroLibrary's `MacroSaveSchema`.
+ * (reused, not copied). `surface` ('sessions' | 'project-home') is accepted on
+ * create and update; a create defaults it to 'sessions' and `projects` to
+ * [resolvedCwd]. `projects` is accepted ONLY as exactly ["*"] (show in every
+ * project); anything else is a 400. An update without `projects` leaves them
+ * unchanged. An update is refused (400) if the macro is not visible to the
+ * resolved cwd (macroLibrary.macroVisibleIn, so '*' macros are reachable), if
+ * `id` starts with `builtin-`, or if `id` is not found. Field validation
+ * reuses macroLibrary's `MacroSaveSchema`.
  *
- * A successful save calls `onChanged()` exactly once so the Sessions HOT
- * KEYS strip updates live, matching the IPC handlers in index.cjs.
+ * A save whose existing or resulting macro is shown in every project needs a
+ * VERIFIED human request: body.humanRequestQuote must appear in a prompt the
+ * human typed into body.originClaudeSessionId (humanPromptLedger) AND name
+ * every/all projects. Otherwise 400, no write, no onChanged, no audit.
+ *
+ * Every successful save appends one `admin_macro_save` audit event and calls
+ * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
+ * matching the IPC handlers in index.cjs.
  */
 'use strict';
 
@@ -27,6 +36,37 @@ const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { resolveCwd } = require('./projectHomeAdminRoutes.cjs');
 const macroLibrary = require('../persona-macro/macroLibrary.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
+const { findHumanPromptContaining } = require('./humanPromptLedger.cjs');
+
+const EVERY_PROJECT_RE = /(^|[^a-z0-9])(every|all|each)\s+(of\s+)?(my\s+|the\s+|our\s+)?projects?($|[^a-z0-9])/;
+
+/** True when the quote asks for every/all projects (or "everywhere"). */
+function quoteNamesEveryProject(quote) {
+  if (typeof quote !== 'string') return false;
+  const q = quote.toLowerCase().replace(/[-_]/g, ' ');
+  return EVERY_PROJECT_RE.test(q) || /(^|[^a-z0-9])everywhere($|[^a-z0-9])/.test(q);
+}
+
+const HUMAN_HINT = "the human can set 'Show in every project' in the macro editor";
+
+/** Fail-closed check that a human asked for an all-projects macro. */
+function verifyAllProjectsRequest(body) {
+  const quote = body.humanRequestQuote;
+  if (typeof quote !== 'string' || !quote.trim()) {
+    return { ok: false, reason: `a macro shown in every project needs humanRequestQuote (a verbatim human request); ${HUMAN_HINT}` };
+  }
+  const origin = body.originClaudeSessionId;
+  if (typeof origin !== 'string' || origin.length < 1 || origin.length > 128) {
+    return { ok: false, reason: `a macro shown in every project needs originClaudeSessionId (1-128 chars); ${HUMAN_HINT}` };
+  }
+  if (!findHumanPromptContaining(origin, quote)) {
+    return { ok: false, reason: `humanRequestQuote was not found in a prompt the human typed in this session; ${HUMAN_HINT}` };
+  }
+  if (!quoteNamesEveryProject(quote)) {
+    return { ok: false, reason: `humanRequestQuote does not name every/all projects; ${HUMAN_HINT}` };
+  }
+  return { ok: true, quote };
+}
 
 /** Read + parse a JSON object body; on failure sends the 400 and returns null. */
 async function readJsonBody(req, res) {
@@ -79,6 +119,12 @@ function saveHandler(onChanged, libOpts) {
       sendJson(res, 400, { ok: false, error: 'built-in macros cannot be edited through this route' });
       return;
     }
+    const p = body.projects;
+    if (p !== undefined && !(Array.isArray(p) && p.length === 1 && p[0] === macroLibrary.ALL_PROJECTS)) {
+      sendJson(res, 400, { ok: false, error: 'projects: only ["*"] is accepted; omit it to use the current project' });
+      return;
+    }
+    const wantsAll = p !== undefined;
     let input;
     try {
       input = macroLibrary.MacroSaveSchema.parse({
@@ -88,24 +134,39 @@ function saveHandler(onChanged, libOpts) {
         tag: body.tag,
         prompt: body.prompt,
         inputs: body.inputs,
+        surface: body.surface,
       });
     } catch (e) {
       sendJson(res, 400, { ok: false, error: e?.issues?.[0]?.message ?? e?.message ?? 'invalid payload' });
       return;
     }
+    let existing;
     if (input.id) {
       const macros = await macroLibrary.listMacros(libOpts);
-      const existing = macros.find((m) => m.id === input.id);
+      existing = macros.find((m) => m.id === input.id);
       if (!existing) {
         sendJson(res, 400, { ok: false, error: `macro not found: ${input.id}` });
         return;
       }
-      if (!existing.projects.includes(resolved.cwd)) {
+      if (!macroLibrary.macroVisibleIn(existing, resolved.cwd)) {
         sendJson(res, 400, { ok: false, error: `macro ${input.id} is not visible to ${resolved.cwd}` });
         return;
       }
-    } else {
-      input = { ...input, projects: [resolved.cwd], surface: 'sessions' };
+    }
+    const allProjects = Boolean(existing?.projects.includes(macroLibrary.ALL_PROJECTS)) || wantsAll;
+    let quote = null;
+    if (allProjects) {
+      const v = verifyAllProjectsRequest(body);
+      if (!v.ok) {
+        sendJson(res, 400, { ok: false, error: v.reason });
+        return;
+      }
+      quote = v.quote;
+    }
+    if (!input.id) {
+      input = { ...input, projects: wantsAll ? [macroLibrary.ALL_PROJECTS] : [resolved.cwd], surface: input.surface ?? 'sessions' };
+    } else if (wantsAll) {
+      input = { ...input, projects: [macroLibrary.ALL_PROJECTS] };
     }
     let macro;
     try {
@@ -114,6 +175,17 @@ function saveHandler(onChanged, libOpts) {
       sendJson(res, 400, { ok: false, error: e?.message ?? 'save failed' });
       return;
     }
+    const origin = body.originClaudeSessionId;
+    appendAuditEvent('admin_macro_save', {
+      route: '/admin/macros/save',
+      cwd: resolved.cwd,
+      macroId: macro.id,
+      projects: macro.projects,
+      surface: macro.surface,
+      created: !input.id,
+      humanRequestQuote: quote,
+      originClaudeSessionId: typeof origin === 'string' && origin.length >= 1 && origin.length <= 128 ? origin : null,
+    });
     if (onChanged) onChanged();
     sendJson(res, 200, { ok: true, macro });
   };
@@ -165,4 +237,5 @@ function registerAdminRoute(adminHttp, { onChanged } = {}, opts = {}) {
 
 module.exports = {
   registerAdminRoute,
+  quoteNamesEveryProject,
 };

@@ -2,7 +2,8 @@
 
 /**
  * agentsIpc.cjs — registers the `agents:*` IPC handlers (Agent Library CRUD + persona/model/effort
- * resolvers). Moved verbatim out of index.cjs; handler bodies and zod wrappers are unchanged.
+ * resolvers). Every handler that takes a payload parses it through ipcSchemas.cjs's
+ * `validated(...)` before agentLibrary (or a resolver) sees it.
  */
 
 const { schemas, validated } = require('./ipcSchemas.cjs');
@@ -16,18 +17,22 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
  * @param {{ ipcMain: any, getWindow: () => any }} opts
  */
 function registerAgentsHandlers({ ipcMain, getWindow }) {
-  // Agent Library nav page (Home face only): global `~/.claude/agents/*.md`
-  // personas plus, per currently-open project tab, whether that project
-  // overlays the same agent name at `<cwd>/.claude/agents/<name>.md`. Read-only.
+  // Agent Library nav page (Home face only) — its one read: every global
+  // `~/.claude/agents/*.md` persona plus, per currently-open project, that
+  // project's override at `<cwd>/.claude/agents/<name>.md` (overrideDetails,
+  // keyed by the project's cwd — the `projectCwd` the writes below take).
   ipcMain.handle('agents:list-personas', () => agentLibrary.listPersonas());
-  // Agent Library CRUD — global personas only (`~/.claude/agents/*.md`); a
-  // project's local overlay can only be removed here (removeOverride), never
-  // created, since Agent Library is a Home-face, machine-wide surface with no
-  // per-tab cwd context of its own. Each mutation broadcasts `agents:changed`
-  // so Agent Library and Tag Library — two independently-mounted dockview
-  // panels, each with its own component-local `listPersonas()` snapshot —
-  // both refresh off the one file on disk instead of one panel going stale
-  // after the other edits the agent<->tag relationship.
+  // Agent Library CRUD. Global personas (`~/.claude/agents/*.md`) are written
+  // by `agents:save-persona` and removed by `agents:delete-persona`. For a
+  // per-project override the page picks one of the open projects:
+  // `agents:save-persona` with that project's `projectCwd` writes its
+  // frontmatter-only override (model/effort only, at
+  // `<projectCwd>/.claude/agents/<name>.md`), and `agents:remove-override`
+  // with the same `projectCwd` drops it. Each mutation broadcasts
+  // `agents:changed` so Agent Library and Tag Library — two independently-
+  // mounted dockview panels, each with its own component-local
+  // `listPersonas()` snapshot — both refresh off the one file on disk instead
+  // of one panel going stale after the other edits the agent<->tag relationship.
   function broadcastAgentsChanged() {
     sendIfAlive(getWindow(), 'agents:changed', {});
   }
@@ -36,16 +41,16 @@ function registerAgentsHandlers({ ipcMain, getWindow }) {
     broadcastAgentsChanged();
     return result;
   }));
-  ipcMain.handle('agents:delete-persona', async (_e, payload) => {
+  ipcMain.handle('agents:delete-persona', validated(schemas.agentsDeletePersona, async (payload) => {
     const result = await agentLibrary.deletePersona(payload);
     broadcastAgentsChanged();
     return result;
-  });
-  ipcMain.handle('agents:remove-override', async (_e, payload) => {
+  }));
+  ipcMain.handle('agents:remove-override', validated(schemas.agentsRemoveOverride, async (payload) => {
     const result = await agentLibrary.removeOverride(payload);
     broadcastAgentsChanged();
     return result;
-  });
+  }));
   // New Epic AIM composer (epicIntake.ts's `agentBody`/`agentPath`): unlike
   // list-personas above (global dir only), this honors the project-overlay-
   // then-global precedence so an Epic's opening prompt carries the persona

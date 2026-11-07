@@ -269,6 +269,23 @@ test('deletePersona removes the file, and is a no-op when it is already gone', a
   await expect(deletePersona({ name: 'gone-soon', globalDir, validatePath: identityValidatePath })).resolves.toEqual({ ok: true });
 });
 
+test('deletePersona rejects a traversal name and leaves the file in place', async () => {
+  const home = await mkTmp('sm-agent-library-delete-traversal-');
+  const globalDir = path.join(home, '.claude', 'agents');
+  await fsp.mkdir(globalDir, { recursive: true });
+  // `<globalDir>/../../notes/x.md` resolves to `<home>/notes/x.md` — outside the agents dir.
+  const victim = path.join(home, 'notes', 'x.md');
+  await fsp.mkdir(path.dirname(victim), { recursive: true });
+  await fsp.writeFile(victim, 'not a persona\n');
+  const validated = [];
+  const validatePath = (p) => { validated.push(p); return p; };
+
+  await expect(deletePersona({ name: '../../notes/x', globalDir, validatePath }))
+    .rejects.toThrow('agent name must be lowercase, hyphenated (e.g. "my-agent")');
+  expect(fs.existsSync(victim)).toBe(true);
+  expect(validated).toEqual([]); // the guard runs before any path is built or checked
+});
+
 test('removeOverride deletes a project overlay resolved by projectCwd (a trailing-slash cwd too), and rejects an unknown or empty cwd', async () => {
   const project = await mkTmp('sm-agent-library-override-');
   await fsp.mkdir(path.join(project, '.claude', 'agents'), { recursive: true });

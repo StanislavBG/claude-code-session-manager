@@ -258,12 +258,19 @@ async function savePersona({
   return { ok: true, path: target };
 }
 
-/** Deletes a global persona `.md` file. Idempotent — missing file is not an error. */
+/**
+ * Deletes a global persona `.md` file. Idempotent — missing file is not an error.
+ * A non-kebab-case `name` (e.g. `../../notes/x`) throws before any path is built,
+ * so it can never unlink a `.md` outside `globalDir`.
+ */
 async function deletePersona({
   name,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
   validatePath = configMgr.validatePath,
 } = {}) {
+  if (!PERSONA_NAME_RE.test(name || '')) {
+    throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
+  }
   const target = validatePath(path.join(globalDir, `${name}.md`));
   try {
     await fsp.unlink(target);

@@ -12,7 +12,7 @@ const path = require('node:path');
 const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
 const { PrdWorkTypeSchema } = require('./lib/prd/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
-const { AgentPersonaSaveSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
+const { AgentPersonaSaveSchema, PersonaNameSchema, ProjectCwdSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
 const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroRemoveFromProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 const { MAX_SLOTS } = require('./lib/scheduler/sessionSlots.cjs');
 
@@ -663,6 +663,10 @@ const setSessionSlotsSchema = z.object({
 // Full field-level rules live in lib/persona-macro/agentPersonaSchema.cjs, mirroring
 // AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
 const agentsSavePersona = AgentPersonaSaveSchema;
+// agents:remove-override — an OPEN project's override, keyed by its absolute cwd (never a folder name).
+const agentsRemoveOverride = z.object({ name: PersonaNameSchema, projectCwd: ProjectCwdSchema }).strict();
+// agents:delete-persona — a kebab-case name only; `.strict()` also bars deletePersona's injectable `globalDir`.
+const agentsDeletePersona = z.object({ name: PersonaNameSchema }).strict();
 // claudeConfig:read / claudeConfig:patch — mirrors ClaudeConfigReadInput /
 // ClaudeConfigPatchInput (src/preload/api.d.ts). fileId comes from the registry in
 // lib/claudeConfig.cjs; `value` absent => delete the key.
@@ -1524,6 +1528,8 @@ module.exports = {
     remoteSessionPrds,
     exchangesList,
     agentsSavePersona,
+    agentsRemoveOverride,
+    agentsDeletePersona,
     claudeConfigRead,
     claudeConfigPatch,
     macrosSave,

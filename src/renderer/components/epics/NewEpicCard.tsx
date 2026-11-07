@@ -420,12 +420,28 @@ export function NewEpicCard({
     if (!canSaveDraft || creating) return
     setCreating(true)
     markHandled()
+    const savedSig = sig
     try {
       const intake = await buildIntake()
       let id: string
       if (editDraft) {
         await saveEditedDraft(editDraft, intake)
         id = editDraft.id
+        // The card stays mounted in edit mode: keep every field, re-enable autosave.
+        lastSavedSigRef.current = savedSig
+        handledRef.current = false
+        toast.success('Draft saved')
+        // Typed during the await (no debounce was armed while handled): arm it now.
+        if (snapRef.current && snapRef.current.sig !== savedSig) {
+          if (debounceRef.current) clearTimeout(debounceRef.current)
+          const t = setTimeout(() => {
+            if (debounceRef.current === t) debounceRef.current = null
+            if (snapRef.current) runAutosave(snapRef.current)
+          }, AUTOSAVE_DEBOUNCE_MS)
+          debounceRef.current = t
+        }
+        onDraftSaved?.(id)
+        return
       } else {
         // Born 'proposed' and left there: no approveProposed, no chat send.
         const { goalText, openingPrompt, sections, runtime } = intake

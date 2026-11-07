@@ -1365,6 +1365,98 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
       expect(updateSpy.mock.calls.length).toBe(afterStart)
     })
 
+    describe('edit-mode explicit Save keeps the card live', () => {
+      const attach = (el: HTMLElement, path: string) => {
+        const fileInput = el.querySelector('[data-testid="new-epic-attach-input"]') as HTMLInputElement
+        const file = new File(['x'], 'a.log', { type: 'text/plain' })
+        Object.defineProperty(file, 'path', { value: path })
+        Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+        act(() => fileInput.dispatchEvent(new Event('change', { bubbles: true })))
+      }
+      const val = (el: HTMLElement, id: string) => (el.querySelector(`[data-testid="${id}"]`) as HTMLInputElement).value
+      const goalOf = (n: number) => (updateSpy.mock.calls[n] as unknown as [string, { goalText: string }])[1].goalText
+
+      it('keeps every field on screen after Save', async () => {
+        const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+        await act(async () => {})
+        type(el, 'new-epic-title', 'Kept title'); type(el, 'new-epic-goal', 'Kept goal')
+        click(el, 'new-epic-save-draft')
+        await act(async () => {})
+        expect(updateSpy).toHaveBeenCalledTimes(1)
+        expect(val(el, 'new-epic-title')).toBe('Kept title')
+        expect(val(el, 'new-epic-goal')).toBe('Kept goal')
+        expect((el.querySelector('[data-testid="new-epic-develop-loop"]') as HTMLInputElement).checked).toBe(false)
+      })
+
+      it('an edit after Save autosaves exactly once', async () => {
+        vi.useFakeTimers()
+        const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+        type(el, 'new-epic-goal', 'first')
+        click(el, 'new-epic-save-draft')
+        await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+        expect(updateSpy).toHaveBeenCalledTimes(1)
+        type(el, 'new-epic-goal', 'second')
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+        expect(updateSpy).toHaveBeenCalledTimes(2)
+        expect(goalOf(1)).toContain('second')
+        await unmount()
+        expect(updateSpy).toHaveBeenCalledTimes(2)
+      })
+
+      it('unmount flushes an edit made after Save', async () => {
+        vi.useFakeTimers()
+        const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+        type(el, 'new-epic-goal', 'first')
+        click(el, 'new-epic-save-draft')
+        await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+        type(el, 'new-epic-goal', 'late')
+        await unmount()
+        expect(updateSpy).toHaveBeenCalledTimes(2)
+        expect(goalOf(1)).toContain('late')
+      })
+
+      it('an edit made during the in-flight save is saved afterwards', async () => {
+        vi.useFakeTimers()
+        let release: () => void = () => {}
+        updateSpy.mockImplementationOnce(() => new Promise<object>((r) => { release = () => r({}) }))
+        const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+        type(el, 'new-epic-goal', 'first')
+        click(el, 'new-epic-save-draft')
+        await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+        type(el, 'new-epic-goal', 'during')
+        await act(async () => { release(); await vi.advanceTimersByTimeAsync(10) })
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+        expect(updateSpy).toHaveBeenCalledTimes(2)
+        expect(goalOf(1)).toContain('during')
+        expect(val(el, 'new-epic-goal')).toBe('during')
+      })
+
+      it('two saves with one attachment give one Reference', async () => {
+        const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+        await act(async () => {})
+        attach(el, '/dl/a.log')
+        click(el, 'new-epic-save-draft')
+        await act(async () => {})
+        click(el, 'new-epic-save-draft')
+        await act(async () => {})
+        expect(updateSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+        for (let i = 0; i < updateSpy.mock.calls.length; i++) {
+          expect(goalOf(i).split('/dl/a.log').length - 1).toBe(1)
+        }
+      })
+
+      it('new-mode Save still resets and mints once', async () => {
+        const onDraftSaved = vi.fn()
+        const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} onDraftSaved={onDraftSaved} />)
+        type(el, 'new-epic-goal', 'typed')
+        click(el, 'new-epic-save-draft')
+        await act(async () => {})
+        expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+        expect(val(el, 'new-epic-goal')).toBe('')
+        expect(onDraftSaved).toHaveBeenCalledTimes(1)
+      })
+    })
+
     it('an autosave failure toasts with the title and does not throw', async () => {
       createPromptSessionSpy.mockRejectedValueOnce(new Error('disk full'))
       const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)

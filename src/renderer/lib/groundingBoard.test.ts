@@ -5,7 +5,7 @@ import type { DelegationReadiness } from '../../preload/api'
 
 function installApi(overrides: {
   readText?: Record<string, { exists: boolean; text: string }>
-  listDir?: Record<string, { ok: boolean; entries: Array<{ name: string }> }>
+  listDir?: Record<string, { ok: boolean; entries: Array<{ name: string; path?: string }> }>
   readJson?: Record<string, unknown>
   exists?: Record<string, boolean>
   branch?: string | null
@@ -18,7 +18,7 @@ function installApi(overrides: {
   })
   const listDir = vi.fn(async (path: string) => {
     const hit = overrides.listDir?.[path]
-    return { ok: hit ? hit.ok : true, entries: hit?.entries ?? [], error: null }
+    return { ok: hit ? hit.ok : true, entries: (hit?.entries ?? []).map((e) => ({ ...e, path: e.path ?? `${path}/${e.name}` })), error: null }
   })
   const readJson = vi.fn(async (path: string) => ({
     exists: true, raw: '', data: overrides.readJson?.[path] ?? null, parseError: null, mtimeMs: 0, error: null,
@@ -185,6 +185,46 @@ describe('computeGroundingBoard', () => {
     })
     const local = groups.find((g) => g.key === 'local')!
     expect(local.items.find((i) => i.name === 'Epic isolation')?.present).toBe(true)
+  })
+})
+
+describe('skills and MCP layers', () => {
+  const input = {
+    home: '/home/bilko', cwd: '/home/bilko/Projects/alpha', agentPersonaPath: null, agentPersonaName: null,
+    openTerminalTabsInProject: 0, otherEpicsInProject: 0,
+  }
+
+  it('counts only folders containing SKILL.md', async () => {
+    installApi({
+      listDir: { '/home/bilko/.claude/skills': { ok: true, entries: [{ name: 'real' }, { name: 'empty' }] } },
+      readText: { '/home/bilko/.claude/skills/real/SKILL.md': { exists: true, text: '# real' } },
+    })
+    const groups = await computeGroundingBoard(input)
+    const item = groups.find((g) => g.key === 'system')!.items.find((i) => i.name === 'skills/')!
+    expect(item.detail).toBe('1 installed')
+  })
+
+  it('reports no skills when no folder has SKILL.md', async () => {
+    installApi({ listDir: { '/home/bilko/.claude/skills': { ok: true, entries: [{ name: 'empty' }] } } })
+    const groups = await computeGroundingBoard(input)
+    const item = groups.find((g) => g.key === 'system')!.items.find((i) => i.name === 'skills/')!
+    expect(item.present).toBe(false)
+  })
+
+  it('reports ~/.claude.json servers under System and .mcp.json servers under Project', async () => {
+    installApi({
+      readJson: {
+        '/home/bilko/.claude.json': { mcpServers: { userSrv: {} } },
+        '/home/bilko/Projects/alpha/.mcp.json': { mcpServers: { projA: {}, projB: {} } },
+      },
+    })
+    const groups = await computeGroundingBoard(input)
+    const sys = groups.find((g) => g.key === 'system')!.items.find((i) => i.name.startsWith('mcp servers'))!
+    const proj = groups.find((g) => g.key === 'project')!.items.find((i) => i.name.startsWith('mcp servers'))!
+    expect(sys.name).toBe('mcp servers · 1')
+    expect(sys.detail).toBe('userSrv')
+    expect(proj.name).toBe('mcp servers · 2')
+    expect(proj.detail).toBe('projA, projB')
   })
 })
 

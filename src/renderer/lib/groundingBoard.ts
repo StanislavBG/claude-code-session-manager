@@ -10,6 +10,7 @@
  */
 
 import { CLAUDE_MD_SCOPES, SETTINGS_SCOPES } from './scopes'
+import { listSkillEntries } from './listSkills'
 import type { DelegationReadiness } from '../../preload/api'
 
 export interface GroundingItem {
@@ -39,11 +40,18 @@ async function fileItem(path: string, name: string, presentDetail: (lines: numbe
   return { name, detail: presentDetail(lines), tokK: estTokK(res.text), present: true }
 }
 
-async function dirCountItem(path: string, name: string, noun: string): Promise<GroundingItem> {
-  const res = await window.api.config.listDir(path, { dirsOnly: true })
-  const count = res.ok ? res.entries.length : 0
-  if (!res.ok || count === 0) return { name, detail: `no ${noun} installed`, tokK: 0, present: false }
-  return { name, detail: `${count} installed`, tokK: estTokK(res.entries.map((e) => e.name).join(' ')) + 0.1 * count, present: true }
+async function skillCountItem(base: string, name: string): Promise<GroundingItem> {
+  const { entries } = await listSkillEntries(base)
+  const count = entries.length
+  if (count === 0) return { name, detail: 'no skills installed', tokK: 0, present: false }
+  return { name, detail: `${count} installed`, tokK: estTokK(entries.map((e) => e.name).join(' ')) + 0.1 * count, present: true }
+}
+
+function mcpItem(servers: Record<string, unknown>): GroundingItem {
+  const count = Object.keys(servers).length
+  return count > 0
+    ? { name: `mcp servers · ${count}`, detail: Object.keys(servers).slice(0, 3).join(', '), tokK: 0.2 * count, present: true }
+    : { name: 'mcp servers', detail: 'none configured', tokK: 0, present: false }
 }
 
 function countHookRules(rawText: string): number {
@@ -83,6 +91,7 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
     projectClaudeMd,
     projectSkills,
     userClaudeJson,
+    projectMcpJson,
     projectSettingsText,
     briefPresent,
     localClaudeMd,
@@ -91,11 +100,12 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
   ] = await Promise.all([
     fileItem(userClaudeMdPath, 'CLAUDE.md', (n) => `global preferences · ${n} lines`),
     window.api.config.readText(userSettingsPath),
-    dirCountItem(`${home}/.claude/skills`, 'skills/', 'skills'),
+    skillCountItem(`${home}/.claude/skills`, 'skills/'),
     agentPersonaPath ? window.api.config.readText(agentPersonaPath) : Promise.resolve(null),
     fileItem(projectClaudeMdPath, 'CLAUDE.md', (n) => `${n} lines`),
-    dirCountItem(`${cwd}/.claude/skills`, '.claude/skills/', 'skills'),
+    skillCountItem(`${cwd}/.claude/skills`, '.claude/skills/'),
     window.api.config.readJson(`${home}/.claude.json`),
+    window.api.config.readJson(`${cwd}/.mcp.json`),
     window.api.config.readText(projectSettingsPath),
     window.api.config.exists(`${cwd}/session-manager-operations/project-brief/brief.json`),
     fileItem(localClaudeMdPath, 'CLAUDE.local.md', (n) => `personal notes · ${n} lines`),
@@ -113,8 +123,8 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
     ),
   ])
 
-  const mcpServers = (userClaudeJson.data as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
-  const mcpCount = Object.keys(mcpServers).length
+  const userMcpServers = (userClaudeJson.data as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
+  const projectMcpServers = (projectMcpJson.data as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
   const hookCount = countHookRules(projectSettingsText.text)
 
   const system: GroundingGroup = {
@@ -125,6 +135,7 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
       userClaudeMd,
       { name: 'settings.json', detail: userSettingsText.exists ? 'model, permissions, output style' : 'not present', tokK: userSettingsText.exists ? estTokK(userSettingsText.text) : 0, present: userSettingsText.exists },
       userSkills,
+      mcpItem(userMcpServers),
       personaFile
         ? { name: `agents/${agentPersonaName}.md`, detail: 'system prompt for the selected role · required', tokK: estTokK(personaFile.text), present: personaFile.exists, locked: true }
         : { name: 'agents/*.md', detail: 'no agent selected — no persona', tokK: 0, present: false },
@@ -138,9 +149,7 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
     items: [
       projectClaudeMd,
       projectSkills,
-      mcpCount > 0
-        ? { name: `mcp servers · ${mcpCount}`, detail: Object.keys(mcpServers).slice(0, 3).join(', '), tokK: 0.2 * mcpCount, present: true }
-        : { name: 'mcp servers', detail: 'none configured', tokK: 0, present: false },
+      mcpItem(projectMcpServers),
       hookCount > 0
         ? { name: `hooks · ${hookCount}`, detail: 'from .claude/settings.json', tokK: 0.1 * hookCount, present: true }
         : { name: 'hooks', detail: 'none configured', tokK: 0, present: false },

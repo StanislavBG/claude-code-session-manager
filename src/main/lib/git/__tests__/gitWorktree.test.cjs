@@ -2276,3 +2276,120 @@ test('listStrandedPins applies its date and already-landed filters', async () =>
   expect(future).toEqual([]);
   expect(await gitWorktree.listStrandedPins({ cwd: '/nonexistent-dir-xyz', key: 'lp', sinceMs: 0 })).toEqual([]);
 });
+
+// ──────────────────────────────────────────── replayBranchOnto
+
+function rpCommit(cwd, file, content, msg, env = {}) {
+  fs.writeFileSync(path.join(cwd, file), content, 'utf8');
+  git(['add', '-A'], cwd);
+  execFileSync('git', ['commit', '-q', '-m', msg], { cwd, encoding: 'utf8', env: { ...process.env, ...env } });
+  return git(['rev-parse', 'HEAD'], cwd).trim();
+}
+const rpMain = (cwd) => git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).trim();
+const rpSnap = (cwd) => ({
+  status: git(['status', '--porcelain'], cwd),
+  head: git(['rev-parse', 'HEAD'], cwd),
+  refs: git(['for-each-ref', 'refs/heads'], cwd),
+});
+
+test('[replay] ancestor onto -> fast-forward result, no objects created', async () => {
+  const base = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-q', '-b', 'feat'], repoCwd);
+  const tip = rpCommit(repoCwd, 'a.txt', 'a\n', 'feat a');
+  const before = git(['count-objects', '-v'], repoCwd);
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: base, branch: 'feat' });
+  expect(r).toEqual({ ok: true, tipSha: tip, replayed: [], skipped: [], fastForward: true });
+  expect(git(['count-objects', '-v'], repoCwd)).toBe(before);
+});
+
+test('[replay] diverged branch is replayed linearly, preserving author, date and full message', async () => {
+  const main = rpMain(repoCwd);
+  git(['checkout', '-q', '-b', 'feat'], repoCwd);
+  const env = { GIT_AUTHOR_NAME: 'Alice A', GIT_AUTHOR_EMAIL: 'alice@example.com', GIT_AUTHOR_DATE: '2020-01-02T03:04:05+00:00' };
+  const c1 = rpCommit(repoCwd, 'a.txt', 'a\n', 'feat a\n\nbody line\n\nCo-Authored-By: Bob <bob@example.com>', env);
+  const c2 = rpCommit(repoCwd, 'b.txt', 'b\n', 'feat b', env);
+  git(['checkout', '-q', main], repoCwd);
+  const onto = rpCommit(repoCwd, 'm.txt', 'm\n', 'main work');
+  const snap = rpSnap(repoCwd);
+
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+  expect(r.ok).toBe(true);
+  expect(r.replayed.map((x) => x.from)).toEqual([c1, c2]);
+  expect(r.skipped).toEqual([]);
+  expect(git(['rev-list', '--merges', `${onto}..${r.tipSha}`], repoCwd)).toBe('');
+  expect(git(['rev-list', '--first-parent', r.tipSha], repoCwd).split('\n')).toContain(onto);
+  for (const { from, to } of r.replayed) {
+    const fmt = (s) => git(['log', '-1', '--format=%an|%ae|%aI', s], repoCwd);
+    expect(fmt(to)).toBe(fmt(from));
+    expect(git(['log', '-1', '--format=%B', to], repoCwd)).toBe(git(['log', '-1', '--format=%B', from], repoCwd));
+  }
+  expect(git(['show', `${r.tipSha}:m.txt`], repoCwd)).toBe('m\n');
+  expect(git(['show', `${r.tipSha}:b.txt`], repoCwd)).toBe('b\n');
+  expect(rpSnap(repoCwd)).toEqual(snap);
+});
+
+test('[replay] already-applied and emptied commits are skipped; merges are never replayed; >200 refused', async () => {
+  const main = rpMain(repoCwd);
+  git(['checkout', '-q', '-b', 'feat'], repoCwd);
+  const dup = rpCommit(repoCwd, 'a.txt', 'a\n', 'add a');
+  const real = rpCommit(repoCwd, 'b.txt', 'b\n', 'add b');
+  git(['checkout', '-q', '-b', 'side', main], repoCwd);
+  rpCommit(repoCwd, 's.txt', 's\n', 'side');
+  git(['checkout', '-q', 'feat'], repoCwd);
+  git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side'], repoCwd);
+  git(['checkout', '-q', main], repoCwd);
+  rpCommit(repoCwd, 'm.txt', 'm\n', 'main work');
+  git(['cherry-pick', dup], repoCwd);
+  const onto = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+  expect(r.ok).toBe(true);
+  expect(r.skipped).toContain(dup);
+  expect(r.replayed.map((x) => x.from)).toContain(real);
+  expect(git(['rev-list', '--merges', `${onto}..${r.tipSha}`], repoCwd)).toBe('');
+
+  // Over the limit: fast-import 201 commits on a branch forked from the first commit.
+  const root = git(['rev-list', '--max-parents=0', 'HEAD'], repoCwd).trim();
+  let stream = '';
+  for (let i = 0; i < 201; i++) {
+    stream += `commit refs/heads/many\ncommitter T <t@e.com> ${1600000000 + i} +0000\ndata 1\nx\n${i === 0 ? `from ${root}\n` : ''}M 100644 inline f${i}.txt\ndata 1\n${i % 10}\n\n`;
+  }
+  execFileSync('git', ['fast-import', '--quiet'], { cwd: repoCwd, input: stream });
+  const big = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'many' });
+  expect(big.ok).toBe(false);
+  expect(big.failureKind).toBe('other');
+});
+
+test('[replay] a conflicting commit reports content_conflict and leaves status, HEAD and refs untouched', async () => {
+  const main = rpMain(repoCwd);
+  git(['checkout', '-q', '-b', 'feat'], repoCwd);
+  rpCommit(repoCwd, 'README.md', 'feature\n', 'feat readme');
+  git(['checkout', '-q', main], repoCwd);
+  const onto = rpCommit(repoCwd, 'README.md', 'mainline\n', 'main readme');
+  const snap = rpSnap(repoCwd);
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+  expect(r.ok).toBe(false);
+  expect(r.failureKind).toBe('content_conflict');
+  expect(r.conflictedPaths).toEqual(['README.md']);
+  expect(rpSnap(repoCwd)).toEqual(snap);
+});
+
+test('[replay] never throws on bad input', async () => {
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: 'nope', branch: 'nope' });
+  expect(r.ok).toBe(false);
+  const r2 = await gitWorktree.replayBranchOnto({ cwd: '/nonexistent-dir-xyz', ontoSha: 'a', branch: 'b' });
+  expect(r2.ok).toBe(false);
+});
+
+test('[replay] a branch whose name starts with "-" is treated as a name, not an option', async () => {
+  const main = rpMain(repoCwd);
+  git(['checkout', '-q', '-b', 'seed'], repoCwd);
+  const c = rpCommit(repoCwd, 'd.txt', 'd\n', 'dash work');
+  git(['update-ref', 'refs/heads/-dash-branch', 'seed'], repoCwd);
+  git(['checkout', '-q', main], repoCwd);
+  const onto = rpCommit(repoCwd, 'm.txt', 'm\n', 'main work');
+  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: '-dash-branch' });
+  expect(r.ok).toBe(true);
+  expect(r.replayed.map((x) => x.from)).toEqual([c]);
+  expect(git(['rev-list', '--merges', `${onto}..${r.tipSha}`], repoCwd)).toBe('');
+});

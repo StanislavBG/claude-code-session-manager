@@ -2071,6 +2071,135 @@ async function runMergeTreeWriteTree({ cwd, oldSha, branchSha }) {
   }
 }
 
+const REPLAY_MAX_COMMITS = 200;
+
+/**
+ * Checkout-free linear replay: rebuilds `branch`'s non-merge commits on top of
+ * `ontoSha` purely in the object database (`git merge-tree --write-tree` +
+ * `git commit-tree`). Touches no checkout, index, HEAD or ref — the caller
+ * decides what to do with the returned `tipSha`. It exists so scheduler-job and
+ * Epic landings can be linear: `integrateBranch` / `attemptIntegrateOntoRef`
+ * create "merge ..." commits, and Bilko's scripts/sync-local-main.sh refuses a
+ * local main carrying merge commits origin lacks.
+ *
+ * Original author name/email/date and the full message are preserved; commits
+ * whose patch is already in `ontoSha`'s history (cherry-pick equivalence) or
+ * that become empty are listed in `skipped`. Merge commits are never replayed.
+ * Needs git >= 2.40 (`merge-tree --merge-base`). Never throws.
+ *
+ * @returns {Promise<{ok:true, tipSha:string, replayed:{from:string,to:string}[], skipped:string[], fastForward?:true}
+ *   | {ok:false, failureKind:string, reason:string, conflictedPaths?:string[]}>}
+ */
+async function replayBranchOnto({ cwd, ontoSha, branch }) {
+  try {
+    // Resolve once; from here on only SHAs reach git, so a branch named like an
+    // option ('-x') can never be read as one (same reason as runMergeTreeWriteTree).
+    const onto = await tryResolveCommit(cwd, `${ontoSha}^{commit}`);
+    if (!onto) return { ok: false, failureKind: 'other', reason: `ontoSha "${ontoSha}" not found` };
+    // A name starting with '-' would be read as an option by rev-parse; try the
+    // fully-qualified ref first for those.
+    const tipIn = (String(branch).startsWith('-') ? null : await tryResolveCommit(cwd, `${branch}^{commit}`))
+      || await tryResolveCommit(cwd, `refs/heads/${branch}^{commit}`);
+    if (!tipIn) return { ok: false, failureKind: 'other', reason: `branch "${branch}" not found` };
+
+    try {
+      await execGit(['merge-base', '--is-ancestor', onto, tipIn], { cwd, timeout: 10_000 });
+      return { ok: true, tipSha: tipIn, replayed: [], skipped: [], fastForward: true };
+    } catch (e) {
+      if (!(e && e.code === 1)) {
+        return { ok: false, failureKind: 'other', reason: `merge-base --is-ancestor failed: ${(e && (e.stderrText || e.message)) || e}` };
+      }
+    }
+
+    const lines = async (extra) => (await execGit(
+      ['rev-list', '--reverse', '--topo-order', '--no-merges', ...extra, '--right-only', `${onto}...${tipIn}`],
+      { cwd, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 },
+    )).split('\n').map((l) => l.trim()).filter(Boolean);
+    const kept = await lines(['--cherry-pick']);
+    const all = await lines([]);
+    const keptSet = new Set(kept);
+    const skipped = all.filter((c) => !keptSet.has(c));
+    if (kept.length > REPLAY_MAX_COMMITS) {
+      return { ok: false, failureKind: 'other', reason: `refusing to replay ${kept.length} commits (limit ${REPLAY_MAX_COMMITS})` };
+    }
+
+    let tip = onto;
+    const replayed = [];
+    for (const c of kept) {
+      let parent;
+      try {
+        parent = (await execGit(['rev-parse', '--verify', `${c}^1`], { cwd, timeout: 10_000 })).trim();
+      } catch {
+        return { ok: false, failureKind: 'other', reason: `commit ${c} has no parent to replay from` };
+      }
+      let treeOid;
+      try {
+        const out = await execGit(
+          ['merge-tree', '--write-tree', '--name-only', '--no-messages', `--merge-base=${parent}`, tip, c],
+          { cwd, timeout: 30_000 },
+        );
+        treeOid = (out.split('\n')[0] || '').trim();
+      } catch (e) {
+        const stderrText = (e && e.stderrText) || '';
+        const stdoutText = (e && e.stdoutText) || '';
+        if (e && e.code === 1 && !/unknown option|usage:/i.test(stderrText)) {
+          const conflictedPaths = Array.from(new Set(
+            stdoutText.split('\n').slice(1).map((l) => l.trim()).filter(Boolean),
+          )).sort();
+          return {
+            ok: false,
+            failureKind: 'content_conflict',
+            conflictedPaths,
+            reason: `replay of ${c} conflicts on: ${conflictedPaths.join(', ')}`,
+          };
+        }
+        if ((e && e.code === 129) || /unknown option|usage:/i.test(stderrText)) {
+          return {
+            ok: false,
+            failureKind: 'git_too_old',
+            reason: `git merge-tree --merge-base is unsupported by this git (need >= 2.40): ${stderrText || (e && e.message)}`,
+          };
+        }
+        return { ok: false, failureKind: 'other', reason: `git merge-tree failed: ${stderrText || (e && e.message)}` };
+      }
+
+      const tipTree = (await execGit(['rev-parse', `${tip}^{tree}`], { cwd, timeout: 10_000 })).trim();
+      if (treeOid === tipTree) {
+        skipped.push(c);
+        continue;
+      }
+
+      const meta = (await execGit(['log', '-1', '--format=%an%x00%ae%x00%aI%x00%B', c], { cwd, timeout: 10_000 })).split('\0');
+      const [an, ae, ad] = meta;
+      const message = meta.slice(3).join('\0').replace(/\n+$/, '');
+      const env = { GIT_AUTHOR_NAME: an, GIT_AUTHOR_EMAIL: ae, GIT_AUTHOR_DATE: ad };
+      const commitTreeArgs = ['commit-tree', treeOid, '-p', tip, '-m', message];
+      let newSha;
+      try {
+        newSha = (await execGit(commitTreeArgs, { cwd, timeout: 15_000, env })).trim();
+      } catch (e) {
+        const stderrText = (e && (e.stderrText || e.message)) || String(e);
+        if (!/Please tell me who you are/i.test(stderrText)) {
+          return { ok: false, failureKind: 'other', reason: `git commit-tree failed: ${stderrText}` };
+        }
+        try {
+          newSha = (await execGit(
+            ['-c', 'user.name=Session Manager Scheduler', '-c', 'user.email=scheduler@session-manager.local', ...commitTreeArgs],
+            { cwd, timeout: 15_000, env },
+          )).trim();
+        } catch (e2) {
+          return { ok: false, failureKind: 'other', reason: `git commit-tree failed: ${(e2 && (e2.stderrText || e2.message)) || e2}` };
+        }
+      }
+      replayed.push({ from: c, to: newSha });
+      tip = newSha;
+    }
+    return { ok: true, tipSha: tip, replayed, skipped };
+  } catch (e) {
+    return { ok: false, failureKind: 'other', reason: `replayBranchOnto failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+}
+
 /**
  * One computation attempt for `integrateOntoRef` — resolves both tips fresh,
  * decides ff vs merge-commit vs no-op, and lands the result via a
@@ -2613,6 +2742,7 @@ async function pinStrandedHead({ cwd, dir }) {
 }
 
 module.exports = {
+  replayBranchOnto,
   reconcileWorktreeHead,
   pinUnlandedWorktreeCommits,
   resolveDefaultBranch,

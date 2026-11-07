@@ -19,6 +19,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { effectiveSettings, pickByPrecedence } = require('../effectiveSettings.cjs');
 
 const CACHE_FILE = 'model-catalog.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -114,47 +115,30 @@ function readSettingsEffortLevels(fsImpl) {
   } catch { return null; }
 }
 
+function resolveRoot(cwd, d) {
+  if (!cwd) return null;
+  try { return (d.projectRootOf || require('../activeSessions.cjs').projectRootOf)(path.resolve(cwd)); } catch { return path.resolve(cwd); }
+}
+
 function readAvailableModels(cwd, d, fsImpl) {
   const home = d.homeDir ? d.homeDir() : os.homedir();
-  let root = null;
-  if (cwd) {
-    try { root = (d.projectRootOf || require('../activeSessions.cjs').projectRootOf)(path.resolve(cwd)); } catch { root = path.resolve(cwd); }
-  }
-  const files = [path.join(home, '.claude', 'settings.json')];
-  if (root) files.push(path.join(root, '.claude', 'settings.json'), path.join(root, '.claude', 'settings.local.json'));
-  let merged = null;
-  for (const f of files) {
-    try {
-      const a = JSON.parse(fsImpl.readFileSync(f, 'utf8')).availableModels;
-      if (Array.isArray(a)) merged = [...(merged || []), ...a.filter((x) => typeof x === 'string')];
-    } catch { /* missing/unreadable scope */ }
-  }
-  return merged ? [...new Set(merged)] : null;
+  const { merged } = effectiveSettings({ home, cwd: resolveRoot(cwd, d), fs: fsImpl });
+  const a = merged.availableModels;
+  if (!Array.isArray(a)) return null;
+  return [...new Set(a.filter((x) => typeof x === 'string'))];
 }
 
 /**
- * The `model` key of the user's Claude settings: first non-empty string from
- * <projectRoot>/.claude/settings.local.json, <projectRoot>/.claude/settings.json,
- * then ~/.claude/settings.json (local over project over user). Never throws; null when none.
+ * The `model` key of the effective Claude settings (managed > local > project > user):
+ * first non-empty string. Never throws; null when none.
  */
 function readSettingsModel(cwd, deps = {}) {
   try {
     const d = deps || {};
-    const fsImpl = d.fs || fs;
     const home = d.homeDir ? d.homeDir() : os.homedir();
-    const files = [];
-    if (cwd) {
-      let root;
-      try { root = (d.projectRootOf || require('../activeSessions.cjs').projectRootOf)(path.resolve(cwd)); } catch { root = path.resolve(cwd); }
-      if (root) files.push(path.join(root, '.claude', 'settings.local.json'), path.join(root, '.claude', 'settings.json'));
-    }
-    files.push(path.join(home, '.claude', 'settings.json'));
-    for (const f of files) {
-      try {
-        const m = JSON.parse(fsImpl.readFileSync(f, 'utf8')).model;
-        if (typeof m === 'string' && m.trim()) return m.trim();
-      } catch { /* missing/unreadable scope */ }
-    }
+    const layers = effectiveSettings({ home, cwd: resolveRoot(cwd, d), fs: d.fs || fs }).layers;
+    const m = pickByPrecedence(layers, 'model', (v) => typeof v === 'string' && v.trim() !== '');
+    if (typeof m === 'string') return m.trim();
   } catch { /* never throws */ }
   return null;
 }

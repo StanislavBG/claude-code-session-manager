@@ -12,18 +12,12 @@
 
 const path = require('node:path');
 const { encodeCwd } = require('./util/encodeCwd.cjs');
+const { pickByPrecedence } = require('./effectiveSettings.cjs');
 
 const SCOPES = ['user', 'project', 'local'];
 const NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
-/** Highest-precedence value (local > project > user) of `key` passing `pred`. */
-function pick(settings, key, pred) {
-  for (const layer of ['local', 'project', 'user']) {
-    const s = settings && settings[layer];
-    if (s && typeof s === 'object' && pred(s[key])) return s[key];
-  }
-  return undefined;
-}
+const pick = pickByPrecedence;
 
 function expandDir(value, home, cwd) {
   if (value === '~') return home;

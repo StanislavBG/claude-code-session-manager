@@ -23,6 +23,7 @@ const os = require('node:os');
 const { ipcMain } = require('electron');
 const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
 const { writeJson } = require('./config.cjs');
+const { effectiveSettings } = require('./lib/effectiveSettings.cjs');
 const { createUsageCircuit, singleFlight } = require('./lib/claude/usageCircuit.cjs');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -40,29 +41,13 @@ function envEnabled(v) {
  * not inherit the shell's environment, so `process.env` looks like a clean
  * consumer install even when `claude` itself is talking to a gateway.
  *
- * Precedence mirrors Claude Code: managed (enterprise) settings, then user
- * settings, then user-local settings. Missing/unreadable/invalid files are
+ * Precedence via lib/effectiveSettings.cjs: managed (enterprise) beats local beats user. Missing/unreadable/invalid files are
  * skipped. Returns `{ env, apiKeyHelper }`.
  */
 function readClaudeSettingsAuth() {
-  const merged = {};
-  let apiKeyHelper = false;
-  const managed = process.platform === 'darwin'
-    ? '/Library/Application Support/ClaudeCode/managed-settings.json'
-    : '/etc/claude-code/managed-settings.json';
-  const files = [
-    managed,
-    path.join(os.homedir(), '.claude', 'settings.json'),
-    path.join(os.homedir(), '.claude', 'settings.local.json'),
-  ];
-  for (const f of files) {
-    try {
-      const data = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (data && typeof data.env === 'object' && data.env) Object.assign(merged, data.env);
-      if (data && data.apiKeyHelper) apiKeyHelper = true;
-    } catch { /* missing / unreadable / invalid JSON → skip */ }
-  }
-  return { env: merged, apiKeyHelper };
+  const { merged } = effectiveSettings({ home: os.homedir() });
+  const env = merged.env && typeof merged.env === 'object' && !Array.isArray(merged.env) ? merged.env : {};
+  return { env, apiKeyHelper: !!merged.apiKeyHelper };
 }
 
 /**

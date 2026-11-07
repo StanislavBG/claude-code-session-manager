@@ -223,8 +223,8 @@ End every plan with exactly one validate PRD:
 3. Goal: the plan's slugs and titles.
 4. Criteria: one per PRD, citing it by slug
    (under `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic-id>/`; find it by
-   slug under prds/ or prds-archived/, possibly a timestamped subfolder. Why: `session-manager-operations/scheduler/` is gitignored, so it is never in
-   the validator's job worktree. The last: write and commit
+   slug under prds/ or prds-archived/, possibly a timestamped subfolder. Why: runtime namespaces such as `session-manager-operations/scheduler/` carry their own `.gitignore`
+   (runtime-ops-namespaces-self-ignore), so they are never in the validator's job worktree. The last: write and commit
    `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`, relative to the repository root
    (`git rev-parse --show-toplevel`), not to any subdirectory you `cd`'d into to run a gate.
 5. Notes: "Work as the validator persona — the procedure is your system prompt." and a line

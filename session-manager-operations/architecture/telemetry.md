@@ -246,7 +246,7 @@ finished; `pending` = never attempted, or its marker file is missing or unreadab
 attempted but still under the retry cap; `exhausted` = reached the seeder's `MAX_ATTEMPTS`. A status
 the client does not recognize goes out as `null`, and the whole field is `null` when
 `getSeedStatus()` throws. Bilko's `/install` route persists `seeds` to `app_installs.seeds`
-(bilko-run commit 523ba538); see that repo's `docs/telemetry-beacons.md`, section 'First-run setup
+(bilko-run commit 523ba538); see that repo's `docs/observability.md`, section 'First-run setup
 outcomes (`seeds`)'.
 
 `telemetryBoot.cjs`'s machine-profile heartbeat (version-change OR 30-day liveness) now calls

@@ -24,9 +24,9 @@ describe('uiSettingsPrefs', () => {
   })
 
   it('readUiSettingsPrefs returns the persisted data when the file exists', async () => {
-    const readJson = vi.fn().mockResolvedValue({ exists: true, data: { rawSessionModel: 'sonnet' } })
+    const readJson = vi.fn().mockResolvedValue({ exists: true, data: { terminal: { theme: 'dark', fontSize: 13 } } })
     installApi({ readJson, writeJson: vi.fn() })
-    expect(await readUiSettingsPrefs()).toEqual({ rawSessionModel: 'sonnet' })
+    expect(await readUiSettingsPrefs()).toEqual({ terminal: { theme: 'dark', fontSize: 13 } })
   })
 
   it('readUiSettingsPrefs returns {} when the read throws', async () => {
@@ -39,10 +39,10 @@ describe('uiSettingsPrefs', () => {
     const readJson = vi.fn().mockResolvedValue({ exists: true, data: { terminal: { theme: 'dark', fontSize: 13 } } })
     const writeJson = vi.fn().mockResolvedValue(undefined)
     installApi({ readJson, writeJson })
-    await writeUiSettingsPrefs({ rawSessionModel: 'sonnet' })
+    await writeUiSettingsPrefs({ fileTreeShowHidden: true })
     expect(writeJson).toHaveBeenCalledWith(UI_SETTINGS_PREFS_FILE, {
       terminal: { theme: 'dark', fontSize: 13 },
-      rawSessionModel: 'sonnet',
+      fileTreeShowHidden: true,
     })
   })
 
@@ -50,7 +50,7 @@ describe('uiSettingsPrefs', () => {
     const readJson = vi.fn().mockResolvedValue({ exists: false })
     const writeJson = vi.fn().mockRejectedValue(new Error('disk full'))
     installApi({ readJson, writeJson })
-    await expect(writeUiSettingsPrefs({ rawSessionModel: 'sonnet' })).rejects.toThrow('disk full')
+    await expect(writeUiSettingsPrefs({ terminal: { theme: 'dark', fontSize: 13 } })).rejects.toThrow('disk full')
   })
 
   it('serializes two overlapping writes so the later one never reads a stale snapshot (cross-feature TOCTOU)', async () => {
@@ -65,10 +65,10 @@ describe('uiSettingsPrefs', () => {
     }))
     installApi({ readJson, writeJson })
 
-    // rawSessionModel.ts and terminalSettings.ts both write through this
+    // fileTree and terminalSettings both write through this
     // module — issuing their writes back-to-back must not let the second
     // one's read-modify-write cycle start before the first one's write lands.
-    const p1 = writeUiSettingsPrefs({ rawSessionModel: 'sonnet' })
+    const p1 = writeUiSettingsPrefs({ fileTreeShowHidden: true })
     await vi.waitFor(() => expect(writeJson).toHaveBeenCalledTimes(1))
 
     const p2 = writeUiSettingsPrefs({ terminal: { theme: 'paper', fontSize: 18 } })
@@ -81,14 +81,14 @@ describe('uiSettingsPrefs', () => {
     await vi.waitFor(() => expect(writeJson).toHaveBeenCalledTimes(2))
     // p2's read-modify-write must have picked up p1's already-applied field.
     expect(writeJson.mock.calls[1][1]).toEqual({
-      rawSessionModel: 'sonnet',
+      fileTreeShowHidden: true,
       terminal: { theme: 'paper', fontSize: 18 },
     })
 
     writeResolvers[1]()
     await p2
     expect(store).toEqual({
-      rawSessionModel: 'sonnet',
+      fileTreeShowHidden: true,
       terminal: { theme: 'paper', fontSize: 18 },
     })
   })

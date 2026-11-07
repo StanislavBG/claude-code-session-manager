@@ -56,12 +56,12 @@ describe('editorPrefs', () => {
   })
 
   it('setTheme writes a merge-write patch through the shared ui-settings-prefs.json, preserving sibling fields', async () => {
-    store.rawSessionModel = 'sonnet'
+    store.terminal = { theme: 'dark', fontSize: 13 }
     const { useEditorPrefs } = await freshModule()
     useEditorPrefs.getState().setTheme('dark')
     await vi.waitFor(() => expect(writeJson).toHaveBeenCalled())
     expect(writeJson).toHaveBeenCalledWith(UI_SETTINGS_PREFS_FILE, expect.objectContaining({
-      rawSessionModel: 'sonnet',
+      terminal: { theme: 'dark', fontSize: 13 },
       editor: expect.objectContaining({ theme: 'dark' }),
     }))
     expect(useEditorPrefs.getState().theme).toBe('dark')

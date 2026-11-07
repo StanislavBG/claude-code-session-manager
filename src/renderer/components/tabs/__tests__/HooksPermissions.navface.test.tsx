@@ -146,7 +146,7 @@ describe.each([
       expect(viewTabLabels(el)).not.toContain(homeOnlyTab)
     })
 
-    it(`bounces back to Effective if navFace flips to project while ${homeOnlyTab} was selected`, async () => {
+    it(`bounces back to the default view if navFace flips to project while ${homeOnlyTab} was selected`, async () => {
       const el = await mount()
       await act(async () => {
         clickViewTab(el, homeOnlyTab)

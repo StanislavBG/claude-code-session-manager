@@ -12,7 +12,7 @@ export interface AppSettingsFile<T extends object> {
   subscribe: (cb: () => void) => () => void
 }
 
-const instances = new Map<string, AppSettingsFile<any>>()
+const instances = new Map<string, AppSettingsFile<any>>() // lint-allow-any: heterogeneous registry keyed by file id
 
 function samePath(eventPath: string, filePath: string): boolean {
   const norm = (p: string) => p.replace(/\\/g, '/')

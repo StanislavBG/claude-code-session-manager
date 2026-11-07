@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { EmptyState } from '../ui/EmptyState'
@@ -10,9 +10,6 @@ import { PermissionsPresetsLibrary } from './Library'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { ViewTabs } from '../ui/ViewTabs'
-import { EffectiveTree } from '../ui/EffectiveTree'
-import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
-import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { toast } from '../../state/toast'
 
@@ -67,7 +64,7 @@ function PermissionsComponent() {
   const prevNavFaceRef = useRef(navFace)
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
-  const [view, setView] = useState<'effective' | 'rules' | 'presets'>('effective')
+  const [view, setView] = useState<'rules' | 'presets'>('rules')
 
   // Permissions is now HOME-only in the sidebar (navGroups.ts), and every
   // nav path that focuses it asserts navFace: 'home' — but a background
@@ -87,9 +84,9 @@ function PermissionsComponent() {
   // 'presets' (PermissionsPresetsLibrary, in ./Library.tsx) is a static
   // reference catalog with no cwd/scope input anywhere — identical on both
   // faces. Project face never offers it (see the ViewTabs options below);
-  // bounce back to 'effective' if you land on Project while it was selected.
+  // bounce back to 'rules' if you land on Project while it was selected.
   useEffect(() => {
-    if (navFace === 'project' && view === 'presets') setView('effective')
+    if (navFace === 'project' && view === 'presets') setView('rules')
   }, [navFace, view])
 
   const handleScopeChange = (next: Scope) => {
@@ -101,16 +98,9 @@ function PermissionsComponent() {
   const activePath = scopePaths[scope] ?? null
   const files = useConfig((s) => s.files)
 
-  const patchKey = (keyPath: string[], value: unknown) => {
-    window.api.claudeConfig
-      .patch({ fileId: 'settings', scope, cwd, keyPath, value })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
-  }
-
   const viewTabs = (
     <ViewTabs
       options={[
-        { key: 'effective', label: 'Effective' },
         { key: 'rules', label: 'Rules' },
         ...(navFace === 'home' ? [{ key: 'presets', label: 'Presets' }] as const : []),
       ]}
@@ -118,22 +108,6 @@ function PermissionsComponent() {
       onChange={setView}
     />
   )
-
-  const effective = useMemo(() => {
-    const merged = mergeScopes(parseScopedJson(files, scopePaths))
-    return getAtPath(merged, ['permissions']) ?? { kind: 'object' as const, children: {} }
-  }, [files, scopePaths])
-
-  const overrideInto = (path: string[], value: unknown) => {
-    const target = scopePaths[scope]
-    if (!target) return
-    const { err: draftErr } = parsePerms(files[target]?.draftRaw ?? '')
-    if (draftErr) {
-      toast.error(INVALID_JSON_MSG)
-      return
-    }
-    patchKey(['permissions', ...path], value)
-  }
 
   if (!home) return <EmptyState title="loading…" />
   if (view === 'presets') {
@@ -145,28 +119,6 @@ function PermissionsComponent() {
   }
   const scopeNeedsCwd = (s: Scope) => s !== 'user' && !cwd
   const file = activePath ? files[activePath] : null
-  const { perms, full, err } = file ? parsePerms(file.draftRaw) : { perms: {}, full: {}, err: null }
-
-  const updatePerm = (key: string, value: unknown) => {
-    if (!activePath) return
-    if (err) {
-      toast.error(INVALID_JSON_MSG)
-      return
-    }
-    patchKey(['permissions', key], value)
-  }
-
-  const addRule = (list: PermissionList, value: string) => {
-    const v = value.trim()
-    if (!v) return
-    const cur = perms[list] ?? []
-    if (cur.includes(v)) return
-    updatePerm(list, [...cur, v])
-  }
-  const removeRule = (list: PermissionList, idx: number) => {
-    const cur = perms[list] ?? []
-    updatePerm(list, cur.filter((_, i) => i !== idx))
-  }
 
   return (
     <Panel
@@ -204,41 +156,8 @@ function PermissionsComponent() {
           title="no active project"
           hint="open a tab in a project directory to edit project or local permissions"
         />
-      ) : view === 'effective' ? (
-        <EffectiveTree
-          node={effective}
-          targetScope={scope}
-          onOverride={overrideInto}
-          schema={settingsSchema().rootedAt(['permissions'])}
-          rootLabel="permissions"
-        />
       ) : activePath && file ? (
-        <div className="p-4 space-y-5 max-w-3xl">
-          {err && (
-            <div role="alert" className="text-xs text-red-400 border border-red-400/40 rounded px-3 py-2">
-              {INVALID_JSON_MSG} ({err})
-            </div>
-          )}
-          <ModeSelector
-            value={perms.defaultMode ?? 'default'}
-            onChange={(mode) => updatePerm('defaultMode', mode)}
-          />
-          {LISTS.map((list) => (
-            <RuleList
-              key={list}
-              list={list}
-              rules={perms[list] ?? []}
-              disabled={!!err}
-              onAdd={(v) => addRule(list, v)}
-              onRemove={(i) => removeRule(list, i)}
-            />
-          ))}
-          <AdditionalDirs
-            dirs={perms.additionalDirectories ?? []}
-            disabled={!!err}
-            onChange={(dirs) => updatePerm('additionalDirectories', dirs)}
-          />
-        </div>
+        <PermissionsRulesEditor scope={scope} cwd={cwd} activePath={activePath} />
       ) : (
         <EmptyState title="resolving…" />
       )}
@@ -248,6 +167,60 @@ function PermissionsComponent() {
 
 // Memoized: no props; own data comes from store/IPC hooks inside the component.
 export const Permissions = memo(PermissionsComponent)
+
+/** Rules editor body over the `permissions` key of one scope's settings.json — shared by the Permissions page and the Settings Permissions tab. */
+export function PermissionsRulesEditor({ scope, cwd, activePath }: { scope: Scope; cwd: string | null; activePath: string }) {
+  const file = useConfig((s) => s.files[activePath])
+  const { perms, err } = file ? parsePerms(file.draftRaw) : { perms: {} as PermissionsShape, err: null }
+
+  const updatePerm = (key: string, value: unknown) => {
+    if (err) {
+      toast.error(INVALID_JSON_MSG)
+      return
+    }
+    window.api.claudeConfig
+      .patch({ fileId: 'settings', scope, cwd, keyPath: ['permissions', key], value })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
+  }
+
+  const addRule = (list: PermissionList, value: string) => {
+    const v = value.trim()
+    if (!v) return
+    const cur = perms[list] ?? []
+    if (cur.includes(v)) return
+    updatePerm(list, [...cur, v])
+  }
+  const removeRule = (list: PermissionList, idx: number) => {
+    const cur = perms[list] ?? []
+    updatePerm(list, cur.filter((_, i) => i !== idx))
+  }
+
+  return (
+    <div className="p-4 space-y-5 max-w-3xl">
+      {err && (
+        <div role="alert" className="text-xs text-red-400 border border-red-400/40 rounded px-3 py-2">
+          {INVALID_JSON_MSG} ({err})
+        </div>
+      )}
+      <ModeSelector value={perms.defaultMode ?? 'default'} onChange={(mode) => updatePerm('defaultMode', mode)} />
+      {LISTS.map((list) => (
+        <RuleList
+          key={list}
+          list={list}
+          rules={perms[list] ?? []}
+          disabled={!!err}
+          onAdd={(v) => addRule(list, v)}
+          onRemove={(i) => removeRule(list, i)}
+        />
+      ))}
+      <AdditionalDirs
+        dirs={perms.additionalDirectories ?? []}
+        disabled={!!err}
+        onChange={(dirs) => updatePerm('additionalDirectories', dirs)}
+      />
+    </div>
+  )
+}
 
 function ModeSelector({
   value,

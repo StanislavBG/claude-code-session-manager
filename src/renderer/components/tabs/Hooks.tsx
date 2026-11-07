@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -13,10 +13,6 @@ import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { HooksLibrary } from './Library'
 import { ViewTabs } from '../ui/ViewTabs'
-import { EffectiveTree } from '../ui/EffectiveTree'
-import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
-import { parseScopedJson } from '../../lib/parseScopedJson'
-import { settingsSchema } from '../../lib/settingsSchema'
 import rawSettingsSchema from '../../data/claude-settings-schema.json'
 import { Tooltip } from '../ui/Tooltip'
 import { toast } from '../../state/toast'
@@ -176,8 +172,7 @@ function HooksComponent() {
   const prevNavFaceRef = useRef(navFace)
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
-  const [selectedEvent, setSelectedEvent] = useState<HookEvent>('PreToolUse')
-  const [view, setView] = useState<'effective' | 'events' | 'library'>('effective')
+  const [view, setView] = useState<'events' | 'library'>('events')
 
   // Hooks is now HOME-only in the sidebar (navGroups.ts), and every nav path
   // that focuses it asserts navFace: 'home' — but a background split
@@ -197,9 +192,9 @@ function HooksComponent() {
   // 'library' (HooksLibrary, in ./Library.tsx) is a static reference catalog
   // with no cwd/scope input anywhere — identical on both faces. Project face
   // never offers it (see the ViewTabs options below); bounce back to
-  // 'effective' if you land on Project while it was selected.
+  // 'events' if you land on Project while it was selected.
   useEffect(() => {
-    if (navFace === 'project' && view === 'library') setView('effective')
+    if (navFace === 'project' && view === 'library') setView('events')
   }, [navFace, view])
 
   const handleScopeChange = (next: Scope) => {
@@ -210,23 +205,9 @@ function HooksComponent() {
   const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
   const path = scopePaths[scope] ?? null
 
-  const files = useConfig((s) => s.files)
-
-  const patchKey = (keyPath: string[], value: unknown) => {
-    window.api.claudeConfig
-      .patch({ fileId: 'settings', scope, cwd, keyPath, value })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
-  }
-  const [testFire, setTestFire] = useState<{
-    event: HookEvent
-    matcher: string
-    command: string
-  } | null>(null)
-
   const viewTabs = (
     <ViewTabs
       options={[
-        { key: 'effective', label: 'Effective' },
         { key: 'events', label: 'Events' },
         ...(navFace === 'home' ? [{ key: 'library', label: 'Library' }] as const : []),
       ]}
@@ -234,22 +215,6 @@ function HooksComponent() {
       onChange={setView}
     />
   )
-
-  const effective = useMemo(() => {
-    const merged = mergeScopes(parseScopedJson(files, scopePaths))
-    return getAtPath(merged, ['hooks']) ?? { kind: 'object' as const, children: {} }
-  }, [files, scopePaths])
-
-  const overrideInto = (nodePath: string[], value: unknown) => {
-    const target = scopePaths[scope]
-    if (!target) return
-    const { err: draftErr } = parseFull(files[target]?.draftRaw ?? '')
-    if (draftErr) {
-      toast.error(INVALID_JSON_MSG)
-      return
-    }
-    patchKey(['hooks', ...nodePath], value)
-  }
 
   if (!home) return <EmptyState title="loading…" />
   if (view === 'library') {
@@ -276,8 +241,48 @@ function HooksComponent() {
   }
   if (!path) return <EmptyState title="loading…" />
 
-  const file = files[path]
-  const { full, hooks, err } = file ? parseFull(file.draftRaw) : { full: {}, hooks: {}, err: null }
+  return (
+    <Panel
+      toolbar={
+        <>
+          {viewTabs}
+          <span className="mx-2 text-fg-faint">·</span>
+          <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={handleScopeChange} />
+          <span className="ml-3 text-fg-faint truncate">{path}</span>
+          <div className="flex-1" />
+          <a
+            href="https://code.claude.com/docs/en/hooks"
+            target="_blank"
+            rel="noreferrer"
+            className="text-fg-faint hover:text-fg-dim underline-offset-2 hover:underline"
+          >
+            hook reference ↗
+          </a>
+        </>
+      }
+    >
+      <HooksEventsEditor scope={scope} cwd={cwd} path={path} />
+    </Panel>
+  )
+}
+
+/** Events editor body over the `hooks` key of one scope's settings.json — shared by the Hooks page and the Settings Hooks tab. */
+export function HooksEventsEditor({ scope, cwd, path }: { scope: Scope; cwd: string | null; path: string }) {
+  const [selectedEvent, setSelectedEvent] = useState<HookEvent>('PreToolUse')
+  const [testFire, setTestFire] = useState<{
+    event: HookEvent
+    matcher: string
+    command: string
+  } | null>(null)
+
+  const patchKey = (keyPath: string[], value: unknown) => {
+    window.api.claudeConfig
+      .patch({ fileId: 'settings', scope, cwd, keyPath, value })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
+  }
+
+  const file = useConfig((s) => s.files[path])
+  const { hooks, err } = file ? parseFull(file.draftRaw) : { hooks: {} as HooksConfig, err: null }
 
   // Old 2025-era event names (PreBash etc.) silently disappear from the
   // documented sidebar; surface them in a single chip so users notice the
@@ -310,37 +315,9 @@ function HooksComponent() {
     updateEvent(selectedEvent, groups.filter((_, i) => i !== idx))
   }
 
+
   return (
-    <Panel
-      toolbar={
-        <>
-          {viewTabs}
-          <span className="mx-2 text-fg-faint">·</span>
-          <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={handleScopeChange} />
-          <span className="ml-3 text-fg-faint truncate">
-            {view === 'effective' ? `overrides → ${path}` : path}
-          </span>
-          <div className="flex-1" />
-          <a
-            href="https://code.claude.com/docs/en/hooks"
-            target="_blank"
-            rel="noreferrer"
-            className="text-fg-faint hover:text-fg-dim underline-offset-2 hover:underline"
-          >
-            hook reference ↗
-          </a>
-        </>
-      }
-    >
-      {view === 'effective' ? (
-        <EffectiveTree
-          node={effective}
-          targetScope={scope}
-          onOverride={overrideInto}
-          schema={settingsSchema().rootedAt(['hooks'])}
-          rootLabel="hooks"
-        />
-      ) : (
+    <>
       <div className="flex flex-col h-full">
       {err ? (
         <div role="alert" className="px-3 py-2 border-b border-line text-xs text-red-400">
@@ -440,7 +417,6 @@ function HooksComponent() {
         }
       />
       </div>
-      )}
       {testFire ? (
         <TestFireModal
           event={testFire.event}
@@ -449,7 +425,7 @@ function HooksComponent() {
           onClose={() => setTestFire(null)}
         />
       ) : null}
-    </Panel>
+    </>
   )
 }
 

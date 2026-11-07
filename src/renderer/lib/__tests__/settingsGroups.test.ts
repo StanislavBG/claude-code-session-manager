@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SETTINGS_GROUPS, planGroupRail, planGroups } from '../settingsGroups'
+import { OWNED_KEYS, SETTINGS_GROUPS, planGroupRail, planGroups } from '../settingsGroups'
 
 describe('Model & Reasoning group', () => {
   it('is marked advanced — demoted out of the curated primary listing per agent-model-nav-consolidation', () => {
@@ -20,7 +20,9 @@ describe('planGroupRail', () => {
     const allKeys = new Set(SETTINGS_GROUPS.flatMap((g) => g.keys))
     const presentKeys = new Set<string>()
     const rail = planGroupRail(allKeys, presentKeys)
-    expect(rail.map((r) => r.id)).toEqual(SETTINGS_GROUPS.map((g) => g.id))
+    // Groups whose keys are all owned by another Settings tab/page are not rendered.
+    const expected = SETTINGS_GROUPS.filter((g) => g.keys.some((k) => !OWNED_KEYS.has(k))).map((g) => g.id)
+    expect(rail.map((r) => r.id)).toEqual(expected)
   })
 
   it('computes a correct set-count out of the group total', () => {

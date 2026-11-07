@@ -125,16 +125,29 @@ describe('AgentLibrary watches ~/.claude/agents via config:changed', () => {
     expect(api.agents.listPersonas).toHaveBeenCalledTimes(1)
   })
 
-  it('also watches the active project overlay directory when a project tab is open', async () => {
-    const tab: SessionTab = {
-      id: 't1', sessionId: 't1', label: 'alpha', cwd: '/home/bilko/Projects/alpha',
+  it('watches every open project overlay directory with no active tab set, and re-lists on a change in one', async () => {
+    const tab = (id: string, cwd: string): SessionTab => ({
+      id, sessionId: id, label: id, cwd,
       pid: null, status: 'dormant', exitCode: null, startupCommand: null, presetId: null, generation: 0,
-    }
-    useSessions.setState({ tabs: [tab], activeTabId: tab.id })
-    const { api } = installWindowApiMock()
+    })
+    useSessions.setState({
+      tabs: [tab('t1', '/home/bilko/Projects/alpha'), tab('t2', '/home/bilko/Projects/beta/')],
+      activeTabId: null,
+    })
+    const { api, emitConfigChanged } = installWindowApiMock()
     await mount()
     const watchedPaths = api.config.watch.mock.calls.flatMap((c) => c[0] as string[])
-    expect(watchedPaths).toContain('/home/bilko/Projects/alpha/.claude/agents')
+    expect(watchedPaths).toEqual(expect.arrayContaining([
+      AGENTS_DIR,
+      '/home/bilko/Projects/alpha/.claude/agents',
+      '/home/bilko/Projects/beta/.claude/agents',
+    ]))
+    expect(api.agents.listPersonas).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      emitConfigChanged('/home/bilko/Projects/beta/.claude/agents')
+      await Promise.resolve()
+    })
+    expect(api.agents.listPersonas).toHaveBeenCalledTimes(2)
   })
 
   it('unwatches the agents directory on unmount', async () => {

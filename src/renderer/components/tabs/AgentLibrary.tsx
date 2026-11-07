@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -22,17 +22,24 @@ import { modelFamily } from '../../lib/prettyModel'
 import { modelSupportsEffort } from '../../lib/effortSupport'
 import { useSessions } from '../../state/sessions'
 import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
-import { normalizeCwd } from '../../lib/knownProjectAggregate'
+import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregate'
+import { compactPath } from '../../lib/compactPath'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
  * Follows Skills.tsx's canonical list+detail shape (component-local fetch on
  * mount, filterable sidebar, detail pane) plus real CRUD: New/Duplicate/Save/
  * Revert/Delete write straight through to disk via `window.api.agents.*`
- * (agentLibrary.cjs), scoped to the global persona directory only — a
- * project's local overlay at `<cwd>/.claude/agents/<name>.md` can be dropped
- * here (`removeOverride`) but never created, since this page has no per-tab
- * cwd context of its own (it's a Home-face, machine-wide surface).
+ * (agentLibrary.cjs), scoped to the global persona directory.
+ *
+ * Per-project overrides: this is a Home-face, machine-wide page, so it never
+ * reads the active tab — no open project is special. The PROJECT OVERRIDE
+ * block instead carries an explicit project picker listing every open project
+ * (one entry per unique tab cwd, nothing preselected); choosing one shows and
+ * writes that project's frontmatter-only overlay at
+ * `<cwd>/.claude/agents/<name>.md`, keyed by the chosen cwd. Any open
+ * project's overlay can also be dropped from the "project overrides" chips
+ * (`removeOverride`).
  *
  * The "tags" field assigns/removes session intent tags (TAG_LIBRARY) on this
  * persona — a `tags:` frontmatter line persisted alongside `tools`/`model`.
@@ -81,14 +88,31 @@ function toDraft(p: AgentPersona): Draft {
 
 const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '' }
 
+type OverrideDetail = NonNullable<AgentPersona['overrideDetails']>[number]
+
+/** An open project the PROJECT OVERRIDE picker can target: a unique normalized tab cwd and its folder name. */
+interface OpenProject { cwd: string; name: string }
+
+/** One entry per unique `normalizeCwd(tab.cwd)` (so `/a/b/` and `/a/b` are one), sorted by name then cwd. */
+function openProjectsOf(tabs: readonly { cwd: string }[]): OpenProject[] {
+  const byCwd = new Map<string, OpenProject>()
+  for (const t of tabs) {
+    const cwd = typeof t.cwd === 'string' ? normalizeCwd(t.cwd) : ''
+    if (cwd && !byCwd.has(cwd)) byCwd.set(cwd, { cwd, name: projectNameFromCwd(cwd) })
+  }
+  return [...byCwd.values()].sort((a, b) => a.name.localeCompare(b.name) || a.cwd.localeCompare(b.cwd))
+}
+
+/** What one project's overlay of a persona overrides: its frontmatter keys (minus `name`), plus "full body". */
+function overrideParts(d: OverrideDetail): string[] {
+  return [...d.fields.filter((f) => f !== 'name'), ...(d.bodyOverridden ? ['full body'] : [])]
+}
+
 /** Tooltip for the list's override badge: per project, which keys a frontmatter-only overlay sets, or "full body".
  *  One line per overrideDetails entry (one per open cwd), so two projects sharing a folder name stay two lines. */
 function overrideSummary(p: AgentPersona): string {
   return (p.overrideDetails ?? [])
-    .map((d) => {
-      const parts = [...d.fields.filter((f) => f !== 'name'), ...(d.bodyOverridden ? ['full body'] : [])]
-      return `${d.project}: ${parts.join(', ') || 'overlay'}`
-    })
+    .map((d) => `${d.project}: ${overrideParts(d).join(', ') || 'overlay'}`)
     .join('\n')
 }
 
@@ -104,9 +128,14 @@ function AgentLibraryComponent() {
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
-  // The active project is the active tab's cwd — null on a HOME-face surface with no tab.
-  const activeCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
-  const activeProject = activeCwd ? activeCwd.replace(/\/+$/, '').split('/').pop() || activeCwd : null
+  // Every open project, from the tab list — this Home-face page never reads which tab is active.
+  // The selector returns the store's own array; the derived list is built in useMemo, never in it.
+  const tabs = useSessions((s) => s.tabs)
+  const openProjects = useMemo(() => openProjectsOf(tabs), [tabs])
+  // The PROJECT OVERRIDE picker's choice: page state (survives switching personas), null on mount.
+  const [overrideCwd, setOverrideCwd] = useState<string | null>(null)
+  // Derived, so a closed tab falls back to "Choose a project…" with no effect.
+  const overrideProject = openProjects.find((p) => p.cwd === overrideCwd) ?? null
 
   // Re-read after this page's own save; optionally select the saved persona.
   // (Mount + agents:changed refresh live in useAgentPersonasState.)
@@ -116,11 +145,11 @@ function AgentLibraryComponent() {
   }
 
   // agents:changed only fires as a write-echo from this app's OWN save/delete
-  // (agentLibrary.cjs) — an external edit to ~/.claude/agents/*.md (or the
-  // active project's overlay dir) is otherwise invisible until the next
-  // manual reload. Watch both directories directly and re-list on any
+  // (agentLibrary.cjs) — an external edit to ~/.claude/agents/*.md (or any
+  // open project's overlay dir) is otherwise invisible until the next
+  // manual reload. Watch those directories directly and re-list on any
   // add/change/unlink, in addition to (not instead of) the echo above.
-  useAgentsDirWatch(activeCwd, () => load())
+  useAgentsDirWatch(openProjects.map((p) => p.cwd), () => load())
 
   // Cross-tab deep link: EpicDetail's read-only Agent+model chip (PRD
   // agent-epic-readback) navigates here to jump straight to the persona a
@@ -257,23 +286,24 @@ function AgentLibraryComponent() {
     }
   }
 
-  // Writes the ACTIVE project's frontmatter-only overlay through the same savePersona IPC (projectCwd
+  // Writes the CHOSEN project's frontmatter-only overlay through the same savePersona IPC (projectCwd
   // set = overlay, never the global file); clearing both keys drops the overlay via removeOverride.
-  // Keyed by the active tab's normalized cwd, never its folder name (two open projects can share one).
+  // Keyed by the picked project's normalized cwd, never its folder name (two open projects can share one).
+  // A tab closed between render and click makes main throw ("project not open") → the toast below.
   const saveOverride = async (patch: { model: string; effort: string }) => {
-    if (!saved || !activeCwd || !activeProject) return
-    const projectCwd = normalizeCwd(activeCwd)
+    if (!saved || !overrideProject) return
+    const { cwd: projectCwd, name: projectLabel } = overrideProject
     setBusy(true)
     try {
       if (patch.model === 'inherit' && patch.effort === 'inherit') {
         await window.api.agents.removeOverride({ name: saved.name, projectCwd })
-        toast.info(`cleared ${activeProject}'s override of ${saved.name}`)
+        toast.info(`cleared ${projectLabel}'s override of ${saved.name}`)
       } else {
         await window.api.agents.savePersona({
           name: saved.name, projectCwd, description: '', tools: [], color: '', tags: [], body: '',
           model: patch.model, effort: patch.effort,
         })
-        toast.info(`saved ${activeProject}'s override of ${saved.name}`)
+        toast.info(`saved ${projectLabel}'s override of ${saved.name}`)
       }
       await load(saved.name)
     } catch (e) {
@@ -398,8 +428,9 @@ function AgentLibraryComponent() {
               onSave={save}
               onDelete={remove}
               onDropOverride={dropOverride}
-              activeProject={activeProject}
-              activeCwd={activeCwd}
+              projects={openProjects}
+              selected={overrideProject}
+              onSelect={setOverrideCwd}
               onSaveOverride={saveOverride}
             />
           ) : (
@@ -416,7 +447,7 @@ export const AgentLibrary = memo(AgentLibraryComponent)
 
 function AgentPersonaEditor({
   obj, set, saved, dirty, isNew, busy, confirmDelete, setConfirmDelete,
-  onDuplicate, onRevert, onSave, onDelete, onDropOverride, activeProject, activeCwd, onSaveOverride,
+  onDuplicate, onRevert, onSave, onDelete, onDropOverride, projects, selected, onSelect, onSaveOverride,
 }: {
   obj: Draft
   set: (patch: Partial<Draft>) => void
@@ -431,8 +462,10 @@ function AgentPersonaEditor({
   onSave: () => void
   onDelete: () => void
   onDropOverride: (cwd: string, label: string) => void
-  activeProject: string | null
-  activeCwd: string | null
+  /** PROJECT OVERRIDE picker: every open project, the chosen one (null = none), and the chooser. */
+  projects: OpenProject[]
+  selected: OpenProject | null
+  onSelect: (cwd: string | null) => void
   onSaveOverride: (patch: { model: string; effort: string }) => void
 }) {
   const home = useHomeDir()
@@ -468,7 +501,7 @@ function AgentPersonaEditor({
         <EffortPicker value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
 
         {!isNew && saved && (
-          <ProjectOverrideBlock saved={saved} activeProject={activeProject} activeCwd={activeCwd} busy={busy} onSave={onSaveOverride} />
+          <ProjectOverrideBlock saved={saved} projects={projects} selected={selected} onSelect={onSelect} busy={busy} onSave={onSaveOverride} />
         )}
 
         <Field label="tools" hint={`${obj.tools.length} of ${TOOLS.length} granted. Anything not ticked is refused at call time.`}>
@@ -709,30 +742,37 @@ function EffortPicker({ value, model, onChange, label = 'effort', testIdPrefix =
 }
 
 /**
- * PROJECT OVERRIDE — the ACTIVE project's runtime model/effort for this persona, written as a
- * frontmatter-only overlay at `<cwd>/.claude/agents/<name>.md` (no body; lib/persona-macro/personaMerge.cjs inherits the
- * rest from the global persona). Deliberately a separate block from the global rows above it: those edit
- * `~/.claude/agents/<name>.md` for the whole machine, these edit only this project's file. Each picker writes
- * on change (no draft/Save step) so the two scopes never share a Save button.
+ * PROJECT OVERRIDE — an explicit project picker over every open project (one option per unique tab cwd,
+ * nothing preselected: the page never reads the active tab, so no open project is special), then the CHOSEN
+ * project's runtime model/effort for this persona, written as a frontmatter-only overlay at
+ * `<cwd>/.claude/agents/<name>.md` (no body; lib/persona-macro/personaMerge.cjs inherits the rest from the
+ * global persona). An option whose project already overrides this persona names what it overrides; two open
+ * projects sharing a folder name are labelled by their home-shortened paths instead. Deliberately a separate
+ * block from the global rows above it: those edit `~/.claude/agents/<name>.md` for the whole machine, these
+ * edit only the chosen project's file. Each picker writes on change (no draft/Save step) so the two scopes
+ * never share a Save button. The choice is AgentLibrary's page state (it survives switching personas) and
+ * falls back to "Choose a project…" once that project's tab closes.
  */
-function ProjectOverrideBlock({ saved, activeProject, activeCwd, busy, onSave }: {
+function ProjectOverrideBlock({ saved, projects, selected, onSelect, busy, onSave }: {
   saved: AgentPersona
-  activeProject: string | null
-  activeCwd: string | null
+  projects: OpenProject[]
+  selected: OpenProject | null
+  onSelect: (cwd: string | null) => void
   busy: boolean
   onSave: (patch: { model: string; effort: string }) => void
 }) {
-  if (!activeProject || !activeCwd) {
-    return (
-      <div data-testid="project-override-none" className="border border-dashed border-line rounded p-3 text-[11px] text-fg-faint">
-        <div className="text-[10.5px] font-semibold uppercase tracking-wide mb-1 font-mono">project override</div>
-        No active project — open a project tab to override this persona&apos;s model or effort for that project only.
-      </div>
-    )
+  const home = useHomeDir()
+  const nameCount = new Map<string, number>()
+  for (const p of projects) nameCount.set(p.name, (nameCount.get(p.name) ?? 0) + 1)
+  const optionLabel = (p: OpenProject) => {
+    const label = (nameCount.get(p.name) ?? 0) > 1 ? compactPath(p.cwd, home) : p.name
+    const d = saved.overrideDetails?.find((x) => x.cwd === p.cwd)
+    if (!d) return label
+    const parts = overrideParts(d)
+    return `${label} — ${parts.length ? `overrides ${parts.join(', ')}` : 'overlay'}`
   }
   // By cwd, not folder name: two open projects sharing a name must not read each other's overlay.
-  const activeKey = normalizeCwd(activeCwd)
-  const detail = saved.overrideDetails?.find((d) => d.cwd === activeKey)
+  const detail = selected ? saved.overrideDetails?.find((d) => d.cwd === selected.cwd) : undefined
   const fullBody = !!detail?.bodyOverridden
   const model = detail?.values?.model ?? 'inherit'
   const effort = detail?.values?.effort ?? 'inherit'
@@ -740,47 +780,79 @@ function ProjectOverrideBlock({ saved, activeProject, activeCwd, busy, onSave }:
   const globalEffort = saved.effort ?? 'inherit'
 
   return (
-    <div data-testid="project-override" className="border border-accent/40 rounded p-3 space-y-3 bg-accent/5">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10.5px] font-semibold uppercase tracking-wide text-accent font-mono">project override</span>
-        <Badge tone="accent">{activeProject} only</Badge>
-        <span className="ml-auto min-w-0"><SourceChip path={`${(activeCwd ?? '').replace(/\/+$/, '')}/.claude/agents/${saved.name}.md`} /></span>
-      </div>
-      <div className="text-[11px] text-fg-faint leading-snug">
-        Changes what the SCHEDULER (and new Epics) spawn for <strong>{activeProject}</strong> only — a frontmatter-only overlay with just the keys you set;
-        the persona&apos;s body stays the global one. The global model/effort rows edit the machine-wide persona and are never touched here.
-      </div>
-      {fullBody && (
-        <div data-testid="project-override-fullbody" className="text-[11px] text-amber-400 leading-snug">
-          {activeProject} already has a FULL-BODY override of this persona (its own definition text). It is shown as-is and not converted to a
-          frontmatter-only overlay — edit that file directly, or drop it with × under &quot;project overrides&quot; below.
+    <div
+      data-testid="project-override-block"
+      className={selected ? 'border border-accent/40 rounded p-3 space-y-3 bg-accent/5' : 'border border-dashed border-line rounded p-3 space-y-3'}
+    >
+      <label className="flex flex-col gap-1">
+        <span className={`text-[10.5px] font-semibold uppercase tracking-wide font-mono ${selected ? 'text-accent' : 'text-fg-faint'}`}>
+          project override
+        </span>
+        <select
+          data-testid="override-project-select"
+          value={selected?.cwd ?? ''}
+          onChange={(e) => onSelect(e.target.value || null)}
+          disabled={busy || projects.length === 0}
+          className="rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] text-fg disabled:opacity-60"
+        >
+          <option value="">Choose a project…</option>
+          {projects.map((p) => (
+            <option key={p.cwd} value={p.cwd}>{optionLabel(p)}</option>
+          ))}
+        </select>
+      </label>
+      {projects.length === 0 ? (
+        <div data-testid="project-override-none" className="text-[11px] text-fg-faint leading-snug">
+          No open project tabs — open a project tab to override this persona&apos;s model or effort for it.
+        </div>
+      ) : !selected ? (
+        <div data-testid="project-override-unselected" className="text-[11px] text-fg-faint leading-snug">
+          Pick an open project to see or set this persona&apos;s model and effort for that project only. A project that
+          already overrides this persona says what it overrides.
+        </div>
+      ) : (
+        <div data-testid="project-override" className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge tone="accent">{selected.name} only</Badge>
+            <span className="ml-auto min-w-0"><SourceChip path={`${selected.cwd}/.claude/agents/${saved.name}.md`} /></span>
+          </div>
+          <div className="text-[11px] text-fg-faint leading-snug">
+            Changes what the SCHEDULER (and new Epics) spawn for <strong>{selected.name}</strong> only — a frontmatter-only overlay with just the keys you set;
+            the persona&apos;s body stays the global one. The global model/effort rows edit the machine-wide persona and are never touched here.
+          </div>
+          {fullBody && (
+            <div data-testid="project-override-fullbody" className="text-[11px] text-amber-400 leading-snug">
+              {selected.name} already has a FULL-BODY override of this persona (its own definition text). It is shown as-is and not converted to a
+              frontmatter-only overlay — edit that file directly, or drop it with × under &quot;project overrides&quot; below.
+            </div>
+          )}
+          <fieldset disabled={busy || fullBody} className="space-y-3 border-0 p-0 m-0 min-w-0">
+            <ModelPicker
+              value={model}
+              onChange={(v) => { if (!fullBody) onSave({ model: v, effort }) }}
+              label="project model"
+              hint="'use global' writes no model: line in the overlay."
+              testIdPrefix="override-"
+              inheritLabel="use global"
+            />
+            <EffortPicker
+              value={effort}
+              model={model !== 'inherit' ? model : globalModel}
+              onChange={(v) => { if (!fullBody) onSave({ model, effort: v }) }}
+              label="project effort"
+              testIdPrefix="override-"
+              inheritLabel="use global"
+            />
+          </fieldset>
+          <div data-testid="override-provenance" className="text-[11px] font-mono text-fg-dim space-y-0.5">
+            {[['model', globalModel, model], ['effort', globalEffort, effort]].map(([k, g, o]) => (
+              <div key={k} data-testid={`override-provenance-${k}`}>
+                {k}: {o !== 'inherit' ? <>{g} <span className="text-fg-faint">(global)</span> → <span className="text-accent">{o}</span> <span className="text-fg-faint">(this project)</span></> : <>{g} <span className="text-fg-faint">(global — not overridden)</span></>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
-      <fieldset disabled={busy || fullBody} className="space-y-3 border-0 p-0 m-0 min-w-0">
-        <ModelPicker
-          value={model}
-          onChange={(v) => { if (!fullBody) onSave({ model: v, effort }) }}
-          label="project model"
-          hint="'use global' writes no model: line in the overlay."
-          testIdPrefix="override-"
-          inheritLabel="use global"
-        />
-        <EffortPicker
-          value={effort}
-          model={model !== 'inherit' ? model : globalModel}
-          onChange={(v) => { if (!fullBody) onSave({ model, effort: v }) }}
-          label="project effort"
-          testIdPrefix="override-"
-          inheritLabel="use global"
-        />
-      </fieldset>
-      <div data-testid="override-provenance" className="text-[11px] font-mono text-fg-dim space-y-0.5">
-        {[['model', globalModel, model], ['effort', globalEffort, effort]].map(([k, g, o]) => (
-          <div key={k} data-testid={`override-provenance-${k}`}>
-            {k}: {o !== 'inherit' ? <>{g} <span className="text-fg-faint">(global)</span> → <span className="text-accent">{o}</span> <span className="text-fg-faint">(this project)</span></> : <>{g} <span className="text-fg-faint">(global — not overridden)</span></>}
-          </div>
-        ))}
-      </div>
     </div>
   )
 }

@@ -34,8 +34,8 @@ function TagLibraryComponent({ onOpenPersona }: { onOpenPersona?: (name: string)
   // agents:changed only fires as a write-echo from this app's OWN save — an
   // external edit to ~/.claude/agents/*.md is otherwise invisible. This page
   // is Home-face, machine-wide only (see docblock above), so only the global
-  // directory is watched — no per-project overlay concept here.
-  useAgentsDirWatch(null, () => { void refresh() })
+  // directory is watched — no project cwds, no per-project overlay concept here.
+  useAgentsDirWatch([], () => { void refresh() })
 
   const selected = TAG_LIBRARY.find((entry) => entry.tag === selectedTag) ?? null
 

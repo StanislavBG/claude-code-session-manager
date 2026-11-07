@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { TagLibrary } from '../TagLibrary'
+import { useSessions } from '../../../state/sessions'
 import type { AgentPersona, ConfigChangedEvent } from '../../../../preload/api'
 
 /**
@@ -70,6 +71,7 @@ async function mount() {
 }
 
 afterEach(() => {
+  useSessions.setState({ tabs: [], activeTabId: null })
   act(() => root?.unmount())
   container?.remove()
   container = null
@@ -78,11 +80,12 @@ afterEach(() => {
 })
 
 describe('TagLibrary watches ~/.claude/agents via config:changed', () => {
-  it('registers a watch on the global agents directory on mount', async () => {
+  it('registers a watch on the global agents directory only — never an open project overlay dir — on mount', async () => {
+    useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/alpha' } as never], activeTabId: 't1' })
     const { api } = installWindowApiMock()
     await mount()
     const watchedPaths = api.config.watch.mock.calls.flatMap((c) => c[0] as string[])
-    expect(watchedPaths).toContain(AGENTS_DIR)
+    expect([...new Set(watchedPaths)]).toEqual([AGENTS_DIR])
   })
 
   it('re-fetches personas when config:changed fires for the watched agents directory', async () => {

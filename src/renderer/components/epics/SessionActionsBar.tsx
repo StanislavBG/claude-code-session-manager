@@ -82,6 +82,9 @@ function ManagePanel({
               />
               <span className="truncate text-fg">{m.label}</span>
               {all && <span className="shrink-0 text-[10px] text-fg-faint">every project</span>}
+              {m.surface === 'project-home' && (
+                <span data-testid="hotkey-manage-surface" className="shrink-0 text-[10px] text-fg-faint">Project Home</span>
+              )}
             </label>
             {confirming === m.id ? (
               <>

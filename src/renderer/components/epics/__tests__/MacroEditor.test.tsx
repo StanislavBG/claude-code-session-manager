@@ -37,7 +37,7 @@ describe('MacroEditor', () => {
     mount()
     act(() => { setValue(q('macro-label') as HTMLInputElement, ' Go '); setValue(q('macro-prompt') as HTMLTextAreaElement, 'Do it') })
     await act(async () => { q('macro-save').click() })
-    expect(save).toHaveBeenCalledWith({ label: 'Go', agentName: 'architect', tag: 'feature', prompt: 'Do it', projects: [CWD], autoStartTargets: [] })
+    expect(save).toHaveBeenCalledWith({ label: 'Go', agentName: 'architect', tag: 'feature', prompt: 'Do it', projects: [CWD], surface: 'sessions', autoStartTargets: [] })
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -219,5 +219,35 @@ describe('MacroEditor', () => {
       await act(async () => { q('macro-save').click() })
       expect(save.mock.calls[0][0].inputs).toEqual([])
     })
+  })
+
+  const pickSurface = (v: string) => {
+    const sel = q('macro-surface') as HTMLSelectElement
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(sel, v)
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+
+  it('sends the chosen surface on create', async () => {
+    mount()
+    act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+    pickSurface('project-home')
+    await act(async () => { q('macro-save').click() })
+    expect(save.mock.calls[0][0].surface).toBe('project-home')
+  })
+
+  it('prefills the surface on edit', async () => {
+    mount({ macro: mac({ surface: 'project-home' }) })
+    expect((q('macro-surface') as HTMLSelectElement).value).toBe('project-home')
+    await act(async () => { q('macro-save').click() })
+    expect(save.mock.calls[0][0].surface).toBe('project-home')
+  })
+
+  it('hides the surface control and omits surface for a built-in', async () => {
+    mount({ macro: mac({ builtin: true, surface: 'project-home' }) })
+    expect(q('macro-surface')).toBeNull()
+    await act(async () => { q('macro-save').click() })
+    expect('surface' in save.mock.calls[0][0]).toBe(false)
   })
 })

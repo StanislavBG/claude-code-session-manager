@@ -145,7 +145,7 @@ describe('SessionActionsBar', () => {
       setValue(q(el, 'macro-prompt') as HTMLTextAreaElement, 'Scan everything')
     })
     await act(async () => { q(el, 'macro-save')!.click() })
-    expect(save).toHaveBeenCalledWith({ label: 'Scan', agentName: 'scout', tag: 'bug', prompt: 'Scan everything', projects: [CWD], autoStartTargets: [] })
+    expect(save).toHaveBeenCalledWith({ label: 'Scan', agentName: 'scout', tag: 'bug', prompt: 'Scan everything', projects: [CWD], surface: 'sessions', autoStartTargets: [] })
     expect(q(el, 'macro-editor')).toBeNull()
 
     library = [macro({ id: 'new1', label: 'Scan' })]
@@ -191,6 +191,16 @@ describe('SessionActionsBar', () => {
     expect(toggle.checked).toBe(true)
     expect(toggle.disabled).toBe(true)
     expect(q(el, 'hotkey-manage-panel')!.textContent).toContain('every project')
+  })
+
+  it('manage panel chips project-home rows only', async () => {
+    library = [macro(), macro({ id: 'm2', surface: 'project-home' })]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    act(() => q(el, 'hotkey-manage')!.click())
+    const rows = Array.from(el.querySelectorAll('[data-testid="hotkey-manage-row"]'))
+    const chip = (r: Element) => r.querySelector('[data-testid="hotkey-manage-surface"]')
+    expect(chip(rows.find((r) => r.getAttribute('data-macro-id') === 'm1')!)).toBeNull()
+    expect(chip(rows.find((r) => r.getAttribute('data-macro-id') === 'm2')!)?.textContent).toBe('Project Home')
   })
 
   it('delete requires a confirm step', async () => {

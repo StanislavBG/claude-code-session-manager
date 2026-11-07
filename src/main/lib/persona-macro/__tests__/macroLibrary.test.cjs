@@ -240,6 +240,17 @@ test('builtin flag cannot be set via saveMacro', async () => {
   expect(created.builtin).toBeUndefined();
 });
 
+test('built-in surface cannot be changed; same-surface save is ok', async () => {
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.listMacros(o);
+  const b = { label: 'Test One', agentName: 'test-builder', tag: 'build', prompt: 'v1 prompt', id: 'builtin-test-one' };
+  await expect(lib.saveMacro({ ...b, surface: 'sessions' }, o)).rejects.toThrow('built-in macro surface cannot be changed');
+  const same = await lib.saveMacro({ ...b, surface: 'project-home' }, o);
+  expect(same.surface).toBe('project-home');
+  const none = await lib.saveMacro(b, o);
+  expect(none.surface).toBe('project-home');
+});
+
 test('seeds built-ins into a missing store', async () => {
   const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
   const listed = await lib.listMacros(o);

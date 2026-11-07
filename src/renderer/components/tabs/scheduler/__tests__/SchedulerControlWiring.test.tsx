@@ -28,6 +28,7 @@ const api = {
     resetJob: ok(), adoptPrd: ok(), setPrdDisposition: ok(), openFolder: vi.fn(async () => {}),
     readLog: vi.fn(() => new Promise(() => {})),
     listPrds: vi.fn(async () => []),
+    sessionSlots: vi.fn(async () => ({ total: 3, inUse: 0, holders: [], min: 0, max: 10, default: 5, envOverride: false })),
   },
   supervisor: { getLog: vi.fn(async () => []) },
   history: { dashboard: vi.fn(async () => null) },

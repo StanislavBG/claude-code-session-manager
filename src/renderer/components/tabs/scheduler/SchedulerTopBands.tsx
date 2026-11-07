@@ -307,9 +307,9 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
   const resetsIn = resetMs ? (resetMs > now ? formatRelative(resetMs - now) : 'soon') : '—'
 
   // Concurrency
-  const ec = snapshot.effectiveConcurrency
-  const cap = ec?.cap ?? 5
-  const envPinned = ec?.source === 'env'
+  // One read channel: the cap comes from useSessionSlots (schedule:session-slots), never snapshot.effectiveConcurrency.
+  const cap = slotSnapshot?.total ?? 5
+  const envPinned = slotSnapshot?.envOverride === true
   const policy = snapshot.config.firePolicy ?? 'when-available'
   const fireDisabled = pending === 0 && running === 0
 

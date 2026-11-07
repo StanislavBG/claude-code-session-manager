@@ -241,22 +241,23 @@ describe('SchedulerTopBands — concurrency + policy', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
     await click(q('kpi-concurrency-inc')); expect(api.schedule.setSessionSlots).toHaveBeenLastCalledWith(6)
     await click(q('kpi-concurrency-dec')); expect(api.schedule.setSessionSlots).toHaveBeenLastCalledWith(4)
-    useScheduleState.setState({ snapshot: fixture({ effectiveConcurrency: { cap: 10, free: 0, source: 'pool' } as never }) })
+    api.schedule.sessionSlots.mockResolvedValue({ total: 10, inUse: 0, holders: [], min: 0, max: 10, default: 5, envOverride: false })
+    await click(q('kpi-concurrency-inc'))
     await mount()
     expect((q('kpi-concurrency-inc') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('slots stepper max follows snapshot max', async () => {
     api.schedule.sessionSlots.mockResolvedValue({ total: 31, inUse: 0, holders: [], min: 0, max: 32, default: 5, envOverride: false })
-    useScheduleState.setState({ snapshot: fixture({ effectiveConcurrency: { cap: 31, free: 31, source: 'pool' } as never }) })
     await mount()
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
     await click(q('kpi-concurrency-inc')); expect(api.schedule.setSessionSlots).toHaveBeenLastCalledWith(32)
   })
 
   it('stepper is disabled with an env badge when pinned by SM_SESSION_SLOTS', async () => {
-    useScheduleState.setState({ snapshot: fixture({ effectiveConcurrency: { cap: 5, free: 0, source: 'env' } as never }) })
+    api.schedule.sessionSlots.mockResolvedValue({ total: 5, inUse: 0, holders: [], min: 0, max: 10, default: 5, envOverride: true })
     await mount()
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
     expect((q('kpi-concurrency-inc') as HTMLButtonElement).disabled).toBe(true)
     expect((q('kpi-concurrency-dec') as HTMLButtonElement).disabled).toBe(true)
     expect(q('kpi-concurrency').textContent).toContain('env')

@@ -3,7 +3,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ToolsPane } from '../ToolsPane'
-import type { AgentPersona, Macro } from '../../../../../../preload/api'
+import { useToast } from '../../../../../state/toast'
+import type { AgentPersona, Macro, MdNetwork, MdNetworkResult } from '../../../../../../preload/api'
 
 const CWD = '/p/alpha'
 
@@ -49,17 +50,62 @@ const ASK = macro({
 })
 const SESSIONS_ONLY = macro({ id: 'sessions-only', label: 'Elsewhere', surface: 'sessions' })
 
+/** A scan of 58 docs / 20 links with three findings (two broken links, one orphan group). */
+const NET: MdNetwork = {
+  ok: true,
+  root: 'CLAUDE.md',
+  nodes: [
+    { id: 'CLAUDE.md', path: 'CLAUDE.md', depth: 0, type: 'hub', linksOut: 2, linkedFrom: 0 },
+    { id: 'src/CLAUDE.md', path: 'src/CLAUDE.md', depth: 1, type: 'owner', linksOut: 1, linkedFrom: 1 },
+    { id: 'plugins/CLAUDE.md', path: 'plugins/CLAUDE.md', depth: 1, type: 'owner', linksOut: 0, linkedFrom: 1 },
+  ],
+  edges: [
+    { from: 'CLAUDE.md', to: 'src/CLAUDE.md' },
+    { from: 'CLAUDE.md', to: 'plugins/CLAUDE.md' },
+    { from: 'src/CLAUDE.md', to: 'src/gone.md', broken: true },
+  ],
+  findings: [
+    { type: 'broken-link', file: 'src/CLAUDE.md', line: 4, target: 'gone.md', to: 'src/gone.md', where: 'src/CLAUDE.md:4 → gone.md', detail: 'The link target doesn’t exist.' },
+    { type: 'broken-link', file: 'src/CLAUDE.md', line: 9, target: 'gone.md', to: 'src/gone.md', where: 'src/CLAUDE.md:9 → gone.md', detail: 'The link target doesn’t exist.' },
+    { type: 'orphan', where: 'notes/', count: 1, paths: ['notes/a.md'], detail: 'No link path from CLAUDE.md reaches this doc, so agents starting there never find it.' },
+  ],
+  docs: 58,
+  links: 20,
+  scopes: ['src/', 'plugins/'],
+}
+const INFO = '58 docs · 20 links · 3 findings. A review opens an architect session that reports first and changes no files until you approve.'
+
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  let reject!: (e: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 const save = vi.fn()
 const listPersonas = vi.fn()
+const mdNetwork = vi.fn<(payload: { cwd: string }) => Promise<MdNetworkResult>>()
+const open = vi.fn()
 
 beforeEach(() => {
   save.mockReset()
   save.mockResolvedValue({})
   listPersonas.mockReset()
   listPersonas.mockResolvedValue([persona('architect', ['discussion', 'feature'])])
+  // Tests that are not about the link map keep the scan pending (no late state updates).
+  mdNetwork.mockReset()
+  mdNetwork.mockReturnValue(new Promise<MdNetworkResult>(() => {}))
+  open.mockReset()
+  open.mockResolvedValue({ ok: true })
+  useToast.setState({ toasts: [], history: [], unreadCount: 0 })
   ;(window as unknown as { api: unknown }).api = {
     macros: { save },
     agents: { listPersonas, onChanged: () => () => {} },
+    projectPages: { mdNetwork },
+    shell: { open },
   }
 })
 
@@ -88,6 +134,8 @@ function render(over: Partial<Props> = {}) {
 }
 
 const flush = () => act(async () => { await Promise.resolve() })
+/** Lets every pending promise (the mdNetwork scan) settle inside act. */
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
 const q = (id: string) => container!.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const rows = () => Array.from(container!.querySelectorAll('[data-testid="project-home-tool"]')) as HTMLButtonElement[]
 const rowIds = () => rows().map((r) => r.getAttribute('data-macro-id'))
@@ -200,10 +248,14 @@ describe('ToolsPane generic tool', () => {
 })
 
 describe('ToolsPane Review MD network', () => {
-  it('shows the title bar, Scope select (default + scopes prop), Mode from the input, and the description', () => {
-    render({ macros: [REVIEW, SWEEP], scopes: ['src/', 'plugins/'] })
+  it('shows the title bar, Scope select (default + scanned scopes), Mode from the input, and the description', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [REVIEW, SWEEP] })
     expect(q('project-home-tool-title')!.textContent).toBe('Review MD network')
     expect(q('project-home-tool-sub')!.textContent).toBe('built-in macro · architect')
+    expect(Array.from((q('project-home-review-scope') as HTMLSelectElement).options).map((o) => o.value)).toEqual(['the whole project'])
+    await settle()
+    expect(q('project-home-tool-sub')!.textContent).toBe('built-in macro · architect · 3 findings')
     const scope = q('project-home-review-scope') as HTMLSelectElement
     expect(Array.from(scope.options).map((o) => o.value)).toEqual(['the whole project', 'src/', 'plugins/'])
     expect(scope.value).toBe('the whole project')
@@ -222,9 +274,11 @@ describe('ToolsPane Review MD network', () => {
     expect(onLaunch.mock.calls).toEqual([[REVIEW, undefined, { scope: 'the whole project', mode: 'Full review' }]])
   })
 
-  it('Run review sends the picked scope and mode', () => {
+  it('Run review sends the picked scope and mode', async () => {
+    mdNetwork.mockResolvedValue(NET)
     const onLaunch = vi.fn()
-    render({ macros: [REVIEW], onLaunch, scopes: ['src/', 'plugins/'] })
+    render({ macros: [REVIEW], onLaunch })
+    await settle()
     setSelect(q('project-home-review-scope') as HTMLSelectElement, 'src/')
     act(() => modeButtons().find((b) => b.textContent === 'Drift check')!.click())
     expect(pressedMode()).toEqual(['Drift check'])
@@ -249,11 +303,18 @@ describe('ToolsPane Review MD network', () => {
     expect(onLaunch.mock.calls).toEqual([[live, undefined, { scope: 'docs only', mode: 'Deep' }]])
   })
 
-  it('a scope that leaves the scopes prop falls back to the default', () => {
-    const onLaunch = vi.fn()
-    render({ macros: [REVIEW], onLaunch, scopes: ['src/'] })
+  it('a scope that a refreshed scan no longer lists falls back to the default', async () => {
+    mdNetwork.mockResolvedValueOnce({ ...NET, scopes: ['src/'] }).mockResolvedValueOnce({ ...NET, scopes: ['plugins/'] })
+    render({ macros: [REVIEW] })
+    await settle()
     setSelect(q('project-home-review-scope') as HTMLSelectElement, 'src/')
-    render({ macros: [REVIEW], onLaunch, scopes: ['plugins/'] })
+    expect((q('project-home-review-scope') as HTMLSelectElement).value).toBe('src/')
+    act(() => q('project-home-review-refresh')!.click())
+    await settle()
+    expect(Array.from((q('project-home-review-scope') as HTMLSelectElement).options).map((o) => o.value)).toEqual([
+      'the whole project',
+      'plugins/',
+    ])
     expect((q('project-home-review-scope') as HTMLSelectElement).value).toBe('the whole project')
   })
 
@@ -264,6 +325,110 @@ describe('ToolsPane Review MD network', () => {
     expect(run.textContent).toContain('Run review')
     render({ macros: [REVIEW], launching: REVIEW.id })
     expect((q('project-home-run-review') as HTMLButtonElement).textContent).toContain('Starting…')
+  })
+})
+
+describe('ToolsPane Review MD network link map', () => {
+  const infoText = () => q('project-home-review-info-text')!.textContent
+  const toasts = () => useToast.getState().toasts.map((t) => [t.kind, t.message])
+  const meta = (id: string) => row(id).querySelector('[data-testid="project-home-tool-meta"]')!.textContent
+
+  it('scans mdNetwork({ cwd }) once when the view mounts, shows Scanning docs… until it lands, then the strip and both cards', async () => {
+    const scan = deferred<MdNetworkResult>()
+    mdNetwork.mockReturnValue(scan.promise)
+    render({ macros: [REVIEW, SWEEP] })
+    expect(mdNetwork.mock.calls).toEqual([[{ cwd: CWD }]])
+    expect(infoText()).toBe('Scanning docs…')
+    expect(q('md-link-map-svg')).toBeNull()
+    expect(q('md-findings')).toBeNull()
+    render({ macros: [REVIEW, { ...SWEEP }] })
+    expect(mdNetwork).toHaveBeenCalledTimes(1)
+    await act(async () => { scan.resolve(NET) })
+    expect(infoText()).toBe(INFO)
+    expect(q('md-link-map-svg')).not.toBeNull()
+    expect(q('md-findings')!.querySelectorAll('[data-testid="md-finding"]')).toHaveLength(3)
+  })
+
+  it('shows "<n> findings" on the Review row and reports the count through onFindingsCount', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    const onFindingsCount = vi.fn()
+    render({ macros: [REVIEW, SWEEP], onFindingsCount })
+    expect(meta(REVIEW.id)).toBe('architect')
+    await settle()
+    expect(meta(REVIEW.id)).toBe('3 findings')
+    expect(meta('sweep')).toBe('dev-lead')
+    expect(onFindingsCount.mock.calls).toEqual([[CWD, 3]])
+  })
+
+  it('does not scan while another tool is shown; scans once Review MD network is picked, not again on switching back', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [SWEEP] })
+    act(() => row('sweep').click())
+    render({ macros: [REVIEW, SWEEP] })
+    expect(selectedIds()).toEqual(['sweep'])
+    expect(mdNetwork).not.toHaveBeenCalled()
+    act(() => row(REVIEW.id).click())
+    await settle()
+    expect(mdNetwork.mock.calls).toEqual([[{ cwd: CWD }]])
+    act(() => row('sweep').click())
+    act(() => row(REVIEW.id).click())
+    await settle()
+    expect(mdNetwork).toHaveBeenCalledTimes(1)
+    expect(infoText()).toBe(INFO)
+  })
+
+  it('scans again for a new cwd', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [REVIEW] })
+    await settle()
+    render({ macros: [REVIEW], cwd: '/p/beta' })
+    await settle()
+    expect(mdNetwork.mock.calls).toEqual([[{ cwd: CWD }], [{ cwd: '/p/beta' }]])
+  })
+
+  it('Refresh scans again, reads Scanning docs… and disables itself until the new result lands', async () => {
+    const second = deferred<MdNetworkResult>()
+    mdNetwork.mockResolvedValueOnce(NET).mockReturnValueOnce(second.promise)
+    render({ macros: [REVIEW] })
+    await settle()
+    const refresh = q('project-home-review-refresh') as HTMLButtonElement
+    expect(refresh.disabled).toBe(false)
+    act(() => refresh.click())
+    expect(mdNetwork).toHaveBeenCalledTimes(2)
+    expect(infoText()).toBe('Scanning docs…')
+    expect((q('project-home-review-refresh') as HTMLButtonElement).disabled).toBe(true)
+    // The last map stays up while the new scan runs.
+    expect(q('md-link-map-svg')).not.toBeNull()
+    await act(async () => { second.resolve({ ...NET, docs: 60, findings: [] }) })
+    expect(infoText()).toBe('60 docs · 20 links · 0 findings. A review opens an architect session that reports first and changes no files until you approve.')
+    expect(meta(REVIEW.id)).toBe('0 findings')
+  })
+
+  it('{ ok:false } shows its error text with no toast, and re-renders do not rescan', async () => {
+    mdNetwork.mockResolvedValue({ ok: false, error: 'no CLAUDE.md at the project root' })
+    const onFindingsCount = vi.fn()
+    render({ macros: [REVIEW], onFindingsCount })
+    await settle()
+    expect(infoText()).toContain('no CLAUDE.md at the project root')
+    expect(q('md-link-map-svg')).toBeNull()
+    expect(toasts()).toEqual([])
+    render({ macros: [{ ...REVIEW }], onFindingsCount })
+    render({ macros: [REVIEW, SWEEP], onFindingsCount })
+    await settle()
+    expect(mdNetwork).toHaveBeenCalledTimes(1)
+    expect(toasts()).toEqual([])
+    expect(onFindingsCount.mock.calls).toEqual([[CWD, null]])
+    expect(meta(REVIEW.id)).toBe('architect')
+  })
+
+  it('a rejected scan shows its error and toasts it once', async () => {
+    mdNetwork.mockRejectedValue(new Error('invalid cwd'))
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(infoText()).toContain('invalid cwd')
+    render({ macros: [{ ...REVIEW }] })
+    await settle()
+    expect(toasts()).toEqual([['error', 'Could not map docs: invalid cwd']])
   })
 })
 

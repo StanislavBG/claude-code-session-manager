@@ -5,7 +5,8 @@
  * list beside the VideoPlayer with its SOURCES and QUALITY REPORT cards. Both
  * build through the Generate composer (Generate page|video, Regenerate…).
  * `tools`: ToolsPane — the same list | content layout, Review MD network first,
- * then every other project-home macro (there is no hot-key strip any more).
+ * then every other project-home macro (there is no hot-key strip any more); its
+ * link-map scan's findings count goes up through `onFindingsCount`.
  * The loading / load-error states cover pages and videos. With no entries,
  * each pane shows its starter gallery (LibraryEmptyState), whose TIP link
  * calls `onGoTools` — ProjectHome switches to the Tools tab.
@@ -20,7 +21,7 @@
 import { useState } from 'react'
 import { PagesPane } from './PagesPane'
 import { VideosPane } from './VideosPane'
-import { ToolsPane, type LaunchFn } from './ToolsPane'
+import { ToolsPane, type FindingsCountFn, type LaunchFn } from './ToolsPane'
 import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
 import type { BuildLaunch } from './BuildingPanel'
 import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
@@ -42,6 +43,7 @@ export function ProjectPagesSection({
   launches,
   onLaunched,
   onGoTools,
+  onFindingsCount,
 }: {
   tab: ProjectHomeTab
   cwd?: string | null
@@ -60,6 +62,8 @@ export function ProjectPagesSection({
   onLaunched?: (macroId: string, launch: BuildLaunch) => void
   /** Switches Project Home to its Tools tab (ProjectHome's `onTabChange('tools')`) — the empty states' TIP link. */
   onGoTools?: () => void
+  /** ToolsPane's link-map findings count per scanned cwd (null when the scan failed) — ProjectHome's Tools key button. */
+  onFindingsCount?: FindingsCountFn
 }) {
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
@@ -67,7 +71,7 @@ export function ProjectPagesSection({
   if (tab === 'tools') {
     return (
       <div data-testid="project-home-section" data-tab={tab} className="flex min-h-0 flex-1 flex-col">
-        <ToolsPane cwd={cwd} macros={macros} launching={launching} onLaunch={onLaunch} />
+        <ToolsPane cwd={cwd} macros={macros} launching={launching} onLaunch={onLaunch} onFindingsCount={onFindingsCount} />
       </div>
     )
   }

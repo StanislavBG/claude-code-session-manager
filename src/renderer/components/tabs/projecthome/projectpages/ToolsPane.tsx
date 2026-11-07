@@ -12,15 +12,25 @@
  * Every launch goes through `onLaunch` — ProjectHome's `useMacroLaunch`, the
  * path the Sessions hot keys use, which opens the Epic. Scope default and Mode
  * options/default are read from the live macro, never hardcoded.
+ *
+ * Review MD network's data is one `window.api.projectPages.mdNetwork` scan,
+ * fetched once per cwd when its view first shows and again on `Refresh` —
+ * never polled. The scan fills the info strip, the LINK MAP / FINDINGS cards
+ * (MdLinkMap), the Scope options after the input's default, the row and title
+ * findings count, and `onFindingsCount` (ProjectHome's Tools key button).
  */
-import { useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { MacroEditor } from '../../../epics/MacroEditor'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { useAgentPersonas } from '../../../../lib/useAgentPersonas'
-import type { Macro } from '../../../../../preload/api'
+import { toast } from '../../../../state/toast'
+import { MdNetworkCards } from './MdLinkMap'
+import type { Macro, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
 
 export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
+/** A finished scan's findings count for `cwd`; null when the scan failed. */
+export type FindingsCountFn = (cwd: string, count: number | null) => void
 
 const REVIEW_MD_NETWORK_ID = 'builtin-review-md-network'
 /** Pages / Videos launch these from their own tabs. */
@@ -29,6 +39,70 @@ const NO_SCOPES: readonly string[] = []
 
 const REVIEW_DESCRIPTION =
   'Maps CLAUDE.md and every doc it leads to, so agents start from one short entry map and find each fact in exactly one place — with nothing stale.'
+const REVIEW_NOTE = 'A review opens an architect session that reports first and changes no files until you approve.'
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
+
+/** One cwd's link-map scan; `loading` keeps the last map up while a refresh runs. */
+type MdNetworkScan =
+  | { cwd: string; status: 'loading'; result: MdNetwork | null }
+  | { cwd: string; status: 'ready'; result: MdNetwork }
+  | { cwd: string; status: 'error'; error: string }
+
+/**
+ * Scans `cwd` once when `active` (the Review MD network view shows) first holds for it, and
+ * again on `refresh` — never on a timer. A scan a newer one replaced is dropped. `{ ok:false }`
+ * (nothing to map: not a git repo, no root CLAUDE.md) shows in the pane only; a rejected call
+ * also toasts, once per scan.
+ */
+function useMdNetworkScan(cwd: string | null | undefined, active: boolean, onFindingsCount?: FindingsCountFn) {
+  const [scan, setScan] = useState<MdNetworkScan | null>(null)
+  const requestedCwd = useRef<string | null>(null)
+  const latest = useRef(0)
+
+  const start = useCallback(
+    (forCwd: string) => {
+      requestedCwd.current = forCwd
+      const id = ++latest.current
+      setScan((prev) => ({
+        cwd: forCwd,
+        status: 'loading',
+        result: prev?.cwd === forCwd && prev.status !== 'error' ? prev.result : null,
+      }))
+      let pending: Promise<MdNetworkResult>
+      try {
+        pending = window.api.projectPages.mdNetwork({ cwd: forCwd })
+      } catch (err) {
+        pending = Promise.reject(err)
+      }
+      pending.then(
+        (res) => {
+          if (id !== latest.current) return
+          setScan(res.ok ? { cwd: forCwd, status: 'ready', result: res } : { cwd: forCwd, status: 'error', error: res.error })
+          onFindingsCount?.(forCwd, res.ok ? res.findings.length : null)
+        },
+        (err: unknown) => {
+          if (id !== latest.current) return
+          const message = (err instanceof Error ? err.message : String(err)) || 'Unknown error'
+          setScan({ cwd: forCwd, status: 'error', error: message })
+          onFindingsCount?.(forCwd, null)
+          toast.error(`Could not map docs: ${message}`)
+        },
+      )
+    },
+    [onFindingsCount],
+  )
+
+  useEffect(() => {
+    if (active && cwd && requestedCwd.current !== cwd) start(cwd)
+  }, [active, cwd, start])
+
+  const refresh = useCallback(() => {
+    if (cwd) start(cwd)
+  }, [cwd, start])
+
+  return { scan: scan?.cwd === cwd ? scan : null, refresh }
+}
 
 const PRIMARY_CLASS =
   'inline-flex h-[34px] flex-none items-center gap-[7px] whitespace-nowrap rounded-lg bg-accent px-[15px] text-[13px] font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
@@ -39,7 +113,7 @@ function toolMacros(macros: readonly Macro[]): Macro[] {
   return [...tools.filter((m) => m.id === REVIEW_MD_NETWORK_ID), ...tools.filter((m) => m.id !== REVIEW_MD_NETWORK_ID)]
 }
 
-function ToolRow({ macro, selected, onSelect }: { macro: Macro; selected: boolean; onSelect: () => void }) {
+function ToolRow({ macro, meta, selected, onSelect }: { macro: Macro; meta: string; selected: boolean; onSelect: () => void }) {
   return (
     <button
       type="button"
@@ -56,7 +130,9 @@ function ToolRow({ macro, selected, onSelect }: { macro: Macro; selected: boolea
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
         <span className={`truncate text-[13.5px] font-semibold ${selected ? 'text-fg' : 'text-fg-dim'}`}>{macro.label}</span>
-        <span className="truncate font-mono text-[10.5px] text-fg-faint">{macro.agentName}</span>
+        <span data-testid="project-home-tool-meta" className="truncate font-mono text-[10.5px] text-fg-faint">
+          {meta}
+        </span>
       </span>
     </button>
   )
@@ -114,19 +190,65 @@ function GenericTool({ macro, launching, onLaunch }: { macro: Macro; launching: 
   )
 }
 
+/** Scan state, counts and the review note, with a small Refresh on the right. */
+function ReviewInfo({ cwd, scan, onRefresh }: { cwd?: string | null; scan: MdNetworkScan | null; onRefresh: () => void }) {
+  // No scan yet for a cwd means the first one is about to start.
+  const loading = scan ? scan.status === 'loading' : !!cwd
+  let tone = 'bg-sage-dark'
+  let text = REVIEW_NOTE
+  if (loading) {
+    tone = 'bg-honey animate-pulse'
+    text = 'Scanning docs…'
+  } else if (scan?.status === 'error') {
+    tone = 'bg-accent'
+    text = `Could not map docs: ${scan.error}`
+  } else if (scan?.status === 'ready') {
+    const { docs, links, findings } = scan.result
+    text = `${plural(docs, 'doc')} · ${plural(links, 'link')} · ${plural(findings.length, 'finding')}. ${REVIEW_NOTE}`
+  }
+  return (
+    <div
+      data-testid="project-home-review-info"
+      className="flex flex-none flex-wrap items-center gap-2.5 rounded-[10px] bg-bg-elev px-3.5 py-2.5 text-[12.5px] leading-[1.5] text-fg-dim"
+    >
+      <span className={`h-[7px] w-[7px] flex-none rounded-full ${tone}`} />
+      <span data-testid="project-home-review-info-text" className="min-w-[240px] flex-1">
+        {text}
+      </span>
+      <button
+        type="button"
+        data-testid="project-home-review-refresh"
+        disabled={!cwd || loading}
+        onClick={onRefresh}
+        className="inline-flex h-[26px] flex-none items-center gap-1.5 rounded-md border border-rule-structural bg-bg-hi px-2.5 text-[11.5px] font-semibold text-fg-dim cursor-pointer hover:border-fg-faint hover:text-fg disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <AlmanacIcon name="reload" size={12} stroke={2} />
+        Refresh
+      </button>
+    </div>
+  )
+}
+
 function ReviewTool({
   macro,
-  scopes,
+  cwd,
+  scan,
+  onRefresh,
   launching,
   onLaunch,
 }: {
   macro: Macro
-  scopes: readonly string[]
+  cwd?: string | null
+  scan: MdNetworkScan | null
+  onRefresh: () => void
   launching: string | null
   onLaunch: LaunchFn
 }) {
   const [scopePick, setScopePick] = useState<string | null>(null)
   const [modePick, setModePick] = useState<string | null>(null)
+  // The last good map stays up (and keeps feeding Scope) while a refresh runs.
+  const network = scan && scan.status !== 'error' ? scan.result : null
+  const scopes = network?.scopes ?? NO_SCOPES
   const scopeInput = macro.inputs?.find((i) => i.name === 'scope')
   const modeInput = macro.inputs?.find((i) => i.name === 'mode')
   const scopeOptions = Array.from(new Set([scopeInput?.default ?? '', ...scopes].filter((s) => s !== '')))
@@ -141,7 +263,10 @@ function ReviewTool({
 
   return (
     <>
-      <TitleBar title={macro.label} sub={`built-in macro · ${macro.agentName}`}>
+      <TitleBar
+        title={macro.label}
+        sub={`built-in macro · ${macro.agentName}${network ? ` · ${plural(network.findings.length, 'finding')}` : ''}`}
+      >
         <div className="flex min-w-0 max-w-full flex-col gap-[5px]">
           <span className="text-[11.5px] font-semibold text-fg-dim">{scopeLabel}</span>
           <select
@@ -194,7 +319,8 @@ function ReviewTool({
       <p data-testid="project-home-review-description" className="m-0 max-w-[72ch] flex-none text-[13.5px] leading-[1.55] text-fg-dim">
         {REVIEW_DESCRIPTION}
       </p>
-      {/* Slot for the info strip, LINK MAP and FINDINGS cards (PRD ph2-md-link-map); nothing renders here yet. */}
+      <ReviewInfo cwd={cwd} scan={scan} onRefresh={onRefresh} />
+      {network && <MdNetworkCards cwd={cwd} network={network} />}
     </>
   )
 }
@@ -217,15 +343,15 @@ export function ToolsPane({
   macros,
   launching,
   onLaunch,
-  scopes = NO_SCOPES,
+  onFindingsCount,
 }: {
   cwd?: string | null
   /** This project's `surface: 'project-home'` macros (ProjectHome's `macrosForProject`). */
   macros: readonly Macro[]
   launching: string | null
   onLaunch: LaunchFn
-  /** Review MD network Scope options offered after the scope input's default. */
-  scopes?: readonly string[]
+  /** Each finished link-map scan's findings count (null when it failed), for the Tools key button. */
+  onFindingsCount?: FindingsCountFn
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -233,6 +359,10 @@ export function ToolsPane({
   const tools = toolMacros(macros)
   // First row by default; a pick survives list refreshes while its macro is still listed.
   const selected = editing ? null : (tools.find((m) => m.id === selectedId) ?? tools[0] ?? null)
+  const { scan, refresh } = useMdNetworkScan(cwd, selected?.id === REVIEW_MD_NETWORK_ID, onFindingsCount)
+  const network = scan && scan.status !== 'error' ? scan.result : null
+  const rowMeta = (m: Macro) =>
+    m.id === REVIEW_MD_NETWORK_ID && network ? plural(network.findings.length, 'finding') : m.agentName
 
   let content: ReactNode
   if (editing) content = <AddTool cwd={cwd} onClose={() => setAdding(false)} />
@@ -243,7 +373,17 @@ export function ToolsPane({
       </p>
     )
   else if (selected.id === REVIEW_MD_NETWORK_ID)
-    content = <ReviewTool key={selected.id} macro={selected} scopes={scopes} launching={launching} onLaunch={onLaunch} />
+    content = (
+      <ReviewTool
+        key={selected.id}
+        macro={selected}
+        cwd={cwd}
+        scan={scan}
+        onRefresh={refresh}
+        launching={launching}
+        onLaunch={onLaunch}
+      />
+    )
   else content = <GenericTool key={selected.id} macro={selected} launching={launching} onLaunch={onLaunch} />
 
   return (
@@ -276,6 +416,7 @@ export function ToolsPane({
               <li key={m.id}>
                 <ToolRow
                   macro={m}
+                  meta={rowMeta(m)}
                   selected={m.id === selected?.id}
                   onSelect={() => {
                     setSelectedId(m.id)

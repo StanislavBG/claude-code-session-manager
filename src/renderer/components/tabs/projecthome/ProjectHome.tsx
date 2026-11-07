@@ -12,6 +12,10 @@
  * an app reload forgets it and the panes fall back to the macro label — and the
  * `“<title>” is ready` toast when a macro's job goes from queued / running to
  * done (Project Home v2 DESIGN_SPEC §4).
+ *
+ * The Tools key button's findings count is the last link-map scan the Tools
+ * pane reported for this cwd (`onFindingsCount`) — unknown, so hidden, until
+ * Tools first opens for the project; ProjectHome never scans on its own.
  */
 
 import { memo, useCallback, useMemo, useState } from 'react'
@@ -78,6 +82,12 @@ function ProjectHomeComponent() {
     [cwd, cwdLaunches, macros],
   )
   useJobSettled(cwd, jobStatus, onJobSettled)
+  // cwd → the Tools pane's last link-map findings count (null = that scan failed).
+  const [findingsByCwd, setFindingsByCwd] = useState<Record<string, number | null>>({})
+  const recordFindings = useCallback((scannedCwd: string, count: number | null) => {
+    setFindingsByCwd((all) => (all[scannedCwd] === count ? all : { ...all, [scannedCwd]: count }))
+  }, [])
+  const findingsCount = cwd ? (findingsByCwd[cwd] ?? null) : null
   // A queued/running job for a library's generate macro counts as one building entry.
   const pageStats = useMemo(() => libraryKeyStats(knowledge, jobStatus['builtin-project-home']), [knowledge, jobStatus])
   const videoStats = useMemo(() => libraryKeyStats(videos, jobStatus['builtin-demo-video']), [videos, jobStatus])
@@ -88,8 +98,7 @@ function ProjectHomeComponent() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-[18px] overflow-hidden px-[28px] pt-[22px] pb-[20px] text-fg">
-      {/* findingsCount stays null (badge hidden) until the Tools pane brings the link-map scan. */}
-      <ProjectHomeKeyButtons tab={tab} onTabChange={setTab} pages={pageStats} videos={videoStats} findingsCount={null} />
+      <ProjectHomeKeyButtons tab={tab} onTabChange={setTab} pages={pageStats} videos={videoStats} findingsCount={findingsCount} />
       <ProjectPagesSection
         tab={tab}
         cwd={cwd}
@@ -106,6 +115,7 @@ function ProjectHomeComponent() {
         launches={cwdLaunches}
         onLaunched={recordLaunch}
         onGoTools={() => setTab('tools')}
+        onFindingsCount={recordFindings}
       />
     </div>
   )

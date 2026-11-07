@@ -2065,6 +2065,10 @@ export interface SessionManagerAPI {
     getWizardState: () => Promise<VoiceWizardState>;
     /** F7: stamp wizard as complete with the current schema. */
     markWizardComplete: () => Promise<VoiceMarkWizardCompleteResult>;
+    /** Read persisted TTS toggle (voice.json `ttsEnabled`). */
+    getTtsEnabled: () => Promise<boolean>;
+    /** Persist TTS toggle. */
+    setTtsEnabled: (enabled: boolean) => Promise<{ ok: boolean; ttsEnabled: boolean }>;
     /** F8 — read persisted turn-detector settings. */
     getTurnDetector: () => Promise<VoiceTurnDetectorState>;
     /** F8 — persist turn-detector settings. */

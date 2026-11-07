@@ -205,6 +205,9 @@ contextBridge.exposeInMainWorld('api', {
     markWizardComplete: () => ipcRenderer.invoke('voice:wizard-complete'),
     // F8 turn-detector settings (~/.claude/session-manager/voice.json `turnDetector` key).
     // MVP: settings persistence + kill switch only; no model is actually loaded in v1.
+    // TTS toggle (~/.claude/session-manager/voice.json `ttsEnabled` key).
+    getTtsEnabled: () => ipcRenderer.invoke('voice:get-tts-enabled'),
+    setTtsEnabled: (enabled) => ipcRenderer.invoke('voice:set-tts-enabled', !!enabled),
     getTurnDetector: () => ipcRenderer.invoke('voice:get-turn-detector'),
     setTurnDetector: (state) => ipcRenderer.invoke('voice:set-turn-detector', state),
   },

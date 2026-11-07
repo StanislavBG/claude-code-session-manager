@@ -17,6 +17,7 @@
 
 const { app, globalShortcut, ipcMain } = require('electron');
 const voiceSettings = require('./voiceSettings.cjs');
+const voiceWizard = require('./voiceWizard.cjs');
 const { voiceHotkeyLog } = require('./lib/voice-hotkey-log.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas, validated } = require('./ipcSchemas.cjs');
@@ -323,6 +324,21 @@ function registerHotkeyHandlers() {
     await voiceSettings.saveDevice(pref);
     return { ok: true };
   }));
+
+  // F7 wizard + F8 turn-detector (logic in voiceWizard.cjs; registered here
+  // so every voice:* handler lives in this one module).
+  ipcMain.handle('voice:wizard-state', () => voiceWizard.wizardState());
+  ipcMain.handle('voice:wizard-complete', () => voiceWizard.wizardComplete());
+  ipcMain.handle('voice:get-turn-detector', () => voiceWizard.getTurnDetector());
+  ipcMain.handle('voice:set-turn-detector', validated(schemas.voiceSetTurnDetector, (state) => voiceWizard.setTurnDetector(state)));
+
+  // TTS toggle persistence (top-level `ttsEnabled` on voice.json).
+  ipcMain.handle('voice:get-tts-enabled', async () => await voiceSettings.loadTtsEnabled());
+  ipcMain.handle('voice:set-tts-enabled', async (_e, enabled) => {
+    if (typeof enabled !== 'boolean') throw new Error('ttsEnabled must be a boolean');
+    await voiceSettings.saveTtsEnabled(enabled);
+    return { ok: true, ttsEnabled: enabled };
+  });
 
   // Renderer pings this when isRecording flips so we can prefix the window
   // title with `● REC — ` (PRD F1 v2 §Security: privacy invariant). This is

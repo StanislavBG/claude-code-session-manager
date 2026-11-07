@@ -885,7 +885,15 @@ export const useVoice = create<VoiceState>((set, get) => {
   },
 
   setExternalRecording: (v) => set({ externalRecording: v }),
-  toggleTTS: () => set((s) => ({ ttsEnabled: !s.ttsEnabled })),
+  toggleTTS: () => {
+    const next = !get().ttsEnabled
+    set({ ttsEnabled: next })
+    Promise.resolve()
+      .then(() => window.api?.voice?.setTtsEnabled?.(next))
+      .catch((e: unknown) => {
+        log.warn('voice', 'setTtsEnabled failed', { error: e instanceof Error ? e.message : String(e) })
+      })
+  },
   setAutoSubmit: (v) => set({ autoSubmit: v }),
   setSubmitDelayMs: (ms) => set({ submitDelayMs: Math.max(500, Math.min(13_000, Math.floor(ms))) }),
   cancelSubmit: () => cancelSubmitInternal(),
@@ -1103,6 +1111,16 @@ export const selectCanRecord = (
     return { canRecord: false, reason: s.errorKind === 'timeout' ? 'load-timeout' : 'error' }
   }
   return { canRecord: false, reason: 'idle' }
+}
+
+// Hydrate the persisted TTS toggle at startup (fire-and-forget; default false).
+if (typeof window !== 'undefined') {
+  Promise.resolve()
+    .then(() => window.api?.voice?.getTtsEnabled?.())
+    .then((v) => { if (typeof v === 'boolean') useVoice.setState({ ttsEnabled: v }) })
+    .catch((e: unknown) => {
+      log.warn('voice', 'getTtsEnabled failed', { error: e instanceof Error ? e.message : String(e) })
+    })
 }
 
 // Test-only read hooks: expose voice state and a transcript history buffer

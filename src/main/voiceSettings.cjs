@@ -299,7 +299,31 @@ async function saveTurnDetector(state) {
   return writeMerged({ turnDetector: normalizeTurnDetector(state) });
 }
 
+// ──────────────────────────────────────────── TTS toggle
+// Top-level boolean `ttsEnabled` on voice.json. Absent/non-boolean = false.
+// Not part of the hotkey normalize(), but writeMerged preserves it, and
+// save() stamps schemaVersion as for every other write.
+
+async function loadTtsEnabled() {
+  const raw = await readRaw();
+  return !!raw && raw.ttsEnabled === true;
+}
+
+async function saveTtsEnabled(enabled) {
+  if (typeof enabled !== 'boolean') {
+    throw new Error('Invalid ttsEnabled value');
+  }
+  const raw = await readRaw();
+  const patch = { ttsEnabled: enabled };
+  // Keep the file's existing schemaVersion handling: stamp it when the file
+  // is fresh or lacks one; never downgrade an existing value.
+  if (!raw || typeof raw.schemaVersion !== 'number') patch.schemaVersion = SCHEMA_VERSION;
+  return writeMerged(patch);
+}
+
 module.exports = {
+  loadTtsEnabled,
+  saveTtsEnabled,
   load,
   save,
   storePath,

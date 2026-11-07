@@ -1,47 +1,38 @@
 /**
- * voiceWizard — F7 first-run mic-check wizard, main-process side.
+ * voiceWizard — F7 first-run mic-check wizard + F8 turn-detector, main side.
  *
- * Owns:
- *   - voice:wizard-state   → returns persisted state + current schema constant
- *   - voice:wizard-complete → stamps completedAt + completedSchema to voice.json
- *
- * No window state held here; persistence is delegated to voiceSettings.cjs
- * (additive `wizard` subtree on the same file as F1/F5).
+ * Exports plain functions only. The `voice:*` ipcMain handlers for all of
+ * these are registered in ONE place: voiceHotkey.registerHotkeyHandlers().
+ * Persistence is delegated to voiceSettings.cjs (additive subtrees on voice.json).
  */
 
-const { ipcMain } = require('electron');
 const voiceSettings = require('./voiceSettings.cjs');
-const { schemas, validated } = require('./ipcSchemas.cjs');
 
-function registerWizardHandlers() {
-  ipcMain.handle('voice:wizard-state', async () => {
-    const w = await voiceSettings.loadWizard();
-    return {
-      completedSchema: w.completedSchema,
-      completedAt: w.completedAt,
-      currentSchema: voiceSettings.WIZARD_SCHEMA,
-    };
-  });
-
-  ipcMain.handle('voice:wizard-complete', async () => {
-    const next = {
-      completedSchema: voiceSettings.WIZARD_SCHEMA,
-      completedAt: new Date().toISOString(),
-    };
-    await voiceSettings.saveWizard(next);
-    return { ok: true, ...next, currentSchema: voiceSettings.WIZARD_SCHEMA };
-  });
-
-  // F8 — turn-detector settings (additive subtree on voice.json).
-  // MVP: persistence only; no model loaded in v1 (see PRD §Loading & inference).
-  ipcMain.handle('voice:get-turn-detector', async () => {
-    return await voiceSettings.loadTurnDetector();
-  });
-
-  ipcMain.handle('voice:set-turn-detector', validated(schemas.voiceSetTurnDetector, async (state) => {
-    await voiceSettings.saveTurnDetector(state);
-    return { ok: true, state: await voiceSettings.loadTurnDetector() };
-  }));
+async function wizardState() {
+  const w = await voiceSettings.loadWizard();
+  return {
+    completedSchema: w.completedSchema,
+    completedAt: w.completedAt,
+    currentSchema: voiceSettings.WIZARD_SCHEMA,
+  };
 }
 
-module.exports = { registerWizardHandlers };
+async function wizardComplete() {
+  const next = {
+    completedSchema: voiceSettings.WIZARD_SCHEMA,
+    completedAt: new Date().toISOString(),
+  };
+  await voiceSettings.saveWizard(next);
+  return { ok: true, ...next, currentSchema: voiceSettings.WIZARD_SCHEMA };
+}
+
+async function getTurnDetector() {
+  return await voiceSettings.loadTurnDetector();
+}
+
+async function setTurnDetector(state) {
+  await voiceSettings.saveTurnDetector(state);
+  return { ok: true, state: await voiceSettings.loadTurnDetector() };
+}
+
+module.exports = { wizardState, wizardComplete, getTurnDetector, setTurnDetector };

@@ -59,7 +59,6 @@ try {
 }
 crashDiagnostics.startCrashReporter();
 const voiceHotkey = require('./voiceHotkey.cjs');
-const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
 const { createAdminHttp } = require('./lib/feedback-remote/localAdminHttp.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
@@ -1061,7 +1060,6 @@ layoutStore.registerLayoutHandlers();
 billing.registerBillingHandlers();
 logs.registerLogHandlers();
 voiceHotkey.registerHotkeyHandlers();
-voiceWizard.registerWizardHandlers();
 scheduler.registerScheduleHandlers();
 watchers.registerWatcherHandlers();
 queueOps.registerQueueOpsHandlers({ retireCompletedSlugs: scheduler.retireCompletedSlugs });

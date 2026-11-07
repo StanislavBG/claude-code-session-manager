@@ -276,6 +276,7 @@ function runDriftCheck(options) {
   const tracked = () => (trackedList || (trackedList = listTracked(root)));
   const findings = [];
   const missing = []; // { file, line, target, cands }
+  const missingLinks = []; // same shape; broken-link candidates, dropped when gitignored
 
   for (const rel of docs) {
     const abs = path.join(root, rel);
@@ -299,7 +300,10 @@ function runDriftCheck(options) {
         const siteRoute = /^\/(?!\/)/.test(t) && !fs.existsSync(fromRoot);
         if (siteRoute && !opts.strictPaths) continue;
         if (!fs.existsSync(path.resolve(docDir, t)) && !fs.existsSync(fromRoot)) {
-          findings.push({ kind: 'broken-link', file: rel, line: l.line, target: l.target });
+          const cands = [path.resolve(docDir, t), fromRoot]
+            .map((p) => toPosix(path.relative(root, p)))
+            .filter((p) => p && !p.startsWith('..'));
+          missingLinks.push({ file: rel, line: l.line, target: l.target, cands });
         }
       }
     }
@@ -353,16 +357,20 @@ function runDriftCheck(options) {
     }
   }
 
-  if (missing.length) {
+  if (missing.length || missingLinks.length) {
     let ignored = new Set();
     if (isGit) {
-      const input = [...new Set(missing.flatMap((m) => m.cands))].join('\n') + '\n';
+      const input = [...new Set([...missing, ...missingLinks].flatMap((m) => m.cands))].join('\n') + '\n';
       const r = spawnSync('git', ['-C', root, 'check-ignore', '--stdin'], { input, encoding: 'utf8' });
       if (!r.error) ignored = new Set(r.stdout.split('\n').filter(Boolean));
     }
     for (const m of missing) {
       if (m.cands.some((c) => ignored.has(c))) continue;
       findings.push({ kind: 'missing-path', file: m.file, line: m.line, target: m.target });
+    }
+    for (const m of missingLinks) {
+      if (m.cands.some((c) => ignored.has(c))) continue;
+      findings.push({ kind: 'broken-link', file: m.file, line: m.line, target: m.target });
     }
   }
 

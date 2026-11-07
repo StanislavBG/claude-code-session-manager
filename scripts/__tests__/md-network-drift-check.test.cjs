@@ -277,3 +277,15 @@ test('a normal broken link on the same line as a placeholder link is still flagg
   const f = run(dir, '--checks', 'links').json.findings;
   expect(f.map((x) => x.target)).toEqual(['nope.md']);
 });
+
+test('missing link to a gitignored target is silent; non-ignored missing link still flagged', () => {
+  const dir = repo({
+    '.gitignore': 'runtime/\n',
+    'CLAUDE.md': '# Hi\n[a](runtime/feedback/README.md)\n[b](docs/gone.md)\n',
+  });
+  for (const args of [[], ['--strict-paths']]) {
+    const { json } = run(dir, ...args);
+    const broken = json.findings.filter((f) => f.kind === 'broken-link');
+    expect(broken.map((f) => f.target)).toEqual(['docs/gone.md']);
+  }
+});

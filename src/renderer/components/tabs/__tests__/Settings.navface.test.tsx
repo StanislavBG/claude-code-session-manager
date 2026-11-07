@@ -177,56 +177,12 @@ describe('Settings scope note states which real file is being edited', () => {
     expect(note(el)).toContain('gitignored')
     expect(note(el)).toContain(`${PROJECT_CWD}/.claude/settings.local.json`)
   })
-
-  it('is absent on Telemetry and Session Manager, which are not claude CLI settings files', async () => {
-    const el = await mount()
-    await act(async () => {
-      clickViewTab(el, 'Telemetry')
-      await Promise.resolve()
-    })
-    expect(el.querySelector('[data-testid="settings-scope-note"]')).toBeNull()
-  })
 })
 
-describe('Settings Telemetry/Session Manager tabs are Home-only', () => {
-  // SettingsTelemetry (~/.claude/session-manager/otel.json) and
-  // SettingsAppPrefs (localStorage) have no cwd/scope input anywhere — they
-  // render identically regardless of navFace, so they must not appear as an
-  // option on the Project face.
-  it('shows Telemetry and Session Manager tabs on the Home face', async () => {
+describe('Settings has no Session Manager app views (moved to AppSettings)', () => {
+  it('offers no Telemetry, Phone remote or Session Manager tab on either face', async () => {
     const el = await mount()
     const labels = viewTabLabels(el)
-    expect(labels).toContain('Telemetry')
-    expect(labels).toContain('Session Manager')
-  })
-
-  it('hides Telemetry and Session Manager tabs on the Project face', async () => {
-    const el = await mount()
-    await act(async () => {
-      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
-      useLayout.setState({ navFace: 'project' })
-      await Promise.resolve()
-    })
-    const labels = viewTabLabels(el)
-    expect(labels).not.toContain('Telemetry')
-    expect(labels).not.toContain('Session Manager')
-  })
-
-  it('bounces back to General if navFace flips to project while Telemetry was selected', async () => {
-    const el = await mount()
-    await act(async () => {
-      clickViewTab(el, 'Telemetry')
-      await Promise.resolve()
-    })
-    await act(async () => {
-      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
-      useLayout.setState({ navFace: 'project' })
-      await Promise.resolve()
-    })
-    // General is the default tab; assert no
-    // dead 'active' styling is stuck on a tab that's no longer rendered.
-    const labels = viewTabLabels(el)
-    expect(labels).not.toContain('Telemetry')
-    expect(el.textContent).not.toContain('Session Manager preferences')
+    for (const l of ['Telemetry', 'Phone remote', 'Session Manager']) expect(labels).not.toContain(l)
   })
 })

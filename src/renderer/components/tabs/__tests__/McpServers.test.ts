@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextServerName } from '../McpServers'
+import { nextServerName, serialize } from '../McpServers'
 
 describe('nextServerName', () => {
   it('picks server-1 for an empty set', () => {
@@ -22,5 +22,16 @@ describe('nextServerName', () => {
   it('walks past multiple collisions', () => {
     const servers = { 'server-2': {}, 'server-3': {}, 'server-4': {} }
     expect(nextServerName(servers)).toBe('server-5')
+  })
+})
+
+describe('serialize', () => {
+  it('strips a stale enabled key from server entries', () => {
+    const out = JSON.parse(
+      serialize({ other: 1 }, { a: { command: 'x', enabled: false } as never, b: { url: 'u' } }),
+    )
+    expect(out.mcpServers.a).toEqual({ command: 'x' })
+    expect(out.mcpServers.b).toEqual({ url: 'u' })
+    expect(out.other).toBe(1)
   })
 })

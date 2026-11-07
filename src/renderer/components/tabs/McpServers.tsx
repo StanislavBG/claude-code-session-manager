@@ -40,8 +40,6 @@ interface McpServer {
   alwaysLoad?: boolean
   /** Not a Claude Code config field — session-manager-only, user-set purpose blurb. */
   description?: string
-  /** Hide this server without removing it. */
-  enabled?: boolean
   /** Per-server tool denylist surfaced in /mcp. */
   disabledTools?: string[]
   permissions?: {
@@ -82,8 +80,15 @@ function parse(raw: string): Shape {
     return { full: {}, servers: {}, err: (e as Error).message }
   }
 }
-function serialize(full: Record<string, unknown>, servers: Record<string, McpServer>): string {
-  return JSON.stringify({ ...full, mcpServers: servers }, null, 2) + '\n'
+/** Claude Code has no per-server `enabled` field; drop a stale one on write. */
+export function serialize(full: Record<string, unknown>, servers: Record<string, McpServer>): string {
+  const clean: Record<string, McpServer> = {}
+  for (const [k, v] of Object.entries(servers)) {
+    const { enabled: _drop, ...rest } = v as McpServer & { enabled?: unknown }
+    void _drop
+    clean[k] = rest
+  }
+  return JSON.stringify({ ...full, mcpServers: clean }, null, 2) + '\n'
 }
 
 /**
@@ -307,6 +312,11 @@ function McpServersComponent() {
         ) : null
       }
     >
+      {scope === 'project' && (
+        <div className="px-3 py-1 text-xs text-fg-faint border-b border-line">
+          Project servers are switched on/off by disabledMcpjsonServers in the project&apos;s .claude/settings.json.
+        </div>
+      )}
       <ListDetail
         sidebar={
           <div className="py-2">
@@ -526,19 +536,6 @@ function McpServerEditor({
             onChange={(e) => onChange({ ...server, alwaysLoad: e.target.checked || undefined })}
           />
           <span className="text-fg-dim">bypass tool-search deferral (v2.1.121+)</span>
-        </label>
-      </div>
-      <div className="flex items-center gap-2">
-        <label className="text-xs text-fg-faint w-20">enabled</label>
-        <label className="flex items-center gap-2 text-xs text-fg">
-          <input
-            type="checkbox"
-            checked={server.enabled !== false}
-            onChange={(e) =>
-              onChange({ ...server, enabled: e.target.checked ? undefined : false })
-            }
-          />
-          <span className="text-fg-dim">load this server in new sessions</span>
         </label>
       </div>
       <Field

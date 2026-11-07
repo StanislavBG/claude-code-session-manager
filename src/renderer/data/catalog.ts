@@ -26,25 +26,6 @@ export interface CatalogSkill {
   source: string
 }
 
-export interface CatalogPlugin {
-  id: string
-  name: string
-  description: string
-  official: boolean
-  source: string
-  bundles: string[]
-  /**
-   * Non-official marketplace this plugin installs from. `add` is the
-   * `/plugin marketplace add <add>` argument: a GitHub `owner/repo`, or the
-   * literal `'bundled'` for the marketplace shipped inside this app's own npx
-   * distribution (main resolves it to the packaged `.claude-plugin` dir, so
-   * install works offline with no GitHub/registry dependency). `name` is the
-   * marketplace name used in `/plugin install <id>@<name>`. Omitted for
-   * official-catalog plugins (already registered).
-   */
-  marketplace?: { add: string; name: string }
-}
-
 /** Hook template — merges into settings.json `hooks[event]`. */
 export interface CatalogHook {
   id: string
@@ -169,49 +150,6 @@ export const CATALOG_SKILLS: CatalogSkill[] = [
   { id: 'claude-api', name: 'Claude API', description: 'Build apps with the Claude API and Anthropic SDKs', official: true, source: 'https://github.com/anthropics/skills/tree/main/skills/claude-api' },
   { id: 'mcp-builder', name: 'MCP Builder', description: 'Scaffold and build new Model Context Protocol servers', official: true, source: 'https://github.com/anthropics/skills/tree/main/skills/mcp-builder' },
   { id: 'skill-creator', name: 'Skill Creator', description: 'Scaffold and create new Claude Code skills', official: true, source: 'https://github.com/anthropics/skills/tree/main/skills/skill-creator' },
-]
-
-export const CATALOG_PLUGINS: CatalogPlugin[] = [
-  // The session-manager's own default dev plugin — its 3 skills + the scheduler
-  // form an end-to-end develop → queue → track → publish loop.
-  // Ships from this repo's marketplace (`.claude-plugin/marketplace.json`).
-  { id: 'session-manager-dev', name: 'Session Manager Dev', description: 'Default dev skillset: /develop (decompose into scheduler PRDs, track to a validated finish), /builder (npm release), /send-feedback (cross-project findings).', official: false, source: 'https://github.com/StanislavBG/claude-code-session-manager/tree/main/plugins/session-manager-dev', bundles: ['skills'], marketplace: { add: 'bundled', name: 'session-manager' } },
-  { id: 'code-review', name: 'Code Review', description: 'Comprehensive code review with best practices and improvement suggestions', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-review', bundles: ['commands', 'agents'] },
-  { id: 'pr-review-toolkit', name: 'PR Review Toolkit', description: 'Pull request review automation and workflows', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit', bundles: ['commands', 'agents'] },
-  { id: 'commit-commands', name: 'Commit Commands', description: 'Git commit workflow shortcuts with conventional commit formatting', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/commit-commands', bundles: ['commands'] },
-  { id: 'feature-dev', name: 'Feature Dev', description: 'Feature development assistance from spec to implementation', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/feature-dev', bundles: ['commands', 'agents'] },
-  { id: 'security-guidance', name: 'Security Guidance', description: 'Security best-practice review and enforcement', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/security-guidance', bundles: ['commands', 'agents'] },
-  { id: 'agent-sdk-dev', name: 'Agent SDK Dev', description: 'Development tools for building with the Claude Agent SDK', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/agent-sdk-dev', bundles: ['commands', 'skills'] },
-  { id: 'plugin-dev', name: 'Plugin Dev', description: 'Scaffolding and tooling for authoring Claude Code plugins', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/plugin-dev', bundles: ['commands', 'skills'] },
-  { id: 'mcp-server-dev', name: 'MCP Server Dev', description: 'Develop and test Model Context Protocol servers', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/mcp-server-dev', bundles: ['commands', 'skills'] },
-  { id: 'skill-creator', name: 'Skill Creator', description: 'Framework for creating and iterating on new skills', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/skill-creator', bundles: ['commands', 'skills'] },
-  { id: 'claude-md-management', name: 'CLAUDE.md Management', description: 'Manage and maintain CLAUDE.md project memory files', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/claude-md-management', bundles: ['commands'] },
-  { id: 'typescript-lsp', name: 'TypeScript LSP', description: 'TypeScript/JavaScript language server integration', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/typescript-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'pyright-lsp', name: 'Pyright LSP', description: 'Python language server integration via Pyright', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pyright-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'rust-analyzer-lsp', name: 'Rust Analyzer LSP', description: 'Rust language server integration via rust-analyzer', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/rust-analyzer-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'gopls-lsp', name: 'Go LSP (gopls)', description: 'Go language server integration via gopls', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/gopls-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'code-simplifier', name: 'Code Simplifier', description: 'Review changed code for reuse, quality, and efficiency then fix issues', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-simplifier', bundles: ['commands', 'agents'] },
-  { id: 'hookify', name: 'Hookify', description: 'Utilities and templates for authoring Claude Code hooks', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/hookify', bundles: ['commands', 'skills'] },
-  { id: 'frontend-design-plugin', name: 'Frontend Design Plugin', description: 'Frontend design assistance and visual polish workflows', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/frontend-design', bundles: ['commands', 'skills', 'agents'] },
-  { id: 'clangd-lsp', name: 'clangd-lsp', description: 'C/C++ diagnostics via clangd. Requires clangd on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/clangd-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'csharp-lsp', name: 'csharp-lsp', description: 'C# diagnostics. Requires OmniSharp or Roslyn LSP on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/csharp-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'jdtls-lsp', name: 'jdtls-lsp', description: 'Java diagnostics via Eclipse JDT LS. Requires jdtls on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/jdtls-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'kotlin-lsp', name: 'kotlin-lsp', description: 'Kotlin diagnostics. Requires kotlin-language-server on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/kotlin-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'lua-lsp', name: 'lua-lsp', description: 'Lua diagnostics. Requires lua-language-server on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/lua-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'php-lsp', name: 'php-lsp', description: 'PHP diagnostics. Requires intelephense or phpactor on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/php-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'swift-lsp', name: 'swift-lsp', description: 'Swift diagnostics via sourcekit-lsp. Requires sourcekit-lsp on $PATH.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/swift-lsp', bundles: ['hooks', 'commands'] },
-  { id: 'github', name: 'github', description: 'GitHub PRs, issues, gh-style flows.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/github', bundles: ['mcp'] },
-  { id: 'gitlab', name: 'gitlab', description: 'GitLab MRs, issues, pipelines.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/gitlab', bundles: ['mcp'] },
-  { id: 'atlassian', name: 'atlassian', description: 'Jira / Confluence search and updates.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/atlassian', bundles: ['mcp'] },
-  { id: 'asana', name: 'asana', description: 'Asana task and project ops.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/asana', bundles: ['mcp'] },
-  { id: 'linear', name: 'linear', description: 'Linear issue tracking — pairs with the Tasks tab.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/linear', bundles: ['mcp'] },
-  { id: 'notion', name: 'notion', description: 'Notion document lookup and edits.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/notion', bundles: ['mcp'] },
-  { id: 'figma', name: 'figma', description: 'Figma file inspection for UI work.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/figma', bundles: ['mcp'] },
-  { id: 'vercel', name: 'vercel', description: 'Vercel deploy diagnostics.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/vercel', bundles: ['mcp'] },
-  { id: 'firebase', name: 'firebase', description: 'Firebase project + Firestore ops.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/firebase', bundles: ['mcp'] },
-  { id: 'supabase', name: 'supabase', description: 'Supabase database operations.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/supabase', bundles: ['mcp'] },
-  { id: 'slack', name: 'slack', description: 'Slack DM / channel posting from agents.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/slack', bundles: ['mcp'] },
-  { id: 'sentry', name: 'sentry', description: 'Sentry bug triage and event lookup.', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/sentry', bundles: ['mcp'] },
 ]
 
 /* ---------------------------------------------------------------- Hooks */

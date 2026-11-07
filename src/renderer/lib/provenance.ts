@@ -20,7 +20,6 @@
 import {
   CATALOG_MCP,
   CATALOG_SKILLS,
-  CATALOG_PLUGINS,
   CATALOG_HOOKS,
   CATALOG_AGENTS,
 } from '../data/catalog'
@@ -63,8 +62,6 @@ for (const m of CATALOG_MCP) {
 // skills are official:false and must NOT read as Anthropic).
 const skillOfficial = new Set(CATALOG_SKILLS.filter((s) => s.official).flatMap((s) => [lc(s.id), lc(s.name)]))
 const skillCommunity = new Set(CATALOG_SKILLS.filter((s) => !s.official).flatMap((s) => [lc(s.id), lc(s.name)]))
-const pluginOfficial = new Set(CATALOG_PLUGINS.filter((p) => p.official).flatMap((p) => [lc(p.id), lc(p.name)]))
-const pluginCommunity = new Set(CATALOG_PLUGINS.filter((p) => !p.official).flatMap((p) => [lc(p.id), lc(p.name)]))
 const agentCatalog = new Set(CATALOG_AGENTS.flatMap((a) => [lc(a.id), lc(a.name)]))
 const hookCatalogIds = new Set(CATALOG_HOOKS.flatMap((h) => [lc(h.id), lc(h.name)]))
 const hookCatalogCommands = new Set(CATALOG_HOOKS.map((h) => h.command.trim()))
@@ -110,8 +107,6 @@ function catalogVerdict(type: ProvItemType, name: string, command?: string): Pro
       if (skillCommunity.has(name)) return C('third-party skill (catalog)')
       return null
     case 'plugin':
-      if (pluginOfficial.has(name)) return A('official Anthropic plugin (catalog)')
-      if (pluginCommunity.has(name)) return C('third-party plugin (catalog)')
       return null
     case 'subagent':
       return agentCatalog.has(name) ? A('bundled Anthropic subagent (catalog)') : null

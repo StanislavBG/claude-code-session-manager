@@ -5,13 +5,13 @@ import { Button } from '../ui/Button'
 import { distinctPlaceholders, fillPlaceholders, type Placeholder } from '../../lib/mcpPlaceholders'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { listSkillEntries } from '../../lib/listSkills'
+import { listMarketplacePlugins, type MarketplacePlugin } from '../../lib/pluginMarketplaces'
 import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
 import { useConfig } from '../../state/config'
 import {
   CATALOG_MCP,
   CATALOG_SKILLS,
-  CATALOG_PLUGINS,
   CATALOG_HOOKS,
   CATALOG_PERMS_PRESETS,
   CATALOG_PROMPT_PRESETS,
@@ -311,9 +311,11 @@ export function PluginsLibrary() {
   const home = useHomeDir()
   const [installed, setInstalled] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
+  const [catalog, setCatalog] = useState<MarketplacePlugin[]>([])
 
   const refresh = async () => {
     if (!home) return
+    setCatalog(await listMarketplacePlugins(home))
     const ids = new Set<string>()
     // Legacy signal: a top-level dir under ~/.claude/plugins named for the id.
     const r = await window.api.config.listDir(`${home}/.claude/plugins`, { dirsOnly: true })
@@ -334,8 +336,8 @@ export function PluginsLibrary() {
   }, [home])
 
   const items = useMemo(
-    () => CATALOG_PLUGINS.filter((p) => matches(query, p.id, p.name, p.description)),
-    [query]
+    () => catalog.filter((p) => matches(query, p.name, p.marketplace, p.description)),
+    [catalog, query]
   )
 
   if (!home) return <EmptyState title="loading…" />
@@ -346,44 +348,32 @@ export function PluginsLibrary() {
         query={query}
         onQueryChange={setQuery}
         count={items.length}
-        total={CATALOG_PLUGINS.length}
+        total={catalog.length}
       />
       <div className="flex-1 overflow-auto divide-y divide-line">
         {items.map((p) => {
-          const on = installed.has(p.id)
-          // Plugins from a non-official marketplace need a one-time
-          // `/plugin marketplace add <repo>` before install; the official
-          // catalog marketplace is pre-registered, so it's install-only.
-          // `bundled` ships inside this app — the in-app Install button wires
-          // the marketplace add automatically, so the copy form is install-only.
-          const mktName = p.marketplace?.name ?? 'anthropics/claude-plugins-official'
-          const installLine = `/plugin install ${p.id}@${mktName}`
-          const installCmd =
-            p.marketplace && p.marketplace.add !== 'bundled'
-              ? `/plugin marketplace add ${p.marketplace.add}\n${installLine}`
-              : installLine
+          const on = installed.has(p.name)
+          // Marketplaces come from known_marketplaces.json, so they are already
+          // registered; install is `/plugin install <name>@<marketplace>`. The
+          // bundled one is resolved by main when the in-app Install button runs.
+          const installLine = `/plugin install ${p.name}@${p.marketplace}`
           return (
-            <div key={p.id} className="px-4 py-3 flex items-start gap-3 hover:bg-bg-elev/50">
+            <div key={`${p.marketplace}/${p.name}`} className="px-4 py-3 flex items-start gap-3 hover:bg-bg-elev/50">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-fg text-xs font-medium">{p.name}</span>
-                  {p.official && <Badge>official</Badge>}
+                  <Badge tone="dim">{p.marketplace}</Badge>
                   {on && <Badge tone="accent">installed</Badge>}
-                  {p.bundles.map((b) => (
-                    <Badge key={b} tone="dim">
-                      {b}
-                    </Badge>
-                  ))}
                 </div>
                 <div className="text-fg-dim text-xs mt-0.5">{p.description}</div>
                 <div className="text-fg-faint text-[10px] font-mono mt-1 truncate">{installLine}</div>
               </div>
               <div className="flex gap-1 shrink-0 items-start">
-                <LinkBtn href={p.source}>source</LinkBtn>
-                <CopyBtn text={installCmd} label="copy" />
+                {/^https?:\/\//.test(p.source) && <LinkBtn href={p.source}>source</LinkBtn>}
+                <CopyBtn text={installLine} label="copy" />
                 <InstallBtn
-                  id={p.id}
-                  marketplace={p.marketplace}
+                  id={p.name}
+                  marketplace={p.marketplace === 'session-manager' ? { add: 'bundled', name: p.marketplace } : undefined}
                   installed={on}
                   onDone={refresh}
                 />

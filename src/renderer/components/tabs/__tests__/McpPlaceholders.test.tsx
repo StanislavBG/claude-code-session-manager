@@ -116,6 +116,8 @@ describe('McpLibrary install with placeholders', () => {
     const [payload] = api.claudeConfig.patch.mock.calls[0]
     expect(payload).toMatchObject({ fileId: 'claudeJson', scope: 'user', keyPath: ['mcpServers', 'sqlite'] })
     expect((payload.value as { args: string[] }).args).toEqual([
+      '--with',
+      'mcp<2',
       'mcp-server-sqlite',
       '--db-path',
       '/tmp/x.db',

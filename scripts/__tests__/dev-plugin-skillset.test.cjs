@@ -1,7 +1,10 @@
 /**
  * dev-plugin-skillset.test.cjs — pins the session-manager-dev plugin to its
- * three in-use skills. The other twelve were removed (0-6 lifetime uses; their
+ * four in-use skills. The other twelve were removed (0-6 lifetime uses; their
  * descriptions cost context in every session) and must not creep back.
+ * The fourth, maintaining-md-network, was added so the 'Review MD network'
+ * procedure is versioned and runnable from any project instead of living only
+ * in a machine-local macros.json.
  *
  * Run: timeout 120 npx vitest run scripts/__tests__/dev-plugin-skillset.test.cjs
  */
@@ -17,7 +20,7 @@ const PLUGIN_DIR = path.join(REPO_ROOT, 'plugins/session-manager-dev');
 const PLUGIN_JSON = path.join(PLUGIN_DIR, '.claude-plugin/plugin.json');
 const MARKETPLACE_JSON = path.join(REPO_ROOT, '.claude-plugin/marketplace.json');
 
-const KEPT = ['builder', 'develop', 'send-feedback'];
+const KEPT = ['builder', 'develop', 'maintaining-md-network', 'send-feedback'];
 const REMOVED = [
   'blog-for-project-feature',
   'discover-features',
@@ -33,7 +36,7 @@ const REMOVED = [
   'requesting-code-review',
 ];
 
-test('skills dir lists exactly the three kept skills', () => {
+test('skills dir lists exactly the four kept skills', () => {
   const dirs = fs
     .readdirSync(path.join(PLUGIN_DIR, 'skills'), { withFileTypes: true })
     .filter((d) => d.isDirectory())

@@ -5,8 +5,8 @@ Part of the **AGENT LAYER** partition — see
 
 ## What's here
 
-`session-manager-dev/skills/` — 3 skills (`builder`, `develop`, `send-feedback`) — verified against `ls
-plugins/session-manager-dev/skills` 2026-10-11; keep in sync with `project-partition.md` and
+`session-manager-dev/skills/` — 4 skills (`builder`, `develop`, `maintaining-md-network`, `send-feedback`) — verified against `ls
+plugins/session-manager-dev/skills` 2026-11-06; keep in sync with `project-partition.md` and
 `seedDevPlugin.cjs`'s header count.
 
 Two manifests: root [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)

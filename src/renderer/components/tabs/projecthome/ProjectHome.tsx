@@ -36,10 +36,7 @@ function ProjectHomeComponent() {
   const library = useMacros()
   const macros = macrosForProject(library, cwd, 'project-home')
   const personas = useAgentPersonas()
-  const { launch, launching } = useMacroLaunch(navigateToEpic, personas, {
-    resumeActive: true,
-    requireReadiness: true,
-  })
+  const { launch, launching } = useMacroLaunch(navigateToEpic, personas)
 
   if (!activeTab) {
     return <EmptyState title="Open a project to see its brief" />

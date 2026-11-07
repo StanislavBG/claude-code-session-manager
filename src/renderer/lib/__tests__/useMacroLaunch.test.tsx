@@ -2,8 +2,7 @@
 /**
  * useMacroLaunch — shared mint -> approve -> send path for pressing a Macro.
  * Default behaviour must stay byte-for-byte what SessionActionsBar always
- * did; `resumeActive`/`requireReadiness` are opt-in additions ported from
- * the old Project Home "Generate" action (useBuilderEpic.ts).
+ * did; job macros add a readiness gate + strict persona check.
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
@@ -34,6 +33,7 @@ function macro(over: Partial<Macro> = {}): Macro {
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const approveProposedSpy = vi.fn()
 const sendSpy = vi.fn()
+const JOB = { estimateMinutes: 10, artifactPaths: [] }
 const READY = { ok: true, checks: [] }
 
 let container: HTMLDivElement | null = null
@@ -47,15 +47,14 @@ async function mount(el: React.ReactElement) {
   return container
 }
 
-function Harness({ personas, opts, onSelect, extraInstructions, macroOver, inputValues }: {
+function Harness({ personas, onSelect, extraInstructions, macroOver, inputValues }: {
   personas: AgentPersona[]
-  opts?: { resumeActive?: boolean; requireReadiness?: boolean }
   onSelect: (id: string) => void
   extraInstructions?: string
   macroOver?: Partial<Macro>
   inputValues?: Record<string, string>
 }) {
-  const { launch, launching } = useMacroLaunch(onSelect, personas, opts)
+  const { launch, launching } = useMacroLaunch(onSelect, personas)
   return (
     <button
       type="button"
@@ -132,32 +131,46 @@ describe('useMacroLaunch', () => {
     expect(openingPrompt).toContain('Additional instructions: focus on the auth flow')
   })
 
-  it('resumeActive: an active Epic for the same (cwd, agentName, tag) is resumed, nothing minted', async () => {
+  it('a job-less macro mints a new Epic even when an active Epic with the same agent and tag exists', async () => {
     usePromptSessions.setState({
       sessions: {
         existing: {
-          id: 'existing',
-          cwd: CWD,
-          goalText: 'Sweep',
-          claudeSessionId: 'sess-1',
-          status: 'active',
-          createdAt: '2026-08-02T00:00:00.000Z',
-          completedAt: null,
-          tag: 'bug',
-          agentType: 'scout',
+          id: 'existing', cwd: CWD, goalText: 'Sweep', claudeSessionId: 'sess-1', status: 'active',
+          createdAt: '2026-08-02T00:00:00.000Z', completedAt: null, tag: 'bug', agentType: 'scout',
         } as any,
       },
     })
     const onSelect = vi.fn()
-    const el = await mount(<Harness personas={[persona()]} opts={{ resumeActive: true }} onSelect={onSelect} />)
+    const el = await mount(
+      <Harness
+        personas={[persona()]}
+        onSelect={onSelect}
+        macroOver={{ prompt: 'run stream={{stream}}', inputs: [{ name: 'stream', label: 'Stream', default: 'x' }] } as Partial<Macro>}
+        inputValues={{ stream: 'math' }}
+      />,
+    )
     await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
-    expect(createPromptSessionSpy).not.toHaveBeenCalled()
-    expect(sendSpy).not.toHaveBeenCalled()
-    expect(onSelect).toHaveBeenCalledWith('existing')
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    const [, goalText, tag, , agentType] = createPromptSessionSpy.mock.calls[0]
+    expect(goalText).toBe('Sweep\n\nrun stream=math')
+    expect(tag).toBe('bug')
+    expect(agentType).toBe('scout')
+    expect(createPromptSessionSpy.mock.calls[0][7]).toEqual({ macroId: 'm1' })
+    const created = Object.values(usePromptSessions.getState().sessions).find((s) => s.id !== 'existing')!
+    expect(onSelect).toHaveBeenCalledWith(created.id)
+    expect(onSelect).not.toHaveBeenCalledWith('existing')
   })
 
-  it('resumeActive: a completed Epic for the same (cwd, agentName, tag) still mints a new one', async () => {
+  it('a job-less macro never calls delegationReadiness', async () => {
+    const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} />)
+    await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+    expect((globalThis as any).window.api.app.delegationReadiness).not.toHaveBeenCalled()
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('a completed Epic for the same (cwd, agentName, tag) still mints a new one', async () => {
     usePromptSessions.setState({
       sessions: {
         done: {
@@ -174,7 +187,7 @@ describe('useMacroLaunch', () => {
       },
     })
     const onSelect = vi.fn()
-    const el = await mount(<Harness personas={[persona()]} opts={{ resumeActive: true }} onSelect={onSelect} />)
+    const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} />)
     await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
     expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
@@ -182,13 +195,13 @@ describe('useMacroLaunch', () => {
     expect(onSelect).toHaveBeenCalledWith(created.id)
   })
 
-  it('requireReadiness: delegationReadiness ok:false blocks the mint and toasts the failing checks', async () => {
+  it('job macro: delegationReadiness ok:false blocks the mint and toasts the failing checks', async () => {
     ;(globalThis as any).window.api.app.delegationReadiness = vi.fn().mockResolvedValue({
       ok: false,
       checks: [{ id: 'x', label: 'Scheduler MCP server answers tools/list', ok: false, detail: 'timeout', fix: null }],
     })
     const onSelect = vi.fn()
-    const el = await mount(<Harness personas={[persona()]} opts={{ requireReadiness: true }} onSelect={onSelect} />)
+    const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} macroOver={{ job: JOB }} />)
     await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
     expect(createPromptSessionSpy).not.toHaveBeenCalled()
@@ -199,19 +212,19 @@ describe('useMacroLaunch', () => {
     ).toBe(true)
   })
 
-  it('requireReadiness: delegationReadiness throwing blocks the mint and toasts', async () => {
+  it('job macro: delegationReadiness throwing blocks the mint and toasts', async () => {
     ;(globalThis as any).window.api.app.delegationReadiness = vi.fn().mockRejectedValue(new Error('timeout'))
     const onSelect = vi.fn()
-    const el = await mount(<Harness personas={[persona()]} opts={{ requireReadiness: true }} onSelect={onSelect} />)
+    const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} macroOver={{ job: JOB }} />)
     await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
     expect(createPromptSessionSpy).not.toHaveBeenCalled()
     expect(useToast.getState().toasts.some((t) => t.kind === 'error' && t.message.includes('timeout'))).toBe(true)
   })
 
-  it('requireReadiness: a missing persona blocks even while the personas list is still empty', async () => {
+  it('job macro: a missing persona blocks even while the personas list is still empty', async () => {
     const onSelect = vi.fn()
-    const el = await mount(<Harness personas={[]} opts={{ requireReadiness: true }} onSelect={onSelect} />)
+    const el = await mount(<Harness personas={[]} onSelect={onSelect} macroOver={{ job: JOB }} />)
     await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
     expect(createPromptSessionSpy).not.toHaveBeenCalled()
@@ -308,7 +321,7 @@ describe('useMacroLaunch', () => {
       confirmSpy.mockReturnValue(false)
       const onSelect = vi.fn()
       const el = await mount(
-        <Harness personas={[persona({ effort: 'max' })]} opts={{ requireReadiness: true }} onSelect={onSelect} />,
+        <Harness personas={[persona({ effort: 'max' })]} onSelect={onSelect} macroOver={{ job: JOB }} />,
       )
       await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
@@ -338,25 +351,6 @@ describe('useMacroLaunch', () => {
       expect(confirmSpy).not.toHaveBeenCalled()
       expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
     })
-
-    it('resumeActive with an existing active Epic + max effort: never prompts', async () => {
-      usePromptSessions.setState({
-        sessions: {
-          existing: {
-            id: 'existing', cwd: CWD, goalText: 'Sweep', claudeSessionId: 'sess-1', status: 'active',
-            createdAt: '2026-08-02T00:00:00.000Z', completedAt: null, tag: 'bug', agentType: 'scout',
-          } as any,
-        },
-      })
-      const onSelect = vi.fn()
-      const el = await mount(
-        <Harness personas={[persona({ effort: 'max' })]} opts={{ resumeActive: true }} onSelect={onSelect} />,
-      )
-      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
-
-      expect(confirmSpy).not.toHaveBeenCalled()
-      expect(onSelect).toHaveBeenCalledWith('existing')
-    })
   })
 
   it('default behaviour: a missing persona in an empty (still-loading) list does NOT block', async () => {
@@ -369,7 +363,6 @@ describe('useMacroLaunch', () => {
   })
 
   describe('job macros', () => {
-    const JOB = { estimateMinutes: 10, artifactPaths: [] }
     const dispatchJob = vi.fn()
     beforeEach(() => {
       dispatchJob.mockReset()
@@ -405,7 +398,7 @@ describe('useMacroLaunch', () => {
 
     it('still runs the readiness check first', async () => {
       ;(globalThis as any).window.api.app.delegationReadiness = vi.fn().mockResolvedValue({ ok: false, checks: [{ ok: false, label: 'hooks' }] })
-      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} opts={{ requireReadiness: true }} macroOver={{ job: JOB }} />)
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} />)
       await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
       expect(dispatchJob).not.toHaveBeenCalled()
       expect(createPromptSessionSpy).not.toHaveBeenCalled()

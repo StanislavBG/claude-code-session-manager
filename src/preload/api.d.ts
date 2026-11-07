@@ -2004,6 +2004,8 @@ export interface SessionManagerAPI {
     writeJson: (path: string, data: unknown, writer?: OpsWriter) => Promise<WriteResult>;
     writeText: (path: string, text: string, writer?: OpsWriter) => Promise<WriteResult>;
     listDir: (path: string, opts?: { filesOnly?: boolean; dirsOnly?: boolean; includeHidden?: boolean }) => Promise<ListDirResult>;
+    /** True when config:write-text would accept this path (same validateWrite). */
+    canWrite: (path: string) => Promise<boolean>;
     exists: (path: string) => Promise<boolean>;
     watch: (paths: string[], opts?: { depth?: 0 | 1 | 2 }) => void;
     unwatch: (paths: string[], opts?: { depth?: 0 | 1 | 2 }) => void;

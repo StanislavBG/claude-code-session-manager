@@ -168,6 +168,7 @@ contextBridge.exposeInMainWorld('api', {
     writeJson: (path, data, writer) => ipcRenderer.invoke('config:write-json', { path, data, writer }),
     writeText: (path, text, writer) => ipcRenderer.invoke('config:write-text', { path, text, writer }),
     listDir: (path, opts) => ipcRenderer.invoke('config:list-dir', { path, opts }),
+    canWrite: (path) => ipcRenderer.invoke('config:can-write', { path }),
     exists: (path) => ipcRenderer.invoke('config:exists', { path }),
     watch: (paths, opts) => ipcRenderer.send('config:watch', { paths, opts }),
     unwatch: (paths, opts) => ipcRenderer.send('config:unwatch', { paths, opts }),

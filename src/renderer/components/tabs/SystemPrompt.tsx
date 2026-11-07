@@ -62,7 +62,21 @@ function SystemPromptComponent() {
   const [selectedRef, setSelectedRef] = useState<ImportRef | null>(null)
   const docPath = selectedRef?.path ?? activePath
   // A broken/missing import has nothing to save into — show it, refuse edits.
-  const docReadOnly = !!selectedRef && (!selectedRef.ok || !selectedRef.exists)
+  // An import outside the write boundary is viewable but config:write-text would
+  // refuse it — resolved via config:can-write so Save never fails after typing.
+  const [unwritable, setUnwritable] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    const p = selectedRef?.path
+    if (!p || !selectedRef.ok || !selectedRef.exists) return
+    let live = true
+    Promise.resolve()
+      .then(() => window.api.config.canWrite(p))
+      .then((ok) => { if (live) setUnwritable((m) => ({ ...m, [p]: ok === false })) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [selectedRef])
+  const outsideBoundary = !!selectedRef && unwritable[selectedRef.path] === true
+  const docReadOnly = !!selectedRef && (!selectedRef.ok || !selectedRef.exists || outsideBoundary)
 
   const files = useConfig((s) => s.files)
   const loadText = useConfig((s) => s.loadText)
@@ -113,7 +127,8 @@ function SystemPromptComponent() {
   const docText = doc?.draftRaw ?? ''
   const tokens = estimateTokens(docText)
   const chars = docText.length
-  const missing = docReadOnly
+  const missing = docReadOnly && !outsideBoundary
+  const readOnly = docReadOnly
 
   const save = async () => {
     if (!docPath) return
@@ -137,7 +152,7 @@ function SystemPromptComponent() {
         </>
       }
       footer={
-        docPath && doc && !missing ? (
+        docPath && doc && !readOnly ? (
           <SaveBar
             dirty={doc.dirty}
             busy={doc.busy}
@@ -185,6 +200,14 @@ function SystemPromptComponent() {
                   This import does not resolve to a readable file — the CLI will skip it.
                 </div>
               )}
+              {outsideBoundary && selectedRef && (
+                <div
+                  data-testid="system-prompt-readonly-note"
+                  className="shrink-0 border-b border-line bg-bg-elev px-3 py-1.5 text-[11px] text-amber-400/90"
+                >
+                  Read-only: <span className="font-mono">{selectedRef.path}</span> is outside the folders Session Manager may write to.
+                </div>
+              )}
               {docPath && (
                 <div className="flex-1 min-h-0">
                   <DocumentEditorPane
@@ -193,7 +216,7 @@ function SystemPromptComponent() {
                     key={docPath}
                     path={docPath}
                     value={docText}
-                    readOnly={missing}
+                    readOnly={readOnly}
                     defaultMode="split"
                     onChange={(v) => {
                       setSaveError(null)

@@ -358,6 +358,16 @@ async function listDir(abs, { filesOnly = false, dirsOnly = false, includeHidden
   }
 }
 
+/** True only when writeTextAtomic would pass its path checks (validatePath + validateWrite). */
+function canWrite(abs) {
+  try {
+    validateWrite(validatePath(expandHome(abs)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function exists(abs) {
   try {
     abs = validatePath(expandHome(abs));
@@ -502,6 +512,7 @@ function registerConfigHandlers() {
   }));
   ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text, writer }) => writeTextAtomic(p, text, { writer })));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
+  ipcMain.handle('config:can-write', v(s.configPath, ({ path: p }) => canWrite(p)));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
   ipcMain.handle('config:parse-imports', v(s.configParseImports, async ({ path: p }) => {
     try {

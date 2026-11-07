@@ -8,6 +8,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { SessionActionsBar } from '../SessionActionsBar'
+import { __resetMacrosCacheForTests } from '../../../lib/useMacros'
 import { useSessions } from '../../../state/sessions'
 import { toast } from '../../../state/toast'
 import type { AgentPersona, Macro } from '../../../../preload/api'
@@ -40,6 +41,7 @@ let root: Root | null = null
 const q = (id: string) => container!.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 
 beforeEach(async () => {
+  __resetMacrosCacheForTests()
   del.mockClear(); removeFromProject.mockClear()
   useSessions.setState({ tabs: [{ id: 'tab-1', cwd: CWD } as any], activeTabId: 'tab-1' })
   container = document.createElement('div')

@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { __resetMacrosCacheForTests } from '../../lib/useMacros'
 import { ProjectHome } from '../tabs/projecthome/ProjectHome'
 import { useSessions } from '../../state/sessions'
 
@@ -9,6 +10,7 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 beforeEach(() => {
+  __resetMacrosCacheForTests()
   useSessions.setState({ tabs: [], activeTabId: null })
   ;(globalThis as any).window.api = {
     schedule: {

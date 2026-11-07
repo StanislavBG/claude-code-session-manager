@@ -8,31 +8,31 @@
 > [`project-partition.md`](project-partition.md) (the WEB PRESENCE partition, physically collected
 > under `web/` by PRD 1184) has a target instead of a vibe.
 >
-> Argued from the HOST's own stated contract — `~/Projects/Bilko/CLAUDE.md`, `docs/map.md` and
+> Argued from the HOST's own stated contract — `~/Projects/Bilko/CLAUDE.md`, `Bilko:docs/map.md` and
 > `~/Projects/Bilko/docs/host-contract.md` — read READ-ONLY for this doc, never edited by it.
 
 ## File-by-file classification
 
 Every file verified by reading it in full on 2026-09-12. Quotes are Bilko's own words.
 
-> **2026-09-25:** the Field Manual went free (2.0.1). `src/lib/sessionManagerCheckout.ts`,
+> **2026-09-25:** the Field Manual went free (2.0.1). src/lib/sessionManagerCheckout.ts,
 > `MANUAL_PRICE_LABEL`, the product page's checkout call and the reader's buy UI were deleted; rows below
 > naming them are historical.
 
 | File (in `~/Projects/Bilko`) | Verdict | Justification (quoting Bilko's own contract) |
 | --- | --- | --- |
-| `src/pages/session-manager-landing/SessionManagerPage.tsx` | **OURS-MISPLACED** | Host's own rule (Bilko `CLAUDE.md`: new apps default to `static-path` in their own repo; `react-route` only when the app must live in this bundle; `docs/map.md` repeats it). This page needs Clerk sign-in + a Stripe checkout call — but the 8 AI-tool siblings prove that doesn't require `react-route`: they are `static-path` and *"call their endpoint same-origin via Clerk JWT — no CORS, no cross-origin auth"* (host-contract.md, gateway pattern). The `FEATURES` array (our tab-by-tab pitch copy) is pure product knowledge with no host dependency at all. |
-| `src/pages/session-manager-landing/ManualPage.tsx` | **OURS-MISPLACED** (reader UI) | Same gateway precedent (the quote once cited from Bilko's `CLAUDE.md` is no longer there; see `docs/host-contract.md`): a sibling ships its React page, its endpoint stays in the host. The reader's UI (TOC rendering, chapter switching, buy button chrome) is presentation, not entitlement — it only *consumes* `manualClient.ts`'s calls. |
-| `src/lib/manualClient.ts` | **OURS-MISPLACED** | Pure browser fetch wrapper with "no React or Clerk import" by its own doc comment — moves with the page, calls the host's `/api/manual/*` gateway same-origin exactly as `useToolApi()` does for the 8 tools. |
-| `src/lib/sessionManagerCheckout.ts` | **OURS-MISPLACED** | Same shape as `manualClient.ts` — a thin fetch wrapper around `/api/stripe/create-checkout-session`. Moves with the pages; the endpoint it calls stays host-side (below). |
-| `server/routes/manual.ts` | **HOST-LEGITIMATE** (gateway endpoints) + one OURS-flavored piece | The `/api/manual/toc`, `/status`, `/chapter/:slug`, `/download/:assetId` routes exist to answer *"is this email entitled?"* — host-contract.md: *"Payments: Stripe. ... one-time purchases via `hasPurchased(email, productKey)` ... from `server/services/stripe.ts`"* is a host-provided service, by name. The `/products/session-manager/my-manual` recovery page rendered inline in this file is presentational HTML with our copy/branding — worth trimming during extraction, but the *function* (email-based entitlement lookup with no Clerk session) has the identical shape to the entitled routes above and needs the same host-side data access, so it stays. |
-| `server/services/manual.ts` | **HOST-LEGITIMATE-BY-NECESSITY** | `isEntitledToManual()` calls `hasPurchased()` from `server/services/stripe.ts` — squarely host substrate. The bundle-reading half (`manualRoot`, `listManualVersions`, `readManifest`, `findChapter`, `resolveReleaseFile`, `readChapterHtml`) reads content **we** author, but it must live where the entitlement check runs (see "The paid-manual case" below) — this is authorship-OURS, hosting-necessarily-HOST, not a clean single verdict. |
-| `server/sm-relay/router.ts` + `tokens.ts` | **HOST-LEGITIMATE** | Verified: the header's claim that it was "ported" from this repo's `web-remote/relay/src/router.ts` is true but stale — the two have diverged (this repo's `web-remote/relay/` is dead code per `project-partition.md`). host-contract.md treats the relay as a *documented host-side exception*: its own "What must NOT move under `/products/<slug>/`" section uses Session Manager's relay as the worked example, explaining the URL is *"baked into already-paired phones"* and must dual-serve via `RELAY_WS_PATHS`. CLAUDE.md's own law says *"The bilko.run relay stays live"* — this is host infrastructure by design, not leakage. It is a "dumb pipe" (its own header comment) that forwards opaque envelopes by `userId`/`deviceId` — it holds no knowledge of Session Manager's tabs, PRDs, or Epics. |
-| `shared/manual-catalog.ts` | **SPLIT** | `MANUAL_PRODUCT_KEY = PRODUCT_KEYS.SESSION_MANAGER` is HOST-LEGITIMATE plumbing — it wires into the shared Stripe catalog by design (see next row). But `MANUAL_TITLE`, `MANUAL_PRICE_LABEL`, and the `ManualChapter`/`ManualManifest`/`ManualToc` interfaces describing our own content's shape are OURS-MISPLACED — none of that is needed by the host's checkout flow, which only needs the `priceType` string. |
-| `session_manager` entry in `shared/product-catalog.ts` | **HOST-LEGITIMATE** | The file is host's *"single source of truth for Stripe products ... used by BOTH the frontend tool registry ... and the backend Stripe flow"* — shared substrate for every product (ContentGrade, PageRoast, PublicTrades, us). Our one entry (`SESSION_MANAGER: 'session_manager'` + its `PRICE_CATALOG` row: env var, product key, mode) carries zero business logic — it is exactly *"an entitlement row in the host's database ... the host doing its job, not leakage"* (per this PRD's own framing, echoing `shared/manual-catalog.ts`'s comment: *"there is no second SKU"*). |
-| `src/data/projectsRegistry.ts` + `standalone-projects.json` `session-manager` rows | **OURS-MISPLACED** | The registry mechanism itself is host substrate (`projectsRegistry.ts`, with `projectsView.ts` as the read view), and a minimal metadata row (slug/name/tagline/category/tags) is exactly what every registered app must provide per host-contract.md's "Every app" checklist — that sliver is legitimate. But the entry's `/products/session-manager` mapping wires a whole react-route page (`session-manager-landing/`) into the host bundle — that is page ownership sitting inside host's registry, not the one-line-per-app shape every other of the ~25 registered siblings uses. |
-| `data/manual/` | **HYBRID — OURS content, HOST-LEGITIMATE storage** | Its own header comment: *"There is deliberately NO download-token machinery here ... every route ... checks that row directly"* and *"lives under `data/manual/`, NOT `dist/`, so the static plugin can never serve a chapter ... by guessed URL."* The bytes are ours (built by this repo's `web/manual/build.mjs`, per `manual-catalog.ts`: *"authored in the session-manager repo ... and committed into this repo"*), but they must be reachable by the same process that runs the entitlement check on every request — a public static file can't be gated per-request. See "The paid-manual case" below for the recommended shape. |
-| `public/projects/session-manager/` | **HOST-LEGITIMATE** (already correct) | Already verified: its `manifest.json` records `gitSha: "69c1d7a"`, this repo's last `web-remote` commit — it is a **published artifact** of `web/remote-app/` (this repo), stored where a static-path sibling's bundle belongs. This is the existing, correct model: *artifact there, source here.* It is what the rest of this doc's recommendations are trying to replicate for the marketing page and manual reader. |
+| `Bilko:src/pages/session-manager-landing/SessionManagerPage.tsx` | **OURS-MISPLACED** | Host's own rule (Bilko `CLAUDE.md`: new apps default to `static-path` in their own repo; `react-route` only when the app must live in this bundle; `Bilko:docs/map.md` repeats it). This page needs Clerk sign-in + a Stripe checkout call — but the 8 AI-tool siblings prove that doesn't require `react-route`: they are `static-path` and *"call their endpoint same-origin via Clerk JWT — no CORS, no cross-origin auth"* (host-contract.md, gateway pattern). The `FEATURES` array (our tab-by-tab pitch copy) is pure product knowledge with no host dependency at all. |
+| `Bilko:src/pages/session-manager-landing/ManualPage.tsx` | **OURS-MISPLACED** (reader UI) | Same gateway precedent (the quote once cited from Bilko's `CLAUDE.md` is no longer there; see `Bilko:docs/host-contract.md`): a sibling ships its React page, its endpoint stays in the host. The reader's UI (TOC rendering, chapter switching, buy button chrome) is presentation, not entitlement — it only *consumes* `manualClient.ts`'s calls. |
+| `Bilko:src/lib/manualClient.ts` | **OURS-MISPLACED** | Pure browser fetch wrapper with "no React or Clerk import" by its own doc comment — moves with the page, calls the host's `/api/manual/*` gateway same-origin exactly as `useToolApi()` does for the 8 tools. |
+| src/lib/sessionManagerCheckout.ts | **OURS-MISPLACED** | Same shape as `manualClient.ts` — a thin fetch wrapper around `/api/stripe/create-checkout-session`. Moves with the pages; the endpoint it calls stays host-side (below). |
+| `Bilko:server/routes/manual.ts` | **HOST-LEGITIMATE** (gateway endpoints) + one OURS-flavored piece | The `/api/manual/toc`, `/status`, `/chapter/:slug`, `/download/:assetId` routes exist to answer *"is this email entitled?"* — host-contract.md: *"Payments: Stripe. ... one-time purchases via `hasPurchased(email, productKey)` ... from `Bilko:server/services/stripe.ts`"* is a host-provided service, by name. The `/products/session-manager/my-manual` recovery page rendered inline in this file is presentational HTML with our copy/branding — worth trimming during extraction, but the *function* (email-based entitlement lookup with no Clerk session) has the identical shape to the entitled routes above and needs the same host-side data access, so it stays. |
+| `Bilko:server/services/manual.ts` | **HOST-LEGITIMATE-BY-NECESSITY** | `isEntitledToManual()` calls `hasPurchased()` from `Bilko:server/services/stripe.ts` — squarely host substrate. The bundle-reading half (`manualRoot`, `listManualVersions`, `readManifest`, `findChapter`, `resolveReleaseFile`, `readChapterHtml`) reads content **we** author, but it must live where the entitlement check runs (see "The paid-manual case" below) — this is authorship-OURS, hosting-necessarily-HOST, not a clean single verdict. |
+| `Bilko:server/sm-relay/router.ts` + `tokens.ts` | **HOST-LEGITIMATE** | Verified: the header's claim that it was "ported" from this repo's `web-remote/relay/src/router.ts` is true but stale — the two have diverged (this repo's `web-remote/relay/` is dead code per `project-partition.md`). host-contract.md treats the relay as a *documented host-side exception*: its own "What must NOT move under `/products/<slug>/`" section uses Session Manager's relay as the worked example, explaining the URL is *"baked into already-paired phones"* and must dual-serve via `RELAY_WS_PATHS`. CLAUDE.md's own law says *"The bilko.run relay stays live"* — this is host infrastructure by design, not leakage. It is a "dumb pipe" (its own header comment) that forwards opaque envelopes by `userId`/`deviceId` — it holds no knowledge of Session Manager's tabs, PRDs, or Epics. |
+| `Bilko:shared/manual-catalog.ts` | **SPLIT** | `MANUAL_PRODUCT_KEY = PRODUCT_KEYS.SESSION_MANAGER` is HOST-LEGITIMATE plumbing — it wires into the shared Stripe catalog by design (see next row). But `MANUAL_TITLE`, `MANUAL_PRICE_LABEL`, and the `ManualChapter`/`ManualManifest`/`ManualToc` interfaces describing our own content's shape are OURS-MISPLACED — none of that is needed by the host's checkout flow, which only needs the `priceType` string. |
+| `session_manager` entry in `Bilko:shared/product-catalog.ts` | **HOST-LEGITIMATE** | The file is host's *"single source of truth for Stripe products ... used by BOTH the frontend tool registry ... and the backend Stripe flow"* — shared substrate for every product (ContentGrade, PageRoast, PublicTrades, us). Our one entry (`SESSION_MANAGER: 'session_manager'` + its `PRICE_CATALOG` row: env var, product key, mode) carries zero business logic — it is exactly *"an entitlement row in the host's database ... the host doing its job, not leakage"* (per this PRD's own framing, echoing `Bilko:shared/manual-catalog.ts`'s comment: *"there is no second SKU"*). |
+| `Bilko:src/data/projectsRegistry.ts` + `standalone-projects.json` `session-manager` rows | **OURS-MISPLACED** | The registry mechanism itself is host substrate (`projectsRegistry.ts`, with `projectsView.ts` as the read view), and a minimal metadata row (slug/name/tagline/category/tags) is exactly what every registered app must provide per host-contract.md's "Every app" checklist — that sliver is legitimate. But the entry's `/products/session-manager` mapping wires a whole react-route page (`Bilko:src/pages/session-manager-landing/`) into the host bundle — that is page ownership sitting inside host's registry, not the one-line-per-app shape every other of the ~25 registered siblings uses. |
+| `Bilko:data/manual/` | **HYBRID — OURS content, HOST-LEGITIMATE storage** | Its own header comment: *"There is deliberately NO download-token machinery here ... every route ... checks that row directly"* and *"lives under `Bilko:data/manual/`, NOT `dist/`, so the static plugin can never serve a chapter ... by guessed URL."* The bytes are ours (built by this repo's `web/manual/build.mjs`, per `manual-catalog.ts`: *"authored in the session-manager repo ... and committed into this repo"*), but they must be reachable by the same process that runs the entitlement check on every request — a public static file can't be gated per-request. See "The paid-manual case" below for the recommended shape. |
+| `Bilko:public/projects/session-manager/` | **HOST-LEGITIMATE** (already correct) | Already verified: its `manifest.json` records `gitSha: "69c1d7a"`, this repo's last `web-remote` commit — it is a **published artifact** of `web/remote-app/` (this repo), stored where a static-path sibling's bundle belongs. This is the existing, correct model: *artifact there, source here.* It is what the rest of this doc's recommendations are trying to replicate for the marketing page and manual reader. |
 
 ## The paid-manual case, worked through
 
@@ -45,7 +45,7 @@ through an entitlement the host alone can verify.
 
 - **Reader UI** → **OURS**. `ManualPage.tsx` + `manualClient.ts` move to the sibling web repo,
   built as part of its static-path bundle (`web/remote-app/`'s sibling — the eventual
-  `web/manual-app/` or folded into one combined bundle at `/projects/session-manager/`).
+  web/manual-app/ or folded into one combined bundle at `/projects/session-manager/`).
 - **Entitlement check** → **HOST-LEGITIMATE**. `isEntitledToManual()` → `hasPurchased(email,
   'session_manager')` must stay host-side: it reads the `stripe_one_time_purchases` table that only
   the host process has a connection to, and it must run synchronously on every `/chapter` and
@@ -56,15 +56,15 @@ through an entitlement the host alone can verify.
   Clerk bearer header directly against the host route. That means the file bytes must live wherever
   that route runs — i.e., the host — because a public CDN-cached static file (the `static-path`
   model) cannot be re-checked against a purchase row on every read. **Recommendation:** treat
-  `data/manual/releases/` the same way `public/projects/session-manager/` is already treated —
+  `Bilko:data/manual/releases/` the same way `Bilko:public/projects/session-manager/` is already treated —
   a **published artifact directory**, fed by this repo's `web/manual/build.mjs` (source of truth
   here), copied into Bilko by the same kind of publish step the static-path siblings already use,
   just gated instead of public. Authorship stays ours; storage stays host-side because the gate
   requires it, not because the content is host's to write.
 - **Candidate pattern evaluated**: the gateway pattern already documented in Bilko's own
-  `docs/host-contract.md` — *"ship their React page from the sibling repo, but their ... endpoint stays in
+  `Bilko:docs/host-contract.md` — *"ship their React page from the sibling repo, but their ... endpoint stays in
   the host"* — is the correct answer here too: sibling ships `ManualPage.tsx`; host keeps
-  `server/routes/manual.ts` + `server/services/manual.ts` + `data/manual/`.
+  `Bilko:server/routes/manual.ts` + `Bilko:server/services/manual.ts` + `Bilko:data/manual/`.
 
 ## Target end state
 
@@ -81,7 +81,7 @@ get to own a `/products/*` root; they get `/projects/<slug>/`. "Everything under
 **Recommendation.** Follow the 8 AI-tool siblings' already-proven resolution, not the
 sub-path-ownership pattern: migrate fully to `static-path` at the canonical `/projects/session-manager/`,
 combining the marketing page, manual reader, and (once ready) the already-published web-remote PWA
-into one sibling bundle, with `server/routes/manual.ts` + `server/routes/stripe.ts` staying host-side
+into one sibling bundle, with `Bilko:server/routes/manual.ts` + `Bilko:server/routes/stripe.ts` staying host-side
 exactly as they do for the other 8 tools. Do **not** try to relocate the static-path convention to
 `/products/*` — that fights the host's own naming contract.
 
@@ -95,18 +95,18 @@ become **permanent 301s** to `/projects/session-manager/manual` and `/projects/s
 — never deleted, exactly like `/manual` → `/products/session-manager/manual` is never deleted today.
 
 **What Bilko retains after extraction:**
-- `server/routes/manual.ts`, `server/services/manual.ts`, `server/services/stripe.ts` — the gateway
+- `Bilko:server/routes/manual.ts`, `Bilko:server/services/manual.ts`, `Bilko:server/services/stripe.ts` — the gateway
   endpoints (entitlement + checkout), reachable same-origin from the new bundle.
-- `shared/product-catalog.ts`'s `session_manager` entry — the shared Stripe catalog row.
-- `data/manual/releases/` — the gated bundle bytes, now fed by a publish step from our repo instead
+- `Bilko:shared/product-catalog.ts`'s `session_manager` entry — the shared Stripe catalog row.
+- `Bilko:data/manual/releases/` — the gated bundle bytes, now fed by a publish step from our repo instead
   of hand-committed.
-- `server/sm-relay/` (router + tokens) — the live relay, unconditionally, per this repo's CLAUDE.md law.
+- `Bilko:server/sm-relay/` (router + tokens) — the live relay, unconditionally, per this repo's CLAUDE.md law.
 - The `standalone-projects.json` registry row and the permanent 301s for the two legacy paths.
 
 **What moves to the new web repo:**
-- `src/pages/session-manager-landing/` (`SessionManagerPage.tsx`, `ManualPage.tsx`), `src/lib/manualClient.ts`.
-- `MANUAL_TITLE`/manifest-shape types out of `shared/manual-catalog.ts`.
-- The react-route mapping for `/products/session-manager` in `src/data/projectsRegistry.ts` — replaced
+- `Bilko:src/pages/session-manager-landing/` (`SessionManagerPage.tsx`, `ManualPage.tsx`), `Bilko:src/lib/manualClient.ts`.
+- `MANUAL_TITLE`/manifest-shape types out of `Bilko:shared/manual-catalog.ts`.
+- The react-route mapping for `/products/session-manager` in `Bilko:src/data/projectsRegistry.ts` — replaced
   by a minimal `static-path` registry row.
 
 This target is downstream of, and does not restate, [`project-partition.md`](project-partition.md)'s

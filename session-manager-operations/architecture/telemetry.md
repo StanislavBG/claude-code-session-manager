@@ -78,7 +78,7 @@ the moment it was queued (see Privacy model below).
 | Path | `~/.claude/session-manager/telemetry-watermarks.json` |
 | Owning module | `src/main/lib/telemetry/telemetryBacklog.cjs` |
 | Write mode | Atomic (`config.cjs`'s `writeJson`), rewritten after each file's drain step |
-| Primary key | `"<projectHash>/<filename>"` (e.g. `a1b2c3d4e5f6/errors-2026-08-01.jsonl`) |
+| Primary key | `"<projectHash>/<filename>"` (e.g. a1b2c3d4e5f6/errors-2026-08-01.jsonl) |
 | Cap / eviction | None — one entry per project-log-file pair ever seen; a `completedAt` stamp on entries older than the 30-day retention floor keeps them cheap to skip (stat only, never re-read) |
 | Ever transmitted? | **No** — `projectHash = sha256(normalizedProjectRoot).slice(0,12)` so this file never itself stores a user's directory layout, but the offsets and hashes stay local |
 
@@ -246,7 +246,7 @@ finished; `pending` = never attempted, or its marker file is missing or unreadab
 attempted but still under the retry cap; `exhausted` = reached the seeder's `MAX_ATTEMPTS`. A status
 the client does not recognize goes out as `null`, and the whole field is `null` when
 `getSeedStatus()` throws. Bilko's `/install` route persists `seeds` to `app_installs.seeds`
-(bilko-run commit 523ba538); see that repo's `docs/observability.md`, section 'First-run setup
+(bilko-run commit 523ba538); see that repo's `Bilko:docs/observability.md`, section 'First-run setup
 outcomes (`seeds`)'.
 
 `telemetryBoot.cjs`'s machine-profile heartbeat (version-change OR 30-day liveness) now calls

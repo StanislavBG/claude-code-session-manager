@@ -7,12 +7,13 @@
  * epic-worktree-isolation chain started by PRD 1032/1033).
  *
  * This is the ONLY point where that per-Epic isolation resolves back into
- * the shared tree — never mid-session (see gitWorktree.cjs's own header
- * comment for the ff-only -> merge-commit -> abort-and-flag algorithm this
- * reuses verbatim). The single caller is `markCompleted`'s merge-before-archive
- * checkpoint (via `attemptMergeToMainInternal` in
- * `src/renderer/state/promptSessions.ts`); there is no explicit "merge to
- * main" action.
+ * the shared tree — never mid-session (see gitWorktree.cjs's `integrateBranch`
+ * for the ff-only -> linear replay -> merge-commit fallback -> abort-and-flag
+ * algorithm this reuses verbatim, and scheduler-operations.md §5a for every
+ * case that still writes a merge commit). The single caller is
+ * `markCompleted`'s merge-before-archive checkpoint (via
+ * `attemptMergeToMainInternal` in `src/renderer/state/promptSessions.ts`);
+ * there is no explicit "merge to main" action.
  *
  * On success the worktree checkout is torn down (cleanupEpicWorktree) since
  * its content now safely lives on the main tree. On a real conflict, the
@@ -53,9 +54,10 @@ async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths) {
     console.log(`[epicWorktreeMerge] ${epicId}: needs manual resolution (${outcome.reason})`);
     return { ok: false, status: 'needs_merge_resolution', reason: outcome.reason };
   }
-  // Clean ff-only/merge-commit landing, or a legitimate no-new-commits
-  // no-op — either way the branch's content is safely reflected (or was
-  // never ahead), so the checkout has nothing left to guard.
+  // Clean landing (ff-only, linear replay, or the merge-commit fallback),
+  // or a legitimate no-new-commits no-op — either way the branch's content
+  // is safely reflected (or was never ahead), so the checkout has nothing
+  // left to guard.
   await cleanupEpicWorktree({ cwd, dir, branch, keepBranch: false });
   return { ok: true, status: 'merged', integrated: outcome.integrated };
 }

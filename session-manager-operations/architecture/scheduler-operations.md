@@ -262,6 +262,65 @@ This gate was added in commit `44c3604` after job 1192 shipped a real, verifiabl
 was still reaped `failed` because the reaper only ever judged spawn bookkeeping
 (`runtime.pid`), never the `landedCommit` a row could already carry.
 
+## 5a. Landing — linear by default, and every case that can still write a merge commit
+
+Every job and Epic branch lands on its base branch (`baseBranch`, else `resolveDefaultBranch`) through
+`integrateBranch` (`gitWorktree.cjs`), linearly, because consuming projects' tooling can refuse merge commits
+(Bilko's `scripts/sync-local-main.sh` exits 3 on any merge commit in `origin/main..main`). Both paths' linear
+step is `replayBranchOnto`: a checkout-free replay (`git merge-tree --merge-base` + `git commit-tree`) of the
+branch's **non-merge commits only** (`rev-list --no-merges`) onto the base tip — author and message kept,
+already-applied or emptied commits skipped, more than 200 refused. A merge commit in the branch is never replayed.
+
+**In-checkout — `integrateBranch`, when `cwd`'s HEAD is on the base branch.** Callers: the scheduler job first-pass
+integrate (`finalizeJobWorktree` → `integrateJobBranch`), the Epic `markCompleted` merge (`epicWorktreeMerge.cjs` →
+`integrateEpicBranch`), mechanical recovery (§4 rung 1) while HEAD is on the base, and `branchSweep.cjs`'s stranded-branch sweep.
+
+1. `git merge --ff-only` → `fastForward: true`.
+2. `replayBranchOnto` onto HEAD, then `git merge --ff-only` of the replayed tip; up to 3 attempts
+   (`MAX_LINEAR_ATTEMPTS`), replaying again when HEAD moved under the ff → `linear: true`, `replayedCommits`.
+   Any other failure here (e.g. the 200-commit cap) returns `failureKind: 'other'` and writes no merge.
+3. `git merge --no-ff` fallback (`merge scheduler job <slug>` / `merge epic <epicId>`), only for a `linearFallback`
+   reason in the table below → `mergeCommit: true`, `linearFallback`. A conflicted fallback whose paths are all
+   pure additions to `.md`/`.markdown`/`.txt`/`.rst` files is concatenated (`autoResolved: 'pure_addition_concat'`).
+4. Abort-and-flag on a real conflict: `git merge --abort`, `ok: false` (`content_conflict` + `conflictedPaths`);
+   the branch is kept (job → `needs_review`, Epic → `needs_merge_resolution`).
+
+**Onto-ref — `integrateOntoRef`, when HEAD is on another branch.** Only mechanical recovery reaches it:
+`performMechanicalRecovery` passes `allowRefLanding: true` (kill switch `SM_REF_LANDING_DISABLE=1`), so
+`integrateBranch` lands straight onto `refs/heads/<base>`, touching no checkout; a detached HEAD, or a branch that
+only touches carried paths, is refused instead. Each attempt first refuses (`target_checked_out`) when that ref is
+checked out or mid-rebase in any worktree.
+
+1. CAS fast-forward (`git update-ref <ref> <branch tip> <old tip>`) → `fastForward: true`.
+2. `replayBranchOnto` onto the ref tip, landed by the same CAS → `linear: true`, `replayedCommits`.
+3. Two-parent merge fallback (`git merge-tree --write-tree` + `git commit-tree -p <ref tip> -p <branch tip>`,
+   same CAS) → `mergeCommit: true`, `linearFallback`.
+4. `content_conflict` refusal when that merge-tree conflicts — the ref is untouched.
+
+A lost CAS recomputes from scratch; 3 losses end in `ref_race` and nothing lands. `integrateBranch` passes a
+landing through with `viaRef: true` (mechanical recovery logs `landed onto the base ref directly`) and
+reports every failure except `content_conflict` as the original `stray_checkout` refusal.
+
+**Every case that can still put a merge commit on the base branch.** Each fallback first prints one `console.warn`
+to Electron's stderr, which the launcher saves as `electron-stderr.log` in the app's `logs/` directory:
+
+```
+[gitWorktree] linear landing of <branch> fell back to a merge commit (<linearFallback>)
+[gitWorktree] linear landing of <branch> onto refs/heads/<base> fell back to a merge commit (<linearFallback>)
+```
+
+| Case | `linearFallback` (the warn's `(…)` suffix) / trigger | What lands |
+| --- | --- | --- |
+| `SM_LINEAR_LANDING_DISABLE=1` | `'disabled'` | Every diverged landing takes the merge fallback, both paths |
+| git older than 2.40 (the replay needs `merge-tree --merge-base`) | `'git_too_old'` | In-checkout: the `merge --no-ff` fallback. Onto-ref: the merge fallback, which itself needs git 2.38 or newer (`merge-tree --write-tree`); on older git nothing lands |
+| A replay conflict the pure-addition auto-resolve (`resolvePureAdditionInTree`; off under `SM_PURE_ADDITION_MERGE_DISABLE=1`) cannot settle | `'content_conflict'` | A merge commit when the whole-branch merge is clean (in-checkout, also when its pure-addition concat settles it); otherwise abort-and-flag or the `content_conflict` refusal |
+| In-checkout only: HEAD moved under all 3 replay attempts | `'ref_race'` | The `merge --no-ff` fallback (an onto-ref `ref_race` lands nothing) |
+| A merge commit already inside the branch — e.g. a conflict resolved with `git merge` in an Epic worktree after the "merging it is yours to do in git" banner | The base is an ancestor of the branch tip: `fastForward: true`, no `linearFallback`, no warn | The fast-forward carries it as-is, both paths. Check `git log --merges <base>..<branch>` before landing |
+
+**Consumer check.** `git log --merges origin/main..main` stays empty unless a `fell back to a merge commit` line was
+logged, a fast-forwarded branch already held a merge commit, or someone merged by hand in the checkout. A fallback
+merge is titled `merge scheduler job <slug>` or `merge epic <epicId>`; any other title came in inside a branch or by hand.
+
 ## 6. The launch circuit breaker
 
 Full narrative + operator guidance already lives in

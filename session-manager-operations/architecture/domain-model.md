@@ -34,7 +34,8 @@ scoping scheme.
   `createEpicWorktree`, created at `proposed → active`) so concurrent Epics on one project don't clobber each
   other's uncommitted edits; Terminal PTY and headless Chat both resolve their spawn cwd to it
   (`epicSpawnCwd.cjs`). Isolation folds back at exactly one checkpoint, `markCompleted`'s merge-before-archive
-  step (`epicWorktreeMerge.cjs`'s `integrateEpicBranch`: ff-only → merge-commit → abort-and-flag). A real
+  step (`epicWorktreeMerge.cjs`'s `integrateEpicBranch`: ff-only → linear replay → merge-commit fallback → abort-and-flag;
+  [when a merge commit still lands](scheduler-operations.md#5a-landing--linear-by-default-and-every-case-that-can-still-write-a-merge-commit)). A real
   conflict sets `worktree.status` to `needs_merge_resolution` (EpicDetail's banner, "Resolve in Terminal")
   rather than blocking anything. Settings' project scope holds the per-project opt-out.
 - **Persistence:** active Epics in `session-manager-operations/prompt-sessions/active-index.json`; completed ones archived one JSON per

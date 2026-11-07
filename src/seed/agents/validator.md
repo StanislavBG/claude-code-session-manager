@@ -4,7 +4,7 @@ description: Validates a finished PLAN (the PRDs its validate PRD lists) once, a
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 4
+seedVersion: 5
 executorOnly: true
 ---
 

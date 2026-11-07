@@ -1,0 +1,142 @@
+/**
+ * md-network-drift-check.test.cjs — drift-check.cjs against temp git repos.
+ * Run: timeout 120 npx vitest run scripts/__tests__/md-network-drift-check.test.cjs
+ */
+
+'use strict';
+
+import { test, expect, afterEach } from 'vitest';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const SCRIPT = path.resolve(
+  __dirname,
+  '../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/drift-check.cjs',
+);
+
+const dirs = [];
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop(), { recursive: true, force: true });
+});
+
+function repo(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mdnet-'));
+  dirs.push(dir);
+  for (const [name, content] of Object.entries(files)) {
+    const p = path.join(dir, name);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  }
+  spawnSync('git', ['init', '-q'], { cwd: dir });
+  spawnSync('git', ['add', '-A'], { cwd: dir });
+  return dir;
+}
+
+function run(dir, ...args) {
+  const r = spawnSync(process.execPath, [SCRIPT, '--root', dir, ...args], { encoding: 'utf8' });
+  let json = null;
+  try { json = JSON.parse(r.stdout); } catch { /* usage error */ }
+  return { code: r.status, json, stderr: r.stderr };
+}
+
+const lines = (n, prefix = 'line') => Array.from({ length: n }, (_, i) => `${prefix} ${i}`).join('\n') + '\n';
+
+test('clean repo exits 0', () => {
+  const dir = repo({ 'CLAUDE.md': '# Hi\n[doc](docs/a.md) and `docs/a.md`\n', 'docs/a.md': '# A\n' });
+  const { code, json } = run(dir);
+  expect(code).toBe(0);
+  expect(json.findings).toEqual([]);
+  expect(json.map).toBeNull();
+  expect(json.checkedFiles).toEqual(['CLAUDE.md', 'docs/a.md']);
+});
+
+test('broken-link, with anchors stripped and root-relative accepted', () => {
+  const dir = repo({
+    'README.md': '[x](nope.md#top) [y](docs/a.md#s) [i](![z](img/none.png))\n[ext](https://a.b/c) [h](#only)\n',
+    'docs/a.md': '[root rel](docs/b.md) [here](b.md)\n',
+    'docs/b.md': '# B\n',
+  });
+  const { code, json } = run(dir);
+  expect(code).toBe(1);
+  const links = json.findings.filter((f) => f.kind === 'broken-link');
+  expect(links.map((f) => f.target)).toContain('nope.md#top');
+  expect(links.every((f) => f.file === 'README.md')).toBe(true);
+  expect(links.find((f) => f.target === 'nope.md#top').line).toBe(1);
+  expect(json.findings.some((f) => f.file === 'docs/a.md')).toBe(false);
+});
+
+test('missing-path with :N suffix; existing and skipped spans are quiet', () => {
+  const dir = repo({
+    '.gitignore': 'build/\n',
+    'README.md': [
+      '`src/gone.js:12-20` `src/here.js:3` `bilko.run/x` `~/a/b` `a/*.js` `a b/c`',
+      '`build/out.js` `@scope/pkg`',
+      '```',
+      '`fenced/missing.js`',
+      '```',
+      '<!-- `commented/missing.js` -->',
+      '',
+    ].join('\n'),
+    'src/here.js': '',
+  });
+  const { json } = run(dir);
+  expect(json.findings).toEqual([
+    { kind: 'missing-path', file: 'README.md', line: 1, target: 'src/gone.js:12-20' },
+  ]);
+});
+
+test('over-line-limit for CLAUDE.md, unscoped rules and the map', () => {
+  const dir = repo({
+    'CLAUDE.md': '<!-- md-network-map -->\n' + lines(80),
+    'pkg/AGENTS.md': lines(201),
+    '.claude/rules/a.md': lines(205),
+    '.claude/rules/scoped.md': '---\npaths: src/**\n---\n' + lines(205),
+  });
+  const { json } = run(dir, '--checks', 'limits');
+  expect(json.map).toBe('CLAUDE.md');
+  const f = json.findings.map((x) => [x.file, x.limit]);
+  expect(f).toContainEqual(['CLAUDE.md', 70]);
+  expect(f).toContainEqual(['pkg/AGENTS.md', 200]);
+  expect(f).toContainEqual(['.claude/rules/a.md', 200]);
+  expect(f.some(([file]) => file === '.claude/rules/scoped.md')).toBe(false);
+  expect(f.some(([file, l]) => file === 'CLAUDE.md' && l === 200)).toBe(false);
+});
+
+test('--map names the map file', () => {
+  const dir = repo({ 'docs/map.md': lines(71) });
+  const { json } = run(dir, '--map', 'docs/map.md', '--checks', 'limits');
+  expect(json.map).toBe('docs/map.md');
+  expect(json.findings).toEqual([{ kind: 'over-line-limit', file: 'docs/map.md', lines: 71, limit: 70 }]);
+});
+
+test('no-contents-list, and contents lists are recognised', () => {
+  const dir = repo({
+    'long.md': '# L\n' + lines(120),
+    'heading.md': '# H\n## Contents\n' + lines(120),
+    'toc.md': '# T\n- [a](#a)\n- [b](#b)\n- [c](#c)\n' + lines(120),
+    'short.md': lines(50),
+  });
+  const { json } = run(dir, '--checks', 'contents');
+  expect(json.findings).toEqual([{ kind: 'no-contents-list', file: 'long.md', lines: 121 }]);
+});
+
+test('--file, --exclude and --checks narrow the run', () => {
+  const dir = repo({
+    'a.md': '[x](missing.md)\n`p/q.js`\n',
+    'skip/b.md': '[x](missing.md)\n',
+  });
+  expect(run(dir).json.counts).toEqual({ 'broken-link': 2, 'missing-path': 1 });
+  expect(run(dir, '--file', 'a.md').json.checkedFiles).toEqual(['a.md']);
+  expect(run(dir, '--exclude', 'skip/').json.checkedFiles).toEqual(['a.md']);
+  expect(run(dir, '--checks', 'links', '--exclude', 'skip/').json.counts).toEqual({ 'broken-link': 1 });
+  expect(run(dir, '--checks', 'contents').code).toBe(0);
+});
+
+test('bad --root and bad flags exit 2', () => {
+  expect(run(path.join(os.tmpdir(), 'mdnet-does-not-exist-xyz')).code).toBe(2);
+  const dir = repo({ 'a.md': '' });
+  expect(run(dir, '--bogus').code).toBe(2);
+  expect(run(dir, '--checks', 'nope').code).toBe(2);
+});

@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&display=swap">
+<style>
+html,body{margin:0;height:100%;background:#f5f0e6;color:#1a1612;font-family:"Inter Tight",-apple-system,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#a83818;text-decoration:none;cursor:pointer}
+a:hover{color:#1a1612;text-decoration:underline}
+button,input,textarea,select{font-family:inherit}
+input::placeholder,textarea::placeholder{color:#9c937f}
+::selection{background:#f4b942;color:#1a1612}
+@keyframes smSlide{0%{transform:translateX(-110%)}100%{transform:translateX(270%)}}
+@keyframes smPulse{0%,100%{opacity:1}50%{opacity:.3}}
+</style>
+</helmet>
+<div data-screen-label="Project Home" style="height:100vh; min-height:600px; display:flex; flex-direction:column; background:#f5f0e6; color:#1a1612; font-size:13px; overflow:hidden">
+
+<div style="flex:none; position:relative; height:44px; display:flex; align-items:flex-end; gap:2px; padding:0 10px; background:#ede6d6; overflow:hidden">
+  <div style="position:absolute; left:0; right:0; bottom:0; height:1px; background:#d4ccb8"></div>
+  <div style="flex:1; min-width:0; height:100%; display:flex; align-items:flex-end; gap:2px; overflow:hidden">
+  <div style="flex:none; display:flex; align-items:center; gap:7px; height:36px; padding:0 12px; font-size:13px; color:#3a342b"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><path d="M4 11l8-7 8 7"></path><path d="M6 10v9h12v-9"></path><path d="M10 19v-5h4v5"></path></svg>Home</div>
+  <div style="flex:none; width:1px; height:18px; margin:0 6px 9px; background:#d4ccb8"></div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#2e5a3e"></span>Self</div>
+  <div style="position:relative; z-index:1; flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 22px; background:#f5f0e6; border:1px solid #d4ccb8; border-top:2px solid #a83818; border-bottom:0; border-radius:9px 9px 0 0; font-size:13px; font-weight:600; color:#1a1612; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#a83818"></span>session-manager</div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#9c937f"></span>burrow</div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#2e5a3e"></span>social-signals-trader</div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#3a342b"></span>family-frame</div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#2e5a3e"></span>Bilko</div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#a83818"></span>starry-night-2</div>
+  <div style="flex:none; display:flex; align-items:center; gap:8px; height:36px; padding:0 14px; font-size:13px; color:#3a342b; white-space:nowrap"><span style="width:7px; height:7px; border-radius:50%; background:#9c937f"></span>Bilko-Game-Academy</div>
+  </div>
+  <div style="flex:none; align-self:center; height:28px; display:flex; align-items:center; padding:0 12px; border-left:1px solid #d4ccb8; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; color:#3a342b">{F}</div>
+</div>
+
+<div style="flex:1; min-height:0; display:flex">
+
+<aside style="flex:none; width:272px; display:flex; flex-direction:column; background:#ede6d6; border-right:1px solid #d4ccb8">
+  <div style="padding:18px 14px 14px; display:flex; flex-direction:column; gap:10px; border-bottom:1px solid #d4ccb8">
+    <div style="display:flex; align-items:center; justify-content:space-between"><span style="font-size:11px; font-weight:600; letter-spacing:.08em; color:#5d5648">PROJECT</span><span style="color:#5d5648; font-size:15px">‹</span></div>
+    <div style="display:flex; flex-direction:column; gap:3px">
+      <div style="display:flex; align-items:center; gap:8px; font-family:'Source Serif 4',Charter,Georgia,serif; font-size:18px; font-weight:600"><span style="width:7px; height:7px; border-radius:50%; background:#2e5a3e"></span>session-manager</div>
+      <div style="padding-left:15px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648">⎇ main</div>
+    </div>
+    <div style="height:34px; display:flex; align-items:center; justify-content:center; gap:6px; border:1px solid #d4ccb8; background:#f5f0e6; border-radius:7px; font-size:13px; font-weight:600; color:#1a1612">+ Open / Start Project</div>
+  </div>
+  <nav style="flex:1; min-height:0; overflow:auto; padding:10px 8px; display:flex; flex-direction:column; gap:2px">
+    <div onClick="{{ goPages }}" style="display:flex; gap:12px; align-items:flex-start; padding:10px 12px; border-radius:9px; background:#f5f0e6; border:1px solid #d4ccb8; cursor:pointer">
+      <span style="flex:none; margin-top:1px; color:#a83818"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"><path d="M4 11l8-7 8 7"></path><path d="M6 10v9h12v-9"></path><path d="M10 19v-5h4v5"></path></svg></span>
+      <span style="display:flex; flex-direction:column; gap:2px; min-width:0">
+        <span style="font-size:14px; font-weight:600; color:#1a1612">Project Home</span>
+        <span style="font-size:12px; color:#5d5648; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Pages, videos and tools for this project</span>
+      </span>
+    </div>
+    <sc-if value="{{ navIsSidebar }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex; flex-direction:column; gap:1px; padding:4px 0 8px 30px">
+        <sc-for list="{{ sideItems }}" as="si" hint-placeholder-count="3">
+          <div onClick="{{ si.go }}" style="display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:7px; cursor:pointer; background:{{ si.bg }}; color:{{ si.fg }}; font-size:13px; font-weight:{{ si.fw }}">
+            <span style="width:6px; height:6px; border-radius:50%; flex:none; background:{{ si.dot }}"></span>
+            <span style="flex:1">{{ si.label }}</span>
+            <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:{{ si.metaFg }}">{{ si.meta }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 12px; border-radius:9px; color:#3a342b" style-hover="background:#e3dcc8">
+      <span style="flex:none; margin-top:1px; color:#5d5648"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 10l3 2-3 2"></path><path d="M13 14h4"></path></svg></span>
+      <span style="display:flex; flex-direction:column; gap:2px; min-width:0"><span style="font-size:14px; font-weight:500; color:#1a1612">Sessions</span><span style="font-size:12px; color:#5d5648; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Independent goal-scoped sessions for this project</span></span>
+    </div>
+    <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 12px; border-radius:9px; color:#3a342b" style-hover="background:#e3dcc8">
+      <span style="flex:none; margin-top:1px; color:#5d5648"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"><path d="M3 7l3-3h4l2 2h9v13H3z"></path></svg></span>
+      <span style="display:flex; flex-direction:column; gap:2px; min-width:0"><span style="font-size:14px; font-weight:500; color:#1a1612">File Explorer</span><span style="font-size:12px; color:#5d5648; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Browse files + edit — starts at your home folder</span></span>
+    </div>
+    <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 12px; border-radius:9px; color:#3a342b" style-hover="background:#e3dcc8">
+      <span style="flex:none; margin-top:1px; color:#5d5648"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path><path d="M8 14l2 2 4-4"></path></svg></span>
+      <span style="display:flex; flex-direction:column; gap:2px; min-width:0"><span style="font-size:14px; font-weight:500; color:#1a1612">Scheduler</span><span style="font-size:12px; color:#5d5648; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">This project's live PRD queue + scheduler policy</span></span>
+    </div>
+    <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 12px; border-radius:9px; color:#3a342b" style-hover="background:#e3dcc8">
+      <span style="flex:none; margin-top:1px; color:#5d5648"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"><path d="M9 4a4 4 0 00-4 4v1a3 3 0 000 6v1a4 4 0 004 4h6a4 4 0 004-4v-1a3 3 0 000-6V8a4 4 0 00-4-4z"></path><path d="M9 9v6M12 6v12M15 9v6"></path></svg></span>
+      <span style="display:flex; flex-direction:column; gap:2px; min-width:0"><span style="font-size:14px; font-weight:500; color:#1a1612">Memory</span><span style="font-size:12px; color:#5d5648; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Workspace memory store</span></span>
+    </div>
+  </nav>
+  <div style="padding:10px 14px; border-top:1px solid #d4ccb8; display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648"><span style="width:6px; height:6px; border-radius:50%; background:#2e5a3e"></span>Claude Code</div>
+</aside>
+
+<main style="flex:1; min-width:0; display:flex; flex-direction:column; gap:18px; padding:22px 28px 20px; overflow:hidden">
+
+  <sc-if value="{{ navIsKeys }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px">
+      <div onClick="{{ goPages }}" style="display:flex; align-items:center; gap:12px; min-width:0; padding:12px 14px; border-radius:12px; border:1px solid {{ kp.border }}; background:{{ kp.bg }}; color:{{ kp.fg }}; cursor:pointer; transition:background .15s, color .15s">
+        <span style="flex:none; width:36px; height:36px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:{{ kp.iconBg }}; color:{{ kp.iconFg }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5a2 2 0 012-2h6v18H6a2 2 0 01-2-2zM12 3h6a2 2 0 012 2v14H12z"></path></svg></span>
+        <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px"><span style="font-size:16px; font-weight:600; letter-spacing:-.01em">Pages</span><span style="font-size:12px; line-height:1.35; color:{{ kp.metaFg }}">{{ pagesMeta }}</span></span>
+        <span style="flex:none; min-width:24px; height:22px; padding:0 7px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; background:{{ kp.badgeBg }}; color:{{ kp.badgeFg }}">{{ pageCount }}</span>
+      </div>
+      <div onClick="{{ goVideos }}" style="display:flex; align-items:center; gap:12px; min-width:0; padding:12px 14px; border-radius:12px; border:1px solid {{ kv.border }}; background:{{ kv.bg }}; color:{{ kv.fg }}; cursor:pointer; transition:background .15s, color .15s">
+        <span style="flex:none; width:36px; height:36px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:{{ kv.iconBg }}; color:{{ kv.iconFg }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M10 9.5v5l4.2-2.5z" fill="currentColor"></path></svg></span>
+        <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px"><span style="font-size:16px; font-weight:600; letter-spacing:-.01em">Videos</span><span style="font-size:12px; line-height:1.35; color:{{ kv.metaFg }}">{{ videosMeta }}</span></span>
+        <span style="flex:none; min-width:24px; height:22px; padding:0 7px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; background:{{ kv.badgeBg }}; color:{{ kv.badgeFg }}">{{ videoCount }}</span>
+      </div>
+      <div onClick="{{ goTools }}" style="display:flex; align-items:center; gap:12px; min-width:0; padding:12px 14px; border-radius:12px; border:1px solid {{ kt.border }}; background:{{ kt.bg }}; color:{{ kt.fg }}; cursor:pointer; transition:background .15s, color .15s">
+        <span style="flex:none; width:36px; height:36px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:{{ kt.iconBg }}; color:{{ kt.iconFg }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><path d="M14 4a4 4 0 014 4l-7 7-4-4 7-7zM7 11l-3 3 6 6 3-3"></path></svg></span>
+        <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px"><span style="font-size:16px; font-weight:600; letter-spacing:-.01em">Tools</span><span style="font-size:12px; line-height:1.35; color:{{ kt.metaFg }}">{{ toolsMeta }}</span></span>
+        <span style="flex:none; min-width:24px; height:22px; padding:0 7px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; background:#a83818; color:#fff8ef">{{ fCount }}</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ navIsTabs }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none; display:flex; align-items:flex-end; gap:32px; padding:0 2px; border-bottom:1px solid #d4ccb8">
+      <div onClick="{{ goPages }}" style="display:flex; align-items:center; gap:9px; padding:2px 0 12px; margin-bottom:-1px; border-bottom:2px solid {{ tp.line }}; color:{{ tp.fg }}; cursor:pointer"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600">Pages</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; padding:1px 7px; border-radius:10px; background:#e3dcc8; color:#3a342b">{{ pageCount }}</span></div>
+      <div onClick="{{ goVideos }}" style="display:flex; align-items:center; gap:9px; padding:2px 0 12px; margin-bottom:-1px; border-bottom:2px solid {{ tv.line }}; color:{{ tv.fg }}; cursor:pointer"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600">Videos</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; padding:1px 7px; border-radius:10px; background:#e3dcc8; color:#3a342b">{{ videoCount }}</span></div>
+      <div onClick="{{ goTools }}" style="display:flex; align-items:center; gap:9px; padding:2px 0 12px; margin-bottom:-1px; border-bottom:2px solid {{ tt.line }}; color:{{ tt.fg }}; cursor:pointer"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600">Tools</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; padding:1px 7px; border-radius:10px; background:#a83818; color:#fff8ef">{{ fCount }}</span></div>
+      <div style="flex:1"></div>
+      <span style="padding-bottom:14px; font-size:12px; color:#5d5648; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">{{ tabMeta }}</span>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ navIsSidebar }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap">
+      <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; letter-spacing:.12em; color:#a83818">PROJECT HOME</span>
+      <span style="color:#9c937f">/</span>
+      <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:26px; font-weight:600; line-height:1.1">{{ tabLabel }}</span>
+      <span style="font-size:13px; color:#5d5648">{{ tabMeta }}</span>
+    </div>
+  </sc-if>
+
+  <div style="flex:1; min-height:0; display:flex; flex-direction:column">
+
+    <sc-if value="{{ showEmpty }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Empty state" style="flex:1; min-height:0; overflow:auto">
+        <div style="max-width:1000px; margin:0 auto; padding:14px 0 36px; display:flex; flex-direction:column; gap:22px">
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; letter-spacing:.12em; color:#a83818">{{ empty.eyebrow }}</span>
+            <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:30px; font-weight:600; line-height:1.12">{{ empty.title }}</span>
+            <span style="font-size:14.5px; line-height:1.55; color:#5d5648; max-width:64ch; text-wrap:pretty">{{ empty.text }}</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:14px">
+            <sc-for list="{{ empty.cards }}" as="t" hint-placeholder-count="4">
+              <div style="display:flex; flex-direction:column; border:1px solid #d4ccb8; border-radius:12px; background:#fbf8f1; overflow:hidden" style-hover="border-color:#9c937f">
+                <div style="height:104px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; overflow:hidden; border-bottom:1px solid #d4ccb8; background:{{ t.pvBg }}; color:{{ t.pvFg }}">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:9.5px; letter-spacing:.1em; color:{{ t.pvAcc }}">{{ t.pvEyebrow }}</span>
+                  <sc-for list="{{ t.lines }}" as="ln" hint-placeholder-count="3">
+                    <span style="display:flex; align-items:center; gap:7px; font-family:{{ t.pvFont }}; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis"><span style="flex:none; width:12px; height:1.5px; background:{{ t.pvAcc }}"></span>{{ ln }}</span>
+                  </sc-for>
+                </div>
+                <div style="flex:1; padding:12px 14px 14px; display:flex; flex-direction:column; gap:10px">
+                  <div style="display:flex; flex-direction:column; gap:3px"><span style="font-size:14.5px; font-weight:600">{{ t.name }}</span><span style="font-size:12.5px; line-height:1.45; color:#5d5648; text-wrap:pretty">{{ t.blurb }}</span></div>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ t.preset }}</span>
+                  <div style="display:flex; gap:8px; margin-top:auto">
+                    <button onClick="{{ t.quick }}" style="display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border:0; border-radius:7px; background:#a83818; color:#fff8ef; font-size:12.5px; font-weight:600; cursor:pointer" style-hover="background:#8f2f13">{{ t.quickLabel }}</button>
+                    <button onClick="{{ t.customize }}" style="display:inline-flex; align-items:center; height:30px; padding:0 11px; border:1px solid #d4ccb8; border-radius:7px; background:#f5f0e6; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer" style-hover="border-color:#9c937f">Customize</button>
+                  </div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; border-radius:10px; background:#ede6d6; font-size:13px; line-height:1.5; color:#3a342b">
+            <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; font-weight:700; letter-spacing:.1em; color:#2e5a3e">TIP</span>
+            <span style="flex:1; min-width:240px">Generated pages and videos are only as good as the docs behind them. If they're messy, run <a onClick="{{ goTools }}" style="font-weight:600">Review MD network</a> in Tools first.</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showPages }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Pages" style="flex:1; min-height:0; display:grid; grid-template-columns:252px minmax(0,1fr); gap:20px">
+        <div style="min-height:0; display:flex; flex-direction:column; gap:12px">
+          <button onClick="{{ newPage }}" style="flex:none; display:flex; align-items:center; justify-content:center; gap:8px; height:38px; width:100%; border:0; border-radius:8px; background:#a83818; color:#fff8ef; font-size:13px; font-weight:600; cursor:pointer" style-hover="background:#8f2f13"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:2;stroke-linecap:round"><path d="M12 4v6M12 14v6M4 12h6M14 12h6"></path></svg>Generate page</button>
+          <div style="flex:none; display:flex; justify-content:space-between; align-items:baseline; padding:2px 2px 0"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">KNOWLEDGE PAGES</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ pageCount }}</span></div>
+          <div style="flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:6px; padding:1px">
+            <sc-for list="{{ pageItems }}" as="p" hint-placeholder-count="3">
+              <div style="display:flex; flex-direction:column; gap:5px">
+                <sc-if value="{{ p.renaming }}" hint-placeholder-val="{{ false }}">
+                  <input value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onDraftKey }}" onBlur="{{ saveRename }}" autoFocus="{{ true }}" aria-label="Entry title" style="width:100%; height:40px; padding:0 11px; border:1px solid #a83818; border-radius:9px; background:#fbf8f1; font-size:13px; color:#1a1612; outline:none">
+                </sc-if>
+                <sc-if value="{{ p.notRenaming }}" hint-placeholder-val="{{ true }}">
+                  <div onClick="{{ p.select }}" style="display:flex; flex-direction:column; gap:5px; padding:10px 12px; border-radius:9px; border:1px solid {{ p.border }}; background:{{ p.bg }}; cursor:pointer">
+                    <span style="font-size:13.5px; font-weight:600; color:{{ p.titleFg }}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">{{ p.title }}</span>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:{{ p.metaFg }}">{{ p.meta }}</span>
+                    <sc-if value="{{ p.building }}" hint-placeholder-val="{{ false }}">{{ p.bar }}</sc-if>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ p.showActions }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; align-items:center; gap:12px; padding:0 4px">
+                    <sc-if value="{{ p.notConfirming }}" hint-placeholder-val="{{ true }}">
+                      <button onClick="{{ p.rename }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:600; color:#5d5648; cursor:pointer" style-hover="color:#1a1612">Rename</button>
+                      <button onClick="{{ p.askDelete }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:600; color:#5d5648; cursor:pointer" style-hover="color:#1a1612">Delete</button>
+                    </sc-if>
+                    <sc-if value="{{ p.confirming }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:11.5px; color:#5d5648">Delete this page?</span>
+                      <button onClick="{{ p.doDelete }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:700; color:#a83818; cursor:pointer">Confirm</button>
+                      <button onClick="{{ cancelDelete }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:600; color:#5d5648; cursor:pointer">Cancel</button>
+                    </sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="min-width:0; min-height:0; display:flex; flex-direction:column; gap:12px">
+          <div style="flex:none; display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+            <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:3px">
+              <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600; line-height:1.15">{{ cp.title }}</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648">{{ cp.sub }}</span>
+            </div>
+            <sc-if value="{{ cp.ready }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ cp.regen }}" style="display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap" style-hover="border-color:#9c937f"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3"></path><path d="M18 3v4h-4M6 21v-4h4"></path></svg>Regenerate…</button>
+            </sc-if>
+            <sc-if value="{{ cp.building }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ openSession }}" style="display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap" style-hover="border-color:#9c937f">Open session</button>
+            </sc-if>
+          </div>
+          <div style="flex:1; min-height:0; overflow:auto; border-radius:12px; background:{{ cp.frameBg }}; border:1px solid {{ cp.frameBorder }}">
+
+            <sc-if value="{{ cp.building }}" hint-placeholder-val="{{ false }}">
+              <div style="min-height:100%; display:flex; align-items:center; justify-content:center; padding:40px 24px">
+                <div style="width:min(440px,100%); display:flex; flex-direction:column; gap:16px">
+                  <span style="display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; letter-spacing:.12em; color:#a83818">{{ cp.pulse }}{{ cp.stateLabel }}</span>
+                  <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:28px; font-weight:600; line-height:1.12">{{ cp.title }}</span>
+                  <span style="font-size:13.5px; line-height:1.6; color:#3a342b; text-wrap:pretty">The project-home-builder agent is reading the project. It saves the page with one project_page_write call, and it shows up here when it's done — you can keep working meanwhile.</span>
+                  {{ cp.bigBar }}
+                  <div style="display:flex; flex-direction:column; gap:6px; padding:12px 14px; border-radius:10px; background:#f5f0e6; border:1px solid #d4ccb8">
+                    <span style="font-size:11px; color:#5d5648">Sent to the builder</span>
+                    <sc-for list="{{ cp.prompt }}" as="ln" hint-placeholder-count="3"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.5; color:#1a1612">{{ ln }}</span></sc-for>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:#5d5648"><span>{{ cp.elapsed }}</span><span>·</span><a onClick="{{ openSession }}" style="font-weight:600">Open session</a></div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ cp.isOverview }}" hint-placeholder-val="{{ true }}">
+              <div style="max-width:920px; padding:40px 44px 56px; display:flex; flex-direction:column; gap:34px; color:#e3dcc8">
+                <div style="display:flex; flex-direction:column; gap:14px">
+                  <h1 style="margin:0; font-family:'Source Serif 4',Charter,Georgia,serif; font-size:38px; line-height:1.08; font-weight:600; color:#f5f0e6; letter-spacing:-.01em">Claude Code Session Manager</h1>
+                  <p style="margin:0; font-size:17px; line-height:1.55; color:#d4ccb8; max-width:62ch; text-wrap:pretty">A local Electron cockpit for the Claude Code CLI: multi-tab terminal, full configuration surface, scheduler, voice dictation and live observability in one window.</p>
+                  <div style="display:flex; flex-wrap:wrap; gap:8px">
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid #3a342b; color:#e3dcc8">v0.127.0</span>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid #3a342b; color:#e3dcc8">MIT</span>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid #3a342b; color:#e3dcc8">Electron 42</span>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid #3a342b; color:#e3dcc8">React 18 + Vite</span>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid #3a342b; color:#e3dcc8">npm: claude-code-session-manager</span>
+                  </div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:12px">
+                  <h2 style="margin:0; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; font-weight:700; letter-spacing:.14em; color:#f4b942">WHO IT’S FOR</h2>
+                  <p style="margin:0; font-size:15px; line-height:1.7; max-width:68ch; text-wrap:pretty">People who already use the <code style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12.5px; padding:1px 6px; border-radius:4px; background:#2a241c; border:1px solid #3a342b; color:#f5f0e6">claude</code> CLI and want to run several sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, dictate by voice, and watch transcripts live. Described in the README as a single-author project; free and open-core (the app and its Field Manual stay free).</p>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:14px">
+                  <h2 style="margin:0; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; font-weight:700; letter-spacing:.14em; color:#f4b942">KEY FEATURES</h2>
+                  <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px">
+                    <div style="display:flex; flex-direction:column; gap:8px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-size:15px; font-weight:600; color:#f5f0e6">Dormant tabs + chat box</span><p style="margin:0; font-size:13.5px; line-height:1.6; color:#d4ccb8">New tabs start as a chat box with no PTY and no <code style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; padding:0 5px; border-radius:4px; background:#2a241c; color:#f5f0e6">claude</code> process until the first message; the headless chat runner uses <code style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; padding:0 5px; border-radius:4px; background:#2a241c; color:#f5f0e6">claude -p</code> with stream-json and session resume. Hydrate to a full terminal any time.</p></div>
+                    <div style="display:flex; flex-direction:column; gap:8px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-size:15px; font-weight:600; color:#f5f0e6">Scheduler / PRD queue</span><p style="margin:0; font-size:13.5px; line-height:1.6; color:#d4ccb8">PRDs under the scheduler’s epics folder run as headless <code style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; padding:0 5px; border-radius:4px; background:#2a241c; color:#f5f0e6">claude -p</code> jobs, authored through the <code style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; padding:0 5px; border-radius:4px; background:#2a241c; color:#f5f0e6">scheduler_create_prd</code> MCP tool. Includes a queue-health linter.</p></div>
+                    <div style="display:flex; flex-direction:column; gap:8px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-size:15px; font-weight:600; color:#f5f0e6">Epics (Sessions)</span><p style="margin:0; font-size:13.5px; line-height:1.6; color:#d4ccb8">One Epic = one unit of work = one claude session, run in its own git worktree. Created from an Agent (who) plus a Tag (what); the opening prompt is composed as Actor, Input, Mission.</p></div>
+                    <div style="display:flex; flex-direction:column; gap:8px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-size:15px; font-weight:600; color:#f5f0e6">Config surface</span><p style="margin:0; font-size:13.5px; line-height:1.6; color:#d4ccb8">Hooks (all 29 events with a test-fire runner), plugins, MCP servers (five transports), skills, permissions, settings with 4-scope drift display, and a Memory tab.</p></div>
+                    <div style="display:flex; flex-direction:column; gap:8px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-size:15px; font-weight:600; color:#f5f0e6">Voice</span><p style="margin:0; font-size:13.5px; line-height:1.6; color:#d4ccb8">Local Moonshine ASR and Silero VAD: push-to-talk, continuous listening, auto-submit, barge-in. Nothing leaves the machine.</p></div>
+                    <div style="display:flex; flex-direction:column; gap:8px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-size:15px; font-weight:600; color:#f5f0e6">Command palette + modes</span><p style="margin:0; font-size:13.5px; line-height:1.6; color:#d4ccb8">Cmd/Ctrl-K palette with banded commands; <code style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; padding:0 5px; border-radius:4px; background:#2a241c; color:#f5f0e6">--simple</code> launches a single-terminal, chrome-free cockpit. Toasts surface non-fatal errors.</p></div>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ cp.isHow }}" hint-placeholder-val="{{ false }}">
+              <div style="max-width:920px; padding:40px 44px 56px; display:flex; flex-direction:column; gap:34px; color:#e3dcc8">
+                <div style="display:flex; flex-direction:column; gap:14px">
+                  <h1 style="margin:0; font-family:'Source Serif 4',Charter,Georgia,serif; font-size:38px; line-height:1.08; font-weight:600; color:#f5f0e6">How it works</h1>
+                  <p style="margin:0; font-size:17px; line-height:1.55; color:#d4ccb8; max-width:62ch; text-wrap:pretty">One Electron window over the claude CLI. The main process owns processes, files and background jobs; the React renderer draws the cockpit; macros and the scheduler run work as Epics.</p>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:14px">
+                  <h2 style="margin:0; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; font-weight:700; letter-spacing:.14em; color:#f4b942">THE PIECES</h2>
+                  <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px">
+                    <div style="display:flex; flex-direction:column; gap:6px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#f4b942">src/main</span><span style="font-size:15px; font-weight:600; color:#f5f0e6">Main process</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">PTYs, files, IPC, and the writer routes that own generated artifacts.</span></div>
+                    <div style="display:flex; flex-direction:column; gap:6px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#f4b942">src/renderer</span><span style="font-size:15px; font-weight:600; color:#f5f0e6">Renderer</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">The React 18 + Vite cockpit: tabs, Project Home, Scheduler, Memory.</span></div>
+                    <div style="display:flex; flex-direction:column; gap:6px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#f4b942">scheduler MCP</span><span style="font-size:15px; font-weight:600; color:#f5f0e6">Agent tools</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">Tools such as scheduler_create_prd and project_page_write that agents call.</span></div>
+                    <div style="display:flex; flex-direction:column; gap:6px; padding:16px 18px; border-radius:10px; border:1px solid #3a342b; background:#211c17"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#f4b942">web-remote/relay</span><span style="font-size:15px; font-weight:600; color:#f5f0e6">Web remote</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">Drive paired computers from a phone through the bilko.run relay.</span></div>
+                  </div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:16px">
+                  <h2 style="margin:0; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:12px; font-weight:700; letter-spacing:.14em; color:#f4b942">ONE PAGE, END TO END</h2>
+                  <div style="display:flex; flex-direction:column; max-width:640px">
+                    <div style="position:relative; display:grid; grid-template-columns:34px minmax(0,1fr); gap:16px; padding-bottom:20px"><span style="position:absolute; left:16px; top:36px; bottom:2px; width:1px; background:#3a342b"></span><span style="width:33px; height:33px; border-radius:50%; border:1px solid #f4b942; color:#f4b942; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:13px">1</span><div style="display:flex; flex-direction:column; gap:4px; padding-top:5px"><span style="font-size:15px; font-weight:600; color:#f5f0e6">You press Generate page</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">The built-in Project Home macro launches an Epic for this project.</span></div></div>
+                    <div style="position:relative; display:grid; grid-template-columns:34px minmax(0,1fr); gap:16px; padding-bottom:20px"><span style="position:absolute; left:16px; top:36px; bottom:2px; width:1px; background:#3a342b"></span><span style="width:33px; height:33px; border-radius:50%; border:1px solid #f4b942; color:#f4b942; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:13px">2</span><div style="display:flex; flex-direction:column; gap:4px; padding-top:5px"><span style="font-size:15px; font-weight:600; color:#f5f0e6">The builder reads the project</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">Manifest, README and docs, the directory tree and the last 30 commits — and drops any claim it can’t source.</span></div></div>
+                    <div style="position:relative; display:grid; grid-template-columns:34px minmax(0,1fr); gap:16px; padding-bottom:20px"><span style="position:absolute; left:16px; top:36px; bottom:2px; width:1px; background:#3a342b"></span><span style="width:33px; height:33px; border-radius:50%; border:1px solid #f4b942; color:#f4b942; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:13px">3</span><div style="display:flex; flex-direction:column; gap:4px; padding-top:5px"><span style="font-size:15px; font-weight:600; color:#f5f0e6">One write, validated</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">project_page_write checks the HTML is self-contained and script-free, then saves index.html and meta.json.</span></div></div>
+                    <div style="display:grid; grid-template-columns:34px minmax(0,1fr); gap:16px"><span style="width:33px; height:33px; border-radius:50%; border:1px solid #f4b942; color:#f4b942; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:13px">4</span><div style="display:flex; flex-direction:column; gap:4px; padding-top:5px"><span style="font-size:15px; font-weight:600; color:#f5f0e6">It appears in Pages</span><span style="font-size:13.5px; line-height:1.6; color:#d4ccb8">A per-project watcher pushes the change and the new entry lands at the top of the list.</span></div></div>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ cp.isFaq }}" hint-placeholder-val="{{ false }}">
+              <div style="max-width:920px; padding:40px 44px 56px; display:flex; flex-direction:column; gap:22px; color:#e3dcc8">
+                <div style="display:flex; flex-direction:column; gap:14px">
+                  <h1 style="margin:0; font-family:'Source Serif 4',Charter,Georgia,serif; font-size:38px; line-height:1.08; font-weight:600; color:#f5f0e6">FAQ</h1>
+                  <p style="margin:0; font-size:17px; line-height:1.55; color:#d4ccb8; max-width:62ch">What newcomers ask first — each answer sourced from the project’s own docs.</p>
+                </div>
+                <div style="display:flex; flex-direction:column; max-width:720px">
+                  <div style="display:flex; flex-direction:column; gap:8px; padding:18px 0; border-top:1px solid #3a342b"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:20px; font-weight:600; color:#f5f0e6">Does my voice leave the machine?</span><span style="font-size:15px; line-height:1.65">No. Speech is transcribed on your own machine. The model loads on your first press and unloads after half an hour without voice.</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#9c937f">Source · manual/chapters/cockpit-tour.html › Voice input</span></div>
+                  <div style="display:flex; flex-direction:column; gap:8px; padding:18px 0; border-top:1px solid #3a342b"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:20px; font-weight:600; color:#f5f0e6">How do I turn telemetry off?</span><span style="font-size:15px; line-height:1.65">Flip the toggle in Settings, or set SM_TELEMETRY=0 when running from a script or scheduled job — it overrides everything else.</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#9c937f">Source · manual/chapters/cockpit-tour.html › Anonymous telemetry</span></div>
+                  <div style="display:flex; flex-direction:column; gap:8px; padding:18px 0; border-top:1px solid #3a342b"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:20px; font-weight:600; color:#f5f0e6">Can I drive it from my phone?</span><span style="font-size:15px; line-height:1.65">Yes. Turn on remote control under Settings › Phone remote, pair each computer once, then switch between them from the web app header.</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#9c937f">Source · manual/chapters/cockpit-tour.html › The web remote</span></div>
+                  <div style="display:flex; flex-direction:column; gap:8px; padding:18px 0; border-top:1px solid #3a342b"><span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:20px; font-weight:600; color:#f5f0e6">I just want one terminal.</span><span style="font-size:15px; line-height:1.65">Launch with --simple and Session Manager boots straight into a single terminal, with no navigation or tabs around it.</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#9c937f">Source · manual/chapters/cockpit-tour.html › Simple mode</span></div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ cp.isGeneric }}" hint-placeholder-val="{{ false }}">
+              <div style="max-width:920px; padding:40px 44px 56px; display:flex; flex-direction:column; gap:26px; color:#e3dcc8">
+                <div style="display:flex; flex-direction:column; gap:12px">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; letter-spacing:.14em; color:#f4b942">{{ gp.eyebrow }}</span>
+                  <h1 style="margin:0; font-family:'Source Serif 4',Charter,Georgia,serif; font-size:38px; line-height:1.08; font-weight:600; color:#f5f0e6">{{ gp.title }}</h1>
+                  <p style="margin:0; font-size:17px; line-height:1.55; color:#d4ccb8; max-width:62ch">{{ gp.lede }}</p>
+                  <sc-if value="{{ gp.hasFocus }}" hint-placeholder-val="{{ false }}"><p style="margin:0; font-size:13.5px; font-style:italic; color:#9c937f">Focus: {{ gp.focus }}</p></sc-if>
+                </div>
+                <sc-for list="{{ gp.sections }}" as="sec" hint-placeholder-count="3">
+                  <div style="display:flex; flex-direction:column; gap:10px; padding-top:22px; border-top:1px solid #3a342b; max-width:720px">
+                    <h2 style="margin:0; font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600; color:#f5f0e6">{{ sec.h }}</h2>
+                    <p style="margin:0; font-size:15px; line-height:1.7">{{ sec.p }}</p>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showVideos }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Videos" style="flex:1; min-height:0; display:grid; grid-template-columns:252px minmax(0,1fr); gap:20px">
+        <div style="min-height:0; display:flex; flex-direction:column; gap:12px">
+          <button onClick="{{ newVideo }}" style="flex:none; display:flex; align-items:center; justify-content:center; gap:8px; height:38px; width:100%; border:0; border-radius:8px; background:#a83818; color:#fff8ef; font-size:13px; font-weight:600; cursor:pointer" style-hover="background:#8f2f13"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:2;stroke-linecap:round"><path d="M12 4v6M12 14v6M4 12h6M14 12h6"></path></svg>Generate video</button>
+          <div style="flex:none; display:flex; justify-content:space-between; align-items:baseline; padding:2px 2px 0"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">VIDEOS</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ videoCount }}</span></div>
+          <div style="flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:6px; padding:1px">
+            <sc-for list="{{ videoItems }}" as="v" hint-placeholder-count="3">
+              <div style="display:flex; flex-direction:column; gap:5px">
+                <sc-if value="{{ v.renaming }}" hint-placeholder-val="{{ false }}">
+                  <input value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onDraftKey }}" onBlur="{{ saveRename }}" autoFocus="{{ true }}" aria-label="Entry title" style="width:100%; height:40px; padding:0 11px; border:1px solid #a83818; border-radius:9px; background:#fbf8f1; font-size:13px; color:#1a1612; outline:none">
+                </sc-if>
+                <sc-if value="{{ v.notRenaming }}" hint-placeholder-val="{{ true }}">
+                  <div onClick="{{ v.select }}" style="display:flex; gap:11px; padding:9px; border-radius:10px; border:1px solid {{ v.border }}; background:{{ v.bg }}; cursor:pointer">
+                    <div style="flex:none; position:relative; width:86px; aspect-ratio:16/9; border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; padding:4px 6px; background:{{ v.thumbBg }}; color:{{ v.thumbFg }}">
+                      <span style="font-family:{{ v.thumbFont }}; font-weight:{{ v.thumbWeight }}; font-size:10.5px; line-height:1.1; text-align:center">{{ v.thumbText }}</span>
+                      <span style="position:absolute; right:3px; bottom:3px; padding:0 4px; border-radius:3px; background:rgba(26,22,18,.8); color:#f5f0e6; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:9.5px">{{ v.dur }}</span>
+                    </div>
+                    <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px">
+                      <span style="font-size:13px; font-weight:600; color:{{ v.titleFg }}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">{{ v.title }}</span>
+                      <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:{{ v.metaFg }}">{{ v.meta }}</span>
+                      <sc-if value="{{ v.hasMeta2 }}" hint-placeholder-val="{{ true }}"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ v.meta2 }}</span></sc-if>
+                      <sc-if value="{{ v.building }}" hint-placeholder-val="{{ false }}"><div style="padding-top:3px">{{ v.bar }}</div></sc-if>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ v.showActions }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; align-items:center; gap:12px; padding:0 4px">
+                    <sc-if value="{{ v.notConfirming }}" hint-placeholder-val="{{ true }}">
+                      <button onClick="{{ v.rename }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:600; color:#5d5648; cursor:pointer" style-hover="color:#1a1612">Rename</button>
+                      <button onClick="{{ v.askDelete }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:600; color:#5d5648; cursor:pointer" style-hover="color:#1a1612">Delete</button>
+                    </sc-if>
+                    <sc-if value="{{ v.confirming }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:11.5px; color:#5d5648">Delete this video?</span>
+                      <button onClick="{{ v.doDelete }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:700; color:#a83818; cursor:pointer">Confirm</button>
+                      <button onClick="{{ cancelDelete }}" style="border:0; background:none; padding:0; font-size:11.5px; font-weight:600; color:#5d5648; cursor:pointer">Cancel</button>
+                    </sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:12px; padding-right:2px">
+          <div style="flex:none; display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+            <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:3px">
+              <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600; line-height:1.15">{{ cv.title }}</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648">{{ cv.sub }}</span>
+            </div>
+            <sc-if value="{{ cv.ready }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ cv.regen }}" style="display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap" style-hover="border-color:#9c937f"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3"></path><path d="M18 3v4h-4M6 21v-4h4"></path></svg>Regenerate…</button>
+            </sc-if>
+            <sc-if value="{{ cv.building }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ openSession }}" style="display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap" style-hover="border-color:#9c937f">Open session</button>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ cv.ready }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:none; border-radius:12px; overflow:hidden; background:#1a1612">
+              <div onClick="{{ togglePlay }}" style="position:relative; aspect-ratio:16/9; overflow:hidden; cursor:pointer; container-type:inline-size; background:{{ cv.bg }}; color:{{ cv.fg }}">
+                <div style="position:absolute; inset:0; display:flex; flex-direction:column; justify-content:space-between; padding:5.5% 6.5%">
+                  <div style="display:flex; justify-content:space-between; gap:12px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:clamp(9px,1.8cqw,12px); letter-spacing:.12em; color:{{ cv.acc }}"><span>{{ cv.eyebrow }}</span><span>{{ cv.sceneNo }}</span></div>
+                  <div style="display:flex; flex-direction:column; gap:clamp(6px,1.8cqw,14px)">
+                    <span style="font-family:{{ cv.font }}; font-weight:{{ cv.weight }}; font-style:{{ cv.italic }}; letter-spacing:{{ cv.track }}; text-transform:{{ cv.caseT }}; font-size:clamp(18px,6.6cqw,56px); line-height:1.02; max-width:14ch; text-wrap:balance">{{ cv.scene }}</span>
+                    <span style="font-size:clamp(11px,2.3cqw,17px); line-height:1.45; max-width:42ch">{{ cv.line }}</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:clamp(9px,1.7cqw,11px); color:{{ cv.acc }}"><span>session-manager</span><span>{{ cv.mascot }}</span></div>
+                </div>
+                <sc-if value="{{ cv.paused }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(26,22,18,.16)">
+                    <span style="width:66px; height:66px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(26,22,18,.84); color:#f5f0e6"><svg width="26" height="26" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"></path></svg></span>
+                  </div>
+                </sc-if>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; padding:10px 12px; color:#f5f0e6">
+                <button onClick="{{ togglePlay }}" aria-label="Play or pause" style="flex:none; width:32px; height:32px; border:0; border-radius:7px; background:#3a342b; color:#f5f0e6; display:flex; align-items:center; justify-content:center; cursor:pointer">
+                  <sc-if value="{{ cv.paused }}" hint-placeholder-val="{{ true }}"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"></path></svg></sc-if>
+                  <sc-if value="{{ cv.playing }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24"><rect x="7" y="5" width="3.5" height="14" rx="0.5" fill="currentColor"></rect><rect x="13.5" y="5" width="3.5" height="14" rx="0.5" fill="currentColor"></rect></svg></sc-if>
+                </button>
+                <button onClick="{{ restart }}" aria-label="Restart" style="flex:none; width:32px; height:32px; border:0; border-radius:7px; background:transparent; color:#d4ccb8; display:flex; align-items:center; justify-content:center; cursor:pointer" style-hover="background:#3a342b"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3"></path><path d="M18 3v4h-4M6 21v-4h4"></path></svg></button>
+                <span style="flex:none; white-space:nowrap; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; color:#d4ccb8">{{ cv.time }}</span>
+                <div onClick="{{ seekBar }}" style="position:relative; flex:1; min-width:80px; height:20px; cursor:pointer">
+                  <div style="position:absolute; left:0; right:0; top:8px; height:4px; border-radius:2px; background:#3a342b"></div>
+                  <div style="position:absolute; left:0; top:8px; height:4px; border-radius:2px; background:#f4b942; width:{{ cv.pct }}"></div>
+                  <sc-for list="{{ cv.marks }}" as="m" hint-placeholder-count="0"><span title="{{ m.label }}" style="position:absolute; top:5px; width:2px; height:10px; border-radius:1px; background:#a83818; left:{{ m.left }}"></span></sc-for>
+                </div>
+                <button onClick="{{ toggleMute }}" title="{{ cv.muteLabel }}" aria-label="{{ cv.muteLabel }}" style="flex:none; width:32px; height:32px; border:0; border-radius:7px; background:transparent; color:#d4ccb8; display:flex; align-items:center; justify-content:center; cursor:pointer" style-hover="background:#3a342b">
+                  <sc-if value="{{ cv.muted }}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 10v4h3l5 4V6L7 10z"></path><path d="M16 10l4 4M20 10l-4 4"></path></svg></sc-if>
+                  <sc-if value="{{ cv.unmuted }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 10v4h3l5 4V6L7 10z"></path><path d="M16 9a4 4 0 010 6M18.5 6.5a7.5 7.5 0 010 11"></path></svg></sc-if>
+                </button>
+              </div>
+            </div>
+
+
+            <div style="flex:none; display:flex; flex-direction:column; gap:8px">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">SCENES</span>
+              <div style="display:flex; flex-wrap:wrap; gap:6px">
+                <sc-for list="{{ cv.scenes }}" as="sc" hint-placeholder-count="4">
+                  <button onClick="{{ sc.seek }}" style="display:flex; align-items:center; gap:8px; height:30px; padding:0 11px; border-radius:8px; border:1px solid {{ sc.border }}; background:{{ sc.bg }}; color:#1a1612; font-size:12.5px; cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ sc.at }}</span>{{ sc.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="flex:none; display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px">
+              <div style="display:flex; flex-direction:column; gap:10px; padding:14px 16px; border:1px solid #d4ccb8; border-radius:12px; background:#fbf8f1">
+                <div style="display:flex; justify-content:space-between"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">SOURCES</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ cv.srcCount }} claims</span></div>
+                <sc-for list="{{ cv.sources }}" as="src" hint-placeholder-count="2">
+                  <div style="display:flex; flex-direction:column; gap:2px; padding-top:9px; border-top:1px solid #ede6d6"><span style="font-size:13px; color:#1a1612">{{ src.claim }}</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ src.source }} › {{ src.ref }}</span></div>
+                </sc-for>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:12px; padding:14px 16px; border:1px solid #d4ccb8; border-radius:12px; background:#fbf8f1">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">QUALITY REPORT</span>
+                <div style="display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px">
+                  <div style="display:flex; flex-direction:column; gap:2px"><span style="font-size:17px; font-weight:600">{{ cv.lufs }}</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10px; color:#5d5648">LUFS</span></div>
+                  <div style="display:flex; flex-direction:column; gap:2px"><span style="font-size:17px; font-weight:600">{{ cv.peak }}</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10px; color:#5d5648">true peak dB</span></div>
+                  <div style="display:flex; flex-direction:column; gap:2px"><span style="font-size:17px; font-weight:600">{{ cv.speech }}</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10px; color:#5d5648">speech</span></div>
+                  <div style="display:flex; flex-direction:column; gap:2px"><span style="font-size:17px; font-weight:600">{{ cv.grade }}</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10px; color:#5d5648">reading grade</span></div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px">
+                  <sc-for list="{{ cv.checks }}" as="ck" hint-placeholder-count="3">
+                    <span style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:#3a342b"><span style="flex:none; color:#2e5a3e"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12l5 5 9-10"></path></svg></span>{{ ck }}</span>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ cv.building }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:none; aspect-ratio:16/9; border-radius:12px; border:1px dashed #9c937f; background:#ede6d6; display:flex; align-items:center; justify-content:center; padding:24px">
+              <div style="width:min(440px,100%); display:flex; flex-direction:column; gap:14px">
+                <span style="display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; letter-spacing:.12em; color:#a83818">{{ cv.pulse }}{{ cv.stateLabel }}</span>
+                <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:28px; font-weight:600; line-height:1.12">{{ cv.title }}</span>
+                <span style="font-size:13.5px; line-height:1.6; color:#3a342b; text-wrap:pretty">The demo-video-builder agent is writing a {{ cv.lenWord }} animation. Before it’s saved it is checked for length, loudness and any network access.</span>
+                {{ cv.bigBar }}
+                <div style="display:flex; flex-direction:column; gap:6px; padding:12px 14px; border-radius:10px; background:#f5f0e6; border:1px solid #d4ccb8">
+                  <span style="font-size:11px; color:#5d5648">Sent to the builder</span>
+                  <sc-for list="{{ cv.prompt }}" as="ln" hint-placeholder-count="3"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.5; color:#1a1612">{{ ln }}</span></sc-for>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:#5d5648"><span>{{ cv.elapsed }}</span><span>·</span><a onClick="{{ openSession }}" style="font-weight:600">Open session</a></div>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showTools }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Tools" style="flex:1; min-height:0; display:grid; grid-template-columns:252px minmax(0,1fr); gap:20px">
+        <div style="min-height:0; display:flex; flex-direction:column; gap:12px">
+          <button onClick="{{ addTool }}" style="flex:none; display:flex; align-items:center; justify-content:center; gap:8px; height:38px; width:100%; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:13px; font-weight:600; cursor:pointer" style-hover="border-color:#9c937f"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:2;stroke-linecap:round"><path d="M12 5v14M5 12h14"></path></svg>Add a tool</button>
+          <div style="flex:none; display:flex; justify-content:space-between; align-items:baseline; padding:2px 2px 0"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">TOOLS</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ toolCount }}</span></div>
+          <div style="flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:6px; padding:1px">
+            <sc-for list="{{ toolItems }}" as="tl" hint-placeholder-count="1">
+              <div onClick="{{ tl.select }}" style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:9px; border:1px solid {{ tl.border }}; background:{{ tl.bg }}; cursor:pointer">
+                <span style="flex:none; width:28px; height:28px; border-radius:7px; display:flex; align-items:center; justify-content:center; background:#1a1612; color:#f4b942"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M9 12h6"></path><path d="M10 8H7a4 4 0 000 8h3M14 8h3a4 4 0 010 8h-3"></path></svg></span>
+                <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px">
+                  <span style="font-size:13.5px; font-weight:600; color:#1a1612; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">{{ tl.name }}</span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:{{ tl.metaFg }}">{{ tl.meta }}</span>
+                </span>
+              </div>
+            </sc-for>
+            <span style="padding:8px 4px 0; font-size:11.5px; line-height:1.45; color:#5d5648">Any macro saved with Surface: Project Home shows up in this list.</span>
+          </div>
+        </div>
+        <div style="min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:14px; padding-right:2px">
+          <div style="flex:none; display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap">
+            <div style="flex:1 1 220px; min-width:0; display:flex; flex-direction:column; gap:3px">
+              <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600; line-height:1.15">Review MD network</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648">built-in macro · architect · {{ fCount }} findings</span>
+            </div>
+            <div style="flex:0 1 auto; min-width:0; max-width:100%; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap">
+              <div style="display:flex; flex-direction:column; gap:5px; min-width:0; max-width:100%">
+                <span style="font-size:11.5px; font-weight:600; color:#3a342b">Scope</span>
+                <select value="{{ scope }}" onChange="{{ onScope }}" style="height:34px; padding:0 10px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; font-size:12.5px; color:#1a1612; cursor:pointer">
+                  <option value="Whole project">Whole project</option>
+                  <option value="src/">src/</option>
+                  <option value="session-manager-operations/">session-manager-operations/</option>
+                  <option value="plugins/">plugins/</option>
+                  <option value="web-remote/">web-remote/</option>
+                  <option value="tests/">tests/</option>
+                </select>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:5px">
+                <span style="font-size:11.5px; font-weight:600; color:#3a342b">Mode</span>
+                <div style="display:flex; gap:2px; padding:3px; border-radius:9px; background:#e3dcc8">
+                  <sc-for list="{{ modeOpts }}" as="o" hint-placeholder-count="2"><button onClick="{{ o.pick }}" style="height:28px; padding:0 12px; border:0; border-radius:7px; font-size:12.5px; cursor:pointer; white-space:nowrap; background:{{ o.bg }}; color:{{ o.fg }}; font-weight:{{ o.fw }}; box-shadow:{{ o.sh }}">{{ o.label }}</button></sc-for>
+                </div>
+              </div>
+              <button onClick="{{ runReview }}" style="display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 15px; border:0; border-radius:8px; background:#a83818; color:#fff8ef; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap" style-hover="background:#8f2f13"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:2;stroke-linecap:round"><path d="M12 4v6M12 14v6M4 12h6M14 12h6"></path></svg>Run review</button>
+            </div>
+          </div>
+          <p style="margin:0; font-size:13.5px; line-height:1.55; color:#3a342b; max-width:72ch; text-wrap:pretty">Maps CLAUDE.md and every doc it leads to, so agents start from one short entry map and find each fact in exactly one place — with nothing stale.</p>
+        <div style="flex:none; display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; border-radius:10px; background:#ede6d6; font-size:12.5px; line-height:1.5; color:#3a342b">
+          <sc-if value="{{ reviewRunning }}" hint-placeholder-val="{{ false }}">
+            {{ pulseAcc }}
+            <span style="flex:1; min-width:240px">{{ reviewText }}</span>
+            <a onClick="{{ openSession }}" style="font-weight:600">Open session</a>
+          </sc-if>
+          <sc-if value="{{ reviewIdle }}" hint-placeholder-val="{{ true }}">
+            <span style="flex:none; width:7px; height:7px; border-radius:50%; background:#2e5a3e"></span>
+            <span style="flex:1; min-width:240px">Last drift check 2h ago · {{ gDocs }} docs · {{ gLinks }} links · {{ fCount }} findings. A review opens an architect session that reports first and changes no files until you approve.</span>
+          </sc-if>
+        </div>
+
+        <div style="flex:none; display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start">
+          <div style="flex:1 1 560px; min-width:0; border:1px solid #d4ccb8; border-radius:12px; background:#fbf8f1; overflow:hidden">
+            <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:12px 16px; border-bottom:1px solid #e3dcc8">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">LINK MAP</span>
+              <span style="flex:1"></span>
+              <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#5d5648"><span style="width:10px; height:10px; border-radius:50%; background:#1a1612"></span>Entry map</span>
+              <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#5d5648"><span style="width:9px; height:9px; border-radius:50%; background:#3a342b"></span>Owner doc</span>
+              <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#5d5648"><span style="width:9px; height:9px; border-radius:50%; border:1.3px solid #5d5648; background:#fbf8f1"></span>Doc</span>
+              <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#5d5648"><span style="width:9px; height:9px; border-radius:50%; border:2px solid #a83818"></span>Finding</span>
+              <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#5d5648"><span style="width:9px; height:9px; border-radius:50%; border:1.5px dashed #a83818"></span>Missing</span>
+            </div>
+            <div style="padding:10px 12px 2px">
+              <svg viewBox="0 0 760 392" style="display:block; width:100%; height:auto">
+                <sc-for list="{{ gEdges }}" as="e" hint-placeholder-count="0"><path d="{{ e.d }}" fill="none" style="stroke:{{ e.stroke }}; stroke-width:{{ e.w }}; stroke-dasharray:{{ e.dash }}; opacity:{{ e.op }}"></path></sc-for>
+                <sc-for list="{{ gNodes }}" as="n" hint-placeholder-count="0">
+                  <g onMouseEnter="{{ n.enter }}" onMouseLeave="{{ n.leave }}" style="opacity:{{ n.op }}; transition:opacity .15s">
+                    <circle cx="{{ n.x }}" cy="{{ n.y }}" r="14" style="fill:transparent"></circle>
+                    <circle cx="{{ n.x }}" cy="{{ n.y }}" r="{{ n.r }}" style="fill:{{ n.fill }}; stroke:{{ n.stroke }}; stroke-width:{{ n.sw }}; stroke-dasharray:{{ n.dash }}"></circle>
+                    <text x="{{ n.lx }}" y="{{ n.ly }}" style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; fill:{{ n.lfill }}; font-weight:{{ n.fw }}; text-anchor:{{ n.anchor }}; paint-order:stroke; stroke:#fbf8f1; stroke-width:4px; stroke-linejoin:round">{{ n.label }}</text>
+                    <text x="{{ n.x }}" y="{{ n.sy }}" style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:9.5px; fill:#5d5648; text-anchor:middle; paint-order:stroke; stroke:#fbf8f1; stroke-width:4px">{{ n.sub }}</text>
+                  </g>
+                </sc-for>
+              </svg>
+            </div>
+            <div style="padding:6px 16px 12px; min-height:30px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648; word-break:break-all">{{ gCaption }}</div>
+          </div>
+
+          <div style="flex:1 1 300px; min-width:0; border:1px solid #d4ccb8; border-radius:12px; background:#fbf8f1; overflow:hidden">
+            <div style="display:flex; justify-content:space-between; padding:12px 16px"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.1em; color:#5d5648">FINDINGS</span><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ fCount }}</span></div>
+            <sc-for list="{{ findings }}" as="f" hint-placeholder-count="3">
+              <div onMouseEnter="{{ f.enter }}" onMouseLeave="{{ f.leave }}" style="display:flex; flex-direction:column; gap:6px; padding:12px 16px; border-top:1px solid #ede6d6; background:{{ f.bg }}">
+                <div style="display:flex; align-items:center; gap:8px">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10px; font-weight:700; letter-spacing:.04em; padding:3px 7px; border-radius:4px; background:{{ f.tagBg }}; color:{{ f.tagFg }}">{{ f.type }}</span>
+                  <span style="flex:1"></span>
+                  <a onClick="{{ f.open }}" style="font-size:12px; font-weight:600">Open</a>
+                </div>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; color:#1a1612; word-break:break-all">{{ f.where }}</span>
+                <span style="font-size:12.5px; line-height:1.45; color:#3a342b">{{ f.detail }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+</main>
+</div>
+
+<div style="flex:none; height:28px; display:flex; align-items:center; gap:18px; padding:0 12px; background:#ede6d6; border-top:1px solid #d4ccb8; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#5d5648; white-space:nowrap; overflow:hidden">
+  <span style="display:flex; align-items:center; gap:6px"><span style="width:6px; height:6px; border-radius:50%; background:#9c937f"></span>offline</span>
+  <span>session —</span>
+  <span>weekly <span style="color:#1a1612">42%</span></span>
+  <span>session-manager · ⎇ main</span>
+  <span>last activity: —</span>
+  <sc-if value="{{ bgBuilding }}" hint-placeholder-val="{{ false }}"><span style="display:flex; align-items:center; gap:6px; color:#a83818">{{ pulseBar }}{{ bgLabel }}</span></sc-if>
+  <span style="flex:1"></span>
+  <span style="display:flex; gap:3px"><span style="width:6px; height:6px; border-radius:50%; background:#a83818"></span><span style="width:6px; height:6px; border-radius:50%; background:#a83818"></span><span style="width:6px; height:6px; border-radius:50%; border:1px solid #9c937f"></span><span style="width:6px; height:6px; border-radius:50%; border:1px solid #9c937f"></span><span style="width:6px; height:6px; border-radius:50%; border:1px solid #9c937f"></span><span style="width:6px; height:6px; border-radius:50%; border:1px solid #9c937f"></span><span style="width:6px; height:6px; border-radius:50%; border:1px solid #9c937f"></span><span style="width:6px; height:6px; border-radius:50%; border:1px solid #9c937f"></span></span>
+  <span>v0.130.2</span>
+</div>
+
+<sc-if value="{{ cmp.open }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Generate composer" onClick="{{ closeComposer }}" style="position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:28px; background:rgba(26,22,18,.45)">
+    <div onClick="{{ stop }}" style="width:min(1040px,100%); height:min(710px,100%); display:flex; flex-direction:column; overflow:hidden; background:#f5f0e6; border:1px solid #d4ccb8; border-radius:14px; box-shadow:0 30px 80px rgba(26,22,18,.35)">
+      <div style="flex:none; display:flex; align-items:center; gap:14px; padding:16px 20px; border-bottom:1px solid #d4ccb8">
+        <sc-if value="{{ cmp.showBack }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ cmpBack }}" style="display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 11px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>Templates</button>
+        </sc-if>
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px">
+          <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:23px; font-weight:600; line-height:1.15">{{ cmp.title }}</span>
+          <span style="font-size:12.5px; color:#5d5648">{{ cmp.sub }}</span>
+        </div>
+        <button onClick="{{ closeComposer }}" aria-label="Close" style="flex:none; width:32px; height:32px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#3a342b; display:flex; align-items:center; justify-content:center; cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:1.9;stroke-linecap:round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+
+      <div style="flex:1; min-height:0; display:flex">
+        <sc-if value="{{ cmp.showList }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:none; width:292px; min-height:0; overflow:auto; padding:14px 12px; display:flex; flex-direction:column; gap:4px; background:#ede6d6; border-right:1px solid #d4ccb8">
+            <span style="padding:2px 8px 6px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.12em; color:#5d5648">START FROM</span>
+            <sc-for list="{{ cmp.list }}" as="t" hint-placeholder-count="5">
+              <div onClick="{{ t.pick }}" style="display:flex; flex-direction:column; gap:3px; padding:10px 12px; border-radius:9px; border:1px solid {{ t.border }}; background:{{ t.bg }}; cursor:pointer">
+                <span style="font-size:13.5px; font-weight:600; color:#1a1612">{{ t.name }}</span>
+                <span style="font-size:12px; line-height:1.4; color:#5d5648">{{ t.blurb }}</span>
+                <span style="margin-top:2px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10px; color:#5d5648">{{ t.preset }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ cmp.showGallery }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1; min-width:0; overflow:auto; padding:20px 22px 24px">
+            <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px">
+              <sc-for list="{{ cmp.cards }}" as="t" hint-placeholder-count="4">
+                <div style="display:flex; flex-direction:column; border:1px solid #d4ccb8; border-radius:12px; background:#fbf8f1; overflow:hidden" style-hover="border-color:#9c937f">
+                  <div style="height:104px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; overflow:hidden; border-bottom:1px solid #d4ccb8; background:{{ t.pvBg }}; color:{{ t.pvFg }}">
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:9.5px; letter-spacing:.1em; color:{{ t.pvAcc }}">{{ t.pvEyebrow }}</span>
+                    <sc-for list="{{ t.lines }}" as="ln" hint-placeholder-count="3">
+                      <span style="display:flex; align-items:center; gap:7px; font-family:{{ t.pvFont }}; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis"><span style="flex:none; width:12px; height:1.5px; background:{{ t.pvAcc }}"></span>{{ ln }}</span>
+                    </sc-for>
+                  </div>
+                  <div style="flex:1; padding:12px 14px 14px; display:flex; flex-direction:column; gap:10px">
+                    <div style="display:flex; flex-direction:column; gap:3px"><span style="font-size:14.5px; font-weight:600">{{ t.name }}</span><span style="font-size:12.5px; line-height:1.45; color:#5d5648; text-wrap:pretty">{{ t.blurb }}</span></div>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; color:#5d5648">{{ t.preset }}</span>
+                    <div style="display:flex; gap:8px; margin-top:auto">
+                      <button onClick="{{ t.quick }}" style="display:inline-flex; align-items:center; height:30px; padding:0 12px; border:0; border-radius:7px; background:#a83818; color:#fff8ef; font-size:12.5px; font-weight:600; cursor:pointer" style-hover="background:#8f2f13">{{ t.quickLabel }}</button>
+                      <button onClick="{{ t.customize }}" style="display:inline-flex; align-items:center; height:30px; padding:0 11px; border:1px solid #d4ccb8; border-radius:7px; background:#f5f0e6; color:#1a1612; font-size:12.5px; font-weight:600; cursor:pointer" style-hover="border-color:#9c937f">Customize</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ cmp.showConfig }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1; min-width:0; overflow:auto; padding:22px 28px 28px">
+            <div style="max-width:660px; display:flex; flex-direction:column; gap:22px">
+              <div style="display:flex; flex-direction:column; gap:7px">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; letter-spacing:.12em; color:#a83818">{{ cmp.eyebrow }}</span>
+                <span style="font-family:'Source Serif 4',Charter,Georgia,serif; font-size:22px; font-weight:600; line-height:1.15">{{ cmp.tplName }}</span>
+                <span style="font-size:13px; line-height:1.5; color:#5d5648">{{ cmp.tplBlurb }}</span>
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:3px">
+                  <span style="font-size:12px; color:#5d5648">{{ cmp.coversLabel }}</span>
+                  <sc-for list="{{ cmp.covers }}" as="cov" hint-placeholder-count="4"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:10.5px; padding:3px 8px; border-radius:5px; background:#e3dcc8; color:#3a342b">{{ cov }}</span></sc-for>
+                </div>
+              </div>
+
+              <sc-if value="{{ cmp.isPage }}" hint-placeholder-val="{{ true }}">
+                <sc-if value="{{ cmp.needsTopic }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; flex-direction:column; gap:7px">
+                    <span style="font-size:12.5px; font-weight:600; color:#1a1612">Topic <span style="font-weight:400; color:#a83818">· required</span></span>
+                    <input value="{{ cmp.topic }}" onChange="{{ onTopic }}" placeholder="e.g. The security model" style="height:38px; padding:0 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; font-size:13.5px; color:#1a1612; outline:none">
+                  </div>
+                </sc-if>
+                <div style="display:flex; gap:28px; flex-wrap:wrap">
+                  <div style="display:flex; flex-direction:column; gap:7px">
+                    <span style="font-size:12.5px; font-weight:600; color:#1a1612">Written for</span>
+                    <div style="display:flex; gap:2px; padding:3px; border-radius:9px; background:#e3dcc8; width:fit-content">
+                      <sc-for list="{{ cmp.audOpts }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.pick }}" style="height:30px; padding:0 13px; border:0; border-radius:7px; font-size:12.5px; cursor:pointer; white-space:nowrap; background:{{ o.bg }}; color:{{ o.fg }}; font-weight:{{ o.fw }}; box-shadow:{{ o.sh }}">{{ o.label }}</button></sc-for>
+                    </div>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:7px">
+                    <span style="font-size:12.5px; font-weight:600; color:#1a1612">Length</span>
+                    <div style="display:flex; gap:2px; padding:3px; border-radius:9px; background:#e3dcc8; width:fit-content">
+                      <sc-for list="{{ cmp.lenOpts }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.pick }}" style="height:30px; padding:0 13px; border:0; border-radius:7px; font-size:12.5px; cursor:pointer; white-space:nowrap; background:{{ o.bg }}; color:{{ o.fg }}; font-weight:{{ o.fw }}; box-shadow:{{ o.sh }}">{{ o.label }}</button></sc-for>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:7px">
+                  <span style="font-size:12.5px; font-weight:600; color:#1a1612">Read from</span>
+                  <div style="display:flex; flex-wrap:wrap; gap:8px">
+                    <sc-for list="{{ cmp.readOpts }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.toggle }}" style="display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border-radius:16px; font-size:12.5px; font-weight:500; cursor:pointer; border:1px solid {{ o.border }}; background:{{ o.bg }}; color:{{ o.fg }}"><span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px">{{ o.mark }}</span>{{ o.label }}</button></sc-for>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ cmp.isVideo }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; flex-direction:column; gap:7px">
+                  <span style="font-size:12.5px; font-weight:600; color:#1a1612">Kind</span>
+                  <div style="display:flex; gap:2px; padding:3px; border-radius:9px; background:#e3dcc8; width:fit-content">
+                    <sc-for list="{{ cmp.kindOpts }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.pick }}" style="height:30px; padding:0 13px; border:0; border-radius:7px; font-size:12.5px; cursor:pointer; white-space:nowrap; background:{{ o.bg }}; color:{{ o.fg }}; font-weight:{{ o.fw }}; box-shadow:{{ o.sh }}">{{ o.label }}</button></sc-for>
+                  </div>
+                </div>
+                <sc-if value="{{ cmp.needsTarget }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; flex-direction:column; gap:7px">
+                    <span style="font-size:12.5px; font-weight:600; color:#1a1612">{{ cmp.targetLabel }} <span style="font-weight:400; color:#5d5648">· optional</span></span>
+                    <input value="{{ cmp.target }}" onChange="{{ onTarget }}" placeholder="{{ cmp.targetHint }}" style="height:38px; padding:0 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; font-size:13.5px; color:#1a1612; outline:none">
+                  </div>
+                </sc-if>
+                <div style="display:flex; flex-direction:column; gap:8px">
+                  <span style="font-size:12.5px; font-weight:600; color:#1a1612">Style</span>
+                  <div style="display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px">
+                    <sc-for list="{{ cmp.styleOpts }}" as="o" hint-placeholder-count="5">
+                      <div onClick="{{ o.pick }}" style="display:flex; flex-direction:column; gap:5px; min-width:0; cursor:pointer">
+                        <div style="aspect-ratio:16/10; border-radius:8px; border:1px solid #d4ccb8; display:flex; align-items:center; justify-content:center; background:{{ o.bg }}; color:{{ o.fg }}; box-shadow:{{ o.ring }}"><span style="font-size:18px; font-family:{{ o.font }}; font-weight:{{ o.weight }}; font-style:{{ o.italic }}; letter-spacing:{{ o.track }}; text-transform:{{ o.caseT }}">{{ o.sample }}</span></div>
+                        <span style="font-size:12px; line-height:1.25; color:#1a1612; font-weight:{{ o.fw }}">{{ o.id }}</span>
+                        <span style="font-size:11px; line-height:1.3; color:#5d5648">{{ o.note }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="display:flex; gap:28px; flex-wrap:wrap">
+                  <div style="display:flex; flex-direction:column; gap:7px">
+                    <span style="font-size:12.5px; font-weight:600; color:#1a1612">Length</span>
+                    <div style="display:flex; gap:2px; padding:3px; border-radius:9px; background:#e3dcc8; width:fit-content">
+                      <sc-for list="{{ cmp.vlenOpts }}" as="o" hint-placeholder-count="2"><button onClick="{{ o.pick }}" style="height:30px; padding:0 13px; border:0; border-radius:7px; font-size:12.5px; cursor:pointer; white-space:nowrap; background:{{ o.bg }}; color:{{ o.fg }}; font-weight:{{ o.fw }}; box-shadow:{{ o.sh }}">{{ o.label }}</button></sc-for>
+                    </div>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:7px">
+                    <span style="font-size:12.5px; font-weight:600; color:#1a1612">Character</span>
+                    <button onClick="{{ toggleMascot }}" style="display:flex; align-items:center; gap:10px; height:36px; padding:0; border:0; background:none; cursor:pointer; font-size:12.5px; color:#1a1612">
+                      <span style="position:relative; width:36px; height:20px; border-radius:10px; transition:background .15s; background:{{ cmp.mascotTrack }}"><span style="position:absolute; top:2px; width:16px; height:16px; border-radius:50%; background:#fbf8f1; box-shadow:0 1px 2px rgba(26,22,18,.3); transition:left .15s; left:{{ cmp.mascotKnob }}"></span></span>
+                      Use the project’s mascot
+                    </button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <div style="display:flex; flex-direction:column; gap:8px">
+                <span style="font-size:12.5px; font-weight:600; color:#1a1612">Focus <span style="font-weight:400; color:#5d5648">· optional</span></span>
+                <textarea value="{{ cmp.focus }}" onChange="{{ onFocus }}" placeholder="{{ cmp.focusHint }}" rows="3" style="width:100%; padding:10px 12px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; font-size:13.5px; line-height:1.5; color:#1a1612; resize:vertical; outline:none"></textarea>
+                <div style="display:flex; flex-wrap:wrap; gap:6px">
+                  <sc-for list="{{ cmp.chips }}" as="ch" hint-placeholder-count="3"><button onClick="{{ ch.add }}" style="height:28px; padding:0 10px; border:1px solid #d4ccb8; border-radius:14px; background:transparent; color:#3a342b; font-size:12px; cursor:pointer" style-hover="background:#ede6d6">+ {{ ch.label }}</button></sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ cmp.showConfig }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:none; display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 20px; border-top:1px solid #d4ccb8; background:#ede6d6">
+          <div style="flex:1; min-width:220px; display:flex; flex-direction:column; gap:2px">
+            <span style="font-size:11px; color:#5d5648">Sent to {{ cmp.agent }} as</span>
+            <span style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#1a1612; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">{{ cmp.promptLine }}</span>
+          </div>
+          <button onClick="{{ closeComposer }}" style="height:36px; padding:0 14px; border:1px solid #d4ccb8; border-radius:8px; background:#fbf8f1; color:#1a1612; font-size:13px; font-weight:600; cursor:pointer">Cancel</button>
+          <button onClick="{{ cmpGenerate }}" style="display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 16px; border:0; border-radius:8px; background:#a83818; color:#fff8ef; font-size:13px; font-weight:600; opacity:{{ cmp.goOpacity }}; cursor:{{ cmp.goCursor }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:2;stroke-linecap:round"><path d="M12 4v6M12 14v6M4 12h6M14 12h6"></path></svg>{{ cmp.goLabel }}</button>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed; left:50%; bottom:44px; transform:translateX(-50%); z-index:70; padding:10px 16px; border-radius:10px; background:#1a1612; color:#f5f0e6; font-size:13px; box-shadow:0 10px 30px rgba(26,22,18,.3); white-space:nowrap">{{ toast }}</div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;navStyle&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;Key buttons&quot;, &quot;Tabs&quot;, &quot;Sidebar&quot;], &quot;default&quot;: &quot;Key buttons&quot;, &quot;tsType&quot;: &quot;'Key buttons' | 'Tabs' | 'Sidebar'&quot;, &quot;section&quot;: &quot;Navigation&quot;}, &quot;composerStyle&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;Split&quot;, &quot;Gallery&quot;], &quot;default&quot;: &quot;Split&quot;, &quot;tsType&quot;: &quot;'Split' | 'Gallery'&quot;, &quot;section&quot;: &quot;Generate flow&quot;}, &quot;firstRun&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;State&quot;}}">
+const INK = '#1a1612', I2 = '#3a342b', I3 = '#5d5648', I4 = '#9c937f';
+const PAPER = '#f5f0e6', P2 = '#ede6d6', P3 = '#e3dcc8', PL = '#fbf8f1', RULE = '#d4ccb8';
+const ACC = '#a83818', ACC2 = '#f4b942', ACC3 = '#2e5a3e', ON_ACC = '#fff8ef';
+const SERIF = "'Source Serif 4', Charter, Georgia, serif";
+const SANS = "'Inter Tight', -apple-system, 'Helvetica Neue', Arial, sans-serif";
+
+const PAGE_TPLS = [
+  { id: 'overview', name: 'Overview', blurb: 'What it is, who it’s for, key features, how to run it.', page: 'Overview', audience: 'Newcomers', length: 'Standard', reads: ['docs', 'tree', 'git'],
+    covers: ['What it is', 'Who it’s for', 'Key features', 'Structure', 'How to run it', 'Key commands'],
+    chips: ['Lead with the scheduler', 'Keep install to one line', 'Say it runs locally'],
+    lede: 'A local Electron cockpit for the Claude Code CLI.',
+    sample: [
+      { h: 'What it is', p: 'Terminal tabs, the full configuration surface, a scheduler and voice dictation for the claude CLI, in one window.' },
+      { h: 'Who it’s for', p: 'People who already use the claude CLI and want several sessions, queued work and live transcripts in one place.' },
+      { h: 'Key features', p: 'Dormant tabs, a PRD queue that runs overnight, Epics in their own git worktrees, and on-device voice.' }] },
+  { id: 'how', name: 'How it works', blurb: 'Architecture and the main flows end to end, tied to real modules.', page: 'How it works', audience: 'Contributors', length: 'In-depth', reads: ['docs', 'tree'],
+    covers: ['The pieces', 'Main process', 'Renderer', 'Agent tools', 'One flow, end to end'],
+    chips: ['Trace one page build end to end', 'Explain dormant tabs', 'Include the web remote'],
+    lede: 'How the pieces fit together, from keystroke to transcript.',
+    sample: [
+      { h: 'The pieces', p: 'src/main owns processes, files and background jobs; src/renderer draws the cockpit in React 18 + Vite.' },
+      { h: 'One message, end to end', p: 'A dormant tab hands your first message to a headless claude -p runner, then hydrates to a full terminal on demand.' },
+      { h: 'Background work', p: 'Macros launch Epics; the scheduler runs PRDs as headless jobs and reports status back to the cockpit.' }] },
+  { id: 'faq', name: 'FAQ', blurb: 'The questions a newcomer really asks, each answer sourced.', page: 'FAQ', audience: 'Newcomers', length: 'Brief', reads: ['docs'],
+    covers: ['Getting started', 'Privacy & telemetry', 'Everyday use', 'Troubleshooting'],
+    chips: ['Cover Windows setup', 'Eight questions max', 'Include the telemetry opt-out'],
+    lede: 'Straight answers, each one sourced from the project’s own docs.',
+    sample: [
+      { h: 'Does my voice leave the machine?', p: 'No. Speech is transcribed locally; the model unloads after half an hour idle.' },
+      { h: 'How do I turn telemetry off?', p: 'Use the toggle in Settings, or set SM_TELEMETRY=0 for scripts and scheduled jobs.' },
+      { h: 'Can I use it from my phone?', p: 'Yes. Pair each computer once under Settings › Phone remote, then open the web remote.' }] },
+  { id: 'start', name: 'Getting started', blurb: 'Install, first run and the commands you’ll use daily.', page: 'Custom topic', topic: 'Getting started: install, first run, key commands', audience: 'Newcomers', length: 'Brief', reads: ['docs', 'tree'],
+    covers: ['Install', 'First run', 'Key commands', 'Where next'],
+    chips: ['Assume a fresh machine', 'Show --simple mode', 'Link the Field Manual'],
+    lede: 'From install to your first Session in a few minutes.',
+    sample: [
+      { h: 'Install', p: 'Install the app from npm, then open it from your launcher.' },
+      { h: 'First run', p: 'Pick a folder with Open / Start Project, then start your first Session from it.' },
+      { h: 'Just one terminal?', p: 'Launch with --simple for a single terminal with no cockpit around it.' }] },
+  { id: 'recent', name: 'What’s new', blurb: 'Recent direction from the last 30 commits, grouped by theme.', page: 'Custom topic', topic: 'What’s new: recent changes grouped by theme', audience: 'Users', length: 'Brief', reads: ['git', 'docs'],
+    covers: ['Highlights', 'New', 'Fixed', 'Next'],
+    chips: ['Only user-facing changes', 'Group by area', 'Skip refactors'],
+    lede: 'What changed lately, read from the last 30 commits.',
+    sample: [
+      { h: 'Highlights', p: 'Project Home keeps a library of Knowledge Pages and Videos — many of each, newest first.' },
+      { h: 'New', p: 'Review MD network ships as a built-in Project Home macro.' },
+      { h: 'Fixed', p: 'Rename and delete refuse bad ids and symlink escapes.' }] },
+  { id: 'custom', name: 'Custom topic', blurb: 'Name any topic — the builder writes a page about exactly that.', page: 'Custom topic', topic: '', audience: 'Users', length: 'Standard', reads: ['docs', 'tree', 'git'],
+    covers: ['Shaped by your topic'],
+    chips: ['A glossary of terms', 'Compare with the plain claude CLI', 'The security model'],
+    lede: 'A page about exactly the topic you named.',
+    sample: [{ h: 'Your topic', p: 'The builder reads the project and writes about exactly this, citing what it read.' }] },
+];
+
+const VIDEO_TPLS = [
+  { id: 'demo', name: 'Project demo', blurb: 'A short tour of what the project does and why it exists.', kind: 'Project demo', style: 'Auto', length: 30, mascot: true,
+    scenes: ['The problem', 'What it is', 'Three key features', 'Try it'], chips: ['End on the install line', 'Feature the scheduler', 'Keep it upbeat'] },
+  { id: 'feature', name: 'Feature spotlight', blurb: 'One feature, shown step by step.', kind: 'Feature', target: 'Scheduler / PRD queue', style: 'Kinetic typography', length: 30, mascot: false,
+    scenes: ['Why it exists', 'How it works', 'Try it'], chips: ['Show a real PRD', 'Mention the queue-health linter', 'No jargon'] },
+  { id: 'blog', name: 'Blog post', blurb: 'Turn a post or release note into a short narrated video.', kind: 'Blog post', target: '', style: 'Professional', length: 60, mascot: false,
+    scenes: ['The headline', 'Key points', 'The takeaway'], chips: ['Quote the post’s title', 'Three points max', 'Point to the post at the end'] },
+  { id: 'whiteboard', name: 'Whiteboard explainer', blurb: 'How it works, drawn out like a whiteboard session.', kind: 'Project demo', style: 'Animated whiteboard', length: 60, mascot: true,
+    scenes: ['The pieces', 'How they connect', 'One request, end to end', 'Recap'], chips: ['Draw the main process and renderer', 'Trace one message', 'Slow, calm pace'] },
+  { id: 'custom', name: 'Custom', blurb: 'Your own brief — every setting is yours to pick.', kind: 'Project demo', style: 'Auto', length: 30, mascot: false,
+    scenes: ['Shaped by your brief'], chips: ['For a conference talk', 'Focus on privacy', 'No mascot, all type'] },
+];
+
+const STYLES = [
+  { id: 'Auto', note: 'Builder decides', bg: P2, fg: INK, acc: ACC, font: SANS, weight: 600, italic: 'normal', track: '-0.01em', caseT: 'none', sample: 'Auto' },
+  { id: 'Professional', note: 'Clean and calm', bg: INK, fg: PAPER, acc: ACC2, font: SERIF, weight: 600, italic: 'normal', track: '-0.01em', caseT: 'none', sample: 'Aa' },
+  { id: 'Fun', note: 'Bright, playful', bg: ACC2, fg: INK, acc: ACC, font: SANS, weight: 800, italic: 'normal', track: '-0.02em', caseT: 'none', sample: 'Hey!' },
+  { id: 'Animated whiteboard', note: 'Hand-drawn diagrams', bg: PL, fg: I2, acc: ACC3, font: SERIF, weight: 400, italic: 'italic', track: '0', caseT: 'none', sample: 'a → b' },
+  { id: 'Kinetic typography', note: 'Type in motion', bg: ACC, fg: ON_ACC, acc: ACC2, font: SANS, weight: 800, italic: 'normal', track: '-0.03em', caseT: 'uppercase', sample: 'Go' },
+];
+
+const AUDIENCES = ['Newcomers', 'Users', 'Contributors'];
+const LENGTHS = ['Brief', 'Standard', 'In-depth'];
+const READS = [{ id: 'docs', label: 'README & docs' }, { id: 'tree', label: 'Source tree' }, { id: 'git', label: 'Git log' }];
+const KINDS = ['Project demo', 'Blog post', 'Feature'];
+const KIND_SLUG = { 'Project demo': 'project-demo', 'Blog post': 'blog-post', 'Feature': 'feature' };
+const PT = id => PAGE_TPLS.find(t => t.id === id) || PAGE_TPLS[0];
+const VT = id => VIDEO_TPLS.find(t => t.id === id) || VIDEO_TPLS[0];
+const ST = id => STYLES.find(t => t.id === id) || STYLES[0];
+
+const PAGES0 = [
+  { id: 'overview', title: 'Overview', tpl: 'overview', when: '1d ago', status: 'done', cfg: { audience: 'Newcomers', length: 'Standard', reads: ['docs', 'tree', 'git'], focus: '', topic: '' } },
+  { id: 'how-it-works', title: 'How it works', tpl: 'how', when: '3d ago', status: 'done', cfg: { audience: 'Contributors', length: 'In-depth', reads: ['docs', 'tree'], focus: 'Trace one page build end to end', topic: '' } },
+  { id: 'faq', title: 'FAQ', tpl: 'faq', when: '5d ago', status: 'done', cfg: { audience: 'Newcomers', length: 'Brief', reads: ['docs'], focus: '', topic: '' } },
+];
+const VIDEOS0 = [
+  { id: 'whiteboard-how', title: 'How it works, on a whiteboard', tpl: 'whiteboard', kind: 'project-demo', lengthS: 60, style: 'Animated whiteboard', when: '', status: 'building', buildMs: 90000, startOffset: 68000,
+    lufs: -16.0, peak: -1.3, speech: 47, grade: 6.3, kb: 702, cfg: { kind: 'Project demo', target: '', style: 'Animated whiteboard', length: 60, mascot: true, focus: 'Draw the main process and renderer' } },
+  { id: 'product-tour', title: 'Product tour', tpl: 'demo', kind: 'project-demo', lengthS: 30, style: 'Kinetic typography', when: '10m ago', status: 'done',
+    lufs: -16.2, peak: -1.4, speech: 24, grade: 6.1, kb: 412, cfg: { kind: 'Project demo', target: '', style: 'Kinetic typography', length: 30, mascot: true, focus: '' } },
+  { id: 'release-notes', title: 'Release notes', tpl: 'blog', kind: 'blog-post', lengthS: 60, style: 'Professional', when: '3h 20m ago', status: 'done',
+    lufs: -16.2, peak: -1.1, speech: 51, grade: 6.1, kb: 768, cfg: { kind: 'Blog post', target: '', style: 'Professional', length: 60, mascot: false, focus: '' } },
+];
+
+const SCENES = {
+  'product-tour': [
+    { t: 0, label: 'Too many terminals.', line: 'Several claude sessions, scattered across windows.' },
+    { t: 6, label: 'One cockpit.', line: 'Tabs, config, scheduler and voice in one window.' },
+    { t: 13, label: 'Queue it for tonight.', line: 'PRDs run as headless claude -p jobs while you sleep.' },
+    { t: 20, label: 'Talk, don’t type.', line: 'Speech is transcribed on your own machine.' },
+    { t: 26, label: 'Free and open-core.', line: 'The app and its Field Manual stay free.' }],
+  'release-notes': [
+    { t: 0, label: 'This week in Session Manager', line: 'Two additions to Project Home, plus fixes.' },
+    { t: 12, label: 'A library, not a page', line: 'Knowledge Pages and Videos — many of each, newest first.' },
+    { t: 30, label: 'Review MD network, built in', line: 'Map and drift-check every doc your agents read.' },
+    { t: 46, label: 'Safer rename and delete', line: 'Bad ids and symlink escapes are refused.' }],
+};
+const SOURCES = {
+  'product-tour': [
+    { claim: 'Runs several claude sessions in one window', source: 'README.md', ref: 'Overview' },
+    { claim: 'PRDs run as headless claude -p jobs', source: 'README.md', ref: 'Scheduler' },
+    { claim: 'Voice is transcribed on your machine', source: 'manual/chapters/cockpit-tour.html', ref: 'Voice input' }],
+  'release-notes': [
+    { claim: 'Project Home keeps a library of pages and videos', source: 'project-pages/README.md', ref: 'Library' },
+    { claim: 'Review MD network ships as a built-in macro', source: 'maintaining-md-network/SKILL.md', ref: 'description' }],
+};
+
+const GX = [44, 232, 470, 650];
+const G_NODES = [
+  { id: 'root', label: 'CLAUDE.md', path: 'CLAUDE.md', c: 0, y: 200, type: 'hub', lab: 'above', sub: 'entry map' },
+  { id: 'readme', label: 'README.md', path: 'README.md', c: 1, y: 40, type: 'owner', lab: 'above' },
+  { id: 'src', label: 'src/CLAUDE.md', path: 'src/CLAUDE.md', c: 1, y: 85, type: 'owner', lab: 'above' },
+  { id: 'ops', label: 'operations/CLAUDE.md', path: 'session-manager-operations/CLAUDE.md', c: 1, y: 130, type: 'owner', lab: 'above' },
+  { id: 'plugins', label: 'plugins/CLAUDE.md', path: 'plugins/CLAUDE.md', c: 1, y: 175, type: 'owner', lab: 'above' },
+  { id: 'remote', label: 'web-remote/CLAUDE.md', path: 'web-remote/CLAUDE.md', c: 1, y: 220, type: 'owner', lab: 'above' },
+  { id: 'web', label: 'web/README.md', path: 'web/README.md', c: 1, y: 265, type: 'owner', lab: 'above' },
+  { id: 'tests', label: 'tests/README.md', path: 'tests/README.md', c: 1, y: 310, type: 'owner', lab: 'above' },
+  { id: 'scripts', label: 'scripts/README.md', path: 'scripts/README.md', c: 1, y: 355, type: 'owner', lab: 'above' },
+  { id: 'contrib', label: 'CONTRIBUTING.md', path: 'CONTRIBUTING.md', c: 2, y: 16, type: 'doc' },
+  { id: 'security', label: 'SECURITY.md', path: 'SECURITY.md', c: 2, y: 40, type: 'doc' },
+  { id: 'coc', label: 'CODE_OF_CONDUCT.md', path: 'CODE_OF_CONDUCT.md', c: 2, y: 64, type: 'doc' },
+  { id: 'pp', label: 'project-pages/README.md', path: 'session-manager-operations/project-pages/README.md', c: 2, y: 98, type: 'doc' },
+  { id: 'arch', label: 'architecture/ · 17', path: 'session-manager-operations/architecture/ (17 docs)', c: 2, y: 120, type: 'folder', n: 17 },
+  { id: 'manual', label: 'manual/ · 21', path: 'session-manager-operations/manual/ (21 docs)', c: 2, y: 142, type: 'folder', n: 21 },
+  { id: 'skill', label: 'md-network/SKILL.md', path: 'plugins/session-manager-dev/skills/maintaining-md-network/SKILL.md', c: 2, y: 175, type: 'doc', lab: 'aboveL' },
+  { id: 'e2e', label: 'e2e/README.md', path: 'tests/e2e/README.md (missing)', c: 2, y: 318, type: 'missing', n: 0 },
+  { id: 'human', label: 'HUMAN_LEARN/ · 2', path: 'session-manager-operations/HUMAN_LEARN/ (2 docs)', c: 2, y: 368, type: 'orphan', n: 2 },
+  { id: 'placement', label: 'placement.md', path: 'plugins/session-manager-dev/skills/maintaining-md-network/placement.md', c: 3, y: 142, type: 'doc' },
+  { id: 'audit', label: 'audit.md', path: 'plugins/session-manager-dev/skills/maintaining-md-network/audit.md', c: 3, y: 164, type: 'doc' },
+  { id: 'plan', label: 'plan.md', path: 'plugins/session-manager-dev/skills/maintaining-md-network/plan.md', c: 3, y: 186, type: 'doc' },
+  { id: 'drift', label: 'drift-check.md', path: 'plugins/session-manager-dev/skills/maintaining-md-network/drift-check.md', c: 3, y: 208, type: 'doc' },
+];
+const G_EDGES = [
+  ['root', 'readme'], ['root', 'src'], ['root', 'ops'], ['root', 'plugins'], ['root', 'remote'], ['root', 'web'], ['root', 'tests'], ['root', 'scripts'],
+  ['readme', 'contrib'], ['readme', 'security'], ['readme', 'coc'],
+  ['ops', 'pp'], ['ops', 'arch'], ['ops', 'manual'], ['plugins', 'skill'], ['tests', 'e2e', 'broken'],
+  ['skill', 'placement'], ['skill', 'audit'], ['skill', 'plan'], ['skill', 'drift'],
+];
+const FINDINGS = [
+  { id: 'f1', type: 'broken-link', node: 'tests', nodes: ['tests', 'e2e'], where: 'tests/README.md:41 → e2e/README.md', detail: 'The link target doesn’t exist.', file: 'tests/README.md' },
+  { id: 'f2', type: 'stale', node: 'pp', nodes: ['pp', 'ops'], where: 'session-manager-operations/project-pages/README.md', detail: 'Legacy single-file sections still sit above the library contract that replaced them.', file: 'project-pages/README.md' },
+  { id: 'f3', type: 'orphan', node: 'human', nodes: ['human'], where: 'session-manager-operations/HUMAN_LEARN/', detail: 'No doc links here, so agents starting from CLAUDE.md never find it.', file: 'HUMAN_LEARN/' },
+];
+const NODE_ST = {
+  hub: { r: 9, fill: INK, stroke: INK, sw: 0, lfill: INK, fw: 700 },
+  owner: { r: 5.5, fill: I2, stroke: I2, sw: 0, lfill: I2, fw: 500 },
+  doc: { r: 4, fill: PL, stroke: I3, sw: 1.3, lfill: I3, fw: 400 },
+  folder: { r: 6.5, fill: P3, stroke: I3, sw: 1.3, lfill: I3, fw: 400 },
+  missing: { r: 5, fill: 'none', stroke: ACC, sw: 1.5, dash: '2.5 2', lfill: ACC, fw: 500 },
+  orphan: { r: 5.5, fill: PL, stroke: I3, sw: 1.3, dash: '2.5 2', lfill: I3, fw: 400 },
+};
+
+const ago = ms => { const s = Math.max(0, Math.round(ms / 1000)); if (s < 5) return 'just now'; if (s < 60) return s + 's ago'; return Math.floor(s / 60) + 'm ago'; };
+const clock = sec => { const s = Math.max(0, Math.floor(sec)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'entry';
+
+class Component extends DCLogic {
+  state = this.fresh(false);
+
+  fresh(empty) {
+    const now = Date.now();
+    const pages = empty ? [] : PAGES0.map(p => ({ ...p, cfg: { ...p.cfg, reads: p.cfg.reads.slice() } }));
+    const videos = empty ? [] : VIDEOS0.map(v => ({ ...v, cfg: { ...v.cfg }, startedAt: v.status === 'done' ? 0 : now - (v.startOffset || 0) }));
+    return { tab: 'pages', pages, videos, selPage: pages.length ? pages[0].id : null, selVideo: empty ? null : 'product-tour',
+      composer: null, renaming: null, draft: '', confirmDel: null, playing: false, t: 0, muted: true,
+      scope: 'Whole project', mode: 'Drift check', reviewAt: 0, hoverNode: null, hoverFinding: null, toast: null, now };
+  }
+
+  componentDidMount() {
+    this.fr = !!this.props.firstRun;
+    if (this.fr) this.setState(this.fresh(true));
+    this.lastTick = Date.now();
+    this.timer = setInterval(() => this.tick(), 400);
+    this.onKey = e => { if (e.key === 'Escape' && this.state.composer) this.setState({ composer: null }); };
+    window.addEventListener('keydown', this.onKey);
+  }
+  componentDidUpdate() {
+    const fr = !!this.props.firstRun;
+    if (fr !== this.fr) { this.fr = fr; this.setState(this.fresh(fr)); }
+  }
+  componentWillUnmount() { clearInterval(this.timer); clearTimeout(this.toastT); window.removeEventListener('keydown', this.onKey); }
+
+  tick() {
+    const now = Date.now(), dt = (now - this.lastTick) / 1000;
+    this.lastTick = now;
+    const s = this.state;
+    const busy = s.pages.some(p => p.status !== 'done') || s.videos.some(v => v.status !== 'done');
+    const reviewing = s.reviewAt && now - s.reviewAt < 90000;
+    if (!busy && !s.playing && !reviewing) return;
+    const done = [];
+    const step = it => {
+      if (it.status === 'done') return it;
+      const el = now - it.startedAt;
+      if (el >= it.buildMs) { done.push(it.title); return { ...it, status: 'done', when: 'just now' }; }
+      if (it.status === 'queued' && el > 2000) return { ...it, status: 'building' };
+      return it;
+    };
+    const next = { now, pages: s.pages.map(step), videos: s.videos.map(step) };
+    if (s.playing) {
+      const v = s.videos.find(x => x.id === s.selVideo) || s.videos[0];
+      const t = s.t + dt;
+      if (!v || t >= v.lengthS) { next.t = v ? v.lengthS : 0; next.playing = false; } else next.t = t;
+    }
+    this.setState(next);
+    if (done.length) this.toast(`“${done[0]}” is ready`);
+  }
+
+  toast(msg) { clearTimeout(this.toastT); this.setState({ toast: msg }); this.toastT = setTimeout(() => this.setState({ toast: null }), 2800); }
+  go(tab) { this.setState({ tab, renaming: null, confirmDel: null, playing: false }); }
+
+  indet(h) {
+    const e = React.createElement;
+    return e('div', { style: { position: 'relative', width: '100%', height: h, borderRadius: h, background: P3, overflow: 'hidden' } },
+      e('div', { style: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '38%', borderRadius: h, background: ACC, animation: 'smSlide 1.4s ease-in-out infinite' } }));
+  }
+  pulse(color) {
+    return React.createElement('span', { style: { display: 'inline-block', flex: 'none', width: 7, height: 7, borderRadius: '50%', background: color, animation: 'smPulse 1.2s ease-in-out infinite' } });
+  }
+
+  defaults(kind, id) {
+    if (kind === 'page') { const t = PT(id); return { audience: t.audience, length: t.length, reads: t.reads.slice(), focus: '', topic: t.topic || '' }; }
+    const t = VT(id); return { kind: t.kind, target: t.target || '', style: t.style, length: t.length, mascot: t.mascot, focus: '' };
+  }
+  openComposer(kind, tplId, editId) {
+    const style = this.props.composerStyle || 'Split';
+    if (editId) {
+      const it = (kind === 'page' ? this.state.pages : this.state.videos).find(x => x.id === editId);
+      if (!it) return;
+      const cfg = kind === 'page' ? { ...it.cfg, reads: it.cfg.reads.slice() } : { ...it.cfg };
+      this.setState({ composer: { kind, step: 'config', tplId: it.tpl, cfg, editId }, renaming: null, confirmDel: null, playing: false });
+      return;
+    }
+    const id = tplId || (kind === 'page' ? PAGE_TPLS : VIDEO_TPLS)[0].id;
+    this.setState({ composer: { kind, step: !tplId && style === 'Gallery' ? 'pick' : 'config', tplId: id, cfg: this.defaults(kind, id), editId: null }, renaming: null, confirmDel: null, playing: false });
+  }
+  pickTpl(id) { this.setState(st => ({ composer: { ...st.composer, tplId: id, step: 'config', cfg: this.defaults(st.composer.kind, id) } })); }
+  setCfg(k, v) { this.setState(st => ({ composer: { ...st.composer, cfg: { ...st.composer.cfg, [k]: v } } })); }
+  toggleRead(id) {
+    const r = this.state.composer.cfg.reads;
+    this.setCfg('reads', r.includes(id) ? r.filter(x => x !== id) : r.concat(id));
+  }
+  addChip(text) { const f = (this.state.composer.cfg.focus || '').trim(); this.setCfg('focus', f ? `${f.replace(/[.;]$/, '')}. ${text}` : text); }
+
+  pagePrompt(tplId, c) {
+    const T = PT(tplId);
+    const lines = [T.page === 'Custom topic' ? `Page: Custom topic: ${c.topic || '…'}` : `Page: ${T.page}`, `Audience: ${c.audience}`, `Length: ${c.length}`,
+      `Read from: ${READS.filter(r => c.reads.includes(r.id)).map(r => r.label).join(', ') || 'nothing selected'}`];
+    if (c.focus) lines.push(c.focus);
+    return lines;
+  }
+  videoPrompt(c) {
+    const lines = [`Video kind: ${c.kind}`];
+    if (c.kind !== 'Project demo' && c.target) lines.push(`Video target: ${c.target}`);
+    lines.push(`Video style: ${c.style}`, `Video length: ${c.length}`, `Character: ${c.mascot ? 'on' : 'off'}`);
+    if (c.focus) lines.push(c.focus);
+    return lines;
+  }
+
+  create(kind, tplId, cfg) {
+    const now = Date.now(), suffix = now.toString(36).slice(-4);
+    if (kind === 'page') {
+      const T = PT(tplId);
+      const title = T.page === 'Custom topic' ? (cfg.topic.split(':')[0].trim() || 'Untitled topic') : T.name;
+      const id = `${slug(title)}-${suffix}`;
+      const item = { id, title, tpl: tplId, when: '', status: 'queued', startedAt: now, buildMs: 9000, cfg: { ...cfg, reads: cfg.reads.slice() } };
+      this.setState(st => ({ pages: [item, ...st.pages], selPage: id, tab: 'pages', composer: null, renaming: null, confirmDel: null }));
+    } else {
+      const T = VT(tplId), tgt = (cfg.target || '').trim();
+      const title = cfg.kind === 'Feature' && tgt ? `${tgt} spotlight` : cfg.kind === 'Blog post' && tgt ? tgt.split('/').pop().replace(/\.[a-z]+$/i, '').replace(/[-_]+/g, ' ') : T.id === 'custom' ? 'Untitled video' : T.name;
+      const id = `${slug(title)}-${suffix}`;
+      const item = { id, title, tpl: tplId, kind: KIND_SLUG[cfg.kind], lengthS: cfg.length, style: cfg.style === 'Auto' ? 'Fun' : cfg.style, when: '', status: 'queued', startedAt: now, buildMs: 15000,
+        lufs: -16.0, peak: -1.2, speech: Math.round(cfg.length * 0.8), grade: 6.4, kb: cfg.length > 30 ? 702 : 388, cfg: { ...cfg } };
+      this.setState(st => ({ videos: [item, ...st.videos], selVideo: id, tab: 'videos', composer: null, playing: false, t: 0, renaming: null, confirmDel: null }));
+    }
+  }
+  rebuild(kind, id, tplId, cfg) {
+    const key = kind === 'page' ? 'pages' : 'videos';
+    this.setState(st => ({
+      [key]: st[key].map(x => x.id !== id ? x : { ...x, tpl: tplId, cfg: kind === 'page' ? { ...cfg, reads: cfg.reads.slice() } : { ...cfg }, status: 'queued', startedAt: Date.now(), buildMs: kind === 'page' ? 9000 : 15000,
+        ...(kind === 'video' ? { lengthS: cfg.length, kind: KIND_SLUG[cfg.kind], style: cfg.style === 'Auto' ? x.style : cfg.style } : {}) }),
+      composer: null, playing: false, t: 0 }));
+  }
+  quick(kind, tplId) {
+    if (kind === 'page' && PT(tplId).page === 'Custom topic' && !PT(tplId).topic) { this.openComposer(kind, tplId); return; }
+    this.create(kind, tplId, this.defaults(kind, tplId));
+  }
+  del(kind, id) {
+    const key = kind === 'page' ? 'pages' : 'videos', selKey = kind === 'page' ? 'selPage' : 'selVideo';
+    this.setState(st => { const list = st[key].filter(x => x.id !== id); return { [key]: list, [selKey]: list.length ? list[0].id : null, confirmDel: null, playing: false, t: 0 }; });
+  }
+  saveRename() {
+    const s = this.state, id = s.renaming;
+    if (!id) return;
+    const title = s.draft.trim();
+    const fix = list => list.map(x => x.id === id && title ? { ...x, title } : x);
+    this.setState({ pages: fix(s.pages), videos: fix(s.videos), renaming: null });
+  }
+  scenesFor(v) {
+    if (SCENES[v.id]) return SCENES[v.id];
+    const T = VT(v.tpl), n = T.scenes.length;
+    return T.scenes.map((label, i) => ({ t: Math.round(i * v.lengthS / n), label, line: i === 0 ? v.title : '' }));
+  }
+  seg(options, value, set) {
+    return options.map(o => { const on = o === value; return { label: o, pick: () => set(o), bg: on ? PL : 'transparent', fg: on ? INK : I3, fw: on ? 600 : 500, sh: on ? '0 1px 2px rgba(26,22,18,.14)' : 'none' }; });
+  }
+  cards(kind) {
+    const isPage = kind === 'page';
+    return (isPage ? PAGE_TPLS : VIDEO_TPLS).map(t => {
+      const sty = isPage ? null : ST(t.style);
+      return {
+        name: t.name, blurb: t.blurb,
+        preset: isPage ? `${t.audience.toLowerCase()} · ${t.length.toLowerCase()}` : `${t.kind.toLowerCase()} · ${t.length}s`,
+        pvBg: isPage ? P2 : sty.bg, pvFg: isPage ? I2 : sty.fg, pvAcc: isPage ? ACC : sty.acc, pvFont: isPage ? SANS : sty.font,
+        pvEyebrow: isPage ? (t.page === 'Custom topic' ? 'PAGE · CUSTOM TOPIC' : `PAGE · ${t.page.toUpperCase()}`) : `${t.length} S · ${t.style.toUpperCase()}`,
+        lines: (isPage ? t.covers : t.scenes).slice(0, 4),
+        quick: () => this.quick(kind, t.id),
+        customize: () => this.openComposer(kind, t.id),
+        quickLabel: isPage && t.id === 'custom' ? 'Name a topic' : 'Generate',
+      };
+    });
+  }
+  graph() {
+    const s = this.state;
+    const byId = {}; G_NODES.forEach(n => { byId[n.id] = n; });
+    const f = FINDINGS.find(x => x.id === s.hoverFinding);
+    let focus = null;
+    if (f) focus = new Set(f.nodes);
+    else if (s.hoverNode) { focus = new Set([s.hoverNode]); G_EDGES.forEach(([a, b]) => { if (a === s.hoverNode) focus.add(b); if (b === s.hoverNode) focus.add(a); }); }
+    const flagged = {}; FINDINGS.forEach(x => { flagged[x.node] = x.type; });
+    const nodes = G_NODES.map(n => {
+      const st = NODE_ST[n.type], x = GX[n.c], y = n.y, flag = flagged[n.id];
+      let fill = st.fill, stroke = st.stroke, sw = st.sw, lfill = st.lfill;
+      if (flag === 'broken-link') { fill = PAPER; stroke = ACC; sw = 2; lfill = ACC; }
+      if (flag === 'stale') { fill = PAPER; stroke = ACC2; sw = 2.5; lfill = I2; }
+      const hot = !!focus && focus.has(n.id);
+      const r = hot ? st.r + 1.5 : st.r;
+      let lx = x + r + 6, ly = y + 3.5, anchor = 'start';
+      if (n.lab === 'above') { lx = x; ly = y - r - 6; anchor = 'middle'; }
+      if (n.lab === 'aboveL') { lx = x + 4; ly = y - r - 6; anchor = 'end'; }
+      return { x, y, r, fill, stroke, sw, dash: st.dash || 'none', lfill, fw: hot ? 700 : st.fw, lx, ly, anchor, label: n.label,
+        sub: n.sub || '', sy: y + r + 15, op: !focus || hot ? 1 : 0.25,
+        enter: () => this.setState({ hoverNode: n.id }), leave: () => this.setState({ hoverNode: null }) };
+    });
+    const edges = G_EDGES.map(([a, b, kind]) => {
+      const A = byId[a], B = byId[b], x1 = GX[A.c], y1 = A.y, x2 = GX[B.c], y2 = B.y, mx = (x1 + x2) / 2;
+      const on = !focus || (focus.has(a) && focus.has(b)), broken = kind === 'broken';
+      return { d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`, stroke: broken ? ACC : focus && on ? I2 : I4, w: broken ? 1.6 : 1.2, dash: broken ? '5 4' : 'none', op: on ? (broken || focus ? 1 : 0.6) : 0.12 };
+    });
+    let caption = 'Hover a doc to see where it lives and what links to it.';
+    const hn = s.hoverNode && byId[s.hoverNode];
+    if (hn) caption = `${hn.path} · links out ${G_EDGES.filter(e => e[0] === hn.id).length} · linked from ${G_EDGES.filter(e => e[1] === hn.id).length}`;
+    else if (f) caption = `${f.type} · ${f.where}`;
+    const docs = G_NODES.filter(n => n.type !== 'missing').reduce((a, n) => a + (n.n || 1), 0);
+    return { nodes, edges, caption, docs, links: G_EDGES.length };
+  }
+
+  renderVals() {
+    const s = this.state, now = s.now || Date.now();
+    const nav = this.props.navStyle || 'Key buttons';
+    const cmpStyle = this.props.composerStyle || 'Split';
+    const pages = s.pages, videos = s.videos;
+    const pBusy = pages.filter(p => p.status !== 'done'), vBusy = videos.filter(v => v.status !== 'done');
+    const fCount = FINDINGS.length;
+    const meta = (list, busy, noun) => !list.length ? 'Nothing generated yet' : busy.length ? `${busy.length} building · ${list.length - busy.length} ready` : `${list.length} ${noun}${list.length === 1 ? '' : 's'} · latest ${list[0].when}`;
+    const pagesMeta = meta(pages, pBusy, 'page'), videosMeta = meta(videos, vBusy, 'video'), toolsMeta = `Review MD network · ${fCount} findings`;
+    const key = on => on ? { bg: INK, fg: PAPER, border: INK, iconBg: ACC, iconFg: ON_ACC, metaFg: RULE, badgeBg: I2, badgeFg: PAPER }
+      : { bg: PL, fg: INK, border: RULE, iconBg: P3, iconFg: I2, metaFg: I3, badgeBg: P3, badgeFg: I2 };
+    const tabSt = on => ({ fg: on ? INK : I3, line: on ? ACC : 'transparent' });
+    const showEmpty = (s.tab === 'pages' && !pages.length) || (s.tab === 'videos' && !videos.length);
+    const stateOf = it => it.status === 'queued' ? 'QUEUED' : 'BUILDING';
+    const elapsedOf = it => it.status === 'queued' ? 'Waiting to start' : `Started ${ago(now - it.startedAt)}`;
+    const metaOf = it => it.status === 'queued' ? 'Queued' : `Building… started ${ago(now - it.startedAt)}`;
+
+    const curPage = pages.find(p => p.id === s.selPage) || pages[0] || null;
+    const pageItems = pages.map(p => {
+      const sel = !!curPage && p.id === curPage.id, busy = p.status !== 'done', T = PT(p.tpl);
+      return {
+        title: p.title, meta: busy ? metaOf(p) : `${T.page === 'Custom topic' ? 'custom topic' : T.name.toLowerCase()} · ${p.when}`, metaFg: busy ? ACC : I3,
+        border: sel ? ACC : RULE, bg: sel ? PL : 'transparent', titleFg: sel ? INK : I2,
+        building: busy, bar: busy ? this.indet(3) : null, select: () => this.setState({ selPage: p.id, renaming: null, confirmDel: null }),
+        renaming: s.renaming === p.id, notRenaming: s.renaming !== p.id, showActions: sel && !busy && s.renaming !== p.id,
+        confirming: s.confirmDel === p.id, notConfirming: s.confirmDel !== p.id,
+        rename: () => this.setState({ renaming: p.id, draft: p.title, confirmDel: null }),
+        askDelete: () => this.setState({ confirmDel: p.id }), doDelete: () => this.del('page', p.id),
+      };
+    });
+    let cp = {}, gp = { sections: [] };
+    if (curPage) {
+      const T = PT(curPage.tpl), busy = curPage.status !== 'done', c = curPage.cfg, known = ['overview', 'how-it-works', 'faq'].includes(curPage.id);
+      const kindName = T.page === 'Custom topic' ? 'Custom topic' : T.name;
+      cp = {
+        title: curPage.title, sub: `${kindName} · ${c.audience.toLowerCase()} · ${c.length.toLowerCase()}${busy ? '' : ` · sonnet · ${curPage.when}`}`,
+        ready: !busy, building: busy, frameBg: busy ? P2 : INK, frameBorder: busy ? RULE : INK,
+        isOverview: !busy && curPage.id === 'overview', isHow: !busy && curPage.id === 'how-it-works', isFaq: !busy && curPage.id === 'faq', isGeneric: !busy && !known,
+        stateLabel: stateOf(curPage), elapsed: elapsedOf(curPage), pulse: busy ? this.pulse(ACC) : null, bigBar: busy ? this.indet(4) : null,
+        prompt: this.pagePrompt(curPage.tpl, c), regen: () => this.openComposer('page', curPage.tpl, curPage.id),
+      };
+      gp = { eyebrow: `${kindName.toUpperCase()} · FOR ${c.audience.toUpperCase()}`, title: curPage.title, lede: T.lede, focus: c.focus, hasFocus: !!c.focus,
+        sections: T.id === 'custom' ? [{ h: c.topic || 'Your topic', p: T.sample[0].p }] : T.sample };
+    }
+
+    const curVideo = videos.find(v => v.id === s.selVideo) || videos[0] || null;
+    const videoItems = videos.map(v => {
+      const sel = !!curVideo && v.id === curVideo.id, busy = v.status !== 'done', sty = ST(v.style);
+      return {
+        title: v.title, meta: busy ? metaOf(v) : `${v.kind} · ${v.lengthS}s · ${v.when}`, meta2: `LUFS ${v.lufs} · grade ${v.grade}`, hasMeta2: !busy, metaFg: busy ? ACC : I3,
+        border: sel ? ACC : RULE, bg: sel ? PL : 'transparent', titleFg: sel ? INK : I2,
+        thumbBg: busy ? P3 : sty.bg, thumbFg: busy ? I3 : sty.fg, thumbFont: sty.font, thumbWeight: sty.weight, thumbText: busy ? '· · ·' : v.title, dur: clock(v.lengthS),
+        building: busy, bar: busy ? this.indet(3) : null, select: () => this.setState({ selVideo: v.id, renaming: null, confirmDel: null, playing: false, t: 0 }),
+        renaming: s.renaming === v.id, notRenaming: s.renaming !== v.id, showActions: sel && !busy && s.renaming !== v.id,
+        confirming: s.confirmDel === v.id, notConfirming: s.confirmDel !== v.id,
+        rename: () => this.setState({ renaming: v.id, draft: v.title, confirmDel: null }),
+        askDelete: () => this.setState({ confirmDel: v.id }), doDelete: () => this.del('video', v.id),
+      };
+    });
+    let cv = {};
+    if (curVideo) {
+      const busy = curVideo.status !== 'done', sty = ST(curVideo.style), dur = curVideo.lengthS, scenes = this.scenesFor(curVideo);
+      const t = Math.min(s.t, dur);
+      let idx = 0; scenes.forEach((x, i) => { if (x.t <= t) idx = i; });
+      const sc = scenes[idx] || { label: curVideo.title, line: '' };
+      const src = SOURCES[curVideo.id] || [{ claim: 'What the project is and who it’s for', source: 'README.md', ref: 'Overview' }, { claim: 'How to run it', source: 'package.json', ref: 'scripts' }];
+      cv = {
+        ready: !busy, building: busy, title: curVideo.title,
+        sub: `${curVideo.kind} · ${dur}s · ${curVideo.style.toLowerCase()}${busy ? '' : ` · ${curVideo.when}`}`,
+        bg: sty.bg, fg: sty.fg, acc: sty.acc, font: sty.font, weight: sty.weight, italic: sty.italic, track: sty.track, caseT: sty.caseT,
+        eyebrow: curVideo.title.toUpperCase(), sceneNo: `${String(idx + 1).padStart(2, '0')} / ${String(scenes.length).padStart(2, '0')}`,
+        scene: sc.label, line: sc.line, mascot: curVideo.cfg.mascot ? 'with mascot' : '',
+        paused: !s.playing, playing: s.playing, time: `${clock(t)} / ${clock(dur)}`, pct: `${(t / dur) * 100}%`,
+        marks: scenes.slice(1).map(x => ({ left: `${(x.t / dur) * 100}%`, label: x.label })),
+        muteLabel: s.muted ? 'Tap for sound' : 'Mute', muted: s.muted, unmuted: !s.muted,
+        scenes: scenes.map((x, i) => ({ at: clock(x.t), label: x.label, seek: () => this.setState({ t: x.t }), bg: i === idx ? PL : 'transparent', border: i === idx ? ACC : RULE })),
+        sources: src, srcCount: src.length, lufs: curVideo.lufs, peak: curVideo.peak, speech: `${curVideo.speech}s`, grade: curVideo.grade,
+        checks: [`Length matches sm-demo-duration (${dur}s)`, 'No network-capable APIs', `Under the size cap · ${curVideo.kb} KB of ${dur > 30 ? 4 : 2} MB`],
+        stateLabel: stateOf(curVideo), elapsed: elapsedOf(curVideo), pulse: busy ? this.pulse(ACC) : null, bigBar: busy ? this.indet(4) : null,
+        prompt: this.videoPrompt(curVideo.cfg), lenWord: dur > 30 ? 'one-minute' : '30-second',
+        regen: () => this.openComposer('video', curVideo.tpl, curVideo.id),
+      };
+    }
+
+    const c = s.composer;
+    let cmp = { open: false };
+    if (c) {
+      const isPage = c.kind === 'page', tpls = isPage ? PAGE_TPLS : VIDEO_TPLS, T = isPage ? PT(c.tplId) : VT(c.tplId), cfg = c.cfg;
+      const editItem = c.editId ? (isPage ? pages : videos).find(x => x.id === c.editId) : null;
+      const pick = c.step === 'pick', needsTopic = isPage && T.page === 'Custom topic', canGo = !needsTopic || !!(cfg.topic || '').trim();
+      cmp = {
+        open: true, isPage, isVideo: !isPage,
+        title: editItem ? `Regenerate “${editItem.title}”` : isPage ? 'Generate page' : 'Generate video',
+        sub: editItem ? 'Same settings as last time — change anything before it rebuilds.' : pick ? 'Start from a pre-built configuration. Generate it as-is, or customize it first.' : 'Pick a starting point — every setting below is pre-filled from it and yours to change.',
+        showList: !pick && cmpStyle === 'Split' && !editItem, showGallery: pick, showConfig: !pick, showBack: !pick && cmpStyle === 'Gallery' && !editItem,
+        list: tpls.map(t => ({ name: t.name, blurb: t.blurb, preset: isPage ? `${t.audience.toLowerCase()} · ${t.length.toLowerCase()}` : `${t.kind.toLowerCase()} · ${t.length}s · ${t.style.toLowerCase()}`,
+          pick: () => this.pickTpl(t.id), bg: t.id === c.tplId ? PL : 'transparent', border: t.id === c.tplId ? ACC : 'transparent' })),
+        cards: this.cards(c.kind),
+        eyebrow: editItem ? `REBUILDING · ${editItem.id}` : `TEMPLATE · ${T.name.toUpperCase()}`, tplName: T.name, tplBlurb: T.blurb,
+        coversLabel: isPage ? 'Will cover' : 'Scenes', covers: isPage ? T.covers : T.scenes,
+        needsTopic, topic: cfg.topic || '',
+        audOpts: isPage ? this.seg(AUDIENCES, cfg.audience, v => this.setCfg('audience', v)) : [],
+        lenOpts: isPage ? this.seg(LENGTHS, cfg.length, v => this.setCfg('length', v)) : [],
+        readOpts: isPage ? READS.map(r => { const on = cfg.reads.includes(r.id); return { label: r.label, toggle: () => this.toggleRead(r.id), bg: on ? INK : PL, fg: on ? PAPER : I2, border: on ? INK : RULE, mark: on ? '✓' : '+' }; }) : [],
+        kindOpts: !isPage ? this.seg(KINDS, cfg.kind, v => this.setCfg('kind', v)) : [],
+        needsTarget: !isPage && cfg.kind !== 'Project demo', targetLabel: cfg.kind === 'Feature' ? 'Feature' : 'Post',
+        targetHint: cfg.kind === 'Feature' ? 'Feature name, e.g. Scheduler / PRD queue' : 'Post path or URL', target: cfg.target || '',
+        styleOpts: !isPage ? STYLES.map(x => ({ ...x, pick: () => this.setCfg('style', x.id), ring: x.id === cfg.style ? `0 0 0 2px ${PAPER}, 0 0 0 4px ${ACC}` : 'none', fw: x.id === cfg.style ? 700 : 500 })) : [],
+        vlenOpts: !isPage ? this.seg(['30 seconds', '1 minute'], cfg.length === 60 ? '1 minute' : '30 seconds', v => this.setCfg('length', v === '1 minute' ? 60 : 30)) : [],
+        mascotTrack: cfg.mascot ? ACC3 : RULE, mascotKnob: cfg.mascot ? '18px' : '2px',
+        focus: cfg.focus || '', focusHint: isPage ? 'Anything to emphasize or avoid? e.g. lead with the scheduler' : 'What should the video focus on? e.g. end on the install line',
+        chips: T.chips.map(label => ({ label, add: () => this.addChip(label) })),
+        agent: isPage ? 'project-home-builder' : 'demo-video-builder',
+        promptLine: (isPage ? this.pagePrompt(c.tplId, cfg) : this.videoPrompt(cfg)).join(' · '),
+        goLabel: editItem ? 'Regenerate' : isPage ? 'Generate page' : 'Generate video', goOpacity: canGo ? 1 : 0.45, goCursor: canGo ? 'pointer' : 'not-allowed',
+      };
+    }
+
+    const g = this.graph();
+    const reviewRunning = !!s.reviewAt && now - s.reviewAt < 90000;
+    const bgCount = pBusy.length + vBusy.length;
+
+    return {
+      navIsKeys: nav === 'Key buttons', navIsTabs: nav === 'Tabs', navIsSidebar: nav === 'Sidebar',
+      goPages: () => this.go('pages'), goVideos: () => this.go('videos'), goTools: () => this.go('tools'),
+      kp: key(s.tab === 'pages'), kv: key(s.tab === 'videos'), kt: key(s.tab === 'tools'),
+      tp: tabSt(s.tab === 'pages'), tv: tabSt(s.tab === 'videos'), tt: tabSt(s.tab === 'tools'),
+      pagesMeta, videosMeta, toolsMeta, pageCount: pages.length, videoCount: videos.length, fCount,
+      sideItems: [['pages', 'Pages', String(pages.length)], ['videos', 'Videos', String(videos.length)], ['tools', 'Tools', `${fCount} findings`]].map(([id, label, m]) => {
+        const on = s.tab === id;
+        return { label, meta: m, go: () => this.go(id), bg: on ? PAPER : 'transparent', fg: on ? INK : I2, fw: on ? 600 : 500, dot: on ? ACC : I4, metaFg: id === 'tools' ? ACC : I3 };
+      }),
+      tabLabel: { pages: 'Pages', videos: 'Videos', tools: 'Tools' }[s.tab], tabMeta: { pages: pagesMeta, videos: videosMeta, tools: toolsMeta }[s.tab],
+      showEmpty, showPages: s.tab === 'pages' && pages.length > 0, showVideos: s.tab === 'videos' && videos.length > 0, showTools: s.tab === 'tools',
+      empty: s.tab === 'videos'
+        ? { eyebrow: 'NO VIDEOS YET', title: 'Show the project in under a minute', text: 'Videos are short, self-contained animations — 30 seconds or a minute. Each starting point below is a pre-built configuration: generate it as-is, or customize it first.', cards: this.cards('video') }
+        : { eyebrow: 'NO PAGES YET', title: 'Start this project’s library', text: 'Pages explain the project in writing, grounded in what the builder actually reads. Each starting point below is a pre-built configuration: generate it as-is, or customize it first.', cards: this.cards('page') },
+      newPage: () => this.openComposer('page'), newVideo: () => this.openComposer('video'),
+      pageItems, cp, gp, videoItems, cv,
+      draft: s.draft, onDraft: e => this.setState({ draft: e.target.value }),
+      onDraftKey: e => { if (e.key === 'Enter') this.saveRename(); else if (e.key === 'Escape') this.setState({ renaming: null }); },
+      saveRename: () => this.saveRename(), cancelDelete: () => this.setState({ confirmDel: null }),
+      openSession: () => this.toast('Opens the Epic in Sessions'),
+      togglePlay: () => { if (!curVideo || curVideo.status !== 'done') return; if (s.playing) this.setState({ playing: false }); else { this.lastTick = Date.now(); this.setState({ playing: true, t: s.t >= curVideo.lengthS ? 0 : s.t }); } },
+      restart: () => { this.lastTick = Date.now(); this.setState({ t: 0, playing: true }); },
+      seekBar: e => { if (!curVideo) return; const r = e.currentTarget.getBoundingClientRect(); const k = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); this.setState({ t: k * curVideo.lengthS }); },
+      toggleMute: () => this.setState({ muted: !s.muted }),
+      scope: s.scope, onScope: e => this.setState({ scope: e.target.value }),
+      modeOpts: this.seg(['Full review', 'Drift check'], s.mode, v => this.setState({ mode: v })),
+      runReview: () => { this.setState({ reviewAt: Date.now() }); this.toast(`Architect session started · ${s.mode} · ${s.scope}`); },
+      reviewRunning, reviewIdle: !reviewRunning,
+      reviewText: `${s.mode} of ${s.scope === 'Whole project' ? 'the whole project' : s.scope} started ${ago(now - s.reviewAt)} in an architect session. It reports first and changes no files until you approve.`,
+      pulseAcc: this.pulse(ACC), pulseBar: this.pulse(ACC),
+      gDocs: g.docs, gLinks: g.links, gNodes: g.nodes, gEdges: g.edges, gCaption: g.caption,
+      findings: FINDINGS.map(f => ({ ...f, enter: () => this.setState({ hoverFinding: f.id }), leave: () => this.setState({ hoverFinding: null }),
+        bg: s.hoverFinding === f.id ? P2 : 'transparent',
+        tagBg: f.type === 'broken-link' ? ACC : f.type === 'stale' ? ACC2 : P3, tagFg: f.type === 'broken-link' ? ON_ACC : f.type === 'stale' ? INK : I2,
+        open: () => this.toast(`Opens ${f.file} in File Explorer`) })),
+      cmp, cmpBack: () => this.setState(st => ({ composer: { ...st.composer, step: 'pick' } })),
+      closeComposer: () => this.setState({ composer: null }), stop: e => e.stopPropagation(),
+      onTopic: e => this.setCfg('topic', e.target.value), onTarget: e => this.setCfg('target', e.target.value), onFocus: e => this.setCfg('focus', e.target.value),
+      toggleMascot: () => this.setCfg('mascot', !(c && c.cfg.mascot)),
+      cmpGenerate: () => {
+        if (!c) return;
+        if (c.kind === 'page' && PT(c.tplId).page === 'Custom topic' && !(c.cfg.topic || '').trim()) return;
+        if (c.editId) this.rebuild(c.kind, c.editId, c.tplId, c.cfg); else this.create(c.kind, c.tplId, c.cfg);
+      },
+      bgBuilding: bgCount > 0, bgLabel: `${bgCount} building`,
+      hasToast: !!s.toast, toast: s.toast || '',
+      toolCount: 1, addTool: () => this.toast('Opens the macro editor with Surface: Project Home'),
+      toolItems: [{ name: 'Review MD network', meta: `${fCount} findings · checked 2h ago`, metaFg: ACC, border: ACC, bg: PL, select: () => {} }],
+    };
+  }
+}
+</script>
+</body>
+</html>

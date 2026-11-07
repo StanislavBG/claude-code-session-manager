@@ -14,7 +14,7 @@ React 18 + Vite renderer. Layout (no per-file lists — `ls` it):
 
 **Project Home's artifacts (`home.html`, `demo-video/index.html`) build as background jobs via
 `lib/useMacroLaunch.ts`** (`window.api.macros.dispatchJob` / `jobStatus`) **and `lib/projectPages/useProjectPagesOutput.ts`**;
-`web/project-pages` is gone.
+web/project-pages is gone.
 
 **Tab registry = four files that change together:** `lib/navKey.ts` (`NavKey` union),
 `lib/screenKeys.ts`, `components/screenComponents.tsx`, `lib/navGroups.ts` (`NAV_ITEMS`). The

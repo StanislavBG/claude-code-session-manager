@@ -48,7 +48,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | --- | --- | --- |
 | `src/main/` | DESKTOP HARNESS | **Except** `projectPages.cjs` → WEB PRESENCE (producer of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/scheduler/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
 | `src/preload/` | DESKTOP HARNESS | |
-| `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by web/project-pages/build-renderer.mjs; web/project-pages/generate-font-data.mjs writes library/fontData.ts there). |
+| `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by the retired web/project-pages/build-renderer.mjs; the retired web/project-pages/generate-font-data.mjs and library/fontData.ts were removed in 536d7ed4, no replacement). |
 | `src/seed/` | DESKTOP HARNESS | |
 
 **Ambiguous case, resolved:** `src/main/scheduler.cjs` is DESKTOP HARNESS runtime (it is the app's job
@@ -71,7 +71,7 @@ in `scripts/` is AGENT LAYER + DESKTOP HARNESS only.
 
 | Entry | Partition | Note |
 | --- | --- | --- |
-| `project-pages/` (`render.cjs`, `renderer/`, logic/, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, `generate-font-data.mjs`, __tests__/publish-gate.test.cjs) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. |
+| `project-pages/` (`render.cjs`, `renderer/`, logic/, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, __tests__/publish-gate.test.cjs) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. Retired: generate-font-data.mjs (removed in 536d7ed4, no replacement). |
 | `manual/` (`build.mjs`, `capture-figures.mjs`, `__tests__/`) | WEB PRESENCE | Field Manual build/capture tooling, formerly scripts/build-manual.mjs + scripts/capture-manual-figures.mjs. Reads/writes `session-manager-operations/manual/` (OPERATIONS STATE, unmoved) and writes into `~/Projects/Bilko`. |
 | `remote-app/` | WEB PRESENCE | The phone-remote PWA, formerly web-remote/app/. |
 

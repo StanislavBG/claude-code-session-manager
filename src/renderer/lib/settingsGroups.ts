@@ -21,12 +21,26 @@ export interface SettingGroup {
   advanced?: boolean
 }
 
+/**
+ * Keys another surface owns. General hides them and shows one summary line per
+ * owner instead; `tab` is the Settings tab that edits them (null = a separate
+ * page, not a Settings tab).
+ */
+export const KEY_OWNERS: { id: string; label: string; tab: 'permissions' | 'hooks' | null; keys: string[] }[] = [
+  { id: 'permissions', label: 'Permissions', tab: 'permissions', keys: ['permissions'] },
+  { id: 'hooks', label: 'Hooks', tab: 'hooks', keys: ['hooks', 'disableAllHooks', 'allowedHttpHookUrls', 'httpHookAllowedEnvVars'] },
+  { id: 'mcp', label: 'MCP Servers', tab: null, keys: ['enabledMcpjsonServers', 'disabledMcpjsonServers', 'enableAllProjectMcpServers'] },
+  { id: 'plugins', label: 'Plugins', tab: null, keys: ['enabledPlugins'] },
+]
+
+export const OWNED_KEYS: ReadonlySet<string> = new Set(KEY_OWNERS.flatMap((o) => o.keys))
+
 export const SETTINGS_GROUPS: SettingGroup[] = [
   {
     id: 'essentials',
     title: 'Essentials',
     summary: 'The knobs you reach for first.',
-    keys: ['model', 'language', 'outputStyle', 'permissions'],
+    keys: ['model', 'language', 'outputStyle'],
   },
   {
     id: 'git',
@@ -222,7 +236,7 @@ export function planGroups(allKeys: Set<string>): GroupPlan[] {
   const placed = new Set<string>()
   const plans: GroupPlan[] = []
   for (const g of SETTINGS_GROUPS) {
-    const keys = g.keys.filter((k) => allKeys.has(k))
+    const keys = g.keys.filter((k) => allKeys.has(k) && !OWNED_KEYS.has(k))
     keys.forEach((k) => placed.add(k))
     if (keys.length === 0) continue
     plans.push({
@@ -234,7 +248,7 @@ export function planGroups(allKeys: Set<string>): GroupPlan[] {
     })
   }
   const other = Array.from(allKeys)
-    .filter((k) => !placed.has(k) && k !== '$schema')
+    .filter((k) => !placed.has(k) && k !== '$schema' && !OWNED_KEYS.has(k))
     .sort()
   if (other.length > 0) {
     plans.push({

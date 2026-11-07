@@ -212,7 +212,7 @@ describe('Settings Telemetry/Session Manager tabs are Home-only', () => {
     expect(labels).not.toContain('Session Manager')
   })
 
-  it('bounces back to Guided if navFace flips to project while Telemetry was selected', async () => {
+  it('bounces back to General if navFace flips to project while Telemetry was selected', async () => {
     const el = await mount()
     await act(async () => {
       clickViewTab(el, 'Telemetry')
@@ -223,7 +223,7 @@ describe('Settings Telemetry/Session Manager tabs are Home-only', () => {
       useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
-    // Guided is the only tab whose active-state class survives; assert no
+    // General is the default tab; assert no
     // dead 'active' styling is stuck on a tab that's no longer rendered.
     const labels = viewTabLabels(el)
     expect(labels).not.toContain('Telemetry')

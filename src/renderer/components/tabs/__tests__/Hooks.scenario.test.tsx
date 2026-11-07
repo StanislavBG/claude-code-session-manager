@@ -4,12 +4,9 @@ import { act } from 'react-dom/test-utils'
 import { Hooks } from '../Hooks'
 import { useConfig, type FileState } from '../../../state/config'
 import { useToast } from '../../../state/toast'
-import { useLayout } from '../../../state/layout'
-import { useSessions } from '../../../state/sessions'
-import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness, clickViewTab } from './_navfaceHarness'
+import { HOME, useNavfaceHarness, clickViewTab } from './_navfaceHarness'
 
 const USER_PATH = `${HOME}/.claude/settings.json`
-const PROJECT_PATH = `${PROJECT_CWD}/.claude/settings.json`
 
 function installWindowApiMock() {
   const api = {
@@ -101,20 +98,6 @@ describe('Hooks no-clobber on bad draft', () => {
     await click(buttonByText(el, '+ add group'))
     expect(setDraft).not.toHaveBeenCalled()
     expect(saveJson).not.toHaveBeenCalled()
-  })
-
-  it('invalid target draft: override gives an error toast and no setDraft', async () => {
-    useLayout.setState({ navFace: 'project' })
-    useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
-    const { setDraft, saveJson } = seedDrafts({ [PROJECT_PATH]: '{ "permissions": { ' })
-    const el = await mount()
-    // Unset schema keys render as ghost rows whose "set" button calls overrideInto.
-    const set = buttonByText(el, 'set')
-    expect(set).toBeTruthy()
-    await click(set)
-    expect(setDraft).not.toHaveBeenCalled()
-    expect(saveJson).not.toHaveBeenCalled()
-    expect(errorToasts().some((t) => /invalid JSON/i.test(t.message))).toBe(true)
   })
 
   it('valid draft patches only hooks.<event> when adding a group', async () => {

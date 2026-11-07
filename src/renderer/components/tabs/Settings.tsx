@@ -4,7 +4,10 @@ import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
 import { JsonEditor } from '../ui/JsonEditor'
 import { EmptyState } from '../ui/EmptyState'
-import { EffectiveTree } from '../ui/EffectiveTree'
+import { SourceChip } from '../ui/SourceChip'
+import { PermissionsRulesEditor } from './Permissions'
+import { HooksEventsEditor } from './Hooks'
+import { KEY_OWNERS } from '../../lib/settingsGroups'
 import { EffectiveCards } from '../ui/EffectiveCards'
 import { ViewTabs } from '../ui/ViewTabs'
 import { useConfig } from '../../state/config'
@@ -13,7 +16,7 @@ import { useLayout } from '../../state/layout'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
-import { mergeScopes } from '../../lib/mergeScopes'
+import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { toast } from '../../state/toast'
@@ -51,6 +54,37 @@ export const SETTINGS_SCOPE_NOTES: Record<Scope, { title: string; body: string }
   },
 }
 
+/** One line per key-owner: what it holds in the merged settings, and (for tab owners) a jump to that tab. */
+function OwnedSummaries({
+  effective,
+  onOpenTab,
+}: {
+  effective: Parameters<typeof getAtPath>[0]
+  onOpenTab: (tab: 'permissions' | 'hooks') => void
+}) {
+  return (
+    <ul data-testid="settings-owned-summaries" className="px-3 py-2 space-y-1 text-[11.5px] border-b border-line">
+      {KEY_OWNERS.map((o) => {
+        const set = o.keys.filter((k) => getAtPath(effective, [k]) !== null)
+        const text = set.length ? `${set.length} of ${o.keys.length} keys set (${set.join(', ')})` : 'nothing set'
+        return (
+          <li key={o.id} data-testid={`owned-summary-${o.id}`} className="flex items-center gap-2 text-fg-dim">
+            <span className="font-semibold text-fg w-28 shrink-0">{o.label}</span>
+            <span className="truncate">{text}</span>
+            {o.tab ? (
+              <button type="button" onClick={() => onOpenTab(o.tab!)} className="ml-auto text-accent hover:underline shrink-0">
+                edit in {o.label} tab →
+              </button>
+            ) : (
+              <span className="ml-auto text-fg-faint shrink-0">managed on the {o.label} page</span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 function SettingsComponent() {
   const home = useHomeDir()
   const tabs = useSessions((s) => s.tabs)
@@ -69,7 +103,7 @@ function SettingsComponent() {
   const prevNavFaceRef = useRef(navFace)
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
-  const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'remote' | 'app'>('effective')
+  const [view, setView] = useState<'general' | 'permissions' | 'hooks' | 'raw' | 'telemetry' | 'remote' | 'app'>('general')
 
   // Settings is now HOME-only in the sidebar (navGroups.ts), and every nav
   // path that focuses it asserts navFace: 'home' — but a background split
@@ -91,11 +125,11 @@ function SettingsComponent() {
   // cwd/scope input anywhere in SettingsTelemetry/SettingsAppPrefs, so they
   // render byte-identical regardless of navFace. Project face never offers
   // them (see the ViewTabs options below); this effect just bounces the view
-  // back to 'effective' if you land on the Project face while one of them
+  // back to 'general' if you land on the Project face while one of them
   // was already selected, so the toolbar never shows an active tab that's no
   // longer in its own options list.
   useEffect(() => {
-    if (navFace === 'project' && (view === 'telemetry' || view === 'remote' || view === 'app')) setView('effective')
+    if (navFace === 'project' && (view === 'telemetry' || view === 'remote' || view === 'app')) setView('general')
   }, [navFace, view])
 
   const handleScopeChange = (next: Scope) => {
@@ -134,7 +168,7 @@ function SettingsComponent() {
       } catch (e) {
         // Refuse: an unparseable Raw draft means the user is mid-edit; fix it in Raw first.
         setSaveError(
-          `${target} is not valid JSON (${e instanceof Error ? e.message : String(e)}) — fix it in Raw before using Guided/Tree edits.`
+          `${target} is not valid JSON (${e instanceof Error ? e.message : String(e)}) — fix it in Raw before editing from General.`
         )
         return
       }
@@ -156,8 +190,9 @@ function SettingsComponent() {
         <>
           <ViewTabs
             options={[
-              { key: 'effective', label: 'Guided' },
-              { key: 'tree', label: 'Tree' },
+              { key: 'general', label: 'General' },
+              { key: 'permissions', label: 'Permissions' },
+              { key: 'hooks', label: 'Hooks' },
               { key: 'raw', label: 'Raw' },
               // Machine-wide only — see the reset effect above for why these
               // are hidden on the Project face rather than just left visible
@@ -185,7 +220,7 @@ function SettingsComponent() {
                 }}
               />
               <span className="ml-3 text-fg-faint truncate">
-                {view === 'effective' ? `overrides → ${activePath ?? '—'}` : activePath ?? '—'}
+                {view === 'general' ? `overrides → ${activePath ?? '—'}` : activePath ?? '—'}
               </span>
             </>
           )}
@@ -201,7 +236,7 @@ function SettingsComponent() {
         </>
       }
       footer={
-        view !== 'telemetry' && view !== 'remote' && view !== 'app' && activePath && file ? (
+        view === 'raw' && activePath && file ? (
           <SaveBar
             dirty={file.dirty}
             busy={file.busy}
@@ -240,27 +275,57 @@ function SettingsComponent() {
               <span className="ml-1.5 font-mono text-fg-faint">{activePath}</span>
             )}
           </div>
+          {saveError && view !== 'raw' && (
+            <div role="alert" className="px-3 py-2 border-b border-line text-xs text-red-400">
+              {saveError}
+            </div>
+          )}
           {scope === 'project' && cwd && <SettingsEpicIsolation cwd={cwd} />}
           {scopeNeedsCwd(scope) ? (
             <EmptyState
               title="no active project"
               hint="open a tab in a project directory to edit project or local settings"
             />
-          ) : view === 'effective' ? (
-            <EffectiveCards
-              node={effective}
-              targetScope={scope}
-              onOverride={overrideInto}
-              schema={settingsSchema()}
-            />
-          ) : view === 'tree' ? (
-            <EffectiveTree
-              node={effective}
-              targetScope={scope}
-              onOverride={overrideInto}
-              schema={settingsSchema()}
-            />
+          ) : view === 'general' ? (
+            <>
+              <div className="px-3 pt-2">
+                <SourceChip path={activePath ?? ''} />
+              </div>
+              <OwnedSummaries effective={effective} onOpenTab={setView} />
+              <EffectiveCards
+                node={effective}
+                targetScope={scope}
+                onOverride={overrideInto}
+                schema={settingsSchema()}
+              />
+            </>
+          ) : view === 'permissions' ? (
+            activePath ? (
+              <>
+                <div className="px-3 pt-2">
+                  <SourceChip path={activePath} keyPath={['permissions']} />
+                </div>
+                <PermissionsRulesEditor scope={scope} cwd={cwd} activePath={activePath} />
+              </>
+            ) : (
+              <EmptyState title="resolving…" />
+            )
+          ) : view === 'hooks' ? (
+            activePath ? (
+              <>
+                <div className="px-3 pt-2">
+                  <SourceChip path={activePath} keyPath={['hooks']} />
+                </div>
+                <HooksEventsEditor scope={scope} cwd={cwd} path={activePath} />
+              </>
+            ) : (
+              <EmptyState title="resolving…" />
+            )
           ) : activePath && file ? (
+            <>
+            <div className="px-3 pt-2">
+              <SourceChip path={activePath} />
+            </div>
             <JsonEditor
               path={activePath}
               value={file.draftRaw}
@@ -269,6 +334,7 @@ function SettingsComponent() {
                 setDraft(activePath, v)
               }}
             />
+            </>
           ) : (
             <EmptyState title="resolving…" />
           )}

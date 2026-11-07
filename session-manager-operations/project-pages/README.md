@@ -26,7 +26,7 @@ JavaScript (the home page does not):
 - it is rejected if it references any network-capable API (`fetch`, `XMLHttpRequest`,
   `WebSocket`, `EventSource`, `sendBeacon`, dynamic `import(...)`, `importScripts`,
   `<iframe>`/`<object>`/`<embed>`, `window.open`, or any `src=`/`href=` pointing at
-  `http(s)://` or `//`);
+  http(s):// or `//`);
 - before it is written, a `Content-Security-Policy` meta tag (`default-src 'none';
   script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
   media-src data: blob:; font-src data:; connect-src 'none'`) is injected as the first
@@ -99,7 +99,7 @@ replaces that entry.
 | --- | --- | --- |
 | `project_page_write` | `POST /admin/project-home/pages/write` | `knowledge/<pageId>/` |
 | `project_video_write` | `POST /admin/project-home/videos/write` | `videos/<videoId>/` |
-| `project_home_write` (alias) | `POST /admin/project-home/write` | `knowledge/overview/` |
+| `project_home_write` (alias) | `POST /admin/project-home/write` | knowledge/overview/ |
 | `project_demo_video_write` (alias) | `POST /admin/project-home/demo-video/write` | new `videos/vid-<id>/`, kind `project-demo`, length read from `sm-demo-duration` |
 
 Burrow (and any older caller) keeps using `/admin/project-home/demo-video/write`; the alias
@@ -117,9 +117,9 @@ drives `window.smDemo` when present, else the first `<audio>`/`<video>`.
 ### Migration
 
 `migrateLegacy` runs once per project and is idempotent: `home.html` becomes
-`knowledge/overview/` and `demo-video/index.html` becomes `videos/legacy-<sha10>/`
+knowledge/overview/ and `demo-video/index.html` becomes `videos/legacy-<sha10>/`
 (kind `project-demo`, style `legacy`). The originals are kept as `home.html.migrated` and
-`demo-video/index.html.migrated`; do not delete or restore them.
+demo-video/index.html.migrated; do not delete or restore them.
 
 ### Rename and delete
 

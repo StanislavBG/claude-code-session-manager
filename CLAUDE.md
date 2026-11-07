@@ -106,7 +106,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 
 - **PRD authoring is API-only** — `scheduler_create_prd` is the only way to write a PRD.
   App not running? Stop and ask the human to start it; never hand-write one.
-- Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
+- Flat scheduler/prds/ is **RETIRED** — auto-consolidated into prds-archived/ on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
   rules from two real stuck-job incidents + a pre-queue checklist (§15).

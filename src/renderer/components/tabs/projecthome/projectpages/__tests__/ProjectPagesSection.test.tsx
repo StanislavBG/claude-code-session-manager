@@ -317,6 +317,68 @@ describe('ProjectPagesSection', () => {
     })
   })
 
+  describe('hot-key strip', () => {
+    const STRIP = '[data-testid="project-home-hotkeys"]'
+    const KEY = '[data-testid="project-home-hotkey"]'
+    const REVIEW = macro({ id: 'review-md', label: 'Review MD network', surface: 'project-home' })
+    const WITH_INPUTS = macro({
+      id: 'with-inputs',
+      label: 'Ask',
+      prompt: 'Do {{topic}}',
+      inputs: [{ name: 'topic', label: 'Topic', required: false }],
+    } as Partial<Macro>)
+    const keyBtn = (el: HTMLElement, id: string) =>
+      el.querySelector(`${KEY}[data-macro-id="${id}"]`) as HTMLButtonElement
+
+    it('is absent with only the builtins', () => {
+      const el = mount(<ProjectPagesSection {...props()} />)
+      expect(el.querySelector(STRIP)).toBeNull()
+    })
+
+    it('never lists the builtins, on both pages', async () => {
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], videos: [NEW_V] })} />)
+      const ids = () => Array.from(el.querySelectorAll(KEY)).map((b) => b.getAttribute('data-macro-id'))
+      expect(ids()).toEqual(['review-md'])
+      await switchTo(el, 'videos')
+      expect(ids()).toEqual(['review-md'])
+    })
+
+    it('a no-input macro calls onLaunch once', () => {
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], onLaunch })} />)
+      act(() => keyBtn(el, 'review-md').click())
+      expect(onLaunch).toHaveBeenCalledTimes(1)
+      expect(onLaunch).toHaveBeenCalledWith(REVIEW)
+    })
+
+    it('an input macro opens the form; submit passes values, cancel does not launch', () => {
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, WITH_INPUTS], onLaunch })} />)
+      act(() => keyBtn(el, 'with-inputs').click())
+      expect(onLaunch).not.toHaveBeenCalled()
+      expect(el.querySelector('[data-testid="macro-inputs-form"]')).not.toBeNull()
+      act(() => (el.querySelector('[data-testid="macro-inputs-cancel"]') as HTMLElement).click())
+      expect(el.querySelector('[data-testid="macro-inputs-form"]')).toBeNull()
+      expect(onLaunch).not.toHaveBeenCalled()
+      act(() => keyBtn(el, 'with-inputs').click())
+      const input = el.querySelector('[data-testid="macro-input-topic"]') as HTMLInputElement
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(input, 'cats')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      act(() => (el.querySelector('[data-testid="macro-inputs-start"]') as HTMLElement).click())
+      expect(onLaunch).toHaveBeenCalledTimes(1)
+      expect(onLaunch).toHaveBeenCalledWith(WITH_INPUTS, undefined, { topic: 'cats' })
+    })
+
+    it('disables while launching and shows Starting…', () => {
+      const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], launching: 'review-md' })} />)
+      expect(keyBtn(el, 'review-md').disabled).toBe(true)
+      expect(keyBtn(el, 'review-md').textContent).toContain('Starting…')
+    })
+  })
+
   it('disables the macro button while launching', () => {
     const el = mount(<ProjectPagesSection {...props({ launching: 'builtin-project-home' })} />)
     expect(macroBtn(el, 'builtin-project-home').disabled).toBe(true)

@@ -442,6 +442,13 @@
  },
  {
   "ns": "macros",
+  "method": "removeFromProject",
+  "channel": "macros:remove-from-project",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "macros",
   "method": "dispatchJob",
   "channel": "macros:dispatch-job",
   "kind": "invoke",
@@ -526,6 +533,13 @@
  },
  {
   "ns": "config",
+  "method": "canWrite",
+  "channel": "config:can-write",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
   "method": "watch",
   "channel": "config:watch",
   "kind": "send",
@@ -550,6 +564,20 @@
   "method": "onChanged",
   "channel": "config:changed",
   "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "claudeConfig",
+  "method": "read",
+  "channel": "claudeConfig:read",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "claudeConfig",
+  "method": "patch",
+  "channel": "claudeConfig:patch",
+  "kind": "invoke",
   "remote": "deny"
  },
  {
@@ -621,6 +649,20 @@
   "channel": "voice:get-turn-detector",
   "kind": "invoke",
   "remote": "read"
+ },
+ {
+  "ns": "voice",
+  "method": "getTtsEnabled",
+  "channel": "voice:get-tts-enabled",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "voice",
+  "method": "setTtsEnabled",
+  "channel": "voice:set-tts-enabled",
+  "kind": "invoke",
+  "remote": "mutate"
  },
  {
   "ns": "voice",
@@ -1144,6 +1186,27 @@
   "ns": "plugins",
   "method": "abort",
   "channel": "plugins:abort",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "plugins",
+  "method": "list",
+  "channel": "plugins:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "plugins",
+  "method": "setEnabled",
+  "channel": "plugins:set-enabled",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "plugins",
+  "method": "uninstall",
+  "channel": "plugins:uninstall",
   "kind": "invoke",
   "remote": "deny"
  },

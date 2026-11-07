@@ -1277,4 +1277,100 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
       expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('Draft goal')
     })
   })
+
+  describe('autosave on switch-out', () => {
+    const approveSpy = vi.fn()
+    const updateSpy = vi.fn()
+    const makeEdit = async () => {
+      const { composeEpicIntake } = await import('../../../lib/epicIntake')
+      const intake = composeEpicIntake({ title: 'T', goal: 'G', referencePaths: [], tag: undefined, agentName: 'architect', contextInjections: { 'delegate-implementation': false } as never })
+      return { id: 'draft-9', cwd: '/home/bilko/Projects/alpha', goalText: intake.goalText, claudeSessionId: 'c9', status: 'proposed', createdAt: new Date().toISOString(), completedAt: null, agentType: 'architect', developLoop: false, openingPrompt: intake.openingPrompt, sections: intake.sections, source: 'NewEpicCard' } as never
+    }
+    const type = (el: HTMLElement, id: string, v: string) => act(() => setNativeValue(el.querySelector(`[data-testid="${id}"]`) as HTMLInputElement, v))
+    const click = (el: HTMLElement, id: string) => act(() => (el.querySelector(`[data-testid="${id}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const unmount = async () => { act(() => root!.unmount()); root = createRoot(document.createElement('div')); await act(async () => {}) }
+
+    beforeEach(() => {
+      approveSpy.mockClear(); updateSpy.mockReset(); updateSpy.mockImplementation(async () => ({}))
+      usePromptSessions.setState({ approveProposed: approveSpy, updateProposedDraft: updateSpy } as never)
+    })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('unmounting a typed new card saves it once as a draft', async () => {
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      type(el, 'new-epic-title', 'My title'); type(el, 'new-epic-goal', 'My objective')
+      await unmount()
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][1]).toContain('My objective')
+      expect(createPromptSessionSpy.mock.calls[0][3]).toBe('NewEpicCard autosave')
+      expect(approveSpy).not.toHaveBeenCalled()
+    })
+
+    it('an empty card mints nothing on unmount', async () => {
+      mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await unmount()
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    })
+
+    it('Cancel mints nothing', async () => {
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      type(el, 'new-epic-goal', 'discard me')
+      click(el, 'new-epic-cancel')
+      await unmount()
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    })
+
+    it('a cwd change saves into the old cwd', async () => {
+      useSessions.setState({ tabs: [{ id: 't1', cwd: '/p/one' } as never, { id: 't2', cwd: '/p/two' } as never], activeTabId: 't1' })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      type(el, 'new-epic-goal', 'typed in one')
+      await act(async () => { useSessions.setState({ activeTabId: 't2' }) })
+      await act(async () => {})
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][0]).toBe('/p/one')
+    })
+
+    it('edit mode: debounce coalesces edits into one update; no call when unchanged', async () => {
+      vi.useFakeTimers()
+      const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(updateSpy).not.toHaveBeenCalled()
+      type(el, 'new-epic-goal', 'a'); type(el, 'new-epic-goal', 'ab'); type(el, 'new-epic-goal', 'abc')
+      await act(async () => { await vi.advanceTimersByTimeAsync(799) })
+      expect(updateSpy).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+      expect(updateSpy).toHaveBeenCalledTimes(1)
+      expect((updateSpy.mock.calls[0] as unknown as [string, { goalText: string }])[1].goalText).toContain('abc')
+    })
+
+    it('edit mode: unmount flushes a pending change immediately', async () => {
+      vi.useFakeTimers()
+      const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      type(el, 'new-epic-goal', 'pending')
+      expect(updateSpy).not.toHaveBeenCalled()
+      await unmount()
+      expect(updateSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('no save lands after Start', async () => {
+      vi.useFakeTimers()
+      const el = mount(<NewEpicCard draftEpic={await makeEdit()} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      type(el, 'new-epic-goal', 'edited')
+      click(el, 'new-epic-create')
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+      const afterStart = updateSpy.mock.calls.length
+      expect(approveSpy).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      await unmount()
+      expect(updateSpy.mock.calls.length).toBe(afterStart)
+    })
+
+    it('an autosave failure toasts with the title and does not throw', async () => {
+      createPromptSessionSpy.mockRejectedValueOnce(new Error('disk full'))
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      type(el, 'new-epic-title', 'Keep me'); type(el, 'new-epic-goal', 'x')
+      await unmount()
+      expect(useToast.getState().toasts.some((t) => t.kind === 'error' && /Keep me/.test(t.message) && /disk full/.test(t.message))).toBe(true)
+    })
+  })
 })

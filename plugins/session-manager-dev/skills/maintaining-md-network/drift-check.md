@@ -71,6 +71,10 @@ A backticked path claims the file exists in this repo. The script checks every s
 
 Write examples in plain text, not backticks, unless the path really exists.
 
+Template placeholders: the links check skips a link target that contains double curly braces, a dollar sign followed by curly braces, or an angle-bracket placeholder such as repo in angle brackets. These are template fill-ins, not real paths.
+
+Template folders: a folder of templates, such as docs/templates, holds relative links that only resolve once the template is rendered somewhere else. Pass each such folder as its own `--exclude` prefix, and record the flag in the review record's Drift-check command line.
+
 ## First run: exclude machine records
 
 Machine-written records and runtime folders (job logs, archived PRDs, review records, generated reports) hold thousands of stale path mentions and drown real findings. On the first Full review:

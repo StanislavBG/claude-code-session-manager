@@ -8,7 +8,7 @@
  */
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, beforeEach } from 'vitest';
 const fsp = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
@@ -24,9 +24,17 @@ const tmpDirs = [];
 const servers = [];
 let originalHome;
 let originalProjectRoot;
-const ENV_KEYS = ['SM_CHAT_SESSION_ID', 'SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MAY_QUEUE'];
+const ENV_KEYS = ['SM_CHAT_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MAY_QUEUE'];
 const savedEnv = {};
 for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+
+// Hermetic: ambient session ids (set when the suite runs inside a Claude/SM
+// session) would leak into originClaudeSessionId. Tests that want it set it.
+beforeEach(() => {
+  for (const k of ENV_KEYS) {
+    if (k === 'SM_CHAT_SESSION_ID' || k === 'CLAUDE_CODE_SESSION_ID') delete process.env[k];
+  }
+});
 
 afterEach(async () => {
   for (const k of ENV_KEYS) {

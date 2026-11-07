@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { toast } from './toast'
+import { appSettingsFile } from '../lib/appSettingsFile'
 
 interface ProjectsPrefsState {
   /** Keyed by the project's cwd — a project IS its working directory. */
@@ -23,14 +24,12 @@ function enqueue(task: () => Promise<void>): Promise<void> {
   return run
 }
 
-/** Reads the file fresh; a missing file is an empty pin set, any other failure rejects. */
+const prefsFile = () => appSettingsFile<{ pinned?: Record<string, boolean> }>(FILE)
+
+/** Reads the file fresh; a missing or unreadable file is an empty pin set. */
 async function readPinned(): Promise<Record<string, boolean>> {
-  const r = await window.api.config.readJson(FILE)
-  if (r.exists && r.data && typeof r.data === 'object') {
-    const p = (r.data as { pinned?: unknown }).pinned
-    if (p && typeof p === 'object') return { ...(p as Record<string, boolean>) }
-  }
-  return {}
+  const p = (await prefsFile().read()).pinned
+  return p && typeof p === 'object' ? { ...p } : {}
 }
 
 /** Resolves once every queued pin read/write has settled. */
@@ -74,7 +73,7 @@ export const useProjectsPrefs = create<ProjectsPrefsState>((set) => ({
       if (next[cwd]) delete next[cwd]
       else next[cwd] = true
       try {
-        await window.api.config.writeJson(FILE, { pinned: next })
+        await prefsFile().patch({ pinned: next })
         set({ pinned: next })
       } catch (err) {
         set({ pinned: lastRead })

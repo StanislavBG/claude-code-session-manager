@@ -3,10 +3,11 @@ import { CHAT_VERBOSITY_DEFAULT, isChatVerbosity, type ChatVerbosity } from '../
 import { readUiPrefs, writeUiPrefsPatch } from '../lib/uiPrefs'
 import { knownEpicIdsForCwd } from '../lib/epicIdsForCwd'
 import { toast } from './toast'
+import { appSettingsFile } from '../lib/appSettingsFile'
 
 /**
  * Persisted chat-feed display prefs. Follows the `epicsPrefs.ts` pattern:
- * zustand store + tmp+rename JSON via `window.api.config.writeJson`, hydrated
+ * zustand store + tmp+rename JSON via `appSettingsFile`, hydrated
  * once on mount.
  *
  * Two tiers deliberately, mirroring how the dial is actually used: a global
@@ -59,7 +60,7 @@ function readLevel(v: unknown): ChatVerbosity | null {
 function persist(get: () => ChatPrefsState): void {
   const s = get()
   const payload: PersistedChatPrefs = { verbosity: s.verbosity }
-  window.api.config.writeJson(CHAT_PREFS_FILE, payload).catch(() => {})
+  appSettingsFile<PersistedChatPrefs>(CHAT_PREFS_FILE).patch(payload).catch(() => {})
 }
 
 /**
@@ -70,13 +71,7 @@ function persist(get: () => ChatPrefsState): void {
  * place, untouched — this only ever reads it.
  */
 async function migratePerEpic(cwd: string): Promise<Record<string, ChatVerbosity>> {
-  let legacy: Record<string, unknown> = {}
-  try {
-    const r = await window.api.config.readJson(CHAT_PREFS_FILE)
-    if (r.exists && r.data && typeof r.data === 'object') {
-      legacy = (r.data as { perEpic?: Record<string, unknown> }).perEpic ?? {}
-    }
-  } catch { /* first run / unreadable legacy file — nothing to migrate */ }
+  const legacy = (await appSettingsFile<{ perEpic?: Record<string, unknown> }>(CHAT_PREFS_FILE).read()).perEpic ?? {}
   const knownIds = await knownEpicIdsForCwd(cwd)
   const seeded: Record<string, ChatVerbosity> = {}
   for (const [epicId, v] of Object.entries(legacy)) {
@@ -100,13 +95,10 @@ export const useChatPrefs = create<ChatPrefsState>((set, get) => ({
 
   hydrate: async (cwd) => {
     if (!get().hydrated) {
-      try {
-        const r = await window.api.config.readJson(CHAT_PREFS_FILE)
-        if (r.exists && r.data && typeof r.data === 'object') {
-          const d = r.data as Partial<PersistedChatPrefs>
-          set({ verbosity: readLevel(d.verbosity) ?? CHAT_VERBOSITY_DEFAULT })
-        }
-      } catch { /* first run / unreadable file — fall through to defaults */ }
+      const d = await appSettingsFile<Partial<PersistedChatPrefs>>(CHAT_PREFS_FILE).read()
+      if (Object.keys(d).length > 0) {
+        set({ verbosity: readLevel(d.verbosity) ?? CHAT_VERBOSITY_DEFAULT })
+      }
       set({ hydrated: true })
     }
 

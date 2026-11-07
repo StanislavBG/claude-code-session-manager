@@ -6,7 +6,7 @@
  *   node drift-check.cjs [--root <dir>] [--map <path>] [--file <path>]...
  *                        [--exclude <prefix>]... [--checks links,paths,limits,contents] [--strict-paths]
  *
- * Prints one JSON object { root, map, checkedFiles, findings, counts } to stdout.
+ * Prints one JSON object { root, map, notes, checkedFiles, findings, counts } to stdout.
  * Exit 0 = no findings, 1 = findings, 2 = usage error / missing root.
  */
 
@@ -118,6 +118,7 @@ function parseDoc(text) {
   const rawLines = text.split('\n');
   const links = [];
   const spans = [];
+  const importTokens = [];
   let fence = null;
   let inComment = false;
   rawLines.forEach((raw, idx) => {
@@ -155,10 +156,55 @@ function parseDoc(text) {
       if (t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1);
       links.push({ line: lineNo, target: t });
     }
+    const impRe = /(?:^|\s)@(\S+)/g;
+    while ((m = impRe.exec(noCode))) importTokens.push(m[1]);
     const spanRe = /`([^`]+)`/g;
     while ((m = spanRe.exec(line))) spans.push({ line: lineNo, span: m[1].trim() });
   });
-  return { lines: rawLines, links, spans };
+  return { lines: rawLines, links, spans, importTokens };
+}
+
+const MAX_IMPORT_HOPS = 4;
+
+/** Claude Code `@path` imports of a doc: absolute .md paths inside root. */
+function parseImports(text, fileAbs, root) {
+  const out = [];
+  for (let tok of parseDoc(text).importTokens) {
+    tok = tok.replace(/[.,;:!?)\]}'"]+$/, '');
+    if (!tok || tok.startsWith('~')) continue;
+    if (!/\.md$/i.test(tok)) continue;
+    const abs = path.resolve(path.dirname(fileAbs), tok);
+    const rel = path.relative(root, abs);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    if (!out.includes(abs)) out.push(abs);
+  }
+  return out;
+}
+
+const docInfoCache = new Map(); // abs -> { lines, imports } | null (per process; reset each run)
+
+function docInfo(fileAbs, root) {
+  if (docInfoCache.has(fileAbs)) return docInfoCache.get(fileAbs);
+  let info = null;
+  try {
+    const text = fs.readFileSync(fileAbs, 'utf8');
+    info = { lines: countLines(text), imports: parseImports(text, fileAbs, root) };
+  } catch { /* missing target: ignored */ }
+  docInfoCache.set(fileAbs, info);
+  return info;
+}
+
+/** Own lines + lines of recursively imported .md files (<= 4 hops, each file once). */
+function expandedLineCount(fileAbs, root, seen = new Set(), depth = 0) {
+  if (seen.has(fileAbs)) return 0;
+  const info = docInfo(fileAbs, root);
+  if (!info) return 0;
+  seen.add(fileAbs);
+  let total = info.lines;
+  if (depth < MAX_IMPORT_HOPS) {
+    for (const imp of info.imports) total += expandedLineCount(imp, root, seen, depth + 1);
+  }
+  return total;
 }
 
 const countLines = (text) => {
@@ -184,6 +230,7 @@ function runDriftCheck(options) {
     throw new UsageError(`root is not a directory: ${root}`);
   }
   const checks = new Set(opts.checks);
+  docInfoCache.clear();
 
   let docs;
   let isGit;
@@ -205,11 +252,20 @@ function runDriftCheck(options) {
     map = toPosix(path.relative(root, path.resolve(root, opts.map)));
     if (!fs.existsSync(path.join(root, map))) throw new UsageError(`map not found: ${opts.map}`);
   } else {
-    for (const name of ['CLAUDE.md', 'AGENTS.md']) {
-      const p = path.join(root, name);
-      if (fs.existsSync(p) && /<!--\s*md-network-map/.test(fs.readFileSync(p, 'utf8'))) { map = name; break; }
+    const rootFiles = ['CLAUDE.md', 'AGENTS.md'].map((n) => path.join(root, n)).filter((p) => fs.existsSync(p));
+    const candidates = [...rootFiles];
+    for (const p of rootFiles) {
+      const info = docInfo(p, root);
+      for (const imp of info ? info.imports : []) if (!candidates.includes(imp)) candidates.push(imp);
+    }
+    for (const p of candidates) {
+      let t;
+      try { t = fs.readFileSync(p, 'utf8'); } catch { continue; }
+      if (/<!--\s*md-network-map/.test(t)) { map = toPosix(path.relative(root, p)); break; }
     }
   }
+  const notes = [];
+  if (map === null) notes.push('no md-network-map comment found; the 70-line map limit was not applied');
 
   let trackedList = null;
   const tracked = () => (trackedList || (trackedList = listTracked(root)));
@@ -271,11 +327,16 @@ function runDriftCheck(options) {
     if (checks.has('limits')) {
       const base = path.posix.basename(rel);
       const isRule = /(^|\/)\.claude\/rules\/.+\.md$/.test(rel) && !hasPathsFrontmatter(text);
-      if ((base === 'CLAUDE.md' || base === 'AGENTS.md' || isRule) && lineCount > LIMIT_ALWAYS_LOADED) {
-        findings.push({ kind: 'over-line-limit', file: rel, lines: lineCount, limit: LIMIT_ALWAYS_LOADED });
-      }
-      if (map && rel === map && lineCount > LIMIT_MAP) {
-        findings.push({ kind: 'over-line-limit', file: rel, lines: lineCount, limit: LIMIT_MAP });
+      const alwaysLoaded = base === 'CLAUDE.md' || base === 'AGENTS.md' || isRule;
+      const isMap = !!map && rel === map;
+      if (alwaysLoaded || isMap) {
+        const expandedLines = expandedLineCount(abs, root);
+        if (alwaysLoaded && expandedLines > LIMIT_ALWAYS_LOADED) {
+          findings.push({ kind: 'over-line-limit', file: rel, lines: lineCount, expandedLines, limit: LIMIT_ALWAYS_LOADED });
+        }
+        if (isMap && expandedLines > LIMIT_MAP) {
+          findings.push({ kind: 'over-line-limit', file: rel, lines: lineCount, expandedLines, limit: LIMIT_MAP });
+        }
       }
     }
 
@@ -300,7 +361,7 @@ function runDriftCheck(options) {
   findings.sort((x, y) => (x.file < y.file ? -1 : x.file > y.file ? 1 : (x.line || 0) - (y.line || 0)));
   const counts = {};
   for (const f of findings) counts[f.kind] = (counts[f.kind] || 0) + 1;
-  return { root: toPosix(root), map, checkedFiles: docs, findings, counts };
+  return { root: toPosix(root), map, notes, checkedFiles: docs, findings, counts };
 }
 
 function main() {

@@ -108,7 +108,7 @@ test('--map names the map file', () => {
   const dir = repo({ 'docs/map.md': lines(71) });
   const { json } = run(dir, '--map', 'docs/map.md', '--checks', 'limits');
   expect(json.map).toBe('docs/map.md');
-  expect(json.findings).toEqual([{ kind: 'over-line-limit', file: 'docs/map.md', lines: 71, limit: 70 }]);
+  expect(json.findings).toEqual([{ kind: 'over-line-limit', file: 'docs/map.md', lines: 71, expandedLines: 71, limit: 70 }]);
 });
 
 test('no-contents-list, and contents lists are recognised', () => {
@@ -172,4 +172,55 @@ test('site-route links are quiet by default, broken-link with --strict-paths', (
   expect(run(dir, '--strict-paths').json.findings).toEqual([
     { kind: 'broken-link', file: 'README.md', line: 1, target: '/projects/git-viewer/' },
   ]);
+});
+
+test('map is found through an @import of docs/map.md', () => {
+  const dir = repo({
+    'CLAUDE.md': '# Hi\n@docs/map.md\n',
+    'docs/map.md': '<!-- md-network-map -->\n' + lines(80),
+  });
+  const { json } = run(dir, '--checks', 'limits');
+  expect(json.map).toBe('docs/map.md');
+  expect(json.notes).toEqual([]);
+  expect(json.findings.some((f) => f.file === 'docs/map.md' && f.limit === 70)).toBe(true);
+});
+
+test('null map adds a note, not a finding', () => {
+  const dir = repo({ 'CLAUDE.md': '# Hi\n' });
+  const { code, json } = run(dir);
+  expect(code).toBe(0);
+  expect(json.map).toBeNull();
+  expect(json.notes).toContain('no md-network-map comment found; the 70-line map limit was not applied');
+  expect(json.findings).toEqual([]);
+});
+
+test('imports count toward the always-loaded limit', () => {
+  const dir = repo({
+    'CLAUDE.md': '# Hi\n' + lines(9) + '@docs/big.md\n',
+    'docs/big.md': lines(250),
+  });
+  const { json } = run(dir, '--checks', 'limits');
+  expect(json.findings).toEqual([
+    { kind: 'over-line-limit', file: 'CLAUDE.md', lines: 11, expandedLines: 261, limit: 200 },
+  ]);
+});
+
+test('import cycles terminate', () => {
+  const dir = repo({
+    'CLAUDE.md': '@a.md\n',
+    'a.md': 'x\n@b.md\n',
+    'b.md': 'y\n@a.md\n@CLAUDE.md\n@missing.md\n',
+  });
+  const { code, json } = run(dir, '--checks', 'limits');
+  expect(code).toBe(0);
+  expect(json.findings).toEqual([]);
+});
+
+test('emails, code spans, fences, home paths and outside-root targets are not imports', () => {
+  const dir = repo({
+    'CLAUDE.md': 'mail a@big.md here\n`@docs/big.md`\n```\n@docs/big.md\n```\n@~/big.md\n@../big.md\n',
+    'docs/big.md': lines(250),
+  });
+  const { json } = run(dir, '--checks', 'limits');
+  expect(json.findings).toEqual([]);
 });

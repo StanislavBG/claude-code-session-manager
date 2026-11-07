@@ -88,10 +88,12 @@ describe('remoteApi + transcripts.exists', () => {
     const { api, sent, deliver } = setup()
     const tabs = Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, sessionId: `s${i}`, cwd: `/p${i}`, label: `L${i}`, presetId: 'p' }))
     api.sessions.load = async () => ({ tabs, activeTabId: 't0', freshStart: false })
-    // Answer transcript:exists probes through the shim; deny everything else.
+    // Answer the two awaited probes hydrate makes per tab (transcript:exists and
+    // agents:resolve-epic-model, a read-tier channel the desktop bridge answers).
     const origSend = sent.push.bind(sent)
     sent.push = (m: any) => {
       if (m.channel === 'transcript:exists') queueMicrotask(() => deliver({ type: 'sm-ipc-result', id: m.id, result: true }))
+      if (m.channel === 'agents:resolve-epic-model') queueMicrotask(() => deliver({ type: 'sm-ipc-result', id: m.id, result: 'sonnet' }))
       return origSend(m)
     }
     vi.stubGlobal('window', { api })

@@ -443,6 +443,29 @@ test('the real demo-video v4 copy with a late updatedAt upgrades to the current 
   expect(m.prompt).toBe(real.prompt);
 });
 
+test('re-stamped project-home v2 and demo-video v6 copies upgrade to v3 and v7', async () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  for (const [id, shipped, next] of [['builtin-project-home', 2, 3], ['builtin-demo-video', 6, 7]]) {
+    const real = BUILTIN_MACROS.find((b) => b.id === id);
+    expect(typeof real.priorPrompts[shipped - 1]).toBe('string');
+    seedStored({
+      id: real.id,
+      label: real.label,
+      agentName: real.agentName,
+      tag: real.tag,
+      surface: real.surface,
+      prompt: real.priorPrompts[shipped - 1],
+      builtinVersion: shipped,
+      createdAt: '2026-10-03T19:04:10.519Z',
+      updatedAt: '2026-11-06T19:35:19.725Z',
+    });
+    const listed = await lib.listMacros({ filePath, listPersonas: async () => [], builtins: BUILTIN_MACROS });
+    const m = listed.find((x) => x.id === real.id);
+    expect(m.builtinVersion).toBe(next);
+    expect(m.prompt).toBe(real.prompt);
+  }
+});
+
 test('built-in macros cannot be deleted', async () => {
   const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
   await lib.listMacros(o);

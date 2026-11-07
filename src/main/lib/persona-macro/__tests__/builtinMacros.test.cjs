@@ -23,10 +23,10 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v6 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v7 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(6);
-  expect(macro.priorPrompts).toHaveLength(5);
+  expect(macro.builtinVersion).toBe(7);
+  expect(macro.priorPrompts).toHaveLength(6);
   expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
   for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
@@ -137,22 +137,56 @@ test('built-in macros declare a frozen background job', () => {
     expect(Object.isFrozen(m.job)).toBe(true);
     expect(Object.isFrozen(m.job.artifactPaths)).toBe(true);
   }
-  expect(home.builtinVersion).toBe(2);
-  expect(home.priorPrompts).toHaveLength(1);
+  expect(home.builtinVersion).toBe(3);
+  expect(home.priorPrompts).toHaveLength(2);
   for (const m of [demo, home]) expect(m.builtinVersion).toBe(m.priorPrompts.length + 1);
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(6);
-  expect(demo.priorPrompts).toHaveLength(5);
+  expect(demo.builtinVersion).toBe(7);
+  expect(demo.priorPrompts).toHaveLength(6);
+});
+
+// The Project Home Generate composer always sends these lines (design-mocks/project-home-v2/DESIGN_SPEC.md
+// "Prompt lines"); macroJobDispatch.cjs appends them as "Additional instructions: ..." plus an "Entry id" line.
+const sha256 = (s) => require('node:crypto').createHash('sha256').update(s).digest('hex');
+// A bump only adds: every sentence and ';' clause of the previous prompt survives verbatim.
+const priorClauses = (s) => s.split(/(?<=[.;])\s+/).map((c) => c.replace(/[.;]$/, ''));
+
+test('Project Home v3 honours the Audience, Length and Read from lines and keeps every v2 clause', () => {
+  const home = BUILTIN_MACROS.find((m) => m.id === 'builtin-project-home');
+  expect(home.builtinVersion).toBe(3);
+  expect(home.priorPrompts).toHaveLength(2);
+  // the last prior prompt is the shipped v2 prompt, byte for byte
+  expect(sha256(home.priorPrompts.at(-1))).toBe('72e5d32a75e98fb9944372d6f8add27dd277ced7e62377066d5d1bc99e7ffd89');
+  for (const clause of priorClauses(home.priorPrompts.at(-1))) expect(home.prompt).toContain(clause);
+  for (const t of ['Audience:', 'Length:', 'Read from:', "'Page: Overview'", 'additional instructions', "'Entry id'"]) {
+    expect(home.prompt).toContain(t);
+  }
+  for (const v of ['Newcomers', 'Users', 'Contributors', 'Brief', 'Standard', 'In-depth', 'README & docs', 'Source tree', 'Git log', 'nothing selected']) {
+    expect(home.prompt).toContain(v);
+  }
+});
+
+test('Demo Video v7 honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  expect(demo.builtinVersion).toBe(7);
+  expect(demo.priorPrompts).toHaveLength(6);
+  // the last prior prompt is the shipped v6 prompt, byte for byte
+  expect(sha256(demo.priorPrompts.at(-1))).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
+  for (const clause of priorClauses(demo.priorPrompts.at(-1))) expect(demo.prompt).toContain(clause);
+  for (const t of ['Character: off', 'Video style: Auto', "'Video kind: Project demo'", "'Video length: 30'", "'Character: on'", 'type-led', 'meta.character', 'additional instructions', "'Entry id'"]) {
+    expect(demo.prompt).toContain(t);
+  }
 });
 
 test('builtin-review-md-network is a job-less project-home macro with scope + mode inputs', () => {
   const crypto = require('node:crypto');
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
-  expect(sha('builtin-project-home')).toBe('a6862158c0eabe4381f5a121193109ddb45f8e24a945435a617ad83ea57d956b');
-  expect(sha('builtin-demo-video')).toBe('e74120a2cd3621b4e4828a99d1f03e0c1da92ab82d52734e7a390e5dfe537e10');
+  expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
+  expect(sha('builtin-demo-video')).toBe('956bd0c0af28bc577f85cb343d476fb3713fdc18d26f08c72d50cea1b6e26dcb');
+  expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');
   expect(b).toBeTruthy();

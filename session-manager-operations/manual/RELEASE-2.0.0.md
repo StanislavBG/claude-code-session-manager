@@ -5,7 +5,7 @@
 - **Commit:** `744452a028ce13bde559e33657aa5509176ab738` — "fix(manual): light-theme reader with
   readable contrast" (worktree `~/Projects/Bilko-manual-v2`, not pushed; mv2-50 merges + pushes
   after validation).
-- **Files touched:** `src/pages/ManualPage.tsx`, `src/index.css` (the `.manual-*` block only).
+- **Files touched:** src/pages/ManualPage.tsx, `src/index.css` (the `.manual-*` block only).
 - **What changed:** the live reader at `bilko.run/products/session-manager/manual` was styled
   for a dark theme (`text-neutral-100/200/300`, `#f5f5f5`, `#d4d4d4`, `bg-neutral-900/950`) on
   the site's light cream background, making the title, header, and chapter text nearly
@@ -71,15 +71,15 @@ function contrast(a, b) {
 
 ### Not in this pass
 
-- Grouping the chapter list by part (`mv2-32` owns `shared/manual-catalog.ts`'s part field).
+- Grouping the chapter list by part (`mv2-32` owns `Bilko:shared/manual-catalog.ts`'s part field).
 - Pushing `manual-v2` to origin (`mv2-50` merges and pushes after validation).
 
 ## mv2-32 — reader parts nav
 
 - **Commit:** `10570bc` — "feat(manual): group reader chapter list by part" (worktree
   `~/Projects/Bilko-manual-v2`, not pushed).
-- **Files touched:** `shared/manual-catalog.ts`, `src/pages/ManualPage.tsx`,
-  `tests/manual.test.ts`.
+- **Files touched:** `Bilko:shared/manual-catalog.ts`, src/pages/ManualPage.tsx,
+  `Bilko:tests/manual.test.ts`.
 - **What changed:** `ManualChapter` gains optional `part?: string`; `tocFromManifest` carries it
   through into the public `/api/manual/toc` response only when present. The reader's desktop nav
   now renders a small heading above the first chapter of each part (numbering continues across
@@ -93,7 +93,7 @@ function contrast(a, b) {
 
 - **Commit:** `034f46c` — "manual: Field Manual 2.0.0 release bundle" (worktree
   `~/Projects/Bilko-manual-v2`, not pushed; mv2-50 merges + pushes after validation).
-- **Files touched:** `data/manual/releases/2.0.0/` (13 chapter files, `manifest.json`,
+- **Files touched:** `Bilko:data/manual/releases/2.0.0/` (13 chapter files, `manifest.json`,
   `field-manual-2.0.0.html`, `field-manual-2.0.0.pdf`, `figures/`).
 - **What changed:** built the 2.0.0 release from `session-manager-operations/manual/`
   (`releasedAt: 2026-09-25`, `documentsAppVersion: 0.97.0`, both already current — no source edit
@@ -132,11 +132,11 @@ function contrast(a, b) {
 - **Bug:** the live reader showed "released 9/24/2026" for `releasedAt: "2026-09-25"` — a
   date-only ISO string parses as UTC midnight, so `new Date(toc.releasedAt).toLocaleDateString()`
   rendered the previous day in every US timezone (the same off-by-one 1.10.1 had).
-- **Fix:** `shared/manual-catalog.ts` gains `formatManualReleaseDate(isoDate)` —
+- **Fix:** `Bilko:shared/manual-catalog.ts` gains `formatManualReleaseDate(isoDate)` —
   `new Date(isoDate).toLocaleDateString(undefined, { timeZone: 'UTC' })`, which never shifts the
-  day. `src/pages/ManualPage.tsx:194` now calls it instead of formatting `releasedAt` directly;
+  day. src/pages/ManualPage.tsx:194 now calls it instead of formatting `releasedAt` directly;
   `grep -rn "new Date(.*releasedAt" src server` found no other unshifted use.
-- **Test:** `tests/manual.test.ts` — under `TZ=America/Los_Angeles`,
+- **Test:** `Bilko:tests/manual.test.ts` — under `TZ=America/Los_Angeles`,
   `formatManualReleaseDate('2026-09-25')` contains `'25'` and not `'24'`.
 - Merge: worktree `~/Projects/Bilko-manual-date-fix` on branch `manual-date-fix` (from
   `origin/main`, `node_modules` symlinked) — `git fetch origin` (already up to date), commit

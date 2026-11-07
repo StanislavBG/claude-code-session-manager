@@ -7,9 +7,9 @@ import { TagLibrary } from '../TagLibrary'
 import type { AgentPersona } from '../../../../preload/api'
 
 /**
- * TagLibrary shows/edits which agent personas carry a given Epic intent tag —
- * the other side of AgentLibrary.tsx's "tags" field, both reading/writing the
- * same `tags:` frontmatter via `window.api.agents.*`. Mirrors
+ * TagLibrary shows (read-only) which agent personas carry a given Epic intent tag —
+ * the other side of AgentLibrary.tsx's "tags" field, read via
+ * `window.api.agents.listPersonas`. Mirrors
  * AgentLibrary.test.tsx's window.api mocking approach.
  */
 
@@ -109,102 +109,32 @@ describe('TagLibrary', () => {
     expect(el.textContent).toContain('no agent carries this tag yet')
   })
 
-  it('unassigning an agent calls savePersona with that tag removed', async () => {
+  it('is read-only: no assign/unassign controls and no savePersona call', async () => {
     const { api } = installWindowApiMock()
     const el = await mount()
-    const removeBtn = Array.from(el.querySelectorAll('button')).find((b) => b.title === 'Remove this tag from the agent')
-    await act(async () => {
-      removeBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
-    })
-    expect(api.agents.savePersona).toHaveBeenCalledWith(expect.objectContaining({ name: 'builder', tags: [] }))
+    expect(el.querySelector('select')).toBeNull()
+    expect(el.textContent).not.toContain('+ assign agent')
+    expect(Array.from(el.querySelectorAll('button')).some((b) => b.title === 'Remove this tag from the agent')).toBe(false)
+    expect(api.agents.savePersona).not.toHaveBeenCalled()
   })
 
-  it('assigning an agent calls savePersona with that tag added', async () => {
-    const { api } = installWindowApiMock()
-    const el = await mount()
-    const bugRow = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('#bug'))
+  it('clicking a carrying persona calls onOpenPersona with its name', async () => {
+    installWindowApiMock()
+    const onOpen = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
     await act(async () => {
-      bugRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      root!.render(createElement(TagLibrary, { onOpenPersona: onOpen }))
+      await Promise.resolve()
       await Promise.resolve()
     })
-    const addBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('+ assign agent'))
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.title === 'Open builder in Personas')
     await act(async () => {
-      addBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      btn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })
-    const select = el.querySelector('select') as HTMLSelectElement
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
-    await act(async () => {
-      nativeSetter.call(select, 'debugger')
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-      await Promise.resolve()
-    })
-    expect(api.agents.savePersona).toHaveBeenCalledWith(expect.objectContaining({ name: 'debugger', tags: ['bug'] }))
-  })
-
-  describe('preserves non-tag persona fields on save', () => {
-    const RICH: AgentPersona = {
-      name: 'rich',
-      description: 'Has every optional field.',
-      tools: ['Read'],
-      model: 'sonnet',
-      effort: 'medium',
-      color: 'blue',
-      tags: ['feature'],
-      projects: ['*'],
-      action: 'run-it',
-      actionLabel: 'Run it',
-      title: 'Rich Persona',
-      path: '/home/bilko/.claude/agents/rich.md',
-      body: 'You are rich.',
-      overridingProjects: [],
-    }
-    const preserved = {
-      effort: 'medium',
-      title: 'Rich Persona',
-      projects: ['*'],
-      action: 'run-it',
-      actionLabel: 'Run it',
-    }
-
-    it('assign keeps effort, title, projects, action and actionLabel', async () => {
-      const { api } = installWindowApiMock([RICH])
-      const el = await mount()
-      const bugRow = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('#bug'))
-      await act(async () => {
-        bugRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-        await Promise.resolve()
-      })
-      const addBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('+ assign agent'))
-      await act(async () => {
-        addBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-        await Promise.resolve()
-      })
-      const select = el.querySelector('select') as HTMLSelectElement
-      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
-      await act(async () => {
-        nativeSetter.call(select, 'rich')
-        select.dispatchEvent(new Event('change', { bubbles: true }))
-        await Promise.resolve()
-      })
-      expect(api.agents.savePersona).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'rich', tags: ['feature', 'bug'], ...preserved }),
-      )
-    })
-
-    it('unassign keeps effort, title, projects, action and actionLabel', async () => {
-      const { api } = installWindowApiMock([RICH])
-      const el = await mount()
-      const removeBtn = Array.from(el.querySelectorAll('button')).find((b) => b.title === 'Remove this tag from the agent')
-      await act(async () => {
-        removeBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-        await Promise.resolve()
-      })
-      expect(api.agents.savePersona).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'rich', tags: [], ...preserved }),
-      )
-    })
+    expect(onOpen).toHaveBeenCalledWith('builder')
   })
 
   it('re-fetches personas when agents:changed fires — Agent Library edits the same file from its own side', async () => {

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -8,13 +8,12 @@ import { agentTagDef } from '../../lib/agentTagDefs'
 import { toast } from '../../state/toast'
 import { useAgentPersonasState } from '../../lib/useAgentPersonas'
 import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
-import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
-import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
+import type { AgentPersona } from '../../../preload/api'
 
 
 /**
- * Tag Library — read-only directory of the Epic intent-tag taxonomy, plus a
- * writable relationship: which agent personas carry a given tag. Follows
+ * Tag Library — read-only directory of the Epic intent-tag taxonomy and which
+ * agent personas carry each tag (shown as the Tags tab of AgentLibrary.tsx). Follows
  * Skills.tsx's canonical list+detail shape, same as its sibling
  * AgentLibrary.tsx. Reads from lib/tagLibrary.ts (the single source of
  * truth also consumed by ticketDisplay.ts and epicQueueControls.ts) rather
@@ -22,57 +21,23 @@ import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
  * same tone used for the tag chip everywhere else in the app), and the
  * "opening framing" block below quotes agentTagDefs.ts's initialPromptTemplate
  * verbatim, per CLAUDE.md's rule that a tag's mission text has exactly one
- * source. The tag TAXONOMY itself stays read-only: EpicTag is a closed
- * TypeScript union threaded through composeEpicIntake, ticketDisplayStatus,
- * and epicQueueControls's group order — adding/renaming tags at runtime would
- * mean converting that into a dynamic, persisted taxonomy, a materially
- * bigger change than this page's redesign. What IS writable here is the
- * agent↔tag assignment: each persona's `tags:` frontmatter field
- * (agentLibrary.cjs) is the single source of truth, and this page
- * assigns/removes it from the tag side exactly as AgentLibrary.tsx does from
- * the agent side. Home face only — the taxonomy is machine-wide, not
+ * source.
+ * Assignment is edited only on the persona side (Agent Library → Personas →
+ * tags); this view never writes persona files.
+ * Home face only — the taxonomy is machine-wide, not
  * per-project.
  */
-function TagLibraryComponent() {
+function TagLibraryComponent({ onOpenPersona }: { onOpenPersona?: (name: string) => void }) {
   const [selectedTag, setSelectedTag] = useState<TagLibraryEntry['tag']>(TAG_LIBRARY[0].tag)
   const { personas, refresh } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load agent personas'))
-  const [adding, setAdding] = useState(false)
-  const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
-
-  const load = refresh
 
   // agents:changed only fires as a write-echo from this app's OWN save — an
   // external edit to ~/.claude/agents/*.md is otherwise invisible. This page
   // is Home-face, machine-wide only (see docblock above), so only the global
   // directory is watched — no per-project overlay concept here.
-  useAgentsDirWatch(null, () => load())
+  useAgentsDirWatch(null, () => { void refresh() })
 
   const selected = TAG_LIBRARY.find((entry) => entry.tag === selectedTag) ?? null
-
-  const assign = async (persona: AgentPersona, tag: AgentPersonaTag) => {
-    try {
-      // toKnownTags drops stale/foreign tags (permitted on read) that would fail agentPersonaSchema.cjs.
-      await window.api.agents.savePersona(
-        toPersonaSaveInput(persona, { tags: toKnownTags([...persona.tags, tag]) }),
-      )
-      setAdding(false)
-      await load()
-    } catch (e) {
-      toast.error((e as Error).message || 'failed to assign tag')
-    }
-  }
-
-  const unassign = async (persona: AgentPersona, tag: AgentPersonaTag) => {
-    try {
-      await window.api.agents.savePersona(
-        toPersonaSaveInput(persona, { tags: toKnownTags(persona.tags.filter((t) => t !== tag)) }),
-      )
-      await load()
-    } catch (e) {
-      toast.error((e as Error).message || 'failed to remove tag')
-    }
-  }
 
   return (
     <Panel
@@ -92,7 +57,7 @@ function TagLibraryComponent() {
               return (
                 <button
                   key={entry.tag}
-                  onClick={() => { setSelectedTag(entry.tag); setAdding(false) }}
+                  onClick={() => { setSelectedTag(entry.tag) }}
                   className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 border-l-2 ${
                     on ? 'bg-bg-hi text-fg border-accent' : 'text-fg-dim hover:text-fg hover:bg-bg-hi border-transparent'
                   }`}
@@ -112,10 +77,7 @@ function TagLibraryComponent() {
             <TagLibraryDetail
               entry={selected}
               personas={personas}
-              adding={adding}
-              setAdding={setAdding}
-              onAssign={assign}
-              onUnassign={unassign}
+              onOpenPersona={onOpenPersona}
             />
           ) : (
             <EmptyState title="select a tag" />
@@ -130,19 +92,15 @@ function TagLibraryComponent() {
 export const TagLibrary = memo(TagLibraryComponent)
 
 function TagLibraryDetail({
-  entry, personas, adding, setAdding, onAssign, onUnassign,
+  entry, personas, onOpenPersona,
 }: {
   entry: TagLibraryEntry
   personas: AgentPersona[] | null
-  adding: boolean
-  setAdding: (v: boolean) => void
-  onAssign: (persona: AgentPersona, tag: AgentPersonaTag) => void
-  onUnassign: (persona: AgentPersona, tag: AgentPersonaTag) => void
+  onOpenPersona?: (name: string) => void
 }) {
   const tone = ticketTagTone(entry.tag)
   const def = agentTagDef(entry.tag)
   const assigned = personas?.filter((p) => p.tags.includes(entry.tag)) ?? []
-  const unassigned = personas?.filter((p) => !p.tags.includes(entry.tag)) ?? []
 
   return (
     <div className="p-4 space-y-4 max-w-3xl">
@@ -172,33 +130,17 @@ function TagLibraryDetail({
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
             {assigned.map((p) => (
-              <span key={p.name} className="inline-flex items-center gap-1.5 bg-bg-elev border border-line rounded px-2 py-0.5 text-[11px] font-mono text-fg-dim">
+              <button
+                key={p.name}
+                onClick={() => onOpenPersona?.(p.name)}
+                title={`Open ${p.name} in Personas`}
+                className="inline-flex items-center bg-bg-elev border border-line rounded px-2 py-0.5 text-[11px] font-mono text-fg-dim hover:text-fg hover:bg-bg-hi"
+              >
                 {p.name}
-                <button onClick={() => onUnassign(p, entry.tag)} title="Remove this tag from the agent" className="text-fg-faint hover:text-fg">×</button>
-              </span>
-            ))}
-            {assigned.length === 0 && !adding && (
-              <span className="text-xs text-fg-faint italic mr-1">no agent carries this tag yet.</span>
-            )}
-            {adding ? (
-              unassigned.length > 0 ? (
-                <select
-                  autoFocus
-                  defaultValue=""
-                  onChange={(e) => { const p = personas.find((x) => x.name === e.target.value); if (p) onAssign(p, entry.tag) }}
-                  onBlur={() => setAdding(false)}
-                  className="bg-bg border border-line rounded px-2 py-0.5 text-[11px] text-fg font-mono"
-                >
-                  <option value="" disabled>pick an agent…</option>
-                  {unassigned.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                </select>
-              ) : (
-                <span className="text-xs text-fg-faint italic">every agent already carries this tag.</span>
-              )
-            ) : (
-              <button onClick={() => setAdding(true)} className="px-2 py-0.5 rounded-full text-[11px] font-mono border border-line text-fg-faint hover:text-fg hover:bg-bg-hi">
-                + assign agent
               </button>
+            ))}
+            {assigned.length === 0 && (
+              <span className="text-xs text-fg-faint italic mr-1">no agent carries this tag yet.</span>
             )}
           </div>
         )}

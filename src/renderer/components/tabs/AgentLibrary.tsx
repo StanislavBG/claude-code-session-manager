@@ -3,6 +3,10 @@ import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
+import { ViewTabs } from '../ui/ViewTabs'
+import { SourceChip } from '../ui/SourceChip'
+import { TagLibrary } from './TagLibrary'
+import { useHomeDir } from '../../lib/useHomeDir'
 import { Button } from '../ui/Button'
 import { Choice } from '../ui/Choice'
 import { toast } from '../../state/toast'
@@ -31,9 +35,8 @@ import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
  *
  * The "tags" field assigns/removes session intent tags (TAG_LIBRARY) on this
  * persona — a `tags:` frontmatter line persisted alongside `tools`/`model`.
- * Tag Library's detail pane reads/writes the same field from the other side
- * (which agents carry a given tag), so the relationship is a single source
- * of truth no matter which page you edit it from.
+ * The Tags tab (TagLibrary, read-only) shows the other side of that
+ * relationship; this editor is the only place the field is written.
  *
  * Existing `projects:`/`action:`/`actionLabel:` frontmatter (legacy persona Actions,
  * migrated once into the machine-local Macro library and no longer rendered
@@ -90,6 +93,7 @@ function overrideSummary(p: AgentPersona): string {
 }
 
 function AgentLibraryComponent() {
+  const [view, setView] = useState<'personas' | 'tags'>('personas')
   const { personas, refresh } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load agent personas'))
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -131,6 +135,24 @@ function AgentLibraryComponent() {
     window.addEventListener('sm:select-persona', h)
     return () => window.removeEventListener('sm:select-persona', h)
   }, [])
+
+  const viewTabs = (
+    <ViewTabs
+      options={[{ key: 'personas', label: 'Personas' }, { key: 'tags', label: 'Tags' }] as const}
+      active={view}
+      onChange={setView}
+    />
+  )
+  if (view === 'tags') {
+    return (
+      <div className="flex flex-col h-full min-h-0">
+        <div className="px-3 py-1.5 border-b border-line">{viewTabs}</div>
+        <div className="flex-1 min-h-0">
+          <TagLibrary onOpenPersona={(name) => { setSelectedName(name); setDraft(null); setCreating(false); setView('personas') }} />
+        </div>
+      </div>
+    )
+  }
 
   if (personas === null) return <EmptyState title="loading…" />
 
@@ -262,6 +284,7 @@ function AgentLibraryComponent() {
     <Panel
       toolbar={
         <>
+          {viewTabs}
           <span className="text-fg-faint">
             {personas.length} persona{personas.length === 1 ? '' : 's'}
           </span>
@@ -373,6 +396,7 @@ function AgentLibraryComponent() {
               onDelete={remove}
               onDropOverride={dropOverride}
               activeProject={activeProject}
+              activeCwd={activeCwd}
               onSaveOverride={saveOverride}
             />
           ) : (
@@ -389,7 +413,7 @@ export const AgentLibrary = memo(AgentLibraryComponent)
 
 function AgentPersonaEditor({
   obj, set, saved, dirty, isNew, busy, confirmDelete, setConfirmDelete,
-  onDuplicate, onRevert, onSave, onDelete, onDropOverride, activeProject, onSaveOverride,
+  onDuplicate, onRevert, onSave, onDelete, onDropOverride, activeProject, activeCwd, onSaveOverride,
 }: {
   obj: Draft
   set: (patch: Partial<Draft>) => void
@@ -405,16 +429,18 @@ function AgentPersonaEditor({
   onDelete: () => void
   onDropOverride: (projectName: string) => void
   activeProject: string | null
+  activeCwd: string | null
   onSaveOverride: (patch: { model: string; effort: string }) => void
 }) {
-  const path = `~/.claude/agents/${obj.name}.md`
+  const home = useHomeDir()
+  const path = !isNew && saved ? saved.path : `${home ?? '~'}/.claude/agents/${obj.name}.md`
   const canRevertOrSave = dirty || isNew
   return (
     <div className="max-w-3xl">
       <div className="px-4 py-3 border-b border-line flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold text-fg font-mono">{obj.name}</span>
         {isNew ? <Badge tone="accent">unsaved draft</Badge> : dirty ? <Badge tone="warn">edited</Badge> : <Badge tone="good">saved</Badge>}
-        <span className="ml-auto text-[11px] text-fg-faint font-mono">{path}</span>
+        <span className="ml-auto min-w-0"><SourceChip path={path} /></span>
       </div>
 
       <div className="p-4 space-y-4">
@@ -439,7 +465,7 @@ function AgentPersonaEditor({
         <EffortPicker value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
 
         {!isNew && saved && (
-          <ProjectOverrideBlock saved={saved} activeProject={activeProject} busy={busy} onSave={onSaveOverride} />
+          <ProjectOverrideBlock saved={saved} activeProject={activeProject} activeCwd={activeCwd} busy={busy} onSave={onSaveOverride} />
         )}
 
         <Field label="tools" hint={`${obj.tools.length} of ${TOOLS.length} granted. Anything not ticked is refused at call time.`}>
@@ -478,7 +504,7 @@ function AgentPersonaEditor({
           </div>
         </Field>
 
-        <Field label="tags" hint="Session mission tags this persona is associated with — shown as the default agent on that tag's own page. The first one (in Tag Library order) is the MISSION an Action button's session opens with.">
+        <Field label="tags" hint="Session mission tags this persona is associated with — shown as the default agent on the Tags tab.">
           <div className="flex flex-wrap gap-1.5">
             {TAG_LIBRARY.map((t) => {
               const on = obj.tags.includes(t.tag)
@@ -686,9 +712,10 @@ function EffortPicker({ value, model, onChange, label = 'effort', testIdPrefix =
  * `~/.claude/agents/<name>.md` for the whole machine, these edit only this project's file. Each picker writes
  * on change (no draft/Save step) so the two scopes never share a Save button.
  */
-function ProjectOverrideBlock({ saved, activeProject, busy, onSave }: {
+function ProjectOverrideBlock({ saved, activeProject, activeCwd, busy, onSave }: {
   saved: AgentPersona
   activeProject: string | null
+  activeCwd: string | null
   busy: boolean
   onSave: (patch: { model: string; effort: string }) => void
 }) {
@@ -712,7 +739,7 @@ function ProjectOverrideBlock({ saved, activeProject, busy, onSave }: {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[10.5px] font-semibold uppercase tracking-wide text-accent font-mono">project override</span>
         <Badge tone="accent">{activeProject} only</Badge>
-        <span className="ml-auto text-[11px] text-fg-faint font-mono">{`<project>/.claude/agents/${saved.name}.md`}</span>
+        <span className="ml-auto min-w-0"><SourceChip path={`${(activeCwd ?? '').replace(/\/+$/, '')}/.claude/agents/${saved.name}.md`} /></span>
       </div>
       <div className="text-[11px] text-fg-faint leading-snug">
         Changes what the SCHEDULER (and new Epics) spawn for <strong>{activeProject}</strong> only — a frontmatter-only overlay with just the keys you set;

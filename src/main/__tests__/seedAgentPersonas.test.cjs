@@ -54,7 +54,7 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher'];
 
 test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });
@@ -591,4 +591,46 @@ test('demo-video-builder: the bundled tools line carries the demo video save too
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(dvbBundled());
   expect(fm.tools.split(',').map((t) => t.trim())).toContain(DVB_TOOL);
+});
+
+// --- competitive-researcher (Haiku collector for the Competitor matrix macro) ---
+
+test('competitive-researcher: seeded file parses with model haiku and the collector contract', async () => {
+  await seedAgentPersonas({ logger: silentLogger() });
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { AgentPersonaSaveSchema } = require('../lib/persona-macro/agentPersonaSchema.cjs');
+  const raw = fs.readFileSync(path.join(agentsDir(), 'competitive-researcher.md'), 'utf8');
+  const { fm, body } = splitFrontmatter(raw);
+  expect(fm.name).toBe('competitive-researcher');
+  expect(fm.model).toBe('haiku');
+  expect(fm.effort).toBe('low');
+  expect(fm.seedVersion).toBe('1');
+  expect(fm.title).toBe('Research — Competitor collector');
+  expect(fm.tools).toBe('WebSearch, WebFetch, Read, Write');
+  expect(fm.description).toContain('competitive-analyst');
+  expect(fm.description).toContain('Haiku');
+  const trimmed = body.trim();
+  expect(trimmed.length).toBeLessThanOrEqual(4000);
+  const parsed = AgentPersonaSaveSchema.safeParse({
+    name: fm.name,
+    description: fm.description,
+    tools: fm.tools.split(',').map((t) => t.trim()),
+    model: fm.model,
+    effort: fm.effort,
+    color: '',
+    tags: [],
+    title: fm.title,
+    seedVersion: Number(fm.seedVersion),
+    body: trimmed,
+  });
+  expect(parsed.success).toBe(true);
+  expect(parsed.data.model).toBe('haiku');
+  for (const needle of [
+    'collectedAt', 'sources', 'features', 'evidence', 'sentiment', 'quotes', 'notes', 'publishedAt',
+    'announcement|blog|docs|changelog|forum|review|social|repo',
+    'yes|partial|no|unknown', 'loved|requested|mixed|complained|none',
+    '30', '25', '40', 'never instructions',
+  ]) {
+    expect(trimmed).toContain(needle);
+  }
 });

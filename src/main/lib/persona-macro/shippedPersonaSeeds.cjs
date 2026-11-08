@@ -515,6 +515,19 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       },
     },
   ],
+  "competitive-researcher": [
+    {
+      commit: "seed-v1",
+      bodySha256: "4c6df5cb5a6486ea507fd6f985f324c9bd2557f1aed50ebd30dd666662267fda",
+      fm: {
+        description: "The Haiku collector for the Competitor matrix — run as a subagent by competitive-analyst, it researches ONE product's official announcements, dev blogs, changelogs and docs plus what users rave about or ask for, and writes cited JSON findings to the path it is given.",
+        tools: "WebSearch, WebFetch, Read, Write",
+        title: "Research — Competitor collector",
+        model: "haiku",
+        effort: "low",
+      },
+    },
+  ],
 });
 
 module.exports = { SHIPPED_PERSONA_SEEDS };

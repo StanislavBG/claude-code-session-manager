@@ -160,3 +160,13 @@ test('competitor matrix dispatches a single matrix.json artifact with the Compet
   expect(i.goal).not.toContain('Entry id');
   expect(i.gate[0]).toContain('/tmp/proj/session-manager-operations/project-pages/matrix/matrix.json');
 });
+
+test('a knowledge id of competitive-matrix becomes competitive-matrix-page; videos keep it', async () => {
+  for (const extra of ['Replace entry: competitive-matrix', 'Page: Competitive matrix', 'Page: Custom topic: Competitive matrix']) {
+    const i = await inputFor(extra, 'builtin-project-home');
+    expect(i.artifactPaths).toEqual(['session-manager-operations/project-pages/knowledge/competitive-matrix-page/index.html']);
+    expect(i.goal.endsWith('Entry id: competitive-matrix-page. Save with pageId = competitive-matrix-page.')).toBe(true);
+  }
+  const video = await inputFor('Replace entry: competitive-matrix');
+  expect(video.artifactPaths).toEqual(['session-manager-operations/project-pages/videos/competitive-matrix/index.html']);
+});

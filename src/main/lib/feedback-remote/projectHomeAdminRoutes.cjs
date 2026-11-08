@@ -232,8 +232,14 @@ function maxVideoBytes(lengthS) {
   return Math.ceil(lengthS / 30) * MAX_DEMO_VIDEO_BYTES;
 }
 
+// Owned by the Competitor matrix store (project-pages/matrixStore.cjs writes
+// knowledge/<id>/ directly). Kept local on purpose; macroJobDispatch.cjs holds
+// the same constant so the builder never derives this id.
+const MATRIX_PAGE_ID = 'competitive-matrix';
+
 function buildPage(input, { pageId, title, topic }) {
   if (!ENTRY_ID_RE.test(pageId)) return { error: 'invalid pageId' };
+  if (pageId === MATRIX_PAGE_ID) return { error: `pageId '${MATRIX_PAGE_ID}' is reserved for the Competitor matrix (written by project_matrix_write)` };
   const rejection = validateHomeHtml(input.html);
   if (rejection) return { error: rejection };
   return {

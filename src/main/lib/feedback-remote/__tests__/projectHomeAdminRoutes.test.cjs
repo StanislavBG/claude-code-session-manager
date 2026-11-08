@@ -145,3 +145,23 @@ test('rejects a missing cwd and an oversized body with 4xx JSON', async () => {
   expect(big.status).toBeLessThan(500);
   expect(big.body.ok).toBe(false);
 });
+
+test('pages/write refuses the reserved competitive-matrix id and writes nothing; matrix/write still writes it', async () => {
+  const cwd = await mkProjectCwd();
+  const http = setup();
+  const html = '<!doctype html><html><head><title>x</title></head><body>builder page</body></html>';
+  const page = await http.call('POST', '/admin/project-home/pages/write', {
+    body: { cwd, pageId: 'competitive-matrix', title: 'Competitive matrix', html },
+  });
+  expect(page.status).toBe(400);
+  expect(page.body).toEqual({
+    ok: false,
+    error: "pageId 'competitive-matrix' is reserved for the Competitor matrix (written by project_matrix_write)",
+  });
+  const pageDir = path.join(cwd, 'session-manager-operations', 'project-pages', 'knowledge', 'competitive-matrix');
+  expect(fs.existsSync(pageDir)).toBe(false);
+  const w = await http.call('POST', '/admin/project-home/matrix/write', { body: { cwd, matrix: buildMatrix(), model: 'opus' } });
+  expect(w.status).toBe(200);
+  expect(w.body.ok).toBe(true);
+  expect(fs.existsSync(path.join(pageDir, 'index.html'))).toBe(true);
+});

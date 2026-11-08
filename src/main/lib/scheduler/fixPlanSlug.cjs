@@ -32,6 +32,8 @@
  */
 'use strict';
 
+const { isSafeEpicId } = require('../prd/prdLocations.cjs');
+
 function isFixPlanSlug(slug) {
   return /^\d+-fix-/.test(slug);
 }
@@ -59,4 +61,16 @@ function resolveIsFixPlan(slug, isFixPlan) {
   return isFixPlanSlug(slug);
 }
 
-module.exports = { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan };
+/**
+ * The ONE repo-relative path a fix plan may name for a validation record
+ * (PRD 2883). Lives under the authored `reviews/` namespace — never under the
+ * gitignored `scheduler/` runtime folder, where the fix-plan PRD file itself
+ * sits. An unsafe/missing epicId drops the epic segment rather than
+ * concatenating it into a path.
+ */
+function fixPlanRecordPath(epicId, fixSlug) {
+  const base = 'session-manager-operations/reviews/validation';
+  return isSafeEpicId(epicId) ? `${base}/${epicId}/${fixSlug}.md` : `${base}/${fixSlug}.md`;
+}
+
+module.exports = { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan, fixPlanRecordPath };

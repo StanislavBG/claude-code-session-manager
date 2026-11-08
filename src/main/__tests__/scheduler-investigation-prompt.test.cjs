@@ -145,3 +145,77 @@ test('isGitRepoSync: true for a real git repo, false for a non-repo dir, false f
     fs.rmSync(nonRepo, { recursive: true, force: true });
   }
 });
+
+// ─── Records and commits: the one allowed record path (PRD 2883) ─────────────
+
+const { fixPlanRecordPath } = require('../lib/scheduler/fixPlanSlug.cjs');
+const { RUNTIME_NAMESPACES } = require('../lib/opsOwnership.cjs');
+
+const RECORD_BAN_MARKER = 'Never name any of these paths as a file to write or commit';
+
+function promptVariants() {
+  const recordPath = fixPlanRecordPath('e1', '1695-fix-x');
+  return [
+    buildInvestigationPrompt(makeArgs()),
+    buildInvestigationPrompt(makeArgs({ recordPath, recordIgnored: false })),
+    buildInvestigationPrompt(makeArgs({ recordPath, recordIgnored: true })),
+    buildInvestigationPrompt(makeArgs({
+      recordPath, recordIgnored: false,
+      failedJob: { slug: '05-my-feature', title: 'My feature', exitCode: 1, verifierVerdict: 'abandoned_background_task' },
+    })),
+  ];
+}
+
+test('fixPlanRecordPath: epic-scoped for a safe epicId, flat for missing/unsafe, never under scheduler/', () => {
+  assert.equal(fixPlanRecordPath('e1', '1695-fix-x'), 'session-manager-operations/reviews/validation/e1/1695-fix-x.md');
+  for (const bad of [undefined, null, '', '../x', 'a/b', 'a\\b']) {
+    const p = fixPlanRecordPath(bad, '1695-fix-x');
+    assert.equal(p, 'session-manager-operations/reviews/validation/1695-fix-x.md');
+    assert.doesNotMatch(p, /session-manager-operations\/scheduler\//);
+  }
+});
+
+test('recordIgnored false names the exact record path and plain git add', () => {
+  const prompt = buildInvestigationPrompt(makeArgs({ recordPath: fixPlanRecordPath('e1', '1695-fix-x'), recordIgnored: false }));
+  assert.ok(prompt.includes('session-manager-operations/reviews/validation/e1/1695-fix-x.md'));
+  assert.ok(prompt.includes('git add session-manager-operations/reviews/validation/e1/1695-fix-x.md'));
+  assert.match(prompt, /only allowed record location/);
+});
+
+test('recordIgnored true (and the defaults) name no record path and forbid asking for a record', () => {
+  const ignored = buildInvestigationPrompt(makeArgs({ recordPath: fixPlanRecordPath('e1', '1695-fix-x'), recordIgnored: true }));
+  assert.match(ignored, /ignores/);
+  assert.match(ignored, /must not ask for any record file/);
+  assert.doesNotMatch(ignored, /reviews\/validation\/e1\/1695-fix-x\.md/);
+  const dflt = buildInvestigationPrompt(makeArgs());
+  assert.match(dflt, /must not ask for any record file/);
+  assert.doesNotMatch(dflt, /reviews\/validation\//);
+});
+
+test('every variant states the no-change fix plan makes no commit and closes on a truthful PASS', () => {
+  for (const prompt of promptVariants()) {
+    assert.match(prompt, /only confirms already-landed work changes no file and makes no commit/);
+    assert.match(prompt, /SCHEDULER_VERDICT: PASS with no commit/);
+    assert.match(prompt, /never add a record just so the job can close/);
+  }
+});
+
+test('every variant bans every runtime namespace path and force-adds', () => {
+  for (const prompt of promptVariants()) {
+    for (const ns of RUNTIME_NAMESPACES) assert.ok(prompt.includes(`session-manager-operations/${ns}/`), ns);
+    assert.ok(prompt.includes(RECORD_BAN_MARKER));
+    assert.match(prompt, /git add -f/);
+    assert.match(prompt, /git add --force/);
+  }
+});
+
+test('apart from fixPath and the ban line, no variant points a write at session-manager-operations/scheduler/', () => {
+  const fixPath = '/repo/session-manager-operations/scheduler/epics/e1/prds/1695-fix-x.md';
+  const recordPath = fixPlanRecordPath('e1', '1695-fix-x');
+  for (const extra of [{}, { recordPath, recordIgnored: false }, { recordPath, recordIgnored: true }]) {
+    const prompt = buildInvestigationPrompt(makeArgs({ fixPath, ...extra }));
+    const rest = prompt.split(fixPath).join('<FIX_PATH>')
+      .split('\n').filter((l) => !l.includes(RECORD_BAN_MARKER)).join('\n');
+    assert.doesNotMatch(rest, /session-manager-operations\/scheduler\//);
+  }
+});

@@ -76,7 +76,7 @@ const {
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
   readSpawnedPidFromLog, readLogMtimeMs, isClaudeArgv,
 } = require('./lib/scheduler/reaperHelpers.cjs');
-const { resolveProjectRoot, ensureRuntimeIgnores } = require('./lib/opsOwnership.cjs');
+const { resolveProjectRoot, ensureRuntimeIgnores, RUNTIME_NAMESPACES } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
@@ -116,7 +116,7 @@ const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/scheduler/terminalRunOutcome.cjs');
-const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/scheduler/fixPlanSlug.cjs');
+const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan, fixPlanRecordPath } = require('./lib/scheduler/fixPlanSlug.cjs');
 const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
 const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
@@ -5292,7 +5292,22 @@ function healTargetForFix(fixSlug, jobs) {
  * unit-tested (no spawn, no fs). Inputs are the already-resolved values that
  * spawnInvestigation computes.
  */
-function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild = null }) {
+function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild = null, recordPath = null, recordIgnored = true }) {
+  const runtimePaths = RUNTIME_NAMESPACES.map((ns) => `session-manager-operations/${ns}/`).join(', ');
+  const recordRule = (recordPath && !recordIgnored)
+    ? `- The only allowed record location is ${recordPath}. If the fix plan asks for a record file, it must be exactly this path.
+- Stage the record with plain \`git add ${recordPath}\`.`
+    : recordPath
+      ? '- This repo\'s .gitignore ignores the fix-plan record path, so the fix plan must not ask for any record file.'
+      : '- No record path is available for this repo, so the fix plan must not ask for any record file.';
+  const recordsSection = `
+
+# Records and commits
+${recordRule}
+- A fix plan that only confirms already-landed work changes no file and makes no commit.
+- The scheduler closes such a fix plan on a truthful SCHEDULER_VERDICT: PASS with no commit, so never add a record just so the job can close.
+- Never name any of these paths as a file to write or commit (machine-local runtime state): ${runtimePaths}
+- Never tell the executor to run \`git add -f\` or \`git add --force\`.`;
   const deadFixChildNote = deadChild ? `
 
 # This is a REOPENED investigation — your own prior fix plan died
@@ -5426,7 +5441,7 @@ ${logTail}
      In that case LEAD the fix-plan PRD by quoting VERBATIM the canonical rule from standards.md's
      Execution discipline section — "You ARE the executor — never re-queue or self-schedule" — rather
      than authoring new prose. Instruct the fix-plan's executor plainly that a queued PRD is the task,
-     not evidence of completion, and that the deliverable is the code diff.
+     not evidence of completion, and that the deliverable is the code diff.${recordsSection}
 
 DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
 }
@@ -5614,7 +5629,19 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
     console.warn(`[scheduler] investigation cwd is not a git repo (${cwd}); falling back to ${DEFAULT_PROJECT_CWD}`);
     cwd = DEFAULT_PROJECT_CWD;
   }
-  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild });
+  // The one record path a fix plan may name (PRD 2883), and whether the target
+  // repo ignores it — several sibling repos ignore all of
+  // session-manager-operations/, so it is checked, never assumed tracked.
+  // exit 0 = ignored, exit 1 = not ignored, anything else = treat as ignored.
+  const recordPath = fixPlanRecordPath(failedJob.epicId, fixSlug);
+  let recordIgnored = true;
+  try {
+    await sharedGitExec.execGit(cwd, ['check-ignore', '-q', '--no-index', '--', recordPath], { timeout: 10000 });
+    recordIgnored = true;
+  } catch (err) {
+    recordIgnored = !(err && err.code === 1);
+  }
+  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild, recordPath, recordIgnored });
 
   // Phase 1: open log fd for pre-spawn diagnostics.
   const { fd, safeLog, closeFd } = openLog(investigationLogPath);

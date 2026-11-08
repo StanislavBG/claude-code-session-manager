@@ -19,13 +19,23 @@
  * isolation — its outstanding diff is carried into the fresh worktree
  * instead (gitWorktree.cjs's createWorktree).
  *
+ * A restored Epic (`restoredSession: true`, minted around an existing CLI
+ * session) is never isolated, at approve or reopen: its transcript lives under
+ * the project checkout's ~/.claude/projects encoding and its history (and any
+ * uncommitted work) refers to the main checkout, so planEpicSpawn resumes it
+ * from the project cwd — a worktree would sit unused while its queue row
+ * falsely showed isolation.
+ *
  * Mirrors promptSessionsCreateEpic.cjs's shape: `validatePath(cwd)` closes
  * the same "arbitrary renderer-supplied cwd" gap that handler documents,
  * since this is likewise reachable from the renderer over IPC.
  */
 
 const path = require('node:path');
-const { createEpicWorktree } = require('../git/gitWorktree.cjs');
+// Called through the module object (not destructured) so tests can observe
+// and substitute createEpicWorktree — gitWorktree.cjs does the same for
+// captureAndCarryBaseDiff.
+const gitWorktree = require('../git/gitWorktree.cjs');
 const { validatePath } = require('../../config.cjs');
 
 /**
@@ -33,8 +43,9 @@ const { validatePath } = require('../../config.cjs');
  *
  * Returns the `worktree` field shape (`{ dir, branch, baseCwd, status,
  * carriedPaths }`) ready to persist onto the Epic record on success, or
- * `null` on any failure — createEpicWorktree/createWorktree never throw, so
- * this never does either.
+ * `null` for a restored Epic or on any failure — createEpicWorktree/
+ * createWorktree never throw, and neither does isRestoredEpic, so this
+ * never does either.
  */
 /** In-flight mints, keyed by resolved cwd + epicId (turn 1 awaits these — awaitPendingEpicWorktree). */
 const pendingMints = new Map();
@@ -83,8 +94,38 @@ function __resetPendingForTests() {
   pendingMints.clear();
 }
 
+const isFlaggedRestored = (record) => !!record && typeof record === 'object' && record.restoredSession === true;
+
+/**
+ * isRestoredEpic(cwd, epicId) → boolean. Reads the Epic's row from
+ * active-index.json (approve: the proposed row is there). When the index has
+ * no row, reads the Epic's own prompt-sessions/<epicId>.json instead
+ * (reopen: completion tombstones the Epic out of the index, and epicReopen's
+ * provisionWorktree mints before writing the row back — the archive holds
+ * the record under `session`, a live mirror holds it flat). Never throws —
+ * an unreadable record proceeds as today (not restored).
+ */
+function isRestoredEpic(cwd, epicId) {
+  try {
+    // Lazy: requiring epicMint.cjs at load would risk a require cycle.
+    const { readActiveIndex } = require('./epicMint.cjs');
+    const { sessions } = readActiveIndex(cwd);
+    if (Object.prototype.hasOwnProperty.call(sessions, epicId)) return isFlaggedRestored(sessions[epicId]);
+    const { epicMirrorPath } = require('./epicStatusMirror.cjs');
+    const { readJsonOrSync } = require('../util/atomicFs.cjs');
+    const mirror = readJsonOrSync(epicMirrorPath(cwd, epicId), null);
+    return isFlaggedRestored(mirror) || isFlaggedRestored(mirror && mirror.session);
+  } catch {
+    return false;
+  }
+}
+
 async function mintEpicWorktree(cwd, epicId) {
-  const result = await createEpicWorktree({ cwd, epicId });
+  if (isRestoredEpic(cwd, epicId)) {
+    console.log(`[epicWorktreeMint] ${epicId}: not isolated (restored-session)`);
+    return null;
+  }
+  const result = await gitWorktree.createEpicWorktree({ cwd, epicId });
   if (!result.ok) {
     console.log(`[epicWorktreeMint] ${epicId}: not isolated (${result.reason})`);
     return null;

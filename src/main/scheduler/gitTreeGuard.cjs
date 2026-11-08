@@ -518,20 +518,19 @@ function gitRangeCommits(cwd, before, after) {
  *  1. Ancestry: the branch tip is an ancestor of (or equal to) HEAD, the
  *     same `mergeBase === branchHead` test as integrateBranch()'s no-op
  *     detection.
- *  2. Content: `gitWorktree.isBranchContentLanded({ cwd, base: 'HEAD', branch })`.
+ *  2. Content: `gitWorktree.isBranchContentLanded({ cwd, base: 'HEAD', branch, sinceSha: forkSha })`.
  *     Linear landing (PRDs 2743, 2825) replays the branch onto the base, so a
  *     landed branch's own commits never become ancestors of HEAD. Proof 1
  *     alone made the reaper park a landed job as "still holds unintegrated
  *     work — never merged" (validator finding I-2). The helper also accepts
  *     patch-equivalent commits on HEAD, or a merge that would change nothing.
- * Deliberately never calls integrateBranch itself: this is used by
- * reapDeadRunningJobs to PROVE a dead job's work already landed, never to
- * perform the landing — attempting a real merge from an audit check is a
- * mutating action with its own conflict/timing risk, and "land the still-
- * stranded branch" is explicitly a separate, later decision (mechanical
- * recovery, or a human), not something a reap pass should do on its own
- * initiative. See reapDeadRunningJobs's own header comment for why the
- * conservative failure direction here is needs_review, never a silent merge.
+ *     `forkSha` (the branch's fork point) is passed as `sinceSha`, bounding
+ *     the proof to the job's own commits — a base rebased after the fork
+ *     never makes the base's rewritten commits read as unlanded job work.
+ * This check itself never calls integrateBranch: it is read-only proof.
+ * The landing decision belongs to reapDeadRunningJobs, which integrates a
+ * `false` branch only when the run printed its own SCHEDULER_VERDICT: PASS
+ * line; any other outcome parks needs_review, never a silent merge.
  *
  * Returns:
  *  - true  — branch exists and its content is already in HEAD (integrated by
@@ -543,7 +542,7 @@ function gitRangeCommits(cwd, before, after) {
  *    in-place run, or SM_JOB_WORKTREE_DISABLE), or `rev-parse` errored.
  * Never throws.
  */
-function isBranchAlreadyIntegrated(cwd, branch) {
+function isBranchAlreadyIntegrated(cwd, branch, forkSha = null) {
   return new Promise((resolve) => {
     if (!cwd || !branch) { resolve(null); return; }
     execFile(
@@ -558,7 +557,7 @@ function isBranchAlreadyIntegrated(cwd, branch) {
           (mbErr, mbOut) => {
             const mergeBase = mbErr ? '' : String(mbOut || '').trim();
             if (mergeBase !== '' && mergeBase === branchHead) { resolve(true); return; }
-            gitWorktree.isBranchContentLanded({ cwd, base: 'HEAD', branch })
+            gitWorktree.isBranchContentLanded({ cwd, base: 'HEAD', branch, sinceSha: forkSha || undefined })
               .then((landed) => resolve(landed === true), () => resolve(false));
           },
         );

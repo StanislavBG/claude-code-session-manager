@@ -8855,12 +8855,17 @@ async function reapDeadRunningJobs() {
           headReconcile = await jobWorktree.reconcileWorktreeHead({ cwd: rowCwd, dir: wtDir, branch, key: d.slug });
         } catch { headReconcile = null; }
       }
-      const integrated = await gitTreeGuard.isBranchAlreadyIntegrated(rowCwd, branch);
+      // The branch's fork point bounds the landed-content proof (and the
+      // integration below) to the job's own commits, so a base rebased while
+      // the run was adopted never reads the base's rewritten commits as work.
+      const forkSha = await jobWorktree.resolveForkSha({ cwd: rowCwd, branch, recorded: row.worktreeForkSha || null });
+      const integrated = await gitTreeGuard.isBranchAlreadyIntegrated(rowCwd, branch, forkSha);
       const headNow = await gitTreeGuard.gitHead(rowCwd);
       const guardHeadBeforeVal = row.guardHeadBefore || null;
       let landedCommit = null;
       let notLandedInfo = null;
       let effectiveSuccess = true;
+      let integrationDetail = null;
       // The boot sweep runs before this reaper and removes the worktree, pinning
       // its unique commits; the branch then sits at the fork point and reads as
       // integrated. Consult the job's own pins so that case parks instead.
@@ -8976,19 +8981,51 @@ async function reapDeadRunningJobs() {
             }
           }
         }
+      } else if (d.gateOutcome === 'passed') {
+        // Branch still holds work HEAD lacks, and the run printed its own
+        // SCHEDULER_VERDICT: PASS line (resolveReapGateOutcome): land it now,
+        // fork-bounded, exactly as finalizeJobWorktree would have (Bilko PRD
+        // 1716 committed, passed, and was parked only because its scheduler
+        // restarted). Git work stays here, outside mutate(). Dirt was already
+        // salvaged/snapshotted above.
+        const integration = await jobWorktree.integrateJobBranch({
+          cwd: rowCwd,
+          branch,
+          slug: d.slug,
+          carriedPaths: row.carriedPaths || [],
+          baseBranch: row.worktreeBaseBranch || undefined,
+          forkSha,
+        });
+        integrationDetail = integration;
+        if (integration && integration.ok) {
+          landedCommit = integration.sha || (await gitTreeGuard.gitHead(rowCwd)) || null;
+          notLandedInfo = null;
+          effectiveSuccess = true;
+          const checkoutDir = typeof wtDir === 'string' && wtDir && wtDir !== rowCwd && fs.existsSync(wtDir) ? wtDir : undefined;
+          await jobWorktree.cleanupJobWorktree({ cwd: rowCwd, dir: checkoutDir, branch, keepBranch: false });
+          console.log(`[scheduler] reapDeadRunningJobs: integrated ${branch} for PASS run ${d.slug} → ${landedCommit || 'HEAD'}`);
+        } else {
+          effectiveSuccess = false;
+          const failure = (integration && integration.reason) || 'integration failed';
+          notLandedInfo = {
+            verdict: 'worktree_integration_failed',
+            reason: worktreeIntegrationVerdict({ failure, detail: integration, slug: d.slug }).reason,
+          };
+          console.log(`[scheduler] reapDeadRunningJobs: integration of ${branch} failed for ${d.slug}: ${failure}`);
+        }
       } else {
-        // Branch exists and still holds commits never merged into rowCwd's
-        // HEAD — the exact PRD 1118 shape. Never merge it here (see
-        // isBranchAlreadyIntegrated's header comment); park for review
-        // instead, naming the branch so the work is easy to find and land by
-        // hand or via mechanical recovery.
+        // Branch still holds commits never merged into rowCwd's HEAD and the
+        // run printed no PASS line of its own — the PRD 1118 shape. Land only
+        // on the run's own PASS line (above); otherwise park for review,
+        // naming the branch so the work is easy to find and land by hand or
+        // via mechanical recovery.
         effectiveSuccess = false;
         notLandedInfo = {
           verdict: 'reaped_without_integration',
           reason: `worktree branch ${branch} still holds unintegrated work — never merged into ${rowCwd}`,
         };
       }
-      integrationResults.set(d.slug, { effectiveSuccess, landedCommit, notLandedInfo, dirt, salvagePatch, uncommittedSnapshot });
+      integrationResults.set(d.slug, { effectiveSuccess, landedCommit, notLandedInfo, dirt, salvagePatch, uncommittedSnapshot, integrationDetail });
     }
 
     // Evidence-before-failure guard for a row about to be stamped 'failed'
@@ -9158,6 +9195,13 @@ async function reapDeadRunningJobs() {
             s.jobs[idx].verifierVerdict = notLandedInfo.verdict;
           } else {
             delete s.jobs[idx].verifierVerdict;
+          }
+          // A PASS run whose reap-time integration failed (above) carries the
+          // failure subtype + conflicted paths, so mechanical recovery can
+          // retry once HEAD moves.
+          const reapIntegration = integrationResults.get(slug)?.integrationDetail || null;
+          if (reapIntegration && notLandedInfo?.verdict === 'worktree_integration_failed') {
+            stampIntegrationFailure(s.jobs[idx], reapIntegration);
           }
           transitionJob(s.jobs[idx], targetStatus, { reason: transitionReason, source });
           s.jobs[idx].exitCode = landed ? 0 : (s.jobs[idx].exitCode ?? 1);

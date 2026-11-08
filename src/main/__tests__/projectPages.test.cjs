@@ -362,3 +362,77 @@ test('project-pages:md-network returns the scanner result for a repo cwd and ref
   const refused = await mdNetwork({}, { cwd: os.tmpdir() });
   expect(refused).toEqual({ ok: false, error: expect.stringMatching(/ephemeral/) });
 });
+
+// ─── project-pages:matrix ──────────────────────────────────────────────────
+
+const MATRIX_T = '2026-11-08T12:00:00.000Z';
+function buildMatrix() {
+  return {
+    schemaVersion: 1,
+    product: { id: 'self', name: 'Session Manager', summary: 'cockpit' },
+    competitors: [{ id: 'opencode', name: 'OpenCode', category: 'harness', chosenBy: 'user', why: 'popular' }],
+    groups: [{ id: 'sessions', title: 'Sessions', description: '' }],
+    features: [{
+      id: 'f-1', groupId: 'sessions', title: 'Feature', description: 'desc',
+      sentiment: { signal: 'loved', summary: 's', sourceIds: ['src-1'] },
+      support: {
+        self: { status: 'no', note: '', sourceIds: [] },
+        opencode: { status: 'yes', note: 'n', sourceIds: ['src-1'] },
+      },
+      recommendation: { priority: 'P1', rationale: 'r', sessionGoal: 'g' },
+      firstSeenAt: MATRIX_T, updatedAt: MATRIX_T,
+    }],
+    sources: [{
+      id: 'src-1', url: 'https://example.com/post', title: 'Post', publisher: 'Ex',
+      publishedAt: null, retrievedAt: MATRIX_T, kind: 'blog',
+    }],
+    runs: [{ at: MATRIX_T, model: 'opus', competitors: ['OpenCode'], added: ['f-1'], changed: [], notes: '' }],
+    updatedAt: MATRIX_T,
+  };
+}
+
+function writeMatrixFile(cwd, text) {
+  const dir = path.join(pagesDir(cwd), 'matrix');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'matrix.json'), text);
+}
+
+test('project-pages:matrix returns null with no error when no matrix is saved', async () => {
+  registerProjectPagesIpc();
+  const matrix = ipcHandlers.get('project-pages:matrix');
+  expect(typeof matrix).toBe('function');
+  const cwd = await mkTmpCwd();
+  expect(await matrix({}, { cwd })).toEqual({ ok: true, matrix: null, error: null });
+});
+
+test('project-pages:matrix returns a valid saved matrix', async () => {
+  registerProjectPagesIpc();
+  const matrix = ipcHandlers.get('project-pages:matrix');
+  const cwd = await mkTmpCwd();
+  writeMatrixFile(cwd, JSON.stringify(buildMatrix()));
+  expect(await matrix({}, { cwd })).toEqual({ ok: true, matrix: buildMatrix(), error: null });
+});
+
+test('project-pages:matrix returns matrix null with an error string for an invalid file', async () => {
+  registerProjectPagesIpc();
+  const matrix = ipcHandlers.get('project-pages:matrix');
+  const cwd = await mkTmpCwd();
+  const bad = buildMatrix();
+  bad.features[0].groupId = 'nope';
+  writeMatrixFile(cwd, JSON.stringify(bad));
+  const result = await matrix({}, { cwd });
+  expect(result.ok).toBe(true);
+  expect(result.matrix).toBeNull();
+  expect(result.error).toEqual(expect.stringMatching(/unknown group 'nope'/));
+
+  writeMatrixFile(cwd, '{not json');
+  const garbled = await matrix({}, { cwd });
+  expect(garbled).toEqual({ ok: true, matrix: null, error: expect.stringMatching(/invalid JSON/) });
+});
+
+test('project-pages:matrix refuses an ephemeral cwd', async () => {
+  registerProjectPagesIpc();
+  const matrix = ipcHandlers.get('project-pages:matrix');
+  config.addAllowedRoot(os.tmpdir());
+  expect(await matrix({}, { cwd: os.tmpdir() })).toEqual({ ok: false, error: expect.stringMatching(/ephemeral/) });
+});

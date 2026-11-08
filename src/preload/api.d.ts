@@ -1704,6 +1704,102 @@ export interface MdNetwork {
 /** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */
 export type MdNetworkResult = MdNetwork | { ok: false; error: string };
 
+// ────────────────────────────────────────────── Competitor matrix
+// Mirrors CompetitiveMatrixSchema in src/main/lib/project-pages/competitiveMatrix.cjs — keep field-for-field.
+
+export type MatrixSupportStatus = 'yes' | 'partial' | 'no' | 'unknown';
+export type MatrixSentimentSignal = 'loved' | 'requested' | 'mixed' | 'complained' | 'none';
+export type MatrixPriority = 'P0' | 'P1' | 'P2' | 'P3' | 'none';
+export type MatrixSourceKind = 'announcement' | 'blog' | 'docs' | 'changelog' | 'forum' | 'review' | 'social' | 'repo';
+
+/** My product — always id 'self'. */
+export interface MatrixProduct {
+  id: 'self';
+  name: string;
+  summary: string;
+}
+
+export interface MatrixCompetitor {
+  id: string;
+  name: string;
+  url?: string;
+  category: string;
+  chosenBy: 'user' | 'auto';
+  why: string;
+}
+
+export interface MatrixGroup {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export interface MatrixSupportCell {
+  status: MatrixSupportStatus;
+  note: string;
+  sourceIds: string[];
+}
+
+export interface MatrixSentiment {
+  signal: MatrixSentimentSignal;
+  summary: string;
+  sourceIds: string[];
+}
+
+export interface MatrixRecommendation {
+  priority: MatrixPriority;
+  rationale: string;
+  sessionGoal: string;
+}
+
+export interface MatrixFeature {
+  id: string;
+  groupId: string;
+  title: string;
+  description: string;
+  sentiment: MatrixSentiment;
+  /** Keyed by 'self' plus every competitor id — exactly those keys. */
+  support: Record<string, MatrixSupportCell>;
+  recommendation: MatrixRecommendation;
+  firstSeenAt: string;
+  updatedAt: string;
+}
+
+export interface MatrixSource {
+  id: string;
+  url: string;
+  title: string;
+  publisher: string;
+  publishedAt: string | null;
+  retrievedAt: string;
+  kind: MatrixSourceKind;
+}
+
+export interface MatrixRun {
+  at: string;
+  model: string;
+  competitors: string[];
+  added: string[];
+  changed: string[];
+  notes: string;
+}
+
+export interface CompetitiveMatrix {
+  schemaVersion: 1;
+  product: MatrixProduct;
+  competitors: MatrixCompetitor[];
+  groups: MatrixGroup[];
+  features: MatrixFeature[];
+  sources: MatrixSource[];
+  runs: MatrixRun[];
+  updatedAt: string;
+}
+
+/** `matrix` is null when none is saved (error null) or the file is invalid (error set); `ok:false` when the cwd has no project root. */
+export type CompetitorMatrixResult =
+  | { ok: true; matrix: CompetitiveMatrix | null; error: string | null }
+  | { ok: false; error: string };
+
 // ────────────────────────────────────────────── Git status (richer than app:git-branch)
 
 /** Mirrors the status returned by src/main/git.cjs mapStatus(). */
@@ -2428,6 +2524,8 @@ export interface SessionManagerAPI {
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
     /** Map the project's markdown link network from its root CLAUDE.md (read-only, bounded, no LLM) for the Tools pane. Scans on every call — no watcher, no cache. `ok:false` (with `error`) for a cwd `get` answers with empty lists (tmpdir / linked worktree), a folder that is not a git repo, or no root CLAUDE.md; rejects on an invalid cwd, like `get`. */
     mdNetwork: (payload: { cwd: string }) => Promise<MdNetworkResult>;
+    /** Read the saved Competitor matrix (project-pages/matrix/matrix.json) — read-only; writes go through project_matrix_write. */
+    matrix: (payload: { cwd: string }) => Promise<CompetitorMatrixResult>;
     /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */
     watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;
     /** Stop pushing `onChanged` events for this cwd — must be paired 1:1 with a prior `watch` call. */

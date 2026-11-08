@@ -11,7 +11,8 @@
  * refcounted per-cwd watcher pushes `project-pages:changed` for either. It
  * never writes content (watch()'s mkdir creates an empty directory only).
  * mdNetwork() maps the project's markdown link network on demand
- * (lib/mdNetworkScan.cjs) for the Tools pane.
+ * (lib/mdNetworkScan.cjs) for the Tools pane. matrix() reads the saved
+ * Competitor matrix (lib/project-pages/competitiveMatrix.cjs readMatrix).
  */
 
 const { ipcMain } = require('electron');
@@ -23,6 +24,7 @@ const { opsPath, assertOpsWrite, resolveProjectRoot } = require('./lib/opsOwners
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { listLibrary, migrateLegacy } = require('./lib/project-pages/pagesLibrary.cjs');
 const { scanMdNetwork } = require('./lib/mdNetworkScan.cjs');
+const { readMatrix } = require('./lib/project-pages/competitiveMatrix.cjs');
 
 let mainWindow = null;
 function attachWindow(window) {
@@ -101,6 +103,21 @@ async function mdNetwork({ cwd }) {
   const { root, ephemeral } = tryProjectRoot(config.validatePath(cwd));
   if (ephemeral) return { ok: false, error: MD_NETWORK_EPHEMERAL };
   return scanMdNetwork(root);
+}
+
+const MATRIX_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project matrix';
+
+/**
+ * -> CompetitorMatrixResult: the saved Competitor matrix, read once per call.
+ * Resolves the project root like mdNetwork(); `{ ok: true, matrix, error }`
+ * from readMatrix (matrix null when none / invalid, error set when invalid),
+ * or `{ ok: false, error }` when the cwd has no project root.
+ */
+async function matrix({ cwd }) {
+  const { root, ephemeral } = tryProjectRoot(config.validatePath(cwd));
+  if (ephemeral) return { ok: false, error: MATRIX_EPHEMERAL };
+  const { matrix: m, error } = await readMatrix(root);
+  return { ok: true, matrix: m, error };
 }
 
 /** True for paths whose change should refresh the library (relative to project-pages/). */
@@ -275,6 +292,7 @@ function registerProjectPagesIpc() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('project-pages:get', v(s.projectPagesCwd, get));
   ipcMain.handle('project-pages:md-network', v(s.projectPagesCwd, mdNetwork));
+  ipcMain.handle('project-pages:matrix', v(s.projectPagesCwd, matrix));
   ipcMain.handle('project-pages:watch', v(s.projectPagesCwd, ({ cwd }) => watchOutput(cwd)));
   ipcMain.handle('project-pages:rename', v(s.projectPagesRename, renameEntry));
   ipcMain.handle('project-pages:delete', v(s.projectPagesDelete, deleteEntry));
@@ -289,6 +307,7 @@ module.exports = {
   registerProjectPagesIpc,
   get,
   mdNetwork,
+  matrix,
   renameEntry,
   deleteEntry,
   watchOutput,

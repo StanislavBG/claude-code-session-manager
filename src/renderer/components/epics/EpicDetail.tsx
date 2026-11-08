@@ -268,7 +268,12 @@ function ResponseEvent({
   // gets its own amber treatment + an explicit marker rather than blending
   // into ordinary assistant prose or the neutral STATUS_TONE.needs_review
   // pill used elsewhere for PRD status chips.
-  const isSchedulerNotice = event.outcome === 'needs_review'
+  // PRD 2950 — macros:dispatch-job (macroJobIpc.cjs) appends this when a
+  // macro's background build could not be queued for this Epic, so the Epic
+  // never reads as a silently running session. Distinct from the needs_review
+  // scheduler notice: no PRD ever existed.
+  const isJobNotQueued = event.notice === 'job-not-queued'
+  const isSchedulerNotice = !isJobNotQueued && event.outcome === 'needs_review'
   // PRD 987 — fold the Epic's own validation verdict (PRD 986's
   // event.validation) into the tone: a job that self-reported 'completed'
   // but hasn't been verified by this Epic renders in the neutral CLAIMED
@@ -277,7 +282,9 @@ function ResponseEvent({
     ? resolveValidatedStatus(event.outcome, event.validation)
     : null
   const tone = validatedStatus ? STATUS_TONE[validatedStatus] : null
-  const accessibleLabel = isSchedulerNotice
+  const accessibleLabel = isJobNotQueued
+    ? `Notice — build not queued: ${event.text ?? ''}`
+    : isSchedulerNotice
     ? `Scheduler notice from a stopped PRD${event.prdSlug ? ` (PRD ${event.prdSlug})` : ''}: ${event.text ?? ''}`
     : event.prdSlug && tone
       ? `PRD ${event.prdSlug} — ${tone.label}`
@@ -285,16 +292,25 @@ function ResponseEvent({
 
   return (
     <div
-      data-testid="epic-response-event"
+      data-testid={isJobNotQueued ? 'epic-job-not-queued-notice' : 'epic-response-event'}
       aria-label={accessibleLabel}
       className={`break-words text-center text-[11px] ${
-        isSchedulerNotice
+        isJobNotQueued || isSchedulerNotice
           ? `border ${AMBER_TINT} ${AMBER_TEXT} rounded-lg px-2.5 py-1.5`
           : tone
             ? `${tone.bg} ${tone.text} rounded-lg px-2 py-1`
             : 'text-fg-faint'
       }`}
     >
+      {isJobNotQueued && (
+        <div
+          className={`mb-1 flex items-center justify-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide ${AMBER_TEXT}`}
+          data-testid="epic-job-not-queued-marker"
+        >
+          <span aria-hidden="true">⚠️</span>
+          Build not queued
+        </div>
+      )}
       {isSchedulerNotice && (
         <div
           className={`mb-1 flex items-center justify-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide ${AMBER_TEXT}`}

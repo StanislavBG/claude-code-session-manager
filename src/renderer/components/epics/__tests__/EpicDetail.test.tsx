@@ -670,6 +670,32 @@ describe('EpicDetail (PRD 827)', () => {
     expect(responseEvent.getAttribute('aria-label')).toContain('Scheduler notice from a stopped PRD')
   })
 
+  it('PRD 2950: a response event marked notice "job-not-queued" renders as a distinct amber "build not queued" notice, not prose or the scheduler-notice card', async () => {
+    installWindowApiMock()
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: initialEvent.id,
+      text: 'Competitor matrix background build was not queued: disk full — press it again in Project Home ▸ Tools to retry.',
+      notice: 'job-not-queued',
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    expect(el.querySelector('[data-testid="epic-response-event"]')).toBeNull()
+    const notice = el.querySelector('[data-testid="epic-job-not-queued-notice"]')!
+    expect(notice).toBeTruthy()
+    expect(notice.getAttribute('aria-label')).toMatch(/build not queued/i)
+    expect(notice.getAttribute('aria-label')).toContain('disk full')
+    expect(notice.className).toMatch(/#8e641a/)
+    expect(notice.querySelector('[data-testid="epic-job-not-queued-marker"]')?.textContent).toContain('Build not queued')
+    expect(notice.querySelector('[data-testid="epic-response-question-marker"]')).toBeNull()
+    expect(notice.querySelector('[data-testid="epic-response-event-text"]')?.textContent).toContain('Project Home ▸ Tools')
+  })
+
   it('renders the "closed" event as a terminator rule (EventDivider), not plain centered text', async () => {
     installWindowApiMock()
 

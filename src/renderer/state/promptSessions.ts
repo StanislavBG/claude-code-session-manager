@@ -245,6 +245,11 @@ export interface PromptSessionEvent {
    *  events), which render exactly as before — renderer surfacing of this
    *  state is the sibling PRD, deliberately not this one. */
   validation?: 'unvalidated' | 'validating' | 'verified' | 'refuted'
+  /** PRD 2950 — marker on a main-appended 'response' event that is a notice,
+   *  not prose. 'job-not-queued' = macros:dispatch-job could not queue this
+   *  Epic's background build (macroJobIpc.cjs); EpicDetail renders it as a
+   *  distinct amber "build not queued" notice. Absent on every other event. */
+  notice?: 'job-not-queued'
 }
 
 /**

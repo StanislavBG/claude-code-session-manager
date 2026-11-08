@@ -2848,6 +2848,8 @@ export interface PromptSessionEventAppendedPayload {
     at: string;
     prdSlug?: string;
     text?: string;
+    /** 'job-not-queued' = a macro's background build could not be queued for this Epic (macroJobIpc.cjs). */
+    notice?: 'job-not-queued';
   };
 }
 

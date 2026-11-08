@@ -69,6 +69,80 @@ describe('macros:dispatch-job', () => {
   });
 });
 
+describe('macros:dispatch-job — job-not-queued notice (PRD 2950)', () => {
+  const idx = () => ({ sessions: { e1: { status: 'active' }, p1: { status: 'proposed' } } });
+
+  it('appends one notice to a proposed Epic refused as not active', async () => {
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const { handlers, deps } = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason });
+    const r = await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-competitor-matrix', epicId: 'p1' });
+    expect(r).toEqual({ ok: false, error: 'epic p1 is not an active session in this project' });
+    expect(deps.createPrd).not.toHaveBeenCalled();
+    expect(appendResponseEventWithReason).toHaveBeenCalledTimes(1);
+    const [cwd, epicId, text, meta] = appendResponseEventWithReason.mock.calls[0];
+    expect([cwd, epicId]).toEqual(['/p', 'p1']);
+    expect(text).toContain('Competitor matrix');
+    expect(text).toContain('epic p1 is not an active session in this project');
+    expect(text).toContain("press it again in Project Home ▸ Tools to retry");
+    expect(meta).toEqual({ notice: 'job-not-queued', allowInactive: true });
+  });
+
+  it('appends no notice for an epicId that is not in the index', async () => {
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const { handlers } = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason });
+    const r = await handlers['macros:dispatch-job']({}, { ...good, epicId: 'nope' });
+    expect(r.ok).toBe(false);
+    expect(appendResponseEventWithReason).not.toHaveBeenCalled();
+  });
+
+  it('appends one notice naming the createPrd failure, falling back to the macroId as label', async () => {
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const createPrd = vi.fn(async () => ({ ok: false, error: 'disk full' }));
+    const builtins = [{ id: 'm-x', job: { artifactPaths: ['a.json'], estimateMinutes: 5 }, prompt: 'p' }];
+    const { handlers } = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason, createPrd });
+    const r = await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-competitor-matrix', epicId: 'e1' });
+    expect(r).toEqual({ ok: false, error: 'disk full' });
+    expect(appendResponseEventWithReason).toHaveBeenCalledTimes(1);
+    const text = appendResponseEventWithReason.mock.calls[0][2];
+    expect(text).toContain('Competitor matrix');
+    expect(text).toContain('disk full');
+    expect(text).toContain("press it again in Project Home ▸ Tools to retry");
+    // label fallback: an unknown macroId names itself
+    const dispatchMacroJob = vi.fn(async () => ({ ok: false, error: 'boom' }));
+    const s2 = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason: vi.fn(async () => ({ ok: true })), dispatchMacroJob, builtins });
+    await s2.handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'unknown-macro', epicId: 'e1' });
+    expect(s2.deps.appendResponseEventWithReason.mock.calls[0][2]).toContain('unknown-macro');
+  });
+
+  it('appends no notice on a successful dispatch', async () => {
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's', epicId: 'e1' }));
+    const { handlers } = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason, dispatchMacroJob });
+    expect((await handlers['macros:dispatch-job']({}, good)).ok).toBe(true);
+    expect(appendResponseEventWithReason).not.toHaveBeenCalled();
+  });
+
+  it('appends no notice when the macro is already building', async () => {
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const loadJobs = vi.fn(async () => [{ macroId: 'builtin-competitor-matrix', status: 'running', slug: 'cm-1', cwd: '/p' }]);
+    const { handlers } = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason, loadJobs });
+    const r = await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-competitor-matrix', epicId: 'e1' });
+    expect(r).toMatchObject({ ok: false, activeSlug: 'cm-1' });
+    expect(appendResponseEventWithReason).not.toHaveBeenCalled();
+  });
+
+  it('a failed or throwing append keeps the original result and never throws', async () => {
+    const dispatchMacroJob = vi.fn(async () => ({ ok: false, error: 'queue unreadable' }));
+    for (const append of [vi.fn(async () => { throw new Error('locked'); }), vi.fn(async () => ({ ok: false, reason: 'error' })), vi.fn(() => { throw new Error('sync'); })]) {
+      const { handlers } = setup({ readActiveIndex: vi.fn(idx), appendResponseEventWithReason: append, dispatchMacroJob });
+      expect(await handlers['macros:dispatch-job']({}, good)).toEqual({ ok: false, error: 'queue unreadable' });
+      const refused = await handlers['macros:dispatch-job']({}, { ...good, epicId: 'p1' });
+      expect(refused).toEqual({ ok: false, error: 'epic p1 is not an active session in this project' });
+      expect(append).toHaveBeenCalledTimes(2);
+    }
+  });
+});
+
 describe('macros:job-status', () => {
   it('validates { cwd } and returns macroJobStatuses with live queue + history tail', async () => {
     const macroJobStatuses = vi.fn(async () => [{ macroId: 'a' }]);

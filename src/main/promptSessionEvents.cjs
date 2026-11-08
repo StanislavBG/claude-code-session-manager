@@ -2,9 +2,11 @@
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**
- * Main-process counterpart to promptSessions.ts's event chain, used ONLY by
- * the scheduler's PRD-finished notification path (notifyOriginatingTab,
- * scheduler.cjs). The renderer owns the live in-memory PromptSession store
+ * Main-process counterpart to promptSessions.ts's event chain, used by the
+ * scheduler's PRD-finished notification path (notifyOriginatingTab,
+ * scheduler.cjs) and by macros:dispatch-job (macroJobIpc.cjs), which appends a
+ * durable 'job-not-queued' notice when a macro's background build could not be
+ * queued for its Epic (PRD 2950). The renderer owns the live in-memory PromptSession store
  * and its own persistActiveIndex; this module never touches that store — it
  * reads/writes the SAME on-disk active-index.json directly, read-modify-
  * write, so a scheduler job (which runs in the main process, with no
@@ -23,8 +25,8 @@ const config = require('./config.cjs');
 const { activeIndexPath: promptSessionActiveIndexPath, withPathLock } = require('./lib/epic/epicMint.cjs');
 
 // IPC channel broadcast whenever an event is appended to a PromptSession's
-// chain from the main process (currently only the scheduler's response-event
-// append below). Mirrors chatRunner.cjs's attachWindow/broadcast pattern.
+// chain from the main process (the scheduler's and macroJobIpc's
+// response-event appends below). Mirrors chatRunner.cjs's attachWindow/broadcast pattern.
 const EVENT_APPENDED_CHANNEL = 'promptSession:event-appended';
 
 let mainWindow = null;
@@ -68,7 +70,8 @@ function mintEventId() {
  * regardless of the job's self-reported outcome; the authoring Epic's own
  * validation pass is what may later move it to 'verified'/'refuted'. `agentType`
  * (the job's agent) and `digestKey` (the settle digest's stable key) ride the
- * same meta arg and are copied the same way. All
+ * same meta arg and are copied the same way, as is `notice` (PRD 2950 — a
+ * marker like 'job-not-queued' the renderer turns into a distinct notice). All
  * keys are added to the event object only when present in `meta`, never as
  * `undefined`-valued keys, so events appended without them serialize
  * identically to before.
@@ -100,6 +103,7 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
       if (meta && meta.validation) event.validation = meta.validation;
       if (meta && meta.agentType) event.agentType = meta.agentType;
       if (meta && meta.digestKey) event.digestKey = meta.digestKey;
+      if (meta && meta.notice) event.notice = meta.notice;
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });

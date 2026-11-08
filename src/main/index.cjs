@@ -623,6 +623,8 @@ require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, {
   createPrd: (input) => prdCreate.createPrd(input, scheduler.remote),
   loadJobs: async () => (await require('./lib/scheduler/queueStore.cjs').readMerged()).jobs || [],
   archivePrd: (slug, cwd) => queueOps.archiveMany([slug], cwd),
+  // Durable 'job-not-queued' notice on the Epic when a dispatch fails (PRD 2950).
+  appendResponseEventWithReason: promptSessionEvents.appendResponseEventWithReason,
 });
 // claudeConfig (lib/claudeConfig.cjs): key-scoped read/patch of Claude's JSON config files.
 // A successful patch broadcasts `config:changed` so renderer state refreshes.

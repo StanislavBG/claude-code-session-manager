@@ -248,6 +248,40 @@ describe('remoteArgFence', () => {
     })
   })
 
+  // Project Home > Tools > Competitor matrix (main/projectPages.cjs): same root fence as md-network.
+  // Uses a synthetic read row: the apiSurface.json row is owned by the matrix IPC PRD.
+  describe('project-pages:matrix is a fenced read', () => {
+    const ch = 'project-pages:matrix'
+    const viewOnly = { remoteEnabled: true, remoteControlEnabled: false }
+    const mkD = (cfg = viewOnly) => {
+      const fn = vi.fn(async (_e, { cwd }) => ({ ok: true, matrix: null, root: cwd }))
+      const d = createRemoteIpcDispatcher({
+        surface: [{ channel: ch, kind: 'invoke', remote: 'read' }],
+        handlers: new Map([[ch, fn]]),
+        getConfig: () => cfg,
+        fenceCtx: mk(),
+      })
+      return { fn, d }
+    }
+    it('fences its cwd field to a registered project root', () => {
+      expect(PATH_FENCED_CHANNELS[ch]).toEqual({ field: 'cwd', mode: 'root' })
+    })
+    it('forwards a cwd inside a registered root', async () => {
+      const { fn, d } = mkD()
+      expect(await d.invoke(authed, ch, [{ cwd: '/home/u/proj' }])).toEqual({ ok: true, result: { ok: true, matrix: null, root: '/home/u/proj' } })
+      expect(fn).toHaveBeenCalledWith({ sender: null, remoteClientId: 'c1' }, { cwd: '/home/u/proj' })
+    })
+    it('refuses a cwd outside every registered root', async () => {
+      for (const cfg of [viewOnly, fullCfg]) {
+        const { fn, d } = mkD(cfg)
+        for (const args of [[{ cwd: '/home/u' }], [{ cwd: '/home/u/other' }], [{ cwd: '/tmp/x' }], [{}], []]) {
+          expect(await d.invoke(authed, ch, args)).toEqual(fenced)
+        }
+        expect(fn).not.toHaveBeenCalled()
+      }
+    })
+  })
+
   describe('home / ancestor roots are ignored', () => {
     const withRoots = (roots) => ({ ...mk(), projectRoots: () => roots })
     it('home registered as a root does not expose ~/notes.txt', () => {

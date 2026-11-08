@@ -8817,6 +8817,50 @@ async function reapDeadRunningJobs() {
           cwd: rowCwd, key: d.slug, sinceMs: Number.isFinite(startedMs) ? startedMs : 0,
         });
       } catch { strandedPins = []; }
+      // Commit-guard evidence for a worktree run (PRD 2892): an sm-job branch
+      // that never left its base reads as integrated, so a zero-commit run
+      // with real uncommitted work (Bilko 1685) would otherwise complete.
+      // Mirrors finalizeJobWorktree: salvage first, then drop carried WIP the
+      // run left byte-identical, then pin the work before the checkout goes.
+      let dirt = null;
+      let salvagePatch = null;
+      let uncommittedSnapshot = null;
+      let runMadeCommit = null;
+      const hasCheckout = integrated !== null && typeof wtDir === 'string' && wtDir && wtDir !== rowCwd && fs.existsSync(wtDir);
+      if (hasCheckout) {
+        try {
+          const raw = await gitTreeGuard.uncommittedChanges(wtDir);
+          if (Array.isArray(raw)) {
+            dirt = stripAppOwnedChurn(raw);
+            if (dirt.length && Array.isArray(row.carriedPaths) && row.carriedPaths.length) {
+              const same = new Set(await jobWorktree.unchangedCarriedPaths({ cwd: rowCwd, dir: wtDir, paths: row.carriedPaths }));
+              if (same.size) dirt = dirt.filter((p) => !same.has(p));
+            }
+          }
+          if (dirt && dirt.length) {
+            if (row.runId) {
+              const salvagePath = path.join(schedulerPaths.runsDir(), row.runId, `${d.slug}.uncommitted.patch`);
+              const salvage = await jobWorktree.salvageJobWorktreeDiff({ dir: wtDir, outFile: salvagePath });
+              if (salvage && salvage.ok) {
+                salvagePatch = salvagePath;
+                console.log(`[scheduler] reapDeadRunningJobs: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff for ${d.slug} to ${salvagePath}`);
+              }
+            }
+            const snap = await jobWorktree.snapshotUncommittedWork({ cwd: rowCwd, dir: wtDir, key: d.slug });
+            if (snap && snap.sha && snap.ref) uncommittedSnapshot = { sha: snap.sha, ref: snap.ref };
+            else if (snap && snap.error) console.error(`[scheduler] reapDeadRunningJobs: uncommitted snapshot failed for ${d.slug}: ${snap.error}`);
+          }
+        } catch (e) {
+          console.error(`[scheduler] reapDeadRunningJobs: worktree salvage failed for ${d.slug}`, e);
+        }
+        const commitCount = await jobWorktree.worktreeRunCommitCount({ dir: wtDir });
+        if (commitCount >= 0) {
+          runMadeCommit = commitCount > 0
+            || headReconcile?.action === 'fast-forwarded'
+            || headReconcile?.action === 'diverged'
+            || strandedPins.length > 0;
+        }
+      }
       const pinVerdict = headReconcile?.action === 'diverged'
         ? null
         : gitTreeGuard.strandedCommitVerdict({ worktreeHead: { stranded: strandedPins }, landedCommit: null });
@@ -8847,6 +8891,37 @@ async function reapDeadRunningJobs() {
         }
       } else if (integrated === true) {
         if (guardHeadBeforeVal && headNow && headNow !== guardHeadBeforeVal) landedCommit = headNow;
+        // spawnJob's commit guard, applied to the adopted run (PRD 2892). A
+        // -1 commit count or a missing checkout (runMadeCommit null) or an
+        // unreadable status (dirt null) keeps the pre-guard behaviour.
+        if (runMadeCommit !== null && dirt !== null) {
+          const artifactPaths = row.artifactPaths;
+          const guardVerdict = commitGuardVerdict({
+            newlyDirty: dirt,
+            siblingRunning: false,
+            ranInWorktree: true,
+            jobSelfCommitted: runMadeCommit,
+            legitimateNoOp: false,
+            isFixPlanJob: resolveIsFixPlan(d.slug, row.isFixPlan),
+            artifactVerified: row.deliverable === 'artifact' && Array.isArray(artifactPaths) && artifactPaths.length > 0,
+            verifyResult: null,
+            salvagePatch,
+          });
+          if (guardVerdict) {
+            const satisfyingCommits = guardVerdict.verdict === 'silent_no_op'
+              ? await findSatisfyingCommitOnMain(row)
+              : [];
+            const finalVerdict = resolveCommitGuardOutcome(guardVerdict, satisfyingCommits);
+            if (finalVerdict.verdict !== 'already_satisfied_on_main') {
+              effectiveSuccess = false;
+              landedCommit = null;
+              notLandedInfo = { verdict: finalVerdict.verdict, reason: finalVerdict.reason };
+              console.log(`[scheduler] reapDeadRunningJobs commit-guard: ${d.slug} ${finalVerdict.verdict} → needs_review`);
+            } else {
+              console.log(`[scheduler] reapDeadRunningJobs already-satisfied-on-main: ${d.slug} → completed (${finalVerdict.satisfyingSha})`);
+            }
+          }
+        }
       } else {
         // Branch exists and still holds commits never merged into rowCwd's
         // HEAD — the exact PRD 1118 shape. Never merge it here (see
@@ -8859,7 +8934,7 @@ async function reapDeadRunningJobs() {
           reason: `worktree branch ${branch} still holds unintegrated work — never merged into ${rowCwd}`,
         };
       }
-      integrationResults.set(d.slug, { effectiveSuccess, landedCommit, notLandedInfo });
+      integrationResults.set(d.slug, { effectiveSuccess, landedCommit, notLandedInfo, dirt, salvagePatch, uncommittedSnapshot });
     }
 
     // Evidence-before-failure guard for a row about to be stamped 'failed'
@@ -9058,7 +9133,16 @@ async function reapDeadRunningJobs() {
         delete s.jobs[idx].overrun;
         delete s.jobs[idx].guardBaseline;
         delete s.jobs[idx].guardHeadBefore;
-        applyLeftoverFields(s.jobs[idx], deltaPaths);
+        // A worktree run's checkout dirt (PRD 2892) wins over the in-place
+        // baseline delta, which only ever sees the main tree.
+        const wtEvidence = success && !rateLimited ? integrationResults.get(slug) : null;
+        if (wtEvidence && Array.isArray(wtEvidence.dirt) && wtEvidence.dirt.length) {
+          if (wtEvidence.salvagePatch) s.jobs[idx].salvagePatch = wtEvidence.salvagePatch;
+          if (wtEvidence.uncommittedSnapshot) s.jobs[idx].uncommittedSnapshot = wtEvidence.uncommittedSnapshot;
+          applyLeftoverFields(s.jobs[idx], wtEvidence.dirt);
+        } else {
+          applyLeftoverFields(s.jobs[idx], deltaPaths);
+        }
         runningSet.delete(slug);
         // A dead job reaped here never reached spawnJob's own finally block
         // (that's this reaper's whole reason to exist — see its header

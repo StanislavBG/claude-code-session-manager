@@ -833,6 +833,8 @@ export interface ScheduleJob {
    *  lost — set whenever the commit-guard's worktree or in-place salvage
    *  pass produced one (PRD 1098). */
   salvagePatch?: string | null;
+  /** Commit + ref pinning a reaped run's uncommitted checkout work before the checkout was lost (PRD 2892). */
+  uncommittedSnapshot?: { sha: string; ref: string };
   /** Why a pending row is not being dispatched this tick (worktree cap, launch circuit breaker). */
   heldReason?: string;
   /** Set when this row's last dispatch never got a model turn (issue #11): the

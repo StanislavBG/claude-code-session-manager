@@ -107,6 +107,8 @@ const ScheduleJobSchema = z
     quietLeaseDegraded: z.boolean().optional(),
     // Salvaged uncommitted diff patch path (PRD 1098).
     salvagePatch: z.string().nullable().optional(),
+    // Pin of a dead run's uncommitted checkout work (refs/sm-uncommitted/...), PRD 2892.
+    uncommittedSnapshot: z.object({ sha: z.string(), ref: z.string() }).optional(),
     // Leftover-attribution fields: the newly-dirty paths a terminal run left
     // uncommitted, diffed against the persisted pre-run baseline
     // (guardBaseline/guardHeadBefore below). Set on EVERY terminal outcome

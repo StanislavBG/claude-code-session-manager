@@ -23,17 +23,17 @@ describe('deriveMcpConnectionState', () => {
   })
 
   it('is unprobed when no matching entry by name', () => {
-    const probe = probeWith([{ name: 'other', target: 'x', transport: 'stdio', status: 'connected' }])
+    const probe = probeWith([{ name: 'other', target: 'x', transport: 'stdio', status: 'connected', statusText: '' }])
     expect(deriveMcpConnectionState('fetch', probe).state).toBe('unprobed')
   })
 
   it('is unprobed when entry status is unknown', () => {
-    const probe = probeWith([{ name: 'fetch', target: 'x', transport: 'stdio', status: 'unknown' }])
+    const probe = probeWith([{ name: 'fetch', target: 'x', transport: 'stdio', status: 'unknown', statusText: '' }])
     expect(deriveMcpConnectionState('fetch', probe).state).toBe('unprobed')
   })
 
   it('is ready when connected', () => {
-    const probe = probeWith([{ name: 'fetch', target: 'x', transport: 'stdio', status: 'connected' }])
+    const probe = probeWith([{ name: 'fetch', target: 'x', transport: 'stdio', status: 'connected', statusText: '' }])
     expect(deriveMcpConnectionState('fetch', probe)).toEqual({
       state: 'ready',
       label: 'Ready',
@@ -48,7 +48,7 @@ describe('deriveMcpConnectionState', () => {
     ['needs-auth', 'Needs auth'],
     ['pending', 'Pending approval'],
   ] as const)('is not-ready with label for %s', (status, label) => {
-    const probe = probeWith([{ name: 'fetch', target: 'x', transport: 'stdio', status }])
+    const probe = probeWith([{ name: 'fetch', target: 'x', transport: 'stdio', status, statusText: '' }])
     expect(deriveMcpConnectionState('fetch', probe)).toEqual({
       state: 'not-ready',
       label,

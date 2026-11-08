@@ -86,7 +86,7 @@ test('mandatory deny set and read-only invariants', () => {
   const table = require('../apiSurface.cjs');
   const deny = (r) => r.remote === 'deny';
   for (const r of table) {
-    if (/^pty:/.test(r.channel) || ['app:test-fire-hook', 'app:pick-directory', 'app:reboot-app', 'watchers:add', 'plugins:install', 'voice:set-hotkey', 'voice:set-recording', 'config:write-json', 'config:write-text'].includes(r.channel)
+    if (/^pty:/.test(r.channel) || ['app:test-fire-hook', 'app:pick-directory', 'app:reboot-app', 'watchers:add', 'plugins:install', 'voice:set-hotkey', 'voice:set-recording', 'config:write-json', 'config:write-text', 'mcp:check-server'].includes(r.channel)
       || /^(clipboard|shell|updater):/.test(r.channel)) {
       assert.ok(deny(r), `${key(r)} must be deny`);
     }
@@ -94,4 +94,15 @@ test('mandatory deny set and read-only invariants', () => {
       assert.ok(!/(write|save|delete|set|install|spawn|kill|create|run|remove|open|reboot)/i.test(r.channel.replace(/^.*:/, '')) || r.kind === 'on', `${key(r)} looks mutating but is read`);
     }
   }
+});
+
+// mcp:check-server spawns the configured server's command, so the web remote must never reach it.
+test('mcp.checkServer is listed and desktop-only (deny)', () => {
+  const table = require('../apiSurface.cjs');
+  const row = table.find((r) => r.ns === 'mcp' && r.method === 'checkServer');
+  assert.ok(row, 'mcp.checkServer missing from apiSurface');
+  assert.deepStrictEqual(
+    { channel: row.channel, kind: row.kind, remote: row.remote },
+    { channel: 'mcp:check-server', kind: 'invoke', remote: 'deny' },
+  );
 });

@@ -92,6 +92,14 @@ test('customerFeedback exposes nine methods wired to customerFeedback:* channels
   assert.deepStrictEqual(invokeCalls[0].payload, { title: 't', body: 'b', tag: 'bug' });
 });
 
+test('mcp.checkServer forwards the request unchanged to mcp:check-server', async () => {
+  assert.strictEqual(typeof exposedApi.mcp.checkServer, 'function');
+  const req = { source: 'project', name: 'github', cwd: '/tmp/proj' };
+  invokeCalls.length = 0;
+  await exposedApi.mcp.checkServer(req);
+  assert.deepStrictEqual(invokeCalls, [{ channel: 'mcp:check-server', payload: req }]);
+});
+
 test('updater namespace exposes six methods wired to updater:* channels', async () => {
   const u = exposedApi.updater;
   assert.ok(u, 'expected exposedApi.updater');

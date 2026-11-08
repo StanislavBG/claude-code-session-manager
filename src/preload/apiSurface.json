@@ -350,6 +350,13 @@
   "remote": "mutate"
  },
  {
+  "ns": "mcp",
+  "method": "checkServer",
+  "channel": "mcp:check-server",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
   "ns": "agents",
   "method": "listPersonas",
   "channel": "agents:list-personas",

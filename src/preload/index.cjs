@@ -118,6 +118,8 @@ contextBridge.exposeInMainWorld('api', {
   mcp: {
     status: () => ipcRenderer.invoke('mcp:status'),
     catalog: () => ipcRenderer.invoke('mcp:catalog'),
+    // Desktop-only (apiSurface remote: deny) — main spawns the named server's configured command.
+    checkServer: (req) => ipcRenderer.invoke('mcp:check-server', req),
   },
   agents: {
     listPersonas: () => ipcRenderer.invoke('agents:list-personas'),

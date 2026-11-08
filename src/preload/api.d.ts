@@ -248,6 +248,8 @@ export interface McpServerStatus {
   target: string;
   transport: 'stdio' | 'http' | 'sse' | 'ws' | 'unknown';
   status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'unknown';
+  /** The line's trimmed text after the status glyph (e.g. "Connected"); may be empty. */
+  statusText: string;
 }
 
 export interface McpStatusResult {
@@ -256,6 +258,25 @@ export interface McpStatusResult {
   error?: string;
   checkedAt: number;
 }
+
+/** Mirrors schemas.mcpCheckServer (src/main/ipcSchemas.cjs). NAMES which configured server
+ *  to check; main reads its config from disk (lib/mcpToolsProbe.cjs checkConfiguredMcpServer),
+ *  so the renderer can't choose what is spawned. user = ~/.claude.json mcpServers; project =
+ *  <cwd>/.mcp.json mcpServers (cwd: the project's absolute root); plugin = a server of the
+ *  installed plugin `pluginKey` (name@marketplace). cwd counts for a project server only,
+ *  pluginKey for a plugin server only. */
+export type McpCheckRequest =
+  | { source: 'user'; name: string; cwd?: string; pluginKey?: string }
+  | { source: 'project'; name: string; cwd: string; pluginKey?: string }
+  | { source: 'plugin'; name: string; cwd?: string; pluginKey: string };
+
+/** One on-demand check of a configured MCP server (initialize → tools/list). A server
+ *  that isn't configured resolves to { ok: false, status: 'failed', error: 'server not found' };
+ *  an invalid request, a refused project cwd or an unparseable config file rejects, with
+ *  nothing spawned. */
+export type McpCheckResult =
+  | { ok: true; status: 'connected'; tools: { name: string; description?: string }[]; checkedAt: number }
+  | { ok: false; status: 'failed' | 'needs-auth'; error: string; checkedAt: number };
 
 /** One session-manager-scheduler MCP tool's catalog entry (src/main/lib/mcpToolCatalog.cjs) —
  *  the same data GET /admin/mcp/catalog serves, read in-process for the Dashboard's
@@ -2018,6 +2039,8 @@ export interface SessionManagerAPI {
   mcp: {
     status: () => Promise<McpStatusResult>;
     catalog: () => Promise<McpCatalogResult>;
+    /** Desktop-only: the web remote is denied it (apiSurface remote: deny) — it spawns the server. */
+    checkServer: (req: McpCheckRequest) => Promise<McpCheckResult>;
   };
   agents: {
     listPersonas: () => Promise<AgentPersona[]>;

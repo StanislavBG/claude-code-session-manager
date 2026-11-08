@@ -11,13 +11,18 @@
  * "own file, own register*Handlers export, wired from index.cjs" shape for
  * the neighboring active-index merge IPC) rather than growing epicMint.cjs
  * itself, since this is IPC-registration plumbing, not Epic-minting logic.
+ *
+ * Also home to 'promptSessions:list-restorable', the New Session card's
+ * "Restore a session" picker, whose pick comes back as create-epic's
+ * `restoreSessionId`.
  */
 
 const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('./epicMint.cjs');
+const { listRestorableSessions } = require('./restorableSessions.cjs');
 const { validatePath } = require('../../config.cjs');
 
 /**
- * createEpicViaIpc(cwd, { goalText, tag?, agentType?, source? }) → Promise<{ epicId, session }>
+ * createEpicViaIpc(cwd, { goalText, tag?, agentType?, source?, restoreSessionId? }) → Promise<{ epicId, session }>
  *
  * THE one Epic-creation path (epicMint.cjs's SINGLE-CREATOR LAW): this handler
  * holds `MINT_AUTHORITY_NEW_EPIC_UI`, the token that unlocks ensureEpic's mint
@@ -40,8 +45,12 @@ const { validatePath } = require('../../config.cjs');
  * filesystem location — the same boundary every other renderer-facing path
  * IPC (config:read-json/write-json, lib/epic/activeIndexMerge.cjs's own merge) is
  * already required to pass through.
+ *
+ * `restoreSessionId` (absent = a normal mint) asks ensureEpic to adopt that
+ * existing Claude Code CLI session as the new Epic's claudeSessionId. ensureEpic's
+ * restore gate decides; a refused id rejects the call, never mints a fresh session.
  */
-async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections } = {}) {
+async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId } = {}) {
   validatePath(cwd);
   const { epicId } = await ensureEpic(cwd, {
     goalText,
@@ -53,6 +62,7 @@ async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, 
     source,
     openingPrompt,
     sections,
+    restoreSessionId,
     mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI,
     status: 'proposed',
   });
@@ -60,14 +70,31 @@ async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, 
   return { epicId, session: index.sessions[epicId] };
 }
 
+/**
+ * listRestorableViaIpc(cwd) → Promise<RestorableList>
+ *
+ * This project's Claude Code CLI sessions that no Epic owns yet, newest first
+ * (restorableSessions.cjs's listRestorableSessions). `cwd` is renderer-supplied,
+ * so it passes the same validatePath boundary as createEpicViaIpc before any
+ * transcript dir is read; an out-of-bounds cwd rejects.
+ */
+async function listRestorableViaIpc(cwd) {
+  validatePath(cwd);
+  return listRestorableSessions({ cwd });
+}
+
 function registerPromptSessionsCreateEpicHandlers() {
   const { ipcMain } = require('electron');
   const { schemas: s, validated: v } = require('../../ipcSchemas.cjs');
   ipcMain.handle(
     'promptSessions:create-epic',
-    v(s.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections }) =>
-      createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections })),
+    v(s.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId }) =>
+      createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId })),
+  );
+  ipcMain.handle(
+    'promptSessions:list-restorable',
+    v(s.promptSessionsListRestorable, ({ cwd }) => listRestorableViaIpc(cwd)),
   );
 }
 
-module.exports = { createEpicViaIpc, registerPromptSessionsCreateEpicHandlers };
+module.exports = { createEpicViaIpc, listRestorableViaIpc, registerPromptSessionsCreateEpicHandlers };

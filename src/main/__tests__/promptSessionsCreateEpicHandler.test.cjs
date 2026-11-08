@@ -5,10 +5,12 @@
  * through main's own ensureEpic() instead of hand-constructing the
  * PromptSession record itself. Nothing in the app calls this yet.
  *
- * Exercises the handler the same way index.cjs wires it — schema validation
- * (ipcSchemas.cjs's `validated` wrapper) in front of the business logic —
- * without touching Electron's `ipcMain`, mirroring activeIndexMerge.test.cjs's
- * pattern of testing the underlying function directly.
+ * Exercises the handlers exactly as index.cjs wires them: the ones
+ * registerPromptSessionsCreateEpicHandlers really registers, with Electron's
+ * `ipcMain` stubbed through the require cache — schema validation
+ * (ipcSchemas.cjs's `validated` wrapper) in front of the business logic. Also
+ * covers 'promptSessions:list-restorable' and restoreSessionId (restore a
+ * Claude Code CLI session as a new Epic).
  *
  * Run: timeout 300 npx vitest run src/main/__tests__/promptSessionsCreateEpicHandler.test.cjs
  */
@@ -20,17 +22,55 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { schemas, validated } = require('../ipcSchemas.cjs');
-const { createEpicViaIpc } = require('../lib/epic/promptSessionsCreateEpic.cjs');
+const { schemas } = require('../ipcSchemas.cjs');
+const {
+  createEpicViaIpc,
+  listRestorableViaIpc,
+  registerPromptSessionsCreateEpicHandlers,
+} = require('../lib/epic/promptSessionsCreateEpic.cjs');
 const { readActiveIndex } = require('../lib/epic/epicMint.cjs');
+const { listRestorableSessions } = require('../lib/epic/restorableSessions.cjs');
+const { encodeCwd } = require('../lib/util/encodeCwd.cjs');
 const { PromptSessionSchema } = require('../lib/promptSessionSchema.cjs');
 const config = require('../config.cjs');
 
-const handler = validated(schemas.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, source }) =>
-  createEpicViaIpc(cwd, { goalText, tag, agentType, source }));
+/**
+ * Every channel registerPromptSessionsCreateEpicHandlers registers, by name.
+ * The stub only lives for the register call; the prior cache entry is put back.
+ * @returns {Map<string, Function>}
+ */
+function registeredHandlers() {
+  const electronPath = require.resolve('electron');
+  const prior = require.cache[electronPath];
+  const handlers = new Map();
+  require.cache[electronPath] = {
+    id: electronPath,
+    filename: electronPath,
+    loaded: true,
+    exports: { ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) } },
+  };
+  try {
+    registerPromptSessionsCreateEpicHandlers();
+  } finally {
+    if (prior) require.cache[electronPath] = prior;
+    else delete require.cache[electronPath];
+  }
+  return handlers;
+}
+
+const handlers = registeredHandlers();
+const handler = handlers.get('promptSessions:create-epic');
+const listRestorableHandler = handlers.get('promptSessions:list-restorable');
 
 const tmpDirs = [];
+/** HOME as it was before useTempHome() moved it; null when this test never moved it. */
+let homeToRestore = null;
 afterEach(async () => {
+  if (homeToRestore) {
+    if (homeToRestore.value === undefined) delete process.env.HOME;
+    else process.env.HOME = homeToRestore.value;
+    homeToRestore = null;
+  }
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
     await fsp.rm(d, { recursive: true, force: true });
@@ -173,4 +213,98 @@ test('developLoop false is forwarded and stored; true or omitted writes no key',
   expect('developLoop' in on.session).toBe(false);
   const none = await createEpicViaIpc(cwd, { goalText: 'Loop omitted', agentType: 'architect' });
   expect('developLoop' in none.session).toBe(false);
+});
+
+// ── Restore a Claude Code CLI session as a new Epic ─────────────────────────
+// restoreSessionId rides 'promptSessions:create-epic' into ensureEpic, and
+// 'promptSessions:list-restorable' lists the candidates. Neither IPC function
+// takes deps, so a CLI transcript fixture is reached the way the app reaches
+// it: through os.homedir(), pointed at a temp HOME for one test.
+
+const RESTORE_ID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+/** Point HOME (os.homedir()) at a fresh temp dir; afterEach puts it back. */
+async function useTempHome() {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-promptsessions-home-'));
+  tmpDirs.push(home);
+  if (!homeToRestore) homeToRestore = { value: process.env.HOME };
+  process.env.HOME = home;
+  expect(os.homedir()).toBe(home);
+  return home;
+}
+
+/** A CLI transcript for `sessionId`, recorded in `cwd`, as `claude` writes it. */
+function writeCliTranscript(home, cwd, sessionId) {
+  const dir = path.join(home, '.claude', 'projects', encodeCwd(cwd));
+  fs.mkdirSync(dir, { recursive: true });
+  const rows = [
+    { type: 'user', cwd, sessionId, entrypoint: 'cli', isSidechain: false, message: { role: 'user', content: 'pick up the refactor' } },
+    { type: 'assistant', cwd, sessionId, entrypoint: 'cli', isSidechain: false, message: { role: 'assistant', content: [{ type: 'text', text: 'on it' }] } },
+  ];
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+}
+
+test('the registered create-epic handler carries restoreSessionId into ensureEpic: the new Epic adopts that CLI session', async () => {
+  const cwd = await mkCwd();
+  writeCliTranscript(await useTempHome(), cwd, RESTORE_ID);
+
+  const result = await handler(null, { cwd, goalText: 'Carry on the CLI refactor', restoreSessionId: RESTORE_ID });
+
+  expect(result.session.claudeSessionId).toBe(RESTORE_ID);
+  expect(result.session.restoredSession).toBe(true);
+  expect(result.session.status).toBe('proposed');
+  expect(readActiveIndex(cwd).sessions[result.epicId]).toEqual(result.session);
+  expect(PromptSessionSchema.safeParse(result.session).success).toBe(true);
+});
+
+test('a restoreSessionId with no transcript is refused by ensureEpic, never swapped for a fresh session', async () => {
+  const cwd = await mkCwd();
+  await useTempHome();
+
+  await expect(createEpicViaIpc(cwd, { goalText: 'Restore a ghost', restoreSessionId: RESTORE_ID }))
+    .rejects.toThrow(/No CLI transcript for session/);
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+});
+
+test('a malformed restoreSessionId is rejected by ipcSchemas validation before ensureEpic ever runs', async () => {
+  const cwd = await mkCwd();
+  const bad = ['', 'not-a-uuid', '../../etc/passwd', `${RESTORE_ID}.jsonl`, `${RESTORE_ID}/x`, RESTORE_ID.replace(/-/g, ''), 42, null];
+  for (const restoreSessionId of bad) {
+    expect(schemas.promptSessionsCreateEpic.safeParse({ cwd, goalText: 'x', restoreSessionId }).success).toBe(false);
+    expect(() => handler(null, { cwd, goalText: 'Bad restore id', restoreSessionId })).toThrow();
+  }
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+  // Well-formed ids pass (either case); ensureEpic's restore gate then decides.
+  expect(schemas.promptSessionsCreateEpic.parse({ cwd, goalText: 'x', restoreSessionId: RESTORE_ID }).restoreSessionId).toBe(RESTORE_ID);
+  expect(schemas.promptSessionsCreateEpic.safeParse({ cwd, goalText: 'x', restoreSessionId: RESTORE_ID.toUpperCase() }).success).toBe(true);
+});
+
+test('list-restorable payload is a strict { cwd }', () => {
+  const s = schemas.promptSessionsListRestorable;
+  expect(s.parse({ cwd: '/tmp/x' })).toEqual({ cwd: '/tmp/x' });
+  expect(s.safeParse({}).success).toBe(false);
+  expect(s.safeParse({ cwd: '' }).success).toBe(false);
+  expect(s.safeParse({ cwd: '/'.repeat(4097) }).success).toBe(false);
+  expect(s.safeParse({ cwd: '/tmp/x', limit: 5 }).success).toBe(false);
+});
+
+test('list-restorable rejects a cwd outside every allowed root', async () => {
+  const unregistered = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-promptsessions-list-restorable-unregistered-'));
+  tmpDirs.push(unregistered);
+  expect(listRestorableHandler).toBeTypeOf('function');
+
+  await expect(listRestorableHandler(null, { cwd: unregistered })).rejects.toThrow(/outside allowed boundaries/);
+  await expect(listRestorableViaIpc(unregistered)).rejects.toThrow(/outside allowed boundaries/);
+});
+
+test('list-restorable returns listRestorableSessions\' result for an allowed project cwd', async () => {
+  const cwd = await mkCwd();
+  writeCliTranscript(await useTempHome(), cwd, RESTORE_ID);
+  expect(listRestorableHandler).toBeTypeOf('function');
+
+  const result = await listRestorableHandler(null, { cwd });
+
+  expect(result.sessions.map((s) => s.sessionId)).toEqual([RESTORE_ID]);
+  expect(result.sessions[0].firstPrompt).toBe('pick up the refactor');
+  expect(result).toEqual(await listRestorableSessions({ cwd }));
 });

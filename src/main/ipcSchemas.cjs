@@ -15,6 +15,8 @@ const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema, PersonaNameSchema, ProjectCwdSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
 const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroRemoveFromProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 const { MAX_SLOTS } = require('./lib/scheduler/sessionSlots.cjs');
+// Aliased: this file already has a looser, exchanges-only SESSION_ID_RE (Exchanges section).
+const { SESSION_ID_RE: RESTORABLE_SESSION_ID_RE } = require('./lib/epic/restorableSessions.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -235,7 +237,16 @@ const promptSessionsCreateEpic = z.object({
   // future scripted Epic) composes a full opening prompt.
   openingPrompt: z.string().max(200000).optional(),
   sections: z.array(EpicIntakeSectionSchema).max(200).optional(),
+  // Restore: adopt this project's existing Claude Code CLI session (a UUID —
+  // it becomes a transcript filename) instead of minting a fresh one. Absent =
+  // a normal mint; ensureEpic's restore gate decides whether the id may be adopted.
+  restoreSessionId: z.string().regex(RESTORABLE_SESSION_ID_RE).optional(),
 });
+
+// Renderer entry point for the "Restore a session" picker: this project's CLI
+// sessions no Epic owns yet (lib/epic/restorableSessions.cjs). The handler runs
+// `cwd` through config.cjs's validatePath before any transcript dir is read.
+const promptSessionsListRestorable = z.object({ cwd: z.string().min(1).max(4096) }).strict();
 
 // Renderer entry point for creating an Epic's isolated git worktree
 // (lib/epic/epicWorktreeMint.cjs) at the proposed->active transition — PRD 1033.
@@ -1500,6 +1511,7 @@ module.exports = {
     promptSessionsMergeActiveIndex,
     promptSessionsWriteArchive,
     promptSessionsCreateEpic,
+    promptSessionsListRestorable,
     promptSessionsCreateWorktree,
     promptSessionsReopen,
     promptSessionsCwd,

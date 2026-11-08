@@ -9,7 +9,7 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { describe, test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -38,6 +38,7 @@ const {
   unwatchOutput,
   closeAllOutputWatchers,
   registerProjectPagesIpc,
+  isLibraryPath,
   _outputWatchers,
 } = require('../projectPages.cjs');
 
@@ -435,4 +436,16 @@ test('project-pages:matrix refuses an ephemeral cwd', async () => {
   const matrix = ipcHandlers.get('project-pages:matrix');
   config.addAllowedRoot(os.tmpdir());
   expect(await matrix({}, { cwd: os.tmpdir() })).toEqual({ ok: false, error: expect.stringMatching(/ephemeral/) });
+});
+
+describe('isLibraryPath', () => {
+  test('accepts matrix/matrix.json only, not sibling matrix files', () => {
+    expect(isLibraryPath(path.join('matrix', 'matrix.json'))).toBe(true);
+    expect(isLibraryPath(path.join('matrix', 'matrix.schema.json'))).toBe(false);
+    expect(isLibraryPath(path.join('matrix', 'other.json'))).toBe(false);
+  });
+
+  test('still accepts knowledge/<id>/index.html', () => {
+    expect(isLibraryPath(path.join('knowledge', 'overview', 'index.html'))).toBe(true);
+  });
 });

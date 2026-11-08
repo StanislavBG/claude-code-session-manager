@@ -124,7 +124,10 @@ async function matrix({ cwd }) {
 function isLibraryPath(rel) {
   const parts = rel.split(path.sep);
   if (parts.length === 1) return parts[0] === 'home.html';
-  if (parts.length === 2) return parts[0] === 'demo-video' && parts[1] === 'index.html';
+  if (parts.length === 2) {
+    if (parts[0] === 'matrix' && parts[1] === 'matrix.json') return true;
+    return parts[0] === 'demo-video' && parts[1] === 'index.html';
+  }
   if (parts.length === 3 && (parts[0] === 'knowledge' || parts[0] === 'videos')) {
     return parts[1] !== '_character' && (parts[2] === 'index.html' || parts[2] === 'meta.json');
   }
@@ -308,6 +311,7 @@ module.exports = {
   get,
   mdNetwork,
   matrix,
+  isLibraryPath,
   renameEntry,
   deleteEntry,
   watchOutput,

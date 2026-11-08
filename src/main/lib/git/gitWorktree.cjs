@@ -809,6 +809,43 @@ function withKindLock(kind, fn) {
   return result;
 }
 
+// Per-checkout promise-chain tails for `withCheckoutLock`, keyed by the
+// checkout's real path. An entry exists only while its chain has work.
+const checkoutLocks = new Map();
+
+/** @param {string} cwd */
+function checkoutLockKey(cwd) {
+  try { return fs.realpathSync(cwd); } catch { return path.resolve(cwd); }
+}
+
+/**
+ * Serializes `fn` per main checkout, so the callers that land into one
+ * checkout (scheduler finalize, mechanical recovery, the branch sweep, the
+ * reaper landing adopted PASS runs) never run `git merge`/`git checkout`
+ * there at once — two concurrent ones clash on `.git/index.lock`, which
+ * reports as `failureKind: 'other'` and parks a job whose work was fine.
+ * Different checkouts run concurrently. A rejection from `fn` is returned to
+ * its own caller only; the chain swallows it so later callers still run.
+ * Process-local: the app is single-instance, so no cross-process lock.
+ * @template T
+ * @param {string} cwd
+ * @param {() => T | Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+async function withCheckoutLock(cwd, fn) {
+  const key = checkoutLockKey(cwd);
+  const previous = checkoutLocks.get(key) || Promise.resolve();
+  const result = previous.then(() => fn());
+  const tail = result.then(() => {}, () => {});
+  checkoutLocks.set(key, tail);
+  try {
+    return await result;
+  } finally {
+    // Only the call that is still the chain's tail drains it.
+    if (checkoutLocks.get(key) === tail) checkoutLocks.delete(key);
+  }
+}
+
 /**
  * Decides whether a new worktree of `kind` may be created right now, and if
  * so reserves the slot — the single choke point `createWorktree` calls
@@ -1631,6 +1668,20 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     return strayCheckoutFailure;
   }
 
+  // Everything below runs git merge/checkout in `cwd` itself, so it is
+  // serialized per checkout (see withCheckoutLock). Called through
+  // module.exports so tests can spy on the lock.
+  return module.exports.withCheckoutLock(cwd, () => integrateBranchInCheckout({
+    cwd, branch, carriedPaths, forkSha, mergeMessage,
+  }));
+}
+
+/**
+ * The in-checkout half of `integrateBranch`: HEAD is already verified to be
+ * on the expected base branch. Only ever called under `withCheckoutLock(cwd)`.
+ * @param {{cwd: string, branch: string, carriedPaths?: string[], forkSha?: string, mergeMessage: string}} a
+ */
+async function integrateBranchInCheckout({ cwd, branch, carriedPaths, forkSha, mergeMessage }) {
   let branchHead;
   try {
     branchHead = (await execGit(['rev-parse', branch], { cwd, timeout: 10_000 })).trim();
@@ -3512,6 +3563,9 @@ module.exports = {
   getCurrentBranch,
   isCarriedWipOnly,
   integrateBranch,
+  withCheckoutLock,
+  // Test-only view of the live lock map (entries exist only while busy).
+  _checkoutLocks: checkoutLocks,
   cleanupWorktree,
   salvageWorktreeDiff,
   salvageDirtyDelta,

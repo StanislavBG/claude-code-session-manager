@@ -19,7 +19,7 @@ const History = lazy(() => import('./tabs/History').then((m) => ({ default: m.Hi
 const Scheduler = lazy(() => import('./tabs/Scheduler').then((m) => ({ default: m.Scheduler })))
 const Settings = lazy(() => import('./tabs/Settings').then((m) => ({ default: m.Settings })))
 const SystemPrompt = lazy(() => import('./tabs/SystemPrompt').then((m) => ({ default: m.SystemPrompt })))
-const Memory = lazy(() => import('./tabs/Memory').then((m) => ({ default: m.Memory })))
+const ProjectClaudeConfig = lazy(() => import('./tabs/ProjectClaudeConfig').then((m) => ({ default: m.ProjectClaudeConfig })))
 const Extensions = lazy(() => import('./tabs/Extensions').then((m) => ({ default: m.Extensions })))
 const AppSettings = lazy(() => import('./tabs/AppSettings').then((m) => ({ default: m.AppSettings })))
 const AgentLibrary = lazy(() => import('./tabs/AgentLibrary').then((m) => ({ default: m.AgentLibrary })))
@@ -53,7 +53,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'history':       { title: 'Spend, tokens and time',    intro: 'Estimated spend, tokens, prompts and active time across every project — by project, model and day. Export any range to CSV.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
-  'memory':        { title: 'Memory',                    intro: 'Claude Code\'s own memory files for this project and its subagents — a MEMORY.md index plus topic files. Stored locally, nothing leaves your machine.' },
+  'memory':        { title: 'Claude config',             intro: 'This project\'s own Claude Code files — its memory folder, CLAUDE.md and CLAUDE.local.md, .claude/settings.json and settings.local.json, .mcp.json and .claude/skills/. Each tab edits the real file the claude CLI reads when a session starts here; ~/.claude is edited from Home.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'settings':      { title: 'Settings',                  intro: 'Claude Code\'s settings.json — permissions, hooks, env and every other key, per scope, with schema validation.' },
@@ -108,7 +108,7 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
     switch (active) {
       case 'history':       return <LazyScreen><History /></LazyScreen>
       case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
-      case 'memory':        return <LazyScreen><Memory /></LazyScreen>
+      case 'memory':        return <LazyScreen><ProjectClaudeConfig /></LazyScreen>
       case 'system-prompt': return <LazyScreen><SystemPrompt /></LazyScreen>
       case 'settings':      return <LazyScreen><Settings scope="user" /></LazyScreen>
       case 'extensions':    return <LazyScreen><Extensions /></LazyScreen>

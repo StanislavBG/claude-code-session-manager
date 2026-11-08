@@ -69,7 +69,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
 
   // Claude Code — files the claude CLI itself reads
   { key: 'system-prompt', group: 'Claude Code', label: 'CLAUDE.md', icon: 'system-prompt', hint: 'Your ~/.claude/CLAUDE.md — house rules for every session on this machine', faces: HOME },
-  { key: 'memory',         group: 'Claude Code', label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store', faces: PROJECT },
+  { key: 'memory',         group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'This project\'s own files — CLAUDE.md, CLAUDE.local.md, .claude/settings.json, .mcp.json, .claude/skills/ and its memory folder', faces: PROJECT },
   { key: 'settings',       group: 'Claude Code', label: 'Settings',       icon: 'settings',       hint: 'settings.json — permissions, hooks, env and every other key, per scope', faces: HOME },
   { key: 'extensions',     group: 'Claude Code', label: 'Extensions',     icon: 'plugins',        hint: 'Skills, MCP servers and plugins', faces: HOME },
   { key: 'agent-library',  group: 'Claude Code', label: 'Agents',         icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
@@ -113,7 +113,7 @@ export function isHomeOnlyNavKey(key: NavKey): boolean {
 
 /**
  * Mirror of `isHomeOnlyNavKey` for `faces: PROJECT` entries (Project Home,
- * Sessions, Scheduler, Memory). Same purpose, opposite
+ * Sessions, Scheduler, Claude config). Same purpose, opposite
  * face: a face-agnostic route (CommandPalette's `nav:*`, the footer's
  * scheduler pill, Home's "Open Scheduler →" buttons) that lands on one of
  * these screens must assert `navFace: 'project'`, or the user ends up reading

@@ -273,12 +273,15 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
             {items.length} {items.length === 1 ? 'item' : 'items'}
           </span>
           <div className="flex-1" />
-          <button
-            onClick={onAdd}
-            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
-          >
-            Add…
-          </button>
+          {/* Only a caller with a catalog for this scope can add; Project scope has none. */}
+          {onAdd && (
+            <button
+              onClick={onAdd}
+              className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
+            >
+              Add…
+            </button>
+          )}
           {selectedItem && (
             <ProvenanceBadge
               scope={selectedItem.scope}

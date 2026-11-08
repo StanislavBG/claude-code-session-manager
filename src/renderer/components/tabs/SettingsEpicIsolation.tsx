@@ -11,8 +11,9 @@ import { toast } from '../../state/toast'
  * gets its own small card rather than a JSON key — but reuses the same
  * SaveBar dirty/save/revert affordance Settings.tsx's scoped editors use,
  * per CLAUDE.md's "follow the existing scoped-editor pattern" convention.
- * Rendered by Settings.tsx only when scope === 'project' — that scope's own
- * ScopeSwitcher is what makes this "per-project", not a switcher of its own.
+ * Rendered by the Project face's Claude config page (ProjectClaudeConfig.tsx,
+ * Settings tab) under a SourceChip naming its real file — that page is already
+ * per-project, so the toggle has no scope switcher of its own.
  */
 export function SettingsEpicIsolation({ cwd }: { cwd: string }) {
   const [loaded, setLoaded] = useState(false)

@@ -19,7 +19,6 @@ import { mergeScopes, getAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { toast } from '../../state/toast'
-import { SettingsEpicIsolation } from './SettingsEpicIsolation'
 
 /**
  * Per-scope statement of WHAT FILE this screen is editing and HOW WIDELY it
@@ -211,7 +210,6 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
               {saveError}
             </div>
           )}
-          {scope === 'project' && cwd && <SettingsEpicIsolation cwd={cwd} />}
           {scopeNeedsCwd(scope) ? (
             <EmptyState
               title="no active project"

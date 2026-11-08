@@ -5,7 +5,9 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { MemoryExplorer } from './memory/explorer/MemoryExplorer'
 
 /**
- * Memory — the redesigned Explorer. Scope (workspace or one subagent) persists
+ * Memory — the Memory tab of the Project face's Claude config page
+ * (ProjectClaudeConfig.tsx, NavKey `memory`): the redesigned Explorer over the
+ * active project's memory folder. Scope (workspace or one subagent) persists
  * under `sm.memoryTab.scope` inside the Explorer shell.
  */
 function MemoryComponent() {

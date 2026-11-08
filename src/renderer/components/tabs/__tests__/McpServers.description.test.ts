@@ -8,8 +8,8 @@ import { flushAsync } from '../../../testUtils/domFlush'
 /**
  * A server's user-set `description` rides on its 3a list row as the tooltip —
  * line 2 stays "<origin> · <status>" — and a server without one has no
- * tooltip. The editor form should round-trip a description edit back into
- * the saved config.
+ * tooltip. The editor form (behind the 3a detail's Edit JSON) should
+ * round-trip a description edit back into the saved config.
  */
 
 const CLAUDE_JSON_PATH = '/home/test/.claude.json'
@@ -128,6 +128,14 @@ describe('McpServers sidebar + editor description', () => {
     })
     await flush()
 
+    // The per-server form lives behind the 3a detail's Edit JSON.
+    const editJson = container.querySelector<HTMLButtonElement>('[data-testid="mcp-edit-json"]')
+    expect(editJson).toBeTruthy()
+    act(() => {
+      editJson!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await flush()
+
     const descInput = Array.from(container.querySelectorAll('input')).find(
       (i) => i.previousElementSibling?.textContent === 'description' || i.placeholder === 'what this server does…',
     )
@@ -140,7 +148,8 @@ describe('McpServers sidebar + editor description', () => {
     })
     await flush()
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Save')
+    // The SaveBar's Save carries its shortcut hint after the label ("Save" + "Ctrl S").
+    const saveButton = Array.from(container.querySelectorAll('button')).find((b) => /^Save(Ctrl S|⌘S)?$/.test(b.textContent ?? ''))
     if (saveButton) {
       act(() => {
         saveButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))

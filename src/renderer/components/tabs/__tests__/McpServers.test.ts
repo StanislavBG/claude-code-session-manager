@@ -9,6 +9,7 @@ import { useConfig } from '../../../state/config'
 import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
 import { useMcpChecks, mcpCheckKey } from '../../../state/mcpChecks'
+import { useToast } from '../../../state/toast'
 import type { McpCheckRequest, McpCheckResult } from '../../../../preload/api'
 import { HOME, PROJECT_CWD, PROJECT_TAB } from './_navfaceHarness'
 
@@ -127,6 +128,8 @@ function installApi(servers: Record<string, unknown> = SERVERS) {
       read: vi.fn().mockResolvedValue({ path: '', data: {} }),
       patch: vi.fn().mockResolvedValue({ ok: true, path: '', data: {} }),
     },
+    // lib/clipboard.ts copyText writes through main (navigator.clipboard is denied in Electron).
+    clipboard: { writeText: vi.fn(async () => ({ ok: true })) },
     mcp: {
       // The retired mount-time probe; the list must never call it.
       status: vi.fn().mockResolvedValue({ ok: true, error: null, servers: [] }),
@@ -170,6 +173,11 @@ const rowNames = () =>
 const selectedRows = () =>
   Array.from(container!.querySelectorAll<HTMLElement>('[data-testid^="mcp-row-"][aria-current="true"]')).map((r) => r.dataset.testid!.slice('mcp-row-'.length))
 const nameInput = () => container!.querySelector<HTMLInputElement>('input[aria-label="Server name"]')
+const detailName = () => q('mcp-detail-name')?.textContent ?? null
+/** The SaveBar's Save button — its label carries the "Ctrl S" shortcut hint after "Save". */
+const saveButton = () =>
+  Array.from(container!.querySelectorAll('button')).find((b) => /^Save(Ctrl S|⌘S)?$/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement | undefined
+const toastMessages = () => useToast.getState().toasts.map((t) => t.message)
 const buttonByText = (label: string) =>
   Array.from(container!.querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined
 
@@ -189,11 +197,20 @@ async function typeInto(input: HTMLInputElement, value: string) {
   await flush()
 }
 
+/** React's onBlur listens for focusout. */
+async function blur(el: HTMLElement) {
+  await act(async () => {
+    el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+  })
+  await flush()
+}
+
 beforeEach(() => {
   useLayout.setState({ navFace: 'home' })
   useSessions.setState({ tabs: [], activeTabId: null })
   useConfig.setState({ files: {}, watchRefs: {} })
   useMcpChecks.setState(PRISTINE_CHECKS, true)
+  useToast.setState({ toasts: [] })
 })
 
 afterEach(() => {
@@ -274,19 +291,25 @@ describe('McpServers 3a list', () => {
     installApi()
     await mount()
     expect(selectedRows()).toEqual(['alpha'])
-    expect(nameInput()?.value).toBe('alpha')
+    expect(detailName()).toBe('alpha')
 
+    // delete lives in today's per-server form, behind Edit JSON.
+    await click(q('mcp-edit-json'))
     await click(buttonByText('delete')!)
     expect(rowNames()).toEqual(['beta', 'delta', 'gamma'])
     expect(selectedRows()).toEqual(['beta'])
-    expect(nameInput()?.value).toBe('beta')
+    expect(detailName()).toBe('beta')
+    // The server that moves up opens in the 3a detail, not the form.
+    expect(nameInput()).toBeNull()
+    expect(q('mcp-command')).not.toBeNull()
 
     // Removing the last row selects the one now last.
     await click(q('mcp-row-gamma'))
-    expect(nameInput()?.value).toBe('gamma')
+    expect(detailName()).toBe('gamma')
+    await click(q('mcp-edit-json'))
     await click(buttonByText('delete')!)
     expect(selectedRows()).toEqual(['delta'])
-    expect(nameInput()?.value).toBe('delta')
+    expect(detailName()).toBe('delta')
     expect(container!.textContent).not.toContain('No MCP servers yet')
   })
 
@@ -296,6 +319,7 @@ describe('McpServers 3a list', () => {
     expect(rowNames()).toEqual([])
     expect(q('extensions-toolbar-summary')!.textContent).toBe('0 servers · 0 checked')
     expect(container!.textContent).toContain('No MCP servers yet')
+    expect(q('mcp-detail')).toBeNull()
     expect(nameInput()).toBeNull()
   })
 
@@ -356,7 +380,10 @@ describe('McpServers 3a list', () => {
 
     expect(rowNames()).toEqual(['alpha', 'beta', 'delta', 'gamma', 'server-5'])
     expect(selectedRows()).toEqual(['server-5'])
+    // A blank server opens straight in today's form — name and command are all it needs.
+    expect(detailName()).toBe('server-5')
     expect(nameInput()?.value).toBe('server-5')
+    expect(q('mcp-edit-done')).not.toBeNull()
     expect(q('extensions-toolbar-summary')!.textContent).toBe('5 servers · 0 checked')
     const file = useConfig.getState().files[CLAUDE_JSON]
     expect(file.dirty).toBe(true)
@@ -377,8 +404,311 @@ describe('McpServers 3a list', () => {
     expect(q('mcp-list-header')!.firstChild?.textContent).toBe('In .mcp.json')
     expect(q('mcp-gating')).not.toBeNull()
     expect(selectedRows()).toEqual(['srv'])
+    expect(q('mcp-detail-scope')!.textContent).toBe('Project scope')
+    expect(q('mcp-detail-keypath')!.textContent).toBe('.mcp.json › mcpServers › srv')
+    expect(q('savebar-clean')!.textContent).toBe('Saved — matches .mcp.json')
 
     await click(q('mcp-check-all'))
     expect(checkAll).toHaveBeenCalledWith([{ source: 'project', name: 'srv', cwd: PROJECT_CWD }])
+  })
+})
+
+/* ── The 3a detail: header, COMMAND / ENVIRONMENT / TOOLS, Edit JSON, the SaveBar ── */
+
+describe('McpServers 3a detail', () => {
+  const ago = (ms: number) => Date.now() - ms
+
+  it('heads the detail with the 22px name, a Connected pill, "checked <ago>", provenance + transport badges, scope and key path', async () => {
+    useMcpChecks.setState({ results: { [mcpCheckKey(userReq('alpha'))]: { ...connected(2), checkedAt: ago(5 * 60_000) } } })
+    installApi()
+    await mount()
+
+    const name = q('mcp-detail-name')!
+    expect(name.textContent).toBe('alpha')
+    expect(name.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-[22px]', 'font-semibold']))
+
+    const pill = q('mcp-detail-status')!
+    expect(pill.textContent).toBe('Connected')
+    expect(pill.dataset.status).toBe('connected')
+    expect(pill.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-sage/15', 'text-sage-dark']))
+    expect(pill.querySelector('.bg-sage')).not.toBeNull()
+    expect(q('mcp-detail-checked')!.textContent).toBe('checked 5m ago')
+
+    // The origin as ProvenanceBadge resolves it (accent tone = Anthropic); display-only here.
+    const origin = q('mcp-detail-meta')!.querySelector<HTMLElement>('.text-accent-dark')!
+    expect(origin.textContent).toBe('Anthropic')
+    expect(origin.title).toMatch(/^Auto-detected Anthropic/)
+    expect(q('mcp-detail-transport')!.textContent).toBe('stdio')
+    expect(q('mcp-detail-transport')!.querySelector('.uppercase')).not.toBeNull()
+    expect(q('mcp-detail-scope')!.textContent).toBe('User scope')
+    expect(q('mcp-detail-keypath')!.textContent).toBe('~/.claude.json › mcpServers › alpha')
+    expect(q('mcp-detail-keypath')!.className).toContain('font-mono')
+
+    // DESIGN_SPEC §7.1: Claude Code has no per-server enabled field, so there is no Enabled switch.
+    expect(container!.querySelector('[role="switch"]')).toBeNull()
+    expect(container!.textContent).not.toMatch(/Enabled/)
+  })
+
+  it('draws the Failed, Needs auth and Not checked pill variants — a failure names its error on hover', async () => {
+    useMcpChecks.setState({
+      results: { [mcpCheckKey(userReq('beta'))]: failed, [mcpCheckKey(userReq('delta'))]: needsAuth },
+    })
+    installApi()
+    await mount()
+    const pill = () => q('mcp-detail-status')!
+    const classes = () => pill().className.split(/\s+/)
+
+    // alpha has never been checked.
+    expect(pill().textContent).toBe('Not checked')
+    expect(pill().dataset.status).toBe('unchecked')
+    expect(pill().querySelector('.border-fg-faint\\/60')).not.toBeNull()
+    expect(q('mcp-detail-checked')).toBeNull()
+
+    await click(q('mcp-row-beta'))
+    expect(pill().textContent).toBe('Failed')
+    expect(pill().dataset.status).toBe('failed')
+    expect(classes()).toEqual(expect.arrayContaining(['bg-red-500/10', 'text-red-700']))
+    expect(pill().title).toBe('spawn ENOENT')
+    expect(q('mcp-detail-checked')!.textContent).toMatch(/^checked \d+d ago$/)
+    expect(q('mcp-detail-transport')!.textContent).toBe('http')
+
+    await click(q('mcp-row-delta'))
+    expect(pill().textContent).toBe('Needs auth')
+    expect(pill().dataset.status).toBe('needs-auth')
+    expect(classes()).toEqual(expect.arrayContaining(['bg-honey/15', 'text-honey-dark']))
+    expect(pill().querySelector('.bg-honey')).not.toBeNull()
+  })
+
+  it('Check again runs this server\'s check through the mcpChecks store and shows the checking state until it settles', async () => {
+    const api = installApi()
+    let settle!: (r: McpCheckResult) => void
+    api.mcp.checkServer.mockImplementationOnce(() => new Promise<McpCheckResult>((r) => { settle = r }))
+    await mount()
+
+    const button = () => q('mcp-check-again') as HTMLButtonElement
+    expect(button().textContent).toBe('Check again')
+    await click(button())
+    expect(api.mcp.checkServer).toHaveBeenCalledTimes(1)
+    expect(api.mcp.checkServer).toHaveBeenCalledWith(userReq('alpha'))
+    expect(useMcpChecks.getState().checking[mcpCheckKey(userReq('alpha'))]).toBe(true)
+    expect(button().textContent).toBe('Checking…')
+    expect(button().disabled).toBe(true)
+    expect(q('mcp-detail-checked')!.textContent).toBe('checking…')
+    // The list row follows the same in-flight check.
+    expect(q('mcp-status-alpha')!.textContent).toBe('Anthropic · checking…')
+
+    await act(async () => { settle({ ...connected(1), checkedAt: Date.now() }) })
+    await flush()
+    expect(button().textContent).toBe('Check again')
+    expect(button().disabled).toBe(false)
+    expect(q('mcp-detail-status')!.textContent).toBe('Connected')
+    expect(q('mcp-detail-checked')!.textContent).toBe('checked just now')
+    expect(q('mcp-tools-count')!.textContent).toBe('1')
+  })
+
+  it('TOOLS lists the last check as mono name | description | mono mcp__<server>__<tool>; unchecked and failed servers say why there are none', async () => {
+    const tools = [
+      { name: 'fetch', description: 'Fetches a URL from the internet.' },
+      { name: 'read_page', description: '' },
+    ]
+    useMcpChecks.setState({
+      results: {
+        [mcpCheckKey(userReq('alpha'))]: { ok: true, status: 'connected', tools, checkedAt: ago(1_000) },
+        [mcpCheckKey(userReq('beta'))]: failed,
+      },
+    })
+    installApi()
+    await mount()
+
+    expect(q('mcp-tools-count')!.textContent).toBe('2')
+    expect(q('mcp-tools')!.textContent).toContain('from the last check')
+    const rows = Array.from(container!.querySelectorAll<HTMLElement>('[data-testid^="mcp-tool-row-"]'))
+    expect(rows.map((r) => Array.from(r.children).map((c) => c.textContent))).toEqual([
+      ['fetch', 'Fetches a URL from the internet.', 'mcp__alpha__fetch'],
+      ['read_page', '', 'mcp__alpha__read_page'],
+    ])
+    expect(rows[0].children[0].className).toContain('font-mono')
+    expect(rows[0].children[2].className).toContain('font-mono')
+
+    await click(q('mcp-row-gamma'))
+    expect(q('mcp-tools-empty')!.textContent).toBe('Check this server to list its tools.')
+    expect(q('mcp-tools-count')).toBeNull()
+    expect(container!.querySelectorAll('[data-testid^="mcp-tool-row-"]')).toHaveLength(0)
+
+    await click(q('mcp-row-beta'))
+    expect(q('mcp-tools-empty')!.textContent).toBe('The last check failed: spawn ENOENT')
+  })
+
+  it('COMMAND shows "$ <command> <args…>" (an http server: its URL) in a mono box, and Copy writes it to the clipboard with a toast', async () => {
+    const api = installApi({ ...SERVERS, spaced: { command: 'node', args: ['server.js', '--root', '/tmp/my dir'] } })
+    await mount()
+
+    const box = q('mcp-command-box')!
+    expect(box.className.split(/\s+/)).toEqual(expect.arrayContaining(['font-mono', 'bg-bg-hi']))
+    expect(box.textContent!.startsWith('$')).toBe(true)
+    expect(q('mcp-command')!.textContent).toBe('npx -y @anthropic-ai/alpha-mcp')
+
+    await click(q('mcp-command-copy'))
+    expect(api.clipboard.writeText).toHaveBeenCalledWith('npx -y @anthropic-ai/alpha-mcp')
+    expect(toastMessages()).toEqual(['Command copied'])
+
+    // An argument with a space is quoted, so the copied line runs as configured.
+    await click(q('mcp-row-spaced'))
+    expect(q('mcp-command')!.textContent).toBe("node server.js --root '/tmp/my dir'")
+
+    await click(q('mcp-row-beta'))
+    expect(q('mcp-command')!.textContent).toBe('https://beta.example.com/mcp')
+    expect(q('mcp-command-box')!.textContent).not.toContain('$')
+    await click(q('mcp-command-copy'))
+    expect(api.clipboard.writeText).toHaveBeenLastCalledWith('https://beta.example.com/mcp')
+  })
+
+  it('ENVIRONMENT masks every value until its row is revealed; no variables = the dashed "No variables set" box', async () => {
+    installApi({
+      envy: { command: 'node', args: ['envy.js'], env: { API_TOKEN: 'sekrit-123', REGION: 'us-west-2' } },
+      plain: { command: 'node', args: ['plain.js'] },
+    })
+    await mount()
+
+    const envRows = () => Array.from(q('mcp-env')!.querySelectorAll<HTMLElement>('[data-testid^="mcp-env-row-"]'))
+    expect(envRows().map((r) => r.dataset.testid)).toEqual(['mcp-env-row-API_TOKEN', 'mcp-env-row-REGION'])
+    expect(envRows()[0].textContent).toContain('API_TOKEN')
+    expect(container!.innerHTML).not.toContain('sekrit-123')
+    expect(container!.innerHTML).not.toContain('us-west-2')
+
+    await click(q('mcp-env-reveal-API_TOKEN'))
+    expect(q('mcp-env-value-API_TOKEN')!.textContent).toBe('sekrit-123')
+    expect(q('mcp-env-reveal-API_TOKEN')!.textContent).toBe('Hide')
+    // Revealing one row leaves the others masked.
+    expect(container!.innerHTML).not.toContain('us-west-2')
+
+    await click(q('mcp-env-reveal-API_TOKEN'))
+    expect(container!.innerHTML).not.toContain('sekrit-123')
+
+    await click(q('mcp-row-plain'))
+    const empty = q('mcp-env-empty')!
+    expect(empty.textContent).toContain('No variables set')
+    expect(empty.className.split(/\s+/)).toContain('border-dashed')
+    expect(empty.querySelector('[data-testid="mcp-env-add"]')!.textContent).toBe('+ Add variable')
+  })
+
+  it('+ Add variable puts KEY=value in the draft (SaveBar dirty) and Save patches the server\'s env — the value is never toasted', async () => {
+    const api = installApi()
+    await mount()
+    expect(q('savebar-clean')!.textContent).toBe('Saved — matches ~/.claude.json')
+
+    await click(q('mcp-env-add'))
+    expect((q('mcp-env-add-confirm') as HTMLButtonElement).disabled).toBe(true)
+    await typeInto(q('mcp-env-new-key') as HTMLInputElement, 'API_TOKEN')
+    await typeInto(q('mcp-env-new-value') as HTMLInputElement, 'sekrit-123')
+    await click(q('mcp-env-add-confirm'))
+
+    const file = useConfig.getState().files[CLAUDE_JSON]
+    expect(file.dirty).toBe(true)
+    expect(JSON.parse(file.draftRaw).mcpServers.alpha.env).toEqual({ API_TOKEN: 'sekrit-123' })
+    expect(q('savebar-clean')).toBeNull()
+    expect(container!.textContent).toContain('unsaved')
+    // The new row is masked like the rest.
+    expect(q('mcp-env-row-API_TOKEN')).not.toBeNull()
+    expect(container!.innerHTML).not.toContain('sekrit-123')
+
+    await click(saveButton()!)
+    expect(api.claudeConfig.patch).toHaveBeenCalledTimes(1)
+    expect(api.claudeConfig.patch).toHaveBeenCalledWith({
+      fileId: 'claudeJson',
+      scope: 'user',
+      keyPath: ['mcpServers', 'alpha'],
+      value: { command: 'npx', args: ['-y', '@anthropic-ai/alpha-mcp'], env: { API_TOKEN: 'sekrit-123' } },
+    })
+    expect(toastMessages().some((m) => m.includes('sekrit-123'))).toBe(false)
+  })
+
+  it('a remote server lists HEADERS (masked) instead of ENVIRONMENT, and + Add header patches headers', async () => {
+    installApi({ remote: { type: 'http', url: 'https://r.example.com/mcp', headers: { Authorization: 'Bearer tok-123456' } } })
+    await mount()
+
+    expect(q('mcp-env')).toBeNull()
+    expect(q('mcp-headers-row-Authorization')).not.toBeNull()
+    expect(container!.innerHTML).not.toContain('tok-123456')
+
+    await click(q('mcp-headers-add'))
+    await typeInto(q('mcp-headers-new-key') as HTMLInputElement, 'X-Team')
+    await typeInto(q('mcp-headers-new-value') as HTMLInputElement, 'core')
+    await click(q('mcp-headers-add-confirm'))
+    expect(JSON.parse(useConfig.getState().files[CLAUDE_JSON].draftRaw).mcpServers.remote.headers).toEqual({
+      Authorization: 'Bearer tok-123456',
+      'X-Team': 'core',
+    })
+  })
+
+  it('Edit JSON swaps the body for today\'s per-server form; Done brings the 3a detail back with the edit kept in the draft', async () => {
+    installApi()
+    await mount()
+    expect(q('mcp-command')).not.toBeNull()
+    expect(nameInput()).toBeNull()
+
+    await click(q('mcp-edit-json'))
+    for (const gone of ['mcp-command-box', 'mcp-env', 'mcp-tools', 'mcp-edit-json']) expect(q(gone)).toBeNull()
+    expect(nameInput()?.value).toBe('alpha')
+    // The header stays: name, pill, Check again — and Done in Edit JSON's place.
+    expect(detailName()).toBe('alpha')
+    expect(q('mcp-detail-status')).not.toBeNull()
+    expect(container!.querySelectorAll('[data-testid="mcp-check-again"]')).toHaveLength(1)
+    expect(q('mcp-edit-done')!.textContent).toBe('Done')
+    // The form keeps the origin override menu the old form header had.
+    expect(q('mcp-json-form')!.querySelector('button[aria-label^="Origin: Anthropic"]')).not.toBeNull()
+
+    const command = Array.from(container!.querySelectorAll('input')).find((i) => i.placeholder === 'npx / node / python …')!
+    await typeInto(command, 'bunx')
+    expect(useConfig.getState().files[CLAUDE_JSON].dirty).toBe(true)
+
+    await click(q('mcp-edit-done'))
+    expect(nameInput()).toBeNull()
+    expect(q('mcp-edit-json')).not.toBeNull()
+    expect(q('mcp-command')!.textContent).toBe('bunx -y @anthropic-ai/alpha-mcp')
+    expect(useConfig.getState().files[CLAUDE_JSON].dirty).toBe(true)
+  })
+
+  it('a rename inside Edit JSON keeps the form open on the renamed server; picking another server closes it', async () => {
+    installApi()
+    await mount()
+    await click(q('mcp-edit-json'))
+    const input = nameInput()!
+    await typeInto(input, 'alpha-2')
+    await blur(input)
+
+    expect(selectedRows()).toEqual(['alpha-2'])
+    expect(detailName()).toBe('alpha-2')
+    expect(nameInput()?.value).toBe('alpha-2')
+    expect(q('mcp-edit-done')).not.toBeNull()
+
+    await click(q('mcp-row-beta'))
+    expect(detailName()).toBe('beta')
+    expect(nameInput()).toBeNull()
+    expect(q('mcp-edit-json')).not.toBeNull()
+  })
+
+  it('the SaveBar names the scope\'s file when clean, shows the save shortcut, and Ctrl+S saves while focus is in the pane', async () => {
+    const api = installApi()
+    await mount()
+    expect(q('savebar-clean')!.textContent).toBe('Saved — matches ~/.claude.json')
+    expect(saveButton()!.querySelector('kbd')?.textContent).toBe('Ctrl S')
+    expect(saveButton()!.getAttribute('aria-keyshortcuts')).toBe('Control+S')
+
+    await click(q('mcp-env-add'))
+    await typeInto(q('mcp-env-new-key') as HTMLInputElement, 'REGION')
+    await click(q('mcp-env-add-confirm'))
+    expect(useConfig.getState().files[CLAUDE_JSON].dirty).toBe(true)
+
+    q('mcp-row-alpha')!.focus()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    await flush()
+    expect(api.claudeConfig.patch).toHaveBeenCalledTimes(1)
+    expect(api.claudeConfig.patch).toHaveBeenCalledWith(expect.objectContaining({
+      keyPath: ['mcpServers', 'alpha'],
+      value: expect.objectContaining({ env: { REGION: '' } }),
+    }))
   })
 })

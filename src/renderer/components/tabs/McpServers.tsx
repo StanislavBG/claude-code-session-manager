@@ -1,11 +1,11 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
-import { Badge, type BadgeTone } from '../ui/Badge'
 import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
+import { McpServerDetail, MCP_CHECK_LABEL, MCP_DOT_CLASS, type McpCheckState } from './extensions/McpServerDetail'
 import {
   classifyProvenance,
   provenanceKey,
@@ -35,10 +35,12 @@ import type { McpCheckRequest, McpCheckResult } from '../../../preload/api'
  *
  * The list is the Extensions 3a design (design-mocks/extensions-3a/DESIGN_SPEC.md §2, §4):
  * the shared ExtensionsToolbar, one status dot per server from the mcpChecks store (checks
- * run only on Check all / Check — never on mount), and a server always selected.
+ * run only on Check all / Check again — never on mount), and a server always selected. The
+ * selected server opens in the 3a detail (extensions/McpServerDetail.tsx); its Edit JSON shows
+ * today's full per-server form (McpServerEditor below) in the detail's body.
  */
 type ServerType = 'stdio' | 'http' | 'sse' | 'ws' | 'streamable-http'
-interface McpServer {
+export interface McpServer {
   type?: ServerType
   command?: string
   args?: string[]
@@ -137,32 +139,6 @@ export function nextServerName(servers: Record<string, McpServer>): string {
 
 export interface McpAddContext { scope: Scope; cwd: string | null }
 
-/** A server's check state as the list draws it: its stored check result's status, or `unchecked`. */
-type McpCheckState = 'unchecked' | McpCheckResult['status']
-
-// 3a status dots (DESIGN_SPEC §4): hollow ring = not checked, sage = connected, red = failed,
-// honey = needs auth.
-const DOT_CLASS: Record<McpCheckState, string> = {
-  unchecked: 'border-[1.5px] border-fg-faint/60',
-  connected: 'bg-sage',
-  failed: 'bg-red-500',
-  'needs-auth': 'bg-honey',
-}
-
-const STATE_LABEL: Record<McpCheckState, string> = {
-  unchecked: 'Not checked',
-  connected: 'Connected',
-  failed: 'Failed',
-  'needs-auth': 'Needs auth',
-}
-
-const STATE_TONE: Record<McpCheckState, BadgeTone> = {
-  unchecked: 'dim',
-  connected: 'good',
-  failed: 'accent',
-  'needs-auth': 'warn',
-}
-
 // Row line 2's origin word: Anthropic accent-dark, Community honey-dark, Local in the line's own faint.
 const ORIGIN_CLASS: Record<Provenance, string> = {
   anthropic: 'text-accent-dark',
@@ -198,8 +174,8 @@ function McpCheckDot({ result, checking, testId }: { result: McpCheckResult | un
       aria-hidden="true"
       data-testid={testId}
       data-status={state}
-      title={result && !result.ok ? `${STATE_LABEL[state]}: ${result.error}` : STATE_LABEL[state]}
-      className={`w-2 h-2 shrink-0 box-border rounded-full ${DOT_CLASS[state]}${checking ? ' animate-pulse' : ''}`}
+      title={result && !result.ok ? `${MCP_CHECK_LABEL[state]}: ${result.error}` : MCP_CHECK_LABEL[state]}
+      className={`w-2 h-2 shrink-0 box-border rounded-full ${MCP_DOT_CLASS[state]}${checking ? ' animate-pulse' : ''}`}
     />
   )
 }
@@ -211,6 +187,10 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
 
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
+  // The server whose Edit JSON form is open in the detail, or null for the 3a detail.
+  const [jsonFor, setJsonFor] = useState<string | null>(null)
+  // The pane the SaveBar's Ctrl/Cmd+S saves from.
+  const paneRef = useRef<HTMLDivElement>(null)
 
   const path = useMemo(() => (home ? pathFor(scope, home, cwd) : null), [home, scope, cwd])
 
@@ -234,7 +214,6 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const checkResults = useMcpChecks(selectMcpCheckResults)
   const checking = useMcpChecks(selectMcpChecking)
   const checkAll = useMcpChecks((s) => s.checkAll)
-  const checkOne = useMcpChecks((s) => s.check)
 
   // Row line 2 names each server's origin — a manual override from the provenance sidecar, else
   // the auto-classified one (the same resolution ProvenanceBadge shows).
@@ -280,7 +259,8 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const listedRequests = listed.map(requestFor).filter((r): r is McpCheckRequest => r !== null)
   const checkedCount = names.filter((n) => resultFor(n) !== undefined).length
   const checkingListed = listed.some(isChecking)
-  const fileLabel = scope === 'user' ? 'In ~/.claude.json' : 'In .mcp.json'
+  // The scope's file as the page names it — list header, detail key path and SaveBar alike.
+  const fileName = scope === 'user' ? '~/.claude.json' : '.mcp.json'
 
   const updateServers = (next: Record<string, McpServer>) => {
     setSaveError(null)
@@ -290,6 +270,12 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const addServer = () => {
     const name = nextServerName(servers)
     updateServers({ ...servers, [name]: { type: 'stdio', command: '', args: [] } })
+    setSelectedName(name)
+    // A blank server has nothing to show in the 3a body yet: open it in the form.
+    setJsonFor(name)
+  }
+  const selectServer = (name: string) => {
+    if (name !== selected) setJsonFor(null)
     setSelectedName(name)
   }
   const removeServer = (name: string) => {
@@ -301,6 +287,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     delete next[name]
     updateServers(next)
     setSelectedName(rest[Math.min(at, rest.length - 1)] ?? null)
+    setJsonFor(null)
   }
   const renameServer = (oldName: string, newName: string) => {
     if (!newName || newName === oldName || servers[newName]) return
@@ -308,6 +295,8 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     for (const k of Object.keys(servers)) next[k === oldName ? newName : k] = servers[k]
     updateServers(next)
     setSelectedName(newName)
+    // A rename from the form keeps the form open on the renamed server.
+    setJsonFor((open) => (open === oldName ? newName : open))
   }
   const updateServer = (name: string, srv: McpServer) => {
     updateServers({ ...servers, [name]: srv })
@@ -317,7 +306,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   if (onAdd) addItems.push({ label: 'Browse catalog…', testId: 'mcp-browse-catalog', onSelect: () => onAdd({ scope, cwd }) })
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={paneRef} className="h-full flex flex-col">
       <ExtensionsToolbar
         filter={filter}
         onFilterChange={setFilter}
@@ -374,6 +363,9 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
                   setSaveError(null)
                   revert(path)
                 }}
+                cleanLabel={`Saved — matches ${fileName}`}
+                shortcutHint
+                scopeRef={paneRef}
               />
             ) : null
           }
@@ -388,7 +380,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
                   data-testid="mcp-list-header"
                   className="flex items-center gap-2 mx-1.5 mt-3 mb-1 text-[11px] font-semibold tracking-[.06em] uppercase text-fg-faint"
                 >
-                  {fileLabel}
+                  {`In ${fileName}`}
                   <span className="font-mono font-medium tracking-normal text-fg-faint/60">{listed.length}</span>
                 </div>
                 {names.length === 0 ? (
@@ -411,7 +403,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
                         data-testid={`mcp-row-${n}`}
                         aria-current={isSelected ? 'true' : undefined}
                         title={srv.description?.trim() || undefined}
-                        onClick={() => setSelectedName(n)}
+                        onClick={() => selectServer(n)}
                         className={`w-full text-left grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1.5 rounded-[7px] border ${
                           isSelected ? 'bg-bg-hi border-line' : 'border-transparent hover:bg-bg-hi/60'
                         }`}
@@ -440,20 +432,30 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
             }
             detail={
               selected !== null ? (
-                <McpServerEditor
+                // Keyed by name: another server — or a rename — starts with every value masked again.
+                <McpServerDetail
                   key={selected}
                   name={selected}
                   server={servers[selected]}
                   scope={scope}
-                  result={resultFor(selected)}
-                  checking={isChecking(selected)}
-                  onCheck={() => {
-                    const req = requestFor(selected)
-                    if (req) void checkOne(req)
-                  }}
-                  onRename={(n) => renameServer(selected, n)}
+                  fileLabel={fileName}
+                  checkRequest={requestFor(selected)}
+                  provenance={mcpProvInput(selected, servers[selected])}
                   onChange={(s) => updateServer(selected, s)}
-                  onRemove={() => removeServer(selected)}
+                  editing={jsonFor === selected}
+                  onEditingChange={(on) => setJsonFor(on ? selected : null)}
+                  editor={
+                    jsonFor === selected ? (
+                      <McpServerEditor
+                        name={selected}
+                        server={servers[selected]}
+                        scope={scope}
+                        onRename={(n) => renameServer(selected, n)}
+                        onChange={(s) => updateServer(selected, s)}
+                        onRemove={() => removeServer(selected)}
+                      />
+                    ) : null
+                  }
                 />
               ) : (
                 <EmptyState
@@ -472,14 +474,17 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
 // Memoized: own data comes from store/IPC hooks inside the component.
 export const McpServers = memo(McpServersComponent)
 
-/** Today's per-server editor form, kept mounted until the 3a detail pane (PRD ext3a-mcp-detail) replaces it. */
+/**
+ * Today's full per-server form — every field of the entry (name, description, type, command/args/
+ * env or url/headers, alwaysLoad, disabledTools, permissions) plus the origin override — shown by
+ * the 3a detail's Edit JSON (DESIGN_SPEC §7.2). The detail's header above it carries the status
+ * and Check again. The name input is uncontrolled, so the form is remounted under the detail's
+ * per-name key.
+ */
 function McpServerEditor({
   name,
   server,
   scope,
-  result,
-  checking,
-  onCheck,
   onRename,
   onChange,
   onRemove,
@@ -487,16 +492,10 @@ function McpServerEditor({
   name: string
   server: McpServer
   scope: Scope
-  /** The server's stored check result from the mcpChecks store; undefined = never checked. */
-  result: McpCheckResult | undefined
-  checking: boolean
-  /** Runs this server's real check (initialize + tools/list) through the mcpChecks store. */
-  onCheck: () => void
   onRename: (n: string) => void
   onChange: (s: McpServer) => void
   onRemove: () => void
 }) {
-  const state: McpCheckState = result?.status ?? 'unchecked'
   const type = server.type ?? 'stdio'
   const isReserved = RESERVED_NAMES.has(name)
   const isCaution = CAUTION_NAMES.has(name)
@@ -514,22 +513,11 @@ function McpServerEditor({
   const disabledToolsText = (server.disabledTools ?? []).join(', ')
 
   return (
-    <div className="p-4 space-y-4 max-w-2xl">
+    <div data-testid="mcp-json-form" className="space-y-4 max-w-2xl">
       <div className="flex items-center gap-2">
-        <McpCheckDot result={result} checking={checking} />
-        <Badge tone={STATE_TONE[state]} title={result && !result.ok ? result.error : undefined}>
-          {STATE_LABEL[state]}
-          {result?.ok ? ` · ${result.tools.length} tool${result.tools.length === 1 ? '' : 's'}` : ''}
-        </Badge>
+        <span className="text-xs text-fg-faint w-20">origin</span>
         <ProvenanceBadge scope={scope} input={mcpProvInput(name, server)} />
-        <button
-          type="button"
-          onClick={onCheck}
-          disabled={checking}
-          className="ml-auto px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50"
-        >
-          {checking ? 'Checking…' : result ? 'Check again' : 'Check'}
-        </button>
+        <span className="text-xs text-fg-faint">click to change</span>
       </div>
       <div className="flex items-center gap-2">
         <label className="text-xs text-fg-faint w-20">name</label>

@@ -63,8 +63,12 @@ function rowFor(el: HTMLElement, name: string): HTMLElement {
   return span!.closest('div.px-4') as HTMLElement
 }
 
+/** A button's label without a <kbd> shortcut hint — the SaveBar's Save reads "Save" + "Ctrl S". */
+const labelOf = (b: HTMLButtonElement) =>
+  Array.from(b.childNodes).filter((n) => n.nodeName !== 'KBD').map((n) => n.textContent).join('').trim()
+
 function buttonIn(el: HTMLElement, label: string): HTMLButtonElement {
-  return Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement
+  return Array.from(el.querySelectorAll('button')).find((b) => labelOf(b) === label) as HTMLButtonElement
 }
 
 async function type(input: HTMLInputElement, value: string) {

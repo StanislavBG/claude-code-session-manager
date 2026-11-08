@@ -610,6 +610,8 @@ contextBridge.exposeInMainWorld('api', {
     /** Read-tier (remote-safe) Sessions reads — see main/promptSessionsIpc.cjs. */
     loadActiveIndex: (payload) => ipcRenderer.invoke('promptSessions:load-active-index', payload),
     listArchived: (payload) => ipcRenderer.invoke('promptSessions:list-archived', payload),
+    /** This project's earlier Claude Code sessions no Epic owns yet (restore-as-new-Epic picker). */
+    listRestorable: (payload) => ipcRenderer.invoke('promptSessions:list-restorable', payload),
     readArchived: (payload) => ipcRenderer.invoke('promptSessions:read-archived', payload),
     readSessionTranscript: (payload) => ipcRenderer.invoke('promptSessions:read-session-transcript', payload),
     /** Mutate-tier archive write for markCompleted (main builds the path; single-writer 'epics'). */

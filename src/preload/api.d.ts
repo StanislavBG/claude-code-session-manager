@@ -2542,6 +2542,8 @@ export interface SessionManagerAPI {
      *  that is not a registered project root. */
     loadActiveIndex: (payload: { cwd: string }) => Promise<{ exists: boolean; data: unknown; error?: string }>;
     listArchived: (payload: { cwd: string }) => Promise<{ ok: boolean; ids: string[]; error?: string }>;
+    /** This project's earlier Claude Code sessions no Epic owns yet, newest first (restore-as-new-Epic picker). */
+    listRestorable: (payload: { cwd: string }) => Promise<PromptSessionsListRestorableResult>;
     readArchived: (payload: { cwd: string; epicId: string }) => Promise<{ exists: boolean; data: unknown; error?: string }>;
     readSessionTranscript: (payload: { cwd: string; sessionId: string }) => Promise<{ exists: boolean; text: string; error?: string }>;
     writeArchive: (payload: { cwd: string; epicId: string; archive: Record<string, unknown> }) => Promise<{ ok: true }>;
@@ -2622,11 +2624,42 @@ export interface PromptSessionsCreateEpicPayload {
     /** Which part of its AIM slot this entry is; absent on Epics minted before AIM sections. */
     part?: 'persona' | 'grounding' | 'injection' | 'reference' | 'job-type' | 'goal';
   }>;
+  /** Adopt an existing CLI session of this project instead of minting one. */
+  restoreSessionId?: string;
 }
 
 export interface PromptSessionsCreateEpicResult {
   epicId: string;
   session: PromptSession;
+}
+
+// ─────────────────────────────────── PromptSessions list-restorable (main-side lib/epic/restorableSessions.cjs)
+/** One earlier Claude Code session of this project that no Epic owns yet. */
+export interface RestorableSession {
+  sessionId: string;
+  /** Last `custom-title` row, else last `summary` row. */
+  title: string | null;
+  /** First real user prompt in the transcript head. */
+  firstPrompt: string;
+  lastPrompt: string | null;
+  gitBranch: string | null;
+  /** First recorded entrypoint is `sdk-*` (a `claude -p` / SDK run). */
+  headless: boolean;
+  mtimeMs: number;
+  sizeBytes: number;
+  /** Written in the last 120 s, so it may still be open in a terminal. */
+  recentlyActive: boolean;
+}
+
+export interface PromptSessionsListRestorableResult {
+  /** Newest first by mtime. */
+  sessions: RestorableSession[];
+  /** Transcripts left out because an Epic already owns them. */
+  hiddenClaimed: number;
+  /** Transcript heads read by this call. */
+  scanned: number;
+  /** The walk stopped with candidates left. */
+  truncated: boolean;
 }
 
 // ─────────────────────────────────── PromptSessions create-worktree (main-side createEpicWorktree)

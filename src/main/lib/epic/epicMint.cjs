@@ -212,7 +212,32 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { epicId?, goalText, tag?, status?, openingPrompt?, source?, agentType?, model?, effort?, developLoop?, mintAuthority? }) → Promise<{ epicId, prdDir, created }>
+ * restoreRefusal(cwd, index, restoreSessionId, mintAuthority, deps) — why
+ * ensureEpic must NOT adopt `restoreSessionId` as a new Epic's
+ * claudeSessionId, or null when it may. Runs inside ensureEpic's withPathLock
+ * task against the index that task just read, so of two mints restoring the
+ * same id the second always sees the row the first wrote.
+ */
+function restoreRefusal(cwd, index, restoreSessionId, mintAuthority, deps) {
+  if (mintAuthority !== MINT_AUTHORITY_NEW_EPIC_UI) {
+    return "restoring a Claude Code session as an Epic is the New Epic UI's alone (mintAuthority "
+      + `'${MINT_AUTHORITY_NEW_EPIC_UI}'), not '${mintAuthority}'`;
+  }
+  const owner = Object.entries(index.sessions)
+    .find(([, s]) => s && typeof s === 'object' && s.claudeSessionId === restoreSessionId);
+  if (owner) {
+    return `claude session ${restoreSessionId} already belongs to Epic ${owner[0]} in this project `
+      + '(EPIC : claude-session is 1:1)';
+  }
+  // Lazy: restorableSessions.cjs requires this module at load time, so a
+  // top-level require here would hand it a half-built exports object.
+  const { checkRestorableSessionSync } = require('./restorableSessions.cjs');
+  const check = checkRestorableSessionSync(cwd, restoreSessionId, deps);
+  return check.ok ? null : check.message;
+}
+
+/**
+ * ensureEpic(cwd, { epicId?, goalText, tag?, status?, openingPrompt?, source?, agentType?, model?, effort?, developLoop?, mintAuthority?, restoreSessionId? }, deps?) → Promise<{ epicId, prdDir, created }>
  *
  * Two behaviors, and only two:
  *  - JOIN (the default, for every automated caller): `epicId` names an Epic
@@ -221,6 +246,15 @@ function withPathLock(lockPath, task) {
  *  - MINT (the New Epic UI alone): `mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI`
  *    creates a brand-new Epic. No similarity/keyword matching runs first — the
  *    human asked for a new Epic, so they get a new Epic.
+ *
+ * RESTORE is a MINT whose `restoreSessionId` (default null) names an existing
+ * Claude Code CLI session: the new Epic adopts it as its claudeSessionId and is
+ * marked `restoredSession: true`, so a human can carry a plain-CLI conversation
+ * on as an Epic. Any non-null value is a restore request; it is refused unless
+ * mintAuthority is MINT_AUTHORITY_NEW_EPIC_UI, no Epic of this project already
+ * owns the id (EPIC : claude-session stays 1:1), and restorableSessions.cjs's
+ * checkRestorableSessionSync finds the transcript under this project's own
+ * `~/.claude/projects/<encodeCwd(cwd)>/` dir (`deps.homeDir` moves HOME for tests).
  *
  * Every Epic is BORN 'proposed'; `status` defaults to it and the mint branch
  * rejects any other value outright (fail-closed, mirroring opsOwnership.cjs's
@@ -231,7 +265,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, developLoop = null, mintAuthority = null } = {}, deps = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, developLoop = null, mintAuthority = null, restoreSessionId = null } = {}, deps = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -309,15 +343,28 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       }
     }
 
+    // RESTORE GATE (see restoreRefusal and the JSDoc above). An empty or
+    // malformed id is refused, never quietly swapped for a fresh session.
+    const restoring = restoreSessionId !== null;
+    if (restoring) {
+      const reason = restoreRefusal(cwd, index, restoreSessionId, mintAuthority, deps);
+      if (reason) {
+        appendAuditEvent('epic_mint_refused', { cwd, epicId: null, status, reason });
+        throw new Error(`ensureEpic: ${reason}`);
+      }
+    }
+
     const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
     const session = {
       id: epicId,
       cwd,
       goalText: String(goalText || ''),
-      // Independently minted, never shared with a SessionTab — same invariant
-      // as renderer-created PromptSessions (state/promptSessions.ts).
-      claudeSessionId: crypto.randomUUID(),
+      // A fresh UUID, never shared with a SessionTab. A restored Epic instead
+      // adopts an existing CLI session that no Epic or SessionTab owns (the
+      // RESTORE GATE above refuses an id any Epic of this project holds).
+      claudeSessionId: restoring ? restoreSessionId : crypto.randomUUID(),
+      ...(restoring ? { restoredSession: true } : {}),
       // 'proposed' files the Epic WITHOUT starting it — nothing runs until the
       // human presses Approve & start in the Epics workspace.
       status,
@@ -386,7 +433,15 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
 
     // Every mint is logged — the trace-back point for "who created this Epic"
     // (see auditLog.cjs).
-    appendAuditEvent('epic_mint', { cwd, epicId, status, tag: tag ?? null, goalText: session.goalText, source: source ?? null });
+    appendAuditEvent('epic_mint', {
+      cwd,
+      epicId,
+      status,
+      tag: tag ?? null,
+      goalText: session.goalText,
+      source: source ?? null,
+      ...(restoring ? { restoredSession: true } : {}),
+    });
 
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
     fs.mkdirSync(prdDir, { recursive: true });

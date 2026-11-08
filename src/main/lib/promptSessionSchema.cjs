@@ -97,6 +97,11 @@ const PromptSessionSchema = z.object({
   // false = started with the develop loop (/develop skill, delegation guard, PRD queueing) switched off;
   // fixed for the life of its session; absent = on; only false is ever written.
   developLoop: z.boolean().optional(),
+  // true = this Epic adopted an existing CLI session as its claudeSessionId
+  // (ensureEpic's restoreSessionId) instead of a fresh one; absent otherwise.
+  // Only true is ever written: a false would fail here, and dropInvalidSessions
+  // (ipcSchemas.cjs) would then drop the whole stored row.
+  restoredSession: z.literal(true).optional(),
   // Absent on Epics minted before this field existed — those fall back to
   // rendering the flat `openingPrompt` as a single block (see
   // ChatTranscriptTurn.tsx's EpicIntakeCard).

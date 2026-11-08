@@ -108,6 +108,8 @@ export interface PromptSession {
   effort?: string
   /** false = started with the develop loop off, fixed for the life of the session; absent = on. */
   developLoop?: boolean
+  /** true = claudeSessionId was adopted from an existing CLI session (a restore), not freshly minted; absent otherwise. */
+  restoredSession?: true
   /** Labeled slices of `openingPrompt`, in the same order composeEpicIntake
    *  (epicIntake.ts) concatenates them: actor, injection(s), input, mission,
    *  goal, reference(s). Lets the Epic's first turn render a structured AIM

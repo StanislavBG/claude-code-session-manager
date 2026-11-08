@@ -1,7 +1,8 @@
 /**
  * epicMint.test.cjs — unit tests for ensureEpic's two behaviors: JOIN (every
  * automated caller, by explicit epicId) and MINT (the New Epic UI alone, via
- * mintAuthority — epicMint.cjs's SINGLE-CREATOR LAW).
+ * mintAuthority — epicMint.cjs's SINGLE-CREATOR LAW), including a New Epic
+ * mint that adopts an existing CLI session (restoreSessionId).
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/epicMint.test.cjs
  */
@@ -13,7 +14,14 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { ensureEpic, removeEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
+const {
+  ensureEpic,
+  removeEpic,
+  readActiveIndex,
+  MINT_AUTHORITY_NEW_EPIC_UI,
+  MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+} = require('../lib/epic/epicMint.cjs');
+const { encodeCwd } = require('../lib/util/encodeCwd.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -340,4 +348,203 @@ test('minting with no agentType at all is unaffected by the persona check', asyn
   const cwd = await mkCwd();
   const minted = await mint(cwd, { goalText: 'no persona at all' });
   expect(minted.created).toBe(true);
+});
+
+// ─── RESTORE (adopt an existing CLI session) ────────────────────────────────
+// restoreSessionId lets the New Epic mint adopt a Claude Code session already
+// on disk instead of minting a fresh claudeSessionId. EPIC : claude-session
+// stays 1:1, so an id any Epic of this project holds is refused, as is any
+// authority but the New Epic UI. Transcripts live under a temp HOME, reached
+// through deps.homeDir (restorableSessions.cjs's test seam).
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const sid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+async function mkHome() {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-epicmint-home-'));
+  tmpDirs.push(home);
+  return home;
+}
+
+function promptSessionsDir(cwd) {
+  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** A CLI transcript for `sessionId`, recorded in `cwd`, as `claude` writes it. */
+function writeCliTranscript(home, cwd, sessionId) {
+  const dir = path.join(home, '.claude', 'projects', encodeCwd(cwd));
+  fs.mkdirSync(dir, { recursive: true });
+  const rows = [
+    { type: 'user', cwd, sessionId, entrypoint: 'cli', isSidechain: false, message: { role: 'user', content: 'pick up the refactor' } },
+    { type: 'assistant', cwd, sessionId, entrypoint: 'cli', isSidechain: false, message: { role: 'assistant', content: [{ type: 'text', text: 'on it' }] } },
+  ];
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+}
+
+/** A project cwd plus a temp HOME holding one restorable CLI transcript. */
+async function restoreFixture(id = sid(1)) {
+  const cwd = await mkCwd();
+  const home = await mkHome();
+  writeCliTranscript(home, cwd, id);
+  return { cwd, id, deps: { homeDir: home } };
+}
+
+function refusalsFor(cwd) {
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
+  return readAuditRecordsForCwd(auditLog, cwd).filter((r) => r.kind === 'epic_mint_refused');
+}
+
+test('a New Epic mint with restoreSessionId adopts that CLI session and marks the record restoredSession', async () => {
+  const { cwd, id, deps } = await restoreFixture();
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
+
+  const minted = await mint(cwd, { goalText: 'carry on the CLI refactor', restoreSessionId: id }, deps);
+
+  expect(minted.created).toBe(true);
+  const session = readActiveIndex(cwd).sessions[minted.epicId];
+  expect(session.claudeSessionId).toBe(id);
+  expect(session.restoredSession).toBe(true);
+  expect(session.status).toBe('proposed');
+  const mintEvent = readAuditRecordsForCwd(auditLog, cwd).find((r) => r.kind === 'epic_mint');
+  expect(mintEvent).toBeDefined();
+  expect(mintEvent.epicId).toBe(minted.epicId);
+  expect(mintEvent.restoredSession).toBe(true);
+});
+
+test('a mint without restoreSessionId keeps today\'s record shape: fresh claudeSessionId, no restoredSession key', async () => {
+  const cwd = await mkCwd();
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
+
+  const minted = await mint(cwd, { goalText: 'plain new epic' });
+
+  const session = readActiveIndex(cwd).sessions[minted.epicId];
+  expect(Object.keys(session)).toEqual(['id', 'cwd', 'goalText', 'claudeSessionId', 'status', 'createdAt', 'completedAt']);
+  expect(session.claudeSessionId).toMatch(UUID_RE);
+  const mintEvent = readAuditRecordsForCwd(auditLog, cwd).find((r) => r.kind === 'epic_mint');
+  expect(mintEvent).toBeDefined();
+  expect('restoredSession' in mintEvent).toBe(false);
+});
+
+test('a restore of a claudeSessionId an active-index Epic already holds is refused and audited', async () => {
+  const { cwd, id, deps } = await restoreFixture();
+  promptSessionsDir(cwd);
+  writeIndex(cwd, {
+    sessions: {
+      'owner-epic-1': {
+        id: 'owner-epic-1',
+        cwd,
+        goalText: 'already owns this session',
+        claudeSessionId: id,
+        status: 'active',
+        createdAt: '2026-11-07T12:00:00.000Z',
+        completedAt: null,
+      },
+    },
+    events: {},
+  });
+
+  await expect(mint(cwd, { goalText: 'restore it again', restoreSessionId: id }, deps))
+    .rejects.toThrow(/^ensureEpic: .*owner-epic-1/);
+
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toEqual(['owner-epic-1']);
+  const refusals = refusalsFor(cwd);
+  expect(refusals).toHaveLength(1);
+  expect(refusals[0].epicId).toBe(null);
+  expect(refusals[0].reason).toContain(id);
+  expect(refusals[0].reason).toContain('owner-epic-1');
+});
+
+test('a restore of a claudeSessionId an archived Epic holds is refused with restorableSessions\' message', async () => {
+  const { cwd, id, deps } = await restoreFixture();
+  fs.writeFileSync(
+    path.join(promptSessionsDir(cwd), 'archived-epic-1.json'),
+    JSON.stringify({ session: { id: 'archived-epic-1', cwd, claudeSessionId: id, status: 'completed' }, events: [], status: 'completed' }),
+  );
+
+  await expect(mint(cwd, { goalText: 'restore an archived one', restoreSessionId: id }, deps))
+    .rejects.toThrow(/^ensureEpic: .*already belongs to an Epic in this project/);
+
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+  const refusals = refusalsFor(cwd);
+  expect(refusals).toHaveLength(1);
+  expect(refusals[0].reason).toMatch(/already belongs to an Epic in this project/);
+});
+
+test('a restore with no transcript on disk is refused', async () => {
+  const cwd = await mkCwd();
+  const home = await mkHome();
+
+  await expect(mint(cwd, { goalText: 'restore a ghost', restoreSessionId: sid(7) }, { homeDir: home }))
+    .rejects.toThrow(/^ensureEpic: No CLI transcript for session/);
+
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+  const refusals = refusalsFor(cwd);
+  expect(refusals).toHaveLength(1);
+  expect(refusals[0].reason).toContain(sid(7));
+});
+
+for (const bad of ['not-a-uuid', `../${sid(1)}`, `${sid(1)}.jsonl`, '']) {
+  test(`a restore with the non-UUID id ${JSON.stringify(bad)} is refused before any path is built`, async () => {
+    const { cwd, deps } = await restoreFixture();
+
+    await expect(mint(cwd, { goalText: 'restore a bad id', restoreSessionId: bad }, deps))
+      .rejects.toThrow(/^ensureEpic: .*not a Claude session UUID/);
+
+    expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+    expect(refusalsFor(cwd)).toHaveLength(1);
+  });
+}
+
+test('only the New Epic UI may restore: the cross-project-feedback authority and no authority are refused', async () => {
+  const { cwd, id, deps } = await restoreFixture();
+
+  await expect(ensureEpic(cwd, {
+    goalText: 'inbound proposal tries to adopt a session',
+    restoreSessionId: id,
+    mintAuthority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+  }, deps)).rejects.toThrow(/^ensureEpic: .*New Epic UI/);
+  await expect(ensureEpic(cwd, { goalText: 'agent tries to adopt a session', restoreSessionId: id }, deps))
+    .rejects.toThrow(/no open Epic to join/);
+
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+  const refusals = refusalsFor(cwd);
+  expect(refusals).toHaveLength(2);
+  expect(refusals[0].reason).toContain(MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK);
+});
+
+test('two concurrent restores of the same session id mint exactly one Epic', async () => {
+  const { cwd, id, deps } = await restoreFixture();
+
+  const [first, second] = await Promise.allSettled([
+    mint(cwd, { goalText: 'first press', restoreSessionId: id }, deps),
+    mint(cwd, { goalText: 'second press', restoreSessionId: id }, deps),
+  ]);
+
+  expect(first.status).toBe('fulfilled');
+  expect(second.status).toBe('rejected');
+  expect(second.reason.message).toMatch(/^ensureEpic: .*already belongs to Epic/);
+  const owners = Object.values(readActiveIndex(cwd).sessions).filter((s) => s.claudeSessionId === id);
+  expect(owners).toHaveLength(1);
+  expect(owners[0].id).toBe(first.value.epicId);
+  expect(refusalsFor(cwd)).toHaveLength(1);
+});
+
+test('PromptSessionSchema keeps restoredSession: true and rejects any other value', () => {
+  const { PromptSessionSchema } = require('../lib/promptSessionSchema.cjs');
+  const base = {
+    id: 'epic-1',
+    cwd: '/home/user/project',
+    goalText: 'g',
+    claudeSessionId: sid(1),
+    status: 'proposed',
+    createdAt: '2026-11-07T12:00:00.000Z',
+    completedAt: null,
+  };
+
+  expect(PromptSessionSchema.parse({ ...base, restoredSession: true }).restoredSession).toBe(true);
+  expect('restoredSession' in PromptSessionSchema.parse(base)).toBe(false);
+  expect(PromptSessionSchema.safeParse({ ...base, restoredSession: false }).success).toBe(false);
+  expect(PromptSessionSchema.safeParse({ ...base, restoredSession: 'yes' }).success).toBe(false);
 });

@@ -19,6 +19,13 @@
  *      written) while the process is still actually running.
  * Either match logs one line naming the slug and which check held it, so a
  * persistently-skipped leak stays visible (RCA: PRD 1108).
+ *
+ * PRD 2908: scheduler.cjs now runs partitionBootOrphans BEFORE this sweep and
+ * passes its adopted slugs in as `adoptedSlugs`, checked first — so the sweep
+ * and the partition agree on adoption. A run that printed PASS and exited
+ * seconds before the restart (dead pid, no holder, fresh run log) is adopted
+ * by the partition; its checkout and sm-job branch must survive so
+ * reapDeadRunningJobs can land it instead of parking a stranded pin.
  */
 
 /**
@@ -26,10 +33,11 @@
  * supervisor-record → runtime.pid → run-log ladder partitionBootOrphans uses,
  * so the two boot passes agree. Default: runtime.pid alone.
  *
- * @param {{ bootJobs: Array<object>, claudePidAlive: (pid: number) => boolean, hasLiveHolder: (dir: string, holders?: Set<string>) => boolean, cwdHolders?: Set<string>, rowPid?: (job: object) => number|null }} deps
+ * @param {{ bootJobs: Array<object>, claudePidAlive: (pid: number) => boolean, hasLiveHolder: (dir: string, holders?: Set<string>) => boolean, cwdHolders?: Set<string>, rowPid?: (job: object) => number|null, adoptedSlugs?: Set<string>|Array<string> }} deps
  * @returns {(slug: string, entry: { worktree: string, branch: string|null }) => boolean}
  */
-function buildJobWorktreeIsLive({ bootJobs, claudePidAlive, hasLiveHolder, cwdHolders, rowPid = (j) => j.runtime && j.runtime.pid }) {
+function buildJobWorktreeIsLive({ bootJobs, claudePidAlive, hasLiveHolder, cwdHolders, rowPid = (j) => j.runtime && j.runtime.pid, adoptedSlugs = [] }) {
+  const adopted = new Set(adoptedSlugs || []);
   const runningPidBySlug = new Map();
   for (const j of Array.isArray(bootJobs) ? bootJobs : []) {
     if (!j || j.status !== 'running') continue;
@@ -38,6 +46,10 @@ function buildJobWorktreeIsLive({ bootJobs, claudePidAlive, hasLiveHolder, cwdHo
   }
 
   return function isLive(slug, entry) {
+    if (adopted.has(slug)) {
+      console.log(`[gitWorktree] boot sweep: skipping job worktree slug=${slug} — adopted row, the reaper finalizes it`);
+      return true;
+    }
     const pid = runningPidBySlug.get(slug);
     if (pid && claudePidAlive(pid)) {
       console.log(`[gitWorktree] boot sweep: skipping job worktree slug=${slug} — running row with live pid=${pid}`);

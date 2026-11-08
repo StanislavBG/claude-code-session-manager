@@ -80,3 +80,40 @@ test('rowPid (the record/log ladder) is consulted instead of runtime.pid alone',
   });
   expect(isLive('job-e', { worktree: '/tmp/checkout-e' })).toBe(true);
 });
+
+test('PRD 2908: an adopted slug with a dead pid and no cwd holder is live', () => {
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const isLive = buildJobWorktreeIsLive({
+      bootJobs: [{ slug: 'job-f', status: 'running', runtime: { pid: 4242 } }],
+      claudePidAlive: () => false,
+      hasLiveHolder: () => false,
+      adoptedSlugs: new Set(['job-f']),
+    });
+    expect(isLive('job-f', { worktree: '/tmp/checkout-f' })).toBe(true);
+    const lines = log.mock.calls.map((c) => String(c[0]));
+    expect(lines.filter((l) => l.includes('slug=job-f') && l.includes('adopted row, the reaper finalizes it'))).toHaveLength(1);
+  } finally {
+    log.mockRestore();
+  }
+});
+
+test('PRD 2908: a non-adopted dead slug is not live (array form accepted)', () => {
+  const isLive = buildJobWorktreeIsLive({
+    bootJobs: [{ slug: 'job-g', status: 'running', runtime: { pid: 4242 } }],
+    claudePidAlive: () => false,
+    hasLiveHolder: () => false,
+    adoptedSlugs: ['job-other'],
+  });
+  expect(isLive('job-g', { worktree: '/tmp/checkout-g' })).toBe(false);
+  expect(isLive('job-other', { worktree: '/tmp/checkout-o' })).toBe(true);
+});
+
+test('PRD 2908: no adoptedSlugs behaves as before — dead pid, no holder → not live', () => {
+  const isLive = buildJobWorktreeIsLive({
+    bootJobs: [{ slug: 'job-h', status: 'running', runtime: { pid: 4242 } }],
+    claudePidAlive: () => false,
+    hasLiveHolder: () => false,
+  });
+  expect(isLive('job-h', { worktree: '/tmp/checkout-h' })).toBe(false);
+});

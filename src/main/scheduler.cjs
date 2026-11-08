@@ -11304,6 +11304,21 @@ async function init() {
       || bootUncommittedSnapshots.get(bootSnapshotKey(null, j.slug))
       || null;
 
+    // Partition FIRST (PRD 2908): the job-worktree sweep below must keep every
+    // checkout the partition adopts — a run that printed PASS and exited just
+    // before the restart is adopted on its fresh run log, and the reaper
+    // finalizes it from its intact sm-job branch.
+    const { immediate: immediateSlugs, adopted: adoptedSlugs } = partitionBootOrphans(bootSnap.jobs, {
+      pidAlive: claudePidAlive,
+      getLogPid: (j) => readSpawnedPidFromLog(bootLogPath(j)),
+      getLogMtimeMs: (j) => readLogMtimeMs(bootLogPath(j)),
+      logFreshWindowMs: IDLE_OUTPUT_KILL_MS,
+      findLiveProcess: (j) => findLiveProcessForJob(j, {
+        worktreeDir: jobWorktree.worktreeDirFor(j.cwd || DEFAULT_PROJECT_CWD, j.slug),
+      }),
+      readRecord: supervisorRecord.readSupervisorRecord,
+    });
+
     // Worktree boot reconciliation (PRD 994): a job worktree that survives an
     // app crash/host reboot must not leak disk or a dangling branch forever —
     // this sweeps every known project cwd (every cwd referenced by a queue
@@ -11326,6 +11341,7 @@ async function init() {
         hasLiveHolder: gitWorktree.hasLiveHolder,
         cwdHolders: gitWorktree.listCwdHolders(),
         rowPid: (j) => bootRowPid(j, bootLogPath),
+        adoptedSlugs: new Set(adoptedSlugs),
       });
       const sweep = await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds], { isLive });
       for (const s of (sweep && Array.isArray(sweep.snapshots)) ? sweep.snapshots : []) {
@@ -11348,16 +11364,6 @@ async function init() {
       console.error('[scheduler] boot epic-worktree reconciliation failed', e?.message);
     }
 
-    const { immediate: immediateSlugs, adopted: adoptedSlugs } = partitionBootOrphans(bootSnap.jobs, {
-      pidAlive: claudePidAlive,
-      getLogPid: (j) => readSpawnedPidFromLog(bootLogPath(j)),
-      getLogMtimeMs: (j) => readLogMtimeMs(bootLogPath(j)),
-      logFreshWindowMs: IDLE_OUTPUT_KILL_MS,
-      findLiveProcess: (j) => findLiveProcessForJob(j, {
-        worktreeDir: jobWorktree.worktreeDirFor(j.cwd || DEFAULT_PROJECT_CWD, j.slug),
-      }),
-      readRecord: supervisorRecord.readSupervisorRecord,
-    });
     const bootOutcomes = new Map();
     for (const j of bootSnap.jobs) {
       if (!immediateSlugs.includes(j.slug)) continue;

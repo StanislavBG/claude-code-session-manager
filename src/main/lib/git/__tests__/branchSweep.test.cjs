@@ -187,3 +187,66 @@ test('SM_BRANCH_SWEEP_DISABLE=1 restores today\'s behaviour exactly — no scan,
   expect(results).toEqual([]);
   expect(fs.existsSync(path.join(repoCwd, 'golf.txt'))).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// Rewritten base: the sweep is bounded at each branch's fork commit (PRD 2909).
+// ---------------------------------------------------------------------------
+
+const S_LINES = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8', 'l9', 'l10'];
+
+function commitS(cwd, line5, message) {
+  const lines = S_LINES.slice();
+  lines[4] = line5;
+  fs.writeFileSync(path.join(cwd, 's.txt'), `${lines.join('\n')}\n`, 'utf8');
+  git(['add', 's.txt'], cwd);
+  git(['commit', '-q', '-m', message], cwd);
+  return git(['rev-parse', 'HEAD'], cwd).trim();
+}
+
+/** B (s.txt l1..l10), P (line 5 -> P), sm-job/<slug> at P with own commit J (j.txt); main reset to B. */
+function forkAtPThenResetToB(cwd, slug) {
+  const b = commitS(cwd, 'l5', 'B');
+  commitS(cwd, 'P', 'P');
+  const branch = `sm-job/${slug}`;
+  git(['branch', branch], cwd); // reflog records the creation at P
+  const tmpCheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-branchsweep-checkout-'));
+  git(['worktree', 'add', '-q', tmpCheckout, branch], cwd);
+  fs.writeFileSync(path.join(tmpCheckout, 'j.txt'), 'job work\n', 'utf8');
+  git(['add', 'j.txt'], tmpCheckout);
+  git(['commit', '-q', '-m', 'J'], tmpCheckout);
+  git(['worktree', 'remove', '--force', tmpCheckout], cwd);
+  git(['reset', '-q', '--hard', b], cwd);
+  return { branch, b };
+}
+
+test('rebased main: a terminal-row branch forked at P lands only J, and a second pass reads it merged', async () => {
+  const { branch, b } = forkAtPThenResetToB(repoCwd, 'rebased');
+  commitS(repoCwd, 'U', 'U');
+  const p2 = commitS(repoCwd, 'U+P', 'P2');
+  const jobs = [{ slug: 'rebased', status: 'completed' }];
+
+  const first = await sweepStrandedJobBranches({ cwd: repoCwd, jobs, attemptedBranches: new Set() });
+  const r1 = first.results.find((x) => x.branch === branch);
+  expect(r1.action).toBe('integrated');
+  expect(git(['rev-list', '--count', `${p2}..HEAD`], repoCwd).trim()).toBe('1');
+  expect(git(['log', '-1', '--format=%s', 'HEAD'], repoCwd).trim()).toBe('J');
+  expect(git(['rev-parse', 'HEAD^'], repoCwd).trim()).toBe(p2);
+  expect(fs.readFileSync(path.join(repoCwd, 's.txt'), 'utf8').split('\n')[4]).toBe('U+P');
+  expect(fs.existsSync(path.join(repoCwd, 'j.txt'))).toBe(true);
+  expect(git(['rev-list', '--count', `${b}..HEAD`], repoCwd).trim()).toBe('3');
+
+  const second = await sweepStrandedJobBranches({ cwd: repoCwd, jobs, attemptedBranches: new Set() });
+  expect(second.results.find((x) => x.branch === branch).action).toBe('no-op-merged');
+});
+
+test('reset main: a leftover terminal-row branch forked at a dropped P lands J only; P stays absent', async () => {
+  const { branch, b } = forkAtPThenResetToB(repoCwd, 'reset');
+  const jobs = [{ slug: 'reset', status: 'completed' }];
+
+  const { results } = await sweepStrandedJobBranches({ cwd: repoCwd, jobs, attemptedBranches: new Set() });
+  expect(results.find((x) => x.branch === branch).action).toBe('integrated');
+  expect(git(['rev-list', '--count', `${b}..HEAD`], repoCwd).trim()).toBe('1');
+  expect(git(['log', '-1', '--format=%s', 'HEAD'], repoCwd).trim()).toBe('J');
+  expect(fs.readFileSync(path.join(repoCwd, 's.txt'), 'utf8').split('\n')[4]).toBe('l5');
+  expect(fs.existsSync(path.join(repoCwd, 'j.txt'))).toBe(true);
+});

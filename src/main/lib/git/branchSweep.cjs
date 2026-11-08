@@ -90,12 +90,18 @@ async function sweepStrandedJobBranches({ cwd, jobs, attemptedBranches }) {
       results.push({ branch, slug, action: 'skip-checked-out' });
       continue;
     }
-    const merged = await gitWorktree.isBranchMergedIntoHead(cwd, branch);
+    const row = slug ? jobsBySlug.get(slug) : null;
+    // forkSha bounds both the merged check and integration at the branch's own
+    // commits: after main is rebased/reset, the pre-rewrite commits it inherited
+    // must neither be replayed back nor keep a replay-landed branch "unmerged".
+    const forkSha = await gitWorktree.resolveForkSha({
+      cwd, branch, recorded: (row && row.worktreeForkSha) || null,
+    });
+    const merged = await gitWorktree.isBranchMergedIntoHead(cwd, branch, forkSha);
     if (merged) {
       results.push({ branch, slug, action: 'no-op-merged' });
       continue;
     }
-    const row = slug ? jobsBySlug.get(slug) : null;
     const terminalOrMissing = !row || TERMINAL_JOB_STATUSES.has(row.status);
     if (!terminalOrMissing) {
       results.push({ branch, slug, action: 'skip-active-row' });
@@ -114,7 +120,7 @@ async function sweepStrandedJobBranches({ cwd, jobs, attemptedBranches }) {
     // branch (no row at all) has nothing to read, so it falls back to
     // resolveDefaultBranch(cwd), same as before.
     const integration = await gitWorktree.integrateJobBranch({
-      cwd, branch, slug: slug || branch, baseBranch: (row && row.worktreeBaseBranch) || null,
+      cwd, branch, slug: slug || branch, baseBranch: (row && row.worktreeBaseBranch) || null, forkSha,
     });
     results.push({ branch, slug, action: integration.ok ? 'integrated' : 'conflict', integration });
   }

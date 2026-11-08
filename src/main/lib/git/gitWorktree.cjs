@@ -1681,15 +1681,20 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
       baseHeadSha: await readHeadSha(cwd),
     };
   }
-  try {
-    await execGit(['merge', '--ff-only', '--no-overwrite-ignore', branch], { cwd, timeout: 30_000 });
-    // The branch tip we fast-forwarded to, read from the branch ref (not HEAD,
-    // which a concurrent writer may already have moved).
-    return { ok: true, integrated: true, fastForward: true, sha: await tryResolveCommit(cwd, `${branch}^{commit}`) };
-  } catch {
-    // Main tree advanced since the worktree branched (a sibling job/Epic
-    // merged first) — replay the branch linearly onto HEAD; a merge commit is
-    // only the documented fallback.
+  // A rewritten base (main reset under the job) can still be an ancestor of
+  // the branch; fast-forwarding would land the pre-rewrite commits the job
+  // inherited, so a rewritten base always takes the fork-bounded replay below.
+  if (!baseRewritten) {
+    try {
+      await execGit(['merge', '--ff-only', '--no-overwrite-ignore', branch], { cwd, timeout: 30_000 });
+      // The branch tip we fast-forwarded to, read from the branch ref (not HEAD,
+      // which a concurrent writer may already have moved).
+      return { ok: true, integrated: true, fastForward: true, sha: await tryResolveCommit(cwd, `${branch}^{commit}`) };
+    } catch {
+      // Main tree advanced since the worktree branched (a sibling job/Epic
+      // merged first) — replay the branch linearly onto HEAD; a merge commit is
+      // only the documented fallback.
+    }
   }
   let linearFallback = '';
   if (process.env.SM_LINEAR_LANDING_DISABLE === '1' && !baseRewritten) {
@@ -2099,11 +2104,15 @@ async function salvageDirtyDelta({ cwd, paths, outFile }) {
  * once per process lifetime, and `reclaimTerminalJobOrphans` keep its checkout
  * (validator finding I-2). Used by both to tell a genuinely stranded
  * `sm-job/*` branch from one that's already a no-op.
+ * `forkSha` (the commit the branch forked from, e.g. from resolveForkSha)
+ * bounds the content check to the branch's own commits, so after main is
+ * rebased or reset the pre-rewrite commits the branch inherited don't keep
+ * a replay-landed branch reading as unmerged; null/unusable = unbounded.
  * Never throws; a branch that doesn't exist, or any other git failure, is
  * conservatively reported as NOT merged so a caller never treats an
  * unreadable branch as safe to skip.
  */
-async function isBranchMergedIntoHead(cwd, branch) {
+async function isBranchMergedIntoHead(cwd, branch, forkSha = null) {
   let branchHead;
   try {
     branchHead = (await execGit(['rev-parse', '--verify', branch], { cwd, timeout: 10_000 })).trim();
@@ -2116,7 +2125,7 @@ async function isBranchMergedIntoHead(cwd, branch) {
   } catch {
     // No merge base, or git failed: ancestry proves nothing, so the content check decides.
   }
-  return (await isBranchContentLanded({ cwd, base: 'HEAD', branch })) === true;
+  return (await isBranchContentLanded({ cwd, base: 'HEAD', branch, sinceSha: forkSha || undefined })) === true;
 }
 
 /**
@@ -2355,7 +2364,10 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
       if (live) continue;
     }
 
-    const merged = await isBranchMergedIntoHead(cwd, entry.branch);
+    // Bound the merged check at the branch's fork (reflog fallback — no row
+    // here) so a branch landed by replay onto a rewritten base reads merged.
+    const forkSha = await resolveForkSha({ cwd, branch: entry.branch, recorded: null });
+    const merged = await isBranchMergedIntoHead(cwd, entry.branch, forkSha);
     if (!merged) continue; // real un-landed work — never touch
 
     let statusOut = '';
@@ -2597,16 +2609,22 @@ async function replayBranchOnto({ cwd, ontoSha, branch, sinceSha }) {
       || await tryResolveCommit(cwd, `refs/heads/${branch}^{commit}`);
     if (!tipIn) return { ok: false, failureKind: 'other', reason: `branch "${branch}" not found` };
 
-    try {
-      await execGit(['merge-base', '--is-ancestor', onto, tipIn], { cwd, timeout: 10_000 });
-      return { ok: true, tipSha: tipIn, replayed: [], skipped: [], fastForward: true };
-    } catch (e) {
-      if (!(e && e.code === 1)) {
-        return { ok: false, failureKind: 'other', reason: `merge-base --is-ancestor failed: ${(e && (e.stderrText || e.message)) || e}` };
+    const since = await resolveForkBound(cwd, sinceSha, tipIn);
+    // Fast-forward shortcut only when `onto` already holds the fork: an `onto`
+    // that is an ancestor of the tip but NOT of the fork (base reset under the
+    // job) would otherwise land the pre-rewrite commits the branch inherited.
+    const ontoHoldsFork = !since || (await isAncestorOf(cwd, since, onto)) === true;
+    if (ontoHoldsFork) {
+      try {
+        await execGit(['merge-base', '--is-ancestor', onto, tipIn], { cwd, timeout: 10_000 });
+        return { ok: true, tipSha: tipIn, replayed: [], skipped: [], fastForward: true };
+      } catch (e) {
+        if (!(e && e.code === 1)) {
+          return { ok: false, failureKind: 'other', reason: `merge-base --is-ancestor failed: ${(e && (e.stderrText || e.message)) || e}` };
+        }
       }
     }
 
-    const since = await resolveForkBound(cwd, sinceSha, tipIn);
     const bound = since ? [`^${since}`] : [];
     const lines = async (extra) => (await execGit(
       ['rev-list', '--reverse', '--topo-order', '--no-merges', ...extra, '--right-only', `${onto}...${tipIn}`, ...bound],
@@ -2824,7 +2842,9 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message, forkSh
     }
   }
 
-  if (isAncestor) {
+  // Same rewritten-base rule as the in-checkout path: never fast-forward the
+  // pre-rewrite commits back in; replay only the job's own commits below.
+  if (isAncestor && !baseRewritten) {
     const outcome = await updateRefOrClassify([targetRef, branchSha, oldSha]);
     if (outcome.retry) return { retry: true };
     if (!outcome.ok) return outcome;

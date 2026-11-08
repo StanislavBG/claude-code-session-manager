@@ -2,16 +2,17 @@ import { memo, useCallback, useRef, useState, useEffect } from 'react'
 import { Z } from '../../lib/zLayers'
 import { useSessions } from '../../state/sessions'
 import { useEditor } from '../../state/editor'
-import { useLayout } from '../../state/layout'
+import { useLayout, usePanelTabHint } from '../../state/layout'
 import { useProjectsPrefs } from '../../state/projectsPrefs'
 import { useKnownProjects } from '../../lib/useKnownProjects'
-import { FileTree } from '../layout/FileTree'
+import { FileTree, type FileTreeReveal } from '../layout/FileTree'
 import { EditorView } from './EditorView'
 import { Tooltip } from '../ui/Tooltip'
 import { compactPath } from '../../lib/compactPath'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { readUiSettingsPrefs, writeUiSettingsPrefs, type UiSettingsPrefs } from '../../lib/uiSettingsPrefs'
 import { toast } from '../../state/toast'
+import { parseRevealHint, relativeSegments } from '../../lib/revealInFileExplorer'
 
 function saveLayoutPrefs(patch: UiSettingsPrefs): void {
   writeUiSettingsPrefs(patch).catch(() => toast.error("Couldn't save File Explorer layout."))
@@ -56,6 +57,9 @@ function ProjectsWorkspaceComponent() {
   collapsedRef.current = collapsed
   const containerRef = useRef<HTMLDivElement>(null)
   const launcherRef = useRef<HTMLDivElement>(null)
+  // Set once a reveal opened the file tree, so the late layout-prefs read below
+  // can't collapse it again under the revealed row.
+  const revealOpenedTreeRef = useRef(false)
 
   // One entry per real working directory (lib/knownProjectAggregate.ts) — the
   // launcher lists PROJECTS, not the ~/.claude/projects transcript folders
@@ -74,9 +78,60 @@ function ProjectsWorkspaceComponent() {
       if (typeof p.projectsSplitPct === 'number' && Number.isFinite(p.projectsSplitPct)) {
         setPct(clampSplit(p.projectsSplitPct))
       }
-      if (typeof p.projectsFileTreeCollapsed === 'boolean') setCollapsed(p.projectsFileTreeCollapsed)
+      if (typeof p.projectsFileTreeCollapsed === 'boolean' && !revealOpenedTreeRef.current) {
+        setCollapsed(p.projectsFileTreeCollapsed)
+      }
     })
     return () => { cancelled = true }
+  }, [])
+
+  // "Reveal in File Explorer" (lib/revealInFileExplorer.ts). A `reveal:<path>`
+  // hint waits in `pendingReveal` until the roots it could land in are known
+  // (the home dir resolves async), then goes to FileTree as `reveal` once a
+  // root containing it is showing: the active face's root first (no
+  // navigation), else the other face's. Outside every root → the OS file
+  // manager. Any other hint is ignored, as before.
+  const revealTokenRef = useRef(0)
+  const [pendingReveal, setPendingReveal] = useState<FileTreeReveal | null>(null)
+  const [reveal, setReveal] = useState<(FileTreeReveal & { root: string }) | null>(null)
+  usePanelTabHint('projects', (hint) => {
+    const path = parseRevealHint(hint)
+    if (path) setPendingReveal({ path, token: ++revealTokenRef.current })
+  })
+  const projectCwd = activeTab?.cwd ?? null
+  useEffect(() => {
+    if (!pendingReveal) return
+    const { path } = pendingReveal
+    const inside = (dir: string | null): dir is string => !!dir && relativeSegments(path, dir) !== null
+    const here = navFace === 'home' ? homeDir : projectCwd
+    const other = navFace === 'home'
+      ? { face: 'project' as const, root: projectCwd }
+      : { face: 'home' as const, root: homeDir }
+    let target: { face: typeof navFace; root: string } | null = null
+    if (inside(here)) target = { face: navFace, root: here }
+    else if (homeDir === null) return // the home root is still resolving — decide once it is known
+    else if (inside(other.root)) target = { face: other.face, root: other.root }
+    setPendingReveal(null)
+    if (!target) {
+      void window.api.shell.open({ as: 'revealPath', path }).then(
+        (r) => { if (!r.ok) toast.error(`Couldn't reveal ${path}: ${r.error ?? 'unknown error'}`) },
+        (e: unknown) => toast.error(`Couldn't reveal ${path}: ${e instanceof Error ? e.message : String(e)}`),
+      )
+      return
+    }
+    if (target.face !== navFace) useLayout.getState().setNavFace(target.face)
+    // The tree must be visible to show the row. Not saved as the layout.
+    revealOpenedTreeRef.current = true
+    setCollapsed(false)
+    setReveal({ ...pendingReveal, root: target.root })
+  }, [pendingReveal, navFace, homeDir, projectCwd])
+  // A reveal is aimed at one root: drop it if the File Explorer moved to
+  // another root before FileTree took it.
+  useEffect(() => {
+    setReveal((r) => (r && rootCwd !== null && r.root !== rootCwd ? null : r))
+  }, [rootCwd])
+  const handleRevealDone = useCallback((token: number) => {
+    setReveal((r) => (r && r.token === token ? null : r))
   }, [])
 
   const sortedRows = [...projects].sort((a, b) =>
@@ -238,7 +293,13 @@ function ProjectsWorkspaceComponent() {
               {compactPath(rootCwd, homeDir)}
             </div>
             <div className="flex-1 min-h-0 overflow-auto">
-              <FileTree cwd={rootCwd} activeTabId={activeTab?.id ?? null} onPreviewFile={openInline} />
+              <FileTree
+                cwd={rootCwd}
+                activeTabId={activeTab?.id ?? null}
+                onPreviewFile={openInline}
+                reveal={reveal && reveal.root === rootCwd ? reveal : null}
+                onRevealDone={handleRevealDone}
+              />
             </div>
           </>
         ) : (

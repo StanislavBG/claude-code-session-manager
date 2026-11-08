@@ -12,6 +12,9 @@
  *     / open externally / reveal in OS / copy path / send to chat.
  *   - Best-effort git status badges if `window.api.git?.fileStatus` exists; the
  *     call is wrapped so a missing IPC degrades silently.
+ *   - Selection + reveal: a click selects its row; the `reveal` prop
+ *     (ProjectsWorkspace's `reveal:<path>` hint, lib/revealInFileExplorer.ts)
+ *     expands the folders down to a path, selects it and scrolls it into view.
  *
  * The component does not own the cwd selector — MainPane passes the active
  * terminal tab's cwd in. When the cwd changes, transient state (search, inline
@@ -26,7 +29,8 @@ import { toast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
-import { dirname, basename, segments, isUnder } from '../../lib/pathSep'
+import { dirname, basename, segments, isUnder, join } from '../../lib/pathSep'
+import { relativeSegments } from '../../lib/revealInFileExplorer'
 import { readUiPrefs,writeUiPrefsPatch } from '../../lib/uiPrefs'
 import { readUiSettingsPrefs, writeUiSettingsPrefs } from '../../lib/uiSettingsPrefs'
 
@@ -77,7 +81,23 @@ interface FileTreeProps {
   onSendToChat?: (path: string) => void
   /** Active tab id — used to send "@path " via pty.write. */
   activeTabId?: string | null
+  /**
+   * Show `path` (inside `cwd`) once the tree has loaded: expand the folders
+   * down to it, select it, scroll it into view. A new `token` repeats a reveal.
+   */
+  reveal?: FileTreeReveal | null
+  /** Called with the reveal's token once it was handled — shown, or toasted as not found. */
+  onRevealDone?: (token: number) => void
 }
+
+export interface FileTreeReveal {
+  path: string
+  token: number
+}
+
+// Identifies which listing the root currently shows; a reveal waits until it
+// matches the live cwd + hidden filter (see the reveal effect).
+const rootKeyOf = (cwd: string, showHidden: boolean) => `${showHidden ? 1 : 0}:${cwd}`
 
 interface TreeNode extends FileEntry {
   children?: TreeNode[]
@@ -153,10 +173,26 @@ interface ContextMenuState {
   node: TreeNode
 }
 
-export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: FileTreeProps) {
+export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal, onRevealDone }: FileTreeProps) {
   const focusedRef = usePanelFocusRef()
   const focused = usePanelFocus()
   const [root, setRoot] = useState<TreeNode[]>([])
+  // Live mirror of `root` for the reveal walk, which runs after async listings.
+  const rootRef = useRef(root)
+  rootRef.current = root
+  // Selected row (click or reveal). Transient — cleared when cwd changes.
+  const [selected, setSelected] = useState<string | null>(null)
+  const selectedRowRef = useRef<HTMLDivElement | null>(null)
+  // Bumped by a reveal so the effect below scrolls the selected row into view.
+  const [scrollRequest, setScrollRequest] = useState(0)
+  // Reveal gate: `hydratedCwd` = cwd whose first listing + persisted expansion
+  // landed; `rootKey` = rootKeyOf() of the listing the root shows.
+  const [hydratedCwd, setHydratedCwd] = useState<string | null>(null)
+  const [rootKey, setRootKey] = useState<string | null>(null)
+  const handledRevealRef = useRef<number | null>(null)
+  const [revealRetry, setRevealRetry] = useState(0)
+  const onRevealDoneRef = useRef(onRevealDone)
+  onRevealDoneRef.current = onRevealDone
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // Live mirror of `expanded` so effects keyed on other deps (e.g. showHidden)
   // can read the current set without re-subscribing to every expand/collapse.
@@ -220,6 +256,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     } else {
       setRoot(result.entries.map((e) => ({ ...e })))
     }
+    setRootKey(rootKeyOf(cwd, showHidden))
     setLoading(false)
   }, [cwd, showHidden])
 
@@ -244,7 +281,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
       )
       if (loadReqRef.current !== req) return dead   // superseded by a newer load
       for (const { p, result } of results) {
-        if (result.ok) setRoot((prev) => attachChildren(prev, p, result.entries.map((e) => ({ ...e }))))
+        if (result.ok) setRoot((prev) => attachChildren(prev, p, result.entries.map((e) => ({ ...e })), expandedRef.current))
         else dead.push(p)
       }
     }
@@ -272,6 +309,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     setCreatePrompt(null)
     setDeleteConfirm(null)
     setGitStatus({})
+    setSelected(null)
     let cancelled = false
     expandedUserSetRef.current = false
     ;(async () => {
@@ -290,6 +328,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
         expandedRef.current = initial
         setExpanded(initial)
       }
+      setHydratedCwd(cwd)
       if (!restored.length) return
       const dead = await restoreSubtrees(restored)
       if (cancelled || !dead.length) return
@@ -460,7 +499,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     const result = await window.api.files.list(node.path, showHidden)
     if (!result.ok) return
     // Mutate the tree to attach children.
-    setRoot((prev) => attachChildren(prev, node.path, result.entries.map((e) => ({ ...e }))))
+    setRoot((prev) => attachChildren(prev, node.path, result.entries.map((e) => ({ ...e })), expandedRef.current))
   }, [expanded, showHidden, persistExpanded])
 
   const refreshNode = useCallback(async (nodePath: string) => {
@@ -470,9 +509,85 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     }
     const result = await window.api.files.list(nodePath, showHidden)
     if (result.ok) {
-      setRoot((prev) => attachChildren(prev, nodePath, result.entries.map((e) => ({ ...e }))))
+      setRoot((prev) => attachChildren(prev, nodePath, result.entries.map((e) => ({ ...e })), expandedRef.current))
     }
   }, [cwd, loadRoot, showHidden])
+
+  // Reveal `req.path` (`rel` = its segments below cwd): list the folders on
+  // the way down, attach them, expand them (persisted like any expansion),
+  // select the target and scroll to it.
+  const revealInTree = useCallback(async (req: FileTreeReveal, rel: string[]) => {
+    const done = () => onRevealDoneRef.current?.(req.token)
+    if (!rel.length) { setSelected(null); done(); return } // cwd itself — the tree already shows it
+    const loadReq = loadReqRef.current
+    // Every folder on the way down is known up front, so list them concurrently.
+    const dirs = rel.slice(0, -1).map((_, i) => join(cwd, ...rel.slice(0, i + 1)))
+    const listings = await Promise.all(dirs.map((d) => window.api.files.list(d, showHidden)))
+    if (loadReqRef.current !== loadReq) {
+      // A newer root load replaced the tree mid-walk — run again once it settles.
+      handledRevealRef.current = null
+      setRevealRetry((n) => n + 1)
+      return
+    }
+    // Walk by NAME, not joined path: main lists real paths (symlinks resolved),
+    // so a node's path can differ from the joined one.
+    let level: TreeNode[] = rootRef.current
+    const opened: Array<{ path: string; children: TreeNode[] }> = []
+    let target: TreeNode | null = null
+    let failure = 'not found'
+    for (let i = 0; i < rel.length; i++) {
+      const node = level.find((n) => n.name === rel[i])
+      if (!node) break
+      if (i === rel.length - 1) { target = node; break }
+      const listing = listings[i]
+      if (!node.isDirectory) break
+      if (!listing.ok) { failure = listing.error ?? 'could not list its folder'; break }
+      const children: TreeNode[] = listing.entries.map((e) => ({ ...e }))
+      opened.push({ path: node.path, children })
+      level = children
+    }
+    if (!target) {
+      toast.error(`Couldn't reveal ${req.path}: ${failure}`)
+      done()
+      return
+    }
+    const folders = opened.map((o) => o.path)
+    persistExpanded((prev) => (folders.every((f) => prev.has(f)) ? prev : new Set([...prev, ...folders])))
+    setRoot((prev) => opened.reduce((acc, o) => attachChildren(acc, o.path, o.children, expandedRef.current), prev))
+    setSearch('') // the top-level filter could hide the revealed row
+    setError(null) // a stale rename/create error hides the whole tree
+    setSelected(target.path)
+    setScrollRequest((n) => n + 1)
+    done()
+  }, [cwd, showHidden, persistExpanded])
+
+  // Run a reveal once the tree is settled: this cwd's first listing and
+  // persisted expansion have landed (earlier would attach to an empty tree or
+  // clobber the restored expansion) and the root shows the live hidden filter.
+  useEffect(() => {
+    if (!reveal || handledRevealRef.current === reveal.token) return
+    if (hydratedCwd !== cwd || rootKey !== rootKeyOf(cwd, showHidden) || loading) return
+    const rel = relativeSegments(reveal.path, cwd)
+    if (!rel) {
+      handledRevealRef.current = reveal.token
+      toast.error(`Couldn't reveal ${reveal.path}: it is outside ${cwd}`)
+      onRevealDoneRef.current?.(reveal.token)
+      return
+    }
+    if (rel.some((seg) => seg.startsWith('.'))) {
+      // Under a hidden folder: show hidden files in this view — not saved as
+      // the preference, and pinned so a late hydration read can't hide it
+      // again. The re-listed tree re-runs this effect.
+      showHiddenUserSetRef.current = true
+      if (!showHidden) { setShowHiddenState(true); return }
+    }
+    handledRevealRef.current = reveal.token
+    void revealInTree(reveal, rel)
+  }, [reveal, hydratedCwd, rootKey, loading, cwd, showHidden, revealRetry, revealInTree])
+
+  useEffect(() => {
+    if (scrollRequest) selectedRowRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [scrollRequest])
 
   const handleFileClick = useCallback((node: TreeNode) => {
     if (node.isDirectory) {
@@ -644,6 +759,9 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
             expanded={expanded}
             gitStatus={gitStatus}
             renaming={renaming}
+            selected={selected}
+            selectedRowRef={selectedRowRef}
+            onSelect={setSelected}
             renameValue={renameValue}
             renameInputRef={renameInputRef}
             onRenameChange={setRenameValue}
@@ -742,6 +860,9 @@ interface RowsProps {
   expanded: Set<string>
   gitStatus: GitStatusMap
   renaming: string | null
+  selected: string | null
+  selectedRowRef: React.MutableRefObject<HTMLDivElement | null>
+  onSelect: (path: string) => void
   renameValue: string
   renameInputRef: React.RefObject<HTMLInputElement>
   onRenameChange: (v: string) => void
@@ -754,21 +875,26 @@ interface RowsProps {
 }
 
 function Rows(props: RowsProps): React.ReactElement {
-  const { nodes, depth, expanded, gitStatus, renaming, onContextMenu } = props
+  const { nodes, depth, expanded, gitStatus, renaming, selected, onContextMenu } = props
   return (
     <>
       {nodes.map((node) => {
         const isExpanded = expanded.has(node.path)
         const isRenaming = renaming === node.path
+        const isSelected = selected === node.path
         const status = gitStatus[node.path]
         const color = getExtColor(node.name, node.isDirectory)
         return (
           <div key={node.path}>
             <div
-              className="group flex items-center gap-1.5 py-0.5 pr-2 cursor-pointer transition-colors hover:bg-bg-hi"
+              ref={isSelected ? props.selectedRowRef : undefined}
+              data-path={node.path}
+              data-selected={isSelected ? 'true' : undefined}
+              className={`group flex items-center gap-1.5 py-0.5 pr-2 cursor-pointer transition-colors hover:bg-bg-hi ${isSelected ? 'bg-accent/15' : ''}`}
               style={{ paddingLeft: `${8 + depth * 14}px` }}
               onClick={() => {
                 if (isRenaming) return
+                props.onSelect(node.path)
                 if (node.isDirectory) props.onToggleDir(node)
                 else props.onFileClick(node)
               }}
@@ -957,12 +1083,27 @@ export function displayName(p: string): string {
   return basename(p)
 }
 
-/** Immutable tree update: returns a new node array with children attached at path. */
-function attachChildren(nodes: TreeNode[], targetPath: string, children: TreeNode[]): TreeNode[] {
+/**
+ * Immutable tree update: returns a new node array with `children` attached at
+ * `targetPath`. A child folder still in `expanded` keeps its loaded subtree, so
+ * re-listing a parent (watcher refresh, a restore landing after a reveal)
+ * never empties an open subfolder; collapsed ones re-list on their next expand.
+ */
+function attachChildren(nodes: TreeNode[], targetPath: string, children: TreeNode[], expanded: ReadonlySet<string>): TreeNode[] {
   return nodes.map((n) => {
-    if (n.path === targetPath) return { ...n, children }
-    if (n.children) return { ...n, children: attachChildren(n.children, targetPath, children) }
+    if (n.path === targetPath) return { ...n, children: keepOpenSubtrees(n.children, children, expanded) }
+    if (n.children) return { ...n, children: attachChildren(n.children, targetPath, children, expanded) }
     return n
+  })
+}
+
+function keepOpenSubtrees(prev: TreeNode[] | undefined, next: TreeNode[], expanded: ReadonlySet<string>): TreeNode[] {
+  const loaded = new Map<string, TreeNode[]>()
+  for (const c of prev ?? []) if (c.children && expanded.has(c.path)) loaded.set(c.path, c.children)
+  if (!loaded.size) return next
+  return next.map((c) => {
+    const kept = c.isDirectory ? loaded.get(c.path) : undefined
+    return kept ? { ...c, children: kept } : c
   })
 }
 

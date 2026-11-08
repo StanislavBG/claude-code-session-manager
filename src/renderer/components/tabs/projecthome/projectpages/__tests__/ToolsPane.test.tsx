@@ -169,7 +169,7 @@ describe('ToolsPane list', () => {
     const header = q('project-home-tools-header')!
     expect(header.textContent?.startsWith('TOOLS')).toBe(true)
     expect(q('project-home-tools-count')!.textContent).toBe('3')
-    expect(q('project-home-tools-footnote')!.textContent).toBe('Any macro saved with Surface: Project Home shows up in this list.')
+    expect(q('project-home-tools-footnote')!.textContent).toBe('Every Project Home tool shows up here in every project. What it generates stays with each project.')
     expect(q('project-home-add-tool')!.textContent).toContain('Add a tool')
   })
 
@@ -467,7 +467,7 @@ describe('ToolsPane Add a tool', () => {
     expect(q('project-home-run-review')).not.toBeNull()
   })
 
-  it('saves a project-home macro for the active cwd, then closes', async () => {
+  it('saves a project-home macro for every project, then closes', async () => {
     render({ macros: [REVIEW] })
     act(() => q('project-home-add-tool')!.click())
     await flush()
@@ -477,7 +477,7 @@ describe('ToolsPane Add a tool', () => {
     await act(async () => { q('macro-save')!.click() })
     expect(save).toHaveBeenCalledTimes(1)
     expect(save.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ label: 'Lint', agentName: 'architect', prompt: 'Run lint', projects: [CWD], surface: 'project-home' }),
+      expect.objectContaining({ label: 'Lint', agentName: 'architect', prompt: 'Run lint', projects: ['*'], surface: 'project-home' }),
     )
     expect(q('macro-editor')).toBeNull()
   })

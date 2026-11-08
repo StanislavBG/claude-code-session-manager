@@ -451,7 +451,7 @@ export function ToolsPane({
             ))}
           </ul>
           <p data-testid="project-home-tools-footnote" className="m-0 px-1 pt-2 text-[11.5px] leading-[1.45] text-fg-faint">
-            Any macro saved with Surface: Project Home shows up in this list.
+            Every Project Home tool shows up here in every project. What it generates stays with each project.
           </p>
         </div>
       </div>

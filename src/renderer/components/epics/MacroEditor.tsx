@@ -47,6 +47,10 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
   const [surface, setSurface] = useState<Macro['surface']>(
     macro ? (macro.surface ?? 'sessions') : (defaultSurface ?? 'sessions'),
   )
+  // A Project Home tool is part of every project's Project Home — only what it
+  // generates is per project. `everywhere` keeps the user's own choice so
+  // switching back to Sessions restores it.
+  const projectHome = surface === 'project-home'
   const [inputs, setInputs] = useState<MacroInput[]>(macro?.inputs ?? [])
   const storedTargets = macro?.autoStartTargets
   const [autoMode, setAutoMode] = useState<'off' | 'all' | 'selected'>(
@@ -126,7 +130,8 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
     try {
       let projects: string[]
       const base = latest ?? macro
-      if (!base) projects = everywhere ? ['*'] : [cwd]
+      if (projectHome) projects = ['*']
+      else if (!base) projects = everywhere ? ['*'] : [cwd]
       else if (everywhere === initialEverywhere) projects = base.projects
       else if (everywhere) projects = ['*']
       else projects = base.projects.includes('*') ? [cwd] : base.projects
@@ -311,7 +316,7 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
             <option value="project-home">Project Home</option>
           </select>
           <div className="text-[11px] text-fg-faint">
-            Project Home lists it under Tools on that project&apos;s Project Home page.
+            Project Home lists it under Tools on every project&apos;s Project Home page.
           </div>
         </div>
       )}
@@ -320,11 +325,17 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
         <input
           type="checkbox"
           data-testid="macro-everywhere"
-          checked={everywhere}
+          checked={projectHome || everywhere}
+          disabled={projectHome}
           onChange={(e) => setEverywhere(e.target.checked)}
         />
         Show in every project
       </label>
+      {projectHome && (
+        <div data-testid="macro-everywhere-note" className="text-[11px] text-fg-faint">
+          Project Home tools are part of every project&apos;s Project Home. What a tool generates stays with each project.
+        </div>
+      )}
 
       <div className="flex flex-col gap-1">
         <label className={LABEL} htmlFor="macro-auto-start-mode">Can start work in other projects</label>

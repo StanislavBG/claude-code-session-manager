@@ -257,7 +257,7 @@ describe('MacroEditor', () => {
       expect((q('macro-surface') as HTMLSelectElement).value).toBe('project-home')
       act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
       await act(async () => { q('macro-save').click() })
-      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ surface: 'project-home', projects: [CWD] }))
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ surface: 'project-home', projects: ['*'] }))
     })
 
     it('stays changeable before save', async () => {
@@ -276,6 +276,71 @@ describe('MacroEditor', () => {
     it('absent: a new macro still starts on Sessions', () => {
       mount()
       expect((q('macro-surface') as HTMLSelectElement).value).toBe('sessions')
+    })
+  })
+
+  describe('Project Home tools are shown in every project', () => {
+    const NOTE = "Project Home tools are part of every project's Project Home. What a tool generates stays with each project."
+    const box = () => q('macro-everywhere') as HTMLInputElement
+    const fill = () => act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+    const expectLocked = () => {
+      expect(box().checked).toBe(true)
+      expect(box().disabled).toBe(true)
+      expect(q('macro-everywhere-note').textContent).toBe(NOTE)
+    }
+
+    it('locks the checkbox for a new Project Home macro and saves ["*"]', async () => {
+      mount({ defaultSurface: 'project-home' })
+      expectLocked()
+      fill()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].projects).toEqual(['*'])
+    })
+
+    it('locks the checkbox for an edited Project Home macro stored as [cwd] and saves ["*"]', async () => {
+      mount({ macro: mac({ surface: 'project-home', projects: [CWD] }) })
+      expectLocked()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].projects).toEqual(['*'])
+    })
+
+    it('locks the checkbox for a built-in Project Home macro and saves ["*"]', async () => {
+      mount({ macro: mac({ builtin: true, surface: 'project-home', projects: [CWD] }) })
+      expectLocked()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].projects).toEqual(['*'])
+    })
+
+    it('a sessions macro switched to Project Home saves ["*"]', async () => {
+      mount({ macro: mac({ surface: 'sessions', projects: [CWD] }) })
+      expect(box().disabled).toBe(false)
+      expect(q('macro-everywhere-note')).toBeNull()
+      pickSurface('project-home')
+      expectLocked()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].projects).toEqual(['*'])
+    })
+
+    it('an untouched sessions macro keeps its stored projects', async () => {
+      mount({ macro: mac({ surface: 'sessions', projects: [CWD, '/p/beta'] }) })
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].projects).toEqual([CWD, '/p/beta'])
+    })
+
+    it("switching a new macro back to Sessions restores the user's own choice and saves [cwd]", async () => {
+      mount({ defaultSurface: 'project-home' })
+      fill()
+      pickSurface('sessions')
+      expect(box().checked).toBe(false)
+      expect(box().disabled).toBe(false)
+      expect(q('macro-everywhere-note')).toBeNull()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].projects).toEqual([CWD])
+    })
+
+    it('Shown on helper text says every project', () => {
+      mount()
+      expect(container.textContent).toContain("Project Home lists it under Tools on every project's Project Home page.")
     })
   })
 })

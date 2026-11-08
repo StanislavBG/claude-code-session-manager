@@ -131,12 +131,38 @@ test('finish-review reason with landed commits and side effects', () => {
 test('finish-review reason with no commit landed and no side effects', () => {
   const out = budget.classifyBudgetKill(RES, null, { inFinishReview: true, reviewSkill: 'security-review', sideEffects: [] });
   assert.equal(out.reason,
-    'wall-clock budget exceeded inside the finish-protocol review (/security-review never returned): ran 45m against a 45m budget (estimateMinutes=0); no commit had landed');
+    'wall-clock budget exceeded inside the finish-protocol review (/security-review never returned): ran 45m against a 45m budget (estimateMinutes=0); no commit landed on the job branch');
 });
 
 test('finish-review reason falls back to the landed sha alone when commits could not be read', () => {
   const out = budget.classifyBudgetKill(RES, 'db5825d8aaaa', { inFinishReview: true, reviewSkill: 'code-review', sideEffects: [], commits: null });
   assert.match(out.reason, /; work already landed: db5825d$/);
+});
+
+test('real-shaped compound commands: the entry is the push/publish segment itself', () => {
+  const ctx = budget.describeBudgetKillContext(log(
+    toolUse('b1', 'Bash', { command: 'cd /tmp/release && git add a b && git commit -m x && git push origin HEAD:main' }), toolResult('b1'),
+    toolUse('b2', 'Bash', { command: 'cd pkg && test -f x.tgz && npm publish x.tgz --access public' }), toolResult('b2'),
+    toolUse('b3', 'Bash', { command: 'cd pkg && npm publish --dry-run; git status' }), toolResult('b3', true),
+    toolUse('s1', 'Skill', { skill: 'code-review' }),
+  ));
+  assert.deepEqual(ctx.sideEffects, ['git push origin HEAD:main', 'npm publish x.tgz --access public']);
+});
+
+test('two matching segments in one command give two entries; separators ;, ||, | and newline split too', () => {
+  const ctx = budget.describeBudgetKillContext(log(
+    toolUse('b1', 'Bash', { command: 'git push origin HEAD:main && npm publish --access public' }), toolResult('b1'),
+    toolUse('b2', 'Bash', { command: 'git push origin HEAD:main; echo ok\ngit push --tags || true | cat' }), toolResult('b2'),
+  ));
+  assert.deepEqual(ctx.sideEffects, ['git push origin HEAD:main', 'npm publish --access public', 'git push --tags']);
+});
+
+test('finish-review reason cuts a long reviewSkill to 80 chars plus an ellipsis', () => {
+  const skill = `code-review --fix ${Array.from({ length: 6 }, (_, i) => `src/main/scheduler/some/long/path/file${i}.cjs`).join(' ')}`;
+  const out = budget.classifyBudgetKill(RES, null, { inFinishReview: true, reviewSkill: skill, sideEffects: [] });
+  assert.ok(out.reason.startsWith(`wall-clock budget exceeded inside the finish-protocol review (/${skill.slice(0, 80)}… never returned): `));
+  const short = budget.classifyBudgetKill(RES, null, { inFinishReview: true, reviewSkill: 'x'.repeat(80), sideEffects: [] });
+  assert.ok(short.reason.includes(`(/${'x'.repeat(80)} never returned)`));
 });
 
 test('classifyBudgetKill still returns null for a non-budget outcome', () => {

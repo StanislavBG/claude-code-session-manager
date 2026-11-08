@@ -233,7 +233,9 @@ function classifyBudgetKill(res, landedCommitEvidence, context) {
   }
   // Keep the ran/budget/estimate figures: everything after the generic prefix.
   const figures = baseReason.replace(/^wall-clock budget exceeded:?\s*/, '');
-  let reason = `wall-clock budget exceeded inside the finish-protocol review (/${context.reviewSkill || 'code-review'} never returned)`;
+  const skillLabel = String(context.reviewSkill || 'code-review');
+  const skillShown = skillLabel.length > REVIEW_SKILL_MAX_CHARS ? `${skillLabel.slice(0, REVIEW_SKILL_MAX_CHARS)}…` : skillLabel;
+  let reason = `wall-clock budget exceeded inside the finish-protocol review (/${skillShown} never returned)`;
   if (figures) reason += `: ${figures}`;
   const commits = Array.isArray(context.commits) ? context.commits.slice(0, 5) : [];
   if (commits.length > 0) {
@@ -241,7 +243,7 @@ function classifyBudgetKill(res, landedCommitEvidence, context) {
   } else if (landedCommit) {
     reason += `; work already landed: ${String(landedCommit).slice(0, 7)}`;
   } else {
-    reason += '; no commit had landed';
+    reason += '; no commit landed on the job branch';
   }
   const sideEffects = Array.isArray(context.sideEffects) ? context.sideEffects : [];
   if (sideEffects.length > 0) reason += `; side effects already run: ${sideEffects.join(' | ')}`;
@@ -251,6 +253,28 @@ function classifyBudgetKill(res, landedCommitEvidence, context) {
 const REVIEW_SKILL_PREFIXES = ['code-review', 'security-review'];
 const SIDE_EFFECT_MAX = 5;
 const SIDE_EFFECT_MAX_CHARS = 120;
+const REVIEW_SKILL_MAX_CHARS = 80;
+const SIDE_EFFECT_PATTERNS = ['git push', 'npm publish'];
+
+/**
+ * sideEffectSegments(command) → string[]
+ *
+ * Pure. Splits a Bash command on &&, ||, ;, | and newlines (no shell parser —
+ * a split inside a quoted string is acceptable), trims each segment and keeps
+ * the ones naming `git push` / `npm publish`, each cut to 120 chars. So a real
+ * executor's `cd /tmp/x && git add a && git commit -m y && git push origin
+ * HEAD:main` is labelled by its push, not by its leading `cd`.
+ *
+ * @param {string} command
+ * @returns {string[]}
+ */
+function sideEffectSegments(command) {
+  return String(command)
+    .split(/&&|\|\||;|\||\n/)
+    .map((seg) => seg.trim())
+    .filter((seg) => SIDE_EFFECT_PATTERNS.some((p) => seg.includes(p)))
+    .map((seg) => seg.slice(0, SIDE_EFFECT_MAX_CHARS));
+}
 
 /**
  * describeBudgetKillContext(logText) → { inFinishReview, reviewSkill, sideEffects }
@@ -260,7 +284,7 @@ const SIDE_EFFECT_MAX_CHARS = 120;
  * executor's LAST top-level tool call a review Skill (/code-review,
  * /security-review) that never got its tool_result — i.e. did the budget kill
  * land inside the finish-protocol review? `sideEffects` lists the `git push` /
- * `npm publish` Bash commands that had already succeeded (a matching
+ * `npm publish` command segments (see sideEffectSegments) of Bash calls that had already succeeded (a matching
  * tool_result with is_error !== true), deduped, at most 5, each ≤ 120 chars.
  * Subagent events (non-null parent_tool_use_id) never count as the last
  * top-level tool_use.
@@ -323,10 +347,11 @@ function describeBudgetKillContext(logText) {
     const sideEffects = [];
     for (const call of bashCalls) {
       if (sideEffects.length >= SIDE_EFFECT_MAX) break;
-      if (!call.command.includes('git push') && !call.command.includes('npm publish')) continue;
       if (!results.has(call.id) || results.get(call.id) === true) continue;
-      const cut = call.command.trim().slice(0, SIDE_EFFECT_MAX_CHARS);
-      if (!sideEffects.includes(cut)) sideEffects.push(cut);
+      for (const seg of module.exports.sideEffectSegments(call.command)) {
+        if (sideEffects.length >= SIDE_EFFECT_MAX) break;
+        if (!sideEffects.includes(seg)) sideEffects.push(seg);
+      }
     }
     return { inFinishReview, reviewSkill, sideEffects };
   } catch {
@@ -711,6 +736,7 @@ module.exports = {
   computeJobBudgetMs,
   classifyBudgetKill,
   describeBudgetKillContext,
+  sideEffectSegments,
   isJobBudgetExempt,
   shouldKillForBudget,
   resolveBudgetKillOutcome,

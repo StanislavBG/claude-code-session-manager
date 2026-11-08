@@ -12,10 +12,11 @@ import { toast } from '../../../state/toast'
 /** Scenario tests for the Skills page: the 3a list column and its write paths (create, toggle, remove). */
 
 vi.mock('../../ui/MarkdownEditor', () => ({
-  MarkdownEditor: (p: { value: string; theme?: string; onChange?: (v: string) => void }) =>
+  MarkdownEditor: (p: { value: string; theme?: string; readOnly?: boolean; onChange?: (v: string) => void }) =>
     createElement('textarea', {
       'data-testid': 'markdown-editor',
       'data-theme': p.theme ?? 'dark',
+      readOnly: !!p.readOnly,
       value: p.value,
       onChange: (e: { target: { value: string } }) => p.onChange?.(e.target.value),
     }),
@@ -31,30 +32,80 @@ const md = (name: string, extra: string[] = []) =>
   ['---', `name: ${name}`, `description: ${name} desc`, ...extra, '---', '', 'body'].join('\n')
 const commandMd = (description: string) => ['---', `description: ${description}`, '---', '', 'body'].join('\n')
 
+/** An installed plugin fixture: its skill folder names and command names live under `/plugins/<name>`. */
+interface PluginFixture {
+  name: string
+  enabled?: boolean
+  skills?: string[]
+  commands?: string[]
+  /** Every read under this plugin's install dir throws. */
+  broken?: boolean
+}
+const pluginRoot = (name: string) => `/plugins/${name}`
+
 /** `skills` are folder names under SKILLS_DIR; `commands` maps a command name to its description. */
 function installApi({
   skills = ['skill-one', 'skill-two'],
   commands = {},
-}: { skills?: string[]; commands?: Record<string, string> } = {}) {
+  plugins = [],
+}: { skills?: string[]; commands?: Record<string, string>; plugins?: PluginFixture[] } = {}) {
   const disk: Record<string, string> = {}
   for (const n of skills) disk[`${SKILLS_DIR}/${n}/SKILL.md`] = md(n)
   for (const [n, description] of Object.entries(commands)) disk[`${COMMANDS_DIR}/${n}.md`] = commandMd(description)
+  for (const p of plugins) {
+    for (const n of p.skills ?? []) disk[`${pluginRoot(p.name)}/skills/${n}/SKILL.md`] = md(n)
+    for (const n of p.commands ?? []) disk[`${pluginRoot(p.name)}/commands/${n}.md`] = commandMd(`${n} cmd`)
+  }
+  const pluginOf = (path: string) => plugins.find((p) => path === pluginRoot(p.name) || path.startsWith(`${pluginRoot(p.name)}/`))
+  const assertReadable = (path: string) => {
+    if (pluginOf(path)?.broken) throw new Error('EACCES: permission denied')
+  }
   const entry = (name: string, path: string, isDirectory: boolean) =>
     ({ name, path, isDirectory, isFile: !isDirectory, mtimeMs: 0, size: 0 })
   const api = {
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
+    plugins: {
+      list: vi.fn(async () =>
+        plugins.map((p) => ({
+          key: `${p.name}@market`,
+          name: p.name,
+          marketplace: 'market',
+          version: '1.0.0',
+          scope: 'user',
+          installPath: pluginRoot(p.name),
+          enabled: p.enabled ?? true,
+        }))
+      ),
+    },
     config: {
+      exists: vi.fn(async (path: string) => {
+        assertReadable(path)
+        const p = pluginOf(path)
+        return !!p && path === `${pluginRoot(p.name)}/skills` && (p.skills ?? []).length > 0
+      }),
+      readJson: vi.fn(async (path: string) => {
+        assertReadable(path)
+        return { exists: false, data: null, parseError: false, error: null }
+      }),
       listDir: vi.fn(async (path: string, opts?: { dirsOnly?: boolean; filesOnly?: boolean }) => {
+        assertReadable(path)
         if (path === SKILLS_DIR && opts?.dirsOnly) {
           return { ok: true, error: null, entries: skills.map((n) => entry(n, `${SKILLS_DIR}/${n}`, true)) }
         }
         if (path === COMMANDS_DIR && opts?.filesOnly) {
           return { ok: true, error: null, entries: Object.keys(commands).map((n) => entry(`${n}.md`, `${COMMANDS_DIR}/${n}.md`, false)) }
         }
+        const p = pluginOf(path)
+        if (p && path === `${pluginRoot(p.name)}/skills` && opts?.dirsOnly) {
+          return { ok: true, error: null, entries: (p.skills ?? []).map((n) => entry(n, `${path}/${n}`, true)) }
+        }
+        if (p && path === `${pluginRoot(p.name)}/commands` && opts?.filesOnly) {
+          return { ok: true, error: null, entries: (p.commands ?? []).map((n) => entry(`${n}.md`, `${path}/${n}.md`, false)) }
+        }
         return { ok: true, error: null, entries: [] }
       }),
       readText: vi.fn(async (path: string) =>
-        path in disk
+        (assertReadable(path), path in disk)
           ? { exists: true, text: disk[path], mtimeMs: 0, error: null }
           : { exists: false, text: '', mtimeMs: 0, error: null }
       ),
@@ -391,7 +442,7 @@ describe('Skills list', () => {
     const onAdd = vi.fn()
     const el = await mount({ onAdd })
     expect((q(el, 'extensions-toolbar-filter') as HTMLInputElement).placeholder).toBe('Filter skills and commands')
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('1 skill · 2 commands')
+    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('1 skill · 2 commands · 0 from plugins')
     expect(buttonByText(el, 'Add…')).toBeUndefined()
     expect(q(el, 'skills-new')!.textContent).toBe('+ New')
     await click(q(el, 'skills-new')!)
@@ -419,7 +470,7 @@ describe('Skills list', () => {
     expect(empty.textContent).toContain('A skill is a folder with a SKILL.md that Claude loads when a task calls for it.')
     expect(classes(empty)).toEqual(expect.arrayContaining(['border-dashed', 'border-rule']))
     expect(q(el, 'skills-section-skills-count')!.textContent).toBe('0')
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('0 skills · 0 commands')
+    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('0 skills · 0 commands · 0 from plugins')
     const link = q(el, 'skills-create-link')!
     expect(link.textContent).toBe('Create a skill →')
     await click(link)
@@ -448,7 +499,7 @@ describe('Skills list', () => {
     await typeFilter(el, 'Skill-One')
     expect(listed(el)).toEqual(['/skill-one'])
     // The summary counts everything, not just what the filter shows.
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('2 skills · 1 command')
+    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('2 skills · 1 command · 0 from plugins')
 
     await typeFilter(el, '')
     expect(listed(el)).toHaveLength(3)
@@ -663,5 +714,110 @@ describe('Skills create (+ New)', () => {
     expect(selectedName(el)).toEqual([])
     expect(listed(el)).not.toContain('/my-skill')
     expect(q(el, 'skill-detail')).toBeNull()
+  })
+})
+
+describe('Skills FROM PLUGINS (3a)', () => {
+  const STRIPE: PluginFixture = { name: 'stripe', skills: ['checkout', 'billing', 'connect'], commands: ['stripe-login', 'test-cards'] }
+  const DEV: PluginFixture = { name: 'session-manager-dev', skills: ['develop'] }
+  const OFF: PluginFixture = { name: 'disabled-one', enabled: false, skills: ['nope'] }
+  const groupRows = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLElement>('[data-testid="plugin-skills-row"]'))
+  const rowFor = (el: HTMLElement, name: string) => groupRows(el).find((r) => r.getAttribute('data-plugin') === name)
+  const pluginItems = (el: HTMLElement) =>
+    Array.from(el.querySelectorAll<HTMLElement>('[data-testid="plugin-skills-item"]')).map((i) => q(i, 'plugin-skills-item-name')?.textContent)
+
+  it('lists one row per enabled plugin with its counts (zero parts omitted), a READ-ONLY badge and the total', async () => {
+    installApi({ plugins: [STRIPE, DEV, OFF] })
+    const el = await mount()
+    const header = q(el, 'skills-section-plugins')!
+    expect(header.textContent).toContain('From plugins')
+    expect(q(header, 'skills-section-plugins-count')?.textContent).toBe('6')
+    expect(q(header, 'skills-section-plugins-readonly')?.textContent).toBe('READ-ONLY')
+    expect(groupRows(el).map((r) => r.getAttribute('data-plugin'))).toEqual(['session-manager-dev', 'stripe'])
+    expect(q(rowFor(el, 'stripe')!, 'plugin-skills-row-counts')?.textContent).toBe('3 skills · 2 commands')
+    expect(q(rowFor(el, 'session-manager-dev')!, 'plugin-skills-row-counts')?.textContent).toBe('1 skill')
+    expect(rowFor(el, 'stripe')!.querySelector('svg')).not.toBeNull()
+    // Collapsed by default; plugin items never show up as editable cards.
+    expect(pluginItems(el)).toEqual([])
+    expect(listed(el)).toEqual(['/skill-one', '/skill-two'])
+  })
+
+  it('appends the plugin total to the toolbar summary', async () => {
+    installApi({ commands: { deploy: 'Ship it' }, plugins: [STRIPE, DEV] })
+    const el = await mount()
+    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('2 skills · 1 command · 6 from plugins')
+  })
+
+  it('expands a plugin row to its skills and commands and opens one read-only', async () => {
+    const { api } = installApi({ plugins: [STRIPE] })
+    const el = await mount()
+    await click(rowFor(el, 'stripe')!)
+    expect(rowFor(el, 'stripe')!.getAttribute('aria-expanded')).toBe('true')
+    expect(pluginItems(el)).toEqual(['/billing', '/checkout', '/connect', '/stripe-login', '/test-cards'])
+    const checkout = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="plugin-skills-item"]'))[1]
+    await click(checkout)
+    const detail = q(el, 'skill-detail')!
+    expect(q(detail, 'skill-detail-name')?.textContent).toBe('/checkout')
+    expect(q(detail, 'skill-detail-kind')?.textContent).toBe('SKILL')
+    expect(q(detail, 'skill-detail-plugin')?.textContent).toBe('from stripe')
+    expect((q(detail, 'markdown-editor') as HTMLTextAreaElement).readOnly).toBe(true)
+    expect(q(detail, 'skill-detail-description')).toBeNull()
+    expect(q(detail, 'skill-detail-description-text')?.textContent).toBe('checkout desc')
+    expect(q(detail, 'skill-detail-path')?.textContent).toBe('/plugins/stripe/skills/checkout/SKILL.md')
+    expect(q(detail, 'skill-detail-reveal')).not.toBeNull()
+    expect(buttonByText(detail, 'SaveCtrl S')).toBeUndefined()
+    expect(q(detail, 'savebar-clean')).toBeNull()
+    expect(api.config.writeText).not.toHaveBeenCalled()
+
+    // A command opens as COMMAND, still read-only.
+    const login = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="plugin-skills-item"]'))[3]
+    await click(login)
+    expect(q(el, 'skill-detail-kind')?.textContent).toBe('COMMAND')
+    expect(q(el, 'skill-detail-description-text')?.textContent).toBe('stripe-login cmd')
+  })
+
+  it('the filter also matches plugin items, showing the matching ones', async () => {
+    installApi({ plugins: [STRIPE, DEV] })
+    const el = await mount()
+    await typeFilter(el, 'connect')
+    expect(groupRows(el).map((r) => r.getAttribute('data-plugin'))).toEqual(['stripe'])
+    expect(pluginItems(el)).toEqual(['/connect'])
+    expect(q(el, 'skills-section-plugins-count')?.textContent).toBe('1')
+    expect(listed(el)).toEqual([])
+  })
+
+  it('shows a failing plugin as a row with an error note and keeps the rest of the list', async () => {
+    installApi({ plugins: [STRIPE, { name: 'broken', broken: true, skills: ['x'] }] })
+    const el = await mount()
+    const broken = rowFor(el, 'broken')!
+    expect(q(broken, 'plugin-skills-row-error')?.textContent).toBe('Could not read plugin')
+    expect(q(broken, 'plugin-skills-row-error')?.getAttribute('title')).toContain('EACCES')
+    expect(q(rowFor(el, 'stripe')!, 'plugin-skills-row-counts')?.textContent).toBe('3 skills · 2 commands')
+    expect(listed(el)).toEqual(['/skill-one', '/skill-two'])
+  })
+
+  it('loads plugin data once per mount and again on config.onChanged for the plugin sources', async () => {
+    const { api } = installApi({ plugins: [STRIPE] })
+    const el = await mount()
+    expect(api.plugins.list).toHaveBeenCalledTimes(1)
+    const emit = (path: string) =>
+      (api.config.onChanged.mock.calls as unknown as Array<[(i: { path: string }) => void]>).forEach(([cb]) => cb({ path }))
+    api.plugins.list.mockResolvedValueOnce([])
+    await act(async () => {
+      emit(`${HOME}/.claude/plugins/installed_plugins.json`)
+      await flush()
+      await flush()
+    })
+    expect(api.plugins.list).toHaveBeenCalledTimes(2)
+    expect(groupRows(el)).toEqual([])
+  })
+
+  it('has no FROM PLUGINS section in project scope', async () => {
+    const { api } = installApi({ plugins: [STRIPE] })
+    useSessions.setState({ tabs: [{ id: 't1', cwd: '/work/proj' }] as never, activeTabId: 't1' })
+    const el = await mount({ scope: 'project' })
+    expect(q(el, 'skills-section-plugins')).toBeNull()
+    expect(api.plugins.list).not.toHaveBeenCalled()
+    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('0 skills · 0 commands')
   })
 })

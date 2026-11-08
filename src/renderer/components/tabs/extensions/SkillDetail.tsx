@@ -16,8 +16,10 @@ export interface SkillDetailItem {
   kind: 'skills' | 'commands'
   scope: Scope
   name: string
-  /** Absolute path to the editable markdown file. */
+  /** Absolute path to the markdown file. */
   path: string
+  /** Set for an item a plugin adds: shown as a `from <plugin>` badge in place of the scope badge. */
+  plugin?: string
 }
 
 interface Props {
@@ -34,6 +36,8 @@ interface Props {
   onDraftChange: (raw: string) => void
   onSave: () => void
   onRevert: () => void
+  /** Plugin items (3a FROM PLUGINS): read-only editor, Description as text, no save bar. */
+  readOnly?: boolean
 }
 
 type View = 'source' | 'preview'
@@ -55,7 +59,10 @@ function shortPath(path: string, home: string): string {
   return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
 }
 
-/** Skills detail pane (3a): header, DESCRIPTION / FILE fields, body-only editor or preview, save bar. */
+/**
+ * Skills detail pane (3a): header, DESCRIPTION / FILE fields, body-only editor or preview, save bar.
+ * `readOnly` (plugin items): the same layout with nothing editable and no save bar.
+ */
 export function SkillDetail({
   item,
   home,
@@ -67,6 +74,7 @@ export function SkillDetail({
   onDraftChange,
   onSave,
   onRevert,
+  readOnly = false,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>('source')
@@ -104,9 +112,20 @@ export function SkillDetail({
           <span data-testid="skill-detail-kind" className={BADGE}>
             {item.kind === 'commands' ? 'COMMAND' : 'SKILL'}
           </span>
-          <span data-testid="skill-detail-scope" className={BADGE}>
-            {item.scope.toUpperCase()}
-          </span>
+          {item.plugin ? (
+            <span data-testid="skill-detail-plugin" className={BADGE}>
+              from {item.plugin}
+            </span>
+          ) : (
+            <span data-testid="skill-detail-scope" className={BADGE}>
+              {item.scope.toUpperCase()}
+            </span>
+          )}
+          {readOnly && (
+            <span data-testid="skill-detail-readonly" className={BADGE}>
+              READ-ONLY
+            </span>
+          )}
           <div
             role="group"
             aria-label="View"
@@ -118,9 +137,22 @@ export function SkillDetail({
         </div>
 
         <div className="grid grid-cols-[84px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2.5 mt-3.5">
-          <label htmlFor={`skill-desc-${item.path}`} className={FIELD_LABEL}>
-            Description
-          </label>
+          {readOnly ? (
+            <span className={FIELD_LABEL}>Description</span>
+          ) : (
+            <label htmlFor={`skill-desc-${item.path}`} className={FIELD_LABEL}>
+              Description
+            </label>
+          )}
+          {readOnly ? (
+            <span
+              id={`skill-desc-${item.path}`}
+              data-testid="skill-detail-description-text"
+              className="text-[13px] leading-[1.45] text-fg-dim"
+            >
+              {description || <span className="text-fg-faint">No description</span>}
+            </span>
+          ) : (
           <input
             id={`skill-desc-${item.path}`}
             data-testid="skill-detail-description"
@@ -130,6 +162,7 @@ export function SkillDetail({
             placeholder="What this does and when Claude should use it"
             className="px-2.5 py-[7px] bg-bg-hi border border-line rounded-md text-[13px] leading-[1.45] text-fg outline-none focus:border-accent"
           />
+          )}
           <span className={FIELD_LABEL}>File</span>
           <div className="min-w-0 flex items-baseline gap-3 text-xs">
             <span data-testid="skill-detail-path" title={item.path} className="min-w-0 truncate font-mono text-[11.5px] text-fg-dim">
@@ -152,7 +185,10 @@ export function SkillDetail({
               path={item.path}
               theme="paper"
               value={parts.body}
-              onChange={(body) => onDraftChange(joinSkillDoc(parts.frontmatter, body))}
+              readOnly={readOnly}
+              onChange={(body) => {
+                if (!readOnly) onDraftChange(joinSkillDoc(parts.frontmatter, body))
+              }}
             />
           ) : (
             <div className="h-full overflow-auto">
@@ -166,6 +202,7 @@ export function SkillDetail({
           )}
         </div>
       </div>
+      {!readOnly && (
       <div className="shrink-0 border-t border-line bg-bg-elev">
         <SaveBar
           dirty={dirty}
@@ -179,6 +216,7 @@ export function SkillDetail({
           scopeRef={rootRef}
         />
       </div>
+      )}
     </div>
   )
 }

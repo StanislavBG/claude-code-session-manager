@@ -15,6 +15,7 @@ import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/s
 import { toast } from '../../state/toast'
 import { SkillDetail } from './extensions/SkillDetail'
 import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
+import { PluginSkillsGroup, usePluginSkills, type PluginSkillItem } from './extensions/PluginSkillsGroup'
 
 const WATCH_DEBOUNCE_MS = 250
 const SELF_SAVE_WINDOW_MS = 2000
@@ -130,6 +131,12 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   const focusDescriptionFor = useRef<string | null>(null)
   const listRootRef = useRef<HTMLDivElement>(null)
 
+  // FROM PLUGINS (user scope only): enabled plugins' skills + commands, read-only.
+  const pluginEntries = usePluginSkills(home, scope === 'user')
+  const pluginItems = useMemo(() => pluginEntries.flatMap((p) => p.items), [pluginEntries])
+  const pluginItemsRef = useRef<PluginSkillItem[]>(pluginItems)
+  pluginItemsRef.current = pluginItems
+
   const scopeRoots = useMemo(() => {
     if (!home) return null
     return roots(home, cwd)
@@ -208,7 +215,9 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
     )
     setItems(next)
     setListed(true)
-    setSelectedPath((cur) => (next.find((i) => i.path === cur) ? cur : next[0]?.path ?? null))
+    setSelectedPath((cur) =>
+      next.find((i) => i.path === cur) || pluginItemsRef.current.some((i) => i.path === cur) ? cur : next[0]?.path ?? null
+    )
   }, [bases, scope])
 
   useEffect(() => { void loadItems() }, [loadItems])
@@ -409,6 +418,8 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
 
   const file = selectedPath ? files[selectedPath] : null
   const selectedItem = selectedPath ? items.find((i) => i.path === selectedPath) ?? null : null
+  const selectedPluginItem =
+    !selectedItem && selectedPath ? pluginItems.find((i) => i.path === selectedPath) ?? null : null
 
   // Filter on name or description, case-insensitive; a leading "/" is how a
   // name is shown, so "/deploy" finds the deploy command too.
@@ -606,7 +617,11 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
         filter={filter}
         onFilterChange={setFilter}
         placeholder="Filter skills and commands"
-        summary={`${plural(skillItems.length, 'skill', 'skills')} · ${plural(commandItems.length, 'command', 'commands')}`}
+        summary={[
+          plural(skillItems.length, 'skill', 'skills'),
+          plural(commandItems.length, 'command', 'commands'),
+          ...(scope === 'user' ? [`${pluginItems.length} from plugins`] : []),
+        ].join(' · ')}
         primary={{ label: '+ New', testId: 'skills-new', items: newMenu }}
       />
       <div className="flex-1 min-h-0">
@@ -621,6 +636,14 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
                 <SectionHeader label="Slash commands" count={shownCommands.length} testId="skills-section-commands" />
                 {newRow('commands')}
                 {commandsBody}
+                {scope === 'user' && listed && (
+                  <PluginSkillsGroup
+                    plugins={pluginEntries}
+                    needle={needle}
+                    selectedPath={selectedPath}
+                    onSelect={setSelectedPath}
+                  />
+                )}
               </div>
             }
             detail={
@@ -646,6 +669,20 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
                     setSaveError(null)
                     revert(selectedItem.path)
                   }}
+                />
+              ) : selectedPluginItem && file ? (
+                <SkillDetail
+                  readOnly
+                  item={{ ...selectedPluginItem, scope }}
+                  home={home}
+                  draft={file.draftRaw}
+                  dirty={false}
+                  busy={file.busy}
+                  lastSavedAt={file.lastSavedAt}
+                  saveError={null}
+                  onDraftChange={() => {}}
+                  onSave={() => {}}
+                  onRevert={() => {}}
                 />
               ) : items.length === 0 && loadErrors.length > 0 ? (
                 <div data-testid="skills-list-error">

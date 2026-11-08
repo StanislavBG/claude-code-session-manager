@@ -2097,11 +2097,37 @@ async function isBranchMergedIntoHead(cwd, branch) {
  * never reads as landed. Never throws. Both names resolve to SHAs first and
  * only SHAs reach git. A name starting with '-' resolves only via
  * `refs/heads/`, as in replayBranchOnto.
+ * `sinceSha` (the commit the branch forked from) bounds proofs 2 and 3 to the
+ * branch's own commits, so a base rewritten while the job ran does not count
+ * the pre-rewrite commits the branch inherited as unlanded; an unusable
+ * `sinceSha` (empty, unresolvable, not an ancestor of the tip) is ignored.
  *
- * @param {{ cwd?: string, base?: string, branch?: string }} [opts]
+ * @param {{ cwd?: string, base?: string, branch?: string, sinceSha?: string }} [opts]
  * @returns {Promise<boolean|null>}
  */
-async function isBranchContentLanded({ cwd, base = 'HEAD', branch } = {}) {
+/**
+ * Resolves `sinceSha` (the commit a job branch forked from) to a SHA, or null
+ * when it is empty, unresolvable, or not an ancestor of (or equal to) `tipSha`
+ * — a null bound leaves the caller's range unbounded, exactly as before.
+ *
+ * @param {string} cwd
+ * @param {unknown} sinceSha
+ * @param {string} tipSha
+ * @returns {Promise<string|null>}
+ */
+async function resolveForkBound(cwd, sinceSha, tipSha) {
+  if (typeof sinceSha !== 'string' || !sinceSha || sinceSha.startsWith('-')) return null;
+  const since = await tryResolveCommit(cwd, `${sinceSha}^{commit}`);
+  if (!since) return null;
+  try {
+    await execGit(['merge-base', '--is-ancestor', since, tipSha], { cwd, timeout: 10_000 });
+    return since;
+  } catch {
+    return null;
+  }
+}
+
+async function isBranchContentLanded({ cwd, base = 'HEAD', branch, sinceSha } = {}) {
   try {
     if (typeof cwd !== 'string' || !cwd) return null;
     const resolveName = async (name) => {
@@ -2120,9 +2146,12 @@ async function isBranchContentLanded({ cwd, base = 'HEAD', branch } = {}) {
       // Exit 1 = not an ancestor. On any other failure, try the content proofs.
     }
 
+    const since = await resolveForkBound(cwd, sinceSha, tipSha);
+    if (since && since === tipSha) return true;
+
     try {
       const out = await execGit(
-        ['rev-list', '--right-only', '--cherry-pick', '--no-merges', '--count', `${baseSha}...${tipSha}`],
+        ['rev-list', '--right-only', '--cherry-pick', '--no-merges', '--count', `${baseSha}...${tipSha}`, ...(since ? [`^${since}`] : [])],
         { cwd, timeout: 30_000 },
       );
       if (Number.parseInt(out.trim(), 10) === 0) return true;
@@ -2131,7 +2160,10 @@ async function isBranchContentLanded({ cwd, base = 'HEAD', branch } = {}) {
     }
 
     try {
-      const out = await execGit(['merge-tree', '--write-tree', '--no-messages', baseSha, tipSha], { cwd, timeout: 30_000 });
+      const out = await execGit(
+        ['merge-tree', '--write-tree', '--no-messages', ...(since ? [`--merge-base=${since}`] : []), baseSha, tipSha],
+        { cwd, timeout: 30_000 },
+      );
       const mergedTree = (out.split('\n')[0] || '').trim();
       const baseTree = (await execGit(['rev-parse', '--verify', `${baseSha}^{tree}`], { cwd, timeout: 10_000 })).trim();
       return mergedTree !== '' && mergedTree === baseTree;
@@ -2448,11 +2480,17 @@ const REPLAY_MERGE_FALLBACK_KINDS = new Set(['git_too_old', 'content_conflict', 
  * `git merge-tree --write-tree <onto> <branch>` writes (real merge base), or
  * it fails `branch_has_merges` rather than drop that content.
  * Needs git >= 2.40 (`merge-tree --merge-base`). Never throws.
+ * `sinceSha` (the commit the branch forked from) bounds every range to commits
+ * not reachable from it: when the base was rewritten (rebase/reset) while the
+ * job ran, the branch's inherited pre-rewrite commits have rebased copies with
+ * other patch-ids and would replay with spurious conflicts. An unusable
+ * `sinceSha` (empty, unresolvable, not an ancestor of the tip) is ignored.
  *
+ * @param {{ cwd: string, ontoSha: string, branch: string, sinceSha?: string }} opts
  * @returns {Promise<{ok:true, tipSha:string, replayed:{from:string,to:string}[], skipped:string[], fastForward?:true}
  *   | {ok:false, failureKind:string, reason:string, conflictedPaths?:string[]}>}
  */
-async function replayBranchOnto({ cwd, ontoSha, branch }) {
+async function replayBranchOnto({ cwd, ontoSha, branch, sinceSha }) {
   try {
     // Resolve once; from here on only SHAs reach git, so a branch named like an
     // option ('-x') can never be read as one (same reason as runMergeTreeWriteTree).
@@ -2473,8 +2511,10 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
       }
     }
 
+    const since = await resolveForkBound(cwd, sinceSha, tipIn);
+    const bound = since ? [`^${since}`] : [];
     const lines = async (extra) => (await execGit(
-      ['rev-list', '--reverse', '--topo-order', '--no-merges', ...extra, '--right-only', `${onto}...${tipIn}`],
+      ['rev-list', '--reverse', '--topo-order', '--no-merges', ...extra, '--right-only', `${onto}...${tipIn}`, ...bound],
       { cwd, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 },
     )).split('\n').map((l) => l.trim()).filter(Boolean);
     const kept = await lines(['--cherry-pick']);
@@ -2574,13 +2614,16 @@ async function replayBranchOnto({ cwd, ontoSha, branch }) {
     // replay above, so prove the replay reproduced the branch's content — the
     // tree a real merge of the two tips writes — before calling it linear.
     const mergeCount = Number.parseInt((await execGit(
-      ['rev-list', '--count', '--merges', `${onto}..${tipIn}`],
+      ['rev-list', '--count', '--merges', `${onto}..${tipIn}`, ...bound],
       { cwd, timeout: 30_000 },
     )).trim(), 10);
     if (mergeCount > 0) {
       let mergedTree = '';
       try {
-        const out = await execGit(['merge-tree', '--write-tree', '--no-messages', onto, tipIn], { cwd, timeout: 30_000 });
+        const out = await execGit(
+          ['merge-tree', '--write-tree', '--no-messages', ...(since ? [`--merge-base=${since}`] : []), onto, tipIn],
+          { cwd, timeout: 30_000 },
+        );
         mergedTree = (out.split('\n')[0] || '').trim();
       } catch {
         // Any non-zero exit, a conflict included, leaves no tree to prove the replay against.

@@ -337,7 +337,11 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     ...listed.map(requestFor).filter((r): r is McpCheckRequest => r !== null),
     ...listedPlugins.map(pluginCheckRequest),
   ]
-  const totalCount = names.length + pluginServers.length
+  // "<n> servers" is the scope file's own count (matches the folder tab); plugin servers are named apart.
+  const summary = [
+    `${names.length} server${names.length === 1 ? '' : 's'}`,
+    ...(pluginServers.length > 0 ? [`${pluginServers.length} from plugins`] : []),
+  ]
   const checkedCount =
     names.filter((n) => resultFor(n) !== undefined).length + pluginServers.filter((p) => checkResults[pluginKeyOf(p)] !== undefined).length
   const checkingListed = listed.some(isChecking) || listedPlugins.some((p) => checking[pluginKeyOf(p)] === true)
@@ -399,7 +403,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
         filter={filter}
         onFilterChange={setFilter}
         placeholder="Filter servers"
-        summary={`${totalCount} server${totalCount === 1 ? '' : 's'} · ${checkedCount} checked`}
+        summary={[...summary, `${checkedCount} checked`].join(' · ')}
         primary={{ label: '+ Add server', testId: 'mcp-add-server', items: addItems }}
       >
         <button

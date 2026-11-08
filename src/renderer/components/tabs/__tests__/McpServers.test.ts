@@ -772,8 +772,8 @@ describe('McpServers FROM PLUGINS', () => {
     expect(q(`mcp-plugin-status-${LINEAR_ID}`)!.textContent).toBe('via the linear plugin · not checked')
     expect(q(`mcp-plugin-dot-${STRIPE_ID}`)!.dataset.status).toBe('connected')
 
-    // The summary counts plugin servers, checked ones included.
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('6 servers · 1 checked')
+    // The summary names plugin servers apart from the file's; checked counts both.
+    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 2 from plugins · 1 checked')
     // The config server stays selected by default.
     expect(selectedRows()).toEqual(['alpha'])
   })
@@ -835,7 +835,18 @@ describe('McpServers FROM PLUGINS', () => {
     expect(api.mcp.checkServer).toHaveBeenCalledTimes(6)
     expect(api.mcp.checkServer).toHaveBeenCalledWith(stripeReq)
     expect(api.mcp.checkServer).toHaveBeenCalledWith(linearReq)
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('6 servers · 6 checked')
+    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 2 from plugins · 6 checked')
+  })
+
+  it('counts only the file\'s servers as servers and names plugin servers apart: "4 servers · 1 from plugins · <m> checked"', async () => {
+    const api = installApi(SERVERS, [PLUGINS[0]])
+    await mount()
+    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 1 from plugins · 0 checked')
+
+    await click(q('mcp-check-all'))
+    await flush()
+    expect(api.mcp.checkServer).toHaveBeenCalledTimes(5)
+    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 1 from plugins · 5 checked')
   })
 
   it('the filter narrows plugin rows and Check all to them too', async () => {

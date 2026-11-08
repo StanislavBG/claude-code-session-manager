@@ -296,6 +296,15 @@ describe('ProjectPagesSection', () => {
     expect(el.querySelector('[data-testid="video-item"]')?.textContent).toContain('bad meta')
   })
 
+  it('the competitive-matrix page passes onGoTools to PagesPane: Update in Tools replaces Regenerate…', async () => {
+    const onGoTools = vi.fn()
+    mount(<ProjectPagesSection {...props({ knowledge: [kEntry('competitive-matrix', 'Competitor matrix', 3000), NEW_K], onGoTools })} />)
+    await flush()
+    expect(byTestId('project-home-regenerate')).toBeNull()
+    act(() => byTestId('project-home-update-in-tools')!.click())
+    expect(onGoTools).toHaveBeenCalledTimes(1)
+  })
+
   it('each page has its own empty state with its starter cards', async () => {
     const onLaunch = vi.fn()
     const el = mount(<ProjectPagesSection {...props({ onLaunch })} />)

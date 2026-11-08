@@ -20,6 +20,9 @@
  * straight through `launch`; Customize, and Custom topic's `Name a topic`, open the composer on the
  * template. A failed job's reason shows above the cards; the TIP link calls `onGoTools`.
  *
+ * The `competitive-matrix` entry is the Competitor matrix tool's snapshot: its title bar shows
+ * `Update in Tools` (calls `onGoTools`) in place of Regenerate…, so it is only ever updated from Tools.
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
@@ -51,6 +54,9 @@ export const EXTRA_INSTRUCTIONS_CAP = 4000
 
 /** `pagePromptLines` opens with Page, Audience, Length and Read from; any line after them is the Focus text. */
 const PAGE_FIXED_LINES = 4
+
+/** The Competitor matrix tool's read-only HTML snapshot: updated only from Tools, never regenerated here. */
+const COMPETITOR_MATRIX_ENTRY_ID = 'competitive-matrix'
 
 const NO_MACRO_TITLE = 'The built-in Project Home macro is not available for this project'
 
@@ -195,7 +201,7 @@ export interface PagesPaneProps {
   lastLaunch?: BuildLaunch
   /** Reports each launch so ProjectHome can keep it as the macro's `lastLaunch`. */
   onLaunched?: (macroId: string, launch: BuildLaunch) => void
-  /** Switches Project Home to Tools — the empty state's `Review MD network` link. */
+  /** Switches Project Home to Tools — the empty state's `Review MD network` link and the competitive-matrix entry's `Update in Tools`. */
   onGoTools?: () => void
 }
 
@@ -354,6 +360,17 @@ export function PagesPane({
                   className={REGENERATE_CLASS}
                 >
                   Open session
+                </button>
+              ) : selected?.id === COMPETITOR_MATRIX_ENTRY_ID ? (
+                // The Competitor matrix tool owns this snapshot; project-home-builder must never rebuild it.
+                <button
+                  type="button"
+                  data-testid="project-home-update-in-tools"
+                  disabled={!onGoTools}
+                  onClick={() => onGoTools?.()}
+                  className={REGENERATE_CLASS}
+                >
+                  Update in Tools
                 </button>
               ) : (
                 selected && (

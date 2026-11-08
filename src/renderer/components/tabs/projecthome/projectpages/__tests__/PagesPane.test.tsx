@@ -380,6 +380,41 @@ describe('PagesPane Generate and Regenerate', () => {
   })
 })
 
+describe('PagesPane competitive-matrix entry', () => {
+  const MATRIX = page('competitive-matrix', 'Competitor matrix', HOUR)
+
+  it('shows Update in Tools instead of Regenerate… and the button calls onGoTools', async () => {
+    const onGoTools = vi.fn()
+    mount({ entries: [MATRIX, ...ENTRIES], onGoTools })
+    await flush()
+    expect(tid('project-home-page-title')?.textContent).toBe('Competitor matrix')
+    expect(tid('project-home-regenerate')).toBeNull()
+    const btn = tid('project-home-update-in-tools') as HTMLButtonElement
+    expect(btn.textContent).toBe('Update in Tools')
+    expect(btn.disabled).toBe(false)
+    click(btn)
+    expect(onGoTools).toHaveBeenCalledTimes(1)
+    expect(tid('composer-title')).toBeNull()
+  })
+
+  it('every other entry keeps Regenerate… and shows no Update in Tools', async () => {
+    mount({ entries: [MATRIX, ...ENTRIES], onGoTools: vi.fn() })
+    await flush()
+    for (const r of rows().slice(1)) {
+      click(r)
+      expect(tid('project-home-regenerate')?.textContent).toBe('Regenerate…')
+      expect(tid('project-home-update-in-tools')).toBeNull()
+    }
+  })
+
+  it('without onGoTools the Update in Tools button is disabled', async () => {
+    mount({ entries: [MATRIX] })
+    await flush()
+    expect((tid('project-home-update-in-tools') as HTMLButtonElement).disabled).toBe(true)
+    expect(tid('project-home-regenerate')).toBeNull()
+  })
+})
+
 describe('PagesPane rename and delete', () => {
   it('shows Rename and Delete only under the selected row', () => {
     mount()

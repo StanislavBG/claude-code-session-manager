@@ -3168,9 +3168,24 @@ function isBootRowAlive(j, {
  * reconciliation even though the live reap path is now guarded. Callers
  * must resolve this (a git spawn) BEFORE calling mutate(), never inside it —
  * pass null when there is none (a 'success' then re-queues, unless artifact-only).
+ *
+ * `uncommittedSnapshot` ({ sha, ref } | null) is the commit the boot worktree
+ * sweep pinned this row's uncommitted checkout work to before removing it
+ * (PRD 2893). It is stamped on the row on every branch; a 'success' with no
+ * landed commit whose only output is that snapshot parks needs_review rather
+ * than re-queuing — a re-run would start from a clean tree and hide the work.
  */
-function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit = null) {
+function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit = null, uncommittedSnapshot = null) {
   const now = new Date().toISOString();
+  const snap = uncommittedSnapshot && uncommittedSnapshot.sha && uncommittedSnapshot.ref
+    ? { sha: uncommittedSnapshot.sha, ref: uncommittedSnapshot.ref }
+    : null;
+  applyOrphanOutcomeInner(job, outcome, killNote, confirmedLandedCommit, snap, now);
+  // Stamped after the branch so a reset (resetJobFields) can never drop it.
+  if (snap) job.uncommittedSnapshot = snap;
+}
+
+function applyOrphanOutcomeInner(job, outcome, killNote, confirmedLandedCommit, snap, now) {
   // A reported 'success' completes only on landed-commit evidence, or for a
   // DECLARED artifact-only PRD (`deliverable: artifact` + artifactPaths — same
   // check as runVerify's artifact exemption) where no commit is legitimate.
@@ -3184,6 +3199,13 @@ function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit =
     }
     job.exitCode = 0;
     job.error = null;
+    job.finishedAt = now;
+    delete job.runtime;
+  } else if (outcome === 'success' && snap) {
+    const reason = `boot orphan reconciliation: run reported success but no landed commit was found; its uncommitted worktree work was kept as ${snap.sha} (${snap.ref})${killNote}`;
+    transitionJob(job, 'needs_review', { reason, source: 'applyOrphanOutcome:uncommitted' });
+    job.verifierVerdict = 'uncommitted_changes';
+    job.error = reason;
     job.finishedAt = now;
     delete job.runtime;
   } else if (outcome === 'failed') {
@@ -6057,7 +6079,8 @@ function reportSchedulerError(message, slug, e) {
  * the job can never be left `running`. The branch is kept on every failure.
  * @returns {Promise<{worktreeLeftoverDirty: string[], salvagePatch: string|null,
  *   worktreeIntegrationFailure: string|null, worktreeIntegrationDetail: object|null,
- *   mergeAutoResolved: string|null, mergeAutoResolvedPaths: string[]|null}>}
+ *   mergeAutoResolved: string|null, mergeAutoResolvedPaths: string[]|null,
+ *   uncommittedSnapshot: {sha: string, ref: string}|null}>}
  */
 async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardCwd, carriedPaths, deps = {} }) {
   const jw = deps.jobWorktree || jobWorktree;
@@ -6071,6 +6094,15 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
   let mergeAutoResolved = null;
   let mergeAutoResolvedPaths = null;
   let integratedSha = null;
+  // The removal pins any uncommitted work as refs/sm-uncommitted/... before
+  // deleting the checkout (PRD 2891); surfaced so spawnJob stamps it (PRD 2893).
+  let uncommittedSnapshot = null;
+  const cleanup = async (args) => {
+    const res = await jw.cleanupJobWorktree(args);
+    const snap = res && res.snapshot;
+    if (snap && snap.sha && snap.ref) uncommittedSnapshot = { sha: snap.sha, ref: snap.ref };
+    return res;
+  };
   const worktreeHead = { action: 'unknown', finalHead: null, stranded: [] };
   const addStranded = (list) => {
     for (const c of Array.isArray(list) ? list : []) {
@@ -6114,14 +6146,14 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
       // Cancelled mid-run: keep the commit on the job branch only.
       appendAuditEvent('job_cancel_integration_skipped', { slug: job.slug, runId, branch: worktree.branch });
       await pinUnlanded();
-      await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
-      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: true, worktreeHead };
+      await cleanup({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: true, worktreeHead, uncommittedSnapshot };
     }
     if (worktreeHead.action === 'diverged') {
       console.error(`[scheduler] ${job.slug}: worktree HEAD diverged from ${worktree.branch} — not integrating; commit pinned`);
       await pinUnlanded();
-      await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
-      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: false, worktreeHead };
+      await cleanup({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: false, worktreeHead, uncommittedSnapshot };
     }
     const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch });
     if (integration.ok && integration.reason === 'carried-wip-only') {
@@ -6141,7 +6173,7 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
       }
     }
     if (!integration.ok || !integration.integrated) await pinUnlanded();
-    await jw.cleanupJobWorktree({
+    await cleanup({
       cwd: guardCwd,
       dir: worktree.dir,
       branch: worktree.branch,
@@ -6152,10 +6184,10 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
     report('spawnJob worktree finalize failed', job.slug, e);
     // Best-effort: release the checkout + worktree-cap slot, keep the branch.
     try {
-      await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+      await cleanup({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
     } catch { /* already reported above */ }
   }
-  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, cancelled: false, worktreeHead };
+  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, cancelled: false, worktreeHead, uncommittedSnapshot };
 }
 
 /**
@@ -6609,6 +6641,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // shape for the whole run). Named generically (not "worktree...") because
     // an in-place run salvages one too (PRD 1098).
     let salvagePatch = null;
+    let uncommittedSnapshot = null;
     // Which foreign-WIP shape applies to THIS run: an isolated worktree only
     // ever needs to disclose carriedPaths (its checkout starts clean apart
     // from those carried paths); an in-place/shared-tree run discloses the
@@ -6639,7 +6672,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }, reviewInRun, worktree.ok ? worktree.setup : { ran: false, ok: false, reason: 'in-place', waitedMs: 0, ms: 0, commands: [] });
     } finally {
       if (worktree.ok) {
-        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, worktreeHead } =
+        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, worktreeHead, uncommittedSnapshot } =
           await finalizeJobWorktree({ job, runId, runDir, worktree, guardCwd, carriedPaths }));
       } else {
         // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
@@ -7356,6 +7389,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             s.jobs[i2].salvagePatch = salvagePatch;
           } else {
             delete s.jobs[i2].salvagePatch;
+          }
+          if (uncommittedSnapshot) {
+            s.jobs[i2].uncommittedSnapshot = uncommittedSnapshot;
+          } else {
+            delete s.jobs[i2].uncommittedSnapshot;
           }
           // Closed-set outcome taxonomy (issue #11 list A2) so a queue row
           // says WHY it ended without anyone opening the transcript.
@@ -11197,6 +11235,14 @@ async function init() {
     // classify immediately below.
     const bootSnap = readQueueSync();
     const bootLogPath = (j) => (j?.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null);
+    // cwd + slug → { sha, ref } of the uncommitted work the boot worktree sweep
+    // pinned before removing a dead job's checkout (PRD 2893). The stale-age
+    // part of the sweep may not know the main tree (cwd null) — slug fallback.
+    const bootUncommittedSnapshots = new Map();
+    const bootSnapshotKey = (cwd, slug) => `${cwd || ''}\0${slug}`;
+    const bootSnapshotFor = (j) => bootUncommittedSnapshots.get(bootSnapshotKey(j.cwd || DEFAULT_PROJECT_CWD, j.slug))
+      || bootUncommittedSnapshots.get(bootSnapshotKey(null, j.slug))
+      || null;
 
     // Worktree boot reconciliation (PRD 994): a job worktree that survives an
     // app crash/host reboot must not leak disk or a dangling branch forever —
@@ -11221,7 +11267,10 @@ async function init() {
         cwdHolders: gitWorktree.listCwdHolders(),
         rowPid: (j) => bootRowPid(j, bootLogPath),
       });
-      await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds], { isLive });
+      const sweep = await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds], { isLive });
+      for (const s of (sweep && Array.isArray(sweep.snapshots)) ? sweep.snapshots : []) {
+        if (s && s.key && s.sha && s.ref) bootUncommittedSnapshots.set(bootSnapshotKey(s.cwd, s.key), { sha: s.sha, ref: s.ref });
+      }
     } catch (e) {
       console.error('[scheduler] boot worktree reconciliation failed', e?.message);
     }
@@ -11282,7 +11331,7 @@ async function init() {
         const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
         const pid = j.runtime?.pid;
         const killNote = pid ? ` (orphan pid=${pid}: dead)` : '';
-        applyOrphanOutcome(j, outcome, killNote, bootLandedCommitEvidence.get(j.slug) || null);
+        applyOrphanOutcome(j, outcome, killNote, bootLandedCommitEvidence.get(j.slug) || null, bootSnapshotFor(j));
         if (j.status === 'completed') bootReconciledCompletions.push({ slug: j.slug, cwd: j.cwd });
         console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → status=${j.status}`);
       }

@@ -199,3 +199,37 @@ test('applyOrphanOutcome: no_result at the cap fails terminally instead of re-qu
   assert.match(job.error, new RegExp(`exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts`));
   assert.equal(job.runtime, undefined);
 });
+
+// PRD 2893: the boot sweep snapshots a dead job's uncommitted worktree work
+// before removing the checkout; a 'success' whose only output is that snapshot
+// parks for review instead of re-queuing (which would hide the kept work).
+const SNAP = { sha: 'deadbeef1234', ref: 'refs/sm-uncommitted/s/deadbeef1234' };
+
+test('applyOrphanOutcome: success + uncommitted snapshot parks needs_review/uncommitted_changes, no re-queue', () => {
+  const job = { slug: 's', status: 'running', runtime: { pid: 1 }, orphanRetries: 0 };
+  applyOrphanOutcome(job, 'success', '', null, SNAP);
+  assert.equal(job.status, 'needs_review');
+  assert.equal(job.verifierVerdict, 'uncommitted_changes');
+  assert.match(job.error, /deadbeef1234/);
+  assert.match(job.error, /refs\/sm-uncommitted\/s\/deadbeef1234/);
+  assert.ok(job.finishedAt);
+  assert.equal(job.runtime, undefined);
+  assert.equal(job.orphanRetries, 0, 'must not consume a re-queue attempt');
+  assert.deepEqual(job.uncommittedSnapshot, SNAP);
+});
+
+test('applyOrphanOutcome: success + snapshot + landed commit still completes', () => {
+  const job = { slug: 's', status: 'running', runtime: { pid: 1 } };
+  applyOrphanOutcome(job, 'success', '', 'abc123', SNAP);
+  assert.equal(job.status, 'completed');
+  assert.equal(job.landedCommit, 'abc123');
+  assert.deepEqual(job.uncommittedSnapshot, SNAP);
+});
+
+test('applyOrphanOutcome: no_result + snapshot re-queues and keeps uncommittedSnapshot', () => {
+  const job = { slug: 's', status: 'running', runtime: { pid: 1 }, orphanRetries: 0 };
+  applyOrphanOutcome(job, 'no_result', '', null, SNAP);
+  assert.equal(job.status, 'pending');
+  assert.equal(job.orphanRetries, 1);
+  assert.deepEqual(job.uncommittedSnapshot, SNAP);
+});

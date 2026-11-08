@@ -900,6 +900,12 @@ async function isRegisteredWorktreeOnBranch(cwd, dir, branch) {
  * human's dirty diff is relative to their OWN tree, not `fromRef`'s, so
  * applying it here would silently misplace or conflict with content that has
  * nothing to do with it.
+ *
+ * `forkSha` on the success result is the full SHA the checkout was forked
+ * from (the resolved `fromRef`, else `HEAD^{commit}`) — the SHA, never the
+ * name 'HEAD', is what `git worktree add` receives. Integration needs it to
+ * replay only the job's own commits after a base rewrite. Omitted on an
+ * unborn HEAD and on the Epic reuse result.
  */
 async function createWorktree({ kind, cwd, key, fromRef }) {
   configFor(kind); // throws on an unknown kind before anything else runs
@@ -923,6 +929,11 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
   if (typeof fromRef === 'string' && fromRef) {
     resolvedFromRefSha = await tryResolveCommit(cwd, `${fromRef}^{commit}`);
   }
+  // forkSha: the exact commit this checkout forks from, returned so
+  // integration can bound a replay at the fork point after the base branch is
+  // rewritten (rebase/reset) mid-run. Null only on an unborn HEAD, where the
+  // start point stays the name 'HEAD' and the result omits forkSha.
+  const forkSha = resolvedFromRefSha || await tryResolveCommit(cwd, 'HEAD^{commit}');
 
   // Epic mint is idempotent: a live Epic checkout (registered on its own
   // branch) is returned untouched — the leftover teardown below would delete
@@ -944,7 +955,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
 
   const dir = worktreeDirFor(kind, cwd, key);
   const branch = branchNameFor(kind, key);
-  const worktreeSource = resolvedFromRefSha || 'HEAD';
+  const worktreeSource = forkSha || 'HEAD';
   try {
     await fsp.mkdir(path.dirname(dir), { recursive: true });
     // Defensive: a same-key leftover from a prior crashed run (same slug/id
@@ -988,6 +999,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
   registeredCheckouts.set(dir, { kind, branch });
   const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch, setup };
   if (resolvedFromRefSha) result.forkedFrom = fromRef;
+  if (forkSha) result.forkSha = forkSha;
   return result;
 }
 
@@ -3119,6 +3131,46 @@ async function listStrandedPins({ cwd, key, sinceMs }) {
   }
 }
 
+/**
+ * Recover the commit `branch` forked from. Returns `recorded` when it resolves
+ * to a commit that is an ancestor of (or equal to) the branch tip; else the
+ * oldest `git reflog` entry of refs/heads/<branch> (its creation point) when
+ * that is an ancestor of the tip; else null. Never throws. The branch is
+ * always addressed as refs/heads/<branch>, so a '-'-prefixed name can't be
+ * read as an option.
+ *
+ * Why: integration can replay only a job's own commits after a base rewrite
+ * only if it knows the fork point; the reflog fallback covers rows queued
+ * before createWorktree started returning `forkSha`.
+ *
+ * @param {{ cwd: string, branch: string, recorded?: string|null }} opts
+ * @returns {Promise<string|null>}
+ */
+async function resolveForkSha({ cwd, branch, recorded }) {
+  try {
+    if (!cwd || typeof cwd !== 'string' || !branch || typeof branch !== 'string') return null;
+    const ref = `refs/heads/${branch}`;
+    const tip = await tryResolveCommit(cwd, `${ref}^{commit}`);
+    if (!tip) return null;
+    if (typeof recorded === 'string' && recorded && !recorded.startsWith('-')) {
+      const sha = await tryResolveCommit(cwd, `${recorded}^{commit}`);
+      if (sha && (await isAncestorOf(cwd, sha, tip)) === true) return sha;
+    }
+    let out = '';
+    try {
+      out = await execGit(['reflog', 'show', '--format=%H', ref, '--'], { cwd, timeout: 10_000 });
+    } catch {
+      return null;
+    }
+    const entries = String(out).split('\n').map((l) => l.trim()).filter(Boolean);
+    const oldest = entries.length ? entries[entries.length - 1] : null;
+    if (oldest && /^[0-9a-f]{40,64}$/.test(oldest) && (await isAncestorOf(cwd, oldest, tip)) === true) return oldest;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** True/false for `git merge-base --is-ancestor a b`; null on a real failure. */
 async function isAncestorOf(cwd, a, b) {
   try {
@@ -3361,6 +3413,7 @@ module.exports = {
   reconcileWorktreesOnBoot,
   deleteBranchKeepingUniqueCommits,
   listStrandedPins,
+  resolveForkSha,
   sweepStaleWorktreeCheckouts,
   mainTreeFromWorktreeGitFile,
   getObservedWorktreeCount,

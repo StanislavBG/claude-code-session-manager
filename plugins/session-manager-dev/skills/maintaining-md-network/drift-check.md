@@ -22,7 +22,7 @@ node <skill base dir>/scripts/drift-check.cjs --root <repo>
 | Flag | Meaning |
 | --- | --- |
 | `--root <dir>` | Repo to check. Defaults to the current directory. Must be a directory. |
-| `--map <path>` | The entry map. Default: the CLAUDE.md or AGENTS.md at the root that holds the maintainer comment (see below). |
+| `--map <path>` | The entry map. Default: the first file that holds the maintainer comment, searched in this order: the root CLAUDE.md, the root AGENTS.md, then the `.md` files those two import directly with at-sign imports (see below). |
 | `--file <path>` | Check only this file. Repeat for each file. Default: every tracked `.md` file (all `.md` files outside `.git` and `node_modules` when the repo is not git). |
 | `--exclude <prefix>` | Skip files whose repo-relative path starts with the prefix. Repeat as needed. |
 | `--checks <list>` | Comma list from `links`, `paths`, `limits`, `contents`. Default: all four. |
@@ -32,14 +32,16 @@ A flag that needs a value fails if the value is missing or starts with `--`.
 
 ### Output
 
-One JSON object on stdout:
+One JSON object on stdout, with its keys in this order:
 
 - `root`: the resolved repo root.
 - `map`: the map file used, or null.
 - `notes`: plain-text caveats, such as `no md-network-map comment found; the 70-line map limit was not applied`. Read it: an empty map means the map limit never ran.
-- `checkedFiles`: the repo-relative files checked.
 - `findings`: a list, sorted by file then line.
 - `counts`: findings per kind.
+- `checkedFiles`: the repo-relative files checked.
+
+`checkedFiles` comes last, so a long file list never hides the findings in a cut-off view of the output.
 
 ### Finding kinds
 
@@ -59,7 +61,7 @@ Rules the script applies:
 - Site route: a link starting with a single slash that does not exist under the repo root is treated as a website route and skipped. `--strict-paths` turns that skip off.
 - Ignore marker: a line that contains the marker `<!-- drift-check-ignore -->` is skipped by the link and path checks.
 - Ellipsis rule: a span with a `...` segment, such as src/.../x.ts, is a placeholder and is skipped.
-- Map detection: without `--map`, the script looks for the maintainer comment in the root CLAUDE.md and AGENTS.md, then in the `.md` files they import with at-sign imports. The first file with the comment is the map.
+- Map detection: without `--map`, the script looks for the maintainer comment in the root CLAUDE.md and AGENTS.md, then in the `.md` files inside the repo that they import directly with at-sign imports. Only those direct imports (one hop) are searched, not the files they import in turn. The first file with the comment is the map.
 
 ## Path conventions
 
@@ -180,4 +182,12 @@ The map carries one HTML comment, so the script and the next reviewer can find i
 <!-- md-network-map owner: <name> last-review: <YYYY-MM-DD> -->
 ```
 
-Without `--map`, the script looks for this comment in CLAUDE.md, then AGENTS.md, at the repo root. The first file that has it is the map, and it gets the 70-line limit. Update `last-review` in the same commit as each review record. HTML comments are stripped before the model reads the file, so the comment costs no context.
+Put the comment in the map file itself. The map may be an imported file: when the root CLAUDE.md pulls in docs/map.md with an at-sign import, the comment goes in docs/map.md.
+
+Without `--map`, the script searches the root CLAUDE.md, then the root AGENTS.md, then the `.md` files those two import directly with at-sign imports. The first file that has the comment is the map, and it gets the 70-line limit.
+
+Do not put the comment in a CLAUDE.md that only imports the map. That makes CLAUDE.md the map, so CLAUDE.md plus everything it imports is held to the 70-line limit, and the real map gets no limit of its own. On the Bilko repo, moving the comment from docs/map.md to CLAUDE.md gave a false over-line-limit finding: CLAUDE.md had 45 lines, 93 with its imports, against a limit of 70.
+
+Update `last-review` in the same commit as each review record.
+
+Claude Code strips block-level HTML comments, such as this one on its own line, from CLAUDE.md and from the files it imports before the model reads them. There the comment costs no context. A tool that returns the raw file text does not strip it: the Read tool, an MCP server, or a script. If a project's tool serves the map to a model, strip the comment in that tool.

@@ -1387,6 +1387,13 @@
  },
  {
   "ns": "projectPages",
+  "method": "matrix",
+  "channel": "project-pages:matrix",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "projectPages",
   "method": "watch",
   "channel": "project-pages:watch",
   "kind": "invoke",

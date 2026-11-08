@@ -155,7 +155,17 @@ test('escapeHtml escapes & < > " \' and the XSS title appears only escaped', () 
   const html = renderMatrixHtml(valid(buildMatrix()));
   expect(html).not.toContain(XSS);
   expect(html).not.toMatch(/<img\b/i);
-  expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  expect(html).toContain('&lt;img src=x onerror=alert&#40;1)&gt;');
+});
+
+test('escapeHtml encodes @ and ( so web-sourced CSS-looking text passes validateHomeHtml', () => {
+  expect(escapeHtml('@import url(x)')).toBe('&#64;import url&#40;x)');
+  const m = buildMatrix();
+  m.features[0].description = '@import url(https://evil.example/x.css)';
+  const html = renderMatrixHtml(valid(m));
+  expect(html).not.toContain('@import');
+  expect(html).toContain('&#64;import url&#40;https://evil.example/x.css)');
+  expect(validateHomeHtml(html)).toBeNull();
 });
 
 test('passes validateHomeHtml and stays under 1 MB for 300 features', () => {

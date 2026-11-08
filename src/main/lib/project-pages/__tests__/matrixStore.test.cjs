@@ -145,3 +145,24 @@ test('history keeps only the newest HISTORY_KEEP files', async () => {
   const expected = [...names, '20261108T120000Z.json'].sort().slice(-50);
   expect(left).toEqual(expected);
 });
+
+test('a rendered snapshot validateHomeHtml rejects returns ok:false and writes nothing', async () => {
+  const cwd = await mkTmpCwd();
+  const render = () => '<!DOCTYPE html><html><body><script src="https://evil.example/x.js"></script></body></html>';
+  const r = await writeMatrix(cwd, buildMatrix(), { model: 'opus', renderHtml: render });
+  expect(r.ok).toBe(false);
+  expect(r.error).toMatch(/self-contained/);
+  expect(fs.existsSync(pages(cwd))).toBe(false);
+});
+
+test('rejected snapshot leaves an existing matrix.json and history untouched', async () => {
+  const cwd = await mkTmpCwd();
+  const first = await writeMatrix(cwd, buildMatrix('2026-11-08T12:00:00.000Z'));
+  const before = fs.readFileSync(first.path);
+  const r = await writeMatrix(cwd, buildMatrix('2026-11-09T12:00:00.000Z'), {
+    renderHtml: () => '<html><body><script src="//evil.example/x.js"></script></body></html>',
+  });
+  expect(r.ok).toBe(false);
+  expect(fs.readFileSync(first.path).equals(before)).toBe(true);
+  expect(fs.existsSync(path.join(pages(cwd), 'matrix', 'history'))).toBe(false);
+});

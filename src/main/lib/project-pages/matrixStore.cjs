@@ -71,11 +71,12 @@ async function pruneHistory(historyDir) {
 }
 
 /**
- * writeMatrix(realCwd, value, { model }) ->
+ * writeMatrix(realCwd, value, { model, renderHtml }) ->
  *   { ok: true, path, htmlPath, historyPath } | { ok: false, error }.
- * Nothing is written when validation fails.
+ * Nothing is written when validation fails — of the matrix, or of the rendered
+ * HTML snapshot against validateHomeHtml (fail closed). renderHtml is a test seam.
  */
-async function writeMatrix(realCwd, value, { model = '' } = {}) {
+async function writeMatrix(realCwd, value, { model = '', renderHtml = renderMatrixHtml } = {}) {
   const v = validateMatrix(value);
   if (!v.ok) return { ok: false, error: v.error };
   const paths = matrixPaths(realCwd);
@@ -90,6 +91,11 @@ async function writeMatrix(realCwd, value, { model = '' } = {}) {
     createdAt: new Date().toISOString(),
     model: String(model || '').slice(0, 60),
   });
+  const html = renderHtml(matrix);
+  // Lazy: projectHomeAdminRoutes.cjs requires this module (circular at top level).
+  const { validateHomeHtml } = require('../feedback-remote/projectHomeAdminRoutes.cjs');
+  const rejection = validateHomeHtml(html);
+  if (rejection) return { ok: false, error: `matrix page rejected: ${rejection}` };
 
   const historyPath = await archivePrevious(paths);
   if (historyPath) await pruneHistory(paths.history);
@@ -98,7 +104,7 @@ async function writeMatrix(realCwd, value, { model = '' } = {}) {
   await write(paths.schema, JSON.stringify(matrixJsonSchema(), null, 2) + '\n');
   const pageDir = opsPath(realCwd, 'project-pages', 'knowledge', PAGE_ID);
   const htmlPath = path.join(pageDir, 'index.html');
-  await write(htmlPath, renderMatrixHtml(matrix));
+  await write(htmlPath, html);
   await write(path.join(pageDir, 'meta.json'), JSON.stringify(meta, null, 2) + '\n');
   return { ok: true, path: paths.matrix, htmlPath, historyPath };
 }

@@ -21,11 +21,17 @@ const STATUS = {
   unknown: { symbol: '?', label: 'Unknown' },
 };
 
-const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const ESCAPES = {
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '@': '&#64;', '(': '&#40;',
+};
 
-/** Escape & < > " ' for text and attribute contexts. */
+/**
+ * Escape & < > " ' for text and attribute contexts, plus @ and ( so research
+ * text like "@import url(https://…)" or "eval(" never trips validateHomeHtml's
+ * literal pattern checks.
+ */
 function escapeHtml(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+  return String(s == null ? '' : s).replace(/[&<>"'@(]/g, (c) => ESCAPES[c]);
 }
 
 const CSS = `

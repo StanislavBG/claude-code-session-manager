@@ -555,7 +555,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       writer: 'src/main/lib/persona-macro/macroLibrary.cjs',
       definedIn: 'src/main/lib/persona-macro/macroLibrary.cjs ',
     },
-    summary: 'A saved (agent, tag, prompt) hot key — machine-local library shown per project; pressing it is the same act as New Session.',
+    summary: 'A saved (agent, tag, prompt) hot key — machine-local library; a Sessions hot key is shown per project, a Project Home tool in every project; pressing it is the same act as New Session.',
     fields: [
       { name: 'id', type: 'string', key: 'pk' },
       { name: 'label', type: 'string' },

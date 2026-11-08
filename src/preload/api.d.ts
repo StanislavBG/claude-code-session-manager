@@ -347,7 +347,7 @@ export interface MacroJobStatus {
   finishedAt: string | null;
 }
 
-/** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project). */
+/** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project); a surface `'project-home'` macro is always `['*']` (only its generated artifacts are per project). */
 export interface Macro {
   id: string;
   label: string;

@@ -776,3 +776,34 @@ test('dead pid + finalizeOwned false → reaped as before', () => {
   assert.strictEqual(reapable.length, 1);
   assert.strictEqual(reapable[0].pidless, false);
 });
+
+describe('resolveReapGateOutcome — passed means the run\'s own verdict line said PASS', () => {
+  const { resolveReapGateOutcome } = require('../reaperHelpers.cjs');
+  test('success + PASS verdict line → passed', () => {
+    assert.strictEqual(resolveReapGateOutcome('success', 'done\nSCHEDULER_VERDICT: PASS'), 'passed');
+  });
+  test('success with no verdict line → unknown (Bilko 1685)', () => {
+    assert.strictEqual(resolveReapGateOutcome('success', 'I wrote the code but never ran the gate.'), 'unknown');
+    assert.strictEqual(resolveReapGateOutcome('success', null), 'unknown');
+  });
+  test('verdict mentioned mid-sentence does not count', () => {
+    assert.strictEqual(resolveReapGateOutcome('success', 'I will print SCHEDULER_VERDICT: PASS later'), 'unknown');
+  });
+  test('the LAST verdict line wins', () => {
+    assert.strictEqual(resolveReapGateOutcome('success', 'SCHEDULER_VERDICT: PASS\nretry\nSCHEDULER_VERDICT: FAIL gate red'), 'failed');
+    assert.strictEqual(resolveReapGateOutcome('success', 'SCHEDULER_VERDICT: FAIL x\nfixed\nSCHEDULER_VERDICT: PASS'), 'passed');
+  });
+  test('failed outcome or FAIL verdict line → failed', () => {
+    assert.strictEqual(resolveReapGateOutcome('failed', 'SCHEDULER_VERDICT: PASS'), 'failed');
+    assert.strictEqual(resolveReapGateOutcome('failed', null), 'failed');
+    assert.strictEqual(resolveReapGateOutcome('success', 'SCHEDULER_VERDICT: FAIL gate red'), 'failed');
+  });
+  test('no_result → never_ran', () => {
+    assert.strictEqual(resolveReapGateOutcome('no_result', null), 'never_ran');
+  });
+  test('anything else → unknown', () => {
+    assert.strictEqual(resolveReapGateOutcome('unknown', 'SCHEDULER_VERDICT: PASS'), 'unknown');
+    assert.strictEqual(resolveReapGateOutcome('rate_limited', null), 'unknown');
+    assert.strictEqual(resolveReapGateOutcome('success', 'SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP'), 'unknown');
+  });
+});

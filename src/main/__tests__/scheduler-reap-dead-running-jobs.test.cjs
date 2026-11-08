@@ -99,7 +99,7 @@ test('reapDeadRunningJobs reconciles a queue.json row stuck at status:running wi
     },
   ]);
   writeRunLog('run-desynced', 'desynced-job', [
-    '{"type":"result","subtype":"success","result":"done","is_error":false}',
+    '{"type":"result","subtype":"success","result":"done\\nSCHEDULER_VERDICT: PASS","is_error":false}',
   ]);
 
   // runningSet is a fresh module-level Set with nothing in it — this is the
@@ -111,7 +111,22 @@ test('reapDeadRunningJobs reconciles a queue.json row stuck at status:running wi
   assert.equal(jobs[0].status, 'completed', 'job must be reconciled from disk state, not skipped via the runningSet gate');
   assert.equal(jobs[0].exitCode, 0);
   assert.equal(jobs[0].runtime, undefined);
-  assert.equal(jobs[0].gateOutcome, 'passed', 'a success result event maps to gateOutcome:passed');
+  assert.equal(jobs[0].gateOutcome, 'passed', 'a success result whose own verdict line says PASS maps to gateOutcome:passed');
+});
+
+test('reapDeadRunningJobs stamps gateOutcome unknown (not passed) for a success result with no SCHEDULER_VERDICT line', async () => {
+  const projectCwd = path.join(tmpHome, 'b-project-no-verdict');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+  const queuePath = writeProjectQueue(projectCwd, [
+    { slug: 'no-verdict-job', status: 'running', cwd: projectCwd, runId: 'run-no-verdict', runtime: { pid: 999999 } },
+  ]);
+  writeRunLog('run-no-verdict', 'no-verdict-job', [
+    '{"type":"result","subtype":"success","result":"done","is_error":false}',
+  ]);
+  await reapDeadRunningJobs();
+  const row = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === 'no-verdict-job');
+  assert.equal(row.gateOutcome, 'unknown', 'no verdict line → the gate is not claimed as passed');
 });
 
 test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS with an empty run dir as failed, not completed, and audits it', async () => {

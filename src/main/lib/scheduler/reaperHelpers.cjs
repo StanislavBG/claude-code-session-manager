@@ -279,6 +279,40 @@ function mapOutcomeToGateOutcome(outcome) {
   }
 }
 
+/**
+ * resolveReapGateOutcome(outcome, resultText) → 'passed'|'failed'|'never_ran'|'unknown'
+ *
+ * The reaper's gateOutcome for a non-pidless dead row. Unlike
+ * mapOutcomeToGateOutcome, 'passed' is NOT inferred from the CLI result
+ * event's subtype=success — that only says the session ended cleanly, not
+ * that a gate ran (Bilko job 1685 never ran its gate, printed no verdict, and
+ * was stamped 'passed'). 'passed' requires the run's own LAST
+ * `SCHEDULER_VERDICT:` line to say PASS. Each line is classified by
+ * runVerify.cjs's scanSentinel (the one SCHEDULER_VERDICT parser), scanned
+ * from the end so the final say wins.
+ */
+function lastVerdictLine(resultText) {
+  if (typeof resultText !== 'string' || !resultText) return null;
+  // Lazy require: runVerify.cjs is a larger module; keep this lib cheap to load.
+  const { scanSentinel } = require('../../runVerify.cjs');
+  const lines = resultText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const v = scanSentinel({ resultText: lines[i].replace(/\r$/, '') }, []);
+    if (v) return v;
+  }
+  return null;
+}
+
+function resolveReapGateOutcome(outcome, resultText) {
+  if (outcome === 'failed') return 'failed';
+  if (outcome === 'no_result') return 'never_ran';
+  if (outcome !== 'success') return 'unknown';
+  const verdict = lastVerdictLine(resultText);
+  if (verdict === 'pass') return 'passed';
+  if (verdict === 'fail') return 'failed';
+  return 'unknown';
+}
+
 // Max times an orphaned job may be re-queued before giving up (marking failed).
 // Single source of truth: both the in-app reaper (scheduler.cjs) and the external
 // offline watchdog (watchdogHelpers.cjs) import this so their give-up budgets can
@@ -527,6 +561,7 @@ module.exports = {
   isClaudeArgv,
   classifyRunOutcome,
   mapOutcomeToGateOutcome,
+  resolveReapGateOutcome,
   ORPHAN_REQUEUE_CAP,
   selectReapableJobs,
   findLiveProcessForJob,

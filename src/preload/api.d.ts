@@ -762,7 +762,9 @@ export interface ScheduleJob {
   /** Structured terminal-outcome label set alongside `error` (never replacing
    *  it) so a reader can tell "the gate ran and went red" (failed) apart from
    *  "the gate never got to run" (never_ran) — reaperHelpers.cjs's
-   *  mapOutcomeToGateOutcome (PRD 1109). */
+   *  resolveReapGateOutcome (PRD 1109). 'passed' means the run's own last
+   *  SCHEDULER_VERDICT line said PASS — NOT that the scheduler itself ran
+   *  the gate; a clean CLI exit with no verdict line reads 'unknown'. */
   gateOutcome?: 'passed' | 'failed' | 'never_ran' | 'unknown';
   /** Claude session UUID passed via `--session-id`. Set when the job spawns
    *  and persisted across queue reloads so the renderer can find the JSONL

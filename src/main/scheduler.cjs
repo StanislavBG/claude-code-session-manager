@@ -72,7 +72,7 @@ const { shouldRunFlatSweep, FLAT_SWEEP_INTERVAL_MS } = require('./lib/scheduler/
 const { appendError } = require('./lib/telemetry/opsErrorLog.cjs');
 const { readTail } = require('./lib/util/fileTail.cjs');
 const {
-  claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
+  claudePidAlive, classifyRunOutcome, resolveReapGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
   readSpawnedPidFromLog, readLogMtimeMs, isClaudeArgv,
 } = require('./lib/scheduler/reaperHelpers.cjs');
@@ -8764,7 +8764,7 @@ async function reapDeadRunningJobs() {
       // THIS slug have any artifact in there" — reused rather than
       // re-derived so a phantom link never survives the reap.
       const hasOwnArtifact = pidless ? logHasOutput(logPath) : true;
-      const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, hasOwnArtifact) : mapOutcomeToGateOutcome(outcome);
+      const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, hasOwnArtifact) : resolveReapGateOutcome(outcome, extractResultTextFromLog(logPath));
       dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath, noOwnArtifact: pidless && !hasOwnArtifact, failureOverride });
     }
 

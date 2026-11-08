@@ -82,6 +82,7 @@
   "macroAdminRoutes": "feedback-remote",
   "macroLibrary": "persona-macro",
   "mainHeapSnapshot": "telemetry",
+  "mcpToolsProbe": ".",
   "mdNetworkScan": ".",
   "memoryScope": "process",
   "modelCatalog": "claude",

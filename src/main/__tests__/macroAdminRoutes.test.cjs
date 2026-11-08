@@ -427,7 +427,7 @@ test('delete: refusals return 400 with no onChanged and no audit event', async (
 // --- surface / '*' projects / verified human request ------------------------
 
 const humanLedger = require('../lib/feedback-remote/humanPromptLedger.cjs');
-const { quoteNamesEveryProject } = require('../lib/feedback-remote/macroAdminRoutes.cjs');
+const { quoteNamesEveryProject, quoteNamesProjectHome } = require('../lib/feedback-remote/macroAdminRoutes.cjs');
 
 function saveEvents(id) {
   return readTail(1_000_000)
@@ -448,18 +448,114 @@ test('quoteNamesEveryProject matches every/all/each projects and everywhere only
   }
 });
 
-test('surface is accepted on create and update; projects unchanged on update', async () => {
+const PH_TEXT = 'Write a new Macro for Project Home - a CPU audit';
+const PH_QUOTE = 'Write a new Macro for Project Home';
+
+test('quoteNamesProjectHome matches Project Home spellings only', () => {
+  for (const q of ['Write a new Macro for Project Home', 'add a project-home tool', 'PROJECT_HOME tools']) {
+    expect(quoteNamesProjectHome(q)).toBe(true);
+  }
+  for (const q of ['home project', 'in this project', '', 42]) {
+    expect(quoteNamesProjectHome(q)).toBe(false);
+  }
+});
+
+test('surface: sessions create stays [cwd]; project-home saves store [*] and keep it on update', async () => {
+  humanLedger._resetForTests();
   const { cwd, adminHttp, getChangedCount } = await setupDelete();
-  const created = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, surface: 'project-home' } });
+  const origin = 'sess-surface';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const verified = { humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin };
+
+  const plain = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, surface: 'sessions' } });
+  expect(plain.status).toBe(200);
+  expect(plain.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
+  const upd0 = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, id: plain.body.macro.id, ...MAC, label: 'R2' } });
+  expect(upd0.status).toBe(200);
+  expect(upd0.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
+
+  const created = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, surface: 'project-home', ...verified } });
   expect(created.status).toBe(200);
   expect(created.body.macro.surface).toBe('project-home');
-  expect(created.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
+  expect(created.body.macro.projects).toEqual(['*']);
   const id = created.body.macro.id;
-  const upd = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, id, ...MAC, surface: 'sessions' } });
+  const upd = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, id, ...MAC, label: 'Renamed', ...verified } });
   expect(upd.status).toBe(200);
-  expect(upd.body.macro.surface).toBe('sessions');
-  expect(upd.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
-  expect(getChangedCount()).toBe(2);
+  expect(upd.body.macro.surface).toBe('project-home');
+  expect(upd.body.macro.projects).toEqual(['*']);
+  expect(getChangedCount()).toBe(4);
+  humanLedger._resetForTests();
+});
+
+test('project-home create with a verified Project Home quote stores [*] and writes one audit event', async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const origin = 'sess-ph-ok';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const res = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, ...MAC, label: 'CPU audit', surface: 'project-home', humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin },
+  });
+  expect(res.status).toBe(200);
+  expect(res.body.macro.projects).toEqual(['*']);
+  const ev = saveEvents(res.body.macro.id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({
+    route: '/admin/macros/save', projects: ['*'], surface: 'project-home', created: true,
+    humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin,
+  });
+  expect(getChangedCount()).toBe(1);
+  humanLedger._resetForTests();
+});
+
+test('project-home create or switch is refused without a verified Project Home quote; no write, onChanged or audit', async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const origin = 'sess-ph-refuse';
+  humanLedger.recordHumanPrompt(origin, 'please keep the Review macro available for this project only');
+  const existing = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'SessionsOne' } });
+  expect(existing.status).toBe(200);
+  const id = existing.body.macro.id;
+  const before = getChangedCount();
+  const cases = [
+    {},
+    { humanRequestQuote: PH_QUOTE },
+    { humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin },
+    { humanRequestQuote: 'keep the Review macro available for this project only', originClaudeSessionId: origin },
+  ];
+  for (const extra of cases) {
+    for (const idPart of [{}, { id }]) {
+      const res = await adminHttp.call('POST', '/admin/macros/save', {
+        body: { cwd, ...MAC, label: 'PhRefused', surface: 'project-home', ...idPart, ...extra },
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+      expect(res.body.error).toContain('Project Home ▸ Tools ▸ Add a tool');
+    }
+  }
+  expect(getChangedCount()).toBe(before);
+  expect(saveEvents(id)).toHaveLength(1);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  const labels = list.body.macros.map((m) => m.label);
+  expect(labels).not.toContain('PhRefused');
+  expect(list.body.macros.find((m) => m.id === id)).toMatchObject({ surface: 'sessions', projects: [fs.realpathSync(cwd)] });
+  humanLedger._resetForTests();
+});
+
+test("sessions '*' create needs an every-project quote; a Project Home quote is refused", async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const origin = 'sess-sessions-star';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const res = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, ...MAC, label: 'SessStar', projects: ['*'], humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin },
+  });
+  expect(res.status).toBe(400);
+  expect(res.body.error).toContain('Show in every project');
+  const noQuote = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'SessPlain' } });
+  expect(noQuote.status).toBe(200);
+  expect(noQuote.body.macro.projects).toEqual([fs.realpathSync(cwd)]);
+  expect(getChangedCount()).toBe(1);
+  humanLedger._resetForTests();
 });
 
 test('projects other than exactly ["*"] is refused with 400', async () => {

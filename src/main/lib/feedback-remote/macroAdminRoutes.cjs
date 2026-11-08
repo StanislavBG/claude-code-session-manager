@@ -14,7 +14,10 @@
  * cwd resolution matches projectHomeAdminRoutes.cjs's resolveCwd exactly
  * (reused, not copied). `surface` ('sessions' | 'project-home') is accepted on
  * create and update; a create defaults it to 'sessions' and `projects` to
- * [resolvedCwd]. `projects` is accepted ONLY as exactly ["*"] (show in every
+ * [resolvedCwd]. A Project Home tool is part of Session Manager and shown in
+ * every project's Project Home, so any save whose resulting surface is
+ * 'project-home' stores projects ["*"]; only what it generates is per project.
+ * `projects` is accepted ONLY as exactly ["*"] (show in every
  * project); anything else is a 400. An update without `projects` leaves them
  * unchanged. An update is refused (400) if the macro is not visible to the
  * resolved cwd (macroLibrary.macroVisibleIn, so '*' macros are reachable), if
@@ -24,7 +27,7 @@
  * A save whose existing or resulting macro is shown in every project needs a
  * VERIFIED human request: body.humanRequestQuote must appear in a prompt the
  * human typed into body.originClaudeSessionId (humanPromptLedger) AND name
- * every/all projects. Otherwise 400, no write, no onChanged, no audit.
+ * every/all projects (or, for a 'project-home' macro, Project Home). Otherwise 400, no write, no onChanged, no audit.
  *
  * Every successful save appends one `admin_macro_save` audit event and calls
  * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
@@ -47,23 +50,36 @@ function quoteNamesEveryProject(quote) {
   return EVERY_PROJECT_RE.test(q) || /(^|[^a-z0-9])everywhere($|[^a-z0-9])/.test(q);
 }
 
-const HUMAN_HINT = "the human can set 'Show in every project' in the macro editor";
+const PROJECT_HOME_RE = /(^|[^a-z0-9])project\s*home($|[^a-z0-9])/;
 
-/** Fail-closed check that a human asked for an all-projects macro. */
-function verifyAllProjectsRequest(body) {
+/** True when the quote names Project Home (project home / project-home / project_home). */
+function quoteNamesProjectHome(quote) {
+  if (typeof quote !== 'string') return false;
+  const q = quote.toLowerCase().replace(/[-_]/g, ' ');
+  return PROJECT_HOME_RE.test(q);
+}
+
+const HUMAN_HINT = "the human can set 'Show in every project' in the macro editor";
+const PROJECT_HOME_HINT =
+  "a Project Home tool is shown in every project's Project Home, so it needs humanRequestQuote (the human's words asking for a Project Home tool); the human can add one from Project Home ▸ Tools ▸ Add a tool";
+
+/** Fail-closed check that a human asked for an all-projects macro (or a Project Home tool). */
+function verifyAllProjectsRequest(body, { projectHome = false } = {}) {
+  const hint = projectHome ? PROJECT_HOME_HINT : HUMAN_HINT;
   const quote = body.humanRequestQuote;
   if (typeof quote !== 'string' || !quote.trim()) {
-    return { ok: false, reason: `a macro shown in every project needs humanRequestQuote (a verbatim human request); ${HUMAN_HINT}` };
+    return { ok: false, reason: `a macro shown in every project needs humanRequestQuote (a verbatim human request); ${hint}` };
   }
   const origin = body.originClaudeSessionId;
   if (typeof origin !== 'string' || origin.length < 1 || origin.length > 128) {
-    return { ok: false, reason: `a macro shown in every project needs originClaudeSessionId (1-128 chars); ${HUMAN_HINT}` };
+    return { ok: false, reason: `a macro shown in every project needs originClaudeSessionId (1-128 chars); ${hint}` };
   }
   if (!findHumanPromptContaining(origin, quote)) {
-    return { ok: false, reason: `humanRequestQuote was not found in a prompt the human typed in this session; ${HUMAN_HINT}` };
+    return { ok: false, reason: `humanRequestQuote was not found in a prompt the human typed in this session; ${hint}` };
   }
-  if (!quoteNamesEveryProject(quote)) {
-    return { ok: false, reason: `humanRequestQuote does not name every/all projects; ${HUMAN_HINT}` };
+  if (!quoteNamesEveryProject(quote) && !(projectHome && quoteNamesProjectHome(quote))) {
+    const named = projectHome ? 'Project Home or every/all projects' : 'every/all projects';
+    return { ok: false, reason: `humanRequestQuote does not name ${named}; ${hint}` };
   }
   return { ok: true, quote };
 }
@@ -153,10 +169,12 @@ function saveHandler(onChanged, libOpts) {
         return;
       }
     }
-    const allProjects = Boolean(existing?.projects.includes(macroLibrary.ALL_PROJECTS)) || wantsAll;
+    const resultSurface = input.surface ?? existing?.surface ?? 'sessions';
+    const projectHome = resultSurface === 'project-home';
+    const allProjects = Boolean(existing?.projects.includes(macroLibrary.ALL_PROJECTS)) || wantsAll || projectHome;
     let quote = null;
     if (allProjects) {
-      const v = verifyAllProjectsRequest(body);
+      const v = verifyAllProjectsRequest(body, { projectHome });
       if (!v.ok) {
         sendJson(res, 400, { ok: false, error: v.reason });
         return;
@@ -164,8 +182,12 @@ function saveHandler(onChanged, libOpts) {
       quote = v.quote;
     }
     if (!input.id) {
-      input = { ...input, projects: wantsAll ? [macroLibrary.ALL_PROJECTS] : [resolved.cwd], surface: input.surface ?? 'sessions' };
-    } else if (wantsAll) {
+      input = {
+        ...input,
+        projects: wantsAll || projectHome ? [macroLibrary.ALL_PROJECTS] : [resolved.cwd],
+        surface: input.surface ?? 'sessions',
+      };
+    } else if (wantsAll || projectHome) {
       input = { ...input, projects: [macroLibrary.ALL_PROJECTS] };
     }
     let macro;
@@ -238,4 +260,5 @@ function registerAdminRoute(adminHttp, { onChanged } = {}, opts = {}) {
 module.exports = {
   registerAdminRoute,
   quoteNamesEveryProject,
+  quoteNamesProjectHome,
 };

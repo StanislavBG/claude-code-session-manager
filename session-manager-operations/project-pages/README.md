@@ -143,6 +143,20 @@ No Tools macro has a `job` (`lib/persona-macro/macroLibrary.cjs` attaches `job` 
 built-ins that declare one), so each press mints a new Epic and opens it — the same act as New
 Session.
 
+Every Tools entry is shown in every project — a Project Home tool is part of Session Manager,
+and only what it generates is per project ([domain-model.md](../architecture/domain-model.md)).
+The pane's footnote (`project-home-tools-footnote`) says so:
+
+> Every Project Home tool shows up here in every project. What it generates stays with each project.
+
+The macro editor locks `Show in every project` on for a Project Home tool and shows the
+`macro-everywhere-note` beneath it. Built-in tools:
+
+- `builtin-review-md-network` — agent `architect`, described above.
+- `builtin-cpu-audit` (`CPU audit & fixes`) — agent `architect`, inputs `Scope` and `Run
+  scenario`; opens an architect Epic that measures the project's CPU use, ranks the findings
+  and builds the fixes through `/develop`.
+
 Per-file notes: [`code-map.md`](../architecture/code-map.md).
 
 ## Library: Knowledge Pages + Videos

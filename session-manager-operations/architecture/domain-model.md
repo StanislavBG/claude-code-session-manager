@@ -112,6 +112,14 @@ scoping scheme.
   macro_list, macro_save and macro_delete. macro_delete acts only for the calling session's own project and only
   in a session a human is attached to: a macro's last project deletes it, and any other project only drops itself,
   so one project never takes a button from another.
+- **A Project Home tool is app-level, not per project.** A macro with `surface: 'project-home'` (Project Home ▸
+  Tools, plus the Pages / Videos library built-ins) is part of Session Manager and shown in every project
+  (`projects: ['*']`); only what it generates — pages, videos, the matrix, the Epics it opens — is per project.
+  `macroLibrary.cjs` enforces it fail-closed: `widenProjectHomeScope` widens stored entries on load and `saveMacro`
+  forces `['*']` on write; `macroAdminRoutes.cjs` makes an agent's save need a verified human quote naming Project
+  Home (`quoteNamesProjectHome`). A tool every install should have ships as a built-in in `builtinMacros.cjs`
+  (`builtin-cpu-audit`). Incident, 2026-11-07: an agent's macro_save left "CPU audit & fixes" on
+  session-manager's Project Home only, missing from every other project.
 - **An Epic's title + objective are fixed for the life of its session, and are its first prompt.** The New Epic
   card composes both through `composeEpicIntake` and sends the objective at creation; nothing rewrites
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of

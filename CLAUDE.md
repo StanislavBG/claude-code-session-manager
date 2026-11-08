@@ -82,9 +82,9 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 - **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`crossProjectFeedback.cjs`,
   `feedback_open_session`, `send-feedback` skill); auto-approved only on a verified human quote or granted macro
   ([domain-model.md](session-manager-operations/architecture/domain-model.md)). Same-cwd rejected — `/develop`.
-- **A MACRO is a saved (agent, tag, prompt) hot key** — machine-local library (`macroLibrary.cjs`,
-  `~/.claude/session-manager/macros.json`), shown per project in the Sessions HOT KEYS strip. Pressing it is the
-  same act as New Session, through the same mint authority.
+- **A MACRO is a saved (agent, tag, prompt) hot key**, machine-local in `macroLibrary.cjs` (`macros.json`). Sessions
+  hot keys are per project; a **Project Home tool is in every project**, only its output is per project. A press is
+  New Session, through the same mint authority.
 - **Settings (System/Project/Local) is substrate, not per-Epic curation.** If a behavior should differ per
   Epic, it is a Tag, an Agent persona, or a future PRD — never a plain Settings edit. `model` + `effort` are
   carved out per-Epic (persona frontmatter wins over the Settings default).

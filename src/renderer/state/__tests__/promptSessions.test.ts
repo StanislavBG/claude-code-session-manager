@@ -1815,6 +1815,88 @@ describe('approveProposed persist failure keeps a started Epic active (PRD 2735)
   })
 })
 
+describe('awaitApprovePersisted', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function setup() {
+    const api = installWindowApiMock()
+    const mod = await import('../promptSessions')
+    const { toast } = await import('../toast')
+    const proposed = await mod.usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    api.promptSessions.mergeActiveIndex.mockClear()
+    const toastErrorSpy = vi.spyOn(toast, 'error')
+    return { api, usePromptSessions: mod.usePromptSessions, awaitApprovePersisted: mod.awaitApprovePersisted, proposed, toastErrorSpy }
+  }
+
+  it('does not resolve until mergeActiveIndex resolves, then resolves', async () => {
+    const { api, usePromptSessions, awaitApprovePersisted, proposed } = await setup()
+    let resolveMerge!: (v: unknown) => void
+    api.promptSessions.mergeActiveIndex.mockReturnValueOnce(new Promise((resolve) => { resolveMerge = resolve }))
+    const approved = usePromptSessions.getState().approveProposed(proposed.id)
+    expect(approved?.status).toBe('active')
+    let settled = false
+    const p = awaitApprovePersisted(proposed.id).then(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(settled).toBe(false)
+    resolveMerge({ sessions: {}, events: {} })
+    await p
+    expect(settled).toBe(true)
+  })
+
+  it('resolves when the first attempt fails and the retry succeeds', async () => {
+    const { api, usePromptSessions, awaitApprovePersisted, proposed, toastErrorSpy } = await setup()
+    api.promptSessions.mergeActiveIndex
+      .mockRejectedValueOnce(new Error('stall'))
+      .mockResolvedValue({ sessions: {}, events: {} })
+    usePromptSessions.getState().approveProposed(proposed.id)
+    const p = awaitApprovePersisted(proposed.id)
+    await vi.advanceTimersByTimeAsync(5000)
+    await expect(p).resolves.toBeUndefined()
+    expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalledTimes(2)
+    expect(toastErrorSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects with the last failure message when all 3 attempts fail, then the entry is cleared', async () => {
+    const { api, usePromptSessions, awaitApprovePersisted, proposed, toastErrorSpy } = await setup()
+    api.promptSessions.mergeActiveIndex
+      .mockRejectedValueOnce(new Error('first'))
+      .mockRejectedValueOnce(new Error('second'))
+      .mockRejectedValueOnce(new Error('third'))
+    usePromptSessions.getState().approveProposed(proposed.id)
+    const p = awaitApprovePersisted(proposed.id)
+    const assertion = expect(p).rejects.toThrow('third')
+    await vi.advanceTimersByTimeAsync(10000)
+    await assertion
+    expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalledTimes(3)
+    expect(toastErrorSpy).toHaveBeenCalledTimes(1)
+    // Settled entry removed: a later await does not replay the stale rejection.
+    await expect(awaitApprovePersisted(proposed.id)).resolves.toBeUndefined()
+  })
+
+  it('resolves (does not hang) when retries stop because the Epic is no longer active', async () => {
+    const { api, usePromptSessions, awaitApprovePersisted, proposed } = await setup()
+    api.promptSessions.mergeActiveIndex.mockRejectedValueOnce(new Error('stall'))
+    usePromptSessions.getState().approveProposed(proposed.id)
+    const p = awaitApprovePersisted(proposed.id)
+    await vi.advanceTimersByTimeAsync(10)
+    await usePromptSessions.getState().markCompleted(proposed.id)
+    await vi.advanceTimersByTimeAsync(10000)
+    await expect(p).resolves.toBeUndefined()
+  })
+
+  it('resolves immediately for an id with no pending approve persist', async () => {
+    const { awaitApprovePersisted } = await setup()
+    await expect(awaitApprovePersisted('epic-unknown')).resolves.toBeUndefined()
+  })
+})
+
 describe('approveProposed epic worktree creation (PRD 1033)', () => {
   beforeEach(() => {
     vi.resetModules()

@@ -583,6 +583,21 @@ function persistActiveIndex(
   return next
 }
 
+/** In-flight approve persists keyed by Epic id — one entry per approveProposed
+ *  call whose active-index.json write (incl. its retries) has not settled yet.
+ *  Entries delete themselves on settle so the map never grows. */
+const approvePersists = new Map<string, Promise<void>>()
+
+/** Resolves once approveProposed's persist of this Epic has landed on disk
+ *  (any attempt succeeded, or retries stopped because the Epic is no longer
+ *  'active'); rejects with the last error when every attempt failed. Resolves
+ *  immediately when no approve persist is pending for the id. Lets a caller
+ *  that hands off to main (e.g. macros:dispatch-job, which reads
+ *  active-index.json from disk) wait until main can see the approval. */
+export function awaitApprovePersisted(epicId: string): Promise<void> {
+  return approvePersists.get(epicId) ?? Promise.resolve()
+}
+
 export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   sessions: {},
   events: {},
@@ -637,21 +652,32 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // prompt). Retries stop silently if the Epic is no longer 'active'.
     const { title } = splitTitleAndGoal(session.goalText)
     const retryDelaysMs = [1000, 3000]
-    const attemptPersist = (attempt: number, nextSessions: Parameters<typeof persistActiveIndex>[1], nextEvents: Parameters<typeof persistActiveIndex>[2]): void => {
-      persistActiveIndex(session.cwd, nextSessions, nextEvents, [], [promptSessionId]).catch((err: unknown) => {
-        if (attempt >= retryDelaysMs.length) {
-          const msg = err instanceof Error ? err.message : String(err)
-          toast.error(`"${title}" is running but its approval was not saved: ${msg}`)
-          return
-        }
-        setTimeout(() => {
-          const current = get().sessions[promptSessionId]
-          if (!current || current.status !== 'active') return
-          attemptPersist(attempt + 1, get().sessions, get().events)
-        }, retryDelaysMs[attempt])
+    // Settles once the attempt chain below does — exposed to callers via
+    // awaitApprovePersisted(promptSessionId).
+    const persisted = new Promise<void>((resolve, reject) => {
+      const attemptPersist = (attempt: number, nextSessions: Parameters<typeof persistActiveIndex>[1], nextEvents: Parameters<typeof persistActiveIndex>[2]): void => {
+        persistActiveIndex(session.cwd, nextSessions, nextEvents, [], [promptSessionId]).then(resolve, (err: unknown) => {
+          if (attempt >= retryDelaysMs.length) {
+            const msg = err instanceof Error ? err.message : String(err)
+            toast.error(`"${title}" is running but its approval was not saved: ${msg}`)
+            reject(err instanceof Error ? err : new Error(msg))
+            return
+          }
+          setTimeout(() => {
+            const current = get().sessions[promptSessionId]
+            if (!current || current.status !== 'active') { resolve(); return }
+            attemptPersist(attempt + 1, get().sessions, get().events)
+          }, retryDelaysMs[attempt])
+        })
+      }
+      attemptPersist(0, sessions, get().events)
+    })
+    approvePersists.set(promptSessionId, persisted)
+    persisted
+      .catch(() => {})
+      .finally(() => {
+        if (approvePersists.get(promptSessionId) === persisted) approvePersists.delete(promptSessionId)
       })
-    }
-    attemptPersist(0, sessions, get().events)
     emitAuditEvent('epic_approve', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
     // Fire-and-forget: creates this Epic's isolated git worktree (main-side
     // gitWorktree.cjs's createEpicWorktree, PRD 1033) so its Terminal/Chat

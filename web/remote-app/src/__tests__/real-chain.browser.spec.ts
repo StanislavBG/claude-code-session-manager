@@ -155,7 +155,8 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
     const fn = async () => { calls.push({ channel, at: Date.now() }); return value; };
     if (kind === 'send') fakeIpc.on(channel, fn); else fakeIpc.handle(channel, fn);
   };
-  // Temp project (git-free) holding a real active-index.json: one proposed + one active Epic.
+  // Temp project (git-free) holding a real active-index.json: a plain proposed draft (opens in the
+  // NewEpicCard draft editor), an inbound cross-project proposal (opens on EpicApprovalBar) and an active Epic.
   const projectCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-real-chain-proj-')));
   const psDir = path.join(projectCwd, 'session-manager-operations', 'prompt-sessions');
   fs.mkdirSync(psDir, { recursive: true });
@@ -163,12 +164,19 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
     id, cwd: projectCwd, goalText: title, claudeSessionId: `claude-${id}`, status,
     createdAt: new Date(1_700_000_000_000).toISOString(), completedAt: null, tag: 'feature',
   });
+  // inboundFeedbackOrigin (src/renderer/lib/epicOrigin.ts) is non-null for exactly this source shape;
+  // no autoApprove stamp, so nothing approves it before the test does.
+  const inbound = {
+    ...mkEpic('epic-inbound', 'Chain Inbound Proposal', 'proposed'),
+    source: { producer: 'cross-project-feedback', fromCwd: path.join(path.dirname(projectCwd), 'sm-real-chain-sender') },
+  };
   fs.writeFileSync(path.join(psDir, 'active-index.json'), JSON.stringify({
     sessions: {
       'epic-proposed': mkEpic('epic-proposed', 'Chain Proposed Epic', 'proposed'),
+      'epic-inbound': inbound,
       'epic-active': mkEpic('epic-active', 'Chain Active Epic', 'active'),
     },
-    events: { 'epic-proposed': [], 'epic-active': [] },
+    events: { 'epic-proposed': [], 'epic-inbound': [], 'epic-active': [] },
     tombstones: {},
   }));
   // Registered-project source of the real handlers (promptSessionsIpc defaultProjectRoots): the persisted tabs store.
@@ -371,25 +379,57 @@ describe('real chain: dist-web -> RemoteRenderer -> ws.ts -> relay -> webRemote.
           if (await nav.isVisible().catch(() => false)) opened = await nav.click({ timeout: 2_000 }).then(() => true, () => false);
         }
       }
-      if (await row('Chain Proposed Epic').isVisible().catch(() => false) && await row('Chain Active Epic').isVisible().catch(() => false)) break;
+      const seeded = ['Chain Proposed Epic', 'Chain Inbound Proposal', 'Chain Active Epic'];
+      if ((await Promise.all(seeded.map((t) => row(t).isVisible().catch(() => false)))).every(Boolean)) break;
       await new Promise((r) => setTimeout(r, 250));
     }
     return { frame, row, frameErrors };
   }
   const indexPath = (h: Harness) => path.join(h.projectCwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
-  const readIndex = (h: Harness) => JSON.parse(fs.readFileSync(indexPath(h), 'utf8')) as { sessions: Record<string, { status: string }> };
+  const readIndex = (h: Harness) => JSON.parse(fs.readFileSync(indexPath(h), 'utf8')) as { sessions: Record<string, { status: string; goalText?: string }> };
 
   it('approve on the proposed Epic round-trips to active-index.json', async () => {
     const h = await start({ control: true });
     try {
       const { frame, row, frameErrors } = await openSessions(h);
-      await row('Chain Proposed Epic').click({ timeout: 10_000 });
+      // EpicApprovalBar (epic-approve) is for inbound proposals only; a plain draft opens in NewEpicCard.
+      await row('Chain Inbound Proposal').click({ timeout: 10_000 });
       await frame.getByTestId('epic-approve').click({ timeout: 15_000 });
       const active = await waitFor(() => {
-        try { return readIndex(h).sessions['epic-proposed']?.status === 'active'; } catch { return false; }
+        try { return readIndex(h).sessions['epic-inbound']?.status === 'active'; } catch { return false; }
       }, 15_000);
       expect(active, await diag(h)).toBe(true);
+      expect(readIndex(h).sessions['epic-proposed'].status).toBe('proposed');
       expect(readIndex(h).sessions['epic-active'].status).toBe('active');
+      expect(h.calls.some((c) => c.channel === 'promptSessions:merge-active-index'), await diag(h)).toBe(true);
+      expect(frameErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
+  it('Start Session on a plain proposed draft round-trips to active-index.json', async () => {
+    const h = await start({ control: true });
+    try {
+      const { frame, row, frameErrors } = await openSessions(h);
+      await row('Chain Proposed Epic').click({ timeout: 10_000 });
+      // A human-saved draft reopens in the NewEpicCard editor, prefilled from the Epic.
+      await frame.getByTestId('new-epic-card').waitFor({ state: 'visible', timeout: 15_000 });
+      expect(await frame.getByTestId('new-epic-title').inputValue({ timeout: 5_000 })).toBe('Chain Proposed Epic');
+      // The seeded draft is title-only and Start needs an objective, so type one as a user would.
+      const goal = 'Start this draft from the browser.';
+      await frame.getByTestId('new-epic-goal').fill(goal, { timeout: 5_000 });
+      await frame.getByTestId('new-epic-create').click({ timeout: 15_000 });
+      const active = await waitFor(() => {
+        try { return readIndex(h).sessions['epic-proposed']?.status === 'active'; } catch { return false; }
+      }, 20_000);
+      expect(active, `${await diag(h)}\nerrors: ${frameErrors.join(' | ')}`).toBe(true);
+      // The started Epic replaces the editor; let it render before the error check.
+      await frame.getByTestId('new-epic-card').waitFor({ state: 'detached', timeout: 15_000 });
+      const index = readIndex(h);
+      expect(index.sessions['epic-proposed'].goalText).toContain(goal);
+      expect(index.sessions['epic-inbound'].status).toBe('proposed');
+      expect(index.sessions['epic-active'].status).toBe('active');
       expect(h.calls.some((c) => c.channel === 'promptSessions:merge-active-index'), await diag(h)).toBe(true);
       expect(frameErrors).toEqual([]);
     } finally {
@@ -423,10 +463,12 @@ errors: ${frameErrors.join(' | ')}`).toBe(true);
     try {
       const { frame, row } = await openSessions(h);
       const before = fs.readFileSync(indexPath(h));
-      await row('Chain Proposed Epic').click({ timeout: 10_000 });
+      await row('Chain Inbound Proposal').click({ timeout: 10_000 });
       await frame.getByTestId('epic-approve').click({ timeout: 15_000 });
-      await frame.getByTestId('toast').first().waitFor({ state: 'visible', timeout: 15_000 });
-      expect(await frame.getByTestId('toast').first().innerText()).toMatch(/Could not start/);
+      // approveProposed retries the refused persist (~1 s, then ~3 s) before its one toast (b098fd12).
+      const refusal = frame.getByTestId('toast').filter({ hasText: 'approval was not saved' }).first();
+      await refusal.waitFor({ state: 'visible', timeout: 20_000 });
+      expect(await refusal.innerText()).toMatch(/"Chain Inbound Proposal" is running but its approval was not saved/);
       expect(Buffer.compare(fs.readFileSync(indexPath(h)), before)).toBe(0);
       expect(h.calls.some((c) => c.channel === 'promptSessions:merge-active-index')).toBe(false);
     } finally {

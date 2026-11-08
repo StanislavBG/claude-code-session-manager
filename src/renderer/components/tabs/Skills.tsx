@@ -1,8 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
-import { MarkdownEditor } from '../ui/MarkdownEditor'
-import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { Toggle } from '../ui/Toggle'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
@@ -15,6 +13,7 @@ import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
+import { SkillDetail } from './extensions/SkillDetail'
 import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
 
 const WATCH_DEBOUNCE_MS = 250
@@ -327,6 +326,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   }
 
   const file = selectedPath ? files[selectedPath] : null
+  const selectedItem = selectedPath ? items.find((i) => i.path === selectedPath) ?? null : null
 
   // Filter on name or description, case-insensitive; a leading "/" is how a
   // name is shown, so "/deploy" finds the deploy command too.
@@ -491,27 +491,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
         primary={{ label: '+ New', testId: 'skills-new', items: newMenu }}
       />
       <div className="flex-1 min-h-0">
-        <Panel
-          footer={
-            selectedPath && file ? (
-              <SaveBar
-                dirty={file.dirty}
-                busy={file.busy}
-                parseError={saveError}
-                lastSavedAt={file.lastSavedAt}
-                onSave={async () => {
-                  setSaveError(null)
-                  const r = await saveText(selectedPath)
-                  if (!r.ok) setSaveError(r.error ?? 'save failed')
-                }}
-                onRevert={() => {
-                  setSaveError(null)
-                  revert(selectedPath)
-                }}
-              />
-            ) : null
-          }
-        >
+        <Panel>
           <ListDetail
             sidebarWidth="300px"
             sidebar={
@@ -523,17 +503,29 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
               </div>
             }
             detail={
-              selectedPath && file ? (
-                <div className="h-full">
-                  <MarkdownEditor
-                    path={selectedPath}
-                    value={file.draftRaw}
-                    onChange={(v) => {
-                      setSaveError(null)
-                      setDraft(selectedPath, v)
-                    }}
-                  />
-                </div>
+              selectedItem && file ? (
+                <SkillDetail
+                  item={selectedItem}
+                  home={home}
+                  draft={file.draftRaw}
+                  dirty={file.dirty}
+                  busy={file.busy}
+                  lastSavedAt={file.lastSavedAt}
+                  saveError={saveError}
+                  onDraftChange={(v) => {
+                    setSaveError(null)
+                    setDraft(selectedItem.path, v)
+                  }}
+                  onSave={async () => {
+                    setSaveError(null)
+                    const r = await saveText(selectedItem.path)
+                    if (!r.ok) setSaveError(r.error ?? 'save failed')
+                  }}
+                  onRevert={() => {
+                    setSaveError(null)
+                    revert(selectedItem.path)
+                  }}
+                />
               ) : items.length === 0 && loadErrors.length > 0 ? (
                 <div data-testid="skills-list-error">
                   <EmptyState

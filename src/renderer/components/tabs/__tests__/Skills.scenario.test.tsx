@@ -12,7 +12,13 @@ import { toast } from '../../../state/toast'
 /** Scenario tests for the Skills page: the 3a list column and its write paths (toggle, remove). */
 
 vi.mock('../../ui/MarkdownEditor', () => ({
-  MarkdownEditor: () => createElement('div', { 'data-testid': 'markdown-editor' }),
+  MarkdownEditor: (p: { value: string; theme?: string; onChange?: (v: string) => void }) =>
+    createElement('textarea', {
+      'data-testid': 'markdown-editor',
+      'data-theme': p.theme ?? 'dark',
+      value: p.value,
+      onChange: (e: { target: { value: string } }) => p.onChange?.(e.target.value),
+    }),
 }))
 
 const HOME = '/home/bilko'
@@ -472,5 +478,71 @@ describe('Skills list', () => {
     expect(q(cardFor(el, 'skill-one')!, 'skills-item-desc')!.textContent).toBe('skill-one desc')
     expect(cardFor(el, 'skill-two')).toBeTruthy()
     expect(q(cardFor(el, 'skill-two')!, 'skills-item-desc')).toBeNull()
+  })
+})
+
+describe('Skills detail (3a)', () => {
+  const setValue = async (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+    const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
+    await act(async () => {
+      setter.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await flush()
+    })
+  }
+
+  it('shows the mono name, kind + scope badges, the file row and the clean label', async () => {
+    installApi()
+    const el = await mount()
+    const detail = q(el, 'skill-detail')!
+    expect(q(detail, 'skill-detail-name')?.textContent).toBe('/skill-one')
+    expect(classes(q(detail, 'skill-detail-name'))).toEqual(expect.arrayContaining(['font-mono', 'text-[18px]', 'font-semibold']))
+    expect(q(detail, 'skill-detail-kind')?.textContent).toBe('SKILL')
+    expect(q(detail, 'skill-detail-scope')?.textContent).toBe('USER')
+    expect(q(detail, 'skill-detail-path')?.textContent).toBe('~/.claude/skills/skill-one/SKILL.md')
+    expect(q(detail, 'savebar-clean')?.textContent).toBe('Saved — matches the file on disk')
+    expect(buttonByText(detail, 'SaveCtrl S')).toBeDefined()
+  })
+
+  it('Reveal in File Explorer opens the File Explorer on the file', async () => {
+    installApi()
+    const el = await mount()
+    const openPanel = vi.fn()
+    useLayout.setState({ openPanel } as never)
+    await click(q(el, 'skill-detail-reveal')!)
+    expect(openPanel).toHaveBeenCalledWith('projects', `reveal:${ONE}`)
+  })
+
+  it('edits only the body in a paper editor, and saves the description edit keeping the rest byte-for-byte', async () => {
+    const { disk } = installApi()
+    const el = await mount()
+    const editor = q(el, 'markdown-editor') as HTMLTextAreaElement
+    expect(editor.getAttribute('data-theme')).toBe('paper')
+    expect(editor.value).toBe('\nbody')
+    const desc = q(el, 'skill-detail-description') as HTMLInputElement
+    expect(desc.value).toBe('skill-one desc')
+    await setValue(desc, 'Does: things')
+    await setValue(q(el, 'markdown-editor') as HTMLTextAreaElement, '\nnew body')
+    expect(q(el, 'savebar-clean')).toBeNull()
+    await click(buttonByText(q(el, 'skill-detail')!, 'SaveCtrl S')!)
+    expect(disk[ONE]).toBe(['---', 'name: skill-one', 'description: "Does: things"', '---', '', 'new body'].join('\n'))
+    expect(q(el, 'savebar-clean')?.textContent).toBe('Saved — matches the file on disk')
+  })
+
+  it('Preview renders the body as markdown with serif headings; Source brings the editor back', async () => {
+    const { disk } = installApi()
+    disk[ONE] = ['---', 'name: skill-one', '---', '', '## Step 1', '', '```', 'code', '```'].join('\n')
+    const el = await mount()
+    await click(q(el, 'skill-view-preview')!)
+    expect(q(el, 'markdown-editor')).toBeNull()
+    const preview = q(el, 'skill-preview')!
+    expect(preview.querySelector('h2')?.textContent).toBe('Step 1')
+    expect(preview.querySelector('pre')?.textContent).toContain('code')
+    expect(preview.textContent).not.toContain('name: skill-one')
+    expect(q(el, 'skill-view-preview')?.getAttribute('aria-pressed')).toBe('true')
+    await click(q(el, 'skill-view-source')!)
+    expect(q(el, 'markdown-editor')).not.toBeNull()
+    expect(q(el, 'skill-preview')).toBeNull()
   })
 })

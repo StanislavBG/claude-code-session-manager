@@ -91,6 +91,22 @@ const BUILTIN_MACROS = Object.freeze([
     prompt:
       "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}.",
   }),
+  Object.freeze({
+    id: 'builtin-competitor-matrix',
+    label: 'Competitor matrix',
+    agentName: 'competitive-analyst',
+    tag: 'project-home-builder',
+    surface: 'project-home',
+    projects: ['*'],
+    builtinVersion: 1,
+    job: Object.freeze({
+      estimateMinutes: 90,
+      artifactPaths: Object.freeze(['session-manager-operations/project-pages/matrix/matrix.json']),
+    }),
+    priorPrompts: Object.freeze([]),
+    prompt:
+      "Build this project's competitor feature matrix: how this product compares to its top 4 competitors. The competitors are named on a 'Competitors:' line in the additional instructions — up to 4 semicolon-separated slots, each a product name or 'auto' (an 'auto' slot means pick the most popular remaining competitor in this product's category, with cited popularity evidence); with no Competitors line, reuse the saved matrix's competitors, or make 4 auto picks when there is no saved matrix. Warm-start first: call project_matrix_read and, when a matrix exists, keep its feature, group and competitor ids stable and research only what is new since its last run plus unknown cells. Then fan out Haiku competitive-researcher subagents, one per competitor plus one user-voice sweep, collecting official announcements, dev blogs, changelogs, docs and what users rave about or ask for, with a source URL for every claim. Compare their findings against this repository's real features (read from the README, docs, manifest, source tree and git log, each backed by a path) and merge everything into 6-12 logical feature groups; for every feature record a stable id, title, detailed description, support per product (yes/partial/no/unknown with evidence), user sentiment, priority, rationale, and a ready-to-run sessionGoal where this project lacks or only partly has it. Append a runs[] entry and save the whole matrix with one project_matrix_write call.",
+  }),
 ]);
 
 module.exports = { BUILTIN_MACROS };

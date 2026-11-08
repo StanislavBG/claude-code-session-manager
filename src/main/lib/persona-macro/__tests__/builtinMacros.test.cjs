@@ -227,3 +227,33 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   expect(seeded.inputs).toEqual(b.inputs);
   expect(out.macros.find((m) => m.id === 'review-md-network-d38ffd')).toBeUndefined();
 });
+
+test('builtin-competitor-matrix is a v1 project-home background job run by competitive-analyst', () => {
+  expect(BUILTIN_MACROS.map((m) => m.id)).toEqual([
+    'builtin-project-home', 'builtin-demo-video', 'builtin-review-md-network', 'builtin-competitor-matrix',
+  ]);
+  const c = BUILTIN_MACROS.find((m) => m.id === 'builtin-competitor-matrix');
+  expect(Object.isFrozen(c)).toBe(true);
+  const { prompt, ...rest } = c;
+  expect(rest).toEqual({
+    id: 'builtin-competitor-matrix', label: 'Competitor matrix', agentName: 'competitive-analyst',
+    tag: 'project-home-builder', surface: 'project-home', projects: ['*'], builtinVersion: 1, priorPrompts: [],
+    job: { estimateMinutes: 90, artifactPaths: ['session-manager-operations/project-pages/matrix/matrix.json'] },
+  });
+  expect('entryKind' in c.job).toBe(false);
+  expect('inputs' in c).toBe(false);
+  expect(Object.isFrozen(c.job)).toBe(true);
+  expect(Object.isFrozen(c.job.artifactPaths)).toBe(true);
+  expect(c.builtinVersion).toBe(c.priorPrompts.length + 1);
+  for (const t of [
+    "'Competitors:'", 'up to 4', 'semicolon-separated', "'auto'", 'saved matrix', '4 auto picks',
+    'project_matrix_read', 'competitive-researcher', 'Haiku', 'official announcements', 'dev blogs',
+    'changelogs', 'docs', 'rave about', 'ask for', "this repository's real features", 'groups',
+    'sessionGoal', 'one project_matrix_write call',
+  ]) expect(prompt).toContain(t);
+  expect(prompt).not.toContain('{{');
+
+  const { MacroSchema } = require('../macroLibrary.cjs');
+  const stamp = '2026-01-01T00:00:00.000Z';
+  expect(MacroSchema.safeParse({ ...c, builtin: true, createdAt: stamp, updatedAt: stamp }).success).toBe(true);
+});

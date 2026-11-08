@@ -145,3 +145,18 @@ test('errors: no job, empty epic, createPrd failure', async () => {
   const t = mk({ createPrd: async () => { throw new Error('bad'); } });
   expect((await dispatchMacroJob(base, t)).error).toContain('bad');
 });
+
+test('competitor matrix dispatches a single matrix.json artifact with the Competitors line and no Entry id', async () => {
+  const line = 'Competitors: Claude Desktop; OpenCode; auto; auto';
+  const d = mk();
+  const r = await dispatchMacroJob({ ...base, macroId: 'builtin-competitor-matrix', extraInstructions: line }, d);
+  expect(r.ok).toBe(true);
+  const i = d.createPrd.mock.calls[0][0];
+  const p = ['session-manager-operations/project-pages/matrix/matrix.json'];
+  expect(i).toMatchObject({ agentType: 'competitive-analyst', estimateMinutes: 90, macroId: 'builtin-competitor-matrix', deliverable: 'artifact' });
+  expect(i.artifactPaths).toEqual(p);
+  expect(i.files).toEqual(p);
+  expect(i.goal).toContain(line);
+  expect(i.goal).not.toContain('Entry id');
+  expect(i.gate[0]).toContain('/tmp/proj/session-manager-operations/project-pages/matrix/matrix.json');
+});

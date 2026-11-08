@@ -348,6 +348,8 @@ const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review medium
 2. SECURITY REVIEW — run \`/security-review\` and fix every finding, or explain
    why it is safe. If it is not available, check your diff yourself for
    injection, secrets, path traversal and unsafe input handling.
+   A review command may tell you its report must be your final reply. In this run it is not.
+   Carry its findings into your final report and go on to the next step.
 `;
 
 const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — skip it in this run. The plan's trailing validator job reviews code and security once, for the whole plan. Do NOT run /code-review or /security-review here.

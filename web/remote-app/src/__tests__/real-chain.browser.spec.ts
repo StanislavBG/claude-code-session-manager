@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { chromium, type Browser } from 'playwright-core';
 import { build } from 'esbuild';
-import { WebSocketServer, type WebSocket as WsSocket } from 'ws';
+import { WebSocketServer, type WebSocket as WsSocket, type RawData } from 'ws';
 import { createRequire } from 'node:module';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
@@ -219,11 +219,11 @@ async function start(opts: { rekeyAfterFirstResults?: boolean; control?: boolean
   };
   webRemote.__test.setWs({ readyState: 1, send: toBrowser, terminate: () => {} });
   let helloSeen = 0;
-  wss.on('connection', (sock) => {
+  wss.on('connection', (sock: WsSocket) => {
     const connId = `conn-${++n}`;
     conns.set(connId, sock);
     sock.send(JSON.stringify({ type: 'auth:ok', id: '', ts: Date.now() }));
-    sock.on('message', (data) => {
+    sock.on('message', (data: RawData) => {
       const env = JSON.parse(String(data));
       if (!relayAccepts(env)) { h.rejected.push(`browser ${env.type}`); return; }
       browserSent.push({ type: env.type, at: Date.now() });

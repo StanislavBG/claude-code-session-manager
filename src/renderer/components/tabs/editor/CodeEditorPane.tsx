@@ -18,6 +18,7 @@ import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useEditor, extOf } from '../../../state/editor'
 import { useEditorPrefs } from '../../../state/editorPrefs'
+import { definePaperTheme, PAPER_THEME } from '../../../lib/monacoPaperTheme'
 
 interface Props {
   path: string
@@ -46,28 +47,14 @@ const LANG: Record<string, string> = {
 }
 const PROSE = new Set(['md', 'mdx', 'markdown', 'txt', 'log'])
 
-// Custom Monaco themes matching the app's paper-warm / dark palettes. Defined
-// once on first mount (guarded) so toggling theme is just setTheme.
-let themesDefined = false
+// Custom Monaco themes matching the app's paper-warm / dark palettes. The paper
+// one is shared (lib/monacoPaperTheme); the dark one is this pane's own. Both
+// are defined once on first mount (guarded) so toggling theme is just setTheme.
+let darkThemeDefined = false
 function defineThemes(monaco: typeof import('monaco-editor')) {
-  if (themesDefined) return
-  themesDefined = true
-  monaco.editor.defineTheme('sm-paper', {
-    base: 'vs',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#f6efe1',
-      'editor.foreground': '#2a221a',
-      'editorLineNumber.foreground': '#b8a98a',
-      'editorLineNumber.activeForeground': '#7a6a4f',
-      'editor.lineHighlightBackground': '#efe6d3',
-      'editor.selectionBackground': '#e0d3b8',
-      'editorCursor.foreground': '#b85c34',
-      'editorIndentGuide.background1': '#e6dcc4',
-      'editor.findMatchHighlightBackground': '#e8d7a8',
-    },
-  })
+  definePaperTheme(monaco)
+  if (darkThemeDefined) return
+  darkThemeDefined = true
   monaco.editor.defineTheme('sm-dark', {
     base: 'vs-dark',
     inherit: true,
@@ -98,7 +85,7 @@ export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, o
     editorRef.current = ed
     monacoRef.current = monaco
     defineThemes(monaco)
-    monaco.editor.setTheme(theme === 'dark' ? 'sm-dark' : 'sm-paper')
+    monaco.editor.setTheme(theme === 'dark' ? 'sm-dark' : PAPER_THEME)
     ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current())
     onReady?.(ed)
     const emit = () => {
@@ -131,7 +118,7 @@ export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, o
 
   // Live-apply theme changes without remount.
   useEffect(() => {
-    monacoRef.current?.editor.setTheme(theme === 'dark' ? 'sm-dark' : 'sm-paper')
+    monacoRef.current?.editor.setTheme(theme === 'dark' ? 'sm-dark' : PAPER_THEME)
   }, [theme])
 
   // Release the editor ref to the parent on unmount.
@@ -144,7 +131,7 @@ export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, o
       value={value}
       onChange={(v) => onChange(v ?? '')}
       onMount={onMount}
-      theme={theme === 'dark' ? 'sm-dark' : 'sm-paper'}
+      theme={theme === 'dark' ? 'sm-dark' : PAPER_THEME}
       options={{
         readOnly: !!readOnly,
         minimap: { enabled: minimap },

@@ -1512,7 +1512,7 @@ async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
  * branch and has no working tree this path could trust to content-verify
  * against.
  */
-async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch, allowRefLanding = false }) {
+async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch, allowRefLanding = false, forkSha }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
 
   const expectedBranch = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
@@ -1569,7 +1569,14 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     if (refMergeBase && refMergeBase === refBranchHead) {
       return { ok: true, integrated: false, reason: 'branch has no new commits' };
     }
-    const refRuntimeAdds = await findRuntimeStateAdds({ cwd, branch, mergeBase: refMergeBase || expectedBranch });
+    const refRewrite = await resolveRewrittenFork(
+      cwd, forkSha, refBranchHead, await tryResolveCommit(cwd, `refs/heads/${expectedBranch}^{commit}`),
+    );
+    if (refRewrite.fork && refRewrite.fork === refBranchHead) {
+      return { ok: true, integrated: false, reason: 'branch has no new commits' };
+    }
+    const refScopeBase = refRewrite.baseRewritten ? refRewrite.fork : (refMergeBase || expectedBranch);
+    const refRuntimeAdds = await findRuntimeStateAdds({ cwd, branch, mergeBase: refScopeBase });
     if (refRuntimeAdds.length) {
       const refusal = await runtimeStateRefusal(cwd, refRuntimeAdds);
       return { ...refusal, baseHeadSha: await tryResolveCommit(cwd, `${expectedBranch}^{commit}`) };
@@ -1584,7 +1591,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     // paths still lands below, same as the in-checkout path.
     if (Array.isArray(carriedPaths) && carriedPaths.length) {
       try {
-        const changedOut = await execGit(['diff', `${refMergeBase || expectedBranch}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+        const changedOut = await execGit(['diff', `${refScopeBase}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
         const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
         if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
           return strayCheckoutFailure;
@@ -1595,7 +1602,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
       }
     }
     const refResult = await integrateOntoRef({
-      cwd, targetRef: `refs/heads/${expectedBranch}`, branch, message: mergeMessage,
+      cwd, targetRef: `refs/heads/${expectedBranch}`, branch, message: mergeMessage, forkSha,
     });
     if (refResult.ok) {
       // Spread refResult first so the landing's own shape passes through
@@ -1609,6 +1616,9 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     }
     if (refResult.failureKind === 'target_checked_out') {
       return strayCheckoutFailure;
+    }
+    if (refResult.baseRewritten) {
+      return refResult;
     }
     if (refResult.failureKind === 'content_conflict') {
       return {
@@ -1636,6 +1646,14 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
   if (mergeBase && mergeBase === branchHead) {
     return { ok: true, integrated: false, reason: 'branch has no new commits' };
   }
+  // Base rewritten under the job (rebase/reset): the fork commit is no longer
+  // in HEAD's history, so only commits after it are the job's own — they
+  // bound the replay and every "what did this branch change" diff below.
+  const { fork, baseRewritten } = await resolveRewrittenFork(cwd, forkSha, branchHead, await readHeadSha(cwd));
+  if (fork && fork === branchHead) {
+    return { ok: true, integrated: false, reason: 'branch has no new commits' };
+  }
+  const scopeBase = baseRewritten && fork ? fork : mergeBase;
 
   // Path membership alone is NOT enough: a job that legitimately edits the
   // SAME file the base tree had carried-in WIP on (e.g. this repo's own
@@ -1650,10 +1668,10 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     return { ok: true, integrated: false, reason: 'carried-wip-only' };
   }
 
-  const runtimeAdds = await findRuntimeStateAdds({ cwd, branch, mergeBase });
+  const runtimeAdds = await findRuntimeStateAdds({ cwd, branch, mergeBase: scopeBase });
   if (runtimeAdds.length) return runtimeStateRefusal(cwd, runtimeAdds);
 
-  const clobber = await findIgnoredLivePaths({ cwd, branch, mergeBase });
+  const clobber = await findIgnoredLivePaths({ cwd, branch, mergeBase: scopeBase });
   if (clobber.length) {
     return {
       ok: false,
@@ -1674,15 +1692,18 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     // only the documented fallback.
   }
   let linearFallback = '';
-  if (process.env.SM_LINEAR_LANDING_DISABLE === '1') {
+  if (process.env.SM_LINEAR_LANDING_DISABLE === '1' && !baseRewritten) {
     linearFallback = 'disabled';
   } else {
     const MAX_LINEAR_ATTEMPTS = 3;
     let landed = null;
     for (let attempt = 0; attempt < MAX_LINEAR_ATTEMPTS; attempt++) {
       const headSha = await readHeadSha(cwd);
-      const r = await replayBranchOnto({ cwd, ontoSha: headSha, branch: branchHead });
+      const r = await replayBranchOnto({ cwd, ontoSha: headSha, branch: branchHead, sinceSha: fork || undefined });
       if (!r.ok) {
+        if (baseRewritten && REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
+          return rewrittenBaseReplayFailure(r, headSha);
+        }
         if (REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
           linearFallback = r.failureKind;
           break;
@@ -1737,6 +1758,15 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     }
     if (landed) return landed;
     if (!linearFallback) linearFallback = 'ref_race';
+    if (baseRewritten) {
+      return {
+        ok: false,
+        failureKind: 'ref_race',
+        baseRewritten: true,
+        baseHeadSha: await readHeadSha(cwd),
+        reason: 'linear landing onto the rewritten base kept racing a moving HEAD; refusing a merge-commit fallback',
+      };
+    }
   }
   console.warn(`[gitWorktree] linear landing of ${branch} fell back to a merge commit (${linearFallback})`);
   const fb = { linearFallback };
@@ -2137,6 +2167,59 @@ async function resolveForkBound(cwd, sinceSha, tipSha) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolves the job's fork commit against the branch tip and the landing
+ * target: `fork` is `forkSha` resolved (null unless it is an ancestor of, or
+ * equal to, `branchSha`), and `baseRewritten` is true when that fork is NOT
+ * an ancestor of `targetSha` — the base was rebased/reset under the job, so
+ * only commits after the fork are the job's own. Never throws.
+ *
+ * @param {string} cwd
+ * @param {unknown} forkSha
+ * @param {string} branchSha
+ * @param {string|null} targetSha
+ * @returns {Promise<{fork: string|null, baseRewritten: boolean}>}
+ */
+async function resolveRewrittenFork(cwd, forkSha, branchSha, targetSha) {
+  const fork = await resolveForkBound(cwd, forkSha, branchSha);
+  if (!fork || !targetSha) return { fork, baseRewritten: false };
+  try {
+    await execGit(['merge-base', '--is-ancestor', fork, targetSha], { cwd, timeout: 10_000 });
+    return { fork, baseRewritten: false };
+  } catch (e) {
+    return { fork, baseRewritten: !!(e && e.code === 1) };
+  }
+}
+
+/**
+ * Terminal result for a replay that failed while the base was rewritten: the
+ * two-parent merge fallback would merge the pre-rewrite history back in, so
+ * nothing lands. A conflict names every path.
+ *
+ * @param {{failureKind?: string, reason?: string, conflictedPaths?: string[]}} r
+ * @param {string|null} baseHeadSha
+ */
+function rewrittenBaseReplayFailure(r, baseHeadSha) {
+  if (r.failureKind === 'content_conflict') {
+    const conflictedPaths = r.conflictedPaths || [];
+    return {
+      ok: false,
+      failureKind: 'content_conflict',
+      conflictedPaths,
+      baseRewritten: true,
+      baseHeadSha,
+      reason: `replay of the job's own commits onto the rewritten base conflicts on: ${conflictedPaths.join(', ')}`,
+    };
+  }
+  return {
+    ok: false,
+    failureKind: 'other',
+    baseRewritten: true,
+    baseHeadSha,
+    reason: `replay of the job's own commits onto the rewritten base failed (${r.failureKind}); refusing a merge-commit fallback: ${r.reason}`,
+  };
 }
 
 async function isBranchContentLanded({ cwd, base = 'HEAD', branch, sinceSha } = {}) {
@@ -2680,7 +2763,7 @@ async function replayBranchOnto({ cwd, ontoSha, branch, sinceSha }) {
  * merge-tree/commit-tree inputs). Every other return is terminal: a real
  * `{ ok: true/false, ... }`.
  */
-async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
+async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message, forkSha }) {
   const branchSha = await tryResolveCommit(cwd, `${branch}^{commit}`);
   if (!branchSha) return { ok: false, reason: `branch "${branch}" not found` };
 
@@ -2697,6 +2780,10 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
   }
 
   if (oldSha === branchSha) {
+    return { ok: true, integrated: false, reason: 'branch has no new commits' };
+  }
+  const { fork, baseRewritten } = await resolveRewrittenFork(cwd, forkSha, branchSha, oldSha);
+  if (fork && fork === branchSha) {
     return { ok: true, integrated: false, reason: 'branch has no new commits' };
   }
 
@@ -2750,10 +2837,10 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
   // replay so it rebuilds exactly the commits resolved above. A two-parent
   // merge is only the logged fallback for what a replay cannot do.
   let linearFallback = '';
-  if (process.env.SM_LINEAR_LANDING_DISABLE === '1') {
+  if (process.env.SM_LINEAR_LANDING_DISABLE === '1' && !baseRewritten) {
     linearFallback = 'disabled';
   } else {
-    const r = await replayBranchOnto({ cwd, ontoSha: oldSha, branch: branchSha });
+    const r = await replayBranchOnto({ cwd, ontoSha: oldSha, branch: branchSha, sinceSha: fork || undefined });
     if (r.ok) {
       const outcome = await updateRefOrClassify([targetRef, r.tipSha, oldSha]);
       if (outcome.retry) return { retry: true };
@@ -2762,6 +2849,9 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
         ok: true, integrated: true, linear: true, sha: r.tipSha, replayedCommits: r.replayed.length,
         ...(r.autoResolved ? { autoResolved: r.autoResolved, resolvedPaths: r.resolvedPaths } : {}),
       };
+    }
+    if (baseRewritten && REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
+      return rewrittenBaseReplayFailure(r, oldSha);
     }
     if (!REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
       return { ok: false, failureKind: 'other', reason: r.reason };
@@ -2940,7 +3030,7 @@ async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
  * caller landed first) retries the WHOLE computation, up to 3 attempts total,
  * before giving up with `failureKind: 'ref_race'`.
  */
-async function integrateOntoRef({ cwd, targetRef, branch, message }) {
+async function integrateOntoRef({ cwd, targetRef, branch, message, forkSha }) {
   if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
   if (!targetRef || typeof targetRef !== 'string') return { ok: false, reason: 'no targetRef provided' };
   if (!branch || typeof branch !== 'string') return { ok: false, reason: 'no branch provided' };
@@ -2960,7 +3050,7 @@ async function integrateOntoRef({ cwd, targetRef, branch, message }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const guard = await checkTargetRefNotCheckedOut({ cwd, targetRef: normalizedTargetRef });
     if (!guard.ok) return guard;
-    const result = await attemptIntegrateOntoRef({ cwd, targetRef: normalizedTargetRef, branch, message: mergeMessage });
+    const result = await attemptIntegrateOntoRef({ cwd, targetRef: normalizedTargetRef, branch, message: mergeMessage, forkSha });
     if (!result.retry) return result;
   }
   return { ok: false, failureKind: 'ref_race' };
@@ -3036,8 +3126,8 @@ async function ensureLandBranch({ cwd, epicId, baseBranch }) {
 async function createJobWorktree({ cwd, slug, fromRef }) {
   return createWorktree({ kind: 'job', cwd, key: slug, fromRef });
 }
-async function integrateJobBranch({ cwd, branch, slug, carriedPaths, baseBranch, allowRefLanding }) {
-  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths, baseBranch, allowRefLanding });
+async function integrateJobBranch({ cwd, branch, slug, carriedPaths, baseBranch, allowRefLanding, forkSha }) {
+  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths, baseBranch, allowRefLanding, forkSha });
 }
 async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'job', cwd, dir, branch, keepBranch });
@@ -3052,8 +3142,8 @@ async function salvageJobDirtyDelta({ cwd, paths, outFile }) {
 async function createEpicWorktree({ cwd, epicId }) {
   return createWorktree({ kind: 'epic', cwd, key: epicId });
 }
-async function integrateEpicBranch({ cwd, branch, epicId, baseBranch }) {
-  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId, baseBranch });
+async function integrateEpicBranch({ cwd, branch, epicId, baseBranch, forkSha }) {
+  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId, baseBranch, forkSha });
 }
 async function cleanupEpicWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'epic', cwd, dir, branch, keepBranch });

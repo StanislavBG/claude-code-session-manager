@@ -20,11 +20,15 @@ import { missionTagsForAgent } from '../../lib/missionTags'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, resolveContextInjections, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
-import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
+import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult, RestorableSession } from '../../../preload/api'
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
 import { draftFieldsFromEpic, hasDraftContent, isEditableDraft } from '../../lib/epicDraft'
+import { RestoreSessionPanel, restorableSessionLabel, restorableSessionMeta } from './RestoreSessionPanel'
 
 const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
+const GOAL_PLACEHOLDER = 'The objective, in a sentence or two — sent as the first instruction. ⌘V to attach a screenshot.'
+const RESTORE_GOAL_PLACEHOLDER = 'What should this session do next? Sent as the next message after its history.'
+const FRESH_DRAFT_RESTORE_NOTE = 'A saved draft keeps its own session. To continue an earlier Claude Code session, start a new session instead.'
 
 // The readiness checks Session Manager can close itself, one press each. Keyed
 // by the check's fixAction; the two installers share one result shape and one
@@ -126,6 +130,8 @@ export function NewEpicCard({
   const { projects } = useKnownProjects()
   const tabs = useSessions((s) => s.tabs)
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
+  // Tab id = claude session id: a session already open as a tab is never offered for restore.
+  const openTabIds = useMemo(() => tabs.map((t) => t.id), [tabs])
 
   // One entry per real working directory. Previously this deduped over
   // `enriched[...]?.cwd ?? candidatePath(row.encoded)`, so every unresolvable
@@ -152,6 +158,8 @@ export function NewEpicCard({
   const [creating, setCreating] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [advanced, setAdvanced] = useState(false)
+  // The earlier CLI session this Epic continues (advanced face's Restore panel); null = a fresh session.
+  const [restoreSession, setRestoreSession] = useState<RestorableSession | null>(null)
   // Per-Epic runtime overrides ('' = use the agent's own). Re-seeded to '' whenever the agent changes.
   const [modelOverride, setModelOverride] = useState(seed?.model ?? '')
   const [effortOverride, setEffortOverride] = useState(seed?.effort ?? '')
@@ -263,6 +271,21 @@ export function NewEpicCard({
   const canSaveDraft = Boolean(effectiveCwd) && hasDraftContent({ title, goal, referenceCount: savedRefs.length + att.items.length })
   effectiveCwdRef.current = effectiveCwd
 
+  // A pick is only good for the project it was listed in, and never once that
+  // session is open as a tab (two writers on one transcript): drop it when either stops holding.
+  const restoreCwdRef = useRef(effectiveCwd)
+  useEffect(() => {
+    const cwdMoved = restoreCwdRef.current !== effectiveCwd
+    restoreCwdRef.current = effectiveCwd
+    if (restoreSession && (cwdMoved || openTabIds.includes(restoreSession.sessionId))) setRestoreSession(null)
+  }, [effectiveCwd, openTabIds, restoreSession])
+
+  // A pick fills an EMPTY title with the session's own name; a typed title is never touched.
+  const pickRestoreSession = (s: RestorableSession | null) => {
+    setRestoreSession(s)
+    if (s) setTitle((t) => (t.trim() ? t : restorableSessionLabel(s).slice(0, 80).trimEnd()))
+  }
+
   // Read-only "what will this Agent actually run as" readout for the mono
   // line below the mission — null while loading or on IPC failure, in which
   // case the line below falls back to the pre-existing bare-alias text
@@ -360,6 +383,7 @@ export function NewEpicCard({
     setInjectionOverrides({})
     setDevelopLoopOverride(null)
     setSavedRefs([])
+    setRestoreSession(null)
     att.clear()
   }
 
@@ -398,7 +422,13 @@ export function NewEpicCard({
       inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt, readiness) : undefined,
       contextInjections: contextInjectionsOn,
     })
-    const runtime = { model: modelOverride || undefined, effort: effortOverride || undefined, ...(developLoop ? {} : { developLoop: false }) }
+    const runtime = {
+      model: modelOverride || undefined,
+      effort: effortOverride || undefined,
+      ...(developLoop ? {} : { developLoop: false }),
+      // Only a NEW Epic adopts an earlier session; a reopened draft keeps the one it was minted with.
+      ...(restoreSession && !editDraft ? { restoreSessionId: restoreSession.sessionId } : {}),
+    }
     return { ...intake, runtime }
   }
 
@@ -521,7 +551,7 @@ export function NewEpicCard({
   }
 
   // ---- Autosave: leaving the card never throws typed work away ----
-  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides])
+  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides, restoreSession?.sessionId ?? null])
   if (editDraft && lastSavedSigRef.current === null) lastSavedSigRef.current = sig
   const snap: AutosaveSnap = {
     cwd: effectiveCwd,
@@ -799,6 +829,33 @@ export function NewEpicCard({
             )}
             <div className="mb-2.5" />
 
+            {restoreSession && (
+              <div
+                data-testid="new-epic-restore-chip"
+                className="mb-2 flex items-center gap-2 rounded-[10px] border border-accent-muted bg-bg px-[13px] py-2"
+              >
+                <span className="shrink-0 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-accent">
+                  Restoring
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-fg" title={restoreSession.sessionId}>
+                  {restorableSessionLabel(restoreSession)}
+                </span>
+                <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
+                  {restorableSessionMeta(restoreSession, Date.now())}
+                </span>
+                <button
+                  type="button"
+                  data-testid="new-epic-restore-clear"
+                  aria-label="Start a fresh session instead"
+                  title="Start a fresh session instead"
+                  onClick={() => setRestoreSession(null)}
+                  className="shrink-0 text-fg-faint hover:text-fg"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
             <input
               data-testid="new-epic-title"
               type="text"
@@ -814,7 +871,7 @@ export function NewEpicCard({
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               onPaste={(e) => attachPastedFiles(e, att)}
-              placeholder="The objective, in a sentence or two — sent as the first instruction. ⌘V to attach a screenshot."
+              placeholder={restoreSession ? RESTORE_GOAL_PLACEHOLDER : GOAL_PLACEHOLDER}
               className="mb-3 w-full resize-y appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-[13px] leading-[1.55] text-fg outline-none"
             />
 
@@ -989,6 +1046,20 @@ export function NewEpicCard({
                 onEffort={setEffortOverride}
               />
             </div>
+
+            {/* Restore a session — mounted (and so listed) only while this face
+                is open. An edited draft keeps the session it was minted with,
+                so there it only says which one that is. */}
+            {advanced && effectiveCwd ? (
+              <RestoreSessionPanel
+                cwd={effectiveCwd}
+                excludeIds={openTabIds}
+                selectedId={editDraft ? (editDraft.restoredSession ? editDraft.claudeSessionId : null) : restoreSession?.sessionId ?? null}
+                onSelect={pickRestoreSession}
+                readOnly={Boolean(editDraft)}
+                readOnlyNote={editDraft && !editDraft.restoredSession ? FRESH_DRAFT_RESTORE_NOTE : undefined}
+              />
+            ) : null}
 
             {/* Context Injections — Session-Manager-authored text, independent
                 of Actor/Input/Mission and independently toggleable (unlike the

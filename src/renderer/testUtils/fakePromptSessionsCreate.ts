@@ -17,7 +17,9 @@ function slugifyForTest(text: string): string {
 
 /** Shared window.api.promptSessions.create mock for every test that mints an
  *  Epic through createPromptSession (PRD 954/the async conversion) — returns
- *  a schema-shaped { epicId, session } response without a real main process. */
+ *  a schema-shaped { epicId, session } response without a real main process.
+ *  A `restoreSessionId` is adopted as the claudeSessionId and flagged
+ *  `restoredSession`, as main's ensureEpic does for a restored CLI session. */
 export function fakePromptSessionsCreate() {
   return vi.fn(
     async ({
@@ -29,6 +31,7 @@ export function fakePromptSessionsCreate() {
       effort,
       openingPrompt,
       sections,
+      restoreSessionId,
     }: {
       cwd: string
       goalText: string
@@ -38,6 +41,7 @@ export function fakePromptSessionsCreate() {
       effort?: string
       openingPrompt?: string
       sections?: EpicIntakeSection[]
+      restoreSessionId?: string
     }) => {
       const epicId = `${slugifyForTest(goalText)}-${crypto.randomUUID().slice(0, 8)}`
       const now = new Date().toISOString()
@@ -45,7 +49,7 @@ export function fakePromptSessionsCreate() {
         id: epicId,
         cwd,
         goalText,
-        claudeSessionId: crypto.randomUUID(),
+        claudeSessionId: restoreSessionId ?? crypto.randomUUID(),
         status: 'proposed',
         createdAt: now,
         completedAt: null,
@@ -55,6 +59,7 @@ export function fakePromptSessionsCreate() {
         ...(effort ? { effort } : {}),
         ...(openingPrompt ? { openingPrompt } : {}),
         ...(sections && sections.length ? { sections } : {}),
+        ...(restoreSessionId ? { restoredSession: true as const } : {}),
       }
       return { epicId, session }
     },

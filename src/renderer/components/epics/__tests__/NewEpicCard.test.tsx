@@ -10,12 +10,43 @@ import { useToast } from '../../../state/toast'
 import { useConfig } from '../../../state/config'
 import { agentTagDef } from '../../../lib/agentTagDefs'
 import { CONTEXT_INJECTIONS } from '../../../lib/contextInjections'
-import type { AgentPersona } from '../../../../preload/api'
+import type { AgentPersona, PromptSessionsListRestorableResult, RestorableSession } from '../../../../preload/api'
 import type { MainModelHalf } from '../../../lib/effectiveModelInfo'
 import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const sendSpy = vi.fn()
+// Earlier Claude Code sessions of the project, as main's listRestorable answers (newest first).
+const RESTORABLE_FIXTURE: RestorableSession[] = [
+  {
+    sessionId: 'aaaaaaaa-0000-4000-8000-00000000000a',
+    title: 'Fix the login redirect',
+    firstPrompt: 'the login page loops back to itself',
+    lastPrompt: 'still looping',
+    gitBranch: 'main',
+    headless: false,
+    mtimeMs: Date.now() - 10 * 60_000,
+    sizeBytes: 4096,
+    recentlyActive: false,
+  },
+  {
+    sessionId: 'bbbbbbbb-0000-4000-8000-00000000000b',
+    title: null,
+    firstPrompt: 'Add a dark mode toggle to the settings page, persist the choice per user, and re-theme every chart when it flips',
+    lastPrompt: null,
+    gitBranch: null,
+    headless: false,
+    mtimeMs: Date.now() - 2 * 3_600_000,
+    sizeBytes: 2048,
+    recentlyActive: false,
+  },
+]
+const listRestorableSpy = vi.fn(async (_payload: { cwd: string }): Promise<PromptSessionsListRestorableResult> => ({
+  sessions: RESTORABLE_FIXTURE,
+  hiddenClaimed: 0,
+  scanned: RESTORABLE_FIXTURE.length,
+  truncated: false,
+}))
 const listPersonasSpy = vi.fn(async (): Promise<AgentPersona[]> => [])
 const getPersonaBodySpy = vi.fn(async (): Promise<{ path: string; text: string } | null> => null)
 const resolveModelInfoSpy = vi.fn(async (): Promise<MainModelHalf> => ({
@@ -75,6 +106,7 @@ beforeEach(() => {
   createPromptSessionSpy.mockClear()
   useChat.setState({ send: sendSpy })
   sendSpy.mockClear()
+  listRestorableSpy.mockClear()
   useSessions.setState({ tabs: [], activeTabId: null })
   listPersonasSpy.mockClear()
   listPersonasSpy.mockResolvedValue([])
@@ -110,7 +142,7 @@ beforeEach(() => {
       listDir: vi.fn().mockResolvedValue({ ok: true, entries: [], error: null }),
       exists: vi.fn().mockResolvedValue(false),
     },
-    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn(), listRestorable: listRestorableSpy },
   }
 })
 
@@ -1464,5 +1496,168 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
       await unmount()
       expect(useToast.getState().toasts.some((t) => t.kind === 'error' && /Keep me/.test(t.message) && /disk full/.test(t.message))).toBe(true)
     })
+  })
+})
+
+describe('NewEpicCard restore an earlier session', () => {
+  const [RESTORE, LONG_PROMPT] = RESTORABLE_FIXTURE
+  const ALPHA = '/home/bilko/Projects/alpha'
+  const approveSpy = vi.fn()
+  const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`)
+  const click = (el: HTMLElement, id: string) => act(() => { (q(el, id) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  const pick = (el: HTMLElement, sessionId: string) => act(() => { (q(el, `restore-session-option-${sessionId}`) as HTMLInputElement).click() })
+  const titleOf = (el: HTMLElement) => (q(el, 'new-epic-title') as HTMLInputElement).value
+  const goalBox = (el: HTMLElement) => q(el, 'new-epic-goal') as HTMLTextAreaElement
+  const createIpcPayload = () => (window.api.promptSessions.create as ReturnType<typeof vi.fn>).mock.calls[0][0]
+  async function mountCard(props: Partial<React.ComponentProps<typeof NewEpicCard>> = {}) {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} {...props} />)
+    await act(async () => {})
+    return el
+  }
+  async function openAdvanced(el: HTMLElement) {
+    click(el, 'new-epic-flip-to-grounding')
+    await act(async () => {})
+  }
+  async function savedDraft(over: Record<string, unknown>) {
+    const { composeEpicIntake } = await import('../../../lib/epicIntake')
+    const intake = composeEpicIntake({ title: 'Saved', goal: 'Saved goal', referencePaths: [], tag: undefined, agentName: 'architect', contextInjections: { 'delegate-implementation': false } as never })
+    return { id: 'draft-r', cwd: ALPHA, goalText: intake.goalText, claudeSessionId: 'claude-own-1', status: 'proposed', createdAt: new Date().toISOString(), completedAt: null, agentType: 'architect', developLoop: false, openingPrompt: intake.openingPrompt, sections: intake.sections, source: 'NewEpicCard', ...over } as never
+  }
+
+  beforeEach(() => {
+    approveSpy.mockClear()
+    usePromptSessions.setState({ approveProposed: approveSpy } as never)
+  })
+
+  it('renders the panel only while advanced is open, immediately above the Context injections box', async () => {
+    // A session already open as a tab is never offered (tab id = claude session id).
+    useSessions.setState({ tabs: [{ id: LONG_PROMPT.sessionId, cwd: '/home/bilko/Projects/beta' } as never], activeTabId: null })
+    const el = await mountCard()
+    expect(q(el, 'new-epic-restore-panel')).toBeNull()
+    expect(listRestorableSpy).not.toHaveBeenCalled()
+
+    await openAdvanced(el)
+
+    const panel = q(el, 'new-epic-restore-panel')!
+    const heading = Array.from(el.querySelectorAll('div')).find((d) => d.textContent === 'Context injections')
+    expect(heading).toBeTruthy()
+    expect(panel.compareDocumentPosition(heading!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(panel.nextElementSibling?.firstElementChild).toBe(heading)
+    expect(panel.previousElementSibling?.getAttribute('data-testid')).toBe('new-epic-runtime-panel')
+    expect(listRestorableSpy).toHaveBeenCalledTimes(1)
+    expect(listRestorableSpy).toHaveBeenCalledWith({ cwd: ALPHA })
+    expect(q(el, `restore-session-option-${RESTORE.sessionId}`)).not.toBeNull()
+    expect(q(el, `restore-session-option-${LONG_PROMPT.sessionId}`)).toBeNull()
+
+    click(el, 'new-epic-flip-to-goal')
+    expect(q(el, 'new-epic-restore-panel')).toBeNull()
+  })
+
+  it('Start on a picked session creates the Epic on that session and still sends the opening prompt as its next message', async () => {
+    const onCreated = vi.fn()
+    const el = await mountCard({ onCreated })
+    await openAdvanced(el)
+    expect((q(el, 'restore-session-option-none') as HTMLInputElement).checked).toBe(true)
+
+    pick(el, RESTORE.sessionId)
+
+    // An empty title takes the session's own; the front face names the pick and re-words the goal.
+    expect(titleOf(el)).toBe('Fix the login redirect')
+    expect(q(el, 'new-epic-restore-chip')?.textContent).toContain('Fix the login redirect')
+    expect(goalBox(el).placeholder).toBe('What should this session do next? Sent as the next message after its history.')
+    act(() => setNativeValue(goalBox(el), 'Now add the regression test'))
+    click(el, 'new-epic-create')
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    expect(createPromptSessionSpy.mock.calls[0][3]).toBe('NewEpicCard')
+    expect(createPromptSessionSpy.mock.calls[0][7]).toMatchObject({ restoreSessionId: RESTORE.sessionId })
+    expect(createIpcPayload().restoreSessionId).toBe(RESTORE.sessionId)
+    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    expect(created.claudeSessionId).toBe(RESTORE.sessionId)
+    expect(approveSpy).toHaveBeenCalledWith(created.id, 'NewEpicCard', undefined)
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+    const sent = sendSpy.mock.calls[0][0]
+    expect(sent).toMatchObject({ tabId: created.id, sessionId: RESTORE.sessionId, cwd: ALPHA })
+    expect(sent.prompt).toBe(created.openingPrompt)
+    expect(sent.prompt).toContain('Now add the regression test')
+    expect(onCreated).toHaveBeenCalledWith(created.id)
+    // resetForm dropped the pick with everything else.
+    expect(q(el, 'new-epic-restore-chip')).toBeNull()
+  })
+
+  it('Start with no pick leaves runtime without restoreSessionId', async () => {
+    const el = await mountCard()
+    await openAdvanced(el)
+    act(() => setNativeValue(goalBox(el), 'A brand-new goal'))
+    click(el, 'new-epic-create')
+    await act(async () => {})
+
+    const runtime = createPromptSessionSpy.mock.calls[0][7]
+    expect(runtime).toBeDefined()
+    expect(Object.keys(runtime!)).not.toContain('restoreSessionId')
+    expect('restoreSessionId' in createIpcPayload()).toBe(false)
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+    expect(sendSpy.mock.calls[0][0].sessionId).not.toBe(RESTORE.sessionId)
+  })
+
+  it('Save draft carries the pick; the chip clear button goes back to a fresh session and keeps the title', async () => {
+    const el = await mountCard({ onDraftSaved: vi.fn() })
+    await openAdvanced(el)
+    pick(el, LONG_PROMPT.sessionId)
+    // No title on that session: its first prompt stands in, capped at 80 chars.
+    const prefilled = titleOf(el)
+    expect(prefilled.length).toBeLessThanOrEqual(80)
+    expect(prefilled.length).toBeGreaterThan(40)
+    expect(LONG_PROMPT.firstPrompt.startsWith(prefilled)).toBe(true)
+
+    click(el, 'new-epic-restore-clear')
+    expect(q(el, 'new-epic-restore-chip')).toBeNull()
+    expect((q(el, 'restore-session-option-none') as HTMLInputElement).checked).toBe(true)
+    expect(goalBox(el).placeholder).not.toContain('after its history')
+    expect(titleOf(el)).toBe(prefilled)
+
+    // A title that is already there is never overwritten by a later pick.
+    pick(el, RESTORE.sessionId)
+    expect(titleOf(el)).toBe(prefilled)
+    click(el, 'new-epic-save-draft')
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    expect(createPromptSessionSpy.mock.calls[0][3]).toBe('NewEpicCard save-draft')
+    expect(createPromptSessionSpy.mock.calls[0][7]).toMatchObject({ restoreSessionId: RESTORE.sessionId })
+    expect(approveSpy).not.toHaveBeenCalled()
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('leaving the card autosaves the draft on the picked session too', async () => {
+    const el = await mountCard()
+    await openAdvanced(el)
+    pick(el, RESTORE.sessionId)
+    act(() => setNativeValue(goalBox(el), 'Keep going from here'))
+    act(() => root!.unmount())
+    root = createRoot(document.createElement('div'))
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    expect(createPromptSessionSpy.mock.calls[0][3]).toBe('NewEpicCard autosave')
+    expect(createPromptSessionSpy.mock.calls[0][7]).toMatchObject({ restoreSessionId: RESTORE.sessionId })
+  })
+
+  it('edit mode shows a restored draft its adopted session read-only and never lists', async () => {
+    const el = await mountCard({ draftEpic: await savedDraft({ claudeSessionId: RESTORE.sessionId, restoredSession: true }) })
+    await openAdvanced(el)
+    expect(q(el, 'restore-session-readonly-id')?.textContent).toContain(RESTORE.sessionId)
+    expect(el.querySelector('[data-testid^="restore-session-option-"]')).toBeNull()
+    expect(listRestorableSpy).not.toHaveBeenCalled()
+  })
+
+  it('edit mode on a fresh-session draft notes that a saved draft keeps its own session', async () => {
+    const el = await mountCard({ draftEpic: await savedDraft({}) })
+    await openAdvanced(el)
+    expect(q(el, 'restore-session-readonly-note')?.textContent).toMatch(/saved draft keeps its own session/i)
+    expect(q(el, 'restore-session-readonly-id')).toBeNull()
+    expect(el.querySelector('[data-testid^="restore-session-option-"]')).toBeNull()
+    expect(listRestorableSpy).not.toHaveBeenCalled()
   })
 })

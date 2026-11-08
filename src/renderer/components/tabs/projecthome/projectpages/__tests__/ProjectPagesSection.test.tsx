@@ -519,7 +519,7 @@ describe('ProjectPagesSection', () => {
       const el = mount(<ProjectPagesSection {...props({ tab: 'tools' })} />)
       expect(toolIds(el)).toEqual([])
       expect(el.querySelector('[data-testid="project-home-add-tool"]')).not.toBeNull()
-      expect(el.querySelector('[data-testid="project-home-tools-footnote"]')?.textContent).toContain('Surface: Project Home')
+      expect(el.querySelector('[data-testid="project-home-tools-footnote"]')?.textContent).toContain('Every Project Home tool shows up here in every project')
     })
 
     it('does not wait on or report the pages load', () => {

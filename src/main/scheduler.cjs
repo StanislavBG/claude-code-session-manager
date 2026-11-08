@@ -244,6 +244,8 @@ const RESULT_TAIL_BYTES = 8 * 1024;
 // boundary) — a real `result` string can be a full paragraph, so
 // extractResultTextFromLog scans more of the tail to find it whole.
 const RESULT_TEXT_TAIL_BYTES = 64 * 1024;
+// Budget-kill context scan (describeBudgetKillContext) reads at most this much run log.
+const BUDGET_KILL_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 
 // Idle-output watchdog: if the log file mtime stops advancing for this long
 // while the process is still alive, the agent is hung mid-work (network
@@ -3009,6 +3011,8 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // Like exitCode: this run's outcome, not durable across a reset — a stale
   // leak badge from a prior attempt must not linger once the job re-fires.
   delete job.leakedDescendants;
+  // Same category — which phase a budget kill landed in is this run's outcome.
+  delete job.budgetKillPhase;
   // A pending row is about to re-run fresh — a stale leftover badge or a
   // stale pre-run baseline from the attempt that just ended must not linger
   // and be mistaken for THIS (not-yet-run) attempt's own output. spawnJob
@@ -7087,6 +7091,32 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }
     }
 
+    // Budget-kill context (PRD 2888): did the kill land inside the
+    // finish-protocol review Skill call, and what had already landed/run?
+    // IO here (bounded log tail + bounded git log); the parse is pure in
+    // budget.describeBudgetKillContext. Any failure → null → today's reason.
+    let budgetKillContext = null;
+    if (res.killedByWatchdog === 'budget') {
+      try {
+        const tail = readTail(path.join(runDir, `${job.slug}.log`), BUDGET_KILL_LOG_TAIL_BYTES);
+        budgetKillContext = tail ? budget.describeBudgetKillContext(tail) : null;
+      } catch {
+        budgetKillContext = null;
+      }
+      const landedForContext = sigtermLandedCommitEvidence || plainExitLandedCommitEvidence;
+      if (budgetKillContext && budgetKillContext.inFinishReview && landedForContext && guardHeadBefore) {
+        try {
+          const out = await execGitAt(guardCwd, ['log', '-n', '5', '--format=%H %s', `${guardHeadBefore}..${landedForContext}`], { timeout: 10_000 });
+          budgetKillContext.commits = String(out).split('\n').filter(Boolean).map((l) => {
+            const sp = l.indexOf(' ');
+            return sp < 0 ? { sha: l, subject: '' } : { sha: l.slice(0, sp), subject: l.slice(sp + 1) };
+          });
+        } catch {
+          budgetKillContext.commits = null; // classifyBudgetKill falls back to the landed sha alone
+        }
+      }
+    }
+
     let actuallyFailed = false;
     let failedJobSnapshot = null;
     let needsInvestigationNow = false;
@@ -7166,7 +7196,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // sigtermLandedCommitEvidence/plainExitLandedCommitEvidence, whichever
           // this exit code populated) still adjudicated on git evidence rather
           // than discarded. See classifyBudgetKill's own header.
-          const budgetKill = budget.classifyBudgetKill(res, sigtermLandedCommitEvidence || plainExitLandedCommitEvidence);
+          const budgetKill = budget.classifyBudgetKill(res, sigtermLandedCommitEvidence || plainExitLandedCommitEvidence, budgetKillContext);
+          delete s.jobs[i2].budgetKillPhase;
           const sigtermOverride = (!budgetKill && res.exitCode !== 0)
             ? gitTreeGuard.classifySigtermWithCommit(res.exitCode, sigtermCommitFound)
             : null;
@@ -7188,6 +7219,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             effectiveStatus = budgetKill.status;
             sigtermOverrideReason = budgetKill.reason;
             s.jobs[i2].verifierVerdict = 'budget_exceeded';
+            if (budgetKillContext && budgetKillContext.inFinishReview) s.jobs[i2].budgetKillPhase = 'finish-review';
             if (budgetKill.landedCommit) jobLandedCommitThisRun = budgetKill.landedCommit;
           } else if (sigtermOverride) {
             effectiveStatus = sigtermOverride.status;

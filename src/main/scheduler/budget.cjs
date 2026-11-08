@@ -195,7 +195,7 @@ function computeJobBudgetMs(estimateMinutes, { factor, floorMs, ceilingMs } = {}
 }
 
 /**
- * classifyBudgetKill(res, landedCommitEvidence) → { status, reason, landedCommit } | null
+ * classifyBudgetKill(res, landedCommitEvidence, context?) → { status, reason, landedCommit } | null
  *
  * Pure. `res` is executeJob's resolved outcome — only fires when
  * `res.killedByWatchdog === 'budget'` (stamped by the budget watchdog inside
@@ -212,14 +212,126 @@ function computeJobBudgetMs(estimateMinutes, { factor, floorMs, ceilingMs } = {}
  * commit-guard evidence check the plain sigterm/exit paths already use, is
  * threaded onto the row as `landedCommit` so a job that HAD already
  * committed before overrunning is still adjudicated on its git evidence.
+ *
+ * `context` (optional) is describeBudgetKillContext's output plus an optional
+ * `commits` list ({ sha, subject }[], the run's own commits, read by the
+ * caller). Only when `context.inFinishReview` is true does the reason change:
+ * it names the review call the kill landed in, what had already landed, and
+ * which push/publish side effects had already run. Otherwise the reason is
+ * byte-identical to the context-less one.
+ *
+ * @param {any} res
+ * @param {string|null|undefined} landedCommitEvidence
+ * @param {{ inFinishReview?: boolean, reviewSkill?: string|null, sideEffects?: string[], commits?: Array<{ sha: string, subject: string }>|null }|null} [context]
  */
-function classifyBudgetKill(res, landedCommitEvidence) {
+function classifyBudgetKill(res, landedCommitEvidence, context) {
   if (!res || res.killedByWatchdog !== 'budget') return null;
-  return {
-    status: 'needs_review',
-    reason: res.budgetKillReason || `wall-clock budget exceeded (exit ${res.exitCode})`,
-    landedCommit: landedCommitEvidence || null,
-  };
+  const baseReason = res.budgetKillReason || `wall-clock budget exceeded (exit ${res.exitCode})`;
+  const landedCommit = landedCommitEvidence || null;
+  if (!context || context.inFinishReview !== true) {
+    return { status: 'needs_review', reason: baseReason, landedCommit };
+  }
+  // Keep the ran/budget/estimate figures: everything after the generic prefix.
+  const figures = baseReason.replace(/^wall-clock budget exceeded:?\s*/, '');
+  let reason = `wall-clock budget exceeded inside the finish-protocol review (/${context.reviewSkill || 'code-review'} never returned)`;
+  if (figures) reason += `: ${figures}`;
+  const commits = Array.isArray(context.commits) ? context.commits.slice(0, 5) : [];
+  if (commits.length > 0) {
+    reason += `; work already landed: ${commits.map((c) => `${String(c.sha).slice(0, 7)} ${c.subject}`.trim()).join(', ')}`;
+  } else if (landedCommit) {
+    reason += `; work already landed: ${String(landedCommit).slice(0, 7)}`;
+  } else {
+    reason += '; no commit had landed';
+  }
+  const sideEffects = Array.isArray(context.sideEffects) ? context.sideEffects : [];
+  if (sideEffects.length > 0) reason += `; side effects already run: ${sideEffects.join(' | ')}`;
+  return { status: 'needs_review', reason, landedCommit };
+}
+
+const REVIEW_SKILL_PREFIXES = ['code-review', 'security-review'];
+const SIDE_EFFECT_MAX = 5;
+const SIDE_EFFECT_MAX_CHARS = 120;
+
+/**
+ * describeBudgetKillContext(logText) → { inFinishReview, reviewSkill, sideEffects }
+ *
+ * Pure, never throws. Parses a `claude -p --output-format stream-json` run log
+ * (or its tail — a torn first line is just skipped) and answers: was the
+ * executor's LAST top-level tool call a review Skill (/code-review,
+ * /security-review) that never got its tool_result — i.e. did the budget kill
+ * land inside the finish-protocol review? `sideEffects` lists the `git push` /
+ * `npm publish` Bash commands that had already succeeded (a matching
+ * tool_result with is_error !== true), deduped, at most 5, each ≤ 120 chars.
+ * Subagent events (non-null parent_tool_use_id) never count as the last
+ * top-level tool_use.
+ *
+ * @param {string} logText
+ * @returns {{ inFinishReview: boolean, reviewSkill: string|null, sideEffects: string[] }}
+ */
+function describeBudgetKillContext(logText) {
+  const empty = { inFinishReview: false, reviewSkill: null, sideEffects: [] };
+  try {
+    if (typeof logText !== 'string' || !logText) return empty;
+    /** @type {any} */
+    let lastTopToolUse = null;
+    /** @type {Map<string, boolean>} tool_use_id → is_error */
+    const results = new Map();
+    // true once a tool_result answers the current lastTopToolUse
+    let answeredAfterLast = false;
+    /** @type {Array<{ id: string, command: string }>} */
+    const bashCalls = [];
+    for (const raw of logText.split('\n')) {
+      const line = raw.trim();
+      if (!line || line[0] !== '{') continue;
+      let ev;
+      try { ev = JSON.parse(line); } catch { continue; }
+      if (!ev || typeof ev !== 'object') continue;
+      const content = ev.message && Array.isArray(ev.message.content) ? ev.message.content : null;
+      if (!content) continue;
+      const topLevel = ev.parent_tool_use_id == null;
+      if (ev.type === 'assistant') {
+        for (const block of content) {
+          if (!block || block.type !== 'tool_use') continue;
+          if (block.name === 'Bash' && block.input && typeof block.input.command === 'string' && typeof block.id === 'string') {
+            bashCalls.push({ id: block.id, command: block.input.command });
+          }
+          if (topLevel) {
+            lastTopToolUse = block;
+            answeredAfterLast = false;
+          }
+        }
+      } else if (ev.type === 'user') {
+        for (const block of content) {
+          if (!block || block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+          results.set(block.tool_use_id, block.is_error === true);
+          if (lastTopToolUse && block.tool_use_id === lastTopToolUse.id) answeredAfterLast = true;
+        }
+      }
+    }
+    let inFinishReview = false;
+    let reviewSkill = null;
+    if (lastTopToolUse && lastTopToolUse.name === 'Skill' && !answeredAfterLast) {
+      const input = lastTopToolUse.input || {};
+      const skill = typeof input.skill === 'string' ? input.skill.trim() : '';
+      if (REVIEW_SKILL_PREFIXES.some((p) => skill.startsWith(p))) {
+        inFinishReview = true;
+        const args = typeof input.args === 'string' ? input.args.trim() : '';
+        reviewSkill = args ? `${skill} ${args}` : skill;
+      }
+    }
+    /** @type {string[]} */
+    const sideEffects = [];
+    for (const call of bashCalls) {
+      if (sideEffects.length >= SIDE_EFFECT_MAX) break;
+      if (!call.command.includes('git push') && !call.command.includes('npm publish')) continue;
+      if (!results.has(call.id) || results.get(call.id) === true) continue;
+      const cut = call.command.trim().slice(0, SIDE_EFFECT_MAX_CHARS);
+      if (!sideEffects.includes(cut)) sideEffects.push(cut);
+    }
+    return { inFinishReview, reviewSkill, sideEffects };
+  } catch {
+    return empty;
+  }
 }
 
 /**
@@ -598,6 +710,7 @@ module.exports = {
   findOverrunningJobs,
   computeJobBudgetMs,
   classifyBudgetKill,
+  describeBudgetKillContext,
   isJobBudgetExempt,
   shouldKillForBudget,
   resolveBudgetKillOutcome,

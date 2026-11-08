@@ -179,9 +179,9 @@ written here. A term that couldn't be verified against real source was dropped, 
 | Completed | A finished Session, archived with its full history. | — |
 | Approve & start | The button that turns a Proposed Session into an Active one and sends its first instruction. | Approve & start |
 | Agent | Which member of your agency works this Session — the "who." | Agent |
-| Agent Library | Where you browse, edit, and create the agent personas available on your machine. | Agent Library |
+| Agents page | Where you browse, edit, and create the agent personas available on your machine (its Personas tab). | Agents |
 | Mission | What kind of work this Session is — the "how." It shapes how eagerly the agency queues follow-up work. | Mission |
-| Tag Library | Where you manage the list of Missions a Session can carry. | Tag Library |
+| Tags | The Agents page's read-only list of Missions and the agents connected to each; you connect an agent to a Mission on the agent itself. | Tags |
 | Architect | The agency's project lead — plans the work, breaks it into pieces, and tracks it to done. | — |
 | Dev-lead | One of the agency's builders — takes a single, already-scoped piece of work and builds exactly that. | — |
 | Validator | The agency's quality control — checks finished work against what was promised before it counts as done. | — |
@@ -190,19 +190,22 @@ written here. A term that couldn't be verified against real source was dropped, 
 | Queue | The list of work orders that are waiting, running, or finished. | — |
 | Needs review | A work order that stopped because it has a question only you can answer. | Needs review |
 | House rules | This manual's word for the standing instructions, settings, and permissions you give every Session. | — |
-| System Prompt | The house rules every Session reads before anything else — your standing instructions file. | System Prompt |
-| Settings | App-wide preferences: theme, voice, and other machine-level choices. | Settings |
+| System Prompt | The house rules every Session reads before anything else — your standing instructions file. | CLAUDE.md |
+| Settings | Claude Code's own settings file: permissions, hooks, environment variables, the default model. | Settings |
+| Claude config | One project's own Claude Code files: memory, CLAUDE.md, settings, MCP servers, skills. | Claude config |
 | Permissions | The rules that decide what an agent may do without stopping to ask you first. | Permissions |
 | Skills | Packaged instructions an agent can load for a specific kind of task. | Skills |
 | Plugins | Installable extensions that add new skills, agents, or tools to Claude Code. | Plugins |
 | MCP Servers | Connections that let an agent reach outside tools and services. | MCP Servers |
 | Hooks | Small scripts that run automatically when something happens in a Session. | Hooks |
+| Extensions | The page with a tab each for Skills, MCP Servers, and Plugins. | Extensions |
 | Memory | Notes an agent keeps and can read back in a later Session. | Memory |
 | Dashboard | The one-page overview of every project and every Session on your machine. | Dashboard |
 | Project Home | A one-page, auto-written overview of a single project. | Project Home |
 | File Explorer | The built-in file browser and editor. | File Explorer |
 | History | A record of past Sessions, with cost and usage over time. | History |
 | Voice | Talk to your agents with your microphone instead of typing. | Voice |
+| App Settings | Session Manager's own preferences: voice, appearance, telemetry, phone remote, updates. | App Settings |
 
 ## Honesty rules
 

@@ -2,9 +2,13 @@
 <p class="lede">Teach your agents new tricks: packaged skills, plugins, connected tools and automatic hooks — and how to add them safely.</p>
 
 <p>Your agency doesn't stop at whatever Claude Code knows out of the box. You can teach it new
-know-how, connect it to outside tools, and set up actions that fire on their own. Four Configure
-tabs cover this: Skills, Plugins, MCP Servers, and Hooks. Each edits a real file Claude Code
-already reads — nothing here is a parallel system layered on top.</p>
+know-how, connect it to outside tools, and set up actions that fire on their own. On Home, the
+<strong>Extensions</strong> page has a tab each for Skills, MCP Servers, and Plugins. Hooks live
+in a tab inside Settings, because they're part of the settings file.</p>
+
+<p>Each of these edits a real file Claude Code already reads — nothing here is a parallel system
+layered on top. A single project can also keep its own skills and MCP servers. You'll find those
+on that project's Claude config page.</p>
 
 <h2>Skills: packaged know-how</h2>
 
@@ -17,24 +21,24 @@ Commands. Pick a skill and you can read it, and turn it off with a <strong>Toggl
 deleting it — handy if a skill keeps firing when you don't want it to. Removing a skill moves its
 folder to the trash, so a change of mind later is still recoverable.</p>
 
-<p>Switch the tab to <strong>Library</strong> and you get a searchable catalog of skills and
-plugins you don't have yet, instead of the ones you've already installed.</p>
+<p>To add one, press <strong>Add…</strong>. A drawer opens with a searchable catalog of skills
+you can install.</p>
 
 <aside class="manual-analogy"><strong>Think of it like this:</strong> a skill is a training manual
 one of your agents keeps on a shelf. Some manuals they reach for automatically, the moment the job
 looks familiar. Others they only open when you hand them the exact page number.</aside>
 
-<h2>Plugins: bundles from the Library</h2>
+<h2>Plugins: bundles from the catalog</h2>
 
 <p>A plugin is a bundle — several skills, agents, or connected tools, packaged together and
-installed in one step. Open the Plugins tab and you land on <strong>Installed</strong>, a
-read-only view of every plugin already on your machine: its name, where it came from, and a
-drill-in showing exactly what it added. You can look, but you can't edit a plugin's contents from
-here — that keeps one clear place to edit a skill, instead of two competing editors for the same
-file.</p>
+installed in one step. The Plugins tab lists every plugin already on your machine: its name,
+where it came from, and a drill-in showing exactly what it added. Each one has a switch to turn
+it on or off, and an <strong>Uninstall</strong> button.</p>
 
-<p>To add a new one, switch to <strong>Library</strong>. Each row shows the plugin's name, a
-description, and an <strong>Install</strong> button that runs a real install for you, in the
+<p>You can look inside a plugin, but you can't edit its contents from here. That keeps one clear
+place to edit a skill, instead of two competing editors for the same file. To add a new plugin,
+press <strong>Add…</strong>. Each row in the catalog shows the plugin's name, a description, and
+an <strong>Install</strong> button that runs a real install for you, in the
 background, with progress shown right in the row.</p>
 
 <table class="manual-table">
@@ -44,7 +48,7 @@ background, with progress shown right in the row.</p>
     as a slash command.</td><td>You want an agent to know how to do something specific, every
     time it applies.</td></tr>
     <tr><td>Plugins</td><td>A bundle of skills, agents, or tools you install together from the
-    Library.</td><td>You want a whole toolkit at once, not one skill at a time.</td></tr>
+    catalog.</td><td>You want a whole toolkit at once, not one skill at a time.</td></tr>
     <tr><td>MCP Servers</td><td>Connections that let an agent reach outside tools and
     services.</td><td>The work needs data or an action outside your project folder.</td></tr>
     <tr><td>Hooks</td><td>Small commands that run automatically when something happens in a
@@ -57,8 +61,8 @@ background, with progress shown right in the row.</p>
 
 <p>MCP stands for a protocol Claude Code uses to reach tools that live outside your project — a
 database, a ticket tracker, another app entirely. The MCP Servers tab lists every server you've
-registered, at either User scope (every project on this machine) or Project scope (this project
-only).</p>
+registered for your whole machine. A server meant for one project only goes on that project's
+Claude config page, in its MCP tab.</p>
 
 <p>Adding a server to the list only proves the entry is well-formed. It says nothing about
 whether Claude Code can actually reach it. A misspelled command, a service that needs you to sign
@@ -66,9 +70,9 @@ in first, or a server still waiting on your approval all look identical on the p
 untried.</p>
 
 <p>That's why the tab gives you a live check. Press <strong>test connections</strong> and it asks
-the real CLI which servers actually answered, then shows a status next to each one: Ready to use,
-Failed to connect, Needs you to sign in, or Not checked yet. Read that status before you start a
-Session that assumes a server's tools are there — a Session that starts before a server answers
+the real CLI which servers actually answered, then shows a status next to each one: Ready, Failed,
+Needs auth (you have to sign in first), Pending approval, or Not checked. Read that status before
+you start a Session that assumes a server's tools are there — a Session that starts before a server answers
 won't pick up its tools partway through.</p>
 
 <aside class="manual-tip"><strong>Try this:</strong> after adding or editing any MCP server, press
@@ -78,8 +82,9 @@ different things, and only the check tells you which one you have.</aside>
 <h2>Hooks: automatic actions on events</h2>
 
 <p>A hook is a small command that Claude Code runs by itself, triggered by something happening in
-a Session — before it uses a tool, after it stops, when a Session begins. The Hooks tab edits the
-exact setting Claude Code already reads, at whichever scope you choose.</p>
+a Session — before it uses a tool, after it stops, when a Session begins. The Hooks tab, inside
+Settings, edits the exact setting Claude Code already reads. On Home it edits your User file; a
+project's Claude config page has the same tab for its Project and Local files.</p>
 
 <p>Pick an event on the left, then write the command that should run and which situations should
 trigger it. Saving proves the command is well-formed. It proves nothing about whether the command
@@ -111,14 +116,13 @@ what's there, add to it safely, and prove it works before you rely on it.</p>
 <div class="manual-takeaways">
   <h2>What you learned</h2>
   <ul>
+    <li>Extensions holds Skills, MCP Servers, and Plugins; Hooks is a tab inside Settings.</li>
     <li>Skills are packaged know-how — some load themselves, some you type as a slash
     command.</li>
-    <li>Plugins bundle several abilities together; Installed is read-only, Library is where you
-    install from.</li>
-    <li>MCP Servers connect outside tools; always test connections before trusting one is
-    live.</li>
-    <li>Hooks run commands automatically on Session events; test-fire one before you trust it in
-    production.</li>
+    <li>Plugins bundle several abilities together; you can switch one off, and Add… is where you
+    install a new one.</li>
+    <li>Test an MCP server's connections, and test-fire a hook, before you trust either one to
+    work.</li>
     <li>Only install skills, plugins, MCP servers, and hooks from sources you trust — they all run
     real commands with real permissions.</li>
   </ul>

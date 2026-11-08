@@ -51,13 +51,17 @@ scoping scheme.
 
 ## Agent + Tag, and the AIM prompt
 
-- **Epic creation is two independent selections.** `agentType` (Actor — an Agent Library persona,
+- **Epic creation is two independent selections.** `agentType` (Actor — a persona from the Agents page,
   `~/.claude/agents/*.md`) and `tag` (Mission — what the Epic is for) are separate axes on `PromptSession`.
-  Either may be None (see [Plain sessions](#plain-sessions)). The `tag` taxonomy is a closed union; both libraries are full CRUD editors (`AgentLibrary.tsx` via
-  `agentLibrary.cjs`'s `savePersona`/`deletePersona`/`removeOverride`; `TagLibrary.tsx`), never read-only
-  directories — don't describe them as read-only in docs or copy.
-- **Persona↔tag membership is many-to-many with one source of truth:** each persona's `tags:` frontmatter
-  (`AgentPersona.tags`), editable from either library page, both writing through `savePersona`.
+  Either may be None (see [Plain sessions](#plain-sessions)). The `tag` taxonomy is a closed union.
+- **Both libraries live on one page, Agents (`AgentLibrary.tsx`, NavKey `agent-library`).** Its Personas tab is a
+  full CRUD editor (`agentLibrary.cjs`'s `savePersona`/`deletePersona`/`removeOverride`) — don't describe it as
+  read-only. Its Tags tab (`TagLibrary.tsx`) IS read-only: the closed taxonomy, each tag's opening framing, and
+  the personas that carry it; a persona link there opens that persona on the Personas tab.
+- **Tags are edited only on the persona.** Persona↔tag membership is many-to-many with one source of truth: each
+  persona's `tags:` frontmatter (`AgentPersona.tags`), set in the persona editor's `tags` field and written
+  through `savePersona`. The Tags tab only reads it back and never writes a persona file, so no second editor
+  can drift from the first.
 - **Field names reuse existing vocabulary.** `tag` is the field `lib/tagLibrary.ts`'s `TAG_LIBRARY` and
   `lib/agentTagDefs.ts` already describe — every "what does this tag mean" string reads through
   `agentTagDef(tag).description`, never a second copy. `agentType` matches Claude Code's own `agent_type` hook
@@ -116,23 +120,27 @@ scoping scheme.
 
 ## Settings is substrate, not per-Epic curation
 
-- `Settings.tsx` and its siblings (Permissions/Hooks/MCP Servers/Skills) edit on-disk files at three scopes
-  (`lib/scopes.ts`'s `SETTINGS_SCOPES`: `~/.claude/settings.json`, `<cwd>/.claude/settings.json`,
-  `<cwd>/.claude/settings.local.json`) that the CLI reads on every invocation regardless of Epic. One TAB hosts
-  many Epics, so a Project-scope edit changes the substrate for every current and future Epic in that project
-  (User scope: machine-wide). `groundingBoard.ts` only reports that these files exist.
+- The Settings page (`Settings.tsx`: General / Permissions / Hooks / Raw tabs) and the Extensions page (Skills /
+  MCP Servers / Plugins tabs) edit on-disk files the CLI reads on every invocation regardless of Epic. Settings
+  spans three scopes (`lib/scopes.ts`'s `SETTINGS_SCOPES`: `~/.claude/settings.json`,
+  `<cwd>/.claude/settings.json`, `<cwd>/.claude/settings.local.json`): the Home-face page is User scope, and the
+  Project face's Claude config page mounts the same component at Project or Local scope, beside that project's
+  `.mcp.json`, `.claude/skills/`, `CLAUDE.md` / `CLAUDE.local.md` and memory folder. One TAB hosts many Epics,
+  so a Project-scope edit changes the substrate for every current and future Epic in that project (User scope:
+  machine-wide). `groundingBoard.ts` only reports that these files exist.
 - **Rule: if behavior should differ per Epic or task, it is a Tag (`initialPromptTemplate`), an Agent persona,
   or a future PRD — never a plain Settings edit.** Settings holds what is identical for the scope regardless of
   task: permissions, hooks, MCP servers, env vars, output style, default effort/reasoning mode.
-- **`model` and `effort` are the carve-outs**, carried per-Epic by the persona's frontmatter (Agent Library's
+- **`model` and `effort` are the carve-outs**, carried per-Epic by the persona's frontmatter (the Agents page's
   catalog-driven rows; `inherit` writes no line). `settings.json`'s `effortLevel` stays the substrate default
   and cannot hold session-only levels like `max`. Settings' "Model & Reasoning" card is advanced/raw-JSON-only
   because its one per-Epic field, `model`, is edited from the persona editor. Its other fields
   (`effortLevel`, `fastMode`, `alwaysThinkingEnabled`, …) are substrate-only.
-- **`SystemPrompt.tsx` is User scope only** (`~/.claude/CLAUDE.md`). It is a HOME-face screen with no project
-  context, so a project switcher could only dead-end or silently follow whichever project owned the active top
-  tab; `<cwd>/CLAUDE.md` is contextual and discovered by the CLI from the session's cwd. Don't re-add the
-  switcher.
+- **`SystemPrompt.tsx` (sidebar label "CLAUDE.md") is User scope only** (`~/.claude/CLAUDE.md`). It is a
+  HOME-face screen with no project context, so a project switcher could only dead-end or silently follow
+  whichever project owned the active top tab; `<cwd>/CLAUDE.md` is contextual and discovered by the CLI from the
+  session's cwd, so it and `CLAUDE.local.md` are edited on the Project face's Claude config page (CLAUDE.md tab,
+  Project / Local). Don't re-add the switcher.
 - **The Agents page (`AgentLibrary.tsx`) is Home-face too, so for the same reason it never reads the active
   tab.** A persona's project override names its project explicitly from a picker of every open project (one per
   unique tab cwd), written via `agents.savePersona` with `projectCwd` and dropped via
@@ -237,7 +245,7 @@ by skipping the same-PR registration of a new folder.
 - **The APP and the Field Manual are both free.** No license check, entitlement gate, trial limit, nag, or
   "pro" tier, and no feature or chapter moves behind a purchase; the open-core pricing rule lives in the
   manual's own README.
-- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI Settings → Phone remote. The relay,
+- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. The relay,
   its routes, and the product-page copy in `~/Projects/Bilko/` are not decommissioned.
 
 ## Plain sessions

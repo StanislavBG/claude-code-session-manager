@@ -95,7 +95,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   [session-manager-operations/CLAUDE.md](session-manager-operations/CLAUDE.md).
 - **Open-core: the APP and the Field Manual are both free, and stay free.** Never add a license check,
   entitlement gate, trial limit, nag, or "pro" tier, and never move a feature or chapter behind a purchase.
-- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI Settings → Phone remote. Do
+- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. Do
   NOT delete/decommission the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 
 ## Scheduler

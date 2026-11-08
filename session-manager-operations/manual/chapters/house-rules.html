@@ -8,13 +8,13 @@ Permissions that shape how every Session behaves.</p>
 
 <h2>The System Prompt: your machine-wide house rules</h2>
 
-<p>The System Prompt tab lives on the Home face, under Configure. It edits one real file:
-<code>~/.claude/CLAUDE.md</code>. Every Session that Claude Code starts, in every project on this
-machine, reads this file first. Saving here changes what every agent on your machine already
-knows before it reads your actual request.</p>
+<p>On Home, the sidebar's <strong>CLAUDE.md</strong> row, under Claude Code, opens your System
+Prompt. It edits one real file: <code>~/.claude/CLAUDE.md</code>. Every Session that Claude Code
+starts, in every project on this machine, reads this file first. Saving here changes what every
+agent on your machine already knows before it reads your actual request.</p>
 
-<p>This tab has no scope switcher, because the file it edits has no scope to switch. If your
-house rules file uses <code>@path/to/file.md</code>-style imports to pull in other files, the tab
+<p>This page has no scope switcher, because the file it edits has no scope to switch. If your
+house rules file uses <code>@path/to/file.md</code>-style imports to pull in other files, the page
 lists each one in a left-hand rail so you can open and edit it too — they count as part of the
 same instructions the CLI loads.</p>
 
@@ -29,17 +29,23 @@ a file named <code>CLAUDE.md</code> in the project's own folder, and a second fi
 <code>CLAUDE.local.md</code> for rules that apply only on this machine. Both are read fresh
 whenever a Session starts in that project.</p>
 
-<p>Session Manager doesn't give these two files their own Configure tab. Open them through File
-Explorer instead, the same way you'd open any other file in the project. <code>CLAUDE.md</code>
-is meant to be checked into the project's own version control and shared with anyone who works on
-it; <code>CLAUDE.local.md</code> stays on your machine only.</p>
+<p>To edit them, switch to that project's tab and open <strong>Claude config</strong> from the
+sidebar. It gathers the project's own Claude Code files in one place: Memory, CLAUDE.md, Settings,
+MCP, and Skills each get a tab. On the CLAUDE.md tab, choose Project to edit <code>CLAUDE.md</code>,
+or Local to edit <code>CLAUDE.local.md</code>.</p>
+
+<p><code>CLAUDE.md</code> is meant to be checked into the project's own version control and shared
+with anyone who works on it; <code>CLAUDE.local.md</code> stays on your machine only.</p>
+
+<aside class="manual-note"><strong>Good to know:</strong> your machine-wide file and a project's
+file share the name <code>CLAUDE.md</code>. The one you open from Home reaches every project. The
+one in Claude config reaches only its own project.</aside>
 
 <h2>Settings: three scopes, one winner</h2>
 
-<p>The Settings tab, also under Configure, edits the app-wide preferences Claude Code keeps in a
-file called <code>settings.json</code> — theme, environment variables, and other machine-level
-choices. There isn't just one copy of this file. There are three, one per scope, and Settings
-lets you switch between them with a scope selector at the top of the tab.</p>
+<p>The <strong>Settings</strong> page, also under Claude Code, edits the preferences Claude Code
+keeps in a file called <code>settings.json</code> — environment variables, the default model, and
+other choices. There isn't just one copy of this file. There are three, one per scope:</p>
 
 <table class="manual-table">
   <thead><tr><th>Scope</th><th>File</th><th>Applies to</th></tr></thead>
@@ -53,14 +59,19 @@ lets you switch between them with a scope selector at the top of the tab.</p>
   </tbody>
 </table>
 
+<p>The Settings page on Home edits your User file. A project's Project and Local files live on
+its Claude config page, in the Settings tab, where you pick Project or Local. It's the same editor
+either way, so everything below works the same in both places.</p>
+
 <p>When the same setting is written in more than one file, Local wins over Project, and Project
-wins over User. The Settings tab has a Guided view that shows you the merged result across all
-three scopes at once, so you can see which value will actually take effect before you change
-anything.</p>
+wins over User. Settings opens on its General tab, which shows the value that will actually take
+effect for each setting, so you can check it before you change anything. Its Raw tab shows the
+whole file as plain text, for when you'd rather edit it by hand.</p>
 
 <aside class="manual-note"><strong>Good to know:</strong> Permissions, which we cover next, isn't
-a separate file at all. It's a section inside these same three <code>settings.json</code> files,
-just with its own tab and its own editor for that one section.</aside>
+a separate file at all. It's a section inside these same <code>settings.json</code> files, so it's
+a tab inside Settings rather than a page of its own. Hooks work the same way, with their own tab
+right next to it.</aside>
 
 <h2>Permissions: fewer interruptions, same safety rails</h2>
 
@@ -87,9 +98,9 @@ a mode that accepts routine edits automatically, a read-only planning mode, and 
 permission checks entirely. Most people never touch it and leave it on the normal, safest
 setting.</p>
 
-<p>The tab opens on an Effective view, showing the merged rules from all three scopes together,
-before you ever see a raw list. That order is deliberate: check what's already true before you
-add a new rule that might duplicate — or contradict — one that's already there.</p>
+<p>The Permissions tab shows the rules of one file at a time: the scope you're editing. Before you
+add a rule, glance at the other scopes too. A new rule can duplicate — or contradict — one that's
+already there.</p>
 
 <aside class="manual-warning"><strong>Watch out:</strong> an Allow rule written at Project scope
 ships to everyone who works on that project, on their machine, the moment they pull your changes.
@@ -112,12 +123,13 @@ runs, or no matter what kind of work it's doing.</p>
 <div class="manual-takeaways">
   <h2>What you learned</h2>
   <ul>
-    <li>The System Prompt tab edits <code>~/.claude/CLAUDE.md</code>, read by every Session on
-    this machine.</li>
+    <li>The CLAUDE.md row on Home edits <code>~/.claude/CLAUDE.md</code>, read by every Session
+    on this machine.</li>
     <li>A project's own <code>CLAUDE.md</code> and <code>CLAUDE.local.md</code> add rules for
-    that project, opened through File Explorer.</li>
-    <li>Settings has three scopes — User, Project, Local — and Local beats Project beats User.</li>
-    <li>Permissions holds Allow, Deny, and Ask rules that stop needless prompts without turning
+    that project, edited on that project's Claude config page.</li>
+    <li>Settings has three scopes — User, Project, Local — and Local beats Project beats User.
+    Home edits User; a project's Claude config edits the other two.</li>
+    <li>Permissions, a tab inside Settings, holds Allow, Deny, and Ask rules that stop needless prompts without turning
     off the safety rail.</li>
     <li>A Settings or Permissions change reaches every Session in its scope; per-Session behavior
     belongs on that Session's Agent or Mission instead.</li>

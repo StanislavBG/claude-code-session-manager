@@ -383,6 +383,45 @@ test('macro_save with projects refuses in a job or outside a session, without HT
   expect(requests).toHaveLength(0);
 });
 
+test('macro_save with surface project-home refuses in a job or outside a session, without HTTP', async () => {
+  const { handleCallTool, requests } = await deleteHarness({ ok: true });
+  setDeleteEnv({ chat: 'chat-123', slug: 'some-job' });
+  let result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, surface: 'project-home' });
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('shown in every project');
+  expect(result.content[0].text).toContain('Project Home ▸ Tools ▸ Add a tool');
+  setDeleteEnv({});
+  result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, surface: 'project-home' });
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('Project Home ▸ Tools ▸ Add a tool');
+  expect(requests).toHaveLength(0);
+});
+
+test('macro_save with surface project-home in a chat session forwards surface, quote and origin', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, requests } = await deleteHarness({ ok: true, macro: { id: 'm1' } });
+  const result = await callTool(handleCallTool, 'macro_save', {
+    ...SAVE_ARGS, surface: 'project-home', humanRequestQuote: 'add a Project Home tool for this',
+  });
+  expect(result.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body).toMatchObject({
+    surface: 'project-home',
+    humanRequestQuote: 'add a Project Home tool for this',
+    originClaudeSessionId: 'chat-123',
+  });
+  expect(requests[0].body.projects).toBeUndefined();
+});
+
+test('macro_save schema text says a Project Home tool is shown in every project', async () => {
+  const { TOOLS } = await deleteHarness({ ok: true });
+  const props = TOOLS.find((t) => t.name === 'macro_save').inputSchema.properties;
+  expect(props.surface.description).toContain('Project Home ▸ Tools');
+  expect(props.surface.description).toContain('every project');
+  expect(props.humanRequestQuote.description).toContain("surface 'project-home'");
+  expect(props.id.description).not.toContain('scoped to this project');
+});
+
 test('macro_save turns an admin { ok: false, error } into an error result', async () => {
   setDeleteEnv({ chat: 'chat-123' });
   const { handleCallTool } = await deleteHarness({ ok: false, error: 'quote not found in chat' });

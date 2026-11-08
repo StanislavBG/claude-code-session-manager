@@ -661,14 +661,14 @@ const TOOLS = [
       type: 'object',
       properties: {
         cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
-        id: { type: 'string', description: 'Optional: id of an existing macro (already visible to this project) to update. Omit to create a new macro scoped to this project.' },
+        id: { type: 'string', description: 'Optional: id of an existing macro (already visible to this project) to update. Omit to create a new macro.' },
         label: { type: 'string', description: 'Short label shown on the HOT KEYS button.' },
         agentName: { type: 'string', description: 'Persona to run the macro as (e.g. "builder").' },
         tag: { type: 'string', description: 'Mission tag for the macro.' },
         prompt: { type: 'string', description: 'The opening prompt the macro sends. Write input placeholders as {{name}}; each is filled from the matching entry in `inputs` when the macro is pressed.' },
-        surface: { type: 'string', enum: ['sessions', 'project-home'], description: "Where the macro shows: 'sessions' = Sessions HOT KEYS strip, 'project-home' = Project Home button row." },
+        surface: { type: 'string', enum: ['sessions', 'project-home'], description: "Where the macro shows: 'sessions' = Sessions HOT KEYS strip; 'project-home' = a tool in Project Home ▸ Tools, shown in every project (only what it generates is per project). A 'project-home' save needs humanRequestQuote and a Session Manager chat session." },
         projects: { type: 'array', items: { type: 'string' }, description: 'Optional: only ["*"] is accepted, to show the macro in every project. Needs humanRequestQuote and a Session Manager chat session.' },
-        humanRequestQuote: { type: 'string', description: 'With projects ["*"]: the exact words the human typed in this chat that ask for every/all projects.' },
+        humanRequestQuote: { type: 'string', description: "With projects [\"*\"] or surface 'project-home': the exact words the human typed in this chat asking for every project or for a Project Home tool." },
         inputs: {
           type: 'array',
           description: 'Optional input fields the human fills in before the macro runs. Prompt placeholders are written as {{name}}. Omit on update to keep the existing inputs; pass [] to clear them.',
@@ -1127,7 +1127,15 @@ async function handleCallTool(request) {
       if (missing.length > 0) {
         return errorResult(`missing or invalid required argument(s): ${missing.join(', ')}`);
       }
-      if (args.projects !== undefined) {
+      // A Project Home tool is shown in every project, so it gets the same
+      // human-session refusal as projects ["*"].
+      if (args.surface === 'project-home') {
+        const refusal = humanSessionRefusal(
+          'refused: a Project Home tool is shown in every project and is saved only in a Session Manager chat session where the human asked for it. '
+          + 'Say in your final result that the human can add it from Project Home ▸ Tools ▸ Add a tool.',
+        );
+        if (refusal) return refusal;
+      } else if (args.projects !== undefined) {
         const refusal = humanSessionRefusal(
           'refused: a macro shown in every project is saved only in a Session Manager chat session where the human asked for it. '
           + 'Say in your final result that the human can set Show in every project in the macro editor.',

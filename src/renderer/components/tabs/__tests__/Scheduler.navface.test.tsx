@@ -21,13 +21,6 @@ import { flushAsync } from '../../../testUtils/domFlush'
  * none is.
  */
 
-// GlobalControlsSection (rendered inside SessionManagerConfig) pulls in a
-// much larger IPC surface (config, homeDir, skills) unrelated to what these
-// tests cover — stub it, same as SessionManagerConfig.test.tsx does.
-vi.mock('../GlobalControlsSection', () => ({
-  GlobalControlsSection: () => createElement('div', { 'data-testid': 'global-controls-stub' }),
-}))
-
 const ALPHA_TAB: SessionTab = {
   id: 'tab-alpha',
   sessionId: 'tab-alpha',

@@ -283,3 +283,52 @@ describe('SystemPrompt Insert preset menu', () => {
     expect(pane(el).textContent).toBe(draft)
   })
 })
+
+describe('SystemPrompt keeps CLAUDE.md in step with disk through the shared useConfig entry', () => {
+  const button = (el: HTMLElement, re: RegExp) =>
+    Array.from(el.querySelectorAll('button')).find((b) => re.test(b.textContent?.trim() ?? '')) as HTMLElement
+
+  it('a rejected write shows the error, keeps the draft and leaves the disk text unchanged', async () => {
+    writeText.mockResolvedValueOnce({ ok: false, error: 'disk full' })
+    const el = await mount()
+    await click(pane(el)) // dirty the root
+    await click(button(el, /save/i))
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(el.textContent).toContain('disk full')
+    const f = useConfig.getState().files[ROOT]
+    expect(f.diskRaw).toBe(TEXT[ROOT])
+    expect(f.draftRaw).toBe(`${TEXT[ROOT]}EDIT`)
+    expect(f.dirty).toBe(true)
+    expect(f.busy).toBe(false)
+  })
+
+  it('Revert drops the draft back to the disk text', async () => {
+    const el = await mount()
+    await click(pane(el))
+    expect(useConfig.getState().files[ROOT].dirty).toBe(true)
+
+    await click(button(el, /^revert$/i))
+
+    const f = useConfig.getState().files[ROOT]
+    expect(f.draftRaw).toBe(TEXT[ROOT])
+    expect(f.dirty).toBe(false)
+    expect(pane(el).textContent).toBe(TEXT[ROOT])
+  })
+
+  it('an external change re-reads CLAUDE.md as text and refreshes the pane without a remount', async () => {
+    const el = await mount()
+    const original = TEXT[ROOT]
+    TEXT[ROOT] = '# root edited elsewhere\n'
+    try {
+      await act(async () => {
+        useConfig.getState().onExternalChange(ROOT)
+        await flushAsync(4)
+      })
+      expect(useConfig.getState().files[ROOT].diskRaw).toBe('# root edited elsewhere\n')
+      expect(pane(el).textContent).toBe('# root edited elsewhere\n')
+    } finally {
+      TEXT[ROOT] = original
+    }
+  })
+})

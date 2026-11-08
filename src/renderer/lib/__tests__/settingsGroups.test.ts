@@ -7,7 +7,7 @@ describe('Model & Reasoning group', () => {
     expect(modelGroup.advanced).toBe(true)
   })
 
-  it('flags the plan as advanced so EffectiveCards/EffectiveTree hide it from the default view', () => {
+  it('flags the plan as advanced so EffectiveCards hides it from the default view', () => {
     const allKeys = new Set(SETTINGS_GROUPS.flatMap((g) => g.keys))
     const plans = planGroups(allKeys)
     const modelPlan = plans.find((p) => p.id === 'model')!

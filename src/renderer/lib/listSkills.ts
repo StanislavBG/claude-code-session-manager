@@ -23,9 +23,8 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
  * Walks a skills root dir (e.g. ~/.claude/skills), returning every skill
  * found — either a direct subdir containing SKILL.md, or one level deeper
  * under a namespace dir (e.g. <root>/user/<name>/SKILL.md) unless
- * `nested: false` (default true). The only skills-folder walker. Shared by
- * Skills.tsx (full listing) and GlobalControlsSection.tsx (count only) so
- * skill-discovery rules can't silently diverge between the two.
+ * `nested: false` (default true). The only skills-folder walker, shared by
+ * every skills listing so skill-discovery rules can't silently diverge.
  *
  * Failures (listDir `ok: false`, rejected readText) are returned in `errors`
  * alongside whatever did list; callers decide how to surface them.

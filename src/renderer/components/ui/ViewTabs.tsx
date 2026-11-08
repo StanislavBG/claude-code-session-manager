@@ -1,7 +1,6 @@
 /**
  * Generic N-way pill toggle used for Effective | Raw | Library -style view
- * switches in scope-editor tabs. Library.tsx has its own 2-way ViewSwitcher
- * that predates this; keep both until those callers converge.
+ * switches in scope-editor tabs.
  */
 
 interface Option<K extends string> {

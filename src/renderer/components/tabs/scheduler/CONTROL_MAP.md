@@ -172,8 +172,7 @@ Data: `schedule.getHistory()` once on mount (`HIST:48`); no refresh control, no 
 
 ## 10. Machine pill (SessionManagerConfig)
 
-`SCH:371` renders `<SessionManagerConfig navigate>` (`tabs/SessionManagerConfig.tsx:30`), which mounts `GlobalControlsSection`
-and a "open to Home on launch" preference toggle (`:94`, a prefs call, not scheduler API). Its scheduler-API touchpoints are
+`SCH:371` renders `<SessionManagerConfig />` (`tabs/SessionManagerConfig.tsx`): the Session pool and On disk cards. Its scheduler-API touchpoints are
 read-only display via `useSessionSlots()` (`lib/useSessionSlots.ts` → `schedule.sessionSlots()`). Not enumerated control-by-control
 here (out of scope of the nine surfaces); the interactive session-slot cap editor lives on the Home tab (`Home.tsx:642` →
 `schedule.setSessionSlots`), and the same cap is editable from the Queue CONCURRENCY KPI cell (§2).

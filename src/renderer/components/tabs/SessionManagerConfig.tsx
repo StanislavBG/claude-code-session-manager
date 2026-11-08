@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { GlobalControlsSection } from './GlobalControlsSection'
 import { useSessionSlots } from '../../lib/useSessionSlots'
 import { SlotDots } from '../ui/SlotDots'
-import type { NavKey } from '../../lib/navKey'
 
 /**
  * SessionManagerConfig — the home for GLOBAL (machine-level) configuration,
@@ -20,11 +18,7 @@ import type { NavKey } from '../../lib/navKey'
  * out of sync with whichever one the user last touched.
  */
 
-interface SessionManagerConfigProps {
-  navigate?: (k: NavKey) => void
-}
-
-export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
+export function SessionManagerConfig() {
   const slots = useSessionSlots()
   const [worktreeBase, setWorktreeBase] = useState<string | null>(null)
 
@@ -36,9 +30,6 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
 
   return (
     <div className="max-w-[760px] space-y-6">
-      {/* ── Global Controls ──────────────────────────────────────── */}
-      <GlobalControlsSection navigate={navigate} />
-
       {/* ── Session pool ─────────────────────────────────────────── */}
       <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
         <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Session pool</h2>

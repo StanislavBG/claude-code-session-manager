@@ -71,6 +71,13 @@ describe('Extensions', () => {
     expect(chips()).toEqual(['~/.claude/plugins/installed_plugins.json', '~/.claude/settings.json › enabledPlugins'])
   })
 
+  it('openPanel with a tab pre-selects that tab (Command palette / deep-link path)', async () => {
+    const chips = () => Array.from(container.querySelectorAll('[data-testid="source-chip-path"]')).map((e) => e.textContent)
+    await act(async () => { useLayout.getState().openPanel('extensions', 'mcp') }); await flush()
+    expect(chips()).toEqual(['~/.claude.json › mcpServers'])
+    expect(useLayout.getState().panelTabHint).toBeFalsy()
+  })
+
   it('pages have no Library toggle; Add… opens the catalog drawer', async () => {
     expect(btn('Library')).toBeUndefined()
     expect(btn('Installed')).toBeUndefined()

@@ -111,7 +111,7 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
         {subView === 'history' && <SchedulerHistoryView scopeCwd={scopeCwd} />}
         {subView === 'machine' && (
           <div className="h-full overflow-y-auto px-9 py-6">
-            <SessionManagerConfig navigate={navigate} />
+            <SessionManagerConfig />
           </div>
         )}
       </div>

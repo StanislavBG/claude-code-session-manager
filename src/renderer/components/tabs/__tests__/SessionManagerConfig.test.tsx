@@ -6,13 +6,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { SessionManagerConfig } from '../SessionManagerConfig'
 import { flushAsync } from '../../../testUtils/domFlush'
 
-// GlobalControlsSection pulls in a much larger IPC surface (config, homeDir,
-// skills) unrelated to the toggle under test here — stub it to keep this
-// suite scoped to the Behavior section.
-vi.mock('../GlobalControlsSection', () => ({
-  GlobalControlsSection: () => createElement('div', { 'data-testid': 'global-controls-stub' }),
-}))
-
 function installApi(prefsFile: Record<string, unknown>) {
   const readJson = vi.fn().mockResolvedValue(
     prefsFile ? { exists: true, data: prefsFile } : { exists: false },
@@ -55,6 +48,14 @@ describe('SessionManagerConfig', () => {
     await flushAsync()
     expect(el.querySelector('button[role="switch"]')).toBeNull()
     expect(el.textContent).not.toContain('Open to Home on launch')
+  })
+
+  it('renders no Global Controls summary cards (each duplicated a Home page counter)', async () => {
+    installApi({})
+    const el = mount()
+    await flushAsync()
+    expect(el.textContent).not.toContain('Global Controls')
+    expect(el.querySelectorAll('button')).toHaveLength(0)
   })
 
   it('shows the resolved worktree base in the On disk list', async () => {

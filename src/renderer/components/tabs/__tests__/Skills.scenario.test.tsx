@@ -9,7 +9,7 @@ import { useSessions } from '../../../state/sessions'
 import { useConfig } from '../../../state/config'
 import { toast } from '../../../state/toast'
 
-/** Scenario tests for the Skills page: the 3a list column and its write paths (toggle, remove). */
+/** Scenario tests for the Skills page: the 3a list column and its write paths (create, toggle, remove). */
 
 vi.mock('../../ui/MarkdownEditor', () => ({
   MarkdownEditor: (p: { value: string; theme?: string; onChange?: (v: string) => void }) =>
@@ -410,7 +410,7 @@ describe('Skills list', () => {
     expect(q(el, 'skills-new-browse-catalog')).toBeNull()
   })
 
-  it('explains what a skill is when there are none, and Create a skill → opens the catalog', async () => {
+  it('explains what a skill is when there are none, and Create a skill → starts New skill', async () => {
     installApi({ skills: [] })
     const onAdd = vi.fn()
     const el = await mount({ onAdd })
@@ -423,7 +423,10 @@ describe('Skills list', () => {
     const link = q(el, 'skills-create-link')!
     expect(link.textContent).toBe('Create a skill →')
     await click(link)
-    expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(onAdd).not.toHaveBeenCalled()
+    const input = q(el, 'skills-new-name-skills') as HTMLInputElement
+    expect(input).not.toBeNull()
+    expect(document.activeElement).toBe(input)
   })
 
   it('filters skills and commands by name or description, ignoring case', async () => {
@@ -544,5 +547,121 @@ describe('Skills detail (3a)', () => {
     await click(q(el, 'skill-view-source')!)
     expect(q(el, 'markdown-editor')).not.toBeNull()
     expect(q(el, 'skill-preview')).toBeNull()
+  })
+})
+
+describe('Skills create (+ New)', () => {
+  const PROJECT = '/work/proj'
+  const setNative = (input: HTMLInputElement, value: string) =>
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+  const typeName = async (input: HTMLInputElement, value: string) => {
+    await act(async () => {
+      setNative(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const press = async (input: HTMLElement, key: string) => {
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+      await flush()
+      await flush()
+    })
+  }
+  const pickNew = async (el: HTMLElement, id: 'skills-new-skill' | 'skills-new-command') => {
+    await click(q(el, 'skills-new')!)
+    await click(q(el, id)!)
+  }
+  const selectedName = (el: HTMLElement) =>
+    cards(el).filter((c) => q(c, 'skills-item-name')?.getAttribute('aria-current') === 'true').map(nameOf)
+
+  it('the + New menu offers New skill, New command and Browse catalog…', async () => {
+    installApi()
+    const el = await mount({ onAdd: vi.fn() })
+    await click(q(el, 'skills-new')!)
+    const labels = Array.from(q(el, 'skills-new-menu')!.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent)
+    expect(labels).toEqual(['New skill', 'New command', 'Browse catalog…'])
+  })
+
+  it('creates a skill in the user scope, selects it and focuses its Description', async () => {
+    const { api, disk } = installApi()
+    const el = await mount()
+    await pickNew(el, 'skills-new-skill')
+    const input = q(el, 'skills-new-name-skills') as HTMLInputElement
+    // Inline at the top of the Skills section: right after its header, before the first card.
+    expect(q(el, 'skills-section-skills')!.nextElementSibling).toBe(q(el, 'skills-new-row-skills'))
+    expect(document.activeElement).toBe(input)
+    await typeName(input, 'my-skill')
+    await press(input, 'Enter')
+    const path = `${SKILLS_DIR}/my-skill/SKILL.md`
+    expect(api.config.writeText).toHaveBeenCalledTimes(1)
+    expect(disk[path]).toBe(['---', 'name: my-skill', 'description: ""', '---', '', '# my-skill', ''].join('\n'))
+    expect(q(el, 'skills-new-name-skills')).toBeNull()
+    expect(selectedName(el)).toEqual(['/my-skill'])
+    expect(q(el, 'skill-detail-name')!.textContent).toContain('my-skill')
+    expect(document.activeElement).toBe(q(el, 'skill-detail-description'))
+  })
+
+  it('creates a command under the project scope root', async () => {
+    const { api, disk } = installApi({ skills: [] })
+    useSessions.setState({ tabs: [{ id: 't1', cwd: PROJECT } as never], activeTabId: 't1' })
+    const el = await mount({ scope: 'project' })
+    await pickNew(el, 'skills-new-command')
+    const input = q(el, 'skills-new-name-commands') as HTMLInputElement
+    expect(q(el, 'skills-section-commands')!.nextElementSibling).toBe(q(el, 'skills-new-row-commands'))
+    await typeName(input, 'deploy')
+    await press(input, 'Enter')
+    const path = `${PROJECT}/.claude/commands/deploy.md`
+    expect(api.config.writeText).toHaveBeenCalledWith(path, ['---', 'description: ""', '---', ''].join('\n'))
+    expect(disk[path]).toBeDefined()
+    expect(selectedName(el)).toEqual(['/deploy'])
+    expect(document.activeElement).toBe(q(el, 'skill-detail-description'))
+  })
+
+  it('rejects an invalid name inline and never writes; Escape cancels', async () => {
+    const { api } = installApi()
+    const el = await mount()
+    await pickNew(el, 'skills-new-skill')
+    const input = q(el, 'skills-new-name-skills') as HTMLInputElement
+    for (const bad of ['My Skill', '-lead', 'a'.repeat(65), 'a_b']) {
+      await typeName(input, bad)
+      await press(input, 'Enter')
+      expect(q(el, 'skills-new-error-skills')!.textContent).toMatch(/lowercase/i)
+    }
+    expect(api.config.writeText).not.toHaveBeenCalled()
+    await press(input, 'Escape')
+    expect(q(el, 'skills-new-name-skills')).toBeNull()
+    expect(api.config.writeText).not.toHaveBeenCalled()
+  })
+
+  it('rejects a name that collides with an existing item', async () => {
+    const { api } = installApi({ commands: { deploy: 'Ship it' } })
+    const el = await mount()
+    await pickNew(el, 'skills-new-skill')
+    const skillInput = q(el, 'skills-new-name-skills') as HTMLInputElement
+    await typeName(skillInput, 'skill-one')
+    await press(skillInput, 'Enter')
+    expect(q(el, 'skills-new-error-skills')!.textContent).toMatch(/already exists/i)
+    await press(skillInput, 'Escape')
+    await pickNew(el, 'skills-new-command')
+    const cmdInput = q(el, 'skills-new-name-commands') as HTMLInputElement
+    await typeName(cmdInput, 'deploy')
+    await press(cmdInput, 'Enter')
+    expect(q(el, 'skills-new-error-commands')!.textContent).toMatch(/already exists/i)
+    expect(api.config.writeText).not.toHaveBeenCalled()
+  })
+
+  it('toasts the write failure and leaves nothing selected', async () => {
+    const { api } = installApi()
+    api.config.writeText.mockResolvedValueOnce({ ok: false, error: 'EACCES: permission denied' } as never)
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    const el = await mount()
+    await pickNew(el, 'skills-new-skill')
+    const input = q(el, 'skills-new-name-skills') as HTMLInputElement
+    await typeName(input, 'my-skill')
+    await press(input, 'Enter')
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('EACCES: permission denied'))
+    expect(selectedName(el)).toEqual([])
+    expect(listed(el)).not.toContain('/my-skill')
+    expect(q(el, 'skill-detail')).toBeNull()
   })
 })

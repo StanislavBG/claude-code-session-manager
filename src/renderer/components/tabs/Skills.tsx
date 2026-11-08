@@ -72,6 +72,16 @@ async function readCommandDescriptions(
   return out
 }
 
+/** Skill folder / command file names the CLI accepts as a slash name. */
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
+const NAME_RULE = 'Use lowercase letters, digits and hyphens (max 64), starting with a letter or digit'
+
+/** Minimal starting file for a new skill (SKILL.md) or command (<name>.md). */
+const newFileText = (kind: Kind, name: string) =>
+  kind === 'skills'
+    ? ['---', `name: ${name}`, 'description: ""', '---', '', `# ${name}`, ''].join('\n')
+    : ['---', 'description: ""', '---', ''].join('\n')
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 /** List section header (3a): 11px semibold uppercase label + mono count. */
@@ -112,6 +122,13 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   // False until the first listing lands, so the empty states never flash.
   const [listed, setListed] = useState(false)
+  // Inline "+ New" name prompt: which section it is open in, its text and error.
+  const [creating, setCreating] = useState<Kind | null>(null)
+  const [newName, setNewName] = useState('')
+  const [newNameError, setNewNameError] = useState<string | null>(null)
+  // Path of a just-created item whose Description field gets focus once its editor loads.
+  const focusDescriptionFor = useRef<string | null>(null)
+  const listRootRef = useRef<HTMLDivElement>(null)
 
   const scopeRoots = useMemo(() => {
     if (!home) return null
@@ -308,6 +325,71 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
 
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Focus the Description field of a just-created item once its detail renders.
+  const selectedLoaded = !!(selectedPath && files[selectedPath])
+  useEffect(() => {
+    if (!selectedLoaded || !selectedPath || focusDescriptionFor.current !== selectedPath) return
+    const input = listRootRef.current?.querySelector<HTMLInputElement>('[data-testid="skill-detail-description"]')
+    if (!input) return
+    focusDescriptionFor.current = null
+    input.focus()
+  }, [selectedLoaded, selectedPath])
+
+  function startCreate(kind: Kind) {
+    setFilter('')
+    setNewName('')
+    setNewNameError(null)
+    setCreating(kind)
+  }
+
+  function cancelCreate() {
+    setCreating(null)
+    setNewName('')
+    setNewNameError(null)
+  }
+
+  // Validate the name, refuse to overwrite anything (listed or on disk), then
+  // write the minimal file in the active scope. config:write-text creates
+  // missing parent directories, so a new skill folder needs no separate mkdir.
+  async function createItem(kind: Kind, rawName: string) {
+    if (!bases) return
+    const name = rawName.trim()
+    if (!NAME_RE.test(name)) {
+      setNewNameError(NAME_RULE)
+      return
+    }
+    const label = kind === 'skills' ? 'skill' : 'command'
+    if (items.some((i) => i.kind === kind && i.name === name)) {
+      setNewNameError(`A ${label} named "${name}" already exists`)
+      return
+    }
+    const dir = kind === 'skills' ? `${bases.skills}/${name}` : null
+    const path = kind === 'skills' ? `${dir}/SKILL.md` : `${bases.commands}/${name}.md`
+    try {
+      const cur = await window.api.config.readText(path)
+      if (cur.exists) {
+        setNewNameError(`A ${label} named "${name}" already exists`)
+        return
+      }
+      const w = await window.api.config.writeText(path, newFileText(kind, name))
+      if (!w.ok) throw new Error(w.error ?? 'write failed')
+    } catch (e) {
+      toast.error(`Could not create ${label} "${name}": ${errorText(e)}`)
+      cancelCreate()
+      setSelectedPath(null)
+      return
+    }
+    cancelCreate()
+    const item: Item = { kind, scope, name, path, dir, disabled: false, description: '' }
+    setItems((prev) =>
+      [...prev.filter((i) => i.path !== path), item].sort((a, b) =>
+        a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skills' ? -1 : 1
+      )
+    )
+    focusDescriptionFor.current = path
+    setSelectedPath(path)
+  }
+
   if (!home) return <EmptyState title="loading…" />
   if (scope === 'project' && !cwd) {
     return (
@@ -343,13 +425,52 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   const skillErrors = errorsUnder(bases?.skills)
   const commandErrors = errorsUnder(bases?.commands)
 
-  // "Create a skill →" starts the same flow as the + New menu's New skill
-  // item. Until that flow exists it opens this scope's catalog, when there is one.
-  const startNewSkill = onAdd
+  // "Create a skill →" starts the same flow as the + New menu's New skill item.
+  const startNewSkill = () => startCreate('skills')
   // Only a caller with a catalog for this scope can browse it; Project scope has none.
-  const newMenu: ExtensionsToolbarMenuItem[] = onAdd
-    ? [{ label: 'Browse catalog…', testId: 'skills-new-browse-catalog', onSelect: onAdd }]
-    : []
+  const newMenu: ExtensionsToolbarMenuItem[] = [
+    { label: 'New skill', testId: 'skills-new-skill', onSelect: startNewSkill },
+    { label: 'New command', testId: 'skills-new-command', onSelect: () => startCreate('commands') },
+    ...(onAdd ? [{ label: 'Browse catalog…', testId: 'skills-new-browse-catalog', onSelect: onAdd }] : []),
+  ]
+
+  // Inline name prompt at the top of a section while + New is creating there.
+  const newRow = (kind: Kind) =>
+    creating !== kind ? null : (
+      <div data-testid={`skills-new-row-${kind}`} className="mx-0.5 mb-1 flex flex-col gap-1">
+        <input
+          autoFocus
+          data-testid={`skills-new-name-${kind}`}
+          aria-label={kind === 'skills' ? 'New skill name' : 'New command name'}
+          aria-invalid={newNameError ? 'true' : undefined}
+          placeholder={kind === 'skills' ? 'skill-name' : 'command-name'}
+          value={newName}
+          spellCheck={false}
+          onChange={(e) => {
+            setNewName(e.target.value)
+            setNewNameError(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              e.stopPropagation()
+              cancelCreate()
+            } else if (e.key === 'Enter') {
+              e.preventDefault()
+              void createItem(kind, newName)
+            }
+          }}
+          className={`h-7 px-2.5 bg-bg-hi border rounded-[7px] font-mono text-[12.5px] text-fg outline-none ${
+            newNameError ? 'border-red-400' : 'border-accent'
+          }`}
+        />
+        {newNameError && (
+          <div data-testid={`skills-new-error-${kind}`} role="alert" className="mx-1 text-[11px] text-red-400">
+            {newNameError}
+          </div>
+        )}
+      </div>
+    )
 
   const renderItem = (i: Item) => {
     const selected = selectedPath === i.path
@@ -455,16 +576,14 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
       >
         <span className="font-semibold text-fg">No skills yet</span>
         <span>A skill is a folder with a SKILL.md that Claude loads when a task calls for it.</span>
-        {startNewSkill && (
-          <button
-            type="button"
-            data-testid="skills-create-link"
-            onClick={() => startNewSkill()}
-            className="self-start font-semibold text-accent hover:underline"
-          >
-            Create a skill →
-          </button>
-        )}
+        <button
+          type="button"
+          data-testid="skills-create-link"
+          onClick={() => startNewSkill()}
+          className="self-start font-semibold text-accent hover:underline"
+        >
+          Create a skill →
+        </button>
       </div>
     )
   }
@@ -482,7 +601,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   } else commandsBody = <SectionNote>No slash commands</SectionNote>
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={listRootRef} className="h-full flex flex-col">
       <ExtensionsToolbar
         filter={filter}
         onFilterChange={setFilter}
@@ -497,8 +616,10 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
             sidebar={
               <div data-testid="skills-list" className="flex flex-col gap-1 px-2 py-1">
                 <SectionHeader label="Skills" count={shownSkills.length} testId="skills-section-skills" />
+                {newRow('skills')}
                 {skillsBody}
                 <SectionHeader label="Slash commands" count={shownCommands.length} testId="skills-section-commands" />
+                {newRow('commands')}
                 {commandsBody}
               </div>
             }

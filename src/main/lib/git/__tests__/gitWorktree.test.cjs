@@ -2799,3 +2799,97 @@ test('[integrateOntoRef] I-1: the lossy shape falls back with linearFallback bra
   expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });
+
+// ── Runtime-state backstop: a job branch that ADDS a gitignored file under a
+// RUNTIME_NAMESPACES folder is refused; the base stays put, the branch stays.
+function commitGitignore(lines) {
+  fs.writeFileSync(path.join(repoCwd, '.gitignore'), lines.join('\n') + '\n', 'utf8');
+  git(['add', '.gitignore'], repoCwd);
+  git(['commit', '-q', '-m', 'gitignore'], repoCwd);
+}
+
+test('[runtime-state] refuses a branch that force-adds an ignored file under scheduler/, keeps the branch', async () => {
+  commitGitignore(['session-manager-operations/scheduler/']);
+  const slug = 'rs-refuse';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  const rel = 'session-manager-operations/scheduler/epics/e1/validation/v.md';
+  fs.mkdirSync(path.dirname(path.join(worktree.dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(worktree.dir, rel), 'record\n', 'utf8');
+  fs.writeFileSync(path.join(worktree.dir, 'real-work.txt'), 'work\n', 'utf8');
+  git(['add', '-f', rel, 'real-work.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit with runtime state'], worktree.dir);
+
+  const baseBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const baseBefore = git(['rev-parse', baseBranch], repoCwd).trim();
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('other');
+  expect(outcome.reason).toMatch(/^refusing to integrate: branch adds app runtime state \(never committed\): /);
+  expect(outcome.runtimeStatePaths).toEqual([rel]);
+  expect(outcome.baseHeadSha).toBe(baseBefore);
+  expect(git(['rev-parse', baseBranch], repoCwd).trim()).toBe(baseBefore);
+  const names = git(['log', '--name-only', '--format=', baseBranch], repoCwd);
+  expect(names.split('\n').some((l) => l.startsWith('session-manager-operations/scheduler/'))).toBe(false);
+  expect(git(['branch', '--list', worktree.branch], repoCwd).trim()).not.toBe('');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+  expect(git(['branch', '--list', worktree.branch], repoCwd).trim()).not.toBe('');
+});
+
+test('[runtime-state] ref-landing path refuses the same branch without moving the base ref', async () => {
+  commitGitignore(['session-manager-operations/scheduler/']);
+  const slug = 'rs-refuse-ref';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  const rel = 'session-manager-operations/scheduler/epics/e1/validation/v.md';
+  fs.mkdirSync(path.dirname(path.join(worktree.dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(worktree.dir, rel), 'record\n', 'utf8');
+  git(['add', '-f', rel], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit with runtime state'], worktree.dir);
+
+  const baseBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const baseBefore = git(['rev-parse', baseBranch], repoCwd).trim();
+  git(['checkout', '-q', '-b', 'human/side'], repoCwd);
+  const outcome = await gitWorktree.integrateJobBranch({
+    cwd: repoCwd, branch: worktree.branch, slug, baseBranch, allowRefLanding: true,
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.runtimeStatePaths).toEqual([rel]);
+  expect(git(['rev-parse', baseBranch], repoCwd).trim()).toBe(baseBefore);
+  expect(git(['branch', '--list', worktree.branch], repoCwd).trim()).not.toBe('');
+  git(['checkout', '-q', baseBranch], repoCwd);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[runtime-state] a branch adding under reviews/ (not a runtime namespace) integrates', async () => {
+  const slug = 'rs-reviews';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  const rel = 'session-manager-operations/reviews/validation/e1/v.md';
+  fs.mkdirSync(path.dirname(path.join(worktree.dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(worktree.dir, rel), 'record\n', 'utf8');
+  git(['add', rel], worktree.dir);
+  git(['commit', '-q', '-m', 'validation record'], worktree.dir);
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[runtime-state] modifying a tracked, un-ignored scheduler/README.md integrates', async () => {
+  const readme = 'session-manager-operations/scheduler/README.md';
+  fs.mkdirSync(path.join(repoCwd, 'session-manager-operations/scheduler'), { recursive: true });
+  fs.writeFileSync(path.join(repoCwd, readme), 'v1\n', 'utf8');
+  fs.writeFileSync(path.join(repoCwd, '.gitignore'),
+    'session-manager-operations/scheduler/*\n!session-manager-operations/scheduler/README.md\n', 'utf8');
+  git(['add', '.gitignore', readme], repoCwd);
+  git(['commit', '-q', '-m', 'tracked scheduler readme'], repoCwd);
+  const slug = 'rs-readme';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, readme), 'v2\n', 'utf8');
+  git(['add', readme], worktree.dir);
+  git(['commit', '-q', '-m', 'edit readme'], worktree.dir);
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});

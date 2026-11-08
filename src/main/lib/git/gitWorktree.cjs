@@ -1511,6 +1511,11 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     if (refMergeBase && refMergeBase === refBranchHead) {
       return { ok: true, integrated: false, reason: 'branch has no new commits' };
     }
+    const refRuntimeAdds = await findRuntimeStateAdds({ cwd, branch, mergeBase: refMergeBase || expectedBranch });
+    if (refRuntimeAdds.length) {
+      const refusal = await runtimeStateRefusal(cwd, refRuntimeAdds);
+      return { ...refusal, baseHeadSha: await tryResolveCommit(cwd, `${expectedBranch}^{commit}`) };
+    }
     // Carried-WIP shortcut, path membership only: `cwd` is on `actualBranch`,
     // not `expectedBranch`, so there is no trustworthy working tree here to
     // content-verify against (isCarriedWipOnly's approach, used by the
@@ -1586,6 +1591,9 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
   if (await isCarriedWipOnly({ cwd, branch, carriedPaths })) {
     return { ok: true, integrated: false, reason: 'carried-wip-only' };
   }
+
+  const runtimeAdds = await findRuntimeStateAdds({ cwd, branch, mergeBase });
+  if (runtimeAdds.length) return runtimeStateRefusal(cwd, runtimeAdds);
 
   const clobber = await findIgnoredLivePaths({ cwd, branch, mergeBase });
   if (clobber.length) {
@@ -1800,6 +1808,44 @@ async function findIgnoredLivePaths({ cwd, branch, mergeBase }) {
     try { await fsp.lstat(path.join(cwd, p)); live.push(p); } catch { /* absent — safe */ }
   }
   return live;
+}
+
+/**
+ * Paths the branch ADDED since the merge base under an app runtime folder
+ * (`session-manager-operations/<ns>/`, ns from RUNTIME_NAMESPACES — state
+ * that must never be committed) AND that are git-ignored in `cwd`, i.e. a
+ * force-added runtime file. Modified/deleted paths and deliberately
+ * un-ignored ones are never returned. A diff error returns [].
+ * @param {{cwd: string, branch: string, mergeBase: string}} a
+ * @returns {Promise<string[]>}
+ */
+async function findRuntimeStateAdds({ cwd, branch, mergeBase }) {
+  let added;
+  try {
+    const pathspecs = RUNTIME_NAMESPACES.map((ns) => `:(top)${OPS_ROOT_DIR}/${ns}/`);
+    const out = await execGit(
+      ['diff', '--name-only', '-z', '--diff-filter=A', `${mergeBase || 'HEAD'}..${branch}`, '--', ...pathspecs],
+      { cwd, timeout: 15_000 },
+    );
+    added = out.split('\0').filter(Boolean);
+  } catch {
+    return [];
+  }
+  return filterIgnoredPaths({ cwd, paths: added });
+}
+
+/**
+ * Integration refusal for a branch that adds app runtime state. Base branch
+ * is untouched and the job branch is kept for recovery.
+ */
+async function runtimeStateRefusal(cwd, paths) {
+  return {
+    ok: false,
+    reason: `refusing to integrate: branch adds app runtime state (never committed): ${paths.join(', ')}`,
+    failureKind: 'other',
+    runtimeStatePaths: paths,
+    baseHeadSha: await readHeadSha(cwd),
+  };
 }
 
 /**
@@ -3077,6 +3123,7 @@ async function pinStrandedHead({ cwd, dir }) {
 }
 
 module.exports = {
+  findRuntimeStateAdds,
   replayBranchOnto,
   reconcileWorktreeHead,
   pinUnlandedWorktreeCommits,

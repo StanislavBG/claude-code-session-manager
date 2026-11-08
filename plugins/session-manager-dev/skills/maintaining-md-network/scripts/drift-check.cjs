@@ -6,7 +6,7 @@
  *   node drift-check.cjs [--root <dir>] [--map <path>] [--file <path>]...
  *                        [--exclude <prefix>]... [--checks links,paths,limits,contents] [--strict-paths]
  *
- * Prints one JSON object { root, map, notes, checkedFiles, findings, counts } to stdout.
+ * Prints one JSON object { root, map, notes, findings, counts, checkedFiles } to stdout.
  * Exit 0 = no findings, 1 = findings, 2 = usage error / missing root.
  */
 
@@ -377,9 +377,12 @@ function runDriftCheck(options) {
   findings.sort((x, y) => (x.file < y.file ? -1 : x.file > y.file ? 1 : (x.line || 0) - (y.line || 0)));
   const counts = {};
   for (const f of findings) counts[f.kind] = (counts[f.kind] || 0) + 1;
-  return { root: toPosix(root), map, notes, checkedFiles: docs, findings, counts };
+  // checkedFiles last: a long file list must not push findings and counts out of a truncated view.
+  return { root: toPosix(root), map, notes, findings, counts, checkedFiles: docs };
 }
 
+// Set process.exitCode, never process.exit(): stdout/stderr to a pipe are async on POSIX, and
+// process.exit() drops whatever has not drained (a report cut at the 64 KiB pipe buffer).
 function main() {
   let result;
   try {
@@ -387,12 +390,13 @@ function main() {
   } catch (err) {
     if (err instanceof UsageError) {
       process.stderr.write(`drift-check: ${err.message}\n`);
-      process.exit(2);
+      process.exitCode = 2;
+      return;
     }
     throw err;
   }
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-  process.exit(result.findings.length ? 1 : 0);
+  process.exitCode = result.findings.length ? 1 : 0;
 }
 
 module.exports = { runDriftCheck, parseArgs };

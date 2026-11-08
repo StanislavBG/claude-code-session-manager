@@ -289,3 +289,22 @@ test('missing link to a gitignored target is silent; non-ignored missing link st
     expect(broken.map((f) => f.target)).toEqual(['docs/gone.md']);
   }
 });
+
+// A real OS pipe (64 KiB buffer) is required: spawnSync's own stdio is a
+// socketpair with a larger buffer and does not cut the report. r.status is
+// cat's exit code, so it is not asserted. --checks links: a 1,000-line README
+// would also raise no-contents-list.
+test('report survives a shell pipe past 64 KiB', () => {
+  const dir = repo({ 'README.md': Array.from({ length: 1000 }, (_, i) => `[x](missing-${i}.md)`).join('\n') + '\n' });
+  const r = spawnSync('sh', ['-c', '"$0" "$1" --root "$2" --checks links | cat', process.execPath, SCRIPT, dir], {
+    encoding: 'utf8',
+    maxBuffer: 1 << 26,
+  });
+  expect(r.stdout.length).toBeGreaterThan(65536);
+  expect(JSON.parse(r.stdout).findings.length).toBe(1000);
+});
+
+test('checkedFiles is the last key', () => {
+  const { json } = run(repo({ 'CLAUDE.md': '# Hi\n' }));
+  expect(Object.keys(json)).toEqual(['root', 'map', 'notes', 'findings', 'counts', 'checkedFiles']);
+});

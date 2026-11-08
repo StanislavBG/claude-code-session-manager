@@ -17,15 +17,17 @@ start on their own — Claude notices your request matches what a skill is for, 
 you asking. Others only run when you type a slash command, like <code>/develop</code>.</p>
 
 <p>The Skills tab lists what's already on your machine, split into two groups: Skills and Slash
-Commands. Pick a skill and you can read it, and turn it off with a <strong>Toggle</strong> without
-deleting it — handy if a skill keeps firing when you don't want it to. Removing a skill moves its
+Commands. Pick a skill and you can read it, edit its description and body, and press
+<strong>Save</strong> to write the change back to its file. You can also turn it off with a
+<strong>Toggle</strong> without deleting it — handy if a skill keeps firing when you don't want it to. Removing a skill moves its
 folder to the trash, so a change of mind later is still recoverable.</p>
 
 <p>Skills and commands that came with a plugin appear in their own <strong>From plugins</strong>
 group. You can open and read them, but not edit them here — they belong to the plugin.</p>
 
-<p>To add one, press <strong>Add…</strong>. A drawer opens with a searchable catalog of skills
-you can install.</p>
+<p>To add one, press <strong>+ New</strong>. Choose <strong>New skill</strong> or
+<strong>New command</strong> to name a blank one and write it yourself, or <strong>Browse
+catalog…</strong> to open a searchable catalog of skills you can install.</p>
 
 <aside class="manual-analogy"><strong>Think of it like this:</strong> a skill is a training manual
 one of your agents keeps on a shelf. Some manuals they reach for automatically, the moment the job
@@ -46,7 +48,7 @@ kind: Agents for agents, Settings ▸ Hooks for hooks.</p>
 
 <p>You can look inside a plugin, but you can't edit its contents from here. That keeps one clear
 place to edit a skill, instead of two competing editors for the same file. To add a new plugin,
-press <strong>Add…</strong>. Each row in the catalog shows the plugin's name, a description, and
+press <strong>+ Add plugin</strong>. Each row in the catalog shows the plugin's name, a description, and
 an <strong>Install</strong> button that runs a real install for you, in the
 background, with progress shown right in the row.</p>
 
@@ -71,7 +73,9 @@ background, with progress shown right in the row.</p>
 <p>MCP stands for a protocol Claude Code uses to reach tools that live outside your project — a
 database, a ticket tracker, another app entirely. The MCP Servers tab lists every server you've
 registered for your whole machine. A server meant for one project only goes on that project's
-Claude config page, in its MCP tab.</p>
+Claude config page, in its MCP tab. To add one, press <strong>+ Add server</strong>: choose
+<strong>New server</strong> to fill it in yourself, or <strong>Browse catalog…</strong> to pick
+one from the catalog.</p>
 
 <p>Adding a server to the list only proves the entry is well-formed. It says nothing about
 whether Claude Code can actually reach it. A misspelled command, a service that needs you to sign
@@ -134,8 +138,8 @@ what's there, add to it safely, and prove it works before you rely on it.</p>
     <li>Extensions holds Skills, MCP Servers, and Plugins; Hooks is a tab inside Settings.</li>
     <li>Skills are packaged know-how — some load themselves, some you type as a slash
     command.</li>
-    <li>Plugins bundle several abilities together; you can switch one off, and Add… is where you
-    install a new one.</li>
+    <li>Plugins bundle several abilities together; you can switch one off, and + Add plugin is
+    where you install a new one.</li>
     <li>Test an MCP server's connections, and test-fire a hook, before you trust either one to
     work.</li>
     <li>Only install skills, plugins, MCP servers, and hooks from sources you trust — they all run

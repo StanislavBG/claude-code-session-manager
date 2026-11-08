@@ -483,9 +483,27 @@ test('setMacroProject on a built-in keeps the wildcard behaviour', async () => {
 test('real BUILTIN_MACROS seed as expected', async () => {
   const o = { filePath, listPersonas: async () => [] };
   const listed = await lib.listMacros(o);
-  expect(listed.map((m) => m.id).sort()).toEqual(['builtin-competitor-matrix', 'builtin-demo-video', 'builtin-project-home', 'builtin-review-md-network']);
+  expect(listed.map((m) => m.id).sort()).toEqual(['builtin-competitor-matrix', 'builtin-cpu-audit', 'builtin-demo-video', 'builtin-project-home', 'builtin-review-md-network']);
   const projectHome = listed.find((m) => m.id === 'builtin-project-home');
   expect(projectHome).toMatchObject({ label: 'Project Home', agentName: 'project-home-builder', tag: 'project-home-builder', surface: 'project-home' });
+});
+
+test('builtin-cpu-audit retires the custom cpu-audit-fixes-8bd5d1 copy: one CPU audit button, shown everywhere', async () => {
+  const stamp = '2026-11-08T02:34:24.206Z';
+  const inputs = [
+    { name: 'scope', label: 'Scope', default: 'the whole project', required: true },
+    { name: 'scenario', label: 'Run scenario', default: 'idle, then its typical everyday load', required: true },
+  ];
+  fs.writeFileSync(filePath, JSON.stringify({ macros: [{
+    id: 'cpu-audit-fixes-8bd5d1', label: 'CPU audit & fixes', agentName: 'architect', tag: 'feature',
+    prompt: 'Audit CPU. Scope: {{scope}}. Scenario: {{scenario}}.', projects: ['/home/u/proj'],
+    surface: 'project-home', createdAt: stamp, updatedAt: stamp, inputs,
+  }] }));
+  const listed = await lib.listMacros({ filePath, listPersonas: async () => [] });
+  const cpu = listed.find((m) => m.id === 'builtin-cpu-audit');
+  expect(cpu).toMatchObject({ builtin: true, projects: ['*'], inputs });
+  expect(listed.find((m) => m.id === 'cpu-audit-fixes-8bd5d1')).toBeUndefined();
+  expect(listed.filter((m) => m.label === 'CPU audit & fixes')).toHaveLength(1);
 });
 
 // ── inputs ──────────────────────────────────────────────────────────────────

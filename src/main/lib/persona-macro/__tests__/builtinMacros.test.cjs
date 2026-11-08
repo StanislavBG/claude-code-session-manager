@@ -231,6 +231,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
 test('builtin-competitor-matrix is a v1 project-home background job run by competitive-analyst', () => {
   expect(BUILTIN_MACROS.map((m) => m.id)).toEqual([
     'builtin-project-home', 'builtin-demo-video', 'builtin-review-md-network', 'builtin-competitor-matrix',
+    'builtin-cpu-audit',
   ]);
   const c = BUILTIN_MACROS.find((m) => m.id === 'builtin-competitor-matrix');
   expect(Object.isFrozen(c)).toBe(true);
@@ -256,4 +257,41 @@ test('builtin-competitor-matrix is a v1 project-home background job run by compe
   const { MacroSchema } = require('../macroLibrary.cjs');
   const stamp = '2026-01-01T00:00:00.000Z';
   expect(MacroSchema.safeParse({ ...c, builtin: true, createdAt: stamp, updatedAt: stamp }).success).toBe(true);
+});
+
+test('builtin-cpu-audit is a job-less project-home architect macro with scope + scenario inputs', () => {
+  const crypto = require('node:crypto');
+  const { MacroSchema, renderMacroPrompt } = require('../macroLibrary.cjs');
+  const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-cpu-audit');
+  expect(b).toBeTruthy();
+  expect(Object.isFrozen(b)).toBe(true);
+  expect(Object.isFrozen(b.inputs)).toBe(true);
+  for (const i of b.inputs) expect(Object.isFrozen(i)).toBe(true);
+  expect(Object.isFrozen(b.supersedes)).toBe(true);
+  expect(Object.isFrozen(b.priorPrompts)).toBe(true);
+  const { prompt, ...rest } = b;
+  expect(rest).toEqual({
+    id: 'builtin-cpu-audit', label: 'CPU audit & fixes', agentName: 'architect', tag: 'feature',
+    surface: 'project-home', projects: ['*'], builtinVersion: 1, priorPrompts: [],
+    supersedes: ['cpu-audit-fixes-8bd5d1'],
+    inputs: [
+      { name: 'scope', label: 'Scope', default: 'the whole project', required: true },
+      { name: 'scenario', label: 'Run scenario', default: 'idle, then its typical everyday load', required: true },
+    ],
+  });
+  expect('job' in b).toBe(false);
+  expect(b.builtinVersion).toBe(b.priorPrompts.length + 1);
+
+  expect(crypto.createHash('sha256').update(prompt, 'utf8').digest('hex'))
+    .toBe('7e9ed14bb613ed9d290b28d3155bcd02c57bb76811275869b319a5978afa1427');
+  expect((prompt.match(/\n/g) || []).length).toBe(12);
+  for (const t of ['{{scope}}', '{{scenario}}', '/develop']) expect(prompt).toContain(t);
+
+  const stamp = '2026-01-01T00:00:00.000Z';
+  expect(MacroSchema.safeParse({ ...b, builtin: true, createdAt: stamp, updatedAt: stamp }).success).toBe(true);
+  const r = renderMacroPrompt(prompt, b.inputs, {});
+  expect(r.ok).toBe(true);
+  expect(r.prompt).toContain('Scope: the whole project.');
+  expect(r.prompt).toContain('Run scenario to measure: idle, then its typical everyday load.');
+  expect(r.prompt).not.toContain('{{');
 });

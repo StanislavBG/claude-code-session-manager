@@ -440,7 +440,7 @@ test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the r
 
 // ---------- PRD 1133: reaper must prove integration before 'completed' ----------
 
-test('reapDeadRunningJobs: a worktree job shaped like PRD 1118 (branch un-integrated, landedCommit absent) comes out needs_review, naming the branch, and never merges it', async () => {
+test('reapDeadRunningJobs: a worktree job shaped like PRD 1118 (branch un-integrated, landedCommit absent) with no PASS line in its run log comes out needs_review, naming the branch, and never merges it', async () => {
   const projectCwd = path.join(tmpHome, 'i-project-1118-shape');
   initRepo(projectCwd);
   registerActiveProject(projectCwd);
@@ -490,7 +490,7 @@ test('reapDeadRunningJobs: a worktree job shaped like PRD 1118 (branch un-integr
   assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'guardCwd HEAD must not have moved — no merge was performed');
 });
 
-test('reapDeadRunningJobs: a dead successful job with a commit on a detached worktree HEAD parks instead of completing', async () => {
+test('reapDeadRunningJobs: a dead successful job with a commit on a detached worktree HEAD and no PASS line in its run log parks instead of completing', async () => {
   const projectCwd = path.join(tmpHome, 'l-project-detached-head');
   initRepo(projectCwd);
   registerActiveProject(projectCwd);
@@ -526,7 +526,7 @@ test('reapDeadRunningJobs: a dead successful job with a commit on a detached wor
   assert.equal(row.status, 'needs_review');
   assert.equal(row.verifierVerdict, 'reaped_without_integration');
   assert.equal(row.landedCommit, undefined);
-  assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'the reaper only parks, never lands');
+  assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'with no PASS line the reaper only parks, never lands');
 });
 
 function setupPinnedJob(name, { pinOnBase = false, startedAtMs = Date.now() - 60_000 } = {}) {

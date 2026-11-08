@@ -140,3 +140,39 @@ test('PASS (no error) + transcript evidence + non-git cwd → clean, not pass_no
     } finally { rmdir(nonGitCwd); }
   } finally { rmdir(tmp); }
 });
+
+// ─── (5) run_commit_not_landed reason names HEAD ancestry, not reachability ──
+// Bilko 399e5c5e existed in the repo but never landed on HEAD; the old
+// "not reachable from the repo" wording sent the diagnosis the wrong way.
+
+test('run_commit_not_landed reason says the commit exists but never landed on the checkout HEAD', async () => {
+  const tmp = makeTmpDir();
+  const repo = makeTmpGitRepo();
+  try {
+    execFileSync('git', ['checkout', '-q', '-b', 'side'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'side'], { cwd: repo });
+    const sideSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    execFileSync('git', ['checkout', '-q', '-'], { cwd: repo });
+    const slug = '2906-some-original-prd';
+    writeLog(tmp, slug, [
+      { type: 'user', tool_use_result: { gitOperation: { commit: { sha: sideSha, kind: 'committed' } } } },
+      { type: 'result', subtype: 'success', result: 'Done.\nSCHEDULER_VERDICT: PASS' },
+    ]);
+    const prdPath = writePrd(tmp, slug, 'prose only');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: repo },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'run_commit_not_landed', `got ${verdict.verdict}: ${verdict.reason}`);
+    assert.ok(
+      verdict.reason.includes(
+        "SCHEDULER_VERDICT: PASS but the transcript reports a commit that exists in the repo but never landed on the checkout's HEAD: "
+        + sideSha,
+      ),
+      `unexpected reason: ${verdict.reason}`,
+    );
+  } finally { rmdir(tmp); rmdir(repo); }
+});

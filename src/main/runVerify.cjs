@@ -809,8 +809,10 @@ async function verifyRun({
     // bare PASS with no commit from one is still a strong silent-failure
     // signal and stays covered by this check.
     const isFixPlanJob = /^\d+-fix-/.test(queueEntry?.slug || '');
-    // A transcript-reported commit that is not reachable from the repo was
-    // dropped (detached HEAD, off-branch); no no-commit exemption may excuse it.
+    // A transcript-reported commit that exists in the repo but never landed
+    // on the checkout's HEAD (on no ref, for -merge-main slugs) was dropped
+    // (detached HEAD, off-branch, rewritten base); no no-commit exemption may
+    // excuse it.
     let unlandedTranscriptShas = [];
     if (sentinel === 'pass' && !commitEvidence && cwdIsGitRepo) {
       unlandedTranscriptShas = (transcriptCommitShas || [])
@@ -822,7 +824,10 @@ async function verifyRun({
     if (unlandedTranscriptShas.length > 0) {
       issues.push({
         verdict: 'run_commit_not_landed',
-        reason: 'SCHEDULER_VERDICT: PASS but the transcript reports a commit that is not reachable from the repo: '
+        reason: 'SCHEDULER_VERDICT: PASS but the transcript reports a commit that '
+          + (isMergeMainSlug(queueEntry?.slug)
+            ? 'is on no ref: '
+            : "exists in the repo but never landed on the checkout's HEAD: ")
           + unlandedTranscriptShas.join(', '),
         priority: 1,
         downgradeTo: 'needs_review',

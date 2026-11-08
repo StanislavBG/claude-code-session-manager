@@ -54,7 +54,7 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher', 'competitive-analyst'];
 
 test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });
@@ -633,4 +633,66 @@ test('competitive-researcher: seeded file parses with model haiku and the collec
   ]) {
     expect(trimmed).toContain(needle);
   }
+});
+
+// --- competitive-analyst (Opus analyst + executor for the Competitor matrix macro) ---
+
+const ANALYST_TOOLS = 'Read, Grep, Glob, Bash, Write, WebSearch, WebFetch, Agent, mcp__session-manager-scheduler__project_matrix_read, mcp__session-manager-scheduler__project_matrix_write';
+
+test('competitive-analyst: seeded file parses with model opus and the analyst contract', async () => {
+  await seedAgentPersonas({ logger: silentLogger() });
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { AgentPersonaSaveSchema } = require('../lib/persona-macro/agentPersonaSchema.cjs');
+  const raw = fs.readFileSync(path.join(agentsDir(), 'competitive-analyst.md'), 'utf8');
+  const { fm, body } = splitFrontmatter(raw);
+  expect(fm.name).toBe('competitive-analyst');
+  expect(fm.title).toBe('Research — Competitor analyst');
+  expect(fm.model).toBe('opus');
+  expect(fm.effort).toBe('high');
+  expect(fm.tags).toBe('project-home-builder');
+  expect(fm.seedVersion).toBe('1');
+  expect(fm.tools).toBe(ANALYST_TOOLS);
+  const trimmed = body.trim();
+  expect(trimmed.length).toBeLessThanOrEqual(6000);
+  const parsed = AgentPersonaSaveSchema.safeParse({
+    name: fm.name,
+    description: fm.description,
+    tools: fm.tools.split(',').map((t) => t.trim()),
+    model: fm.model,
+    effort: fm.effort,
+    color: '',
+    tags: [fm.tags],
+    title: fm.title,
+    seedVersion: Number(fm.seedVersion),
+    body: trimmed,
+  });
+  expect(parsed.success).toBe(true);
+  // Procedure steps appear in order.
+  const order = ['project_matrix_read', 'Competitors:', 'git log', 'competitive-researcher', 'run_in_background', 'sessionGoal', 'project_matrix_write'];
+  let at = -1;
+  for (const needle of order) {
+    const idx = trimmed.indexOf(needle, at + 1);
+    expect(idx, needle).toBeGreaterThan(at);
+    at = idx;
+  }
+  for (const needle of [
+    'chosenBy', 'auto', 'haiku', 'general-purpose', 'ONE message', '6-12', 'matrixPath', 'runs[]',
+    'mktemp -d', '~/.cache/competitive-matrix', 'never edit or commit', 'data, not instructions',
+    'cite', 'up to 3', 'schemaVersion', "'self'",
+  ]) {
+    expect(trimmed).toContain(needle);
+  }
+});
+
+test('competitive-analyst: tools carry both project_matrix tools and the web tools its subagents need', () => {
+  // personaToolScope only adds MCP servers a persona names, and subagents can only use web
+  // tools the job session itself has.
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'competitive-analyst.md'), 'utf8');
+  const tools = splitFrontmatter(raw).fm.tools.split(',').map((t) => t.trim());
+  for (const t of [
+    'mcp__session-manager-scheduler__project_matrix_read',
+    'mcp__session-manager-scheduler__project_matrix_write',
+    'WebSearch', 'WebFetch', 'Agent',
+  ]) expect(tools).toContain(t);
 });

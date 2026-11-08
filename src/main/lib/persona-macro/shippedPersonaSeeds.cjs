@@ -528,6 +528,20 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       },
     },
   ],
+  "competitive-analyst": [
+    {
+      commit: "seed-v1",
+      bodySha256: "8e72237e9b743bb8c26cc701d3ebd6c65212ebf777de37f9eb5f40aeaf224fae",
+      fm: {
+        description: "The Opus analyst and executor of the Competitor matrix macro — warm-starts from the saved matrix, settles 1..4 competitors, inventories this project's real features, fans out Haiku competitive-researcher subagents, then merges everything into a grouped feature matrix with sentiment and prioritized recommendations and saves it once with project_matrix_write.",
+        tools: "Read, Grep, Glob, Bash, Write, WebSearch, WebFetch, Agent, mcp__session-manager-scheduler__project_matrix_read, mcp__session-manager-scheduler__project_matrix_write",
+        title: "Research — Competitor analyst",
+        model: "opus",
+        effort: "high",
+        tags: "project-home-builder",
+      },
+    },
+  ],
 });
 
 module.exports = { SHIPPED_PERSONA_SEEDS };

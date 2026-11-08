@@ -188,6 +188,7 @@ replaces that entry.
 | `project_video_write` | `POST /admin/project-home/videos/write` | `videos/<videoId>/` |
 | `project_home_write` (alias) | `POST /admin/project-home/write` | knowledge/overview/ |
 | `project_demo_video_write` (alias) | `POST /admin/project-home/demo-video/write` | new `videos/vid-<id>/`, kind `project-demo`, length read from `sm-demo-duration` |
+| `project_matrix_write` | `POST /admin/project-home/matrix/write` | `matrix/matrix.json` (+ schema, history, `knowledge/competitive-matrix/`) — see Competitor matrix |
 
 Burrow (and any older caller) keeps using `/admin/project-home/demo-video/write`; the alias
 is permanent, not a shim to remove. Limits: a page is <= 1 MB; a video is <= 2 MB per
@@ -217,3 +218,26 @@ kind folder (symlink escape).
 
 The sections before "Who triggers generation" describe the legacy single-file layout;
 where they differ, this section wins.
+
+## Competitor matrix
+
+```
+project-pages/
+  matrix/matrix.json             the saved matrix: self + 1..4 competitors, feature groups, features, sources, runs[]
+  matrix/matrix.schema.json      its JSON Schema, rewritten with every save
+  matrix/history/<stamp>.json    previous valid matrix.json per save, newest 50 kept
+  knowledge/competitive-matrix/  read-only HTML snapshot (matrixHtml.cjs); reserved page id in the Pages library
+```
+
+Read: `project_matrix_read` -> `POST /admin/project-home/matrix/read` (matrix or null, plus the
+schema). Write: `project_matrix_write` -> `POST /admin/project-home/matrix/write` ->
+`writeMatrix` (`lib/project-pages/matrixStore.cjs`): validate, archive, write, refresh the
+snapshot. Every write goes through writer `project-home`. Model + validation:
+`lib/project-pages/competitiveMatrix.cjs`; the renderer reads it over `project-pages:matrix`.
+
+Macro flow: Project Home ▸ Tools ▸ Competitor matrix (`builtin-competitor-matrix`) queues a
+background job run as `competitive-analyst` (Opus), which fans out `competitive-researcher`
+subagents (Haiku) and saves with one `project_matrix_write`. The `Competitors:` line names up to
+4 `;`-separated slots (a name or `auto`). Every run warm-starts from the saved matrix
+(`project_matrix_read`), keeping its ids. A missing feature offers Start session; Start all and
+Add all as proposed act on every missing feature.

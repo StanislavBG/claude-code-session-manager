@@ -65,6 +65,19 @@ describe('FINISH_PROTOCOL', () => {
     expect(iSec).toBeLessThan(iCommit)
   })
 
+  it('pins the /code-review level to medium and bans level-less / heavy levels', () => {
+    // A level-less /code-review takes the session effort; at max it fans out
+    // 10+ finder agents and outlives the job budget (2026-11-07/08 kills).
+    expect(FINISH_PROTOCOL).toContain('/code-review medium --fix')
+    expect(FINISH_PROTOCOL).not.toMatch(/\/code-review --fix/)
+    const ban = (FINISH_PROTOCOL as string).split("\n").find((l: string) => /Never call \/code-review/.test(l)) ?? ''
+    expect(ban).toMatch(/no level/)
+    expect(ban).toMatch(/xhigh/)
+    expect(ban).toMatch(/max/)
+    expect(ban).toMatch(/ultra/)
+    expect(FINISH_PROTOCOL).toMatch(/review your own diff with the same care/)
+  })
+
   it('reinforces the no-bonus-work bound', () => {
     expect(FINISH_PROTOCOL).toMatch(/beyond the acceptance criteria/i)
   })

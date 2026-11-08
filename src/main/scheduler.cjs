@@ -299,7 +299,10 @@ const BASH_MAX_TIMEOUT_MS = 900_000; // 15 min — must stay below IDLE_OUTPUT_K
 // Plain words on purpose: short sentences, one rule each, rule first, then
 // "Why:". Tests pin the load-bearing tokens (SYNCHRONOUSLY, background Bash,
 // Monitor, TaskOutput, ScheduleWakeup, "no later turn", `timeout <n>`,
-// `git add <path>`, the SCHEDULER_VERDICT lines) — keep them exact. No line
+// `git add <path>`, the SCHEDULER_VERDICT lines, `/code-review medium --fix`
+// and the "Never call /code-review with no level, or at xhigh, max or ultra"
+// ban — PRD 2887: a level-less call took the session's max effort and outlived
+// the job budget) — keep them exact. No line
 // of this text may START with SCHEDULER_VERDICT: or FOREIGN_WIP_PATHS: —
 // runVerify's scanners are line-anchored.
 function buildFinishHead(verifyStepNum) {
@@ -331,8 +334,13 @@ It covers every test, typecheck, lint and build command, while you build and whi
 `;
 }
 
-const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\` on your changes. Apply the fixes it finds,
-   correctness first. If you think a finding is wrong, say why in your final report.
+const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review medium --fix\` on your changes.
+   Always pass the level word medium.
+   Never call /code-review with no level, or at xhigh, max or ultra, in this run.
+   Why: with no level the skill uses this run's effort, and at max it starts 10 or
+   more review agents and runs 30+ minutes, longer than the job budget. The run is
+   killed before your verdict line.
+   Apply the fixes it finds, correctness first. If you think a finding is wrong, say why in your final report.
    Do not skip a finding silently. If \`/code-review\` is not available here,
    review your own diff with the same care.
 2. SECURITY REVIEW — run \`/security-review\` and fix every finding, or explain

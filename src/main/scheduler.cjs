@@ -9854,6 +9854,125 @@ async function runGateShadow(job) {
   return gateShadow;
 }
 
+/**
+ * Finish-review budget-kill heal: the one rung that may complete a
+ * budget_exceeded park (reviewLadder.isFinishReviewKillHealEligible). The kill
+ * hit inside the finish-protocol review after the run's commit landed, so
+ * only the review and the verdict line are missing. Re-runs the PRD's own
+ * gate — same resolveGate + runGateSequence the shadow gate uses — in a
+ * scratch detached worktree at the main checkout's HEAD (contains the landed
+ * commit, untouched by foreign WIP in the main tree). Never heals on
+ * transcript evidence alone.
+ *
+ * One attempt: finishReviewHealAttemptedAt is stamped whatever the outcome
+ * (green, red, unrunnable, not integrated); only a `busy` gate slot returns
+ * without stamping, since nothing was attempted. Green → completed with a
+ * reason naming the skipped review; anything else leaves the row
+ * needs_review with its existing reason.
+ */
+async function runFinishReviewKillHeal(job) {
+  if (!reviewLadder.isFinishReviewKillHealEligible(job) || !job.cwd) return null;
+  const cwd = job.cwd;
+  const landed7 = job.landedCommit.slice(0, 7);
+  let gate = { source: 'none', sequence: [] };
+  let outcome = { status: 'unavailable', reason: 'not-run', results: [] };
+  let evidenceOk = false;
+  let integratedOk = false;
+  let setupOk = false;
+  const head = await gitTreeGuard.gitHead(cwd);
+  const startedAtMs = typeof job.startedAt === 'string' ? Date.parse(job.startedAt) : NaN;
+  if (Number.isFinite(startedAtMs)) {
+    try { evidenceOk = await resolveLandedCommitEvidence(cwd, job.landedCommit, job.startedAt); } catch { evidenceOk = false; }
+  }
+  if (head) {
+    try {
+      await execGitAt(cwd, ['merge-base', '--is-ancestor', job.landedCommit, head], { timeout: 10_000 });
+      integratedOk = true;
+    } catch { integratedOk = false; }
+  }
+  let prdText = null;
+  try {
+    const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
+    prdText = fs.readFileSync(prdPath, 'utf8');
+  } catch { prdText = null; }
+  if (prdText !== null) gate = resolveGate(prdText);
+  const pre = reviewLadder.decideFinishReviewKillHeal({ evidenceOk, integratedOk, gate, setupOk: true, outcome: { status: 'green' } });
+  if (pre.complete) {
+    const scratch = path.join(os.tmpdir(), `sm-finish-review-heal-${process.pid}-${Date.now()}`);
+    let added = false;
+    try {
+      await execGitAt(cwd, ['worktree', 'add', '--detach', scratch, head], { timeout: 120_000 });
+      added = true;
+      const deps = await linkDependencyDirs({ mainCwd: cwd, worktreeCwd: scratch });
+      const setup = deps && deps.setup ? deps.setup : null;
+      setupOk = setup === null || isWorktreeSetupSettled(setup);
+      if (setupOk) {
+        const r = await runGateSequence(gate.sequence, { cwd: scratch });
+        if (r.status === 'busy') return null; // nothing attempted — leave the row eligible
+        outcome = r;
+      } else {
+        outcome = { status: 'unavailable', reason: `setup-${setup?.reason ?? 'error'}`, results: [] };
+      }
+    } catch (e) {
+      outcome = { status: 'unavailable', reason: `gate-error: ${e && e.message ? e.message : e}`, results: [] };
+    } finally {
+      if (added) {
+        try { await execGitAt(cwd, ['worktree', 'remove', '--force', scratch], { timeout: 60_000 }); } catch { /* best-effort */ }
+      }
+      try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try { await execGitAt(cwd, ['worktree', 'prune'], { timeout: 30_000 }); } catch { /* best-effort */ }
+    }
+  }
+  const decision = reviewLadder.decideFinishReviewKillHeal({ evidenceOk, integratedOk, gate, setupOk, outcome });
+  const record = {
+    attemptedAt: new Date().toISOString(),
+    head: head ?? null,
+    landedCommit: job.landedCommit,
+    gateStatus: outcome.status,
+    gateReason: outcome.reason ?? null,
+    complete: decision.complete,
+    reason: decision.reason,
+  };
+  let resolved = null;
+  await mutate((s) => {
+    for (const j of s.jobs) {
+      if (j.slug !== job.slug) continue;
+      const unchanged = j.status === 'needs_review'
+        && j.verifierVerdict === 'budget_exceeded'
+        && j.budgetKillPhase === 'finish-review'
+        && j.landedCommit === job.landedCommit
+        && j.runId === job.runId
+        && j.startedAt === job.startedAt;
+      if (!unchanged) {
+        console.log(`[scheduler] finish-review heal: ${job.slug} result dropped — row changed under the gate`);
+        continue;
+      }
+      j.finishReviewHealAttemptedAt = record.attemptedAt;
+      j.finishReviewHeal = record;
+      if (!decision.complete) continue;
+      transitionJob(j, 'completed', {
+        reason: `finish-protocol review killed at budget; gate re-run green on ${landed7}; review skipped`,
+        source: 'finishReviewKillHeal',
+      });
+      j.error = null;
+      delete j.verifierVerdict;
+      delete j.looksDone;
+      resolved = { slug: j.slug, cwd: j.cwd };
+    }
+  });
+  if (resolved) {
+    try { await prdPaths.archiveCompletedPrd(resolved.slug, resolved.cwd); } catch (e) {
+      console.error('[scheduler] finish-review heal archive error', resolved.slug, e);
+    }
+    appendAuditEvent('needs_review_finish_review_healed', { slug: resolved.slug, cwd: resolved.cwd, landedCommit: job.landedCommit, head });
+    console.log(`[scheduler] finish-review heal: ${resolved.slug} completed — gate re-run green on ${landed7}, review skipped`);
+  } else {
+    console.log(`[scheduler] finish-review heal: ${job.slug} stays needs_review (${decision.reason})`);
+  }
+  await broadcast();
+  return record;
+}
+
 // Tail of the last background shadow gate — lets tests (and only tests) await it.
 let gateShadowPending = null;
 // The slug the background shadow gate is currently deciding, from the pick
@@ -10023,6 +10142,8 @@ async function reverifyNeedsReview() {
       .then((gateTarget) => {
         if (!gateTarget) return;
         gateShadowSlug = gateTarget.slug;
+        // Tier-0 pick: a finish-review budget kill gets its one-shot heal, not a shadow run.
+        if (reviewLadder.isFinishReviewKillHealEligible(gateTarget)) return runFinishReviewKillHeal(gateTarget);
         return runGateShadow(gateTarget);
       })
       .catch((e) => { console.error('[scheduler] gate shadow error', gateShadowSlug, e); })
@@ -11997,6 +12118,7 @@ module.exports = {
   OOM_SCORE_ADJ_JOB,
   reverifyNeedsReview,
   runGateShadow,
+  runFinishReviewKillHeal,
   awaitGateShadowIdle: async () => { while (gateShadowPending) await gateShadowPending; },
   applyNeedsReviewAutoResolve,
   applyStuckFailedAutoSkip,

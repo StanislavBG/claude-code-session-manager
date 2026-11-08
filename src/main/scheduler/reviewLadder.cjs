@@ -187,8 +187,58 @@ const RESCAN_EXCLUDED_VERDICTS = new Set([
   // Its damage IS a commit stranded on an unmerged sm-job branch — a landedCommit restates it; selectMechanicalRecoveryTarget owns the real re-merge.
   'worktree_integration_failed',
   // The run overran its own time/cost estimate; no transcript or git evidence can un-overrun it (selectAutoFixTargets excludes it too).
+  // Carve-out (isFinishReviewKillHealEligible): a kill inside the finish-protocol review AFTER the commit
+  // integrated left only the review + verdict undone, so a green re-run of the PRD's own gate is the proof.
   'budget_exceeded',
 ]);
+
+/**
+ * Finish-review budget-kill heal (one attempt). The ONLY budget_exceeded rows
+ * any self-heal rung may touch: the kill hit inside the finish-protocol review
+ * (budgetKillPhase 'finish-review', stamped at finalize) after the run landed
+ * a commit. Everything else budget_exceeded stays excluded (above).
+ *
+ * Pure. Integration into the main checkout is only partly provable here: a
+ * row carrying an integrationFailureKind (stampIntegrationFailure — commit
+ * stranded on an unmerged sm-job branch) is refused outright; the rung in
+ * scheduler.cjs additionally requires landedCommit to be an ancestor of the
+ * main checkout's HEAD before it runs the gate.
+ *
+ * Bounded to one attempt by finishReviewHealAttemptedAt, stamped by the rung
+ * whatever the outcome (red, unrunnable, not integrated) — so a red gate never
+ * loops. Kill-switch: SM_FINISH_REVIEW_HEAL_DISABLE=1.
+ */
+function isFinishReviewKillHealEligible(job) {
+  if (process.env.SM_FINISH_REVIEW_HEAL_DISABLE === '1') return false;
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.verifierVerdict !== 'budget_exceeded') return false;
+  if (job.budgetKillPhase !== 'finish-review') return false;
+  if (typeof job.landedCommit !== 'string' || job.landedCommit.length === 0) return false;
+  if (job.finishReviewHealAttemptedAt) return false;
+  if (job.integrationFailureKind) return false;
+  if (isCancelledJob(job) || isRefireCapped(job)) return false;
+  return true;
+}
+
+/**
+ * Pure decision for the finish-review heal, from ground truth the rung
+ * computed: evidenceOk (landedCommit is git-verified evidence from THIS
+ * dispatch), integratedOk (landedCommit is an ancestor of the main
+ * checkout's HEAD), setupOk (scratch worktree's declared setup settled), the
+ * resolved gate, and runGateSequence's outcome. First failed check names the
+ * reason. Mirrors decideGateAuthority's trusted-gate rule ('ac-line-guess'
+ * never counts).
+ */
+function decideFinishReviewKillHeal({ evidenceOk, integratedOk, gate, setupOk, outcome } = {}) {
+  if (evidenceOk !== true) return { complete: false, reason: 'commit-not-from-this-run' };
+  if (integratedOk !== true) return { complete: false, reason: 'commit-not-integrated' };
+  const hasGate = (gate?.source === 'explicit' || gate?.source === 'ac-line')
+    && Array.isArray(gate?.sequence) && gate.sequence.length > 0;
+  if (!hasGate) return { complete: false, reason: 'no-gate' };
+  if (setupOk !== true) return { complete: false, reason: 'setup-not-settled' };
+  if (outcome?.status !== 'green') return { complete: false, reason: outcome?.status === 'red' ? 'gate-red' : 'gate-not-runnable' };
+  return { complete: true, reason: 'gate-green' };
+}
 
 // Per-pass / per-row bounds on the evidence-only rung (the widened candidate
 // set). Each scan costs one computeLooksDone: a per-cwd-deduped `git fetch`
@@ -879,6 +929,8 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     // auto-fix investigation or auto-retry — the run didn't fail, it simply
     // overran its own estimate; there's no code defect to diagnose (Out of
     // scope: "retrying or auto-resuming a budget-killed job" for this PRD).
+    // The finish-review carve-out (isFinishReviewKillHealEligible) heals via a gate
+    // re-run, never via auto-fix — so this exclusion holds for every budget_exceeded row.
     if (job.verifierVerdict === 'budget_exceeded') return false;
     // A stale re-run whose work already shipped (rcaReport's 'already-shipped'
     // class) must never buy a fix-plan PRD — there is nothing to fix, and the
@@ -969,6 +1021,11 @@ function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false, ba
     const head = headByCwd.get(j.cwd);
     return typeof head === 'string' && head.length > 0;
   });
+
+  // Tier 0: a finish-review budget kill's one-shot heal (bounded by its own
+  // attempt stamp, so it can win the pick at most once per row).
+  const finishReviewHeal = eligible.find((j) => isFinishReviewKillHealEligible(j));
+  if (finishReviewHeal) return finishReviewHeal;
 
   const isStale = (j) => {
     const head = headByCwd.get(j.cwd);
@@ -1074,4 +1131,6 @@ module.exports = {
   selectAutoFixTargets,
   isEligibleForImmediateAutoFix,
   selectGateShadowTarget,
+  isFinishReviewKillHealEligible,
+  decideFinishReviewKillHeal,
 };

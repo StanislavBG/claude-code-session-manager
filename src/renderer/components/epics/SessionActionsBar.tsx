@@ -53,9 +53,16 @@ function ManagePanel({
       toast.error(err instanceof Error ? err.message : String(err))
     }
   }
-  const remove = async (m: Macro) => {
+  // A '*' macro is shown in every project, so "remove from this project" is
+  // refused by macroLibrary — its Delete is the editor's "Delete everywhere"
+  // (deleteMacro resolves { ok: true } or throws; the catch toasts).
+  const remove = async (m: Macro, all: boolean) => {
     setConfirming(null)
     try {
+      if (all) {
+        await window.api.macros.delete({ id: m.id })
+        return
+      }
       if (!cwd) return
       const r = await window.api.macros.removeFromProject({ id: m.id, cwd })
       if (!r.ok) toast.error(r.error)
@@ -88,8 +95,8 @@ function ManagePanel({
             </label>
             {confirming === m.id ? (
               <>
-                <span className="text-fg-dim">Remove from this project?</span>
-                <button type="button" data-testid="hotkey-delete-yes" onClick={() => void remove(m)} className="font-semibold text-red-500">
+                <span className="text-fg-dim">{all ? 'Delete from every project?' : 'Remove from this project?'}</span>
+                <button type="button" data-testid="hotkey-delete-yes" onClick={() => void remove(m, all)} className="font-semibold text-red-500">
                   Yes
                 </button>
                 <button type="button" data-testid="hotkey-delete-no" onClick={() => setConfirming(null)} className="text-fg-dim hover:text-fg">
@@ -101,9 +108,12 @@ function ManagePanel({
                 <button type="button" data-testid="hotkey-edit" onClick={() => onEdit(m)} className="text-fg-dim hover:text-fg">
                   Edit
                 </button>
-                <button type="button" data-testid="hotkey-delete" onClick={() => setConfirming(m.id)} className="text-fg-dim hover:text-red-500">
-                  Delete
-                </button>
+                {/* removeFromProject refuses built-ins and rows not listed here. */}
+                {!m.builtin && shown && (
+                  <button type="button" data-testid="hotkey-delete" onClick={() => setConfirming(m.id)} className="text-fg-dim hover:text-red-500">
+                    Delete
+                  </button>
+                )}
               </>
             )}
           </div>

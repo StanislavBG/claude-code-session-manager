@@ -78,7 +78,7 @@ beforeEach(() => {
   usePromptSessions.setState({ sessions: {}, events: {} })
   usePromptSessions.setState({ createPromptSession: createPromptSessionSpy, approveProposed: approveProposedSpy })
   createPromptSessionSpy.mockClear(); approveProposedSpy.mockClear(); sendSpy.mockClear()
-  save.mockClear(); setProject.mockClear(); del.mockClear()
+  save.mockClear(); setProject.mockClear(); del.mockClear(); removeFromProject.mockClear()
   useChat.setState({ send: sendSpy })
   useSessions.setState({ tabs: [{ id: 'tab-1', cwd: CWD } as any], activeTabId: 'tab-1' })
 })
@@ -231,6 +231,65 @@ describe('SessionActionsBar', () => {
     await act(async () => { q(el, 'hotkey-delete-yes')!.click() })
     expect(del).not.toHaveBeenCalled()
     expect(removeFromProject).toHaveBeenCalledWith({ id: 'm1', cwd: CWD })
+  })
+
+  it("a '*' row's Delete confirms 'Delete from every project?' and deletes everywhere", async () => {
+    library = [macro({ projects: ['*'] })]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    act(() => q(el, 'hotkey-manage')!.click())
+    act(() => q(el, 'hotkey-delete')!.click())
+    expect(q(el, 'hotkey-manage-row')!.textContent).toContain('Delete from every project?')
+    expect(q(el, 'hotkey-manage-row')!.textContent).not.toContain('Remove from this project?')
+    await act(async () => { q(el, 'hotkey-delete-yes')!.click() })
+    expect(del).toHaveBeenCalledTimes(1)
+    expect(del).toHaveBeenCalledWith({ id: 'm1' })
+    expect(removeFromProject).not.toHaveBeenCalled()
+  })
+
+  it("a project-scoped row's Delete confirms 'Remove from this project?' and removes from this project", async () => {
+    library = [macro()]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    act(() => q(el, 'hotkey-manage')!.click())
+    act(() => q(el, 'hotkey-delete')!.click())
+    expect(q(el, 'hotkey-manage-row')!.textContent).toContain('Remove from this project?')
+    expect(q(el, 'hotkey-manage-row')!.textContent).not.toContain('Delete from every project?')
+    await act(async () => { q(el, 'hotkey-delete-yes')!.click() })
+    expect(removeFromProject).toHaveBeenCalledWith({ id: 'm1', cwd: CWD })
+    expect(del).not.toHaveBeenCalled()
+  })
+
+  it("a rejected '*' delete toasts the error and keeps the panel open", async () => {
+    library = [macro({ projects: ['*'] })]
+    del.mockRejectedValueOnce(new Error('disk full'))
+    const errSpy = vi.spyOn(toast, 'error')
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    act(() => q(el, 'hotkey-manage')!.click())
+    act(() => q(el, 'hotkey-delete')!.click())
+    await act(async () => { q(el, 'hotkey-delete-yes')!.click() })
+    expect(errSpy).toHaveBeenCalledWith('disk full')
+    expect(q(el, 'hotkey-manage-panel')).not.toBeNull()
+    expect(q(el, 'hotkey-manage-row')).not.toBeNull()
+    errSpy.mockRestore()
+  })
+
+  it('built-in rows show no Delete control', async () => {
+    library = [macro({ id: 'b1', builtin: true, projects: ['*'], surface: 'project-home' }), macro({ id: 'm2' })]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    act(() => q(el, 'hotkey-manage')!.click())
+    const rows = Array.from(el.querySelectorAll('[data-testid="hotkey-manage-row"]'))
+    const del_ = (id: string) => rows.find((r) => r.getAttribute('data-macro-id') === id)!.querySelector('[data-testid="hotkey-delete"]')
+    expect(del_('b1')).toBeNull()
+    expect(del_('m2')).not.toBeNull()
+  })
+
+  it('rows not shown in this project show no Delete control', async () => {
+    library = [macro({ id: 'other', projects: [OTHER] }), macro({ id: 'here' })]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    act(() => q(el, 'hotkey-manage')!.click())
+    const rows = Array.from(el.querySelectorAll('[data-testid="hotkey-manage-row"]'))
+    const del_ = (id: string) => rows.find((r) => r.getAttribute('data-macro-id') === id)!.querySelector('[data-testid="hotkey-delete"]')
+    expect(del_('other')).toBeNull()
+    expect(del_('here')).not.toBeNull()
   })
 
   it('edit prefills and preserves the id and projects', async () => {

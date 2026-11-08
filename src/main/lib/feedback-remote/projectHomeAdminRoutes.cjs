@@ -4,6 +4,8 @@
  *   POST /admin/project-home/videos/write       -> project-pages/videos/<videoId>/{index.html,meta.json}
  *   POST /admin/project-home/write              alias: {cwd, html} -> knowledge/overview/
  *   POST /admin/project-home/demo-video/write   alias: {cwd, html} -> a new videos/vid-<id>/ project-demo entry
+ *   POST /admin/project-home/matrix/read        {cwd} -> project-pages/matrix/matrix.json (+ its JSON Schema)
+ *   POST /admin/project-home/matrix/write       {cwd, matrix, model?} -> matrixStore.writeMatrix
  * all owned by writer 'project-home' (see opsOwnership.cjs). Registered
  * against the same injected localAdminHttp.cjs transport as
  * prdAdminRoutes.cjs.
@@ -32,6 +34,8 @@ const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
 const { validateCharacterJson, validateCharacterJs, readCharacter, characterDir, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
 const { checkHtmlLimits } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
+const { readMatrix, matrixJsonSchema, MAX_MATRIX_BYTES } = require('../project-pages/competitiveMatrix.cjs');
+const { writeMatrix } = require('../project-pages/matrixStore.cjs');
 
 const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
@@ -330,6 +334,57 @@ function registerAdminRoute(adminHttp) {
 
   // POST /admin/project-home/character/write {cwd, json, js, replace?} -> videos/_character/
   adminHttp.registerRoute('POST', '/admin/project-home/character/write', characterWriteHandler);
+
+  // POST /admin/project-home/matrix/read {cwd?} -> {ok, matrix|null, error, path, schema}
+  adminHttp.registerRoute('POST', '/admin/project-home/matrix/read', makeMatrixHandler(async (cwd) => {
+    const r = await readMatrix(cwd);
+    return { status: 200, body: { ok: true, matrix: r.matrix, error: r.error, path: r.path, schema: matrixJsonSchema() } };
+  }));
+
+  // POST /admin/project-home/matrix/write {cwd?, matrix, model?} -> writeMatrix's result
+  adminHttp.registerRoute('POST', '/admin/project-home/matrix/write', makeMatrixHandler(async (cwd, body) => {
+    if (body.model !== undefined && typeof body.model !== 'string') {
+      return { status: 400, body: { ok: false, error: 'model must be a string' } };
+    }
+    config.addAllowedRoot(cwd);
+    const r = await writeMatrix(cwd, body.matrix, { model: body.model ?? '' });
+    return { status: r.ok ? 200 : 400, body: r };
+  }));
+}
+
+/** JSON body (capped at MAX_MATRIX_BYTES + 64 KB) + resolveCwd, then `run(cwd, body)` -> {status, body}. */
+function makeMatrixHandler(run) {
+  return async (req, res) => {
+    let raw;
+    try {
+      raw = await readBody(req, MAX_MATRIX_BYTES + 64 * 1024);
+    } catch (e) {
+      sendJson(res, 413, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'} (matrix limit is ${MAX_MATRIX_BYTES} bytes)` });
+      return;
+    }
+    let body;
+    try {
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      sendJson(res, 400, { ok: false, error: 'invalid payload' });
+      return;
+    }
+    const resolved = resolveCwd(body.cwd);
+    if (!resolved.ok) {
+      sendJson(res, resolved.status, { ok: false, error: resolved.error });
+      return;
+    }
+    try {
+      const out = await run(resolved.cwd, body);
+      sendJson(res, out.status, out.body);
+    } catch (e) {
+      sendJson(res, 500, { ok: false, error: e?.message ?? 'matrix route failed' });
+    }
+  };
 }
 
 async function characterWriteHandler(req, res) {

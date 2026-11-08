@@ -79,12 +79,14 @@ const GOOD_HTML = '<!DOCTYPE html><html><head><style>body{background:url(data:im
 const GOOD_DEMO_VIDEO_HTML = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
   + '<body><canvas id="c"></canvas><script>window.smDemo = { scenes: [] }; const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
 
-test('registers the library routes, the aliases and the character route', () => {
+test('registers the library routes, the aliases, the character route and the matrix routes', () => {
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
   expect([...adminHttp.routes.keys()].sort()).toEqual([
     'POST /admin/project-home/character/write',
     'POST /admin/project-home/demo-video/write',
+    'POST /admin/project-home/matrix/read',
+    'POST /admin/project-home/matrix/write',
     'POST /admin/project-home/pages/write',
     'POST /admin/project-home/videos/write',
     'POST /admin/project-home/write',

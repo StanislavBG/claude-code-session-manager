@@ -1469,15 +1469,25 @@ async function getCurrentBranch(cwd) {
  * Never throws — any read failure (including no `carriedPaths`) is reported
  * as `false`, the safer default that falls through to a real integration
  * attempt rather than silently dropping a commit.
+ *
+ * `scopeBase` (optional): when a non-empty string, the diff's lower bound —
+ * the job's fork when the base was rewritten under it, since the merge-base
+ * with the rewritten HEAD would count the inherited pre-rewrite commits as
+ * the branch's own changes and the shortcut would never fire. Omitted =
+ * `merge-base HEAD branch`.
  */
-async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
+async function isCarriedWipOnly({ cwd, branch, carriedPaths, scopeBase }) {
   if (!Array.isArray(carriedPaths) || !carriedPaths.length) return false;
   try {
     let mergeBase = '';
-    try {
-      mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
-    } catch {
-      mergeBase = '';
+    if (typeof scopeBase === 'string' && scopeBase) {
+      mergeBase = scopeBase;
+    } else {
+      try {
+        mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+      } catch {
+        mergeBase = '';
+      }
     }
     const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
     const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -1548,6 +1558,11 @@ async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
  * in-checkout path's `isCarriedWipOnly`, because `cwd` is on some other
  * branch and has no working tree this path could trust to content-verify
  * against.
+ *
+ * SM_LINEAR_LANDING_DISABLE=1 is not honoured on a rewritten base (forkSha no
+ * longer an ancestor of the target): a merge commit would merge the
+ * pre-rewrite history back in, so the fork-bounded linear replay always runs
+ * and a failed replay parks instead of falling back to a merge.
  */
 async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch, allowRefLanding = false, forkSha }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
@@ -1715,7 +1730,7 @@ async function integrateBranchInCheckout({ cwd, branch, carriedPaths, forkSha, m
   // than the ordinary merge-conflict path (branch kept, flagged for manual
   // recovery) this shortcut is supposed to be a safe subset of. See
   // `isCarriedWipOnly` above for the content-verify logic.
-  if (await isCarriedWipOnly({ cwd, branch, carriedPaths })) {
+  if (await isCarriedWipOnly({ cwd, branch, carriedPaths, scopeBase: baseRewritten && fork ? fork : undefined })) {
     return { ok: true, integrated: false, reason: 'carried-wip-only' };
   }
 
@@ -1758,7 +1773,7 @@ async function integrateBranchInCheckout({ cwd, branch, carriedPaths, forkSha, m
       const r = await replayBranchOnto({ cwd, ontoSha: headSha, branch: branchHead, sinceSha: fork || undefined });
       if (!r.ok) {
         if (baseRewritten && REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
-          return rewrittenBaseReplayFailure(r, headSha);
+          return rewrittenBaseReplayFailure(r, headSha, { cwd, fork, tip: branchHead });
         }
         if (REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
           linearFallback = r.failureKind;
@@ -2256,12 +2271,16 @@ async function resolveRewrittenFork(cwd, forkSha, branchSha, targetSha) {
 /**
  * Terminal result for a replay that failed while the base was rewritten: the
  * two-parent merge fallback would merge the pre-rewrite history back in, so
- * nothing lands. A conflict names every path.
+ * nothing lands. A conflict names every conflicted path; any other failure
+ * (git_too_old, branch_has_merges) names the job's own paths
+ * (`git diff --name-only <fork> <tip>`) in `conflictedPaths` + `reason`, so the
+ * park still says what needs a manual landing.
  *
  * @param {{failureKind?: string, reason?: string, conflictedPaths?: string[]}} r
  * @param {string|null} baseHeadSha
+ * @param {{cwd?: string, fork?: string|null, tip?: string|null}} [scope]
  */
-function rewrittenBaseReplayFailure(r, baseHeadSha) {
+async function rewrittenBaseReplayFailure(r, baseHeadSha, { cwd, fork, tip } = {}) {
   if (r.failureKind === 'content_conflict') {
     const conflictedPaths = r.conflictedPaths || [];
     return {
@@ -2273,12 +2292,23 @@ function rewrittenBaseReplayFailure(r, baseHeadSha) {
       reason: `replay of the job's own commits onto the rewritten base conflicts on: ${conflictedPaths.join(', ')}`,
     };
   }
+  let conflictedPaths = [];
+  if (cwd && fork && tip) {
+    try {
+      const out = await execGit(['diff', '--name-only', fork, tip], { cwd, timeout: 10_000 });
+      conflictedPaths = out.split('\n').map((l) => l.trim()).filter(Boolean);
+    } catch {
+      conflictedPaths = [];
+    }
+  }
+  const named = conflictedPaths.length ? ` (job's own paths: ${conflictedPaths.join(', ')})` : '';
   return {
     ok: false,
     failureKind: 'other',
+    conflictedPaths,
     baseRewritten: true,
     baseHeadSha,
-    reason: `replay of the job's own commits onto the rewritten base failed (${r.failureKind}); refusing a merge-commit fallback: ${r.reason}`,
+    reason: `replay of the job's own commits onto the rewritten base failed (${r.failureKind}); refusing a merge-commit fallback${named}: ${r.reason}`,
   };
 }
 
@@ -2831,6 +2861,11 @@ async function replayBranchOnto({ cwd, ontoSha, branch, sinceSha }) {
  * derived from it (the ff/replay/merge decision, the replayed commits, the
  * merge-tree/commit-tree inputs). Every other return is terminal: a real
  * `{ ok: true/false, ... }`.
+ *
+ * SM_LINEAR_LANDING_DISABLE=1 is not honoured on a rewritten base (forkSha no
+ * longer an ancestor of `targetRef`): a merge commit would merge the
+ * pre-rewrite history back in, so the fork-bounded replay always runs and a
+ * failed replay is terminal with no merge-commit fallback.
  */
 async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message, forkSha }) {
   const branchSha = await tryResolveCommit(cwd, `${branch}^{commit}`);
@@ -2922,7 +2957,7 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message, forkSh
       };
     }
     if (baseRewritten && REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
-      return rewrittenBaseReplayFailure(r, oldSha);
+      return rewrittenBaseReplayFailure(r, oldSha, { cwd, fork, tip: branchSha });
     }
     if (!REPLAY_MERGE_FALLBACK_KINDS.has(r.failureKind)) {
       return { ok: false, failureKind: 'other', reason: r.reason };

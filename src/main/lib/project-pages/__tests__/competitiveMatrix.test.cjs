@@ -105,20 +105,20 @@ test('duplicate ids fail', () => {
     const m = buildMatrix();
     m[list].push(JSON.parse(JSON.stringify(m[list][0])));
     if (list === 'competitors') m.competitors.splice(1, 1); // stay within the 1..4 cap
-    expectFail(m, `${list}[${m[list].length - 1}].id`);
+    expect(expectFail(m, `${list}[${m[list].length - 1}].id`)).toBeTypeOf('string');
   }
 });
 
 test("competitor id 'self' fails", () => {
   const m = buildMatrix();
   m.competitors[3].id = 'self';
-  expectFail(m, 'competitors[3].id');
+  expect(expectFail(m, 'competitors[3].id')).toBeTypeOf('string');
 });
 
 test('feature.groupId not in groups fails', () => {
   const m = buildMatrix();
   m.features[1].groupId = 'nope';
-  expectFail(m, 'features[1].groupId');
+  expect(expectFail(m, 'features[1].groupId')).toBeTypeOf('string');
 });
 
 test('feature.support missing a product key fails', () => {
@@ -136,25 +136,25 @@ test('feature.support adding a product key fails', () => {
 test('unknown sourceIds fail (sentiment and support)', () => {
   const a = buildMatrix();
   a.features[0].sentiment.sourceIds = ['ghost'];
-  expectFail(a, 'features[0].sentiment.sourceIds[0]');
+  expect(expectFail(a, 'features[0].sentiment.sourceIds[0]')).toBeTypeOf('string');
   const b = buildMatrix();
   b.features[1].support.cursor.sourceIds = ['src-1', 'ghost'];
-  expectFail(b, 'features[1].support.cursor.sourceIds[1]');
+  expect(expectFail(b, 'features[1].support.cursor.sourceIds[1]')).toBeTypeOf('string');
 });
 
 test('non-https URL fails', () => {
   const a = buildMatrix();
   a.sources[0].url = 'http://example.com/post';
-  expectFail(a, 'sources[0].url');
+  expect(expectFail(a, 'sources[0].url')).toBeTypeOf('string');
   const b = buildMatrix();
   b.competitors[0].url = 'http://example.com';
-  expectFail(b, 'competitors[0].url');
+  expect(expectFail(b, 'competitors[0].url')).toBeTypeOf('string');
 });
 
 test('size over MAX_MATRIX_BYTES fails', () => {
   const m = buildMatrix();
   m.padding = 'x'.repeat(MAX_MATRIX_BYTES);
-  expectFail(m, '(root)');
+  expect(expectFail(m, '(root)')).toBeTypeOf('string');
   expect(validateMatrix(m).error).toMatch(/cap/);
 });
 

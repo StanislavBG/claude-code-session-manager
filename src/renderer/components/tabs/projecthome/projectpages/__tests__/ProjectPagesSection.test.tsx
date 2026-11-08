@@ -522,6 +522,21 @@ describe('ProjectPagesSection', () => {
       expect(toolIds(el)).toEqual(['review-md'])
     })
 
+    it('threads jobStatus and onOpenSession to the competitor matrix view', () => {
+      const matrixApi = vi.fn(() => new Promise(() => {}))
+      ;(window as unknown as { api: { projectPages: unknown } }).api.projectPages = { matrix: matrixApi }
+      const CM = macro({ id: 'builtin-competitor-matrix', label: 'Competitor matrix', surface: 'project-home' })
+      const running: MacroJobStatus = {
+        macroId: CM.id, epicId: 'e', slug: 's', state: 'running', status: 'running', reason: null, startedAt: null, finishedAt: null,
+      }
+      const el = mount(
+        <ProjectPagesSection {...props({ cwd: '/p/x', macros: [...MACROS, CM], tab: 'tools', jobStatus: { [CM.id]: running }, onOpenSession: vi.fn() })} />,
+      )
+      expect(el.querySelector('[data-testid="competitor-matrix"]')?.getAttribute('data-has-session-handler')).toBe('true')
+      expect(el.querySelector('[data-testid="competitor-matrix-status"]')?.textContent).toContain('Researching…')
+      expect(matrixApi.mock.calls).toEqual([[{ cwd: '/p/x' }]])
+    })
+
     it('launches the selected tool through onLaunch', () => {
       const onLaunch = vi.fn()
       const el = mount(<ProjectPagesSection {...props({ macros: [...MACROS, REVIEW], onLaunch, tab: 'tools' })} />)

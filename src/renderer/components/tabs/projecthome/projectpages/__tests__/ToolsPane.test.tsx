@@ -48,6 +48,7 @@ const ASK = macro({
   prompt: 'Do {{topic}}',
   inputs: [{ name: 'topic', label: 'Topic', required: false }],
 })
+const MATRIX_TOOL = macro({ id: 'builtin-competitor-matrix', label: 'Competitor matrix', builtin: true })
 const SESSIONS_ONLY = macro({ id: 'sessions-only', label: 'Elsewhere', surface: 'sessions' })
 
 /** A scan of 58 docs / 20 links with three findings (two broken links, one orphan group). */
@@ -88,6 +89,7 @@ function deferred<T>() {
 const save = vi.fn()
 const listPersonas = vi.fn()
 const mdNetwork = vi.fn<(payload: { cwd: string }) => Promise<MdNetworkResult>>()
+const matrix = vi.fn()
 const open = vi.fn()
 
 beforeEach(() => {
@@ -100,11 +102,13 @@ beforeEach(() => {
   mdNetwork.mockReturnValue(new Promise<MdNetworkResult>(() => {}))
   open.mockReset()
   open.mockResolvedValue({ ok: true })
+  matrix.mockReset()
+  matrix.mockReturnValue(new Promise(() => {}))
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
   ;(window as unknown as { api: unknown }).api = {
     macros: { save },
     agents: { listPersonas, onChanged: () => () => {} },
-    projectPages: { mdNetwork },
+    projectPages: { mdNetwork, matrix },
     shell: { open },
   }
 })
@@ -202,6 +206,23 @@ describe('ToolsPane list', () => {
     expect(q('project-home-add-tool')).not.toBeNull()
     expect(q('project-home-tools-footnote')).not.toBeNull()
     expect(q('project-home-tools-empty')).not.toBeNull()
+  })
+})
+
+describe('ToolsPane Competitor matrix', () => {
+  it('renders CompetitorMatrixView for the competitor matrix tool with cwd, job status and launch wiring', () => {
+    const onLaunch = vi.fn()
+    const job = { macroId: MATRIX_TOOL.id, epicId: 'e', slug: 's', state: 'running' as const, status: 'running', reason: null, startedAt: null, finishedAt: null }
+    render({ macros: [REVIEW, MATRIX_TOOL, SWEEP], onLaunch, jobStatus: { [MATRIX_TOOL.id]: job }, onOpenSession: vi.fn() })
+    expect(q('competitor-matrix')).toBeNull()
+    act(() => row(MATRIX_TOOL.id).click())
+    expect(q('competitor-matrix')).not.toBeNull()
+    expect(q('competitor-matrix')!.getAttribute('data-has-session-handler')).toBe('true')
+    expect(matrix.mock.calls).toEqual([[{ cwd: CWD }]])
+    expect(q('competitor-matrix-status')!.textContent).toContain('Researching…')
+    expect((q('competitor-matrix-run') as HTMLButtonElement).disabled).toBe(true)
+    expect(q('project-home-run-tool')).toBeNull()
+    expect(q('project-home-run-review')).toBeNull()
   })
 })
 

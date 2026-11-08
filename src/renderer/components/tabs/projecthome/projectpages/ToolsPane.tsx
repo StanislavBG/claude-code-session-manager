@@ -7,7 +7,8 @@
  * a footnote. Content column, for the selected tool (first row by default):
  * Review MD network gets its Scope select, Mode segmented control and
  * `Run review`; any other macro gets a title bar plus its MacroInputsForm when
- * it declares inputs, else a primary `Run`.
+ * it declares inputs, else a primary `Run`. Competitor matrix gets
+ * CompetitorMatrixView (its saved matrix, competitor slots, Run research).
  *
  * Every launch goes through `onLaunch` — ProjectHome's `useMacroLaunch`, the
  * path the Sessions hot keys use, which opens the Epic. Scope default and Mode
@@ -26,13 +27,15 @@ import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { useAgentPersonas } from '../../../../lib/useAgentPersonas'
 import { toast } from '../../../../state/toast'
 import { MdNetworkCards } from './MdLinkMap'
-import type { Macro, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
+import { CompetitorMatrixView } from './CompetitorMatrixView'
+import type { Macro, MacroJobStatus, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
 
 export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
 /** A finished scan's findings count for `cwd`; null when the scan failed. */
 export type FindingsCountFn = (cwd: string, count: number | null) => void
 
 const REVIEW_MD_NETWORK_ID = 'builtin-review-md-network'
+const COMPETITOR_MATRIX_ID = 'builtin-competitor-matrix'
 /** Pages / Videos launch these from their own tabs. */
 const LIBRARY_MACRO_IDS: readonly string[] = ['builtin-project-home', 'builtin-demo-video']
 const NO_SCOPES: readonly string[] = []
@@ -126,7 +129,11 @@ function ToolRow({ macro, meta, selected, onSelect }: { macro: Macro; meta: stri
       }`}
     >
       <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-fg text-honey">
-        <AlmanacIcon name={macro.id === REVIEW_MD_NETWORK_ID ? 'link' : 'tool'} size={15} stroke={1.8} />
+        <AlmanacIcon
+          name={macro.id === REVIEW_MD_NETWORK_ID ? 'link' : macro.id === COMPETITOR_MATRIX_ID ? 'usage' : 'tool'}
+          size={15}
+          stroke={1.8}
+        />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
         <span className={`truncate text-[13.5px] font-semibold ${selected ? 'text-fg' : 'text-fg-dim'}`}>{macro.label}</span>
@@ -344,6 +351,8 @@ export function ToolsPane({
   launching,
   onLaunch,
   onFindingsCount,
+  jobStatus,
+  onOpenSession,
 }: {
   cwd?: string | null
   /** This project's `surface: 'project-home'` macros (ProjectHome's `macrosForProject`). */
@@ -352,6 +361,9 @@ export function ToolsPane({
   onLaunch: LaunchFn
   /** Each finished link-map scan's findings count (null when it failed), for the Tools key button. */
   onFindingsCount?: FindingsCountFn
+  /** ProjectHome's latest job per macro id (useMacroJobStatus). */
+  jobStatus?: Record<string, MacroJobStatus>
+  onOpenSession?: (epicId: string) => void
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -382,6 +394,18 @@ export function ToolsPane({
         onRefresh={refresh}
         launching={launching}
         onLaunch={onLaunch}
+      />
+    )
+  else if (selected.id === COMPETITOR_MATRIX_ID)
+    content = (
+      <CompetitorMatrixView
+        key={selected.id}
+        cwd={cwd}
+        macro={selected}
+        onLaunch={onLaunch}
+        launching={launching}
+        jobStatus={jobStatus?.[COMPETITOR_MATRIX_ID]}
+        onOpenSession={onOpenSession}
       />
     )
   else content = <GenericTool key={selected.id} macro={selected} launching={launching} onLaunch={onLaunch} />

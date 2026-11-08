@@ -71,7 +71,15 @@ export function ProjectPagesSection({
   if (tab === 'tools') {
     return (
       <div data-testid="project-home-section" data-tab={tab} className="flex min-h-0 flex-1 flex-col">
-        <ToolsPane cwd={cwd} macros={macros} launching={launching} onLaunch={onLaunch} onFindingsCount={onFindingsCount} />
+        <ToolsPane
+          cwd={cwd}
+          macros={macros}
+          launching={launching}
+          onLaunch={onLaunch}
+          onFindingsCount={onFindingsCount}
+          jobStatus={jobStatus}
+          onOpenSession={onOpenSession}
+        />
       </div>
     )
   }

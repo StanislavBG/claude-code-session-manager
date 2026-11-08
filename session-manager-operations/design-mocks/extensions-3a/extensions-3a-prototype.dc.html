@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,500;1,8..60,600&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#f6efe1}a{color:#b85c34;text-decoration:none}a:hover{color:#8f4524;text-decoration:underline}</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#f6efe1;color:#2a221a;font-family:'Inter Tight',-apple-system,'Helvetica Neue',Arial,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased">
+
+<div style="flex:none;height:46px;display:flex;align-items:flex-end;padding-left:8px;background:#efe6d3;border-bottom:1px solid #e0d3b8;position:relative;z-index:2">
+<div style="align-self:center;display:flex;align-items:center;gap:7px;height:30px;padding:0 15px 0 13px;border-radius:999px;background:#b85c34;color:#fbf6ec;font-size:13px;font-weight:600;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>Home</div>
+<div style="align-self:center;width:1px;height:28px;background:#e0d3b8;margin:0 4px 0 10px"></div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span>Self</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;min-width:136px;padding:0 16px;margin-bottom:-1px;font-size:13px;font-weight:600;color:#2a221a;background:#f6efe1;border:1px solid #b85c34;border-bottom:1px solid #f6efe1;border-radius:8px 8px 0 0"><span style="width:7px;height:7px;border-radius:50%;background:#b85c34"></span>session-manager</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#a39079"></span>burrow</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#7d8a6a"></span>social-signals-trader</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#4a3c2e"></span>family-frame</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span>Bilko</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#b85c34"></span>starry-night-2</div>
+<div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;font-size:13px;color:#5b4a40"><span style="width:7px;height:7px;border-radius:50%;background:#a39079"></span>Bilko-Game-Academy</div>
+<div style="margin-left:auto;align-self:stretch;display:flex;align-items:center;padding:0 20px;border-left:1px solid #e0d3b8;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5b4a36">&#123;F&#125;</div>
+</div>
+
+<div style="flex:1;min-height:0;display:flex">
+
+<aside style="flex:none;width:280px;display:flex;flex-direction:column;background:#efe6d3;border-right:1px solid #e0d3b8">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 14px 12px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#8a7a60">Session Manager</span>
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
+</div>
+<div style="margin:0 12px 14px;height:32px;display:flex;align-items:center;justify-content:center;gap:7px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;font-size:13px;font-weight:500;color:#2a221a;cursor:pointer">+ Open / Start Project</div>
+<div style="border-top:1px solid #e0d3b8"></div>
+<div style="flex:1;min-height:0;display:flex;flex-direction:column;gap:2px;padding:12px 6px">
+
+<div style="padding:8px 10px 6px">
+<div style="display:flex;align-items:center;gap:7px;font-family:'Source Serif 4',Charter,Georgia,serif;font-style:italic;font-weight:600;font-size:13.5px;letter-spacing:.02em;text-transform:uppercase;color:#8a7a60"><span style="font-style:normal;font-size:9px">▾</span>Workspace</div>
+<div style="margin:4px 0 0 15px;font-size:11px;line-height:1.4;color:#9e9077">Where you do the work — sessions, files, and everything currently running.</div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">Dashboard</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">This machine — every project, every active session</div></div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">File Explorer</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Browse files + edit — starts at your home folder for every project</div></div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">History</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Spend, tokens and time across every project</div></div>
+</div>
+
+<div style="padding:14px 10px 6px">
+<div style="display:flex;align-items:center;gap:7px;font-family:'Source Serif 4',Charter,Georgia,serif;font-style:italic;font-weight:600;font-size:13.5px;letter-spacing:.02em;text-transform:uppercase;color:#8a7a60"><span style="font-style:normal;font-size:9px">▾</span>Claude Code</div>
+<div style="margin:4px 0 0 15px;font-size:11px;line-height:1.4;color:#9e9077">How Claude behaves — changes here apply to every session you start.</div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M13 8H7"></path><path d="M17 12H7"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">CLAUDE.md</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Your ~/.claude/CLAUDE.md — house rules for every session</div></div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">Settings</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">settings.json — permissions, hooks, env and everything else</div></div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:8px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b85c34" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;font-weight:600;color:#2a221a">Extensions</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Skills, MCP servers and plugins</div></div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">Agents</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Agent personas available to this machine, and when they run</div></div>
+</div>
+
+<div style="padding:14px 10px 6px">
+<div style="display:flex;align-items:center;gap:7px;font-family:'Source Serif 4',Charter,Georgia,serif;font-style:italic;font-weight:600;font-size:13.5px;letter-spacing:.02em;text-transform:uppercase;color:#8a7a60"><span style="font-style:normal;font-size:9px">▾</span>Session Manager</div>
+<div style="margin:4px 0 0 15px;font-size:11px;line-height:1.4;color:#9e9077">This app's own preferences — voice, appearance, telemetry, updates.</div>
+</div>
+<div style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:start;padding:7px 10px;border:1px solid transparent;border-radius:8px;cursor:pointer" style-hover="background:#f3ebdb">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-top:3px"><circle cx="12" cy="12" r="10"></circle><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"></path></svg>
+<div style="min-width:0"><div style="font-size:14px;line-height:1.35;color:#5b4a36">App Settings</div><div style="font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Voice, appearance, telemetry, phone remote, updates</div></div>
+</div>
+</div>
+<div style="display:flex;align-items:center;height:26px;padding:0 10px;border-top:1px solid #e0d3b8"><span style="width:5px;height:5px;border-radius:50%;background:#8a7a60"></span></div>
+</aside>
+
+<main style="flex:1;min-width:0;display:flex;flex-direction:column;padding:26px 32px 22px">
+<div style="flex:none">
+<div style="display:flex;align-items:baseline;justify-content:space-between">
+<span style="font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8a7a60">Claude Code</span>
+<span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#b85c34;cursor:pointer">Learn</span>
+</div>
+<sc-if value="{{ showTitle }}" hint-placeholder-val="{{ true }}"><h1 style="margin:8px 0 10px;font-family:'Source Serif 4',Charter,Georgia,serif;font-size:38px;font-weight:400;line-height:1.05;letter-spacing:-.01em;color:#2a221a">Extensions</h1></sc-if>
+<sc-if value="{{ hideTitle }}" hint-placeholder-val="{{ false }}"><div style="height:8px"></div></sc-if>
+<p style="margin:0;font-size:14px;color:#5b4a36">Skills, MCP servers and plugins — each tab edits the real file Claude Code reads.</p>
+</div>
+
+<div role="tablist" style="flex:none;position:relative;z-index:1;display:flex;align-items:flex-end;gap:2px;margin:24px 0 -1px">
+<sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+<sc-if value="{{ t.on }}"><div role="tab" aria-selected="true" style="display:flex;align-items:center;gap:9px;height:41px;padding:0 20px;background:#efe6d3;border:1px solid #b85c34;border-top-width:2px;border-bottom-color:#efe6d3;border-radius:9px 9px 0 0;font-size:14.5px;font-weight:600;color:#2a221a">{{ t.label }}<sc-if value="{{ counts }}"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;color:#b85c34">{{ t.count }}</span></sc-if></div></sc-if>
+<sc-if value="{{ t.off }}"><div role="tab" onClick="{{ t.select }}" style="display:flex;align-items:center;gap:9px;height:38px;padding:0 20px;border:1px solid transparent;border-bottom:none;border-radius:9px 9px 0 0;font-size:14.5px;font-weight:500;color:#5b4a36;cursor:pointer" style-hover="background:#efe6d3;color:#2a221a;border-color:#e0d3b8">{{ t.label }}<sc-if value="{{ counts }}"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;color:#9e9077">{{ t.count }}</span></sc-if></div></sc-if>
+</sc-for>
+<div style="margin-left:auto;align-self:center;min-width:0;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px 18px;font-size:11.5px;color:#8a7a60">
+<sc-for list="{{ sources }}" as="s" hint-placeholder-count="1"><span style="white-space:nowrap"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;color:#5b4a36">{{ s.path }}</span> · {{ s.meta }}</span></sc-for>
+</div>
+</div>
+
+<div style="flex:1;min-height:0;position:relative;background:#f6efe1;border:1px solid #e0d3b8">
+
+<sc-if value="{{ isSkills }}" hint-placeholder-val="{{ true }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+<div style="flex:none;height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#efe6d3;border-bottom:1px solid #e0d3b8;font-size:12px">
+<span style="width:276px;height:28px;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:0 9px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;color:#9e9077"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9e9077" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Filter skills and commands</span>
+<span style="color:#8a7a60">0 skills · 1 command · 16 from plugins</span>
+<span style="margin-left:auto;height:28px;display:inline-flex;align-items:center;gap:6px;padding:0 10px 0 12px;border-radius:6px;background:#b85c34;color:#fbf6ec;font-size:12.5px;font-weight:600;box-shadow:0 1px 2px rgba(90,40,15,.25);cursor:pointer" style-hover="background:#a44f2b">+ New<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></span>
+</div>
+<div style="flex:1;min-height:0;display:flex">
+<div style="flex:none;width:300px;box-sizing:border-box;display:flex;flex-direction:column;gap:4px;padding:4px 8px;border-right:1px solid #e0d3b8;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px;margin:12px 6px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">Skills<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0;color:#b3a895">0</span></div>
+<div style="margin:0 2px 4px;padding:11px 12px;display:flex;flex-direction:column;gap:5px;border:1px dashed #d4c4a4;border-radius:7px;font-size:12px;line-height:1.45;color:#7a6a52">
+<span style="font-weight:600;color:#2a221a">No skills yet</span>
+<span>A skill is a folder with a SKILL.md that Claude loads when a task calls for it.</span>
+<span style="font-weight:600;color:#b85c34;cursor:pointer">Create a skill →</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin:12px 6px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">Slash commands<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0;color:#b3a895">1</span></div>
+<div style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:7px">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;font-weight:600;color:#2a221a">/refresh-claude-md</span><span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#efe6d3;border:1px solid #e0d3b8;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#5b4a36">LOCAL</span></div>
+<span style="font-size:11.5px;color:#8a7a60;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Audit, refresh, and split CLAUDE.md files in the current project</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin:12px 6px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">From plugins<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0;color:#b3a895">16</span><span style="margin-left:auto;padding:0 5px;border:1px solid #e0d3b8;border-radius:3px;font-size:9.5px;font-weight:500;color:#9e9077">READ-ONLY</span></div>
+<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid transparent;border-radius:7px;font-size:12.5px;color:#5b4a36;cursor:pointer" style-hover="background:#f3ebdb"><span>session-manager-dev</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#9e9077">4 skills</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#b3a895" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></div>
+<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid transparent;border-radius:7px;font-size:12.5px;color:#5b4a36;cursor:pointer" style-hover="background:#f3ebdb"><span>stripe</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#9e9077">10 skills · 2 commands</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#b3a895" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></div>
+</div>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:16px 22px 0">
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:18px;font-weight:600;color:#2a221a">/refresh-claude-md</span>
+<span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#efe6d3;border:1px solid #e0d3b8;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#5b4a36">COMMAND</span>
+<span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#efe6d3;border:1px solid #e0d3b8;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#5b4a36">LOCAL</span>
+<div style="margin-left:auto;display:flex;gap:2px;padding:2px;background:#efe6d3;border:1px solid #e0d3b8;border-radius:7px">
+<sc-if value="{{ srcOn }}"><span style="height:24px;display:inline-flex;align-items:center;padding:0 11px;border-radius:5px;background:#fbf6ec;box-shadow:0 1px 2px rgba(42,34,26,.16);font-size:12px;font-weight:600;color:#2a221a">Source</span></sc-if>
+<sc-if value="{{ srcOff }}"><span onClick="{{ showSource }}" style="height:24px;display:inline-flex;align-items:center;padding:0 11px;border-radius:5px;font-size:12px;color:#7a6a52;cursor:pointer" style-hover="color:#2a221a">Source</span></sc-if>
+<sc-if value="{{ preOn }}"><span style="height:24px;display:inline-flex;align-items:center;padding:0 11px;border-radius:5px;background:#fbf6ec;box-shadow:0 1px 2px rgba(42,34,26,.16);font-size:12px;font-weight:600;color:#2a221a">Preview</span></sc-if>
+<sc-if value="{{ preOff }}"><span onClick="{{ showPreview }}" style="height:24px;display:inline-flex;align-items:center;padding:0 11px;border-radius:5px;font-size:12px;color:#7a6a52;cursor:pointer" style-hover="color:#2a221a">Preview</span></sc-if>
+</div>
+</div>
+<div style="display:grid;grid-template-columns:84px minmax(0,1fr);align-items:baseline;gap:10px 12px;margin-top:14px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">Description</span>
+<div style="padding:7px 10px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;font-size:13px;line-height:1.45;color:#2a221a">Audit, refresh, and split CLAUDE.md files in the current project so they stay accurate, concise, and well-scoped.</div>
+<span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">File</span>
+<div style="display:flex;align-items:baseline;gap:12px;font-size:12px"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:#5b4a36">~/.claude/commands/refresh-claude-md.md</span><span style="font-weight:500;color:#b85c34;cursor:pointer">Reveal in File Explorer</span></div>
+</div>
+<div style="flex:1;min-height:0;margin-top:14px;border:1px solid #e0d3b8;border-bottom:none;border-radius:7px 7px 0 0;background:#fbf6ec;overflow:hidden">
+<sc-if value="{{ srcOn }}">
+<div style="display:grid;grid-template-columns:42px minmax(0,1fr);grid-auto-rows:minmax(19px,auto);column-gap:16px;padding:10px 18px 0 0;font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:12px;line-height:19px;color:#2a221a;white-space:pre-wrap">
+<span style="text-align:right;color:#b3a895">1</span><span><span style="padding:1px 8px;border-radius:4px;background:#efe6d3;color:#8a7a60">▸ frontmatter — description, edited above</span></span>
+<span style="text-align:right;color:#b3a895">4</span><span></span>
+<span style="text-align:right;color:#b3a895">5</span><span>You are auditing and refreshing CLAUDE.md files in this repository. CLAUDE.md is the per-project instruction file Claude reads on every conversation — it must be <b style="font-weight:700">**accurate, concise, and scoped to where it lives**</b>.</span>
+<span style="text-align:right;color:#b3a895">6</span><span></span>
+<span style="text-align:right;color:#b3a895">7</span><span style="font-weight:600;color:#b85c34">## Step 1 — Inventory</span>
+<span style="text-align:right;color:#b3a895">8</span><span></span>
+<span style="text-align:right;color:#b3a895">9</span><span>Find every CLAUDE.md in the repo:</span>
+<span style="text-align:right;color:#b3a895">10</span><span style="color:#9e9077">```<span style="color:#2e5a3e">bash</span></span>
+<span style="text-align:right;color:#b3a895">11</span><span style="color:#2e5a3e">find . -name "CLAUDE.md" -not -path "*/node_modules/*" -not -path "*/.git/*"</span>
+<span style="text-align:right;color:#b3a895">12</span><span style="color:#9e9077">```</span>
+<span style="text-align:right;color:#b3a895">13</span><span></span>
+<span style="text-align:right;color:#b3a895">14</span><span>For each one, note:</span>
+<span style="text-align:right;color:#b3a895">15</span><span><span style="color:#b85c34">-</span> Path and line count</span>
+<span style="text-align:right;color:#b3a895">16</span><span><span style="color:#b85c34">-</span> Last commit touching it: <span style="color:#7b560e">`git log -1 --format="%ar — %s" -- &lt;path&gt;`</span></span>
+<span style="text-align:right;color:#b3a895">17</span><span><span style="color:#b85c34">-</span> Subtree it governs (project root, a package, a service, etc.)</span>
+<span style="text-align:right;color:#b3a895">18</span><span></span>
+<span style="text-align:right;color:#b3a895">19</span><span style="font-weight:600;color:#b85c34">## Step 2 — Detect drift</span>
+<span style="text-align:right;color:#b3a895">20</span><span></span>
+<span style="text-align:right;color:#b3a895">21</span><span>For each CLAUDE.md, sample what changed in its subtree since the file was last touched:</span>
+<span style="text-align:right;color:#b3a895">22</span><span style="color:#9e9077">```<span style="color:#2e5a3e">bash</span></span>
+<span style="text-align:right;color:#b3a895">23</span><span style="color:#2e5a3e">git log --oneline --since="&lt;last-CLAUDE.md-commit-date&gt;" -- &lt;subtree&gt;</span>
+<span style="text-align:right;color:#b3a895">24</span><span style="color:#9e9077">```</span>
+</div>
+</sc-if>
+<sc-if value="{{ preOn }}">
+<div style="max-width:720px;padding:16px 26px;font-size:14px;line-height:1.6;color:#2a221a">
+<p style="margin:0 0 14px">You are auditing and refreshing CLAUDE.md files in this repository. CLAUDE.md is the per-project instruction file Claude reads on every conversation — it must be <b>accurate, concise, and scoped to where it lives</b>.</p>
+<h3 style="margin:0 0 6px;font-family:'Source Serif 4',Charter,Georgia,serif;font-size:20px;font-weight:600">Step 1 — Inventory</h3>
+<p style="margin:0 0 8px">Find every CLAUDE.md in the repo:</p>
+<div style="margin:0 0 12px;padding:9px 12px;background:#f3ebdb;border:1px solid #e0d3b8;border-radius:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:#2e5a3e">find . -name "CLAUDE.md" -not -path "*/node_modules/*" -not -path "*/.git/*"</div>
+<p style="margin:0 0 4px">For each one, note:</p>
+<ul style="margin:0 0 14px;padding-left:20px">
+<li>Path and line count</li>
+<li>Last commit touching it: <code style="padding:1px 5px;background:#f3ebdb;border-radius:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:#7b560e">git log -1 --format="%ar — %s" -- &lt;path&gt;</code></li>
+<li>Subtree it governs (project root, a package, a service, etc.)</li>
+</ul>
+<h3 style="margin:0 0 6px;font-family:'Source Serif 4',Charter,Georgia,serif;font-size:20px;font-weight:600">Step 2 — Detect drift</h3>
+<p style="margin:0 0 8px">For each CLAUDE.md, sample what changed in its subtree since the file was last touched:</p>
+<div style="margin:0 0 12px;padding:9px 12px;background:#f3ebdb;border:1px solid #e0d3b8;border-radius:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:#2e5a3e">git log --oneline --since="&lt;last-CLAUDE.md-commit-date&gt;" -- &lt;subtree&gt;</div>
+</div>
+</sc-if>
+</div>
+</div>
+</div>
+<div style="flex:none;height:40px;display:flex;align-items:center;gap:8px;padding:0 12px 0 16px;background:#efe6d3;border-top:1px solid #e0d3b8;font-size:12px">
+<span style="display:flex;align-items:center;gap:7px;color:#8a7a60"><span style="width:6px;height:6px;border-radius:50%;background:#6f7d52"></span>Saved — matches the file on disk</span>
+<span style="margin-left:auto;height:26px;display:inline-flex;align-items:center;padding:0 11px;border:1px solid #e6dac3;border-radius:5px;color:#b3a895">Revert</span>
+<span style="height:26px;display:inline-flex;align-items:center;gap:8px;padding:0 11px;background:#eae0cd;border:1px solid #e6dac3;border-radius:5px;color:#b3a895">Save<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px">Ctrl S</span></span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isMcp }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+<div style="flex:none;height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#efe6d3;border-bottom:1px solid #e0d3b8;font-size:12px">
+<span style="width:276px;height:28px;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:0 9px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;color:#9e9077"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9e9077" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Filter servers</span>
+<span style="color:#8a7a60">7 servers · 1 checked</span>
+<span style="height:28px;display:inline-flex;align-items:center;padding:0 11px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;font-size:12.5px;color:#2a221a;cursor:pointer" style-hover="border-color:#d4c4a4">Check all</span>
+<span style="margin-left:auto;height:28px;display:inline-flex;align-items:center;gap:6px;padding:0 10px 0 12px;border-radius:6px;background:#b85c34;color:#fbf6ec;font-size:12.5px;font-weight:600;box-shadow:0 1px 2px rgba(90,40,15,.25);cursor:pointer" style-hover="background:#a44f2b">+ Add server<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></span>
+</div>
+<div style="flex:1;min-height:0;display:flex">
+<div style="flex:none;width:300px;box-sizing:border-box;display:flex;flex-direction:column;gap:2px;padding:4px 8px;border-right:1px solid #e0d3b8;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px;margin:12px 6px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">In ~/.claude.json<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0;color:#b3a895">7</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">bilko-host</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60">Local · not checked</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">blender</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60">Local · not checked</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:7px"><span style="width:8px;height:8px;border-radius:50%;background:#6f7d52"></span><span style="font-size:13px;font-weight:600;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">fetch</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60"><span style="color:#9a4527">Anthropic</span> · connected · 1 tool</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">google-workspace</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60">Local · not checked</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">n8n</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60">Local · not checked</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">playwright</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60"><span style="color:#7b560e">Community</span> · not checked</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">session-manager</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">stdio</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60">Local · not checked</span></div>
+<div style="display:flex;align-items:center;gap:8px;margin:12px 6px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">From plugins<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0;color:#b3a895">1</span><span style="margin-left:auto;padding:0 5px;border:1px solid #e0d3b8;border-radius:3px;font-size:9.5px;font-weight:500;color:#9e9077">READ-ONLY</span></div>
+<div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:6px 10px;border:1px solid transparent;border-radius:7px;cursor:pointer" style-hover="background:#f3ebdb"><span style="width:8px;height:8px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b3a895"></span><span style="font-size:13px;color:#2a221a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">stripe</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#9e9077">plugin</span><span></span><span style="grid-column:2 / 4;font-size:11px;color:#8a7a60">via the stripe plugin · not checked</span></div>
+</div>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;padding:18px 24px;overflow:hidden">
+<div style="display:flex;align-items:flex-start;gap:16px">
+<div style="min-width:0;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:12px">
+<span style="font-size:22px;font-weight:600;letter-spacing:-.01em;color:#2a221a">fetch</span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;background:#e5e7d4;font-size:12px;font-weight:600;color:#4e5a38"><span style="width:6px;height:6px;border-radius:50%;background:#6f7d52"></span>Connected</span>
+<span style="font-size:12px;color:#8a7a60">checked just now</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8a7a60">
+<span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#f2dccd;border:1px solid #e2b6a0;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#9a4527">ANTHROPIC</span>
+<span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#efe6d3;border:1px solid #e0d3b8;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#5b4a36">STDIO</span>
+<span>User scope</span><span style="color:#c9bba0">·</span>
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:#5b4a36">~/.claude.json › mcpServers › fetch</span>
+</div>
+</div>
+<div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+<span style="height:28px;display:inline-flex;align-items:center;padding:0 11px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;font-size:12.5px;color:#2a221a;cursor:pointer" style-hover="border-color:#d4c4a4">Check again</span>
+<span style="height:28px;display:inline-flex;align-items:center;padding:0 11px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;font-size:12.5px;color:#2a221a;cursor:pointer" style-hover="border-color:#d4c4a4">Edit JSON</span>
+<span style="display:flex;align-items:center;gap:8px;margin-left:8px;font-size:12px;color:#5b4a36"><span onClick="{{ toggleMcp }}" style="position:relative;flex:none;width:36px;height:20px;border-radius:10px;background:{{ mcpSw.bg }};cursor:pointer;transition:background .15s"><span style="position:absolute;top:2px;left:{{ mcpSw.left }};width:16px;height:16px;border-radius:50%;background:#fbf6ec;box-shadow:0 1px 2px rgba(42,34,26,.3);transition:left .15s"></span></span>{{ mcpSw.label }}</span>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:7px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">Command</span>
+<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#2a221a"><span style="color:#b3a895">$</span>uvx mcp-server-fetch<span style="margin-left:auto;font-family:'Inter Tight',sans-serif;font-size:12px;color:#8a7a60;cursor:pointer">Copy</span></div>
+</div>
+<div style="display:flex;flex-direction:column;gap:7px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">Environment</span>
+<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px dashed #d4c4a4;border-radius:6px;font-size:12.5px;color:#8a7a60">No variables set<span style="margin-left:auto;font-weight:600;color:#b85c34;cursor:pointer">+ Add variable</span></div>
+</div>
+<div style="display:flex;flex-direction:column;gap:7px">
+<span style="display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a7a60">Tools<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0;color:#b3a895">1</span><span style="font-weight:400;letter-spacing:0;text-transform:none;color:#9e9077">from the last check</span></span>
+<div style="display:grid;grid-template-columns:120px minmax(0,1fr) auto;align-items:baseline;gap:16px;padding:10px 12px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px">
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;font-weight:600;color:#2a221a">fetch</span>
+<span style="font-size:12.5px;color:#5b4a36">Fetches a URL from the internet and extracts its contents as markdown.</span>
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#9e9077">mcp__fetch__fetch</span>
+</div>
+</div>
+</div>
+</div>
+<div style="flex:none;height:40px;display:flex;align-items:center;gap:8px;padding:0 12px 0 16px;background:#efe6d3;border-top:1px solid #e0d3b8;font-size:12px">
+<span style="display:flex;align-items:center;gap:7px;color:#8a7a60"><span style="width:6px;height:6px;border-radius:50%;background:#6f7d52"></span>Saved — matches ~/.claude.json</span>
+<span style="margin-left:auto;height:26px;display:inline-flex;align-items:center;padding:0 11px;border:1px solid #e6dac3;border-radius:5px;color:#b3a895">Revert</span>
+<span style="height:26px;display:inline-flex;align-items:center;gap:8px;padding:0 11px;background:#eae0cd;border:1px solid #e6dac3;border-radius:5px;color:#b3a895">Save<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px">Ctrl S</span></span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isPlugins }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+<div style="flex:none;height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#efe6d3;border-bottom:1px solid #e0d3b8;font-size:12px">
+<span style="width:276px;height:28px;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:0 9px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:6px;color:#9e9077"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9e9077" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Filter plugins</span>
+<span style="color:#8a7a60">2 installed · {{ enabledCount }} enabled</span>
+<span style="margin-left:auto;height:28px;display:inline-flex;align-items:center;gap:6px;padding:0 10px 0 12px;border-radius:6px;background:#b85c34;color:#fbf6ec;font-size:12.5px;font-weight:600;box-shadow:0 1px 2px rgba(90,40,15,.25);cursor:pointer" style-hover="background:#a44f2b">+ Add plugin<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></span>
+</div>
+<div style="flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;padding:16px">
+
+<div style="display:grid;grid-template-columns:36px minmax(0,1fr) auto;column-gap:16px;padding:16px 18px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:10px">
+<span onClick="{{ toggleP1 }}" style="position:relative;margin-top:1px;width:36px;height:20px;border-radius:10px;background:{{ p1.bg }};cursor:pointer;transition:background .15s"><span style="position:absolute;top:2px;left:{{ p1.left }};width:16px;height:16px;border-radius:50%;background:#fbf6ec;box-shadow:0 1px 2px rgba(42,34,26,.3);transition:left .15s"></span></span>
+<div style="min-width:0;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 10px">
+<span style="font-size:15px;font-weight:600;color:#2a221a">session-manager-dev</span>
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:#8a7a60">v0.3.5</span>
+<span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#f3e5c6;border:1px solid #e8cf98;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#7b560e">COMMUNITY</span>
+<span style="font-size:12px;color:#8a7a60">User scope</span>
+</div>
+<span style="font-size:13px;color:#5b4a36">The default end-to-end development skillset</span>
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+<span onClick="{{ goSkills }}" style="display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#f6efe1;border:1px solid #e0d3b8;border-radius:999px;font-size:12px;color:#5b4a36;cursor:pointer" style-hover="border-color:#b85c34;color:#2a221a"><b style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:#2a221a">4</b>skills<span style="color:#b3a895">›</span></span>
+</div>
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">~/.claude/plugins/cache/session-manager/session-manager-dev/0.3.5</span>
+</div>
+<div style="position:relative;align-self:start"><span style="width:30px;height:28px;display:inline-flex;align-items:center;justify-content:center;background:#f6efe1;border:1px solid #e0d3b8;border-radius:6px;color:#5b4a36;cursor:pointer" style-hover="border-color:#d4c4a4"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></span></div>
+</div>
+
+<div style="display:grid;grid-template-columns:36px minmax(0,1fr) auto;column-gap:16px;padding:16px 18px;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:10px">
+<span onClick="{{ toggleP2 }}" style="position:relative;margin-top:1px;width:36px;height:20px;border-radius:10px;background:{{ p2.bg }};cursor:pointer;transition:background .15s"><span style="position:absolute;top:2px;left:{{ p2.left }};width:16px;height:16px;border-radius:50%;background:#fbf6ec;box-shadow:0 1px 2px rgba(42,34,26,.3);transition:left .15s"></span></span>
+<div style="min-width:0;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 10px">
+<span style="font-size:15px;font-weight:600;color:#2a221a">stripe</span>
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:#8a7a60">v0.11.17</span>
+<span style="height:16px;display:inline-flex;align-items:center;padding:0 6px;background:#f3e5c6;border:1px solid #e8cf98;border-radius:3px;font-size:10px;letter-spacing:.04em;color:#7b560e">COMMUNITY</span>
+<span style="font-size:12px;color:#8a7a60">User scope</span>
+</div>
+<span style="font-size:13px;color:#5b4a36">Stripe development plugin for Claude</span>
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+<span onClick="{{ goSkills }}" style="display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#f6efe1;border:1px solid #e0d3b8;border-radius:999px;font-size:12px;color:#5b4a36;cursor:pointer" style-hover="border-color:#b85c34;color:#2a221a"><b style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:#2a221a">10</b>skills<span style="color:#b3a895">›</span></span>
+<span onClick="{{ goSkills }}" style="display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#f6efe1;border:1px solid #e0d3b8;border-radius:999px;font-size:12px;color:#5b4a36;cursor:pointer" style-hover="border-color:#b85c34;color:#2a221a"><b style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:#2a221a">2</b>commands<span style="color:#b3a895">›</span></span>
+<span onClick="{{ goMcp }}" style="display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#f6efe1;border:1px solid #e0d3b8;border-radius:999px;font-size:12px;color:#5b4a36;cursor:pointer" style-hover="border-color:#b85c34;color:#2a221a">MCP server<span style="color:#b3a895">›</span></span>
+<span style="display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#f6efe1;border:1px solid #e0d3b8;border-radius:999px;font-size:12px;color:#5b4a36;cursor:pointer" style-hover="border-color:#b85c34;color:#2a221a"><b style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:#2a221a">1</b>agent<span style="color:#b3a895">↗</span></span>
+<span style="display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#f6efe1;border:1px solid #e0d3b8;border-radius:999px;font-size:12px;color:#5b4a36;cursor:pointer" style-hover="border-color:#b85c34;color:#2a221a"><b style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:#2a221a">7</b>hooks<span style="color:#b3a895">↗</span></span>
+</div>
+<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#9e9077;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">~/.claude/plugins/cache/claude-plugins-official/stripe/0.11.17</span>
+</div>
+<div style="position:relative;align-self:start">
+<span onClick="{{ toggleMenu }}" style="width:30px;height:28px;display:inline-flex;align-items:center;justify-content:center;background:#f6efe1;border:1px solid #e0d3b8;border-radius:6px;color:#5b4a36;cursor:pointer" style-hover="border-color:#d4c4a4"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></span>
+<sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:0;top:34px;z-index:5;width:210px;padding:5px;display:flex;flex-direction:column;background:#fbf6ec;border:1px solid #e0d3b8;border-radius:8px;box-shadow:0 14px 30px -14px rgba(42,34,26,.45);font-size:12.5px;color:#2a221a">
+<span style="padding:7px 10px;border-radius:5px;cursor:pointer" style-hover="background:#efe6d3">Reveal in File Explorer</span>
+<span style="padding:7px 10px;border-radius:5px;cursor:pointer" style-hover="background:#efe6d3">Copy path</span>
+<span style="height:1px;margin:4px 6px;background:#e0d3b8"></span>
+<span style="padding:7px 10px;border-radius:5px;font-weight:500;color:#a83818;cursor:pointer" style-hover="background:#f2dccd">Uninstall stripe</span>
+</div></sc-if>
+</div>
+</div>
+
+<span style="padding:0 4px;font-size:12px;color:#8a7a60">Plugin contents also appear, read-only, in Skills and MCP Servers — tagged with the plugin that added them.</span>
+</div>
+</div>
+</sc-if>
+
+</div>
+</main>
+</div>
+
+<div style="flex:none;height:26px;display:flex;align-items:center;gap:16px;padding:0 12px;background:#efe6d3;border-top:1px solid #e0d3b8;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#5b4d40">
+<span style="display:flex;align-items:center;gap:6px"><span style="width:5px;height:5px;border-radius:50%;background:#8a7a60"></span>offline</span>
+<span>session —</span>
+<span>weekly 52%</span>
+<span style="color:#907c60">session-manager · ⎇main</span>
+<span style="color:#907c60">last activity: —</span>
+<span style="margin-left:auto;display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#b85c34"></span><span style="width:8px;height:8px;border-radius:50%;background:#b85c34"></span><span style="width:8px;height:8px;border-radius:50%;background:#b85c34"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span><span style="width:6px;height:6px;border-radius:50%;border:1px solid #e0d3b8"></span></span>
+<span style="margin-left:6px">v0.130.2</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;tab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Skills&quot;,&quot;MCP Servers&quot;,&quot;Plugins&quot;],&quot;default&quot;:&quot;Skills&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;counts&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;menu&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;hideTitle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const TABS = [
+  { key: 'skills', label: 'Skills', count: '1', sources: [{ path: '~/.claude/skills', meta: 'created on first save' }] },
+  { key: 'mcp', label: 'MCP Servers', count: '7', sources: [{ path: '~/.claude.json › mcpServers', meta: 'just now' }] },
+  { key: 'plugins', label: 'Plugins', count: '2', sources: [
+    { path: '~/.claude/plugins/installed_plugins.json', meta: '9h 31m ago' },
+    { path: '~/.claude/settings.json › enabledPlugins', meta: '15d ago' }
+  ] }
+];
+
+class Component extends DCLogic {
+  state = { tab: null, view: 'source', p1: true, p2: true, mcpOn: true, menu: null };
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.tab !== this.props.tab && this.state.tab !== null) this.setState({ tab: null });
+  }
+
+  norm(v) {
+    const s = String(v || '').toLowerCase();
+    if (s.includes('mcp')) return 'mcp';
+    if (s.includes('plug')) return 'plugins';
+    return 'skills';
+  }
+
+  renderVals() {
+    const st = this.state;
+    const cur = st.tab || this.norm(this.props.tab);
+    const go = k => () => this.setState({ tab: k });
+    const flip = k => () => this.setState(s => ({ [k]: !s[k] }));
+    const sw = on => ({ bg: on ? '#b85c34' : '#d4c4a4', left: on ? '18px' : '2px', label: on ? 'Enabled' : 'Disabled' });
+    const menuOpen = st.menu === null ? !!this.props.menu : st.menu;
+    const active = TABS.find(t => t.key === cur);
+    return {
+      tabs: TABS.map(t => ({ ...t, on: t.key === cur, off: t.key !== cur, select: go(t.key) })),
+      counts: this.props.counts ?? true,
+      showTitle: !this.props.hideTitle,
+      hideTitle: !!this.props.hideTitle,
+      sources: active.sources,
+      isSkills: cur === 'skills', isMcp: cur === 'mcp', isPlugins: cur === 'plugins',
+      goSkills: go('skills'), goMcp: go('mcp'),
+      srcOn: st.view === 'source', srcOff: st.view !== 'source',
+      preOn: st.view === 'preview', preOff: st.view !== 'preview',
+      showSource: () => this.setState({ view: 'source' }),
+      showPreview: () => this.setState({ view: 'preview' }),
+      p1: sw(st.p1), p2: sw(st.p2), mcpSw: sw(st.mcpOn),
+      toggleP1: flip('p1'), toggleP2: flip('p2'), toggleMcp: flip('mcpOn'),
+      enabledCount: (st.p1 ? 1 : 0) + (st.p2 ? 1 : 0),
+      menuOpen, toggleMenu: () => this.setState({ menu: !menuOpen })
+    };
+  }
+}
+</script>
+</body>
+</html>

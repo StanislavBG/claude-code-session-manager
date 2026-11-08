@@ -17,6 +17,7 @@ const { encodeCwd } = require('../../util/encodeCwd.cjs');
 const {
   SESSION_ID_RE,
   claimedClaudeSessionIds,
+  claimedClaudeSessionIdsAsync,
   listRestorableSessions,
   checkRestorableSessionSync,
   __resetCacheForTests,
@@ -252,18 +253,41 @@ test('strings are trimmed and capped at 300 chars without splitting a surrogate 
   expect(emoji.firstPrompt).toBe('a'.repeat(299));
 });
 
-test('limit caps the list and truncated says candidates remained', async () => {
+test('limit caps each kind and truncated says unread candidates remained', async () => {
   for (let i = 1; i <= 5; i += 1) writeSession(uuid(i), { mtimeSec: T0 + i });
+  for (let i = 6; i <= 8; i += 1) writeSession(uuid(i), { entrypoint: 'sdk-cli', mtimeSec: T0 - i }); // older headless runs
   const two = await list({ limit: 2 });
-  expect(ids(two)).toEqual([uuid(5), uuid(4)]);
-  expect(two).toMatchObject({ scanned: 2, truncated: true });
-  expect(await list({ limit: 5 })).toMatchObject({ scanned: 5, truncated: false });
+  // A full interactive budget does not stop the walk: it reads on (3, 2, 1 dropped) until the headless one fills too.
+  expect(ids(two)).toEqual([uuid(5), uuid(4), uuid(6), uuid(7)]);
+  expect(two).toMatchObject({ scanned: 7, truncated: true });
+  expect(await list({ limit: 5 })).toMatchObject({ scanned: 8, truncated: false });
 });
 
-test('at most 200 transcript heads are read per call', async () => {
-  for (let i = 1; i <= 205; i += 1) writeTranscript(uuid(i), [user('elsewhere', { cwd: '/some/other/project' })], T0 + 1000 + i);
-  writeSession(uuid(999), { mtimeSec: T0 }); // restorable, but older than the 200 newest
-  expect(await list()).toEqual({ sessions: [], hiddenClaimed: 0, scanned: 200, truncated: true });
+test('at most 400 transcript heads are read per call', async () => {
+  for (let i = 1; i <= 405; i += 1) writeTranscript(uuid(i), [user('elsewhere', { cwd: '/some/other/project' })], T0 + 1000 + i);
+  writeSession(uuid(999), { mtimeSec: T0 }); // restorable, but older than the 400 newest
+  expect(await list()).toEqual({ sessions: [], hiddenClaimed: 0, scanned: 400, truncated: true });
+});
+
+test('interactive and headless rows have separate budgets: 60 newer headless runs leave room for 3 interactive sessions', async () => {
+  for (let i = 1; i <= 3; i += 1) writeSession(uuid(i), { mtimeSec: T0 + i });
+  for (let i = 4; i <= 63; i += 1) writeSession(uuid(i), { entrypoint: 'sdk-cli', mtimeSec: T0 + i });
+  const r = await list(); // default limit 50, per kind
+  const newestHeadless = Array.from({ length: 50 }, (_, k) => uuid(63 - k));
+  expect(r.sessions.filter((s) => !s.headless).map((s) => s.sessionId)).toEqual([uuid(3), uuid(2), uuid(1)]);
+  expect(r.sessions.filter((s) => s.headless).map((s) => s.sessionId)).toEqual(newestHeadless);
+  expect(ids(r)).toEqual([...newestHeadless, uuid(3), uuid(2), uuid(1)]); // still one array, newest first
+  expect(r).toMatchObject({ hiddenClaimed: 0, scanned: 63, truncated: false });
+});
+
+test('an interactive session older than the 400-read window is not listed and truncated is true', async () => {
+  for (let i = 1; i <= 399; i += 1) writeSession(uuid(1000 + i), { entrypoint: 'sdk-cli', mtimeSec: T0 + 1000 + i });
+  writeSession(uuid(2), { prompt: 'read #400, the last one', mtimeSec: T0 + 2 });
+  writeSession(uuid(1), { prompt: 'read #401, past the window', mtimeSec: T0 + 1 });
+  const r = await list();
+  expect(r.sessions.filter((s) => !s.headless).map((s) => s.sessionId)).toEqual([uuid(2)]);
+  expect(r.sessions.filter((s) => s.headless)).toHaveLength(50);
+  expect(r).toMatchObject({ scanned: 400, truncated: true });
 });
 
 test('checkRestorableSessionSync refuses a non-UUID id before touching the filesystem', () => {
@@ -297,4 +321,35 @@ test('the claimed-id memo re-reads only an Epic file whose mtime:size changed', 
   writeIndex({ e: { id: 'e', claudeSessionId: uuid(5) } }); // active-index.json appears: picked up, archives untouched
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(5)]);
   expect(reads).toHaveBeenCalledTimes(1);
+});
+
+test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-reads only a changed Epic file via fs.promises', async () => {
+  writeIndex({ live: { id: 'live', claudeSessionId: uuid(9), status: 'active' } });
+  writeArchive('epic-a', uuid(1), T0);
+  writeArchive('epic-b', uuid(2), T0);
+  fs.writeFileSync(path.join(promptDir(), 'epic-bad.json'), '{"session": '); // malformed: owns nothing
+  const syncIds = claimedClaudeSessionIds(cwd, deps());
+  __resetCacheForTests();
+  const asyncIds = await claimedClaudeSessionIdsAsync(cwd, deps());
+  expect(sorted(asyncIds)).toEqual([uuid(1), uuid(2), uuid(9)]);
+  expect(sorted(asyncIds)).toEqual(sorted(syncIds));
+
+  // Calls that touched an archived Epic file (active-index.json stays a sync readActiveIndex read).
+  const onArchives = (spy) => spy.mock.calls.map(([p]) => String(p))
+    .filter((p) => path.dirname(p) === promptDir() && path.basename(p) !== 'active-index.json')
+    .map((p) => path.basename(p));
+  const readFile = vi.spyOn(fs.promises, 'readFile');
+  const readFileSync = vi.spyOn(fs, 'readFileSync');
+  const statSync = vi.spyOn(fs, 'statSync');
+  writeArchive('epic-a', uuid(3), T0); // same size and mtime: stays memoised (still reports uuid(1))
+  writeArchive('epic-b', uuid(4), T0 + 5); // new mtime: re-read
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
+  expect(onArchives(readFile)).toEqual(['epic-b.json']);
+  expect(onArchives(readFileSync)).toEqual([]);
+  expect(onArchives(statSync)).toEqual([]);
+
+  // The sync reader starts from the memo the async one wrote: nothing changed since, so nothing is re-read.
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
+  expect(onArchives(readFileSync)).toEqual([]);
+  expect(onArchives(readFile)).toEqual(['epic-b.json']);
 });

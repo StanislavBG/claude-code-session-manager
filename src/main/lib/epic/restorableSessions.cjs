@@ -23,10 +23,16 @@
  *   - reads ONE project dir and never enumerates ~/.claude/projects itself;
  *   - reads at most the first and the last 64 KiB of a transcript through fixed
  *     buffers (never readFile) and parses only complete lines;
- *   - head-reads at most 200 transcripts per call, newest first, and reports
- *     `truncated` when candidates remained;
+ *   - head-reads at most 400 transcripts per call, newest first, and reports
+ *     `truncated` when unread candidates remained;
+ *   - fills two budgets of `limit` rows, interactive and headless, so a headless
+ *     row never takes an interactive row's place. Per-kind budgets exist because
+ *     a project with claude -p automation has ~98% headless transcripts: one
+ *     shared budget listed 48 headless + 2 interactive rows on this repo;
  *   - memoises the claimed-id scan per cwd on each ops file's mtimeMs:size, so
  *     an unchanged Epic file is never re-read (epicTranscriptPath.cjs's shape).
+ *     The list path scans through fs.promises (claimedClaudeSessionIdsAsync): a
+ *     cold scan reads every archived Epic file, which blocked 191 ms when sync.
  *
  * Read-only: never writes, never spawns. listRestorableSessions is async (it
  * backs a picker IPC); checkRestorableSessionSync is the sync single-id gate
@@ -47,7 +53,7 @@ const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 const HEAD_BYTES = 64 * 1024;
 const TAIL_BYTES = 64 * 1024;
-const MAX_HEAD_READS = 200;
+const MAX_HEAD_READS = 400;
 const DEFAULT_LIMIT = 50;
 const MAX_TEXT = 300;
 const RECENT_MS = 120 * 1000;
@@ -79,10 +85,12 @@ const LATE_ROW_HINTS = ['"last-prompt"', '"custom-title"', '"summary"'];
 
 /**
  * @typedef {object} RestorableList
- * @property {RestorableSession[]} sessions Newest first by mtime.
+ * @property {RestorableSession[]} sessions Newest first by mtime. The limit is per kind: up to `limit`
+ *   interactive rows plus, on a separate budget, up to `limit` headless rows.
  * @property {number} hiddenClaimed Transcripts left out because an Epic owns them.
- * @property {number} scanned Transcript heads read by this call (at most 200).
- * @property {boolean} truncated The walk stopped (limit or the 200-read cap) with candidates left.
+ * @property {number} scanned Transcript heads read by this call (at most 400).
+ * @property {boolean} truncated Unread unclaimed candidates remained: the walk stopped with both per-kind
+ *   budgets full, or at the 400-read cap.
  */
 
 /** @typedef {'invalid_id'|'not_found'|'cwd_mismatch'|'claimed'} RefusalCode */
@@ -108,11 +116,26 @@ const LATE_ROW_HINTS = ['"last-prompt"', '"custom-title"', '"summary"'];
 
 /** @typedef {{ key: string, sid: string|null }} ArchiveRec */
 
-/** @type {Map<string, { indexKey: string, indexIds: string[], files: Map<string, ArchiveRec> }>} */
+/**
+ * One cwd's claimed-id memo. The sync and the async reader both read and write it.
+ * @typedef {{ indexKey: string, indexIds: string[], files: Map<string, ArchiveRec> }} ClaimedEntry
+ */
+
+/** @type {Map<string, ClaimedEntry>} */
 const claimedCache = new Map();
 
 function __resetCacheForTests() {
   claimedCache.clear();
+}
+
+/**
+ * The memo key. One formatter for both stat paths, so each reader can reuse
+ * the records the other wrote.
+ * @param {import('node:fs').Stats} s
+ * @returns {string} `mtimeMs:size`
+ */
+function keyOf(s) {
+  return `${s.mtimeMs}:${s.size}`;
 }
 
 /**
@@ -121,11 +144,38 @@ function __resetCacheForTests() {
  */
 function statKey(file) {
   try {
-    const s = fs.statSync(file);
-    return `${s.mtimeMs}:${s.size}`;
+    return keyOf(fs.statSync(file));
   } catch {
     return 'missing';
   }
+}
+
+/**
+ * statKey through fs.promises.
+ * @param {string} file
+ * @returns {Promise<string>} `mtimeMs:size`, or 'missing'
+ */
+async function statKeyAsync(file) {
+  try {
+    return keyOf(await fs.promises.stat(file));
+  } catch {
+    return 'missing';
+  }
+}
+
+/**
+ * Run `task(0)` … `task(count - 1)` with at most 16 in flight, so a dir of
+ * 1,500 files does not flood libuv's threadpool. `task` must not reject.
+ * @param {number} count
+ * @param {(index: number) => Promise<void>} task
+ * @returns {Promise<void>}
+ */
+async function forEachBounded(count, task) {
+  let next = 0;
+  const worker = async () => {
+    while (next < count) await task(next++);
+  };
+  await Promise.all(Array.from({ length: Math.min(STAT_CONCURRENCY, count) }, worker));
 }
 
 /**
@@ -157,77 +207,166 @@ function sessionIdOf(session) {
   return typeof sid === 'string' && sid ? sid : null;
 }
 
+const ACTIVE_INDEX = 'active-index.json';
+
+/**
+ * This cwd's prompt-sessions dir, or null when the cwd has no ops root
+ * (relative, tmpdir or linked worktree) and so cannot hold Epics.
+ * @param {unknown} cwd
+ * @returns {string|null}
+ */
+function promptSessionsDirOf(cwd) {
+  if (typeof cwd !== 'string' || !cwd) return null;
+  try {
+    // Lazy, as in epicMint.cjs: opsOwnership → ephemeralCwd → activeSessions.
+    const { opsPath } = require('../opsOwnership.cjs');
+    return opsPath(cwd, 'prompt-sessions');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * claudeSessionIds in active-index.json: one small file, read through
+ * readActiveIndex by both readers.
+ * @param {string} cwd
+ * @param {RestorableDeps} d
+ * @returns {string[]}
+ */
+function readIndexIds(cwd, d) {
+  /** @type {Record<string, unknown>} */
+  let sessions = {};
+  try {
+    sessions = (d.readActiveIndex || readActiveIndex)(cwd).sessions || {};
+  } catch {
+    sessions = {};
+  }
+  /** @type {string[]} */
+  const out = [];
+  for (const s of Object.values(sessions)) {
+    const sid = sessionIdOf(s);
+    if (sid) out.push(sid);
+  }
+  return out;
+}
+
+/** @param {string} name An archived Epic file: any `.json` but the index. */
+function isArchiveName(name) {
+  return name.endsWith('.json') && name !== ACTIVE_INDEX;
+}
+
+/**
+ * First half of the per-file archive-record update both readers share: the
+ * memo's record while the file's mtimeMs:size is unchanged, else null.
+ * @param {Map<string, ArchiveRec>} prevFiles
+ * @param {string} name
+ * @param {string} key
+ * @returns {ArchiveRec|null}
+ */
+function memoHit(prevFiles, name, key) {
+  const hit = prevFiles.get(name);
+  return hit && hit.key === key ? hit : null;
+}
+
+/**
+ * Second half: the record for an archived Epic file read at `key`. A missing,
+ * empty or malformed file (`doc` null) owns nothing.
+ * @param {string} key
+ * @param {unknown} doc
+ * @returns {ArchiveRec}
+ */
+function archiveRec(key, doc) {
+  return { key, sid: doc && typeof doc === 'object' ? sessionIdOf(/** @type {Row} */ (doc).session) : null };
+}
+
+/**
+ * Store `entry` as `cwd`'s memo and return the ids it claims.
+ * @param {string} cwd
+ * @param {ClaimedEntry} entry
+ * @returns {Set<string>}
+ */
+function commitClaimed(cwd, entry) {
+  claimedCache.set(cwd, entry);
+  /** @type {Set<string>} */
+  const ids = new Set(entry.indexIds);
+  for (const rec of entry.files.values()) if (rec.sid) ids.add(rec.sid);
+  return ids;
+}
+
 /**
  * Every claudeSessionId an Epic of this project owns: active-index.json plus
  * each archived prompt-sessions/<id>.json. Memoised per cwd on each file's
  * mtimeMs:size, so an unchanged file is never re-read (one statSync per file per
- * call). A cwd with no ops root (relative, tmpdir or linked worktree) cannot
- * hold Epics, so it owns nothing.
+ * call); the memo is shared with claimedClaudeSessionIdsAsync. A cwd with no ops
+ * root (relative, tmpdir or linked worktree) cannot hold Epics, so it owns
+ * nothing. Sync, for the mint gate (checkRestorableSessionSync).
  * @param {string} cwd Project cwd (mapped to its ops root by opsPath).
  * @param {RestorableDeps} [deps]
  * @returns {Set<string>}
  */
 function claimedClaudeSessionIds(cwd, deps) {
-  /** @type {Set<string>} */
-  const ids = new Set();
-  if (typeof cwd !== 'string' || !cwd) return ids;
+  const dir = promptSessionsDirOf(cwd);
+  if (!dir) return new Set();
   const d = deps || {};
-  let dir;
-  try {
-    // Lazy, as in epicMint.cjs: opsOwnership → ephemeralCwd → activeSessions.
-    const { opsPath } = require('../opsOwnership.cjs');
-    dir = opsPath(cwd, 'prompt-sessions');
-  } catch {
-    return ids;
-  }
   const prev = claimedCache.get(cwd);
-
-  const indexKey = statKey(path.join(dir, 'active-index.json'));
-  /** @type {string[]} */
-  let indexIds = [];
-  if (prev && prev.indexKey === indexKey) {
-    indexIds = prev.indexIds;
-  } else {
-    /** @type {Record<string, unknown>} */
-    let sessions = {};
-    try {
-      sessions = (d.readActiveIndex || readActiveIndex)(cwd).sessions || {};
-    } catch {
-      sessions = {};
-    }
-    for (const s of Object.values(sessions)) {
-      const sid = sessionIdOf(s);
-      if (sid) indexIds.push(sid);
-    }
-  }
-
+  const indexKey = statKey(path.join(dir, ACTIVE_INDEX));
+  const indexIds = prev && prev.indexKey === indexKey ? prev.indexIds : readIndexIds(cwd, d);
   const prevFiles = prev ? prev.files : new Map();
-  /** @type {Map<string, ArchiveRec>} */
-  const files = new Map();
   /** @type {string[]} */
   let names = [];
   try {
-    names = fs.readdirSync(dir);
+    names = fs.readdirSync(dir).filter(isArchiveName);
   } catch {
     names = [];
   }
+  /** @type {Map<string, ArchiveRec>} */
+  const files = new Map();
   for (const name of names) {
-    if (!name.endsWith('.json') || name === 'active-index.json') continue;
     const file = path.join(dir, name);
     const key = statKey(file);
-    const hit = prevFiles.get(name);
-    if (hit && hit.key === key) {
-      files.set(name, hit);
-      continue;
-    }
-    const doc = atomicFs.readJsonOrSync(file, null);
-    files.set(name, { key, sid: doc && typeof doc === 'object' ? sessionIdOf(doc.session) : null });
+    files.set(name, memoHit(prevFiles, name, key) || archiveRec(key, atomicFs.readJsonOrSync(file, null)));
   }
-  claimedCache.set(cwd, { indexKey, indexIds, files });
+  return commitClaimed(cwd, { indexKey, indexIds, files });
+}
 
-  for (const sid of indexIds) ids.add(sid);
-  for (const rec of files.values()) if (rec.sid) ids.add(rec.sid);
-  return ids;
+/**
+ * claimedClaudeSessionIds through fs.promises (readdir, stat and readFile, at
+ * most 16 files in flight), for the list path. A cold scan reads every archived
+ * Epic file; done sync it blocked the main loop for 191 ms. Same memo as the
+ * sync reader, so either one re-reads only the files whose mtimeMs:size changed
+ * since the last scan by either. active-index.json stays a readActiveIndex read,
+ * memoised on its own key as in the sync reader.
+ * @param {string} cwd Project cwd (mapped to its ops root by opsPath).
+ * @param {RestorableDeps} [deps]
+ * @returns {Promise<Set<string>>}
+ */
+async function claimedClaudeSessionIdsAsync(cwd, deps) {
+  const dir = promptSessionsDirOf(cwd);
+  if (!dir) return new Set();
+  const d = deps || {};
+  const prev = claimedCache.get(cwd);
+  const indexKey = await statKeyAsync(path.join(dir, ACTIVE_INDEX));
+  const indexIds = prev && prev.indexKey === indexKey ? prev.indexIds : readIndexIds(cwd, d);
+  const prevFiles = prev ? prev.files : new Map();
+  /** @type {string[]} */
+  let names = [];
+  try {
+    names = (await fs.promises.readdir(dir)).filter(isArchiveName);
+  } catch {
+    names = [];
+  }
+  /** @type {ArchiveRec[]} */
+  const recs = new Array(names.length);
+  await forEachBounded(names.length, async (k) => {
+    const file = path.join(dir, names[k]);
+    const key = await statKeyAsync(file);
+    // atomicFs.readJsonOr is fs.promises.readFile + JSON.parse; malformed → null.
+    recs[k] = memoHit(prevFiles, names[k], key) || archiveRec(key, await atomicFs.readJsonOr(file, null));
+  });
+  /** @type {Map<string, ArchiveRec>} */
+  const files = new Map();
+  names.forEach((name, k) => files.set(name, recs[k])); // readdir order, as the sync reader
+  return commitClaimed(cwd, { indexKey, indexIds, files });
 }
 
 /**
@@ -431,8 +570,8 @@ function isTranscriptName(name) {
 }
 
 /**
- * Regular-file transcripts among `names`, stat'ed with bounded concurrency so a
- * 1,500-file dir does not flood libuv's threadpool.
+ * Regular-file transcripts among `names`, stat'ed with bounded concurrency
+ * (forEachBounded) so a 1,500-file dir does not flood libuv's threadpool.
  * @param {string} dir
  * @param {string[]} names Already filtered to `<uuid>.jsonl`.
  * @returns {Promise<Candidate[]>}
@@ -440,28 +579,28 @@ function isTranscriptName(name) {
 async function statCandidates(dir, names) {
   /** @type {Candidate[]} */
   const out = [];
-  let next = 0;
-  const worker = async () => {
-    while (next < names.length) {
-      const name = names[next++];
-      try {
-        const st = await fs.promises.stat(path.join(dir, name));
-        if (st.isFile()) out.push({ name, sessionId: name.slice(0, -JSONL.length), mtimeMs: st.mtimeMs, sizeBytes: st.size });
-      } catch {
-        // vanished between readdir and stat
-      }
+  await forEachBounded(names.length, async (k) => {
+    const name = names[k];
+    try {
+      const st = await fs.promises.stat(path.join(dir, name));
+      if (st.isFile()) out.push({ name, sessionId: name.slice(0, -JSONL.length), mtimeMs: st.mtimeMs, sizeBytes: st.size });
+    } catch {
+      // vanished between readdir and stat
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(STAT_CONCURRENCY, names.length) }, worker));
+  });
   return out;
 }
 
 /**
  * CLI sessions in this project's transcript dir that no Epic owns, newest
- * first, for the "Restore a session" picker. Reads only that one dir; a
- * missing dir lists nothing. Never throws (the `{ cwd: '' }` default makes a
- * bare call list nothing).
- * @param {{ cwd: string, limit?: number, deps?: RestorableDeps }} opts
+ * first, for the "Restore a session" picker. The limit is per kind: up to
+ * `limit` interactive rows and, on a separate budget, up to `limit` headless
+ * rows, so a headless run never takes an interactive row's place. The walk
+ * stops once both budgets are full or after 400 head reads. Reads only that one
+ * dir; a missing dir lists nothing. Never throws (the `{ cwd: '' }` default
+ * makes a bare call list nothing).
+ * @param {{ cwd: string, limit?: number, deps?: RestorableDeps }} opts `limit` is per kind
+ *   (default 50, at most 400).
  * @returns {Promise<RestorableList>}
  */
 async function listRestorableSessions({ cwd, limit = DEFAULT_LIMIT, deps } = { cwd: '' }) {
@@ -481,7 +620,7 @@ async function listRestorableSessions({ cwd, limit = DEFAULT_LIMIT, deps } = { c
   const candidates = await statCandidates(dir, names.filter(isTranscriptName));
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
 
-  const claimed = lowerSet(claimedClaudeSessionIds(projectCwd, d));
+  const claimed = lowerSet(await claimedClaudeSessionIdsAsync(projectCwd, d));
   /** @type {Candidate[]} */
   const open = [];
   for (const c of candidates) {
@@ -492,13 +631,19 @@ async function listRestorableSessions({ cwd, limit = DEFAULT_LIMIT, deps } = { c
   const max = Number.isInteger(limit) && limit > 0 ? Math.min(limit, MAX_HEAD_READS) : DEFAULT_LIMIT;
   const now = d.now ? d.now() : Date.now();
   const bufs = { head: Buffer.allocUnsafe(HEAD_BYTES), tail: Buffer.allocUnsafe(TAIL_BYTES) };
+  // Only a head says which kind a row is, so a full budget drops that kind's
+  // later rows while the walk reads on for the other kind.
+  let interactive = 0;
+  let headless = 0;
   let i = 0;
   for (; i < open.length; i += 1) {
-    if (result.sessions.length >= max || result.scanned >= MAX_HEAD_READS) break;
+    if ((interactive >= max && headless >= max) || result.scanned >= MAX_HEAD_READS) break;
     const c = open[i];
     result.scanned += 1;
     const fields = await inspectTranscript(path.join(dir, c.name), c.sizeBytes, projectCwd, bufs);
-    if (!fields) continue;
+    if (!fields || (fields.headless ? headless : interactive) >= max) continue;
+    if (fields.headless) headless += 1;
+    else interactive += 1;
     result.sessions.push({
       sessionId: c.sessionId,
       title: fields.title,
@@ -597,6 +742,7 @@ function checkRestorableSessionSync(cwd, sessionId, deps) {
 module.exports = {
   SESSION_ID_RE,
   claimedClaudeSessionIds,
+  claimedClaudeSessionIdsAsync,
   listRestorableSessions,
   checkRestorableSessionSync,
   __resetCacheForTests,

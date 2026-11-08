@@ -8,6 +8,11 @@
  * from the last check"); mcpStatus.cjs (`claude mcp list`) gives status only.
  * On demand only: nothing here runs by itself.
  *
+ * checkConfiguredMcpServer backs IPC mcp:check-server. Its request only NAMES a
+ * configured server (user ~/.claude.json, project <cwd>/.mcp.json, or an
+ * installed plugin's own files); the config is read from disk here, so a caller
+ * can never choose the command a check spawns.
+ *
  * Top-level lib/ module because no domain folder fits: it is an MCP client,
  * lib/ has no mcp/ folder (its MCP siblings mcpStdioServer.cjs and
  * mcpToolCatalog.cjs sit top-level too), and a one-file subfolder is not allowed.
@@ -25,9 +30,13 @@
  */
 
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const os = require('node:os');
+const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { StringDecoder } = require('node:string_decoder');
+const claudeConfig = require('./claudeConfig.cjs');
+const { readJsonOr } = require('./util/atomicFs.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./process/cleanEnv.cjs');
 const { killTree, detachedSpawnOpts } = require('./process/killTree.cjs');
 const { resolveSpawn } = require('./process/winSpawn.cjs');
@@ -691,4 +700,132 @@ async function checkMcpServer(server, options) {
   return { ...outcome, checkedAt: Date.now() };
 }
 
-module.exports = { checkMcpServer };
+// ── configured servers (IPC mcp:check-server) ───────────────────────────────
+
+/**
+ * @typedef {{ source: 'user' | 'project' | 'plugin', name: string, cwd?: string, pluginKey?: string }} McpServerRequest
+ *   WHICH configured server: user = ~/.claude.json mcpServers, project =
+ *   <cwd>/.mcp.json mcpServers, plugin = a server of the installed plugin keyed
+ *   pluginKey (name@marketplace). cwd counts for a project server only.
+ */
+
+const PLUGIN_ROOT_VAR = '${CLAUDE_PLUGIN_ROOT}';
+
+/** @param {object} obj @param {string} key */
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/** map[name] when it is the map's own object entry — never an inherited key such as __proto__. */
+function ownEntry(map, name) {
+  return isObject(map) && hasOwn(map, name) && isObject(map[name]) ? map[name] : null;
+}
+
+/** The manifest: .claude-plugin/plugin.json, else the legacy root plugin.json; null when the first one present doesn't parse. */
+async function readPluginManifest(root) {
+  for (const file of [path.join(root, '.claude-plugin', 'plugin.json'), path.join(root, 'plugin.json')]) {
+    if (!(await fsp.access(file).then(() => true, () => false))) continue;
+    const data = await readJsonOr(file, null);
+    return isObject(data) ? data : null;
+  }
+  return null;
+}
+
+/** A server map from `{ mcpServers: {...} }`, or a bare map whose every value has a command or url. */
+function pluginServerMap(data) {
+  if (!isObject(data)) return null;
+  if (isObject(data.mcpServers)) return data.mcpServers;
+  const values = Object.values(data);
+  const bare = values.length > 0 && values.every((d) => isObject(d) && (typeof d.command === 'string' || typeof d.url === 'string'));
+  return bare ? data : null;
+}
+
+/**
+ * A plugin's server maps in the order the Plugins tab reads them (renderer
+ * lib/pluginContents.ts listPluginMcpServers), so a server it lists is a server
+ * this finds: the manifest's inline mcpServers object, then each file the
+ * manifest declares inside the plugin root, then the default .mcp.json.
+ * Unreadable or malformed files are skipped.
+ * @param {string} root  the resolved, absolute install dir
+ */
+async function pluginServerMaps(root) {
+  const manifest = await readPluginManifest(root);
+  const decl = manifest ? manifest.mcpServers : undefined;
+  const declared = typeof decl === 'string' ? [decl] : Array.isArray(decl) ? decl.filter((d) => typeof d === 'string') : [];
+  /** @type {Set<string>} */
+  const files = new Set();
+  for (const rel of declared) {
+    const abs = path.resolve(root, rel);
+    if (abs === root || abs.startsWith(root + path.sep)) files.add(abs);
+  }
+  files.add(path.join(root, '.mcp.json'));
+  const bodies = await Promise.all([...files].map((file) => readJsonOr(file, null)));
+  return [isObject(decl) ? decl : null, ...bodies].map(pluginServerMap).filter(isObject);
+}
+
+/** A copy of a JSON value with ${CLAUDE_PLUGIN_ROOT} in every string replaced by root, as Claude Code expands a plugin's servers. */
+function expandPluginRoot(value, root) {
+  if (typeof value === 'string') return value.split(PLUGIN_ROOT_VAR).join(root);
+  if (Array.isArray(value)) return value.map((v) => expandPluginRoot(v, root));
+  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, expandPluginRoot(v, root)]));
+  return value;
+}
+
+/**
+ * The config of ONE configured MCP server, read from disk.
+ *
+ * @param {McpServerRequest} request
+ * @param {{ home?: string }} [options]  home is injectable for tests
+ * @returns {Promise<{ server: Record<string, any>, cwd: string } | null>}
+ *   null when no such server is configured. cwd is where a stdio server starts:
+ *   the project root for a project server, else the home directory (Claude Code
+ *   starts a server in its session's directory, and a check has none). Rejects
+ *   when ~/.claude.json or <cwd>/.mcp.json exists but is not a JSON object.
+ */
+async function resolveMcpServerConfig(request, options) {
+  const home = (options && options.home) || os.homedir();
+  const { source, name, cwd, pluginKey } = isObject(request) ? request : {};
+  if (typeof name !== 'string' || !name) return null;
+  if (source === 'user') {
+    const { data } = await claudeConfig.read({ fileId: 'claudeJson', scope: 'user', home });
+    const server = ownEntry(data.mcpServers, name);
+    return server ? { server, cwd: home } : null;
+  }
+  if (source === 'project') {
+    if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return null;
+    const { data } = await claudeConfig.read({ fileId: 'mcpJson', scope: 'project', cwd });
+    const server = ownEntry(data.mcpServers, name);
+    return server ? { server, cwd } : null;
+  }
+  if (source === 'plugin') {
+    // Required here, not at the top: pluginInstall.cjs pulls in electron, node-pty
+    // and ipcSchemas.cjs, none of which a plain checkMcpServer caller needs.
+    const { listInstalled } = require('../pluginInstall.cjs');
+    const plugin = typeof pluginKey === 'string' ? listInstalled(home).find((p) => p.key === pluginKey) : undefined;
+    if (!plugin || typeof plugin.installPath !== 'string' || !path.isAbsolute(plugin.installPath)) return null;
+    const root = path.resolve(plugin.installPath);
+    for (const map of await pluginServerMaps(root)) {
+      // The first definition of a name wins, as in the Plugins tab's list.
+      if (hasOwn(map, name)) return isObject(map[name]) ? { server: expandPluginRoot(map[name], root), cwd: home } : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * IPC mcp:check-server's body: resolves the request to ONE configured server
+ * and checks it.
+ *
+ * @param {McpServerRequest} request
+ * @param {{ home?: string, timeoutMs?: number, clientVersion?: string, check?: typeof checkMcpServer }} [options]
+ *   home and check are injectable for tests; timeoutMs and clientVersion go to checkMcpServer.
+ * @returns {ReturnType<typeof checkMcpServer>}  checkMcpServer's result, unchanged. A server
+ *   that isn't configured resolves to { ok: false, status: 'failed', error: 'server not found' }
+ *   with nothing spawned; a config file that can't be parsed rejects, also with nothing spawned.
+ */
+async function checkConfiguredMcpServer(request, options) {
+  const { home, check = checkMcpServer, timeoutMs, clientVersion } = options || {};
+  const target = await resolveMcpServerConfig(request, { home });
+  if (!target) return { ok: false, status: 'failed', error: 'server not found', checkedAt: Date.now() };
+  return check(target.server, { timeoutMs, clientVersion, cwd: target.cwd });
+}
+
+module.exports = { checkMcpServer, resolveMcpServerConfig, checkConfiguredMcpServer };

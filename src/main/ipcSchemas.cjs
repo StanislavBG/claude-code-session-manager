@@ -693,6 +693,20 @@ const claudeConfigPatch = z.object({
   keyPath: z.array(z.string().min(1).max(256)).min(1).max(8),
   value: z.unknown().optional(),
 }).strict();
+// mcp:check-server — names WHICH configured server to check, never its config:
+// main reads that from disk (lib/mcpToolsProbe.cjs checkConfiguredMcpServer), so
+// the renderer can't make main spawn a command of its choosing. A project server
+// needs its project's absolute cwd, a plugin server its installed key; neither
+// field moves a server of another source.
+const PLUGIN_KEY_RE = /^[a-z0-9][a-z0-9._\-]*@[a-z0-9][a-z0-9._\-]*$/i; // name@marketplace, as in installed_plugins.json
+const mcpCheckServer = z.object({
+  source: z.enum(['user', 'project', 'plugin']),
+  name: z.string().min(1).max(128),
+  cwd: z.string().min(1).max(4096).refine((s) => path.isAbsolute(s), 'cwd must be absolute').optional(),
+  pluginKey: z.string().regex(PLUGIN_KEY_RE).max(256).optional(),
+}).strict()
+  .refine((p) => p.source !== 'project' || p.cwd !== undefined, 'a project server needs its cwd')
+  .refine((p) => p.source !== 'plugin' || p.pluginKey !== undefined, 'a plugin server needs its pluginKey');
 const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
@@ -1291,7 +1305,7 @@ const pluginsAbort = z.object({
 }).passthrough();
 const pluginsList = z.object({}).strict();
 const pluginsSetEnabled = z.object({
-  key: z.string().regex(/^[a-z0-9][a-z0-9._\-]*@[a-z0-9][a-z0-9._\-]*$/i).max(256),
+  key: z.string().regex(PLUGIN_KEY_RE).max(256),
   enabled: z.boolean(),
 }).strict();
 const pluginsUninstall = z.object({
@@ -1544,6 +1558,7 @@ module.exports = {
     agentsDeletePersona,
     claudeConfigRead,
     claudeConfigPatch,
+    mcpCheckServer,
     macrosSave,
     macrosDelete,
     macrosSetProject,

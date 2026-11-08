@@ -38,6 +38,7 @@ const sessionsStore = require('./sessionsStore.cjs');
 const layoutStore = require('./layoutStore.cjs');
 const billing = require('./usage.cjs');
 const { probeMcpStatus } = require('./mcpStatus.cjs');
+const { checkConfiguredMcpServer } = require('./lib/mcpToolsProbe.cjs');
 const logs = require('./logs.cjs');
 const crashDiagnostics = require('./crashDiagnostics.cjs');
 // Start the local minidump collector before app-ready (required by Electron).
@@ -592,6 +593,14 @@ ipcMain.handle('app:launch-mode', () => ({
 // MCP Servers tab (PRD 456 consumes this): probes live connection status via
 // `claude mcp list`. Read-only, single in-flight call — no polling.
 ipcMain.handle('mcp:status', () => probeMcpStatus());
+
+// Extensions MCP detail: check ONE configured server on demand (initialize →
+// tools/list, lib/mcpToolsProbe.cjs). The payload only NAMES the server; its
+// config is read from disk in main, so the renderer can't choose what is spawned.
+ipcMain.handle('mcp:check-server', validated(schemas.mcpCheckServer, async (p) => {
+  if (p.source === 'project') configMgr.validatePath(p.cwd);
+  return checkConfiguredMcpServer(p, { clientVersion: app.getVersion() });
+}));
 
 // The Dashboard's "Agent tools" section (HomeAgentTools): the same catalog data
 // GET /admin/mcp/catalog serves to external callers, read in-process here so

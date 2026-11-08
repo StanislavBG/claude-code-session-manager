@@ -9,6 +9,7 @@ import { trackScreen } from '../telemetry';
 import { deviceLabel } from '../devices';
 import DevicePicker from './DevicePicker';
 import RemoteRenderer from './RemoteRenderer';
+import { loadViewMode, saveViewMode, type ViewMode } from '../viewMode';
 
 interface Props {
   socket: RelaySocket | null;
@@ -22,6 +23,9 @@ const PROJECTS_ROUTE: Route = { view: 'projects' };
  * Drill-down cockpit: Projects → a project's Sessions → one Session, driven by
  * `route` in the store. Each forward step pushes a history entry so the browser
  * back button (popstate) walks the route back up.
+ * View mode (src/viewMode.ts, read once per mount): 'phone' makes the drill-down the
+ * main area and never mounts RemoteRenderer; 'full' mounts the desktop's own renderer
+ * with the drill-down as its fallback. The header toggle switches and stores the mode.
  */
 export default function Cockpit({ socket, deviceId, onRefreshDevices }: Props) {
   const wsConnected = useStore((s) => s.wsConnected);
@@ -38,6 +42,13 @@ export default function Cockpit({ socket, deviceId, onRefreshDevices }: Props) {
   const activeDeviceId = useStore((s) => s.activeDeviceId);
   const meta = useStore((s) => (s.activeDeviceId ? s.deviceMeta[s.activeDeviceId] : undefined));
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
+
+  const toggleViewMode = () => {
+    const next: ViewMode = viewMode === 'phone' ? 'full' : 'phone';
+    saveViewMode(next);
+    setViewMode(next);
+  };
 
   useEffect(() => {
     window.history.replaceState({ ...(window.history.state ?? {}), smRoute: useStore.getState().route }, '');
@@ -95,6 +106,14 @@ export default function Cockpit({ socket, deviceId, onRefreshDevices }: Props) {
       <header className="flex items-center gap-3 px-3 pt-[max(0.25rem,env(safe-area-inset-top))] h-[calc(3rem+env(safe-area-inset-top))] border-b border-edge bg-paper flex-shrink-0">
         <span className="flex-1 font-serif text-lg font-semibold truncate">{title}</span>
         <button
+          onClick={toggleViewMode}
+          data-testid="view-mode-toggle"
+          data-track="cockpit-view-mode"
+          className="min-h-touch flex-shrink-0 whitespace-nowrap px-2.5 rounded-full border border-edge text-xs font-mono text-ink-soft hover:text-ink"
+        >
+          {viewMode === 'phone' ? 'Full UI' : 'Phone view'}
+        </button>
+        <button
           onClick={() => setPickerOpen(true)}
           data-testid="device-switcher"
           data-track="cockpit-device-switch"
@@ -108,7 +127,7 @@ export default function Cockpit({ socket, deviceId, onRefreshDevices }: Props) {
         </span>
       </header>
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {ready && !awaitingDesktopConfirm && socket ? (
+        {viewMode === 'full' && ready && !awaitingDesktopConfirm && socket ? (
           <RemoteRenderer key={activeDeviceId ?? deviceId} socket={socket} deviceId={deviceId} fallback={body} />
         ) : body}
       </main>

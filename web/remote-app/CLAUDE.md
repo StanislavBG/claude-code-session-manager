@@ -44,6 +44,7 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `e2e:rekey` — desktop → phone (plaintext): drop the session key and re-send `e2e:hello`; pinned phones re-authenticate without SAS.
 
 A signed-in browser can drive any paired desktop, chosen in the header switcher (`src/devices.ts`).
+Phone-class browsers (`PHONE_QUERY` in `src/viewMode.ts`) get the drill-down as their primary UI and never load the desktop renderer; wider browsers get the full UI; the header toggle overrides this, stored under `sm-remote-view-mode`.
 
 ## Who consumes this
 

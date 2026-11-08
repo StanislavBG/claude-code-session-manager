@@ -31,6 +31,10 @@
  * project). setMacroProject cannot narrow a '*' macro: it returns
  * `{ ok: false, error: 'macro is shown in every project' }`.
  *
+ * A surface 'project-home' macro is shown in every project (only its generated
+ * artifacts are per project); this module enforces that on load (a narrowed
+ * stored entry is widened to ['*']) and on save (projects forced to ['*']).
+ *
  * Plain Node, no Electron imports.
  */
 
@@ -394,16 +398,35 @@ function ensureBuiltins(macros, builtins) {
   return { macros: next, changed, retired };
 }
 
-/** Apply builtin seeding/upgrades, writing only when something changed. */
+/**
+ * Pure. A 'project-home' macro is shown in every project, so any such entry
+ * whose `projects` is not exactly ['*'] comes back with ['*']. Every other
+ * field — notably `updatedAt` — is left as is: ensureBuiltins reads
+ * `updatedAt !== createdAt` as a human edit and would freeze a built-in.
+ * Returns `{ macros, changed }`.
+ */
+function widenProjectHomeScope(macros) {
+  let changed = false;
+  const next = macros.map((m) => {
+    if (m.surface !== 'project-home') return m;
+    if (m.projects.length === 1 && m.projects[0] === ALL_PROJECTS) return m;
+    changed = true;
+    return { ...m, projects: [ALL_PROJECTS] };
+  });
+  return { macros: changed ? next : macros, changed };
+}
+
+/** Apply project-home widening + builtin seeding/upgrades, writing only when something changed. */
 async function applyBuiltins(filePath, macros, opts) {
   const builtins = resolveBuiltins(opts);
-  const { macros: next, changed, retired } = ensureBuiltins(macros, builtins);
-  if (!changed) return { macros, failed: false };
+  const widened = widenProjectHomeScope(macros);
+  const { macros: next, changed: builtinsChanged, retired } = ensureBuiltins(widened.macros, builtins);
+  if (!builtinsChanged && !widened.changed) return { macros, failed: false };
   try {
     await writeStore(filePath, next);
   } catch (err) {
-    console.warn('[macroLibrary] could not persist built-in macro seeding:', err && err.message);
-    return { macros, failed: false };
+    console.warn('[macroLibrary] could not persist built-in macro seeding / project-home widening:', err && err.message);
+    return { macros: widened.macros, failed: false };
   }
   for (const id of retired) {
     const by = (builtins || []).find((b) => Array.isArray(b.supersedes) && b.supersedes.includes(id));
@@ -528,7 +551,7 @@ async function listMacrosRaw(opts) {
   const first = await readStore(filePath);
   if (first.state === 'ok') {
     const { changed } = ensureBuiltins(first.macros, resolveBuiltins(opts));
-    if (!changed) return first.macros;
+    if (!changed && !widenProjectHomeScope(first.macros).changed) return first.macros;
   }
   // Missing/corrupt/needs-seeding: repair inside the write chain so racing callers don't double-seed.
   return serialize(async () => (await loadStore(filePath, opts)).macros);
@@ -566,7 +589,10 @@ async function saveMacro(input, opts = {}) {
       if (macros[idx].builtin && parsed.surface !== undefined && parsed.surface !== macros[idx].surface) {
         throw new Error('built-in macro surface cannot be changed');
       }
-      const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : macros[idx].projects;
+      const surface = parsed.surface ?? macros[idx].surface;
+      const projects = surface === 'project-home'
+        ? [ALL_PROJECTS]
+        : parsed.projects !== undefined ? normalizeProjects(parsed.projects) : macros[idx].projects;
       saved = {
         ...macros[idx],
         label: parsed.label,
@@ -574,7 +600,7 @@ async function saveMacro(input, opts = {}) {
         tag: parsed.tag,
         prompt: parsed.prompt,
         projects,
-        surface: parsed.surface ?? macros[idx].surface,
+        surface,
         updatedAt: now,
       };
       if (parsed.inputs === undefined) {
@@ -594,7 +620,10 @@ async function saveMacro(input, opts = {}) {
       assertPlaceholdersDeclared(saved);
       macros[idx] = saved;
     } else {
-      const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : [];
+      const surface = parsed.surface ?? 'sessions';
+      const projects = surface === 'project-home'
+        ? [ALL_PROJECTS]
+        : parsed.projects !== undefined ? normalizeProjects(parsed.projects) : [];
       saved = {
         id: newId(parsed.label, new Set(macros.map((m) => m.id))),
         label: parsed.label,
@@ -602,7 +631,7 @@ async function saveMacro(input, opts = {}) {
         tag: parsed.tag,
         prompt: parsed.prompt,
         projects,
-        surface: parsed.surface ?? 'sessions',
+        surface,
         createdAt: now,
         updatedAt: now,
       };
@@ -718,4 +747,5 @@ module.exports = {
   removeMacroFromProject,
   defaultFilePath,
   ensureBuiltins,
+  widenProjectHomeScope,
 };

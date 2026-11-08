@@ -364,14 +364,15 @@ test('an unchanged Save through saveMacro does not stop the next upgrade', async
   expect(m).toMatchObject({ prompt: 'v2 prompt', builtinVersion: 2 });
 });
 
-test('an upgrade keeps projects and autoStartTargets, and drops inputs the built-in no longer declares', async () => {
+test('an upgrade widens project-home projects, keeps autoStartTargets, and drops inputs the built-in no longer declares', async () => {
   const inputs = [{ name: 'x', label: 'X' }];
   const autoStartTargets = ['/tmp/some-project'];
   seedStored({ projects: ['/a', '/b'], inputs, autoStartTargets });
   const listed = await lib.listMacros(histOpts());
   const m = listed.find((x) => x.id === 'builtin-test-one');
   expect(m.prompt).toBe('v2 prompt');
-  expect(m.projects).toEqual(['/a', '/b']);
+  // A project-home macro is shown in every project, so narrowed projects are widened.
+  expect(m.projects).toEqual(['*']);
   expect(m.inputs).toBeUndefined();
   expect(m.autoStartTargets).toEqual(autoStartTargets);
 });
@@ -793,4 +794,143 @@ test('supersedes retires non-builtin macros on first seed only', async () => {
   fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [mk('old-one')] }));
   await lib.listMacros({ ...opts, builtins: [b] });
   expect(info).toHaveBeenCalledWith('[macroLibrary] retired macro old-one, superseded by built-in bi-inputs');
+});
+
+// --- project-home macros are shown in every project -------------------------
+
+const PH_STAMP = '2026-01-01T00:00:00.000Z';
+const PH_EDIT_STAMP = '2026-02-01T00:00:00.000Z';
+const narrowedProjectHome = (o = {}) => ({
+  id: 'cpu-audit-abc123',
+  label: 'CPU audit & fixes',
+  agentName: 'builder',
+  tag: 'build',
+  prompt: 'Audit CPU',
+  projects: ['/home/u/proj'],
+  surface: 'project-home',
+  createdAt: PH_STAMP,
+  updatedAt: PH_EDIT_STAMP,
+  ...o,
+});
+
+test('widenProjectHomeScope widens narrowed project-home entries only', () => {
+  const ph = narrowedProjectHome();
+  const phAll = narrowedProjectHome({ id: 'ph-all-000001', projects: ['*'] });
+  const phMixed = narrowedProjectHome({ id: 'ph-mix-000001', projects: ['*', '/x'] });
+  const sess = narrowedProjectHome({ id: 'sess-000001', surface: 'sessions' });
+  const { macros, changed } = lib.widenProjectHomeScope([ph, phAll, phMixed, sess]);
+  expect(changed).toBe(true);
+  expect(macros[0]).toEqual({ ...ph, projects: ['*'] });
+  expect(macros[0].updatedAt).toBe(PH_EDIT_STAMP);
+  expect(macros[0].createdAt).toBe(PH_STAMP);
+  expect(macros[1]).toEqual(phAll);
+  expect(macros[2]).toEqual({ ...phMixed, projects: ['*'] });
+  expect(macros[3]).toBe(sess);
+  expect(ph.projects).toEqual(['/home/u/proj']);
+
+  const none = lib.widenProjectHomeScope([phAll, sess]);
+  expect(none.changed).toBe(false);
+  expect(none.macros).toEqual([phAll, sess]);
+});
+
+test('listMacros widens a stored project-home macro and persists once', async () => {
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [narrowedProjectHome()] }));
+  const listed = await lib.listMacros(opts);
+  expect(listed).toHaveLength(1);
+  expect(listed[0].projects).toEqual(['*']);
+  expect(listed[0].updatedAt).toBe(PH_EDIT_STAMP);
+  const afterFirst = fs.readFileSync(filePath, 'utf8');
+  expect(JSON.parse(afterFirst).macros[0].projects).toEqual(['*']);
+  const again = await lib.listMacros(opts);
+  expect(again[0].projects).toEqual(['*']);
+  expect(fs.readFileSync(filePath, 'utf8')).toBe(afterFirst);
+});
+
+test('narrowed unedited built-in project-home copy is widened and still upgrades', async () => {
+  const stored = narrowedProjectHome({
+    id: 'builtin-test-one',
+    label: 'Test One',
+    agentName: 'test-builder',
+    prompt: 'v1 prompt',
+    builtin: true,
+    builtinVersion: 1,
+    updatedAt: PH_STAMP,
+  });
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [stored] }));
+  const listed = await lib.listMacros({ ...opts, builtins: TEST_BUILTINS_V2 });
+  expect(listed).toHaveLength(1);
+  expect(listed[0]).toMatchObject({
+    projects: ['*'],
+    label: 'Test One v2',
+    prompt: 'v2 prompt',
+    builtinVersion: 2,
+    createdAt: PH_STAMP,
+    updatedAt: PH_STAMP,
+  });
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')).macros[0];
+  expect(onDisk.projects).toEqual(['*']);
+  expect(onDisk.updatedAt).toBe(PH_STAMP);
+});
+
+test('widening alone keeps an unedited built-in upgradable later', async () => {
+  const stored = narrowedProjectHome({
+    id: 'builtin-test-one',
+    label: 'Test One',
+    agentName: 'test-builder',
+    prompt: 'v1 prompt',
+    builtin: true,
+    builtinVersion: 1,
+    updatedAt: PH_STAMP,
+  });
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [stored] }));
+  const v1 = await lib.listMacros({ ...opts, builtins: TEST_BUILTINS_V1 });
+  expect(v1[0]).toMatchObject({ projects: ['*'], updatedAt: PH_STAMP, builtinVersion: 1 });
+  const v2 = await lib.listMacros({ ...opts, builtins: TEST_BUILTINS_V2 });
+  expect(v2[0]).toMatchObject({ projects: ['*'], label: 'Test One v2', builtinVersion: 2 });
+});
+
+test('saveMacro stores ["*"] for every project-home save', async () => {
+  const a = await lib.saveMacro(base({ surface: 'project-home', projects: ['/x'] }), opts);
+  expect(a.projects).toEqual(['*']);
+  const { projects: _p, ...noProjects } = base({ label: 'No projects', surface: 'project-home' });
+  const b = await lib.saveMacro(noProjects, opts);
+  expect(b.projects).toEqual(['*']);
+
+  const s = await lib.saveMacro(base({ label: 'Sess' }), opts);
+  expect(s.projects).toEqual(['/work/a']);
+  const switched = await lib.saveMacro({ ...base({ label: 'Sess' }), id: s.id, surface: 'project-home' }, opts);
+  expect(switched.projects).toEqual(['*']);
+
+  const narrowed = await lib.saveMacro({ ...base({ label: 'Sess' }), id: s.id, projects: ['/x'] }, opts);
+  expect(narrowed.surface).toBe('project-home');
+  expect(narrowed.projects).toEqual(['*']);
+
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')).macros;
+  for (const m of onDisk) expect(m.projects).toEqual(['*']);
+});
+
+test('sessions macro keeps its projects handling', async () => {
+  const s = await lib.saveMacro(base({ projects: ['/work/a/', '/work/b'] }), opts);
+  expect(s.projects).toEqual(['/work/a', '/work/b']);
+  const kept = await lib.saveMacro({ ...base(), id: s.id, projects: undefined }, opts);
+  expect(kept.projects).toEqual(['/work/a', '/work/b']);
+  const changed = await lib.saveMacro({ ...base(), id: s.id, projects: ['/work/c'] }, opts);
+  expect(changed.projects).toEqual(['/work/c']);
+  const { projects: _p, ...noProjects } = base({ label: 'Empty' });
+  const empty = await lib.saveMacro(noProjects, opts);
+  expect(empty.projects).toEqual([]);
+});
+
+test('a narrowed stored project-home macro cannot be narrowed or removed', async () => {
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [narrowedProjectHome()] }));
+  const off = await lib.setMacroProject({ id: 'cpu-audit-abc123', cwd: '/home/u/proj', enabled: false }, opts);
+  expect(off).toEqual({ ok: false, error: 'macro is shown in every project' });
+  const afterSet = fs.readFileSync(filePath, 'utf8');
+  const rm = await lib.removeMacroFromProject({ id: 'cpu-audit-abc123', cwd: '/home/u/proj' }, opts);
+  expect(rm.ok).toBe(false);
+  expect(rm.error).toMatch(/shown in every project/);
+  expect(fs.readFileSync(filePath, 'utf8')).toBe(afterSet);
+  const onDisk = JSON.parse(afterSet).macros;
+  expect(onDisk).toHaveLength(1);
+  expect(onDisk[0]).toMatchObject({ projects: ['*'], updatedAt: PH_EDIT_STAMP });
 });

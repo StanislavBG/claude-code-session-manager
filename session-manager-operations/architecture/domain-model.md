@@ -29,7 +29,10 @@ scoping scheme.
   cwd. Switching views hands the session off (mutually exclusive attachment) instead of minting a new
   sessionId, because context continuity across the switch is the invariant. The event chain
   (`prompt → prd_created → response → closed`, linked by `causedByEventId`) is the auditable trace of
-  everything the Epic spawned.
+  everything the Epic spawned. The one exception to minting is a **restored Epic** (`restoredSession: true`):
+  it adopts an existing CLI session of the same project that no Epic or SessionTab owns instead of minting one,
+  so a conversation begun in the plain CLI carries on as an Epic. It is still minted only by a human's New
+  Session press and is still 1:1 (`epicMint.cjs`'s restore gate; candidates from `restorableSessions.cjs`).
 - **Active Epics run in their own `git worktree`** (branch `sm-epic/<id>`, `gitWorktree.cjs`'s
   `createEpicWorktree`, created at `proposed → active`) so concurrent Epics on one project don't clobber each
   other's uncommitted edits; Terminal PTY and headless Chat both resolve their spawn cwd to it
@@ -37,7 +40,11 @@ scoping scheme.
   step (`epicWorktreeMerge.cjs`'s `integrateEpicBranch`: ff-only → linear replay → merge-commit fallback → abort-and-flag;
   [when a merge commit still lands](scheduler-operations.md#5a-landing--linear-by-default-and-every-case-that-can-still-write-a-merge-commit)). A real
   conflict sets `worktree.status` to `needs_merge_resolution` (EpicDetail's banner, "Resolve in Terminal")
-  rather than blocking anything. Settings' project scope holds the per-project opt-out.
+  rather than blocking anything. Settings' project scope holds the per-project opt-out. A restored Epic stays
+  in the project checkout: `epicWorktreeMint.cjs` refuses `restoredSession` Epics at approve and reopen,
+  because the adopted transcript is filed under the checkout's `~/.claude/projects` encoding and its history
+  (and any uncommitted work) refers to that checkout — `planEpicSpawn` resumes it from the project cwd, so a
+  worktree would sit unused while its queue row falsely showed isolation.
 - **Persistence:** active Epics in `session-manager-operations/prompt-sessions/active-index.json`; completed ones archived one JSON per
   Epic in the same folder. Resume reopens the same Epic in place (same id and
   claudeSessionId, full history) — see [lifecycle](../prompt-sessions/README.md#lifecycle).

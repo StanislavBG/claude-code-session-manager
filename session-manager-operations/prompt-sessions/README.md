@@ -94,7 +94,7 @@ interface PromptSession {
   id: string
   cwd: string
   goalText: string                       // the original top-level prompt; fixed for the Epic's life
-  claudeSessionId: string                // independently minted, never shared with a SessionTab
+  claudeSessionId: string                // independently minted (adopted when restoredSession), never shared with a SessionTab
   status: 'proposed' | 'active' | 'completed'
   createdAt: string
   completedAt: string | null
@@ -104,8 +104,13 @@ interface PromptSession {
   source?: EpicSource                    // which automated producer minted this Epic (absent if human-created)
   agentType?: string                     // Agent Library persona name chosen to run this Epic — the "who"; absent = None (named to match Claude Code's own agent_type/subagent_type vocabulary, not a new one)
   developLoop?: false                    // false = plain session: dev plugin off, no PRDs accepted, inline edits allowed; fixed for the session
+  restoredSession?: true                 // literal true or absent, never false; set only by the New Epic mint given restoreSessionId: claudeSessionId adopts an existing CLI session of this project
 }
 ```
+
+`restoredSession` marks the one exception to minting a fresh `claudeSessionId` — see the
+[domain model](../architecture/domain-model.md#hierarchy) for the adoption rule and why such an Epic
+runs in the project checkout instead of a worktree.
 
 `PromptSessionEvent` (`promptSessions.ts:86-99`) — one step in the Epic's
 `prompt → prd_created → response → closed` chain, FK-linked via `causedByEventId` (must reference
@@ -198,7 +203,10 @@ There is one transition, `proposed → active`, reached by two equivalent human 
 Both must run one code path: send the Epic's `openingPrompt` (falling back to `goalText`) as the
 first message of its own `claudeSessionId`. Today that is
 `useChat.send({ tabId: epic.id, sessionId: epic.claudeSessionId, cwd, prompt: openingPrompt || goalText })`,
-which is the behavior to preserve. An Epic can never begin two different ways.
+which is the behavior to preserve. An Epic can never begin two different ways. A restored Epic
+(`restoredSession: true`) runs this same path, but its adopted session already has history, so the
+opening prompt is sent as that session's next message (`planEpicSpawn` resumes it from the project
+cwd) rather than its first.
 
 ### A `proposed` Epic is a minimal row, and is never erased
 

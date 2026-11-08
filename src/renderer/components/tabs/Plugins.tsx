@@ -1,10 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Panel } from '../ui/Panel'
-import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { Badge } from '../ui/Badge'
-import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { DirEntry, SeedStatus } from '../../../preload/api'
@@ -21,6 +18,9 @@ import {
   type PluginRow,
 } from '../../lib/pluginContents'
 import { SkillHomePage } from './plugins/PluginSkillBrowser'
+import { PluginCard, pluginProvInput, type PluginJumpTab } from './plugins/PluginCard'
+import { ExtensionsToolbar } from './extensions/ExtensionsToolbar'
+import { useLayout } from '../../state/layout'
 import { toast, useToast } from '../../state/toast'
 
 interface InstalledPluginEntry {
@@ -37,24 +37,38 @@ interface InstalledPluginsManifest {
   plugins: Record<string, InstalledPluginEntry[]>
 }
 
-// Single source for the provenance input so the column + toolbar badges agree.
-const pluginProvInput = (r: PluginRow): ProvenanceInput => ({
-  type: 'plugin', name: r.name, repository: r.manifest?.repository, homepage: r.manifest?.homepage,
-})
+const FOOTNOTE = 'Plugin contents also appear, read-only, in Skills and MCP Servers — tagged with the plugin that added them.'
+
+/** Without an `onJump` from the Extensions page, a chip opens that page on the tab through its tab hint. */
+const jumpViaLayout = (tab: PluginJumpTab) => useLayout.getState().openPanel('extensions', tab)
+
+/** A plugin matches the filter when its name, manifest name or description contains it (case-insensitive). */
+function matchesFilter(r: PluginRow, needle: string): boolean {
+  return [r.name, r.manifest?.name, r.manifest?.description].some((s) => typeof s === 'string' && s.toLowerCase().includes(needle))
+}
+
+interface PluginsProps {
+  /** Opens the catalog drawer (the `+ Add plugin` menu's `Browse catalog…`). */
+  onAdd?: () => void
+  /** Switches the Extensions tab for a card's `›` chip. */
+  onJump?: (tab: PluginJumpTab) => void
+}
 
 /**
  * Installed plugins come from `~/.claude/plugins/installed_plugins.json` (written by the `claude` CLI; installs
- * happen via the Library view or `claude plugin install`). Each entry's `installPath` bundles skills,
- * subagents, and hooks. We show its manifest + contents
- * as an inspector, with a per-row enable switch (settings.json enabledPlugins) and Uninstall.
+ * happen via the catalog drawer or `claude plugin install`). Each entry's `installPath` bundles skills,
+ * subagents, and hooks. In the 3a design (DESIGN_SPEC §5) each plugin is a PluginCard — enable switch
+ * (settings.json enabledPlugins), contents chips that jump to the tab holding them, and a ⋯ menu with
+ * Uninstall — under the shared ExtensionsToolbar; the card's name opens the PluginHomePage drill-in.
  * Editing a plugin's components would duplicate the Skills/Subagents/Hooks tabs — out of scope.
  */
-function PluginsComponent({ onAdd }: { onAdd?: () => void } = {}) {
+function PluginsComponent({ onAdd, onJump }: PluginsProps) {
   const home = useHomeDir()
   const [rows, setRows] = useState<PluginRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const [filter, setFilter] = useState('')
   const [seedStatus, setSeedStatus] = useState<SeedStatus | null>(null)
   const [dismissedSeeders, setDismissedSeeders] = useState<Set<string>>(new Set())
   const showToast = useToast((s) => s.show)
@@ -177,9 +191,9 @@ function PluginsComponent({ onAdd }: { onAdd?: () => void } = {}) {
     }
   }
 
+  // The card's ⋯ menu has already confirmed inline; no native confirm here.
   const onUninstall = async (r: PluginRow) => {
     if (!r.marketplace) return
-    if (!window.confirm(`Uninstall plugin "${r.name}"?`)) return
     setBusyKey(r.key ?? r.name)
     try {
       const res = await window.api.plugins.uninstall({ slug: r.name, marketplaceName: r.marketplace })
@@ -191,118 +205,6 @@ function PluginsComponent({ onAdd }: { onAdd?: () => void } = {}) {
       await loadRows()
     }
   }
-
-  const columns: Column<PluginRow>[] = [
-    {
-      key: 'enabled',
-      header: 'on',
-      render: (r) => (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={r.enabled === true}
-          aria-label={`${r.enabled ? 'Disable' : 'Enable'} ${r.name}`}
-          data-testid="plugin-enabled-switch"
-          disabled={!r.key || busyKey === r.key}
-          onClick={(e) => {
-            e.stopPropagation()
-            void onToggle(r)
-          }}
-          className={`w-8 h-4 rounded-full relative transition-colors ${r.enabled ? 'bg-accent' : 'bg-bg-hi border border-line'}`}
-        >
-          <span
-            className={`absolute top-0.5 w-3 h-3 rounded-full bg-fg transition-all ${r.enabled ? 'left-4' : 'left-0.5'}`}
-          />
-        </button>
-      ),
-      width: '3.5rem',
-    },
-    {
-      key: 'name',
-      header: 'name',
-      render: (r) => (
-        <div style={{ maxWidth: '16rem' }}>
-          <div className="truncate">{r.name}</div>
-          {r.manifest?.description ? (
-            <div className="truncate text-fg-faint" title={r.manifest.description}>
-              {r.manifest.description}
-            </div>
-          ) : null}
-        </div>
-      ),
-      width: '16rem',
-    },
-    {
-      key: 'origin',
-      header: 'origin',
-      render: (r) => <ProvenanceBadge interactive={false} input={pluginProvInput(r)} />,
-      width: '7rem',
-    },
-    {
-      key: 'scope',
-      header: 'scope',
-      render: (r) =>
-        r.scope ? <span data-testid="plugin-scope">{r.scope}</span> : <span className="text-fg-faint">—</span>,
-      width: '5rem',
-    },
-    {
-      key: 'version',
-      header: 'version',
-      render: (r) => r.manifest?.version ?? <span className="text-fg-faint">—</span>,
-      width: '6rem',
-    },
-    {
-      key: 'manifest',
-      header: 'manifest',
-      render: (r) => (r.hasManifest ? 'plugin.json' : <span className="text-fg-faint">—</span>),
-      width: '8rem',
-    },
-    {
-      key: 'contents',
-      header: 'contents',
-      render: (r) => (
-        <span className="font-mono text-fg-faint text-xs">
-          {[
-            r.agents > 0 ? `${r.agents} agents` : null,
-            r.commands > 0 ? `${r.commands} commands` : null,
-            r.skills > 0 ? `${r.skills} skills` : null,
-            r.hooks > 0 ? `${r.hooks} hooks` : null,
-            r.monitors > 0 ? `${r.monitors} monitors` : null,
-            r.binCount > 0 ? `${r.binCount} bin` : null,
-            r.hasLsp ? 'lsp' : null,
-            r.hasMcp ? 'mcp' : null,
-            r.error ? 'inspection failed' : null,
-          ]
-            .filter(Boolean)
-            .join(' · ') || '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'path',
-      header: 'path',
-      render: (r) => <span className="font-mono text-fg-faint truncate">{r.path}</span>,
-    },
-    {
-      key: 'actions',
-      header: '',
-      render: (r) => (
-        <button
-          type="button"
-          data-testid="plugin-uninstall"
-          disabled={!r.marketplace || busyKey === (r.key ?? r.name)}
-          onClick={(e) => {
-            e.stopPropagation()
-            void onUninstall(r)
-          }}
-          className="text-xs text-red-300 hover:underline disabled:opacity-40"
-        >
-          Uninstall
-        </button>
-      ),
-      width: '5rem',
-    },
-  ]
 
   const exhaustedSeeders = useMemo(() => {
     if (!seedStatus) return []
@@ -323,21 +225,34 @@ function PluginsComponent({ onAdd }: { onAdd?: () => void } = {}) {
 
   const selectedRow = selected ? rows.find((r) => r.path === selected) ?? null : null
 
+  const enabledCount = useMemo(() => rows.filter((r) => r.enabled === true).length, [rows])
+  const needle = filter.trim().toLowerCase()
+  const visibleRows = useMemo(() => (needle ? rows.filter((r) => matchesFilter(r, needle)) : rows), [rows, needle])
+  const addPrimary = useMemo(
+    () => ({
+      label: '+ Add plugin',
+      testId: 'plugins-add',
+      items: [{ label: 'Browse catalog…', testId: 'plugins-add-catalog', onSelect: () => onAdd?.() }],
+    }),
+    [onAdd],
+  )
+  const openRow = useCallback((r: PluginRow) => setSelected(r.path), [])
+  const jump = onJump ?? jumpViaLayout
+
+  // The drill-in replaces the whole tab body; it carries its own header and `← Plugins` back link.
+  if (selectedRow) {
+    return <PluginHomePage key={selectedRow.path} row={selectedRow} home={home} onBack={() => setSelected(null)} />
+  }
+
   return (
-    <Panel
-      toolbar={
-        <>
-          <span className="text-fg-faint">{rows.length} plugins</span>
-          <div className="flex-1" />
-          <button
-            onClick={onAdd}
-            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
-          >
-            Add…
-          </button>
-        </>
-      }
-    >
+    <div className="flex flex-col h-full min-h-0">
+      <ExtensionsToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        placeholder="Filter plugins"
+        summary={`${rows.length} installed · ${enabledCount} enabled`}
+        primary={addPrimary}
+      />
       {seedBanner}
       {loadError ? (
         <div role="alert" className="shrink-0 px-3 py-2 border-b border-line bg-red-950/20 text-xs text-red-300">
@@ -345,36 +260,46 @@ function PluginsComponent({ onAdd }: { onAdd?: () => void } = {}) {
           {rows.length > 0 ? ' — showing the last known list' : null}
         </div>
       ) : null}
-      {loading && rows.length === 0 ? (
-        <EmptyState title="scanning plugins…" />
-      ) : loadError && rows.length === 0 ? null : selectedRow ? (
-        <PluginHomePage key={selectedRow.path} row={selectedRow} home={home} onBack={() => setSelected(null)} />
-      ) : (
-        <div className="flex flex-col h-full">
-          <div className="flex-1 min-h-0 overflow-auto">
-            <KVTable
-              columns={columns}
-              rows={rows}
-              getKey={(r) => r.path}
-              activeKey={selected}
-              onRowClick={(r) => setSelected(r.path)}
-              empty={
-                <>
-                  no plugins installed
-                  <div className="mt-2 text-fg-faint">
-                    use Add… or run <code>claude plugin install</code>
-                  </div>
-                </>
-              }
-            />
+      <div className="flex-1 min-h-0 overflow-auto">
+        {loading && rows.length === 0 ? (
+          <EmptyState title="scanning plugins…" />
+        ) : loadError && rows.length === 0 ? null : (
+          <div className="flex flex-col gap-3 p-4">
+            {rows.length === 0 ? (
+              <div
+                data-testid="plugins-empty"
+                className="flex flex-col gap-1 px-[18px] py-4 border border-dashed border-rule rounded-[10px] text-[13px] text-fg-dim"
+              >
+                <span className="font-semibold text-fg">No plugins installed</span>
+                <span>
+                  Use + Add plugin, or run <code className="font-mono text-xs">claude plugin install</code>.
+                </span>
+              </div>
+            ) : visibleRows.length === 0 ? (
+              <p className="px-1 text-[13px] text-fg-dim">No plugins match “{filter.trim()}”.</p>
+            ) : (
+              visibleRows.map((r) => (
+                <PluginCard
+                  key={r.path}
+                  row={r}
+                  home={home}
+                  busy={busyKey !== null && busyKey === (r.key ?? r.name)}
+                  onToggle={(row) => void onToggle(row)}
+                  onOpen={openRow}
+                  onUninstall={(row) => void onUninstall(row)}
+                  onJump={jump}
+                />
+              ))
+            )}
+            <p className="px-1 text-xs text-fg-faint">{FOOTNOTE}</p>
           </div>
-        </div>
-      )}
-    </Panel>
+        )}
+      </div>
+    </div>
   )
 }
 
-// Memoized: no props; own data comes from store/IPC hooks inside the component.
+// Memoized: Extensions passes stable onAdd/onJump callbacks; own data comes from store/IPC hooks inside.
 export const Plugins = memo(PluginsComponent)
 
 const SEEDER_LABELS: Record<keyof SeedStatus, string> = {

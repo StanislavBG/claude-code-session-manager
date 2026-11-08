@@ -107,7 +107,8 @@ function ExtensionsComponent() {
       <div className="flex-1 min-h-0 border border-line bg-bg" data-testid="extensions-panel">
         {tab === 'skills' && <Skills onAdd={add} scope="user" />}
         {tab === 'mcp' && <McpServers onAdd={addMcp} scope="user" />}
-        {tab === 'plugins' && <Plugins onAdd={add} />}
+        {/* A plugin card's skills/commands/MCP chip switches to the tab that lists them. */}
+        {tab === 'plugins' && <Plugins onAdd={add} onJump={selectTab} />}
       </div>
       <HomeSessionDrawer open={drawer} onClose={closeDrawer} title={DRAWER_TITLE[tab]} keyVals={[]}>
         {tab === 'skills' && <SkillsLibrary />}

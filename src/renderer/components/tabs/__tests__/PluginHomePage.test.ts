@@ -12,8 +12,8 @@ vi.mock('../../ui/MarkdownEditor', () => ({
 }))
 
 /**
- * Clicking an installed-plugin row navigates to a full drill-in page
- * (PluginHomePage) in place of the table: one-line header, meta strip,
+ * Clicking an installed plugin's card name navigates to a full drill-in page
+ * (PluginHomePage) in place of the cards: one-line header, meta strip,
  * left section index, and real skill/agent data. A back link returns to
  * the list.
  */
@@ -162,7 +162,16 @@ describe('Plugins drill-in page', () => {
     container.remove()
   })
 
-  it('navigates to the plugin home page on row click, shows header/meta/sections, and returns via back link', async () => {
+  /** The PluginCard whose name button reads `name`. */
+  const cardFor = (name: string) =>
+    Array.from(container.querySelectorAll('[data-testid="plugin-card"]')).find(
+      (c) => c.querySelector('[data-testid="plugin-card-name"]')?.textContent === name,
+    ) as HTMLElement
+  const cards = () => Array.from(container.querySelectorAll('[data-testid="plugin-card"]'))
+  /** Clicking a card's name opens its drill-in. */
+  const openCard = (card: HTMLElement) => (card.querySelector('[data-testid="plugin-card-name"]') as HTMLButtonElement).click()
+
+  it('navigates to the plugin home page on a card name click, shows header/meta/sections, and returns via back link', async () => {
     const api = installWindowApiMock()
     const { Plugins } = await import('../Plugins')
 
@@ -172,30 +181,25 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    const demoRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
-      r.textContent?.includes('demo'),
-    ) as HTMLElement
+    const demoRow = cardFor('demo')
     expect(demoRow).toBeTruthy()
 
-    // Description renders as a bounded muted line under the name when the
-    // manifest has one, and the name cell is just the name when it has none.
-    const descDiv = demoRow.querySelector('td div.truncate.text-fg-faint') as HTMLElement | null
+    // Description renders as its own line on the card when the manifest has
+    // one, and a card whose manifest has none shows just the name.
+    const descDiv = demoRow.querySelector('[data-testid="plugin-card-description"]') as HTMLElement | null
     expect(descDiv?.textContent).toBe(DEMO_MANIFEST.description)
     expect(descDiv?.getAttribute('title')).toBe(DEMO_MANIFEST.description)
-    expect((descDiv?.parentElement as HTMLElement).style.maxWidth).toBeTruthy()
-    const bareRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
-      r.textContent?.includes('bare'),
-    ) as HTMLElement
-    expect(bareRow.querySelectorAll('td')[1]?.textContent).toBe('bare')
-    expect(bareRow.querySelector('td div.truncate.text-fg-faint')).toBeFalsy()
+    const bareRow = cardFor('bare')
+    expect(bareRow.querySelector('[data-testid="plugin-card-name"]')?.textContent).toBe('bare')
+    expect(bareRow.querySelector('[data-testid="plugin-card-description"]')).toBeFalsy()
 
     act(() => {
-      demoRow.click()
+      openCard(demoRow)
     })
     await flush()
 
-    // Table is gone; page header shows name, version, back link.
-    expect(container.querySelector('table')).toBeFalsy()
+    // Cards are gone; page header shows name, version, back link.
+    expect(container.querySelector('[data-testid="plugin-card"]')).toBeFalsy()
     const text = container.textContent ?? ''
     expect(text).toContain('demo')
     expect(text).toContain('v1.2.3')
@@ -230,7 +234,7 @@ describe('Plugins drill-in page', () => {
       backLink.click()
     })
     await flush()
-    expect(container.querySelector('table')).toBeTruthy()
+    expect(container.querySelector('[data-testid="plugin-card"]')).toBeTruthy()
 
     expect(api.config.readJson).toHaveBeenCalled()
     act(() => root.unmount())
@@ -253,10 +257,7 @@ describe('Plugins drill-in page', () => {
     try {
       act(() => api.fireChange())
       await flush()
-      const freshRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
-        r.textContent?.includes('fresh'),
-      )
-      expect(freshRow).toBeTruthy()
+      expect(cardFor('fresh')).toBeTruthy()
     } finally {
       delete plugins['fresh@marketplace-a']
     }
@@ -273,11 +274,8 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    const demoRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
-      r.textContent?.includes('demo'),
-    ) as HTMLElement
     act(() => {
-      demoRow.click()
+      openCard(cardFor('demo'))
     })
     await flush()
 
@@ -307,8 +305,8 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    // Back to Plugin Home's Skills section list — not the outer Plugins table.
-    expect(container.querySelector('table')).toBeFalsy()
+    // Back to Plugin Home's Skills section list — not the outer Plugins cards.
+    expect(container.querySelector('[data-testid="plugin-card"]')).toBeFalsy()
     const afterBackText = container.textContent ?? ''
     expect(afterBackText).toContain('my-skill')
     expect(afterBackText).toContain('Does the skill thing.')
@@ -327,13 +325,11 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    const bareRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
-      r.textContent?.includes('bare'),
-    ) as HTMLElement
+    const bareRow = cardFor('bare')
     expect(bareRow).toBeTruthy()
 
     act(() => {
-      bareRow.click()
+      openCard(bareRow)
     })
     await flush()
 
@@ -351,11 +347,8 @@ describe('Plugins drill-in page', () => {
       root.render(createElement(Plugins))
     })
     await flush()
-    const demoRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
-      r.textContent?.includes('demo'),
-    ) as HTMLElement
     act(() => {
-      demoRow.click()
+      openCard(cardFor('demo'))
     })
     await flush()
   }
@@ -398,7 +391,7 @@ describe('Plugins drill-in page', () => {
     await flush()
     expect(container.textContent).not.toContain('scanning plugins')
     expect(container.textContent).toContain('Reviews things carefully.')
-    expect(container.querySelector('table')).toBeFalsy()
+    expect(container.querySelector('[data-testid="plugin-card"]')).toBeFalsy()
     act(() => root.unmount())
   })
 
@@ -417,7 +410,7 @@ describe('Plugins drill-in page', () => {
     expect(toastError).toHaveBeenCalledTimes(1)
     expect(String(toastError.mock.calls[0][0])).toContain('installed_plugins.json')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('installed_plugins.json')
-    expect(container.textContent).not.toContain('no plugins installed')
+    expect(container.textContent).not.toContain('No plugins installed')
     act(() => root.unmount())
   })
 
@@ -434,7 +427,7 @@ describe('Plugins drill-in page', () => {
 
     expect(toastError).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[role="alert"]')).toBeTruthy()
-    expect(container.querySelectorAll('tr[data-row-key]').length).toBe(2)
+    expect(cards().length).toBe(2)
     act(() => root.unmount())
   })
 
@@ -451,10 +444,9 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    const rows = Array.from(container.querySelectorAll('tr[data-row-key]'))
-    expect(rows.length).toBe(2)
-    expect(rows.find((r) => r.textContent?.includes('demo'))).toBeTruthy()
-    expect(rows.find((r) => r.textContent?.includes('bare'))?.textContent).toContain('inspection failed')
+    expect(cards().length).toBe(2)
+    expect(cardFor('demo')).toBeTruthy()
+    expect(cardFor('bare').textContent).toContain('inspection failed')
     act(() => root.unmount())
   })
 
@@ -680,8 +672,6 @@ describe('Plugins drill-in page', () => {
     const dirEntry = (dir: string, name: string) => ({
       name, path: `${dir}/${name}`, isDirectory: true, isFile: false, mtimeMs: 0, size: 0,
     })
-    const rowFor = (name: string) =>
-      Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) => r.textContent?.includes(name)) as HTMLElement
 
     it('shows the same skill count in the row and the list when only some folders hold a SKILL.md', async () => {
       const api = installWindowApiMock()
@@ -703,10 +693,10 @@ describe('Plugins drill-in page', () => {
       act(() => root.render(createElement(Plugins)))
       await flush()
 
-      const demo = rowFor('demo')
+      const demo = cardFor('demo')
       expect(demo.textContent).toContain('2 skills')
       expect(demo.textContent).not.toContain('3 skills')
-      act(() => demo.click())
+      act(() => openCard(demo))
       await flush()
       const skillsButton = Array.from(container.querySelectorAll('button')).find((b) =>
         b.textContent?.trim().startsWith('Skills'),
@@ -741,10 +731,10 @@ describe('Plugins drill-in page', () => {
       act(() => root.render(createElement(Plugins)))
       await flush()
 
-      const rows = Array.from(container.querySelectorAll('tr[data-row-key]'))
+      const rows = cards()
       expect(rows).toHaveLength(2)
       const scopeCells = rows.map((r) => r.querySelector('[data-testid="plugin-scope"]')?.textContent)
-      expect([...scopeCells].sort()).toEqual(['project', 'user'])
+      expect([...scopeCells].sort()).toEqual(['Project scope', 'User scope'])
       act(() => root.unmount())
     })
 

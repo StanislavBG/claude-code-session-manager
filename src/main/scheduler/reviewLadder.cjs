@@ -122,6 +122,7 @@ function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
     branch: jobWorktree.branchNameFor(job.slug),
     carriedPaths: job.carriedPaths || [],
     baseBranch: job.worktreeBaseBranch || null,
+    forkSha: job.worktreeForkSha || null,
   };
 }
 

@@ -68,6 +68,7 @@ module.exports = {
   listStrandedPins: gitWorktree.listStrandedPins,
   pinUnlandedWorktreeCommits: gitWorktree.pinUnlandedWorktreeCommits,
   resolveDefaultBranch: gitWorktree.resolveDefaultBranch,
+  resolveForkSha: gitWorktree.resolveForkSha,
   parseWorktreeListPorcelain: gitWorktree.parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot: (cwds, opts = {}) => gitWorktree.reconcileWorktreesOnBoot(cwds, { kind: KIND, isLive: opts.isLive }),
   reclaimTerminalJobOrphans: gitWorktree.reclaimTerminalJobOrphans,

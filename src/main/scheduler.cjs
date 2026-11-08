@@ -4233,12 +4233,15 @@ function stampIntegrationFailure(row, integration) {
     else delete row.integrationExpectedBranch;
     if (integration.actualBranch) row.integrationActualBranch = integration.actualBranch;
     else delete row.integrationActualBranch;
+    if (integration.baseRewritten) row.integrationBaseRewritten = true;
+    else delete row.integrationBaseRewritten;
   } else {
     delete row.integrationFailureKind;
     delete row.integrationConflictPaths;
     delete row.integrationBaseHeadSha;
     delete row.integrationExpectedBranch;
     delete row.integrationActualBranch;
+    delete row.integrationBaseRewritten;
   }
 }
 
@@ -4278,6 +4281,11 @@ async function resolveHeadShasForPass(jobs) {
 async function performMechanicalRecovery(job, target) {
   const integration = await jobWorktree.integrateJobBranch({
     cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths, baseBranch: target.baseBranch, allowRefLanding: true,
+    // The branch's fork point, so a base rebased since the failure replays only
+    // the job's own commits. Older rows fall back to the branch reflog.
+    forkSha: typeof jobWorktree.resolveForkSha === 'function'
+      ? await jobWorktree.resolveForkSha({ cwd: target.cwd, branch: target.branch, recorded: target.forkSha })
+      : null,
   });
   if (integration.ok) {
     await jobWorktree.cleanupJobWorktree({ cwd: target.cwd, dir: undefined, branch: target.branch, keepBranch: false });
@@ -6157,7 +6165,7 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
       await cleanup({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
       return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: false, worktreeHead, uncommittedSnapshot };
     }
-    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch });
+    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch, forkSha: worktree.forkSha || null });
     if (integration.ok && integration.reason === 'carried-wip-only') {
       console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} touched only carried base WIP paths — skipping merge (carried-wip-only)`);
     }
@@ -6606,12 +6614,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // recovery retries integration against the SAME target, not whatever `cwd`
     // happens to sit on by then.
     const worktreeBaseBranch = (worktree.ok && typeof worktree.baseBranch === 'string' && worktree.baseBranch) ? worktree.baseBranch : null;
+    // forkSha (createWorktree) — the exact commit the checkout forked from, so
+    // a later mechanical recovery can land only the job's own commits after the
+    // base branch was rewritten (rebased) while it ran.
+    const worktreeForkSha = (worktree.ok && typeof worktree.forkSha === 'string' && worktree.forkSha) ? worktree.forkSha : null;
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx < 0) return;
       if (carriedPaths.length) s.jobs[idx].carriedPaths = carriedPaths;
       if (worktreeBaseBranch) s.jobs[idx].worktreeBaseBranch = worktreeBaseBranch;
       else delete s.jobs[idx].worktreeBaseBranch;
+      if (worktreeForkSha) s.jobs[idx].worktreeForkSha = worktreeForkSha;
+      else delete s.jobs[idx].worktreeForkSha;
     });
 
     // Integrate the job's branch back into guardCwd's own HEAD, THEN tear the

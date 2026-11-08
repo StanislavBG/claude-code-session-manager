@@ -103,5 +103,5 @@ test('a git failure during salvage is swallowed (never throws) and cleanup still
   // scheduler.cjs where salvage failure must never block integration/cleanup.
   await expect(
     gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: path.join(tmpRoot, 'never-existed'), branch: 'sm-job/does-not-exist' }),
-  ).resolves.toBeUndefined();
+  ).resolves.toMatchObject({ snapshot: null });
 });

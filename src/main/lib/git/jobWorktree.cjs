@@ -72,6 +72,8 @@ module.exports = {
   reconcileWorktreesOnBoot: (cwds, opts = {}) => gitWorktree.reconcileWorktreesOnBoot(cwds, { kind: KIND, isLive: opts.isLive }),
   reclaimTerminalJobOrphans: gitWorktree.reclaimTerminalJobOrphans,
   unchangedCarriedPaths: gitWorktree.unchangedCarriedPaths,
+  snapshotUncommittedWork: gitWorktree.snapshotUncommittedWork,
+  worktreeRunCommitCount: gitWorktree.worktreeRunCommitCount,
   // Test-only escape hatch for the in-memory concurrency counter.
   _resetActiveWorktreeCountForTests(n = 0) { gitWorktree._resetActiveWorktreeCountForTests(KIND, n); },
   _getActiveWorktreeCountForTests() { return gitWorktree._getActiveWorktreeCountForTests(KIND); },

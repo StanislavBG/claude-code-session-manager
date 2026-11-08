@@ -76,4 +76,11 @@ function parseWorktreePorcelain(text) {
  */
 const STRANDED_REF_PREFIX = 'refs/sm-stranded/';
 
-module.exports = { execGit, parseWorktreePorcelain, STRANDED_REF_PREFIX };
+/**
+ * Namespace for snapshot commits of a checkout's UNCOMMITTED work, taken just
+ * before the checkout is removed (gitWorktree.snapshotUncommittedWork). Same
+ * outside-refs/heads reasoning as STRANDED_REF_PREFIX.
+ */
+const UNCOMMITTED_REF_PREFIX = 'refs/sm-uncommitted/';
+
+module.exports = { execGit, parseWorktreePorcelain, STRANDED_REF_PREFIX, UNCOMMITTED_REF_PREFIX };

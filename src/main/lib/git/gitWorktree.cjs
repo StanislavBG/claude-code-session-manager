@@ -331,8 +331,15 @@ function branchNameFor(kind, key) {
  * directory, so a sibling checkout still living under the same hash dir can
  * never be destroyed by this call.
  */
-async function removeWorktreeDir(cwd, dir) {
+async function removeWorktreeDir(cwd, dir, { key } = {}) {
   await pinStrandedHead({ cwd, dir });
+  // PRD 2891: never rm -rf unique uncommitted work — pin it as a commit first,
+  // and keep the checkout on disk when that pin cannot be made.
+  const snapshot = await snapshotUncommittedWork({ cwd, dir, key: key || path.basename(dir) });
+  if (snapshot && snapshot.error) {
+    console.warn(`[gitWorktree] keeping ${dir}: uncommitted work could not be snapshotted (${snapshot.error})`);
+    return { removed: false, snapshot };
+  }
   try {
     await execGit(['worktree', 'remove', '--force', dir], { cwd, timeout: 15_000 });
   } catch {
@@ -357,6 +364,7 @@ async function removeWorktreeDir(cwd, dir) {
     // Not empty (a sibling checkout survives), doesn't exist, or a race —
     // all fine to ignore.
   }
+  return { removed: true, snapshot };
 }
 
 /**
@@ -410,9 +418,35 @@ async function mainTreeFromWorktreeGitFile(dir) {
  * the checkout itself, in case git can still resolve it) when that lookup
  * fails. Never throws.
  */
-async function teardownOrphanedCheckout(dir) {
+async function teardownOrphanedCheckout(dir, { key } = {}) {
   const mainTree = await mainTreeFromWorktreeGitFile(dir);
+  const snapKey = key || path.basename(dir);
   await pinStrandedHead({ cwd: mainTree || dir, dir });
+  if (!mainTree) {
+    // No main tree to snapshot against: a dirty (or unreadable) checkout is
+    // kept rather than deleted (PRD 2891).
+    let dirty = false;
+    try {
+      const st = await execGit(['status', '--porcelain'], { cwd: dir, timeout: 15_000 });
+      dirty = st.trim().length > 0;
+    } catch {
+      dirty = true;
+    }
+    if (dirty) {
+      const reason = 'main tree unresolved and checkout is dirty or unreadable';
+      console.warn(`[gitWorktree] keeping ${dir}: ${reason}`);
+      return { removed: false, snapshot: null, mainTree: null, reason };
+    }
+  }
+  let snapshot = null;
+  if (mainTree) {
+    snapshot = await snapshotUncommittedWork({ cwd: mainTree, dir, key: snapKey });
+    if (snapshot && snapshot.error) {
+      const reason = `snapshot failed: ${snapshot.error}`;
+      console.warn(`[gitWorktree] keeping ${dir}: ${reason}`);
+      return { removed: false, snapshot, mainTree, reason };
+    }
+  }
   if (mainTree) {
     try {
       await execGit(['worktree', 'remove', '--force', dir], { cwd: mainTree, timeout: 15_000 });
@@ -422,10 +456,11 @@ async function teardownOrphanedCheckout(dir) {
     }
     try { await fsp.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
     try { await execGit(['worktree', 'prune'], { cwd: mainTree, timeout: 10_000 }); } catch { /* best-effort */ }
-    return;
+    return { removed: true, snapshot, mainTree };
   }
   try { await execGit(['worktree', 'prune'], { cwd: dir, timeout: 10_000 }); } catch { /* best-effort */ }
   try { await fsp.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  return { removed: true, snapshot: null, mainTree: null };
 }
 
 /**
@@ -464,7 +499,9 @@ async function teardownOrphanedCheckout(dir) {
  * kind's own root before any read or delete, so a maliciously-shaped on-disk
  * name can never walk this sweep outside its own tmpdir root.
  *
- * Returns `{ checkoutsRemoved, emptyRootsRemoved }`. Never throws.
+ * Returns `{ checkoutsRemoved, emptyRootsRemoved, snapshots, kept }` —
+ * `checkoutsRemoved` counts only checkouts actually deleted; a checkout whose
+ * uncommitted work could not be snapshotted lands in `kept`. Never throws.
  */
 async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
   const root = worktreeRootFor(kind);
@@ -472,7 +509,7 @@ async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
     ? opts.staleAgeMs
     : getStaleSweepAgeMs(kind);
   const holders = opts.holders instanceof Set ? opts.holders : listCwdHolders();
-  const result = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
+  const result = { checkoutsRemoved: 0, emptyRootsRemoved: 0, snapshots: [], kept: [] };
 
   let hashEntries;
   try {
@@ -512,8 +549,17 @@ async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
       }
 
       try {
-        await teardownOrphanedCheckout(checkoutDir);
-        result.checkoutsRemoved++;
+        const key = keyEntry.name;
+        const td = await teardownOrphanedCheckout(checkoutDir, { key });
+        const tdCwd = (td && td.mainTree) || null;
+        if (td && td.removed) {
+          result.checkoutsRemoved++;
+          if (td.snapshot && td.snapshot.sha) {
+            result.snapshots.push({ cwd: tdCwd, key, sha: td.snapshot.sha, ref: td.snapshot.ref, paths: td.snapshot.paths });
+          }
+        } else if (td) {
+          result.kept.push({ cwd: tdCwd, key, reason: td.reason || 'kept' });
+        }
       } catch {
         /* best-effort */
       }
@@ -1857,8 +1903,16 @@ async function runtimeStateRefusal(cwd, paths) {
  */
 async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
   configFor(kind); // throws on an unknown kind before anything else runs
-  if (dir) await removeWorktreeDir(cwd, dir);
-  if (branch && !keepBranch) {
+  let snapshot = null;
+  let removed = false;
+  if (dir) {
+    const res = await removeWorktreeDir(cwd, dir, { key: keyFromBranch(kind, branch) || path.basename(dir) });
+    snapshot = res.snapshot;
+    removed = res.removed;
+  }
+  // A kept checkout still has the branch checked out (git would refuse the
+  // delete anyway) — leave both for recovery.
+  if (branch && !keepBranch && (!dir || removed)) {
     try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
   }
   try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
@@ -1870,6 +1924,7 @@ async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
   const alreadyExpired = dir ? expiredCheckoutDirs.delete(dir) : false;
   if (dir) registeredCheckouts.delete(dir);
   if (dir && !alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+  return { snapshot, removed };
 }
 
 /**
@@ -2191,7 +2246,8 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
     );
     if (!opsOnly) continue; // real non-ops dirty content present — leave for a human
 
-    await removeWorktreeDir(cwd, entry.worktree);
+    const res = await removeWorktreeDir(cwd, entry.worktree, { key: slug });
+    if (!res.removed) continue; // snapshot failed — checkout (and branch) kept
     if (entry.branch) {
       await deleteBranchKeepingUniqueCommits({ cwd, branch: entry.branch, key: slug });
     }
@@ -2242,6 +2298,8 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
   const root = worktreeRootFor(kind);
   const list = Array.isArray(cwds) ? cwds.filter(Boolean) : [];
   let checkoutsRemoved = 0;
+  const snapshots = [];
+  const kept = [];
   for (const cwd of list) {
     if (!(await isGitRepo(cwd))) continue;
     let out = '';
@@ -2258,8 +2316,15 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
       // even when the checkout is detached or on a branch we do not own.
       const key = branchKey || path.basename(entry.worktree);
       if (isLive && key && (await isLive(key, entry))) continue;
-      await removeWorktreeDir(cwd, entry.worktree);
+      const res = await removeWorktreeDir(cwd, entry.worktree, { key });
+      if (!res.removed) {
+        kept.push({ cwd, key, reason: `snapshot failed: ${(res.snapshot && res.snapshot.error) || 'unknown'}` });
+        continue; // keep its branch too — the checkout still holds it
+      }
       checkoutsRemoved++;
+      if (res.snapshot && res.snapshot.sha) {
+        snapshots.push({ cwd, key, sha: res.snapshot.sha, ref: res.snapshot.ref, paths: res.snapshot.paths });
+      }
       // sm-land/* is the per-Epic integration branch, never a throwaway
       // worktree branch — even if something else checked it out onto a
       // worktree under this kind's root, this sweep must never delete it.
@@ -2271,7 +2336,8 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
     try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
   }
 
-  let sweep = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
+  /** @type {{ checkoutsRemoved: number, emptyRootsRemoved: number, snapshots: any[], kept: any[] }} */
+  let sweep = { checkoutsRemoved: 0, emptyRootsRemoved: 0, snapshots: [], kept: [] };
   try {
     sweep = await sweepStaleWorktreeCheckouts(kind, { staleAgeMs: opts.staleAgeMs, holders: opts.holders });
   } catch {
@@ -2280,10 +2346,13 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
   const totals = {
     checkoutsRemoved: checkoutsRemoved + sweep.checkoutsRemoved,
     emptyRootsRemoved: sweep.emptyRootsRemoved,
+    snapshots: snapshots.concat(sweep.snapshots || []),
+    kept: kept.concat(sweep.kept || []),
   };
   console.log(
     `[gitWorktree] boot sweep (kind:${kind}): reclaimed ${totals.checkoutsRemoved} checkout(s), ` +
-    `${totals.emptyRootsRemoved} empty root dir(s)`
+    `${totals.emptyRootsRemoved} empty root dir(s), ` +
+    `${totals.snapshots.length} uncommitted snapshot(s), ${totals.kept.length} kept`
   );
   return totals;
 }
@@ -3122,7 +3191,98 @@ async function pinStrandedHead({ cwd, dir }) {
   } catch { /* best-effort */ }
 }
 
+// ──────────────────────────────────────────── uncommitted-work snapshot (PRD 2891)
+
+/**
+ * Pins a checkout's uncommitted work (tracked changes + untracked,
+ * non-ignored files) as a commit whose parent is the checkout's HEAD, under
+ * UNCOMMITTED_REF_PREFIX/<safePinKey(key)>/<sha> in `cwd` (the main tree).
+ * Built through a throwaway GIT_INDEX_FILE outside the repo, so the
+ * checkout's own index and the shared stash stack are never touched.
+ *
+ * Returns null when there is nothing unique to keep (clean, missing dir, or
+ * every dirty path byte-identical to `cwd`), `{ sha, ref, paths }` on
+ * success, `{ error, paths }` on a git failure. Never throws.
+ */
+async function snapshotUncommittedWork({ cwd, dir, key }) {
+  /** @type {string[]} */
+  let paths = [];
+  if (!dir || !fs.existsSync(dir)) return null;
+  // A half-created checkout with no .git entry has nothing git can snapshot.
+  if (!fs.existsSync(path.join(dir, '.git'))) return null;
+  let tmpIndex = null;
+  try {
+    const status = await execGit(['status', '--porcelain', '--untracked-files=all'], { cwd: dir, timeout: 30_000 });
+    for (const line of status.split('\n')) {
+      if (line.length < 4) continue;
+      const rest = line.slice(3);
+      const arrow = rest.indexOf(' -> ');
+      const parts = arrow === -1 ? [rest] : [rest.slice(0, arrow), rest.slice(arrow + 4)];
+      for (const raw of parts) {
+        const p = unquotePorcelainPath(raw.trim());
+        if (p && !paths.includes(p)) paths.push(p);
+      }
+    }
+    if (!paths.length) return null;
+    const identical = new Set(await unchangedCarriedPaths({ cwd, dir, paths }));
+    paths = paths.filter((p) => !identical.has(p));
+    if (!paths.length) return null;
+
+    tmpIndex = path.join(os.tmpdir(), `sm-uncommitted-${process.pid}-${crypto.randomBytes(8).toString('hex')}.index`);
+    const env = { GIT_INDEX_FILE: tmpIndex };
+    await execGit(['read-tree', 'HEAD'], { cwd: dir, timeout: 30_000, env });
+    await execGit(['add', '-A', '--', '.'], { cwd: dir, timeout: 120_000, env });
+    const tree = (await execGit(['write-tree'], { cwd: dir, timeout: 30_000, env })).trim();
+    const message = `sm: uncommitted work left in ${key || path.basename(dir)} worktree`;
+    const commitArgs = ['commit-tree', tree, '-p', 'HEAD', '-m', message];
+    let sha;
+    try {
+      sha = (await execGit(commitArgs, { cwd: dir, timeout: 30_000 })).trim();
+    } catch {
+      // No configured identity on this machine — fall back to a neutral one.
+      sha = (await execGit(commitArgs, {
+        cwd: dir,
+        timeout: 30_000,
+        env: {
+          GIT_AUTHOR_NAME: 'Session Manager', GIT_AUTHOR_EMAIL: 'session-manager@localhost',
+          GIT_COMMITTER_NAME: 'Session Manager', GIT_COMMITTER_EMAIL: 'session-manager@localhost',
+        },
+      })).trim();
+    }
+    if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new Error(`commit-tree returned no sha: ${sha}`);
+    const ref = `${sharedGitExec.UNCOMMITTED_REF_PREFIX}${safePinKey(key || path.basename(dir))}/${sha}`;
+    await execGit(['update-ref', ref, sha], { cwd: cwd || dir, timeout: 10_000 });
+    return { sha, ref, paths };
+  } catch (err) {
+    const e = /** @type {any} */ (err);
+    const msg = String((e && (e.stderrText || e.message)) || e).trim().split('\n')[0] || 'git failure';
+    return { error: msg, paths };
+  } finally {
+    if (tmpIndex) {
+      try { await fsp.rm(tmpIndex, { force: true }); } catch { /* best-effort */ }
+      try { await fsp.rm(`${tmpIndex}.lock`, { force: true }); } catch { /* best-effort */ }
+    }
+  }
+}
+
+/**
+ * Number of commit / cherry-pick / revert entries in `dir`'s HEAD reflog
+ * (same subject test as pinUnlandedWorktreeCommits) — the commits a run made
+ * in this checkout. -1 on any failure. Never throws.
+ */
+async function worktreeRunCommitCount({ dir }) {
+  try {
+    if (!dir || !fs.existsSync(dir)) return -1;
+    const out = await execGit(['reflog', 'show', '--format=%gs', '-n', '200', 'HEAD'], { cwd: dir, timeout: 15_000 });
+    return out.split('\n').filter((l) => /^(commit|cherry-pick|revert)\b/.test(l)).length;
+  } catch {
+    return -1;
+  }
+}
+
 module.exports = {
+  snapshotUncommittedWork,
+  worktreeRunCommitCount,
   findRuntimeStateAdds,
   replayBranchOnto,
   reconcileWorktreeHead,

@@ -7,14 +7,28 @@
  * launches the macro with. The matrix renders one table per feature group
  * (self first, then each competitor); a feature row toggles its detail panel.
  * Text-only rendering — research data comes from public web pages.
+ *
+ * Every feature this project lacks or only partly has gets a 'Start session'
+ * button, and the header 'Start all missing (N)' / 'Add all as proposed (N)'.
+ * All three press launchSession — the same path as New Session (architect
+ * actor, feature mission). A feature whose Session already exists in this cwd
+ * (matched on the Sessions-list title) shows 'Open session' instead, so a
+ * second press never mints a duplicate.
  */
-import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { toast } from '../../../../state/toast'
+import { usePromptSessions } from '../../../../state/promptSessions'
+import { launchSession } from '../../../../lib/launchSession'
+import { splitTitleAndGoal } from '../../../../lib/epicDerive'
 import {
   competitorSlots,
   competitorsLine,
+  featureSessionGoal,
+  featureSessionTitle,
   groupedFeatures,
+  isMissingFeature,
+  missingFeatures,
   statusLabel,
   type CompetitorSlot,
   type CompetitorSlotMode,
@@ -49,6 +63,43 @@ const STATUS_TONE: Record<MatrixSupportStatus, string> = {
 
 const EMPTY_TEXT =
   'No matrix yet. Run research to compare this project with up to four competitors: each slot can name a product, let the research pick one (Auto), or stay Off. The result is a grouped feature matrix with sources, user sentiment and a priority per feature.'
+
+const START_SOURCE = 'CompetitorMatrix start-session'
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err)) || 'Unknown error'
+
+/** The Sessions list's title for an Epic: the first line of its goalText. */
+const epicListTitle = (goalText: string) => splitTitleAndGoal(goalText ?? '').title.split('\n')[0]
+
+interface StartControls {
+  /** featureSessionTitle -> existing Epic id in this cwd. */
+  started: Map<string, string>
+  starting: boolean
+  canStart: boolean
+  onStart: (f: MatrixFeature) => void
+  onOpen: (epicId: string) => void
+}
+
+function FeatureStartButton({ feature, ctl }: { feature: MatrixFeature; ctl: StartControls }) {
+  if (!isMissingFeature(feature)) return null
+  const existing = ctl.started.get(featureSessionTitle(feature))
+  return (
+    <button
+      type="button"
+      data-testid="competitor-matrix-start"
+      data-feature-id={feature.id}
+      data-epic-id={existing}
+      disabled={ctl.starting || (!existing && !ctl.canStart)}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (existing) ctl.onOpen(existing)
+        else ctl.onStart(feature)
+      }}
+      className={SMALL_BTN_CLASS}
+    >
+      {existing ? 'Open session' : 'Start session'}
+    </button>
+  )
+}
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 const isBusy = (s?: MacroJobStatus) => s?.state === 'queued' || s?.state === 'running'
@@ -153,7 +204,7 @@ function FeatureDetail({ feature, matrix, colSpan }: { feature: MatrixFeature; m
   )
 }
 
-function MatrixTables({ matrix }: { matrix: CompetitiveMatrix }) {
+function MatrixTables({ matrix, ctl }: { matrix: CompetitiveMatrix; ctl: StartControls }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const products = [
     { id: 'self', name: matrix.product.name },
@@ -199,9 +250,10 @@ function MatrixTables({ matrix }: { matrix: CompetitiveMatrix }) {
                         className={`cursor-pointer border-t border-rule-inner hover:bg-bg-hi ${open ? 'bg-bg-hi' : ''}`}
                       >
                         <td className="px-3 py-2 font-semibold text-fg">
-                          <span className="inline-flex items-center gap-1.5">
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
                             <AlmanacIcon name={open ? 'collapse' : 'expand'} size={11} />
                             {f.title}
+                            <FeatureStartButton feature={f} ctl={ctl} />
                           </span>
                         </td>
                         {products.map((p) => {
@@ -248,7 +300,7 @@ export const CompetitorMatrixView = memo(function CompetitorMatrixView({
   launching: string | null
   /** This macro's latest job (ProjectHome's useMacroJobStatus). */
   jobStatus?: MacroJobStatus
-  /** Opens an Epic by id — reserved for the Start-session buttons (competitor-matrix-start-sessions). */
+  /** Opens an Epic by id — after a single Start session, and for Open session. */
   onOpenSession?: (epicId: string) => void
 }) {
   const { load, reload } = useMatrixLoad(cwd)
@@ -273,6 +325,93 @@ export const CompetitorMatrixView = memo(function CompetitorMatrixView({
   const loading = load ? load.status === 'loading' : !!cwd
   const disabled = line === null || launching !== null || busy
 
+  // Start-session state. The selector returns the stored object; matching lives in useMemo.
+  const sessions = usePromptSessions((s) => s.sessions)
+  const started = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const epic of Object.values(sessions)) {
+      if (epic.cwd !== cwd) continue
+      const title = epicListTitle(epic.goalText)
+      if (!map.has(title)) map.set(title, epic.id)
+    }
+    return map
+  }, [sessions, cwd])
+  const missing = useMemo(() => (matrix ? missingFeatures(matrix) : []), [matrix])
+  const notStarted = missing.filter((f) => !started.has(featureSessionTitle(f)))
+  const [starting, setStarting] = useState(false)
+  const startingRef = useRef(false)
+
+  const launchFeature = (f: MatrixFeature, m: CompetitiveMatrix, approve: boolean) =>
+    launchSession({
+      cwd: cwd as string,
+      agentName: 'architect',
+      tag: 'feature',
+      title: featureSessionTitle(f),
+      goal: featureSessionGoal(f, m),
+      source: START_SOURCE,
+      ...(approve ? {} : { approve: false }),
+    })
+
+  const begin = () => {
+    if (startingRef.current || !cwd || !matrix) return false
+    startingRef.current = true
+    setStarting(true)
+    return true
+  }
+  const end = () => {
+    startingRef.current = false
+    setStarting(false)
+  }
+
+  const startOne = async (f: MatrixFeature) => {
+    if (!matrix || !begin()) return
+    try {
+      const { epicId } = await launchFeature(f, matrix, true)
+      onOpenSession?.(epicId)
+    } catch (err) {
+      toast.error(`Could not start a session for "${f.title}": ${errText(err)}`)
+    } finally {
+      end()
+    }
+  }
+
+  const startAll = async (approve: boolean) => {
+    if (!matrix || startingRef.current || !cwd) return
+    const todo = notStarted
+    const skipped = missing.length - todo.length
+    if (todo.length === 0) return
+    if (approve && !window.confirm(`Start ${todo.length} sessions now? They share this machine's session slots with scheduled jobs.`)) return
+    if (!begin()) return
+    let added = 0
+    let failed = 0
+    try {
+      for (const f of todo) {
+        try {
+          await launchFeature(f, matrix, approve)
+          added++
+        } catch (err) {
+          failed++
+          toast.error(`Could not start a session for "${f.title}": ${errText(err)}`)
+        }
+      }
+    } finally {
+      end()
+    }
+    const head = approve
+      ? `Started ${plural(added, 'session')}`
+      : `Added ${added} proposed ${added === 1 ? 'session' : 'sessions'} — approve them in Sessions`
+    toast.success(`${head}${skipped > 0 ? `, skipped ${skipped} already started` : ''}${failed > 0 ? `, ${failed} failed` : ''}`)
+  }
+
+  const ctl: StartControls = {
+    started,
+    starting,
+    canStart: !!cwd,
+    onStart: (f) => void startOne(f),
+    onOpen: (id) => onOpenSession?.(id),
+  }
+  const bulkDisabled = starting || !cwd || notStarted.length === 0
+
   return (
     <div data-testid="competitor-matrix" data-has-session-handler={onOpenSession ? 'true' : undefined} className="flex flex-col gap-3.5">
       <div className="flex flex-none flex-wrap items-end gap-4">
@@ -295,6 +434,28 @@ export const CompetitorMatrixView = memo(function CompetitorMatrixView({
             </span>
           )}
         </div>
+        {missing.length > 0 && (
+          <>
+            <button
+              type="button"
+              data-testid="competitor-matrix-start-all"
+              disabled={bulkDisabled}
+              onClick={() => void startAll(true)}
+              className={SMALL_BTN_CLASS}
+            >
+              {`Start all missing (${notStarted.length})`}
+            </button>
+            <button
+              type="button"
+              data-testid="competitor-matrix-propose-all"
+              disabled={bulkDisabled}
+              onClick={() => void startAll(false)}
+              className={SMALL_BTN_CLASS}
+            >
+              {`Add all as proposed (${notStarted.length})`}
+            </button>
+          </>
+        )}
         <button type="button" data-testid="competitor-matrix-refresh" disabled={!cwd || loading} onClick={reload} className={SMALL_BTN_CLASS}>
           <AlmanacIcon name="reload" size={12} stroke={2} />
           Refresh
@@ -361,7 +522,7 @@ export const CompetitorMatrixView = memo(function CompetitorMatrixView({
       ) : null}
 
       {matrix ? (
-        <MatrixTables key={slotKey} matrix={matrix} />
+        <MatrixTables key={slotKey} matrix={matrix} ctl={ctl} />
       ) : loading ? (
         <p data-testid="competitor-matrix-loading" className="m-0 text-xs text-fg-faint">
           Loading matrix…

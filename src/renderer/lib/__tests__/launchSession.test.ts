@@ -136,4 +136,18 @@ describe('launchSession', () => {
     await expect(launchSession({ ...input, macroId: 'm9', run: 'job' })).rejects.toThrow('already building')
     expect(send).not.toHaveBeenCalled()
   })
+
+  it('approve false: mints only — no approve, no opening prompt, no job', async () => {
+    const out = await launchSession({ ...input, approve: false })
+    expect(calls).toEqual(['compose', 'create'])
+    expect(approveProposed).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(dispatchJob).not.toHaveBeenCalled()
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+  })
+
+  it('approve true (explicit) behaves like the default', async () => {
+    await launchSession({ ...input, approve: true })
+    expect(calls).toEqual(['compose', 'create', 'approve', 'send'])
+  })
 })

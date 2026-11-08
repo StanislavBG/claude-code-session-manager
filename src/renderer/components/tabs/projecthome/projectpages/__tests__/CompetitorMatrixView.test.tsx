@@ -2,8 +2,13 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+const launchSession = vi.fn()
+vi.mock('../../../../../lib/launchSession', () => ({ launchSession: (...a: unknown[]) => launchSession(...a) }))
+
 import { CompetitorMatrixView } from '../CompetitorMatrixView'
 import { useToast } from '../../../../../state/toast'
+import { usePromptSessions } from '../../../../../state/promptSessions'
+import { featureSessionGoal, featureSessionTitle } from '../../../../../lib/competitorMatrix'
 import type {
   CompetitiveMatrix,
   CompetitorMatrixResult,
@@ -69,6 +74,7 @@ const MATRIX: CompetitiveMatrix = {
     }),
     feature({ id: 'tabs', groupId: 'g1', title: 'Tabs' }),
     feature({ id: 'mcp', groupId: 'g2', title: 'MCP servers' }),
+    feature({ id: 'sync', groupId: 'g2', title: 'Cloud sync', support: { self: cell('partial'), cd: cell('yes'), oc: cell('no'), cu: cell('no'), ai: cell('no') } }),
   ],
   sources: [
     {
@@ -94,6 +100,10 @@ beforeEach(() => {
   matrixApi.mockReset()
   matrixApi.mockResolvedValue({ ok: true, matrix: MATRIX, error: null })
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+  launchSession.mockReset()
+  let n = 0
+  launchSession.mockImplementation(async () => ({ epicId: `e${++n}`, claudeSessionId: `c${n}` }))
+  usePromptSessions.setState({ sessions: {} })
   ;(window as unknown as { api: unknown }).api = { projectPages: { matrix: matrixApi } }
 })
 
@@ -240,5 +250,139 @@ describe('CompetitorMatrixView', () => {
     render()
     await settle()
     expect(useToast.getState().toasts).toHaveLength(1)
+  })
+
+  describe('start sessions', () => {
+    const VOICE = MATRIX.features[0]
+    const SYNC = MATRIX.features[3]
+    const startBtn = (id: string) =>
+      container!.querySelector(`[data-testid="competitor-matrix-start"][data-feature-id="${id}"]`) as HTMLButtonElement | null
+    const startAllBtn = () => q('competitor-matrix-start-all') as HTMLButtonElement
+    const proposeAllBtn = () => q('competitor-matrix-propose-all') as HTMLButtonElement
+    const toasts = () => useToast.getState().toasts.map((t) => ({ kind: t.kind, message: t.message }))
+    const expected = (f: MatrixFeature) => ({
+      cwd: CWD,
+      agentName: 'architect',
+      tag: 'feature',
+      title: featureSessionTitle(f),
+      goal: featureSessionGoal(f, MATRIX),
+      source: 'CompetitorMatrix start-session',
+    })
+    const seedEpic = (id: string, goalText: string, cwd = CWD) =>
+      usePromptSessions.setState({
+        sessions: { ...usePromptSessions.getState().sessions, [id]: { id, cwd, goalText, status: 'proposed' } as never },
+      })
+
+    it('only no/partial features get a Start session button; pressing it launches and opens', async () => {
+      const onOpenSession = vi.fn()
+      render({ onOpenSession })
+      await settle()
+      expect(startBtn('tabs')).toBeNull()
+      expect(startBtn('mcp')).toBeNull()
+      expect(startBtn('voice')!.textContent).toBe('Start session')
+      expect(startBtn('sync')!.textContent).toBe('Start session')
+      act(() => startBtn('voice')!.click())
+      await settle()
+      expect(launchSession.mock.calls).toEqual([[expected(VOICE)]])
+      expect(onOpenSession.mock.calls).toEqual([['e1']])
+      expect(q('competitor-matrix-detail')).toBeNull()
+    })
+
+    it('a failed single start toasts its error', async () => {
+      const onOpenSession = vi.fn()
+      launchSession.mockRejectedValueOnce(new Error('nope'))
+      render({ onOpenSession })
+      await settle()
+      act(() => startBtn('voice')!.click())
+      await settle()
+      expect(onOpenSession).not.toHaveBeenCalled()
+      expect(toasts()).toEqual([{ kind: 'error', message: expect.stringContaining('nope') }])
+    })
+
+    it('Start all missing confirms, then starts each in order without navigating', async () => {
+      const onOpenSession = vi.fn()
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      render({ onOpenSession })
+      await settle()
+      expect(startAllBtn().textContent).toBe('Start all missing (2)')
+      act(() => startAllBtn().click())
+      await settle()
+      expect(confirm).toHaveBeenCalledWith("Start 2 sessions now? They share this machine's session slots with scheduled jobs.")
+      expect(launchSession.mock.calls).toEqual([[expected(VOICE)], [expected(SYNC)]])
+      expect(onOpenSession).not.toHaveBeenCalled()
+      expect(toasts()).toEqual([{ kind: 'info', message: 'Started 2 sessions' }])
+      confirm.mockRestore()
+    })
+
+    it('Cancel on the confirm launches nothing', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      render()
+      await settle()
+      act(() => startAllBtn().click())
+      await settle()
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(launchSession).not.toHaveBeenCalled()
+      confirm.mockRestore()
+    })
+
+    it('Add all as proposed mints with approve false, no confirm, and reports skipped + failed', async () => {
+      const confirm = vi.spyOn(window, 'confirm')
+      seedEpic('old', `${featureSessionTitle(VOICE)}\n\nwhatever`)
+      launchSession.mockRejectedValueOnce(new Error('store down'))
+      render()
+      await settle()
+      expect(proposeAllBtn().textContent).toBe('Add all as proposed (1)')
+      act(() => proposeAllBtn().click())
+      await settle()
+      expect(confirm).not.toHaveBeenCalled()
+      expect(launchSession.mock.calls).toEqual([[{ ...expected(SYNC), approve: false }]])
+      expect(toasts()).toEqual([
+        { kind: 'error', message: expect.stringContaining('store down') },
+        { kind: 'info', message: 'Added 0 proposed sessions — approve them in Sessions, skipped 1 already started, 1 failed' },
+      ])
+      confirm.mockRestore()
+    })
+
+    it('Add all as proposed toasts the added count', async () => {
+      render()
+      await settle()
+      act(() => proposeAllBtn().click())
+      await settle()
+      expect(launchSession.mock.calls).toEqual([[{ ...expected(VOICE), approve: false }], [{ ...expected(SYNC), approve: false }]])
+      expect(toasts()).toEqual([{ kind: 'info', message: 'Added 2 proposed sessions — approve them in Sessions' }])
+    })
+
+    it('a feature with an Epic of the same title in this cwd shows Open session', async () => {
+      const onOpenSession = vi.fn()
+      seedEpic('mine', `${featureSessionTitle(SYNC)}\n\nGoal body`)
+      seedEpic('other-cwd', `${featureSessionTitle(VOICE)}\n\nGoal body`, '/p/beta')
+      render({ onOpenSession })
+      await settle()
+      expect(startBtn('voice')!.textContent).toBe('Start session')
+      expect(startBtn('sync')!.textContent).toBe('Open session')
+      expect(startAllBtn().textContent).toBe('Start all missing (1)')
+      act(() => startBtn('sync')!.click())
+      expect(onOpenSession.mock.calls).toEqual([['mine']])
+      expect(launchSession).not.toHaveBeenCalled()
+    })
+
+    it('disables every start button while a start is in flight', async () => {
+      let resolve!: (v: { epicId: string; claudeSessionId: string }) => void
+      launchSession.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+      render({ onOpenSession: vi.fn() })
+      await settle()
+      act(() => startBtn('voice')!.click())
+      await settle()
+      expect(startBtn('voice')!.disabled).toBe(true)
+      expect(startBtn('sync')!.disabled).toBe(true)
+      expect(startAllBtn().disabled).toBe(true)
+      expect(proposeAllBtn().disabled).toBe(true)
+      act(() => startBtn('sync')!.click())
+      expect(launchSession).toHaveBeenCalledTimes(1)
+      await act(async () => { resolve({ epicId: 'e9', claudeSessionId: 'c9' }) })
+      await settle()
+      expect(startBtn('sync')!.disabled).toBe(false)
+      expect(startAllBtn().disabled).toBe(false)
+    })
   })
 })

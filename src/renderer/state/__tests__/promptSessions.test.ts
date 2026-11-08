@@ -143,6 +143,21 @@ describe('promptSessions.ts', () => {
     expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('developLoop')
   })
 
+  it('createPromptSession sends restoreSessionId only when runtime.restoreSessionId is a non-empty string', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const restoreSessionId = '0c6f3e2a-9b1d-4f57-8a2e-3d4c5b6a7f80'
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Restore it', undefined, undefined, undefined, undefined, undefined, { restoreSessionId })
+    expect(api.promptSessions.create).toHaveBeenLastCalledWith(expect.objectContaining({ restoreSessionId }))
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Fresh mint')
+    expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('restoreSessionId')
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Empty restore id', undefined, undefined, undefined, undefined, undefined, { restoreSessionId: '' })
+    expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('restoreSessionId')
+  })
+
   it('regression: createPromptSession called with no tag arg (the chat.ts:712 dispatch shape) still mints proposed, never active', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
@@ -1826,6 +1841,33 @@ describe('approveProposed epic worktree creation (PRD 1033)', () => {
     await vi.waitFor(() => {
       expect(usePromptSessions.getState().sessions[proposed.id].worktree).toEqual(worktree)
     })
+  })
+
+  it('skips createWorktree for a restored Epic (restoredSession: true) and still fires it for every other Epic', async () => {
+    const api = installWindowApiMock()
+    const restoreSessionId = '0c6f3e2a-9b1d-4f57-8a2e-3d4c5b6a7f80'
+    // Mirrors main's ensureEpic restore branch (epicMint.cjs): the minted
+    // record adopts restoreSessionId as its claudeSessionId and is marked
+    // restoredSession: true. Only this one create call is a restore.
+    const mintFresh = fakePromptSessionsCreate()
+    api.promptSessions.create.mockImplementationOnce(async (payload) => {
+      const { epicId, session } = await mintFresh(payload)
+      return { epicId, session: { ...session, claudeSessionId: restoreSessionId, restoredSession: true as const } }
+    })
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const restored = await usePromptSessions.getState().createPromptSession('/proj', 'Pick up the CLI work', undefined, undefined, undefined, undefined, undefined, { restoreSessionId })
+    expect(restored.restoredSession).toBe(true)
+    expect(usePromptSessions.getState().approveProposed(restored.id)?.status).toBe('active')
+    // createWorktree is invoked synchronously inside approveProposed when it
+    // fires at all, so "not called" right after the return is conclusive.
+    expect(api.promptSessions.createWorktree).not.toHaveBeenCalled()
+
+    const fresh = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    expect(fresh.restoredSession).toBeUndefined()
+    usePromptSessions.getState().approveProposed(fresh.id)
+    expect(api.promptSessions.createWorktree).toHaveBeenCalledTimes(1)
+    expect(api.promptSessions.createWorktree).toHaveBeenCalledWith({ cwd: '/proj', epicId: fresh.id })
   })
 
   it('leaves worktree unset when createWorktree resolves null (not a repo / dirty / disabled / cap reached)', async () => {

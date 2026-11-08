@@ -4,7 +4,7 @@
  * the phone remote, so both start sessions through the same code.
  * Throws on bad input or store failure; callers own any toasting.
  */
-import { usePromptSessions } from '../state/promptSessions'
+import { usePromptSessions, awaitApprovePersisted } from '../state/promptSessions'
 import { useChat } from '../state/chat'
 import { composeEpicIntake } from './epicIntake'
 import { defaultContextInjectionsForTag } from './contextInjections'
@@ -69,8 +69,16 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
   usePromptSessions.getState().approveProposed(session.id, source)
   if (run === 'job') {
     if (!macroId) throw new Error("launchSession: run 'job' requires macroId")
+    // main's dispatch-job checks active-index.json; dispatching before the
+    // approve write lands is refused ("not an active session"), so wait for it.
+    try {
+      await awaitApprovePersisted(session.id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`"${title}" session was created but its build was not queued (approval not saved: ${msg}) — press it again to retry.`)
+    }
     const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions })
-    if (!res.ok) throw new Error(res.error)
+    if (!res.ok) throw new Error(`"${title}" session was created but its build was not queued: ${res.error} — press it again to retry.`)
     return { epicId: session.id, claudeSessionId: session.claudeSessionId }
   }
   useChat.getState().send({

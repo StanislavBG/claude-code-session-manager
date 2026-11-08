@@ -393,7 +393,7 @@ describe('useMacroLaunch', () => {
       expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
       expect(sendSpy).not.toHaveBeenCalled()
       expect(onSelect).not.toHaveBeenCalled()
-      expect(useToast.getState().toasts.map((t) => t.message)).toContain('a build is already running')
+      expect(useToast.getState().toasts.some((t) => t.message.includes('a build is already running') && t.message.includes('build was not queued'))).toBe(true)
     })
 
     it('still runs the readiness check first', async () => {

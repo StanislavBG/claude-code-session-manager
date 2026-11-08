@@ -4,9 +4,11 @@ const calls: string[] = []
 const createPromptSession = vi.fn()
 const approveProposed = vi.fn()
 const send = vi.fn()
+const awaitApprovePersisted = vi.fn()
 
 vi.mock('../../state/promptSessions', () => ({
   usePromptSessions: { getState: () => ({ createPromptSession, approveProposed }) },
+  awaitApprovePersisted: (id: string) => awaitApprovePersisted(id),
 }))
 vi.mock('../../state/chat', () => ({
   useChat: { getState: () => ({ send }) },
@@ -46,6 +48,7 @@ beforeEach(() => {
   })
   approveProposed.mockImplementation(() => void calls.push('approve'))
   send.mockImplementation(() => void calls.push('send'))
+  awaitApprovePersisted.mockResolvedValue(undefined)
 })
 
 describe('launchSession', () => {
@@ -133,8 +136,41 @@ describe('launchSession', () => {
 
   it("run 'job': an { ok: false } result throws its error text", async () => {
     dispatchJob.mockResolvedValue({ ok: false, error: 'already building' })
-    await expect(launchSession({ ...input, macroId: 'm9', run: 'job' })).rejects.toThrow('already building')
+    const err = await launchSession({ ...input, macroId: 'm9', run: 'job' }).catch((e: Error) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toContain('already building')
+    expect((err as Error).message).toContain('build was not queued')
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it("run 'job': waits for the approval to persist before dispatching", async () => {
+    let release!: () => void
+    awaitApprovePersisted.mockReturnValue(new Promise<void>((r) => { release = r }))
+    dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e1' })
+    const p = launchSession({ ...input, macroId: 'm9', run: 'job', extraInstructions: 'x' })
+    await vi.waitFor(() => expect(awaitApprovePersisted).toHaveBeenCalledWith('e1'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(dispatchJob).not.toHaveBeenCalled()
+    release()
+    await p
+    expect(dispatchJob).toHaveBeenCalledTimes(1)
+    expect(dispatchJob).toHaveBeenCalledWith({ cwd: '/p', macroId: 'm9', epicId: 'e1', extraInstructions: 'x' })
+  })
+
+  it("run 'job': a failed approval persist skips dispatch and names the retry", async () => {
+    awaitApprovePersisted.mockRejectedValue(new Error('disk full'))
+    const err = await launchSession({ ...input, title: 'Competitor matrix', macroId: 'm9', run: 'job' }).catch((e: Error) => e)
+    expect(err).toBeInstanceOf(Error)
+    const msg = (err as Error).message
+    expect(msg).toContain('Competitor matrix')
+    expect(msg).toContain('build was not queued')
+    expect(msg).toContain('press it again')
+    expect(dispatchJob).not.toHaveBeenCalled()
+  })
+
+  it('chat path never awaits the approval persist', async () => {
+    await launchSession(input)
+    expect(awaitApprovePersisted).not.toHaveBeenCalled()
   })
 
   it('approve false: mints only — no approve, no opening prompt, no job', async () => {

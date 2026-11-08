@@ -14,6 +14,8 @@
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
  *   project_demo_video_write({ cwd?, html? | htmlPath? }) -> POST /admin/project-home/demo-video/write
  *   project_page_write({ cwd?, pageId, title, topic?, html? | htmlPath? }) -> POST /admin/project-home/pages/write
+ *   project_matrix_read({ cwd? }) -> POST /admin/project-home/matrix/read
+ *   project_matrix_write({ cwd?, matrix? | matrixPath?, model? }) -> POST /admin/project-home/matrix/write
  *   project_character_write({ cwd?, json, js? | jsPath?, replace? }) -> POST /admin/project-home/character/write
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
  *
@@ -64,6 +66,7 @@ function withPointer(text) {
 
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
 const MAX_CHARACTER_JS_BYTES = 300 * 1024;
+const MAX_MATRIX_JSON_BYTES = 1048576;
 
 /** Reads a local .js file for project_character_write; errors carry only the reason, never file contents. */
 async function readCharacterJsFile(p) {
@@ -105,6 +108,37 @@ async function resolveHtmlArg(args) {
   if (hasPath) return readDemoVideoHtmlFile(args.htmlPath);
   if (typeof args.html !== 'string') return { error: 'missing required argument: html' };
   return { html: args.html };
+}
+
+/** Reads + parses a local .json file for project_matrix_write; errors carry only the reason, never file contents. */
+async function readMatrixJsonFile(p) {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: 'matrixPath must be an absolute path' };
+  if (!/\.json$/i.test(p)) return { error: 'matrixPath must end in .json' };
+  let raw;
+  try {
+    const st = await fsp.stat(p);
+    if (!st.isFile()) return { error: 'matrixPath is not a regular file' };
+    if (st.size > MAX_MATRIX_JSON_BYTES) return { error: `matrixPath file exceeds ${MAX_MATRIX_JSON_BYTES} bytes` };
+    raw = await fsp.readFile(p, 'utf8');
+  } catch (err) {
+    return { error: `cannot read matrixPath: ${err && err.code ? err.code : 'read failed'}` };
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (err) {
+    return { error: `matrixPath is not valid JSON: ${err && err.message ? err.message : 'parse failed'}` };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'matrixPath must hold a JSON object' };
+  return { matrix: parsed };
+}
+
+/** Resolves exactly one of matrix / matrixPath into { matrix } or { error }. */
+async function resolveJsonArg(args) {
+  const hasMatrix = !!args && args.matrix !== undefined && args.matrix !== null && args.matrix !== '';
+  const hasPath = !!args && args.matrixPath !== undefined && args.matrixPath !== null && args.matrixPath !== '';
+  if (hasMatrix === hasPath) return { error: 'provide exactly one of matrix or matrixPath' };
+  if (hasPath) return readMatrixJsonFile(args.matrixPath);
+  if (typeof args.matrix !== 'object' || Array.isArray(args.matrix)) return { error: 'matrix must be a JSON object' };
+  return { matrix: args.matrix };
 }
 
 function errorResult(text) {
@@ -570,6 +604,29 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_matrix_read',
+    description: descriptionFor('project_matrix_read'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+      },
+    },
+  },
+  {
+    name: 'project_matrix_write',
+    description: descriptionFor('project_matrix_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        matrix: { type: 'object', description: 'The whole competitive feature matrix as a JSON object matching the schema project_matrix_read returns (<= 1MB). Replaces the stored matrix.' },
+        matrixPath: { type: 'string', description: 'Absolute path to a local .json file holding the matrix (<= 1MB, parsed as JSON; same rules as matrix). Give exactly one of matrix / matrixPath.' },
+        model: { type: 'string', description: 'Optional: id of the model that produced this matrix, recorded with the save.' },
+      },
+    },
+  },
+  {
     name: 'project_video_write',
     description: descriptionFor('project_video_write'),
     inputSchema: {
@@ -1029,6 +1086,20 @@ async function handleCallTool(request) {
       const body = { cwd, pageId: args.pageId, title: args.title, html: loaded.html };
       if (typeof args.topic === 'string' && args.topic) body.topic = args.topic;
       const result = await adminRequest('POST', '/admin/project-home/pages/write', body);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_matrix_read') {
+      const cwd = resolveCwdArg(args);
+      const result = await adminRequest('POST', '/admin/project-home/matrix/read', { cwd });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_matrix_write') {
+      const loaded = await resolveJsonArg(args);
+      if (loaded.error) return errorResult(loaded.error);
+      const cwd = resolveCwdArg(args);
+      const body = { cwd, matrix: loaded.matrix };
+      if (typeof args.model === 'string' && args.model) body.model = args.model;
+      const result = await adminRequest('POST', '/admin/project-home/matrix/write', body);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_video_write') {

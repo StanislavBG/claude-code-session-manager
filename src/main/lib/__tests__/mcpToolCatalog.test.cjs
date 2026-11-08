@@ -80,8 +80,24 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
 
 test('project-home group lists the page/video tools and the two aliases', () => {
   expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
-    'project_home_write', 'project_page_write', 'project_video_write', 'project_demo_video_write', 'project_character_write',
+    'project_home_write', 'project_page_write', 'project_matrix_read', 'project_matrix_write',
+    'project_video_write', 'project_demo_video_write', 'project_character_write',
   ]);
+});
+
+test('project_matrix_read/write catalog entries document the warm-start load and the single save', () => {
+  const entry = (n) => MCP_TOOL_CATALOG.find((x) => x.name === n);
+  const read = entry('project_matrix_read');
+  const write = entry('project_matrix_write');
+  for (const e of [read, write]) {
+    expect(e.group).toBe('project-home');
+    for (const k of ['purpose', 'whenToUse', 'whenNotToUse', 'notes']) expect(typeof e[k]).toBe('string');
+    expect(e.notes).toContain('SM_PROJECT_ROOT');
+  }
+  expect(composeDescription(read)).toContain('JSON Schema');
+  expect(composeDescription(write)).toContain('matrixPath');
+  expect(composeDescription(write)).toContain('project_matrix_read');
+  expect(write.exampleArgs).toEqual({ matrixPath: '/home/bilko/.cache/competitive-matrix/run/matrix.json', model: 'claude-opus-5-5' });
 });
 
 test('aliases say so and no page text invites <script>', () => {

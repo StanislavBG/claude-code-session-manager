@@ -338,6 +338,34 @@ const MCP_TOOL_CATALOG = [
       + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB read limit).',
   },
   {
+    name: 'project_matrix_read',
+    group: 'project-home',
+    purpose: "Load this project's saved competitive feature matrix (session-manager-operations/project-pages/matrix/matrix.json) "
+      + "together with its JSON Schema, via the session-manager app's admin API — the warm start for a competitive-analysis run.",
+    whenToUse: 'Call FIRST in a competitive-analysis run, before any research: start from the saved products, groups and features '
+      + 'instead of a cold start, and shape every edit to the returned `schema`. `matrix` is null when none has been saved yet.',
+    whenNotToUse: 'Do not use to save — use project_matrix_write. Do not read matrix.json from disk yourself: '
+      + 'this call returns the stored copy and the schema it must satisfy in one step.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Returns { ok, matrix | null, error, path, schema }; a non-null `error` means a stored file exists but did not parse or validate.',
+  },
+  {
+    name: 'project_matrix_write',
+    group: 'project-home',
+    purpose: "Save this project's competitive feature matrix — ONE JSON object matching the schema project_matrix_read returns — "
+      + "via the session-manager app's admin API. Each call replaces the whole stored matrix.",
+    whenToUse: 'Use once, at the end of a competitive-analysis run, to save the finished matrix. Build the whole object from '
+      + 'project_matrix_read\'s result plus what your research really found, then pass it as `matrix` or — preferred for a large '
+      + 'matrix — write it to a local .json file and pass its absolute path as `matrixPath`. Pass `model` to record which model wrote it.',
+    whenNotToUse: 'Never fabricate features, products or sources — every cell must trace to something researched. Do not call it '
+      + 'per feature or per product: it is a single whole-matrix save. Do not use for HTML pages — use project_page_write. '
+      + 'The call is rejected for a matrix that fails the schema or exceeds 1MB.',
+    exampleArgs: { matrixPath: '/home/bilko/.cache/competitive-matrix/run/matrix.json', model: 'claude-opus-5-5' },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Give exactly one of `matrix` (object) / `matrixPath` (absolute .json file, <= 1MB, parsed as JSON).',
+  },
+  {
     name: 'project_video_write',
     group: 'project-home',
     purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "

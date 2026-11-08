@@ -467,3 +467,202 @@ test('project_character_write rejects bad argument combinations without calling 
   expect(relative.isError).toBe(true);
   expect(requests).toHaveLength(0);
 });
+
+// ── project_matrix_read / project_matrix_write ──────────────────────────────
+
+const MATRIX_READ = 'project_matrix_read';
+const MATRIX_WRITE = 'project_matrix_write';
+const SAMPLE_MATRIX = { version: 1, products: [{ id: 'self', name: 'Session Manager' }], groups: [] };
+
+let originalJobScope;
+afterEach(() => {
+  if (originalJobScope !== undefined) {
+    if (originalJobScope === null) delete process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+    else process.env.SM_SCHEDULER_JOB_MCP_TOOLS = originalJobScope;
+    originalJobScope = undefined;
+  }
+});
+
+test('project_matrix_read and project_matrix_write are listed with catalog descriptions and optional args', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const read = TOOLS.find((t) => t.name === MATRIX_READ);
+  const write = TOOLS.find((t) => t.name === MATRIX_WRITE);
+  expect(read).toBeTruthy();
+  expect(write).toBeTruthy();
+  expect(read.inputSchema.properties.cwd).toBeTruthy();
+  for (const k of ['cwd', 'matrix', 'matrixPath', 'model']) expect(write.inputSchema.properties[k]).toBeTruthy();
+  expect(write.inputSchema.properties.matrix.type).toBe('object');
+  expect(write.inputSchema.properties.matrixPath.type).toBe('string');
+  expect(read.inputSchema.required ?? []).toEqual([]);
+  expect(write.inputSchema.required ?? []).toEqual([]);
+  for (const [tool, name] of [[read, MATRIX_READ], [write, MATRIX_WRITE]]) {
+    const entry = MCP_TOOL_CATALOG.find((e) => e.name === name);
+    expect(entry.group).toBe('project-home');
+    expect(tool.description).toBe(composeDescription(entry));
+  }
+});
+
+test('project_matrix_read posts {cwd} to /admin/project-home/matrix/read, defaulting cwd to SM_PROJECT_ROOT', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const reply = { ok: true, matrix: SAMPLE_MATRIX, error: null, path: '/p/matrix.json', schema: { type: 'object' } };
+  const { server, requests } = await startFakeAdminServer(token, reply);
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  originalProjectRoot = process.env.SM_PROJECT_ROOT ?? null;
+  process.env.SM_PROJECT_ROOT = '/home/bilko/Projects/session-manager';
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const explicit = await callTool(handleCallTool, MATRIX_READ, { cwd: '/proj' });
+  expect(explicit.isError).toBeFalsy();
+  expect(JSON.parse(explicit.content[0].text)).toEqual(reply);
+  const defaulted = await callTool(handleCallTool, MATRIX_READ, undefined);
+  expect(defaulted.isError).toBeFalsy();
+  expect(requests.map((q) => [q.method, q.url])).toEqual([
+    ['POST', '/admin/project-home/matrix/read'], ['POST', '/admin/project-home/matrix/read'],
+  ]);
+  expect(requests[0].body).toEqual({ cwd: '/proj' });
+  expect(requests[1].body).toEqual({ cwd: '/home/bilko/Projects/session-manager' });
+});
+
+test('project_matrix_write forwards an inline matrix (and model) to /admin/project-home/matrix/write', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true, path: '/p/matrix.json' });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  originalProjectRoot = process.env.SM_PROJECT_ROOT ?? null;
+  process.env.SM_PROJECT_ROOT = '/root-proj';
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  let r = await callTool(handleCallTool, MATRIX_WRITE, { cwd: '/proj', matrix: SAMPLE_MATRIX, model: 'claude-opus-5-5' });
+  expect(r.isError).toBeFalsy();
+  r = await callTool(handleCallTool, MATRIX_WRITE, { matrix: SAMPLE_MATRIX });
+  expect(r.isError).toBeFalsy();
+  expect(requests.map((q) => q.url)).toEqual(['/admin/project-home/matrix/write', '/admin/project-home/matrix/write']);
+  expect(requests[0].body).toEqual({ cwd: '/proj', matrix: SAMPLE_MATRIX, model: 'claude-opus-5-5' });
+  expect(requests[1].body).toEqual({ cwd: '/root-proj', matrix: SAMPLE_MATRIX });
+});
+
+test('project_matrix_write loads matrixPath as parsed JSON', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const dir = await mkTmp();
+  const file = path.join(dir, 'matrix.json');
+  const matrix = { ...SAMPLE_MATRIX, note: 'é' };
+  await fsp.writeFile(file, JSON.stringify(matrix, null, 2), 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const r = await callTool(handleCallTool, MATRIX_WRITE, { cwd: '/proj', matrixPath: file, model: 'opus' });
+  expect(r.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].url).toBe('/admin/project-home/matrix/write');
+  expect(requests[0].body).toEqual({ cwd: '/proj', matrix, model: 'opus' });
+});
+
+test('project_matrix_write rejects bad matrix/matrixPath arguments by name without calling the admin API', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const dir = await mkTmp();
+  const good = path.join(dir, 'ok.json');
+  await fsp.writeFile(good, JSON.stringify(SAMPLE_MATRIX), 'utf8');
+  const txt = path.join(dir, 'm.txt');
+  await fsp.writeFile(txt, JSON.stringify(SAMPLE_MATRIX), 'utf8');
+  const broken = path.join(dir, 'broken.json');
+  await fsp.writeFile(broken, '{"version": 1,', 'utf8');
+  const notObject = path.join(dir, 'array.json');
+  await fsp.writeFile(notObject, '[1,2]', 'utf8');
+  const big = path.join(dir, 'big.json');
+  await fsp.writeFile(big, '"' + 'a'.repeat(1048576) + '"', 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const cases = [
+    [{}, 'exactly one of matrix or matrixPath'],
+    [{ matrix: SAMPLE_MATRIX, matrixPath: good }, 'exactly one of matrix or matrixPath'],
+    [{ matrix: 'not-an-object' }, 'matrix must be a JSON object'],
+    [{ matrix: [1, 2] }, 'matrix must be a JSON object'],
+    [{ matrixPath: 'relative/matrix.json' }, 'matrixPath must be an absolute path'],
+    [{ matrixPath: txt }, 'matrixPath must end in .json'],
+    [{ matrixPath: path.join(dir, 'missing.json') }, 'cannot read matrixPath'],
+    [{ matrixPath: big }, 'exceeds 1048576 bytes'],
+    [{ matrixPath: broken }, 'matrixPath is not valid JSON'],
+    [{ matrixPath: notObject }, 'matrixPath must hold a JSON object'],
+  ];
+  for (const [args, msg] of cases) {
+    const r = await callTool(handleCallTool, MATRIX_WRITE, { cwd: '/proj', ...args });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain(msg);
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('matrix tools obey SM_SCHEDULER_JOB_MCP_TOOLS: omitted from a job scope they are refused without calling the admin API', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  originalJobScope = process.env.SM_SCHEDULER_JOB_MCP_TOOLS ?? null;
+  process.env.SM_SCHEDULER_JOB_MCP_TOOLS = JSON.stringify(['mcp__session-manager-scheduler__project_page_write']);
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  for (const [name, args] of [[MATRIX_READ, { cwd: '/proj' }], [MATRIX_WRITE, { cwd: '/proj', matrix: SAMPLE_MATRIX }]]) {
+    const r = await callTool(handleCallTool, name, args);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain(`refused: ${name} is outside the tool scope`);
+  }
+  expect(requests).toHaveLength(0);
+
+  process.env.SM_SCHEDULER_JOB_MCP_TOOLS = JSON.stringify([
+    'mcp__session-manager-scheduler__project_matrix_read', 'mcp__session-manager-scheduler__project_matrix_write',
+  ]);
+  const ok1 = await callTool(handleCallTool, MATRIX_READ, { cwd: '/proj' });
+  const ok2 = await callTool(handleCallTool, MATRIX_WRITE, { cwd: '/proj', matrix: SAMPLE_MATRIX });
+  expect(ok1.isError).toBeFalsy();
+  expect(ok2.isError).toBeFalsy();
+  expect(requests.map((q) => q.url)).toEqual(['/admin/project-home/matrix/read', '/admin/project-home/matrix/write']);
+});
+
+test('matrix tools are listed over stdio only when the job scope includes them', async () => {
+  const { spawn } = require('node:child_process');
+  const listOver = (scope) => new Promise((resolve, reject) => {
+    const env = { ...process.env, SM_SCHEDULER_JOB_SLUG: 'probe-job' };
+    delete env.SM_SCHEDULER_JOB_MCP_TOOLS;
+    if (scope !== undefined) env.SM_SCHEDULER_JOB_MCP_TOOLS = JSON.stringify(scope);
+    const child = spawn(process.execPath, [SERVER_PATH], { stdio: ['pipe', 'pipe', 'ignore'], env });
+    let buf = '';
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('timeout')); }, 20000);
+    child.stdout.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      let idx;
+      while ((idx = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        if (msg.id === 2) {
+          clearTimeout(timer);
+          child.kill('SIGKILL');
+          resolve(msg.result.tools.map((t) => t.name));
+        }
+      }
+    });
+    child.on('error', reject);
+    const send = (m) => child.stdin.write(JSON.stringify(m) + '\n');
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } } });
+    send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  });
+
+  const omitted = await listOver(['mcp__session-manager-scheduler__project_page_write']);
+  expect(omitted).toEqual(['project_page_write']);
+  const included = await listOver(['mcp__session-manager-scheduler__project_matrix_read', 'mcp__session-manager-scheduler__project_matrix_write']);
+  expect(included.sort()).toEqual([MATRIX_READ, MATRIX_WRITE]);
+}, 30000);

@@ -95,6 +95,17 @@ const MATRIX: CompetitiveMatrix = {
 }
 
 const matrixApi = vi.fn<(payload: { cwd: string }) => Promise<CompetitorMatrixResult>>()
+type ChangedHandler = (payload: { cwd: string }) => void
+let changedHandlers: ChangedHandler[] = []
+const offChanged = vi.fn()
+const onChanged = vi.fn((h: ChangedHandler) => {
+  changedHandlers.push(h)
+  return () => {
+    offChanged()
+    changedHandlers = changedHandlers.filter((x) => x !== h)
+  }
+})
+const fireChanged = (cwd: string) => act(() => { for (const h of [...changedHandlers]) h({ cwd }) })
 
 beforeEach(() => {
   matrixApi.mockReset()
@@ -104,7 +115,10 @@ beforeEach(() => {
   let n = 0
   launchSession.mockImplementation(async () => ({ epicId: `e${++n}`, claudeSessionId: `c${n}` }))
   usePromptSessions.setState({ sessions: {} })
-  ;(window as unknown as { api: unknown }).api = { projectPages: { matrix: matrixApi } }
+  changedHandlers = []
+  offChanged.mockReset()
+  onChanged.mockClear()
+  ;(window as unknown as { api: unknown }).api = { projectPages: { matrix: matrixApi, onChanged } }
 })
 
 let container: HTMLDivElement | null = null
@@ -250,6 +264,45 @@ describe('CompetitorMatrixView', () => {
     render()
     await settle()
     expect(useToast.getState().toasts).toHaveLength(1)
+  })
+
+  describe('project-pages:changed', () => {
+    it('reloads on a matching cwd event so a finished matrix appears; ignores other cwds; unsubscribes on unmount', async () => {
+      matrixApi.mockResolvedValueOnce({ ok: true, matrix: null, error: null })
+      render()
+      await settle()
+      expect(q('competitor-matrix-empty')).not.toBeNull()
+      expect(q('competitor-matrix-group')).toBeNull()
+      expect(onChanged).toHaveBeenCalledTimes(1)
+      fireChanged('/p/beta')
+      await settle()
+      expect(matrixApi).toHaveBeenCalledTimes(1)
+      fireChanged(CWD)
+      await settle()
+      expect(matrixApi).toHaveBeenCalledTimes(2)
+      expect(all('competitor-matrix-group')).toHaveLength(2)
+      act(() => root!.unmount())
+      root = null
+      expect(offChanged).toHaveBeenCalledTimes(1)
+      expect(changedHandlers).toHaveLength(0)
+    })
+
+    it('a burst of events keeps the previous matrix visible and ends on the newest result', async () => {
+      render()
+      await settle()
+      expect(all('competitor-matrix-group')).toHaveLength(2)
+      const resolvers: ((v: CompetitorMatrixResult) => void)[] = []
+      matrixApi.mockImplementation(() => new Promise((r) => { resolvers.push(r) }))
+      fireChanged(CWD)
+      fireChanged(CWD)
+      expect(matrixApi).toHaveBeenCalledTimes(3)
+      expect(all('competitor-matrix-group')).toHaveLength(2)
+      const ONE_GROUP: CompetitiveMatrix = { ...MATRIX, groups: [MATRIX.groups[0]], features: MATRIX.features.slice(0, 2) }
+      await act(async () => { resolvers[1]({ ok: true, matrix: ONE_GROUP, error: null }) })
+      await act(async () => { resolvers[0]({ ok: true, matrix: null, error: null }) })
+      await settle()
+      expect(all('competitor-matrix-group')).toHaveLength(1)
+    })
   })
 
   describe('start sessions', () => {

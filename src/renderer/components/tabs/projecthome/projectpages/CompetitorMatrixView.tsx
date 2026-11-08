@@ -1,6 +1,7 @@
 /**
  * Project Home ▸ Tools ▸ Competitor matrix. Reads the saved matrix with one
- * `window.api.projectPages.matrix({ cwd })` call per cwd, again on Refresh, and
+ * `window.api.projectPages.matrix({ cwd })` call per cwd, again on Refresh, on a
+ * matching project-pages:changed push, and
  * again when the macro's job goes from queued/running to done — never on a
  * timer. Four competitor slots (Auto / Named / Off, prefilled from the saved
  * matrix via `competitorSlots`) feed the 'Competitors:' line the primary button
@@ -105,7 +106,7 @@ const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 const isBusy = (s?: MacroJobStatus) => s?.state === 'queued' || s?.state === 'running'
 const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '')
 
-/** Loads `cwd`'s matrix once, on `reload`, and never on a timer; a load a newer one replaced is dropped. */
+/** Loads `cwd`'s matrix once, on `reload`, and on a matching project-pages:changed event — never on a timer; a load a newer one replaced is dropped. */
 function useMatrixLoad(cwd: string | null | undefined) {
   const [load, setLoad] = useState<MatrixLoad | null>(null)
   const requestedCwd = useRef<string | null>(null)
@@ -145,6 +146,16 @@ function useMatrixLoad(cwd: string | null | undefined) {
 
   useEffect(() => {
     if (cwd && requestedCwd.current !== cwd) start(cwd)
+  }, [cwd, start])
+
+  // A saved matrix rewrites this cwd's project pages; the main-process watcher
+  // pushes project-pages:changed, so the view picks up a finished run itself.
+  useEffect(() => {
+    const onChanged = window.api?.projectPages?.onChanged
+    if (!cwd || !onChanged) return
+    return onChanged((payload) => {
+      if (payload.cwd === cwd) start(cwd)
+    })
   }, [cwd, start])
 
   const reload = useCallback(() => {

@@ -21,7 +21,10 @@ the tool is current, this file is not.
 - Faces: Home
 - Entry: `src/renderer/components/tabs/Extensions.tsx`
 
-Tabs: Skills, MCP Servers, Plugins. Each tab shows a `SourceChip` for the file it edits.
+Tabs: Skills, MCP Servers, Plugins, as `FolderTabs` with counts and the aged source files each tab edits.
+
+Visual source of truth: `session-manager-operations/design-mocks/extensions-3a/DESIGN_SPEC.md` (the 3a design). Check
+layout, copy and states against it; a deviation is a finding unless the spec's §7 (deliberate deviations) names it.
 
 Reads:
 - `~/.claude/skills/` and `<cwd>/.claude/skills/` (Skills)
@@ -37,6 +40,8 @@ Writes: the same files, through the existing skills / MCP / plugins IPC and the 
   never add a parallel method for the same file.
 - A tab can be pre-selected by `openPanel('extensions', '<tab>')` (`usePanelTabHint` in `src/renderer/state/layout.ts`).
 - Lists (skills, servers, plugins) come from disk at read time, never from a hardcoded catalog.
+- MCP checks (`mcp:check-server` via `state/mcpChecks.ts`) run only on Check all / Check again — never on mount.
+- Plugin-provided skills, commands and MCP servers are read-only in Skills and MCP Servers; edit them nowhere here.
 
 ## Boundaries
 

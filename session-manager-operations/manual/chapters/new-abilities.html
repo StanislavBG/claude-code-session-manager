@@ -21,6 +21,9 @@ Commands. Pick a skill and you can read it, and turn it off with a <strong>Toggl
 deleting it — handy if a skill keeps firing when you don't want it to. Removing a skill moves its
 folder to the trash, so a change of mind later is still recoverable.</p>
 
+<p>Skills and commands that came with a plugin appear in their own <strong>From plugins</strong>
+group. You can open and read them, but not edit them here — they belong to the plugin.</p>
+
 <p>To add one, press <strong>Add…</strong>. A drawer opens with a searchable catalog of skills
 you can install.</p>
 
@@ -33,7 +36,13 @@ looks familiar. Others they only open when you hand them the exact page number.<
 <p>A plugin is a bundle — several skills, agents, or connected tools, packaged together and
 installed in one step. The Plugins tab lists every plugin already on your machine: its name,
 where it came from, and a drill-in showing exactly what it added. Each one has a switch to turn
-it on or off, and an <strong>Uninstall</strong> button.</p>
+it on or off, and a <strong>⋯</strong> menu with <strong>Uninstall</strong>, which asks you to
+confirm right there in the menu.</p>
+
+<p>Under each plugin, small chips count what it adds — skills, commands, MCP servers, agents,
+hooks. A chip marked <strong>›</strong> switches to the Extensions tab that lists those items
+(Skills or MCP Servers). A chip marked <strong>↗</strong> takes you to the page that owns that
+kind: Agents for agents, Settings ▸ Hooks for hooks.</p>
 
 <p>You can look inside a plugin, but you can't edit its contents from here. That keeps one clear
 place to edit a skill, instead of two competing editors for the same file. To add a new plugin,
@@ -69,14 +78,20 @@ whether Claude Code can actually reach it. A misspelled command, a service that 
 in first, or a server still waiting on your approval all look identical on the page: present, and
 untried.</p>
 
-<p>That's why the tab gives you a live check. Press <strong>test connections</strong> and it asks
-the real CLI which servers actually answered, then shows a status next to each one: Ready, Failed,
-Needs auth (you have to sign in first), Pending approval, or Not checked. Read that status before
-you start a Session that assumes a server's tools are there — a Session that starts before a server answers
-won't pick up its tools partway through.</p>
+<p>That's why the tab gives you a live check — and it only runs when you ask, never just because
+you opened the page. Press <strong>Check all</strong> to try every server in the list, or
+<strong>Check again</strong> on one server's detail to try just that one. A check really connects
+to the server and asks for its tools. Each server then shows a status dot, the detail shows how
+long ago it was checked, and its <strong>Tools</strong> section lists the tools that server
+offered on the last check. A server nobody has checked yet stays Not checked. Read that status
+before you start a Session that assumes a server's tools are there — a Session that starts before
+a server answers won't pick up its tools partway through.</p>
+
+<p>Servers that a plugin brings appear in a <strong>From plugins</strong> group. You can check
+them like any other server, but you edit them through the plugin, not here.</p>
 
 <aside class="manual-tip"><strong>Try this:</strong> after adding or editing any MCP server, press
-<strong>test connections</strong> right away. A saved entry and a working connection are two
+<strong>Check again</strong> on it right away. A saved entry and a working connection are two
 different things, and only the check tells you which one you have.</aside>
 
 <h2>Hooks: automatic actions on events</h2>

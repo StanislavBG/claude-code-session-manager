@@ -82,10 +82,11 @@ test('a full-body overlay replaces the body wholesale and keeps its raw text byt
   expect(m.text).toBe(fs.readFileSync(path.join(cwd, '.claude', 'agents', 'dev-lead.md'), 'utf8'));
 });
 
-test("this repo's three full-body overlays resolve byte-identically (text + body + path)", async () => {
+test("this repo's full-body builder overlay resolves byte-identically (text + body + path)", async () => {
   const repoAgents = path.resolve(__dirname, '..', '..', '..', '.claude', 'agents');
   const globalDir = mk('sm-pm-global-');
-  for (const name of ['builder', 'project-home-builder']) {
+  // project-home-builder has no overlay here: Project Home tools are shared, so this repo runs the seeded persona.
+  for (const name of ['builder']) {
     persona(globalDir, name, [`name: ${name}`, 'description: g', 'model: opus'], 'global body');
     const overlayFile = path.join(repoAgents, `${name}.md`);
     const raw = fs.readFileSync(overlayFile, 'utf8');

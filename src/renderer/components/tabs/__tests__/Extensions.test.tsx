@@ -88,6 +88,8 @@ async function until(ready: () => boolean) {
 const btn = (label: string) =>
   Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement
 
+const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement
+
 const tabEls = () =>
   Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tablist"][aria-label="Extensions"] [role="tab"]'))
 /** The folder tab's label is its first text node; the count is the mono span after it. */
@@ -155,7 +157,7 @@ describe('Extensions', () => {
     expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['mt-6', '-mb-px', 'relative']))
     expect(row.nextElementSibling).toBe(panel)
     expect(panel.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-1', 'min-h-0', 'border', 'border-line', 'bg-bg']))
-    expect(panel.contains(btn('Add…'))).toBe(true)
+    expect(panel.contains(byId('skills-new'))).toBe(true)
   })
 
   it('openPanel with a tab pre-selects that tab (Command palette / deep-link path)', async () => {
@@ -166,10 +168,12 @@ describe('Extensions', () => {
     expect(useLayout.getState().panelTabHint).toBeFalsy()
   })
 
-  it('pages have no Library toggle; Add… opens the catalog drawer, and switching tabs closes it', async () => {
+  it('pages have no Library toggle; + New ▸ Browse catalog… opens the catalog drawer, and switching tabs closes it', async () => {
     expect(btn('Library')).toBeUndefined()
     expect(btn('Installed')).toBeUndefined()
-    await act(async () => { btn('Add…').click() }); await flush()
+    await until(() => !!byId('skills-new'))
+    await act(async () => { byId('skills-new').click() }); await flush()
+    await act(async () => { byId('skills-new-browse-catalog').click() }); await flush()
     expect(document.querySelector('[data-testid="home-drawer"]')).not.toBeNull()
     await act(async () => { tab('MCP Servers').click() }); await flush()
     expect(document.querySelector('[data-testid="home-drawer"]')).toBeNull()

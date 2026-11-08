@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
@@ -15,9 +15,12 @@ import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
+import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
 
 const WATCH_DEBOUNCE_MS = 250
 const SELF_SAVE_WINDOW_MS = 2000
+/** Same cap listSkillEntries keeps on SKILL.md reads. */
+const READ_CONCURRENCY = 6
 
 type Kind = 'skills' | 'commands'
 
@@ -38,8 +41,62 @@ interface Item {
   dir: string | null
   /** Skills only: `disable-model-invocation: true` in frontmatter. */
   disabled: boolean
-  /** Skills only: `description` frontmatter field, if present. */
+  /** `description` frontmatter field (SKILL.md or the command file), if present. */
   description?: string
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/**
+ * Reads each command file's frontmatter `description`, at most
+ * READ_CONCURRENCY reads in flight. A failed read keeps the command listed
+ * without a description and reports the failure in `errors`.
+ */
+async function readCommandDescriptions(
+  paths: string[],
+  errors: SkillListError[],
+): Promise<Array<string | undefined>> {
+  const out: Array<string | undefined> = paths.map(() => undefined)
+  let next = 0
+  const worker = async () => {
+    for (let idx = next++; idx < paths.length; idx = next++) {
+      try {
+        const r = await window.api.config.readText(paths[idx])
+        if (r.error) errors.push({ path: paths[idx], error: r.error })
+        else if (r.exists) out[idx] = parseSkillMeta(r.text).description ?? undefined
+      } catch (e) {
+        errors.push({ path: paths[idx], error: errorText(e) })
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, paths.length) }, worker))
+  return out
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** List section header (3a): 11px semibold uppercase label + mono count. */
+function SectionHeader({ label, count, testId }: { label: string; count: number; testId: string }) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex items-center gap-2 mt-3 mx-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] uppercase text-fg-faint"
+    >
+      {label}
+      <span data-testid={`${testId}-count`} className="font-mono font-medium tracking-normal text-fg-faint/60">
+        {count}
+      </span>
+    </div>
+  )
+}
+
+/** One quiet line under a section header: nothing matches, nothing yet, or the listing failed. */
+function SectionNote({ children, testId, title }: { children: ReactNode; testId?: string; title?: string }) {
+  return (
+    <div data-testid={testId} title={title} className="mx-1.5 mb-1 text-xs text-fg-faint">
+      {children}
+    </div>
+  )
 }
 
 function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?: Scope } = {}) {
@@ -54,6 +111,8 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   const [loadErrors, setLoadErrors] = useState<SkillListError[]>([])
   // Path of the skill whose inline "remove?" confirmation is open.
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  // False until the first listing lands, so the empty states never flash.
+  const [listed, setListed] = useState(false)
 
   const scopeRoots = useMemo(() => {
     if (!home) return null
@@ -80,6 +139,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
     if (!bases) {
       setItems([])
       setLoadErrors([])
+      setListed(true)
       return
     }
     const next: Item[] = []
@@ -101,14 +161,16 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
         })
       }
     } catch (e) {
-      errors.push({ path: bases.skills, error: e instanceof Error ? e.message : String(e) })
+      errors.push({ path: bases.skills, error: errorText(e) })
     }
     try {
-      // Commands: each .md file is a command.
+      // Commands: each .md file is a command; its card shows the frontmatter
+      // description. Read after the skills so the read cap holds overall.
       const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })
       if (!cmdsDir.ok) errors.push({ path: bases.commands, error: cmdsDir.error ?? 'failed to list directory' })
-      for (const e of cmdsDir.entries as DirEntry[]) {
-        if (!e.name.endsWith('.md')) continue
+      const cmdFiles = (cmdsDir.entries as DirEntry[]).filter((e) => e.name.endsWith('.md'))
+      const descriptions = await readCommandDescriptions(cmdFiles.map((e) => e.path), errors)
+      cmdFiles.forEach((e, idx) => {
         next.push({
           kind: 'commands',
           scope,
@@ -116,10 +178,11 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
           path: e.path,
           dir: null,
           disabled: false,
+          description: descriptions[idx],
         })
-      }
+      })
     } catch (e) {
-      errors.push({ path: bases.commands, error: e instanceof Error ? e.message : String(e) })
+      errors.push({ path: bases.commands, error: errorText(e) })
     }
     if (loadSeq.current !== seq) return
     for (const e of errors) toast.error(`Could not read ${e.path}: ${e.error}`)
@@ -128,6 +191,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
       a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skills' ? -1 : 1
     )
     setItems(next)
+    setListed(true)
     setSelectedPath((cur) => (next.find((i) => i.path === cur) ? cur : next[0]?.path ?? null))
   }, [bases, scope])
 
@@ -262,187 +326,229 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
     )
   }
 
-  const selectedItem = items.find((i) => i.path === selectedPath) ?? null
   const file = selectedPath ? files[selectedPath] : null
 
-  return (
-    <Panel
-      toolbar={
-        <>
-          <span className="ml-3 text-fg-faint">
-            {items.length} {items.length === 1 ? 'item' : 'items'}
-          </span>
-          <div className="flex-1" />
-          {/* Only a caller with a catalog for this scope can add; Project scope has none. */}
-          {onAdd && (
-            <button
-              onClick={onAdd}
-              className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
-            >
-              Add…
-            </button>
-          )}
-          {selectedItem && (
-            <ProvenanceBadge
-              scope={selectedItem.scope}
-              input={{ type: selectedItem.kind === 'commands' ? 'command' : 'skill', name: selectedItem.name }}
-            />
-          )}
-          <span className="ml-2 text-fg-faint truncate">{selectedItem?.path ?? ''}</span>
-        </>
-      }
-      footer={
-        selectedPath && file ? (
-          <SaveBar
-            dirty={file.dirty}
-            busy={file.busy}
-            parseError={saveError}
-            lastSavedAt={file.lastSavedAt}
-            onSave={async () => {
-              setSaveError(null)
-              const r = await saveText(selectedPath)
-              if (!r.ok) setSaveError(r.error ?? 'save failed')
-            }}
-            onRevert={() => {
-              setSaveError(null)
-              revert(selectedPath)
-            }}
+  // Filter on name or description, case-insensitive; a leading "/" is how a
+  // name is shown, so "/deploy" finds the deploy command too.
+  const needle = filter.trim().toLowerCase().replace(/^\//, '')
+  const matches = (i: Item) =>
+    !needle || i.name.toLowerCase().includes(needle) || !!i.description?.toLowerCase().includes(needle)
+  const skillItems = items.filter((i) => i.kind === 'skills')
+  const commandItems = items.filter((i) => i.kind === 'commands')
+  const shownSkills = skillItems.filter(matches)
+  const shownCommands = commandItems.filter(matches)
+  // Load errors under a root: that section is empty because it could not be read.
+  const errorsUnder = (root: string | undefined) =>
+    root ? loadErrors.filter((e) => e.path === root || e.path.startsWith(`${root}/`)) : []
+  const skillErrors = errorsUnder(bases?.skills)
+  const commandErrors = errorsUnder(bases?.commands)
+
+  // "Create a skill →" starts the same flow as the + New menu's New skill
+  // item. Until that flow exists it opens this scope's catalog, when there is one.
+  const startNewSkill = onAdd
+  // Only a caller with a catalog for this scope can browse it; Project scope has none.
+  const newMenu: ExtensionsToolbarMenuItem[] = onAdd
+    ? [{ label: 'Browse catalog…', testId: 'skills-new-browse-catalog', onSelect: onAdd }]
+    : []
+
+  const renderItem = (i: Item) => {
+    const selected = selectedPath === i.path
+    const dirty = !!files[i.path]?.dirty
+    return (
+      <div
+        key={i.path}
+        data-testid="skills-item"
+        data-path={i.path}
+        onClick={() => setSelectedPath(i.path)}
+        className={`flex flex-col gap-[3px] px-2.5 py-2 bg-bg-hi border rounded-[7px] cursor-pointer ${
+          selected ? 'border-accent' : 'border-line hover:border-rule'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="skills-item-name"
+            aria-current={selected ? 'true' : undefined}
+            title={i.disabled ? 'Disabled — Claude will not auto-invoke this skill' : undefined}
+            className={`flex-1 min-w-0 truncate text-left font-mono text-[12.5px] font-semibold text-fg ${
+              i.disabled ? 'line-through opacity-50' : ''
+            }`}
+          >
+            /{i.name}
+          </button>
+          <ProvenanceBadge
+            interactive={false}
+            scope={i.scope}
+            input={{ type: i.kind === 'commands' ? 'command' : 'skill', name: i.name }}
           />
-        ) : null
-      }
-    >
-      <ListDetail
-        sidebar={
-          <div className="py-1">
-            <div className="px-2 pb-1">
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="filter…"
-                className="w-full bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
-              />
-            </div>
-            {(['skills', 'commands'] as Kind[]).map((kind) => {
-              const needle = filter.toLowerCase()
-              const group = items.filter((i) => i.kind === kind && (!needle || i.name.toLowerCase().includes(needle)))
-              return (
-                <div key={kind} className="mb-3">
-                  <div className="px-3 py-1 text-xs uppercase tracking-wider text-fg-faint">
-                    {kind === 'skills' ? 'Skills' : 'Slash Commands'}
-                  </div>
-                  {group.length === 0 ? (
-                    <div className="px-3 py-1 text-xs text-fg-faint italic">none</div>
-                  ) : (
-                    group.map((i) => {
-                      // Skills can be turned off via frontmatter; commands cannot.
-                      const showToggle = i.kind === 'skills'
-                      return (
-                        <div
-                          key={i.path}
-                          className={`w-full px-3 py-1 text-xs flex items-center justify-between gap-2 ${
-                            selectedPath === i.path
-                              ? 'bg-bg-hi text-fg'
-                              : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                          }`}
-                        >
-                          <button
-                            onClick={() => setSelectedPath(i.path)}
-                            className="flex-1 min-w-0 text-left"
-                          >
-                            <div
-                              className={`truncate ${i.disabled ? 'line-through opacity-50' : ''}`}
-                              title={i.disabled ? 'Disabled — Claude will not auto-invoke this skill' : undefined}
-                            >
-                              {i.kind === 'commands' ? '/' : ''}
-                              {i.name}
-                            </div>
-                            {i.description && (
-                              <div className="truncate text-fg-faint">{i.description}</div>
-                            )}
-                          </button>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <ProvenanceBadge
-                              interactive={false}
-                              scope={i.scope}
-                              input={{ type: i.kind === 'commands' ? 'command' : 'skill', name: i.name }}
-                            />
-                            {files[i.path]?.dirty && (
-                              <span className="w-1 h-1 rounded-full bg-accent" />
-                            )}
-                            {showToggle && (
-                              <span
-                                title={files[i.path]?.dirty ? 'This skill has unsaved edits — save or revert before toggling' : undefined}
-                              >
-                                <Toggle
-                                  checked={!i.disabled}
-                                  disabled={!!files[i.path]?.dirty}
-                                  onChange={(v) => void toggleSkillDisabled(i, !v)}
-                                />
-                              </span>
-                            )}
-                            {i.kind === 'skills' && confirmRemove === i.path && (
-                              <span className="flex items-center gap-1">
-                                <button
-                                  onClick={() => void removeSkill(i)}
-                                  title={`Remove ${i.name} — moves the folder to trash; reinstall from the Library`}
-                                  className="text-[10px] font-semibold text-red-400 hover:text-red-300"
-                                >
-                                  confirm
-                                </button>
-                                <button
-                                  onClick={() => setConfirmRemove(null)}
-                                  title="Cancel"
-                                  className="text-[10px] text-fg-faint hover:text-fg"
-                                >
-                                  cancel
-                                </button>
-                              </span>
-                            )}
-                            {i.kind === 'skills' && confirmRemove !== i.path && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setConfirmRemove(i.path) }}
-                                title="Remove skill — moves the folder to trash; reinstall from the Library"
-                                aria-label={`Remove ${i.name}`}
-                                className="text-fg-faint hover:text-red-400 leading-none px-0.5"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              )
-            })}
+          {dirty && <span data-testid="skills-item-dirty" title="Unsaved edits" className="shrink-0 w-1 h-1 rounded-full bg-accent" />}
+          {/* Skills can be turned off via frontmatter, or removed; commands cannot.
+              These controls act on the skill without selecting its card. */}
+          {i.kind === 'skills' && (
+            <span className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              <span title={dirty ? 'This skill has unsaved edits — save or revert before toggling' : undefined}>
+                <Toggle
+                  checked={!i.disabled}
+                  disabled={dirty}
+                  onChange={(v) => void toggleSkillDisabled(i, !v)}
+                />
+              </span>
+              {confirmRemove === i.path ? (
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void removeSkill(i)}
+                    title={`Remove ${i.name} — moves the folder to trash; reinstall from the Library`}
+                    className="text-[10px] font-semibold text-red-400 hover:text-red-300"
+                  >
+                    confirm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRemove(null)}
+                    title="Cancel"
+                    className="text-[10px] text-fg-faint hover:text-fg"
+                  >
+                    cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemove(i.path)}
+                  title="Remove skill — moves the folder to trash; reinstall from the Library"
+                  aria-label={`Remove ${i.name}`}
+                  className="text-fg-faint hover:text-red-400 leading-none px-0.5"
+                >
+                  ✕
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+        {i.description && (
+          <div data-testid="skills-item-desc" title={i.description} className="truncate text-[11.5px] text-fg-faint">
+            {i.description}
           </div>
-        }
-        detail={
-          selectedPath && file ? (
-            <div className="h-full">
-              <MarkdownEditor
-                path={selectedPath}
-                value={file.draftRaw}
-                onChange={(v) => {
+        )}
+      </div>
+    )
+  }
+
+  // Each section shows its matching cards, else says why it is empty —
+  // nothing at all until the first listing lands.
+  let skillsBody: ReactNode = null
+  if (shownSkills.length > 0) skillsBody = shownSkills.map(renderItem)
+  else if (!listed) skillsBody = null
+  else if (skillItems.length > 0) skillsBody = <SectionNote>No skills match the filter</SectionNote>
+  else if (skillErrors.length > 0) {
+    skillsBody = (
+      <SectionNote testId="skills-list-skills-error" title={skillErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}>
+        Could not list skills
+      </SectionNote>
+    )
+  } else {
+    skillsBody = (
+      <div
+        data-testid="skills-empty"
+        className="mx-0.5 mb-1 px-3 py-[11px] flex flex-col gap-[5px] border border-dashed border-rule rounded-[7px] text-xs leading-[1.45] text-fg-dim"
+      >
+        <span className="font-semibold text-fg">No skills yet</span>
+        <span>A skill is a folder with a SKILL.md that Claude loads when a task calls for it.</span>
+        {startNewSkill && (
+          <button
+            type="button"
+            data-testid="skills-create-link"
+            onClick={() => startNewSkill()}
+            className="self-start font-semibold text-accent hover:underline"
+          >
+            Create a skill →
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  let commandsBody: ReactNode = null
+  if (shownCommands.length > 0) commandsBody = shownCommands.map(renderItem)
+  else if (!listed) commandsBody = null
+  else if (commandItems.length > 0) commandsBody = <SectionNote>No commands match the filter</SectionNote>
+  else if (commandErrors.length > 0) {
+    commandsBody = (
+      <SectionNote testId="skills-list-commands-error" title={commandErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}>
+        Could not list slash commands
+      </SectionNote>
+    )
+  } else commandsBody = <SectionNote>No slash commands</SectionNote>
+
+  return (
+    <div className="h-full flex flex-col">
+      <ExtensionsToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        placeholder="Filter skills and commands"
+        summary={`${plural(skillItems.length, 'skill', 'skills')} · ${plural(commandItems.length, 'command', 'commands')}`}
+        primary={{ label: '+ New', testId: 'skills-new', items: newMenu }}
+      />
+      <div className="flex-1 min-h-0">
+        <Panel
+          footer={
+            selectedPath && file ? (
+              <SaveBar
+                dirty={file.dirty}
+                busy={file.busy}
+                parseError={saveError}
+                lastSavedAt={file.lastSavedAt}
+                onSave={async () => {
                   setSaveError(null)
-                  setDraft(selectedPath, v)
+                  const r = await saveText(selectedPath)
+                  if (!r.ok) setSaveError(r.error ?? 'save failed')
+                }}
+                onRevert={() => {
+                  setSaveError(null)
+                  revert(selectedPath)
                 }}
               />
-            </div>
-          ) : items.length === 0 && loadErrors.length > 0 ? (
-            <div data-testid="skills-list-error">
-              <EmptyState
-                title="could not list skills or commands"
-                hint={loadErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}
-              />
-            </div>
-          ) : (
-            <EmptyState title={items.length === 0 ? 'no skills or commands' : 'select an item'} />
-          )
-        }
-      />
-    </Panel>
+            ) : null
+          }
+        >
+          <ListDetail
+            sidebarWidth="300px"
+            sidebar={
+              <div data-testid="skills-list" className="flex flex-col gap-1 px-2 py-1">
+                <SectionHeader label="Skills" count={shownSkills.length} testId="skills-section-skills" />
+                {skillsBody}
+                <SectionHeader label="Slash commands" count={shownCommands.length} testId="skills-section-commands" />
+                {commandsBody}
+              </div>
+            }
+            detail={
+              selectedPath && file ? (
+                <div className="h-full">
+                  <MarkdownEditor
+                    path={selectedPath}
+                    value={file.draftRaw}
+                    onChange={(v) => {
+                      setSaveError(null)
+                      setDraft(selectedPath, v)
+                    }}
+                  />
+                </div>
+              ) : items.length === 0 && loadErrors.length > 0 ? (
+                <div data-testid="skills-list-error">
+                  <EmptyState
+                    title="could not list skills or commands"
+                    hint={loadErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}
+                  />
+                </div>
+              ) : (
+                <EmptyState title={items.length === 0 ? 'no skills or commands' : 'select an item'} />
+              )
+            }
+          />
+        </Panel>
+      </div>
+    </div>
   )
 }
 

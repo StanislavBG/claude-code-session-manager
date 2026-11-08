@@ -343,7 +343,21 @@ const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\
 const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — skip it in this run. The plan's trailing validator job reviews code and security once, for the whole plan. Do NOT run /code-review or /security-review here.
 `;
 
-function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum }) {
+// Runtime folders the COMMIT step bans outright, built from opsOwnership's
+// RUNTIME_NAMESPACES so a new runtime namespace is banned with no edit here.
+const FINISH_RUNTIME_FOLDERS = RUNTIME_NAMESPACES
+  .map((ns) => `session-manager-operations/${ns}/`).join(', ');
+
+// Fix-plan-only VERDICT bullet: the scheduler already accepts a zero-edit fix
+// plan's PASS (runVerify commitGuardVerdict's isFixPlanJob), so tell the
+// executor so — otherwise "PASS needs a landed commit" pushes it into
+// force-adding an ignored runtime record just to have something to commit.
+const FINISH_FIX_PLAN_VERDICT_LINE = `
+   - This job is an auto fix plan.
+     An auto fix plan whose steps changed no file has nothing to commit
+     and prints PASS when the gate is green. Do not invent a commit to have one.`;
+
+function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false }) {
   return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
    foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
    project's own typecheck, lint and test commands instead. The project's
@@ -356,12 +370,20 @@ ${commitStepNum}. COMMIT — stage only the exact paths you created or changed f
    A blanket add puts their half-done work in your commit and breaks both
    jobs' verdicts. Always commit your own work: this rule changes what you
    stage, never whether you commit.
+   Never run \`git add -f\` or \`git add --force\` on a path git ignores, unless the
+   PRD's # Files section names that exact path. If git add refuses a path as
+   ignored, leave it out of the commit and name it in your final report.
+   Why: an ignored path is usually live runtime state, not work product.
+   Never commit any file under these folders, even when the PRD names it:
+     ${FINISH_RUNTIME_FOLDERS}
+   Why: those folders hold the app's live state. A commit of them breaks the
+   running scheduler for every checkout that pulls it.
 ${verdictStepNum}. VERDICT LINE — end your final report with exactly one of these lines.
    Put nothing after it, except the FOREIGN_WIP_PATHS line described below.
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.
+   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}
    - Print FAIL when the gate is red or the commit could not land. Also print
      FAIL when a step needs something this run cannot reach (live runtime
      state, credentials, an account or dashboard action, a host install): do
@@ -401,14 +423,17 @@ in your final report.`;
  * be re-reviewed once by the plan's own trailing validator job, so asking
  * every work-item to also run /code-review + /security-review inline is
  * redundant review work.
+ * `isFixPlan: true` (auto fix-plan jobs only) adds one VERDICT bullet: a fix
+ * plan that changed no file has nothing to commit and prints PASS on a green
+ * gate. Omitted/false leaves the text unchanged.
  */
-function buildFinishProtocol({ reviewInRun = true } = {}) {
+function buildFinishProtocol({ reviewInRun = true, isFixPlan = false } = {}) {
   if (reviewInRun) {
     return buildFinishHead(3) + FINISH_REVIEW_STEPS_IN_RUN
-      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5 });
+      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan });
   }
   return buildFinishHead(2) + FINISH_REVIEW_STEP_DEFERRED
-    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4 });
+    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan });
 }
 
 const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
@@ -4811,7 +4836,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // Always route through composeExecutorPrompt (even with an empty digest)
   // so the finish protocol is appended in the prompt's tail exactly once,
   // after any digest fence rather than concatenated ahead of it.
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun }) });
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan) }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did

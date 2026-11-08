@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { FINISH_PROTOCOL, buildFinishProtocol } = require('../../src/main/scheduler.cjs')
+const { RUNTIME_NAMESPACES } = require('../../src/main/lib/opsOwnership.cjs')
 const { parsePorcelain, computeCommittedDuringRun } = require('../../src/main/scheduler/gitTreeGuard.cjs')
 
 describe('parsePorcelain (commit guard)', () => {
@@ -116,6 +117,72 @@ describe('buildFinishProtocol (PRD 1408: yields to a plan-level validator)', () 
     expect(deferred).toMatch(/Do not stop to ask a question/)
     expect(deferred).not.toMatch(/^SCHEDULER_VERDICT:/m)
     expect(deferred).not.toMatch(/^FOREIGN_WIP_PATHS:/m)
+  })
+})
+
+describe('buildFinishProtocol: force-add ban, runtime folders, fix-plan PASS', () => {
+  const commitStep = (text: string) => {
+    const start = text.indexOf('COMMIT —')
+    const end = text.indexOf('VERDICT LINE —')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    return text.slice(start, end)
+  }
+  const variants = [
+    ['reviewInRun true', buildFinishProtocol({ reviewInRun: true })],
+    ['reviewInRun false', buildFinishProtocol({ reviewInRun: false })],
+    ['reviewInRun true + fix plan', buildFinishProtocol({ reviewInRun: true, isFixPlan: true })],
+    ['reviewInRun false + fix plan', buildFinishProtocol({ reviewInRun: false, isFixPlan: true })],
+  ] as const
+
+  for (const [name, text] of variants) {
+    it(`${name}: COMMIT bans git add -f / --force on ignored paths unless # Files names the exact path`, () => {
+      const commit = commitStep(text)
+      expect(commit).toMatch(/never run `?git add -f`? or `?git add --force`?/i)
+      expect(commit).toMatch(/ignore/)
+      expect(commit).toMatch(/# Files section names that exact path/)
+      expect(commit).toMatch(/leave it out of the commit and name it in your final report/)
+    })
+
+    it(`${name}: COMMIT bans every RUNTIME_NAMESPACES folder outright`, () => {
+      const commit = commitStep(text)
+      expect(RUNTIME_NAMESPACES.length).toBeGreaterThan(0)
+      for (const ns of RUNTIME_NAMESPACES) {
+        expect(commit).toContain(`session-manager-operations/${ns}/`)
+      }
+      expect(commit).toMatch(/even when the PRD names it/)
+    })
+
+    it(`${name}: keeps the blanket-add bans and line-anchored verdict safety`, () => {
+      expect(text).toMatch(/git add <path>/)
+      expect(text).not.toMatch(/git add -A/)
+      expect(text).not.toMatch(/git add \./)
+      expect(text).not.toMatch(/git add --all/)
+      expect(text).not.toMatch(/^SCHEDULER_VERDICT:/m)
+      expect(text).not.toMatch(/^FOREIGN_WIP_PATHS:/m)
+    })
+  }
+
+  it('fix-plan line appears only when isFixPlan is true, right after the PASS bullet', () => {
+    const re = /auto fix plan whose steps changed no file has nothing to commit/
+    for (const reviewInRun of [true, false]) {
+      const fix = buildFinishProtocol({ reviewInRun, isFixPlan: true })
+      expect(fix).toMatch(re)
+      const iPass = fix.indexOf('Print PASS only when')
+      const iFix = fix.search(re)
+      const iFail = fix.indexOf('Print FAIL when')
+      expect(iPass).toBeLessThan(iFix)
+      expect(iFix).toBeLessThan(iFail)
+      expect(buildFinishProtocol({ reviewInRun, isFixPlan: false })).not.toMatch(re)
+      expect(buildFinishProtocol({ reviewInRun })).not.toMatch(re)
+    }
+    expect(FINISH_PROTOCOL).not.toMatch(re)
+  })
+
+  it('default and isFixPlan:false still equal FINISH_PROTOCOL', () => {
+    expect(buildFinishProtocol({ reviewInRun: true })).toBe(FINISH_PROTOCOL)
+    expect(buildFinishProtocol({ reviewInRun: true, isFixPlan: false })).toBe(FINISH_PROTOCOL)
+    expect(buildFinishProtocol()).toBe(FINISH_PROTOCOL)
   })
 })
 

@@ -100,14 +100,39 @@ const connected = (n: number): McpCheckResult => ({
 const failed: McpCheckResult = { ok: false, status: 'failed', error: 'spawn ENOENT', checkedAt: 1 }
 const needsAuth: McpCheckResult = { ok: false, status: 'needs-auth', error: 'HTTP 401', checkedAt: 1 }
 
-function installApi(servers: Record<string, unknown> = SERVERS) {
+interface FakePlugin {
+  key: string
+  name: string
+  enabled: boolean
+  /** The plugin's .mcp.json `mcpServers`. */
+  servers: Record<string, unknown>
+}
+
+const pluginPath = (name: string) => `${HOME}/.claude/plugins/cache/${name}`
+
+function installApi(servers: Record<string, unknown> = SERVERS, plugins: FakePlugin[] = []) {
   const files: Record<string, string> = {
     [CLAUDE_JSON]: JSON.stringify({ mcpServers: servers }, null, 2) + '\n',
     [MCP_JSON]: JSON.stringify({ mcpServers: servers }, null, 2) + '\n',
   }
+  for (const p of plugins) files[`${pluginPath(p.name)}/.mcp.json`] = JSON.stringify({ mcpServers: p.servers })
   const api = {
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
+    plugins: {
+      list: vi.fn(async () =>
+        plugins.map((p) => ({
+          key: p.key,
+          name: p.name,
+          marketplace: p.key.split('@')[1] ?? '',
+          version: '1.0.0',
+          scope: 'user',
+          installPath: pluginPath(p.name),
+          enabled: p.enabled,
+        })),
+      ),
+    },
     config: {
+      exists: vi.fn(async (path: string) => path in files),
       readJson: vi.fn(async (path: string) => {
         const raw = files[path]
         return raw === undefined
@@ -710,5 +735,130 @@ describe('McpServers 3a detail', () => {
       keyPath: ['mcpServers', 'alpha'],
       value: expect.objectContaining({ env: { REGION: '' } }),
     }))
+  })
+})
+
+/* ── FROM PLUGINS: servers enabled plugins add, read-only ── */
+
+const PLUGINS: FakePlugin[] = [
+  { key: 'stripe@claude-plugins-official', name: 'stripe', enabled: true, servers: { stripe: { command: 'npx', args: ['-y', '@stripe/mcp'] } } },
+  { key: 'linear@community', name: 'linear', enabled: true, servers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp' } } },
+  { key: 'off@community', name: 'off', enabled: false, servers: { hidden: { command: 'node' } } },
+]
+const STRIPE_ID = 'stripe@claude-plugins-official/stripe'
+const LINEAR_ID = 'linear@community/linear'
+const stripeReq: McpCheckRequest = { source: 'plugin', name: 'stripe', pluginKey: 'stripe@claude-plugins-official' }
+const linearReq: McpCheckRequest = { source: 'plugin', name: 'linear', pluginKey: 'linear@community' }
+const pluginRowIds = () =>
+  Array.from(container!.querySelectorAll<HTMLElement>('[data-testid^="mcp-plugin-row-"]')).map((r) => r.dataset.testid!.slice('mcp-plugin-row-'.length))
+
+describe('McpServers FROM PLUGINS', () => {
+  it('lists the servers enabled plugins add under FROM PLUGINS with a count, READ-ONLY, transport plugin and "via the <plugin> plugin · <status>"', async () => {
+    useMcpChecks.setState({ results: { [mcpCheckKey(stripeReq)]: connected(2) } })
+    installApi(SERVERS, PLUGINS)
+    await mount()
+
+    const header = q('mcp-plugins-header')!
+    expect(header.firstChild?.textContent).toBe('From plugins')
+    expect(header.className.split(/\s+/)).toContain('uppercase')
+    expect(q('mcp-plugins-count')!.textContent).toBe('2')
+    expect(q('mcp-plugins-readonly')!.textContent).toBe('READ-ONLY')
+
+    // Disabled plugins add nothing; sorted by plugin name.
+    expect(pluginRowIds()).toEqual([LINEAR_ID, STRIPE_ID])
+    expect(rowNames()).toEqual(['alpha', 'beta', 'delta', 'gamma'])
+    expect(q(`mcp-plugin-row-${STRIPE_ID}`)!.querySelector('.font-mono')?.textContent).toBe('plugin')
+    expect(q(`mcp-plugin-status-${STRIPE_ID}`)!.textContent).toBe('via the stripe plugin · connected · 2 tools')
+    expect(q(`mcp-plugin-status-${LINEAR_ID}`)!.textContent).toBe('via the linear plugin · not checked')
+    expect(q(`mcp-plugin-dot-${STRIPE_ID}`)!.dataset.status).toBe('connected')
+
+    // The summary counts plugin servers, checked ones included.
+    expect(q('extensions-toolbar-summary')!.textContent).toBe('6 servers · 1 checked')
+    // The config server stays selected by default.
+    expect(selectedRows()).toEqual(['alpha'])
+  })
+
+  it('has no FROM PLUGINS section in project scope or with no enabled plugin servers', async () => {
+    installApi(SERVERS, [PLUGINS[2]])
+    await mount()
+    expect(q('mcp-plugins-header')).toBeNull()
+    act(() => root?.unmount())
+    container?.remove()
+
+    const api = installApi(SERVERS, PLUGINS)
+    useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+    await mount({ scope: 'project' })
+    expect(q('mcp-plugins-header')).toBeNull()
+    expect(api.plugins.list).not.toHaveBeenCalled()
+  })
+
+  it('opens a plugin server read-only: no Edit JSON, no + Add variable, no SaveBar — Check again checks it as source plugin with its plugin key', async () => {
+    const api = installApi(SERVERS, PLUGINS)
+    await mount()
+
+    await click(q(`mcp-plugin-row-${STRIPE_ID}`))
+    expect(q(`mcp-plugin-row-${STRIPE_ID}`)!.getAttribute('aria-current')).toBe('true')
+    expect(selectedRows()).toEqual([])
+    expect(detailName()).toBe('stripe')
+    expect(q('mcp-detail-transport')!.textContent).toBe('plugin')
+    expect(q('mcp-detail-plugin')!.textContent).toBe('via the stripe plugin')
+    expect(q('mcp-detail-keypath')).toBeNull()
+    expect(q('mcp-command')!.textContent).toBe('npx')
+    expect(q('mcp-edit-json')).toBeNull()
+    expect(q('mcp-edit-done')).toBeNull()
+    expect(q('mcp-env')).toBeNull()
+    expect(q('mcp-env-add')).toBeNull()
+    expect(q('mcp-headers-add')).toBeNull()
+    expect(saveButton()).toBeUndefined()
+    expect(container!.textContent).not.toContain('Saved — matches')
+
+    await click(q('mcp-check-again'))
+    await flush()
+    expect(api.mcp.checkServer).toHaveBeenCalledTimes(1)
+    expect(api.mcp.checkServer).toHaveBeenCalledWith(stripeReq)
+    expect(q('mcp-detail-status')!.dataset.status).toBe('failed')
+    expect(q(`mcp-plugin-status-${STRIPE_ID}`)!.textContent).toBe('via the stripe plugin · failed')
+
+    // Back to a config server: the editable detail and the SaveBar return.
+    await click(q('mcp-row-beta'))
+    expect(detailName()).toBe('beta')
+    expect(q('mcp-edit-json')).not.toBeNull()
+    expect(saveButton()).toBeDefined()
+  })
+
+  it('Check all includes the listed plugin servers and the "<m> checked" summary counts them', async () => {
+    const api = installApi(SERVERS, PLUGINS)
+    await mount()
+
+    await click(q('mcp-check-all'))
+    await flush()
+    expect(api.mcp.checkServer).toHaveBeenCalledTimes(6)
+    expect(api.mcp.checkServer).toHaveBeenCalledWith(stripeReq)
+    expect(api.mcp.checkServer).toHaveBeenCalledWith(linearReq)
+    expect(q('extensions-toolbar-summary')!.textContent).toBe('6 servers · 6 checked')
+  })
+
+  it('the filter narrows plugin rows and Check all to them too', async () => {
+    const checkAll = vi.fn(async () => {})
+    useMcpChecks.setState({ checkAll })
+    installApi(SERVERS, PLUGINS)
+    await mount()
+
+    await typeInto(q('extensions-toolbar-filter') as HTMLInputElement, 'str')
+    expect(rowNames()).toEqual([])
+    expect(pluginRowIds()).toEqual([STRIPE_ID])
+    // With no config row listed, the plugin row is the selected one.
+    expect(detailName()).toBe('stripe')
+    await click(q('mcp-check-all'))
+    expect(checkAll).toHaveBeenCalledWith([stripeReq])
+  })
+
+  it('selects the first plugin server when the file has none of its own', async () => {
+    installApi({}, PLUGINS)
+    await mount()
+    expect(container!.textContent).not.toContain('No MCP servers yet')
+    expect(detailName()).toBe('linear')
+    expect(q('mcp-detail-transport')!.textContent).toBe('plugin')
+    expect(q('mcp-command')!.textContent).toBe('https://mcp.linear.app/mcp')
   })
 })

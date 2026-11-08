@@ -22,7 +22,8 @@ import type { Scope } from '../../lib/scopes'
 import { mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
 import { distinctPlaceholders } from '../../lib/mcpPlaceholders'
-import type { McpCheckRequest, McpCheckResult } from '../../../preload/api'
+import { listPluginMcpServers } from '../../lib/pluginContents'
+import type { InstalledPlugin, McpCheckRequest, McpCheckResult } from '../../../preload/api'
 
 /**
  * MCP servers are stored in ~/.claude.json (user scope) under `mcpServers`,
@@ -38,6 +39,11 @@ import type { McpCheckRequest, McpCheckResult } from '../../../preload/api'
  * run only on Check all / Check again — never on mount), and a server always selected. The
  * selected server opens in the 3a detail (extensions/McpServerDetail.tsx); its Edit JSON shows
  * today's full per-server form (McpServerEditor below) in the detail's body.
+ *
+ * User scope adds FROM PLUGINS (spec §4): the servers each enabled plugin adds (its .mcp.json, read
+ * by pluginContents.ts's listPluginMcpServers), read-only — transport `plugin`, line 2
+ * `via the <plugin> plugin · <status>`. They are checked (source 'plugin' + the plugin key) and
+ * counted like any other server, but open in a read-only detail with no SaveBar.
  */
 type ServerType = 'stdio' | 'http' | 'sse' | 'ws' | 'streamable-http'
 export interface McpServer {
@@ -139,6 +145,47 @@ export function nextServerName(servers: Record<string, McpServer>): string {
 
 export interface McpAddContext { scope: Scope; cwd: string | null }
 
+/** One server an enabled plugin adds — listed read-only under FROM PLUGINS. */
+interface PluginMcpServer {
+  /** Row / selection id: `<pluginKey>/<name>`. */
+  id: string
+  /** `name@marketplace` — the McpCheckRequest's pluginKey. */
+  pluginKey: string
+  /** The plugin's name as line 2 names it: `via the <plugin> plugin`. */
+  plugin: string
+  name: string
+  /** What the plugin's entry declares, as COMMAND shows it (a URL = a remote server). */
+  server: McpServer
+}
+
+const pluginCheckRequest = (p: PluginMcpServer): McpCheckRequest => ({ source: 'plugin', name: p.name, pluginKey: p.pluginKey })
+
+/**
+ * The servers every enabled plugin adds, sorted by plugin then server. A plugin whose contents can't
+ * be read is skipped and named in one error toast; the rest still list.
+ */
+async function loadPluginMcpServers(): Promise<PluginMcpServer[]> {
+  const installed: InstalledPlugin[] = (await window.api.plugins?.list?.()) ?? []
+  const enabled = installed.filter((p): p is InstalledPlugin & { installPath: string } => p.enabled && !!p.installPath)
+  const settled = await Promise.allSettled(enabled.map((p) => listPluginMcpServers(p.installPath)))
+  const out: PluginMcpServer[] = []
+  const unreadable: string[] = []
+  settled.forEach((r, i) => {
+    const p = enabled[i]
+    if (r.status === 'rejected') {
+      unreadable.push(p.name)
+      return
+    }
+    for (const e of r.value) {
+      const decl = e.description ?? ''
+      const server: McpServer = /^[a-z][a-z0-9+.-]*:\/\//i.test(decl) ? { type: 'http', url: decl } : { command: decl || undefined }
+      out.push({ id: `${p.key}/${e.name}`, pluginKey: p.key, plugin: p.name, name: e.name, server })
+    }
+  })
+  if (unreadable.length > 0) toast.error(`Could not read the MCP servers of plugin ${unreadable.join(', ')}`)
+  return out.sort((a, b) => a.plugin.localeCompare(b.plugin) || a.name.localeCompare(b.name))
+}
+
 // Row line 2's origin word: Anthropic accent-dark, Community honey-dark, Local in the line's own faint.
 const ORIGIN_CLASS: Record<Provenance, string> = {
   anthropic: 'text-accent-dark',
@@ -186,6 +233,8 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const cwd = activeTab?.cwd ?? null
 
   const [selectedName, setSelectedName] = useState<string | null>(null)
+  // The FROM PLUGINS row picked (its PluginMcpServer id), or null when a config server is.
+  const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   // The server whose Edit JSON form is open in the detail, or null for the 3a detail.
   const [jsonFor, setJsonFor] = useState<string | null>(null)
@@ -209,6 +258,26 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   }, [path])
 
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // FROM PLUGINS is user scope only: enabled plugins are a user-scope setting.
+  const [pluginServers, setPluginServers] = useState<PluginMcpServer[]>([])
+  useEffect(() => {
+    if (scope !== 'user') {
+      setPluginServers([])
+      return
+    }
+    let alive = true
+    loadPluginMcpServers()
+      .then((list) => {
+        if (alive) setPluginServers(list)
+      })
+      .catch((e: unknown) => {
+        if (alive) toast.error(`Could not list plugin MCP servers: ${e instanceof Error ? e.message : String(e)}`)
+      })
+    return () => {
+      alive = false
+    }
+  }, [scope])
 
   // Statuses are the stored results of on-demand checks (Check all / Check); nothing probes on mount.
   const checkResults = useMcpChecks(selectMcpCheckResults)
@@ -243,9 +312,16 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const names = Object.keys(servers).sort()
   const needle = filter.trim().toLowerCase()
   const listed = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
+  const listedPlugins = needle ? pluginServers.filter((p) => p.name.toLowerCase().includes(needle)) : pluginServers
   // A server is always selected: the picked one while it exists, else the first listed (the
-  // first overall when the filter hides every row). Null only when the file has no servers.
-  const selected = selectedName !== null && names.includes(selectedName) ? selectedName : (listed[0] ?? names[0] ?? null)
+  // first overall when the filter hides every row) — a config server before a plugin one. Null
+  // only when there are no servers at all.
+  const pickedPlugin = selectedPluginId !== null ? pluginServers.find((p) => p.id === selectedPluginId) ?? null : null
+  const pickedName = selectedName !== null && names.includes(selectedName) ? selectedName : null
+  const fallbackName = listed[0] ?? (listedPlugins.length > 0 ? null : names[0] ?? null)
+  const selectedPlugin: PluginMcpServer | null =
+    pickedPlugin ?? (pickedName === null && fallbackName === null ? listedPlugins[0] ?? pluginServers[0] ?? null : null)
+  const selected = selectedPlugin ? null : (pickedName ?? fallbackName)
 
   const requestFor = (n: string) => checkRequestFor(scope, cwd, n)
   const resultFor = (n: string): McpCheckResult | undefined => {
@@ -256,9 +332,15 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     const req = requestFor(n)
     return req ? checking[mcpCheckKey(req)] === true : false
   }
-  const listedRequests = listed.map(requestFor).filter((r): r is McpCheckRequest => r !== null)
-  const checkedCount = names.filter((n) => resultFor(n) !== undefined).length
-  const checkingListed = listed.some(isChecking)
+  const pluginKeyOf = (p: PluginMcpServer) => mcpCheckKey(pluginCheckRequest(p))
+  const listedRequests = [
+    ...listed.map(requestFor).filter((r): r is McpCheckRequest => r !== null),
+    ...listedPlugins.map(pluginCheckRequest),
+  ]
+  const totalCount = names.length + pluginServers.length
+  const checkedCount =
+    names.filter((n) => resultFor(n) !== undefined).length + pluginServers.filter((p) => checkResults[pluginKeyOf(p)] !== undefined).length
+  const checkingListed = listed.some(isChecking) || listedPlugins.some((p) => checking[pluginKeyOf(p)] === true)
   // The scope's file as the page names it — list header, detail key path and SaveBar alike.
   const fileName = scope === 'user' ? '~/.claude.json' : '.mcp.json'
 
@@ -271,12 +353,18 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     const name = nextServerName(servers)
     updateServers({ ...servers, [name]: { type: 'stdio', command: '', args: [] } })
     setSelectedName(name)
+    setSelectedPluginId(null)
     // A blank server has nothing to show in the 3a body yet: open it in the form.
     setJsonFor(name)
   }
   const selectServer = (name: string) => {
     if (name !== selected) setJsonFor(null)
     setSelectedName(name)
+    setSelectedPluginId(null)
+  }
+  const selectPluginServer = (id: string) => {
+    setJsonFor(null)
+    setSelectedPluginId(id)
   }
   const removeServer = (name: string) => {
     // Select the row that moves up into the removed one's place, or the new last row.
@@ -311,7 +399,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
         filter={filter}
         onFilterChange={setFilter}
         placeholder="Filter servers"
-        summary={`${names.length} server${names.length === 1 ? '' : 's'} · ${checkedCount} checked`}
+        summary={`${totalCount} server${totalCount === 1 ? '' : 's'} · ${checkedCount} checked`}
         primary={{ label: '+ Add server', testId: 'mcp-add-server', items: addItems }}
       >
         <button
@@ -327,7 +415,8 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
       <div className="flex-1 min-h-0">
         <Panel
           footer={
-            file ? (
+            // A plugin server is read-only: nothing of it is saved here.
+            file && !selectedPlugin ? (
               <SaveBar
                 dirty={file.dirty}
                 busy={file.busy}
@@ -384,7 +473,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
                   <span className="font-mono font-medium tracking-normal text-fg-faint/60">{listed.length}</span>
                 </div>
                 {names.length === 0 ? (
-                  <div className="mx-1.5 py-1 text-xs text-fg-faint">No servers yet.</div>
+                  <div className="mx-1.5 py-1 text-xs text-fg-faint">{pluginServers.length > 0 ? `No servers in ${fileName} yet.` : 'No servers yet.'}</div>
                 ) : listed.length === 0 ? (
                   <div className="mx-1.5 py-1 text-xs text-fg-faint">No servers match “{filter.trim()}”.</div>
                 ) : (
@@ -428,10 +517,68 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
                     )
                   })
                 )}
+                {pluginServers.length > 0 ? (
+                  <>
+                    <div
+                      data-testid="mcp-plugins-header"
+                      className="flex items-center gap-2 mx-1.5 mt-3 mb-1 text-[11px] font-semibold tracking-[.06em] uppercase text-fg-faint"
+                    >
+                      From plugins
+                      <span data-testid="mcp-plugins-count" className="font-mono font-medium tracking-normal text-fg-faint/60">
+                        {listedPlugins.length}
+                      </span>
+                      <span
+                        data-testid="mcp-plugins-readonly"
+                        className="ml-auto px-[5px] border border-line rounded-[3px] text-[9.5px] font-medium tracking-normal text-fg-faint/80"
+                      >
+                        READ-ONLY
+                      </span>
+                    </div>
+                    {listedPlugins.length === 0 ? (
+                      <div className="mx-1.5 py-1 text-xs text-fg-faint">No plugin servers match “{filter.trim()}”.</div>
+                    ) : (
+                      listedPlugins.map((p) => {
+                        const isSelected = selectedPlugin?.id === p.id
+                        const key = pluginKeyOf(p)
+                        const result = checkResults[key]
+                        const inFlight = checking[key] === true
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            data-testid={`mcp-plugin-row-${p.id}`}
+                            aria-current={isSelected ? 'true' : undefined}
+                            onClick={() => selectPluginServer(p.id)}
+                            className={`w-full text-left grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1.5 rounded-[7px] border ${
+                              isSelected ? 'bg-bg-hi border-line' : 'border-transparent hover:bg-bg-hi/60'
+                            }`}
+                          >
+                            <McpCheckDot result={result} checking={inFlight} testId={`mcp-plugin-dot-${p.id}`} />
+                            <span className={`truncate text-[13px] text-fg${isSelected ? ' font-semibold' : ''}`}>{p.name}</span>
+                            <span className="font-mono text-[10.5px] text-fg-faint/80">plugin</span>
+                            <span data-testid={`mcp-plugin-status-${p.id}`} className="col-start-2 col-span-2 truncate text-[11px] text-fg-faint">
+                              via the {p.plugin} plugin · {inFlight ? 'checking…' : checkStatusText(result)}
+                            </span>
+                          </button>
+                        )
+                      })
+                    )}
+                  </>
+                ) : null}
               </div>
             }
             detail={
-              selected !== null ? (
+              selectedPlugin ? (
+                <McpServerDetail
+                  key={`plugin:${selectedPlugin.id}`}
+                  name={selectedPlugin.name}
+                  server={selectedPlugin.server}
+                  scope="user"
+                  plugin={selectedPlugin.plugin}
+                  checkRequest={pluginCheckRequest(selectedPlugin)}
+                  provenance={mcpProvInput(selectedPlugin.name, selectedPlugin.server)}
+                />
+              ) : selected !== null ? (
                 // Keyed by name: another server — or a rename — starts with every value masked again.
                 <McpServerDetail
                   key={selected}

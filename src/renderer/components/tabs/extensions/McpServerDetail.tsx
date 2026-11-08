@@ -13,6 +13,10 @@
  * with every value masked until its row is revealed; TOOLS from the last check. Edit JSON swaps
  * the body for today's full per-server form, passed in as `editor`, so no field is lost (§7.2).
  *
+ * A server an enabled plugin adds (`plugin` set) opens read-only (spec §4 FROM PLUGINS): a `plugin`
+ * transport badge and `via the <plugin> plugin` in place of the scope + key path, COMMAND and TOOLS
+ * only, and no Edit JSON or + Add — it is checked like any other server but never edited here.
+ *
  * Values never reach a toast or a log. The value of a new variable is read from an uncontrolled
  * input on Add, so it is never mirrored into a DOM attribute either.
  */
@@ -109,18 +113,20 @@ export interface McpServerDetailProps {
   server: McpServer
   scope: Scope
   /** The scope's file as the page names it: `~/.claude.json` (user) or `.mcp.json` (project). */
-  fileLabel: string
+  fileLabel?: string
+  /** The plugin that adds this server; set = read-only (no Edit JSON, no + Add, no editor). */
+  plugin?: string
   /** This server's mcpChecks request; null when there is no project to check it in. */
   checkRequest: McpCheckRequest | null
   /** The provenance input the list row resolves too, so the badge and the row agree. */
   provenance: ProvenanceInput
-  /** Writes the changed server into the page's draft (the SaveBar then reads dirty). */
-  onChange: (next: McpServer) => void
-  /** true while Edit JSON is open: `editor` replaces COMMAND / ENVIRONMENT / TOOLS. */
-  editing: boolean
-  onEditingChange: (editing: boolean) => void
+  /** Writes the changed server into the page's draft (the SaveBar then reads dirty). Unused when read-only. */
+  onChange?: (next: McpServer) => void
+  /** true while Edit JSON is open: `editor` replaces COMMAND / ENVIRONMENT / TOOLS. Ignored when read-only. */
+  editing?: boolean
+  onEditingChange?: (editing: boolean) => void
   /** Today's full per-server form, shown while `editing`. */
-  editor: ReactNode
+  editor?: ReactNode
 }
 
 export function McpServerDetail({
@@ -128,13 +134,16 @@ export function McpServerDetail({
   server,
   scope,
   fileLabel,
+  plugin,
   checkRequest,
   provenance,
   onChange,
-  editing,
+  editing: editingProp = false,
   onEditingChange,
   editor,
 }: McpServerDetailProps) {
+  const readOnly = plugin !== undefined
+  const editing = !readOnly && editingProp
   const key = checkRequest ? mcpCheckKey(checkRequest) : null
   // Stored references / primitives only (CLAUDE.md Avoid list).
   const result = useMcpChecks((s) => (key === null ? undefined : s.results[key]))
@@ -185,13 +194,23 @@ export function McpServerDetail({
                 pane's left edge, so the menu would be clipped. Edit JSON's form carries the override. */}
             <ProvenanceBadge scope={scope} input={provenance} interactive={false} />
             <span data-testid="mcp-detail-transport" className="inline-flex">
-              <Badge tone="dim">{server.type ?? 'stdio'}</Badge>
+              <Badge tone="dim">{readOnly ? 'plugin' : (server.type ?? 'stdio')}</Badge>
             </span>
-            <span data-testid="mcp-detail-scope">{SCOPE_LABEL[scope]}</span>
-            <span aria-hidden="true" className="text-fg-faint/60">·</span>
-            <span data-testid="mcp-detail-keypath" className="min-w-0 font-mono text-[11.5px] text-fg-dim break-words">
-              {fileLabel} › mcpServers › {name}
-            </span>
+            {readOnly ? (
+              <>
+                <span data-testid="mcp-detail-plugin">via the {plugin} plugin</span>
+                <span aria-hidden="true" className="text-fg-faint/60">·</span>
+                <span data-testid="mcp-detail-readonly">read-only</span>
+              </>
+            ) : (
+              <>
+                <span data-testid="mcp-detail-scope">{SCOPE_LABEL[scope]}</span>
+                <span aria-hidden="true" className="text-fg-faint/60">·</span>
+                <span data-testid="mcp-detail-keypath" className="min-w-0 font-mono text-[11.5px] text-fg-dim break-words">
+                  {fileLabel} › mcpServers › {name}
+                </span>
+              </>
+            )}
           </div>
         </div>
         <div className="ml-auto shrink-0 flex items-center gap-2">
@@ -206,12 +225,12 @@ export function McpServerDetail({
           >
             {checking ? 'Checking…' : 'Check again'}
           </button>
-          {editing ? (
-            <button type="button" data-testid="mcp-edit-done" onClick={() => onEditingChange(false)} className={BUTTON_CLASS}>
+          {readOnly ? null : editing ? (
+            <button type="button" data-testid="mcp-edit-done" onClick={() => onEditingChange?.(false)} className={BUTTON_CLASS}>
               Done
             </button>
           ) : (
-            <button type="button" data-testid="mcp-edit-json" onClick={() => onEditingChange(true)} className={BUTTON_CLASS}>
+            <button type="button" data-testid="mcp-edit-json" onClick={() => onEditingChange?.(true)} className={BUTTON_CLASS}>
               Edit JSON
             </button>
           )}
@@ -222,8 +241,8 @@ export function McpServerDetail({
         editor
       ) : (
         <>
-          <CommandSection server={server} />
-          {remote ? (
+          <CommandSection server={server} readOnly={readOnly} />
+          {readOnly ? null : remote ? (
             <ValuesSection
               testId="mcp-headers"
               label="Headers"
@@ -231,7 +250,7 @@ export function McpServerDetail({
               separator=":"
               emptyText="No headers set"
               values={server.headers ?? {}}
-              onAdd={(k, v) => onChange({ ...server, headers: { ...(server.headers ?? {}), [k]: v } })}
+              onAdd={(k, v) => onChange?.({ ...server, headers: { ...(server.headers ?? {}), [k]: v } })}
             />
           ) : (
             <ValuesSection
@@ -241,7 +260,7 @@ export function McpServerDetail({
               separator="="
               emptyText="No variables set"
               values={server.env ?? {}}
-              onAdd={(k, v) => onChange({ ...server, env: { ...(server.env ?? {}), [k]: v } })}
+              onAdd={(k, v) => onChange?.({ ...server, env: { ...(server.env ?? {}), [k]: v } })}
             />
           )}
           <ToolsSection serverName={name} result={result} />
@@ -261,7 +280,7 @@ function useRedrawEvery(ms: number, active: boolean): void {
   }, [ms, active])
 }
 
-function CommandSection({ server }: { server: McpServer }) {
+function CommandSection({ server, readOnly }: { server: McpServer; readOnly: boolean }) {
   const remote = isRemote(server)
   const line = mcpCommandLine(server)
   const copy = async () => {
@@ -287,7 +306,9 @@ function CommandSection({ server }: { server: McpServer }) {
           </span>
         ) : (
           <span data-testid="mcp-command-empty" className="min-w-0 font-sans text-[12.5px] text-fg-faint">
-            {remote ? 'No URL set — Edit JSON to add one.' : 'No command set — Edit JSON to add one.'}
+            {readOnly
+              ? remote ? 'No URL set.' : 'No command set.'
+              : remote ? 'No URL set — Edit JSON to add one.' : 'No command set — Edit JSON to add one.'}
           </span>
         )}
         <button

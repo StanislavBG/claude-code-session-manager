@@ -6,10 +6,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
- * The MCP servers sidebar should surface each server's user-set `description`
- * (when present) as a muted line under the name, and show the name alone
- * with no broken layout when a server has none. The editor form should
- * round-trip a description edit back into the saved config.
+ * A server's user-set `description` rides on its 3a list row as the tooltip —
+ * line 2 stays "<origin> · <status>" — and a server without one has no
+ * tooltip. The editor form should round-trip a description edit back into
+ * the saved config.
  */
 
 const CLAUDE_JSON_PATH = '/home/test/.claude.json'
@@ -87,7 +87,7 @@ describe('McpServers sidebar + editor description', () => {
     container.remove()
   })
 
-  it('shows the description under the name when present, and just the name when absent', async () => {
+  it('carries the description as the row tooltip, not as row text, and leaves it off a server without one', async () => {
     installWindowApiMock()
     const { McpServers } = await import('../McpServers')
 
@@ -97,14 +97,14 @@ describe('McpServers sidebar + editor description', () => {
     })
     await flush()
 
-    const text = container.textContent ?? ''
-    expect(text).toContain('Talks to the widget API.')
+    const row = (name: string) => container.querySelector<HTMLElement>(`[data-testid="mcp-row-${name}"]`)
+    expect(row('with-desc')?.getAttribute('title')).toBe('Talks to the widget API.')
+    expect(row('with-desc')?.textContent).not.toContain('Talks to the widget API.')
+    expect(container.querySelector('[data-testid="mcp-status-with-desc"]')?.textContent).toMatch(/ · not checked$/)
 
-    const rows = Array.from(container.querySelectorAll('button')).filter((b) =>
-      b.textContent?.includes('no-desc'),
-    )
-    expect(rows.length).toBeGreaterThan(0)
-    expect(rows[0].textContent).not.toContain('Talks to the widget API.')
+    expect(row('no-desc')).not.toBeNull()
+    expect(row('no-desc')!.hasAttribute('title')).toBe(false)
+    expect(row('no-desc')!.textContent).not.toContain('Talks to the widget API.')
 
     act(() => root.unmount())
   })

@@ -1,21 +1,28 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
-import { Badge } from '../ui/Badge'
-import { StatusDot } from '../ui/StatusDot'
-import type { ProvenanceInput } from '../../lib/provenance'
+import { Badge, type BadgeTone } from '../ui/Badge'
+import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
+import {
+  classifyProvenance,
+  provenanceKey,
+  PROVENANCE_LABEL,
+  type Provenance,
+  type ProvenanceInput,
+} from '../../lib/provenance'
 import { useConfig } from '../../state/config'
+import { useProvenance } from '../../state/provenance'
+import { mcpCheckKey, selectMcpChecking, selectMcpCheckResults, useMcpChecks } from '../../state/mcpChecks'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { Scope } from '../../lib/scopes'
 import { mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
 import { distinctPlaceholders } from '../../lib/mcpPlaceholders'
-import { deriveMcpConnectionState, type McpConnectionInfo } from '../../lib/mcpConnectionState'
-import type { McpStatusResult } from '../../../preload/api'
+import type { McpCheckRequest, McpCheckResult } from '../../../preload/api'
 
 /**
  * MCP servers are stored in ~/.claude.json (user scope) under `mcpServers`,
@@ -25,6 +32,10 @@ import type { McpStatusResult } from '../../../preload/api'
  * Docs (code.claude.com/docs/en/mcp, 2026-05): transports stdio/http/sse/ws/
  * streamable-http; v2.1.121 added `alwaysLoad`; reserved name `workspace`
  * cannot be used (v2.1.128).
+ *
+ * The list is the Extensions 3a design (design-mocks/extensions-3a/DESIGN_SPEC.md §2, §4):
+ * the shared ExtensionsToolbar, one status dot per server from the mcpChecks store (checks
+ * run only on Check all / Check — never on mount), and a server always selected.
  */
 type ServerType = 'stdio' | 'http' | 'sse' | 'ws' | 'streamable-http'
 interface McpServer {
@@ -126,6 +137,73 @@ export function nextServerName(servers: Record<string, McpServer>): string {
 
 export interface McpAddContext { scope: Scope; cwd: string | null }
 
+/** A server's check state as the list draws it: its stored check result's status, or `unchecked`. */
+type McpCheckState = 'unchecked' | McpCheckResult['status']
+
+// 3a status dots (DESIGN_SPEC §4): hollow ring = not checked, sage = connected, red = failed,
+// honey = needs auth.
+const DOT_CLASS: Record<McpCheckState, string> = {
+  unchecked: 'border-[1.5px] border-fg-faint/60',
+  connected: 'bg-sage',
+  failed: 'bg-red-500',
+  'needs-auth': 'bg-honey',
+}
+
+const STATE_LABEL: Record<McpCheckState, string> = {
+  unchecked: 'Not checked',
+  connected: 'Connected',
+  failed: 'Failed',
+  'needs-auth': 'Needs auth',
+}
+
+const STATE_TONE: Record<McpCheckState, BadgeTone> = {
+  unchecked: 'dim',
+  connected: 'good',
+  failed: 'accent',
+  'needs-auth': 'warn',
+}
+
+// Row line 2's origin word: Anthropic accent-dark, Community honey-dark, Local in the line's own faint.
+const ORIGIN_CLASS: Record<Provenance, string> = {
+  anthropic: 'text-accent-dark',
+  community: 'text-honey-dark',
+  local: '',
+}
+
+/** Row line 2's status: `not checked` | `connected · <n> tool(s)` | `failed` | `needs auth`. */
+function checkStatusText(result: McpCheckResult | undefined): string {
+  if (!result) return 'not checked'
+  if (result.status === 'connected') {
+    const n = result.tools.length
+    return `connected · ${n} tool${n === 1 ? '' : 's'}`
+  }
+  return result.status === 'needs-auth' ? 'needs auth' : 'failed'
+}
+
+/**
+ * The mcpChecks request for one server of this list, or null with no project to check in.
+ * A user server carries no cwd — main starts it in ~ whatever project is open — so its result
+ * is shared by every project; a project server is keyed by its project.
+ */
+function checkRequestFor(scope: Scope, cwd: string | null, name: string): McpCheckRequest | null {
+  if (scope === 'user') return { source: 'user', name }
+  return cwd ? { source: 'project', name, cwd } : null
+}
+
+/** The 8px status dot; pulses while a check of the server is in flight. */
+function McpCheckDot({ result, checking, testId }: { result: McpCheckResult | undefined; checking: boolean; testId?: string }) {
+  const state: McpCheckState = result?.status ?? 'unchecked'
+  return (
+    <span
+      aria-hidden="true"
+      data-testid={testId}
+      data-status={state}
+      title={result && !result.ok ? `${STATE_LABEL[state]}: ${result.error}` : STATE_LABEL[state]}
+      className={`w-2 h-2 shrink-0 box-border rounded-full ${DOT_CLASS[state]}${checking ? ' animate-pulse' : ''}`}
+    />
+  )
+}
+
 function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddContext) => void; scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
@@ -152,33 +230,19 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
 
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const [probe, setProbe] = useState<McpStatusResult | null>(null)
-  const [probing, setProbing] = useState(false)
-  // Guards against an in-flight probe (mount fetch or a prior manual refresh)
-  // resolving after a newer one and clobbering fresher state; also skips
-  // setState once the tab has unmounted.
-  const probeRequestId = useRef(0)
-  const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
-  const refreshStatus = async () => {
-    const requestId = ++probeRequestId.current
-    setProbing(true)
-    try {
-      const r = await window.api.mcp.status()
-      if (!mounted.current || requestId !== probeRequestId.current) return
-      setProbe(r)
-      if (!r.ok) toast.error(r.error ?? 'MCP status probe failed')
-    } catch (e) {
-      if (!mounted.current || requestId !== probeRequestId.current) return
-      setProbe(null)
-      toast.error((e as Error).message || 'MCP status probe failed')
-    } finally {
-      if (mounted.current && requestId === probeRequestId.current) setProbing(false)
-    }
-  }
+  // Statuses are the stored results of on-demand checks (Check all / Check); nothing probes on mount.
+  const checkResults = useMcpChecks(selectMcpCheckResults)
+  const checking = useMcpChecks(selectMcpChecking)
+  const checkAll = useMcpChecks((s) => s.checkAll)
+  const checkOne = useMcpChecks((s) => s.check)
+
+  // Row line 2 names each server's origin — a manual override from the provenance sidecar, else
+  // the auto-classified one (the same resolution ProvenanceBadge shows).
+  const provenanceOverrides = useProvenance((s) => s.overrides)
+  const loadProvenance = useProvenance((s) => s.load)
   useEffect(() => {
-    refreshStatus()
-  }, [])
+    if (home) void loadProvenance(home)
+  }, [home, loadProvenance])
 
   if (!home) return <EmptyState title="loading…" />
   if (scope === 'project' && !cwd) {
@@ -198,7 +262,25 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const file = files[path]
   const { full, servers, err } = file ? parse(file.draftRaw) : { full: {}, servers: {}, err: null }
   const names = Object.keys(servers).sort()
-  const selected = selectedName ? servers[selectedName] : null
+  const needle = filter.trim().toLowerCase()
+  const listed = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
+  // A server is always selected: the picked one while it exists, else the first listed (the
+  // first overall when the filter hides every row). Null only when the file has no servers.
+  const selected = selectedName !== null && names.includes(selectedName) ? selectedName : (listed[0] ?? names[0] ?? null)
+
+  const requestFor = (n: string) => checkRequestFor(scope, cwd, n)
+  const resultFor = (n: string): McpCheckResult | undefined => {
+    const req = requestFor(n)
+    return req ? checkResults[mcpCheckKey(req)] : undefined
+  }
+  const isChecking = (n: string): boolean => {
+    const req = requestFor(n)
+    return req ? checking[mcpCheckKey(req)] === true : false
+  }
+  const listedRequests = listed.map(requestFor).filter((r): r is McpCheckRequest => r !== null)
+  const checkedCount = names.filter((n) => resultFor(n) !== undefined).length
+  const checkingListed = listed.some(isChecking)
+  const fileLabel = scope === 'user' ? 'In ~/.claude.json' : 'In .mcp.json'
 
   const updateServers = (next: Record<string, McpServer>) => {
     setSaveError(null)
@@ -211,10 +293,14 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     setSelectedName(name)
   }
   const removeServer = (name: string) => {
+    // Select the row that moves up into the removed one's place, or the new last row.
+    const order = listed.includes(name) ? listed : names
+    const at = order.indexOf(name)
+    const rest = order.filter((n) => n !== name)
     const next = { ...servers }
     delete next[name]
     updateServers(next)
-    if (selectedName === name) setSelectedName(null)
+    setSelectedName(rest[Math.min(at, rest.length - 1)] ?? null)
   }
   const renameServer = (oldName: string, newName: string) => {
     if (!newName || newName === oldName || servers[newName]) return
@@ -227,181 +313,190 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     updateServers({ ...servers, [name]: srv })
   }
 
+  const addItems: ExtensionsToolbarMenuItem[] = [{ label: 'New server', testId: 'mcp-new-server', onSelect: addServer }]
+  if (onAdd) addItems.push({ label: 'Browse catalog…', testId: 'mcp-browse-catalog', onSelect: () => onAdd({ scope, cwd }) })
+
   return (
-    <Panel
-      toolbar={
-        <>
-          <span className="ml-3 px-1.5 py-0.5 text-[10px] rounded border border-line text-fg-faint">
-            {names.length} server{names.length === 1 ? '' : 's'}
-          </span>
-          <span className="ml-2 text-fg-faint truncate">{path}</span>
-          <div className="flex-1" />
-          {selectedName && selected && (
-            <ProvenanceBadge scope={scope} input={mcpProvInput(selectedName, selected)} className="mr-2" />
-          )}
-          <button
-            onClick={refreshStatus}
-            disabled={probing}
-            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50 mr-2"
-          >
-            {probing ? 'checking…' : '⟳ test connections'}
-          </button>
-          <button
-            onClick={() => onAdd?.({ scope, cwd })}
-            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi mr-2"
-          >
-            Add…
-          </button>
-          <button
-            onClick={addServer}
-            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
-          >
-            + new server
-          </button>
-        </>
-      }
-      footer={
-        file ? (
-          <SaveBar
-            dirty={file.dirty}
-            busy={file.busy}
-            parseError={saveError || err || file.parseError}
-            lastSavedAt={file.lastSavedAt}
-            onSave={async () => {
-              setSaveError(null)
-              // Refuse to persist a new/changed server that still has a literal `<token>`.
-              // Unchanged servers are exempt so a pre-existing broken entry can't block fixing/removing others.
-              const disk = (file.diskData as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
-              for (const [n, srv] of Object.entries(servers)) {
-                if (JSON.stringify(srv) === JSON.stringify(disk[n])) continue
-                const ph = distinctPlaceholders(srv)
-                if (ph.length > 0) {
-                  useToast.getState().show('error', `Not saved: "${n}" still contains placeholder ${ph.map((p) => p.token).join(', ')} — replace it with a real value`)
-                  return
-                }
-              }
-              try {
-                for (const p of diffServerPatches(disk as Record<string, McpServer>, servers)) {
-                  await window.api.claudeConfig.patch({
-                    ...mcpPatchTarget(scope, cwd),
-                    keyPath: ['mcpServers', p.name],
-                    value: p.value,
-                  })
-                }
-                await loadJson(path)
-              } catch (e) {
-                setSaveError((e as Error).message || 'save failed')
-              }
-            }}
-            onRevert={() => {
-              setSaveError(null)
-              revert(path)
-            }}
-          />
-        ) : null
-      }
-    >
-      {scope === 'project' && cwd && <McpProjectGating cwd={cwd} names={names} />}
-      <ListDetail
-        sidebar={
-          <div className="py-2">
-            <div className="px-2 pb-1">
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="filter…"
-                className="w-full bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
+    <div className="h-full flex flex-col">
+      <ExtensionsToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        placeholder="Filter servers"
+        summary={`${names.length} server${names.length === 1 ? '' : 's'} · ${checkedCount} checked`}
+        primary={{ label: '+ Add server', testId: 'mcp-add-server', items: addItems }}
+      >
+        <button
+          type="button"
+          data-testid="mcp-check-all"
+          onClick={() => void checkAll(listedRequests)}
+          disabled={listedRequests.length === 0 || checkingListed}
+          className="shrink-0 h-7 inline-flex items-center px-[11px] bg-bg-hi border border-line rounded-md text-[12.5px] text-fg hover:border-rule disabled:opacity-50 disabled:hover:border-line"
+        >
+          {checkingListed ? 'Checking…' : 'Check all'}
+        </button>
+      </ExtensionsToolbar>
+      <div className="flex-1 min-h-0">
+        <Panel
+          footer={
+            file ? (
+              <SaveBar
+                dirty={file.dirty}
+                busy={file.busy}
+                parseError={saveError || err || file.parseError}
+                lastSavedAt={file.lastSavedAt}
+                onSave={async () => {
+                  setSaveError(null)
+                  // Refuse to persist a new/changed server that still has a literal `<token>`.
+                  // Unchanged servers are exempt so a pre-existing broken entry can't block fixing/removing others.
+                  const disk = (file.diskData as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
+                  for (const [n, srv] of Object.entries(servers)) {
+                    if (JSON.stringify(srv) === JSON.stringify(disk[n])) continue
+                    const ph = distinctPlaceholders(srv)
+                    if (ph.length > 0) {
+                      useToast.getState().show('error', `Not saved: "${n}" still contains placeholder ${ph.map((p) => p.token).join(', ')} — replace it with a real value`)
+                      return
+                    }
+                  }
+                  try {
+                    for (const p of diffServerPatches(disk as Record<string, McpServer>, servers)) {
+                      await window.api.claudeConfig.patch({
+                        ...mcpPatchTarget(scope, cwd),
+                        keyPath: ['mcpServers', p.name],
+                        value: p.value,
+                      })
+                    }
+                    await loadJson(path)
+                  } catch (e) {
+                    setSaveError((e as Error).message || 'save failed')
+                  }
+                }}
+                onRevert={() => {
+                  setSaveError(null)
+                  revert(path)
+                }}
               />
-            </div>
-            {names.length === 0 ? (
-              <div className="px-3 py-1 text-xs text-fg-faint italic">no servers</div>
-            ) : (
-              names.filter((n) => !filter || n.toLowerCase().includes(filter.toLowerCase())).map((n) => {
-                const conn = deriveMcpConnectionState(n, probe)
-                const description = servers[n].description?.trim()
-                return (
-                  <button
-                    key={n}
-                    onClick={() => setSelectedName(n)}
-                    className={`w-full text-left px-3 py-1 text-xs flex flex-col gap-0.5 ${
-                      selectedName === n
-                        ? 'bg-bg-hi text-fg'
-                        : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 justify-between w-full">
-                      <span className="flex items-center gap-2 min-w-0">
-                        <StatusDot state={conn.dotState} title={conn.label} />
-                        <span className="truncate">{n}</span>
-                      </span>
-                      <span className="ml-2 flex items-center gap-2 shrink-0">
-                        {(() => {
-                          const ph = distinctPlaceholders(servers[n])
-                          return ph.length > 0 ? (
-                            <Badge tone="warn" title={`${scope} scope · ${path}`}>
-                              unconfigured placeholder: {ph.map((p) => p.token).join(', ')}
-                            </Badge>
-                          ) : null
-                        })()}
-                        <Badge tone={conn.badgeTone}>{conn.label}</Badge>
-                        <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
-                        <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
-                      </span>
-                    </span>
-                    {description ? (
-                      <span className="pl-5 text-fg-faint truncate" title={description}>
-                        {description}
-                      </span>
-                    ) : null}
-                  </button>
-                )
-              })
-            )}
-          </div>
-        }
-        detail={
-          selectedName && selected ? (
-            <McpServerEditor
-              name={selectedName}
-              server={selected}
-              connection={deriveMcpConnectionState(selectedName, probe)}
-              onTestConnection={refreshStatus}
-              testing={probing}
-              onRename={(n) => renameServer(selectedName, n)}
-              onChange={(s) => updateServer(selectedName, s)}
-              onRemove={() => removeServer(selectedName)}
-            />
-          ) : (
-            <EmptyState title="select a server or click + new" />
-          )
-        }
-      />
-    </Panel>
+            ) : null
+          }
+        >
+          {scope === 'project' && cwd && <McpProjectGating cwd={cwd} names={names} />}
+          <ListDetail
+            sidebarWidth="300px"
+            sidebar={
+              <div className="flex flex-col gap-0.5 px-2 py-1">
+                {/* Renders IN ~/.CLAUDE.JSON / IN .MCP.JSON — `uppercase` keeps the real file name in the DOM. */}
+                <div
+                  data-testid="mcp-list-header"
+                  className="flex items-center gap-2 mx-1.5 mt-3 mb-1 text-[11px] font-semibold tracking-[.06em] uppercase text-fg-faint"
+                >
+                  {fileLabel}
+                  <span className="font-mono font-medium tracking-normal text-fg-faint/60">{listed.length}</span>
+                </div>
+                {names.length === 0 ? (
+                  <div className="mx-1.5 py-1 text-xs text-fg-faint">No servers yet.</div>
+                ) : listed.length === 0 ? (
+                  <div className="mx-1.5 py-1 text-xs text-fg-faint">No servers match “{filter.trim()}”.</div>
+                ) : (
+                  listed.map((n) => {
+                    const srv = servers[n]
+                    const isSelected = n === selected
+                    const result = resultFor(n)
+                    const inFlight = isChecking(n)
+                    const origin: Provenance =
+                      provenanceOverrides[provenanceKey('mcp', scope, n)] ?? classifyProvenance(mcpProvInput(n, srv)).provenance
+                    const placeholders = distinctPlaceholders(srv).map((p) => p.token).join(', ')
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        data-testid={`mcp-row-${n}`}
+                        aria-current={isSelected ? 'true' : undefined}
+                        title={srv.description?.trim() || undefined}
+                        onClick={() => setSelectedName(n)}
+                        className={`w-full text-left grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1.5 rounded-[7px] border ${
+                          isSelected ? 'bg-bg-hi border-line' : 'border-transparent hover:bg-bg-hi/60'
+                        }`}
+                      >
+                        <McpCheckDot result={result} checking={inFlight} testId={`mcp-dot-${n}`} />
+                        <span className={`truncate text-[13px] text-fg${isSelected ? ' font-semibold' : ''}`}>{n}</span>
+                        <span className="font-mono text-[10.5px] text-fg-faint/80">{srv.type ?? 'stdio'}</span>
+                        <span data-testid={`mcp-status-${n}`} className="col-start-2 col-span-2 truncate text-[11px] text-fg-faint">
+                          <span className={ORIGIN_CLASS[origin]}>{PROVENANCE_LABEL[origin]}</span>
+                          {' · '}
+                          {inFlight ? 'checking…' : checkStatusText(result)}
+                        </span>
+                        {placeholders ? (
+                          <span
+                            className="col-start-2 col-span-2 truncate text-[11px] text-honey-dark"
+                            title={`${scope} scope · ${path} — replace ${placeholders} with a real value; Save refuses it until then`}
+                          >
+                            ⚠ unconfigured placeholder: {placeholders}
+                          </span>
+                        ) : null}
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            }
+            detail={
+              selected !== null ? (
+                <McpServerEditor
+                  key={selected}
+                  name={selected}
+                  server={servers[selected]}
+                  scope={scope}
+                  result={resultFor(selected)}
+                  checking={isChecking(selected)}
+                  onCheck={() => {
+                    const req = requestFor(selected)
+                    if (req) void checkOne(req)
+                  }}
+                  onRename={(n) => renameServer(selected, n)}
+                  onChange={(s) => updateServer(selected, s)}
+                  onRemove={() => removeServer(selected)}
+                />
+              ) : (
+                <EmptyState
+                  title="No MCP servers yet"
+                  hint={onAdd ? '+ Add server starts a new one or browses the catalog.' : '+ Add server starts a new one.'}
+                />
+              )
+            }
+          />
+        </Panel>
+      </div>
+    </div>
   )
 }
 
-// Memoized: no props; own data comes from store/IPC hooks inside the component.
+// Memoized: own data comes from store/IPC hooks inside the component.
 export const McpServers = memo(McpServersComponent)
 
+/** Today's per-server editor form, kept mounted until the 3a detail pane (PRD ext3a-mcp-detail) replaces it. */
 function McpServerEditor({
   name,
   server,
-  connection,
-  onTestConnection,
-  testing,
+  scope,
+  result,
+  checking,
+  onCheck,
   onRename,
   onChange,
   onRemove,
 }: {
   name: string
   server: McpServer
-  connection: McpConnectionInfo
-  onTestConnection: () => void
-  testing: boolean
+  scope: Scope
+  /** The server's stored check result from the mcpChecks store; undefined = never checked. */
+  result: McpCheckResult | undefined
+  checking: boolean
+  /** Runs this server's real check (initialize + tools/list) through the mcpChecks store. */
+  onCheck: () => void
   onRename: (n: string) => void
   onChange: (s: McpServer) => void
   onRemove: () => void
 }) {
+  const state: McpCheckState = result?.status ?? 'unchecked'
   const type = server.type ?? 'stdio'
   const isReserved = RESERVED_NAMES.has(name)
   const isCaution = CAUTION_NAMES.has(name)
@@ -421,19 +516,25 @@ function McpServerEditor({
   return (
     <div className="p-4 space-y-4 max-w-2xl">
       <div className="flex items-center gap-2">
-        <StatusDot state={connection.dotState} size="md" title={connection.label} />
-        <Badge tone={connection.badgeTone}>{connection.label}</Badge>
+        <McpCheckDot result={result} checking={checking} />
+        <Badge tone={STATE_TONE[state]} title={result && !result.ok ? result.error : undefined}>
+          {STATE_LABEL[state]}
+          {result?.ok ? ` · ${result.tools.length} tool${result.tools.length === 1 ? '' : 's'}` : ''}
+        </Badge>
+        <ProvenanceBadge scope={scope} input={mcpProvInput(name, server)} />
         <button
-          onClick={onTestConnection}
-          disabled={testing}
+          type="button"
+          onClick={onCheck}
+          disabled={checking}
           className="ml-auto px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50"
         >
-          {testing ? 'checking…' : 'test connection'}
+          {checking ? 'Checking…' : result ? 'Check again' : 'Check'}
         </button>
       </div>
       <div className="flex items-center gap-2">
         <label className="text-xs text-fg-faint w-20">name</label>
         <input
+          aria-label="Server name"
           defaultValue={name}
           onBlur={(e) => onRename(e.target.value.trim())}
           className="flex-1 bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg font-mono"

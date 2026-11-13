@@ -10,7 +10,7 @@
  * identically on every surface — the same act as New Session (SINGLE-CREATOR LAW: born
  * proposed, approved by the press), always minting a new Epic.
  *
- * A persona at xhigh/max effort needs a window.confirm (macroCostWarning) before
+ * A persona at xhigh/max effort needs a window.confirm (macroCostNotice) before
  * minting; cancelling mints nothing.
  */
 import { useState } from 'react'
@@ -18,7 +18,7 @@ import { usePromptSessions } from '../state/promptSessions'
 import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
 import { launchSession } from './launchSession'
-import { macroCostWarning } from './macroCost'
+import { macroCostNotice } from './macroCost'
 import { defaultMacroValues, renderMacroPrompt } from './macroPrompt'
 import type { AgentPersona, Macro } from '../../preload/api'
 
@@ -47,8 +47,8 @@ export function useMacroLaunch(
       return
     }
 
-    const costWarning = macroCostWarning(macro, persona)
-    if (costWarning && !window.confirm(costWarning)) return
+    const notice = macroCostNotice(macro, persona)
+    if (notice && !window.confirm(`${notice.message} Continue?`)) return
 
     const rendered = renderMacroPrompt(macro.prompt, macro.inputs, inputValues ?? defaultMacroValues(macro.inputs))
     if (!rendered.ok) {

@@ -4,6 +4,7 @@ Shared main-process helpers (CommonJS `.cjs`). Layout source of truth: `scripts/
 
 ## What's here
 
+- `app-preview/` — Epic dev-server preview processes (spawn, URL detect, stop, orphan sweep).
 - `claude/` — claude CLI binary, caps, model/effort resolution.
 - `epic/` — Epic mint, worktrees, active index, spawn plan/cwd, transcripts.
 - `feedback-remote/` — cross-project and customer feedback conduits.

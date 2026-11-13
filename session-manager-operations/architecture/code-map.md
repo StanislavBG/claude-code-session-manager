@@ -84,6 +84,16 @@
 - `lib/prettyModel.ts` — single source of truth for model-name shortening (incl. `[1m]` suffix); import it, never copy it.
 - `lib/dataModelErd.ts` + `components/tabs/DataModel.tsx` — hand-maintained MIRROR of the app's persisted shapes (entities, paths, owners, fields, relations), not a scanner. Update it in the same PR that changes a persisted shape; the `dataModelErd.ts` header lists each entity's source. Shown as App Settings ▸ Storage map; it has no sidebar row of its own.
 
+**App preview** (Epic "Run preview" — the project's dev server in the Epic's folder, opened in the system browser):
+- `src/main/lib/app-preview/appPreviewScripts.cjs` — pure helpers: lists `package.json` scripts (validated names, suggests `dev`/`start`/…), finds the first loopback URL in ANSI-stripped output, allocates a free port.
+- `src/main/lib/app-preview/appPreviewManager.cjs` — single owner of every preview process: `npm run <script>` detached on a free `PORT`, URL watch (90 s timeout), `shell.openExternal`, `stop` / `stopAll` kill the process tree then sweep by env marker.
+- `src/main/lib/app-preview/appPreviewIpc.cjs` — IPC `appPreview:scripts` / `start` / `stop` / `list` (`window.api.appPreview`), broadcasts `appPreview:changed`; main resolves the folder from the active index (live worktree, else project), never from a renderer path; links `node_modules` into a restored worktree.
+- `src/main/lib/app-preview/appPreviewSweep.cjs` — finds preview processes by `/proc` environ markers (`SM_PROC_ROLE=preview`, `SM_PREVIEW_EPIC_ID`, `SM_PREVIEW_OWNER_PID`); kills an Epic's setsid escapees and, at boot, orphans of a dead app.
+- `src/renderer/state/appPreview.ts` — runtime-only zustand island keyed by epicId, fed by `list()` + `onChanged`; toasts running / failed / unexpected stop once per transition.
+- `src/renderer/components/epics/EpicAppPreview.tsx` — the Run preview control in `EpicDetail`: script picker + confirm, Open / Stop, own call errors as toasts.
+- Invariants: no embedded webview (URL goes to `shell.openExternal`; `will-attach-webview` stays blocked in `index.cjs`); at most one preview per Epic; the user confirms the script before it runs; killed on Epic complete/delete (renderer pre-merge stop in `promptSessions.ts`, `epicWorktreeMerge.cjs` merge-to-main, `activeIndexMerge.cjs` index removal) and on app quit (`stopAll` in `before-quit` / `will-quit`); nothing is written under the operations root.
+- Known limits: `npm run` only (no pnpm/yarn/bun runner); `PORT` is a hint (Vite ignores it) — the URL comes from the server's output; gitignored files (`.env`) are absent from Epic worktrees; secret-named env vars (TOKEN, API_KEY, SECRET, …) are stripped by `cleanChildEnv` as in terminal tabs; `npm` must be on the app's PATH; the orphan sweep is Linux-only.
+
 ## Renderer data flow
 
 The renderer uses isolated zustand stores (no cross-store subscription). Data flows: **main process → IPC broadcast → store subscription → selector → component hook**.

@@ -908,6 +908,20 @@ const projectPagesCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 
+// project-pages:md-network — cwd plus optional human folder overrides for the
+// census. Folders are repo-relative path PREFIXES used only for classification
+// (never joined onto the fs), so the shape check here is the whole contract.
+const mdNetworkFolder = z.string().min(1).max(512).refine(
+  (f) => !f.startsWith('/') && !f.includes('\\') && !f.includes('\0') && !f.split('/').includes('..'),
+  { message: "folder must be repo-relative (no leading '/', backslash, NUL or '..' segment)" },
+);
+const mdNetworkFolderList = z.array(mdNetworkFolder).max(50);
+const projectPagesMdNetwork = z.object({
+  cwd: z.string().min(1).max(4096),
+  recordFolders: mdNetworkFolderList.optional(),
+  docFolders: mdNetworkFolderList.optional(),
+}).strict();
+
 // ──────────────────────────────────────────── Project Home admin route
 // Real path validation is projectRootResolve.cjs + config.cjs's validatePath;
 // html content limits live in projectHomeAdminRoutes.cjs's validateHomeHtml.
@@ -1542,6 +1556,7 @@ module.exports = {
     memoryProposeFix,
     projectBriefCwd,
     projectPagesCwd,
+    projectPagesMdNetwork,
     projectPagesRename,
     projectPagesDelete,
     projectHomeAdminWriteBody,

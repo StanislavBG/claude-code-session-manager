@@ -277,6 +277,17 @@ describe('remoteArgFence', () => {
       expect(await d.invoke(unauthed, ch, [{ cwd: '/home/u/proj' }])).toEqual({ ok: false, reason: 'e2e_not_authenticated' })
       expect(fn).not.toHaveBeenCalled()
     })
+    it('fences a payload carrying folder overrides on its cwd field alone', async () => {
+      const { fn, d } = mkD()
+      const payload = { cwd: '/home/u/proj', recordFolders: ['scheduler/epics'], docFolders: ['docs'] }
+      expect((await d.invoke(authed, ch, [payload])).ok).toBe(true)
+      expect(fn).toHaveBeenCalledWith({ sender: null, remoteClientId: 'c1' }, payload)
+      for (const cwd of ['/home/u/other', '/home/u/.ssh']) {
+        expect(await d.invoke(authed, ch, [{ ...payload, cwd }])).toEqual(fenced)
+      }
+      expect(await d.invoke(authed, ch, [{ recordFolders: ['/home/u/proj'] }])).toEqual(fenced)
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
   })
 
   // Project Home > Tools > Competitor matrix (main/projectPages.cjs): same root fence as md-network.

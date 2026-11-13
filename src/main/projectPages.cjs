@@ -93,16 +93,27 @@ async function get({ cwd }) {
 
 const MD_NETWORK_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project to scan';
 
+/** Strip trailing slashes ('docs/' -> 'docs'); undefined stays undefined. */
+const stripTrailingSlashes = (folders) => folders && folders.map((f) => f.replace(/\/+$/, ''));
+
 /**
  * -> MdNetworkResult: the project's markdown link network from its root
  * CLAUDE.md, scanned once per call (no watcher, no cache). `cwd` is validated
  * like get() (an invalid path rejects); a cwd get() answers with EMPTY() gets
  * `{ ok: false, error }`.
+ *
+ * `recordFolders` / `docFolders` are a human's census overrides (mark a folder
+ * as machine-written records, or as real docs). They are only repo-relative
+ * path prefixes for classification and never reach the file system — only
+ * `cwd` is a path that is resolved or read.
  */
-async function mdNetwork({ cwd }) {
+async function mdNetwork({ cwd, recordFolders, docFolders }) {
   const { root, ephemeral } = tryProjectRoot(config.validatePath(cwd));
   if (ephemeral) return { ok: false, error: MD_NETWORK_EPHEMERAL };
-  return scanMdNetwork(root);
+  return scanMdNetwork(root, {}, {
+    recordFolders: stripTrailingSlashes(recordFolders),
+    docFolders: stripTrailingSlashes(docFolders),
+  });
 }
 
 const MATRIX_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project matrix';
@@ -294,7 +305,7 @@ async function deleteEntry(input) {
 function registerProjectPagesIpc() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('project-pages:get', v(s.projectPagesCwd, get));
-  ipcMain.handle('project-pages:md-network', v(s.projectPagesCwd, mdNetwork));
+  ipcMain.handle('project-pages:md-network', v(s.projectPagesMdNetwork, mdNetwork));
   ipcMain.handle('project-pages:matrix', v(s.projectPagesCwd, matrix));
   ipcMain.handle('project-pages:watch', v(s.projectPagesCwd, ({ cwd }) => watchOutput(cwd)));
   ipcMain.handle('project-pages:rename', v(s.projectPagesRename, renameEntry));

@@ -2635,7 +2635,7 @@ export interface SessionManagerAPI {
     /** Read the project-pages library (knowledge/<id>/ pages and videos/<id>/ videos, each with its meta) as a `ProjectPagesGetResult`; empty lists if nothing exists yet. Never fires an LLM call. */
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
     /** Map the project's markdown link network from its root CLAUDE.md (read-only, bounded, no LLM) for the Tools pane. Scans on every call — no watcher, no cache. `ok:false` (with `error`) for a cwd `get` answers with empty lists (tmpdir / linked worktree), a folder that is not a git repo, or no root CLAUDE.md; rejects on an invalid cwd, like `get`. */
-    mdNetwork: (payload: { cwd: string }) => Promise<MdNetworkResult>;
+    mdNetwork: (payload: { cwd: string; recordFolders?: string[]; docFolders?: string[] }) => Promise<MdNetworkResult>;
     /** Read the saved Competitor matrix (project-pages/matrix/matrix.json) — read-only; writes go through project_matrix_write. */
     matrix: (payload: { cwd: string }) => Promise<CompetitorMatrixResult>;
     /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */

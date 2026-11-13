@@ -14,7 +14,7 @@ function doc(path: string, depth: number, linksOut = 0, linkedFrom = 1): MdNetwo
 }
 
 function network(nodes: MdNetworkNode[], edges: MdNetworkEdge[], findings: MdNetworkFinding[] = []): MdNetwork {
-  return { ok: true, root: 'CLAUDE.md', nodes, edges, findings, docs: nodes.length, links: edges.length, scopes: [] }
+  return { ok: true, root: 'CLAUDE.md', nodes, edges, findings, docs: nodes.length, links: edges.length, scopes: [], census: { docs: [], collections: [], counts: { tracked: 0, network: 0, records: 0, unlinked: 0, byRole: { map: 0, scoped: 0, agent: 0, record: 0, doc: 0 } }, gitWindow: { commits: 0, oldestMs: null }, warnings: [] } }
 }
 
 const ARCH = Array.from({ length: 9 }, (_, i) => `docs/arch/a${i + 1}.md`)

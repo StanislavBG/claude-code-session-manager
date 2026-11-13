@@ -1718,7 +1718,11 @@ export interface MdNetworkOrphan {
 /** Broken links come first (in walk order), then orphan groups (by folder). */
 export type MdNetworkFinding = MdNetworkBrokenLink | MdNetworkOrphan;
 
-/** A project's markdown link network, mapped from its root CLAUDE.md. */
+/**
+ * A project's markdown link network, mapped from its root CLAUDE.md, plus a per-doc
+ * census of every tracked .md (role, size, git recency, dead/stale refs, code mentions).
+ * Orphan findings leave out docs the census puts in a record collection.
+ */
 export interface MdNetwork {
   ok: true;
   /** The root doc, 'CLAUDE.md'. */
@@ -1733,6 +1737,8 @@ export interface MdNetwork {
   links: number;
   /** Top-level folders holding reachable docs, each with a trailing slash, sorted. */
   scopes: string[];
+  /** Every tracked .md; docs left unread past the 2000 cap have `lines`/`bytes` null. A failed git call adds a `warnings` entry, never an error. */
+  census: MdCensus;
 }
 
 /** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */

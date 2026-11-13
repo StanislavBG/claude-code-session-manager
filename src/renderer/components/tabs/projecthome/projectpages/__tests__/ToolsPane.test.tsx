@@ -73,6 +73,7 @@ const NET: MdNetwork = {
   docs: 58,
   links: 20,
   scopes: ['src/', 'plugins/'],
+  census: { docs: [], collections: [], counts: { tracked: 0, network: 0, records: 0, unlinked: 0, byRole: { map: 0, scoped: 0, agent: 0, record: 0, doc: 0 } }, gitWindow: { commits: 0, oldestMs: null }, warnings: [] },
 }
 const INFO = '58 docs · 20 links · 3 findings. A review opens an architect session that reports first and changes no files until you approve.'
 

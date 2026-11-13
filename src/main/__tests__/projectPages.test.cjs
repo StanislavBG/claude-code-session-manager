@@ -358,6 +358,13 @@ test('project-pages:md-network returns the scanner result for a repo cwd and ref
     ['broken-link', 'CLAUDE.md:3 → docs/gone.md'],
     ['orphan', 'docs/'],
   ]);
+  // A repo with no commits: the census still covers every tracked doc, recency degrades to a warning.
+  expect(result.census.docs.map((d) => [d.path, d.lastCommitMs])).toEqual([
+    ['CLAUDE.md', null],
+    ['docs/a.md', null],
+    ['docs/orphan.md', null],
+  ]);
+  expect(result.census.warnings).toEqual([expect.stringMatching(/^git history unavailable: /)]);
 
   config.addAllowedRoot(os.tmpdir());
   const refused = await mdNetwork({}, { cwd: os.tmpdir() });

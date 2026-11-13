@@ -11,12 +11,20 @@
  * (git only lists the files), and it does I/O, so it is not util/. It sits
  * beside memoryMdNetwork.cjs, the other reader of the same docs network.
  *
- * - buildMdNetwork({ files, root, exists }) — pure graph builder over in-memory docs.
- * - scanMdNetwork(cwd, deps) — thin I/O wrapper: one `git ls-files -z`, at most
- *   MAX_DOCS docs read (the root, then breadth-first along its links, then the
- *   rest shallowest-first, so the cap drops unreachable docs before reachable
+ * - buildMdNetwork({ files, root, exists, records }) — pure graph builder over
+ *   in-memory docs; `records` paths never appear in orphan findings.
+ * - scanMdNetwork(cwd, deps, opts) — thin I/O wrapper: one `git ls-files -z`, at
+ *   most MAX_DOCS docs read (the root, then breadth-first along its links, then
+ *   the rest shallowest-first, so the cap drops unreachable docs before reachable
  *   ones), at most MAX_DOC_BYTES each, READ_BATCH reads in parallel, async fs only.
  *   Untracked link targets (e.g. gitignored files) are checked on disk.
+ *   It also attaches a per-doc census (mdDocCensus.cjs + mdDocRefs.cjs) over
+ *   every tracked .md: one `git log --max-count=2000 --name-only` (64 MB buffer)
+ *   for recency, one `git grep -F -o` over non-.md files (16 MB buffer) for code
+ *   mentions, and at most MAX_REF_PROBES on-disk probes (READ_BATCH at a time)
+ *   for backticked paths git does not vouch for — unprobed ones count as
+ *   existing. A failing git call degrades to a census warning, never an error.
+ *   Docs in record collections (opts.recordFolders / heuristic) leave orphans.
  *
  * Followed: inline `[text](target)` links (images too) and `<target.md>`
  * autolinks, outside code fences, inline code and HTML comments. Ignored: any
@@ -29,6 +37,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execGit } = require('./git/gitExec.cjs');
+const { censusMdDocs, parseGitLog } = require('./mdDocCensus.cjs');
+const { backtickPaths, assessRefs, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
 
 const ROOT_DOC = 'CLAUDE.md';
 const MAX_DOCS = 2000;
@@ -38,6 +48,11 @@ const READ_BATCH = 32;
 const MAX_LINK_CHARS = 1024;
 /** `git ls-files -z` stdout cap; node's 1 MB default overflows near 15k tracked files. */
 const LS_FILES_MAX_BUFFER = 64 * 1024 * 1024;
+const LOG_ARGS = ['log', '--max-count=2000', '--no-renames', '--format=%x01%ct', '--name-only', '-z'];
+const LOG_MAX_BUFFER = 64 * 1024 * 1024;
+const GREP_MAX_BUFFER = 16 * 1024 * 1024;
+/** On-disk probes for backticked paths git does not vouch for, per scan. */
+const MAX_REF_PROBES = 500;
 const OWNER_NAMES = new Set(['CLAUDE.md', 'README.md', 'AGENTS.md']);
 const MISSING_CODES = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
 const DETAIL_MISSING = 'The link target doesn’t exist.';
@@ -60,8 +75,12 @@ const AUTOLINK_RE = /<([^<>\s]{1,1024})>/g;
  * @typedef {{ type: 'broken-link', file: string, line: number, target: string, to: string, where: string, detail: string }} MdNetworkBrokenLink
  * @typedef {{ type: 'orphan', where: string, count: number, paths: string[], detail: string }} MdNetworkOrphan
  * @typedef {MdNetworkBrokenLink | MdNetworkOrphan} MdNetworkFinding
- * @typedef {{ ok: true, root: string, nodes: MdNetworkNode[], edges: MdNetworkEdge[], findings: MdNetworkFinding[], docs: number, links: number, scopes: string[] }} MdNetwork
+ * @typedef {{ ok: true, root: string, nodes: MdNetworkNode[], edges: MdNetworkEdge[], findings: MdNetworkFinding[], docs: number, links: number, scopes: string[] }} MdLinkNetwork
+ * @typedef {MdLinkNetwork | { ok: false, error: string }} MdLinkNetworkResult
+ * @typedef {import('./mdDocCensus.cjs').MdCensus} MdCensus
+ * @typedef {MdLinkNetwork & { census: MdCensus }} MdNetwork
  * @typedef {MdNetwork | { ok: false, error: string }} MdNetworkResult
+ * @typedef {{ recordFolders?: string[], docFolders?: string[] }} ScanOpts
  * @typedef {{ fence: string, inComment: boolean }} LineState an open code fence / HTML comment
  */
 
@@ -289,7 +308,7 @@ function orphanDetail(root, count) {
     : `No link path from ${root} reaches these ${count} docs, so agents starting there never find them.`;
 }
 
-/** @param {string} root @returns {MdNetworkResult} */
+/** @param {string} root @returns {{ ok: false, error: string }} */
 function missingRoot(root) {
   return { ok: false, error: `no ${root} at the project root` };
 }
@@ -298,11 +317,12 @@ function missingRoot(root) {
  * Pure: the link network reachable from `root` over in-memory docs.
  * `exists(relPath)` vouches for link targets that are neither one of `files`
  * nor a folder holding one (code files, docs left unread, untracked files);
- * without it such targets are missing.
- * @param {{ files?: MdFile[], root?: string, exists?: (relPath: string) => boolean }} [input]
- * @returns {MdNetworkResult}
+ * without it such targets are missing. `records` (record-collection docs, not
+ * meant to be linked) are left out of orphan groups.
+ * @param {{ files?: MdFile[], root?: string, exists?: (relPath: string) => boolean, records?: ReadonlySet<string> }} [input]
+ * @returns {MdLinkNetworkResult}
  */
-function buildMdNetwork({ files = [], root = ROOT_DOC, exists } = {}) {
+function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
   try {
     const rootPath = toRepoPath(root);
     /** @type {Map<string, MdFile>} */
@@ -367,7 +387,7 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists } = {}) {
     /** @type {Map<string, string[]>} */
     const orphans = new Map();
     for (const p of docs.keys()) {
-      if (depth.has(p)) continue;
+      if (depth.has(p) || (records !== undefined && records.has(p))) continue;
       const top = topFolder(p);
       const group = orphans.get(top);
       if (group) group.push(p);
@@ -429,9 +449,10 @@ function gitFailure(err) {
  * I/O: scans the git project at `cwd` and builds its network. Never throws.
  * @param {string} cwd the project root (`git ls-files` paths are relative to it)
  * @param {ScanDeps} [deps] injectable I/O; defaults are git + async fs
+ * @param {ScanOpts} [opts] record-collection overrides for the census
  * @returns {Promise<MdNetworkResult>}
  */
-async function scanMdNetwork(cwd, deps = {}) {
+async function scanMdNetwork(cwd, deps = {}, opts = {}) {
   try {
     if (typeof cwd !== 'string' || cwd === '') return { ok: false, error: 'cwd must be a non-empty path' };
     /** @type {NonNullable<ScanDeps['execGit']>} */
@@ -542,11 +563,133 @@ async function scanMdNetwork(cwd, deps = {}) {
       });
     }
 
-    return buildMdNetwork({
-      files,
-      root: ROOT_DOC,
-      exists: (p) => onDisk.has(p) || (!gone.has(p) && (trackedSet.has(p) || trackedFolders.has(p))),
+    /** @param {string} p */
+    const vouched = (p) => !gone.has(p) && (trackedSet.has(p) || trackedFolders.has(p));
+    /** @param {string} p */
+    const present = (p) => onDisk.has(p) || vouched(p);
+    const network = buildMdNetwork({ files, root: ROOT_DOC, exists: present });
+    if (!network.ok) return network;
+
+    // ── Census ──
+    /** @type {string[]} */
+    const warnings = [];
+
+    // Recency: one capped git log; newest first, so the first sighting wins.
+    /** @type {import('./mdDocCensus.cjs').GitLogEntry[]} */
+    let log = [];
+    try {
+      const out = String(await runGit(cwd, LOG_ARGS, { maxBuffer: LOG_MAX_BUFFER }));
+      log = parseGitLog(out);
+      if (log.length === 0 && out.trim() !== '') warnings.push('git history unavailable: unparseable git log output');
+    } catch (err) {
+      warnings.push(`git history unavailable: ${gitFailure(err)}`);
+    }
+    /** @type {Map<string, number>} */
+    const lastCommit = new Map();
+    for (const entry of log) {
+      for (const f of entry.files) if (!lastCommit.has(f)) lastCommit.set(f, entry.ms);
+    }
+    /** @param {string} p */
+    const lastCommitOf = (p) => lastCommit.get(p) ?? null;
+
+    /** @type {Map<string, { depth: number, linkedFrom: number }>} */
+    const reachable = new Map(network.nodes.map((n) => [n.path, { depth: n.depth, linkedFrom: n.linkedFrom }]));
+    /** @type {Map<string, MdFile>} */
+    const readByPath = new Map(files.map((f) => [f.path, f]));
+
+    // Backticked paths git does not vouch for: probed on disk, capped; the rest count as existing.
+    /** @type {Map<string, boolean>} */
+    const probed = new Map();
+    /** @type {string[]} */
+    const toProbe = [];
+    const queuedProbes = new Set();
+    /** @type {Map<MdFile, string[]>} */
+    const tokensOf = new Map();
+    for (const file of files) {
+      const tokens = backtickPaths(file.text);
+      tokensOf.set(file, tokens);
+      const dir = path.posix.dirname(file.path);
+      for (const tok of tokens) {
+        const rootForm = toRepoPath(tok);
+        const forms = dir === '.' ? [rootForm] : [rootForm, toRepoPath(path.posix.join(dir, tok))];
+        for (const rel of forms) {
+          if (rel === '.' || rel === '..' || rel.startsWith('../')) continue;
+          if (vouched(rel)) break; // assessRefs takes the first existing form
+          if (onDisk.has(rel) || queuedProbes.has(rel) || toProbe.length >= MAX_REF_PROBES) continue;
+          queuedProbes.add(rel);
+          toProbe.push(rel);
+        }
+      }
+    }
+    for (let i = 0; i < toProbe.length; i += READ_BATCH) {
+      const batch = toProbe.slice(i, i + READ_BATCH);
+      const hits = await Promise.all(batch.map(probe));
+      batch.forEach((rel, k) => probed.set(rel, hits[k]));
+    }
+    /** @param {string} p */
+    const refExists = (p) => {
+      if (present(p)) return true;
+      if (gone.has(p)) return false;
+      const hit = probed.get(p);
+      return hit === undefined ? true : hit;
+    };
+
+    /** @type {Map<string, import('./mdDocCensus.cjs').MdDocRefs>} */
+    const refs = new Map();
+    for (const file of files) {
+      const linkTargets = linksOf(file)
+        .filter((l) => !l.escapes && present(l.to))
+        .map((l) => l.to);
+      refs.set(
+        file.path,
+        assessRefs({
+          docPath: file.path,
+          linkTargets,
+          tokens: tokensOf.get(file) ?? [],
+          docMs: lastCommitOf(file.path),
+          exists: refExists,
+          lastCommitOf,
+        }),
+      );
+    }
+
+    // Code mentions: one git grep over every non-.md tracked file.
+    /** @type {Map<string, string[]>} */
+    let codeMentions = new Map();
+    const { patterns, owner } = mentionPatterns(docPaths);
+    if (patterns.length > 0) {
+      const grepArgs = ['grep', '--no-color', '-I', '-F', '-o', '--null', ...patterns.flatMap((p) => ['-e', p]), '--', '.', ':(exclude)*.md'];
+      try {
+        codeMentions = parseMentions(String(await runGit(cwd, grepArgs, { maxBuffer: GREP_MAX_BUFFER })), owner);
+      } catch (err) {
+        const stderr = errorField(err, 'stderrText');
+        const noMatches = errorField(err, 'code') === 1 && !(typeof stderr === 'string' && stderr.trim() !== '');
+        if (!noMatches) warnings.push(`code mentions unavailable: ${gitFailure(err)}`);
+      }
+    }
+
+    const docs = docPaths.map((p) => {
+      const file = readByPath.get(p);
+      if (!file) return { path: p, text: null, lines: null, bytes: null };
+      const { text } = file;
+      return { path: p, text, lines: text === '' ? 0 : text.split('\n').length, bytes: Buffer.byteLength(text) };
     });
+    const census = censusMdDocs({
+      root: ROOT_DOC,
+      docs,
+      reachable,
+      log,
+      refs,
+      codeMentions,
+      recordFolders: opts.recordFolders,
+      docFolders: opts.docFolders,
+    });
+    census.warnings.unshift(...warnings);
+
+    const records = new Set(census.docs.filter((d) => d.role === 'record').map((d) => d.path));
+    if (records.size === 0) return { ...network, census };
+    const pruned = buildMdNetwork({ files, root: ROOT_DOC, exists: present, records });
+    return pruned.ok ? { ...pruned, census } : pruned;
   } catch (err) {
     return { ok: false, error: errorText(err) };
   }

@@ -43,6 +43,21 @@ test('sidecar round-trip under SM_AGENT_CLI_STATE_DIR', () => {
   expect(Number.isNaN(Date.parse(got.updatedAt))).toBe(false);
 });
 
+test('with SM_AGENT_CLI_STATE_DIR unset the root is under SM_SCHEDULER_HOME', () => {
+  delete process.env.SM_AGENT_CLI_STATE_DIR;
+  const prevHome = process.env.SM_SCHEDULER_HOME;
+  // A scheduler home distinct from $HOME/.claude/session-manager, so a hand-built
+  // os.homedir() root cannot coincide with it.
+  const home = path.join(tmp, 'sched-home');
+  process.env.SM_SCHEDULER_HOME = home;
+  try {
+    expect(store.transcriptPathFor(ID)).toBe(path.join(home, 'agent-cli', 'transcripts', `${ID}.jsonl`));
+  } finally {
+    if (prevHome === undefined) delete process.env.SM_SCHEDULER_HOME;
+    else process.env.SM_SCHEDULER_HOME = prevHome;
+  }
+});
+
 test('transcriptPathFor resolves under <root>/transcripts', () => {
   expect(store.transcriptPathFor(ID)).toBe(path.join(tmp, 'transcripts', `${ID}.jsonl`));
 });

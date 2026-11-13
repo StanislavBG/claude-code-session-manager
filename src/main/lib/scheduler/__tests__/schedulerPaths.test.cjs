@@ -36,6 +36,7 @@ const ROUTED_MODULES = [
   'scripts/scheduler-mcp-server.cjs',
   'scripts/replay-verdicts.cjs',
   'scripts/audit-ops-hygiene.cjs',
+  'src/main/lib/agent-cli/agentCliSessionStore.cjs',
 ];
 
 const ENV_KEYS = ['SM_SCHEDULER_HOME', 'SM_SCHEDULER_LOG_CWD', 'SM_ADMIN_TOKEN_PATH', 'SM_DEV', 'SM_E2E'];
@@ -70,6 +71,11 @@ test('every resolver lands under SM_SCHEDULER_HOME', () => {
   expect(sp.sessionSlotsConfigPath()).toBe(path.join(tmpHome, 'session-slots-config.json'));
   expect(sp.adminTokenPath()).toBe(path.join(tmpHome, 'admin-api.json'));
   expect(sp.watchdogLogsDir()).toBe(path.join(tmpHome, 'logs'));
+});
+
+test('agentCliStateRoot() lands under SM_SCHEDULER_HOME', () => {
+  expect(sp.agentCliStateRoot()).toBe(path.join(process.env.SM_SCHEDULER_HOME, 'agent-cli'));
+  expect(sp.agentCliStateRoot()).toBe(path.join(tmpHome, 'agent-cli'));
 });
 
 test('resolvers are lazy: changing the env changes the result without re-requiring', () => {

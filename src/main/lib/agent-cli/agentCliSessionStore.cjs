@@ -5,14 +5,15 @@
 //   <root>/sessions/<id>.json     — sidecar mapping to the CLI's native session id
 //   <root>/transcripts/<id>.jsonl — Claude-transcript-compatible JSONL so the
 //                                   existing tail / Chat feed / usage readers work
-// <root> = $SM_AGENT_CLI_STATE_DIR or ~/.claude/session-manager/agent-cli,
+// <root> = $SM_AGENT_CLI_STATE_DIR or schedulerPaths.agentCliStateRoot()
+// (<SM_SCHEDULER_HOME or ~/.claude/session-manager>/agent-cli),
 // resolved per call so tests (and env changes) take effect without re-require.
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { writeJsonAtomicSync, readJsonOrSync } = require('../util/atomicFs.cjs');
+const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIR_MODE = 0o700;
@@ -20,7 +21,7 @@ const DIR_MODE = 0o700;
 function rootDir() {
   const env = process.env.SM_AGENT_CLI_STATE_DIR;
   if (typeof env === 'string' && env.trim()) return env;
-  return path.join(os.homedir(), '.claude', 'session-manager', 'agent-cli');
+  return schedulerPaths.agentCliStateRoot();
 }
 
 function assertId(claudeSessionId) {

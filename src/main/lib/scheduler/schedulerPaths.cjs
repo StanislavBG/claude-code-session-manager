@@ -123,6 +123,8 @@ function historyRollupCursorPath() { return assertNotLiveRoot(path.join(schedule
 function historyRollupLockPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'history-rollup.lock'), 'historyRollupLockPath'); }
 function historyRollupPath() { return path.join(schedulerHome(), 'history-rollup.jsonl'); }
 function auditLogPath() { return path.join(schedulerHome(), 'audit-log.jsonl'); }
+/** Non-Claude agent-CLI session sidecars and transcripts (agent-cli/agentCliSessionStore.cjs). */
+function agentCliStateRoot() { return assertNotLiveRoot(path.join(schedulerHome(), 'agent-cli'), 'agentCliStateRoot'); }
 function procnamesRoot() { return path.join(schedulerHome(), 'procnames'); }
 /** Legacy global history sidecar (read-only; new appends go to per-project shards). */
 function queueHistoryPath() { return path.join(scheduledPlansRoot(), 'history.jsonl'); }
@@ -212,6 +214,7 @@ module.exports = {
   historyRollupPath,
   auditLogPath,
   procnamesRoot,
+  agentCliStateRoot,
   queueHistoryPath,
   instanceLockPath,
   heapSnapshotDir,

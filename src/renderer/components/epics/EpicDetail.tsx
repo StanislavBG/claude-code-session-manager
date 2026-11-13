@@ -6,6 +6,7 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, isWebRemote, WEB_TERMINAL_TOOLTIP, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { EpicAppPreview } from './EpicAppPreview'
+import { EpicChangesView } from './EpicChangesView'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, WORKTREE_TONE, InboundProposalCard } from './epic-primitives'
 import { inboundFeedbackOrigin, inboundSeriesSiblings } from '../../lib/epicOrigin'
@@ -90,7 +91,7 @@ const EMPTY_EVENTS: PromptSessionEvent[] = []
 const EMPTY_JOBS: ScheduleJob[] = []
 const EMPTY_TURNS: ChatTurn[] = []
 
-type ViewKey = 'discussion' | 'prds' | 'runs'
+type ViewKey = 'discussion' | 'prds' | 'runs' | 'changes'
 
 /**
  * The Epic's h1, editable in place — the ONE surface where a session's title
@@ -743,6 +744,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // except the single loudest level, which means "show me the raw record".
   const injectedPreamble = showsInjectedPreamble(verbosity) ? ('shown' as const) : ('hidden' as const)
   useEffect(() => {
+    // Discussion only — a running Epic must never yank the Changes (or
+    // PRDs/Runs) view to the bottom on every stream delta.
+    if (view !== 'discussion') return
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
     // Auto-scroll to bottom on Epic switch, on switching back to Discussion,
@@ -801,6 +805,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     { key: 'discussion', label: 'Discussion' },
     { key: 'prds', label: `PRDs ${attachedPrds.length}` },
     { key: 'runs', label: `Runs ${epicRuns.length}` },
+    { key: 'changes', label: 'Changes' },
   ]
 
   const onMarkCompleted = () => {
@@ -1286,6 +1291,10 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               epicRuns.map((j) => <RunCard key={j.slug} job={j} />)
             )}
           </div>
+        )}
+
+        {view === 'changes' && (
+          <EpicChangesView promptSession={promptSession} onSent={() => setView('discussion')} />
         )}
       </div>
       )}

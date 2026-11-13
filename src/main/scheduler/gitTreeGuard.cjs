@@ -418,7 +418,8 @@ async function committedInWindow(cwd, startedAt, finishedAt) {
       : new Date().toISOString();
     execFile(
       'git',
-      ['-C', cwd, 'log', `--exclude=${sharedGitExec.STRANDED_REF_PREFIX}*`, '--all', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
+      // refs/sm-epic-review/* holds Epic Changes pin/snapshot commits — never a job's evidence.
+      ['-C', cwd, 'log', `--exclude=${sharedGitExec.STRANDED_REF_PREFIX}*`, '--exclude=refs/sm-epic-review/*', '--all', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
       { timeout: 10_000, windowsHide: true },
       (err, stdout) => { resolve(!err && String(stdout || '').trim().length > 0); },
     );

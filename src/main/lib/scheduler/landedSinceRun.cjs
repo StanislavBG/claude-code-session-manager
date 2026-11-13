@@ -44,7 +44,8 @@ function landedSinceRun(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_TIM
     }
     execFile(
       'git',
-      ['-C', cwd, 'log', `--exclude=${STRANDED_REF_PREFIX}*`, '--all', `--since=${sinceIso}`, '--format=%H', '--', ...paths],
+      // refs/sm-epic-review/* holds Epic Changes pin/snapshot commits — never a job's evidence.
+      ['-C', cwd, 'log', `--exclude=${STRANDED_REF_PREFIX}*`, '--exclude=refs/sm-epic-review/*', '--all', `--since=${sinceIso}`, '--format=%H', '--', ...paths],
       { timeout: timeoutMs, windowsHide: true },
       (err, stdout) => {
         if (err) { resolve([]); return; }

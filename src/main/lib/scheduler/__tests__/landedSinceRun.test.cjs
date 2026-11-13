@@ -172,3 +172,22 @@ test('landedSinceRun --all scan excludes pinned refs/sm-stranded commits', async
   execFileSync('git', ['-C', dir, 'branch', '-q', '-D', 'tmp']);
   assert.deepStrictEqual(await landedSinceRun(dir, since, ['src/stranded.js']), []);
 });
+
+test('landedSinceRun --all scan excludes refs/sm-epic-review pin commits, still reports branch commits', async () => {
+  const dir = mkRepoOnMain();
+  const since = new Date().toISOString();
+  const t = Math.floor(Date.parse(since) / 1000) + 2;
+  commitFile(dir, 'base.txt', 'b', 'base', t);
+  execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'tmp']);
+  commitFile(dir, 'src/pinned.js', 'p', 'pinned', t + 1);
+  const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD']).toString().trim();
+  execFileSync('git', ['-C', dir, 'update-ref', 'refs/sm-epic-review/x/y/head', sha]);
+  execFileSync('git', ['-C', dir, 'checkout', '-q', 'main']);
+  execFileSync('git', ['-C', dir, 'branch', '-q', '-D', 'tmp']);
+  assert.deepStrictEqual(await landedSinceRun(dir, since, ['src/pinned.js']), []);
+  execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'feature']);
+  commitFile(dir, 'src/pinned.js', 'q', 'branch commit', t + 2);
+  const branchSha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD']).toString().trim();
+  execFileSync('git', ['-C', dir, 'checkout', '-q', 'main']);
+  assert.deepStrictEqual(await landedSinceRun(dir, since, ['src/pinned.js']), [branchSha]);
+});

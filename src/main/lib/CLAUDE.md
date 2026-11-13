@@ -4,6 +4,7 @@ Shared main-process helpers (CommonJS `.cjs`). Layout source of truth: `scripts/
 
 ## What's here
 
+- `agent-cli/` — other agent CLIs: registry, adapters, session store, turn planner, IPC.
 - `app-preview/` — Epic dev-server preview processes (spawn, URL detect, stop, orphan sweep).
 - `claude/` — claude CLI binary, caps, model/effort resolution.
 - `epic/` — Epic mint, worktrees, active index, spawn plan/cwd, transcripts.

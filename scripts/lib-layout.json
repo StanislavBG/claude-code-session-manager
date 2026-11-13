@@ -163,5 +163,10 @@
   "appPreviewScripts": "app-preview",
   "appPreviewManager": "app-preview",
   "appPreviewIpc": "app-preview",
-  "appPreviewSweep": "app-preview"
+  "appPreviewSweep": "app-preview",
+  "agentCliEvents": "agent-cli",
+  "agentCliRegistry": "agent-cli",
+  "agentCliSessionStore": "agent-cli",
+  "agentCliTurn": "agent-cli",
+  "agentCliIpc": "agent-cli"
 }

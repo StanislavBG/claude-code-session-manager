@@ -104,6 +104,16 @@
 - Invariants: no embedded webview (URL goes to `shell.openExternal`; `will-attach-webview` stays blocked in `index.cjs`); at most one preview per Epic; the user confirms the script before it runs; killed on Epic complete/delete (renderer pre-merge stop in `promptSessions.ts`, `epicWorktreeMerge.cjs` merge-to-main, `activeIndexMerge.cjs` index removal) and on app quit (`stopAll` in `before-quit` / `will-quit`); nothing is written under the operations root.
 - Known limits: `npm run` only (no pnpm/yarn/bun runner); `PORT` is a hint (Vite ignores it) — the URL comes from the server's output; gitignored files (`.env`) are absent from Epic worktrees; secret-named env vars (TOKEN, API_KEY, SECRET, …) are stripped by `cleanChildEnv` as in terminal tabs; `npm` must be on the app's PATH; the orphan sweep is Linux-only.
 
+**Agent CLIs** (non-Claude Epics — `PromptSession.agentCli` set; absent = Claude Code):
+- `src/main/lib/agent-cli/agentCliEvents.cjs` — the shared adapter contract: CLI ids (`isAgentCliId` / `isNonClaudeAgentCli`) and the Claude stream-json event builders every adapter emits so `chatRunner.cjs`'s `processLine` consumes them unchanged; pure.
+- `src/main/lib/agent-cli/agentCliRegistry.cjs` — `AGENT_CLI_CATALOG` (label + binaries per CLI), binary resolver with per-CLI test override, bounded cached detection probe, lazy `adapterFor`; detects only, never installs (not in `prereqs.cjs`).
+- `src/main/lib/agent-cli/adapters/{codex,gemini,antigravity,cursor,opencode}.cjs` — one pure adapter per CLI: headless + interactive argv (prompt over stdin, except Cursor's guarded positional arg) and native JSON → contract-event translation.
+- `src/main/lib/agent-cli/agentCliSessionStore.cjs` — machine-level state under `$SM_AGENT_CLI_STATE_DIR` or `~/.claude/session-manager/agent-cli` (not the ops root): per-Epic native-session sidecar + Claude-compatible transcript JSONL the existing tail/Chat/usage readers read.
+- `src/main/lib/agent-cli/agentCliTurn.cjs` — plans ONE Chat turn for `chatRunner.cjs`: binary, argv + stdin, inherited auth env, stream parser, transcript writer; model is `epic.agentCliModel` only (persona `--model` is Claude-only); spawns nothing.
+- `src/main/lib/agent-cli/agentCliIpc.cjs` — IPC `agentCli:detect` (installed CLIs for the New Session picker) and `agentCli:terminal-command` (the shell line the Epic Terminal pane types); desktop-only, not in the web-remote allowlist.
+- `src/renderer/components/epics/AgentCliPicker.tsx` — the New Session agent-CLI choice (Claude Code default), fed by `agentCli:detect`; writes `agentCli` / `agentCliModel` at mint.
+- `src/renderer/lib/agentCliCatalog.ts` — renderer display labels per CLI id (`agentCliLabel`) for the Epic header / queue chip; mirrors the registry's labels, held in step by `agentCliCatalogParity.test.cjs`.
+
 ## Renderer data flow
 
 The renderer uses isolated zustand stores (no cross-store subscription). Data flows: **main process → IPC broadcast → store subscription → selector → component hook**.

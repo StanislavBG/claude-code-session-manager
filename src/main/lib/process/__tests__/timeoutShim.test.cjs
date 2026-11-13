@@ -131,22 +131,73 @@ test('kills a grandchild too, by signalling the whole process group', () => {
   const pidFile = path.join(dir, 'grandchild.pid');
   const grandchildScript = path.join(dir, 'grandchild.cjs');
   const childScript = path.join(dir, 'child.cjs');
-  fs.writeFileSync(
-    grandchildScript,
-    "require('node:fs').writeFileSync(process.argv[2], String(process.pid));\nsetInterval(()=>{},1000);\n",
-  );
+  fs.writeFileSync(grandchildScript, 'setInterval(()=>{},1000);\n');
+  // The CHILD records the grandchild's pid synchronously, the moment spawn()
+  // returns — no dependence on the grandchild's own node boot finishing
+  // before DURATION, which is what made the old pid-file write racy under load.
   fs.writeFileSync(
     childScript,
-    "require('node:child_process').spawn(process.execPath, [require('node:path').join(__dirname, 'grandchild.cjs'), process.argv[2]], { stdio: 'ignore' });\nsetInterval(()=>{},1000);\n",
+    "const gc = require('node:child_process').spawn(process.execPath, [require('node:path').join(__dirname, 'grandchild.cjs')], { stdio: 'ignore' });\nrequire('node:fs').writeFileSync(process.argv[2], String(gc.pid));\nsetInterval(()=>{},1000);\n",
   );
 
-  const r = runShim(['0.4', process.execPath, childScript, pidFile]);
-  expect(r.status).toBe(124);
+  let pid = 0;
+  let gone = false;
+  try {
+    const r = runShim(['1.5', process.execPath, childScript, pidFile]);
+    if (fs.existsSync(pidFile)) pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    expect(r.status).toBe(124);
+    expect(Number.isInteger(pid) && pid > 0).toBe(true);
 
-  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-  expect(Number.isInteger(pid)).toBe(true);
-  expect(() => process.kill(pid, 0)).toThrow();
-});
+    // The shim exits as soon as the direct child dies; the grandchild has been
+    // signalled by then but, under load, may not have finished dying. Poll
+    // (bounded) instead of probing once. If the shim signalled only the direct
+    // child, the grandchild is never signalled and lives on (setInterval),
+    // so the deadline expires and the test fails.
+    gone = waitForPidGone(pid, grandchildScript, 5000);
+    expect(gone).toBe(true);
+  } finally {
+    // Never leak the grandchild, whichever assertion failed — but only
+    // SIGKILL a pid that is still provably OUR grandchild (never a recycled pid).
+    if (!gone && pid > 0 && isOurLiveProcess(pid, grandchildScript)) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+  }
+}, 15000);
+
+/**
+ * True when `pid` is a live (non-zombie) process running `marker`. A zombie
+ * still answers kill(pid, 0) until its (re)parent reaps it, and a recycled
+ * pid may answer it too (or throw EPERM) — neither is our grandchild alive.
+ * On platforms without /proc, falls back to the plain kill(pid, 0) probe.
+ */
+function isOurLiveProcess(pid, marker) {
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    if (err && (err.code === 'ESRCH' || err.code === 'EPERM')) return false;
+    throw err;
+  }
+  if (process.platform !== 'linux') return true;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+    if (state === 'Z' || state === 'X') return false;
+    return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(marker);
+  } catch {
+    return false; // vanished between the probe and the read
+  }
+}
+
+/** Synchronously poll until `pid` is no longer our live grandchild, or `timeoutMs` elapses. */
+function waitForPidGone(pid, marker, timeoutMs) {
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!isOurLiveProcess(pid, marker)) return true;
+    if (Date.now() >= deadline) return false;
+    Atomics.wait(sleeper, 0, 0, 25);
+  }
+}
 
 test('ensureTimeoutShim installs the shim pair, is idempotent, and sets the launcher mode to 0755', async () => {
   const homeDir = mkTmp('sm-timeout-shim-home-');

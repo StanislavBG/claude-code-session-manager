@@ -75,6 +75,7 @@ const promptSessionsCreateEpic = require('./lib/epic/promptSessionsCreateEpic.cj
 const customerFeedbackIpc = require('./lib/feedback-remote/customerFeedbackIpc.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const epicWorktreeMerge = require('./lib/epic/epicWorktreeMerge.cjs');
+const { registerAppPreviewHandlers, getAppPreviewManager } = require('./lib/app-preview/appPreviewIpc.cjs');
 const epicWorktreeProjectConfig = require('./lib/epic/epicWorktreeProjectConfig.cjs');
 const macroLibrary = require('./lib/persona-macro/macroLibrary.cjs');
 const { resolveModelCatalog } = require('./lib/claude/modelCatalog.cjs');
@@ -1086,6 +1087,7 @@ require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();
 epicWorktreeMint.registerEpicWorktreeMintHandlers();
 epicWorktreeMerge.registerEpicWorktreeMergeHandlers();
+registerAppPreviewHandlers(ipcMain, { getWindow: () => mainWindow });
 require('./lib/epic/epicReopen.cjs').registerEpicReopenHandlers();
 epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();
 registerMemoryAggregateIpc();
@@ -1693,6 +1695,8 @@ function runShutdownCleanup() {
   // later before-quit/will-quit firing is a safe no-op.
   releaseSchedulerOwnership();
   try { scheduler.stop(); } catch { /* */ }
+  // App preview dev servers die with the app (sync SIGKILL of each tree).
+  try { getAppPreviewManager().stopAll(); } catch { /* */ }
   // PRD F1 v2 §IPC plumbing: must unregisterAll on will-quit.
   try { globalShortcut.unregisterAll(); } catch { /* */ }
   voiceHotkey.disposeOnQuit();
@@ -1723,6 +1727,7 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   releaseSchedulerOwnership();
   supervisor.stopSupervisor();
+  try { getAppPreviewManager().stopAll(); } catch { /* */ }
   ptyManager.killAll();
   configMgr.closeAllWatchers();
   closeAllProjectPagesWatchers();

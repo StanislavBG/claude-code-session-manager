@@ -285,6 +285,25 @@ const promptSessionsMergeToMain = z.object({
   carriedPaths: z.array(z.string().min(1).max(4096)).max(100000).optional(),
 });
 
+// App preview (lib/app-preview/appPreviewIpc.cjs). Main resolves the dev
+// server's dir from the active index — the renderer sends only cwd + epicId,
+// never a path to run in. The script regex mirrors appPreviewScripts.cjs's
+// SCRIPT_NAME_RE (kept literal here; a test asserts they match): no leading
+// '-' (so '--inspect' can't become an npm flag) and no shell metacharacters.
+const APP_PREVIEW_SCRIPT_RE = /^[A-Za-z0-9@_][A-Za-z0-9:_.@/-]{0,99}$/;
+const appPreviewScripts = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_ID_RE),
+});
+const appPreviewStart = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_ID_RE),
+  script: z.string().regex(APP_PREVIEW_SCRIPT_RE),
+});
+const appPreviewStop = z.object({
+  epicId: z.string().regex(PROMPT_SESSION_ID_RE),
+});
+
 // Renderer entry points for the per-project "disable Epic worktree
 // isolation" UI toggle (lib/epic/epicWorktreeProjectConfig.cjs) — PRD 1035.
 const promptSessionsGetWorktreeDisabled = z.object({
@@ -1434,7 +1453,11 @@ module.exports = {
   SAS_GATED_READS,
   MUTATE_COMMANDS,
   ALLOWED_COMMANDS,
+  APP_PREVIEW_SCRIPT_RE,
   schemas: {
+    appPreviewScripts,
+    appPreviewStart,
+    appPreviewStop,
     webRemotePair,
     webRemoteRevokeDevice,
     webRemoteAuditTail,

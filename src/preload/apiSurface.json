@@ -1484,6 +1484,13 @@
   "remote": "read"
  },
  {
+  "ns": "epicChanges",
+  "method": "get",
+  "channel": "epicChanges:get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
   "ns": "auditLog",
   "method": "append",
   "channel": "auditLog:append",

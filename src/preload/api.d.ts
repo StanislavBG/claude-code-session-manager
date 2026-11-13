@@ -1858,6 +1858,52 @@ export interface GitFileStatus {
   workTreeStatus: string;
 }
 
+/** One line of a unified-diff hunk. `oldNo`/`newNo` are null on the side the line doesn't exist. */
+export interface DiffLine {
+  kind: 'add' | 'del' | 'ctx';
+  oldNo: number | null;
+  newNo: number | null;
+  text: string;
+}
+
+export interface DiffHunk {
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  path: string;
+  oldPath: string | null;
+  status: 'added' | 'deleted' | 'modified' | 'renamed';
+  binary: boolean;
+  additions: number;
+  deletions: number;
+  hunks: DiffHunk[];
+  truncated: boolean;
+  tooLarge?: boolean;
+}
+
+/** One reviewable slice of an Epic's changes: the session's own worktree work, or one landed PRD. */
+export interface EpicChangeSection {
+  kind: 'session' | 'prd';
+  key: string;
+  label: string;
+  slug?: string;
+  base: string | null;
+  head: string | null;
+  live: boolean;
+  files: DiffFile[];
+  error?: string;
+}
+
+export type EpicChanges =
+  | { ok: true; epicId: string; status: string; sections: EpicChangeSection[]; truncated: boolean }
+  | { ok: false; reason: string };
+
 export interface GitStatusResult {
   branch: string;
   ahead: number;
@@ -2599,6 +2645,11 @@ export interface SessionManagerAPI {
      *  tool calls against src/scripts/plugins/bin in the Epic's own claude session transcript).
      *  Read-only, no new writer — reads zero on any missing/unreadable state, never throws. */
     get: (cwd: string, epicId: string, claudeSessionId?: string | null) => Promise<{ prdsQueued: number; inlineEdits: number }>;
+  };
+  epicChanges: {
+    /** Read-only diff of an Epic's changes, sectioned by session pin and per-PRD landed commit.
+     *  Never throws for a missing Epic/worktree — resolves `{ ok: false, reason }`. */
+    get: (args: { cwd: string; epicId: string }) => Promise<EpicChanges>;
   };
   auditLog: {
     /** Append one Epic-lifecycle audit event to ~/.claude/session-manager/audit-log.jsonl.

@@ -432,6 +432,11 @@ contextBridge.exposeInMainWorld('api', {
     get: (cwd, epicId, claudeSessionId) =>
       ipcRenderer.invoke('epicDelegationStats:get', { cwd, epicId, claudeSessionId: claudeSessionId ?? null }),
   },
+  epicChanges: {
+    // ONE payload object ({ cwd, epicId }) — the web remote forwards renderer
+    // args unchanged to handler(event, ...args) and validated() reads one payload.
+    get: (args) => ipcRenderer.invoke('epicChanges:get', args),
+  },
   auditLog: {
     append: (kind, fields) => ipcRenderer.invoke('auditLog:append', { kind, ...fields }),
   },

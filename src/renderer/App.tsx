@@ -12,6 +12,7 @@ import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { SimpleShell } from './components/SimpleShell'
 import { Toast } from './components/ui/Toast'
+import { MacroCostDialog } from './components/epics/MacroCostDialog'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
 import { toast } from './state/toast'
@@ -755,6 +756,7 @@ export function App() {
           raised from one is visible, and below `Z.recording` so the privacy
           banner is never obscured. See lib/zLayers.ts. */}
       <Toast />
+      <MacroCostDialog />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

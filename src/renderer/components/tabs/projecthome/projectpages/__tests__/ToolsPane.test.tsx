@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ToolsPane } from '../ToolsPane'
 import { useToast } from '../../../../../state/toast'
-import type { AgentPersona, Macro, MdNetwork, MdNetworkResult } from '../../../../../../preload/api'
+import type { AgentPersona, Macro, MdCensus, MdDoc, MdDocRole, MdNetwork, MdNetworkResult } from '../../../../../../preload/api'
 
 const CWD = '/p/alpha'
 
@@ -51,6 +51,24 @@ const ASK = macro({
 const MATRIX_TOOL = macro({ id: 'builtin-competitor-matrix', label: 'Competitor matrix', builtin: true })
 const SESSIONS_ONLY = macro({ id: 'sessions-only', label: 'Elsewhere', surface: 'sessions' })
 
+function mdDoc(path: string, role: MdDocRole, depth: number | null): MdDoc {
+  return {
+    path, role, depth, lines: 10, bytes: 200, lastCommitMs: null, commits: 1, linkedFrom: depth === null ? 0 : 1,
+    codeRefs: 0, codeRefFiles: [], deadRefs: [], changedSince: [], collection: null,
+  }
+}
+
+/** A minimal census over the fixture's docs: 60 tracked, 58 in the network, 2 unlinked, no records. */
+function census(counts: Partial<MdCensus['counts']> = {}): MdCensus {
+  return {
+    docs: [mdDoc('CLAUDE.md', 'map', 0), mdDoc('src/CLAUDE.md', 'scoped', 1), mdDoc('plugins/CLAUDE.md', 'scoped', 1), mdDoc('notes/a.md', 'doc', null)],
+    collections: [],
+    counts: { tracked: 60, network: 58, records: 0, unlinked: 2, byRole: { map: 1, scoped: 2, agent: 0, record: 0, doc: 57 }, ...counts },
+    gitWindow: { commits: 0, oldestMs: null },
+    warnings: [],
+  }
+}
+
 /** A scan of 58 docs / 20 links with three findings (two broken links, one orphan group). */
 const NET: MdNetwork = {
   ok: true,
@@ -73,9 +91,10 @@ const NET: MdNetwork = {
   docs: 58,
   links: 20,
   scopes: ['src/', 'plugins/'],
-  census: { docs: [], collections: [], counts: { tracked: 0, network: 0, records: 0, unlinked: 0, byRole: { map: 0, scoped: 0, agent: 0, record: 0, doc: 0 } }, gitWindow: { commits: 0, oldestMs: null }, warnings: [] },
+  census: census(),
 }
-const INFO = '58 docs · 20 links · 3 findings. A review opens an architect session that reports first and changes no files until you approve.'
+const NOTE = 'A review opens an architect session that reports first and changes no files until you approve.'
+const INFO = `60 tracked docs · 58 in the network · 2 unlinked · 20 links · 3 findings. ${NOTE}`
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -92,6 +111,7 @@ const listPersonas = vi.fn()
 const mdNetwork = vi.fn<(payload: { cwd: string }) => Promise<MdNetworkResult>>()
 const matrix = vi.fn()
 const open = vi.fn()
+const read = vi.fn()
 
 beforeEach(() => {
   save.mockReset()
@@ -103,6 +123,8 @@ beforeEach(() => {
   mdNetwork.mockReturnValue(new Promise<MdNetworkResult>(() => {}))
   open.mockReset()
   open.mockResolvedValue({ ok: true })
+  read.mockReset()
+  read.mockResolvedValue({ ok: true, text: '# Doc', size: 5 })
   matrix.mockReset()
   matrix.mockReturnValue(new Promise(() => {}))
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
@@ -111,6 +133,7 @@ beforeEach(() => {
     agents: { listPersonas, onChanged: () => () => {} },
     projectPages: { mdNetwork, matrix },
     shell: { open },
+    files: { read },
   }
 })
 
@@ -421,9 +444,17 @@ describe('ToolsPane Review MD network link map', () => {
     expect((q('project-home-review-refresh') as HTMLButtonElement).disabled).toBe(true)
     // The last map stays up while the new scan runs.
     expect(q('md-link-map-svg')).not.toBeNull()
-    await act(async () => { second.resolve({ ...NET, docs: 60, findings: [] }) })
-    expect(infoText()).toBe('60 docs · 20 links · 0 findings. A review opens an architect session that reports first and changes no files until you approve.')
+    // A scan without a census keeps the bare doc count.
+    await act(async () => { second.resolve({ ...NET, docs: 60, findings: [], census: undefined as unknown as MdCensus }) })
+    expect(infoText()).toBe(`60 docs · 20 links · 0 findings. ${NOTE}`)
     expect(meta(REVIEW.id)).toBe('0 findings')
+  })
+
+  it('names records in the strip only when the census has some', async () => {
+    mdNetwork.mockResolvedValue({ ...NET, census: census({ tracked: 400, network: 58, records: 330, unlinked: 12 }) })
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(infoText()).toBe(`400 tracked docs · 58 in the network · 330 records · 12 unlinked · 20 links · 3 findings. ${NOTE}`)
   })
 
   it('{ ok:false } shows its error text with no toast, and re-renders do not rescan', async () => {
@@ -495,5 +526,70 @@ describe('ToolsPane Add a tool', () => {
   it('is disabled without a cwd', () => {
     render({ cwd: null })
     expect((q('project-home-add-tool') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('ToolsPane Review MD network explorer', () => {
+  const b = (id: string) => document.body.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+  const click = (el: Element | null) => {
+    if (!el) throw new Error('missing element')
+    act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  }
+  const cardNode = (id: string) => q('md-link-map')!.querySelector(`[data-testid="md-link-map-node"][data-node-id="${id}"]`)
+
+  it('Expand opens the full-screen explorer with nothing selected; Close closes it', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(b('md-explorer')).toBeNull()
+    click(q('md-link-map-expand'))
+    expect(b('md-explorer')).not.toBeNull()
+    expect(b('md-explorer-inspector')!.textContent).toContain('Click a doc on the map')
+    expect(b('md-doc-preview')).toBeNull()
+    click(b('md-explorer-close'))
+    expect(b('md-explorer')).toBeNull()
+  })
+
+  it('a node click on the card opens the explorer preselected, and the inspector shows the doc preview', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [REVIEW] })
+    await settle()
+    click(cardNode('src/CLAUDE.md'))
+    await settle()
+    expect(b('md-explorer')).not.toBeNull()
+    expect(b('md-explorer-inspector')!.querySelector('[data-testid="md-doc-preview"]')).not.toBeNull()
+    expect(b('md-doc-preview-path')!.textContent).toBe('src/CLAUDE.md')
+    expect(read).toHaveBeenCalledWith('/p/alpha/src/CLAUDE.md')
+  })
+
+  it('an id that is not a census doc (a missing target) shows the stand-in inspector, not the preview', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [REVIEW] })
+    await settle()
+    click(cardNode('missing:src/gone.md'))
+    expect(b('md-doc-preview')).toBeNull()
+    const other = b('project-home-review-inspector-other')!
+    expect(other.textContent).toContain('src/gone.md')
+    expect(other.textContent).toContain('LINKED FROM · 1')
+    click(Array.from(other.querySelectorAll('button')).find((x) => x.textContent === 'src/CLAUDE.md')!)
+    await settle()
+    expect(b('md-doc-preview-path')!.textContent).toBe('src/CLAUDE.md')
+  })
+
+  it('the Docs view shows the census table; picking a row previews it and marks it selected', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    render({ macros: [REVIEW] })
+    await settle()
+    click(cardNode('src/CLAUDE.md'))
+    await settle()
+    click(b('md-explorer-view-docs'))
+    expect(b('md-doc-table')).not.toBeNull()
+    const rowEl = (p: string) => document.body.querySelector(`[data-testid="md-doc-table-row"][data-path="${p}"]`) as HTMLElement
+    expect(rowEl('src/CLAUDE.md').getAttribute('aria-selected')).toBe('true')
+    click(rowEl('notes/a.md'))
+    await settle()
+    expect(b('md-doc-preview-path')!.textContent).toBe('notes/a.md')
+    expect(rowEl('notes/a.md').getAttribute('aria-selected')).toBe('true')
+    expect(rowEl('src/CLAUDE.md').getAttribute('aria-selected')).toBe('false')
   })
 })

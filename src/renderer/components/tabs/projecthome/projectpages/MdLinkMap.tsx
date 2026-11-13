@@ -453,7 +453,16 @@ export function MdMapGraph({ layout, focus, hoveredId, selectedId = null, onHove
 }
 
 /** The LINK MAP card: legend, SVG and hover caption. */
-export function MdLinkMap({ layout, focusFinding }: { layout: MdLinkMapLayout; focusFinding: MapFocus | null }) {
+export function MdLinkMap({
+  layout,
+  focusFinding,
+  onExplore,
+}: {
+  layout: MdLinkMapLayout
+  focusFinding: MapFocus | null
+  /** When given: an Expand button opens the explorer (null), a node click opens it on that node. */
+  onExplore?: (id: string | null) => void
+}) {
   const [hoverId, setHoverId] = useState<string | null>(null)
   // A hovered id a refreshed scan dropped is no hover at all.
   const hovered = hoverId === null ? undefined : layout.nodes.find((n) => n.id === hoverId)
@@ -482,10 +491,27 @@ export function MdLinkMap({ layout, focusFinding }: { layout: MdLinkMapLayout; f
             {l.label}
           </span>
         ))}
+        {onExplore && (
+          <button
+            type="button"
+            data-testid="md-link-map-expand"
+            aria-label="Open the full-screen explorer"
+            onClick={() => onExplore(null)}
+            className="inline-flex h-[26px] flex-none items-center gap-1.5 rounded-md border border-rule-structural bg-bg-hi px-2.5 text-[11.5px] font-semibold text-fg-dim cursor-pointer hover:border-fg-faint hover:text-fg"
+          >
+            Expand
+          </button>
+        )}
       </div>
       <div className="px-3 pt-2.5 pb-0.5">
         <svg data-testid="md-link-map-svg" viewBox="0 0 760 392" role="img" aria-label="Markdown link map" className="block h-auto w-full">
-          <MdMapGraph layout={layout} focus={focus} hoveredId={hovered ? hovered.id : null} onHover={setHoverId} />
+          <MdMapGraph
+            layout={layout}
+            focus={focus}
+            hoveredId={hovered ? hovered.id : null}
+            onHover={setHoverId}
+            onNodeClick={onExplore ? (n) => onExplore(n.id) : undefined}
+          />
         </svg>
       </div>
       <div data-testid="md-link-map-caption" className="min-h-[30px] break-all px-4 pt-1.5 pb-3 font-mono text-[11px] text-fg-faint">
@@ -588,7 +614,15 @@ export function MdFindings({
 }
 
 /** Both cards side by side over one scan; a hovered finding lights its nodes on the map. */
-export function MdNetworkCards({ cwd, network }: { cwd?: string | null; network: MdNetwork }) {
+export function MdNetworkCards({
+  cwd,
+  network,
+  onExplore,
+}: {
+  cwd?: string | null
+  network: MdNetwork
+  onExplore?: (id: string | null) => void
+}) {
   const layout = useMemo(() => layoutMdNetwork(network), [network])
   const [hoverFinding, setHoverFinding] = useState<number | null>(null)
   const finding = hoverFinding === null ? undefined : network.findings[hoverFinding]
@@ -598,7 +632,7 @@ export function MdNetworkCards({ cwd, network }: { cwd?: string | null; network:
       : null
   return (
     <div className="flex flex-none flex-wrap items-start gap-4">
-      <MdLinkMap layout={layout} focusFinding={focusFinding} />
+      <MdLinkMap layout={layout} focusFinding={focusFinding} onExplore={onExplore} />
       <MdFindings cwd={cwd} findings={network.findings} hovered={hoverFinding} onHover={setHoverFinding} />
     </div>
   )

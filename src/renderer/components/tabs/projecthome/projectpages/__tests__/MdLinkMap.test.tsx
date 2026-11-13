@@ -397,3 +397,36 @@ describe('MdMapGraph', () => {
     expect(onNodeClick.mock.calls.map(([n]) => (n as MdMapNode).id)).toEqual(['README.md', 'README.md', 'README.md'])
   })
 })
+
+describe('MdNetworkCards explore', () => {
+  function mountExplore(onExplore?: (id: string | null) => void) {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => root!.render(<MdNetworkCards cwd={CWD} network={NET} onExplore={onExplore} />))
+  }
+
+  it('the LINK MAP header Expand button calls onExplore(null)', () => {
+    const onExplore = vi.fn()
+    mountExplore(onExplore)
+    const expand = q('md-link-map-expand') as HTMLButtonElement
+    expect(expand.getAttribute('aria-label')).toBe('Open the full-screen explorer')
+    act(() => expand.click())
+    expect(onExplore.mock.calls).toEqual([[null]])
+  })
+
+  it('clicking a node on the card calls onExplore(node.id)', () => {
+    const onExplore = vi.fn()
+    mountExplore(onExplore)
+    const g = node('README.md')
+    expect(g.getAttribute('role')).toBe('button')
+    act(() => { g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onExplore.mock.calls).toEqual([['README.md']])
+  })
+
+  it('without onExplore there is no Expand button and nodes are not buttons', () => {
+    mountExplore()
+    expect(q('md-link-map-expand')).toBeNull()
+    expect(node('README.md').getAttribute('role')).toBeNull()
+  })
+})

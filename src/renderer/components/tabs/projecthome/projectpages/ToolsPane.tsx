@@ -27,6 +27,9 @@ import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { useAgentPersonas } from '../../../../lib/useAgentPersonas'
 import { toast } from '../../../../state/toast'
 import { MdNetworkCards } from './MdLinkMap'
+import { MdNetworkExplorer } from './MdNetworkExplorer'
+import { MdDocPreview } from './MdDocPreview'
+import { MdDocTable } from './MdDocTable'
 import { CompetitorMatrixView } from './CompetitorMatrixView'
 import type { Macro, MacroJobStatus, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
 
@@ -211,7 +214,16 @@ function ReviewInfo({ cwd, scan, onRefresh }: { cwd?: string | null; scan: MdNet
     text = `Could not map docs: ${scan.error}`
   } else if (scan?.status === 'ready') {
     const { docs, links, findings } = scan.result
-    text = `${plural(docs, 'doc')} · ${plural(links, 'link')} · ${plural(findings.length, 'finding')}. ${REVIEW_NOTE}`
+    // The census says what the tracked docs are; an older scan without one keeps the bare count.
+    const counts = scan.result.census?.counts
+    if (counts) {
+      const parts = [plural(counts.tracked, 'tracked doc'), `${counts.network} in the network`]
+      if (counts.records > 0) parts.push(plural(counts.records, 'record'))
+      parts.push(`${counts.unlinked} unlinked`, plural(links, 'link'), plural(findings.length, 'finding'))
+      text = `${parts.join(' · ')}. ${REVIEW_NOTE}`
+    } else {
+      text = `${plural(docs, 'doc')} · ${plural(links, 'link')} · ${plural(findings.length, 'finding')}. ${REVIEW_NOTE}`
+    }
   }
   return (
     <div
@@ -236,6 +248,49 @@ function ReviewInfo({ cwd, scan, onRefresh }: { cwd?: string | null; scan: MdNet
   )
 }
 
+/**
+ * The explorer inspector for an id that is not a tracked doc (a missing target, an orphan group,
+ * a folder) or no selection. MdNetworkExplorer only draws its own default inspector when no
+ * renderInspector is given, so this short stand-in covers the ids MdDocPreview cannot.
+ */
+function ExplorerFallbackInspector({ network, id, select }: { network: MdNetwork; id: string | null; select: (id: string) => void }) {
+  if (id === null) {
+    return (
+      <p data-testid="project-home-review-inspector-hint" className="m-0 text-[12.5px] text-fg-faint">
+        Click a doc on the map, or pick one in Docs, to preview it.
+      </p>
+    )
+  }
+  const missing = id.startsWith('missing:') ? id.slice('missing:'.length) : null
+  const from = Array.from(
+    new Set(network.edges.filter((e) => (missing !== null ? e.broken === true && e.to === missing : e.to === id)).map((e) => e.from)),
+  )
+  return (
+    <div data-testid="project-home-review-inspector-other" className="flex flex-col gap-3">
+      <span className="break-all font-mono text-[12.5px] font-semibold text-fg">{missing ?? id}</span>
+      <span className="font-mono text-[10.5px] tracking-[.1em] text-fg-faint">LINKED FROM · {from.length}</span>
+      {from.map((f) => (
+        <button
+          key={f}
+          type="button"
+          onClick={() => select(f)}
+          className="cursor-pointer break-all text-left font-mono text-[11.5px] text-accent-dark hover:underline"
+        >
+          {f}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Reports the explorer's selected id (seen by renderInspector) so the Docs table can mark it. */
+function SelectionSync({ id, onChange }: { id: string | null; onChange: (id: string | null) => void }) {
+  useEffect(() => {
+    onChange(id)
+  }, [id, onChange])
+  return null
+}
+
 function ReviewTool({
   macro,
   cwd,
@@ -253,6 +308,9 @@ function ReviewTool({
 }) {
   const [scopePick, setScopePick] = useState<string | null>(null)
   const [modePick, setModePick] = useState<string | null>(null)
+  const [explore, setExplore] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
+  // The explorer's live selection, for the Docs table's selected row.
+  const [explorerSel, setExplorerSel] = useState<string | null>(null)
   // The last good map stays up (and keeps feeding Scope) while a refresh runs.
   const network = scan && scan.status !== 'error' ? scan.result : null
   const scopes = network?.scopes ?? NO_SCOPES
@@ -327,7 +385,33 @@ function ReviewTool({
         {REVIEW_DESCRIPTION}
       </p>
       <ReviewInfo cwd={cwd} scan={scan} onRefresh={onRefresh} />
-      {network && <MdNetworkCards cwd={cwd} network={network} />}
+      {network && <MdNetworkCards cwd={cwd} network={network} onExplore={(id) => setExplore({ open: true, id })} />}
+      {network && explore.open && (
+        <MdNetworkExplorer
+          network={network}
+          cwd={cwd}
+          initialPath={explore.id}
+          onClose={() => {
+            setExplore({ open: false, id: null })
+            setExplorerSel(null)
+          }}
+          renderInspector={(id, select) => (
+            <>
+              <SelectionSync id={id} onChange={setExplorerSel} />
+              {id !== null && network.census?.docs.some((d) => d.path === id) ? (
+                <MdDocPreview cwd={cwd} path={id} network={network} onNavigate={select} />
+              ) : (
+                <ExplorerFallbackInspector network={network} id={id} select={select} />
+              )}
+            </>
+          )}
+          renderDocs={
+            network.census
+              ? (select) => <MdDocTable census={network.census} selectedPath={explorerSel} onSelect={select} />
+              : undefined
+          }
+        />
+      )}
     </>
   )
 }

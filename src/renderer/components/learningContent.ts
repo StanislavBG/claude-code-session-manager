@@ -32,7 +32,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         items: [
           { term: 'Pages', body: 'Opens the knowledge-page library. The badge counts ready pages plus any page being built; the line under the name reads “Nothing generated yet”, “<n> building · <m> ready” while a build runs, or the page count and how long ago the newest page was made.' },
           { term: 'Videos', body: 'The same, for the video library.' },
-          { term: 'Tools', body: 'Opens the tool list. Once you have opened Tools for this project, an accent badge shows how many findings Review MD network\'s link map found.' },
+          { term: 'Tools', body: 'Opens the tool list. Once you have opened Tools for this project, an accent badge shows how many findings Review MD network\'s link map found. Its Expand button (or a click on any doc in the map) opens a full-screen explorer with a doc preview and a Docs table.' },
         ],
       },
       {
@@ -48,7 +48,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       {
         title: 'Tools',
         items: [
-          { term: 'Review MD network', body: 'Always listed first. Its LINK MAP draws CLAUDE.md and the docs its links lead to; FINDINGS lists broken links and docs no link path from CLAUDE.md reaches. Pick a Scope and a Mode (Full review or Drift check), then Run review opens an architect Session that reports first and changes no files until you approve. The map is scanned when you first open it and again on Refresh — never on a timer.' },
+          { term: 'Review MD network', body: 'Always listed first. Its LINK MAP draws CLAUDE.md and the docs its links lead to; FINDINGS lists broken links and docs no link path from CLAUDE.md reaches; records (machine-written docs in a record collection, such as validation records) are left out of orphan findings. The strip above the cards says what the tracked docs are: how many are in the network, how many are records and how many are unlinked. Expand on the LINK MAP, or a click on a doc in it, opens the full-screen explorer: zoom and pan the whole map, search paths, and click a doc to read it in the doc preview (its role, usage, recency and contents, with links you can follow). Its Docs view is a table of every tracked doc you can filter and sort by recency, size, links and code mentions. Pick a Scope and a Mode (Full review or Drift check), then Run review opens an architect Session that reports first and changes no files until you approve. The map is scanned when you first open it and again on Refresh — never on a timer.' },
           { term: 'Your tools', body: 'Every macro saved with Shown on: Project Home for this project is listed after it. A tool with inputs shows its form; otherwise press Run. Each press starts a new Session and opens it, the same as pressing a hot key.' },
           { term: 'Add a tool', body: 'Opens the macro editor with Shown on already set to Project Home.' },
         ],

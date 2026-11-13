@@ -2,7 +2,7 @@
  * Display labels for the non-Claude agent CLIs an Epic may run under
  * (PromptSession.agentCli). Mirrors the `label` fields of AGENT_CLI_CATALOG in
  * src/main/lib/agent-cli/agentCliRegistry.cjs — kept in step by
- * src/main/lib/agent-cli/__tests__/agentCliCatalogParity.test.cjs.
+ * tests/unit/agentCliCatalog-crossBoundary.spec.ts.
  */
 export type AgentCliId = 'codex' | 'gemini' | 'antigravity' | 'cursor' | 'opencode'
 

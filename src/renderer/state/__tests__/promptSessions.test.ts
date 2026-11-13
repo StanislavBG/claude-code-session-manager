@@ -143,6 +143,19 @@ describe('promptSessions.ts', () => {
     expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('developLoop')
   })
 
+  it('createPromptSession forwards runtime.agentCli and runtime.agentCliModel only when set', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Codex run', undefined, undefined, undefined, undefined, undefined, { agentCli: 'codex', agentCliModel: 'gpt-5.5' })
+    expect(api.promptSessions.create).toHaveBeenLastCalledWith(expect.objectContaining({ agentCli: 'codex', agentCliModel: 'gpt-5.5' }))
+
+    await usePromptSessions.getState().createPromptSession('/proj', 'Claude run')
+    const last = api.promptSessions.create.mock.calls.at(-1)?.[0]
+    expect(last).not.toHaveProperty('agentCli')
+    expect(last).not.toHaveProperty('agentCliModel')
+  })
+
   it('createPromptSession sends restoreSessionId only when runtime.restoreSessionId is a non-empty string', async () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')

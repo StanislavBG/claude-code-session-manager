@@ -97,6 +97,12 @@ const PromptSessionSchema = z.object({
   // false = started with the develop loop (/develop skill, delegation guard, PRD queueing) switched off;
   // fixed for the life of its session; absent = on; only false is ever written.
   developLoop: z.boolean().optional(),
+  // The agent CLI that runs this Epic's session; absent = Claude Code. Fixed for the life of the
+  // session. Deliberately a bounded string, not an enum: a row written by a newer build naming a CLI
+  // this build doesn't know must never be dropped by dropInvalidSessions (ipcSchemas.cjs).
+  agentCli: z.string().max(32).optional(),
+  // Optional model string passed to that CLI; absent = the CLI's own default.
+  agentCliModel: z.string().max(128).optional(),
   // true = this Epic adopted an existing CLI session as its claudeSessionId
   // (ensureEpic's restoreSessionId) instead of a fresh one; absent otherwise.
   // Only true is ever written: a false would fail here, and dropInvalidSessions

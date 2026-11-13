@@ -108,6 +108,12 @@ export interface PromptSession {
   effort?: string
   /** false = started with the develop loop off, fixed for the life of the session; absent = on. */
   developLoop?: boolean
+  /** The agent CLI that runs this Epic's session (e.g. 'codex', 'gemini', 'antigravity', 'cursor',
+   *  'opencode'). Absent = Claude Code. Fixed for the life of the session. A plain string, not a union,
+   *  so a row written by a newer build naming an unknown CLI still loads. */
+  agentCli?: string
+  /** Optional model string handed to `agentCli`; absent = that CLI's own default. Fixed for the life of the session. */
+  agentCliModel?: string
   /** true = claudeSessionId was adopted from an existing CLI session (a restore), not freshly minted; absent otherwise. */
   restoredSession?: true
   /** Labeled slices of `openingPrompt`, in the same order composeEpicIntake
@@ -314,7 +320,7 @@ interface PromptSessionsState {
     sections?: EpicIntakeSection[],
     /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record.
      *  restoreSessionId adopts that existing CLI session instead of minting one (main marks it restoredSession). */
-    runtime?: { model?: string; effort?: string; macroId?: string; developLoop?: boolean; restoreSessionId?: string },
+    runtime?: { model?: string; effort?: string; macroId?: string; developLoop?: boolean; restoreSessionId?: string; agentCli?: string; agentCliModel?: string },
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -358,6 +364,8 @@ interface PromptSessionsState {
       model?: string | null
       effort?: string | null
       developLoop?: boolean
+      agentCli?: string | null
+      agentCliModel?: string | null
       openingPrompt: string
       sections: EpicIntakeSection[]
     },
@@ -628,6 +636,8 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       ...(runtime?.developLoop === false ? { developLoop: false } : {}),
       ...(runtime?.macroId ? { source: { producer: 'new-epic-ui' as const, macroId: runtime.macroId } } : {}),
       ...(runtime?.restoreSessionId ? { restoreSessionId: runtime.restoreSessionId } : {}),
+      ...(runtime?.agentCli ? { agentCli: runtime.agentCli } : {}),
+      ...(runtime?.agentCliModel ? { agentCliModel: runtime.agentCliModel } : {}),
     })
     // ensureEpic's response is the byte-identical record just written to
     // active-index.json (validated against promptSessionSchema.cjs main-side)
@@ -937,8 +947,8 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (session.status !== 'proposed') {
       throw new Error(`updateProposedDraft: Epic "${promptSessionId}" is ${session.status}, only a proposed draft can be edited`)
     }
-    const { tag, agentType, model, effort, developLoop, ...rest } = session
-    void tag; void agentType; void model; void effort; void developLoop
+    const { tag, agentType, model, effort, developLoop, agentCli, agentCliModel, ...rest } = session
+    void tag; void agentType; void model; void effort; void developLoop; void agentCli; void agentCliModel
     const updated: PromptSession = {
       ...rest,
       goalText: patch.goalText,
@@ -949,6 +959,8 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       ...(patch.model ? { model: patch.model } : {}),
       ...(patch.effort ? { effort: patch.effort } : {}),
       ...(patch.developLoop === false ? { developLoop: false } : {}),
+      ...(patch.agentCli ? { agentCli: patch.agentCli } : {}),
+      ...(patch.agentCliModel ? { agentCliModel: patch.agentCliModel } : {}),
     }
     const sessions = { ...get().sessions, [promptSessionId]: updated }
     set({ sessions })

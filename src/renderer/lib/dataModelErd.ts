@@ -234,6 +234,12 @@ export const ERD_ENTITIES: ErdEntity[] = [
       { name: 'openingPrompt', type: 'string | null', optional: true },
       { name: 'source', type: 'EpicSource', optional: true, note: '{ producer, prdSlug?, runId?, sourceTabId?, fromCwd?, fromEpicId? }' },
       { name: 'agentType', type: 'string', optional: true, key: 'fk', ref: 'agentPersona.name' },
+      { name: 'model', type: 'string', optional: true, note: 'per-Epic model override; absent = the persona model' },
+      { name: 'effort', type: 'string', optional: true, note: 'per-Epic effort override; absent = the persona effort' },
+      { name: 'developLoop', type: 'false', optional: true, note: 'false = started with the develop loop off; absent = on' },
+      { name: 'restoredSession', type: 'true', optional: true, note: 'claudeSessionId adopted from an existing CLI session' },
+      { name: 'agentCli', type: 'string', optional: true, note: 'agent CLI running the session; absent = Claude Code; fixed for the session' },
+      { name: 'agentCliModel', type: 'string', optional: true, note: 'model string passed to agentCli; absent = its default' },
       { name: 'sections', type: 'EpicIntakeSection[]', optional: true },
       {
         name: 'worktree',

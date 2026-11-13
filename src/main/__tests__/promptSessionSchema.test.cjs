@@ -159,3 +159,34 @@ test('a section without part still parses', () => {
 test('a section with part bogus fails', () => {
   expect(PromptSessionSchema.safeParse(sec({ part: 'bogus' })).success).toBe(false);
 });
+
+test('agentCli + agentCliModel round-trip through PromptSessionSchema and the merge-active-index schema', () => {
+  const { promptSessionsMergeActiveIndex } = require('../ipcSchemas.cjs').schemas;
+  const base = {
+    id: 'epic-abc12345',
+    cwd: '/home/bilko/Projects/session-manager',
+    goalText: 'do the thing',
+    claudeSessionId: 'c1b2a3d4-0000-0000-0000-000000000000',
+    status: 'proposed',
+    createdAt: '2026-08-02T00:00:00.000Z',
+    completedAt: null,
+  };
+  const codex = { ...base, agentCli: 'codex', agentCliModel: 'gpt-5.5' };
+  const parsed = PromptSessionSchema.parse(codex);
+  expect(parsed.agentCli).toBe('codex');
+  expect(parsed.agentCliModel).toBe('gpt-5.5');
+
+  // Not an enum: a row from a newer build naming an unknown CLI is kept.
+  const future = { ...base, id: 'epic-def67890', agentCli: 'future-cli' };
+  expect(PromptSessionSchema.parse(future).agentCli).toBe('future-cli');
+
+  const merged = promptSessionsMergeActiveIndex.parse({
+    cwd: base.cwd,
+    sessions: { [codex.id]: codex, [future.id]: future },
+    events: {},
+    source: 'epics',
+  });
+  expect(merged.sessions[codex.id].agentCli).toBe('codex');
+  expect(merged.sessions[codex.id].agentCliModel).toBe('gpt-5.5');
+  expect(merged.sessions[future.id].agentCli).toBe('future-cli');
+});

@@ -83,4 +83,12 @@ const STRANDED_REF_PREFIX = 'refs/sm-stranded/';
  */
 const UNCOMMITTED_REF_PREFIX = 'refs/sm-uncommitted/';
 
-module.exports = { execGit, parseWorktreePorcelain, STRANDED_REF_PREFIX, UNCOMMITTED_REF_PREFIX };
+/**
+ * Namespace for an Epic's review range: refs/sm-epic-review/<epicId>/<tipSha>/
+ * {base,head}, pinned before its sm-epic/<id> branch is deleted so a completed
+ * Epic can still be diffed (gitWorktree.pinEpicReviewRange). Outside
+ * refs/heads: a GC root that branch listings and branchSweep never touch.
+ */
+const EPIC_REVIEW_REF_PREFIX = 'refs/sm-epic-review/';
+
+module.exports = { execGit, parseWorktreePorcelain, STRANDED_REF_PREFIX, UNCOMMITTED_REF_PREFIX, EPIC_REVIEW_REF_PREFIX };

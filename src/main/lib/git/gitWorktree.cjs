@@ -3556,6 +3556,98 @@ async function snapshotUncommittedWork({ cwd, dir, key }) {
   }
 }
 
+// ──────────────────────────────────────────── Epic review-range pins
+
+/**
+ * Pins an Epic's review range — its fork point and its tip — under
+ * EPIC_REVIEW_REF_PREFIX/<epicId>/<headSha>/{base,head} so the Changes view can
+ * still diff the Epic after its sm-epic/<id> branch is deleted. The head is the
+ * branch tip, or, when `dir` holds uncommitted changes, a snapshot commit of
+ * them (snapshotUncommittedWork, which leaves the checkout untouched). One pair
+ * per completion cycle: a reopened, re-completed Epic keeps both.
+ *
+ * Returns { ok: true, base, head }, or { ok: false, reason } when the epicId is
+ * unsafe, the branch is missing, nothing changed, or git fails. Never throws.
+ *
+ * @param {{ cwd: string, branch: string, dir?: string|null }} opts
+ * @returns {Promise<{ ok: true, base: string, head: string } | { ok: false, reason: string }>}
+ */
+async function pinEpicReviewRange({ cwd, branch, dir }) {
+  try {
+    const epicId = keyFromBranch('epic', branch);
+    if (!epicId || !landBranchNameFor(epicId)) return { ok: false, reason: 'unsafe epicId' };
+    const ref = `refs/heads/${branch}`;
+    const tip = await tryResolveCommit(cwd, `${ref}^{commit}`);
+    if (!tip) return { ok: false, reason: 'branch not found' };
+    let fork = await resolveForkSha({ cwd, branch });
+    if (!fork) {
+      const base = await resolveDefaultBranch(cwd);
+      try {
+        fork = (await execGit(['merge-base', `refs/heads/${base}`, ref], { cwd, timeout: 10_000 })).trim() || null;
+      } catch { fork = null; }
+    }
+    if (!fork) return { ok: false, reason: 'no fork point' };
+    let head = tip;
+    if (dir && fs.existsSync(dir)) {
+      const snap = await snapshotUncommittedWork({ cwd, dir, key: epicId });
+      if (snap && 'sha' in snap && snap.sha) head = snap.sha;
+    }
+    if (head === fork) return { ok: false, reason: 'no changes' };
+    const prefix = `${sharedGitExec.EPIC_REVIEW_REF_PREFIX}${epicId}/${head}`;
+    await execGit(['update-ref', `${prefix}/base`, fork], { cwd, timeout: 10_000 });
+    await execGit(['update-ref', `${prefix}/head`, head], { cwd, timeout: 10_000 });
+    return { ok: true, base: fork, head };
+  } catch (err) {
+    const e = /** @type {any} */ (err);
+    const msg = String((e && (e.stderrText || e.message)) || e).trim().split('\n')[0] || 'git failure';
+    return { ok: false, reason: msg };
+  }
+}
+
+/**
+ * Every pinned review range for `epicId`, newest head commit first, from one
+ * `git for-each-ref` over EPIC_REVIEW_REF_PREFIX/<epicId>/. Pairs missing base
+ * or head are skipped. [] for an unsafe epicId, no refs, or any git failure.
+ * Never throws.
+ *
+ * @param {{ cwd: string, epicId: string }} opts
+ * @returns {Promise<Array<{ base: string, head: string, headCommittedAt: string }>>}
+ */
+async function listEpicReviewRanges({ cwd, epicId }) {
+  try {
+    if (!landBranchNameFor(epicId)) return [];
+    const prefix = `${sharedGitExec.EPIC_REVIEW_REF_PREFIX}${epicId}/`;
+    const out = await execGit(
+      ['for-each-ref', '--format=%(refname) %(objectname) %(committerdate:iso-strict)', prefix],
+      { cwd, timeout: 10_000 }
+    );
+    /** @type {Map<string, { base?: string, head?: string, headCommittedAt?: string }>} */
+    const byTip = new Map();
+    for (const line of String(out).split('\n')) {
+      const [refname, sha, date] = line.trim().split(' ');
+      if (!refname || !sha || !refname.startsWith(prefix)) continue;
+      const parts = refname.slice(prefix.length).split('/');
+      if (parts.length !== 2) continue;
+      const [tipSeg, role] = parts;
+      const entry = byTip.get(tipSeg) || {};
+      if (role === 'base') entry.base = sha;
+      else if (role === 'head') { entry.head = sha; entry.headCommittedAt = date || ''; }
+      else continue;
+      byTip.set(tipSeg, entry);
+    }
+    /** @type {Array<{ base: string, head: string, headCommittedAt: string }>} */
+    const ranges = [];
+    for (const e of byTip.values()) {
+      if (e.base && e.head) ranges.push({ base: e.base, head: e.head, headCommittedAt: e.headCommittedAt || '' });
+    }
+    const ts = (/** @type {string} */ d) => { const n = Date.parse(d); return Number.isFinite(n) ? n : 0; };
+    ranges.sort((a, b) => ts(b.headCommittedAt) - ts(a.headCommittedAt));
+    return ranges;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Number of commit / cherry-pick / revert entries in `dir`'s HEAD reflog
  * (same subject test as pinUnlandedWorktreeCommits) — the commits a run made
@@ -3613,6 +3705,8 @@ module.exports = {
   deleteBranchKeepingUniqueCommits,
   listStrandedPins,
   resolveForkSha,
+  pinEpicReviewRange,
+  listEpicReviewRanges,
   sweepStaleWorktreeCheckouts,
   mainTreeFromWorktreeGitFile,
   getObservedWorktreeCount,

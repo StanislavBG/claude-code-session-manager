@@ -29,9 +29,15 @@
  * — a backstop for any caller, since the renderer's markCompleted already
  * stops it — so no preview process outlives the worktree it runs in. A
  * failing stop is logged and never fails the merge.
+ *
+ * Also before integrating — whatever the outcome — the Epic's fork point and
+ * tip (or a snapshot of its uncommitted edits) are pinned under
+ * refs/sm-epic-review/ (pinEpicReviewRange), so the Changes view can still diff
+ * the Epic after cleanupEpicWorktree or the boot reaper deletes its branch. A
+ * pin failure is logged and never changes the merge result.
  */
 
-const { integrateEpicBranch, cleanupEpicWorktree, reconcileWorktreeHead } = require('../git/gitWorktree.cjs');
+const { integrateEpicBranch, cleanupEpicWorktree, reconcileWorktreeHead, pinEpicReviewRange } = require('../git/gitWorktree.cjs');
 const { validatePath } = require('../../config.cjs');
 
 // Lazy require: keeps app-preview (and electron) out of this module's load path.
@@ -61,8 +67,17 @@ async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths, dep
   } catch (err) {
     console.log(`[epicWorktreeMerge] ${epicId}: preview stop failed, merging anyway (${err && err.message ? err.message : err})`);
   }
+  let rec = null;
+  if (dir) rec = await reconcileWorktreeHead({ cwd, dir, branch, key: epicId });
+  try {
+    const pin = await pinEpicReviewRange({ cwd, branch, dir });
+    if (!pin.ok && pin.reason !== 'no changes') {
+      console.log(`[epicWorktreeMerge] ${epicId}: review range not pinned (${pin.reason})`);
+    }
+  } catch (err) {
+    console.log(`[epicWorktreeMerge] ${epicId}: review range not pinned (${err && err.message ? err.message : err})`);
+  }
   if (dir) {
-    const rec = await reconcileWorktreeHead({ cwd, dir, branch, key: epicId });
     if (rec && rec.action === 'diverged') {
       const reason = `worktree HEAD ${rec.finalHead} is not on ${branch}; commit pinned at ${rec.pinnedRef || 'no ref'} — resolve manually`;
       console.log(`[epicWorktreeMerge] ${epicId}: needs manual resolution (${reason})`);

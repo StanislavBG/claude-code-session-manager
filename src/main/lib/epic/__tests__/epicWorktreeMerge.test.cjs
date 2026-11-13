@@ -209,3 +209,76 @@ test('a throwing or rejecting stopPreview never fails the merge', async () => {
     expect(fs.existsSync(path.join(cwd, 'note.txt'))).toBe(true);
   }
 });
+
+// ── Review-range pins (refs/sm-epic-review/): a completed Epic stays diffable.
+
+test('completing a 2-commit Epic pins a review range that survives branch deletion and gc', async () => {
+  const cwd = await mkRepoCwd();
+  const epicId = 'epic-review-two';
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId });
+  expect(created.ok).toBe(true);
+  fs.writeFileSync(path.join(created.dir, 'one.txt'), '1\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'one'], created.dir);
+  fs.writeFileSync(path.join(created.dir, 'two.txt'), '2\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'two'], created.dir);
+  const tip = git(['rev-parse', 'HEAD'], created.dir).trim();
+  const branchDiff = git(['diff', `HEAD...${created.branch}`], cwd);
+
+  const result = await mergeEpicToMainViaIpc(cwd, epicId, created.branch, created.dir, undefined, { stopPreview: async () => {} });
+  expect(result.ok).toBe(true);
+  expect(git(['branch', '--list', created.branch], cwd).trim()).toBe('');
+  git(['reflog', 'expire', '--expire=now', '--all'], cwd);
+  git(['gc', '-q', '--prune=now'], cwd);
+
+  const ranges = await gitWorktree.listEpicReviewRanges({ cwd, epicId });
+  expect(ranges).toHaveLength(1);
+  expect(ranges[0].head).toBe(tip);
+  expect(git(['diff', ranges[0].base, ranges[0].head], cwd)).toBe(branchDiff);
+});
+
+test('an uncommitted-only Epic is pinned with a range whose diff shows its edits', async () => {
+  const cwd = await mkRepoCwd();
+  const epicId = 'epic-review-dirty';
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId });
+  expect(created.ok).toBe(true);
+  fs.writeFileSync(path.join(created.dir, 'wip.txt'), 'uncommitted work\n', 'utf8');
+
+  await mergeEpicToMainViaIpc(cwd, epicId, created.branch, created.dir, undefined, { stopPreview: async () => {} });
+
+  const ranges = await gitWorktree.listEpicReviewRanges({ cwd, epicId });
+  expect(ranges).toHaveLength(1);
+  expect(git(['diff', ranges[0].base, ranges[0].head], cwd)).toContain('+uncommitted work');
+});
+
+test('a 0-change Epic pins nothing', async () => {
+  const cwd = await mkRepoCwd();
+  const epicId = 'epic-review-empty';
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId });
+  expect(created.ok).toBe(true);
+
+  const result = await mergeEpicToMainViaIpc(cwd, epicId, created.branch, created.dir, undefined, { stopPreview: async () => {} });
+  expect(result.ok).toBe(true);
+  expect(await gitWorktree.listEpicReviewRanges({ cwd, epicId })).toEqual([]);
+});
+
+test('a needs_merge_resolution completion is still pinned', async () => {
+  const cwd = await mkRepoCwd();
+  const epicId = 'epic-review-conflict';
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId });
+  expect(created.ok).toBe(true);
+  fs.writeFileSync(path.join(created.dir, 'README.md'), 'epic line\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'epic edits README'], created.dir);
+  const tip = git(['rev-parse', 'HEAD'], created.dir).trim();
+  fs.writeFileSync(path.join(cwd, 'README.md'), 'main line\n', 'utf8');
+  git(['add', '-A'], cwd);
+  git(['commit', '-q', '-m', 'main edits README'], cwd);
+
+  const result = await mergeEpicToMainViaIpc(cwd, epicId, created.branch, created.dir, undefined, { stopPreview: async () => {} });
+  expect(result.status).toBe('needs_merge_resolution');
+  const ranges = await gitWorktree.listEpicReviewRanges({ cwd, epicId });
+  expect(ranges.map((r) => r.head)).toEqual([tip]);
+  expect(git(['diff', ranges[0].base, ranges[0].head], cwd)).toContain('+epic line');
+});

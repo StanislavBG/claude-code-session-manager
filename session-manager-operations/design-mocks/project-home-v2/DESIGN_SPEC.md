@@ -160,6 +160,27 @@ Missing numbers show `-`.
   holds a scanned doc (`src/`, `plugins/`, …). Mode options and default come from the macro's
   `mode` input (live, not hardcoded). Run review = `onLaunch(macro, undefined, { scope, mode })`.
 
+### Review MD network explorer
+
+- **Composition strip**: when the scan carries a census, the info strip reads `<n> tracked docs ·
+  <n> in the network · <n> records · <n> unlinked · <n> links · <n> findings` (records omitted at
+  0); a scan without a census keeps the `<docs> docs` form above.
+- **Expand** on the LINK MAP card (or a node click) opens `MdNetworkExplorer` full-screen over
+  the same scan: the map canvas (wheel zoom, drag pan, Zoom in / Zoom out / Fit, search with
+  Enter to select), a right inspector (`MdDocPreview` for a tracked doc, else its links), and a
+  Map | Docs toggle whose Docs view is `MdDocTable`.
+- **Roles** (`mdDocCensus.cjs`): `map` (root `CLAUDE.md` + its imports), `scoped` (other
+  CLAUDE.md / AGENTS.md / CLAUDE.local.md), `agent` (`.claude/`, skills, plugin agents/commands),
+  `record`, `doc`. **Record collections** are folders of mostly unlinked, write-once docs (or
+  folders a human marks Treat as records / docs in the Docs view); their docs leave orphan findings.
+- **Flags** (`mdCurate.ts` `docFlags`, never on records): stale = no change in 90+ days and not
+  marked reviewed within 90 days; changed since = named files committed after the doc (or its
+  reviewed mark); missing paths = backticked paths that no longer exist; unlinked.
+- **Curation tray** (explorer footer): Keep / Update / Merge / Delete verdicts, notes and Mark
+  reviewed in the inspector; the tray counts picked docs, `Clear` drops every verdict, and
+  `Review picked docs` launches Review MD network with `composeCurationBrief`'s Scope and
+  additional instructions, then closes the explorer. Curation persists in ui-prefs `mdCuration`.
+
 ## 7. Data contract
 
 - Pages / videos: `window.api.projectPages.get` (unchanged) via `useProjectPagesOutput`;

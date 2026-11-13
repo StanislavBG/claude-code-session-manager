@@ -138,7 +138,10 @@ library macros above, which Pages and Videos launch. `Add a tool` opens `MacroEd
 surface preset. Review MD network shows a Scope select, a Mode control (`Full review` |
 `Drift check`) and `Run review`, over one `project-pages:md-network` scan
 (`src/main/lib/mdNetworkScan.cjs`, drawn by `MdLinkMap.tsx`) fetched when its view first shows
-and again on `Refresh`, never polled. Any other tool shows its inputs form, or a plain `Run`.
+and again on `Refresh`, never polled. The link map's `Expand` opens `MdNetworkExplorer.tsx`, a
+full-screen map + doc preview + Docs table whose curation tray launches the review on the picked
+docs; curation lives in ui-prefs `mdCuration` (`src/renderer/lib/useMdCuration.ts`) —
+machine-local, gitignored in this repo. Any other tool shows its inputs form, or a plain `Run`.
 No Tools macro has a `job` (`lib/persona-macro/macroLibrary.cjs` attaches `job` only to the
 built-ins that declare one), so each press mints a new Epic and opens it — the same act as New
 Session.

@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/proj","session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff","model":"Claude 4 Sonnet","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Read README.md and write a summary"}]},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll read the README file."}]},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"tool_call","subtype":"started","call_id":"toolu_read1","tool_call":{"readToolCall":{"args":{"path":"README.md"}}},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"tool_call","subtype":"completed","call_id":"toolu_read1","tool_call":{"readToolCall":{"args":{"path":"README.md"},"result":{"success":{"content":"# Project\n","isEmpty":false,"exceededLimit":false,"totalLines":1,"totalChars":10}}}},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"tool_call","subtype":"started","call_id":"toolu_write1","tool_call":{"writeToolCall":{"args":{"path":"summary.txt","fileText":"A project.","toolCallId":"toolu_write1"}}},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"tool_call","subtype":"completed","call_id":"toolu_write1","tool_call":{"writeToolCall":{"args":{"path":"summary.txt","fileText":"A project.","toolCallId":"toolu_write1"},"result":{"success":{"path":"/tmp/proj/summary.txt","linesCreated":1,"fileSize":10}}}},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" Done."}]},"session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff"}
+{"type":"result","subtype":"success","duration_ms":5234,"duration_api_ms":5234,"is_error":false,"result":"I'll read the README file. Done.","session_id":"c6b62c6f-7ead-4fd6-9922-e952131177ff","request_id":"10e11780-df2f-45dc-a1ff-4540af32e9c0"}

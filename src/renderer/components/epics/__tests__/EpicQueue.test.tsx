@@ -88,3 +88,31 @@ describe('EpicQueue — Actions toolbar', () => {
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('EpicQueue — agent CLI chip (PRD 3017)', () => {
+  function epic(id: string, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      goalText: `Epic ${id}`,
+      cwd: '/home/bilko/Projects/alpha',
+      claudeSessionId: `sess-${id}`,
+      status: 'active',
+      createdAt: '2026-11-13T00:00:00.000Z',
+      completedAt: null,
+      tag: 'feature',
+      ...extra,
+    } as any
+  }
+
+  it('shows the CLI chip on a codex Epic row and none on a Claude Epic row', async () => {
+    const el = mount(<EpicQueue {...baseProps()} epics={[epic('codex-1', { agentCli: 'codex' }), epic('claude-1')]} />)
+    await act(async () => {})
+    const rows = Array.from(el.querySelectorAll('[data-testid="epic-queue-row"]'))
+    const codexRow = rows.find((r) => r.getAttribute('data-epic-id') === 'codex-1')!
+    const claudeRow = rows.find((r) => r.getAttribute('data-epic-id') === 'claude-1')!
+    expect(codexRow).toBeDefined()
+    expect(claudeRow).toBeDefined()
+    expect(codexRow.querySelector('[data-testid="epic-agent-cli-chip"]')?.textContent).toBe('Codex')
+    expect(claudeRow.querySelector('[data-testid="epic-agent-cli-chip"]')).toBeNull()
+  })
+})

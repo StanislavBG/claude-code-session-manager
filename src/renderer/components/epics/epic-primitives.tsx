@@ -6,6 +6,7 @@
  */
 import type { PromptSession } from '../../state/promptSessions'
 import { toAimSections } from '../../lib/epicIntake'
+import { agentCliLabel } from '../../lib/agentCliCatalog'
 import type { EpicDisplayStatus } from '../../lib/epicDerive'
 import { inboundFeedbackOrigin, type InboundFeedbackOrigin, type inboundSeriesSiblings } from '../../lib/epicOrigin'
 
@@ -120,6 +121,29 @@ export function EpicKindTag({ kind, small }: { kind: PromptSession['tag']; small
       } ${tone.text} ${tone.ring}`}
     >
       {tone.label}
+    </span>
+  )
+}
+
+/**
+ * Which non-Claude agent CLI runs this Epic (PromptSession.agentCli). Renders
+ * nothing for a Claude Code Epic (absent or 'claude'). `model` is the Epic's
+ * agentCliModel, shown as "<label> · <model>" when set. Neutral chip tones
+ * shared with the other header chips — no new colors.
+ */
+export function EpicAgentCliChip({ cli, model, small }: { cli?: string; model?: string; small?: boolean }) {
+  const label = agentCliLabel(cli)
+  if (!label) return null
+  const text = model ? `${label} · ${model}` : label
+  return (
+    <span
+      title={`Agent CLI: ${text}`}
+      data-testid="epic-agent-cli-chip"
+      className={`inline-flex items-center font-mono font-semibold tracking-wide rounded ring-1 ring-inset whitespace-nowrap max-w-[14rem] truncate ${
+        small ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-[7px] py-[3px] text-[10.5px]'
+      } text-fg-dim ring-line`}
+    >
+      {text}
     </span>
   )
 }

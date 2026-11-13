@@ -8,8 +8,9 @@ import { EpicTerminalPane } from './EpicTerminalPane'
 import { EpicAppPreview } from './EpicAppPreview'
 import { EpicChangesView } from './EpicChangesView'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, WORKTREE_TONE, InboundProposalCard } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicAgentCliChip, WORKTREE_TONE, InboundProposalCard } from './epic-primitives'
 import { inboundFeedbackOrigin, inboundSeriesSiblings } from '../../lib/epicOrigin'
+import { agentCliLabel } from '../../lib/agentCliCatalog'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
@@ -700,6 +701,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // no model detail in that case rather than a fabricated one.
   const agentType = promptSession.agentType
   const developLoopOff = promptSession.developLoop === false
+  // A non-Claude Epic (Codex, Gemini CLI, …) runs no Claude model/effort, so
+  // the Claude runtime readout is hidden for it; the CLI chip names the runner.
+  const nonClaudeCli = agentCliLabel(promptSession.agentCli) !== null
   const runtimeInfo = useEffectiveModelInfo(cwd, agentType ?? null, { model: promptSession.model, effort: promptSession.effort })
 
   // Tab state resets to Discussion on every Epic change.
@@ -897,6 +901,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             <div className="mb-1.5 flex items-center gap-2 min-w-0" data-testid="epic-detail-tags">
               <EpicStatusChip status={status} />
               <EpicKindTag kind={promptSession.tag} />
+              <EpicAgentCliChip cli={promptSession.agentCli} model={promptSession.agentCliModel} />
               <span
                 className="font-mono text-[11px] text-fg-dim truncate"
                 data-testid="epic-detail-meta-line"
@@ -905,11 +910,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   <button
                     type="button"
                     onClick={() => openAgentLibrary(agentType)}
-                    title={`Agent: ${agentType}${runtimeInfo ? ` — ${formatEffectiveRuntimeLine(runtimeInfo).text}` : ''} — click to open in Agent Library`}
+                    title={`Agent: ${agentType}${runtimeInfo && !nonClaudeCli ? ` — ${formatEffectiveRuntimeLine(runtimeInfo).text}` : ''} — click to open in Agent Library`}
                     data-testid="epic-agent-tag"
                     className="hover:text-fg"
                   >
-                    {runtimeInfo ? formatCompactRuntime(runtimeInfo) : agentType}
+                    {runtimeInfo && !nonClaudeCli ? formatCompactRuntime(runtimeInfo) : agentType}
                   </button>
                 )}
                 {!agentType && (
@@ -917,7 +922,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                     No agent
                   </span>
                 )}
-                {!agentType && runtimeInfo && (
+                {!agentType && runtimeInfo && !nonClaudeCli && (
                   <span data-testid="epic-runtime-line" title={formatEffectiveRuntimeLine(runtimeInfo).text}>
                     {` · ${formatCompactRuntime(runtimeInfo)}`}
                   </span>

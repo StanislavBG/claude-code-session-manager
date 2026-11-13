@@ -357,6 +357,39 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.querySelector('[data-testid="epic-develop-loop-off-chip"]')).toBeNull()
   })
 
+  it('PRD 3017: a codex Epic shows the agent-CLI chip (with its model) and hides the Claude runtime line and persona model/effort', async () => {
+    installWindowApiMock({ branch: null, runtimeInfo: { modelAlias: 'claude-sonnet-4-5', modelSource: 'persona', resolvedModelId: 'claude-sonnet-4-5', resolvedFrom: 'transcript' } })
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-cli-codex', 'Ship it', 'feature')
+    const codexNoAgent = { ...session, agentType: undefined, agentCli: 'codex', agentCliModel: 'gpt-5-codex' } as typeof session
+    const el = mount(createElement(EpicDetail, { promptSession: codexNoAgent }))
+    await flushAsync(2)
+
+    const tags = el.querySelector('[data-testid="epic-detail-tags"]')!
+    const chip = tags.querySelector('[data-testid="epic-agent-cli-chip"]')
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toBe('Codex · gpt-5-codex')
+    expect(el.querySelector('[data-testid="epic-runtime-line"]')).toBeNull()
+    act(() => root?.unmount())
+    container?.remove()
+
+    const codexAgent = { ...session, agentType: 'architect', agentCli: 'codex' } as typeof session
+    const el2 = mount(createElement(EpicDetail, { promptSession: codexAgent }))
+    await flushAsync(2)
+    expect(el2.querySelector('[data-testid="epic-agent-cli-chip"]')?.textContent).toBe('Codex')
+    expect(el2.querySelector('[data-testid="epic-agent-tag"]')?.textContent).toBe('architect')
+    expect(el2.querySelector('[data-testid="epic-runtime-line"]')).toBeNull()
+  })
+
+  it('PRD 3017: a Claude Epic shows no agent-CLI chip', async () => {
+    installWindowApiMock({ branch: null, runtimeInfo: { modelAlias: null, modelSource: 'inherit', resolvedModelId: null, resolvedFrom: null } })
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-cli-claude', 'Ship it', 'feature')
+    const el = mount(createElement(EpicDetail, { promptSession: { ...session, agentCli: 'claude' } as typeof session }))
+    await flushAsync(2)
+    expect(el.querySelector('[data-testid="epic-agent-cli-chip"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-runtime-line"]')).not.toBeNull()
+  })
+
   it('shows a "Develop loop off" chip only when developLoop === false', async () => {
     installWindowApiMock({ branch: null })
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-loop-off', 'Ship it', 'feature')

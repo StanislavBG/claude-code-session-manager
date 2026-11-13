@@ -25,7 +25,7 @@ import {
   type EpicDisplayStatus,
   type EpicSnapshots,
 } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, EpicInboundTag, EpicWorktreeChip, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicAgentCliChip, EpicInboundTag, EpicWorktreeChip, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
 import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
@@ -478,6 +478,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
         <span className="flex items-center gap-1.5">
           <EpicStatusChip status={status} small detail={queuedDetail} />
           <EpicKindTag kind={epic.tag} small />
+          <EpicAgentCliChip cli={epic.agentCli} small />
           <EpicInboundTag origin={inbound} small />
           {status !== 'completed' && <EpicWorktreeChip worktree={epic.worktree} small />}
           <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-9">{age}</span>

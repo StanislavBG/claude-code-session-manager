@@ -1287,6 +1287,12 @@ app.on('web-contents-created', (_e, wc) => {
 
 app.whenReady().then(async () => {
   logs.pruneOld();
+  // Kill "Run preview" dev servers orphaned by a crashed previous run
+  // (they outlive us when a child setsid'd out of the process group).
+  try {
+    const count = require('./lib/app-preview/appPreviewSweep.cjs').sweepOrphanedPreviews();
+    if (count > 0) logs.writeLine({ scope: 'app-preview', level: 'warn', message: 'killed orphaned previews', meta: { count } });
+  } catch { /* best-effort */ }
   logs.writeLine({ scope: 'main', level: 'info', message: 'app start', meta: { version: app.getVersion(), platform: process.platform } });
   logs.writeLine({ scope: 'main', level: 'info', message: 'ozone platform', meta: { ozonePlatform: app.commandLine.getSwitchValue('ozone-platform') || 'default', override: process.env.SM_OZONE_PLATFORM || null } });
 

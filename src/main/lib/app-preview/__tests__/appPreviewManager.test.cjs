@@ -32,6 +32,7 @@ function harness(over = {}) {
   const kills = [];
   const broadcasts = [];
   const opened = [];
+  const sweeps = [];
   let nextChild = null;
   const deps = {
     spawn: (cmd, args, opts) => {
@@ -43,6 +44,7 @@ function harness(over = {}) {
     killTree: (pid, sig) => { kills.push({ pid, sig }); return true; },
     openExternal: (url) => { opened.push(url); return Promise.resolve(); },
     broadcast: (s) => broadcasts.push(s),
+    sweep: (epicId) => { sweeps.push(epicId); return 0; },
     findFreePort: async () => 51234,
     listScripts: () => ({ ok: true, scripts: [{ name: 'dev', command: 'vite' }], suggested: 'dev' }),
     platform: 'linux',
@@ -50,7 +52,7 @@ function harness(over = {}) {
     ...over,
   };
   const mgr = createAppPreviewManager(deps);
-  return { mgr, spawned, kills, broadcasts, opened, setNextChild: (c) => { nextChild = c; } };
+  return { mgr, spawned, kills, broadcasts, opened, sweeps, setNextChild: (c) => { nextChild = c; } };
 }
 
 const START = { cwd: '/proj', epicId: 'e1', dir: '/proj/wt', script: 'dev' };
@@ -228,6 +230,7 @@ describe('failures', () => {
     expect(s.error).toMatch(/no local URL/i);
     expect(s.error).toContain('compiling...');
     expect(h.kills.some((k) => k.pid === 4242)).toBe(true);
+    expect(h.sweeps).toEqual(['e1']);
     h.spawned[0].child.emit('exit', null, 'SIGKILL');
     expect(h.mgr.get('e1').status).toBe('failed');
   });
@@ -254,6 +257,7 @@ describe('failures', () => {
     const h = harness();
     await h.mgr.start(START);
     h.spawned[0].child.emit('exit', 1, null);
+    expect(h.sweeps).toEqual(['e1']);
     const r = await h.mgr.start(START);
     expect(r.state.status).toBe('starting');
     expect(h.spawned).toHaveLength(2);
@@ -271,8 +275,10 @@ describe('stop / stopAll / list', () => {
     await sleep(20);
     expect(h.kills).toEqual([{ pid: 4242, sig: 'SIGTERM' }]);
     expect(done).toBe(false);
+    expect(h.sweeps).toEqual([]);
     child.emit('exit', null, 'SIGTERM');
     await expect(p).resolves.toEqual({ ok: true });
+    expect(h.sweeps).toEqual(['e1']);
     const s = h.mgr.get('e1');
     expect(s.status).toBe('stopped');
     expect(s.error).toBeNull();
@@ -305,6 +311,7 @@ describe('stop / stopAll / list', () => {
     await h.mgr.start({ ...START, epicId: 'c' });
     h.mgr.stopAll();
     expect(h.kills).toEqual([{ pid: 11, sig: 'SIGKILL' }, { pid: 33, sig: 'SIGKILL' }]);
+    expect(h.sweeps).toEqual(['b', 'a', 'c']); // b on its own exit, then each live epic
   });
   test('get/list return copies, one latest state per Epic', async () => {
     const h = harness();

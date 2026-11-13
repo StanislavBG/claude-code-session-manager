@@ -160,5 +160,6 @@
   "worktreeSetup": "git",
   "appPreviewScripts": "app-preview",
   "appPreviewManager": "app-preview",
-  "appPreviewIpc": "app-preview"
+  "appPreviewIpc": "app-preview",
+  "appPreviewSweep": "app-preview"
 }

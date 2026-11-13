@@ -4,13 +4,15 @@
 // preview per Epic (the only bound — no machine-wide cap, per
 // src/main/lib/CLAUDE.md). start() runs `npm run <script>` in the Epic's folder
 // on a free port, watches stdout+stderr for the first loopback URL, opens it in
-// the system browser, and stop()/stopAll() kill the whole process group.
+// the system browser, and stop()/stopAll() kill the whole process group, then
+// sweep(epicId) kills any setsid escapee by its SM_PREVIEW_EPIC_ID env marker.
 // IPC, Epic-close and app-quit wiring live in later modules.
 
 const { killTree: defaultKillTree, detachedSpawnOpts } = require('../process/killTree.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('../process/cleanEnv.cjs');
 const { resolveSpawn: defaultResolveSpawn } = require('../process/winSpawn.cjs');
 const { createHeadTailBuffer } = require('../util/headTailBuffer.cjs');
+const { killPreviewProcesses } = require('./appPreviewSweep.cjs');
 const {
   isValidScriptName,
   listPreviewScripts,
@@ -33,6 +35,7 @@ const TAIL_LINES = 8;
 function createAppPreviewManager(deps = {}) {
   const spawn = deps.spawn || require('node:child_process').spawn;
   const killTree = deps.killTree || defaultKillTree;
+  const sweep = deps.sweep || killPreviewProcesses;
   const openExternal = deps.openExternal || ((url) => require('electron').shell.openExternal(url));
   const broadcast = deps.broadcast || (() => {});
   const findFreePort = deps.findFreePort || defaultFindFreePort;
@@ -56,6 +59,12 @@ function createAppPreviewManager(deps = {}) {
     try { broadcast(copy(entry.state)); } catch (e) { log(`[appPreview] broadcast failed: ${e && e.message}`); }
   };
   const isLive = (entry) => !!entry && !!entry.child && !entry.exited;
+  // Kill processes that left the preview's process group (setsid). Skipped when
+  // a newer preview of the same Epic replaced this entry — it would hit that one.
+  const sweepEpic = (entry) => {
+    if (entries.get(entry.state.epicId) !== entry) return;
+    try { sweep(entry.state.epicId); } catch (e) { log(`[appPreview] sweep failed: ${e && e.message}`); }
+  };
 
   function clearTimers(entry) {
     if (entry.urlTimer) { clearTimeout(entry.urlTimer); entry.urlTimer = null; }
@@ -113,6 +122,7 @@ function createAppPreviewManager(deps = {}) {
     if (entry.exited) return;
     const prev = entry.state.status;
     markDead(entry);
+    sweepEpic(entry);
     const how = signal ? `signal ${signal}` : `code ${code}`;
     if (entry.stopRequested) {
       if (prev !== 'stopped' || entry.state.error !== null) {
@@ -211,6 +221,7 @@ function createAppPreviewManager(deps = {}) {
       const pid = entry.state.pid;
       fail(entry, `no local URL printed within ${Math.round(urlTimeoutMs / 1000)}s`);
       if (isLive(entry) && pid) killTree(pid, 'SIGKILL');
+      sweepEpic(entry);
     }, urlTimeoutMs);
     if (entry.urlTimer && typeof entry.urlTimer.unref === 'function') entry.urlTimer.unref();
     emit(entry);
@@ -235,6 +246,7 @@ function createAppPreviewManager(deps = {}) {
     if (existing && isLive(existing)) {
       // A failed preview whose process is still dying: finish killing it first.
       killTree(existing.state.pid, 'SIGKILL');
+      sweepEpic(existing);
     }
     cancelled.delete(epicId);
     const p = doStart({ cwd, epicId, dir, script }).finally(() => pending.delete(epicId));
@@ -265,7 +277,7 @@ function createAppPreviewManager(deps = {}) {
       killTree(pid, 'SIGTERM');
       entry.killTimer = setTimeout(() => {
         entry.killTimer = null;
-        if (isLive(entry)) killTree(pid, 'SIGKILL');
+        if (isLive(entry)) { killTree(pid, 'SIGKILL'); sweepEpic(entry); }
       }, killGraceMs);
     }
     return done;
@@ -280,6 +292,7 @@ function createAppPreviewManager(deps = {}) {
       entry.stopRequested = true;
       clearTimers(entry);
       killTree(entry.state.pid, 'SIGKILL');
+      sweepEpic(entry);
       killed += 1;
       if (entry.state.status !== 'stopped' || entry.state.error !== null) {
         entry.state = { ...entry.state, status: 'stopped', error: null };

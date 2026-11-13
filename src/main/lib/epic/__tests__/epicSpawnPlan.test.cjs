@@ -222,3 +222,37 @@ test('worktreeDirHint: ignored when the directory is missing', () => {
     expect(withHint).toEqual(without);
   } finally { fs.rmSync(proj, { recursive: true, force: true }); }
 });
+
+// Non-Claude agent CLIs (codex, gemini, …) never write a Claude JSONL, so the transcript
+// reachability guard never fires for them; a swept, unrestorable worktree must still be refused.
+test('non-Claude Epic: worktree dir missing after failed restore => spawn_cwd_missing naming the worktree, no project-cwd fallback', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  try {
+    let restores = 0;
+    const plan = planEpicSpawn({ cwd: proj, claudeSessionId: SID, deps: { homeDir: home, readActiveIndex: () => ({ sessions: epic({ agentCli: 'codex' }) }), restoreWorktree: () => { restores++; return false; } } });
+    expect(restores).toBe(1);
+    expect(plan).toMatchObject({ ok: false, code: 'spawn_cwd_missing' });
+    expect(plan.message).toContain(DEAD);
+  } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('non-Claude Epic with no worktree record => today\'s execCwd (project cwd)', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  try {
+    const plan = planEpicSpawn({ cwd: proj, claudeSessionId: SID, deps: { homeDir: home, readActiveIndex: () => ({ sessions: epic({ agentCli: 'gemini', worktree: undefined }) }) } });
+    expect(plan).toMatchObject({ ok: true, execCwd: proj, useResume: false });
+  } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('non-Claude Epic with an existing worktree dir => today\'s execCwd (the worktree)', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-wt-'));
+  try {
+    const sessions = epic({ agentCli: 'opencode', worktree: { dir: wt, branch: 'sm-epic/e1', baseCwd: proj, status: 'active' } });
+    const plan = planEpicSpawn({ cwd: proj, claudeSessionId: SID, deps: { homeDir: home, readActiveIndex: () => ({ sessions }) } });
+    expect(plan).toMatchObject({ ok: true, execCwd: wt, useResume: false });
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});

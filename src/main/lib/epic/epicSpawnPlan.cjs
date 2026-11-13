@@ -35,6 +35,7 @@ const { projectRootOf } = require('../activeSessions.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 const { resolveEpicSpawnCwd } = require('./epicSpawnCwd.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
+const { isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
 
 /** Map<sessionId, { dir, message }> — sessions found unreachable; valid while `dir` stays missing. */
 const unreachable = new Map();
@@ -107,6 +108,17 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, worktreeD
   }
 
   let execCwd = (deps.resolveSpawnCwd || resolveEpicSpawnCwd)({ cwd, claudeSessionId, deps: { restore: true, readActiveIndex: deps.readActiveIndex, statSync: deps.statSync, restoreWorktree: deps.restoreWorktree } });
+
+  // Non-Claude agent CLIs never write a Claude JSONL, so the reachability guard below never fires
+  // for them. A recorded worktree that is still missing after the restore attempt must be refused
+  // here, or the turn silently runs in the shared project checkout instead of the Epic's worktree.
+  if (isNonClaudeAgentCli(epic?.agentCli) && brokenDir && !isDir(brokenDir, statSync)) {
+    return {
+      ok: false,
+      code: 'spawn_cwd_missing',
+      message: `Cannot spawn session ${claudeSessionId} (${epic.agentCli}): its worktree ${brokenDir} is gone and could not be re-attached. Recreate it (git worktree add "${brokenDir}" ${epic.worktree?.branch || '<sm-epic branch>'}) or start a new Epic — refusing to run in the shared project checkout.`,
+    };
+  }
 
   if (resolved && resolved.existsAnywhere) {
     const projectsDir = path.join(deps.homeDir || os.homedir(), '.claude', 'projects');

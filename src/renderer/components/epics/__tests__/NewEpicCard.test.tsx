@@ -143,6 +143,7 @@ beforeEach(() => {
       exists: vi.fn().mockResolvedValue(false),
     },
     promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn(), listRestorable: listRestorableSpy },
+    agentCli: { detect: vi.fn().mockResolvedValue([]) },
   }
 })
 
@@ -1659,5 +1660,104 @@ describe('NewEpicCard restore an earlier session', () => {
     expect(q(el, 'restore-session-readonly-id')).toBeNull()
     expect(el.querySelector('[data-testid^="restore-session-option-"]')).toBeNull()
     expect(listRestorableSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('NewEpicCard agent CLI choice', () => {
+  const ALPHA = '/home/bilko/Projects/alpha'
+  const architect: AgentPersona = { name: 'architect', description: 'plans', tools: [], model: null, effort: null, color: null, tags: ['feature', 'bug', 'discussion'], projects: [], action: null, actionLabel: null, path: '/a.md', body: '', overridingProjects: [] }
+  const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+  const click = (n: Element) => act(() => { n.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  const detectSpy = vi.fn(async () => [
+    { id: 'codex', label: 'Codex', installed: true, path: '/usr/bin/codex', version: '1', install: null, docs: 'https://x/codex', login: null },
+    { id: 'gemini', label: 'Gemini CLI', installed: false, path: null, version: null, install: 'npm i -g gemini', docs: 'https://x/gemini', login: null },
+  ])
+  const approveSpy = vi.fn()
+
+  beforeEach(() => {
+    ;(window.api as unknown as { agentCli: unknown }).agentCli = { detect: detectSpy }
+    detectSpy.mockClear()
+    approveSpy.mockClear()
+    usePromptSessions.setState({ approveProposed: approveSpy } as never)
+    listPersonasSpy.mockResolvedValue([architect])
+  })
+
+  async function mountReady(props: Partial<React.ComponentProps<typeof NewEpicCard>> = {}) {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} {...props} />)
+    await act(async () => {})
+    return el
+  }
+
+  it('Claude Code is the default and the create runtime carries neither agentCli key', async () => {
+    const el = await mountReady()
+    expect(q(el, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+    expect(q(el, 'new-epic-agent-cli-model')).toBeNull()
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    click(q(el, 'new-epic-create')!)
+    await act(async () => {})
+    const runtime = createPromptSessionSpy.mock.calls[0][7] as Record<string, unknown>
+    expect('agentCli' in runtime).toBe(false)
+    expect('agentCliModel' in runtime).toBe(false)
+  })
+
+  it('codex forces the develop loop off, hides restore + runtime override, and sends agentCli + model', async () => {
+    const el = await mountReady()
+    click(q(el, 'new-epic-flip-to-grounding')!)
+    await act(async () => {})
+    act(() => { (q(el, `restore-session-option-${RESTORABLE_FIXTURE[0].sessionId}`) as HTMLInputElement).click() })
+    expect(q(el, 'new-epic-restore-chip')).not.toBeNull()
+    expect(q(el, 'new-epic-runtime-override')).not.toBeNull()
+
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+
+    const loop = q(el, 'new-epic-develop-loop') as HTMLInputElement
+    expect(loop.checked).toBe(false)
+    expect(loop.disabled).toBe(true)
+    expect(loop.title).toBe('The develop loop needs Claude Code')
+    expect((q(el, 'new-epic-kind-feature') as HTMLButtonElement).disabled).toBe(true)
+    expect(q(el, 'new-epic-restore-chip')).toBeNull()
+    expect(q(el, 'new-epic-restore-panel')).toBeNull()
+    expect(q(el, 'new-epic-runtime-override')).toBeNull()
+    const model = q(el, 'new-epic-agent-cli-model') as HTMLInputElement
+    expect(model.maxLength).toBe(128)
+    act(() => setNativeValue(model, '  gpt-5-codex  '))
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    click(q(el, 'new-epic-create')!)
+    await act(async () => {})
+
+    const runtime = createPromptSessionSpy.mock.calls[0][7] as Record<string, unknown>
+    expect(runtime).toMatchObject({ agentCli: 'codex', agentCliModel: 'gpt-5-codex', developLoop: false })
+    expect('restoreSessionId' in runtime).toBe(false)
+  })
+
+  it('switching back to Claude Code re-enables the loop and drops the model', async () => {
+    const el = await mountReady()
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    act(() => setNativeValue(q(el, 'new-epic-agent-cli-model') as HTMLInputElement, 'm'))
+    click(q(el, 'new-epic-agent-cli-option-claude')!)
+    const loop = q(el, 'new-epic-develop-loop') as HTMLInputElement
+    expect(loop.disabled).toBe(false)
+    expect(loop.checked).toBe(true)
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    click(q(el, 'new-epic-create')!)
+    await act(async () => {})
+    const runtime = createPromptSessionSpy.mock.calls[0][7] as Record<string, unknown>
+    expect('agentCli' in runtime).toBe(false)
+    expect('agentCliModel' in runtime).toBe(false)
+  })
+
+  it('edit-draft mode restores agentCli + model from the draft and re-saves them', async () => {
+    const { composeEpicIntake } = await import('../../../lib/epicIntake')
+    const intake = composeEpicIntake({ title: 'Saved', goal: 'Saved goal', referencePaths: [], tag: undefined, agentName: 'architect', contextInjections: { 'delegate-implementation': false } as never })
+    const draft = { id: 'draft-cli', cwd: ALPHA, goalText: intake.goalText, claudeSessionId: 'c-1', status: 'proposed', createdAt: new Date().toISOString(), completedAt: null, agentType: 'architect', developLoop: false, agentCli: 'codex', agentCliModel: 'o3', openingPrompt: intake.openingPrompt, sections: intake.sections, source: 'NewEpicCard' } as never
+    const updateSpy = vi.fn(async () => {})
+    usePromptSessions.setState({ updateProposedDraft: updateSpy } as never)
+    const el = await mountReady({ draftEpic: draft, onDraftSaved: vi.fn() })
+    expect(q(el, 'new-epic-agent-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
+    expect((q(el, 'new-epic-agent-cli-model') as HTMLInputElement).value).toBe('o3')
+    click(q(el, 'new-epic-save-draft')!)
+    await act(async () => {})
+    expect(updateSpy).toHaveBeenCalled()
+    expect((updateSpy.mock.calls[0] as unknown[])[1]).toMatchObject({ agentCli: 'codex', agentCliModel: 'o3', developLoop: false })
   })
 })

@@ -22,12 +22,14 @@ import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult, RestorableSession } from '../../../preload/api'
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
+import { AgentCliPicker, type AgentCliChoice } from './AgentCliPicker'
 import { draftFieldsFromEpic, hasDraftContent, isEditableDraft } from '../../lib/epicDraft'
 import { RestoreSessionPanel, restorableSessionLabel, restorableSessionMeta } from './RestoreSessionPanel'
 
 const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
 const GOAL_PLACEHOLDER = 'The objective, in a sentence or two — sent as the first instruction. ⌘V to attach a screenshot.'
 const RESTORE_GOAL_PLACEHOLDER = 'What should this session do next? Sent as the next message after its history.'
+const NON_CLAUDE_LOOP_TITLE = 'The develop loop needs Claude Code'
 const FRESH_DRAFT_RESTORE_NOTE = 'A saved draft keeps its own session. To continue an earlier Claude Code session, start a new session instead.'
 
 // The readiness checks Session Manager can close itself, one press each. Keyed
@@ -210,6 +212,10 @@ export function NewEpicCard({
   const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>(seed?.injections ?? {})
   // null = the human has not touched the Develop loop checkbox; once set, it always wins.
   const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(seed ? seed.developLoop : null)
+  // Which CLI runs the session (third independent selection); 'claude' = Claude Code, the default.
+  const [agentCli, setAgentCli] = useState<AgentCliChoice>(() => (editDraft?.agentCli as AgentCliChoice | undefined) || 'claude')
+  const [agentCliModel, setAgentCliModel] = useState(editDraft?.agentCliModel ?? '')
+  const nonClaudeCli = agentCli !== 'claude'
 
   // Default the Actor once the personas first resolve (never after a human pick).
   useEffect(() => {
@@ -234,7 +240,8 @@ export function NewEpicCard({
   const selectedAgent = agentless ? null : agents?.find((a) => a.name === agentName) ?? null
   const missionTags = missionTagsForAgent(selectedAgent)
   const missionKey = missionTags.join(',')
-  const developLoop = developLoopOverride ?? !(agentless && tag === null)
+  // The develop loop (/develop, PRD queueing) is Claude Code only.
+  const developLoop = nonClaudeCli ? false : (developLoopOverride ?? !(agentless && tag === null))
   const contextInjectionsOn = useMemo<Record<ContextInjectionKey, boolean>>(
     () => resolveContextInjections({ tag, agentless, developLoop, overrides: injectionOverrides }),
     [tag, agentless, developLoop, injectionOverrides],
@@ -384,8 +391,17 @@ export function NewEpicCard({
     setDevelopLoopOverride(null)
     setSavedRefs([])
     setRestoreSession(null)
+    setAgentCli('claude')
+    setAgentCliModel('')
     att.clear()
   }
+
+  // A non-Claude CLI cannot continue a Claude Code session: drop any restore pick.
+  const pickAgentCli = (id: AgentCliChoice) => {
+    setAgentCli(id)
+    if (id !== 'claude') setRestoreSession(null)
+  }
+  const trimmedCliModel = agentCliModel.trim()
 
   // The ONE intake builder shared by Start, Save draft and edit-mode Start, so
   // the three can never drift: resolve references, grounding, persona body,
@@ -427,7 +443,9 @@ export function NewEpicCard({
       effort: effortOverride || undefined,
       ...(developLoop ? {} : { developLoop: false }),
       // Only a NEW Epic adopts an earlier session; a reopened draft keeps the one it was minted with.
-      ...(restoreSession && !editDraft ? { restoreSessionId: restoreSession.sessionId } : {}),
+      ...(restoreSession && !editDraft && !nonClaudeCli ? { restoreSessionId: restoreSession.sessionId } : {}),
+      ...(nonClaudeCli ? { agentCli } : {}),
+      ...(nonClaudeCli && trimmedCliModel ? { agentCliModel: trimmedCliModel } : {}),
     }
     return { ...intake, runtime }
   }
@@ -441,6 +459,8 @@ export function NewEpicCard({
       model: modelOverride || null,
       effort: effortOverride || null,
       developLoop,
+      agentCli: nonClaudeCli ? agentCli : null,
+      agentCliModel: nonClaudeCli && trimmedCliModel ? trimmedCliModel : null,
       openingPrompt: intake.openingPrompt,
       sections: intake.sections,
     }, 'NewEpicCard')
@@ -551,7 +571,7 @@ export function NewEpicCard({
   }
 
   // ---- Autosave: leaving the card never throws typed work away ----
-  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides, restoreSession?.sessionId ?? null])
+  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides, restoreSession?.sessionId ?? null, agentCli, trimmedCliModel])
   if (editDraft && lastSavedSigRef.current === null) lastSavedSigRef.current = sig
   const snap: AutosaveSnap = {
     cwd: effectiveCwd,
@@ -801,11 +821,39 @@ export function NewEpicCard({
               {selectedTagMission}
             </p>
 
-            <label className="mb-1 flex cursor-pointer items-start gap-2">
+            <div className="mb-3.5 min-w-0">
+              <div
+                className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
+                title="Which coding-agent CLI runs this session. Claude Code is the default."
+              >
+                CLI
+              </div>
+              <AgentCliPicker value={agentCli} onChange={pickAgentCli} />
+              {nonClaudeCli && (
+                <label className="mt-2 flex flex-col gap-1">
+                  <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+                    Model (optional)
+                  </span>
+                  <input
+                    data-testid="new-epic-agent-cli-model"
+                    type="text"
+                    maxLength={128}
+                    value={agentCliModel}
+                    onChange={(e) => setAgentCliModel(e.target.value)}
+                    placeholder="Blank = the CLI's own default"
+                    className="w-full appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-2 font-mono text-[12.5px] text-fg outline-none"
+                  />
+                </label>
+              )}
+            </div>
+
+            <label className={`mb-1 flex items-start gap-2 ${nonClaudeCli ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
               <input
                 type="checkbox"
                 data-testid="new-epic-develop-loop"
                 checked={developLoop}
+                disabled={nonClaudeCli}
+                title={nonClaudeCli ? NON_CLAUDE_LOOP_TITLE : undefined}
                 onChange={(e) => setDevelopLoopOverride(e.target.checked)}
                 className="mt-0.5"
               />
@@ -829,7 +877,7 @@ export function NewEpicCard({
             )}
             <div className="mb-2.5" />
 
-            {restoreSession && (
+            {restoreSession && !nonClaudeCli && (
               <div
                 data-testid="new-epic-restore-chip"
                 className="mb-2 flex items-center gap-2 rounded-[10px] border border-accent-muted bg-bg px-[13px] py-2"
@@ -1036,21 +1084,23 @@ export function NewEpicCard({
                 )}
                 {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
               </div>
-              <EpicRuntimeOverride
-                cwd={effectiveCwd || null}
-                personaModel={selectedAgent?.model ?? null}
-                personaEffort={selectedAgent?.effort ?? null}
-                model={modelOverride}
-                effort={effortOverride}
-                onModel={setModelOverride}
-                onEffort={setEffortOverride}
-              />
+              {!nonClaudeCli && (
+                <EpicRuntimeOverride
+                  cwd={effectiveCwd || null}
+                  personaModel={selectedAgent?.model ?? null}
+                  personaEffort={selectedAgent?.effort ?? null}
+                  model={modelOverride}
+                  effort={effortOverride}
+                  onModel={setModelOverride}
+                  onEffort={setEffortOverride}
+                />
+              )}
             </div>
 
             {/* Restore a session — mounted (and so listed) only while this face
                 is open. An edited draft keeps the session it was minted with,
                 so there it only says which one that is. */}
-            {advanced && effectiveCwd ? (
+            {advanced && effectiveCwd && !nonClaudeCli ? (
               <RestoreSessionPanel
                 cwd={effectiveCwd}
                 excludeIds={openTabIds}

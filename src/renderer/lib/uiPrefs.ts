@@ -15,6 +15,8 @@
  *  are deliberately never persisted here — a stale unsaved edit silently
  *  reappearing after a restart is a data-integrity risk, not a convenience;
  *  every restored path is re-read from disk fresh instead. */
+import type { MdCuration } from './mdCurate'
+
 export interface EditorSessionPrefs {
   openFiles: string[]
   activeFilePath: string | null
@@ -39,6 +41,8 @@ export interface UiPrefs {
   chatVerbosityPerEpic?: Record<string, string>
   /** editor.ts — the Editor scene's open-files tab strip for this project. */
   editorSession?: EditorSessionPrefs
+  /** useMdCuration — the MD network explorer's verdicts, notes, review stamps and folder overrides (shape: mdCurate.ts). */
+  mdCuration?: MdCuration
 }
 
 export function uiPrefsPath(cwd: string): string {

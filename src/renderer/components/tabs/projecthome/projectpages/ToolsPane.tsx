@@ -19,6 +19,12 @@
  * never polled. The scan fills the info strip, the LINK MAP / FINDINGS cards
  * (MdLinkMap), the Scope options after the input's default, the row and title
  * findings count, and `onFindingsCount` (ProjectHome's Tools key button).
+ *
+ * The explorer's curation (verdicts, notes, reviewed marks, record/doc folder overrides) is
+ * `useMdCuration`'s, kept in this project's ui-prefs. The scan waits for it to load and sends
+ * the folder overrides, rescanning when either folder list changes (never on a verdict, note
+ * or reviewed mark). The explorer footer's CurationTray turns the picked docs into a Review MD
+ * network launch (composeCurationBrief), so curation ends in an architect session.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
@@ -26,12 +32,14 @@ import { MacroEditor } from '../../../epics/MacroEditor'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { useAgentPersonas } from '../../../../lib/useAgentPersonas'
 import { toast } from '../../../../state/toast'
+import { useMdCuration, type UseMdCuration } from '../../../../lib/useMdCuration'
+import { composeCurationBrief, type MdCuration } from '../../../../lib/mdCurate'
 import { MdNetworkCards } from './MdLinkMap'
 import { MdNetworkExplorer } from './MdNetworkExplorer'
 import { MdDocPreview } from './MdDocPreview'
 import { MdDocTable } from './MdDocTable'
 import { CompetitorMatrixView } from './CompetitorMatrixView'
-import type { Macro, MacroJobStatus, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
+import type { Macro, MacroJobStatus, MdCensus, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
 
 export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
 /** A finished scan's findings count for `cwd`; null when the scan failed. */
@@ -42,6 +50,8 @@ const COMPETITOR_MATRIX_ID = 'builtin-competitor-matrix'
 /** Pages / Videos launch these from their own tabs. */
 const LIBRARY_MACRO_IDS: readonly string[] = ['builtin-project-home', 'builtin-demo-video']
 const NO_SCOPES: readonly string[] = []
+/** The Mode a curation launch asks for when the macro offers it. */
+const CURATION_MODE = 'Full review'
 
 const REVIEW_DESCRIPTION =
   'Maps CLAUDE.md and every doc it leads to, so agents start from one short entry map and find each fact in exactly one place — with nothing stale.'
@@ -55,20 +65,37 @@ type MdNetworkScan =
   | { cwd: string; status: 'ready'; result: MdNetwork }
   | { cwd: string; status: 'error'; error: string }
 
+/** The folder overrides a scan sends (useMdCuration's recordFolders / docFolders). */
+interface ScanFolders {
+  recordFolders: string[]
+  docFolders: string[]
+}
+
 /**
- * Scans `cwd` once when `active` (the Review MD network view shows) first holds for it, and
- * again on `refresh` — never on a timer. A scan a newer one replaced is dropped. `{ ok:false }`
+ * Scans `cwd` once `ready` (its curation loaded) and `active` (the Review MD network view shows)
+ * first hold for it, again whenever `folders` changes, and on `refresh` — never on a timer. A scan a newer one replaced is dropped. `{ ok:false }`
  * (nothing to map: not a git repo, no root CLAUDE.md) shows in the pane only; a rejected call
  * also toasts, once per scan.
  */
-function useMdNetworkScan(cwd: string | null | undefined, active: boolean, onFindingsCount?: FindingsCountFn) {
+function useMdNetworkScan(
+  cwd: string | null | undefined,
+  active: boolean,
+  ready: boolean,
+  folders: ScanFolders,
+  onFindingsCount?: FindingsCountFn,
+) {
   const [scan, setScan] = useState<MdNetworkScan | null>(null)
-  const requestedCwd = useRef<string | null>(null)
+  // `${cwd}\n${folders}` of the last scan started, so only a cwd or folder change rescans.
+  const requestedKey = useRef<string | null>(null)
   const latest = useRef(0)
+  const foldersKey = JSON.stringify([folders.recordFolders, folders.docFolders])
+  const foldersRef = useRef(folders)
+  foldersRef.current = folders
 
   const start = useCallback(
-    (forCwd: string) => {
-      requestedCwd.current = forCwd
+    (forCwd: string, key: string) => {
+      requestedKey.current = key
+      const { recordFolders, docFolders } = foldersRef.current
       const id = ++latest.current
       setScan((prev) => ({
         cwd: forCwd,
@@ -77,7 +104,7 @@ function useMdNetworkScan(cwd: string | null | undefined, active: boolean, onFin
       }))
       let pending: Promise<MdNetworkResult>
       try {
-        pending = window.api.projectPages.mdNetwork({ cwd: forCwd })
+        pending = window.api.projectPages.mdNetwork({ cwd: forCwd, recordFolders, docFolders })
       } catch (err) {
         pending = Promise.reject(err)
       }
@@ -100,12 +127,14 @@ function useMdNetworkScan(cwd: string | null | undefined, active: boolean, onFin
   )
 
   useEffect(() => {
-    if (active && cwd && requestedCwd.current !== cwd) start(cwd)
-  }, [active, cwd, start])
+    if (!active || !ready || !cwd) return
+    const key = `${cwd}\n${foldersKey}`
+    if (requestedKey.current !== key) start(cwd, key)
+  }, [active, ready, cwd, foldersKey, start])
 
   const refresh = useCallback(() => {
-    if (cwd) start(cwd)
-  }, [cwd, start])
+    if (cwd && ready) start(cwd, `${cwd}\n${foldersKey}`)
+  }, [cwd, ready, foldersKey, start])
 
   return { scan: scan?.cwd === cwd ? scan : null, refresh }
 }
@@ -291,6 +320,62 @@ function SelectionSync({ id, onChange }: { id: string | null; onChange: (id: str
   return null
 }
 
+/**
+ * The explorer footer: how many docs carry a verdict, Clear (drops every verdict) and Review
+ * picked docs, which launches the review macro with composeCurationBrief's Scope and
+ * additional instructions, then closes the explorer.
+ */
+function CurationTray({
+  macro,
+  curation,
+  census,
+  mode,
+  launching,
+  onLaunch,
+  onClear,
+  onClose,
+}: {
+  macro: Macro
+  curation: MdCuration
+  census: MdCensus
+  mode: string
+  launching: string | null
+  onLaunch: LaunchFn
+  onClear: () => void
+  onClose: () => void
+}) {
+  const brief = composeCurationBrief(curation, census)
+  return (
+    <div data-testid="md-curation-tray" className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+      <span data-testid="md-curation-count" className="flex-1 text-[12.5px] text-fg-dim">
+        {`${plural(brief.picked, 'doc')} picked`}
+      </span>
+      <button
+        type="button"
+        data-testid="md-curation-clear"
+        disabled={Object.keys(curation.verdicts).length === 0}
+        onClick={onClear}
+        className="inline-flex h-[30px] flex-none items-center rounded-md border border-rule-structural bg-bg-hi px-3 text-[12px] font-semibold text-fg-dim cursor-pointer hover:border-fg-faint hover:text-fg disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Clear
+      </button>
+      <button
+        type="button"
+        data-testid="md-curation-review"
+        disabled={brief.picked === 0 || launching !== null}
+        onClick={() => {
+          onLaunch(macro, brief.extraInstructions, { scope: brief.scope, mode })
+          onClose()
+        }}
+        className={PRIMARY_CLASS}
+      >
+        <AlmanacIcon name="sparkle" size={14} />
+        {launching === macro.id ? 'Starting…' : 'Review picked docs'}
+      </button>
+    </div>
+  )
+}
+
 function ReviewTool({
   macro,
   cwd,
@@ -298,6 +383,7 @@ function ReviewTool({
   onRefresh,
   launching,
   onLaunch,
+  md,
 }: {
   macro: Macro
   cwd?: string | null
@@ -305,7 +391,9 @@ function ReviewTool({
   onRefresh: () => void
   launching: string | null
   onLaunch: LaunchFn
+  md: UseMdCuration
 }) {
+  const { curation } = md
   const [scopePick, setScopePick] = useState<string | null>(null)
   const [modePick, setModePick] = useState<string | null>(null)
   const [explore, setExplore] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
@@ -325,6 +413,11 @@ function ReviewTool({
   const mode = modePick !== null && modeOptions.includes(modePick) ? modePick : modeDefault
   const scopeLabel = scopeInput?.label ?? 'Scope'
   const modeLabel = modeInput?.label ?? 'Mode'
+  const curationMode = modeOptions.includes(CURATION_MODE) ? CURATION_MODE : modeDefault
+  const closeExplorer = () => {
+    setExplore({ open: false, id: null })
+    setExplorerSel(null)
+  }
 
   return (
     <>
@@ -391,15 +484,23 @@ function ReviewTool({
           network={network}
           cwd={cwd}
           initialPath={explore.id}
-          onClose={() => {
-            setExplore({ open: false, id: null })
-            setExplorerSel(null)
-          }}
+          onClose={closeExplorer}
           renderInspector={(id, select) => (
             <>
               <SelectionSync id={id} onChange={setExplorerSel} />
               {id !== null && network.census?.docs.some((d) => d.path === id) ? (
-                <MdDocPreview cwd={cwd} path={id} network={network} onNavigate={select} />
+                <MdDocPreview
+                  cwd={cwd}
+                  path={id}
+                  network={network}
+                  onNavigate={select}
+                  verdict={curation.verdicts[id] ?? null}
+                  note={curation.notes[id] ?? ''}
+                  reviewedAtMs={curation.reviewedAt[id] ?? null}
+                  onVerdict={(v) => md.setVerdict(id, v)}
+                  onNote={(text) => md.setNote(id, text)}
+                  onMarkReviewed={() => md.markReviewed(id)}
+                />
               ) : (
                 <ExplorerFallbackInspector network={network} id={id} select={select} />
               )}
@@ -407,8 +508,33 @@ function ReviewTool({
           )}
           renderDocs={
             network.census
-              ? (select) => <MdDocTable census={network.census} selectedPath={explorerSel} onSelect={select} />
+              ? (select) => (
+                  <MdDocTable
+                    census={network.census}
+                    selectedPath={explorerSel}
+                    onSelect={select}
+                    verdicts={curation.verdicts}
+                    reviewedAt={curation.reviewedAt}
+                    recordFolders={curation.recordFolders}
+                    docFolders={curation.docFolders}
+                    onFolderKind={md.setFolderKind}
+                  />
+                )
               : undefined
+          }
+          footer={
+            network.census ? (
+              <CurationTray
+                macro={macro}
+                curation={curation}
+                census={network.census}
+                mode={curationMode}
+                launching={launching}
+                onLaunch={onLaunch}
+                onClear={md.clearVerdicts}
+                onClose={closeExplorer}
+              />
+            ) : undefined
           }
         />
       )}
@@ -455,7 +581,8 @@ export function ToolsPane({
   const tools = toolMacros(macros)
   // First row by default; a pick survives list refreshes while its macro is still listed.
   const selected = editing ? null : (tools.find((m) => m.id === selectedId) ?? tools[0] ?? null)
-  const { scan, refresh } = useMdNetworkScan(cwd, selected?.id === REVIEW_MD_NETWORK_ID, onFindingsCount)
+  const md = useMdCuration(cwd)
+  const { scan, refresh } = useMdNetworkScan(cwd, selected?.id === REVIEW_MD_NETWORK_ID, md.ready, md.curation, onFindingsCount)
   const network = scan && scan.status !== 'error' ? scan.result : null
   const rowMeta = (m: Macro) =>
     m.id === REVIEW_MD_NETWORK_ID && network ? plural(network.findings.length, 'finding') : m.agentName
@@ -478,6 +605,7 @@ export function ToolsPane({
         onRefresh={refresh}
         launching={launching}
         onLaunch={onLaunch}
+        md={md}
       />
     )
   else if (selected.id === COMPETITOR_MATRIX_ID)

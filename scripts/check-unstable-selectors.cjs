@@ -50,6 +50,7 @@ const STORE_HOOK_NAMES = [
   'useScheduleState',
   'usePromptSessions',
   'useTour',
+  'useAppPreview',
 ]
 
 // Matches `<storeHook>(<selector arg>)`, e.g. `useScheduleState((s) => ...)`

@@ -40,14 +40,28 @@ const { encodeCwd } = require('./lib/util/encodeCwd.cjs');
 const { LRUCache } = require('./lib/util/lruCache.cjs');
 const { classifyLine } = require('./lib/classifyTranscriptLine.cjs');
 const { resolveEpicTranscriptPath } = require('./lib/epic/epicTranscriptPath.cjs');
+const agentCliSessionStore = require('./lib/agent-cli/agentCliSessionStore.cjs');
+
+/** Agent-CLI (non-Claude) Epic transcript path when that file exists, else null. Never throws. */
+function agentCliTranscriptIfExists(sessionUuid) {
+  try {
+    const p = agentCliSessionStore.transcriptPathFor(sessionUuid);
+    return fs.existsSync(p) ? p : null;
+  } catch {
+    return null; // invalid (non-UUID) id — not an agent-CLI session
+  }
+}
 
 /**
- * Where the CLI's JSONL for this session lives. Epic sessions run in a
- * worktree, so the resolver checks the worktree encoding as well as the
- * project one; a non-Epic tab resolves to the plain project-encoded path.
- * Sync + absolute always (falls back to the plain path on invalid input).
+ * Where the CLI's JSONL for this session lives. A non-Claude agent-CLI Epic's
+ * Claude-compatible JSONL (agentCliSessionStore) wins when it exists. Epic
+ * sessions run in a worktree, so the resolver checks the worktree encoding as
+ * well as the project one; a non-Epic tab resolves to the plain project-encoded
+ * path. Sync + absolute always (falls back to the plain path on invalid input).
  */
 function resolveTranscript(cwd, sessionUuid) {
+  const agentPath = agentCliTranscriptIfExists(sessionUuid);
+  if (agentPath) return { filePath: agentPath, existsAnywhere: true };
   const r = resolveEpicTranscriptPath({ cwd, claudeSessionId: sessionUuid });
   const filePath = r.path || path.join(os.homedir(), '.claude', 'projects', encodeCwd(cwd), `${sessionUuid}.jsonl`);
   return { filePath, existsAnywhere: !!r.existsAnywhere };

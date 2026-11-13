@@ -309,7 +309,7 @@ test('readLandedCommits: this Epic only, newest terminal row per slug, queue the
   }
 });
 
-test('defaultListEpicPrds: prds/ + prds-archived/<ISO>/ only, title from frontmatter', async () => {
+test('defaultListEpicPrds: prds/ + flat prds-archived/ + prds-archived/<ISO>/, title from frontmatter', async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-epic-list-'));
   tmpDirs.push(root);
   const cwd = path.join(root, 'proj');
@@ -320,6 +320,10 @@ test('defaultListEpicPrds: prds/ + prds-archived/<ISO>/ only, title from frontma
   fs.writeFileSync(path.join(epicDir, 'prds', '10-live.md'), '---\ntitle: Live one\n---\nbody\n');
   fs.writeFileSync(path.join(epicDir, 'prds-archived', '2026-11-01T00-00-00Z', '9-old.md'), 'no frontmatter\n');
   fs.writeFileSync(path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'epic-other', 'prds', '11-x.md'), '---\ntitle: X\n---\n');
+  // Flat archived PRD, plus a duplicate slug: prds/ wins over flat, flat over nested.
+  fs.writeFileSync(path.join(epicDir, 'prds-archived', '8-flat.md'), '---\ntitle: Flat\n---\n');
+  fs.writeFileSync(path.join(epicDir, 'prds-archived', '10-live.md'), '---\ntitle: Archived dup\n---\n');
+  fs.writeFileSync(path.join(epicDir, 'prds-archived', '9-old.md'), '---\ntitle: Flat wins\n---\n');
   const list = defaultListEpicPrds(cwd, EPIC).sort((a, b) => a.slug.localeCompare(b.slug));
-  expect(list).toEqual([{ slug: '10-live', title: 'Live one' }, { slug: '9-old', title: '9-old' }]);
+  expect(list).toEqual([{ slug: '10-live', title: 'Live one' }, { slug: '8-flat', title: 'Flat' }, { slug: '9-old', title: 'Flat wins' }]);
 });

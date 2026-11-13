@@ -233,8 +233,11 @@ function subdirsOf(dir) {
 
 /**
  * The Epic's PRDs → [{ slug, title }], first occurrence of a slug winning.
- * Reads only <epicsRoot>/<epicId>/prds/, prds-archived/<ISO>/ and the
- * ancestor Epic dirs of the same id. Never throws.
+ * Reads only <epicsRoot>/<epicId>/prds/ and both archived layouts —
+ * flat prds-archived/<NN>-<slug>.md (how the scheduler archives today) and
+ * nested prds-archived/<ISO>/<NN>-<slug>.md — plus the ancestor Epic dirs of
+ * the same id. Order: prds/ dirs, then each prds-archived root followed by
+ * its immediate subfolders. Never throws.
  */
 function defaultListEpicPrds(cwd, epicId) {
   const liveDirs = [];
@@ -246,7 +249,7 @@ function defaultListEpicPrds(cwd, epicId) {
   } catch { /* unresolvable ops root: ancestors only */ }
   try { liveDirs.push(...ancestorEpicPrdDirs(cwd, epicId)); } catch { /* none */ }
   try { archivedRoots.push(...ancestorEpicArchivedPrdDirs(cwd, epicId)); } catch { /* none */ }
-  const dirs = [...liveDirs, ...archivedRoots.flatMap(subdirsOf)];
+  const dirs = [...liveDirs, ...archivedRoots.flatMap((root) => [root, ...subdirsOf(root)])];
   const seen = new Map();
   for (const dir of dirs) {
     for (const p of prdFilesIn(dir)) if (!seen.has(p.slug)) seen.set(p.slug, p);

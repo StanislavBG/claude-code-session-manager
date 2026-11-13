@@ -57,6 +57,9 @@ const chatInflight = require('./lib/chatInflight.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const memoryScope = require('./lib/process/memoryScope.cjs');
 const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
+const { isNonClaudeAgentCli } = require('./lib/agent-cli/agentCliEvents.cjs');
+const { planAgentCliTurn } = require('./lib/agent-cli/agentCliTurn.cjs');
+const { writeNativeSession } = require('./lib/agent-cli/agentCliSessionStore.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
 const STDERR_TAIL_MAX = 64 * 1024;
@@ -598,7 +601,13 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       });
     };
 
-    const claudeBin = resolveClaudeBin();
+    // Non-Claude agent-CLI Epic (codex, gemini, …): the turn spawns that CLI's adapter command
+    // instead of claude; every Claude-only resolution below is skipped for it.
+    let agentEpic = null;
+    try { agentEpic = agentModelResolve.findEpicByClaudeSessionId(cwd, sessionId); } catch { agentEpic = null; }
+    const isAgentCli = !!(agentEpic && isNonClaudeAgentCli(agentEpic.agentCli));
+
+    const claudeBin = isAgentCli ? null : resolveClaudeBin();
     // Carried down to any MCP server this run spawns (e.g.
     // scripts/scheduler-mcp-server.cjs, inherited via the claude CLI's own
     // child env) so scheduler_create_prd can auto-resolve sourcePromptId
@@ -627,16 +636,18 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // throws; falls back to the hardcoded 'sonnet' literal when there's no
     // Epic, no agentType, or the persona has no model/'inherit' — --model
     // must never be left unpinned (CLAUDE.md model-pinning rule).
-    const model = agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
+    const model = isAgentCli ? null : agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
     // Persona `effort:` (same overlay-aware persona, agentEffortResolve.cjs);
     // effortArgs() yields NO tokens for inherit/absent/dangling.
-    const effortFlags = effortArgs(resolveEpicEffort({ cwd, claudeSessionId: sessionId }).effort);
+    const effortFlags = isAgentCli ? [] : effortArgs(resolveEpicEffort({ cwd, claudeSessionId: sessionId }).effort);
 
     // Develop-loop-off Epics launch with the dev plugin disabled for this session only.
     let loopOffArgs = [];
-    try {
-      loopOffArgs = developLoopOffSettingsArgs(agentModelResolve.findEpicByClaudeSessionId(cwd, sessionId));
-    } catch { /* lookup failure = launch as today */ }
+    if (!isAgentCli) {
+      try {
+        loopOffArgs = developLoopOffSettingsArgs(agentModelResolve.findEpicByClaudeSessionId(cwd, sessionId));
+      } catch { /* lookup failure = launch as today */ }
+    }
 
     // Main is authoritative about --resume vs --session-id AND the spawn cwd, and it decides
     // them TOGETHER (epicSpawnPlan.cjs): a transcript under an encoding the spawn cwd cannot see
@@ -652,8 +663,25 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       settle();
       return;
     }
+    // Agent-CLI turn plan (agentCliTurn.cjs): command, argv, stdin, auth env, parser, transcript.
+    let agentPlan = null;
+    if (isAgentCli) {
+      agentPlan = planAgentCliTurn({ epic: agentEpic, claudeSessionId: sessionId, cwd: plan.execCwd, prompt: fullPrompt });
+      if (!agentPlan.ok) {
+        emitTerminal('chat:run:error', { tabId, sessionId, code: agentPlan.code, message: agentPlan.message });
+        if (silent && typeof onSilentError === 'function') {
+          try { onSilentError(agentPlan.message, agentPlan.code); } catch { /* caller bug must not wedge the lane */ }
+        }
+        settle();
+        return;
+      }
+    }
+    const agentEnv = agentPlan
+      ? cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd, ...agentPlan.envExtra })
+      : null;
+
     const useResume = plan.useResume;
-    if (useResume !== !!resume) {
+    if (!agentPlan && useResume !== !!resume) {
       try {
         logs.writeLine({
           scope: 'chatRunner',
@@ -764,8 +792,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // A turn's background processes (dev server, local service) outlive it on
     // purpose: the scope is never stopped; created --collect, systemd collects it once empty.
     try {
-      const chatArgs = buildArgs(resumeFlag);
-      let target = claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
+      const chatArgs = agentPlan ? agentPlan.args : buildArgs(resumeFlag);
+      let target = agentPlan
+        ? { command: agentPlan.command, args: chatArgs }
+        : claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
       // Limits first: with the cap off, never probe systemd.
       const limits = memoryScope.memoryLimitsFor({ totalRamMb: Math.floor(require('node:os').totalmem() / 1048576) });
       {
@@ -778,11 +808,12 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
           target = { ...target, command: wrapped.command, args: wrapped.args, argv0: undefined };
         }
       }
+      if (agentPlan) agentPlan.transcript.userPrompt(fullPrompt);
       thisChild = spawn(target.command, target.args || chatArgs, {
         ...(target.argv0 ? { argv0: target.argv0 } : {}),
         ...(target.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         cwd: execCwd,
-        env: childEnv,
+        env: agentPlan ? agentEnv : childEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
         ...detachedSpawnOpts(), // own process group so killTree can SIGTERM descendants
       });
@@ -799,7 +830,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     }
     child = thisChild;
     chatInflight.begin(sessionId, { tabId, cwd, pid: thisChild.pid, startedAt, resume, silent, promptId, origin, worktreeDirHint }).catch(() => {});
-    feedChildStdin(thisChild, fullPrompt, {
+    feedChildStdin(thisChild, agentPlan ? agentPlan.stdin : fullPrompt, {
       log: (m) => logs.writeLine({ scope: 'chatRunner', level: 'warn', message: m }),
     });
 
@@ -907,11 +938,37 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       }
     };
 
+    // Agent-CLI turns: the adapter's parser translates each native line into Claude
+    // stream-json events, which are recorded and then fed through processLine unchanged.
+    let nativeIdSaved = false;
+    const processAgentEvents = (events) => {
+      for (const ev of Array.isArray(events) ? events : []) {
+        try { agentPlan.transcript.event(ev); } catch { /* transcript never fails a turn */ }
+        if (ev && ev.type === 'system' && ev.subtype === 'init' && typeof ev.session_id === 'string'
+            && ev.session_id && !nativeIdSaved) {
+          nativeIdSaved = true;
+          try {
+            writeNativeSession(sessionId, { cli: agentPlan.cli, nativeSessionId: ev.session_id });
+          } catch (err) {
+            logs.writeLine({ scope: 'chatRunner', level: 'warn', message: `agent-cli native session write failed: ${err?.message ?? err}` });
+          }
+        }
+        processLine(JSON.stringify(ev));
+      }
+    };
+    const handleLine = (line) => {
+      if (!agentPlan) { processLine(line); return; }
+      if (!line) return;
+      let events = [];
+      try { events = agentPlan.parser.push(line); } catch { events = []; }
+      processAgentEvents(events);
+    };
+
     thisChild.stdout.on('data', (chunk) => {
       lineBuffer += chunk.toString('utf8');
       let nl;
       while ((nl = lineBuffer.indexOf('\n')) !== -1) {
-        processLine(lineBuffer.slice(0, nl).trim());
+        handleLine(lineBuffer.slice(0, nl).trim());
         lineBuffer = lineBuffer.slice(nl + 1);
       }
       if (lineBuffer.length > LINE_BUFFER_MAX) {
@@ -955,12 +1012,18 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // terminalSent latch.
     thisChild.on('close', (code, signal) => {
       // Flush any partial line that didn't end with \n
-      if (lineBuffer.trim()) processLine(lineBuffer.trim());
+      if (lineBuffer.trim()) handleLine(lineBuffer.trim());
+      if (agentPlan) {
+        let endEvents = [];
+        try { endEvents = agentPlan.parser.end({ exitCode: code }); } catch { endEvents = []; }
+        processAgentEvents(endEvents);
+        try { agentPlan.transcript.close(); } catch { /* never fails a turn */ }
+      }
 
       // Flag-swap retry: the CLI rejected the session flag before doing any
       // work. Retry exactly once with the other flag; the timers, lane and
       // terminal latch stay at executeRun level, so this is still one turn.
-      if (!terminalSent && !killed && code !== 0 && attemptNo === 1
+      if (!agentPlan && !terminalSent && !killed && code !== 0 && attemptNo === 1
           && finalAssistantText === '' && recentToolUses.length === 0
           && !/rate.?limit/i.test(stderrText())) {
         const swapTo = resumeFlag

@@ -59,15 +59,31 @@ function compareEventsChainAware(a, b) {
 }
 
 /**
- * mergeActiveIndex(cwd, { sessions, events, removedIds }) → Promise<{ sessions, events }>
+ * Default app-preview stop: required lazily so this module never loads
+ * app-preview at require time. manager.stop(id) is a no-op for an Epic with
+ * nothing running.
+ */
+function defaultStopPreview(id) {
+  return require('../app-preview/appPreviewIpc.cjs').getAppPreviewManager().stop(id);
+}
+
+/**
+ * mergeActiveIndex(cwd, { sessions, events, removedIds }, deps?) → Promise<{ sessions, events }>
  *
  * `sessions`/`events` are the CALLING renderer's own in-memory contribution
  * for this cwd only (already filtered to 'active'/'proposed' sessions by
  * persistActiveIndex) — never a full merged file; disk remains the source of
  * truth this function reads and reconciles against. Returns the merged
  * { sessions, events } actually written.
+ *
+ * deps.stopPreview(id) (default: the app-preview manager's stop) runs
+ * fire-and-forget for every removedIds entry AFTER the write lands — the
+ * single main-side choke point that stops an Epic's preview whenever it leaves
+ * the active index (completion, deletion, stale-row cleanup; desktop or web
+ * remote). It never delays or changes the returned result; failures are logged.
  */
-async function mergeActiveIndex(cwd, { sessions: rawMemorySessions = {}, events: rawMemoryEvents = {}, removedIds = [] } = {}) {
+async function mergeActiveIndex(cwd, { sessions: rawMemorySessions = {}, events: rawMemoryEvents = {}, removedIds = [] } = {}, deps = {}) {
+  const stopPreview = typeof deps.stopPreview === 'function' ? deps.stopPreview : defaultStopPreview;
   if (!cwd || typeof cwd !== 'string') throw new Error('mergeActiveIndex: cwd is required');
   // Register this project's cwd as a write-allowed root (config.cjs's
   // validateWrite gate) — mirrors the precedent + comment in
@@ -159,6 +175,13 @@ async function mergeActiveIndex(cwd, { sessions: rawMemorySessions = {}, events:
     // payload, so a compromised/forged renderer call can't claim a
     // different writer id.
     await config.writeJson(filePath, index, { writer: 'epics' });
+    // App preview stop — fire-and-forget, only after the write succeeded
+    // (writeJson throws on failure, so a failed write never reaches here).
+    for (const id of removedIds) {
+      Promise.resolve()
+        .then(() => stopPreview(id))
+        .catch((e) => console.warn(`[activeIndexMerge] app preview stop failed for ${id}`, e));
+    }
     // Status mirror (epicStatusMirror.cjs) — this IPC handler is the
     // renderer-driven persist path (persistActiveIndex), the write site for
     // both the 'proposed'->'active' start transition (approveProposed) and

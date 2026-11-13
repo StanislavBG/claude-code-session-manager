@@ -156,6 +156,21 @@ describe('EpicDetail (PRD 827)', () => {
     // 1.4-1.8s idle; it exceeded the 15s global default under full-suite contention.
   }, 60_000)
 
+  it('mounts Run preview before Mark completed for an active Epic only', async () => {
+    installWindowApiMock()
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Preview\n\nRun it.', 'feature')
+    const active = usePromptSessions.getState().approveProposed(proposed.id)!
+    const el = mount(createElement(EpicDetail, { promptSession: active }))
+    const run = el.querySelector('[data-testid="epic-preview-run"]')
+    const mark = el.querySelector('[data-testid="epic-mark-completed"]')
+    expect(run).not.toBeNull()
+    expect(run!.compareDocumentPosition(mark!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    act(() => root?.unmount())
+    container?.remove()
+    const done = mount(createElement(EpicDetail, { promptSession: { ...active, status: 'completed', completedAt: new Date().toISOString() } }))
+    expect(done.querySelector('[data-testid="epic-preview-run"]')).toBeNull()
+  })
+
   describe('editable title (full view)', () => {
     async function mountEpic() {
       installWindowApiMock()

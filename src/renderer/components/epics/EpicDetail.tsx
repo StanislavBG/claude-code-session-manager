@@ -5,6 +5,7 @@ import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, isWebRemote, WEB_TERMINAL_TOOLTIP, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
+import { EpicAppPreview } from './EpicAppPreview'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, WORKTREE_TONE, InboundProposalCard } from './epic-primitives'
 import { inboundFeedbackOrigin, inboundSeriesSiblings } from '../../lib/epicOrigin'
@@ -1007,6 +1008,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               </button>
             ) : (
               <>
+                {promptSession.status === 'active' && !webRemote && <EpicAppPreview epicId={epicId} cwd={cwd} />}
                 <button
                   type="button"
                   onClick={onMarkCompleted}

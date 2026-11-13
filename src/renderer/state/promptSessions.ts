@@ -435,6 +435,18 @@ function hasPendingWrite(path: string): boolean {
   return (pendingWriteCounts.get(path) ?? 0) > 0
 }
 
+/** Best-effort stop of an Epic's dev-server preview on Epic close
+ *  (markCompleted / deleteEpic). Never throws and never toasts: main's
+ *  mergeEpicToMainViaIpc stop and the quit-time stopAll are the backstops. */
+async function stopAppPreviewBestEffort(epicId: string): Promise<void> {
+  try {
+    if (typeof window === 'undefined') return
+    await window.api?.appPreview?.stop({ epicId })
+  } catch {
+    /* best effort: main's merge stop and quit stopAll are the backstops */
+  }
+}
+
 /** Merge-to-main attempt (PRD 1034) — markCompleted's merge-before-archive
  *  checkpoint is its sole caller, and the ONLY point where an Epic's per-Epic
  *  git isolation (PRD 1032/1033) resolves back into its owning project's main
@@ -759,6 +771,9 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // changes) rather than inventing a second kill mechanism.
     await window.api.chat.cancel(promptSessionId)
     window.api.pty.kill(session.claudeSessionId)
+    // Kill the Epic's dev-server preview before the merge tears down the
+    // worktree it runs in.
+    await stopAppPreviewBestEffort(promptSessionId)
 
     // Merge-to-main checkpoint (PRD 1034) — the ONLY point where this Epic's
     // isolated git worktree (PRD 1032/1033) resolves back into its owning
@@ -984,6 +999,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (useEpicTerminal.getState().isAttached(promptSessionId)) {
       throw new Error('deleteEpic: this Epic has a live Terminal session attached — detach it first')
     }
+    await stopAppPreviewBestEffort(promptSessionId)
     const priorSessions = get().sessions
     const priorEvents = get().events
     const sessions = { ...priorSessions }

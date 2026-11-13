@@ -24,13 +24,27 @@
  * re-attach and fall back to the project cwd) and resolve it manually — the
  * branch and worktree dir are deliberately left intact so the human can merge
  * them from the command line.
+ *
+ * Before integrating, the Epic's dev-server preview (app-preview/) is stopped
+ * — a backstop for any caller, since the renderer's markCompleted already
+ * stops it — so no preview process outlives the worktree it runs in. A
+ * failing stop is logged and never fails the merge.
  */
 
 const { integrateEpicBranch, cleanupEpicWorktree, reconcileWorktreeHead } = require('../git/gitWorktree.cjs');
 const { validatePath } = require('../../config.cjs');
 
+// Lazy require: keeps app-preview (and electron) out of this module's load path.
+async function defaultStopPreview(epicId) {
+  const { getAppPreviewManager } = require('../app-preview/appPreviewIpc.cjs');
+  await getAppPreviewManager().stop(epicId);
+}
+
 /**
- * mergeEpicToMainViaIpc(cwd, epicId, branch, dir) → Promise<MergeOutcome>
+ * mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths?, deps?) → Promise<MergeOutcome>
+ *
+ * `deps.stopPreview(epicId)` is injectable for tests; defaults to the app
+ * preview manager's stop.
  *
  * `MergeOutcome` is `{ ok: true, status: 'merged', integrated: boolean }` on
  * a clean merge (or a legitimate no-new-commits no-op — either way nothing
@@ -39,8 +53,14 @@ const { validatePath } = require('../../config.cjs');
  * real conflict — never throws (integrateEpicBranch/cleanupEpicWorktree
  * never do either).
  */
-async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths) {
+async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths, deps = {}) {
   validatePath(cwd);
+  const stopPreview = deps.stopPreview || defaultStopPreview;
+  try {
+    await stopPreview(epicId);
+  } catch (err) {
+    console.log(`[epicWorktreeMerge] ${epicId}: preview stop failed, merging anyway (${err && err.message ? err.message : err})`);
+  }
   if (dir) {
     const rec = await reconcileWorktreeHead({ cwd, dir, branch, key: epicId });
     if (rec && rec.action === 'diverged') {

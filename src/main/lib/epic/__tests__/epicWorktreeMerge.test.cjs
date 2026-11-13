@@ -167,3 +167,45 @@ test('a diverged worktree HEAD is refused with the checkout and branch intact', 
   expect(git(['branch', '--list', created.branch], cwd).trim()).not.toBe('');
   expect(fs.existsSync(path.join(cwd, 'on-branch.txt'))).toBe(false);
 });
+
+test('the injected stopPreview runs before integration, with the worktree still in place', async () => {
+  const cwd = await mkRepoCwd();
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId: 'epic-merge-preview' });
+  expect(created.ok).toBe(true);
+  fs.writeFileSync(path.join(created.dir, 'epic-note.txt'), 'epic work\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'epic edits'], created.dir);
+
+  const seen = [];
+  const stopPreview = async (epicId) => {
+    seen.push({
+      epicId,
+      worktreeExists: fs.existsSync(created.dir),
+      landedOnMain: fs.existsSync(path.join(cwd, 'epic-note.txt')),
+    });
+  };
+  const result = await mergeEpicToMainViaIpc(cwd, 'epic-merge-preview', created.branch, created.dir, undefined, { stopPreview });
+
+  expect(seen).toEqual([{ epicId: 'epic-merge-preview', worktreeExists: true, landedOnMain: false }]);
+  expect(result).toEqual({ ok: true, status: 'merged', integrated: true });
+  expect(fs.existsSync(path.join(cwd, 'epic-note.txt'))).toBe(true);
+});
+
+test('a throwing or rejecting stopPreview never fails the merge', async () => {
+  for (const [epicId, stopPreview] of [
+    ['epic-merge-stop-throws', () => { throw new Error('boom'); }],
+    ['epic-merge-stop-rejects', async () => { throw new Error('boom'); }],
+  ]) {
+    const cwd = await mkRepoCwd();
+    const created = await gitWorktree.createEpicWorktree({ cwd, epicId });
+    expect(created.ok).toBe(true);
+    fs.writeFileSync(path.join(created.dir, 'note.txt'), 'x\n', 'utf8');
+    git(['add', '-A'], created.dir);
+    git(['commit', '-q', '-m', 'epic edits'], created.dir);
+
+    const result = await mergeEpicToMainViaIpc(cwd, epicId, created.branch, created.dir, undefined, { stopPreview });
+
+    expect(result).toEqual({ ok: true, status: 'merged', integrated: true });
+    expect(fs.existsSync(path.join(cwd, 'note.txt'))).toBe(true);
+  }
+});

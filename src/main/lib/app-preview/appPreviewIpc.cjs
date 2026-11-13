@@ -14,6 +14,7 @@
  */
 
 const fs = require('node:fs');
+const path = require('node:path');
 const { createAppPreviewManager } = require('./appPreviewManager.cjs');
 const { listPreviewScripts } = require('./appPreviewScripts.cjs');
 const { sendIfAlive } = require('../sendToRenderer.cjs');
@@ -71,28 +72,54 @@ function resolveAppPreviewDir({ cwd, epicId, deps = {} } = {}) {
 }
 
 /**
- * @param {{ handle: (channel: string, fn: (...args: any[]) => any) => void }} ipcMain
- * @param {{ getWindow?: () => any }} [opts]
+ * ensureWorktreeDeps — a worktree restored after a reboot / tmp sweep
+ * (restoreEpicWorktree) is a bare `git worktree add` with no node_modules, so
+ * `npm run dev` would fail. Link the main checkout's dependency dirs when the
+ * worktree lacks node_modules and the main checkout has one. Never throws and
+ * never blocks the start: a skip or error is logged, and any resulting
+ * dev-server failure reaches the user as the preview's failed-state toast.
  */
-function registerAppPreviewHandlers(ipcMain, { getWindow } = {}) {
+async function ensureWorktreeDeps({ cwd, dir, inWorktree, deps = {} }) {
+  if (!inWorktree) return;
+  const existsSync = deps.existsSync || fs.existsSync;
+  const log = deps.log || ((...a) => console.warn(...a));
+  try {
+    if (existsSync(path.join(dir, 'node_modules')) || !existsSync(path.join(cwd, 'node_modules'))) return;
+    const link = deps.linkDependencyDirs || require('../git/worktreeDeps.cjs').linkDependencyDirs;
+    const res = await link({ mainCwd: cwd, worktreeCwd: dir });
+    if (res && Array.isArray(res.skipped) && res.skipped.includes('node_modules')) {
+      log(`[appPreview] node_modules was not linked into ${dir}; starting the preview anyway`);
+    }
+  } catch (e) {
+    log(`[appPreview] linking dependency dirs into ${dir} failed: ${(e && e.message) || String(e)}; starting the preview anyway`);
+  }
+}
+
+/**
+ * @param {{ handle: (channel: string, fn: (...args: any[]) => any) => void }} ipcMain
+ * @param {{ getWindow?: () => any, deps?: { resolveDeps?: any, existsSync?: (p: string) => boolean, linkDependencyDirs?: (a: { mainCwd: string, worktreeCwd: string }) => any, getManager?: () => any, log?: (...a: any[]) => void } }} [opts]
+ */
+function registerAppPreviewHandlers(ipcMain, { getWindow, deps = {} } = {}) {
   if (typeof getWindow === 'function') currentGetWindow = getWindow;
+  const getManager = deps.getManager || getAppPreviewManager;
   const { schemas: s, validated: v } = require('../../ipcSchemas.cjs');
 
   ipcMain.handle('appPreview:scripts', v(s.appPreviewScripts, ({ cwd, epicId }) => {
-    const r = resolveAppPreviewDir({ cwd, epicId });
+    const r = resolveAppPreviewDir({ cwd, epicId, deps: deps.resolveDeps });
     if (!r.ok) return { ok: false, error: r.error };
     return { ...listPreviewScripts(r.dir), dir: r.dir, inWorktree: r.inWorktree };
   }));
 
   ipcMain.handle('appPreview:start', v(s.appPreviewStart, async ({ cwd, epicId, script }) => {
-    const r = resolveAppPreviewDir({ cwd, epicId });
+    const r = resolveAppPreviewDir({ cwd, epicId, deps: deps.resolveDeps });
     if (!r.ok) return { ok: false, error: r.error };
-    return getAppPreviewManager().start({ cwd, epicId, dir: r.dir, script });
+    await ensureWorktreeDeps({ cwd, dir: r.dir, inWorktree: r.inWorktree, deps });
+    return getManager().start({ cwd, epicId, dir: r.dir, script });
   }));
 
-  ipcMain.handle('appPreview:stop', v(s.appPreviewStop, ({ epicId }) => getAppPreviewManager().stop(epicId)));
+  ipcMain.handle('appPreview:stop', v(s.appPreviewStop, ({ epicId }) => getManager().stop(epicId)));
 
-  ipcMain.handle('appPreview:list', () => getAppPreviewManager().list());
+  ipcMain.handle('appPreview:list', () => getManager().list());
 }
 
-module.exports = { getAppPreviewManager, resolveAppPreviewDir, registerAppPreviewHandlers };
+module.exports = { getAppPreviewManager, resolveAppPreviewDir, ensureWorktreeDeps, registerAppPreviewHandlers };

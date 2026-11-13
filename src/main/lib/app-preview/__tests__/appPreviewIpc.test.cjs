@@ -110,3 +110,71 @@ describe('registerAppPreviewHandlers', () => {
     expect(Array.isArray(await ipc.handlers.get('appPreview:list')({}))).toBe(true);
   });
 });
+
+describe('appPreview:start links worktree dependency dirs', () => {
+  const path = require('node:path');
+
+  function setup({ session, existingFiles = [], link }) {
+    const handlers = new Map();
+    const ipc = { handle: (ch, fn) => handlers.set(ch, fn) };
+    const calls = { link: [], start: [], log: [] };
+    const manager = { start: async (a) => { calls.start.push(a); return { ok: true }; }, stop: () => ({}), list: () => [] };
+    registerAppPreviewHandlers(ipc, {
+      getWindow: () => null,
+      deps: {
+        resolveDeps: deps({ e1: session }),
+        existsSync: (p) => existingFiles.includes(p),
+        linkDependencyDirs: async (a) => { calls.link.push(a); return link ? link(a) : { linked: ['node_modules'], skipped: [] }; },
+        getManager: () => manager,
+        log: (...a) => calls.log.push(a.join(' ')),
+      },
+    });
+    return { start: (p) => handlers.get('appPreview:start')({}, p), calls };
+  }
+  const payload = { cwd: CWD, epicId: 'e1', script: 'dev' };
+  const live = { status: 'active', worktree: { dir: WT, status: 'active' } };
+
+  test('worktree missing node_modules while main has it → link before start', async () => {
+    const { start, calls } = setup({ session: live, existingFiles: [path.join(CWD, 'node_modules')] });
+    const r = await start(payload);
+    expect(r).toEqual({ ok: true });
+    expect(calls.link).toEqual([{ mainCwd: CWD, worktreeCwd: WT }]);
+    expect(calls.start).toEqual([{ cwd: CWD, epicId: 'e1', dir: WT, script: 'dev' }]);
+  });
+
+  test('node_modules already in the worktree → no link', async () => {
+    const { start, calls } = setup({ session: live, existingFiles: [path.join(CWD, 'node_modules'), path.join(WT, 'node_modules')] });
+    await start(payload);
+    expect(calls.link).toEqual([]);
+    expect(calls.start.length).toBe(1);
+  });
+
+  test('main checkout has no node_modules → no link', async () => {
+    const { start, calls } = setup({ session: live, existingFiles: [] });
+    await start(payload);
+    expect(calls.link).toEqual([]);
+    expect(calls.start.length).toBe(1);
+  });
+
+  test('not a worktree → no link', async () => {
+    const { start, calls } = setup({ session: { status: 'active' }, existingFiles: [path.join(CWD, 'node_modules')] });
+    await start(payload);
+    expect(calls.link).toEqual([]);
+    expect(calls.start).toEqual([{ cwd: CWD, epicId: 'e1', dir: CWD, script: 'dev' }]);
+  });
+
+  test('throwing link is logged and start still runs', async () => {
+    const { start, calls } = setup({ session: live, existingFiles: [path.join(CWD, 'node_modules')], link: () => { throw new Error('boom'); } });
+    const r = await start(payload);
+    expect(r).toEqual({ ok: true });
+    expect(calls.start.length).toBe(1);
+    expect(calls.log.join('\n')).toMatch(/boom/);
+  });
+
+  test('link that skipped node_modules is logged and start still runs', async () => {
+    const { start, calls } = setup({ session: live, existingFiles: [path.join(CWD, 'node_modules')], link: () => ({ linked: [], skipped: ['node_modules'] }) });
+    await start(payload);
+    expect(calls.start.length).toBe(1);
+    expect(calls.log.join('\n')).toMatch(/node_modules/);
+  });
+});

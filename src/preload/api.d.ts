@@ -1738,6 +1738,20 @@ export interface MdNetwork {
 /** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */
 export type MdNetworkResult = MdNetwork | { ok: false; error: string };
 
+// ────────────────────────────────────────────── Project Pages: markdown doc census
+// Mirrors the JSDoc typedefs in src/main/lib/mdDocCensus.cjs.
+// Every path is repo-relative POSIX; folder strings end with '/'.
+
+/** How agents meet a doc: 'map' = the root + its @-imports; 'scoped' = another CLAUDE.md / AGENTS.md / CLAUDE.local.md; 'agent' = .claude/, skills/, plugin agents/commands; 'record' = in a record collection and unreachable; 'doc' = anything else. */
+export type MdDocRole = 'map' | 'scoped' | 'agent' | 'record' | 'doc';
+
+export interface MdDoc { path: string; role: MdDocRole; depth: number | null; lines: number | null; bytes: number | null; lastCommitMs: number | null; commits: number; linkedFrom: number; codeRefs: number; codeRefFiles: string[]; deadRefs: string[]; changedSince: { path: string; ms: number }[]; collection: string | null; }
+
+/** A folder of machine-written, write-once, unlinked docs (e.g. validation records). */
+export interface MdRecordCollection { folder: string; docs: number; linked: number; lastCommitMs: number | null; source: 'heuristic' | 'override'; }
+
+export interface MdCensus { docs: MdDoc[]; collections: MdRecordCollection[]; counts: { tracked: number; network: number; records: number; unlinked: number; byRole: Record<MdDocRole, number> }; gitWindow: { commits: number; oldestMs: number | null }; warnings: string[]; }
+
 // ────────────────────────────────────────────── Competitor matrix
 // Mirrors CompetitiveMatrixSchema in src/main/lib/project-pages/competitiveMatrix.cjs — keep field-for-field.
 

@@ -83,6 +83,7 @@
   "macroLibrary": "persona-macro",
   "mainHeapSnapshot": "telemetry",
   "mcpToolsProbe": ".",
+  "mdDocCensus": ".",
   "mdNetworkScan": ".",
   "memoryScope": "process",
   "modelCatalog": "claude",

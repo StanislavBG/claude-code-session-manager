@@ -23,6 +23,7 @@
     "src/main/lib/claudeConfig.cjs",
     "src/main/lib/effectiveSettings.cjs",
     "src/main/lib/mdNetworkScan.cjs",
+    "src/main/lib/mdDocCensus.cjs",
     "src/main/lib/process/procGroupRss.cjs",
     "src/main/lib/project-pages/playerBridge.cjs",
     "src/main/ipcSchemas.cjs"

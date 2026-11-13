@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const zlib = require('node:zlib');
 const { assertOpsWrite, opsPath } = require('../opsOwnership.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
+const { isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
 
 const SUBDIR = 'transcripts-archive';
 
@@ -62,21 +63,53 @@ function readSidecar(cwd, epicId) {
 }
 
 /**
- * archiveTranscript({cwd, epicId, claudeSessionId}, {resolvePath}) -> pointer | null.
- * Reads the raw Claude JSONL main-side and writes the sidecar; null when the
- * JSONL is missing or empty (caller falls back to durableTurns).
+ * Default Epic lookup: the agentCli on the Epic's active-index row, else on its
+ * status mirror (`<id>.json`, either `{session}`-wrapped or flat). null = Claude.
  */
-function archiveTranscript(args, { resolvePath } = {}) {
+function defaultAgentCliOf(cwd, epicId) {
+  try {
+    const { readActiveIndex } = require('./epicMint.cjs');
+    const row = readActiveIndex(cwd).sessions[epicId];
+    if (row && typeof row.agentCli === 'string') return row.agentCli;
+  } catch { /* fall through */ }
+  try {
+    const { epicMirrorPath } = require('./epicStatusMirror.cjs');
+    const m = JSON.parse(fs.readFileSync(epicMirrorPath(cwd, epicId), 'utf8'));
+    const rec = m && m.session && typeof m.session === 'object' ? m.session : m;
+    if (rec && typeof rec.agentCli === 'string') return rec.agentCli;
+  } catch { /* absent */ }
+  return null;
+}
+
+/**
+ * archiveTranscript({cwd, epicId, claudeSessionId, agentCli?}, {resolvePath, agentCliOf}) -> pointer | null.
+ * Reads the raw transcript main-side and writes the sidecar: the Claude JSONL for a
+ * Claude Epic, the agent-CLI transcript (agentCliSessionStore.transcriptPathFor) for an
+ * Epic with a non-Claude agentCli. null when the file is missing or empty (caller falls
+ * back to durableTurns).
+ */
+function archiveTranscript(args, { resolvePath, agentCliOf } = {}) {
   const { cwd, epicId, claudeSessionId } = args || {};
   if (typeof cwd !== 'string' || !require('node:path').isAbsolute(cwd)) {
     throw new Error('archivedTranscript: cwd must be an absolute path');
   }
   assertSafeEpicId(epicId);
   if (typeof claudeSessionId !== 'string' || !claudeSessionId) return null;
-  const resolve = resolvePath || ((c, s) => require('../../transcripts.cjs').transcriptPath(c, s));
+  let agentCli = args && typeof args.agentCli === 'string' ? args.agentCli : null;
+  if (!agentCli) {
+    try { agentCli = (agentCliOf || defaultAgentCliOf)(cwd, epicId); } catch { agentCli = null; }
+  }
+  let file;
+  try {
+    file = isNonClaudeAgentCli(agentCli)
+      ? require('../agent-cli/agentCliSessionStore.cjs').transcriptPathFor(claudeSessionId)
+      : (resolvePath || ((c, s) => require('../../transcripts.cjs').transcriptPath(c, s)))(cwd, claudeSessionId);
+  } catch {
+    return null;
+  }
   let text;
   try {
-    text = fs.readFileSync(resolve(cwd, claudeSessionId), 'utf8');
+    text = fs.readFileSync(file, 'utf8');
   } catch {
     return null;
   }

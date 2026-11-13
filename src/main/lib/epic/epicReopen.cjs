@@ -15,6 +15,7 @@ const { assertOpsWrite } = require('../opsOwnership.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
 const { hasTranscriptSource, ensureEpicTranscriptReachable } = require('./epicTranscriptRestore.cjs');
 const { restoreEpicWorktree } = require('./epicSpawnCwd.cjs');
+const { isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
 
 const inFlight = new Map();
 
@@ -83,8 +84,11 @@ async function doReopen({ cwd, epicId, deps }) {
   }
 
   const claudeSessionId = arch.claudeSessionId;
+  // A non-Claude agent-CLI Epic has no Claude JSONL to restore: its transcript lives in
+  // agentCliSessionStore and its CLI resumes from its own native session id.
+  const claudeTranscript = !isNonClaudeAgentCli(arch.agentCli);
   const tDeps = deps.homeDir || deps.statSync ? { homeDir: deps.homeDir, statSync: deps.statSync } : {};
-  if (!hasTranscriptSource({ cwd, epicId, claudeSessionId, deps: tDeps })) {
+  if (claudeTranscript && !hasTranscriptSource({ cwd, epicId, claudeSessionId, deps: tDeps })) {
     // No source anywhere, so this never writes; it only names the failure.
     const r = ensureEpicTranscriptReachable({ cwd, epicId, claudeSessionId, deps: tDeps });
     return r.ok ? fail('transcript_missing', 'No saved transcript.') : r;
@@ -92,7 +96,9 @@ async function doReopen({ cwd, epicId, deps }) {
 
   const { worktree, created } = await provisionWorktree({ cwd, epicId, archived: arch.worktree, deps });
   const spawnCwd = usableDir(worktree, deps) || cwd;
-  const reach = ensureEpicTranscriptReachable({ cwd, epicId, claudeSessionId, spawnCwd, deps: tDeps });
+  const reach = claudeTranscript
+    ? ensureEpicTranscriptReachable({ cwd, epicId, claudeSessionId, spawnCwd, deps: tDeps })
+    : { ok: true };
   if (!reach.ok) {
     if (created && worktree && worktree.dir) {
       try {

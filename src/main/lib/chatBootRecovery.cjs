@@ -11,7 +11,11 @@
  *    chatRunner.run() with the same sessionId and a fixed continue prompt, at most once per
  *    session per 24 h.
  * Touches only the session's own turn: never mints an Epic or edits its title/objective/status.
+ * An entry whose Epic runs a non-Claude agent CLI (agentCli) has no Claude JSONL to judge and
+ * no `claude --resume` to continue, so it is cleared from the ledger and logged, never re-run.
  */
+
+const { isNonClaudeAgentCli } = require('./agent-cli/agentCliEvents.cjs');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ORPHAN_POLL_MS = 5000;
@@ -23,6 +27,27 @@ const CONTINUE_PROMPT = 'The Session Manager app restarted while your previous t
 function defaultPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
+}
+
+/**
+ * Default Epic lookup for a ledger entry: the project's active index, keyed by promptId
+ * (the Epic id) or matched by claudeSessionId. Returns the Epic's agentCli or null.
+ */
+function defaultAgentCliOf(entry) {
+  try {
+    if (!entry || typeof entry.cwd !== 'string' || !entry.cwd) return null;
+    const { projectRootOf } = require('./activeSessions.cjs');
+    const { readActiveIndex } = require('./epic/epicMint.cjs');
+    const sessions = readActiveIndex(projectRootOf(entry.cwd)).sessions || {};
+    let rec = entry.promptId && Object.prototype.hasOwnProperty.call(sessions, entry.promptId)
+      ? sessions[entry.promptId] : null;
+    if (!rec) rec = Object.values(sessions).find((s) => s && s.claudeSessionId === entry.sessionId) || null;
+    return rec && typeof rec.agentCli === 'string' ? rec.agentCli : null;
+  } catch { return null; }
+}
+
+function defaultLog(line) {
+  try { require('../logs.cjs').writeLine(line); } catch { /* best-effort */ }
 }
 
 function isChatProcessFor(identity, sessionId) {
@@ -57,7 +82,7 @@ function classifyTurnTail(text) {
  * @param {object} deps
  *  ledger {list,end,markRecovered,recoveredMap}, run(opts), holdOrphan(sid), releaseOrphan(sid),
  *  pidAlive(pid), identityOf(pid), sessionTurnState(entry) → 'finished'|'unfinished'|'missing',
- *  now(), pollMs, setTimer/clearTimer (tests)
+ *  now(), pollMs, setTimer/clearTimer (tests), agentCliOf(entry) → agentCli|null, log(line)
  * @returns {Promise<{ pending: Promise<void>, results: object[] }>} resolves after the first pass;
  *  `pending` settles once every orphan has exited and been handled.
  */
@@ -68,6 +93,7 @@ async function recoverInflightTurns(deps) {
     sessionTurnState = async () => 'missing',
     now = Date.now, pollMs = ORPHAN_POLL_MS,
     setTimer = setTimeout,
+    agentCliOf = defaultAgentCliOf, log = defaultLog,
   } = deps;
   const results = [];
   const waits = [];
@@ -109,6 +135,20 @@ async function recoverInflightTurns(deps) {
 
   for (const entry of entries) {
     if (!entry || !entry.sessionId) continue;
+    let agentCli = null;
+    try { agentCli = agentCliOf(entry); } catch { agentCli = null; }
+    if (isNonClaudeAgentCli(agentCli)) {
+      try {
+        log({
+          scope: 'chat-boot-recovery', level: 'info',
+          message: `skipping interrupted ${agentCli} turn for session ${entry.sessionId} (no auto-continue for non-Claude agent CLIs)`,
+          meta: { sessionId: entry.sessionId, agentCli },
+        });
+      } catch { /* best-effort */ }
+      try { await ledger.end(entry.sessionId); } catch { /* best-effort */ }
+      results.push({ sessionId: entry.sessionId, outcome: 'skipped_agent_cli', agentCli });
+      continue;
+    }
     if (isOrphan(entry)) {
       holdOrphan(entry.sessionId);
       waits.push(new Promise((resolve) => {

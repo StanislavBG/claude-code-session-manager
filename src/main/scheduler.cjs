@@ -1850,6 +1850,7 @@ async function reconcilePass(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? job.agentType ?? null,
       macroId: p.macroId ?? job.macroId ?? null,
+      effort: p.effort ?? job.effort ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
     // discovered) whose PRD file now carries a stamp — written via the
@@ -1974,6 +1975,7 @@ async function reconcilePass(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
       macroId: p.macroId ?? inv.row?.macroId ?? null,
+      effort: p.effort ?? inv.row?.effort ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
     // A repair is not a lifecycle transition — the corrupted `status` was
@@ -2126,6 +2128,7 @@ async function reconcilePass(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
       macroId: p.macroId ?? null,
+      effort: p.effort ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
       // the starvation escalation both need a provable age for a pending row;
@@ -4910,9 +4913,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // a dangling/absent agentType falls back to no persona + FALLBACK_MODEL
   // and is logged once by resolvePrdPersonaForSpawn itself.
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
-  const personaEffort = resolveEpicEffort({ cwd, agentType: job.agentType }).effort;
+  const effortResolution = resolveEpicEffort({ cwd, agentType: job.agentType, prdEffort: job.effort });
+  const personaEffort = effortResolution.effort;
   const personaToolScope = buildPersonaToolScope(personaResolution.tools, { disallowed: HEADLESS_DISALLOWED_TOOLS });
-  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
+  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}${effortResolution.source === 'prd' ? ' (prd)' : ''}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
 
   // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
   // called below via withChildAndLog) sees a resolved --permission-prompts
@@ -11603,6 +11607,7 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
           dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
           macroId: parsed.macroId ?? null,
+          effort: parsed.effort ?? null,
           disposition: parsed.disposition ?? null,
           planId: parsed.planId ?? null,
           mtimeMs: stat.mtimeMs,

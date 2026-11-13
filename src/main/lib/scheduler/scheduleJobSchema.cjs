@@ -95,6 +95,8 @@ const ScheduleJobSchema = z
     epicId: z.string().nullable().optional(),
     // Macro press this job's PRD came from (PRD frontmatter `macroId`).
     macroId: z.string().nullable().optional(),
+    // PRD frontmatter `effort` — a per-run level from a macro press (outranks the persona's).
+    effort: z.string().nullable().optional(),
     statusHistory: z.array(ScheduleJobStatusHistoryEntrySchema).optional(),
     // Opt-in exclusive-lease PRD flag (PRD 1107) — serializes this job against
     // every other job machine-wide for its run so a timing-sensitive gate

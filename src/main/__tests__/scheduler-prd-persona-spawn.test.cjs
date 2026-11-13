@@ -109,7 +109,7 @@ function writePersona(dir, name, frontmatterLines, bodyText) {
   fs.writeFileSync(path.join(dir, `${name}.md`), lines.join('\n'));
 }
 
-async function runJobWithAgentType({ agentType, overlay }) {
+async function runJobWithAgentType({ agentType, overlay, effort }) {
   // Under tmpHome so config.validatePath's home-dir boundary admits the project overlay.
   const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-prd-persona-main-'));
   if (overlay) writePersona(path.join(mainCwd, '.claude', 'agents'), overlay.name, overlay.frontmatter, overlay.body || '');
@@ -122,6 +122,7 @@ async function runJobWithAgentType({ agentType, overlay }) {
   process.env.SM_CLAUDE_BIN = writeClaudeStub();
 
   const job = { slug, cwd: mainCwd, agentType };
+  if (effort !== undefined) job.effort = effort;
   const result = await executeJob(job, runDir, mainCwd, () => Promise.resolve());
   const argv = JSON.parse(fs.readFileSync(path.join(mainCwd, 'argv.marker'), 'utf8'));
   fs.rmSync(mainCwd, { recursive: true, force: true });
@@ -189,6 +190,13 @@ test('executeJob: persona effort reaches the child as --effort; inherit yields n
   const inherit = await runJobWithAgentType({ agentType: 'effort-inherit' });
   expect(inherit.argv).not.toContain('--effort');
   expect(inherit.argv).not.toContain('inherit');
+});
+
+test('executeJob: a PRD-level job.effort outranks the persona effort in the child argv', async () => {
+  writePersona(path.join(tmpHome, '.claude', 'agents'), 'effort-max', ['model: opus', 'effort: max'], 'body');
+  const { result, argv } = await runJobWithAgentType({ agentType: 'effort-max', effort: 'medium' });
+  expect(result.exitCode).toBe(0);
+  expect(argv[argv.indexOf('--effort') + 1]).toBe('medium');
 });
 
 // ---------- project overlay MERGE: frontmatter-only overlay patches the runtime fields ----------

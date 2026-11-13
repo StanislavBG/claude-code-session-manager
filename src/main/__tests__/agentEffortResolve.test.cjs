@@ -115,3 +115,13 @@ test('an Epic-level effort override beats the persona effort; an Epic without th
   expect(resolveEpicEffort({ cwd, claudeSessionId: 's-old', deps })).toEqual({ effort: 'low', source: 'persona' });
   expect(resolveEpicEffort({ cwd, claudeSessionId: 's-np', deps })).toEqual({ effort: 'low', source: 'epic' });
 });
+
+// PRD frontmatter `effort` (a per-run level from a macro press) > Epic > persona.
+test('a valid prdEffort beats the persona effort (source prd); an invalid one falls back to the persona', async () => {
+  const cwd = await mkTmpDir('sm-effort-prd-cwd-');
+  const globalDir = await mkTmpDir('sm-effort-prd-agents-');
+  writePersona(globalDir, 'p', ['effort: max']);
+  const deps = { globalDir, validatePath: noopValidatePath };
+  expect(resolveEpicEffort({ cwd, agentType: 'p', prdEffort: 'medium', deps })).toEqual({ effort: 'medium', source: 'prd' });
+  expect(resolveEpicEffort({ cwd, agentType: 'p', prdEffort: 'turbo', deps })).toEqual({ effort: 'max', source: 'persona' });
+});

@@ -7,6 +7,10 @@
  * agentLibrary.cjs's serializePersona; the key is literally `effort`).
  *
  * PRECEDENCE (explicit):
+ *   P. the PRD's own `effort` frontmatter (`prdEffort`, persisted on the queue
+ *      row as job.effort; source 'prd') beats everything below. Written
+ *      in-process only when a human pressing a macro chose a lower effort;
+ *      scheduled PRDs only. A value outside PRD_EFFORT_LEVELS is ignored.
  *   0. Epic-level `effort` (the New Session card's override, stored on the Epic
  *      record; source 'epic') beats everything below. Only reachable on the
  *      Chat/Terminal path (claudeSessionId) — a scheduled PRD has no Epic record
@@ -34,6 +38,7 @@
  * Plain sync Node module, never throws (same contract as resolveEpicModel).
  */
 
+const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
 const { findEpicByClaudeSessionId, epicOverrideValue, readOverlayAwarePersona } = require('./agentModelResolve.cjs');
 
 // `auto` is a `/effort` RESET verb, not a `--effort` value; it must never reach argv.
@@ -42,15 +47,18 @@ const NON_FLAG_EFFORT = new Set(['inherit', 'auto']);
 const NO_EFFORT = Object.freeze({ effort: null, source: null });
 
 /**
- * @param {{ cwd: string, claudeSessionId?: string, agentType?: string|null, deps?: object }} opts
+ * @param {{ cwd: string, claudeSessionId?: string, agentType?: string|null, prdEffort?: string|null, deps?: object }} opts
+ *   `prdEffort` (scheduler PRD path) wins over every other rung when it is a
+ *   PRD_EFFORT_LEVELS value; any other value is ignored.
  *   `agentType` wins when given (scheduler PRD path); otherwise it is joined
  *   from the Epic's `claudeSessionId` (Chat/Terminal path).
- * @returns {{ effort: string|null, source: 'epic'|'persona'|'persona-overlay'|'inherit'|null }}
+ * @returns {{ effort: string|null, source: 'prd'|'epic'|'persona'|'persona-overlay'|'inherit'|null }}
  *   source null = no agentType/persona resolved; 'inherit' = persona present
  *   but sets no level.
  */
-function resolveEpicEffort({ cwd, claudeSessionId, agentType, deps = {} } = {}) {
+function resolveEpicEffort({ cwd, claudeSessionId, agentType, prdEffort, deps = {} } = {}) {
   try {
+    if (typeof prdEffort === 'string' && PRD_EFFORT_LEVELS.includes(prdEffort)) return { effort: prdEffort, source: 'prd' };
     const epic = claudeSessionId ? findEpicByClaudeSessionId(cwd, claudeSessionId, deps) : null;
     const override = epicOverrideValue(epic, 'effort');
     if (override && !NON_FLAG_EFFORT.has(override.toLowerCase())) return { effort: override, source: 'epic' };

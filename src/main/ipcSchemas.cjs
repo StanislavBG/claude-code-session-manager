@@ -285,6 +285,14 @@ const promptSessionsMergeToMain = z.object({
   carriedPaths: z.array(z.string().min(1).max(4096)).max(100000).optional(),
 });
 
+// Epic Changes view read (lib/epic/epicChanges.cjs getEpicChanges). Strict so
+// an unknown key is refused; getEpicChanges re-validates cwd (absolute +
+// validatePath) and epicId (isSafeEpicId) itself.
+const epicChangesGet = z.object({
+  cwd: z.string().min(1),
+  epicId: z.string().min(1).max(200),
+}).strict();
+
 // App preview (lib/app-preview/appPreviewIpc.cjs). Main resolves the dev
 // server's dir from the active index — the renderer sends only cwd + epicId,
 // never a path to run in. The script regex mirrors appPreviewScripts.cjs's
@@ -1557,6 +1565,7 @@ module.exports = {
     promptSessionsReadArchived,
     promptSessionsReadSessionTranscript,
     promptSessionsMergeToMain,
+    epicChangesGet,
     promptSessionsGetWorktreeDisabled,
     promptSessionsSetWorktreeDisabled,
     auditLogAppend,

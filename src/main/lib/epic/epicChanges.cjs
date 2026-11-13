@@ -424,8 +424,31 @@ async function getEpicChanges(input, deps) {
   }
 }
 
+/**
+ * Register 'epicChanges:get'. Concurrent calls for the same (cwd, epicId)
+ * share one in-flight getEpicChanges run; the entry is dropped once it
+ * settles, so nothing is cached across calls. deps.getEpicChanges is a test seam.
+ */
+function registerEpicChangesHandlers(ipcMain = require('electron').ipcMain, deps = {}) {
+  const { schemas: s, validated: v } = require('../../ipcSchemas.cjs');
+  const run = deps.getEpicChanges || getEpicChanges;
+  /** @type {Map<string, Promise<unknown>>} */
+  const inFlight = new Map();
+  ipcMain.handle('epicChanges:get', v(s.epicChangesGet, ({ cwd, epicId }) => {
+    const key = `${cwd}\u0000${epicId}`;
+    const existing = inFlight.get(key);
+    if (existing) return existing;
+    let started;
+    try { started = Promise.resolve(run({ cwd, epicId })); } catch (err) { started = Promise.reject(err); }
+    const p = started.finally(() => { if (inFlight.get(key) === p) inFlight.delete(key); });
+    inFlight.set(key, p);
+    return p;
+  }));
+}
+
 module.exports = {
   getEpicChanges,
+  registerEpicChangesHandlers,
   SECTION_BUILDERS,
   buildSessionSections,
   buildPrdSections,

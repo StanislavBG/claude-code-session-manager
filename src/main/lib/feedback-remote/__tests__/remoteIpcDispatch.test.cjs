@@ -205,6 +205,37 @@ describe('remoteArgFence', () => {
     expect((await d.invoke(authed, 'files:read', [{ path: '/home/u/proj/a' }])).ok).toBe(true)
   })
 
+  // Epic Changes view: getEpicChanges diffs a project's repo — only registered roots.
+  describe('epicChanges:get is fenced to a registered project root', () => {
+    const ch = 'epicChanges:get'
+    const mkD = () => {
+      const fn = vi.fn(async (_e, { cwd, epicId }) => ({ ok: true, cwd, epicId }))
+      const d = createRemoteIpcDispatcher({
+        surface: [{ channel: ch, kind: 'invoke', remote: 'read' }],
+        handlers: new Map([[ch, fn]]),
+        getConfig: () => fullCfg,
+        fenceCtx: mk(),
+      })
+      return { fn, d }
+    }
+    it('declares a cwd root fence', () => {
+      expect(PATH_FENCED_CHANNELS[ch]).toEqual({ field: 'cwd', mode: 'root' })
+    })
+    it('runs for a registered root', async () => {
+      const { fn, d } = mkD()
+      expect(await d.invoke(authed, ch, [{ cwd: '/home/u/proj', epicId: 'e1' }])).toEqual({ ok: true, result: { ok: true, cwd: '/home/u/proj', epicId: 'e1' } })
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
+    it('refuses an unregistered cwd before the handler runs', async () => {
+      const { fn, d } = mkD()
+      for (const cwd of ['/home/u/other', '/tmp/x', '/home/u', '/home/u/.ssh']) {
+        expect(await d.invoke(authed, ch, [{ cwd, epicId: 'e1' }])).toEqual(fenced)
+      }
+      expect(await d.invoke(authed, ch, [{ epicId: 'e1' }])).toEqual(fenced)
+      expect(fn).not.toHaveBeenCalled()
+    })
+  })
+
   // Project Home > Tools > Review MD network: the REAL apiSurface row + fence entry.
   describe('project-pages:md-network is a fenced read through the real surface', () => {
     const realSurface = require('../../../../preload/apiSurface.cjs')

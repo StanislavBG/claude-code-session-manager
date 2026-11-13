@@ -1087,6 +1087,7 @@ require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();
 epicWorktreeMint.registerEpicWorktreeMintHandlers();
 epicWorktreeMerge.registerEpicWorktreeMergeHandlers();
+require('./lib/epic/epicChanges.cjs').registerEpicChangesHandlers();
 registerAppPreviewHandlers(ipcMain, { getWindow: () => mainWindow });
 require('./lib/epic/epicReopen.cjs').registerEpicReopenHandlers();
 epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();

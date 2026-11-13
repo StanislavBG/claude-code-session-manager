@@ -64,6 +64,8 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'project-pages:md-network': { field: 'cwd', mode: 'root' },
   // Project Home ▸ Tools ▸ Competitor matrix (main/projectPages.cjs): read-only, cwd inside a registered root.
   'project-pages:matrix': { field: 'cwd', mode: 'root' },
+  // Epic Changes view (main/lib/epic/epicChanges.cjs): diffs a repo, so cwd must sit inside a registered root.
+  'epicChanges:get': { field: 'cwd', mode: 'root' },
 })
 
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker', '.password-store', '.azure', '.terraform.d'])

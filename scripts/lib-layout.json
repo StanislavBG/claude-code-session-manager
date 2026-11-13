@@ -157,5 +157,6 @@
   "withTimeout": "util",
   "workTypeLibrary": "prd",
   "worktreeDeps": "git",
-  "worktreeSetup": "git"
+  "worktreeSetup": "git",
+  "appPreviewScripts": "app-preview"
 }

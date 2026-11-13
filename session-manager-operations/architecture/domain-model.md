@@ -48,6 +48,9 @@ scoping scheme.
 - **Persistence:** active Epics in `session-manager-operations/prompt-sessions/active-index.json`; completed ones archived one JSON per
   Epic in the same folder. Resume reopens the same Epic in place (same id and
   claudeSessionId, full history) — see [lifecycle](../prompt-sessions/README.md#lifecycle).
+- **The Changes tab is a VIEW of an Epic inside `EpicDetail`** (no LeftNav entry; one read API, `epicChanges:get`).
+  Its line comments go back to the Epic's own session as ONE follow-up chat message — never a new Epic or PRD,
+  because review is iteration within the Epic (single-creator law).
 
 ## Agent + Tag, and the AIM prompt
 

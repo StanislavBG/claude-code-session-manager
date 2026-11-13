@@ -42,6 +42,44 @@ const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 // simulate a corrupted construction — the real construction below is
 // hardcoded and always valid.
 const promptSessionSchema = require('../promptSessionSchema.cjs');
+// Agent-CLI id helpers come from the shared adapter contract
+// (lib/agent-cli/agentCliEvents.cjs, which exists in this tree) — not a local
+// copy of the id list, so the two can never drift.
+const { isAgentCliId, isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
+
+const AGENT_CLI_MODEL_RE = /^[A-Za-z0-9._:/@+\[\]-]{1,128}$/;
+
+/**
+ * agentCliMintFields(agentCli, agentCliModel, restoreSessionId) — validate the
+ * Epic's agent-CLI options and return the record keys they add ({} for a
+ * Claude Code Epic, so its on-disk shape is unchanged). Throws on any bad
+ * combination. The develop loop (dev plugin, /develop, PRD API) and Restore a
+ * session only work with Claude Code, so a non-Claude Epic is always
+ * developLoop:false and can never adopt a CLI session.
+ */
+function agentCliMintFields(agentCli, agentCliModel, restoreSessionId) {
+  const absent = agentCli === undefined || agentCli === null || agentCli === 'claude';
+  if (!absent && !isAgentCliId(agentCli)) {
+    throw new Error(`ensureEpic: unknown agentCli '${String(agentCli)}' — expected one of claude, codex, gemini, antigravity, cursor, opencode`);
+  }
+  const modelGiven = agentCliModel !== undefined && agentCliModel !== null;
+  if (absent || !isNonClaudeAgentCli(agentCli)) {
+    if (modelGiven) throw new Error('ensureEpic: agentCliModel requires a non-Claude agentCli');
+    return {};
+  }
+  if (restoreSessionId !== null && restoreSessionId !== undefined) {
+    throw new Error(`ensureEpic: Restore a session is Claude Code only — cannot restore into a '${agentCli}' Epic`);
+  }
+  const fields = { agentCli };
+  if (modelGiven) {
+    const trimmed = typeof agentCliModel === 'string' ? agentCliModel.trim() : '';
+    if (!trimmed || !AGENT_CLI_MODEL_RE.test(trimmed)) {
+      throw new Error(`ensureEpic: invalid agentCliModel ${JSON.stringify(agentCliModel)} — must match ${AGENT_CLI_MODEL_RE}`);
+    }
+    fields.agentCliModel = trimmed;
+  }
+  return fields;
+}
 
 // The one token that unlocks ensureEpic's mint branch. Held by
 // lib/epic/promptSessionsCreateEpic.cjs (the New Epic card's IPC handler) and
@@ -265,7 +303,7 @@ function restoreRefusal(cwd, index, restoreSessionId, mintAuthority, deps) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, developLoop = null, mintAuthority = null, restoreSessionId = null } = {}, deps = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, developLoop = null, mintAuthority = null, restoreSessionId = null, agentCli = null, agentCliModel = null } = {}, deps = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -274,6 +312,10 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
   // Epic that exists on disk but never renders in any project's queue.
   cwd = path.resolve(cwd);
   return withPathLock(activeIndexPath(cwd), () => {
+    // Agent-CLI rules run first — a bad id or combination throws before
+    // anything (index, mirror, audit, PRD dir) is written.
+    const cliFields = agentCliMintFields(agentCli, agentCliModel, restoreSessionId);
+    if (cliFields.agentCli) developLoop = false;
     const index = readActiveIndex(cwd);
 
     // A dispatch that already knows its Epic (sourcePromptId frontmatter from
@@ -393,6 +435,8 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       ...(typeof effort === 'string' && effort ? { effort } : {}),
       // Only false is persisted: absent = develop loop on (byte-identical legacy shape).
       ...(developLoop === false ? { developLoop: false } : {}),
+      // Non-Claude agent CLI only (absent = Claude Code, legacy shape).
+      ...cliFields,
     };
 
     // Validate the constructed record against the canonical PromptSession

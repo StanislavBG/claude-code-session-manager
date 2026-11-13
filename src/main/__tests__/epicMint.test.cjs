@@ -548,3 +548,79 @@ test('PromptSessionSchema keeps restoredSession: true and rejects any other valu
   expect(PromptSessionSchema.safeParse({ ...base, restoredSession: false }).success).toBe(false);
   expect(PromptSessionSchema.safeParse({ ...base, restoredSession: 'yes' }).success).toBe(false);
 });
+
+// ─── AGENT CLI (non-Claude agent CLIs) ───────────────────────────────────────
+
+test('agentCli claude / null / undefined records no agentCli key — byte-identical to today\'s record', async () => {
+  const cwd = await mkCwd();
+  const legacy = await mint(cwd, { goalText: 'plain' });
+  const asClaude = await mint(cwd, { goalText: 'plain', agentCli: 'claude' });
+  const asNull = await mint(cwd, { goalText: 'plain', agentCli: null, agentCliModel: null });
+  const asUndef = await mint(cwd, { goalText: 'plain', agentCli: undefined });
+  const sessions = readActiveIndex(cwd).sessions;
+  const strip = (s) => JSON.stringify({ ...s, id: '', claudeSessionId: '', createdAt: '' });
+  const base = strip(sessions[legacy.epicId]);
+  expect(Object.keys(sessions[legacy.epicId])).toEqual(['id', 'cwd', 'goalText', 'claudeSessionId', 'status', 'createdAt', 'completedAt']);
+  for (const m of [asClaude, asNull, asUndef]) {
+    expect(Object.keys(sessions[m.epicId])).toEqual(Object.keys(sessions[legacy.epicId]));
+    expect(strip(sessions[m.epicId])).toBe(base);
+  }
+});
+
+for (const bad of ['copilot', 'Codex', '', 42]) {
+  test(`an unknown agentCli ${JSON.stringify(bad)} throws naming the id before anything is written`, async () => {
+    const cwd = await mkCwd();
+    await expect(mint(cwd, { goalText: 'bad cli', agentCli: bad }))
+      .rejects.toThrow(new RegExp(`unknown agentCli '${String(bad)}'`));
+    expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'))).toBe(false);
+    expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'scheduler'))).toBe(false);
+  });
+}
+
+for (const cli of ['codex', 'gemini', 'antigravity', 'cursor', 'opencode']) {
+  test(`a ${cli} Epic records agentCli and is forced to developLoop:false`, async () => {
+    const cwd = await mkCwd();
+    const on = await mint(cwd, { goalText: `${cli} epic`, agentCli: cli, developLoop: true });
+    const omitted = await mint(cwd, { goalText: `${cli} epic 2`, agentCli: cli });
+    const sessions = readActiveIndex(cwd).sessions;
+    for (const m of [on, omitted]) {
+      expect(sessions[m.epicId].agentCli).toBe(cli);
+      expect(sessions[m.epicId].developLoop).toBe(false);
+      expect('agentCliModel' in sessions[m.epicId]).toBe(false);
+    }
+  });
+}
+
+test('a non-Claude Epic records a valid agentCliModel, trimmed', async () => {
+  const cwd = await mkCwd();
+  const a = await mint(cwd, { goalText: 'm1', agentCli: 'codex', agentCliModel: '  gpt-5.1-codex  ' });
+  const b = await mint(cwd, { goalText: 'm2', agentCli: 'opencode', agentCliModel: 'anthropic/claude-x@v1+[beta]:2' });
+  const sessions = readActiveIndex(cwd).sessions;
+  expect(sessions[a.epicId].agentCliModel).toBe('gpt-5.1-codex');
+  expect(sessions[b.epicId].agentCliModel).toBe('anthropic/claude-x@v1+[beta]:2');
+});
+
+for (const bad of ['', '   ', 'has space', 'semi;colon', 'x'.repeat(129), 7]) {
+  test(`an invalid agentCliModel ${JSON.stringify(bad).slice(0, 20)} throws and writes nothing`, async () => {
+    const cwd = await mkCwd();
+    await expect(mint(cwd, { goalText: 'bad model', agentCli: 'gemini', agentCliModel: bad }))
+      .rejects.toThrow(/invalid agentCliModel/);
+    expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'))).toBe(false);
+  });
+}
+
+for (const cli of [undefined, null, 'claude']) {
+  test(`agentCliModel without a non-Claude agentCli (${String(cli)}) throws`, async () => {
+    const cwd = await mkCwd();
+    await expect(mint(cwd, { goalText: 'orphan model', agentCli: cli, agentCliModel: 'gpt-5' }))
+      .rejects.toThrow(/agentCliModel requires a non-Claude agentCli/);
+    expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'))).toBe(false);
+  });
+}
+
+test('a non-Claude agentCli with restoreSessionId throws: Restore a session is Claude Code only', async () => {
+  const { cwd, id, deps } = await restoreFixture();
+  await expect(mint(cwd, { goalText: 'restore into codex', agentCli: 'codex', restoreSessionId: id }, deps))
+    .rejects.toThrow(/Restore a session is Claude Code only/);
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+});

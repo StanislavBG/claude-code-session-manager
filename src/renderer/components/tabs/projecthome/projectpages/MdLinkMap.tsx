@@ -5,8 +5,10 @@
  * `layoutMdNetwork` is the pure layout: four columns by link depth from the root CLAUDE.md
  * (x = 44 / 232 / 470 / 650 of the 760×392 viewBox, depth 3+ in the last), each column's rows
  * spread evenly within y 16..376. Rows keep the scan's walk order, so a doc sits near the doc
- * that first linked it. More than 8 docs of one folder in a column collapse into one
- * `<folder>/ · <n>` node (its edges re-routed, links inside it dropped). A broken link's target
+ * that first linked it. `opts.minRowGap` grows the height to fit the fullest column at that gap
+ * (never below 392); rows then spread within 16..height-16. More than 8 docs of one folder in a column collapse into one
+ * `<folder>/ · <n>` node (its edges re-routed, links inside it dropped) unless `opts.expanded` holds
+ * that folder node's id. A broken link's target
  * gets a dashed accent Missing node one column right of the linking doc, which is drawn as a
  * Finding; each orphan group is an unlinked dashed node at the foot of the last column.
  *
@@ -14,14 +16,15 @@
  * its nodes. Colours are token classes written as whole literals (Tailwind JIT); geometry is
  * plain SVG attributes.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import { toast } from '../../../../state/toast'
 import type { MdNetwork, MdNetworkFinding } from '../../../../../preload/api'
 
 const COLUMN_X = [44, 232, 470, 650] as const
 const LAST_COLUMN = COLUMN_X.length - 1
 const ROW_TOP = 16
-const ROW_BOTTOM = 376
+const MAP_WIDTH = 760
+const MAP_HEIGHT = 392
 /** A column holding more than this many docs of one folder draws them as one folder node. */
 const COLLAPSE_OVER = 8
 /** Label room per column, in characters of the 10.5px mono label. */
@@ -66,6 +69,16 @@ export interface MdLinkMapLayout {
   edges: MdMapEdge[]
   /** The map nodes each finding marks, in the scan's `findings` order. */
   findingNodes: string[][]
+  /** The canvas the coordinates live in: 760 wide; 392 tall unless `minRowGap` grew it. */
+  width: number
+  height: number
+}
+
+export interface LayoutOptions {
+  /** Folder node ids (`folder:<column>:<dir>`) whose docs draw as individual nodes. */
+  expanded?: ReadonlySet<string>
+  /** The least vertical gap between rows; the canvas grows to keep it. */
+  minRowGap?: number
 }
 
 interface DraftNode extends Omit<MdMapNode, 'x' | 'y'> {
@@ -112,8 +125,9 @@ function edgePath(a: { x: number; y: number }, b: { x: number; y: number }): str
   return `M${a.x} ${a.y} C${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`
 }
 
-/** Pure: where every node and edge of one scan goes on the 760×392 map. */
-export function layoutMdNetwork(net: MdNetwork): MdLinkMapLayout {
+/** Pure: where every node and edge of one scan goes on the 760-wide map (392 tall by default). */
+export function layoutMdNetwork(net: MdNetwork, opts: LayoutOptions = {}): MdLinkMapLayout {
+  const expanded = opts.expanded
   // The scan lists edges in walk order, so the first edge into a target is the one that found it.
   const firstIn = new Map<string, number>()
   net.edges.forEach((e, i) => {
@@ -134,8 +148,8 @@ export function layoutMdNetwork(net: MdNetwork): MdLinkMapLayout {
     const column = columnOf(n.depth)
     const dir = dirOf(n.path)
     const order = firstIn.get(n.id) ?? -1
-    if ((perFolder.get(`${column}\0${dir}`) ?? 0) > COLLAPSE_OVER) {
-      const id = `folder:${column}:${dir}`
+    const id = `folder:${column}:${dir}`
+    if ((perFolder.get(`${column}\0${dir}`) ?? 0) > COLLAPSE_OVER && !expanded?.has(id)) {
       nodeOf.set(n.id, id)
       const group = drafts.get(id)
       const count = (group?.count ?? 0) + 1
@@ -228,12 +242,15 @@ export function layoutMdNetwork(net: MdNetwork): MdLinkMapLayout {
 
   const columns: DraftNode[][] = COLUMN_X.map(() => [])
   for (const d of drafts.values()) columns[d.column].push(d)
+  const fullest = Math.max(...columns.map((list) => list.length))
+  const height = opts.minRowGap === undefined ? MAP_HEIGHT : Math.max(MAP_HEIGHT, 2 * ROW_TOP + fullest * opts.minRowGap)
+  const rowBottom = height - ROW_TOP
   const nodes: MdMapNode[] = []
   const at = new Map<string, MdMapNode>()
   columns.forEach((list, column) => {
     // Stable sort: ties (orphan groups) keep their findings order.
     list.sort((a, b) => (a.order === b.order ? 0 : a.order < b.order ? -1 : 1))
-    const step = (ROW_BOTTOM - ROW_TOP) / list.length
+    const step = (rowBottom - ROW_TOP) / list.length
     list.forEach((d, row) => {
       const node: MdMapNode = {
         id: d.id,
@@ -258,7 +275,7 @@ export function layoutMdNetwork(net: MdNetwork): MdLinkMapLayout {
     const b = at.get(l.to)
     return a && b ? [{ ...l, d: edgePath(a, b) }] : []
   })
-  return { nodes, edges, findingNodes }
+  return { nodes, edges, findingNodes, width: MAP_WIDTH, height }
 }
 
 interface NodeLook {
@@ -307,6 +324,134 @@ function edgeClass(broken: boolean, lit: boolean): string {
   return lit ? 'fill-none stroke-fg-dim' : 'fill-none stroke-fg-faint'
 }
 
+export interface MdMapGraphProps {
+  layout: MdLinkMapLayout
+  /** The lit node ids (a hovered node's neighbourhood or a finding's nodes); null lights all. */
+  focus: ReadonlySet<string> | null
+  /** The hovered node, whose own edges alone light; null when nothing (or a finding) is hovered. */
+  hoveredId: string | null
+  /** The node drawn with an accent selection ring. */
+  selectedId?: string | null
+  /** A node's id on mouse enter, null on mouse leave. */
+  onHover: (id: string | null) => void
+  /** When given, nodes are buttons: click, Enter or Space call it. */
+  onNodeClick?: (node: MdMapNode) => void
+}
+
+/** The map's edges and nodes, drawn into an enclosing `<svg>` sized to the layout. */
+export function MdMapGraph({ layout, focus, hoveredId, selectedId = null, onHover, onNodeClick }: MdMapGraphProps) {
+  const edgeOn = (e: MdMapEdge) => {
+    if (!focus) return true
+    if (hoveredId !== null) return e.from === hoveredId || e.to === hoveredId
+    return focus.has(e.from) && focus.has(e.to)
+  }
+  return (
+    <>
+      {layout.edges.map((e) => {
+        const on = edgeOn(e)
+        const lit = focus !== null && on
+        let opacity = 0.12
+        if (on) opacity = e.broken || focus ? 1 : 0.6
+        return (
+          <path
+            key={`${e.from} > ${e.to}`}
+            data-testid="md-link-map-edge"
+            data-from={e.from}
+            data-to={e.to}
+            data-broken={e.broken ? 'true' : undefined}
+            data-lit={lit ? 'true' : undefined}
+            d={e.d}
+            className={edgeClass(e.broken, lit)}
+            strokeWidth={e.broken ? 1.6 : 1.2}
+            strokeDasharray={e.broken ? '5 4' : undefined}
+            style={{ opacity }}
+          />
+        )
+      })}
+      {layout.nodes.map((n) => {
+        const look = NODE_LOOK[n.kind]
+        const hot = focus !== null && focus.has(n.id)
+        let state = 'idle'
+        if (focus) state = hot ? 'hot' : 'dim'
+        const r = hot ? look.r + 1.5 : look.r
+        const above = n.column <= 1
+        const selected = selectedId !== null && selectedId === n.id
+        const button = onNodeClick
+          ? {
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': n.path,
+              onClick: () => onNodeClick(n),
+              onKeyDown: (ev: KeyboardEvent<SVGGElement>) => {
+                if (ev.key !== 'Enter' && ev.key !== ' ') return
+                ev.preventDefault()
+                onNodeClick(n)
+              },
+            }
+          : {}
+        return (
+          <g
+            key={n.id}
+            data-testid="md-link-map-node"
+            data-node-id={n.id}
+            data-kind={n.kind}
+            data-state={state}
+            data-selected={selected ? 'true' : undefined}
+            onMouseEnter={() => onHover(n.id)}
+            onMouseLeave={() => onHover(null)}
+            className={onNodeClick ? 'cursor-pointer transition-opacity duration-150' : 'transition-opacity duration-150'}
+            style={{ opacity: state === 'dim' ? 0.25 : 1 }}
+            {...button}
+          >
+            <circle cx={n.x} cy={n.y} r={14} className="fill-transparent" />
+            {selected && (
+              <circle
+                data-testid="md-link-map-ring"
+                cx={n.x}
+                cy={n.y}
+                r={r + 4}
+                className="fill-none stroke-accent"
+                strokeWidth={2}
+              />
+            )}
+            <circle
+              data-testid="md-link-map-dot"
+              cx={n.x}
+              cy={n.y}
+              r={r}
+              className={n.flagged ? 'fill-bg stroke-accent' : look.dot}
+              strokeWidth={n.flagged ? 2 : look.strokeWidth}
+              strokeDasharray={look.dash}
+            />
+            <text
+              x={above ? n.x : round1(n.x + r + 6)}
+              y={above ? round1(n.y - r - 6) : round1(n.y + 3.5)}
+              textAnchor={above ? 'middle' : 'start'}
+              strokeWidth={4}
+              className={`stroke-bg-hi font-mono text-[10.5px] [paint-order:stroke] [stroke-linejoin:round] ${
+                n.flagged ? 'fill-accent' : look.label
+              } ${hot ? 'font-bold' : look.weight}`}
+            >
+              {n.label}
+            </text>
+            {n.kind === 'hub' && (
+              <text
+                x={n.x}
+                y={round1(n.y + r + 15)}
+                textAnchor="middle"
+                strokeWidth={4}
+                className="fill-fg-faint stroke-bg-hi font-mono text-[9.5px] [paint-order:stroke]"
+              >
+                entry map
+              </text>
+            )}
+          </g>
+        )
+      })}
+    </>
+  )
+}
+
 /** The LINK MAP card: legend, SVG and hover caption. */
 export function MdLinkMap({ layout, focusFinding }: { layout: MdLinkMapLayout; focusFinding: MapFocus | null }) {
   const [hoverId, setHoverId] = useState<string | null>(null)
@@ -320,11 +465,6 @@ export function MdLinkMap({ layout, focusFinding }: { layout: MdLinkMapLayout; f
   } else if (focusFinding) {
     focus = new Set(focusFinding.ids)
     caption = focusFinding.caption
-  }
-  const edgeOn = (e: MdMapEdge) => {
-    if (!focus) return true
-    if (hovered) return e.from === hovered.id || e.to === hovered.id
-    return focus.has(e.from) && focus.has(e.to)
   }
 
   return (
@@ -345,81 +485,7 @@ export function MdLinkMap({ layout, focusFinding }: { layout: MdLinkMapLayout; f
       </div>
       <div className="px-3 pt-2.5 pb-0.5">
         <svg data-testid="md-link-map-svg" viewBox="0 0 760 392" role="img" aria-label="Markdown link map" className="block h-auto w-full">
-          {layout.edges.map((e) => {
-            const on = edgeOn(e)
-            const lit = focus !== null && on
-            let opacity = 0.12
-            if (on) opacity = e.broken || focus ? 1 : 0.6
-            return (
-              <path
-                key={`${e.from} > ${e.to}`}
-                data-testid="md-link-map-edge"
-                data-from={e.from}
-                data-to={e.to}
-                data-broken={e.broken ? 'true' : undefined}
-                data-lit={lit ? 'true' : undefined}
-                d={e.d}
-                className={edgeClass(e.broken, lit)}
-                strokeWidth={e.broken ? 1.6 : 1.2}
-                strokeDasharray={e.broken ? '5 4' : undefined}
-                style={{ opacity }}
-              />
-            )
-          })}
-          {layout.nodes.map((n) => {
-            const look = NODE_LOOK[n.kind]
-            const hot = focus !== null && focus.has(n.id)
-            let state = 'idle'
-            if (focus) state = hot ? 'hot' : 'dim'
-            const r = hot ? look.r + 1.5 : look.r
-            const above = n.column <= 1
-            return (
-              <g
-                key={n.id}
-                data-testid="md-link-map-node"
-                data-node-id={n.id}
-                data-kind={n.kind}
-                data-state={state}
-                onMouseEnter={() => setHoverId(n.id)}
-                onMouseLeave={() => setHoverId((cur) => (cur === n.id ? null : cur))}
-                className="transition-opacity duration-150"
-                style={{ opacity: state === 'dim' ? 0.25 : 1 }}
-              >
-                <circle cx={n.x} cy={n.y} r={14} className="fill-transparent" />
-                <circle
-                  data-testid="md-link-map-dot"
-                  cx={n.x}
-                  cy={n.y}
-                  r={r}
-                  className={n.flagged ? 'fill-bg stroke-accent' : look.dot}
-                  strokeWidth={n.flagged ? 2 : look.strokeWidth}
-                  strokeDasharray={look.dash}
-                />
-                <text
-                  x={above ? n.x : round1(n.x + r + 6)}
-                  y={above ? round1(n.y - r - 6) : round1(n.y + 3.5)}
-                  textAnchor={above ? 'middle' : 'start'}
-                  strokeWidth={4}
-                  className={`stroke-bg-hi font-mono text-[10.5px] [paint-order:stroke] [stroke-linejoin:round] ${
-                    n.flagged ? 'fill-accent' : look.label
-                  } ${hot ? 'font-bold' : look.weight}`}
-                >
-                  {n.label}
-                </text>
-                {n.kind === 'hub' && (
-                  <text
-                    x={n.x}
-                    y={round1(n.y + r + 15)}
-                    textAnchor="middle"
-                    strokeWidth={4}
-                    className="fill-fg-faint stroke-bg-hi font-mono text-[9.5px] [paint-order:stroke]"
-                  >
-                    entry map
-                  </text>
-                )}
-              </g>
-            )
-          })}
+          <MdMapGraph layout={layout} focus={focus} hoveredId={hovered ? hovered.id : null} onHover={setHoverId} />
         </svg>
       </div>
       <div data-testid="md-link-map-caption" className="min-h-[30px] break-all px-4 pt-1.5 pb-3 font-mono text-[11px] text-fg-faint">

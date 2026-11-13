@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { MdNetworkCards, layoutMdNetwork, type MdLinkMapLayout } from '../MdLinkMap'
+import { MdMapGraph, MdNetworkCards, layoutMdNetwork, type MdLinkMapLayout, type MdMapNode } from '../MdLinkMap'
 import { useToast } from '../../../../../state/toast'
 import type { MdNetwork, MdNetworkEdge, MdNetworkFinding, MdNetworkNode } from '../../../../../../preload/api'
 
@@ -149,6 +149,39 @@ describe('layoutMdNetwork', () => {
     expect(byId(layout, ORPHAN_ID)).toMatchObject({ kind: 'orphan', label: 'notes/ · 2', path: 'notes/ (2 docs)', count: 2 })
     expect(layout.nodes.filter((n) => n.flagged).map((n) => n.id)).toEqual(['README.md'])
     expect(layout.findingNodes).toEqual([['README.md', MISSING], [ORPHAN_ID]])
+  })
+
+  it('reports the default 760x392 canvas with no options', () => {
+    const layout = layoutMdNetwork(NET)
+    expect([layout.width, layout.height]).toEqual([760, 392])
+  })
+
+  it('draws the docs of an expanded folder as individual nodes, keeping the other ids', () => {
+    const layout = layoutMdNetwork(NET, { expanded: new Set([GROUP]) })
+    expect(layout.nodes.some((n) => n.id === GROUP)).toBe(false)
+    expect(layout.nodes.filter((n) => n.column === 1).map((n) => n.id)).toEqual(['README.md', ...ARCH])
+    expect(byId(layout, 'docs/arch/a1.md')).toMatchObject({ kind: 'doc', label: 'arch/a1.md', linksOut: 2 })
+    const pairs = layout.edges.map((e) => `${e.from} > ${e.to}`)
+    expect(pairs).toContain('docs/arch/a1.md > docs/arch/a2.md')
+    expect(pairs).toContain('docs/arch/a1.md > docs/arch/deep.md')
+    expect(byId(layout, MISSING).id).toBe(MISSING)
+    expect(byId(layout, ORPHAN_ID).id).toBe(ORPHAN_ID)
+    expect(layout.height).toBe(392)
+  })
+
+  it('grows the height to fit the fullest column at minRowGap and spreads rows within 16..height-16', () => {
+    const layout = layoutMdNetwork(NET, { expanded: new Set([GROUP]), minRowGap: 40 })
+    // Column 1 holds README + nine arch docs: 32 + 10 * 40.
+    expect([layout.width, layout.height]).toEqual([760, 432])
+    const col1 = layout.nodes.filter((n) => n.column === 1).map((n) => n.y)
+    expect(col1[0]).toBe(36)
+    expect(col1[9]).toBe(396)
+    for (const n of layout.nodes) {
+      expect(n.y).toBeGreaterThanOrEqual(16)
+      expect(n.y).toBeLessThanOrEqual(layout.height - 16)
+    }
+    // A sparse map never shrinks below the card's height.
+    expect(layoutMdNetwork(NET, { minRowGap: 40 }).height).toBe(392)
   })
 })
 
@@ -310,5 +343,57 @@ describe('MdNetworkCards FINDINGS', () => {
     expect(q('md-findings-empty')).not.toBeNull()
     act(() => root!.render(<MdNetworkCards cwd={null} network={NET} />))
     expect((all('md-finding-open') as HTMLButtonElement[]).every((b) => b.disabled)).toBe(true)
+  })
+})
+
+describe('MdMapGraph', () => {
+  const layout = layoutMdNetwork(NET)
+
+  function mountGraph(props: { selectedId?: string | null; onNodeClick?: (n: MdMapNode) => void }) {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() =>
+      root!.render(
+        <svg>
+          <MdMapGraph layout={layout} focus={null} hoveredId={null} onHover={() => {}} {...props} />
+        </svg>,
+      ),
+    )
+  }
+
+  it('marks the selected node with data-selected and an accent ring', () => {
+    mountGraph({ selectedId: 'README.md' })
+    expect(all('md-link-map-node')).toHaveLength(layout.nodes.length)
+    expect(all('md-link-map-edge')).toHaveLength(layout.edges.length)
+    const selected = all('md-link-map-node').filter((g) => g.getAttribute('data-selected') === 'true')
+    expect(selected.map((g) => g.getAttribute('data-node-id'))).toEqual(['README.md'])
+    const ring = node('README.md').querySelector('[data-testid="md-link-map-ring"]')!
+    expect(ring.getAttribute('class')).toContain('stroke-accent')
+    expect(node('CLAUDE.md').querySelector('[data-testid="md-link-map-ring"]')).toBeNull()
+  })
+
+  it('without onNodeClick nodes are not buttons', () => {
+    mountGraph({})
+    const g = node('README.md')
+    expect(g.getAttribute('role')).toBeNull()
+    expect(g.getAttribute('tabindex')).toBeNull()
+    expect(g.getAttribute('class')).not.toContain('cursor-pointer')
+  })
+
+  it('with onNodeClick nodes are focusable buttons that click, Enter and Space activate', () => {
+    const onNodeClick = vi.fn()
+    mountGraph({ onNodeClick })
+    const g = node('README.md')
+    expect(g.getAttribute('role')).toBe('button')
+    expect(g.getAttribute('tabindex')).toBe('0')
+    expect(g.getAttribute('aria-label')).toBe('README.md')
+    expect(g.getAttribute('class')).toContain('cursor-pointer')
+    expect(node(GROUP).getAttribute('aria-label')).toBe('docs/arch/ (9 docs)')
+    act(() => { g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    act(() => { g.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    act(() => { g.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    act(() => { g.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })) })
+    expect(onNodeClick.mock.calls.map(([n]) => (n as MdMapNode).id)).toEqual(['README.md', 'README.md', 'README.md'])
   })
 })

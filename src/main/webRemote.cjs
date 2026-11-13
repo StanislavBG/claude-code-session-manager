@@ -628,11 +628,13 @@ async function tailLines(filePath, fromOffset) {
 async function pollSessionWatcher(w) {
   // The transcript may not exist yet (new session) or may live under another
   // project/worktree encoding: re-resolve while the watched file is missing.
+  // An agent-CLI (non-Claude) Epic's transcript lives under agentCliSessionStore.
   if (!fs.existsSync(w.filePath)) {
     try {
-      const next = require('./transcripts.cjs').transcriptPath(w.cwd, w.sessionId);
+      const agentPath = require('./lib/remoteTranscriptTail.cjs').agentCliTranscriptPath(w.sessionId);
+      const next = agentPath ?? require('./transcripts.cjs').transcriptPath(w.cwd, w.sessionId);
       if (next && next !== w.filePath) {
-        validatePath(next);
+        if (!agentPath) validatePath(next);
         w.filePath = next;
         w.offset = null;
         w.inode = undefined;
@@ -674,11 +676,14 @@ async function pollSessionWatcher(w) {
 
 function startSessionWatch(tabId, cwd, sessionId = tabId) {
   if (_sessionWatchers.has(tabId)) return;
-  const filePath = require('./transcripts.cjs').transcriptPath(cwd, sessionId);
+  const claudePath = require('./transcripts.cjs').transcriptPath(cwd, sessionId);
   // Defense in depth: the schema restricts tabId charset, but re-validate the
   // FINAL joined path against the home-dir boundary (validatePath resolves
   // symlinks + rejects escapes) before any fs read. Throws → dispatch drops it.
-  validatePath(filePath);
+  validatePath(claudePath);
+  // Agent-CLI Epics: the store builds this path from a UUID-validated id under
+  // its own state root (never throws — a bad id resolves to null).
+  const filePath = require('./lib/remoteTranscriptTail.cjs').agentCliTranscriptPath(sessionId) ?? claudePath;
   const w = {
     tabId, cwd, sessionId, filePath,
     offset: null,       // null → first poll reads a bounded tail then tracks EOF
@@ -1212,7 +1217,7 @@ function getDispatchMap() {
       if (!filePath || !sessionId) return { messages: [], hasMore: false, nextBefore: null };
       validatePath(filePath);
       const exchanges = await listExchanges({ cwd: parsed.cwd, sessionId, limit: limit + 1, offset: before });
-      const tail = before === 0 ? await readRecentChatMessages(filePath, { limit: 30 }) : [];
+      const tail = before === 0 ? await readRecentChatMessages(filePath, { limit: 30, claudeSessionId: sessionId }) : [];
       return buildRemoteConversation({ exchanges, tail, limit, before });
     },
 

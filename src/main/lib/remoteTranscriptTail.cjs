@@ -6,6 +6,7 @@
 // Top-level (no domain fits: epic/ transcripts are path-only; util/ is domain-free).
 // Transcripts reach hundreds of MB, so cost is O(maxBytes), never O(file).
 
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 
 const DEFAULT_LIMIT = 30;
@@ -58,12 +59,30 @@ function toChatMessage(line) {
 }
 
 /**
- * @param {string} filePath
- * @param {{ limit?: number, maxBytes?: number }} [opts]
+ * Agent-CLI (non-Claude) Epics write a Claude-compatible transcript under
+ * agentCliSessionStore instead of ~/.claude/projects.
+ * @param {unknown} claudeSessionId
+ * @returns {string|null} that file's path when it exists; null otherwise,
+ *   including for a non-UUID id (the store's validation error is swallowed).
+ */
+function agentCliTranscriptPath(claudeSessionId) {
+  if (typeof claudeSessionId !== 'string' || !claudeSessionId) return null;
+  try {
+    const p = require('./agent-cli/agentCliSessionStore.cjs').transcriptPathFor(claudeSessionId);
+    return fs.existsSync(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} filePath  the Claude transcript path (used when no agent-CLI file exists)
+ * @param {{ limit?: number, maxBytes?: number, claudeSessionId?: string }} [opts]
  * @returns {Promise<Array<{ role: 'user'|'assistant', text: string, ts: string|null, uuid: string|null }>>}
  *   oldest first; [] on any read failure.
  */
-async function readRecentChatMessages(filePath, { limit = DEFAULT_LIMIT, maxBytes = DEFAULT_MAX_BYTES } = {}) {
+async function readRecentChatMessages(filePath, { limit = DEFAULT_LIMIT, maxBytes = DEFAULT_MAX_BYTES, claudeSessionId } = {}) {
+  filePath = agentCliTranscriptPath(claudeSessionId) ?? filePath;
   if (typeof filePath !== 'string' || !filePath) return [];
   const n = Math.floor(Number(limit));
   const lim = Number.isFinite(n) ? Math.min(MAX_LIMIT, Math.max(1, n)) : DEFAULT_LIMIT;
@@ -154,4 +173,4 @@ function buildRemoteConversation({ exchanges = [], tail = [], limit = 10, before
   return { messages: [...history, ...live], hasMore, nextBefore: hasMore ? b + returned : null };
 }
 
-module.exports = { readRecentChatMessages, buildRemoteConversation };
+module.exports = { readRecentChatMessages, buildRemoteConversation, agentCliTranscriptPath };

@@ -32,7 +32,7 @@ const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
-const { splitFrontmatter } = require('./prdFrontmatter.cjs');
+const { splitFrontmatter, PRD_EFFORT_LEVELS } = require('./prdFrontmatter.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
@@ -89,7 +89,7 @@ function isValidMacroId(id) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort,
     gate, files, budgetExempt,
   } = input;
 
@@ -143,6 +143,7 @@ function buildPrdBody(input) {
   // sibling jobs would otherwise invalidate. Only emitted when true — see
   // prdFrontmatter.cjs's applyKey for the matching "only true opts in" parse.
   if (isValidMacroId(macroId)) fmLines.push(`macroId: ${macroId}`);
+  if (PRD_EFFORT_LEVELS.includes(effort)) fmLines.push(`effort: ${effort}`);
   if (quietMachine === true) fmLines.push('quietMachine: true');
   // Budget exemption is for a sweep validator that cannot be split further;
   // every other caller's budgetExempt is ignored.
@@ -428,6 +429,10 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // macroId (in-process callers only): refused before NN allocation.
   if (input.macroId != null && !isValidMacroId(input.macroId)) {
     return { ok: false, applied: false, status: 400, error: 'macroId must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/ when given' };
+  }
+  // effort (in-process callers only: macroJobDispatch.cjs)
+  if (input.effort != null && !PRD_EFFORT_LEVELS.includes(input.effort)) {
+    return { ok: false, applied: false, status: 400, error: 'effort must be one of low, medium, high, xhigh, max when given' };
   }
 
   // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied

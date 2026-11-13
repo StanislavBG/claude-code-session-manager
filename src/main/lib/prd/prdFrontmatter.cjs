@@ -77,8 +77,11 @@ function splitFrontmatter(raw) {
  * never emitted, which is how `scheduler_update_prd` clears a dependency.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort'];
+// Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
+// value is always safe as a frontmatter line and as a --effort argv token.
+const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 const MACRO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
@@ -199,6 +202,10 @@ function applyKey(fm, key, after) {
       // Id of the macro whose press dispatched this PRD; anything off-pattern is dropped.
       if (typeof v === 'string' && MACRO_ID_RE.test(v.trim())) fm.macroId = v.trim();
       return;
+    case 'effort':
+      // In-process-only per-PRD effort override; anything outside PRD_EFFORT_LEVELS is dropped.
+      if (typeof v === 'string' && PRD_EFFORT_LEVELS.includes(v.trim())) fm.effort = v.trim();
+      return;
     case 'artifactPaths': {
       // Inline `[a, b]` list, same shape as dependsOn.
       const list = parseInlineList(after);
@@ -315,4 +322,4 @@ function serializePrdFile(fm, body) {
   return `---\n${fmText}\n---\n${body}`;
 }
 
-module.exports = { splitFrontmatter, parsePrdFile, serializePrdFile, RECOGNIZED_KEYS };
+module.exports = { splitFrontmatter, parsePrdFile, serializePrdFile, RECOGNIZED_KEYS, PRD_EFFORT_LEVELS };

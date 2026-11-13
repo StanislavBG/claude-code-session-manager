@@ -84,6 +84,7 @@
   "mainHeapSnapshot": "telemetry",
   "mcpToolsProbe": ".",
   "mdDocCensus": ".",
+  "mdDocRefs": ".",
   "mdNetworkScan": ".",
   "memoryScope": "process",
   "modelCatalog": "claude",

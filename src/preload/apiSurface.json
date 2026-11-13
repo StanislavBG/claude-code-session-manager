@@ -357,6 +357,20 @@
   "remote": "deny"
  },
  {
+  "ns": "agentCli",
+  "method": "detect",
+  "channel": "agentCli:detect",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "agentCli",
+  "method": "terminalCommand",
+  "channel": "agentCli:terminal-command",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
   "ns": "agents",
   "method": "listPersonas",
   "channel": "agents:list-personas",

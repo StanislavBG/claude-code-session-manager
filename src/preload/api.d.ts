@@ -431,6 +431,23 @@ export interface MacroSaveInput {
   autoStartTargets?: string[];
 }
 
+/** One `agentCli.detect` row — a non-Claude agent CLI and whether it is installed. */
+export interface AgentCliDetectRow {
+  id: 'codex' | 'gemini' | 'antigravity' | 'cursor' | 'opencode';
+  label: string;
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  install: string | null;
+  docs: string;
+  login: string | null;
+}
+
+/** `agentCli.terminalCommand` result: a single-quoted shell line, or why there is none. */
+export type AgentCliTerminalCommandResult =
+  | { ok: true; command: string }
+  | { ok: false; message: string };
+
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
 export interface AgentPersona {
   name: string;
@@ -2241,6 +2258,13 @@ export interface SessionManagerAPI {
     catalog: () => Promise<McpCatalogResult>;
     /** Desktop-only: the web remote is denied it (apiSurface remote: deny) — it spawns the server. */
     checkServer: (req: McpCheckRequest) => Promise<McpCheckResult>;
+  };
+  /** Non-Claude agent CLIs (main-side registry + adapters). Desktop-only: not exposed to the web remote. */
+  agentCli: {
+    /** One row per non-Claude CLI; cached 60 s in main unless `refresh`. Never rejects. */
+    detect: (payload?: { refresh?: boolean }) => Promise<AgentCliDetectRow[]>;
+    /** The exact shell line (no trailing CR) the Epic Terminal pane types to launch/resume this Epic's CLI. */
+    terminalCommand: (payload: { cwd: string; claudeSessionId: string }) => Promise<AgentCliTerminalCommandResult>;
   };
   agents: {
     listPersonas: () => Promise<AgentPersona[]>;

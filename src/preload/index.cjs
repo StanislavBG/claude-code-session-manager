@@ -121,6 +121,11 @@ contextBridge.exposeInMainWorld('api', {
     // Desktop-only (apiSurface remote: deny) — main spawns the named server's configured command.
     checkServer: (req) => ipcRenderer.invoke('mcp:check-server', req),
   },
+  // Non-Claude agent CLIs (desktop-only; apiSurface remote: deny).
+  agentCli: {
+    detect: (payload) => ipcRenderer.invoke('agentCli:detect', payload),
+    terminalCommand: (payload) => ipcRenderer.invoke('agentCli:terminal-command', payload),
+  },
   agents: {
     listPersonas: () => ipcRenderer.invoke('agents:list-personas'),
     savePersona: (payload) => ipcRenderer.invoke('agents:save-persona', payload),

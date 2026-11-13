@@ -1118,6 +1118,7 @@ filesIpc.registerFilesHandlers();
 registerDocEditHandlers();
 webRemote.registerRemoteHandlers();
 registerAgentsHandlers({ ipcMain, getWindow: () => mainWindow });
+require('./lib/agent-cli/agentCliIpc.cjs').registerAgentCliHandlers({ ipcMain });
 try {
   registerUpdaterIpc({ ipcMain, getWindow: () => mainWindow, ptyManager });
 } catch (e) {

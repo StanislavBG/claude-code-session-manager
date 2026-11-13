@@ -114,6 +114,9 @@ scoping scheme.
   so one project never takes a button from another. A macro shown in every project, which includes every Project
   Home tool, is never removed by an agent's macro_delete; the human deletes it everywhere from the HOT KEYS manage
   panel ('Delete from every project?') or the macro editor's Delete everywhere.
+  An xhigh/max persona makes every press open MacroCostDialog (useMacroCostPrompt, mounted once in App.tsx);
+  'Run at <lower>' (default medium) is per launch: chat Epic `effort` override or build PRD `effort`
+  frontmatter (in-process only; resolveEpicEffort's 'prd' rung outranks the persona); no macro or persona is edited.
 - **A Project Home tool is app-level, not per project.** A macro with `surface: 'project-home'` (Project Home ▸
   Tools, plus the Pages / Videos library built-ins) is part of Session Manager and shown in every project
   (`projects: ['*']`); only what it generates — pages, videos, the matrix, the Epics it opens — is per project.

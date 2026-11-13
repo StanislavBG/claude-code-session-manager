@@ -203,3 +203,123 @@ test('a failing git call yields that section with files: [] and error', async ()
     expect(c.opts.maxBuffer).toBe(32 * 1024 * 1024);
   }
 });
+
+// ---------- 'prd' sections (one per landed PRD of the Epic) ----------
+
+const { readLandedCommits, defaultListEpicPrds } = require('../epicChanges.cjs');
+
+function commitFile(cwd, name, text, msg) {
+  fs.writeFileSync(path.join(cwd, name), text);
+  git(cwd, 'add', name);
+  git(cwd, 'commit', '-q', '-m', msg);
+  return git(cwd, 'rev-parse', 'HEAD');
+}
+
+test('two landed PRDs (one a merge) -> prd sections after session sections, by PRD number', async () => {
+  const { cwd, dir } = await makeRepo();
+  fs.writeFileSync(path.join(dir, 'live.txt'), 'l\n'); // a session:live section exists
+  const shaA = commitFile(cwd, 'p1.txt', 'p1\n', 'prd 12');
+  // Merge commit: side branch adds side.txt, main adds main2.txt, merge.
+  git(cwd, 'checkout', '-q', '-b', 'side');
+  commitFile(cwd, 'side.txt', 's\n', 'side');
+  git(cwd, 'checkout', '-q', 'main');
+  commitFile(cwd, 'main2.txt', 'm\n', 'main2');
+  git(cwd, 'merge', '-q', '--no-ff', '-m', 'merge side', 'side');
+  const shaM = git(cwd, 'rev-parse', 'HEAD');
+  const record = { status: 'active', worktree: { dir, branch: BRANCH, baseCwd: cwd, status: 'active' } };
+  const listEpicPrds = () => [{ slug: '100-merge', title: 'Merge PRD' }, { slug: '12-first', title: 'First PRD' }];
+  const landedCommitFor = (_c, slugs) => {
+    expect(slugs.sort()).toEqual(['100-merge', '12-first']);
+    return new Map([['100-merge', shaM], ['12-first', shaA]]);
+  };
+  const res = await getEpicChanges({ cwd, epicId: EPIC }, depsFor(record, { listEpicPrds, landedCommitFor }));
+  expect(res.ok).toBe(true);
+  expect(res.sections.map((s) => s.key)).toEqual(['session:live', 'prd:12-first', 'prd:100-merge']);
+  const [, a, m] = res.sections;
+  expect(a).toEqual({ kind: 'prd', key: 'prd:12-first', label: 'First PRD', slug: '12-first', base: `${shaA}^1`, head: shaA, live: false, files: a.files });
+  expect(paths(a)).toEqual(['p1.txt']);
+  expect(m).toMatchObject({ kind: 'prd', label: 'Merge PRD', base: `${shaM}^1`, head: shaM });
+  expect(paths(m)).toEqual(['side.txt']); // first-parent diff only
+});
+
+test('no landedCommit and unknown sha are skipped; parentless commit diffs against empty tree', async () => {
+  const { cwd } = await makeRepo();
+  const root = git(cwd, 'rev-list', '--max-parents=0', 'HEAD');
+  const listEpicPrds = () => [{ slug: '1-root', title: '1-root' }, { slug: '2-none', title: 'x' }, { slug: '3-bogus', title: 'y' }];
+  const landedCommitFor = () => new Map([['1-root', root], ['3-bogus', 'deadbeef'.repeat(5)]]);
+  const res = await getEpicChanges({ cwd, epicId: EPIC }, depsFor({ status: 'completed' }, { listEpicPrds, landedCommitFor }));
+  expect(res.sections.map((s) => s.key)).toEqual(['prd:1-root']);
+  expect(paths(res.sections[0])).toEqual(['a.txt', 'carried.txt']);
+  expect(res.sections[0].error).toBeUndefined();
+});
+
+test('caps count prd sections; at most 4 git diffs at once', async () => {
+  const { cwd } = await makeRepo();
+  const shas = [];
+  for (let i = 0; i < 6; i += 1) {
+    shas.push(commitFile(cwd, `big${i}.txt`, Array.from({ length: 5000 }, (_, j) => `l${j}`).join('\n') + '\n', `p${i}`));
+  }
+  const listEpicPrds = () => shas.map((_, i) => ({ slug: `${i + 1}-p`, title: `P${i}` }));
+  const landedCommitFor = () => new Map(shas.map((s, i) => [`${i + 1}-p`, s]));
+  const { execGit: realExecGit } = require('../../git/gitExec.cjs');
+  let inFlight = 0; let peak = 0;
+  const execGit = async (c, args, opts) => {
+    const isDiff = args.includes('diff');
+    if (isDiff) { inFlight += 1; peak = Math.max(peak, inFlight); await new Promise((r) => setTimeout(r, 20)); }
+    try { return await realExecGit(c, args, opts); } finally { if (isDiff) inFlight -= 1; }
+  };
+  const res = await getEpicChanges({ cwd, epicId: EPIC }, depsFor({ status: 'completed' }, { listEpicPrds, landedCommitFor, execGit }));
+  expect(res.sections).toHaveLength(6);
+  expect(res.truncated).toBe(true);
+  expect(res.sections.slice(0, 4).every((s) => !s.files[0].tooLarge)).toBe(true);
+  expect(res.sections[4].files[0]).toMatchObject({ tooLarge: true, hunks: [] });
+  expect(peak).toBeLessThanOrEqual(4);
+  expect(peak).toBeGreaterThan(1);
+});
+
+test('readLandedCommits: this Epic only, newest terminal row per slug, queue then history', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-epic-landed-'));
+  tmpDirs.push(root);
+  const prev = process.env.SM_HISTORY_PATH_OVERRIDE;
+  process.env.SM_HISTORY_PATH_OVERRIDE = path.join(root, 'global-history.jsonl');
+  try {
+    const queuePath = path.join(root, 'queue.json');
+    const historyPath = path.join(root, 'history.jsonl');
+    fs.writeFileSync(queuePath, JSON.stringify({ jobs: [
+      { slug: '5-q', status: 'completed', epicId: EPIC, landedCommit: 'd'.repeat(40), finishedAt: '2026-11-10T00:00:00Z', cwd: '/proj/q' },
+      { slug: '6-pending', status: 'pending', epicId: EPIC, landedCommit: 'f'.repeat(40) },
+    ] }));
+    const rows = [
+      { kind: 'terminal', slug: '1-a', status: 'completed', sourcePromptId: EPIC, landedCommit: 'a'.repeat(40), finishedAt: '2026-11-01T00:00:00Z' },
+      { kind: 'terminal', slug: '1-a', status: 'completed', sourcePromptId: EPIC, landedCommit: 'b'.repeat(40), finishedAt: '2026-11-02T00:00:00Z', cwd: '/proj/x' },
+      { kind: 'terminal', slug: '2-other', status: 'completed', epicId: 'epic-other', landedCommit: 'c'.repeat(40), finishedAt: '2026-11-03T00:00:00Z' },
+      { kind: 'needs_review_entry', slug: '1-a', epicId: EPIC },
+      { kind: 'terminal', slug: '3-failed', status: 'failed', epicId: EPIC, finishedAt: '2026-11-03T00:00:00Z' },
+      { kind: 'terminal', slug: '5-q', status: 'completed', epicId: EPIC, landedCommit: 'e'.repeat(40), finishedAt: '2026-11-09T00:00:00Z' },
+    ];
+    fs.writeFileSync(historyPath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const map = readLandedCommits({ queuePath, historyPath, epicId: EPIC, slugs: ['1-a', '2-other', '3-failed', '5-q', '6-pending'] });
+    expect([...map.keys()].sort()).toEqual(['1-a', '5-q']);
+    expect(map.get('1-a')).toEqual({ sha: 'b'.repeat(40), cwd: '/proj/x' });
+    expect(map.get('5-q')).toEqual({ sha: 'd'.repeat(40), cwd: '/proj/q' });
+    // Missing files -> empty map, never throws.
+    expect(readLandedCommits({ queuePath: path.join(root, 'nope'), historyPath: path.join(root, 'nope2'), epicId: EPIC, slugs: ['1-a'] }).size).toBe(0);
+  } finally {
+    if (prev === undefined) delete process.env.SM_HISTORY_PATH_OVERRIDE; else process.env.SM_HISTORY_PATH_OVERRIDE = prev;
+  }
+});
+
+test('defaultListEpicPrds: prds/ + prds-archived/<ISO>/ only, title from frontmatter', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-epic-list-'));
+  tmpDirs.push(root);
+  const cwd = path.join(root, 'proj');
+  const epicDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', EPIC);
+  fs.mkdirSync(path.join(epicDir, 'prds'), { recursive: true });
+  fs.mkdirSync(path.join(epicDir, 'prds-archived', '2026-11-01T00-00-00Z'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'epic-other', 'prds'), { recursive: true });
+  fs.writeFileSync(path.join(epicDir, 'prds', '10-live.md'), '---\ntitle: Live one\n---\nbody\n');
+  fs.writeFileSync(path.join(epicDir, 'prds-archived', '2026-11-01T00-00-00Z', '9-old.md'), 'no frontmatter\n');
+  fs.writeFileSync(path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'epic-other', 'prds', '11-x.md'), '---\ntitle: X\n---\n');
+  const list = defaultListEpicPrds(cwd, EPIC).sort((a, b) => a.slug.localeCompare(b.slug));
+  expect(list).toEqual([{ slug: '10-live', title: 'Live one' }, { slug: '9-old', title: '9-old' }]);
+});

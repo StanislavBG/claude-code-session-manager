@@ -11,7 +11,12 @@
  *                       carried in at mint and still unchanged.
  *   - session:branch  — checkout removed but sm-epic/<id> still alive.
  *   - session:<head>  — one per pinned review range (refs/sm-epic-review/).
- * A follow-up adds a 'prd' kind (one section per landed PRD) in this file.
+ * and the 'prd' kind — one section per PRD of the Epic that landed a commit.
+ * Scheduled PRD jobs fork from and land on the project's base branch, not on
+ * sm-epic/<id>, so a develop-loop Epic's work shows up only here. PRD slugs
+ * come only from this Epic's own prds/ + prds-archived/ dirs (plus ancestor
+ * Epic dirs); landedCommit only from THIS project's queue shard + history
+ * tail, filtered to this Epic — never a machine-wide scan.
  *
  * Every git call goes through gitExec.execGit with an argv array, a bounded
  * timeout and a 32 MiB maxBuffer; every diff uses fixed flags so user config
@@ -29,7 +34,10 @@ const path = require('node:path');
 const gitExec = require('../git/gitExec.cjs');
 const gitWorktree = require('../git/gitWorktree.cjs');
 const { parseUnifiedDiff } = require('../git/unifiedDiff.cjs');
-const { isSafeEpicId } = require('../prd/prdLocations.cjs');
+const {
+  isSafeEpicId, resolveEpicsRoot, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs,
+} = require('../prd/prdLocations.cjs');
+const { parsePrdFile } = require('../prd/prdFrontmatter.cjs');
 
 const GIT_TIMEOUT_MS = 20_000;
 const GIT_MAX_BUFFER = 32 * 1024 * 1024;
@@ -38,6 +46,10 @@ const MAX_TOTAL_LINES = 20_000;
 const MAX_UNTRACKED = 200;
 const MAX_UNTRACKED_BYTES = 1024 * 1024;
 const LIVE_WORKTREE_STATUSES = new Set(['active', 'needs_merge_resolution']);
+const PRD_DIFF_CONCURRENCY = 4;
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+const TERMINAL_JOB_STATUSES = new Set(['completed', 'skipped', 'failed', 'quarantined']);
+const HISTORY_TAIL = { maxRows: 5000, maxBytes: 8388608 };
 const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '-M', '--src-prefix=a/', '--dst-prefix=b/'];
 
 /** Default record lookup: the active index entry, else the archived record. */
@@ -53,6 +65,8 @@ function defaultLoadEpic(cwd, epicId) {
 function resolveDeps(deps = {}) {
   return {
     loadEpic: deps.loadEpic || defaultLoadEpic,
+    listEpicPrds: deps.listEpicPrds || defaultListEpicPrds,
+    landedCommitFor: deps.landedCommitFor || defaultLandedCommitFor,
     listEpicReviewRanges: deps.listEpicReviewRanges || gitWorktree.listEpicReviewRanges,
     resolveForkSha: deps.resolveForkSha || gitWorktree.resolveForkSha,
     unchangedCarriedPaths: deps.unchangedCarriedPaths || gitWorktree.unchangedCarriedPaths,
@@ -186,8 +200,177 @@ async function buildSessionSections({ cwd, epicId, record, deps: d, state }) {
   return sections;
 }
 
-/** Section builders by kind, in display order. A follow-up PRD adds 'prd'. */
-const SECTION_BUILDERS = { session: buildSessionSections };
+// ---------- 'prd' sections ----------
+
+/** `<slug>.md` files directly in `dir` → [{ slug, title }]. Never throws. */
+function prdFilesIn(dir) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    if (!name.endsWith('.md')) continue;
+    const file = path.join(dir, name);
+    let title = '';
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+      const t = parsePrdFile(fs.readFileSync(file, 'utf8')).frontmatter.title;
+      title = typeof t === 'string' ? t.trim() : '';
+    } catch { continue; }
+    const slug = name.slice(0, -3);
+    out.push({ slug, title: title || slug });
+  }
+  return out;
+}
+
+/** Immediate subdirectories of `dir` (prds-archived/<ISO>/). Never throws. */
+function subdirsOf(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(dir, e.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The Epic's PRDs → [{ slug, title }], first occurrence of a slug winning.
+ * Reads only <epicsRoot>/<epicId>/prds/, prds-archived/<ISO>/ and the
+ * ancestor Epic dirs of the same id. Never throws.
+ */
+function defaultListEpicPrds(cwd, epicId) {
+  const liveDirs = [];
+  const archivedRoots = [];
+  try {
+    const epicDir = path.join(resolveEpicsRoot(cwd), epicId);
+    liveDirs.push(path.join(epicDir, 'prds'));
+    archivedRoots.push(path.join(epicDir, 'prds-archived'));
+  } catch { /* unresolvable ops root: ancestors only */ }
+  try { liveDirs.push(...ancestorEpicPrdDirs(cwd, epicId)); } catch { /* none */ }
+  try { archivedRoots.push(...ancestorEpicArchivedPrdDirs(cwd, epicId)); } catch { /* none */ }
+  const dirs = [...liveDirs, ...archivedRoots.flatMap(subdirsOf)];
+  const seen = new Map();
+  for (const dir of dirs) {
+    for (const p of prdFilesIn(dir)) if (!seen.has(p.slug)) seen.set(p.slug, p);
+  }
+  return [...seen.values()];
+}
+
+/** Queue shard rows (`{ jobs: [...] }`) from one file. Missing/corrupt → []. */
+function readQueueRows(file) {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(data && data.jobs) ? data.jobs : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * readLandedCommits({ queuePath, historyPath, epicId, slugs }) →
+ *   Map slug -> { sha, cwd }
+ * Considers only terminal rows of this Epic ((row.epicId || row.sourcePromptId)
+ * === epicId) whose slug is in `slugs`. The newest terminal row per slug wins
+ * (by finishedAt; on a tie, queue rows beat history, newer history lines beat
+ * older); a winner without landedCommit drops the slug. Never throws.
+ */
+function readLandedCommits({ queuePath, historyPath, epicId, slugs }) {
+  const want = new Set(slugs);
+  /** @type {Map<string, { row: any, at: string }>} */
+  const best = new Map();
+  const consider = (row) => {
+    if (!row || typeof row !== 'object' || typeof row.slug !== 'string' || !want.has(row.slug)) return;
+    if ((row.epicId || row.sourcePromptId) !== epicId) return;
+    if (row.kind && row.kind !== 'terminal') return;
+    if (!TERMINAL_JOB_STATUSES.has(row.status)) return;
+    const at = typeof row.finishedAt === 'string' ? row.finishedAt : '';
+    const cur = best.get(row.slug);
+    if (!cur || at >= cur.at) best.set(row.slug, { row, at });
+  };
+  let history = [];
+  try {
+    const { readHistoryFileTailSync } = require('../scheduler/queueHistory.cjs');
+    history = historyPath ? readHistoryFileTailSync(historyPath, HISTORY_TAIL) : [];
+  } catch { history = []; }
+  // Tail is newest-first: walk oldest → newest, then the live queue shard.
+  for (let i = history.length - 1; i >= 0; i -= 1) consider(history[i]);
+  if (queuePath) for (const row of readQueueRows(queuePath)) consider(row);
+  const out = new Map();
+  for (const [slug, { row }] of best) {
+    const sha = typeof row.landedCommit === 'string' ? row.landedCommit.trim() : '';
+    if (!/^[0-9a-f]{7,64}$/.test(sha)) continue;
+    out.set(slug, { sha, cwd: typeof row.cwd === 'string' && path.isAbsolute(row.cwd) ? row.cwd : null });
+  }
+  return out;
+}
+
+/** Default landedCommitFor: this project's queue shard + history file only. */
+function defaultLandedCommitFor(cwd, slugs, epicId) {
+  const { projectQueuePath, projectHistoryPath } = require('../scheduler/queueStore.cjs');
+  let queuePath = null;
+  let historyPath = null;
+  try { queuePath = projectQueuePath(cwd); } catch { queuePath = null; }
+  try { historyPath = projectHistoryPath(cwd); } catch { historyPath = null; }
+  if (!queuePath && !historyPath) return new Map();
+  return readLandedCommits({ queuePath, historyPath, epicId, slugs });
+}
+
+/** Run `fn` over `items` with at most `limit` in flight; results in input order. */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+const prdNumber = (slug) => {
+  const m = /^(\d+)/.exec(slug);
+  return m ? Number(m[1]) : Number.POSITIVE_INFINITY;
+};
+
+/** The 'prd' sections: one per PRD of this Epic with a resolvable landedCommit. */
+async function buildPrdSections({ cwd, epicId, deps: d }) {
+  let prds = [];
+  try { prds = await d.listEpicPrds(cwd, epicId); } catch { prds = []; }
+  prds = (Array.isArray(prds) ? prds : []).filter((p) => p && typeof p.slug === 'string' && p.slug);
+  if (!prds.length) return [];
+  let landed;
+  try { landed = await d.landedCommitFor(cwd, prds.map((p) => p.slug), epicId); } catch { landed = null; }
+  if (!(landed instanceof Map)) return [];
+  const todo = [];
+  for (const p of prds) {
+    const v = landed.get(p.slug);
+    const sha = typeof v === 'string' ? v : v && typeof v.sha === 'string' ? v.sha : '';
+    if (!/^[0-9a-f]{7,64}$/.test(sha)) continue;
+    const rowCwd = v && typeof v === 'object' && typeof v.cwd === 'string' && path.isAbsolute(v.cwd) ? v.cwd : null;
+    todo.push({ slug: p.slug, title: typeof p.title === 'string' && p.title ? p.title : p.slug, sha, gitCwd: rowCwd || cwd });
+  }
+  todo.sort((a, b) => (prdNumber(a.slug) - prdNumber(b.slug)) || a.slug.localeCompare(b.slug));
+  const built = await mapLimit(todo, PRD_DIFF_CONCURRENCY, async (t) => {
+    try {
+      await git(d, t.gitCwd, ['cat-file', '-e', `${t.sha}^{commit}`]);
+    } catch {
+      return null; // unknown sha: skip silently
+    }
+    const head = t.sha;
+    const meta = { kind: 'prd', key: `prd:${t.slug}`, label: t.title, slug: t.slug, base: `${head}^1`, head, live: false };
+    try {
+      const hasParent = !!(await tryCommit(d, t.gitCwd, `${head}^1`));
+      const files = await runDiff(d, t.gitCwd, [hasParent ? `${head}^1` : EMPTY_TREE, head, '--']);
+      return { ...meta, files };
+    } catch (err) {
+      return { ...meta, files: [], error: errText(err) };
+    }
+  });
+  return built.filter(Boolean);
+}
+
+/** Section builders by kind, in display order. */
+const SECTION_BUILDERS = { session: buildSessionSections, prd: buildPrdSections };
 
 /** Enforce the per-section file cap and the total line cap in place. */
 function applyCaps(sections, state) {
@@ -214,7 +397,8 @@ function applyCaps(sections, state) {
 /**
  * getEpicChanges({ cwd, epicId }, deps?) → Promise<
  *   { ok: true, epicId, status, sections, truncated } | { ok: false, reason }>
- * deps (all optional, for tests): loadEpic, listEpicReviewRanges,
+ * deps (all optional, for tests): loadEpic, listEpicPrds, landedCommitFor,
+ * listEpicReviewRanges,
  * resolveForkSha, unchangedCarriedPaths, resolveDefaultBranch, execGit,
  * validatePath. Never throws.
  */
@@ -244,6 +428,10 @@ module.exports = {
   getEpicChanges,
   SECTION_BUILDERS,
   buildSessionSections,
+  buildPrdSections,
+  defaultListEpicPrds,
+  defaultLandedCommitFor,
+  readLandedCommits,
   runDiff,
   applyCaps,
   defaultLoadEpic,

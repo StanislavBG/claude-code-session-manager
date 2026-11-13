@@ -14,8 +14,16 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
  * resume command, and the exited -> "Back to Chat" handoff.
  */
 
+const xtermInstances = vi.hoisted(() => [] as Array<{ write: { mock: { calls: unknown[][] } } }>)
+/** Everything the pane wrote into its (most recent) xterm viewport. */
+function termWrites(): string {
+  const t = xtermInstances[xtermInstances.length - 1]
+  return t ? t.write.mock.calls.map(([d]) => String(d)).join('') : ''
+}
+
 vi.mock('@xterm/xterm', () => {
   class FakeTerm {
+    constructor() { xtermInstances.push(this) }
     cols = 80
     rows = 24
     options: Record<string, unknown> = {}
@@ -364,5 +372,97 @@ describe('EpicTerminalPane (PRD 831)', () => {
     expect(cmdWrite).toBeTruthy()
     expect(cmdWrite![0].data).toContain('--session-id')
     expect(cmdWrite![0].data).not.toContain('--resume')
+  })
+  describe('non-Claude agentCli Epic', () => {
+    async function seedCodexEpic() {
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      usePromptSessions.setState((st) => ({
+        sessions: { ...st.sessions, 'epic-codex': { id: 'epic-codex', agentCli: 'codex' } as never },
+      }))
+    }
+
+    function mountCodex() {
+      mount(
+        createElement(EpicTerminalPaneRef!, {
+          epicId: 'epic-codex',
+          cwd: '/proj',
+          sessionId: 'claude-session-codex',
+          onReturnToChat: () => {},
+        }),
+      )
+    }
+
+    let EpicTerminalPaneRef: typeof import('../EpicTerminalPane').EpicTerminalPane | null = null
+
+    it('types the main-built terminalCommand line instead of the claude launch', async () => {
+      const { write } = installWindowApiMock()
+      const terminalCommand = vi.fn().mockResolvedValue({ ok: true, command: "codex resume 'abc'" })
+      const resolveEpicModel = vi.fn().mockResolvedValue('sonnet')
+      Object.assign(window.api as unknown as Record<string, unknown>, {
+        agentCli: { terminalCommand },
+        agents: { resolveEpicModel, resolveEpicEffort: vi.fn() },
+      })
+      await seedCodexEpic()
+      EpicTerminalPaneRef = (await import('../EpicTerminalPane')).EpicTerminalPane
+      mountCodex()
+
+      await flushAsync(3)
+      act(() => { vi.advanceTimersByTime(1400) })
+      expect(write.mock.calls.find(([p]) => p.data.includes('codex'))).toBeUndefined()
+      act(() => { vi.advanceTimersByTime(200) })
+
+      expect(terminalCommand).toHaveBeenCalledWith({ cwd: '/proj', claudeSessionId: 'claude-session-codex' })
+      expect(resolveEpicModel).not.toHaveBeenCalled()
+      const typed = write.mock.calls.map(([p]) => p.data).join('')
+      expect(typed).toBe("codex resume 'abc'\r")
+      expect(typed).not.toContain('claude ')
+    })
+
+    it('prints the [session-manager] notice and types nothing on an ok:false result', async () => {
+      const { write } = installWindowApiMock()
+      const terminalCommand = vi.fn().mockResolvedValue({ ok: false, message: 'codex is not installed' })
+      Object.assign(window.api as unknown as Record<string, unknown>, { agentCli: { terminalCommand } })
+      await seedCodexEpic()
+      EpicTerminalPaneRef = (await import('../EpicTerminalPane')).EpicTerminalPane
+      mountCodex()
+
+      await flushAsync(3)
+      act(() => { vi.advanceTimersByTime(2000) })
+
+      expect(terminalCommand).toHaveBeenCalled()
+      expect(write).not.toHaveBeenCalled()
+      expect(termWrites()).toContain('\r\n[session-manager] codex is not installed\r\n')
+    })
+
+    it('prints the notice and types nothing when terminalCommand rejects', async () => {
+      const { write } = installWindowApiMock()
+      const terminalCommand = vi.fn().mockRejectedValue(new Error('ipc down'))
+      Object.assign(window.api as unknown as Record<string, unknown>, { agentCli: { terminalCommand } })
+      await seedCodexEpic()
+      EpicTerminalPaneRef = (await import('../EpicTerminalPane')).EpicTerminalPane
+      mountCodex()
+
+      await flushAsync(3)
+      act(() => { vi.advanceTimersByTime(2000) })
+
+      expect(write).not.toHaveBeenCalled()
+      expect(termWrites()).toContain('\r\n[session-manager] ipc down\r\n')
+    })
+
+    it('a reattach types nothing and never asks main for the command', async () => {
+      const { spawn, write } = installWindowApiMock()
+      spawn.mockResolvedValue({ pid: 123, cwd: '/proj', reattached: true })
+      const terminalCommand = vi.fn().mockResolvedValue({ ok: true, command: "codex resume 'abc'" })
+      Object.assign(window.api as unknown as Record<string, unknown>, { agentCli: { terminalCommand } })
+      await seedCodexEpic()
+      EpicTerminalPaneRef = (await import('../EpicTerminalPane')).EpicTerminalPane
+      mountCodex()
+
+      await flushAsync(3)
+      act(() => { vi.advanceTimersByTime(2000) })
+
+      expect(terminalCommand).not.toHaveBeenCalled()
+      expect(write).not.toHaveBeenCalled()
+    })
   })
 })

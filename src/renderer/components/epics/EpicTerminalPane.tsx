@@ -73,6 +73,12 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
   const developLoop = usePromptSessions((s) => s.sessions[epicId]?.developLoop)
   const developLoopRef = useRef(developLoop)
   developLoopRef.current = developLoop
+  // Primitive selector (string | undefined), read through a ref like
+  // developLoop. Set and not 'claude' = this Epic's session belongs to another
+  // agent CLI, whose resume line main builds (agentCli:terminal-command).
+  const agentCli = usePromptSessions((s) => s.sessions[epicId]?.agentCli)
+  const agentCliRef = useRef(agentCli)
+  agentCliRef.current = agentCli
 
   // Attached the instant this pane mounts (before the pty round-trip
   // resolves) so chat.ts's send() guard blocks immediately on mode switch.
@@ -133,6 +139,25 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
         // running in it; typing the launch command again would inject it into
         // the live REPL as a prompt. Same guard as Terminal.tsx (PRD 833 I3).
         if (reattached) return
+        const cli = agentCliRef.current
+        if (cli && cli !== 'claude') {
+          // Non-Claude Epic: main owns the native CLI's resume line for this
+          // session — Chat and Terminal stay two views over the same session.
+          let notice: string
+          try {
+            const result = await window.api.agentCli.terminalCommand({ cwd, claudeSessionId: sessionId })
+            if (result.ok) {
+              const line = `${result.command}\r`
+              setTimeout(() => writeInChunks(sessionId, line), 1500)
+              return
+            }
+            notice = result.message
+          } catch (err) {
+            notice = err instanceof Error ? err.message : String(err)
+          }
+          term.write(`\r\n[session-manager] ${notice}\r\n`)
+          return
+        }
         // First interaction of an Epic in Terminal mode has no transcript yet:
         // `--resume` of a nonexistent session errors out. Same durable
         // resume-vs-create decision chat.ts's send() makes (PRD 833 I2).

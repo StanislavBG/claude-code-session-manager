@@ -308,3 +308,47 @@ test('list-restorable returns listRestorableSessions\' result for an allowed pro
   expect(result.sessions[0].firstPrompt).toBe('pick up the refactor');
   expect(result).toEqual(await listRestorableSessions({ cwd }));
 });
+
+// ── Agent CLI choice (New Session card) ─────────────────────────────────────
+// agentCli/agentCliModel ride 'promptSessions:create-epic' into ensureEpic,
+// which owns the Claude-only rules (non-Claude ⇒ developLoop false; no restore).
+
+test('a codex create through the registered handler persists agentCli codex with developLoop false', async () => {
+  const cwd = await mkCwd();
+  const result = await handler(null, { cwd, goalText: 'Codex run', agentCli: 'codex', agentCliModel: 'gpt-5-codex' });
+  expect(result.session.agentCli).toBe('codex');
+  expect(result.session.agentCliModel).toBe('gpt-5-codex');
+  expect(result.session.developLoop).toBe(false);
+  expect(readActiveIndex(cwd).sessions[result.epicId]).toEqual(result.session);
+  expect(PromptSessionSchema.safeParse(result.session).success).toBe(true);
+});
+
+test('an unknown agentCli or a malformed agentCliModel is rejected by ipcSchemas validation', async () => {
+  const cwd = await mkCwd();
+  const s = schemas.promptSessionsCreateEpic;
+  expect(s.safeParse({ cwd, goalText: 'x', agentCli: 'copilot' }).success).toBe(false);
+  expect(s.safeParse({ cwd, goalText: 'x', agentCli: 'codex', agentCliModel: '' }).success).toBe(false);
+  expect(s.safeParse({ cwd, goalText: 'x', agentCli: 'codex', agentCliModel: 'm'.repeat(129) }).success).toBe(false);
+  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'cursor', 'opencode']) {
+    expect(s.parse({ cwd, goalText: 'x', agentCli: id }).agentCli).toBe(id);
+  }
+  expect(() => handler(null, { cwd, goalText: 'Bad cli', agentCli: 'copilot' })).toThrow();
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+});
+
+test('codex plus restoreSessionId comes back as the handler error result and mints nothing', async () => {
+  const cwd = await mkCwd();
+  writeCliTranscript(await useTempHome(), cwd, RESTORE_ID);
+  await expect(handler(null, { cwd, goalText: 'Restore into codex', agentCli: 'codex', restoreSessionId: RESTORE_ID }))
+    .rejects.toThrow(/Claude Code only/);
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+});
+
+test('omitting agentCli and agentCliModel leaves the minted record unchanged', async () => {
+  const cwd = await mkCwd();
+  const result = await handler(null, { cwd, goalText: 'Plain Claude run', agentType: 'architect' });
+  expect('agentCli' in result.session).toBe(false);
+  expect('agentCliModel' in result.session).toBe(false);
+  expect('developLoop' in result.session).toBe(false);
+  expect(result.session.status).toBe('proposed');
+});

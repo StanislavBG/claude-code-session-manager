@@ -22,7 +22,7 @@ const { listRestorableSessions } = require('./restorableSessions.cjs');
 const { validatePath } = require('../../config.cjs');
 
 /**
- * createEpicViaIpc(cwd, { goalText, tag?, agentType?, source?, restoreSessionId? }) → Promise<{ epicId, session }>
+ * createEpicViaIpc(cwd, { goalText, tag?, agentType?, source?, restoreSessionId?, agentCli?, agentCliModel? }) → Promise<{ epicId, session }>
  *
  * THE one Epic-creation path (epicMint.cjs's SINGLE-CREATOR LAW): this handler
  * holds `MINT_AUTHORITY_NEW_EPIC_UI`, the token that unlocks ensureEpic's mint
@@ -49,8 +49,11 @@ const { validatePath } = require('../../config.cjs');
  * `restoreSessionId` (absent = a normal mint) asks ensureEpic to adopt that
  * existing Claude Code CLI session as the new Epic's claudeSessionId. ensureEpic's
  * restore gate decides; a refused id rejects the call, never mints a fresh session.
+ *
+ * `agentCli` / `agentCliModel` (absent = Claude Code) pick the agent CLI. ensureEpic
+ * owns the Claude-only rules; a broken rule throws, so the call rejects and nothing is minted.
  */
-async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId } = {}) {
+async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId, agentCli, agentCliModel } = {}) {
   validatePath(cwd);
   const { epicId } = await ensureEpic(cwd, {
     goalText,
@@ -63,6 +66,8 @@ async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, 
     openingPrompt,
     sections,
     restoreSessionId,
+    agentCli,
+    agentCliModel,
     mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI,
     status: 'proposed',
   });
@@ -88,8 +93,8 @@ function registerPromptSessionsCreateEpicHandlers() {
   const { schemas: s, validated: v } = require('../../ipcSchemas.cjs');
   ipcMain.handle(
     'promptSessions:create-epic',
-    v(s.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId }) =>
-      createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId })),
+    v(s.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId, agentCli, agentCliModel }) =>
+      createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, developLoop, source, openingPrompt, sections, restoreSessionId, agentCli, agentCliModel })),
   );
   ipcMain.handle(
     'promptSessions:list-restorable',

@@ -242,6 +242,11 @@ const promptSessionsCreateEpic = z.object({
   // it becomes a transcript filename) instead of minting a fresh one. Absent =
   // a normal mint; ensureEpic's restore gate decides whether the id may be adopted.
   restoreSessionId: z.string().regex(RESTORABLE_SESSION_ID_RE).optional(),
+  // Which agent CLI drives this Epic; absent = Claude Code. ensureEpic enforces
+  // the Claude-only rules (non-Claude => develop loop off, no restore).
+  agentCli: z.enum(['claude', 'codex', 'gemini', 'antigravity', 'cursor', 'opencode']).optional(),
+  // Model passed to a non-Claude CLI; absent = that CLI's own default.
+  agentCliModel: z.string().min(1).max(128).optional(),
 });
 
 // Renderer entry point for the "Restore a session" picker: this project's CLI

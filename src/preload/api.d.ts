@@ -2868,6 +2868,10 @@ export interface PromptSessionsCreateEpicPayload {
   }>;
   /** Adopt an existing CLI session of this project instead of minting one. */
   restoreSessionId?: string;
+  /** Agent CLI driving this Epic; absent = Claude Code. Non-Claude forces developLoop false and refuses restore. */
+  agentCli?: 'claude' | 'codex' | 'gemini' | 'antigravity' | 'cursor' | 'opencode';
+  /** Model for a non-Claude CLI; absent = that CLI's default. */
+  agentCliModel?: string;
 }
 
 export interface PromptSessionsCreateEpicResult {

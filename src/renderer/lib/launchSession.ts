@@ -23,6 +23,8 @@ export interface LaunchSessionInput {
   /** 'job' queues the build via macros.dispatchJob instead of sending a chat turn. */
   run?: 'chat' | 'job'
   extraInstructions?: string
+  /** Per-launch effort chosen in the high-effort cost dialog; omitted keeps the persona's. */
+  effort?: string
   /** Default true. false = mint only: the Epic stays proposed (no approve, no opening prompt, no job). */
   approve?: boolean
 }
@@ -46,7 +48,7 @@ export async function resolvePersonaBody(
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, run, extraInstructions, approve = true } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, run, extraInstructions, effort, approve = true } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
   if (!title) throw new Error('launchSession: title is required')
@@ -62,9 +64,10 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     contextInjections: defaultContextInjectionsForTag(tag),
     ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
   })
+  const runtime = { ...(macroId ? { macroId } : {}), ...(effort ? { effort } : {}) }
   const session = await usePromptSessions
     .getState()
-    .createPromptSession(cwd, goalText, tag, source, agentName, openingPrompt, sections, ...(macroId ? [{ macroId }] as const : []))
+    .createPromptSession(cwd, goalText, tag, source, agentName, openingPrompt, sections, ...(Object.keys(runtime).length ? [runtime] as const : []))
   if (!approve) return { epicId: session.id, claudeSessionId: session.claudeSessionId }
   usePromptSessions.getState().approveProposed(session.id, source)
   if (run === 'job') {
@@ -77,7 +80,7 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(`"${title}" session was created but its build was not queued (approval not saved: ${msg}) — press it again to retry.`)
     }
-    const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions })
+    const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions, ...(effort ? { effort } : {}) })
     if (!res.ok) throw new Error(`"${title}" session was created but its build was not queued: ${res.error} — press it again to retry.`)
     return { epicId: session.id, claudeSessionId: session.claudeSessionId }
   }

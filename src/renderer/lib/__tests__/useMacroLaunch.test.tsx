@@ -12,6 +12,7 @@ import { usePromptSessions } from '../../state/promptSessions'
 import { useSessions } from '../../state/sessions'
 import { useChat } from '../../state/chat'
 import { useToast } from '../../state/toast'
+import { useMacroCostPrompt, type MacroCostChoice } from '../../state/macroCostPrompt'
 import { fakePromptSessionsCreate } from '../../testUtils/fakePromptSessionsCreate'
 import type { AgentPersona, Macro } from '../../../preload/api'
 
@@ -308,48 +309,118 @@ describe('useMacroLaunch', () => {
     })
   })
 
-  describe('cost confirmation', () => {
+  describe('cost prompt', () => {
+    const dispatchJob = vi.fn()
     let confirmSpy: ReturnType<typeof vi.spyOn>
     beforeEach(() => {
       confirmSpy = vi.spyOn(window, 'confirm')
+      useMacroCostPrompt.setState({ hostMounted: true, request: null })
+      dispatchJob.mockReset()
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e' })
+      ;(globalThis as any).window.api.macros = { dispatchJob }
+      ;(globalThis as any).window.api.agents = { getPersonaBody: vi.fn().mockResolvedValue(null) }
     })
     afterEach(() => {
       confirmSpy.mockRestore()
+      useMacroCostPrompt.setState({ hostMounted: false, request: null })
     })
 
-    it('max effort + confirm declined: nothing is minted or readiness-checked', async () => {
-      confirmSpy.mockReturnValue(false)
+    /** Press the button, wait for the prompt to open, then answer it. */
+    async function pressAndAnswer(el: HTMLElement, choice: MacroCostChoice) {
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      const req = useMacroCostPrompt.getState().request
+      expect(req).not.toBeNull()
+      await act(async () => { useMacroCostPrompt.getState().answer(choice) })
+      return req!
+    }
+
+    it('cancel: nothing is minted or readiness-checked', async () => {
       const onSelect = vi.fn()
       const el = await mount(
         <Harness personas={[persona({ effort: 'max' })]} onSelect={onSelect} macroOver={{ job: JOB }} />,
       )
-      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      const req = await pressAndAnswer(el, { proceed: false })
 
-      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(req).toMatchObject({ cwd: CWD, macroLabel: 'Sweep', agentName: 'scout', effort: 'max' })
+      expect(confirmSpy).not.toHaveBeenCalled()
       expect(createPromptSessionSpy).not.toHaveBeenCalled()
       expect(sendSpy).not.toHaveBeenCalled()
       expect(onSelect).not.toHaveBeenCalled()
+      expect(dispatchJob).not.toHaveBeenCalled()
       expect((globalThis as any).window.api.app.delegationReadiness).not.toHaveBeenCalled()
     })
 
-    it('max effort + confirm accepted: launches exactly once', async () => {
-      confirmSpy.mockReturnValue(true)
+    it('run as-is: launches exactly once with no effort in the runtime argument', async () => {
       const onSelect = vi.fn()
       const el = await mount(<Harness personas={[persona({ effort: 'max' })]} onSelect={onSelect} />)
-      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      await pressAndAnswer(el, { proceed: true, effort: null })
 
-      expect(confirmSpy).toHaveBeenCalledTimes(1)
       expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][7]).toEqual({ macroId: 'm1' })
       expect(onSelect).toHaveBeenCalledTimes(1)
     })
 
-    it('medium effort: no confirm, launches', async () => {
+    it("run lower 'medium': mints with runtime effort 'medium'", async () => {
+      const onSelect = vi.fn()
+      const el = await mount(<Harness personas={[persona({ effort: 'max' })]} onSelect={onSelect} />)
+      await pressAndAnswer(el, { proceed: true, effort: 'medium' })
+
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][7]).toEqual({ macroId: 'm1', effort: 'medium' })
+      expect(onSelect).toHaveBeenCalledTimes(1)
+    })
+
+    it("job macro, new Epic: dispatchJob gets effort 'medium'", async () => {
+      const el = await mount(
+        <Harness personas={[persona({ effort: 'max' })]} onSelect={vi.fn()} macroOver={{ job: JOB }} />,
+      )
+      await pressAndAnswer(el, { proceed: true, effort: 'medium' })
+
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][7]).toEqual({ macroId: 'm1', effort: 'medium' })
+      expect(dispatchJob).toHaveBeenCalledTimes(1)
+      expect(dispatchJob.mock.calls[0][0]).toMatchObject({ macroId: 'm1', effort: 'medium' })
+    })
+
+    it("job macro, reuse active Epic: dispatchJob gets effort 'medium'", async () => {
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active' } as any },
+      })
+      const el = await mount(
+        <Harness personas={[persona({ effort: 'max' })]} onSelect={vi.fn()} macroOver={{ job: JOB }} />,
+      )
+      await pressAndAnswer(el, { proceed: true, effort: 'medium' })
+
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(dispatchJob).toHaveBeenCalledWith({
+        cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: undefined, effort: 'medium',
+      })
+    })
+
+    it('job macro, reuse active Epic, run as-is: payload has no effort key', async () => {
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active' } as any },
+      })
+      const el = await mount(
+        <Harness personas={[persona({ effort: 'max' })]} onSelect={vi.fn()} macroOver={{ job: JOB }} />,
+      )
+      await pressAndAnswer(el, { proceed: true, effort: null })
+
+      expect(dispatchJob).toHaveBeenCalledTimes(1)
+      expect(dispatchJob.mock.calls[0][0]).not.toHaveProperty('effort')
+    })
+
+    it('medium-effort persona: no prompt opens, launches', async () => {
+      const askSpy = vi.spyOn(useMacroCostPrompt.getState(), 'ask')
       const onSelect = vi.fn()
       const el = await mount(<Harness personas={[persona({ effort: 'medium' })]} onSelect={onSelect} />)
       await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
+      expect(askSpy).not.toHaveBeenCalled()
+      expect(useMacroCostPrompt.getState().request).toBeNull()
       expect(confirmSpy).not.toHaveBeenCalled()
       expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      askSpy.mockRestore()
     })
   })
 

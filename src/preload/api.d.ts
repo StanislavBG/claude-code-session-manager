@@ -328,6 +328,9 @@ export interface MacroJobDispatchInput {
   macroId: string;
   epicId: string;
   extraInstructions?: string;
+  /** Per-launch effort chosen in the high-effort cost dialog: one of low, medium, high, xhigh, max;
+   *  main refuses anything else. Omitted = the persona's own effort. */
+  effort?: string;
 }
 
 export type MacroJobDispatchResult =

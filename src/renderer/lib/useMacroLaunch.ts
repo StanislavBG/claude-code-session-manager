@@ -10,8 +10,10 @@
  * identically on every surface — the same act as New Session (SINGLE-CREATOR LAW: born
  * proposed, approved by the press), always minting a new Epic.
  *
- * A persona at xhigh/max effort needs a window.confirm (macroCostNotice) before
- * minting; cancelling mints nothing.
+ * A persona at xhigh/max effort (macroCostNotice) opens the high-effort cost dialog
+ * (useMacroCostPrompt) before minting: cancel mints nothing; run as-is keeps the
+ * persona's effort; run lower carries the chosen effort into the launch — the Epic's
+ * per-Epic `effort` override for chat macros, the dispatchJob payload for job macros.
  */
 import { useState } from 'react'
 import { usePromptSessions } from '../state/promptSessions'
@@ -19,6 +21,7 @@ import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
 import { launchSession } from './launchSession'
 import { macroCostNotice } from './macroCost'
+import { useMacroCostPrompt } from '../state/macroCostPrompt'
 import { defaultMacroValues, renderMacroPrompt } from './macroPrompt'
 import type { AgentPersona, Macro } from '../../preload/api'
 
@@ -48,7 +51,18 @@ export function useMacroLaunch(
     }
 
     const notice = macroCostNotice(macro, persona)
-    if (notice && !window.confirm(`${notice.message} Continue?`)) return
+    const choice = notice
+      ? await useMacroCostPrompt.getState().ask({
+          cwd: activeTabCwd,
+          macroLabel: macro.label,
+          agentName: macro.agentName,
+          model: notice.model,
+          effort: notice.effort,
+          message: notice.message,
+        })
+      : null
+    if (choice && !choice.proceed) return
+    const effort = choice && choice.proceed && choice.effort ? choice.effort : undefined
 
     const rendered = renderMacroPrompt(macro.prompt, macro.inputs, inputValues ?? defaultMacroValues(macro.inputs))
     if (!rendered.ok) {
@@ -88,6 +102,7 @@ export function useMacroLaunch(
             macroId: macro.id,
             epicId: existing.id,
             extraInstructions: trimmedExtra || undefined,
+            ...(effort ? { effort } : {}),
           })
           if (!res.ok) throw new Error(res.error)
         } else {
@@ -102,6 +117,7 @@ export function useMacroLaunch(
             macroId: macro.id,
             run: 'job',
             extraInstructions: trimmedExtra || undefined,
+            ...(effort ? { effort } : {}),
           })
         }
         toast.success(`${macro.label} is building in the background`)
@@ -117,6 +133,7 @@ export function useMacroLaunch(
         agentDescription: persona?.description ?? undefined,
         source: `SessionActionsBar ${macro.agentName}`,
         macroId: macro.id,
+        ...(effort ? { effort } : {}),
       })
       onSelect(result.epicId)
     } catch (err) {

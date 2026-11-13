@@ -309,6 +309,37 @@ export interface McpCatalogResult {
 export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art' | 'portfolio';
 
 /** One declared `{{name}}` argument of a macro prompt (macroLibrary.cjs `MacroInputSchema`). */
+export type AppPreviewStatus = 'starting' | 'running' | 'failed' | 'stopped';
+
+/** One Epic's dev-server preview. cwd = project root, dir = folder the dev command runs in,
+ *  command = the script text from package.json, startedAt = ISO time. */
+export interface AppPreviewState {
+  epicId: string;
+  cwd: string;
+  dir: string;
+  script: string;
+  command: string;
+  port: number;
+  url: string | null;
+  status: AppPreviewStatus;
+  error: string | null;
+  pid: number | null;
+  startedAt: string;
+}
+
+export interface AppPreviewScript {
+  name: string;
+  command: string;
+}
+
+export type AppPreviewScriptsResult =
+  | { ok: true; dir: string; inWorktree: boolean; scripts: AppPreviewScript[]; suggested: string | null }
+  | { ok: false; error: string };
+
+export type AppPreviewStartResult =
+  | { ok: true; state: AppPreviewState }
+  | { ok: false; error: string };
+
 export interface MacroInput {
   name: string;
   label: string;
@@ -2208,6 +2239,18 @@ export interface SessionManagerAPI {
     jobStatus: (payload: { cwd: string }) => Promise<MacroJobStatus[]>;
     /** Fires after any save/delete/setProject — re-fetch list(). */
     onChanged: (handler: () => void) => () => void;
+  };
+  appPreview: {
+    /** The Epic's package.json scripts (dir = worktree when it has one) plus a suggested dev script. */
+    scripts: (payload: { cwd: string; epicId: string }) => Promise<AppPreviewScriptsResult>;
+    /** Spawns the Epic's dev script on a free port after the user confirmed it; desktop only. */
+    start: (payload: { cwd: string; epicId: string; script: string }) => Promise<AppPreviewStartResult>;
+    /** Stops the Epic's preview process, if any. */
+    stop: (payload: { epicId: string }) => Promise<{ ok: true }>;
+    /** Every tracked preview, one per Epic. */
+    list: () => Promise<AppPreviewState[]>;
+    /** Fires on every preview state change with the new state. */
+    onChanged(handler: (state: AppPreviewState) => void): () => void;
   };
   models: {
     /** Live model/effort catalog (`modelCatalog.cjs`'s `resolveModelCatalog`). Never rejects from

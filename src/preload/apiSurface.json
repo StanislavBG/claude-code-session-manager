@@ -476,6 +476,41 @@
   "remote": "read"
  },
  {
+  "ns": "appPreview",
+  "method": "scripts",
+  "channel": "appPreview:scripts",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "appPreview",
+  "method": "start",
+  "channel": "appPreview:start",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "appPreview",
+  "method": "stop",
+  "channel": "appPreview:stop",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "appPreview",
+  "method": "list",
+  "channel": "appPreview:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "appPreview",
+  "method": "onChanged",
+  "channel": "appPreview:changed",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
   "ns": "models",
   "method": "catalog",
   "channel": "models:catalog",

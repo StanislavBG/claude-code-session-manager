@@ -124,3 +124,41 @@ test('updater namespace exposes six methods wired to updater:* channels', async 
   }
   assert.strictEqual(typeof u.onStatus(() => {}), 'function');
 });
+
+test('appPreview exposes five methods wired to appPreview:* channels; onChanged forwards the payload', async () => {
+  const p = exposedApi.appPreview;
+  assert.ok(p, 'expected exposedApi.appPreview');
+  assert.deepStrictEqual(Object.keys(p).sort(), ['list', 'onChanged', 'scripts', 'start', 'stop']);
+  const cases = [
+    ['scripts', [{ cwd: '/tmp/proj', epicId: 'e1' }], 'appPreview:scripts', { cwd: '/tmp/proj', epicId: 'e1' }],
+    ['start', [{ cwd: '/tmp/proj', epicId: 'e1', script: 'dev' }], 'appPreview:start', { cwd: '/tmp/proj', epicId: 'e1', script: 'dev' }],
+    ['stop', [{ epicId: 'e1' }], 'appPreview:stop', { epicId: 'e1' }],
+    ['list', [], 'appPreview:list', undefined],
+  ];
+  for (const [method, args, channel, payload] of cases) {
+    invokeCalls.length = 0;
+    await p[method](...args);
+    assert.deepStrictEqual(invokeCalls, [{ channel, payload }]);
+  }
+  const electron = require('electron');
+  const origOn = electron.ipcRenderer.on;
+  const origRemove = electron.ipcRenderer.removeListener;
+  let registered = null;
+  let removed = null;
+  electron.ipcRenderer.on = (channel, listener) => { registered = { channel, listener }; };
+  electron.ipcRenderer.removeListener = (channel, listener) => { removed = { channel, listener }; };
+  try {
+    const got = [];
+    const unsub = p.onChanged((state) => got.push(state));
+    assert.strictEqual(registered.channel, 'appPreview:changed');
+    const state = { epicId: 'e1', status: 'running' };
+    registered.listener({}, state);
+    assert.deepStrictEqual(got, [state]);
+    assert.strictEqual(typeof unsub, 'function');
+    unsub();
+    assert.deepStrictEqual(removed, registered);
+  } finally {
+    electron.ipcRenderer.on = origOn;
+    electron.ipcRenderer.removeListener = origRemove;
+  }
+});

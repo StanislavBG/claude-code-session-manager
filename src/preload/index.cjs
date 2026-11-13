@@ -153,6 +153,18 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('macros:changed', listener);
     },
   },
+  appPreview: {
+    scripts: (payload) => ipcRenderer.invoke('appPreview:scripts', payload),
+    start: (payload) => ipcRenderer.invoke('appPreview:start', payload),
+    stop: (payload) => ipcRenderer.invoke('appPreview:stop', payload),
+    list: () => ipcRenderer.invoke('appPreview:list'),
+    // Fired on every preview state change; forwards the AppPreviewState payload.
+    onChanged: (handler) => {
+      const listener = (_e, state) => handler(state);
+      ipcRenderer.on('appPreview:changed', listener);
+      return () => ipcRenderer.removeListener('appPreview:changed', listener);
+    },
+  },
   models: {
     catalog: (payload) => ipcRenderer.invoke('models:catalog', payload),
   },

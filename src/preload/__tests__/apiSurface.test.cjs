@@ -106,3 +106,16 @@ test('mcp.checkServer is listed and desktop-only (deny)', () => {
     { channel: 'mcp:check-server', kind: 'invoke', remote: 'deny' },
   );
 });
+
+// scripts/start take a cwd and spawn/read on the desktop; stop must stay reachable for a remote Epic close.
+test('appPreview rows carry the expected channels and remote policies', () => {
+  const table = require('../apiSurface.cjs');
+  const rows = table.filter((r) => r.ns === 'appPreview').map((r) => [r.method, r.channel, r.kind, r.remote]);
+  assert.deepStrictEqual(rows, [
+    ['scripts', 'appPreview:scripts', 'invoke', 'deny'],
+    ['start', 'appPreview:start', 'invoke', 'deny'],
+    ['stop', 'appPreview:stop', 'invoke', 'mutate'],
+    ['list', 'appPreview:list', 'invoke', 'read'],
+    ['onChanged', 'appPreview:changed', 'on', 'read'],
+  ]);
+});

@@ -5,6 +5,7 @@
  * scheduler PRD inside an existing Epic, so the build runs headless as the
  * macro's persona under the scheduler's budget instead of a chat turn.
  * Never mints an Epic (single-creator law): the caller supplies epicId.
+ * A press may carry a lower per-run effort, written as the PRD's `effort` frontmatter.
  *
  * Plain Node, no Electron imports; all I/O is injected.
  */
@@ -12,6 +13,7 @@
 const path = require('node:path');
 const { BUILTIN_MACROS } = require('./builtinMacros.cjs');
 const { kebabCase } = require('../util/kebabCase.cjs');
+const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
 
 const ACTIVE = new Set(['pending', 'held', 'running']);
 const RETRYABLE = new Set(['needs_review', 'failed']);
@@ -54,7 +56,7 @@ function rawEntryIdFor(kind, extra, t) {
 }
 
 async function dispatchMacroJob(
-  { cwd, macroId, epicId, extraInstructions } = {},
+  { cwd, macroId, epicId, extraInstructions, effort } = {},
   { createPrd, listRows, archivePrd, builtins = BUILTIN_MACROS, now = Date.now } = {},
 ) {
   const macro = (builtins || []).find((m) => m && m.id === macroId);
@@ -117,6 +119,7 @@ async function dispatchMacroJob(
       + 'Build outside the repository (mktemp -d under ~/.cache). SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd.',
     gate: absPaths.map((p) => buildGate(p, t)),
   };
+  if (typeof effort === 'string' && PRD_EFFORT_LEVELS.includes(effort)) input.effort = effort;
 
   let res;
   try {

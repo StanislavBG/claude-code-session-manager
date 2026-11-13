@@ -61,6 +61,20 @@ describe('macros:dispatch-job', () => {
     expect(deps.archivePrd).toHaveBeenCalledWith('slug', '/p');
   });
 
+  it('forwards effort to dispatchMacroJob', async () => {
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's', epicId: 'e1' }));
+    const { handlers } = setup({ dispatchMacroJob });
+    await handlers['macros:dispatch-job']({}, { ...good, effort: 'medium' });
+    expect(dispatchMacroJob.mock.calls[0][0].effort).toBe('medium');
+  });
+
+  it('the real macrosDispatchJob schema accepts only the PRD effort levels', () => {
+    expect(schemas.macrosDispatchJob.safeParse({ ...good, effort: 'turbo' }).success).toBe(false);
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(schemas.macrosDispatchJob.parse({ ...good, effort }).effort).toBe(effort);
+    }
+  });
+
   it('end to end with the real dispatchMacroJob: createPrd called once, no extra rescan dep', async () => {
     const { handlers, deps } = setup();
     const r = await handlers['macros:dispatch-job']({}, good);

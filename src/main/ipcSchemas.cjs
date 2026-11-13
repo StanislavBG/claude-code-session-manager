@@ -15,6 +15,7 @@ const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema, PersonaNameSchema, ProjectCwdSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
 const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroRemoveFromProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 const { MAX_SLOTS } = require('./lib/scheduler/sessionSlots.cjs');
+const { PRD_EFFORT_LEVELS } = require('./lib/prd/prdFrontmatter.cjs');
 // Aliased: this file already has a looser, exchanges-only SESSION_ID_RE (Exchanges section).
 const { SESSION_ID_RE: RESTORABLE_SESSION_ID_RE } = require('./lib/epic/restorableSessions.cjs');
 
@@ -717,6 +718,7 @@ const macrosDispatchJob = z.object({
   macroId: z.string().min(1).max(128),
   epicId: z.string().min(1).max(200),
   extraInstructions: z.string().max(4000).optional(),
+  effort: z.enum(/** @type {[string, ...string[]]} */ ([...PRD_EFFORT_LEVELS])).optional(),
 });
 const macrosJobStatus = z.object({ cwd: z.string().min(1).max(4096) });
 

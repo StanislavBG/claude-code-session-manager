@@ -170,3 +170,14 @@ test('a knowledge id of competitive-matrix becomes competitive-matrix-page; vide
   const video = await inputFor('Replace entry: competitive-matrix');
   expect(video.artifactPaths).toEqual(['session-manager-operations/project-pages/videos/competitive-matrix/index.html']);
 });
+
+test('a valid effort reaches the createPrd input; absent or unknown effort leaves no effort key', async () => {
+  const d = mk();
+  expect((await dispatchMacroJob({ ...base, effort: 'medium' }, d)).ok).toBe(true);
+  expect(d.createPrd.mock.calls[0][0].effort).toBe('medium');
+  for (const effort of [undefined, 'turbo']) {
+    const e = mk();
+    expect((await dispatchMacroJob({ ...base, effort }, e)).ok).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(e.createPrd.mock.calls[0][0], 'effort')).toBe(false);
+  }
+});

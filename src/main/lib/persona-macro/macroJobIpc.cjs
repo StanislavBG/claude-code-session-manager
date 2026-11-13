@@ -66,7 +66,7 @@ function registerMacroJobIpc(ipcMain, deps = {}) {
     let result;
     try {
       result = await dispatch(
-        { cwd, macroId: payload.macroId, epicId: payload.epicId, extraInstructions: payload.extraInstructions },
+        { cwd, macroId: payload.macroId, epicId: payload.epicId, extraInstructions: payload.extraInstructions, effort: payload.effort },
         {
           createPrd: deps.createPrd,
           listRows: async () => deps.loadJobs(),

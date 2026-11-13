@@ -23,8 +23,9 @@ scoping scheme.
   *session* because that is what an Epic is: a tagged claude session opened through AIM. `PromptSession`,
   `EpicTag`, `epicId`, every `epic-*` testid and every on-disk path (`scheduler/epics/<epic-id>/`) keep the
   code name — don't carry the label change into identifiers.
-- **EPIC : claude-session = 1:1.** Each Epic mints its own `claudeSessionId`, never shared with or derived from
-  a SessionTab's. **Chat and Terminal are two views over that one session**: Chat is headless
+- **EPIC : claude-session = 1:1.** The 1:1 is with the Epic's agent-CLI session — Claude Code by default, or
+  another CLI ([Agent CLI](#agent-cli)). `claudeSessionId` stays the app-level id either way. Each Epic mints its
+  own `claudeSessionId`, never shared with or derived from a SessionTab's. **Chat and Terminal are two views over that one session**: Chat is headless
   `claude -p --resume <id>` via chatRunner, Terminal is interactive PTY `claude --resume <id>` in the Epic's
   cwd. Switching views hands the session off (mutually exclusive attachment) instead of minting a new
   sessionId, because context continuity across the switch is the invariant. The event chain
@@ -135,6 +136,29 @@ scoping scheme.
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of
   work is the intended shape. The queue row's `renameEpic` is a cosmetic carve-out (typo, clarity), never a
   repurposing.
+
+## Agent CLI
+
+- **A third independent selection.** Besides Actor and Mission, New Session picks which agent CLI runs the
+  session: `PromptSession.agentCli` (`codex`, `gemini`, `antigravity`, `cursor`, `opencode`). Absent = Claude
+  Code. An optional `agentCliModel` goes to that CLI; absent = the CLI's own default. Both are fixed for the
+  life of the session, like the title and objective. `epicMint.cjs`'s `agentCliMintFields` validates them.
+- **Chat runs the CLI headless** through the adapters in `src/main/lib/agent-cli/` (`agentCliTurn.cjs` plans
+  the turn, `adapters/<cli>.cjs` spawns it). Each adapter translates the CLI's own output into Claude
+  `stream-json` events, so chatRunner, the Chat feed and the usage readers stay unchanged.
+- **Terminal types one shell line** that main builds from the adapter (`agentCli:terminal-command` in
+  `agentCliIpc.cjs`). It launches or resumes the CLI's own interactive session in the Epic's cwd.
+- **State lives outside the ops root** (`agentCliSessionStore.cjs`), keyed by `claudeSessionId`: the CLI's
+  native session id in `~/.claude/session-manager/agent-cli/sessions/<id>.json`, and the Claude-compatible
+  feed in `~/.claude/session-manager/agent-cli/transcripts/<id>.jsonl`.
+- **Limits of a non-Claude Epic:**
+  - `developLoop` is always `false` (forced at mint), so it takes no PRDs.
+  - No "Restore a session" — restore adopts a Claude Code session only; mint refuses the pair.
+  - No persona `model`/`effort` — those are Claude flags and are never forwarded. Only `agentCliModel` is.
+  - Turns typed in the Terminal stay in the CLI's own history. They do not appear in the app's feed, which
+    records Chat turns only.
+- **Claude-only surfaces:** macros (hot keys), phone launches and scheduler PRDs always run Claude Code. The
+  agent-CLI IPC channels are desktop-only and not in the web-remote allowlist.
 
 ## Settings is substrate, not per-Epic curation
 

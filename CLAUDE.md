@@ -62,10 +62,10 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 - **TAB = cwd = Main Project.** One TAB per project; extra sessions within a project are Epics, not tabs.
 - **EPIC = one unit of work** (`PromptSession`). "Sessions" is the user-facing name; `Epic`/`PromptSession`/
   `epicId`/`epic-*` testids/on-disk paths stay the code name — don't "finish" the rename into identifiers.
-- **EPIC : claude-session = 1:1.** Chat and Terminal are two VIEWS over one session — switching hands off the
-  session, never mints a new sessionId. Active Epics run in their own `git worktree` (branch `sm-epic/<id>`).
-- **Epic creation is two independent selections:** `agentType` (Actor) + `tag` (Mission); either may be None
-  (absent). `tag` stays a closed 7-tag union. A `developLoop:false` Epic takes no PRDs.
+- **EPIC : agent-CLI session = 1:1** (`claudeSessionId` = app id). Chat + Terminal = two VIEWS of it —
+  switching never mints a new sessionId. Active Epics run in their own `git worktree` (branch `sm-epic/<id>`).
+- **Epic creation is three independent selections:** `agentType` (Actor), `tag` (Mission), `agentCli` (absent =
+  Claude Code; others: desktop-only). `tag` = closed 7-tag union. `developLoop:false` = no PRDs.
 - **The opening prompt is AIM — Actor, Input, Mission, in that order**, composed only by
   `lib/epicIntake.ts`'s `composeEpicIntake`. It is framing, never a second source of truth for what the CLI loads.
 - **An Epic's title + objective are fixed for the life of its session.** Iterate in follow-up messages; start a

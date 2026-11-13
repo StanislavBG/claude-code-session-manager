@@ -1,10 +1,10 @@
 # claude-code-session-manager
 
-Local cockpit for the Claude Code CLI — multi-tab terminal, configuration surface, scheduler, voice dictation, and live observability, all in one Electron desktop app.
+Local cockpit for the Claude Code CLI (the default; sessions can also run Codex, Gemini CLI, Antigravity CLI, Cursor Agent or OpenCode) — multi-tab terminal, configuration surface, scheduler, voice dictation, and live observability, all in one Electron desktop app.
 
 ## The 30-second pitch
 
-You already use the `claude` CLI. This wraps it in a cockpit so you can run multiple sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, talk to it with your microphone, and watch transcripts in real time — without ever leaving the window.
+You already use the `claude` CLI. This wraps it in a cockpit so you can run multiple sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, talk to it with your microphone, and watch transcripts in real time — without ever leaving the window. Claude Code is the default. A session can also run Codex, Gemini CLI, Antigravity CLI, Cursor Agent or OpenCode instead, in Chat and Terminal; macros, phone launches and scheduled PRDs stay on Claude Code.
 
 New tabs open as a lightweight **chat box** and stay dormant — no PTY, no `claude` process — until you actually send a message, so a window full of tabs costs almost nothing. Prefer a single bare terminal? Launch with `--simple`.
 
@@ -59,7 +59,7 @@ Linux needs `build-essential` and `python3` in that case.
 **Anonymous product telemetry is on by default.** It posts event, log, error, and crash records to bilko.run. Opt out with `SM_TELEMETRY=0` or Settings → Telemetry. Details: [telemetry.md](session-manager-operations/architecture/telemetry.md).
 
 - The Content-Security-Policy restricts `connect-src` to four hosts: `api.anthropic.com` (so the in-app `/usage` panel can read the billing endpoint), `registry.npmjs.org`, `json.schemastore.org`, and `www.schemastore.org`.
-- All settings, skills, hooks, scheduler PRDs, transcripts, and voice configuration stay on disk under `~/.claude/`. The `claude` CLI itself is the only network egress for AI work — the cockpit never proxies your prompts.
+- All settings, skills, hooks, scheduler PRDs, transcripts, and voice configuration stay on disk under `~/.claude/`. The agent CLI you choose (`claude` by default) is the only network egress for AI work — the cockpit never proxies your prompts.
 - The recording-status pill is always mounted at the top of the window whenever the microphone is hot, above every other UI layer. There is no way to record without seeing the indicator.
 
 ## Voice setup

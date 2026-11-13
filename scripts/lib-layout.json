@@ -158,5 +158,6 @@
   "workTypeLibrary": "prd",
   "worktreeDeps": "git",
   "worktreeSetup": "git",
-  "appPreviewScripts": "app-preview"
+  "appPreviewScripts": "app-preview",
+  "appPreviewManager": "app-preview"
 }

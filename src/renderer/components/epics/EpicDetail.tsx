@@ -16,6 +16,7 @@ import { PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedSt
 import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { BackgroundBuildStatus } from './BackgroundBuildStatus'
+import { BuildResultCard } from './BuildResultCard'
 import { useMacros } from '../../lib/useMacros'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
@@ -221,6 +222,18 @@ function EpicTitle({ epicId, title, goal }: { epicId: string; title: string; goa
 }
 
 /**
+ * PRD 3119 — opens Project Home for a finished build. Routes through the same
+ * App.tsx `sm:navigate` → navigate() setter the left nav and the other Epic
+ * jumps (lib/epicNav) use. The Epic is shown inside its own project's tab, so
+ * the active tab's cwd is this Epic's cwd; ProjectHome keeps its Pages /
+ * Videos sub-tab in local state with no deep link, so opening Project Home is
+ * the whole action (buildOutput is accepted for when one exists).
+ */
+function openProjectHome(): void {
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'project-home' }))
+}
+
+/**
  * Renders a 'response' PromptSessionEvent — a bounded preview by default
  * (the in-memory event carries at most RESPONSE_EVENT_PREVIEW_MAX chars,
  * chat.ts). When the preview looks truncated (ends in the '…' chat.ts
@@ -266,6 +279,12 @@ function ResponseEvent({
 
   const displayText = expanded && fullText ? fullText : (event.text ?? '')
   const displayHtml = useMemo(() => renderChatMarkdown(displayText), [displayText])
+  // PRD 3119 — a macro background build's finish notice (scheduler.cjs
+  // notifyOriginatingTab, PRD 3116) renders as a DONE / FAILED card. Placed
+  // after every hook above so the branch never changes hook order.
+  if (event.notice === 'build-done' || event.notice === 'build-failed') {
+    return <BuildResultCard event={event} cwd={cwd} epicId={epicId} onOpenProjectHome={openProjectHome} />
+  }
   // A 'response' event with outcome 'needs_review' is written exclusively by
   // scheduler.cjs's flushDueReviewNotices once a parked job's self-heal ladder gives up or its
   // hold time passes — see that function's own doc comment. It is a

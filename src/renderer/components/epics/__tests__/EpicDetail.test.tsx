@@ -742,6 +742,43 @@ describe('EpicDetail (PRD 827)', () => {
     expect(notice.querySelector('[data-testid="epic-job-not-queued-marker"]')?.textContent).toContain('Build not queued')
     expect(notice.querySelector('[data-testid="epic-response-question-marker"]')).toBeNull()
     expect(notice.querySelector('[data-testid="epic-response-event-text"]')?.textContent).toContain('Project Home ▸ Tools')
+     expect(el.querySelector('[data-testid="epic-build-result-card"]')).toBeNull()
+  })
+
+  it('PRD 3119: build-done / build-failed notices merged from main render as BuildResultCard, keeping notice + buildOutput in the store', async () => {
+    installWindowApiMock()
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Make a demo video', 'feature')
+    usePromptSessions.getState().mergeAppendedEvent('/tmp/proj', session.id, {
+      id: 'pevt-done',
+      promptSessionId: session.id,
+      kind: 'response',
+      causedByEventId: null,
+      at: new Date(Date.now() + 1000).toISOString(),
+      text: 'DONE — Demo Video: “Tour” is saved (30 s · warm). Watch it in Project Home ▸ Videos.',
+      prdSlug: '3200-demo-video',
+      outcome: 'completed',
+      notice: 'build-done',
+      buildOutput: { kind: 'video', id: 'tour', title: 'Tour' },
+    })
+    const stored = usePromptSessions.getState().events[session.id].find((e) => e.id === 'pevt-done')!
+    expect(stored.notice).toBe('build-done')
+    expect(stored.buildOutput).toEqual({ kind: 'video', id: 'tour', title: 'Tour' })
+
+    const navigated: unknown[] = []
+    const onNav = (e: Event) => navigated.push((e as CustomEvent).detail)
+    window.addEventListener('sm:navigate', onNav)
+    try {
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      const card = el.querySelector('[data-testid="epic-build-result-card"]')!
+      expect(card).toBeTruthy()
+      expect(card.getAttribute('data-notice')).toBe('build-done')
+      expect(el.querySelector('[data-testid="epic-response-event"]')).toBeNull()
+      act(() => (el.querySelector('[data-testid="epic-build-result-open"]') as HTMLButtonElement).click())
+      expect(navigated).toEqual(['project-home'])
+    } finally {
+      window.removeEventListener('sm:navigate', onNav)
+    }
   })
 
   it('renders the "closed" event as a terminator rule (EventDivider), not plain centered text', async () => {

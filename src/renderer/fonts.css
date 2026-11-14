@@ -105,9 +105,3 @@
   font-display: swap;
   src: url('./assets/fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
 }
-
-/* Geist ss03 = alternate l (glyph l.ss03, verified in the font's GSUB) so
- * capital I and lowercase l are distinguishable. */
-body {
-  font-feature-settings: 'ss03' 1;
-}

@@ -3,6 +3,7 @@ import type { PromptSessionEvent } from '../state/promptSessions'
 import { visibleFeedTurns } from '../components/ChatTranscriptTurn'
 import { splitStopSignal } from './stopSignal'
 import { filterTurnsByVerbosity, type ChatVerbosity } from './chatVerbosity'
+import { questionCardStates, type QuestionCardState } from './questionCardState'
 
 export type ValidationVerdict = 'unvalidated' | 'validating' | 'verified' | 'refuted'
 export type TimelineEvent = PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' }
@@ -16,6 +17,8 @@ export type TimelineItem =
       index: number
       /** Same value nearestPrecedingUserPrompt(visibleTurns, index) yields. */
       precedingUserPrompt: string | undefined
+      /** Set on role 'question' turns only — whether the card is still the live ask. */
+      questionCardState?: QuestionCardState
     }
   | { kind: 'event'; at: number; event: TimelineEvent }
 
@@ -45,6 +48,9 @@ export function buildEpicTimeline(
 
   // One forward pass: index, preceding-user-prompt (nearest non-event turn's
   // text when it is a user turn), and the last assistant index.
+  // Computed over the unfiltered `turns` so a hidden human reply or newer
+  // question still closes an older card.
+  const cardStates = questionCardStates(turns)
   const turnItems: TimelineItem[] = new Array(visibleTurns.length)
   let lastAssistantIndex = -1
   let prevNonEvent: ChatTurn | undefined
@@ -56,6 +62,7 @@ export function buildEpicTimeline(
       turn: t,
       index: i,
       precedingUserPrompt: prevNonEvent?.role === 'user' ? prevNonEvent.text : undefined,
+      questionCardState: t.role === 'question' ? cardStates.get(t.id) : undefined,
     }
     if (t.role === 'assistant') lastAssistantIndex = i
     if (t.role !== 'event') prevNonEvent = t

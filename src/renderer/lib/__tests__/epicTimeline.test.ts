@@ -6,6 +6,7 @@ import { visibleFeedTurns, nearestPrecedingUserPrompt } from '../../components/C
 import { filterTurnsByVerbosity, type ChatVerbosity } from '../chatVerbosity'
 import { splitStopSignal } from '../stopSignal'
 import { buildEpicTimeline } from '../epicTimeline'
+import { questionCardStates } from '../questionCardState'
 
 /** Verbatim copy of the pre-change inline derivation from EpicDetail.tsx. */
 function legacy(turns: ChatTurn[], sessionEvents: PromptSessionEvent[], verbosity: ChatVerbosity) {
@@ -40,10 +41,16 @@ function legacy(turns: ChatTurn[], sessionEvents: PromptSessionEvent[], verbosit
       .filter((e) => e.kind === 'prd_created' || e.kind === 'closed' || (e.kind === 'response' && !isDup(e)))
       .map((e) => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
   ].sort((a, b) => a.at - b.at)
+  const cardStates = questionCardStates(turns)
   const items = timeline.map((item) => {
     if (item.kind !== 'turn') return item
     const index = visibleTurns.indexOf(item.turn)
-    return { ...item, index, precedingUserPrompt: nearestPrecedingUserPrompt(visibleTurns, index) }
+    return {
+      ...item,
+      index,
+      precedingUserPrompt: nearestPrecedingUserPrompt(visibleTurns, index),
+      questionCardState: item.turn.role === 'question' ? cardStates.get(item.turn.id) : undefined,
+    }
   })
   return { visibleTurns, hiddenCount, revealLevel, latest, items, lastAssistantIndex }
 }
@@ -104,5 +111,35 @@ describe('buildEpicTimeline', () => {
     const got = buildEpicTimeline([], [], 'standard')
     expect(got.timeline).toEqual([])
     expect(got.lastAssistantIndex).toBe(-1)
+  })
+
+  describe('questionCardState', () => {
+    const SCHEDULER_TEXT =
+      'IMPORTANT: This turn was started by the scheduler and nobody is watching. ' +
+      'Do not ask questions; decide and act, ' +
+      'and end with a short report of what you did.' +
+      '\n\nPRD 12 finished: completed.'
+    const mk = (id: string, role: ChatTurnRole, text: string, i: number): ChatTurn => ({ id, role, text, at: T0 + i * 1000 })
+    const stateOf = (turns: ChatTurn[], id: string) => {
+      const item = buildEpicTimeline(turns, [], 'standard').timeline.find((x) => x.kind === 'turn' && x.turn.id === id)
+      return item?.kind === 'turn' ? item.questionCardState : 'missing'
+    }
+
+    it('a question followed by a human user turn is answered', () => {
+      const turns = [mk('q', 'question', 'Which option?', 0), mk('u', 'user', 'option B', 1)]
+      expect(stateOf(turns, 'q')).toBe('answered')
+      expect(stateOf(turns, 'u')).toBeUndefined()
+    })
+
+    it('a question followed only by a scheduler check-in stays open', () => {
+      const turns = [mk('q', 'question', 'Which option?', 0), mk('s', 'user', SCHEDULER_TEXT, 1)]
+      expect(stateOf(turns, 'q')).toBe('open')
+    })
+
+    it('an older question followed by a newer one is superseded', () => {
+      const turns = [mk('q1', 'question', 'First?', 0), mk('a', 'assistant', 'hm', 1), mk('q2', 'question', 'Second?', 2)]
+      expect(stateOf(turns, 'q1')).toBe('superseded')
+      expect(stateOf(turns, 'q2')).toBe('open')
+    })
   })
 })

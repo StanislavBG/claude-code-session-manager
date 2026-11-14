@@ -1455,4 +1455,35 @@ describe('EpicDetail (PRD 827)', () => {
       expect(el.textContent).toContain('A follow-up message')
     })
   })
+
+  describe('question card state (PRD 3087)', () => {
+    const chatWith = (id: string, turns: unknown[]) =>
+      useChat.setState({ chats: { [id]: { turns, running: false, stream: '', queuedPosition: 0 } as any } })
+
+    it('an answered question renders the Answered chip and no answer input', async () => {
+      installWindowApiMock()
+      const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+      const now = Date.now()
+      chatWith(session.id, [
+        { id: 'q1', role: 'question', text: 'Which option?', at: now - 20_000 },
+        { id: 'u1', role: 'user', text: 'option B', at: now - 10_000 },
+      ])
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      expect(el.querySelector('[data-testid="question-card-answered"]')).not.toBeNull()
+      expect(el.querySelector('[data-testid="question-answer-input"]')).toBeNull()
+    })
+
+    it('a trailing question renders the answer input', async () => {
+      installWindowApiMock()
+      const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+      const now = Date.now()
+      chatWith(session.id, [
+        { id: 'u0', role: 'user', text: 'do it', at: now - 20_000 },
+        { id: 'q2', role: 'question', text: 'Which option?', at: now - 10_000 },
+      ])
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      expect(el.querySelector('[data-testid="question-answer-input"]')).not.toBeNull()
+      expect(el.querySelector('[data-testid="question-card-answered"]')).toBeNull()
+    })
+  })
 })

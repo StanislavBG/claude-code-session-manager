@@ -1153,6 +1153,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                         injectedPreamble={injectedPreamble}
                         needsDecisionStyle
                         precedingUserPrompt={precedingUserPrompt}
+                        questionCardState={item.questionCardState}
                         onQuote={onQuote}
                       />
                     </div>

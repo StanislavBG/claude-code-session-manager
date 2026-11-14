@@ -7,7 +7,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { opsPath } = require('../opsOwnership.cjs');
+// Kit files are seeded to ~/.claude/session-manager/demo-video-kit/ and must
+// load standalone: node built-ins and this folder only (no ../opsOwnership.cjs).
+const OPS_ROOT_DIR = 'session-manager-operations';
 
 const MAX_JS_BYTES = 300 * 1024;
 const MAX_JSON_BYTES = 16 * 1024;
@@ -50,8 +52,23 @@ function validateCharacterJs(js, networkChecks = []) {
   return null;
 }
 
+/**
+ * Local stand-in for opsOwnership.opsPath(projectRoot, 'project-pages', ...):
+ * requires an absolute path and normalizes a path inside the ops root back to
+ * its project root, so the result always lands in
+ * `<projectRoot>/session-manager-operations/project-pages/videos/_character`.
+ * Callers pass an already-resolved project root; writes stay guarded by the
+ * caller's writer-checked writeTextAtomic (assertOpsWrite).
+ */
 function characterDir(projectRoot) {
-  return opsPath(projectRoot, 'project-pages', 'videos', '_character');
+  if (!projectRoot || typeof projectRoot !== 'string') throw new Error('characterDir: projectRoot is required');
+  if (!path.isAbsolute(projectRoot)) {
+    throw new Error(`characterDir: projectRoot must be an absolute path, got "${projectRoot}"`);
+  }
+  const segs = path.resolve(projectRoot).split(path.sep);
+  const idx = segs.indexOf(OPS_ROOT_DIR);
+  const root = idx === -1 ? segs.join(path.sep) : (segs.slice(0, idx).join(path.sep) || path.sep);
+  return path.join(root, OPS_ROOT_DIR, 'project-pages', 'videos', '_character');
 }
 
 /** -> {json, js} | null (absent or invalid). */

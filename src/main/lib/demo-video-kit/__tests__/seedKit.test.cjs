@@ -82,3 +82,19 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
 test('KIT_VERSION is bumped to 2 (bed NaN fix must reach installed kits)', () => {
   expect(KIT_VERSION).toBe('2');
 });
+
+test('every seeded kit file loads standalone from a copied kit folder', async () => {
+  const { spawnSync } = require('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-real-'));
+  tmp.push(root);
+  const destDir = path.join(root, 'kit');
+  const r = await seedDemoVideoKit({ logger: quiet, destDir });
+  expect(r.seeded).toBe(true);
+  const failures = [];
+  for (const f of KIT_FILES) {
+    const file = path.join(destDir, f);
+    const out = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(file)})`], { cwd: os.tmpdir(), encoding: 'utf8', timeout: 30000 });
+    if (out.status !== 0) failures.push(`${f}: exit ${out.status}\n${(out.stderr || '').split('\n').slice(0, 6).join('\n')}`);
+  }
+  expect(failures).toEqual([]);
+});

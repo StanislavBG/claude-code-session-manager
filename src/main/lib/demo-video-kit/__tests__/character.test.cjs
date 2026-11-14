@@ -55,3 +55,12 @@ test('speakWithCommand runs without a shell', () => {
   expect(fs.readFileSync(out, 'utf8')).toBe(text);
   expect(speakWithCommand(kokoro.voice, 'x', out).ok).toBe(false);
 });
+
+test('characterDir builds the ops-root path locally and refuses relative roots', () => {
+  const root = path.join(os.tmpdir(), 'sm-char-root');
+  const want = path.join(root, 'session-manager-operations', 'project-pages', 'videos', '_character');
+  expect(characterDir(root)).toBe(want);
+  expect(characterDir(path.join(root, 'session-manager-operations', 'scheduler'))).toBe(want);
+  expect(() => characterDir('relative/dir')).toThrow(/absolute/);
+  expect(() => characterDir('')).toThrow(/required/);
+});

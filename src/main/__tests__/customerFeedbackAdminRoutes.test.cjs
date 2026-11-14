@@ -1,6 +1,7 @@
 /**
  * customerFeedbackAdminRoutes.test.cjs — GET /admin/customer-feedback/inbox and
- * POST /admin/customer-feedback/status over a stubbed inbox.
+ * POST /admin/customer-feedback/status over a stubbed inbox, and
+ * POST /admin/customer-feedback/submit over an injected submit.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/customerFeedbackAdminRoutes.test.cjs
  */
@@ -55,11 +56,12 @@ function setup(over) {
   return { adminHttp, inbox };
 }
 
-test('registers both routes', () => {
+test('registers all three routes', () => {
   const { adminHttp } = setup();
   expect([...adminHttp.routes.keys()]).toEqual([
     'GET /admin/customer-feedback/inbox',
     'POST /admin/customer-feedback/status',
+    'POST /admin/customer-feedback/submit',
   ]);
 });
 
@@ -121,4 +123,63 @@ test('status not-configured error passes through', async () => {
   const { adminHttp } = setup({ setStatus: async () => ({ ok: false, error: 'Not configured as owner.' }) });
   const r = await adminHttp.call('POST', '/admin/customer-feedback/status', { body: { id: 'a', status: 'open' } });
   expect(r.body).toEqual({ ok: false, error: 'Not configured as owner.' });
+});
+
+// ── POST /admin/customer-feedback/submit ─────────────────────────────────────
+const os = require('os');
+
+function setupSubmit(result = { ok: true, item: { id: 'f1', receipt: 'r1' } }) {
+  const adminHttp = makeFakeAdminHttp();
+  const calls = [];
+  const submit = async (p) => { calls.push(p); return typeof result === 'function' ? result(p) : result; };
+  registerAdminRoute(adminHttp, { inbox: makeInbox(), submit });
+  return { adminHttp, calls };
+}
+
+test('registers the submit route', () => {
+  const { adminHttp } = setupSubmit();
+  expect(adminHttp.routes.has('POST /admin/customer-feedback/submit')).toBe(true);
+});
+
+test('submit forwards home-redacted title/body/tag to the injected submit', async () => {
+  const home = os.homedir();
+  const { adminHttp, calls } = setupSubmit();
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', {
+    body: { title: `Crash in ${home}/x`, body: `see ${home}/a.log and ${home}/b.log`, tag: 'bug' },
+  });
+  expect(r.status).toBe(200);
+  expect(r.body).toEqual({ ok: true, item: { id: 'f1', receipt: 'r1' } });
+  expect(calls).toEqual([{ title: 'Crash in ~/x', body: 'see ~/a.log and ~/b.log', tag: 'bug' }]);
+});
+
+test('submit validation: invalid tag, over-length title, bad JSON give 400 with no submit call', async () => {
+  const { adminHttp, calls } = setupSubmit();
+  const url = '/admin/customer-feedback/submit';
+  for (const call of [
+    { body: { title: 't', body: 'b', tag: 'praise' } },
+    { body: { title: 'x'.repeat(121), body: 'b', tag: 'bug' } },
+    { body: { title: 't', body: 'x'.repeat(4001), tag: 'feature' } },
+    { rawBody: '{nope' },
+  ]) {
+    const r = await adminHttp.call('POST', url, call);
+    expect(r.status).toBe(400);
+    expect(r.body.ok).toBe(false);
+    expect(typeof r.body.error).toBe('string');
+  }
+  expect(calls).toEqual([]);
+});
+
+test('submit error passes through as { ok: false, error } with a non-2xx status', async () => {
+  const { adminHttp } = setupSubmit({ ok: false, error: 'Too many submissions — try again in a minute.' });
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body: 'secret body', tag: 'discussion' } });
+  expect(r.status).toBeGreaterThanOrEqual(400);
+  expect(r.body).toEqual({ ok: false, error: 'Too many submissions — try again in a minute.' });
+  expect(JSON.stringify(r.body)).not.toContain('secret body');
+});
+
+test('a throwing submit never throws out of the handler', async () => {
+  const { adminHttp } = setupSubmit(() => { throw new Error('boom'); });
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body: 'b', tag: 'bug' } });
+  expect(r.status).toBeGreaterThanOrEqual(500);
+  expect(r.body).toEqual({ ok: false, error: 'boom' });
 });

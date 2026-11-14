@@ -5,6 +5,13 @@
  * through customerFeedbackInbox.cjs:
  *   GET  /admin/customer-feedback/inbox?pull=1&includeHidden=1 -> { ok, items, pulled? }
  *   POST /admin/customer-feedback/status {id, status, note?}   -> { ok, item }
+ *   POST /admin/customer-feedback/submit {title, body, tag}     -> { ok, item } | { ok:false, error }
+ *
+ * submit is the customer path (no owner token needed): it runs the exact
+ * submit the {F} panel's customerFeedback:submit IPC uses
+ * (customerFeedbackIpc.submitFeedback -> customerFeedbackClient.submit), so the
+ * item + receipt land in the same local mirror. os.homedir() is replaced with
+ * `~` in title and body first; the body text is never echoed or logged.
  *
  * Deliberately NO route that mints an Epic (SINGLE-CREATOR LAW, epicMint.cjs).
  * Responses never carry the owner token — the inbox lib redacts it from errors.
@@ -82,13 +89,61 @@ function statusHandler(inboxDep) {
   };
 }
 
+/** Replace every occurrence of the home dir with `~`. @param {string} s */
+function redactHome(s) {
+  const home = require('os').homedir();
+  return home ? s.split(home).join('~') : s;
+}
+
+/** @param {any} submitDep */
+function submitHandler(submitDep) {
+  return async (/** @type {any} */ req, /** @type {any} */ res) => {
+    try {
+      let raw;
+      try {
+        raw = await readBody(req);
+      } catch (/** @type {any} */ e) {
+        sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'}` });
+        return;
+      }
+      /** @type {any} */
+      let body;
+      try {
+        body = raw ? JSON.parse(raw) : {};
+      } catch {
+        sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+        return;
+      }
+      const { schemas } = require('../../ipcSchemas.cjs');
+      const parsed = schemas.customerFeedbackSubmit.safeParse(body);
+      if (!parsed.success) {
+        // Issue paths + messages only — never the submitted values.
+        const error = parsed.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ');
+        sendJson(res, 400, { ok: false, error: `invalid submission: ${error}` });
+        return;
+      }
+      const submit = submitDep || require('./customerFeedbackIpc.cjs').submitFeedback;
+      const { title, body: text, tag } = parsed.data;
+      const result = await submit({ title: redactHome(title), body: redactHome(text), tag });
+      if (!result || !result.ok) {
+        sendJson(res, 502, { ok: false, error: result && typeof result.error === 'string' ? result.error : 'submit failed' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, item: result.item });
+    } catch (/** @type {any} */ e) {
+      sendJson(res, 500, { ok: false, error: e && e.message ? String(e.message) : 'submit failed' });
+    }
+  };
+}
+
 /**
  * @param {any} adminHttp
- * @param {{ inbox?: any }} [opts] test seam
+ * @param {{ inbox?: any, submit?: (p: { title: string, body: string, tag: string }) => Promise<any> }} [opts] test seams
  */
 function registerAdminRoute(adminHttp, opts = {}) {
   adminHttp.registerRoute('GET', '/admin/customer-feedback/inbox', inboxHandler(opts.inbox));
   adminHttp.registerRoute('POST', '/admin/customer-feedback/status', statusHandler(opts.inbox));
+  adminHttp.registerRoute('POST', '/admin/customer-feedback/submit', submitHandler(opts.submit));
 }
 
 module.exports = { registerAdminRoute };

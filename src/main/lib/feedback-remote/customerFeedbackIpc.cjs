@@ -4,6 +4,24 @@
 const REFRESH_DELAY_MS = 30_000;
 
 /**
+ * The configured customer-feedback client the panel's customerFeedback:submit
+ * uses. The admin submit route (customerFeedbackAdminRoutes.cjs) reaches the
+ * client through this same getter so an agent submission writes the same
+ * mirror + receipt as a panel one.
+ */
+function getClient() {
+  return require('./customerFeedbackClient.cjs');
+}
+
+/**
+ * Exactly the panel's submit call. @param {{ title: string, body: string, tag: string }} p
+ * @param {any} [client]
+ */
+function submitFeedback(p, client = getClient()) {
+  return client.submit(p);
+}
+
+/**
  * Renderer-facing IPC for the customer-feedback client + owner inbox.
  * Handlers return the libs' `{ ok, ... }` results unchanged.
  * @param {{ ipcMain?: any, client?: any, inbox?: any, setTimeoutImpl?: typeof setTimeout }} [deps]
@@ -11,11 +29,11 @@ const REFRESH_DELAY_MS = 30_000;
 function registerCustomerFeedbackHandlers(deps = {}) {
   const ipcMain = deps.ipcMain || require('electron').ipcMain;
   const { schemas: s, validated: v } = require('../../ipcSchemas.cjs');
-  const client = deps.client || require('./customerFeedbackClient.cjs');
+  const client = deps.client || getClient();
   const inbox = deps.inbox || require('./customerFeedbackInbox.cjs');
   const timer = deps.setTimeoutImpl || setTimeout;
 
-  ipcMain.handle('customerFeedback:submit', v(s.customerFeedbackSubmit, (p) => client.submit(p)));
+  ipcMain.handle('customerFeedback:submit', v(s.customerFeedbackSubmit, (p) => submitFeedback(p, client)));
   ipcMain.handle('customerFeedback:list', () => client.list());
   ipcMain.handle('customerFeedback:refresh-status', () => client.refreshStatuses());
   ipcMain.handle('customerFeedback:mark-seen', v(s.customerFeedbackMarkSeen, ({ ids }) => client.markSeen(ids)));
@@ -40,4 +58,4 @@ function registerCustomerFeedbackHandlers(deps = {}) {
   }
 }
 
-module.exports = { registerCustomerFeedbackHandlers, REFRESH_DELAY_MS };
+module.exports = { registerCustomerFeedbackHandlers, getClient, submitFeedback, REFRESH_DELAY_MS };

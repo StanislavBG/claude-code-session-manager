@@ -98,3 +98,49 @@ for (const id of Object.keys(MARKER_NAMES)) {
     expect(getSeedStatus()[id].status).toBe('pending');
   });
 }
+
+// agent-personas writes `{ seeded: [...], attempts, ts }` — no `done` field.
+// Its status must come from the seeded set, built from the real PERSONAS export.
+function personasMarker(seeded, attempts) {
+  writeMarker('agent-personas', JSON.stringify({ seeded, attempts, ts: '2026-01-01T00:00:00.000Z' }));
+}
+
+test('agent-personas: every PERSONAS name seeded, attempts 0 → done', () => {
+  const { PERSONAS } = require('../seedAgentPersonas.cjs');
+  personasMarker([...PERSONAS], 0);
+  expect(getSeedStatus()['agent-personas'].status).toBe('done');
+});
+
+test('agent-personas: every PERSONAS name seeded, attempts 1 → done', () => {
+  const { PERSONAS } = require('../seedAgentPersonas.cjs');
+  personasMarker([...PERSONAS], 1);
+  expect(getSeedStatus()['agent-personas'].status).toBe('done');
+});
+
+test('agent-personas: only architect seeded, attempts 0 → pending', () => {
+  personasMarker(['architect'], 0);
+  expect(getSeedStatus()['agent-personas'].status).toBe('pending');
+});
+
+test('agent-personas: only architect seeded, attempts 1 → failed', () => {
+  personasMarker(['architect'], 1);
+  expect(getSeedStatus()['agent-personas'].status).toBe('failed');
+});
+
+test('agent-personas: only architect seeded, attempts 3 → exhausted', () => {
+  personasMarker(['architect'], 3);
+  expect(getSeedStatus()['agent-personas'].status).toBe('exhausted');
+});
+
+test('agent-personas: the real seeder run reports done', async () => {
+  const savedDisable = process.env.SM_SEED_AGENT_PERSONAS_DISABLE;
+  delete process.env.SM_SEED_AGENT_PERSONAS_DISABLE;
+  try {
+    const { seedAgentPersonas } = require('../seedAgentPersonas.cjs');
+    await seedAgentPersonas({ logger: { log: () => {}, warn: () => {} } });
+    expect(getSeedStatus()['agent-personas'].status).toBe('done');
+  } finally {
+    if (savedDisable === undefined) delete process.env.SM_SEED_AGENT_PERSONAS_DISABLE;
+    else process.env.SM_SEED_AGENT_PERSONAS_DISABLE = savedDisable;
+  }
+});

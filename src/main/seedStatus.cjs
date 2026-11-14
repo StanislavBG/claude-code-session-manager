@@ -22,7 +22,10 @@ const SEEDERS = {
   'agent-personas': seedAgentPersonas,
 };
 
-/** One seeder's marker → 'done' | 'pending' | 'failed' | 'exhausted'. */
+/**
+ * Default reader for `{ done, attempts }` markers → 'done' | 'pending' | 'failed' | 'exhausted'.
+ * A seeder whose marker has another shape exports its own `markerStatus()` instead.
+ */
 function statusFromMarker(mod) {
   try {
     const raw = fs.readFileSync(mod.markerPath(), 'utf8').trim();
@@ -52,7 +55,7 @@ function getSeedStatus() {
   const out = {};
   for (const [id, mod] of Object.entries(SEEDERS)) {
     const fix = FIXES[id];
-    out[id] = { status: statusFromMarker(mod), fix: typeof fix === 'function' ? fix() : fix };
+    out[id] = { status: typeof mod.markerStatus === 'function' ? mod.markerStatus() : statusFromMarker(mod), fix: typeof fix === 'function' ? fix() : fix };
   }
   return out;
 }

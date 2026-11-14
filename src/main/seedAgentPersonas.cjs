@@ -127,6 +127,29 @@ function readMarker() {
   }
 }
 
+/**
+ * This seeder's own marker → 'done' | 'pending' | 'failed' | 'exhausted', read by
+ * seedStatus.cjs. Owned here because only this file knows its marker format: done means
+ * every name in PERSONAS is in `seeded`, whatever `attempts` is. A legacy `{ done: true }`
+ * marker (no `seeded` array) still reads as done. Parses the raw file itself rather than
+ * going through readMarker(), which maps legacy done to LEGACY_DONE_PERSONAS and would
+ * report it as not done. Never throws — absent or unparseable reads as 'pending'.
+ */
+function markerStatus() {
+  try {
+    const m = JSON.parse(fs.readFileSync(markerPath(), 'utf8').trim());
+    const done = Array.isArray(m.seeded)
+      ? PERSONAS.every((n) => m.seeded.includes(n))
+      : Boolean(m.done);
+    if (done) return 'done';
+    const attempts = Number(m.attempts) || 0;
+    if (attempts >= MAX_ATTEMPTS) return 'exhausted';
+    return attempts > 0 ? 'failed' : 'pending';
+  } catch {
+    return 'pending';
+  }
+}
+
 function writeMarker(state) {
   try {
     writeJsonSync(markerPath(), { ...state, ts: new Date().toISOString() });
@@ -383,6 +406,7 @@ module.exports = {
   normalizeNewlines,
   sameFmValue,
   markerPath,
+  markerStatus,
   MAX_ATTEMPTS,
   PERSONAS,
 };

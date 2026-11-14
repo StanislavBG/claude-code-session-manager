@@ -141,8 +141,13 @@ scoping scheme.
 
 - **A third independent selection.** Besides Actor and Mission, New Session picks which agent CLI runs the
   session: `PromptSession.agentCli` (`codex`, `gemini`, `antigravity`, `cursor`, `opencode`). Absent = Claude
-  Code. An optional `agentCliModel` goes to that CLI; absent = the CLI's own default. Both are fixed for the
-  life of the session, like the title and objective. `epicMint.cjs`'s `agentCliMintFields` validates them.
+  Code. An optional `agentCliModel` goes to that CLI; absent = the CLI's own default. The chooser lives on New
+  Session's advanced face (Runtime panel), not the front face. Its default is the Actor persona's `agentCli` /
+  `agentCliModel` frontmatter, set in Home → Agents; an advanced-face pick overrides it for that session only
+  ("Use default" clears the override). A persona default whose CLI is not installed falls back to Claude Code,
+  with a visible "CLI not installed" warning on the front face. The Epic stores the effective value at mint;
+  both fields are then fixed for the life of the session, like the title and objective. `epicMint.cjs`'s
+  `agentCliMintFields` validates them.
 - **Chat runs the CLI headless** through the adapters in `src/main/lib/agent-cli/` (`agentCliTurn.cjs` plans
   the turn, `adapters/<cli>.cjs` spawns it). Each adapter translates the CLI's own output into Claude
   `stream-json` events, so chatRunner, the Chat feed and the usage readers stay unchanged.
@@ -157,8 +162,9 @@ scoping scheme.
   - No persona `model`/`effort` — those are Claude flags and are never forwarded. Only `agentCliModel` is.
   - Turns typed in the Terminal stay in the CLI's own history. They do not appear in the app's feed, which
     records Chat turns only.
-- **Claude-only surfaces:** macros (hot keys), phone launches and scheduler PRDs always run Claude Code. The
-  agent-CLI IPC channels are desktop-only and not in the web-remote allowlist.
+- **Claude-only surfaces:** macros (hot keys), phone launches and scheduler PRDs always run Claude Code — a
+  persona's `agentCli` default is ignored there. The agent-CLI IPC channels are desktop-only and not in the
+  web-remote allowlist.
 
 ## Settings is substrate, not per-Epic curation
 

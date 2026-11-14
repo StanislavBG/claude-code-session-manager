@@ -24,6 +24,7 @@
  *   macro_delete({ id }) -> POST /admin/macros/delete
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
+ *   customer_feedback_submit({ title, body, tag }) -> POST /admin/customer-feedback/submit
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -723,6 +724,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'customer_feedback_submit',
+    description: descriptionFor('customer_feedback_submit'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short title, max 120 chars. Show it to the human before calling.' },
+        body: { type: 'string', description: 'Feedback text, max 4000 chars. No secrets, tokens, customer data or private file contents.' },
+        tag: { type: 'string', enum: ['bug', 'feature', 'discussion'], description: 'Kind of feedback.' },
+      },
+      required: ['title', 'body', 'tag'],
+    },
+  },
+  {
     name: 'session_manager_help',
     description: descriptionFor('session_manager_help'),
     inputSchema: {
@@ -779,6 +793,13 @@ function macroDeleteRefusal() {
   return humanSessionRefusal(
     'refused: macro_delete runs only in a Session Manager chat or terminal session, because a macro goes only when a human asks. '
     + 'Say in your final result which macro should go; the human can remove it from the HOT KEYS panel.',
+  );
+}
+
+function customerFeedbackSubmitRefusal() {
+  return humanSessionRefusal(
+    'refused: customer_feedback_submit runs only in a Session Manager chat or terminal session, because feedback is sent only when a human asks. '
+    + 'Say in your final result what the feedback is; the human can send it from the {F} feedback panel.',
   );
 }
 
@@ -1183,6 +1204,16 @@ async function handleCallTool(request) {
       if (typeof args.note === 'string' && args.note) payload.note = args.note;
       const result = await adminRequest('POST', '/admin/customer-feedback/status', payload);
       if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_set_status failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'customer_feedback_submit') {
+      const refusal = customerFeedbackSubmitRefusal();
+      if (refusal) return refusal;
+      if (!args || typeof args.title !== 'string' || typeof args.body !== 'string' || typeof args.tag !== 'string') {
+        return errorResult('missing or invalid required argument(s): title, body, tag');
+      }
+      const result = await adminRequest('POST', '/admin/customer-feedback/submit', { title: args.title, body: args.body, tag: args.tag });
+      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_submit failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {

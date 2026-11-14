@@ -164,3 +164,79 @@ test('set_status returns an error result on {ok:false}', async () => {
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toContain('status must be one of');
 });
+
+// ── customer_feedback_submit ─────────────────────────────────────────────────
+const SUBMIT_TOOL_NAME = 'customer_feedback_submit';
+
+function withEnv(vars, fn) {
+  const saved = {};
+  for (const k of Object.keys(vars)) {
+    saved[k] = process.env[k];
+    if (vars[k] === undefined) delete process.env[k];
+    else process.env[k] = vars[k];
+  }
+  return Promise.resolve().then(fn).finally(() => {
+    for (const k of Object.keys(saved)) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+}
+
+test('submit is listed with its catalog description and a required title/body/tag schema', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const tool = TOOLS.find((t) => t.name === SUBMIT_TOOL_NAME);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === SUBMIT_TOOL_NAME);
+  expect(tool).toBeTruthy();
+  expect(entry.group).toBe('customer-feedback');
+  expect(tool.description).toBe(composeDescription(entry));
+  expect(tool.inputSchema.required).toEqual(['title', 'body', 'tag']);
+  expect(tool.inputSchema.properties.tag.enum).toEqual(['bug', 'feature', 'discussion']);
+});
+
+test('submit forwards title/body/tag to the route in a human session', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_1' } });
+  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined }, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 'Panel: x', body: 'details', tag: 'feature' }));
+  expect(result.isError).toBeFalsy();
+  expect(JSON.parse(result.content[0].text)).toEqual({ ok: true, item: { id: 'fb_1' } });
+  expect(requests).toHaveLength(1);
+  expect(requests[0].method).toBe('POST');
+  expect(requests[0].url).toBe('/admin/customer-feedback/submit');
+  expect(requests[0].body).toEqual({ title: 'Panel: x', body: 'details', tag: 'feature' });
+});
+
+test('submit returns an error result on {ok:false}', async () => {
+  const { handleCallTool } = await setup({ ok: false, error: 'invalid submission: tag: bad' });
+  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined }, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', body: 'b', tag: 'bug' }));
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('invalid submission');
+});
+
+test('submit is refused in a headless scheduled job without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: null });
+  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: 'some-job' }, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', body: 'b', tag: 'bug' }));
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('{F} feedback panel');
+  expect(requests).toHaveLength(0);
+});
+
+test('submit is refused without SM_CHAT_SESSION_ID without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: null });
+  const result = await withEnv({ SM_CHAT_SESSION_ID: undefined, SM_SCHEDULER_JOB_SLUG: undefined }, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', body: 'b', tag: 'bug' }));
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('{F} feedback panel');
+  expect(requests).toHaveLength(0);
+});
+
+test('submit rejects missing args without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: null });
+  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined }, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', tag: 'bug' }));
+  expect(result.isError).toBe(true);
+  expect(requests).toHaveLength(0);
+});

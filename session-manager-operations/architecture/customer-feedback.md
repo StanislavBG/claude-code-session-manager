@@ -131,7 +131,7 @@ Owner-token errors are passed through `redact()`, so the token never appears in 
 ## Lifecycle
 
 ```
-customer: {F} panel -> submit ──► customer-feedback.json (status open)
+customer: {F} panel -> submit, or MCP customer_feedback_submit (human-session only) ──► customer-feedback.json (status open)
                                         │
 owner: panel "Customer inbox" pull   or MCP customer_feedback_list (pull defaults true)
                                         ▼
@@ -147,6 +147,7 @@ customer: panel open / 30 s after boot ──► status-lookup ──► custome
 ```
 
 1. **Submit** — renderer → IPC `customerFeedback:submit` → `submit()`.
+   MCP `customer_feedback_submit` (human chat/terminal session only; refused in headless jobs) → admin route `POST /admin/customer-feedback/submit` → same `submit()`.
 2. **Pull** — panel inbox (`customerFeedback:inbox-pull`) or the MCP tool `customer_feedback_list`, which
    goes through the loopback admin route `GET /admin/customer-feedback/inbox?pull=1&includeHidden=1`
    (`customerFeedbackAdminRoutes.cjs`).
@@ -181,6 +182,6 @@ IPC channels (`customerFeedbackIpc.cjs`): `customerFeedback:` `submit`, `list`, 
 | `src/main/lib/feedback-remote/customerFeedbackClient.cjs` | customer submit / list / status refresh / markSeen; store 1 |
 | `src/main/lib/feedback-remote/customerFeedbackInbox.cjs` | owner pull / list / setStatus / linkEpic; stores 2 and 3 |
 | `src/main/lib/feedback-remote/customerFeedbackIpc.cjs` | renderer IPC handlers + boot status refresh |
-| `src/main/lib/feedback-remote/customerFeedbackAdminRoutes.cjs` | loopback admin routes behind the two MCP tools |
+| `src/main/lib/feedback-remote/customerFeedbackAdminRoutes.cjs` | loopback admin routes behind the three MCP tools (list, set_status, submit) |
 | `src/renderer/state/customerFeedback.ts` | zustand store |
 | `src/renderer/components/customerFeedback/` | `CustomerFeedbackPanel.tsx`, `CustomerFeedbackInbox.tsx` |

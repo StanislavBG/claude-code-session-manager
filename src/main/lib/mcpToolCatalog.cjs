@@ -459,6 +459,21 @@ const MCP_TOOL_CATALOG = [
     notes: 'The note is shown to the customer; keep it short (the inbox enforces a maximum length).',
   },
   {
+    name: 'customer_feedback_submit',
+    group: 'customer-feedback',
+    purpose: 'Send one piece of feedback about Session Manager itself (bug | feature | discussion) to its maintainers, '
+      + 'the same submission the {F} feedback panel makes, via the session-manager app\'s admin API.',
+    whenToUse: 'Use only when the human asks to send feedback about Session Manager itself. Draft a title (max 120 chars) '
+      + 'and body (max 4000 chars) from the conversation, show the human the exact title, body and tag, and call only '
+      + 'after they agree.',
+    whenNotToUse: 'WHEN NOT TO USE IT: a bug in the project being worked on is /develop; a finding for another local '
+      + 'project is feedback_open_session. Never call it on your own initiative. Never include secrets, tokens, '
+      + 'customer data or private file contents in the title or body.',
+    exampleArgs: { title: 'Feedback panel: prefill from the current session', body: 'What happened, what I expected, steps.', tag: 'feature' },
+    notes: 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). Returns { ok, item }; '
+      + '{ ok:false, error } comes back as an error result. The home directory is redacted to ~ before sending.',
+  },
+  {
     name: 'macro_list',
     group: 'macros',
     purpose: "List this project's HOT KEYS macros — the saved (agent, tag, prompt) one-click buttons shown "

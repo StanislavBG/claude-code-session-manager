@@ -39,7 +39,7 @@ const config = require('../config.cjs');
  * The stub only lives for the register call; the prior cache entry is put back.
  * @returns {Map<string, Function>}
  */
-function registeredHandlers() {
+function registeredHandlers(deps) {
   const electronPath = require.resolve('electron');
   const prior = require.cache[electronPath];
   const handlers = new Map();
@@ -50,7 +50,7 @@ function registeredHandlers() {
     exports: { ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) } },
   };
   try {
-    registerPromptSessionsCreateEpicHandlers();
+    registerPromptSessionsCreateEpicHandlers(deps);
   } finally {
     if (prior) require.cache[electronPath] = prior;
     else delete require.cache[electronPath];
@@ -307,6 +307,54 @@ test('list-restorable returns listRestorableSessions\' result for an allowed pro
   expect(result.sessions.map((s) => s.sessionId)).toEqual([RESTORE_ID]);
   expect(result.sessions[0].firstPrompt).toBe('pick up the refactor');
   expect(result).toEqual(await listRestorableSessions({ cwd }));
+});
+
+// ── list-restorable-recent (cross-project "continue any session" picker) ────
+
+/** The registered list-restorable-recent handler, wired to a recording stub lister. */
+function recentHandlerWith(lister) {
+  return registeredHandlers({ listRecentRestorableSessions: lister }).get('promptSessions:list-restorable-recent');
+}
+
+test('list-restorable-recent payload is a strict { limit?: integer 1..50 }', () => {
+  const s = schemas.promptSessionsListRestorableRecent;
+  expect(s.parse({})).toEqual({});
+  expect(s.parse({ limit: 1 })).toEqual({ limit: 1 });
+  expect(s.parse({ limit: 50 })).toEqual({ limit: 50 });
+  for (const limit of [0, 51, -1, 2.5, '10', null]) expect(s.safeParse({ limit }).success).toBe(false);
+  expect(s.safeParse({ limit: 5, cwd: '/tmp/x' }).success).toBe(false);
+  expect(s.safeParse(undefined).success).toBe(false);
+});
+
+test('list-restorable-recent passes limit through to the injected lister and returns its result', async () => {
+  const calls = [];
+  const out = { sessions: [{ sessionId: RESTORE_ID, cwd: '/tmp/p', mtimeMs: 1 }], projectsRead: 1, truncated: false };
+  const h = recentHandlerWith(async (opts) => { calls.push(opts); return out; });
+  expect(h).toBeTypeOf('function');
+
+  expect(await h(null, { limit: 12 })).toEqual(out);
+  expect(await h(null, {})).toEqual(out);
+  expect(calls).toEqual([{ limit: 12 }, { limit: undefined }]);
+});
+
+test('list-restorable-recent refuses an out-of-range limit without calling the lister', async () => {
+  const calls = [];
+  const h = recentHandlerWith(async (opts) => { calls.push(opts); return { sessions: [], projectsRead: 0, truncated: false }; });
+  for (const limit of [0, 51, 3.5]) {
+    const r = await h(null, { limit });
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe('string');
+  }
+  expect(calls).toHaveLength(0);
+});
+
+test('a lister error becomes { ok: false, error } instead of a thrown rejection', async () => {
+  const h = recentHandlerWith(async () => { throw new Error('disk on fire'); });
+  await expect(h(null, { limit: 5 })).resolves.toEqual({ ok: false, error: 'disk on fire' });
+});
+
+test('the default registration wires list-restorable-recent to the real lister', () => {
+  expect(handlers.get('promptSessions:list-restorable-recent')).toBeTypeOf('function');
 });
 
 // ── Agent CLI choice (New Session card) ─────────────────────────────────────

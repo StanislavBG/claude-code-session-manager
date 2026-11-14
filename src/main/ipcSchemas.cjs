@@ -254,6 +254,11 @@ const promptSessionsCreateEpic = z.object({
 // `cwd` through config.cjs's validatePath before any transcript dir is read.
 const promptSessionsListRestorable = z.object({ cwd: z.string().min(1).max(4096) }).strict();
 
+// Renderer entry point for the cross-project "continue any session" picker
+// (restorableSessions.cjs's listRecentRestorableSessions). No cwd: the project
+// list comes from main's own cached allProjectCwds(), never from the renderer.
+const promptSessionsListRestorableRecent = z.object({ limit: z.number().int().min(1).max(50).optional() }).strict();
+
 // Renderer entry point for creating an Epic's isolated git worktree
 // (lib/epic/epicWorktreeMint.cjs) at the proposed->active transition — PRD 1033.
 const promptSessionsCreateWorktree = z.object({
@@ -1579,6 +1584,7 @@ module.exports = {
     promptSessionsWriteArchive,
     promptSessionsCreateEpic,
     promptSessionsListRestorable,
+    promptSessionsListRestorableRecent,
     promptSessionsCreateWorktree,
     promptSessionsReopen,
     promptSessionsCwd,

@@ -14,11 +14,12 @@
  *
  * Also home to 'promptSessions:list-restorable', the New Session card's
  * "Restore a session" picker, whose pick comes back as create-epic's
- * `restoreSessionId`.
+ * `restoreSessionId`, and to 'promptSessions:list-restorable-recent', the
+ * cross-project variant (listRecentRestorableSessions).
  */
 
 const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('./epicMint.cjs');
-const { listRestorableSessions } = require('./restorableSessions.cjs');
+const { listRestorableSessions, listRecentRestorableSessions } = require('./restorableSessions.cjs');
 const { validatePath } = require('../../config.cjs');
 
 /**
@@ -88,7 +89,30 @@ async function listRestorableViaIpc(cwd) {
   return listRestorableSessions({ cwd });
 }
 
-function registerPromptSessionsCreateEpicHandlers() {
+/**
+ * listRecentRestorableViaIpc({ limit? }, deps?) → Promise<RecentList | { ok: false, error }>
+ *
+ * Interactive restorable sessions across every known project, newest first
+ * (listRecentRestorableSessions). Takes no renderer path — the project list is
+ * main's own. Any failure resolves to `{ ok: false, error }` rather than
+ * rejecting, so the picker can show it without an unhandled IPC error.
+ * `deps.listRecentRestorableSessions` swaps the lister (tests).
+ * @param {{ limit?: number }} args
+ * @param {{ listRecentRestorableSessions?: Function }} [deps]
+ */
+async function listRecentRestorableViaIpc({ limit } = {}, deps = {}) {
+  const lister = deps.listRecentRestorableSessions || listRecentRestorableSessions;
+  try {
+    return await lister({ limit });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * @param {{ listRecentRestorableSessions?: Function }} [deps] test seam for list-restorable-recent
+ */
+function registerPromptSessionsCreateEpicHandlers(deps = {}) {
   const { ipcMain } = require('electron');
   const { schemas: s, validated: v } = require('../../ipcSchemas.cjs');
   ipcMain.handle(
@@ -100,6 +124,15 @@ function registerPromptSessionsCreateEpicHandlers() {
     'promptSessions:list-restorable',
     v(s.promptSessionsListRestorable, ({ cwd }) => listRestorableViaIpc(cwd)),
   );
+  // Validation refusals resolve to { ok: false, error } too, like lister errors.
+  const listRecent = v(s.promptSessionsListRestorableRecent, (args) => listRecentRestorableViaIpc(args, deps));
+  ipcMain.handle('promptSessions:list-restorable-recent', async (/** @type {unknown} */ event, /** @type {unknown} */ payload) => {
+    try {
+      return await listRecent(event, payload);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 }
 
-module.exports = { createEpicViaIpc, listRestorableViaIpc, registerPromptSessionsCreateEpicHandlers };
+module.exports = { createEpicViaIpc, listRestorableViaIpc, listRecentRestorableViaIpc, registerPromptSessionsCreateEpicHandlers };

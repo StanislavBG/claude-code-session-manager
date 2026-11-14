@@ -707,9 +707,11 @@ async function flushImpl(reason) {
     let sawFailure = false;
     for (const channel of ['event', 'log', 'error', 'install']) {
       if (sawFailure) break;
+      if (!telemetrySettings.isEnabled(S.settings)) break;
       const records = byChannel[channel];
       if (channel === 'install') {
         for (const r of records) {
+          if (!telemetrySettings.isEnabled(S.settings)) break;
           const res = await sendSingle('install', r.wire);
           if (res.ok) {
             S.consecutiveFailures = 0;
@@ -728,6 +730,8 @@ async function flushImpl(reason) {
         continue;
       }
       for (let i = 0; i < records.length; i += MAX_BATCH) {
+        // Re-check per batch: an opt-out landing mid-flush stops further sends.
+        if (!telemetrySettings.isEnabled(S.settings)) break;
         const batch = records.slice(i, i + MAX_BATCH);
         const res = await sendBatch(channel, batch.map((r) => r.wire));
         if (res.ok) {
@@ -760,6 +764,16 @@ async function flushImpl(reason) {
   S.lastFlushAt = Date.now();
   S.lastFlushReason = safeReason;
   return result;
+}
+
+/**
+ * Pushes a freshly-saved settings object into the live client so a consent
+ * change (telemetryConsent.applyConsentUpdate) takes effect at once — without
+ * it the client keeps checking the copy it cached at init, so an opt-out
+ * would still accept and send until restart.
+ */
+function applySettings(cfg) {
+  if (cfg && typeof cfg === 'object') S.settings = cfg;
 }
 
 function shutdown() {
@@ -829,6 +843,7 @@ module.exports = {
   reportError,
   reportInstall,
   flush,
+  applySettings,
   shutdown,
   status,
   recentRecords,

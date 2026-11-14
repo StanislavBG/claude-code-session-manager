@@ -25,6 +25,9 @@ async function applyConsentUpdate(cfg, depsOverride) {
   const deps = resolveDeps(depsOverride);
   const before = await deps.telemetrySettings.load();
   const saved = await deps.telemetrySettings.save(cfg);
+  // Live client caches settings at init; push the saved copy so opt-out
+  // stops ingest + egress immediately and a re-enable resumes in-process.
+  if (typeof deps.telemetryClient.applySettings === 'function') deps.telemetryClient.applySettings(saved);
   if (before.enabled && !saved.enabled) {
     await deps.telemetryClient.clearQueue();
   }

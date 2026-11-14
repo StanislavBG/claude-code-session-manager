@@ -503,6 +503,21 @@ function RunCard({ job }: { job: ScheduleJob }) {
   )
 }
 
+/** A finished run whose job row already left queue.json — synthesized from
+ *  the Epic's archived PRD (PRD 3118). No runId survives, so no log link. */
+function FinishedRunCard({ prd }: { prd: EpicPrd }) {
+  const status: PrdDisplayStatus = prd.status === 'failed' ? 'failed' : 'completed'
+  return (
+    <div className="grid gap-2 rounded-xl border border-line bg-bg-hi p-3.5" data-testid="epic-run-card" data-finished="true">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="font-mono text-[12.5px] font-semibold text-fg">{prd.slug}</span>
+        <PrdStatusPill status={status} />
+      </div>
+      {prd.title && prd.title !== prd.slug && <div className="text-[12.5px] text-fg-dim">{prd.title}</div>}
+    </div>
+  )
+}
+
 /** Latest activity timestamp across the Epic's audit events + chat turns,
  *  falling back to the Epic's own createdAt when neither has fired yet. */
 function lastActivityAt(session: PromptSession, events: PromptSessionEvent[], turns: { at: number }[]): number {
@@ -794,7 +809,17 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const branch = useBranch(cwd)
   // Job row is the source of truth for Runs (not the PRD join) so a job
   // whose PRD file was later archived still lists.
-  const epicRuns = scheduleJobs.filter((j) => j.sourcePromptId === epicId)
+  const epicRuns = useMemo(() => scheduleJobs.filter((j) => j.sourcePromptId === epicId), [scheduleJobs, epicId])
+  // A finished job leaves queue.json (PRD 3118), so this Epic's archived PRDs
+  // with no live job row also list as finished runs — the live row wins on a
+  // shared slug. Same sourcePromptId join the PRDs tab (epicPrds) uses.
+  const finishedRuns = useMemo(() => {
+    const liveSlugs = new Set(epicRuns.map((j) => j.slug))
+    return epicPrds(epicId, { sessions: {}, chats: {}, jobs: epicRuns, prds }).filter(
+      (p) => p.archived && !liveSlugs.has(p.slug),
+    )
+  }, [epicRuns, prds, epicId])
+  const runsCount = epicRuns.length + finishedRuns.length
 
   const { title, goal } = splitTitleAndGoal(promptSession.goalText)
 
@@ -827,7 +852,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const views: { key: ViewKey; label: string }[] = [
     { key: 'discussion', label: 'Discussion' },
     { key: 'prds', label: `PRDs ${attachedPrds.length}` },
-    { key: 'runs', label: `Runs ${epicRuns.length}` },
+    { key: 'runs', label: `Runs ${runsCount}` },
     { key: 'changes', label: 'Changes' },
   ]
 
@@ -1319,10 +1344,13 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
         {view === 'runs' && (
           <div className="grid max-w-[900px] gap-2" data-testid="epic-runs-placeholder">
-            {epicRuns.length === 0 ? (
+            {runsCount === 0 ? (
               <EmptyPlaceholder text="No agent runs in this session yet." />
             ) : (
-              epicRuns.map((j) => <RunCard key={j.slug} job={j} />)
+              <>
+                {epicRuns.map((j) => <RunCard key={j.slug} job={j} />)}
+                {finishedRuns.map((p) => <FinishedRunCard key={p.slug} prd={p} />)}
+              </>
             )}
           </div>
         )}

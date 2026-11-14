@@ -285,6 +285,85 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     expect(cards[0].textContent).not.toContain('9-other')
   })
 
+  // PRD 3118 — a finished job leaves queue.json, so Runs must also list the
+  // Epic's archived PRDs (else a 53-minute build reads "Runs 0").
+  async function setupArchived(archived: unknown[] | ((id: string) => unknown[]), jobs: (id: string) => unknown[] = () => []) {
+    installWindowApiMock([])
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const rows = typeof archived === 'function' ? archived(session.id) : archived
+    ;(window.api.schedule.listPrds as any).mockResolvedValue(rows)
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+    useScheduleState.setState({ snapshot: { jobs: jobs(session.id) } as any, loaded: true })
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flush()
+    return el
+  }
+
+  const archivedPrd = (id: string, slug: string, title: string, archivedStatus: 'completed' | 'failed') => ({
+    slug, title, cwd: '/tmp/proj', estimateMinutes: 30, mtimeMs: 1, parallelGroup: 1,
+    sourcePromptId: id, archived: true, archivedStatus,
+  })
+
+  it('Runs lists and counts an archived-only PRD as a finished run', async () => {
+    const el = await setupArchived((id) => [
+      archivedPrd(id, '7-demo-video', 'Demo Video', 'completed'),
+      { slug: '8-draft', title: 'Draft', cwd: '/tmp/proj', estimateMinutes: 5, mtimeMs: 1, parallelGroup: 1, sourcePromptId: id },
+    ])
+
+    const runsTabLabel = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Runs'))
+    expect(runsTabLabel?.textContent).toBe('Runs 1')
+
+    clickTab(el, 'Runs')
+    await flush()
+
+    const cards = el.querySelectorAll('[data-testid="epic-run-card"]')
+    expect(cards.length).toBe(1)
+    expect(cards[0].getAttribute('data-finished')).toBe('true')
+    expect(cards[0].textContent).toContain('7-demo-video')
+    expect(cards[0].textContent).toContain('Demo Video')
+    expect(cards[0].textContent).toContain('completed')
+    expect(el.textContent).not.toContain('No agent runs in this session yet')
+  })
+
+  it('Runs shows a slug present both live and archived once, the live row winning', async () => {
+    const el = await setupArchived(
+      (id) => [archivedPrd(id, '5-widget', 'Widget', 'failed')],
+      (id) => [
+        {
+          slug: '5-widget', title: 'Widget', cwd: '/tmp/proj', parallelGroup: 1, estimateMinutes: 30, bodyPreview: '',
+          status: 'running', runId: 'run-1', startedAt: new Date(Date.now() - 60_000).toISOString(), finishedAt: null,
+          exitCode: null, error: null, sourcePromptId: id,
+        },
+      ],
+    )
+
+    const runsTabLabel = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Runs'))
+    expect(runsTabLabel?.textContent).toBe('Runs 1')
+
+    clickTab(el, 'Runs')
+    await flush()
+
+    const cards = el.querySelectorAll('[data-testid="epic-run-card"]')
+    expect(cards.length).toBe(1)
+    expect(cards[0].getAttribute('data-finished')).toBeNull()
+    expect(cards[0].textContent).toContain('5-widget')
+    expect(cards[0].textContent).not.toContain('failed')
+  })
+
+  it('Runs shows a failed archived run as failed', async () => {
+    const el = await setupArchived((id) => [archivedPrd(id, '6-broken', 'Broken build', 'failed')])
+
+    clickTab(el, 'Runs')
+    await flush()
+
+    const cards = el.querySelectorAll('[data-testid="epic-run-card"]')
+    expect(cards.length).toBe(1)
+    expect(cards[0].textContent).toContain('6-broken')
+    expect(cards[0].querySelector('[role="status"]')?.textContent).toBe('failed')
+  })
+
   it('Runs tab shows the dashed empty state when no jobs match', async () => {
     installWindowApiMock([])
     const { usePromptSessions } = await import('../../../state/promptSessions')

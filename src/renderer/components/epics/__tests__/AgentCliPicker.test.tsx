@@ -33,11 +33,11 @@ let root: Root | null = null
 const q = (id: string) => container!.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const click = (n: Element) => act(() => { n.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
-async function mount(value: AgentCliChoice = 'claude', onChange = vi.fn()) {
+async function mount(value: AgentCliChoice = 'claude', onChange = vi.fn(), testIdPrefix?: string) {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  act(() => root!.render(<AgentCliPicker value={value} onChange={onChange} />))
+  act(() => root!.render(<AgentCliPicker value={value} onChange={onChange} testIdPrefix={testIdPrefix} />))
   await act(async () => {})
   return onChange
 }
@@ -120,5 +120,18 @@ describe('AgentCliPicker', () => {
     for (const id of ['codex', 'gemini', 'antigravity', 'cursor', 'opencode']) {
       expect((q(`new-epic-agent-cli-option-${id}`) as HTMLButtonElement).disabled).toBe(true)
     }
+  })
+
+  it('testIdPrefix renames every test id it renders', async () => {
+    await mount('claude', vi.fn(), 'agent-persona-cli')
+    expect(q('new-epic-agent-cli')).toBeNull()
+    expect(q('agent-persona-cli')).not.toBeNull()
+    expect(q('agent-persona-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+    expect(q('agent-persona-cli-option-codex')).not.toBeNull()
+    expect(q('agent-persona-cli-recheck')).not.toBeNull()
+    expect(q('agent-persona-cli-install-gemini')).not.toBeNull()
+    expect(q('agent-persona-cli-copy-gemini')).not.toBeNull()
+    expect(q('agent-persona-cli-docs-gemini')).not.toBeNull()
+    expect(container!.querySelector('[data-testid^="new-epic-agent-cli"]')).toBeNull()
   })
 })

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
 import type { AgentCliDetectRow, PromptSessionsCreateEpicPayload } from '../../../preload/api'
 import { AGENT_CLI_LABELS, type AgentCliId } from '../../lib/agentCliCatalog'
+import { useAgentCliDetect } from '../../lib/useAgentCliDetect'
 import { useToast } from '../../state/toast'
 
 /** The CLI an Epic runs under; 'claude' (Claude Code) is the default and always available. */
@@ -13,29 +13,23 @@ const ORDER: AgentCliId[] = ['codex', 'gemini', 'antigravity', 'cursor', 'openco
  * coding-agent CLI runs the session. Claude Code is listed first and is always
  * enabled; the others come from `window.api.agentCli.detect` — a not-installed
  * CLI is disabled and shows its install command (copyable) and docs link. A
- * detect failure toasts and leaves only Claude Code enabled.
+ * detect failure toasts and leaves only Claude Code enabled. Detection is
+ * shared via `useAgentCliDetect` — every mounted picker sees the same rows and
+ * one Re-check refreshes them all. `testIdPrefix` (default
+ * 'new-epic-agent-cli') prefixes every data-testid so the picker can mount
+ * outside New Session with its own ids.
  */
-export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onChange: (id: AgentCliChoice) => void }) {
+export function AgentCliPicker({
+  value,
+  onChange,
+  testIdPrefix = 'new-epic-agent-cli',
+}: {
+  value: AgentCliChoice
+  onChange: (id: AgentCliChoice) => void
+  testIdPrefix?: string
+}) {
   const show = useToast((s) => s.show)
-  const [rows, setRows] = useState<AgentCliDetectRow[] | null>(null)
-  const [checking, setChecking] = useState(false)
-
-  const load = useCallback(async (refresh: boolean) => {
-    setChecking(true)
-    try {
-      const detect = window.api?.agentCli?.detect
-      if (typeof detect !== 'function') throw new Error('agentCli.detect is unavailable — restart Session Manager')
-      const next = await detect(refresh ? { refresh: true } : {})
-      setRows(Array.isArray(next) ? next : [])
-    } catch (e) {
-      setRows([])
-      show('error', `Could not detect agent CLIs: ${e instanceof Error ? e.message : String(e)}`)
-    } finally {
-      setChecking(false)
-    }
-  }, [show])
-
-  useEffect(() => { void load(false) }, [load])
+  const { rows, checking, recheck } = useAgentCliDetect()
 
   const byId = new Map((rows ?? []).map((r) => [r.id, r]))
   const copy = async (text: string) => {
@@ -64,7 +58,7 @@ export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onC
         type="button"
         role="radio"
         aria-checked={on}
-        data-testid={`new-epic-agent-cli-option-${id}`}
+        data-testid={`${testIdPrefix}-option-${id}`}
         disabled={!enabled}
         title={title}
         onClick={() => onChange(id)}
@@ -80,7 +74,7 @@ export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onC
   const missing = ORDER.map((id) => byId.get(id)).filter((r): r is AgentCliDetectRow => Boolean(r && !r.installed))
 
   return (
-    <div data-testid="new-epic-agent-cli" className="min-w-0">
+    <div data-testid={testIdPrefix} className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="Agent CLI" className="inline-flex flex-wrap rounded-[10px] border border-line bg-bg p-0.5">
           {chip('claude', 'Claude Code', true)}
@@ -94,9 +88,9 @@ export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onC
         </div>
         <button
           type="button"
-          data-testid="new-epic-agent-cli-recheck"
+          data-testid={`${testIdPrefix}-recheck`}
           disabled={checking}
-          onClick={() => void load(true)}
+          onClick={() => void recheck()}
           className="rounded border border-line px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-dim hover:bg-bg-elev disabled:opacity-50"
         >
           {checking ? 'Checking…' : 'Re-check'}
@@ -107,7 +101,7 @@ export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onC
           {missing.map((r) => (
             <li
               key={r.id}
-              data-testid={`new-epic-agent-cli-install-${r.id}`}
+              data-testid={`${testIdPrefix}-install-${r.id}`}
               className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-fg-faint"
             >
               <span className="font-medium text-fg-dim">{r.label || AGENT_CLI_LABELS[r.id]}</span>
@@ -117,7 +111,7 @@ export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onC
                   <code className="min-w-0 truncate rounded border border-line bg-bg px-1.5 py-0.5 font-mono text-[10.5px] text-fg-dim">{r.install}</code>
                   <button
                     type="button"
-                    data-testid={`new-epic-agent-cli-copy-${r.id}`}
+                    data-testid={`${testIdPrefix}-copy-${r.id}`}
                     onClick={() => void copy(r.install!)}
                     className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-fg-dim hover:bg-bg-elev"
                   >
@@ -127,7 +121,7 @@ export function AgentCliPicker({ value, onChange }: { value: AgentCliChoice; onC
               )}
               <a
                 href={r.docs}
-                data-testid={`new-epic-agent-cli-docs-${r.id}`}
+                data-testid={`${testIdPrefix}-docs-${r.id}`}
                 onClick={(e) => { e.preventDefault(); void openDocs(r.docs) }}
                 className="text-accent hover:underline"
               >

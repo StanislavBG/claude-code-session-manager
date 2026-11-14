@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v19 -->
+<!-- PRD_AUTHORING.md v20 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -189,7 +189,7 @@ timeout 120 python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || tru
 timeout 300 pytest -q   # LAST thing the run does
 ```
 
-The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit only the exact paths you created or changed for this PRD, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. Never print `PASS` on a red gate.
+The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit only the exact paths you created or changed for this PRD, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed (an artifact-only PRD, §5, lands no commit by design and prints `PASS` once the gate is green and the tree is clean), else `SCHEDULER_VERDICT: FAIL <one-line reason>`. Never print `PASS` on a red gate.
 
 ---
 

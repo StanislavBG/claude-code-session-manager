@@ -444,9 +444,9 @@ test('the real demo-video v4 copy with a late updatedAt upgrades to the current 
   expect(m.prompt).toBe(real.prompt);
 });
 
-test('re-stamped project-home v2 and demo-video v6 copies upgrade to v3 and v7', async () => {
+test('re-stamped project-home v2 and demo-video v6 copies upgrade to v3 and v8', async () => {
   const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
-  for (const [id, shipped, next] of [['builtin-project-home', 2, 3], ['builtin-demo-video', 6, 7]]) {
+  for (const [id, shipped, next] of [['builtin-project-home', 2, 3], ['builtin-demo-video', 6, 8]]) {
     const real = BUILTIN_MACROS.find((b) => b.id === id);
     expect(typeof real.priorPrompts[shipped - 1]).toBe('string');
     seedStored({

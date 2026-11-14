@@ -23,15 +23,17 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v7 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v8 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(7);
-  expect(macro.priorPrompts).toHaveLength(6);
+  expect(macro.builtinVersion).toBe(8);
+  expect(macro.priorPrompts).toHaveLength(7);
   expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
   for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
   expect(macro.prompt).not.toContain('30-second');
-  expect(macro.prompt).toContain('Generate a character and cute animated JavaScript video');
+  // the opening follows the Character switch instead of always promising a mascot
+  expect(macro.prompt.startsWith('Generate a cute animated JavaScript video with an original mascot character unless a Character: off line says otherwise')).toBe(true);
+  expect(macro.prompt).not.toContain('Generate a character and');
   for (const style of ['Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography']) {
     expect(macro.prompt).toContain(style);
   }
@@ -143,8 +145,8 @@ test('built-in macros declare a frozen background job', () => {
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(7);
-  expect(demo.priorPrompts).toHaveLength(6);
+  expect(demo.builtinVersion).toBe(8);
+  expect(demo.priorPrompts).toHaveLength(7);
 });
 
 // The Project Home Generate composer always sends these lines (design-mocks/project-home-v2/DESIGN_SPEC.md
@@ -168,16 +170,29 @@ test('Project Home v3 honours the Audience, Length and Read from lines and keeps
   }
 });
 
-test('Demo Video v7 honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
+test('Demo Video v7+ honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(demo.builtinVersion).toBe(7);
-  expect(demo.priorPrompts).toHaveLength(6);
-  // the last prior prompt is the shipped v6 prompt, byte for byte
-  expect(sha256(demo.priorPrompts.at(-1))).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
-  for (const clause of priorClauses(demo.priorPrompts.at(-1))) expect(demo.prompt).toContain(clause);
+  expect(demo.builtinVersion).toBe(8);
+  expect(demo.priorPrompts).toHaveLength(7);
+  // priorPrompts[5] is the shipped v6 prompt, byte for byte; v7 kept every v6 clause
+  expect(sha256(demo.priorPrompts[5])).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
+  for (const clause of priorClauses(demo.priorPrompts[5]).slice(1)) expect(demo.prompt).toContain(clause);
   for (const t of ['Character: off', 'Video style: Auto', "'Video kind: Project demo'", "'Video length: 30'", "'Character: on'", 'type-led', 'meta.character', 'additional instructions', "'Entry id'"]) {
     expect(demo.prompt).toContain(t);
   }
+});
+
+test('Demo Video v8 only rewrites the first sentence of the shipped v7 prompt', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const v7 = demo.priorPrompts.at(-1);
+  // the last prior prompt is the shipped v7 prompt, byte for byte
+  expect(sha256(v7)).toBe('c909ac2ffb96ba54f72cd4a7f08f5ea98f26480cdb5c47640debc7d1807c224f');
+  const v7Opening = 'Generate a character and cute animated JavaScript video';
+  const v8Opening = 'Generate a cute animated JavaScript video with an original mascot character unless a Character: off line says otherwise,';
+  expect(v7.startsWith(v7Opening)).toBe(true);
+  expect(demo.prompt.startsWith(v8Opening)).toBe(true);
+  // everything after the opening words is unchanged
+  expect(demo.prompt.slice(v8Opening.length)).toBe(v7.slice(v7Opening.length));
 });
 
 test('builtin-review-md-network is a job-less project-home macro with scope + mode inputs', () => {
@@ -185,7 +200,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
-  expect(sha('builtin-demo-video')).toBe('956bd0c0af28bc577f85cb343d476fb3713fdc18d26f08c72d50cea1b6e26dcb');
+  expect(sha('builtin-demo-video')).toBe('609f327979161a0fdffe442d7d6255b63b46301b3a867d29a17f05b0d8e9f002');
   expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');

@@ -68,7 +68,9 @@ function screenNode(id: string, ctx: ScreenRenderCtx): ReactNode {
           positioning context, so an absolutely-positioned wrapper resolves
           against the whole .dv-view — tab strip included — and paints over
           it. */}
-      <div className="h-full overflow-auto bg-bg">
+      {/* overscroll-contain: wheel chaining from a page stops here and never
+          reaches the dockview frame. */}
+      <div data-testid="panel-host" className="h-full overflow-auto overscroll-contain bg-bg">
         <ErrorBoundary>{renderScreenComponent(id as NavKey, ctx)}</ErrorBoundary>
       </div>
     </PanelFocusProvider>

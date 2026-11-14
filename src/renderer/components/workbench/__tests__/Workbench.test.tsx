@@ -217,3 +217,15 @@ describe('PanelHost render isolation on panel switch', () => {
     expect(after).toEqual(before)
   })
 })
+
+describe('panel-host wrapper', () => {
+  it('contains overscroll so wheel chaining never reaches the dockview frame', async () => {
+    await mountWorkbench({})
+    const hosts = container.querySelectorAll('[data-testid="panel-host"]')
+    expect(hosts.length).toBe(PANEL_IDS.length)
+    for (const host of Array.from(hosts)) {
+      const cls = host.className.split(/\s+/)
+      expect(cls).toEqual(expect.arrayContaining(['h-full', 'overflow-auto', 'bg-bg', 'overscroll-contain']))
+    }
+  })
+})

@@ -115,7 +115,11 @@
 html, body, #root {
   height: 100%;
   margin: 0;
-  overflow: hidden;
+  /* clip, not hidden: overflow:hidden is still a scroll container, so a
+     scrollIntoView / focus scroll / find-in-page could shift the whole app
+     frame with no way to scroll it back. overflow:clip is not a scroll
+     container (Chromium 90+). */
+  overflow: clip;
 }
 
 ::-webkit-scrollbar {

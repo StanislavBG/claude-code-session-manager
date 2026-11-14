@@ -456,6 +456,10 @@ export interface AgentPersona {
   model: string | null;
   /** Per-Epic reasoning effort (`effort:` frontmatter; a `models.catalog` effort level). Null = inherit. Passed to the claude spawn as `--effort` (never `auto`). */
   effort: string | null;
+  /** Default agent CLI for New Session (`agentCli:` frontmatter); null = Claude Code (or an unknown on-disk value). */
+  agentCli?: AgentCliDetectRow['id'] | null;
+  /** Default model for that CLI (`agentCliModel:` frontmatter); null when unset or agentCli is null. */
+  agentCliModel?: string | null;
   color: string | null;
   /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
   tags: AgentPersonaTag[];
@@ -495,6 +499,10 @@ export interface AgentPersonaSaveInput {
   model: string;
   /** Effort level, or `'inherit'`/omitted to write no `effort:` line. */
   effort?: string;
+  /** Default agent CLI for New Session. Omit to keep the existing file's value; `'claude'` removes it (and the model). */
+  agentCli?: 'claude' | AgentCliDetectRow['id'];
+  /** Model for a non-Claude agentCli; ignored otherwise. Carried over with agentCli when agentCli is omitted. */
+  agentCliModel?: string;
   color: string;
   tags: AgentPersonaTag[];
   /** Project cwds (or the `'*'` sentinel) this persona's Action button appears in. Omit to keep the existing file's value; `[]` clears it. */

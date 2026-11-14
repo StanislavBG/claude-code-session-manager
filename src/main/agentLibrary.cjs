@@ -23,6 +23,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
 const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/persona-macro/personaMerge.cjs');
+const { isNonClaudeAgentCli, isAgentCliModel } = require('./lib/agent-cli/agentCliEvents.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -71,8 +72,11 @@ function decodeLine(s) {
  * integer, present only on the four bundled personas. Written through
  * unchanged (not Claude-Code-visible either) so a save from the Agent
  * Library editor never erases the stamp a hand-edit should keep intact.
+ *
+ * `agentCli` / `agentCliModel` are this app's extension too: the persona's
+ * default agent CLI (and its model) for New Session — Claude Code ignores them.
  */
-const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly']);
+const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly', 'agentCli', 'agentCliModel']);
 
 /**
  * Raw text lines of every top-level frontmatter key block in `raw` whose key
@@ -93,12 +97,17 @@ function extractUnmanagedLines(raw, managed) {
   return out;
 }
 
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, body, preservedLines }) {
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, body, preservedLines }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
   if (model && model !== 'inherit') lines.push(`model: ${model}`);
   if (effort && effort !== 'inherit') lines.push(`effort: ${effort}`);
+  if (isNonClaudeAgentCli(agentCli)) {
+    lines.push(`agentCli: ${agentCli}`);
+    // Double-quoted: a YAML plain scalar can't start with '@' or '['; the allowed charset has no quote/backslash.
+    if (isAgentCliModel(agentCliModel)) lines.push(`agentCliModel: "${agentCliModel}"`);
+  }
   if (color) lines.push(`color: ${color}`);
   if (tags && tags.length) lines.push(`tags: ${tags.join(', ')}`);
   if (projects && projects.length) lines.push(`projects: ${projects.join(', ')}`);
@@ -213,6 +222,8 @@ async function savePersona({
   title,
   seedVersion,
   executorOnly,
+  agentCli,
+  agentCliModel,
   body,
   projectCwd,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -239,11 +250,14 @@ async function savePersona({
   let resolvedAction = action;
   let resolvedActionLabel = actionLabel;
   let resolvedExecutorOnly = executorOnly;
+  // agentCli undefined = carry the file's pair over; 'claude' (or any non-CLI value) = write neither line.
+  let resolvedAgentCli = agentCli;
+  let resolvedAgentCliModel = agentCliModel;
   let preservedLines = [];
   try {
     preservedLines = extractUnmanagedLines(fsSync.readFileSync(target, 'utf8'), MANAGED_PERSONA_KEYS);
   } catch { /* no existing file — nothing to preserve */ }
-  if ([seedVersion, title, projects, action, actionLabel, executorOnly].some((v) => v === undefined)) {
+  if ([seedVersion, title, projects, action, actionLabel, executorOnly, agentCli].some((v) => v === undefined)) {
     try {
       const { fm } = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
       if (resolvedSeedVersion === undefined) {
@@ -252,12 +266,17 @@ async function savePersona({
       }
       if (resolvedExecutorOnly === undefined && String(fm.executorOnly).trim() === 'true') resolvedExecutorOnly = true;
       if (resolvedTitle === undefined && fm.title) resolvedTitle = fm.title;
+      if (agentCli === undefined) {
+        const existingCli = typeof fm.agentCli === 'string' ? fm.agentCli.trim() : '';
+        resolvedAgentCli = isNonClaudeAgentCli(existingCli) ? existingCli : undefined;
+        resolvedAgentCliModel = resolvedAgentCli && isAgentCliModel(fm.agentCliModel) ? fm.agentCliModel : undefined;
+      }
       if (resolvedProjects === undefined && fm.projects) resolvedProjects = parseTools(fm.projects);
       if (resolvedAction === undefined && fm.action) resolvedAction = decodeLine(fm.action);
       if (resolvedActionLabel === undefined && fm.actionLabel) resolvedActionLabel = decodeLine(fm.actionLabel);
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, body, preservedLines });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, body, preservedLines });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
@@ -401,6 +420,8 @@ async function listPersonas({
       });
     }
 
+    const trimmedCli = typeof fm.agentCli === 'string' ? fm.agentCli.trim() : '';
+    const listedCli = isNonClaudeAgentCli(trimmedCli) ? trimmedCli : null;
     personas.push({
       name: fm.name || fallbackName,
       description: fm.description || null,
@@ -415,6 +436,8 @@ async function listPersonas({
       title: fm.title || null,
       seedVersion: fm.seedVersion !== undefined && Number.isFinite(Number(fm.seedVersion)) ? Number(fm.seedVersion) : null,
       executorOnly: String(fm.executorOnly).trim() === 'true',
+      agentCli: listedCli,
+      agentCliModel: listedCli && isAgentCliModel(fm.agentCliModel) ? fm.agentCliModel : null,
       path: real,
       body: body.trim(),
       overridingProjects,

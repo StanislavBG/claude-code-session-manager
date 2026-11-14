@@ -370,3 +370,55 @@ test('effort: written when set, omitted for inherit/unset, round-trips, and unto
   await savePersona({ ...base, name: 'unset-effort', model: 'opus', effort: by['unset-effort'].effort ?? 'inherit' });
   expect(await raw('unset-effort')).not.toContain('effort:');
 });
+
+test('agentCli/agentCliModel: round-trip, carry-over on undefined, claude removes, unknown lists null', async () => {
+  const globalDir = await mkTmp('sm-agent-library-agentcli-');
+  const base = { tools: [], model: 'opus', effort: 'high', color: '', tags: [], body: 'B.', globalDir, validatePath: identityValidatePath, writeTextAtomic: fakeWriteTextAtomic };
+  const raw = (n) => fsp.readFile(path.join(globalDir, `${n}.md`), 'utf8');
+  const list = async () => Object.fromEntries((await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath })).map((p) => [p.name, p]));
+
+  await savePersona({ ...base, name: 'cx', agentCli: 'codex', agentCliModel: 'openai/gpt-5' });
+  const cx = await raw('cx');
+  expect(cx).toContain('effort: high\nagentCli: codex\nagentCliModel: "openai/gpt-5"\n');
+  await savePersona({ ...base, name: 'cf', agentCli: 'opencode', agentCliModel: '@cf/meta/llama-3' });
+  expect(await raw('cf')).toContain('agentCliModel: "@cf/meta/llama-3"');
+  await savePersona({ ...base, name: 'nomodel', agentCli: 'gemini' });
+  expect(await raw('nomodel')).toContain('agentCli: gemini');
+  expect(await raw('nomodel')).not.toContain('agentCliModel');
+  // Model is ignored without a non-Claude CLI.
+  await savePersona({ ...base, name: 'plain', agentCliModel: 'openai/gpt-5' });
+  expect(await raw('plain')).not.toContain('agentCli');
+
+  let by = await list();
+  expect(by.cx.agentCli).toBe('codex');
+  expect(by.cx.agentCliModel).toBe('openai/gpt-5');
+  expect(by.cf.agentCliModel).toBe('@cf/meta/llama-3');
+  expect(by.nomodel.agentCliModel).toBeNull();
+  expect(by.plain.agentCli).toBeNull();
+  expect(by.plain.agentCliModel).toBeNull();
+
+  // Undefined carries over unchanged, no duplicated lines.
+  await savePersona({ ...base, name: 'cx' });
+  const carried = await raw('cx');
+  expect(carried.match(/^agentCli:/gm)).toHaveLength(1);
+  expect(carried.match(/^agentCliModel:/gm)).toHaveLength(1);
+  by = await list();
+  expect(by.cx.agentCli).toBe('codex');
+  expect(by.cx.agentCliModel).toBe('openai/gpt-5');
+
+  // Explicit 'claude' removes both.
+  await savePersona({ ...base, name: 'cx', agentCli: 'claude', agentCliModel: 'openai/gpt-5' });
+  expect(await raw('cx')).not.toContain('agentCli');
+
+  // Unknown on-disk value lists as null and never throws.
+  await fsp.writeFile(path.join(globalDir, 'bad.md'), '---\nname: bad\nagentCli: gpt\nagentCliModel: "x y"\n---\nB.\n');
+  await fsp.writeFile(path.join(globalDir, 'badmodel.md'), '---\nname: badmodel\nagentCli: codex \nagentCliModel: "has space"\n---\nB.\n');
+  by = await list();
+  expect(by.bad.agentCli).toBeNull();
+  expect(by.bad.agentCliModel).toBeNull();
+  expect(by.badmodel.agentCli).toBe('codex');
+  expect(by.badmodel.agentCliModel).toBeNull();
+  // An unknown on-disk value is not carried over either.
+  await savePersona({ ...base, name: 'bad' });
+  expect(await raw('bad')).not.toContain('agentCli');
+});

@@ -51,3 +51,16 @@ test('overlay save keeps unmanaged keys', async () => {
     await expect(fsp.access(path.join(globalDir, 'p.md'))).rejects.toThrow();
   } finally { await fsp.rm(dir, { recursive: true, force: true }); }
 });
+
+test('overlay save never writes agentCli/agentCliModel', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'al-preserve-ov-cli-'));
+  try {
+    const file = path.join(dir, '.claude', 'agents', 'p.md');
+    const globalDir = path.join(dir, 'global');
+    await savePersona({ name: 'p', projectCwd: dir, effort: 'high', agentCli: 'codex', agentCliModel: 'openai/gpt-5', globalDir, validatePath: idPath, writeTextAtomic: write,
+      loadSessions: async () => ({ tabs: [{ cwd: dir }] }) });
+    const out = await fsp.readFile(file, 'utf8');
+    expect(out).toContain('effort: high');
+    expect(out).not.toContain('agentCli');
+  } finally { await fsp.rm(dir, { recursive: true, force: true }); }
+});

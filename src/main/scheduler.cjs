@@ -70,6 +70,7 @@ const { decideVerifyDowngrade } = require('./lib/scheduler/refireCap.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
 const { shouldRunFlatSweep, FLAT_SWEEP_INTERVAL_MS } = require('./lib/scheduler/flatSweepThrottle.cjs');
 const { appendError } = require('./lib/telemetry/opsErrorLog.cjs');
+const { createSingleFlight, listKeyFor, flatString, flattenPrdEntry } = require('./lib/prd/listPrdsSingleFlight.cjs');
 const { readTail } = require('./lib/util/fileTail.cjs');
 const {
   claudePidAlive, classifyRunOutcome, resolveReapGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
@@ -10999,7 +11000,9 @@ function registerScheduleHandlers() {
     }
   }));
 
-  ipcMain.handle('schedule:list-prds', async () => listPrdsInternal());
+  // Optional { cwd } scopes the scan to one project; concurrent calls with the
+  // same cwd key share one in-flight scan (PRD 3063 — heap OOM loop).
+  ipcMain.handle('schedule:list-prds', async (_e, payload) => listPrdsShared({ cwd: payload?.cwd }));
 
   // Return last N completed/failed jobs from queue.json, newest first.
   // Purely additive: no schema change, no archive-folder read needed.
@@ -11613,6 +11616,9 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
           mtimeMs: stat.mtimeMs,
           archived,
         };
+        // Flat copies only: sliced strings into the parsed file text kept
+        // every scanned PRD body alive (2026-11-08 heap snapshot, PRD 3063).
+        flattenPrdEntry(entry);
         out.push(entry);
       } catch (e) {
         logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
@@ -11662,7 +11668,7 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
     if (i < archivedStart) {
       entry.status = liveStatusBySlug.get(entry.slug) ?? null;
     } else {
-      entry.archivedStatus = prdPaths.resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug);
+      entry.archivedStatus = flatString(prdPaths.resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug));
       entry.status = entry.archivedStatus;
     }
   }
@@ -11670,6 +11676,15 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
   out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
   return out;
 }
+
+// Single-flight front door for listPrdsInternal (PRD 3063): concurrent calls
+// with the same normalized cwd (absent cwd = one machine-wide key) await ONE
+// in-flight scan; the slot clears on settle, so a later call rescans and a
+// rejected scan is retried by the next caller.
+const listPrdsShared = createSingleFlight(
+  (arg) => listPrdsInternal(arg),
+  (arg) => listKeyFor(normalizeListCwd(arg?.cwd)),
+);
 
 // remote — in-process (non-IPC) scheduler accessors, used by prdCreate.cjs
 // and other main-process callers. (Named for the retired web-remote relay,
@@ -11881,7 +11896,7 @@ const remote = {
   // long as the underlying PRD set doesn't change mid-page.
   async listPrds(filter = {}) {
     const filterCwd = normalizeListCwd(filter.cwd);
-    const all = await listPrdsInternal({ cwd: filterCwd });
+    const all = await listPrdsShared({ cwd: filterCwd });
     const filtered = all.filter((entry) => {
       if (filterCwd && entry.cwd !== filterCwd) return false;
       if (filter.epicId && entry.epicId !== filter.epicId) return false;
@@ -12379,6 +12394,7 @@ module.exports = {
   prdArchivedSkipResult,
   spawnJob,
   listPrdsInternal,
+  listPrdsShared,
   heartbeatTick,
   appendHeartbeat,
   QUARANTINE_ESCALATE_MS,

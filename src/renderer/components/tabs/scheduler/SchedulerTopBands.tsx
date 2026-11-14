@@ -13,6 +13,7 @@ import { buildPlans, summarizeQueue } from '../../../lib/schedulerStages'
 import { computeStatus } from './computeStatus'
 import { LearningBody } from '../../LearningPanel'
 import { LEARNING_CONTENT } from '../../learningContent'
+import { scrollWithin } from '../../../lib/scrollWithin'
 import { BandRow, ClickToEditNumber, InfoDot, KpiCell, MiniBar, SegmentPills, Stepper } from './sched-primitives'
 
 /**
@@ -38,11 +39,26 @@ export type PlanMode = 'graph' | 'list' | 'critical'
 const POLL_MS = 15_000
 const ATTENTION = new Set(['failed', 'needs_review', 'quarantined'])
 
-/** Shared with the plan list: first failed/needs_review/quarantined row scrolls into view. */
+/** Nearest ancestor whose computed overflowY is auto/scroll — the job list's own scroller. */
+function nearestScroller(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY
+    if (oy === 'auto' || oy === 'scroll') return p
+  }
+  return null
+}
+
+/**
+ * Shared with the plan list: first failed/needs_review/quarantined row scrolls
+ * into view inside the job list's own scroller only (scrollWithin), so the
+ * page frames above it never move.
+ */
 function scrollToNeedsYou(): void {
   const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-job-row]'))
   const target = rows.find((r) => ATTENTION.has(r.dataset.jobStatus ?? ''))
-  target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  if (!target) return
+  const scroller = nearestScroller(target)
+  if (scroller) scrollWithin(scroller, target, { block: 'nearest', behavior: 'smooth' })
 }
 
 function headline(v: ScheduleQueueHealthVerdict, oldestRunningAgeMs: number | null): string {

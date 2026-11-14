@@ -8,6 +8,7 @@ import {
   type EpicIntakeSection,
 } from '../../lib/epicIntake'
 import { estimateTokens } from '../../lib/estimateTokens'
+import { scrollWithin } from '../../lib/scrollWithin'
 
 /**
  * Launch briefing card — the Epic's first turn, rendered from the structured
@@ -150,6 +151,15 @@ function SectionCard({
   )
 }
 
+/** Nearest ancestor whose computed overflowY is auto/scroll. */
+function nearestScroller(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY
+    if (oy === 'auto' || oy === 'scroll') return p
+  }
+  return null
+}
+
 export function EpicIntakeCard({
   sections,
   at: _at,
@@ -170,8 +180,11 @@ export function EpicIntakeCard({
     if (!focusKind) return
     const el = sectionRefs.current[focusKind]
     if (el) {
-      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
-      el.focus()
+      // Scroll only the nearest scrollable ancestor (the native into-view call would
+      // drag every page frame above it), then focus without a second scroll.
+      const scroller = nearestScroller(el)
+      if (scroller) scrollWithin(scroller, el, { block: 'nearest' })
+      el.focus({ preventScroll: true })
     }
     setFocusKind(null)
   }, [focusKind, expanded])

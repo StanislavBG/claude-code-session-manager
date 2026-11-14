@@ -46,6 +46,7 @@ import { openProjectTab } from '../../lib/homeOpenProject'
 import { useSessionSlots } from '../../lib/useSessionSlots'
 import { usePagedList } from '../../lib/usePagedList'
 import { Pager } from '../ui/Pager'
+import { scrollWithin } from '../../lib/scrollWithin'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
@@ -91,7 +92,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
   }
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="h-full overflow-auto" data-home-scroller>
       <div className="mx-auto max-w-[1400px] px-[34px] py-[26px] text-fg">
         <HomeHeaderWithLegend
           greeting={greeting}
@@ -292,7 +293,11 @@ function Hero({
   const inUse = slots?.inUse ?? 0
 
   const scrollToNeeds = () => {
-    document.getElementById('home-needs-you')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Scroll only Home's own scroller — the native into-view call would drag the
+    // app's overflow:hidden page frames above it.
+    const target = document.getElementById('home-needs-you')
+    const scroller = target?.closest<HTMLElement>('[data-home-scroller]')
+    if (target && scroller) scrollWithin(scroller, target, { behavior: 'smooth', block: 'start', offset: 16 })
   }
 
   return (

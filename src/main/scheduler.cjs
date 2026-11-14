@@ -77,7 +77,8 @@ const {
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
   readSpawnedPidFromLog, readLogMtimeMs, isClaudeArgv,
 } = require('./lib/scheduler/reaperHelpers.cjs');
-const { resolveProjectRoot, ensureRuntimeIgnores, RUNTIME_NAMESPACES } = require('./lib/opsOwnership.cjs');
+const { resolveProjectRoot, ensureRuntimeIgnores, RUNTIME_NAMESPACES, opsPath } = require('./lib/opsOwnership.cjs');
+const { BUILTIN_MACROS } = require('./lib/persona-macro/builtinMacros.cjs');
 const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
@@ -3482,6 +3483,77 @@ function armSettleAfterValidatorBudgetKill(job, { scheduleSettle = defaultSchedu
   }
 }
 
+// PRD 3116: a macro's background-build PRD (frontmatter `macroId`) ends with
+// a DONE/FAILED notice naming what was saved, not the generic "PRD finished"
+// line — the generic line read as "idle" and owners typed into the Epic to
+// "start" a build that had already finished.
+const MACRO_ARTIFACT_RE = /^session-manager-operations\/project-pages\/(videos|knowledge)\/([a-z0-9-]+)\/index\.html$/;
+const MACRO_META_MAX_BYTES = 256 * 1024;
+
+function macroLabelFor(prd) {
+  const builtin = BUILTIN_MACROS.find((m) => m && m.id === prd.macroId);
+  if (builtin && typeof builtin.label === 'string' && builtin.label) return builtin.label;
+  const title = typeof prd.title === 'string' ? prd.title.replace(/:\s*background build\s*$/i, '').trim() : '';
+  return title || prd.macroId;
+}
+
+/**
+ * readMacroBuildOutput(cwd, prd) → { kind, id, title, meta } | null
+ * Never throws. The entry id must match /^[a-z0-9-]+$/; the meta.json path is
+ * built with opsPath, never from the raw frontmatter string.
+ */
+function readMacroBuildOutput(cwd, prd) {
+  try {
+    if (!cwd) return null;
+    const first = Array.isArray(prd.artifactPaths) ? prd.artifactPaths[0] : null;
+    if (typeof first !== 'string') return null;
+    const m = MACRO_ARTIFACT_RE.exec(first.trim());
+    if (!m) return null;
+    const dir = m[1];
+    const id = m[2];
+    const metaPath = opsPath(cwd, 'project-pages', dir, id, 'meta.json');
+    const st = fs.statSync(metaPath);
+    if (!st.isFile() || st.size > MACRO_META_MAX_BYTES) return null;
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    if (!meta || typeof meta !== 'object' || typeof meta.title !== 'string' || !meta.title.trim()) return null;
+    return { kind: dir === 'videos' ? 'video' : 'knowledge', id, title: meta.title.trim(), meta };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * macroBuildNotice(job, prd) → { message, notice, buildOutput? } | null
+ * null for any PRD without a `macroId`, or a status other than completed/failed.
+ */
+function macroBuildNotice(job, prd) {
+  if (!prd || typeof prd.macroId !== 'string' || !prd.macroId) return null;
+  if (job.status !== 'completed' && job.status !== 'failed') return null;
+  const label = macroLabelFor(prd);
+  if (job.status === 'failed') {
+    const reason = job.error || job.verifierVerdict || job.status;
+    return {
+      message: `FAILED — ${label}: the background build failed (${reason}). Press it again in Project Home to retry.`,
+      notice: 'build-failed',
+    };
+  }
+  const out = readMacroBuildOutput(job.cwd, prd);
+  if (!out) return { message: `DONE — ${label} finished.`, notice: 'build-done' };
+  const buildOutput = { kind: out.kind, id: out.id, title: out.title };
+  if (out.kind === 'video') {
+    return {
+      message: `DONE — ${label}: “${out.title}” is saved (${out.meta.lengthS} s · ${out.meta.style}). Watch it in Project Home ▸ Videos.`,
+      notice: 'build-done',
+      buildOutput,
+    };
+  }
+  return {
+    message: `DONE — ${label}: “${out.title}” is saved. Read it in Project Home ▸ Pages.`,
+    notice: 'build-done',
+    buildOutput,
+  };
+}
+
 /**
  * notifyOriginatingTab(job) → void
  *
@@ -3540,6 +3612,8 @@ async function notifyOriginatingTab(job, {
       message = `PRD ${job.slug} was skipped: its PRD source could not be found on disk. Blocked dependents: ${shown}${more}.`
         + ' If the PRD file exists, run scheduler_reset_job with force:true; if it was intentionally removed, archive it with scheduler_archive_prd.';
     }
+    const macroNotice = macroBuildNotice(job, prd);
+    if (macroNotice) message = macroNotice.message;
 
     // The EPIC this check-in belongs to. Deliberately does NOT consider
     // `sourceTabId` — that is a Terminal tab id, not an Epic id, and
@@ -3641,6 +3715,8 @@ async function notifyOriginatingTab(job, {
         outcome: job.status,
         validation: 'unvalidated',
         ...(typeof job.agentType === 'string' ? { agentType: job.agentType } : {}),
+        ...(macroNotice ? { notice: macroNotice.notice } : {}),
+        ...(macroNotice && macroNotice.buildOutput ? { buildOutput: macroNotice.buildOutput } : {}),
       }).catch((e) => {
         console.error('[scheduler] notifyOriginatingTab appendResponseEvent error', job?.slug, e);
         return false;

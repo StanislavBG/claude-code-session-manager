@@ -3011,8 +3011,11 @@ export interface PromptSessionEventAppendedPayload {
     at: string;
     prdSlug?: string;
     text?: string;
-    /** 'job-not-queued' = a macro's background build could not be queued for this Epic (macroJobIpc.cjs). */
-    notice?: 'job-not-queued';
+    /** 'job-not-queued' = a macro's background build could not be queued for this Epic (macroJobIpc.cjs);
+     *  'build-done' / 'build-failed' = a macro's background-build PRD finished (scheduler.cjs notifyOriginatingTab). */
+    notice?: 'job-not-queued' | 'build-done' | 'build-failed';
+    /** The saved Project Home entry a 'build-done' notice names, when its meta.json was readable. */
+    buildOutput?: { kind: 'video' | 'knowledge'; id: string; title: string };
   };
 }
 

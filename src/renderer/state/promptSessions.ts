@@ -254,8 +254,12 @@ export interface PromptSessionEvent {
   /** PRD 2950 — marker on a main-appended 'response' event that is a notice,
    *  not prose. 'job-not-queued' = macros:dispatch-job could not queue this
    *  Epic's background build (macroJobIpc.cjs); EpicDetail renders it as a
-   *  distinct amber "build not queued" notice. Absent on every other event. */
-  notice?: 'job-not-queued'
+   *  distinct amber "build not queued" notice. Absent on every other event.
+   *  PRD 3116 — 'build-done' / 'build-failed' = a macro's background-build PRD
+   *  finished (scheduler.cjs notifyOriginatingTab). */
+  notice?: 'job-not-queued' | 'build-done' | 'build-failed'
+  /** PRD 3116 — the saved Project Home entry a 'build-done' notice names. */
+  buildOutput?: { kind: 'video' | 'knowledge'; id: string; title: string }
 }
 
 /**

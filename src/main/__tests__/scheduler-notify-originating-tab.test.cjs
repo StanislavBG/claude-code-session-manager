@@ -472,4 +472,155 @@ describe("transcript", () => {
     expect(text).toContain('scheduler_reset_job with force:true');
     expect(text).toContain('scheduler_archive_prd');
   });
+
+  describe('macro background-build DONE/FAILED notice (PRD 3116)', () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const nodePath = require('node:path');
+
+    function mkProject() {
+      const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-3116-'));
+      fs.mkdirSync(nodePath.join(dir, 'session-manager-operations'), { recursive: true });
+      return dir;
+    }
+    function writeEntry(cwd, kind, id, meta) {
+      const d = nodePath.join(cwd, 'session-manager-operations', 'project-pages', kind, id);
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(nodePath.join(d, 'index.html'), '<html></html>');
+      if (meta !== undefined) fs.writeFileSync(nodePath.join(d, 'meta.json'), typeof meta === 'string' ? meta : JSON.stringify(meta));
+    }
+    async function run(job, prd) {
+      const appendResponseEvent = vi.fn(async () => true);
+      const appendTranscriptTurn = vi.fn(async () => true);
+      await notifyOriginatingTab(job, {
+        parsePrdRaw: vi.fn(async () => ({ sourcePromptId: 'psess-m', ...prd })),
+        appendResponseEvent,
+        appendTranscriptTurn,
+        readResultFromLog: vi.fn(() => 'result text'),
+        scheduleSettle: vi.fn(),
+      });
+      return { appendResponseEvent, appendTranscriptTurn };
+    }
+
+    test('video artifact → DONE text naming title, length, style + build-done notice + buildOutput', async () => {
+      const cwd = mkProject();
+      writeEntry(cwd, 'videos', 'vid-mwguqdcvt42', {
+        title: 'Portfolio reasoning, pitched like a startup', kind: 'demo', style: 'animated-whiteboard', lengthS: 30,
+      });
+      const { appendResponseEvent } = await run(
+        { slug: '9000-demo-video', status: 'completed', cwd, runId: 'r1' },
+        { macroId: 'builtin-demo-video', deliverable: 'artifact', artifactPaths: ['session-manager-operations/project-pages/videos/vid-mwguqdcvt42/index.html'] },
+      );
+      expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+      const [c, e, text, meta] = appendResponseEvent.mock.calls[0];
+      expect(c).toBe(cwd);
+      expect(e).toBe('psess-m');
+      expect(text).toBe('DONE — Demo Video: “Portfolio reasoning, pitched like a startup” is saved (30 s · animated-whiteboard). Watch it in Project Home ▸ Videos.');
+      expect(meta).toMatchObject({
+        prdSlug: '9000-demo-video',
+        outcome: 'completed',
+        notice: 'build-done',
+        buildOutput: { kind: 'video', id: 'vid-mwguqdcvt42', title: 'Portfolio reasoning, pitched like a startup' },
+      });
+    });
+
+    test('knowledge artifact → DONE text pointing at Pages', async () => {
+      const cwd = mkProject();
+      writeEntry(cwd, 'knowledge', 'overview', { title: 'Overview' });
+      const { appendResponseEvent } = await run(
+        { slug: '9001-home', status: 'completed', cwd },
+        { macroId: 'builtin-project-home', artifactPaths: ['session-manager-operations/project-pages/knowledge/overview/index.html'] },
+      );
+      const [, , text, meta] = appendResponseEvent.mock.calls[0];
+      expect(text).toBe('DONE — Project Home: “Overview” is saved. Read it in Project Home ▸ Pages.');
+      expect(meta).toMatchObject({ notice: 'build-done', buildOutput: { kind: 'knowledge', id: 'overview', title: 'Overview' } });
+    });
+
+    test('missing, malformed or oversized meta.json → label-only DONE, never throws', async () => {
+      const cwd = mkProject();
+      writeEntry(cwd, 'videos', 'vid-missing');
+      writeEntry(cwd, 'videos', 'vid-bad', '{not json');
+      writeEntry(cwd, 'videos', 'vid-big', JSON.stringify({ title: 'x', pad: 'a'.repeat(300 * 1024) }));
+      for (const id of ['vid-missing', 'vid-bad', 'vid-big']) {
+        const { appendResponseEvent } = await run(
+          { slug: `9002-${id}`, status: 'completed', cwd },
+          { macroId: 'builtin-demo-video', artifactPaths: [`session-manager-operations/project-pages/videos/${id}/index.html`] },
+        );
+        const [, , text, meta] = appendResponseEvent.mock.calls[0];
+        expect(text).toBe('DONE — Demo Video finished.');
+        expect(meta.notice).toBe('build-done');
+        expect(meta).not.toHaveProperty('buildOutput');
+      }
+    });
+
+    test('unknown macroId label falls back to PRD title minus ": background build", then macroId', async () => {
+      const cwd = mkProject();
+      let { appendResponseEvent } = await run(
+        { slug: '9003-x', status: 'completed', cwd },
+        { macroId: 'custom-thing', title: 'My Tool: background build', artifactPaths: null },
+      );
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('DONE — My Tool finished.');
+      ({ appendResponseEvent } = await run(
+        { slug: '9003-y', status: 'completed', cwd },
+        { macroId: 'custom-thing' },
+      ));
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('DONE — custom-thing finished.');
+    });
+
+    test('failed macro PRD → FAILED text with reason (error, else verifierVerdict, else status) + build-failed notice', async () => {
+      const cwd = mkProject();
+      const prd = { macroId: 'builtin-demo-video', artifactPaths: ['session-manager-operations/project-pages/videos/vid-a/index.html'] };
+      let { appendResponseEvent } = await run({ slug: '9004-a', status: 'failed', cwd, error: 'timeout after 45m' }, prd);
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('FAILED — Demo Video: the background build failed (timeout after 45m). Press it again in Project Home to retry.');
+      expect(appendResponseEvent.mock.calls[0][3]).toMatchObject({ notice: 'build-failed', outcome: 'failed' });
+      ({ appendResponseEvent } = await run({ slug: '9004-b', status: 'failed', cwd, verifierVerdict: 'fail' }, prd));
+      expect(appendResponseEvent.mock.calls[0][2]).toContain('(fail)');
+      ({ appendResponseEvent } = await run({ slug: '9004-c', status: 'failed', cwd }, prd));
+      expect(appendResponseEvent.mock.calls[0][2]).toContain('(failed)');
+    });
+
+    test('path-traversal entry id is rejected → label-only DONE, no buildOutput', async () => {
+      const cwd = mkProject();
+      // A readable meta.json one level up that a traversal would reach.
+      writeEntry(cwd, 'videos', 'real', { title: 'Should not be read' });
+      const { appendResponseEvent } = await run(
+        { slug: '9005-trav', status: 'completed', cwd },
+        { macroId: 'builtin-demo-video', artifactPaths: ['session-manager-operations/project-pages/videos/../videos/real/index.html'] },
+      );
+      const [, , text, meta] = appendResponseEvent.mock.calls[0];
+      expect(text).toBe('DONE — Demo Video finished.');
+      expect(meta).not.toHaveProperty('buildOutput');
+      const r2 = await run(
+        { slug: '9005-up', status: 'completed', cwd },
+        { macroId: 'builtin-demo-video', artifactPaths: ['session-manager-operations/project-pages/videos/A_B/index.html'] },
+      );
+      expect(r2.appendResponseEvent.mock.calls[0][2]).toBe('DONE — Demo Video finished.');
+    });
+
+    test('non-macro PRD keeps the exact old message and no notice; transcript turn unchanged', async () => {
+      const cwd = mkProject();
+      const { appendResponseEvent, appendTranscriptTurn } = await run(
+        { slug: '9006-dev', status: 'completed', cwd, runId: 'r9' },
+        { artifactPaths: ['session-manager-operations/project-pages/videos/vid-x/index.html'] },
+      );
+      const [, , text, meta] = appendResponseEvent.mock.calls[0];
+      expect(text).toBe('PRD 9006-dev finished: completed. Check Scheduler for details.');
+      expect(meta).not.toHaveProperty('notice');
+      expect(meta).not.toHaveProperty('buildOutput');
+      expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, 'psess-m', {
+        role: 'assistant', text: 'result text', eventId: 'prd-result:9006-dev:r9',
+      });
+    });
+
+    test('macro PRD transcript append is unchanged (still the run result text)', async () => {
+      const cwd = mkProject();
+      const { appendTranscriptTurn } = await run(
+        { slug: '9007-m', status: 'completed', cwd, runId: 'r7' },
+        { macroId: 'builtin-demo-video' },
+      );
+      expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, 'psess-m', {
+        role: 'assistant', text: 'result text', eventId: 'prd-result:9007-m:r7',
+      });
+    });
+  });
 });

@@ -25,8 +25,13 @@ function trackAppLaunch({ installChannel, appVersion } = {}, deps) {
   track('app.launch', { installChannel: installChannel || null, appVersion: appVersion || null }, deps);
 }
 
-function trackSessionOpen(deps) {
-  track('session.open', {}, deps);
+// Which view opened the session: a fresh PTY spawn ('terminal', pty.cjs) or a
+// Chat turn that starts a brand-new CLI session via --session-id ('chat',
+// chatRunner.cjs). Closed set — anything else is sent as null.
+const SESSION_SURFACES = ['terminal', 'chat'];
+
+function trackSessionOpen({ surface } = {}, deps) {
+  track('session.open', { surface: SESSION_SURFACES.includes(surface) ? surface : null }, deps);
 }
 
 // Enum mappers — user-authored values never leave the machine; only the closed

@@ -46,6 +46,7 @@ const { extractJson } = require('./lib/util/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/scheduler/sessionSlots.cjs');
 const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
+const telemetryCounters = require('./lib/telemetry/telemetryCounters.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs');
@@ -723,6 +724,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
 
     let killed = false;
     let child = null;
+    // session.open (surface 'chat') fires once per turn, only when a spawn
+    // actually starts a brand-new CLI session (--session-id) — never for a
+    // --resume turn, and never twice if the flag-swap retry re-spawns.
+    let sessionOpenTracked = false;
     const doKill = (sig) => {
       if (killed) return;
       killed = true;
@@ -829,6 +834,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       return;
     }
     child = thisChild;
+    if (!agentPlan && !resumeFlag && !sessionOpenTracked) {
+      sessionOpenTracked = true;
+      telemetryCounters.trackSessionOpen({ surface: 'chat' });
+    }
     chatInflight.begin(sessionId, { tabId, cwd, pid: thisChild.pid, startedAt, resume, silent, promptId, origin, worktreeDirHint }).catch(() => {});
     feedChildStdin(thisChild, agentPlan ? agentPlan.stdin : fullPrompt, {
       log: (m) => logs.writeLine({ scope: 'chatRunner', level: 'warn', message: m }),

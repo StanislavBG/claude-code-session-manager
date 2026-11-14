@@ -169,7 +169,7 @@ class PtyManager {
     // is acceptable for a dev reload.
     //
     // Telemetry: this branch deliberately does NOT call
-    // telemetryCounters.trackSessionOpen() (see below, after the real spawn).
+    // telemetryCounters.trackSessionOpen({ surface: 'terminal' }) (see below, after the real spawn).
     // Tab = claudeSessionId is a 1:1 mapping (CLAUDE.md domain model) — a
     // reattach is the SAME session process still running, not a new one, so
     // counting it here would double-count every renderer reload and every
@@ -300,7 +300,7 @@ class PtyManager {
       return { pid: null, cwd, reattached: false, error: String(err?.message || 'spawn-failed') };
     }
     console.log('[pty] spawned pid=', proc.pid, 'for tabId=', tabId);
-    telemetryCounters.trackSessionOpen();
+    telemetryCounters.trackSessionOpen({ surface: 'terminal' });
 
     const spawnedAt = Date.now();
     let gotData = false;

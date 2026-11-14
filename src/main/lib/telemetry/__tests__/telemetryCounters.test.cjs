@@ -25,11 +25,25 @@ test('trackAppLaunch fires app.launch once with installChannel + appVersion', ()
   expect(Object.keys(calls[0].props).sort()).toEqual(['appVersion', 'installChannel'].sort());
 });
 
-test('trackSessionOpen fires session.open once', () => {
+test('trackSessionOpen fires session.open once with a surface-only prop', () => {
+  for (const surface of ['terminal', 'chat']) {
+    const { calls, deps } = fakeClient();
+    counters.trackSessionOpen({ surface }, deps);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe('session.open');
+    expect(calls[0].props).toEqual({ surface });
+  }
+});
+
+test('trackSessionOpen maps any other surface value to null', () => {
+  for (const surface of [undefined, null, '', 'phone', 'Chat', 42]) {
+    const { calls, deps } = fakeClient();
+    counters.trackSessionOpen({ surface }, deps);
+    expect(calls[0].props).toEqual({ surface: null });
+  }
   const { calls, deps } = fakeClient();
-  counters.trackSessionOpen(deps);
-  expect(calls).toHaveLength(1);
-  expect(calls[0].name).toBe('session.open');
+  counters.trackSessionOpen(undefined, deps);
+  expect(calls[0].props).toEqual({ surface: null });
 });
 
 test('trackEpicCreate fires epic.create once', () => {
@@ -52,7 +66,7 @@ test('trackSchedulerJobFinish fires scheduler.job.finish once with a status-only
 test('a throwing telemetryClient.track never escapes any counter function', () => {
   const deps = { telemetryClient: { track: () => { throw new Error('boom'); } } };
   expect(() => counters.trackAppLaunch({ installChannel: 'dev', appVersion: '1.0.0' }, deps)).not.toThrow();
-  expect(() => counters.trackSessionOpen(deps)).not.toThrow();
+  expect(() => counters.trackSessionOpen({ surface: 'chat' }, deps)).not.toThrow();
   expect(() => counters.trackEpicCreate({}, deps)).not.toThrow();
   expect(() => counters.trackSchedulerJobFinish({ status: 'failed' }, deps)).not.toThrow();
 });

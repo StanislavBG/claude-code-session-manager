@@ -64,7 +64,7 @@ function fakeProc() {
   };
 }
 
-test('a fresh spawn() fires trackSessionOpen exactly once', () => {
+test('a fresh spawn() fires trackSessionOpen({surface:"terminal"}) exactly once', () => {
   const spy = vi.spyOn(telemetryCounters, 'trackSessionOpen').mockImplementation(() => {});
   const cwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-fresh-'));
   const tabId = 'fresh-tab-1';
@@ -73,6 +73,7 @@ test('a fresh spawn() fires trackSessionOpen exactly once', () => {
   manager.spawn({ tabId, cwd, cols: 80, rows: 24 });
 
   expect(spy).toHaveBeenCalledTimes(1);
+  expect(spy).toHaveBeenCalledWith({ surface: 'terminal' });
   manager.kill(tabId);
 });
 

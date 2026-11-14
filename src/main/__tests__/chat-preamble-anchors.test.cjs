@@ -19,7 +19,13 @@ const path = require('path');
 
 import { test, expect } from 'vitest';
 
-const { STOP_SIGNAL_INSTRUCTION, CHAT_MODE_TRUTH_INSTRUCTION } = require('../chatRunner.cjs');
+const {
+  STOP_SIGNAL_INSTRUCTION,
+  CHAT_MODE_TRUTH_INSTRUCTION,
+  SCHEDULER_TURN_INSTRUCTION,
+  STOP_SENTINEL,
+} = require('../chatRunner.cjs');
+const { autoStartTurnInstruction } = require('../lib/feedback-remote/autoStartedSession.cjs');
 
 const HUMAN = 'Review the Alpaca limits and report back what we can trade for free.';
 
@@ -97,4 +103,21 @@ test('EDGE: boilerplate quoted inside the human’s own message is never strippe
   const split = splitInjectedPreamble(quoting);
   expect(split.preamble).toBe(null);
   expect(split.body).toBe(quoting);
+});
+
+test('a scheduler check-in turn splits back into the human’s words', async () => {
+  const { splitInjectedPreamble, MACHINE_TURN_BLOCK_KEYS } = await loadSplitter();
+  const split = splitInjectedPreamble(SCHEDULER_TURN_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + HUMAN);
+  expect(split.body).toBe(HUMAN);
+  expect(split.blockKeys).toEqual(['scheduler-turn', 'chat-mode-truth']);
+  expect(MACHINE_TURN_BLOCK_KEYS).toEqual(['scheduler-turn', 'auto-start-turn']);
+});
+
+test('an auto-started Epic turn splits back into the human’s words', async () => {
+  const { splitInjectedPreamble } = await loadSplitter();
+  const split = splitInjectedPreamble(
+    autoStartTurnInstruction(STOP_SENTINEL) + CHAT_MODE_TRUTH_INSTRUCTION + HUMAN,
+  );
+  expect(split.body).toBe(HUMAN);
+  expect(split.blockKeys).toEqual(['auto-start-turn', 'chat-mode-truth']);
 });

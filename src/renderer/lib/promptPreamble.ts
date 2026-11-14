@@ -5,7 +5,11 @@
  * Why this exists: `chatRunner.cjs` prepends two fixed instruction blocks to
  * every prompt before handing it to `claude -p` (`STOP_SIGNAL_INSTRUCTION` +
  * `CHAT_MODE_TRUTH_INSTRUCTION`, composed as `fullPrompt` at its `-p` call
- * site). The durable exchange log records the clean `prompt`, but the CLI's
+ * site). Turns the app starts on its own open with a different first block
+ * instead of the stop-signal one: `SCHEDULER_TURN_INSTRUCTION` for a
+ * scheduler check-in, `autoStartTurnInstruction` (autoStartedSession.cjs) for
+ * an auto-started Epic — both are known blocks here too (see
+ * `MACHINE_TURN_BLOCK_KEYS`). The durable exchange log records the clean `prompt`, but the CLI's
  * own JSONL records what it was actually sent — so the transcript feed
  * (`ingestTranscriptEvent`) rebuilds user turns containing ~1,400 characters
  * of machine boilerplate with the human's actual sentence buried at the
@@ -48,7 +52,27 @@ export const INJECTED_PROMPT_BLOCKS: InjectedBlockDef[] = [
     start: 'IMPORTANT: This is a one-shot headless run.',
     end: 'reply for the work to continue.',
   },
+  {
+    key: 'scheduler-turn',
+    label: 'Scheduler check-in',
+    start: 'IMPORTANT: This turn was started by the scheduler and nobody is watching.',
+    end: 'and end with a short report of what you did.',
+  },
+  {
+    key: 'auto-start-turn',
+    label: 'Automatic start',
+    start: 'IMPORTANT: This session was started automatically and nobody is watching.',
+    end: 'End with a short report.',
+  },
 ]
+
+/**
+ * Block keys that mark a turn as injected BY THE APP rather than typed by a
+ * human: a scheduler check-in (chatRunner's `SCHEDULER_TURN_INSTRUCTION`) or
+ * an auto-started Epic (`autoStartTurnInstruction`). A user turn whose split
+ * carries one of these keys is a machine turn, not a human reply.
+ */
+export const MACHINE_TURN_BLOCK_KEYS: readonly string[] = ['scheduler-turn', 'auto-start-turn'] as const
 
 export interface SplitPrompt {
   /** The injected boilerplate, verbatim, or null when none was found. */

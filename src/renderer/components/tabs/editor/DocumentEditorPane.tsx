@@ -127,7 +127,7 @@ export function DocumentEditorPane({
           </button>
         )}
         {modes.length > 0 && (
-          <div className="flex items-center ml-1 rounded border border-line overflow-hidden" data-testid="document-mode-toggle">
+          <div className="flex items-center ml-1 rounded border border-line overflow-clip" data-testid="document-mode-toggle">
             {modes.map((m) => (
               <button
                 key={m}
@@ -145,7 +145,7 @@ export function DocumentEditorPane({
 
       <div className="flex-1 min-h-0">
         {effMode === 'split' && markdown ? (
-          <div className="flex h-full">
+          <div className="flex h-full overflow-clip">
             {showOutline && <DocOutline text={value} scrollRef={previewScrollRef} />}
             <div className="flex-1 min-w-0 flex flex-col border-r border-line">
               {!readOnly && <MarkdownToolbar getEditor={getEditor} />}
@@ -156,7 +156,7 @@ export function DocumentEditorPane({
             </div>
           </div>
         ) : effMode === 'preview' && markdown ? (
-          <div className="flex h-full">
+          <div className="flex h-full overflow-clip">
             {showOutline && <DocOutline text={value} scrollRef={previewScrollRef} />}
             <div className="flex-1 min-w-0">
               <MarkdownPreview ref={previewScrollRef} text={value} wideMeasure={prefs.wideMeasure} />

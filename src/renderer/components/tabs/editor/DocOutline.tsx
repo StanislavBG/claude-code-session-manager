@@ -4,11 +4,13 @@
  * preview container to the matching anchor id.
  *
  * The preview is a sibling div (not an iframe), so we scroll by querying the
- * anchor inside the shared scroll container handed in via `scrollRef`.
+ * anchor inside the shared scroll container handed in via `scrollRef` and
+ * scrolling only that container (scrollWithin), never its ancestors.
  */
 
 import { useMemo } from 'react'
 import { extractHeadings } from './MarkdownPreview'
+import { scrollWithin } from '../../../lib/scrollWithin'
 
 interface Props {
   text: string
@@ -29,14 +31,17 @@ export function DocOutline({ text, scrollRef }: Props) {
   const go = (slug: string) => {
     const root = scrollRef.current
     if (!root) return
-    const el = root.querySelector(`#${CSS.escape(slug)}`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = root.querySelector<HTMLElement>(`#${CSS.escape(slug)}`)
+    if (!el) return
+    // Scroll ONLY the preview scroller — never the editor frame above it.
+    // offset 16 = the headings' scroll-margin-top (1rem) landing spot.
+    scrollWithin(scrollRef.current, el, { block: 'start', behavior: 'smooth', offset: 16 })
   }
 
   const minLevel = Math.min(...headings.map((h) => h.level))
 
   return (
-    <div className="w-56 shrink-0 border-r border-line bg-bg-elev overflow-auto">
+    <div className="w-56 shrink-0 border-r border-line bg-bg-elev overflow-auto overscroll-contain">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-fg-faint border-b border-line">Outline</div>
       <nav className="py-1">
         {headings.map((h, i) => (

@@ -121,7 +121,7 @@ export const MarkdownPreview = forwardRef<HTMLDivElement, Props>(function Markdo
   }
 
   return (
-    <div ref={ref} className="h-full overflow-auto bg-bg" onMouseUp={onMouseUp}>
+    <div ref={ref} className="h-full overflow-auto overscroll-contain bg-bg" onMouseUp={onMouseUp}>
       <div
         ref={bodyRef}
         className={

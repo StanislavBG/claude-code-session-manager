@@ -444,7 +444,7 @@ function EditorViewComponent() {
 
           {/* View mode toggle (renderable types) */}
           {modes.length > 0 && (
-            <div className="flex items-center ml-2 rounded border border-line overflow-hidden">
+            <div className="flex items-center ml-2 rounded border border-line overflow-clip">
               {modes.map((m) => (
                 <button
                   key={m}
@@ -489,7 +489,7 @@ function EditorViewComponent() {
               <TiptapBody key={path} value={buffers[path] ?? ''} onChange={(text) => editBuffer(path, text)} />
             </Suspense>
           ) : effMode === 'split' && isMarkdown(path) ? (
-            <div className="flex h-full">
+            <div className="flex h-full overflow-clip">
               {showOutline && <DocOutline text={buffers[path] ?? ''} scrollRef={previewScrollRef} />}
               <div className="flex-1 min-w-0 flex flex-col border-r border-line">
                 <MarkdownToolbar getEditor={getEditor} />
@@ -525,7 +525,7 @@ function EditorViewComponent() {
               )}
             </div>
           ) : effMode === 'preview' && isMarkdown(path) ? (
-            <div className="flex h-full">
+            <div className="flex h-full overflow-clip">
               {showOutline && <DocOutline text={buffers[path] ?? ''} scrollRef={previewScrollRef} />}
               <div ref={previewWrapRef} className="flex-1 min-w-0">
                 <MarkdownPreview

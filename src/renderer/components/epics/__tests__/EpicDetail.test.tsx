@@ -837,8 +837,10 @@ describe('EpicDetail (PRD 827)', () => {
     expect(tintedCard).not.toBeNull()
   })
 
-  it('clicking a needs-input option button submits the answer through chat.send', async () => {
+  it('answering a one-question card by typing and pressing Enter submits the reply through chat.send', async () => {
     const { api } = installWindowApiMock()
+    const { useQuestionDrafts } = await import('../../../state/questionDrafts')
+    useQuestionDrafts.setState({ drafts: {} })
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -849,7 +851,7 @@ describe('EpicDetail (PRD 827)', () => {
               id: 't-question',
               role: 'question',
               text: 'Cap at archive depth or extrapolate?',
-              questions: ['Cap at archive depth', 'Extrapolate'],
+              questions: ['Cap at archive depth or extrapolate?'],
               at: Date.now(),
             },
           ],
@@ -863,15 +865,25 @@ describe('EpicDetail (PRD 827)', () => {
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
     const questionCard = el.querySelector('[data-testid="chat-turn-question"]')!
-    const buttons = Array.from(questionCard.querySelectorAll('button')).filter((b) => b.textContent === 'Extrapolate')
-    expect(buttons).toHaveLength(1)
+    const input = questionCard.querySelector<HTMLTextAreaElement>('[data-testid="question-answer-input"]')!
+    expect(input).not.toBeNull()
 
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => {
-      buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      setter.call(input, 'Extrapolate')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     })
 
+    expect(api.chat.run).toHaveBeenCalledTimes(1)
     expect(api.chat.run).toHaveBeenCalledWith(
-      expect.objectContaining({ tabId: session.id, sessionId: session.claudeSessionId, prompt: 'Extrapolate' }),
+      expect.objectContaining({
+        tabId: session.id,
+        sessionId: session.claudeSessionId,
+        prompt: expect.stringContaining('1. Cap at archive depth or extrapolate?\nAnswer: Extrapolate'),
+      }),
     )
   })
 

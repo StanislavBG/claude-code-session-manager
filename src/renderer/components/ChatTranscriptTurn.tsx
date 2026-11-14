@@ -18,6 +18,8 @@ import { formatAgo } from '../lib/formatTime'
 import { copyText as writeClipboard } from '../lib/clipboard'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 import { InlineConsentTerminal } from './InlineConsentTerminal'
+import { QuestionCard } from './QuestionCard'
+import type { QuestionCardState } from '../lib/questionCardState'
 import { type Attribution } from '../lib/chatAttribution'
 import type { TranscriptEventRef } from '../../preload/api'
 
@@ -1048,12 +1050,14 @@ function TurnComponent({
   clampBodyChars = null,
   injectedPreamble = 'shown',
   onQuote,
+  questionCardState = 'open',
 }: {
   turn: ChatTurn
   cwd: string
   tabId: string
-  /** The tab's claude session id — needed only to submit an inline needs-input
-   *  answer button through the same chat send() path the composer uses. */
+  /** The tab's claude session id — needed to send the question card's
+   *  combined reply (QuestionCard.tsx) and the consent-notice Retry through
+   *  the same chat send() path the composer uses. */
   sessionId: string
   runActive?: boolean
   /** True only for the in-flight live bubble whose text grows per delta —
@@ -1114,14 +1118,17 @@ function TurnComponent({
    *  with no reply-context affordance (Terminal transcript, raw session view)
    *  are unaffected. Set only by EpicDetail's Discussion timeline. */
   onQuote?: (text: string) => void
+  /** Whether this question turn is still the live ask (lib/questionCardState.ts).
+   *  Only read by the 'question' branch; default 'open'. */
+  questionCardState?: QuestionCardState
 }) {
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
   // happen after these hooks run.
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const presentation = turn.role === 'assistant' ? assistantTurnPresentation(turn, runActive) : null
-  // Only needed to disable/enable the question turn's inline answer buttons
-  // while a later run is already in flight for this tab.
+  // Only needed to disable/enable the consent notice's Retry button while a
+  // later run is already in flight for this tab.
   const chatRunning = useChat((s) => s.chats[tabId]?.running ?? false)
   // Only meaningful for the 'notice' branch below, but declared up here
   // (rules of hooks) since earlier roles return before that branch runs.
@@ -1230,10 +1237,6 @@ function TurnComponent({
     const tint = needsDecisionStyle ? ERROR_TINT : AMBER_TINT
     const text = needsDecisionStyle ? ERROR_TEXT : AMBER_TEXT
     const label = needsDecisionStyle ? 'NEEDS YOUR DECISION' : 'Needs your answer'
-    const options = turn.questions ?? [turn.text]
-    const onAnswer = (answer: string) => {
-      useChat.getState().send({ tabId, sessionId, cwd, prompt: answer })
-    }
     return (
       <div className="flex max-w-[90%] items-start gap-2" data-testid="chat-turn-question">
         <div className={`flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border text-xs font-semibold ${tint} ${text}`}>
@@ -1256,25 +1259,15 @@ function TurnComponent({
               <span aria-hidden>❓</span>
               {label}
             </div>
-            <ul className="list-disc space-y-1 pl-5">
-              {options.map((q, i) => (
-                <li key={i}>{q}</li>
-              ))}
-            </ul>
-            <div className={`mt-2 flex flex-wrap gap-2 border-t pt-2 ${tint}`}>
-              {options.map((q, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => onAnswer(q)}
-                  disabled={chatRunning}
-                  title={q}
-                  className={`max-w-full truncate rounded-lg border border-current px-3 py-1.5 text-xs font-semibold hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent ${text}`}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
+            <QuestionCard
+              turn={turn}
+              tabId={tabId}
+              sessionId={sessionId}
+              cwd={cwd}
+              cardState={questionCardState}
+              tintClass={tint}
+              textClass={text}
+            />
           </div>
         </div>
       </div>

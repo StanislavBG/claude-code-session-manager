@@ -193,7 +193,7 @@ const { reconcileEpicWorktreesOnBoot } = require('./lib/epic/epicWorktreeBoot.cj
 const queueStore = require('./lib/scheduler/queueStore.cjs');
 const supervisorRecord = require('./lib/scheduler/jobSupervisorRecord.cjs');
 const adoptedRunSupervisor = require('./lib/scheduler/adoptedRunSupervisor.cjs');
-const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
+const { splitFrontmatter, parsePrdFile, serializePrdFile, isArtifactOnlyDeclaration } = require('./lib/prd/prdFrontmatter.cjs');
 const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
 const { resolvePersonaDefaultEstimate, DEFAULT_PRD_AGENT_TYPE } = require('./lib/prd/prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/prd/depSlugResolve.cjs');
@@ -3226,9 +3226,9 @@ function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit =
 
 function applyOrphanOutcomeInner(job, outcome, killNote, confirmedLandedCommit, snap, now) {
   // A reported 'success' completes only on landed-commit evidence, or for a
-  // DECLARED artifact-only PRD (`deliverable: artifact` + artifactPaths — same
-  // check as runVerify's artifact exemption) where no commit is legitimate.
-  const artifactOnly = job.deliverable === 'artifact' && Array.isArray(job.artifactPaths) && job.artifactPaths.length > 0;
+  // DECLARED artifact-only PRD (`deliverable: artifact` + artifactPaths — the
+  // shared isArtifactOnlyDeclaration predicate) where no commit is legitimate.
+  const artifactOnly = isArtifactOnlyDeclaration(job);
   if (outcome === 'success' && (confirmedLandedCommit || artifactOnly)) {
     if (confirmedLandedCommit) {
       transitionJob(job, 'completed', { reason: `boot orphan reconciliation: run succeeded, landedCommit ${confirmedLandedCommit} resolves`, source: 'applyOrphanOutcome:landed' });
@@ -4994,14 +4994,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // after any digest fence rather than concatenated ahead of it.
   // Artifact-only finish variant (PRD 3109): read from the PRD FILE's own
   // frontmatter — queue rows and parsePrd()'s result carry no
-  // deliverable/artifactPaths, so job.* would always be false. Same condition
-  // as runVerify.cjs's artifact exemption; any read/parse failure → false.
+  // deliverable/artifactPaths, so job.* would always be false. Uses the shared
+  // isArtifactOnlyDeclaration predicate; any read/parse failure → false.
   let isArtifactOnly = false;
   if (prdPath) {
     try {
       const fm = parsePrdFile(await fsp.readFile(prdPath, 'utf8')).frontmatter;
-      isArtifactOnly = !!fm && fm.deliverable === 'artifact'
-        && Array.isArray(fm.artifactPaths) && fm.artifactPaths.length > 0;
+      isArtifactOnly = isArtifactOnlyDeclaration(fm);
     } catch {
       isArtifactOnly = false;
     }
@@ -9081,7 +9080,6 @@ async function reapDeadRunningJobs() {
         // -1 commit count or a missing checkout (runMadeCommit null) or an
         // unreadable status (dirt null) keeps the pre-guard behaviour.
         if (runMadeCommit !== null && dirt !== null) {
-          const artifactPaths = row.artifactPaths;
           const guardVerdict = commitGuardVerdict({
             newlyDirty: dirt,
             siblingRunning: false,
@@ -9089,7 +9087,7 @@ async function reapDeadRunningJobs() {
             jobSelfCommitted: runMadeCommit,
             legitimateNoOp: false,
             isFixPlanJob: resolveIsFixPlan(d.slug, row.isFixPlan),
-            artifactVerified: row.deliverable === 'artifact' && Array.isArray(artifactPaths) && artifactPaths.length > 0,
+            artifactVerified: isArtifactOnlyDeclaration(row),
             verifyResult: null,
             salvagePatch,
           });

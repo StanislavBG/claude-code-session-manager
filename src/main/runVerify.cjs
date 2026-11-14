@@ -44,7 +44,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { parsePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
+const { parsePrdFile, isArtifactOnlyDeclaration } = require('./lib/prd/prdFrontmatter.cjs');
 const { isSatisfiedDepRow } = require('./lib/prd/depSlugResolve.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
@@ -907,7 +907,7 @@ async function verifyRun({
       if (!mergeMainVerified && !priorRunVerified) {
         let fm = null;
         try { fm = parsePrdFile(prdFullText).frontmatter; } catch { fm = null; }
-        if (fm && fm.deliverable === 'artifact' && Array.isArray(fm.artifactPaths) && fm.artifactPaths.length > 0) {
+        if (isArtifactOnlyDeclaration(fm)) {
           const check = artifactsCheck({
             cwd: [queueEntry?.cwd, worktreeDir],
             paths: fm.artifactPaths,

@@ -116,7 +116,31 @@ function missingEntryFiles() {
   return missing;
 }
 
+/**
+ * Off-origin stylesheet/font references in an index.html string: hrefs of
+ * <link rel=stylesheet|preconnect|preload> and @import URLs that are http(s) or protocol-relative.
+ * The bilko.run iframe silently drops these and falls back to system fonts. Pure string parse.
+ */
+function externalStyleRefs(indexHtml) {
+  const html = String(indexHtml || '');
+  const isExternal = (u) => /^(https?:)?\/\//i.test(u.trim());
+  const attr = (tag, name) => {
+    const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
+    return m ? (m[1] ?? m[2] ?? m[3]) : null;
+  };
+  const out = [];
+  const push = (u) => { if (u && isExternal(u) && !out.includes(u.trim())) out.push(u.trim()); };
+  for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
+    const rel = (attr(m[0], 'rel') || '').toLowerCase().split(/\s+/);
+    if (rel.some((r) => r === 'stylesheet' || r === 'preconnect' || r === 'preload')) push(attr(m[0], 'href'));
+  }
+  for (const m of html.matchAll(/@import\s+(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s)'";]+))/gi)) {
+    push(m[1] ?? m[2] ?? m[3]);
+  }
+  return out;
+}
+
 module.exports = {
-  assetManifest, readAsset, missingEntryFiles, MAX_ASSET_BYTES,
+  assetManifest, readAsset, missingEntryFiles, externalStyleRefs, MAX_ASSET_BYTES,
   __test: { setRoot: (p) => { _rootOverride = p; } },
 };

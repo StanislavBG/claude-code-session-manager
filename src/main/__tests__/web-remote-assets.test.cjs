@@ -87,6 +87,30 @@ describe('missingEntryFiles', () => {
   })
 })
 
+describe('externalStyleRefs', () => {
+  const page = (head) => `<!doctype html><html><head>${head}</head><body></body></html>`
+  it('returns Google Fonts stylesheet and preconnect links', () => {
+    const html = page('<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Geist&display=swap" rel="stylesheet">' +
+      '<link rel=preload as=font href=//cdn.example.com/f.woff2>')
+    expect(remoteAssets.externalStyleRefs(html)).toEqual([
+      'https://fonts.googleapis.com', 'https://fonts.gstatic.com',
+      'https://fonts.googleapis.com/css2?family=Geist&display=swap', '//cdn.example.com/f.woff2',
+    ])
+  })
+  it('returns @import URLs on another origin', () => {
+    const html = page('<style>@import url("https://fonts.googleapis.com/css2?family=Inter"); @import \'http://x.test/a.css\';</style>')
+    expect(remoteAssets.externalStyleRefs(html)).toEqual(['https://fonts.googleapis.com/css2?family=Inter', 'http://x.test/a.css'])
+  })
+  it('ignores local app.css, inline styles and local @import', () => {
+    const html = page('<link rel="stylesheet" href="./app.css"><link rel="stylesheet" href="/assets/app.css">' +
+      '<link rel="icon" href="https://example.com/favicon.ico">' +
+      '<style>body{font-family:Geist} @import url("./fonts.css");</style><div style="color:red"></div>')
+    expect(remoteAssets.externalStyleRefs(html)).toEqual([])
+  })
+})
+
 describe('remoteAssets', () => {
   it('manifest hashes match file contents', () => {
     const m = remoteAssets.assetManifest()

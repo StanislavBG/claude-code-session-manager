@@ -14,6 +14,7 @@ import { resolveEpicRef } from '../../../lib/epicProvenance'
 import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
 import { takePendingPrdSlug } from '../../../lib/prdDeepLink'
 import { useEditor } from '../../../state/editor'
+import { requestScheduledPrds } from '../../../lib/useScheduledPrds'
 import { EditorView } from '../EditorView'
 
 interface PrdMeta {
@@ -105,8 +106,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
 
   useEffect(() => {
     let alive = true
-    window.api.schedule
-      .listPrds(scopeCwd ?? undefined)
+    requestScheduledPrds(scopeCwd ?? undefined)
       .then((list) => {
         if (alive) {
           setPrds(excludeArchived(list))
@@ -237,7 +237,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
 
   async function refreshPrds() {
     try {
-      const list = await window.api.schedule.listPrds(scopeCwd ?? undefined)
+      const list = await requestScheduledPrds(scopeCwd ?? undefined)
       setPrds(excludeArchived(list))
     } catch { /* */ }
   }
@@ -272,7 +272,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
         toast.error(`Failed to create PRD: ${res.error}`)
         return
       }
-      const list = await window.api.schedule.listPrds(scopeCwd ?? undefined)
+      const list = await requestScheduledPrds(scopeCwd ?? undefined)
       setPrds(excludeArchived(list))
       openPrd(slug)
     } catch (e: unknown) {

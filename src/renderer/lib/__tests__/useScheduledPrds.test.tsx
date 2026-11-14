@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { useScheduledPrds, __resetScheduledPrdsForTests, LIST_PRDS_COALESCE_MS } from '../useScheduledPrds'
+import { useScheduledPrds, requestScheduledPrds, __resetScheduledPrdsForTests, LIST_PRDS_COALESCE_MS } from '../useScheduledPrds'
 import { useScheduleState } from '../../state/scheduleState'
 import type { PrdListItem, ScheduleStateSnapshot } from '../../../preload/api'
 
@@ -109,5 +109,17 @@ describe('useScheduledPrds — shared fetch', () => {
     expect(listPrds).toHaveBeenCalledTimes(2)
     expect(listPrds).toHaveBeenCalledWith(undefined)
     expect(listPrds).toHaveBeenCalledWith('/q')
+  })
+
+  it('two direct requestScheduledPrds calls for one cwd inside the window make one listPrds call', async () => {
+    const listPrds = installMock()
+    const a = requestScheduledPrds('/p')
+    await vi.advanceTimersByTimeAsync(LIST_PRDS_COALESCE_MS - 50)
+    const b = requestScheduledPrds('/p')
+    await flush()
+    await expect(a).resolves.toBe(LIST)
+    await expect(b).resolves.toBe(LIST)
+    expect(listPrds).toHaveBeenCalledTimes(1)
+    expect(listPrds).toHaveBeenCalledWith('/p')
   })
 })

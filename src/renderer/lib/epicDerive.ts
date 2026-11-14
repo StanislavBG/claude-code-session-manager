@@ -165,7 +165,9 @@ export interface EpicPrd {
 }
 
 /**
- * Joins `window.api.schedule.listPrds()` file entries with schedule jobs on
+ * Joins the cwd-scoped shared PRD fetch (`useScheduledPrds(cwd)` /
+ * `requestScheduledPrds(cwd)` — one coalesced `listPrds(cwd)` IPC call per
+ * cwd) file entries with schedule jobs on
  * `sourcePromptId === epicId` — the PRDs + Runs tabs' data source. A PRD
  * file with no matching job row reports status 'draft' UNLESS it's archived,
  * in which case the file's own `archivedStatus` (completed/failed) stands in

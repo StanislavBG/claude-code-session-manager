@@ -10,7 +10,7 @@ import { useEpicTerminal } from './epicTerminal'
 import { summarizeSignal, type ChatSignal } from '../lib/chatSignals'
 import { extractAttribution, type Attribution } from '../lib/chatAttribution'
 import { splitInjectedPreamble } from '../lib/promptPreamble'
-import { splitStopSignal } from '../lib/stopSignal'
+import { normalizeQuestions, parseStopSignalQuestions, splitStopSignal } from '../lib/stopSignal'
 import { autoApproveInbound } from '../lib/inboundAutoApprove'
 
 /**
@@ -81,6 +81,10 @@ export interface ChatTurn {
    *  reads this instead of re-deriving it from a full payload the store
    *  never keeps. */
   attribution?: Attribution
+  /** Who sent this prompt. Set only on the optimistic user turn dispatchSend
+   *  pushes (fresh and dequeued sends alike) and kept through the in-place
+   *  JSONL upgrade; absent on feed-only turns. */
+  origin?: ChatPromptOrigin
 }
 
 /**
@@ -461,12 +465,20 @@ function pushTurn(
   ticketExtra: Partial<PromptTicket> = {},
 ): void {
   patch(tabId, (c) => {
+    // A question card the JSONL feed already created for this exchange (it
+    // parsed the assistant line's stop-signal block) IS this ask — reuse it
+    // rather than appending a second card, and point the ticket at it.
+    const existingQ =
+      turn.role === 'question' && turn.text && hasTranscriptFeed(tabId)
+        ? findOpenQuestionTurn(c.turns, turn.text)
+        : -1
     const ticketHistory = c.activeTicket
       ? appendTicketHistory(c.ticketHistory ?? [], {
           ...c.activeTicket,
           status: ticketStatus,
           completedAt: Date.now(),
           ...ticketExtra,
+          ...(existingQ !== -1 ? { questionTurnId: c.turns[existingQ].id } : {}),
         })
       : (c.ticketHistory ?? [])
     // Reconciliation with the JSONL transcript feed (see the feed section at
@@ -481,7 +493,9 @@ function pushTurn(
         ? findRecentDuplicateTurn(c.turns, turn.role, turn.text)
         : -1
     const turns =
-      dupIdx !== -1
+      existingQ !== -1
+        ? c.turns
+        : dupIdx !== -1
         ? c.turns.map((t, i) =>
             i === dupIdx
               ? {
@@ -549,7 +563,7 @@ function dispatchSend(args: {
 }): void {
   const { tabId, sessionId, cwd, text, promptId, tag, chainRootId, origin } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
-  const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
+  const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now(), ...(origin ? { origin } : {}) }
   capturePromptSessionTurn(tabId, 'user', text)
   const activeTicket: PromptTicket = cur.activeTicket ?? {
     id: promptId ?? crypto.randomUUID(),
@@ -1135,6 +1149,20 @@ function findRecentDuplicateTurn(turns: ChatTurn[], role: ChatTurnRole, text: st
   return -1
 }
 
+/** Index of a role:'question' turn with exactly `text`, located after the
+ *  LAST role:'user' turn (i.e. within the current exchange), or -1. */
+function findOpenQuestionTurn(turns: ChatTurn[], text: string): number {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].role === 'user') return -1
+    if (turns[i].role === 'question' && turns[i].text === text) return i
+  }
+  return -1
+}
+
+function feedQuestionTurn(questions: string[], at: number, ref: TranscriptEventRef | null | undefined): ChatTurn {
+  return { id: turnId(), role: 'question', questions, text: questions.join('\n'), at, ref }
+}
+
 function capTurns(turns: ChatTurn[]): ChatTurn[] {
   return turns.length > FEED_TURNS_CAP ? turns.slice(turns.length - FEED_TURNS_CAP) : turns
 }
@@ -1205,6 +1233,11 @@ function applyTranscriptEvent(tabId: string, c: TabChat, ev: TranscriptEvent): T
       const idx = stream.indexOf(textData)
       if (idx !== -1) stream = stream.slice(0, idx) + stream.slice(idx + textData.length)
     }
+    // A stop-signal block on an assistant line is the ask itself — the feed
+    // creates its question card (reconciled with a live needs-input twin)
+    // so a rebuilt Discussion still shows unanswered questions.
+    const qs = role === 'assistant' ? parseStopSignalQuestions(textData) : null
+    const qText = qs?.length ? qs.join('\n') : null
     const dupIdx = findRecentDuplicateTurn(c.turns, role, textData)
     if (dupIdx !== -1) {
       // A twin already landed. If it came from the feed (it has a `ref`),
@@ -1215,24 +1248,42 @@ function applyTranscriptEvent(tabId: string, c: TabChat, ev: TranscriptEvent): T
       // byte-exact text, `Show raw`, the branch chip and the `≡` preamble
       // disclosure — everything CLAUDE.md's promptPreamble contract needs.
       if (c.turns[dupIdx].ref) return { ...c, stream }
-      return {
-        ...c,
-        stream,
-        turns: c.turns.map((t, i) =>
-          i === dupIdx
-            ? { ...t, text: textData, at, kind: ev.kind, ref: ev.ref, attribution: attribution ?? t.attribution }
-            : t,
-        ),
+      const upgraded = c.turns.map((t, i) =>
+        i === dupIdx
+          ? { ...t, text: textData, at, kind: ev.kind, ref: ev.ref, attribution: attribution ?? t.attribution }
+          : t,
+      )
+      if (qs && qText) {
+        let qIdx = -1
+        for (let i = dupIdx + 1; i < upgraded.length && upgraded[i].role !== 'user'; i++) {
+          if (upgraded[i].role === 'question' && upgraded[i].text === qText) {
+            qIdx = i
+            break
+          }
+        }
+        if (qIdx !== -1) {
+          if (!upgraded[qIdx].ref) upgraded[qIdx] = { ...upgraded[qIdx], ref: ev.ref }
+        } else {
+          upgraded.splice(dupIdx + 1, 0, feedQuestionTurn(qs, at, ev.ref))
+        }
       }
+      return { ...c, stream, turns: capTurns(upgraded) }
     }
-    return {
-      ...c,
-      stream,
-      turns: capTurns([
-        ...c.turns,
-        { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref, attribution },
-      ]),
+    const assistantTurn: ChatTurn = { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref, attribution }
+    if (qs && qText) {
+      // No assistant twin (e.g. a live needs-input with an empty answerBody
+      // pushed only its question card) — adopt a ref-less live card from the
+      // current exchange rather than adding a second one.
+      const liveQ = findOpenQuestionTurn(c.turns, qText)
+      if (liveQ !== -1 && !c.turns[liveQ].ref) {
+        const turns = c.turns.slice()
+        turns[liveQ] = { ...turns[liveQ], ref: ev.ref }
+        turns.splice(liveQ, 0, assistantTurn)
+        return { ...c, stream, turns: capTurns(turns) }
+      }
+      return { ...c, stream, turns: capTurns([...c.turns, assistantTurn, feedQuestionTurn(qs, at, ev.ref)]) }
     }
+    return { ...c, stream, turns: capTurns([...c.turns, assistantTurn]) }
   }
   // Bounded structured summary for the typed renderers — computed HERE, while
   // ev.data/ev.raw are still in hand from IPC (the store never keeps them).
@@ -1373,8 +1424,9 @@ if (typeof window !== 'undefined' && window.api?.chat) {
     appendResponseEvent(tabId, finalMessage)
     pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now(), outcome: OUTCOME_LANDED })
   })
-  window.api.chat.onNeedsInput(({ tabId, questions, answerBody }) => {
+  window.api.chat.onNeedsInput(({ tabId, questions: rawQuestions, answerBody }) => {
     const questionTurnId = turnId()
+    const questions = normalizeQuestions(rawQuestions)
     if (answerBody && answerBody.trim()) {
       capturePromptSessionTurn(tabId, 'assistant', answerBody)
       appendResponseEvent(tabId, answerBody)

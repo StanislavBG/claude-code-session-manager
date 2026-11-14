@@ -56,6 +56,33 @@ export function splitStopSignal(text: string): SplitStopSignal | null {
   return { body: text.slice(0, idx).trim(), signalBlock: text.slice(idx) }
 }
 
+/**
+ * Normalize a stop-signal `questions` payload: keeps only non-empty strings
+ * (trimmed), in order. Anything that is not an array yields [].
+ */
+export function normalizeQuestions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const q of raw) {
+    if (typeof q !== 'string') continue
+    const t = q.trim()
+    if (t) out.push(t)
+  }
+  return out
+}
+
+/**
+ * The normalized questions of a trailing stop-signal block, or null when the
+ * text carries no valid block (see splitStopSignal). A valid block with no
+ * usable questions yields [].
+ */
+export function parseStopSignalQuestions(text: string): string[] | null {
+  const split = splitStopSignal(text)
+  if (!split) return null
+  const parsed = extractJson(split.signalBlock.slice(STOP_SENTINEL.length)) as { questions?: unknown } | null
+  return normalizeQuestions(parsed?.questions)
+}
+
 /** Minimal balanced-`{...}` JSON extractor — mirrors `main/lib/util/extractJson.cjs`. */
 function extractJson(text: string): unknown {
   if (!text) return null

@@ -137,7 +137,6 @@
   "scopeOomPolicy": "process",
   "singleInstanceGuard": "process",
   "smProcNames": "process",
-  "telemetryBacklog": "telemetry",
   "telemetryBoot": "telemetry",
   "telemetryClient": "telemetry",
   "telemetryConsent": "telemetry",

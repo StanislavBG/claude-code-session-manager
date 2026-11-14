@@ -10,7 +10,6 @@ const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const telemetrySettings = require('./lib/telemetry/telemetrySettings.cjs');
 const telemetryClient = require('./lib/telemetry/telemetryClient.cjs');
-const telemetryBacklog = require('./lib/telemetry/telemetryBacklog.cjs');
 const telemetryConsent = require('./lib/telemetry/telemetryConsent.cjs');
 
 /**
@@ -39,10 +38,7 @@ function registerTelemetryHandlers({ ipcMain }) {
     const saved = await telemetryConsent.applyConsentUpdate(cfg, { telemetrySettings, telemetryClient });
     return { ok: true, config: saved, status: telemetryClient.status() };
   }));
-  ipcMain.handle('telemetry:status', () => ({
-    ...telemetryClient.status(),
-    backlog: telemetryBacklog.lastRunSummary(),
-  }));
+  ipcMain.handle('telemetry:status', () => telemetryClient.status());
   ipcMain.handle('telemetry:config-path', () => telemetrySettings.storePath());
   ipcMain.handle('telemetry:recent-records', () => telemetryClient.recentRecords());
   ipcMain.handle('telemetry:flush-now', () => telemetryClient.flush('manual'));

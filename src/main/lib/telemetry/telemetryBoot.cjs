@@ -25,7 +25,27 @@ function resolveDeps(deps = {}) {
     buildMachineProfile: deps.buildMachineProfile || require('../machineProfile.cjs').buildMachineProfile,
     telemetryCounters: deps.telemetryCounters || require('./telemetryCounters.cjs'),
     getSeedStatus: deps.getSeedStatus || (() => require('../../seedStatus.cjs').getSeedStatus()),
+    fsp: deps.fsp || require('node:fs/promises'),
+    homedir: deps.homedir || require('node:os').homedir,
   };
+}
+
+/**
+ * removeLegacyWatermarks({ fsp, homedir }) — one-shot migration for the
+ * retired errors-<date>.jsonl backlog replay: its delivery
+ * watermarks file has no reader any more. Best-effort: resolves true when a
+ * file was removed, false otherwise (absent, unreadable home, EACCES, ...).
+ * Never throws — telemetry housekeeping must not break boot.
+ */
+async function removeLegacyWatermarks({ fsp, homedir } = {}) {
+  try {
+    const path = require('node:path');
+    const file = path.join(homedir(), '.claude', 'session-manager', 'telemetry-watermarks.json');
+    await fsp.unlink(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -71,10 +91,12 @@ function buildSeeds(getSeedStatus) {
  *     destination for a machine profile.
  *  4. app.launch — one counter event per boot, via telemetryCounters so the
  *     shape lives in exactly one place across every counter this PRD adds.
+ *  5. removeLegacyWatermarks — deletes the retired backlog's watermarks file
+ *     if one is still on disk (best-effort, never throws).
  */
 async function bootSequence({ now = Date.now(), appVersion, installChannel, deps: depsOverride } = {}) {
   const deps = resolveDeps(depsOverride);
-  const { telemetrySettings, telemetryClient, buildMachineProfile, telemetryCounters, getSeedStatus } = deps;
+  const { telemetrySettings, telemetryClient, buildMachineProfile, telemetryCounters, getSeedStatus, fsp, homedir } = deps;
 
   const settings = await telemetrySettings.load();
   const versionChanged = settings.lastMachineReportVersion !== appVersion;
@@ -96,6 +118,8 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
   }
 
   telemetryCounters.trackAppLaunch({ installChannel, appVersion });
+
+  await removeLegacyWatermarks({ fsp, homedir });
 }
 
-module.exports = { bootSequence, buildSeeds };
+module.exports = { bootSequence, buildSeeds, removeLegacyWatermarks };

@@ -4,7 +4,7 @@
  * deployed bilko.run ingest contract, that every persisted row is
  * attributable to an app version + machine class, and that the
  * accumulate -> drain -> confirm -> mark-done lifecycle delivers each record
- * EXACTLY ONCE across restarts, evictions and repeated launches.
+ * EXACTLY ONCE across restarts and failed sends.
  *
  * Starts a real node:http server (no fetch injection) that mirrors the
  * validation + INSERT column mapping of ~/Projects/Bilko/server/routes/
@@ -25,10 +25,6 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-
-const opsErrorLog = require('../lib/telemetry/opsErrorLog.cjs');
-const { isEphemeralCwd } = require('../lib/ephemeralCwd.cjs');
-const { resolveProjectContext } = require('../lib/projectRootResolve.cjs');
 
 // ─── transcription of ~/Projects/Bilko/server/routes/telemetry.ts's shape
 // rules, read fresh for this PRD. The stub below uses these to materialise
@@ -255,11 +251,9 @@ function recordIdOf(row, table) {
   }
 }
 
-// ─── module-reload helpers (mirrors telemetryClient.test.cjs / telemetryBacklog.test.cjs) ───
+// ─── module-reload helpers (mirrors telemetryClient.test.cjs) ───
 
 const tmpDirs = []; // cleaned after each test
-const persistentTmpDirs = []; // project dirs holding fixture files — must survive to the FINAL ROLLUP test, cleaned in afterAll
-const fixtureSnapshots = []; // { path, mtimeMs, bytes: Buffer } captured right after each fixture write
 
 let originalHome;
 let originalSmTelemetry;
@@ -274,10 +268,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (stubServer) await stubServer.close();
-  while (persistentTmpDirs.length) {
-    const d = persistentTmpDirs.pop();
-    await fsp.rm(d, { recursive: true, force: true });
-  }
 });
 
 beforeEach(() => {
@@ -306,14 +296,6 @@ afterEach(async () => {
 async function mkHome() {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-telemetry-contract-home-'));
   tmpDirs.push(dir);
-  return dir;
-}
-
-async function mkProject(name) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), `sm-telemetry-contract-project-${name}-`));
-  // Not pushed to tmpDirs: fixture files written under this project must
-  // survive to the FINAL ROLLUP test's byte-for-byte/mtime check.
-  persistentTmpDirs.push(dir);
   return dir;
 }
 
@@ -363,53 +345,6 @@ function freshBoot() {
   const resolved = require.resolve('../lib/telemetry/telemetryBoot.cjs');
   delete require.cache[resolved];
   return require('../lib/telemetry/telemetryBoot.cjs');
-}
-
-function freshBacklog() {
-  const resolved = require.resolve('../lib/telemetry/telemetryBacklog.cjs');
-  delete require.cache[resolved];
-  return require('../lib/telemetry/telemetryBacklog.cjs');
-}
-
-function makeBacklogDeps({ telemetryClient, config, tabCwds }) {
-  return {
-    sessionsStore: { load: async () => ({ tabs: tabCwds.map((cwd) => ({ cwd })), activeTabId: null }) },
-    isEphemeralCwd,
-    resolveProjectContext,
-    telemetryClient,
-    opsErrorLog,
-    config,
-    fs,
-    fsp,
-  };
-}
-
-function errLine(i, overrides = {}) {
-  return {
-    ts: new Date().toISOString(),
-    level: 'error',
-    scope: `synthetic-${i}`,
-    tabId: null,
-    epicId: null,
-    tags: [`level:error`, `scope:synthetic-${i}`],
-    message: `boom ${i}`,
-    ...overrides,
-  };
-}
-
-function recentDateStr(offsetDays = 0) {
-  return new Date(Date.now() - offsetDays * 86400000).toISOString().slice(0, 10);
-}
-
-function writeErrorsFile(projectCwd, dateStr, lines, { trailingNewline = true } = {}) {
-  const dir = opsErrorLog.logsDir(projectCwd);
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `errors-${dateStr}.jsonl`);
-  const body = lines.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n');
-  fs.writeFileSync(file, trailingNewline ? body + '\n' : body);
-  const stat = fs.statSync(file);
-  fixtureSnapshots.push({ path: file, mtimeMs: stat.mtimeMs, bytes: fs.readFileSync(file) });
-  return file;
 }
 
 async function readQueueLines(client) {
@@ -636,74 +571,27 @@ test('a record accumulated under one appVersion and flushed after an upgrade arr
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC: THE OVER-TRAFFIC TEST — 5 simulated launches, 40 lines delivered exactly once total
-// ═══════════════════════════════════════════════════════════════════════
-
-test('40 backlog error lines across two projects drain across FIVE simulated launches, delivered exactly once in total', async () => {
-  const home = await mkHome();
-  const projectA = await mkProject('traffic-a');
-  const projectB = await mkProject('traffic-b');
-  const day = recentDateStr();
-
-  writeErrorsFile(projectA, day, Array.from({ length: 10 }, (_, i) => errLine(`a1-${i}`)));
-  writeErrorsFile(projectA, recentDateStr(1), Array.from({ length: 10 }, (_, i) => errLine(`a2-${i}`)));
-  writeErrorsFile(projectB, day, Array.from({ length: 10 }, (_, i) => errLine(`b1-${i}`)));
-  writeErrorsFile(projectB, recentDateStr(1), Array.from({ length: 10 }, (_, i) => errLine(`b2-${i}`)));
-
-  const before = stubServer.state.errors.length;
-  const launchCounts = [];
-
-  for (let launch = 0; launch < 5; launch++) {
-    const client = freshClient(home);
-    const backlog = freshBacklog();
-    const deps = makeBacklogDeps({ telemetryClient: client, config: require('../config.cjs'), tabCwds: [projectA, projectB] });
-    await backlog.drainBacklog({ now: Date.now(), deps });
-    launchCounts.push(stubServer.state.errors.length - before - launchCounts.reduce((a, b) => a + b, 0));
-    client.shutdown();
-  }
-
-  expect(launchCounts[0]).toBe(40);
-  for (let i = 1; i < 5; i++) expect(launchCounts[i]).toBe(0);
-
-  const totalReceived = stubServer.state.errors.length - before;
-  expect(totalReceived).toBe(40);
-
-  const recordIds = stubServer.state.errors.slice(before).map((r) => recordIdOf(r, 'errors'));
-  expect(recordIds.every((id) => typeof id === 'string' && id)).toBe(true);
-  expect(new Set(recordIds).size).toBe(40);
-});
-
-// ═══════════════════════════════════════════════════════════════════════
 // AC: exactly-once across a failed send
 // ═══════════════════════════════════════════════════════════════════════
 
-test('records queued, a 503 mid-drain, then a fresh client flushing successfully — every record arrives exactly once, bytesConfirmed frozen during the failure', async () => {
+test('records queued, a 503 on the first flush, then a fresh client flushing successfully — every record arrives exactly once', async () => {
   const home = await mkHome();
-  const project = await mkProject('failed-send');
-  writeErrorsFile(project, recentDateStr(), [errLine('fs-1'), errLine('fs-2'), errLine('fs-3')]);
-
   const before = stubServer.state.errors.length;
 
-  // Round 1: the stub returns 503 for the next error-channel POST — the backlog
-  // drainer durably enqueues the 3 records into the client's queue, but delivery fails.
+  // Round 1: the stub returns 503 for the next error-channel POST — the
+  // records sit durably in the client's queue, but delivery fails.
   stubServer.queueOverride('error', 503, { error: 'service_unavailable' });
   const clientA = freshClient(home);
-  const backlogA = freshBacklog();
-  const depsA = makeBacklogDeps({ telemetryClient: clientA, config: require('../config.cjs'), tabCwds: [project] });
-  await backlogA.drainBacklog({ now: Date.now(), deps: depsA });
+  for (const i of [1, 2, 3]) {
+    await clientA.reportError({ name: 'FailedSendError', msg: `fs-${i}`, stack: `FailedSendError: fs-${i}\n    at f (a.js:1:1)` });
+  }
+  await clientA.flush('manual');
   clientA.shutdown();
 
   expect(stubServer.state.errors.length).toBe(before); // nothing landed during the failure
 
-  const wmPath = path.join(home, '.claude', 'session-manager', 'telemetry-watermarks.json');
-  const wmAfterFailure = JSON.parse(await fsp.readFile(wmPath, 'utf8'));
-  const entryAfterFailure = Object.values(wmAfterFailure).find((e) => e && typeof e === 'object' && 'bytesConfirmed' in e);
-  expect(entryAfterFailure.bytesConfirmed).toBe(0); // bytesConfirmed frozen during the failed phase
-  expect(entryAfterFailure.bytesEnqueued).toBeGreaterThan(0);
-
   // "Restart": a fresh client against the same temp config dir picks up the
-  // still-queued records (telemetryClient's own queue is the durable accumulator)
-  // and flushes them successfully — no drainer involved this time.
+  // still-queued records (telemetryClient's own queue is the durable accumulator).
   const clientB = freshClient(home);
   const result = await clientB.flush('manual');
   clientB.shutdown();
@@ -714,47 +602,6 @@ test('records queued, a 503 mid-drain, then a fresh client flushing successfully
   const ids = stubServer.state.errors.slice(before).map((r) => recordIdOf(r, 'errors'));
   expect(new Set(ids).size).toBe(3);
 });
-
-// ═══════════════════════════════════════════════════════════════════════
-// AC: eviction recovery
-// ═══════════════════════════════════════════════════════════════════════
-
-test('backlog lines force-evicted from the queue before delivery are re-sent exactly once after reconcile + drain, and watermarksRewound reports it', async () => {
-  const home = await mkHome();
-  const project = await mkProject('eviction');
-  writeErrorsFile(project, recentDateStr(), [errLine('ev-1'), errLine('ev-2')]);
-
-  const before = stubServer.state.errors.length;
-
-  // Round 1: enqueue succeeds into the client's durable queue, but delivery fails.
-  stubServer.queueOverride('error', 503, {});
-  let client = freshClient(home);
-  let backlog = freshBacklog();
-  let deps = makeBacklogDeps({ telemetryClient: client, config: require('../config.cjs'), tabCwds: [project] });
-  await backlog.drainBacklog({ now: Date.now(), deps });
-
-  // Force-evict without delivering: wipe the durable queue file directly.
-  await fsp.writeFile(client.queuePath(), '', 'utf8');
-  client.shutdown();
-
-  // Restart.
-  client = freshClient(home);
-  backlog = freshBacklog();
-  deps = makeBacklogDeps({ telemetryClient: client, config: require('../config.cjs'), tabCwds: [project] });
-
-  const reconcileSummary = await backlog.reconcileWatermarks({ now: Date.now(), deps });
-  expect(reconcileSummary.watermarksRewound).toBe(1);
-
-  const drainSummary = await backlog.drainBacklog({ now: Date.now(), deps });
-  expect(drainSummary.linesEnqueued).toBe(2);
-  client.shutdown();
-
-  expect(stubServer.state.errors.length - before).toBe(2); // exactly once
-});
-
-// ═══════════════════════════════════════════════════════════════════════
-// AC: log files untouched across the whole run (checked at the end, see final test)
-// ═══════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════
 // AC: daily cadence
@@ -844,10 +691,8 @@ test('X-SM-Beacon carries the resolved appVersion on every request; a 401 stops 
 // AC: opt-out — zero requests reach the stub across every channel
 // ═══════════════════════════════════════════════════════════════════════
 
-test('SM_TELEMETRY=0: the stub receives zero requests across all three channels, drainBacklog, and flush()', async () => {
+test('SM_TELEMETRY=0: the stub receives zero requests across all three channels and flush()', async () => {
   const home = await mkHome();
-  const project = await mkProject('optout');
-  writeErrorsFile(project, recentDateStr(), [errLine('optout-1')]);
 
   process.env.SM_TELEMETRY = '0';
   const before = stubServer.state.allRequests.length;
@@ -856,9 +701,6 @@ test('SM_TELEMETRY=0: the stub receives zero requests across all three channels,
   await client.track('optout.evt', { a: 1 });
   await client.logLine({ level: 'info', msg: 'x' });
   await client.reportError({ name: 'E', msg: 'x', stack: 'E: x\n    at f (a.js:1:1)' });
-  const backlog = freshBacklog();
-  const deps = makeBacklogDeps({ telemetryClient: client, config: require('../config.cjs'), tabCwds: [project] });
-  await backlog.drainBacklog({ now: Date.now(), deps });
   await client.flush('manual');
   client.shutdown();
 
@@ -899,11 +741,11 @@ test('privacy: homedir, absolute paths, an API-key-shaped value, and a prompt-li
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC: THE ATTRIBUTION TEST + no-received-body-leaks-PII + log-files-untouched
+// AC: THE ATTRIBUTION TEST + no-received-body-leaks-PII
 // (run last: asserts across the ENTIRE test run's accumulated stub state)
 // ═══════════════════════════════════════════════════════════════════════
 
-test('FINAL ROLLUP: every persisted row across the whole run is attributable, no forbidden PII ever reached the wire, and every fixture file is untouched', async () => {
+test('FINAL ROLLUP: every persisted row across the whole run is attributable, no forbidden PII ever reached the wire', async () => {
   // ── THE ATTRIBUTION TEST ──
   let unattributed = 0;
   for (const [table, rows] of [['events', stubServer.state.events], ['logs', stubServer.state.logs], ['errors', stubServer.state.errors]]) {
@@ -929,12 +771,4 @@ test('FINAL ROLLUP: every persisted row across the whole run is attributable, no
     expect(ianaTzRe.test(r.rawBody)).toBe(false);
   }
 
-  // ── log files untouched: byte-for-byte and mtime identical to right after they were written ──
-  expect(fixtureSnapshots.length).toBeGreaterThan(0);
-  for (const snap of fixtureSnapshots) {
-    const stat = fs.statSync(snap.path);
-    const bytes = fs.readFileSync(snap.path);
-    expect(stat.mtimeMs).toBe(snap.mtimeMs);
-    expect(Buffer.compare(bytes, snap.bytes)).toBe(0);
-  }
 });

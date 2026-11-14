@@ -132,3 +132,43 @@ test('fires app.launch via telemetryCounters with installChannel + appVersion', 
   await bootSequence({ now, appVersion: '1.0.0', installChannel: 'npx', deps });
   expect(calls).toEqual([{ installChannel: 'npx', appVersion: '1.0.0' }]);
 });
+
+// ─── legacy watermark cleanup (backlog replay retired) ───
+
+const os = require('node:os');
+const nodePath = require('node:path');
+const nodeFsp = require('node:fs/promises');
+
+test('removeLegacyWatermarks deletes ~/.claude/session-manager/telemetry-watermarks.json when present', async () => {
+  const { removeLegacyWatermarks } = require('../telemetryBoot.cjs');
+  const home = await nodeFsp.mkdtemp(nodePath.join(os.tmpdir(), 'sm-telemetry-boot-wm-'));
+  try {
+    const dir = nodePath.join(home, '.claude', 'session-manager');
+    await nodeFsp.mkdir(dir, { recursive: true });
+    const wm = nodePath.join(dir, 'telemetry-watermarks.json');
+    await nodeFsp.writeFile(wm, '{"a":{"bytesConfirmed":0}}');
+
+    expect(await removeLegacyWatermarks({ fsp: nodeFsp, homedir: () => home })).toBe(true);
+    await expect(nodeFsp.stat(wm)).rejects.toMatchObject({ code: 'ENOENT' });
+    // Second call: nothing left to remove, still never throws.
+    expect(await removeLegacyWatermarks({ fsp: nodeFsp, homedir: () => home })).toBe(false);
+  } finally {
+    await nodeFsp.rm(home, { recursive: true, force: true });
+  }
+});
+
+test('removeLegacyWatermarks never throws when the fs call or homedir fails', async () => {
+  const { removeLegacyWatermarks } = require('../telemetryBoot.cjs');
+  const failingFsp = { rm: async () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); }, unlink: async () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } };
+  await expect(removeLegacyWatermarks({ fsp: failingFsp, homedir: () => '/nonexistent' })).resolves.toBe(false);
+  await expect(removeLegacyWatermarks({ fsp: nodeFsp, homedir: () => { throw new Error('no home'); } })).resolves.toBe(false);
+});
+
+test('bootSequence removes the legacy watermarks file via the injected deps', async () => {
+  const { deps } = fakeDeps();
+  const seen = [];
+  deps.fsp = { unlink: async (p) => { seen.push(p); } };
+  deps.homedir = () => '/home/fake';
+  await bootSequence({ now: Date.now(), appVersion: '1.0.0', deps });
+  expect(seen).toEqual([nodePath.join('/home/fake', '.claude', 'session-manager', 'telemetry-watermarks.json')]);
+});

@@ -493,16 +493,6 @@ function createWindow() {
     if (firstPaintTimer) { clearTimeout(firstPaintTimer); firstPaintTimer = null; }
     mainWindow.maximize();
     mainWindow.show();
-
-    // Backlog drain: ships the pre-existing errors-<date>.jsonl backlog every
-    // known project has already accumulated, marking exactly what's
-    // CONFIRMED delivered. Fired after the window is shown (never blocks
-    // startup) and yields between files internally. See telemetryBacklog.cjs.
-    require('./lib/telemetry/telemetryBacklog.cjs')
-      .bootDrain({ appVersion: app.getVersion() })
-      .catch((e) => {
-        logs.writeLine({ scope: 'telemetry', level: 'warn', message: 'telemetryBacklog.bootDrain failed', meta: { error: e?.message } });
-      });
   });
 
   // Bounded auto-recovery for a crashed / hung / failed-to-load renderer.

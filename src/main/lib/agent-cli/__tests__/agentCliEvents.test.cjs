@@ -89,3 +89,9 @@ test('safeJsonLine returns null for blank, non-JSON, non-object and oversize inp
   const huge = '{"a":"' + 'x'.repeat(8 * 1024 * 1024) + '"}';
   expect(ev.safeJsonLine(huge)).toBeNull();
 });
+
+test('isAgentCliModel accepts model strings matching AGENT_CLI_MODEL_RE only', () => {
+  expect(ev.AGENT_CLI_MODEL_RE).toBeInstanceOf(RegExp);
+  for (const m of ['gpt-5-codex', 'openai/gpt-5', '@cf/meta/llama-3']) expect(ev.isAgentCliModel(m)).toBe(true);
+  for (const m of ['', 'a b', 'x'.repeat(129), undefined, null, 5]) expect(ev.isAgentCliModel(m)).toBe(false);
+});

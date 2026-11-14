@@ -26,6 +26,7 @@ const path = require('node:path');
 const { z } = require('zod');
 const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('../prd/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE, ALL_PROJECTS } = require('../../agentLibrary.cjs');
+const { AGENT_CLI_IDS, isNonClaudeAgentCli, AGENT_CLI_MODEL_RE } = require('../agent-cli/agentCliEvents.cjs');
 
 // Bounded free-text fields — generous for legitimate persona authoring while
 // still blocking a renderer from writing an effectively-unbounded frontmatter
@@ -92,9 +93,17 @@ const AgentPersonaSaveSchema = z.object({
   seedVersion: z.number().int().optional(),
   // Executor-only persona (e.g. dev-lead): New Epic warns when picked as the planning Actor. Never blocks.
   executorOnly: z.boolean().optional(),
+  // Persona's default agent CLI for New Session; 'claude' clears it.
+  agentCli: z.enum(/** @type {[string, ...string[]]} */ ([...AGENT_CLI_IDS])).optional(),
+  // Model handed to that CLI; same rule as epicMint.
+  agentCliModel: z.string().regex(AGENT_CLI_MODEL_RE).optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
-}).strict();
+}).strict().superRefine((p, ctx) => {
+  if (p.agentCliModel !== undefined && !isNonClaudeAgentCli(p.agentCli)) {
+    ctx.addIssue({ code: 'custom', path: ['agentCliModel'], message: 'agentCliModel requires a non-Claude agentCli' });
+  }
+});
 
 /**
  * Throws a clear, descriptive error (not a raw ZodError dump) when `persona`

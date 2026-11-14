@@ -7,6 +7,8 @@ const AGENT_CLI_IDS = Object.freeze(['claude', 'codex', 'gemini', 'antigravity',
 const MAX_LINE_CHARS = 8 * 1024 * 1024;
 const MAX_TOOL_RESULT_CHARS = 4000;
 const USAGE_KEYS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens'];
+// Model string handed to a non-Claude CLI — the one rule Epic mint and persona defaults share.
+const AGENT_CLI_MODEL_RE = /^[A-Za-z0-9._:/@+\[\]-]{1,128}$/;
 
 function isAgentCliId(x) {
   return typeof x === 'string' && AGENT_CLI_IDS.includes(x);
@@ -14,6 +16,10 @@ function isAgentCliId(x) {
 
 function isNonClaudeAgentCli(x) {
   return isAgentCliId(x) && x !== 'claude';
+}
+
+function isAgentCliModel(x) {
+  return typeof x === 'string' && AGENT_CLI_MODEL_RE.test(x);
 }
 
 function initEvent(nativeSessionId, cli) {
@@ -85,6 +91,8 @@ module.exports = {
   AGENT_CLI_IDS,
   isAgentCliId,
   isNonClaudeAgentCli,
+  AGENT_CLI_MODEL_RE,
+  isAgentCliModel,
   initEvent,
   textEvent,
   toolUseEvent,

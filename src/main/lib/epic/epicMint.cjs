@@ -45,9 +45,7 @@ const promptSessionSchema = require('../promptSessionSchema.cjs');
 // Agent-CLI id helpers come from the shared adapter contract
 // (lib/agent-cli/agentCliEvents.cjs, which exists in this tree) — not a local
 // copy of the id list, so the two can never drift.
-const { isAgentCliId, isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
-
-const AGENT_CLI_MODEL_RE = /^[A-Za-z0-9._:/@+\[\]-]{1,128}$/;
+const { isAgentCliId, isNonClaudeAgentCli, AGENT_CLI_MODEL_RE } = require('../agent-cli/agentCliEvents.cjs');
 
 /**
  * agentCliMintFields(agentCli, agentCliModel, restoreSessionId) — validate the

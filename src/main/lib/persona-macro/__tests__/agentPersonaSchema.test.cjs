@@ -108,3 +108,29 @@ test('PersonaNameSchema and ProjectCwdSchema are exported for the other agents:*
   expect(ProjectCwdSchema.safeParse('').success).toBe(false);
   expect(ProjectCwdSchema.safeParse(`/${'a'.repeat(4096)}`).success).toBe(false);
 });
+
+test('agentCli codex + agentCliModel gpt-5-codex parses and survives', () => {
+  const out = assertValidAgentPersonaSave(validPersona({ agentCli: 'codex', agentCliModel: 'gpt-5-codex' }));
+  expect(out.agentCli).toBe('codex');
+  expect(out.agentCliModel).toBe('gpt-5-codex');
+});
+
+test("agentCli 'claude' alone parses (clears the default)", () => {
+  expect(AgentPersonaSaveSchema.safeParse(validPersona({ agentCli: 'claude' })).success).toBe(true);
+});
+
+test('agentCliModel without a non-Claude agentCli is rejected on path agentCliModel', () => {
+  for (const extra of [{ agentCliModel: 'gpt-5-codex' }, { agentCli: 'claude', agentCliModel: 'gpt-5-codex' }]) {
+    const r = AgentPersonaSaveSchema.safeParse(validPersona(extra));
+    expect(r.success).toBe(false);
+    expect(r.error.issues.some((i) => i.path.join('.') === 'agentCliModel')).toBe(true);
+  }
+});
+
+test("an unknown agentCli such as 'gpt' is rejected", () => {
+  expect(() => assertValidAgentPersonaSave(validPersona({ agentCli: 'gpt' }))).toThrow(/agentCli/);
+});
+
+test("an agentCliModel that breaks the mint rule ('a b') is rejected", () => {
+  expect(() => assertValidAgentPersonaSave(validPersona({ agentCli: 'codex', agentCliModel: 'a b' }))).toThrow(/agentCliModel/);
+});

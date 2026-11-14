@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -231,8 +231,32 @@ function HooksComponent({ scope = 'user' }: { scope?: Scope } = {}) {
   )
 }
 
-/** Events editor body over the `hooks` key of one scope's settings.json — shared by the Hooks page and the Settings Hooks tab. */
-export function HooksEventsEditor({ scope, cwd, path }: { scope: Scope; cwd: string | null; path: string }) {
+/** The three pieces of the events editor, handed to `renderLayout` so a host shell can place them. */
+export interface HooksEventsEditorParts {
+  /** Invalid-JSON / unknown-event banners (null when there are none). */
+  banners: ReactNode
+  /** The event list (the sub-menu rail). */
+  list: ReactNode
+  /** The selected event's group editor. */
+  detail: ReactNode
+}
+
+/**
+ * Events editor body over the `hooks` key of one scope's settings.json — shared by the Hooks page and the Settings Hooks tab.
+ * Without `renderLayout` it lays itself out (banners over a ListDetail); with it, the host
+ * (Settings → PageShell) places the banners, event list and detail itself.
+ */
+export function HooksEventsEditor({
+  scope,
+  cwd,
+  path,
+  renderLayout,
+}: {
+  scope: Scope
+  cwd: string | null
+  path: string
+  renderLayout?: (parts: HooksEventsEditorParts) => ReactNode
+}) {
   const [selectedEvent, setSelectedEvent] = useState<HookEvent>('PreToolUse')
   const [testFire, setTestFire] = useState<{
     event: HookEvent
@@ -281,9 +305,8 @@ export function HooksEventsEditor({ scope, cwd, path }: { scope: Scope; cwd: str
   }
 
 
-  return (
+  const bannerNodes = (
     <>
-      <div className="flex flex-col h-full">
       {err ? (
         <div role="alert" className="px-3 py-2 border-b border-line text-xs text-red-400">
           {INVALID_JSON_MSG} ({err})
@@ -296,92 +319,102 @@ export function HooksEventsEditor({ scope, cwd, path }: { scope: Scope; cwd: str
           <span className="text-fg-faint"> · these are ignored by Claude Code 2026; edit settings.json directly to remove.</span>
         </div>
       ) : null}
-      <ListDetail
-        sidebarWidth="14rem"
-        sidebar={
-          <div className="py-1">
-            {HOOK_EVENTS.map((ev) => {
-              const count = countFor(hooks, ev)
-              const doc = HOOK_EVENT_DOCS[ev]
-              const tip = doc ? (
-                <span className="block space-y-1">
-                  <span className="block text-fg">{doc.when}</span>
-                  <span className="block text-fg-faint font-mono">payload: {doc.payload}</span>
-                  {doc.example ? (
-                    <span className="block text-fg-faint italic">e.g. {doc.example}</span>
-                  ) : null}
-                </span>
-              ) : (
-                <span className="text-fg-faint italic">no documentation yet</span>
-              )
-              return (
-                <div key={ev} className="[&>span]:w-full">
-                  <Tooltip content={tip} align="bottom-center">
-                    <button
-                      onClick={() => setSelectedEvent(ev)}
-                      title={doc?.when}
-                      className={`w-full text-left px-3 py-1 text-xs ${
-                        selectedEvent === ev
-                          ? 'bg-bg-hi text-fg'
-                          : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">{ev}</span>
-                        {count > 0 && <span className="text-accent shrink-0 ml-2">{count}</span>}
-                      </div>
-                      {doc ? (
-                        <span className="block text-[11px] leading-[1.3] text-fg-faint/80 font-normal truncate">
-                          {doc.when}
-                        </span>
-                      ) : (
-                        <span className="block text-[11px] leading-[1.3] text-fg-faint/80 italic font-normal truncate">
-                          no documentation yet
-                        </span>
-                      )}
-                    </button>
-                  </Tooltip>
-                </div>
-              )
-            })}
-          </div>
-        }
-        detail={
-          <div className="p-4 space-y-3 max-w-3xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs uppercase tracking-wider text-fg">{selectedEvent}</h3>
+    </>
+  )
+  const banners = err || unknownCount > 0 ? bannerNodes : null
+  const list = (
+    <div className="py-1">
+      {HOOK_EVENTS.map((ev) => {
+        const count = countFor(hooks, ev)
+        const doc = HOOK_EVENT_DOCS[ev]
+        const tip = doc ? (
+          <span className="block space-y-1">
+            <span className="block text-fg">{doc.when}</span>
+            <span className="block text-fg-faint font-mono">payload: {doc.payload}</span>
+            {doc.example ? (
+              <span className="block text-fg-faint italic">e.g. {doc.example}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-fg-faint italic">no documentation yet</span>
+        )
+        return (
+          <div key={ev} className="[&>span]:w-full">
+            <Tooltip content={tip} align="bottom-center">
               <button
-                onClick={addGroup}
-                disabled={!!err}
-                className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={() => setSelectedEvent(ev)}
+                title={doc?.when}
+                className={`w-full text-left px-3 py-1 text-xs ${
+                  selectedEvent === ev
+                    ? 'bg-bg-hi text-fg'
+                    : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                }`}
               >
-                + add group
+                <div className="flex items-center justify-between">
+                  <span className="truncate">{ev}</span>
+                  {count > 0 && <span className="text-accent shrink-0 ml-2">{count}</span>}
+                </div>
+                {doc ? (
+                  <span className="block text-[11px] leading-[1.3] text-fg-faint/80 font-normal truncate">
+                    {doc.when}
+                  </span>
+                ) : (
+                  <span className="block text-[11px] leading-[1.3] text-fg-faint/80 italic font-normal truncate">
+                    no documentation yet
+                  </span>
+                )}
               </button>
-            </div>
-            {groups.length === 0 ? (
-              <div className="text-fg-faint text-xs">no hooks for this event</div>
-            ) : (
-              groups.map((g, i) => (
-                <HookGroupEditor
-                  key={i}
-                  group={g}
-                  jsonInvalid={!!err}
-                  onChange={(next) => updateGroup(i, next)}
-                  onRemove={() => removeGroup(i)}
-                  onTestFire={(rule) =>
-                    setTestFire({
-                      event: selectedEvent,
-                      matcher: g.matcher ?? '',
-                      command: rule.command ?? '',
-                    })
-                  }
-                />
-              ))
-            )}
+            </Tooltip>
           </div>
-        }
-      />
+        )
+      })}
+    </div>
+  )
+  const detail = (
+    <div className="p-4 space-y-3 max-w-3xl">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs uppercase tracking-wider text-fg">{selectedEvent}</h3>
+        <button
+          onClick={addGroup}
+          disabled={!!err}
+          className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          + add group
+        </button>
       </div>
+      {groups.length === 0 ? (
+        <div className="text-fg-faint text-xs">no hooks for this event</div>
+      ) : (
+        groups.map((g, i) => (
+          <HookGroupEditor
+            key={i}
+            group={g}
+            jsonInvalid={!!err}
+            onChange={(next) => updateGroup(i, next)}
+            onRemove={() => removeGroup(i)}
+            onTestFire={(rule) =>
+              setTestFire({
+                event: selectedEvent,
+                matcher: g.matcher ?? '',
+                command: rule.command ?? '',
+              })
+            }
+          />
+        ))
+      )}
+    </div>
+  )
+
+  return (
+    <>
+      {renderLayout ? (
+        renderLayout({ banners, list, detail })
+      ) : (
+        <div className="flex flex-col h-full">
+          {banners}
+          <ListDetail sidebarWidth="14rem" sidebar={list} detail={detail} />
+        </div>
+      )}
       {testFire ? (
         <TestFireModal
           event={testFire.event}

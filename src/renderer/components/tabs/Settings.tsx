@@ -149,17 +149,17 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
   const file = activePath ? files[activePath] : null
   const scopeNeedsCwd = (s: Scope) => s !== 'user' && !cwd
 
-  // `sticky` only for the non-General views, whose header still shares
-  // Panel's scroll body (moved onto PageShell by a sibling PRD).
-  const scopeNote = (sticky: boolean) => (
-    <div
-      data-testid="settings-scope-note"
-      className={`${sticky ? 'sticky top-0 z-10 ' : ''}border-b border-line bg-bg-elev px-3 py-2 text-[11.5px] leading-snug`}
-    >
+  const scopeNote = (
+    <div data-testid="settings-scope-note" className="border-b border-line bg-bg-elev px-3 py-2 text-[11.5px] leading-snug">
       <span className="font-semibold text-fg">{SETTINGS_SCOPE_NOTES[scope].title}</span>
       <span className="mx-1.5 text-fg-faint">·</span>
       <span className="text-fg-dim">{SETTINGS_SCOPE_NOTES[scope].body}</span>
       {activePath && <span className="ml-1.5 font-mono text-fg-faint">{activePath}</span>}
+    </div>
+  )
+  const chipRow = (keyPath?: string[]) => (
+    <div className="px-3 py-2">
+      <SourceChip path={activePath ?? ''} keyPath={keyPath} />
     </div>
   )
   const errorBanner =
@@ -201,26 +201,6 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
           </a>
         </>
       }
-      footer={
-        view === 'raw' && activePath && file ? (
-          <SaveBar
-            dirty={file.dirty}
-            busy={file.busy}
-            parseError={saveError || file.parseError}
-            lastSavedAt={file.lastSavedAt}
-            leading={file.exists ? null : <span>file will be created on save</span>}
-            onSave={async () => {
-              setSaveError(null)
-              const res = await saveJson(activePath)
-              if (!res.ok) setSaveError(res.error ?? 'save failed')
-            }}
-            onRevert={() => {
-              setSaveError(null)
-              revert(activePath)
-            }}
-          />
-        ) : null
-      }
     >
       {view === 'general' && !scopeNeedsCwd(scope) ? (
         // General renders through PageShell: everything above the cards is
@@ -231,7 +211,7 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
           subnavWidth={192}
           header={
             <>
-              {scopeNote(false)}
+              {scopeNote}
               {errorBanner}
               <div className="px-3 pt-2">
                 <SourceChip path={activePath ?? ''} />
@@ -244,42 +224,65 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
         >
           <EffectiveCardsSections cards={cards} targetScope={scope} onOverride={overrideInto} />
         </PageShell>
-      ) : (
-        <>
-          {scopeNote(true)}
-          {errorBanner}
-          {scopeNeedsCwd(scope) ? (
-            <EmptyState
-              title="no active project"
-              hint="open a tab in a project directory to edit project or local settings"
-            />
-          ) : view === 'permissions' ? (
-            activePath ? (
-              <>
-                <div className="px-3 pt-2">
-                  <SourceChip path={activePath} keyPath={['permissions']} />
-                </div>
-                <PermissionsRulesEditor scope={scope} cwd={cwd} activePath={activePath} />
-              </>
-            ) : (
-              <EmptyState title="resolving…" />
-            )
-          ) : view === 'hooks' ? (
-            activePath ? (
-              <>
-                <div className="px-3 pt-2">
-                  <SourceChip path={activePath} keyPath={['hooks']} />
-                </div>
-                <HooksEventsEditor scope={scope} cwd={cwd} path={activePath} />
-              </>
-            ) : (
-              <EmptyState title="resolving…" />
-            )
-          ) : activePath && file ? (
-            <>
-            <div className="px-3 pt-2">
-              <SourceChip path={activePath} />
+      ) : scopeNeedsCwd(scope) ? (
+        <PageShell header={<>{scopeNote}{errorBanner}</>}>
+          <EmptyState
+            title="no active project"
+            hint="open a tab in a project directory to edit project or local settings"
+          />
+        </PageShell>
+      ) : !activePath ? (
+        <PageShell header={<>{scopeNote}{errorBanner}</>}>
+          <EmptyState title="resolving…" />
+        </PageShell>
+      ) : view === 'permissions' ? (
+        // Permissions / Hooks / Raw render through PageShell too: scope note +
+        // SourceChip are the fixed header, the editor is the ONE scroller.
+        <PageShell header={<>{scopeNote}{errorBanner}{chipRow(['permissions'])}</>}>
+          <PermissionsRulesEditor scope={scope} cwd={cwd} activePath={activePath} />
+        </PageShell>
+      ) : view === 'hooks' ? (
+        <HooksEventsEditor
+          scope={scope}
+          cwd={cwd}
+          path={activePath}
+          renderLayout={({ banners, list, detail }) => (
+            <PageShell
+              subnavWidth={224}
+              header={<>{scopeNote}{errorBanner}{chipRow(['hooks'])}{banners}</>}
+              subnav={<div className="min-h-full border-r border-line">{list}</div>}
+            >
+              {detail}
+            </PageShell>
+          )}
+        />
+      ) : file ? (
+        <PageShell
+          header={<>{scopeNote}{chipRow()}</>}
+          footer={
+            <div className="border-t border-line bg-bg-elev">
+              <SaveBar
+                dirty={file.dirty}
+                busy={file.busy}
+                parseError={saveError || file.parseError}
+                lastSavedAt={file.lastSavedAt}
+                leading={file.exists ? null : <span>file will be created on save</span>}
+                onSave={async () => {
+                  setSaveError(null)
+                  const res = await saveJson(activePath)
+                  if (!res.ok) setSaveError(res.error ?? 'save failed')
+                }}
+                onRevert={() => {
+                  setSaveError(null)
+                  revert(activePath)
+                }}
+              />
             </div>
+          }
+        >
+          {/* Monaco scrolls itself: this h-full, overflow-clip box fills the
+              content region exactly, so the content scroller has no range. */}
+          <div data-testid="settings-raw-editor" className="h-full overflow-clip">
             <JsonEditor
               path={activePath}
               value={file.draftRaw}
@@ -288,11 +291,12 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
                 setDraft(activePath, v)
               }}
             />
-            </>
-          ) : (
-            <EmptyState title="resolving…" />
-          )}
-        </>
+          </div>
+        </PageShell>
+      ) : (
+        <PageShell header={<>{scopeNote}{errorBanner}</>}>
+          <EmptyState title="resolving…" />
+        </PageShell>
       )}
     </Panel>
   )

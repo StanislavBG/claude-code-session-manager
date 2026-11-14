@@ -70,6 +70,16 @@ function buildSeeds(getSeedStatus) {
 }
 
 /**
+ * seedsJson(seeds) — the single serialization of a buildSeeds() result that is
+ * persisted as telemetrySettings.lastSeedsReported and compared against it.
+ * Both upsert paths (bootSequence, reportSeedsIfChanged) use this so they
+ * write the identical string. A null seeds snapshot yields null.
+ */
+function seedsJson(seeds) {
+  return seeds ? JSON.stringify(seeds) : null;
+}
+
+/**
  * bootSequence({ now, appVersion, installChannel, deps }) — call once per
  * process from app.whenReady.
  *
@@ -83,7 +93,9 @@ function buildSeeds(getSeedStatus) {
  *     the 30-day liveness heartbeat). lastMachineReportAt/Version are only
  *     persisted when reportInstall() reports success — a failed/dropped
  *     upsert stays due so the next boot retries, rather than being marked
- *     done regardless of outcome.
+ *     done regardless of outcome. On acceptance it also persists
+ *     lastSeedsReported (seedsJson of the seeds it sent), so
+ *     reportSeedsIfChanged skips an identical re-send.
  *     This lands in bilko.run's app_installs table (the sole source for
  *     every install-shaped number on the site). It replaces the former
  *     track('install.machine', profile) call, which duplicated the same
@@ -107,12 +119,17 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
   }
 
   if (telemetrySettings.isMachineReportDue(settings, { now, appVersion })) {
-    const profile = { ...(await buildMachineProfile()), seeds: buildSeeds(getSeedStatus) };
+    const seeds = buildSeeds(getSeedStatus);
+    const profile = { ...(await buildMachineProfile()), seeds };
     const reportResult = await telemetryClient.reportInstall(profile);
     if (reportResult && reportResult.accepted) {
+      // Record the seeds this upsert delivered so reportSeedsIfChanged does not
+      // re-send an identical install record once the seeders settle.
+      const sentSeedsJson = seedsJson(seeds);
       await telemetrySettings.save({
         lastMachineReportAt: new Date(now).toISOString(),
         lastMachineReportVersion: appVersion,
+        ...(sentSeedsJson ? { lastSeedsReported: sentSeedsJson } : {}),
       });
     }
   }
@@ -140,16 +157,16 @@ async function reportSeedsIfChanged({ deps: depsOverride } = {}) {
 
   const seeds = buildSeeds(getSeedStatus);
   if (!seeds) return { sent: false, accepted: false };
-  const seedsJson = JSON.stringify(seeds);
+  const currentSeedsJson = seedsJson(seeds);
 
   const settings = await telemetrySettings.load();
-  if (settings && settings.lastSeedsReported === seedsJson) return { sent: false, accepted: false };
+  if (settings && settings.lastSeedsReported === currentSeedsJson) return { sent: false, accepted: false };
 
   const profile = { ...(await buildMachineProfile()), seeds };
   const reportResult = await telemetryClient.reportInstall(profile);
   const accepted = !!(reportResult && reportResult.accepted);
   if (accepted) {
-    await telemetrySettings.save({ lastSeedsReported: seedsJson });
+    await telemetrySettings.save({ lastSeedsReported: currentSeedsJson });
   }
   return { sent: true, accepted };
 }

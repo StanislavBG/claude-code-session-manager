@@ -116,3 +116,50 @@ test('telemetrySettings: lastSeedsReported is a known string|null key', () => {
   expect(telemetrySettings.isValid({ ...telemetrySettings.DEFAULTS, lastSeedsReported: 5 })).toBe(false);
   expect(telemetrySettings.normalize({ ...telemetrySettings.DEFAULTS, lastSeedsReported: 5 }).lastSeedsReported).toBeNull();
 });
+
+// ── bootSequence's own upsert records lastSeedsReported (no duplicate send) ──
+
+function bootThenSettleHarness({ accepted }) {
+  let stored = { ...telemetrySettings.DEFAULTS };
+  const saved = [];
+  const reported = [];
+  const deps = {
+    telemetrySettings: {
+      load: async () => ({ ...stored }),
+      save: async (patch) => { saved.push(patch); stored = { ...stored, ...patch }; },
+      isMachineReportDue: telemetrySettings.isMachineReportDue,
+    },
+    telemetryClient: {
+      flush: async () => ({}),
+      reportInstall: async (p) => { reported.push(p); return { accepted }; },
+    },
+    buildMachineProfile: async () => ({ appVersion: '9.9.9', platform: 'linux' }),
+    telemetryCounters: { trackAppLaunch: () => {} },
+    getSeedStatus: DONE_STATUS,
+    fsp: { unlink: async () => { throw new Error('ENOENT'); } },
+    homedir: () => '/nonexistent',
+  };
+  return { deps, saved, reported };
+}
+
+test('accepted boot upsert persists lastSeedsReported; unchanged settle sends nothing (1 call total)', async () => {
+  const h = bootThenSettleHarness({ accepted: true });
+  await bootSequence({ now: Date.now(), appVersion: '9.9.9', installChannel: 'npm', deps: h.deps });
+  const doneJson = JSON.stringify({ devPlugin: 'done', schedulerMcp: 'done', agentPersonas: 'done' });
+  expect(h.saved).toHaveLength(1);
+  expect(h.saved[0].lastSeedsReported).toBe(doneJson);
+  expect(h.saved[0].lastMachineReportVersion).toBe('9.9.9');
+  expect(typeof h.saved[0].lastMachineReportAt).toBe('string');
+  const r = await reportSeedsIfChanged({ deps: h.deps });
+  expect(r).toEqual({ sent: false, accepted: false });
+  expect(h.reported).toHaveLength(1);
+});
+
+test('rejected boot upsert saves nothing; reportSeedsIfChanged still sends', async () => {
+  const h = bootThenSettleHarness({ accepted: false });
+  await bootSequence({ now: Date.now(), appVersion: '9.9.9', installChannel: 'npm', deps: h.deps });
+  expect(h.saved).toHaveLength(0);
+  const r = await reportSeedsIfChanged({ deps: h.deps });
+  expect(r.sent).toBe(true);
+  expect(h.reported).toHaveLength(2);
+});

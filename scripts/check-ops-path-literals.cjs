@@ -34,6 +34,7 @@ const ALLOWLIST = new Map([
   ['scripts/audit-ops-hygiene.cjs', 'standalone CLI audit script run against a project cwd; not part of the app runtime'],
   ['scripts/check-doc-hierarchy.cjs', 'standalone lint that walks the repo tree for ops docs; no runtime resolver needed'],
   ['scripts/hooks/lib/guard-inline-implementation-policy.cjs', 'required by guard-inline-implementation.cjs, installed to ~/.claude/session-manager/hooks via shim; runs outside the repo and cannot require opsOwnership'],
+  ['src/main/lib/demo-video-kit/character.cjs', 'demo-video kit file seeded standalone into ~/.claude/session-manager/demo-video-kit/; cannot require opsOwnership.cjs, and only reads <ops>/project-pages/videos/_character/'],
 ])
 
 const SCHEDULER_PATHS_REL = 'src/main/lib/scheduler/schedulerPaths.cjs'

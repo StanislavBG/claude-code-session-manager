@@ -9,6 +9,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 // Kit files are seeded to ~/.claude/session-manager/demo-video-kit/ and must
 // load standalone: node built-ins and this folder only (no ../opsOwnership.cjs).
+// Allowlisted for this literal in scripts/check-ops-path-literals.cjs ALLOWLIST.
 const OPS_ROOT_DIR = 'session-manager-operations';
 
 const MAX_JS_BYTES = 300 * 1024;

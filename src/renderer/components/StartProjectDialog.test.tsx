@@ -11,12 +11,28 @@ vi.mock('../lib/createPickedSession', () => ({
 
 import { StartProjectDialog } from './StartProjectDialog'
 import { openOrStartProject, openProjectAt, startNewProject } from '../lib/createPickedSession'
+import { usePendingRestore } from '../state/pendingRestore'
+import { useToast } from '../state/toast'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
 const onClose = vi.fn()
 const onOpened = vi.fn()
 const pickDirectory = vi.fn()
+const listRestorableRecent = vi.fn()
+
+const ROW = {
+  sessionId: 'sess-1',
+  title: 'Fix the login bug',
+  firstPrompt: 'please fix login',
+  lastPrompt: null,
+  gitBranch: 'main',
+  headless: false,
+  mtimeMs: Date.now() - 5 * 60_000,
+  sizeBytes: 100,
+  recentlyActive: false,
+  cwd: '/home/u/Projects/alpha',
+}
 
 function q<T extends HTMLElement>(id: string): T {
   return document.querySelector(`[data-testid="${id}"]`) as T
@@ -49,7 +65,9 @@ async function click(id: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  ;(window as unknown as { api: unknown }).api = { app: { pickDirectory } }
+  listRestorableRecent.mockResolvedValue({ sessions: [], projectsRead: 0, truncated: false })
+  ;(window as unknown as { api: unknown }).api = { app: { pickDirectory }, promptSessions: { listRestorableRecent } }
+  usePendingRestore.setState({ pick: null })
 })
 
 afterEach(() => {
@@ -105,5 +123,48 @@ describe('StartProjectDialog', () => {
     await click('start-project-open-existing')
     expect(openOrStartProject).toHaveBeenCalledTimes(1)
     expect(onOpened).toHaveBeenCalledTimes(1)
+  })
+
+  it('Continue a session lists rows from listRestorableRecent and says where it continues', async () => {
+    listRestorableRecent.mockResolvedValue({ sessions: [ROW], projectsRead: 1, truncated: false })
+    await mount()
+    expect(listRestorableRecent).toHaveBeenCalledWith({ limit: 30 })
+    const row = q('start-project-recent-row-sess-1')
+    expect(row).toBeTruthy()
+    expect(row.textContent).toContain('Fix the login bug')
+    expect(row.textContent).toContain('alpha')
+    expect(row.textContent).toContain('/home/u/Projects/alpha')
+    expect(row.textContent).toContain('ago')
+    expect(q('start-project-recent').textContent).toMatch(/continues in the folder it was started in/i)
+  })
+
+  it('shows the empty state when there are no sessions', async () => {
+    await mount()
+    expect(q('start-project-recent-empty')).toBeTruthy()
+  })
+
+  it('choosing a row sets the pending pick, opens the project and closes', async () => {
+    listRestorableRecent.mockResolvedValue({ sessions: [ROW], projectsRead: 1, truncated: false })
+    await mount()
+    await click('start-project-recent-row-sess-1')
+    expect(usePendingRestore.getState().pick).toEqual({ cwd: ROW.cwd, session: ROW })
+    expect(openProjectAt).toHaveBeenCalledWith('/home/u/Projects/alpha')
+    expect(onOpened).toHaveBeenCalledTimes(1)
+  })
+
+  it('an IPC error shows an error toast', async () => {
+    const show = vi.spyOn(useToast.getState(), 'show')
+    listRestorableRecent.mockRejectedValue(new Error('boom'))
+    await mount()
+    expect(show).toHaveBeenCalledWith('error', expect.stringContaining('boom'))
+    show.mockRestore()
+  })
+
+  it('an { ok: false } result shows an error toast', async () => {
+    const show = vi.spyOn(useToast.getState(), 'show')
+    listRestorableRecent.mockResolvedValue({ ok: false, error: 'bad cwd' })
+    await mount()
+    expect(show).toHaveBeenCalledWith('error', expect.stringContaining('bad cwd'))
+    show.mockRestore()
   })
 })

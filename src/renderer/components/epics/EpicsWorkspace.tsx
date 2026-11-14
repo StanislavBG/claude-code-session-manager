@@ -21,6 +21,7 @@ import { EpicDetail } from './EpicDetail'
 import { EpicComposer, canCompose } from './EpicComposer'
 import { EpicApprovalBar } from './EpicApprovalBar'
 import { NewEpicCard } from './NewEpicCard'
+import { usePendingRestore } from '../../state/pendingRestore'
 import { isEditableDraft } from '../../lib/epicDraft'
 import { EmptyState } from '../ui/EmptyState'
 
@@ -224,6 +225,16 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   }, [epicUsageKey, selectedId, usageActive])
   const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds, usage }
   const selectedEpic = selectedId ? (sessions[selectedId] ?? null) : null
+
+  // Start Project dialog's "Continue a session" parks a pick for a project; when
+  // this workspace scopes to that project, open its New Session card (the card
+  // itself takes the pick and pre-selects the session for restore).
+  const pendingRestoreCwd = usePendingRestore((s) => s.pick?.cwd ?? null)
+  useEffect(() => {
+    if (!pendingRestoreCwd || !effectiveCwd || pendingRestoreCwd !== effectiveCwd) return
+    setSelectedId(null)
+    setShowNewEpic(true)
+  }, [pendingRestoreCwd, effectiveCwd])
 
   // Preselect the scoped project's most recently active Epic (Terminal.tsx's
   // dormant-tab mount) so switching to that tab lands directly in its own

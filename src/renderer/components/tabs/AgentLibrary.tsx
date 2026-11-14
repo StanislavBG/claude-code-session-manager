@@ -24,6 +24,7 @@ import { useSessions } from '../../state/sessions'
 import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
 import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregate'
 import { compactPath } from '../../lib/compactPath'
+import { AgentCliPicker, type AgentCliChoice } from '../epics/AgentCliPicker'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
@@ -71,6 +72,10 @@ interface Draft {
   // rejects a save just because the persona already had an unrecognized tag on disk.
   tags: string[]
   body: string
+  /** Default coding-agent CLI New Session starts this persona on ('claude' = Claude Code, the default). */
+  agentCli: AgentCliChoice
+  /** Model for a non-Claude agentCli; '' = the CLI's own default. */
+  agentCliModel: string
 }
 
 function toDraft(p: AgentPersona): Draft {
@@ -83,10 +88,12 @@ function toDraft(p: AgentPersona): Draft {
     color: p.color ?? '',
     tags: p.tags,
     body: p.body,
+    agentCli: p.agentCli ?? 'claude',
+    agentCliModel: p.agentCliModel ?? '',
   }
 }
 
-const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '' }
+const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '', agentCli: 'claude', agentCliModel: '' }
 
 type OverrideDetail = NonNullable<AgentPersona['overrideDetails']>[number]
 
@@ -229,10 +236,16 @@ function AgentLibraryComponent() {
         // of that persona fail agentPersonaSchema.cjs's validation.
         tags: toKnownTags(obj.tags),
         body: obj.body,
+        // Always sent: 'claude' clears the agentCli: line. The model rides along only for a
+        // non-Claude CLI with a non-blank value — the main-side schema rejects an empty one.
+        agentCli: obj.agentCli,
+        ...(obj.agentCli !== 'claude' && obj.agentCliModel.trim() ? { agentCliModel: obj.agentCliModel.trim() } : {}),
       }
       // savePersona rewrites the whole file, so an existing persona is the base: title and the
       // legacy projects/action/actionLabel keys (not editable here) pass through untouched.
       const payload: AgentPersonaSaveInput = existing ? toPersonaSaveInput(existing, editorFields) : editorFields
+      // The editor owns agentCliModel: a cleared/Claude model must not be resurrected from the saved base.
+      if (!('agentCliModel' in editorFields)) delete payload.agentCliModel
       await window.api.agents.savePersona(payload)
       toast.info(isNew ? `created ${obj.name}` : `saved ${obj.name}`)
       setDraft(null); setCreating(false)
@@ -499,6 +512,30 @@ function AgentPersonaEditor({
         <ModelPicker value={obj.model} onChange={(v) => set({ model: v })} />
 
         <EffortPicker value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
+
+        <Field
+          label="cli"
+          hint="Which coding-agent CLI New Session starts this persona on — override per session in New Session → advanced. On a non-Claude CLI the session has no develop loop, no Restore, and this persona's model/effort are not used. Macros, phone launches and scheduled PRDs always run Claude Code."
+        >
+          <div className="space-y-2">
+            <AgentCliPicker
+              testIdPrefix="agent-persona-cli"
+              value={obj.agentCli}
+              onChange={(id) => set({ agentCli: id, agentCliModel: '' })}
+            />
+            {obj.agentCli !== 'claude' && (
+              <input
+                data-testid="agent-persona-cli-model"
+                aria-label="CLI model"
+                value={obj.agentCliModel}
+                maxLength={128}
+                placeholder="Blank = the CLI's own default"
+                onChange={(e) => set({ agentCliModel: e.target.value })}
+                className="w-full bg-bg border border-line rounded px-2 py-1 text-xs text-fg font-mono"
+              />
+            )}
+          </div>
+        </Field>
 
         {!isNew && saved && (
           <ProjectOverrideBlock saved={saved} projects={projects} selected={selected} onSelect={onSelect} busy={busy} onSave={onSaveOverride} />

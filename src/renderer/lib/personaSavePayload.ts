@@ -32,6 +32,8 @@ export function toPersonaSaveInput(
     actionLabel: persona.actionLabel ?? undefined,
     title: persona.title ?? undefined,
     body: persona.body,
+    ...(persona.agentCli ? { agentCli: persona.agentCli } : {}),
+    ...(persona.agentCliModel ? { agentCliModel: persona.agentCliModel } : {}),
     ...overrides,
   }
 }

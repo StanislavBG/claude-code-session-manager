@@ -53,4 +53,21 @@ describe('personaSavePayload', () => {
     expect(out.name).toBe('renamed')
     expect(out.originalName).toBe('old')
   })
+
+  it('carries agentCli / agentCliModel through when present', () => {
+    const out = toPersonaSaveInput({ ...persona, agentCli: 'codex', agentCliModel: 'o3' }, { tags: ['feature'] })
+    expect(out.agentCli).toBe('codex')
+    expect(out.agentCliModel).toBe('o3')
+  })
+
+  it('omits agentCli / agentCliModel when absent or null', () => {
+    const out = toPersonaSaveInput({ ...persona, agentCli: null, agentCliModel: null })
+    expect('agentCli' in out).toBe(false)
+    expect('agentCliModel' in out).toBe(false)
+    expect('agentCli' in toPersonaSaveInput(persona)).toBe(false)
+  })
+
+  it('lets overrides.agentCli win over the persona', () => {
+    expect(toPersonaSaveInput({ ...persona, agentCli: 'codex' }, { agentCli: 'claude' }).agentCli).toBe('claude')
+  })
 })

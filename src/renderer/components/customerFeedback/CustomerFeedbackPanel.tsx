@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Z } from '../../lib/zLayers'
 import { useCustomerFeedback } from '../../state/customerFeedback'
+import { useToast } from '../../state/toast'
+import { copyText } from '../../lib/clipboard'
 import { openFreeHour } from '../../lib/freeHour'
 import { CustomerFeedbackInbox } from './CustomerFeedbackInbox'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
@@ -27,6 +29,8 @@ const TAGS: { tag: CustomerFeedbackTag; label: string }[] = [
 
 const TAG_LABEL: Record<CustomerFeedbackTag, string> = { bug: 'Bug', feature: 'Feature', discussion: 'Discussion' }
 
+const SESSION_PHRASE = 'Send this to Session Manager as feedback.'
+
 const TITLE_MAX = 120
 const BODY_MAX = 4000
 
@@ -43,7 +47,9 @@ export function CustomerFeedbackPanel() {
   const refreshStatus = useCustomerFeedback((s) => s.refreshStatus)
   const markSeen = useCustomerFeedback((s) => s.markSeen)
   const ownerMode = useCustomerFeedback((s) => s.ownerInfo?.ownerMode === true)
+  const showToast = useToast((s) => s.show)
   const [entered, setEntered] = useState(false)
+  const [mcpReady, setMcpReady] = useState(false)
 
   const sorted = useMemo(() => [...items].sort((a, b) => b.submittedAt - a.submittedAt), [items])
 
@@ -68,6 +74,25 @@ export function CustomerFeedbackPanel() {
     }
   }, [panelOpen, load, loadOwnerInfo, refreshStatus, markSeen])
 
+  // The session hint only makes sense when the scheduler MCP server (which
+  // carries customer_feedback_submit) is registered for sessions.
+  useEffect(() => {
+    setMcpReady(false)
+    if (!panelOpen) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const s = await window.api?.app?.seedStatus?.()
+        if (!cancelled) setMcpReady(s?.['scheduler-mcp']?.status === 'done')
+      } catch {
+        /* no seed status — hint stays hidden */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [panelOpen])
+
   useEffect(() => {
     if (!panelOpen) return
     const onKey = (e: KeyboardEvent) => {
@@ -83,6 +108,11 @@ export function CustomerFeedbackPanel() {
   if (!panelOpen) return null
 
   const blank = draft.title.trim() === '' || draft.body.trim() === ''
+
+  const copyPhrase = async () => {
+    if (await copyText(SESSION_PHRASE)) showToast('info', 'Copied — paste it into your session.')
+    else showToast('error', 'Could not copy to the clipboard.')
+  }
 
   const node = (
     <div className={`fixed inset-0 ${Z.dialog}`} data-testid="customer-feedback-root">
@@ -122,6 +152,23 @@ export function CustomerFeedbackPanel() {
               if (!blank && !submitting) void submit()
             }}
           >
+            {mcpReady && (
+              <div className="flex items-start gap-2">
+                <p className="m-0 flex-1 text-[12.5px] text-fg-dim" data-testid="customer-feedback-session-hint">
+                  Already talking about this in a session? Ask it: &quot;{SESSION_PHRASE}&quot; It uses what the session
+                  already knows, so you don&apos;t retype it, and the item shows up here.
+                </p>
+                <button
+                  type="button"
+                  className="shrink-0 text-[12.5px] font-semibold text-accent hover:underline"
+                  aria-label="Copy the phrase to ask your session"
+                  data-testid="customer-feedback-session-hint-copy"
+                  onClick={() => void copyPhrase()}
+                >
+                  Copy
+                </button>
+              </div>
+            )}
             <label className="grid gap-1">
               <span className="flex justify-between font-mono text-[11px] uppercase tracking-[0.05em] text-fg-dim">
                 <span>Header</span>

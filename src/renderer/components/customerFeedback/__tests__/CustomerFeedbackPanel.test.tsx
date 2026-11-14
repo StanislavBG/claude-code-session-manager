@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { CustomerFeedbackPanel } from '../CustomerFeedbackPanel'
 import { useCustomerFeedback } from '../../../state/customerFeedback'
+import { useToast } from '../../../state/toast'
 import type { CustomerFeedbackItem, CustomerFeedbackStatus } from '../../../../preload/api'
 
 let container: HTMLDivElement | null = null
@@ -179,5 +180,84 @@ describe('CustomerFeedbackPanel', () => {
     const el = q('customer-feedback-item')!
     expect(el.textContent).toContain('<script>alert(1)</script>')
     expect(el.querySelector('script')).toBeNull()
+  })
+
+  describe('session hint', () => {
+    const PHRASE = 'Send this to Session Manager as feedback.'
+    const seed = (status: 'done' | 'pending' | 'failed' | 'exhausted') => ({
+      'dev-plugin': { status: 'done', fix: '' },
+      'scheduler-mcp': { status, fix: '' },
+      'agent-personas': { status: 'done', fix: '' },
+    })
+    const setApi = (api: unknown) => {
+      ;(window as unknown as { api: unknown }).api = api
+    }
+    const flush = async () => {
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    }
+
+    it('shows the hint above the title when scheduler-mcp is done', async () => {
+      setApi({ app: { seedStatus: vi.fn(async () => seed('done')) } })
+      await mount()
+      await flush()
+      const hint = q('customer-feedback-session-hint')
+      expect(hint).not.toBeNull()
+      expect(hint!.textContent).toContain(
+          'Already talking about this in a session? Ask it: "Send this to Session Manager as feedback." It uses what the session already knows, so you don\'t retype it, and the item shows up here.',
+      )
+      expect(q('customer-feedback-session-hint-copy')).not.toBeNull()
+      const title = q('customer-feedback-title')!
+      expect(hint!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('hides the hint when scheduler-mcp is pending', async () => {
+      setApi({ app: { seedStatus: vi.fn(async () => seed('pending')) } })
+      await mount()
+      await flush()
+      expect(q('customer-feedback-session-hint')).toBeNull()
+      expect(q('customer-feedback-title')).not.toBeNull()
+    })
+
+    it('hides the hint when seedStatus rejects', async () => {
+      setApi({ app: { seedStatus: vi.fn(async () => { throw new Error('boom') }) } })
+      await mount()
+      await flush()
+      expect(q('customer-feedback-session-hint')).toBeNull()
+      expect(q('customer-feedback-title')).not.toBeNull()
+    })
+
+    it('Copy writes the exact phrase and confirms with a toast', async () => {
+      const writeText = vi.fn(async () => ({ ok: true }))
+      const show = vi.fn()
+      useToast.setState({ show } as never)
+      setApi({ app: { seedStatus: vi.fn(async () => seed('done')) }, clipboard: { writeText } })
+      await mount()
+      await flush()
+      await act(async () => {
+        q('customer-feedback-session-hint-copy')!.click()
+        await Promise.resolve()
+      })
+      await flush()
+      expect(writeText).toHaveBeenCalledWith(PHRASE)
+      expect(show).toHaveBeenCalledWith('info', expect.any(String))
+    })
+
+    it('Copy failure shows an error toast', async () => {
+      const writeText = vi.fn(async () => ({ ok: false }))
+      const show = vi.fn()
+      useToast.setState({ show } as never)
+      setApi({ app: { seedStatus: vi.fn(async () => seed('done')) }, clipboard: { writeText } })
+      await mount()
+      await flush()
+      await act(async () => {
+        q('customer-feedback-session-hint-copy')!.click()
+        await Promise.resolve()
+      })
+      await flush()
+      expect(show).toHaveBeenCalledWith('error', expect.any(String))
+    })
   })
 })

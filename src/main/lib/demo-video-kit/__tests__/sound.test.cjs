@@ -56,6 +56,15 @@ describe('demo-video-kit sound', () => {
     for (const n of ['whoosh', 'pop', 'chime', 'click']) expect(s.buildSfx(n).length).toBeGreaterThan(44);
     expect(() => s.buildSfx('nope')).toThrow();
   });
+  for (const st of ['Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography']) {
+    it(`${st} 60 s bed has only finite samples`, () => {
+      const wav = s.buildMusicBed({ style: st, lengthS: 60, seed: 1 });
+      const n = (wav.length - 44) / 4;
+      let bad = -1;
+      for (let i = 0; i < n; i++) if (!Number.isFinite(wav.readFloatLE(44 + i * 4))) { bad = i; break; }
+      expect(bad).toBe(-1);
+    }, 60000);
+  }
   it('parses ebur128 output', () => {
     expect(s.parseEbur128(FIXTURE)).toEqual({ lufs: -14.2, truePeakDb: -1.7 });
   });

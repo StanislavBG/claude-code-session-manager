@@ -8,7 +8,7 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { seedDemoVideoKit, KIT_FILES, kitDestDir } = require('../seedKit.cjs');
+const { seedDemoVideoKit, KIT_FILES, KIT_VERSION, kitDestDir } = require('../seedKit.cjs');
 
 const tmp = [];
 afterEach(() => {
@@ -77,4 +77,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   } finally {
     if (prev === undefined) delete process.env.SM_SCHEDULER_HOME; else process.env.SM_SCHEDULER_HOME = prev;
   }
+});
+
+test('KIT_VERSION is bumped to 2 (bed NaN fix must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('2');
 });

@@ -105,7 +105,8 @@ function bedSamples({ style, lengthS, seed }) {
     const chord = p.prog[bar % p.prog.length];
     const tb = t - bar * barS; // time inside bar
     // Pad: detuned sines with slow swell per bar.
-    const swell = Math.sin(Math.PI * Math.min(1, tb / barS)) ** 0.5;
+    // Clamp: at a bar boundary float rounding can make tb ≈ -1e-15, and a negative base ** 0.5 is NaN.
+    const swell = Math.max(0, Math.sin(Math.PI * Math.min(1, tb / barS))) ** 0.5;
     let v = 0;
     for (const st of chord) {
       const f = semi(root, st);
@@ -273,6 +274,8 @@ function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1 }) {
     const narr = decodeWavF32(fs.readFileSync(narrF32));
     const n = Math.max(narr.length, Math.round(Number(lengthS) * SR));
     const bed = bedSamples({ style, lengthS: n / SR, seed });
+    // A single NaN in the buffer handed to ffmpeg makes libmp3lame assert (0-byte mp3).
+    for (let i = 0; i < bed.length; i++) if (!Number.isFinite(bed[i])) bed[i] = 0;
     const { gain, speechS } = duckEnvelope(narr);
     const bedGain = dbToGain(BED_BASE_DB);
     const mixed = new Float32Array(n);

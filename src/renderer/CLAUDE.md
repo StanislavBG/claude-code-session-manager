@@ -22,6 +22,8 @@ count is whatever `NAV_ITEMS` says — never write a literal in a doc.
 
 **Every nav page has a steward subagent** — `.claude/agents/page-<NavKey>.md`; its principles and modes are in [`page-stewards.md`](../../session-manager-operations/architecture/page-stewards.md). Ask that steward to review a change to its page.
 
+**Any page with a sub-menu renders in `components/layout/PageShell`** — it owns the frame (`overflow-clip`) and the one content scroller; jump to sections with `usePageShell().scrollToAnchor` / `lib/scrollWithin`, never `scrollIntoView` (`npm run lint:scroll`). Incident: [`conventions.md`](../../session-manager-operations/architecture/conventions.md#avoid).
+
 **Generated — never hand-edit:** `public/vad/` via `npm run refresh:vad-assets` (copies every
 `ort-wasm*` file plus silero/worklet; drift-tested); `data/claude-settings-schema.json` via
 `npm run sync:settings-schema`.

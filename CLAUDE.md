@@ -4,7 +4,7 @@ Electron desktop app — local cockpit for Claude Code CLI. Terminal + config/op
 Per-project state lives under `<cwd>/session-manager-operations/`.
 
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
-before changing anything in that area.** Reference docs, all under `session-manager-operations/architecture/`:
+before changing anything in that area.** Reference docs:
 
 > **SIZE BUDGET — 12,000 chars**, checked with `wc -c CLAUDE.md` before every commit. This file is
 > read on every turn of every session. A new law is ONE line here; its rationale goes in the linked
@@ -136,10 +136,10 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 
 ## Avoid
 
-Each of these is a real incident, with the post-mortem in
+Each is a real incident, post-mortem in
 [`conventions.md`](session-manager-operations/architecture/conventions.md) — read it before working around one.
 
-- Launching a `claude -p` process **without acquiring a slot from `lib/scheduler/sessionSlots.cjs`** (the sole
+- Launching `claude -p` **without a slot from `lib/scheduler/sessionSlots.cjs`** (the sole
   machine-wide cap) — never reintroduce a private cap.
 - Gating scheduler batches on **`parallelGroup`** — it's a unique-per-PRD display hint, never a barrier.
   `dependsOn` is the sole ordering primitive.
@@ -150,5 +150,6 @@ Each of these is a real incident, with the post-mortem in
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
 - Re-implementing tmp+rename atomic writes — use `lib/util/atomicFs.cjs`.
 - Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
-- Adding a new LeftNav tab before checking whether an existing surface owns that data.
+- Adding a LeftNav tab before checking if an existing surface owns that data.
 - Adding pane state to parent tabs, or importing design primitives via wildcard.
+- `scrollIntoView` / nested page scrollers — use `PageShell` + `lib/scrollWithin` (`lint:scroll`).

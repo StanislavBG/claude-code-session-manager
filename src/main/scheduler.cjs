@@ -1877,6 +1877,8 @@ async function reconcilePass(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? job.agentType ?? null,
       macroId: p.macroId ?? job.macroId ?? null,
+      deliverable: p.deliverable ?? job.deliverable ?? null,
+      artifactPaths: p.artifactPaths ?? job.artifactPaths ?? null,
       effort: p.effort ?? job.effort ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
@@ -2002,6 +2004,8 @@ async function reconcilePass(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
       macroId: p.macroId ?? inv.row?.macroId ?? null,
+      deliverable: p.deliverable ?? inv.row?.deliverable ?? null,
+      artifactPaths: p.artifactPaths ?? inv.row?.artifactPaths ?? null,
       effort: p.effort ?? inv.row?.effort ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
@@ -2155,6 +2159,8 @@ async function reconcilePass(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
       macroId: p.macroId ?? null,
+      deliverable: p.deliverable ?? null,
+      artifactPaths: p.artifactPaths ?? null,
       effort: p.effort ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
@@ -11650,6 +11656,8 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
           dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
           macroId: parsed.macroId ?? null,
+          deliverable: parsed.deliverable ?? null,
+          artifactPaths: parsed.artifactPaths ?? null,
           effort: parsed.effort ?? null,
           disposition: parsed.disposition ?? null,
           planId: parsed.planId ?? null,

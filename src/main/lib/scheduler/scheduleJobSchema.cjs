@@ -95,6 +95,9 @@ const ScheduleJobSchema = z
     epicId: z.string().nullable().optional(),
     // Macro press this job's PRD came from (PRD frontmatter `macroId`).
     macroId: z.string().nullable().optional(),
+    // PRD frontmatter artifact-only declaration (`deliverable: artifact` + `artifactPaths`).
+    deliverable: z.literal('artifact').nullable().optional(),
+    artifactPaths: z.array(z.string()).nullable().optional(),
     // PRD frontmatter `effort` — a per-run level from a macro press (outranks the persona's).
     effort: z.string().nullable().optional(),
     statusHistory: z.array(ScheduleJobStatusHistoryEntrySchema).optional(),

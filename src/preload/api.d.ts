@@ -793,6 +793,9 @@ export interface ScheduleJobRuntime {
 
 export interface ScheduleJob {
   macroId?: string | null;
+  /** PRD frontmatter artifact-only declaration (PRD 3114). */
+  deliverable?: 'artifact' | null;
+  artifactPaths?: string[] | null;
   slug: string;
   title: string;
   cwd: string | null;

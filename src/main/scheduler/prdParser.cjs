@@ -50,6 +50,22 @@ const prdFileCache = new Map(); // path -> { mtimeMs, ino, parsed }
  * frontmatter, and folds in the parallel-group number from the filename when
  * frontmatter doesn't specify one.
  */
+/**
+ * `artifactPaths: [a, b]` → ['a', 'b'] — the inline-list form only, same
+ * shape prdFrontmatter.cjs's parsePrdFile (runVerify's artifact exemption,
+ * executeJob's finish variant) recognizes. Empty / absent / malformed → null.
+ */
+function parseArtifactPaths(raw) {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  if (!v.startsWith('[') || !v.endsWith(']')) return null;
+  const list = v.slice(1, -1)
+    .split(',')
+    .map((x) => x.trim().replace(/^(['"])(.*)\1$/, '$2'))
+    .filter((x) => x.length > 0);
+  return list.length > 0 ? list : null;
+}
+
 async function parsePrdRaw(filePath) {
   const text = await fsp.readFile(filePath, 'utf8');
   const { fm, body } = splitFrontmatter(text);
@@ -133,6 +149,11 @@ async function parsePrdRaw(filePath) {
     planId: (typeof fm.planId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(fm.planId)) ? fm.planId : null,
     // Macro press that minted this PRD (prdFrontmatter.cjs MACRO_ID_RE); malformed reads as absent.
     macroId: (typeof fm.macroId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(fm.macroId.trim())) ? fm.macroId.trim() : null,
+    // Artifact-only declaration (PRD 3114): copied onto queue rows so the
+    // row-based artifact-only checks in scheduler.cjs see it. Exactly
+    // 'artifact' else null; artifactPaths = non-empty strings, else null.
+    deliverable: (typeof fm.deliverable === 'string' && fm.deliverable.trim() === 'artifact') ? 'artifact' : null,
+    artifactPaths: parseArtifactPaths(fm.artifactPaths),
     effort: (typeof fm.effort === 'string' && PRD_EFFORT_LEVELS.includes(fm.effort.trim())) ? fm.effort.trim() : null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —

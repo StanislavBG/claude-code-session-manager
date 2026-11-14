@@ -25,6 +25,7 @@
 
 const { app, powerSaveBlocker, powerMonitor, crashReporter } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { reportCrash, classifyUncleanShutdown, reportChildProcessGone } = require('./lib/telemetry/crashTelemetry.cjs');
 const { maybeCaptureMainHeap } = require('./lib/telemetry/mainHeapSnapshot.cjs');
@@ -283,9 +284,13 @@ function checkPreviousRun(deps = {}) {
   const lastLoopDelayMaxMs = prev.loop?.loopDelayMaxMs;
   const sampleMs = s?.ts ? Date.parse(s.ts) : NaN;
   const silentGapSec = Number.isFinite(sampleMs) ? Math.round((Date.now() - sampleMs) / 1000) : undefined;
+  // Machine uptime vs. last-sample age: booted after the last sample = os-restart.
+  let bootUptimeSec;
+  try { bootUptimeSec = Math.round((deps.uptime || os.uptime)()); } catch { bootUptimeSec = undefined; }
+  const lastSampleAgeSec = silentGapSec;
   const exitRecord = readExitRecord(dir, prev.pid);
   const stderrTail = readStderrTail(dir);
-  const likelyCause = classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb: s?.totalMb, silentGapSec, exitRecord, stderrTail });
+  const likelyCause = classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb: s?.totalMb, silentGapSec, bootUptimeSec, lastSampleAgeSec, exitRecord, stderrTail });
   log?.writeLine({
     scope: 'crash-diag',
     level: 'error',
@@ -300,6 +305,7 @@ function checkPreviousRun(deps = {}) {
       powerBlockerHeldAtDeath: s?.powerBlockerHeld,
       lastLoopDelayMaxMs,
       silentGapSec,
+      bootUptimeSec,
       likelyCause,
       exitRecord,
       scopeResult,
@@ -309,8 +315,9 @@ function checkPreviousRun(deps = {}) {
   // The unclean-shutdown postmortem is the report most likely to be the ONLY
   // thing ever received from a machine that just OOM-killed the app — the
   // dying process couldn't write it itself. See crashTelemetry.cjs header.
+  // The cause is in the name so the dashboard splits OOM from reboots.
   report({
-    reason: 'unclean-shutdown',
+    reason: `unclean-shutdown:${likelyCause}`,
     meta: {
       lastSampleTs: s?.ts,
       lastTotalMb: s?.totalMb,
@@ -319,6 +326,7 @@ function checkPreviousRun(deps = {}) {
       powerBlockerHeldAtDeath: s?.powerBlockerHeld,
       lastLoopDelayMaxMs,
       silentGapSec,
+      bootUptimeSec,
       likelyCause,
       exitRecord,
     },

@@ -120,6 +120,27 @@ test('classifyUncleanShutdown: unknown otherwise, and non-number inputs never th
   expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: '23000', lastTotalMb: null, silentGapSec: NaN })).toBe('unknown');
 });
 
+test('classifyUncleanShutdown: os-restart when the machine booted after the last sample', () => {
+  const { classifyUncleanShutdown } = require('../crashTelemetry.cjs');
+  // Booted 120 s ago, last sample 3600 s ago: the machine restarted under the app.
+  expect(classifyUncleanShutdown({ lastTotalMb: 900, bootUptimeSec: 120, lastSampleAgeSec: 3600 })).toBe('os-restart');
+  // Machine up longer than the sample age: not a reboot.
+  expect(classifyUncleanShutdown({ lastTotalMb: 900, bootUptimeSec: 3600, lastSampleAgeSec: 120 })).toBe('unknown');
+  expect(classifyUncleanShutdown({ bootUptimeSec: 100, lastSampleAgeSec: 100 })).toBe('unknown');
+  // Missing / non-number inputs never classify as os-restart.
+  expect(classifyUncleanShutdown({ bootUptimeSec: 120 })).toBe('unknown');
+  expect(classifyUncleanShutdown({ bootUptimeSec: '120', lastSampleAgeSec: 3600 })).toBe('unknown');
+});
+
+test('classifyUncleanShutdown: os-restart ranks after memory-pressure and the earlier rules', () => {
+  const { classifyUncleanShutdown } = require('../crashTelemetry.cjs');
+  const reboot = { bootUptimeSec: 60, lastSampleAgeSec: 6000 };
+  expect(classifyUncleanShutdown({ ...reboot, lastTotalMb: 4000 })).toBe('memory-pressure');
+  expect(classifyUncleanShutdown({ ...reboot, lastLoopDelayMaxMs: 20000 })).toBe('main-hang');
+  expect(classifyUncleanShutdown({ ...reboot, exitRecord: { signal: 'SIGTERM' } })).toBe('signal:SIGTERM');
+  expect(classifyUncleanShutdown({ ...reboot, stderrTail: 'Fatal Wayland communication error' })).toBe('compositor-disconnect');
+});
+
 test('reportChildProcessGone: Utility Network Service (non-oom) is a warn log line, not an error', () => {
   const { reportChildProcessGone } = require('../crashTelemetry.cjs');
   const calls = { log: [], err: [] };

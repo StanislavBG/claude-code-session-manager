@@ -10,7 +10,7 @@
  *
  * Named 'crash.<reason>' so an OOM report (reason: 'oom'), a renderer segfault
  * (reason: 'crashed'), and the unclean-shutdown postmortem (reason:
- * 'unclean-shutdown') are distinguishable in aggregate without parsing free
+ * 'unclean-shutdown:<likelyCause>', e.g. 'unclean-shutdown:os-restart') are distinguishable in aggregate without parsing free
  * text. telemetryClient.reportError already stamps the full attribution
  * (appVersion/platform/arch/machineDigest) on every record — that's the
  * whole reason this module exists: these reports are frequently the ONLY
@@ -45,16 +45,21 @@ const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 /**
  * Turns the previous run's evidence into a likely cause. Launcher evidence
  * (stderr tail, exit record) outranks the sample-based rules. silentGapSec is
- * accepted for the caller's meta but does not change the verdict.
- * @param {{ lastLoopDelayMaxMs?: unknown, lastTotalMb?: unknown, silentGapSec?: unknown, exitRecord?: { signal?: unknown } | null, stderrTail?: unknown }} [sample]
- * @returns {string} 'compositor-disconnect' | `signal:<NAME>` | 'main-hang' | 'memory-pressure' | 'unknown'
+ * accepted for the caller's meta but does not change the verdict. When the
+ * machine's uptime (bootUptimeSec) is shorter than the age of the last sample
+ * (lastSampleAgeSec), the OS booted after the app last ran — a reboot or power
+ * loss, not an app crash — so that is 'os-restart' (ranked below
+ * memory-pressure, above 'unknown').
+ * @param {{ lastLoopDelayMaxMs?: unknown, lastTotalMb?: unknown, silentGapSec?: unknown, bootUptimeSec?: unknown, lastSampleAgeSec?: unknown, exitRecord?: { signal?: unknown } | null, stderrTail?: unknown }} [sample]
+ * @returns {string} 'compositor-disconnect' | `signal:<NAME>` | 'main-hang' | 'memory-pressure' | 'os-restart' | 'unknown'
  */
-function classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb, exitRecord, stderrTail } = {}) {
+function classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb, bootUptimeSec, lastSampleAgeSec, exitRecord, stderrTail } = {}) {
   if (typeof stderrTail === 'string' && stderrTail.includes('Fatal Wayland communication error')) return 'compositor-disconnect';
   const sig = exitRecord && exitRecord.signal;
   if (typeof sig === 'string' && /^[A-Z0-9]{2,16}$/.test(sig)) return `signal:${sig}`;
   if (isNum(lastLoopDelayMaxMs) && lastLoopDelayMaxMs >= HANG_LOOP_DELAY_MS) return 'main-hang';
   if (isNum(lastTotalMb) && lastTotalMb >= MEMORY_PRESSURE_MB) return 'memory-pressure';
+  if (isNum(bootUptimeSec) && isNum(lastSampleAgeSec) && bootUptimeSec < lastSampleAgeSec) return 'os-restart';
   return 'unknown';
 }
 

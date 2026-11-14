@@ -12,14 +12,15 @@ let dir;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'exitcause-')); });
 afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
-function run({ open = true, exit, stderr, scope, platform = 'linux' } = {}) {
+function run({ open = true, exit, stderr, scope, platform = 'linux', sampleTs = new Date().toISOString(), uptime } = {}) {
   const sentinelPath = path.join(dir, 'last-run.json');
-  fs.writeFileSync(sentinelPath, JSON.stringify({ open, pid: 4242, startedAt: 't', lastSample: { totalMb: 100, ts: new Date().toISOString() } }));
+  fs.writeFileSync(sentinelPath, JSON.stringify({ open, pid: 4242, startedAt: 't', lastSample: { totalMb: 100, ts: sampleTs } }));
   if (exit) fs.writeFileSync(path.join(dir, 'main-exit.jsonl'), exit.map((e) => JSON.stringify(e)).join('\n') + '\n');
   if (stderr !== undefined) fs.writeFileSync(path.join(dir, 'electron-stderr.log'), stderr);
   const lines = []; const reports = []; const calls = [];
   checkPreviousRun({
     sentinelPath, platform,
+    ...(uptime !== undefined ? { uptime: () => uptime } : {}),
     logs: { writeLine: (l) => lines.push(l) },
     reportCrash: (r) => reports.push(r),
     spawnSync: (...a) => { calls.push(a); return scope === undefined ? { error: new Error('x'), status: null } : { status: 0, stdout: scope + '\n' }; },
@@ -57,9 +58,29 @@ test('oom-kill scope logs oom-scope-stop even when sentinel is clean', () => {
 });
 
 test('missing files, no systemctl: unknown, no throw', () => {
-  const { lines } = run({});
+  const { lines, reports } = run({});
   expect(lines[0].meta.likelyCause).toBe('unknown');
+  expect(reports[0].reason).toBe('unclean-shutdown:unknown');
   expect(lines[0].meta.exitRecord).toBeNull();
+});
+
+test('postmortem is named by its cause; context keeps likelyCause', () => {
+  const { reports } = run({ exit: [{ pid: 4242, signal: 'SIGKILL' }] });
+  expect(reports[0].reason).toBe('unclean-shutdown:signal:SIGKILL');
+  expect(reports[0].meta.likelyCause).toBe('signal:SIGKILL');
+  expect(`crash.${reports[0].reason}`.length).toBeLessThan(60);
+});
+
+test('machine booted after the last sample: os-restart', () => {
+  const sampleTs = new Date(Date.now() - 3600 * 1000).toISOString();
+  const { lines, reports } = run({ sampleTs, uptime: 120 });
+  expect(lines[0].meta.likelyCause).toBe('os-restart');
+  expect(lines[0].meta.bootUptimeSec).toBe(120);
+  expect(reports[0].reason).toBe('unclean-shutdown:os-restart');
+  expect(reports[0].meta.likelyCause).toBe('os-restart');
+  expect(reports[0].meta.bootUptimeSec).toBe(120);
+  // Up longer than the sample age: not a reboot.
+  expect(run({ sampleTs, uptime: 7200 }).reports[0].reason).toBe('unclean-shutdown:unknown');
 });
 
 test('non-linux skips systemctl; success scope result is not an oom line', () => {

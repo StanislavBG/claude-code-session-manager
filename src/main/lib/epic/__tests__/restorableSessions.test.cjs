@@ -19,6 +19,7 @@ const {
   claimedClaudeSessionIds,
   claimedClaudeSessionIdsAsync,
   listRestorableSessions,
+  listRecentRestorableSessions,
   checkRestorableSessionSync,
   __resetCacheForTests,
 } = require('../restorableSessions.cjs');
@@ -352,4 +353,120 @@ test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-r
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
   expect(onArchives(readFileSync)).toEqual([]);
   expect(onArchives(readFile)).toEqual(['epic-b.json']);
+});
+
+// ── listRecentRestorableSessions: machine-wide, bounded merge ──────────────
+
+/** Run `fn` with the fixture helpers pointed at project `p`. */
+function inProject(p, fn) {
+  const saved = cwd;
+  cwd = p;
+  try { fs.mkdirSync(p, { recursive: true }); return fn(); } finally { cwd = saved; }
+}
+
+/** Four projects, each with a transcript dir whose mtime orders them A (newest) … D. */
+function fourProjects() {
+  const projects = ['a', 'b', 'c', 'd'].map((n) => path.join(root, `proj-${n}`));
+  const [a, b, c, d] = projects;
+  inProject(a, () => {
+    writeSession(uuid(11), { prompt: 'a newest', mtimeSec: T0 + 400 });
+    writeSession(uuid(12), { entrypoint: 'sdk-cli', mtimeSec: T0 + 500 }); // headless: dropped
+    writeSession(uuid(13), { prompt: 'a claimed', mtimeSec: T0 + 450 });
+    writeIndex({ e1: { id: 'e1', claudeSessionId: uuid(13), status: 'active' } });
+  });
+  inProject(b, () => {
+    writeSession(uuid(21), { prompt: 'b one', mtimeSec: T0 + 300 });
+    writeSession(uuid(22), { prompt: 'b two', mtimeSec: T0 + 100 });
+  });
+  inProject(c, () => writeSession(uuid(31), { prompt: 'c one', mtimeSec: T0 + 200 }));
+  inProject(d, () => writeSession(uuid(41), { prompt: 'd one', mtimeSec: T0 + 50 }));
+  // Transcript-folder mtimes: the activity order the lister must pick projects by.
+  projects.forEach((p, i) => inProject(p, () => fs.utimesSync(projectDir(), T0 + 1000 - i * 10, T0 + 1000 - i * 10)));
+  return projects;
+}
+
+function recentDeps(projects, extra = {}) {
+  const reads = [];
+  const deps = {
+    homeDir: home,
+    // Deliberately not in activity order: the lister must sort by folder mtime.
+    allProjectCwds: () => [projects[2], projects[0], projects[3], projects[1]],
+    listRestorableSessions: (opts) => { reads.push(opts.cwd); return listRestorableSessions(opts); },
+    ...extra,
+  };
+  return { deps, reads };
+}
+
+test('listRecentRestorableSessions merges interactive rows across projects newest first, with cwd on every row', async () => {
+  const projects = fourProjects();
+  const { deps: d, reads } = recentDeps(projects);
+  const r = await listRecentRestorableSessions({ deps: d });
+  expect(r.sessions.map((s) => [s.sessionId, s.cwd])).toEqual([
+    [uuid(11), projects[0]],
+    [uuid(21), projects[1]],
+    [uuid(31), projects[2]],
+    [uuid(22), projects[1]],
+    [uuid(41), projects[3]],
+  ]);
+  // Headless uuid(12) dropped; Epic-claimed uuid(13) hidden.
+  expect(r.sessions.every((s) => s.headless === false && typeof s.cwd === 'string')).toBe(true);
+  expect(r.sessions[0]).toMatchObject({ firstPrompt: 'a newest', mtimeMs: (T0 + 400) * 1000 });
+  expect(r.projectsRead).toBe(4);
+  expect(r.truncated).toBe(false);
+  expect(sorted(reads)).toEqual(sorted(projects));
+});
+
+test('listRecentRestorableSessions reads only maxProjects projects, newest folder first, and cuts to limit', async () => {
+  const projects = fourProjects();
+  const { deps: d, reads } = recentDeps(projects);
+  const r = await listRecentRestorableSessions({ maxProjects: 2, deps: d });
+  expect(reads).toHaveLength(2);
+  expect(sorted(reads)).toEqual(sorted([projects[0], projects[1]]));
+  expect(r.projectsRead).toBe(2);
+  expect(r.truncated).toBe(true);
+  expect(ids(r)).toEqual([uuid(11), uuid(21), uuid(22)]);
+
+  const cut = await listRecentRestorableSessions({ limit: 2, deps: recentDeps(projects).deps });
+  expect(ids(cut)).toEqual([uuid(11), uuid(21)]);
+  expect(cut.truncated).toBe(true);
+});
+
+test('listRecentRestorableSessions passes perProject as the per-project limit and runs at most 4 reads at once', async () => {
+  const projects = Array.from({ length: 8 }, (_, i) => path.join(root, `many-${i}`));
+  projects.forEach((p, i) => inProject(p, () => writeSession(uuid(100 + i), { mtimeSec: T0 + i })));
+  let inFlight = 0;
+  let peak = 0;
+  const limits = [];
+  const d = {
+    homeDir: home,
+    allProjectCwds: () => projects,
+    listRestorableSessions: async (opts) => {
+      limits.push(opts.limit);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((res) => setTimeout(res, 5));
+      inFlight -= 1;
+      return listRestorableSessions(opts);
+    },
+  };
+  const r = await listRecentRestorableSessions({ perProject: 3, deps: d });
+  expect(peak).toBeLessThanOrEqual(4);
+  expect(peak).toBeGreaterThan(1);
+  expect(limits.every((l) => l === 3)).toBe(true);
+  expect(r.projectsRead).toBe(8);
+  expect(ids(r)).toEqual(projects.map((_, i) => uuid(107 - i)));
+});
+
+test('listRecentRestorableSessions skips a project whose read fails and never throws', async () => {
+  const projects = fourProjects();
+  const { deps: d } = recentDeps(projects, {
+    listRestorableSessions: async (opts) => {
+      if (opts.cwd === projects[1]) throw new Error('EACCES');
+      return listRestorableSessions(opts);
+    },
+  });
+  const r = await listRecentRestorableSessions({ deps: d });
+  expect(ids(r)).toEqual([uuid(11), uuid(31), uuid(41)]);
+  const broken = await listRecentRestorableSessions({ deps: { homeDir: home, allProjectCwds: () => { throw new Error('boom'); } } });
+  expect(broken).toEqual({ sessions: [], projectsRead: 0, truncated: false });
 });

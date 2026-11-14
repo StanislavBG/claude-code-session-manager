@@ -660,6 +660,93 @@ async function listRestorableSessions({ cwd, limit = DEFAULT_LIMIT, deps } = { c
   return result;
 }
 
+const RECENT_READ_CONCURRENCY = 4;
+
+/**
+ * @typedef {object} RecentRestorableDeps
+ * @property {(opts?: object) => string[]} [allProjectCwds] Project cwds (default activeSessions' cached allProjectCwds).
+ * @property {typeof listRestorableSessions} [listRestorableSessions] Per-project lister (test seam).
+ */
+
+/**
+ * Transcript-folder mtime of each of `cwds`, newest first; a folder that
+ * cannot be stat'ed is dropped (no CLI history there).
+ * @param {string[]} cwds
+ * @param {RestorableDeps} d
+ * @returns {Promise<string[]>}
+ */
+async function byFolderActivity(cwds, d) {
+  const stamped = await Promise.all(cwds.map(async (cwd, i) => {
+    try {
+      return { cwd, i, mtimeMs: (await fs.promises.stat(projectDirOf(cwd, d))).mtimeMs };
+    } catch {
+      return null;
+    }
+  }));
+  return /** @type {{ cwd: string, i: number, mtimeMs: number }[]} */ (stamped.filter(Boolean))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || a.i - b.i)
+    .map((s) => s.cwd);
+}
+
+/**
+ * Interactive restorable sessions across this machine's projects, newest
+ * first, each tagged with its project `cwd` — for a "continue any session"
+ * picker. Bounded like listRestorableSessions: the project list comes from
+ * activeSessions' cached allProjectCwds() (never a fresh ~/.claude/projects
+ * walk), at most `maxProjects * 2` transcript folders are stat'ed to rank them
+ * by activity, at most `maxProjects` are read (4 at a time) through
+ * listRestorableSessions({ cwd, limit: perProject }), which also hides
+ * Epic-owned sessions. A project whose read fails is skipped. Never throws.
+ * @param {{ limit?: number, maxProjects?: number, perProject?: number, deps?: RestorableDeps & RecentRestorableDeps }} [opts]
+ * @returns {Promise<{ sessions: (RestorableSession & { cwd: string })[], projectsRead: number, truncated: boolean }>}
+ */
+async function listRecentRestorableSessions({ limit = 30, maxProjects = 25, perProject = 5, deps } = {}) {
+  /** @type {{ sessions: (RestorableSession & { cwd: string })[], projectsRead: number, truncated: boolean }} */
+  const result = { sessions: [], projectsRead: 0, truncated: false };
+  const d = deps || {};
+  const cap = (/** @type {number} */ n, /** @type {number} */ dflt) => (Number.isInteger(n) && n > 0 ? n : dflt);
+  const maxP = cap(maxProjects, 25);
+  const max = cap(limit, 30);
+  const per = cap(perProject, 5);
+  const lister = d.listRestorableSessions || listRestorableSessions;
+  /** @type {string[]} */
+  let all;
+  try {
+    const source = d.allProjectCwds || require('../activeSessions.cjs').allProjectCwds;
+    const raw = source();
+    all = Array.isArray(raw) ? [...new Set(raw.map((c) => normalizeCwd(c)).filter(Boolean))] : [];
+  } catch {
+    return result;
+  }
+  const ranked = await byFolderActivity(all.slice(0, maxP * 2), d);
+  const picked = ranked.slice(0, maxP);
+  if (all.length > maxP * 2 || ranked.length > maxP) result.truncated = true;
+
+  /** @type {(RestorableSession & { cwd: string })[]} */
+  const merged = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < picked.length) {
+      const cwd = picked[next];
+      next += 1;
+      try {
+        const r = await lister({ cwd, limit: per, deps: d });
+        result.projectsRead += 1;
+        if (r.truncated) result.truncated = true;
+        for (const s of r.sessions) if (!s.headless) merged.push({ ...s, cwd });
+      } catch {
+        // unreadable project: skip it
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RECENT_READ_CONCURRENCY, picked.length) }, worker));
+
+  merged.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
+  if (merged.length > max) result.truncated = true;
+  result.sessions = merged.slice(0, max);
+  return result;
+}
+
 /**
  * First ≤ 64 KiB of `file`, through a fixed buffer.
  * @param {string} file
@@ -744,6 +831,7 @@ module.exports = {
   claimedClaudeSessionIds,
   claimedClaudeSessionIdsAsync,
   listRestorableSessions,
+  listRecentRestorableSessions,
   checkRestorableSessionSync,
   __resetCacheForTests,
 };

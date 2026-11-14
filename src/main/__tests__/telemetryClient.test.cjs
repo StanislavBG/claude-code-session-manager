@@ -624,7 +624,7 @@ test('wire field names match server/routes/telemetry.ts exactly', async () => {
   const errorCall = fetchFn.calls.find((c) => c.url.endsWith('/error'));
   const installCall = fetchFn.calls.find((c) => c.url.endsWith('/install'));
 
-  expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'env', 'name', 'props', 'session_id', 'visitor_id'].sort());
+  expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'env', 'name', 'props', 'session_id', 'visitor_id', 'ts'].sort());
   expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
   expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
   // Bilko's /install route persists `seeds` to app_installs.seeds (bilko-run 523ba538).
@@ -809,15 +809,17 @@ test('backoff ceiling: exponential growth caps at 6h', async () => {
   vi.useRealTimers();
 }, 30000);
 
-test('a non-429 4xx disables the client (malformed-contract circuit breaker), not backoff', async () => {
+test('a non-auth 4xx drops the rejected batch (quarantine), neither disable nor backoff', async () => {
   const home = await mkHome();
   const client = freshClient(home);
   await client.track('evt', { a: 1 });
   client._setFetchImpl(fetchStub(async () => statusResponse(400)));
   await client.flush('manual');
   const st = client.status();
-  expect(st.disabledForProcess).toBe(true);
-  expect(st.pendingCount).toBe(1);
+  expect(st.disabledForProcess).toBe(false);
+  expect(st.backoffUntil).toBe(0);
+  expect(st.pendingCount).toBe(0);
+  expect(st.rejectedCount).toBe(1);
   client.shutdown();
 });
 
@@ -985,15 +987,16 @@ test('the install channel POSTs a flat body, never a {batch:[...]} envelope', as
   client.shutdown();
 });
 
-test('a 400 on the install channel disables the client like any other malformed-contract 4xx', async () => {
+test('a 400 on the install channel drops that record like any other non-auth 4xx', async () => {
   const home = await mkHome();
   const client = freshClient(home);
   await client.reportInstall(fakeProfile());
   client._setFetchImpl(fetchStub(async () => statusResponse(400)));
   await client.flush('manual');
   const st = client.status();
-  expect(st.disabledForProcess).toBe(true);
-  expect(st.pendingCount).toBe(1);
+  expect(st.disabledForProcess).toBe(false);
+  expect(st.pendingCount).toBe(0);
+  expect(st.rejectedCount).toBe(1);
   client.shutdown();
 });
 
@@ -1102,17 +1105,16 @@ test('503 flush logs a warn line via logger and does not enqueue anything', asyn
   client.shutdown();
 });
 
-test('400 flush logs the circuit-breaker trip at warn', async () => {
+test('400 flush logs the rejected-batch drop at warn', async () => {
   const home = await mkHome();
   const client = freshClient(home);
   const lines = [];
   client._setLogger((p) => lines.push(p));
   client._setFetchImpl(fetchStub(async () => statusResponse(400)));
   await client.track('evt', { a: 1 });
-  const before = client.status().pendingCount;
   await client.flush('manual');
-  expect(client.status().pendingCount).toBe(before);
-  const warn = lines.find((l) => l.message === 'telemetry disabled for process');
-  expect(warn).toMatchObject({ scope: 'telemetry', level: 'warn', meta: { status: 400 } });
+  expect(client.status().pendingCount).toBe(0);
+  const warn = lines.find((l) => l.message === 'telemetry batch rejected by server; dropped');
+  expect(warn).toMatchObject({ scope: 'telemetry', level: 'warn', meta: { status: 400, channel: 'event', count: 1 } });
   client.shutdown();
 });

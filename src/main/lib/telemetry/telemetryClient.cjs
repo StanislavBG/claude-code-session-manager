@@ -84,6 +84,7 @@ const S = {
   disabledForProcess: false,
   dedupedAppends: 0,
   evictedCount: 0,
+  rejectedCount: 0,
   recent: [],
   errSeen: new Map(),
   dailyTimer: null,
@@ -478,6 +479,9 @@ async function track(name, props) {
     const wire = {
       app: 'session-manager',
       name: safeStr(name, 200),
+      // Captured at track time so the server can date the event by when it
+      // happened, not when a (possibly days-late) flush delivered it.
+      ts: Date.now(),
       props: meta,
       session_id: S.sessionId,
       visitor_id: S.settings.installId,
@@ -660,6 +664,13 @@ function describeFailureStatus(status) {
   return status === 0 ? 'network error' : `HTTP ${status}`;
 }
 
+/**
+ * Classifies a failed send and applies its side effects. Returns:
+ *  - 'backoff'  — 429 / network / 5xx: retryable; stop the flush, keep the batch.
+ *  - 'disabled' — 401 / 403: auth contract broken; stop sending for this process, keep the batch.
+ *  - 'rejected' — any other 4xx: this batch is poison; the caller drops it and moves on,
+ *                 so it doesn't block other channels or fail again every boot.
+ */
 function applyFailureBackoff(status, channel) {
   if (status === 429 || status === 0 || status >= 500) {
     S.consecutiveFailures += 1;
@@ -667,14 +678,25 @@ function applyFailureBackoff(status, channel) {
     S.backoffUntil = Date.now() + ms;
     S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
     logWarn('telemetry send failed', { channel, status, consecutiveFailures: S.consecutiveFailures, backoffMs: ms });
-    return;
+    return 'backoff';
   }
-  if (status >= 400 && status < 500) {
-    // Malformed-contract circuit breaker (includes 401) — not retried.
+  S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
+  if (status === 401 || status === 403) {
     S.disabledForProcess = true;
-    S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
-    logWarn('telemetry disabled for process', { status });
+    logWarn('telemetry disabled for process', { channel, status });
+    return 'disabled';
   }
+  return 'rejected';
+}
+
+/** Drops a server-rejected (non-retryable 4xx) batch from the queue. */
+function rejectRecords(records, channel, status, result) {
+  for (const r of records) {
+    removeFromQueue(r.recordId);
+    result.rejected.push(r.recordId);
+  }
+  S.rejectedCount += records.length;
+  logWarn('telemetry batch rejected by server; dropped', { channel, status, count: records.length });
 }
 
 /**
@@ -692,7 +714,7 @@ function flush(reason) {
 
 async function flushImpl(reason) {
   const safeReason = VALID_REASONS.has(reason) ? reason : 'manual';
-  const result = { sent: [], failed: [], reason: safeReason };
+  const result = { sent: [], failed: [], rejected: [], reason: safeReason };
   try {
     await ensureInit();
     if (!telemetrySettings.isEnabled(S.settings)) return result;
@@ -704,8 +726,9 @@ async function flushImpl(reason) {
       if (byChannel[r.channel]) byChannel[r.channel].push(r);
     }
 
+    // Highest-value channels first so a backoff on bulk events never starves crash reports.
     let sawFailure = false;
-    for (const channel of ['event', 'log', 'error', 'install']) {
+    for (const channel of ['error', 'install', 'log', 'event']) {
       if (sawFailure) break;
       if (!telemetrySettings.isEnabled(S.settings)) break;
       const records = byChannel[channel];
@@ -721,8 +744,11 @@ async function flushImpl(reason) {
             addToSent(r.recordId);
             result.sent.push(r.recordId);
           } else {
+            if (applyFailureBackoff(res.status, channel) === 'rejected') {
+              rejectRecords([r], channel, res.status, result);
+              continue;
+            }
             result.failed.push(r.recordId);
-            applyFailureBackoff(res.status, channel);
             sawFailure = true;
             break;
           }
@@ -744,8 +770,11 @@ async function flushImpl(reason) {
             result.sent.push(r.recordId);
           }
         } else {
+          if (applyFailureBackoff(res.status, channel) === 'rejected') {
+            rejectRecords(batch, channel, res.status, result);
+            continue;
+          }
           for (const r of batch) result.failed.push(r.recordId);
-          applyFailureBackoff(res.status, channel);
           sawFailure = true;
           break;
         }
@@ -789,6 +818,7 @@ function status() {
     sentCount: S.sentIds.size,
     dedupedAppends: S.dedupedAppends,
     evictedCount: S.evictedCount,
+    rejectedCount: S.rejectedCount,
     disabledForProcess: S.disabledForProcess,
     consecutiveFailures: S.consecutiveFailures,
     backoffUntil: S.backoffUntil,

@@ -52,6 +52,16 @@ describe('EpicIntakeCard', () => {
     root = null
   })
 
+  it('captions a background-build Epic\'s briefing as sent to the background build; default caption otherwise', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN, backgroundBuild: true }))
+    expect(el.textContent).toContain('Sent to the background build — not part of the conversation')
+    expect(el.textContent).not.toContain('Sent to the agent at start')
+    act(() => root!.render(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN, backgroundBuild: false })))
+    expect(el.textContent).toContain('Sent to the agent at start — not part of the conversation')
+    expect(el.textContent).not.toContain('Sent to the background build')
+  })
+
   it('CORE: renders the Launch briefing badge, subtitle, and section/token count', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))

@@ -15,6 +15,8 @@ import { EpicQueuePanel } from './EpicQueuePanel'
 import { PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { EpicIntakeCard } from './EpicIntakeCard'
+import { BackgroundBuildStatus } from './BackgroundBuildStatus'
+import { useMacros } from '../../lib/useMacros'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
 import { formatEffectiveRuntimeLine, formatCompactRuntime } from './EffectiveRuntimeLine'
@@ -768,6 +770,23 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     prds,
     events: { [epicId]: sessionEvents },
   }
+  // Background-build Epic = launched by a macro with `job` set (Demo Video,
+  // Project Home pages, …): it never runs a chat turn, so the Discussion
+  // carries a BackgroundBuildStatus line instead (useMacroLaunch.ts).
+  const { macros } = useMacros()
+  const sourceMacroId = promptSession.source?.macroId
+  const isBackgroundBuild = useMemo(
+    () => !!sourceMacroId && macros.some((m) => m.id === sourceMacroId && !!m.job),
+    [macros, sourceMacroId],
+  )
+  const prdCreatedSlugs = useMemo(
+    () => sessionEvents.flatMap((e) => (e.kind === 'prd_created' && e.prdSlug ? [e.prdSlug] : [])),
+    [sessionEvents],
+  )
+  const buildNotQueued = useMemo(
+    () => sessionEvents.some((e) => e.kind === 'response' && e.notice === 'job-not-queued'),
+    [sessionEvents],
+  )
   const status = epicDisplayStatus(epicId, snapshots)
   const attachedPrds = epicPrds(epicId, snapshots)
   const stats = epicStats(epicId, snapshots)
@@ -1133,6 +1152,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                           sections={promptSession.sections}
                           at={t.at}
                           openingPrompt={promptSession.openingPrompt ?? t.text}
+                          backgroundBuild={isBackgroundBuild}
                         />
                       </div>
                     )
@@ -1265,6 +1285,14 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 />
               </div>
             )}
+
+            <BackgroundBuildStatus
+              isBackgroundBuild={isBackgroundBuild}
+              prdCreatedSlugs={prdCreatedSlugs}
+              jobs={scheduleJobs}
+              notQueued={buildNotQueued}
+              onOpenPrd={openPrdSlug}
+            />
 
             <EpicQueuePanel chat={chat} />
           </div>

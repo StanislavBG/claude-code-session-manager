@@ -1456,6 +1456,40 @@ describe('EpicDetail (PRD 827)', () => {
     })
   })
 
+  describe('background-build status (job-macro Epic)', () => {
+    async function mountWithMacros(macros: Array<{ id: string; job?: unknown }>) {
+      installWindowApiMock()
+      const { __resetMacrosCacheForTests } = await import('../../../lib/useMacros')
+      __resetMacrosCacheForTests()
+      ;(window as any).api.macros = { list: vi.fn().mockResolvedValue(macros), onChanged: vi.fn(() => () => {}) }
+      const openingPrompt = 'Goal: Demo video'
+      const proposed = await usePromptSessions.getState().createPromptSession(
+        '/tmp/proj', 'Demo Video', 'feature', undefined, undefined, openingPrompt,
+        [{ kind: 'goal', label: 'Goal', text: openingPrompt }],
+      )
+      const active = usePromptSessions.getState().approveProposed(proposed.id)!
+      const session = { ...active, source: { producer: 'new-epic-ui' as const, macroId: 'builtin-demo-video' } }
+      useChat.setState({
+        chats: { [session.id]: { turns: [{ id: 't-first', role: 'user', text: openingPrompt, at: 1000 }], running: false, stream: '', queuedPosition: 0 } as any },
+      })
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      return el
+    }
+
+    it('shows the queuing status and the background-build caption for a job-macro Epic', async () => {
+      const el = await mountWithMacros([{ id: 'builtin-demo-video', job: { estimateMinutes: 30, artifactPaths: [] } }])
+      expect(el.querySelector('[data-testid="epic-background-build-status"]')?.textContent).toContain('Queuing the background build…')
+      expect(el.textContent).toContain('Sent to the background build — not part of the conversation')
+    })
+
+    it('keeps the Discussion unchanged when the source macro has no job', async () => {
+      const el = await mountWithMacros([{ id: 'builtin-demo-video' }])
+      expect(el.querySelector('[data-testid="epic-background-build-status"]')).toBeNull()
+      expect(el.textContent).toContain('Sent to the agent at start — not part of the conversation')
+    })
+  })
+
   describe('question card state (PRD 3087)', () => {
     const chatWith = (id: string, turns: unknown[]) =>
       useChat.setState({ chats: { [id]: { turns, running: false, stream: '', queuedPosition: 0 } as any } })

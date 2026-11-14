@@ -164,10 +164,13 @@ export function EpicIntakeCard({
   sections,
   at: _at,
   openingPrompt,
+  backgroundBuild = false,
 }: {
   sections: readonly EpicIntakeSection[]
   at: number
   openingPrompt: string
+  /** A job-macro Epic: the briefing went to its background build, not a chat agent. */
+  backgroundBuild?: boolean
 }) {
   const groups = groupSections(sections)
   const tokens = estimateTokens(openingPrompt)
@@ -221,7 +224,11 @@ export function EpicIntakeCard({
           <div data-testid="epic-intake-badge" className="font-mono text-[10px] font-semibold uppercase tracking-wide text-sage-dark">
             Launch briefing
           </div>
-          <p className="mt-0.5 text-xs text-fg-faint">Sent to the agent at start — not part of the conversation</p>
+          <p className="mt-0.5 text-xs text-fg-faint">
+            {backgroundBuild
+              ? 'Sent to the background build — not part of the conversation'
+              : 'Sent to the agent at start — not part of the conversation'}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <span className="whitespace-nowrap font-mono text-[11px] text-fg-faint">

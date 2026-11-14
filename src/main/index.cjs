@@ -508,6 +508,13 @@ function createWindow() {
   // Bounded auto-recovery for a crashed / hung / failed-to-load renderer.
   require('./lib/rendererRecovery.cjs').attachRendererRecovery(mainWindow.webContents, { logs });
 
+  // Capture the window + webContents at registration. The module-level
+  // `mainWindow` is nulled in 'closed' while the app stays alive (macOS), so a
+  // late-firing listener must never dereference it (telemetry: uncaught
+  // "Cannot read properties of null (reading 'webContents')", v0.132.0).
+  const win = mainWindow;
+  const wc = win.webContents;
+
   // Native right-click menu — Copy / Paste / Select All everywhere. Roles
   // hook into Electron's built-in clipboard/selection plumbing, which xterm.js
   // (and Monaco, and Tiptap) all participate in via the standard DOM
@@ -517,15 +524,15 @@ function createWindow() {
   // renderer frame. Fires on Ctrl+R and HMR full-page reloads — the fresh
   // renderer will re-register its own watches, so the old sender's contribution
   // must be unwound first to avoid refcount ratcheting.
-  mainWindow.webContents.on('did-start-navigation', () => {
-    configMgr.releaseWatchesForSender(mainWindow.webContents.id);
+  wc.on('did-start-navigation', () => {
+    configMgr.releaseWatchesForSender(wc.id);
   });
 
   // CSP (frame-src/connect-src) does not govern a subframe navigating itself —
   // a demo-video document could still exfiltrate data via meta refresh or
   // `location.href = 'https://…'`. Block any such navigation out of an
   // smfile:// demo-video subframe.
-  mainWindow.webContents.on('will-frame-navigate', (details) => {
+  wc.on('will-frame-navigate', (details) => {
     if (shouldBlockFrameNavigation({
       isMainFrame: details.isMainFrame,
       currentUrl: details.frame?.url,
@@ -536,13 +543,13 @@ function createWindow() {
     }
   });
 
-  mainWindow.webContents.on('context-menu', (_e, params) => {
+  wc.on('context-menu', (_e, params) => {
     const items = [];
     if (params.editFlags.canCopy) items.push({ label: 'Copy', role: 'copy' });
     if (params.editFlags.canPaste) items.push({ label: 'Paste', role: 'paste' });
     if (items.length) items.push({ type: 'separator' });
     items.push({ label: 'Select All', role: 'selectAll' });
-    Menu.buildFromTemplate(items).popup({ window: mainWindow });
+    Menu.buildFromTemplate(items).popup({ window: win });
   });
 
   const distIndex = path.join(__dirname, '..', '..', 'dist', 'index.html');

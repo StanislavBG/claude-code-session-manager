@@ -49,17 +49,6 @@ function telemetryStatus(overrides: Record<string, unknown> = {}) {
     lastError: null,
     lastFlushAt: Date.now(),
     lastFlushReason: 'boot',
-    backlog: {
-      projectsScanned: 1,
-      filesScanned: 1,
-      linesEnqueued: 3,
-      linesConfirmed: 3,
-      linesSkipped: 0,
-      filesCompleted: 1,
-      watermarksRewound: 0,
-      reason: 'boot',
-      ranAt: new Date().toISOString(),
-    },
     ...overrides,
   }
 }
@@ -145,23 +134,12 @@ describe('SettingsTelemetry — product telemetry section (PRD 1142)', () => {
     expect(el.textContent).toContain('on start-up, after an update, and once a day')
   })
 
-  it('shows queue/dedup/eviction counts and the backlog drain summary including watermarksRewound', async () => {
+  it('shows queue/dedup/eviction counts and no backlog drain line', async () => {
     installWindowApiMock({
       telemetryStatusOverrides: {
         pendingCount: 7,
         dedupedAppends: 4,
         evictedCount: 2,
-        backlog: {
-          projectsScanned: 2,
-          filesScanned: 3,
-          linesEnqueued: 9,
-          linesConfirmed: 8,
-          linesSkipped: 0,
-          filesCompleted: 2,
-          watermarksRewound: 5,
-          reason: 'version-change',
-          ranAt: new Date().toISOString(),
-        },
       },
     })
     const el = mount(createElement(SettingsTelemetry))
@@ -170,7 +148,7 @@ describe('SettingsTelemetry — product telemetry section (PRD 1142)', () => {
     expect(el.textContent).toContain('7')
     expect(el.textContent).toContain('4')
     expect(el.textContent).toContain('2')
-    expect(el.textContent).toMatch(/5 watermarks rewound/)
+    expect(el.textContent).not.toMatch(/backlog drain|watermarks rewound/)
   })
 
   it('shows the delivered (sentCount) count alongside pending', async () => {

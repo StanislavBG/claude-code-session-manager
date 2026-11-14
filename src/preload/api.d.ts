@@ -723,18 +723,6 @@ export interface TelemetryLastError {
   at: number;
 }
 
-export interface TelemetryBacklogSummary {
-  projectsScanned: number;
-  filesScanned: number;
-  linesEnqueued: number;
-  linesConfirmed: number;
-  linesSkipped: number;
-  filesCompleted: number;
-  watermarksRewound: number;
-  reason: string;
-  ranAt: string;
-}
-
 export interface TelemetryStatus {
   pendingCount: number;
   sentCount: number;
@@ -747,7 +735,6 @@ export interface TelemetryStatus {
   lastError: TelemetryLastError | null;
   lastFlushAt: number | null;
   lastFlushReason: string | null;
-  backlog: TelemetryBacklogSummary | null;
 }
 
 export interface TelemetrySetConfigResult {

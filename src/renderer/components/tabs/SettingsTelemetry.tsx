@@ -407,13 +407,6 @@ function ProductTelemetrySection() {
         <div><span className="text-fg-faint">delivered so far:</span> {status.sentCount}</div>
         <div><span className="text-fg-faint">de-duplicated:</span> {status.dedupedAppends}</div>
         <div><span className="text-fg-faint">evicted:</span> {status.evictedCount}</div>
-        {status.backlog && (
-          <div className="text-fg-faint">
-            last backlog drain ({status.backlog.reason}, {fmtWhen(status.backlog.ranAt)}):{' '}
-            {status.backlog.linesEnqueued} enqueued, {status.backlog.linesConfirmed} confirmed,{' '}
-            {status.backlog.watermarksRewound} watermarks rewound
-          </div>
-        )}
         {status.lastError && (
           <div className="text-red-400 break-words">
             <span className="text-fg-faint">last error:</span> {status.lastError.message}

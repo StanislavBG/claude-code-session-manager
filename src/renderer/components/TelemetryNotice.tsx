@@ -37,8 +37,9 @@ export function TelemetryNotice({ cfg, onSaved }: NoticeProps) {
     >
       <div className="text-fg font-medium">This app sends anonymous product telemetry</div>
       <p className="text-fg-dim leading-relaxed">
-        Collected: a coarse machine profile (OS/arch/app version, no hardware id), error and
-        warning counts, and session counts — sent on start-up, after an update, and once a day.
+        Collected: a coarse machine profile (OS/arch/app version, no hardware id), usage counts
+        (launches, sessions, Epics, scheduler jobs), and error reports with messages and stack
+        traces (file paths removed) — sent on start-up, after an update, and once a day.
       </p>
       <p className="text-fg-dim leading-relaxed">
         Never collected: prompts, transcripts, file paths, project names, email, or username.

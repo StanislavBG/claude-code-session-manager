@@ -125,6 +125,22 @@ function parseInlineList(raw) {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * The one definition of an artifact-only PRD: `deliverable: artifact` plus a
+ * non-empty `artifactPaths` list. Used by runVerify's artifact exemption,
+ * executeJob's finish-protocol variant and the scheduler's queue-row checks —
+ * keep every caller on this predicate so the copies cannot drift apart.
+ *
+ * @param {{ deliverable?: unknown, artifactPaths?: unknown } | null | undefined} decl
+ * @returns {boolean}
+ */
+function isArtifactOnlyDeclaration(decl) {
+  if (decl == null || typeof decl !== 'object') return false;
+  return decl.deliverable === 'artifact'
+    && Array.isArray(decl.artifactPaths)
+    && decl.artifactPaths.length > 0;
+}
+
 function arraysEqual(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -322,4 +338,12 @@ function serializePrdFile(fm, body) {
   return `---\n${fmText}\n---\n${body}`;
 }
 
-module.exports = { splitFrontmatter, parsePrdFile, serializePrdFile, RECOGNIZED_KEYS, PRD_EFFORT_LEVELS };
+module.exports = {
+  splitFrontmatter,
+  parsePrdFile,
+  serializePrdFile,
+  parseInlineList,
+  isArtifactOnlyDeclaration,
+  RECOGNIZED_KEYS,
+  PRD_EFFORT_LEVELS,
+};

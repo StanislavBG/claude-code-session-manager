@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { splitFrontmatter, PRD_EFFORT_LEVELS } = require('../lib/prd/prdFrontmatter.cjs');
+const { splitFrontmatter, parseInlineList, PRD_EFFORT_LEVELS } = require('../lib/prd/prdFrontmatter.cjs');
 const { deriveEpicIdFromPrdPath } = require('../lib/prd/prdLocations.cjs');
 const { parseFilesSection } = require('../lib/prd/prdGateFiles.cjs');
 const { reportDanglingAgentTypeOnce } = require('../lib/prd/prdAgentType.cjs');
@@ -46,26 +46,21 @@ let prdDirFiles = null; // sorted absolute paths
 const prdFileCache = new Map(); // path -> { mtimeMs, ino, parsed }
 
 /**
- * Parse a PRD file from disk without any caching. Reads bytes once, decodes
- * frontmatter, and folds in the parallel-group number from the filename when
- * frontmatter doesn't specify one.
- */
-/**
  * `artifactPaths: [a, b]` → ['a', 'b'] — the inline-list form only, same
  * shape prdFrontmatter.cjs's parsePrdFile (runVerify's artifact exemption,
  * executeJob's finish variant) recognizes. Empty / absent / malformed → null.
  */
 function parseArtifactPaths(raw) {
   if (typeof raw !== 'string') return null;
-  const v = raw.trim();
-  if (!v.startsWith('[') || !v.endsWith(']')) return null;
-  const list = v.slice(1, -1)
-    .split(',')
-    .map((x) => x.trim().replace(/^(['"])(.*)\1$/, '$2'))
-    .filter((x) => x.length > 0);
-  return list.length > 0 ? list : null;
+  const list = parseInlineList(raw);
+  return list && list.length > 0 ? list : null;
 }
 
+/**
+ * Parse a PRD file from disk without any caching. Reads bytes once, decodes
+ * frontmatter, and folds in the parallel-group number from the filename when
+ * frontmatter doesn't specify one.
+ */
 async function parsePrdRaw(filePath) {
   const text = await fsp.readFile(filePath, 'utf8');
   const { fm, body } = splitFrontmatter(text);

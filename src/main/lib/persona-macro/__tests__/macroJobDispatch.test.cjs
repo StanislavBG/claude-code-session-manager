@@ -181,3 +181,21 @@ test('a valid effort reaches the createPrd input; absent or unknown effort leave
     expect(Object.prototype.hasOwnProperty.call(e.createPrd.mock.calls[0][0], 'effort')).toBe(false);
   }
 });
+
+test('every builtin build PRD says no commit is expected and a green gate means PASS, sentinel never line-start', async () => {
+  for (const macroId of ['builtin-project-home', 'builtin-demo-video', 'builtin-competitor-matrix']) {
+    const d = mk();
+    await dispatchMacroJob({ ...base, macroId, extraInstructions: macroId === 'builtin-competitor-matrix' ? 'Competitors: Foo' : undefined }, d);
+    const i = d.createPrd.mock.calls[0][0];
+    const ac2 = i.acceptanceCriteria[1];
+    expect(ac2).toMatch(/Nothing in the repository is committed/);
+    expect(ac2).toMatch(/no commit/i);
+    expect(ac2).toMatch(/SCHEDULER_VERDICT: PASS/);
+    expect(i.implementationNotes).toMatch(/artifact-only \(deliverable: artifact\)/);
+    expect(i.implementationNotes).toMatch(/no commit/i);
+    expect(i.implementationNotes).toMatch(/SCHEDULER_VERDICT: PASS/);
+    for (const s of [i.goal, ...i.acceptanceCriteria, i.implementationNotes]) {
+      expect(s).not.toMatch(/^SCHEDULER_VERDICT:/m);
+    }
+  }
+});

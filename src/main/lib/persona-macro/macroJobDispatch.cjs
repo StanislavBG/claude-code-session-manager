@@ -112,11 +112,12 @@ async function dispatchMacroJob(
     goal,
     acceptanceCriteria: [
       `${artifactPaths[0]} is written during this run by the save tool your persona names, never by hand.`,
-      'Nothing in the repository is committed.',
+      'Nothing in the repository is committed. No commit is the expected result: once the gate is green, end with SCHEDULER_VERDICT: PASS, never FAIL for the missing commit.',
     ],
     implementationNotes:
       `Work as the ${macro.agentName} persona (your system prompt) end to end. This build was started from Project Home and no one is watching: never stop to ask. `
-      + 'Build outside the repository (mktemp -d under ~/.cache). SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd.',
+      + 'Build outside the repository (mktemp -d under ~/.cache). SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd. '
+      + 'This build is artifact-only (deliverable: artifact) and lands no commit by design: a green gate with no commit means SCHEDULER_VERDICT: PASS.',
     gate: absPaths.map((p) => buildGate(p, t)),
   };
   if (typeof effort === 'string' && PRD_EFFORT_LEVELS.includes(effort)) input.effort = effort;

@@ -2552,7 +2552,8 @@ export interface SessionManagerAPI {
     readPrd: (slug: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
     readLog: (runId: string, slug: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
     writePrd: (slug: string, body: string) => Promise<{ ok: true; bytesWritten: number } | { ok: false; error: string }>;
-    listPrds: () => Promise<PrdListItem[]>;
+    /** Omit `cwd` for the machine-wide list; pass a project cwd to scope it. */
+    listPrds: (cwd?: string) => Promise<PrdListItem[]>;
     health: () => Promise<ScheduleHealthSnapshot>;
     /** Queue-health header verdict — reuses classifyQueueHealth so this can
      *  never disagree with the starvation watchdog. `cwd` null/omitted =

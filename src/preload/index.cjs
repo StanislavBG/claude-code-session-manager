@@ -329,7 +329,7 @@ contextBridge.exposeInMainWorld('api', {
     readPrd: (slug) => ipcRenderer.invoke('schedule:read-prd', { slug }),
     readLog: (runId, slug) => ipcRenderer.invoke('schedule:read-log', { runId, slug }),
     writePrd: (slug, body) => ipcRenderer.invoke('schedule:write-prd', { slug, body }),
-    listPrds: () => ipcRenderer.invoke('schedule:list-prds'),
+    listPrds: (cwd) => ipcRenderer.invoke('schedule:list-prds', cwd ? { cwd } : undefined),
     health: () => ipcRenderer.invoke('schedule:health'),
     // Queue-health header: one honest verdict for "why does the queue look
     // stale" (saturated/blocked/idle/stalled/paused/launch-blocked), scoped

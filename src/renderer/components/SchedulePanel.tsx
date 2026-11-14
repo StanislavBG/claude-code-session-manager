@@ -241,7 +241,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   // (never on the 1s `now` ticker) so every PlanRow keeps its identity across ticks
   // and PrdRow's React.memo bails out. Declared before the early returns (rules of hooks).
   // Archived PRDs of already-visible Epics are merged back in so a finished plan keeps its done steps.
-  const prds = useScheduledPrds()
+  const prds = useScheduledPrds(scopeCwd)
   const graphJobs = useMemo(
     () => (snap ? applyFilter(mergeArchivedPlanRows(snap.jobs, prds, scopeCwd), filter) : []),
     [snap, prds, scopeCwd, filter],

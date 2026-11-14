@@ -69,7 +69,6 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     return () => usePromptSessions.getState().setFocusedEpicId(null)
   }, [selectedId])
   const [showNewEpic, setShowNewEpic] = useState(false)
-  const prds = useScheduledPrds()
   // Reply-context quote (Turn's hover "Quote" button -> EpicComposer's
   // dismissible strip) — held here since EpicDetail (Turn) and EpicComposer
   // are rendered as siblings, not parent/child.
@@ -88,6 +87,7 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const effectiveCwd = cwd ?? activeTab?.cwd ?? undefined
+  const prds = useScheduledPrds(effectiveCwd)
 
   // Backfill any active/archived PromptSessions persisted from a prior app
   // run, one call per known cwd as they're discovered — mirrors the retired

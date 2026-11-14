@@ -671,7 +671,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   }, [mode, cwd, epicId, sessionId])
 
   const [view, setView] = useState<ViewKey>('discussion')
-  const prds = useScheduledPrds()
+  const prds = useScheduledPrds(cwd)
   const [markingCompleted, setMarkingCompleted] = useState(false)
   const [goalExpanded, setGoalExpanded] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)

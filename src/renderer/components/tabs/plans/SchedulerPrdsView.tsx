@@ -106,7 +106,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
   useEffect(() => {
     let alive = true
     window.api.schedule
-      .listPrds()
+      .listPrds(scopeCwd ?? undefined)
       .then((list) => {
         if (alive) {
           setPrds(excludeArchived(list))
@@ -125,7 +125,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
     return () => {
       alive = false
     }
-  }, [])
+  }, [scopeCwd])
 
   const liveSnap = useScheduleState((s) => s.snapshot)
   // Raw slice — never derive inside a zustand selector (React #185 class).
@@ -237,7 +237,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
 
   async function refreshPrds() {
     try {
-      const list = await window.api.schedule.listPrds()
+      const list = await window.api.schedule.listPrds(scopeCwd ?? undefined)
       setPrds(excludeArchived(list))
     } catch { /* */ }
   }
@@ -272,7 +272,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
         toast.error(`Failed to create PRD: ${res.error}`)
         return
       }
-      const list = await window.api.schedule.listPrds()
+      const list = await window.api.schedule.listPrds(scopeCwd ?? undefined)
       setPrds(excludeArchived(list))
       openPrd(slug)
     } catch (e: unknown) {

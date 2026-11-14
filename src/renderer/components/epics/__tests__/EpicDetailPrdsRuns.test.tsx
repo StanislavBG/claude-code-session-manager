@@ -64,7 +64,12 @@ function mount(el: React.ReactElement) {
   return container
 }
 
-const flush = () => flushAsync(2)
+// useScheduledPrds coalesces listPrds calls in a trailing window
+// (LIST_PRDS_COALESCE_MS = 250 ms), so let that window close first.
+const flush = async () => {
+  await act(() => new Promise<void>((r) => setTimeout(r, 260)))
+  await flushAsync(2)
+}
 
 function clickTab(el: HTMLElement, label: string) {
   const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.startsWith(label)) as HTMLButtonElement

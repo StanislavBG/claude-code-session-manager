@@ -299,7 +299,7 @@ function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1 }) {
   }
 }
 
-module.exports = { buildMusicBed, buildSfx, mix, measure, parseEbur128, STYLES, SFX_NAMES, TARGET };
+module.exports = { buildMusicBed, buildSfx, mix, measure, parseEbur128, runFfmpeg, decodeWavF32, STYLES, SFX_NAMES, TARGET };
 
 if (require.main === module) {
   try {

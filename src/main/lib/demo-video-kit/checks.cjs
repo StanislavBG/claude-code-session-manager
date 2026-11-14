@@ -4,6 +4,8 @@
 // Each check returns {id, ok, detail}. CLI: node checks.cjs <input.json> -> JSON, exit 1 on failure.
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const BANNED_WORDS = Object.freeze([
   'MCP', 'API', 'SDK', 'CLI', 'repo', 'cron', 'pipeline', 'automation', 'npm', 'pnpm', 'deploy',
@@ -21,6 +23,9 @@ const MIN_SPEECH_COVERAGE = 0.4;
 const BLANK_AFTER_S = 0.5;
 const DEFAULT_BLANK_STDDEV = 3;
 const HTML_MB_PER_30S = 2 * 1024 * 1024;
+const MIN_SPEECH_MODULATION = 0.2;
+const ENVELOPE_WINDOW_S = 0.02;
+const DECODE_SR = 16000;
 
 const result = (id, ok, detail) => ({ id, ok: !!ok, detail });
 const words = (s) => String(s || '').split(/\s+/).filter(Boolean);
@@ -120,6 +125,81 @@ function checkHtmlLimits({ html, bytes, lengthS } = {}) {
   return result('htmlLimits', problems.length === 0, problems.length ? problems.join('; ') : `${size} bytes within cap ${cap}`);
 }
 
+// Share of the loudness envelope's modulation energy in the 2-8 Hz syllable band.
+// Envelope = RMS over 20 ms windows (50 Hz), mean removed; energy by DFT over 0.5-25 Hz.
+// Speech lands ~0.3+; a steady hum or drone lands well under 0.2.
+function speechModulationShare(samples, sampleRate) {
+  const sr = Number(sampleRate) || 0;
+  const win = Math.max(1, Math.round(ENVELOPE_WINDOW_S * sr));
+  const n = samples && samples.length ? Math.floor(samples.length / win) : 0;
+  if (n < 4 || !sr) return 0;
+  const env = new Float64Array(n);
+  let mean = 0;
+  for (let w = 0; w < n; w++) {
+    let e = 0;
+    for (let i = w * win; i < (w + 1) * win; i++) e += samples[i] * samples[i];
+    env[w] = Math.sqrt(e / win);
+    mean += env[w];
+  }
+  mean /= n;
+  for (let w = 0; w < n; w++) env[w] -= mean;
+  const envSr = sr / win;
+  let band = 0;
+  let total = 0;
+  for (let k = 1; k <= Math.floor(n / 2); k++) {
+    const f = (k * envSr) / n;
+    if (f < 0.5 || f > 25) continue;
+    let re = 0;
+    let im = 0;
+    const step = (2 * Math.PI * k) / n;
+    for (let w = 0; w < n; w++) { re += env[w] * Math.cos(step * w); im -= env[w] * Math.sin(step * w); }
+    const p = re * re + im * im;
+    total += p;
+    if (f >= 2 && f <= 8) band += p;
+  }
+  return total > 0 ? band / total : 0;
+}
+
+function firstAudioDataUri(html) {
+  const h = String(html || '');
+  const m = /<audio\b[^>]*>/i.exec(h);
+  if (!m) return null;
+  const src = /\ssrc\s*=\s*["'](data:[^"']*)["']/i.exec(m[0]);
+  if (src) return src[1];
+  const rest = h.slice(m.index + m[0].length);
+  const close = rest.search(/<\/audio>/i);
+  const inner = close >= 0 ? rest.slice(0, close) : rest;
+  const source = /<source\b[^>]*\ssrc\s*=\s*["'](data:[^"']*)["']/i.exec(inner);
+  return source ? source[1] : null;
+}
+
+// Decodes the first <audio> data: URI through ffmpeg and fails when it has no speech-like modulation.
+function checkAudioHasSpeech({ html } = {}) {
+  const id = 'audio-speech';
+  const uri = firstAudioDataUri(html);
+  if (!uri) return result(id, false, 'no <audio> data: URI embedded in the HTML');
+  const m = /^data:([^;,]*)((?:;[^;,]*)*),(.*)$/s.exec(uri);
+  if (!m) return result(id, false, 'embedded <audio> data: URI is malformed');
+  const data = /;base64/i.test(m[2]) ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'binary');
+  if (!data.length) return result(id, false, 'embedded <audio> data: URI is empty');
+  const { runFfmpeg, decodeWavF32 } = require('./sound.cjs');
+  let dir = null;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvk-checks-'));
+    const input = path.join(dir, 'audio.bin');
+    const wav = path.join(dir, 'audio.f32.wav');
+    fs.writeFileSync(input, data);
+    runFfmpeg(['-hide_banner', '-nostats', '-y', '-i', input, '-vn', '-ac', '1', '-ar', String(DECODE_SR), '-c:a', 'pcm_f32le', wav]);
+    const share = speechModulationShare(decodeWavF32(fs.readFileSync(wav)), DECODE_SR);
+    return result(id, share >= MIN_SPEECH_MODULATION,
+      `speech-band (2-8 Hz) modulation share ${share.toFixed(2)} (min ${MIN_SPEECH_MODULATION})`);
+  } catch (e) {
+    return result(id, false, `could not decode embedded audio with ffmpeg: ${String((e && e.message) || e).slice(0, 300)}`);
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // input: {captions, narration (string|string[]), closing, lines, speechS, lengthS, frames, blankThreshold, html, bytes}
 function runChecks(input = {}) {
   const out = [];
@@ -130,12 +210,13 @@ function runChecks(input = {}) {
   if (input.speechS != null) out.push(checkSpeechCoverage(input.speechS, input.lengthS));
   if (input.frames) out.push(checkBlankFrames(input.frames, input.blankThreshold));
   if (input.html != null) out.push(checkHtmlLimits({ html: input.html, bytes: input.bytes, lengthS: input.lengthS }));
+  if (typeof input.html === 'string') out.push(checkAudioHasSpeech({ html: input.html }));
   return out;
 }
 
 module.exports = {
   BANNED_WORDS, countSyllables, checkCaptions, lintLanguage, checkClosing, checkVoiceFit,
-  checkSpeechCoverage, checkBlankFrames, checkHtmlLimits, runChecks,
+  checkSpeechCoverage, checkBlankFrames, checkHtmlLimits, speechModulationShare, checkAudioHasSpeech, runChecks,
 };
 
 if (require.main === module) {

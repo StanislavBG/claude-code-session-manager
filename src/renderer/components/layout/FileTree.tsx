@@ -28,6 +28,7 @@ import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
+import { scrollWithin } from '../../lib/scrollWithin'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import { dirname, basename, segments, isUnder, join } from '../../lib/pathSep'
 import { relativeSegments } from '../../lib/revealInFileExplorer'
@@ -183,6 +184,8 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
   // Selected row (click or reveal). Transient — cleared when cwd changes.
   const [selected, setSelected] = useState<string | null>(null)
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
+  // The tree's own scroll container — reveals scroll only this, never the layout frames.
+  const listScrollRef = useRef<HTMLDivElement | null>(null)
   // Bumped by a reveal so the effect below scrolls the selected row into view.
   const [scrollRequest, setScrollRequest] = useState(0)
   // Reveal gate: `hydratedCwd` = cwd whose first listing + persisted expansion
@@ -586,7 +589,10 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
   }, [reveal, hydratedCwd, rootKey, loading, cwd, showHidden, revealRetry, revealInTree])
 
   useEffect(() => {
-    if (scrollRequest) selectedRowRef.current?.scrollIntoView?.({ block: 'nearest' })
+    if (!scrollRequest) return
+    const container = listScrollRef.current
+    const row = selectedRowRef.current
+    if (container && row) scrollWithin(container, row, { block: 'nearest' })
   }, [scrollRequest])
 
   const handleFileClick = useCallback((node: TreeNode) => {
@@ -743,7 +749,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
       </div>
 
       {/* Tree */}
-      <div className="flex-1 overflow-y-auto py-1">
+      <div ref={listScrollRef} className="flex-1 overflow-y-auto py-1">
         {error && (
           <div className="px-3 py-2 text-[11px] text-red-400">{error}</div>
         )}

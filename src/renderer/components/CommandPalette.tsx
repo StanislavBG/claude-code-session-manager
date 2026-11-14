@@ -7,6 +7,7 @@ import { useVoice } from '../state/voice'
 import { useTour } from '../state/tour'
 import { useLayout } from '../state/layout'
 import { toast } from '../state/toast'
+import { scrollWithin } from '../lib/scrollWithin'
 
 /**
  * CommandPalette — Cmd-K / Ctrl-K modal palette.
@@ -307,9 +308,10 @@ export function CommandPalette({ open, onClose, onCommand }: Props) {
 
   // Scroll the highlighted row into view.
   useEffect(() => {
-    if (!listRef.current) return
-    const el = listRef.current.querySelector<HTMLElement>(`[data-cmd-idx="${highlight}"]`)
-    if (el) el.scrollIntoView({ block: 'nearest' })
+    const list = listRef.current
+    if (!list) return
+    const el = list.querySelector<HTMLElement>(`[data-cmd-idx="${highlight}"]`)
+    if (el) scrollWithin(list, el, { block: 'nearest' })
   }, [highlight])
 
   if (!open) return null

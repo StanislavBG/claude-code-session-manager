@@ -45,23 +45,26 @@ const list = vi.fn()
 const writeJson = vi.fn()
 let settingsPrefs: Record<string, unknown> | null = null
 let projectPrefs: Record<string, unknown> | null = null
-const scrolled: Element[] = []
-const realScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+// FileTree reveals via scrollWithin(listContainer, row) — never scrollIntoView,
+// which drags the app's layout frames (scripts/check-scroll-into-view.cjs).
+const { scrolled, scrollContainers } = vi.hoisted(() => ({ scrolled: [] as Element[], scrollContainers: [] as Element[] }))
+vi.mock('../../../lib/scrollWithin', () => ({
+  scrollWithin: (container: HTMLElement, target: HTMLElement) => {
+    scrollContainers.push(container)
+    scrolled.push(target)
+  },
+}))
 
 beforeEach(() => {
   settingsPrefs = null
   projectPrefs = null
   scrolled.length = 0
+  scrollContainers.length = 0
   list.mockReset()
   list.mockImplementation(async (dir: string, showHidden: boolean) => listing(dir, showHidden))
   writeJson.mockReset()
   writeJson.mockResolvedValue(undefined)
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
-  Object.defineProperty(Element.prototype, 'scrollIntoView', {
-    configurable: true,
-    writable: true,
-    value: function (this: Element) { scrolled.push(this) },
-  })
   ;(window as unknown as { api: unknown }).api = {
     files: { list },
     git: { fileStatus: vi.fn().mockResolvedValue({}) },
@@ -88,8 +91,6 @@ afterEach(() => {
   container = null
   root = null
   delete (window as unknown as { api?: unknown }).api
-  if (realScrollIntoView) Object.defineProperty(Element.prototype, 'scrollIntoView', realScrollIntoView)
-  else delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView
 })
 
 type Extra = { reveal?: FileTreeReveal | null; onRevealDone?: (token: number) => void }
@@ -123,6 +124,9 @@ describe('FileTree reveal', () => {
     await until(() => expect(selectedPaths(c)).toEqual([TARGET]))
     for (const dir of [CLAUDE, SKILLS, FOO]) expect(row(c, dir)).not.toBeNull()
     expect(scrolled).toEqual([row(c, TARGET)])
+    // Scrolled within the tree's own list container, not a layout frame.
+    expect(scrollContainers[0]?.contains(row(c, TARGET))).toBe(true)
+    expect(scrollContainers[0]?.className).toContain('overflow-y-auto')
     expect(onRevealDone).toHaveBeenCalledWith(1)
     // The opened folders persist like any user expansion.
     await until(() => expect(writeJson).toHaveBeenCalledWith(

@@ -76,6 +76,7 @@
     "lint:page-stewards": "node scripts/check-page-stewards.cjs",
     "lint:e2e-budget": "node scripts/check-e2e-budget.cjs",
     "lint:scroll": "node scripts/check-scroll-into-view.cjs",
+    "check:frame": "node scripts/frame-integrity.mjs",
     "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage && npm run lint:test-smells && npm run lint:page-stewards && npm run lint:e2e-budget && npm run lint:scroll",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },

@@ -11,6 +11,7 @@ import { EpicRuntimeOverride } from './EpicRuntimeOverride'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
 import { EffectiveRuntimeLine } from './EffectiveRuntimeLine'
 import { useChat } from '../../state/chat'
+import { usePendingRestore } from '../../state/pendingRestore'
 import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
@@ -164,6 +165,8 @@ export function NewEpicCard({
   const [advanced, setAdvanced] = useState(false)
   // The earlier CLI session this Epic continues (advanced face's Restore panel); null = a fresh session.
   const [restoreSession, setRestoreSession] = useState<RestorableSession | null>(null)
+  // A restore pick handed over by the import flow (raw store value — stable identity).
+  const pendingRestorePick = usePendingRestore((s) => s.pick)
   // Per-Epic runtime overrides ('' = use the agent's own). Re-seeded to '' whenever the agent changes.
   const [modelOverride, setModelOverride] = useState(seed?.model ?? '')
   const [effortOverride, setEffortOverride] = useState(seed?.effort ?? '')
@@ -307,6 +310,16 @@ export function NewEpicCard({
     setRestoreSession(s)
     if (s) setTitle((t) => (t.trim() ? t : restorableSessionLabel(s).slice(0, 80).trimEnd()))
   }
+
+  // The import flow pre-selects a session for THIS project's card: take it once,
+  // exactly as a Restore-panel pick. A pick for another cwd stays pending; a
+  // reopened draft keeps its own session, so it never takes one. Declared after
+  // the cwd-move clearing effect so a cwd change drops the old pick first.
+  useEffect(() => {
+    if (!pendingRestorePick || editDraft || !effectiveCwd) return
+    const taken = usePendingRestore.getState().take(effectiveCwd)
+    if (taken) pickRestoreSession(taken.session)
+  }, [effectiveCwd, pendingRestorePick])
 
   // Read-only "what will this Agent actually run as" readout for the mono
   // line below the mission — null while loading or on IPC failure, in which

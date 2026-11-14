@@ -8,6 +8,7 @@ import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
 import { useToast } from '../../../state/toast'
 import { useConfig } from '../../../state/config'
+import { usePendingRestore } from '../../../state/pendingRestore'
 import { agentTagDef } from '../../../lib/agentTagDefs'
 import { CONTEXT_INJECTIONS } from '../../../lib/contextInjections'
 import type { AgentPersona, PromptSessionsListRestorableResult, RestorableSession } from '../../../../preload/api'
@@ -1614,6 +1615,36 @@ describe('NewEpicCard restore an earlier session', () => {
     expect('restoreSessionId' in createIpcPayload()).toBe(false)
     expect(sendSpy).toHaveBeenCalledTimes(1)
     expect(sendSpy.mock.calls[0][0].sessionId).not.toBe(RESTORE.sessionId)
+  })
+
+  describe('pending restore pick (import flow)', () => {
+    afterEach(() => { usePendingRestore.setState({ pick: null }) })
+
+    it('a pending pick for the card\'s cwd is taken once: chip shown, title filled, restoreSessionId sent on create', async () => {
+      usePendingRestore.getState().set({ cwd: ALPHA, session: RESTORE })
+      const el = await mountCard()
+
+      expect(usePendingRestore.getState().pick).toBeNull()
+      expect(q(el, 'new-epic-restore-chip')?.textContent).toContain('Fix the login redirect')
+      expect(titleOf(el)).toBe('Fix the login redirect')
+      act(() => setNativeValue(goalBox(el), 'Carry on'))
+      click(el, 'new-epic-create')
+      await act(async () => {})
+
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][7]).toMatchObject({ restoreSessionId: RESTORE.sessionId })
+      expect(createIpcPayload().restoreSessionId).toBe(RESTORE.sessionId)
+    })
+
+    it('a pending pick for another cwd is ignored and stays pending', async () => {
+      const other = { cwd: '/home/bilko/Projects/beta', session: RESTORE }
+      usePendingRestore.getState().set(other)
+      const el = await mountCard()
+
+      expect(q(el, 'new-epic-restore-chip')).toBeNull()
+      expect(titleOf(el)).toBe('')
+      expect(usePendingRestore.getState().pick).toEqual(other)
+    })
   })
 
   it('Save draft carries the pick; the chip clear button goes back to a fresh session and keeps the title', async () => {

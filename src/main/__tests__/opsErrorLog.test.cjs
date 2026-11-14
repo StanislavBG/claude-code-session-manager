@@ -86,24 +86,60 @@ test('appendError merges caller tags without duplicating auto-derived ones', () 
   assert.ok(line.tags.includes('silent-probe'));
 });
 
+/** Resolve symlinks on the deepest existing ancestor so /tmp vs /private/tmp compare equal. */
+function realOrResolved(p) {
+  let head = path.resolve(p);
+  const tail = [];
+  for (;;) {
+    try { return path.join(fs.realpathSync(head), ...tail.reverse()); } catch { /* walk up */ }
+    const up = path.dirname(head);
+    if (up === head) return path.resolve(p);
+    tail.push(path.basename(head));
+    head = up;
+  }
+}
+
+function isInsideRoot(child, root) {
+  const rel = path.relative(realOrResolved(root), realOrResolved(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * A never-created "real project root" that sits outside os.tmpdir() and
+ * SM_SANDBOX_DIR wherever this checkout lives. The repo's own root is NOT
+ * usable: job/publish worktrees live under /tmp, where it counts as scratch.
+ */
+function outsideScratchProbe() {
+  const roots = [os.tmpdir(), process.env.SM_SANDBOX_DIR].filter(Boolean);
+  const name = `.sm-opslog-refusal-probe-${process.pid}-${Date.now()}`;
+  const candidates = [path.join(os.homedir(), name), path.join(path.parse(process.cwd()).root, name)];
+  const probe = candidates.find((c) => !fs.existsSync(c) && !roots.some((r) => isInsideRoot(c, r)));
+  assert.ok(probe, `no probe cwd outside ${roots.join(', ')} among ${candidates.join(', ')}`);
+  return { probe, roots };
+}
+
 test('under vitest, a real project root is refused: no file written, no telemetry', () => {
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const logsBefore = fs.existsSync(path.join(repoRoot, 'session-manager-operations', 'logs'))
-    ? fs.readdirSync(path.join(repoRoot, 'session-manager-operations', 'logs')).map((f) => [f, fs.statSync(path.join(repoRoot, 'session-manager-operations', 'logs', f)).mtimeMs])
-    : null;
+  const { probe, roots } = outsideScratchProbe();
+  for (const r of roots) assert.equal(isInsideRoot(probe, r), false, `${probe} must sit outside ${r}`);
+  assert.equal(fs.existsSync(probe), false);
   const telemetryPath = require.resolve('../lib/telemetry/telemetryClient.cjs');
   const saved = require.cache[telemetryPath];
-  let calls = 0;
-  require.cache[telemetryPath] = { id: telemetryPath, filename: telemetryPath, loaded: true, exports: { reportError: () => { calls++; }, logLine: () => { calls++; } } };
+  let reportErrorCalls = 0;
+  let logLineCalls = 0;
+  require.cache[telemetryPath] = {
+    id: telemetryPath, filename: telemetryPath, loaded: true,
+    exports: { reportError: () => { reportErrorCalls++; }, logLine: () => { logLineCalls++; } },
+  };
+  let existedAfter;
   try {
-    opsErrorLog.appendError({ cwd: repoRoot, scope: 'chatRunner', tabId: 'T', message: 'fixture' });
-    opsErrorLog.appendError({ cwd: repoRoot, scope: 'chatRunner', level: 'warn', message: 'fixture' });
+    opsErrorLog.appendError({ cwd: probe, scope: 'chatRunner', tabId: 'T', message: 'fixture' });
+    opsErrorLog.appendError({ cwd: probe, scope: 'chatRunner', level: 'warn', message: 'fixture' });
+    existedAfter = fs.existsSync(probe);
   } finally {
     if (saved) require.cache[telemetryPath] = saved; else delete require.cache[telemetryPath];
+    if (fs.existsSync(probe)) fs.rmSync(probe, { recursive: true, force: true });
   }
-  const logsAfter = fs.existsSync(path.join(repoRoot, 'session-manager-operations', 'logs'))
-    ? fs.readdirSync(path.join(repoRoot, 'session-manager-operations', 'logs')).map((f) => [f, fs.statSync(path.join(repoRoot, 'session-manager-operations', 'logs', f)).mtimeMs])
-    : null;
-  assert.deepEqual(logsAfter, logsBefore);
-  assert.equal(calls, 0);
+  assert.equal(existedAfter, false, 'appendError must not create the refused cwd or its logs/');
+  assert.equal(reportErrorCalls, 0);
+  assert.equal(logLineCalls, 0);
 });

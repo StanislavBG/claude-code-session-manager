@@ -2610,18 +2610,62 @@ async function rpAppendConflict(file, baseText, oursAdd, theirsAdd) {
 }
 const rpIdxDirs = () => require('node:fs').readdirSync(require('node:os').tmpdir()).filter((n) => n.startsWith('sm-replay-idx-') || n.startsWith('sm-mergefile-')).sort();
 
+// The live app mkdtemps sm-mergefile-* dirs in the machine-wide os.tmpdir()
+// whenever it lands a job, so rpIdxDirs() must never list that shared folder.
+// Point TMPDIR/TMP/TEMP at a private per-test folder (os.tmpdir() re-reads
+// TMPDIR on every call on POSIX) so only the code under test writes there.
+const RP_TMP_ENV_KEYS = ['TMPDIR', 'TMP', 'TEMP'];
+async function withPrivateTmpdir(fn) {
+  const saved = {};
+  for (const k of RP_TMP_ENV_KEYS) saved[k] = Object.prototype.hasOwnProperty.call(process.env, k) ? process.env[k] : undefined;
+  const originalTmp = os.tmpdir();
+  const priv = fs.mkdtempSync(path.join(originalTmp, 'sm-test-private-tmp-'));
+  try {
+    for (const k of RP_TMP_ENV_KEYS) process.env[k] = priv;
+    return await fn({ privateTmp: priv, originalTmp });
+  } finally {
+    for (const k of RP_TMP_ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    fs.rmSync(priv, { recursive: true, force: true });
+  }
+}
+
 test('[replay] pure-addition .md conflict resolves by concatenation (ours then theirs), main checkout untouched, temp files cleaned', async () => {
   const onto = await rpAppendConflict('notes.md', 'one\n', 'from main\n', 'from feat\n');
   const snap = rpSnap(repoCwd);
-  const tmpBefore = rpIdxDirs();
-  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
-  expect(r.ok).toBe(true);
-  expect(r.autoResolved).toBe('pure_addition_concat');
-  expect(r.resolvedPaths).toEqual(['notes.md']);
-  expect(git(['show', `${r.tipSha}:notes.md`], repoCwd)).toBe('one\nfrom main\nfrom feat\n');
-  expect(git(['rev-parse', `${r.tipSha}^`], repoCwd).trim()).toBe(onto);
-  expect(rpSnap(repoCwd)).toEqual(snap);
-  expect(rpIdxDirs()).toEqual(tmpBefore);
+  await withPrivateTmpdir(async () => {
+    const tmpBefore = rpIdxDirs();
+    const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+    expect(r.ok).toBe(true);
+    expect(r.autoResolved).toBe('pure_addition_concat');
+    expect(r.resolvedPaths).toEqual(['notes.md']);
+    expect(git(['show', `${r.tipSha}:notes.md`], repoCwd)).toBe('one\nfrom main\nfrom feat\n');
+    expect(git(['rev-parse', `${r.tipSha}^`], repoCwd).trim()).toBe(onto);
+    expect(rpSnap(repoCwd)).toEqual(snap);
+    expect(rpIdxDirs()).toEqual(tmpBefore);
+  });
+});
+
+test('[replay] pure-addition temp-dir check ignores foreign sm-mergefile-* dirs in the machine-wide tmpdir', async () => {
+  const onto = await rpAppendConflict('notes.md', 'one\n', 'from main\n', 'from feat\n');
+  let decoy;
+  try {
+    await withPrivateTmpdir(async ({ privateTmp, originalTmp }) => {
+      expect(os.tmpdir()).toBe(privateTmp);
+      const tmpBefore = rpIdxDirs();
+      // A concurrent landing in the live app writes here, mid-replay.
+      decoy = fs.mkdtempSync(path.join(originalTmp, 'sm-mergefile-'));
+      const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+      expect(r.ok).toBe(true);
+      expect(r.autoResolved).toBe('pure_addition_concat');
+      expect(fs.existsSync(decoy)).toBe(true);
+      expect(rpIdxDirs()).toEqual(tmpBefore);
+    });
+  } finally {
+    if (decoy) fs.rmSync(decoy, { recursive: true, force: true });
+  }
 });
 
 test('[replay] pure-addition: non-addition .md conflict and non-allowlisted extension still content_conflict', async () => {
@@ -2631,10 +2675,12 @@ test('[replay] pure-addition: non-addition .md conflict and non-allowlisted exte
   rpCommit(repoCwd, 'doc.md', 'theirs edit\n', 'feat edit');
   git(['checkout', '-q', main], repoCwd);
   const onto = rpCommit(repoCwd, 'doc.md', 'ours edit\n', 'main edit');
-  const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
-  expect(r.ok).toBe(false);
-  expect(r.failureKind).toBe('content_conflict');
-  expect(rpIdxDirs().filter((n) => n.startsWith('sm-replay-idx-'))).toEqual([]);
+  await withPrivateTmpdir(async () => {
+    const r = await gitWorktree.replayBranchOnto({ cwd: repoCwd, ontoSha: onto, branch: 'feat' });
+    expect(r.ok).toBe(false);
+    expect(r.failureKind).toBe('content_conflict');
+    expect(rpIdxDirs().filter((n) => n.startsWith('sm-replay-idx-'))).toEqual([]);
+  });
 });
 
 test('[replay] pure-addition: pure appends to a .js path are not auto-resolved', async () => {

@@ -76,7 +76,7 @@ test('reportDanglingAgentTypeOnce logs once via opsErrorLog when the persona doe
 
     const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     const matches = lines.filter((l) => l.message.includes('ghost-persona-xyz'));
-    // Logged once despite two calls above — dedup key is (cwd, agentType).
+    // Logged once despite two calls above — dedup key is agentType (per process).
     expect(matches).toHaveLength(1);
     expect(matches[0].level).toBe('warn');
     expect(matches[0].scope).toBe('prdAgentType');
@@ -100,4 +100,63 @@ test('reportDanglingAgentTypeOnce is a no-op when cwd or agentType is missing', 
     reportDanglingAgentTypeOnce(null, 'x', { personaExists: () => false });
     reportDanglingAgentTypeOnce('/some/cwd-missing-agenttype', null, { personaExists: () => false });
   }).not.toThrow();
+});
+
+function readMatches(cwd, agentType) {
+  if (!fs.existsSync(todayFile(cwd))) return [];
+  return fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean)
+    .map((l) => JSON.parse(l)).filter((l) => l.message.includes(`'${agentType}'`));
+}
+
+test('reportDanglingAgentTypeOnce warns once per agentType per process, even across cwds', async () => {
+  const cwdA = await mkTmpDir('sm-prd-agenttype-a-');
+  const cwdB = await mkTmpDir('sm-prd-agenttype-b-');
+  try {
+    const deps = { personaExists: () => false };
+    for (let i = 0; i < 5; i += 1) {
+      reportDanglingAgentTypeOnce(cwdA, 'retired-persona-repeat', deps);
+      reportDanglingAgentTypeOnce(cwdB, 'retired-persona-repeat', deps);
+    }
+    expect(readMatches(cwdA, 'retired-persona-repeat').length + readMatches(cwdB, 'retired-persona-repeat').length).toBe(1);
+  } finally {
+    await fsp.rm(cwdA, { recursive: true, force: true });
+    await fsp.rm(cwdB, { recursive: true, force: true });
+  }
+});
+
+test('reportDanglingAgentTypeOnce never warns for an archived PRD (flag or prds-archived/ path)', async () => {
+  const cwd = await mkTmpDir('sm-prd-agenttype-arch-');
+  try {
+    const personaExists = () => false;
+    reportDanglingAgentTypeOnce(cwd, 'retired-persona-archived', { personaExists, archived: true });
+    reportDanglingAgentTypeOnce(cwd, 'retired-persona-archived', {
+      personaExists,
+      filePath: path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'e1', 'prds-archived', '1-x.md'),
+    });
+    expect(readMatches(cwd, 'retired-persona-archived')).toHaveLength(0);
+    // Archived reads must not consume the once-slot: a later live PRD still warns.
+    reportDanglingAgentTypeOnce(cwd, 'retired-persona-archived', {
+      personaExists,
+      filePath: path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'e1', 'prds', '2-y.md'),
+    });
+    expect(readMatches(cwd, 'retired-persona-archived')).toHaveLength(1);
+  } finally {
+    await fsp.rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('reportDanglingAgentTypeOnce warns exactly once for a live unresolvable PRD', async () => {
+  const cwd = await mkTmpDir('sm-prd-agenttype-live-');
+  try {
+    reportDanglingAgentTypeOnce(cwd, 'retired-persona-live', {
+      personaExists: () => false,
+      filePath: path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'e1', 'prds', '3-z.md'),
+    });
+    const m = readMatches(cwd, 'retired-persona-live');
+    expect(m).toHaveLength(1);
+    expect(m[0].level).toBe('warn');
+    expect(m[0].message).toMatch(/has no resolvable persona file/);
+  } finally {
+    await fsp.rm(cwd, { recursive: true, force: true });
+  }
 });

@@ -21,25 +21,35 @@ const fs = require('node:fs');
 /** PRD execution's documented default persona (dev-lead.md's own frontmatter role). */
 const DEFAULT_PRD_AGENT_TYPE = 'dev-lead';
 
-// READ side of the FK — logged at most once per (cwd, agentType) so a hot
-// reconcile/list pass re-parsing the same on-disk PRD every tick doesn't
-// flood opsErrorLog's daily file. Mirrors agentModelResolve.cjs's
+// READ side of the FK — logged at most once per agentType per process so a
+// hot reconcile/list pass re-parsing the same on-disk PRDs every tick (across
+// many cwds — job worktrees each count as one) doesn't flood opsErrorLog's
+// daily file or the remote warns chart. Mirrors agentModelResolve.cjs's
 // loggedDanglingPersonas set.
 const loggedDanglingAgentTypes = new Set();
+
+/** True when the PRD being read is archived — a retired persona there is expected, not a warn. */
+function isArchivedPrd(deps) {
+  if (deps.archived === true) return true;
+  const p = typeof deps.filePath === 'string' ? deps.filePath.replace(/\\/g, '/') : '';
+  return p.includes('/prds-archived/');
+}
 
 /**
  * Read-time tolerance check: a PRD on disk whose persona was renamed or
  * deleted after the PRD was written must still load. Never throws — logs at
- * most once via opsErrorLog when `agentType` is set but unresolvable.
+ * most once per agentType per process via opsErrorLog when `agentType` is set
+ * but unresolvable. Silent for archived PRDs (`deps.archived === true`, or
+ * `deps.filePath` under `prds-archived/`): their personas are routinely retired.
  */
 function reportDanglingAgentTypeOnce(cwd, agentType, deps = {}) {
   if (!cwd || !agentType) return;
   try {
+    if (isArchivedPrd(deps)) return;
+    if (loggedDanglingAgentTypes.has(agentType)) return;
     const checkPersonaExists = deps.personaExists || personaFileExists;
     if (checkPersonaExists(cwd, agentType, deps)) return;
-    const key = `${cwd}::${agentType}`;
-    if (loggedDanglingAgentTypes.has(key)) return;
-    loggedDanglingAgentTypes.add(key);
+    loggedDanglingAgentTypes.add(agentType);
     // Required lazily, same rationale as agentModelResolve.cjs's
     // logDanglingPersonaOnce: pay for this leaf module only on the (rare)
     // miss path.

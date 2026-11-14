@@ -65,7 +65,7 @@ async function parsePrdRaw(filePath) {
   // read — prdAgentType.cjs's header): a persona renamed/deleted after this
   // PRD was written must not stop the PRD from loading. Best-effort only —
   // never lets a logging failure affect parsing.
-  if (fm.agentType && cwd) reportDanglingAgentTypeOnce(cwd, fm.agentType);
+  if (fm.agentType && cwd) reportDanglingAgentTypeOnce(cwd, fm.agentType, { filePath });
 
   return {
     slug: base,

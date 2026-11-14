@@ -493,6 +493,26 @@ function releaseWatchesForSender(senderId) {
   }
 }
 
+/**
+ * Release a renderer's watches whenever its frame starts navigating (Ctrl+R,
+ * HMR full reload) — the fresh renderer re-registers its own. The sender id is
+ * captured at registration so the listener never reaches back through a
+ * window/webContents reference that may since have been nulled or destroyed.
+ * @param {import('node:events').EventEmitter & { id: number }} webContents
+ */
+function bindWatchReleaseOnNavigation(webContents) {
+  const senderId = webContents.id;
+  webContents.on('did-start-navigation', () => {
+    releaseWatchesForSender(senderId);
+  });
+}
+
+/** Watch keys currently registered by `senderId` (test / diagnostics seam). */
+function watchedPathsForSender(senderId) {
+  const sm = senderWatches.get(senderId);
+  return sm ? [...sm.keys()] : [];
+}
+
 function closeAllWatchers() {
   for (const { watcher } of watchers.values()) {
     watcher.close().catch(() => {});
@@ -531,6 +551,8 @@ module.exports = {
   registerConfigHandlers,
   closeAllWatchers,
   releaseWatchesForSender,
+  bindWatchReleaseOnNavigation,
+  watchedPathsForSender,
   watch,
   unwatch,
   // exported for tests / direct use

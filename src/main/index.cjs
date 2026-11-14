@@ -505,18 +505,9 @@ function createWindow() {
   const win = mainWindow;
   const wc = win.webContents;
 
-  // Native right-click menu — Copy / Paste / Select All everywhere. Roles
-  // hook into Electron's built-in clipboard/selection plumbing, which xterm.js
-  // (and Monaco, and Tiptap) all participate in via the standard DOM
-  // selection API, so this single block covers Terminal + Doc Editor + plain
-  // text inputs without per-component wiring.
-  // Release any stale chokidar watchers that were opened by the previous
-  // renderer frame. Fires on Ctrl+R and HMR full-page reloads — the fresh
-  // renderer will re-register its own watches, so the old sender's contribution
-  // must be unwound first to avoid refcount ratcheting.
-  wc.on('did-start-navigation', () => {
-    configMgr.releaseWatchesForSender(wc.id);
-  });
+  // Release the previous renderer frame's chokidar watches on Ctrl+R / HMR
+  // reloads (avoids refcount ratcheting); id captured inside the helper.
+  configMgr.bindWatchReleaseOnNavigation(wc);
 
   // CSP (frame-src/connect-src) does not govern a subframe navigating itself —
   // a demo-video document could still exfiltrate data via meta refresh or
@@ -533,6 +524,11 @@ function createWindow() {
     }
   });
 
+  // Native right-click menu — Copy / Paste / Select All everywhere. Roles
+  // hook into Electron's built-in clipboard/selection plumbing, which xterm.js
+  // (and Monaco, and Tiptap) all participate in via the standard DOM
+  // selection API, so this single block covers Terminal + Doc Editor + plain
+  // text inputs without per-component wiring.
   wc.on('context-menu', (_e, params) => {
     const items = [];
     if (params.editFlags.canCopy) items.push({ label: 'Copy', role: 'copy' });

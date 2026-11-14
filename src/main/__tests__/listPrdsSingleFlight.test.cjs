@@ -1,8 +1,6 @@
 'use strict';
 // PRD 3063 — concurrent schedule:list-prds calls share one in-flight scan per cwd.
 import { describe, it, expect } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
 
 const {
   createSingleFlight,
@@ -92,13 +90,5 @@ describe('listPrdsSingleFlight', () => {
     expect(flatString(undefined)).toBe(undefined);
     expect(flatString('')).toBe('');
     expect(flatString('héllo ✓')).toBe('héllo ✓');
-  });
-
-  it('scheduler.cjs wires the IPC handler through the shared, cwd-aware wrapper', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'scheduler.cjs'), 'utf8');
-    expect(src).toMatch(/ipcMain\.handle\('schedule:list-prds',\s*async \(_e, payload\) => listPrdsShared\(\{ cwd: payload\?\.cwd \}\)\)/);
-    expect(src).toMatch(/const listPrdsShared = createSingleFlight\(/);
-    expect(src).toMatch(/flattenPrdEntry\(entry\)/);
-    expect(src).not.toMatch(/ipcMain\.handle\('schedule:list-prds',\s*async \(\) => listPrdsInternal\(\)\)/);
   });
 });

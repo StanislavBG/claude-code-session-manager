@@ -305,7 +305,14 @@ const BASH_MAX_TIMEOUT_MS = 900_000; // 15 min — must stay below IDLE_OUTPUT_K
 // `git add <path>`, the SCHEDULER_VERDICT lines, `/code-review medium --fix`
 // and the "Never call /code-review with no level, or at xhigh, max or ultra"
 // ban — PRD 2887: a level-less call took the session's max effort and outlived
-// the job budget) — keep them exact. No line
+// the job budget) — keep them exact.
+//
+// `isArtifactOnly: true` (PRD 3109) adds one VERDICT bullet and one COMMIT
+// sentence for a PRD whose frontmatter declares deliverable: artifact +
+// artifactPaths: it commits nothing by design, and runVerify already accepts
+// its no-commit PASS (pass_no_commit_artifact_verified). Without the variant
+// Self job 826-project-home-build saved its page, ran a green gate, and still
+// printed a false FAIL for the missing commit (parked in needs_review). No line
 // of this text may START with SCHEDULER_VERDICT: or FOREIGN_WIP_PATHS: —
 // runVerify's scanners are line-anchored.
 function buildFinishHead(verifyStepNum) {
@@ -370,7 +377,20 @@ const FINISH_FIX_PLAN_VERDICT_LINE = `
      An auto fix plan whose steps changed no file has nothing to commit
      and prints PASS when the gate is green. Do not invent a commit to have one.`;
 
-function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false }) {
+// Artifact-only VERDICT bullet + COMMIT sentence (PRD 3109): a PRD with
+// deliverable: artifact + artifactPaths commits nothing by design, and
+// runVerify's artifact exemption already accepts its no-commit PASS — so say
+// so, or "PASS needs a landed commit" yields a false FAIL after a green gate.
+const FINISH_ARTIFACT_ONLY_VERDICT_LINE = `
+   - This job is artifact-only: its PRD declares deliverable: artifact.
+     It commits nothing by design, so no commit is expected. When the
+     gate is green and the tree is clean, print PASS. Never print FAIL
+     for the missing commit, and do not invent a commit to have one.`;
+
+const FINISH_ARTIFACT_ONLY_COMMIT_LINE = `
+   This job is artifact-only: its output is git-excluded, so there is nothing to stage. Skip the commit and go to the next step.`;
+
+function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false, isArtifactOnly = false }) {
   return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
    foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
    project's own typecheck, lint and test commands instead. The project's
@@ -390,13 +410,13 @@ ${commitStepNum}. COMMIT — stage only the exact paths you created or changed f
    Never commit any file under these folders, even when the PRD names it:
      ${FINISH_RUNTIME_FOLDERS}
    Why: those folders hold the app's live state. A commit of them breaks the
-   running scheduler for every checkout that pulls it.
+   running scheduler for every checkout that pulls it.${isArtifactOnly ? FINISH_ARTIFACT_ONLY_COMMIT_LINE : ''}
 ${verdictStepNum}. VERDICT LINE — end your final report with exactly one of these lines.
    Put nothing after it, except the FOREIGN_WIP_PATHS line described below.
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}
+   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}${isArtifactOnly ? FINISH_ARTIFACT_ONLY_VERDICT_LINE : ''}
    - Print FAIL when the gate is red or the commit could not land. Also print
      FAIL when a step needs something this run cannot reach (live runtime
      state, credentials, an account or dashboard action, a host install): do
@@ -439,14 +459,20 @@ in your final report.`;
  * `isFixPlan: true` (auto fix-plan jobs only) adds one VERDICT bullet: a fix
  * plan that changed no file has nothing to commit and prints PASS on a green
  * gate. Omitted/false leaves the text unchanged.
+ * `isArtifactOnly: true` (PRDs whose own frontmatter has deliverable:
+ * artifact + non-empty artifactPaths — PRD 3109) adds one VERDICT bullet
+ * (after the fix-plan bullet when both are set) and one COMMIT sentence: the
+ * job commits nothing by design and prints PASS on a green gate with a clean
+ * tree, never FAIL for the missing commit. Self job 826 printed exactly that
+ * false FAIL. Omitted/false leaves the text unchanged.
  */
-function buildFinishProtocol({ reviewInRun = true, isFixPlan = false } = {}) {
+function buildFinishProtocol({ reviewInRun = true, isFixPlan = false, isArtifactOnly = false } = {}) {
   if (reviewInRun) {
     return buildFinishHead(3) + FINISH_REVIEW_STEPS_IN_RUN
-      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan });
+      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan, isArtifactOnly });
   }
   return buildFinishHead(2) + FINISH_REVIEW_STEP_DEFERRED
-    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan });
+    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan, isArtifactOnly });
 }
 
 const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
@@ -4884,7 +4910,21 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // Always route through composeExecutorPrompt (even with an empty digest)
   // so the finish protocol is appended in the prompt's tail exactly once,
   // after any digest fence rather than concatenated ahead of it.
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan) }) });
+  // Artifact-only finish variant (PRD 3109): read from the PRD FILE's own
+  // frontmatter — queue rows and parsePrd()'s result carry no
+  // deliverable/artifactPaths, so job.* would always be false. Same condition
+  // as runVerify.cjs's artifact exemption; any read/parse failure → false.
+  let isArtifactOnly = false;
+  if (prdPath) {
+    try {
+      const fm = parsePrdFile(await fsp.readFile(prdPath, 'utf8')).frontmatter;
+      isArtifactOnly = !!fm && fm.deliverable === 'artifact'
+        && Array.isArray(fm.artifactPaths) && fm.artifactPaths.length > 0;
+    } catch {
+      isArtifactOnly = false;
+    }
+  }
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did

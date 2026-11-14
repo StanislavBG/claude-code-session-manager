@@ -146,6 +146,10 @@ describe('buildFinishProtocol: force-add ban, runtime folders, fix-plan PASS', (
     ['reviewInRun false', buildFinishProtocol({ reviewInRun: false })],
     ['reviewInRun true + fix plan', buildFinishProtocol({ reviewInRun: true, isFixPlan: true })],
     ['reviewInRun false + fix plan', buildFinishProtocol({ reviewInRun: false, isFixPlan: true })],
+    ['reviewInRun true + artifact-only', buildFinishProtocol({ reviewInRun: true, isArtifactOnly: true })],
+    ['reviewInRun false + artifact-only', buildFinishProtocol({ reviewInRun: false, isArtifactOnly: true })],
+    ['reviewInRun true + fix plan + artifact-only', buildFinishProtocol({ reviewInRun: true, isFixPlan: true, isArtifactOnly: true })],
+    ['reviewInRun false + fix plan + artifact-only', buildFinishProtocol({ reviewInRun: false, isFixPlan: true, isArtifactOnly: true })],
   ] as const
 
   for (const [name, text] of variants) {
@@ -192,7 +196,48 @@ describe('buildFinishProtocol: force-add ban, runtime folders, fix-plan PASS', (
     expect(FINISH_PROTOCOL).not.toMatch(re)
   })
 
+  it('artifact-only bullet appears only when isArtifactOnly is true, right after the PASS bullet', () => {
+    const re = /This job is artifact-only: its PRD declares deliverable: artifact\./
+    const fixRe = /auto fix plan whose steps changed no file has nothing to commit/
+    for (const reviewInRun of [true, false]) {
+      const art = buildFinishProtocol({ reviewInRun, isArtifactOnly: true })
+      expect(art).toMatch(re)
+      expect(art).toMatch(/Never print FAIL\s+for the missing commit/)
+      expect(art).toMatch(/do not invent a commit/)
+      const iPass = art.indexOf('Print PASS only when')
+      const iArt = art.search(re)
+      const iFail = art.indexOf('Print FAIL when')
+      expect(iPass).toBeLessThan(iArt)
+      expect(iArt).toBeLessThan(iFail)
+      // Both set: fix-plan bullet first, then the artifact-only bullet.
+      const both = buildFinishProtocol({ reviewInRun, isFixPlan: true, isArtifactOnly: true })
+      const bFix = both.search(fixRe)
+      const bArt = both.search(re)
+      expect(both.indexOf('Print PASS only when')).toBeLessThan(bFix)
+      expect(bFix).toBeLessThan(bArt)
+      expect(bArt).toBeLessThan(both.indexOf('Print FAIL when'))
+      expect(buildFinishProtocol({ reviewInRun, isArtifactOnly: false })).not.toMatch(re)
+      expect(buildFinishProtocol({ reviewInRun })).not.toMatch(re)
+      expect(buildFinishProtocol({ reviewInRun, isFixPlan: true })).not.toMatch(re)
+    }
+    expect(FINISH_PROTOCOL).not.toMatch(re)
+  })
+
+  it('artifact-only COMMIT sentence appears only when isArtifactOnly is true, after "Always commit"', () => {
+    const re = /This job is artifact-only: its output is git-excluded, so there is nothing to stage\. Skip the commit/
+    for (const reviewInRun of [true, false]) {
+      for (const isFixPlan of [true, false]) {
+        const commit = commitStep(buildFinishProtocol({ reviewInRun, isFixPlan, isArtifactOnly: true }))
+        expect(commit).toMatch(re)
+        expect(commit.indexOf('Always commit your own work')).toBeGreaterThan(-1)
+        expect(commit.indexOf('Always commit your own work')).toBeLessThan(commit.search(re))
+        expect(commitStep(buildFinishProtocol({ reviewInRun, isFixPlan }))).not.toMatch(re)
+      }
+    }
+  })
+
   it('default and isFixPlan:false still equal FINISH_PROTOCOL', () => {
+    expect(buildFinishProtocol({ reviewInRun: true, isArtifactOnly: false })).toBe(FINISH_PROTOCOL)
     expect(buildFinishProtocol({ reviewInRun: true })).toBe(FINISH_PROTOCOL)
     expect(buildFinishProtocol({ reviewInRun: true, isFixPlan: false })).toBe(FINISH_PROTOCOL)
     expect(buildFinishProtocol()).toBe(FINISH_PROTOCOL)

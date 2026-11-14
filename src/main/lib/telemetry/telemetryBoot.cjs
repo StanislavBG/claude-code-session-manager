@@ -122,4 +122,36 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
   await removeLegacyWatermarks({ fsp, homedir });
 }
 
-module.exports = { bootSequence, buildSeeds, removeLegacyWatermarks };
+/**
+ * reportSeedsIfChanged({ deps }) — call once the boot seeders settle.
+ *
+ * bootSequence snapshots getSeedStatus() before the seeders finish, so a fresh
+ * install's first upsert reports every step 'pending', and the next upsert
+ * would only come on a version bump or the 30-day heartbeat. This re-sends the
+ * install record whenever the settled seeds differ from the last ones an
+ * upsert delivered (telemetrySettings.lastSeedsReported, JSON of the 3 enum
+ * values). lastSeedsReported is persisted only when reportInstall() reports
+ * accepted, so a dropped/failed upsert retries on the next settle.
+ * Resolves { sent, accepted }.
+ */
+async function reportSeedsIfChanged({ deps: depsOverride } = {}) {
+  const deps = resolveDeps(depsOverride);
+  const { telemetrySettings, telemetryClient, buildMachineProfile, getSeedStatus } = deps;
+
+  const seeds = buildSeeds(getSeedStatus);
+  if (!seeds) return { sent: false, accepted: false };
+  const seedsJson = JSON.stringify(seeds);
+
+  const settings = await telemetrySettings.load();
+  if (settings && settings.lastSeedsReported === seedsJson) return { sent: false, accepted: false };
+
+  const profile = { ...(await buildMachineProfile()), seeds };
+  const reportResult = await telemetryClient.reportInstall(profile);
+  const accepted = !!(reportResult && reportResult.accepted);
+  if (accepted) {
+    await telemetrySettings.save({ lastSeedsReported: seedsJson });
+  }
+  return { sent: true, accepted };
+}
+
+module.exports = { bootSequence, buildSeeds, removeLegacyWatermarks, reportSeedsIfChanged };

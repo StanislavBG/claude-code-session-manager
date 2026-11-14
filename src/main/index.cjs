@@ -1587,6 +1587,22 @@ app.whenReady().then(async () => {
   ]).catch((e) => {
     logs.writeLine({ scope: 'seed', level: 'error', message: 'seed chain failed', meta: { error: e?.message } });
   });
+  // Telemetry: bootSequence snapshotted seed status before the seeders ran, so
+  // re-send the install record once seeding settles (fulfil OR reject) when the
+  // seeds differ from the last reported ones. Fail-inert — see telemetryBoot.cjs.
+  {
+    const reportSeeds = () => {
+      try {
+        return require('./lib/telemetry/telemetryBoot.cjs')
+          .reportSeedsIfChanged()
+          .catch((e) => {
+            logs.writeLine({ scope: 'telemetry', level: 'warn', message: 'reportSeedsIfChanged failed', meta: { error: e?.message } });
+          });
+      } catch { /* telemetry must never break boot */ }
+      return undefined;
+    };
+    bootSeedingPromise.then(reportSeeds, reportSeeds);
+  }
   // Rewrite the stable guard-hook shims (~/.claude/session-manager/hooks/) to
   // point at THIS running app's root, on every boot. An already-installed
   // project hook resolves through the shim at invocation time, so an app

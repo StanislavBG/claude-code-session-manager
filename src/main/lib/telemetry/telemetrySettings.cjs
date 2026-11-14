@@ -10,6 +10,7 @@
  *   lastMachineReportAt: string|null,
  *   lastMachineReportVersion: string,
  *   lastDailyFlushAt: string|null,
+ *   lastSeedsReported: string|null, // JSON of the 3 seed enum values last accepted by an install upsert
  *   schemaVersion: 1
  * }
  *
@@ -40,6 +41,7 @@ const DEFAULTS = Object.freeze({
   lastMachineReportAt: null,
   lastMachineReportVersion: '',
   lastDailyFlushAt: null,
+  lastSeedsReported: null,
   schemaVersion: SCHEMA_VERSION,
 });
 
@@ -67,6 +69,7 @@ function isValid(cfg) {
   if (cfg.lastMachineReportAt !== null && typeof cfg.lastMachineReportAt !== 'string') return false;
   if (typeof cfg.lastMachineReportVersion !== 'string') return false;
   if (cfg.lastDailyFlushAt !== null && typeof cfg.lastDailyFlushAt !== 'string') return false;
+  if (cfg.lastSeedsReported !== undefined && cfg.lastSeedsReported !== null && typeof cfg.lastSeedsReported !== 'string') return false;
   if (cfg.schemaVersion !== SCHEMA_VERSION) return false;
   return true;
 }
@@ -80,6 +83,7 @@ function normalize(cfg) {
     lastMachineReportAt: typeof cfg.lastMachineReportAt === 'string' ? cfg.lastMachineReportAt : null,
     lastMachineReportVersion: typeof cfg.lastMachineReportVersion === 'string' ? cfg.lastMachineReportVersion : '',
     lastDailyFlushAt: typeof cfg.lastDailyFlushAt === 'string' ? cfg.lastDailyFlushAt : null,
+    lastSeedsReported: typeof cfg.lastSeedsReported === 'string' ? cfg.lastSeedsReported : null,
     schemaVersion: SCHEMA_VERSION,
   };
 }
@@ -185,6 +189,7 @@ module.exports = {
   save,
   storePath,
   isValid,
+  normalize,
   isEnabled,
   resolveEndpoint,
   isDailyFlushDue,

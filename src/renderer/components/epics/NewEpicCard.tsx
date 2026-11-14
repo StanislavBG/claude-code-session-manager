@@ -23,6 +23,7 @@ import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult, RestorableSession } from '../../../preload/api'
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
 import { AgentCliPicker, type AgentCliChoice } from './AgentCliPicker'
+import { agentCliLabel } from '../../lib/agentCliCatalog'
 import { draftFieldsFromEpic, hasDraftContent, isEditableDraft } from '../../lib/epicDraft'
 import { RestoreSessionPanel, restorableSessionLabel, restorableSessionMeta } from './RestoreSessionPanel'
 
@@ -402,6 +403,7 @@ export function NewEpicCard({
     if (id !== 'claude') setRestoreSession(null)
   }
   const trimmedCliModel = agentCliModel.trim()
+  const cliLabel = agentCliLabel(agentCli)
 
   // The ONE intake builder shared by Start, Save draft and edit-mode Start, so
   // the three can never drift: resolve references, grounding, persona body,
@@ -821,31 +823,25 @@ export function NewEpicCard({
               {selectedTagMission}
             </p>
 
-            <div className="mb-3.5 min-w-0">
+            {nonClaudeCli && (
               <div
-                className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
-                title="Which coding-agent CLI runs this session. Claude Code is the default."
+                data-testid="new-epic-agent-cli-summary"
+                className="mb-3.5 flex min-w-0 items-center gap-2 text-[12px] text-fg-dim"
               >
-                CLI
+                <span className="min-w-0 truncate">
+                  Runs on {cliLabel}
+                  {trimmedCliModel ? ` · ${trimmedCliModel}` : ''}
+                </span>
+                <button
+                  type="button"
+                  data-testid="new-epic-agent-cli-change"
+                  onClick={() => setAdvanced(true)}
+                  className="shrink-0 rounded-md border border-line bg-bg px-2 py-0.5 font-mono text-[10.5px] text-fg-dim hover:bg-bg-elev"
+                >
+                  Change
+                </button>
               </div>
-              <AgentCliPicker value={agentCli} onChange={pickAgentCli} />
-              {nonClaudeCli && (
-                <label className="mt-2 flex flex-col gap-1">
-                  <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
-                    Model (optional)
-                  </span>
-                  <input
-                    data-testid="new-epic-agent-cli-model"
-                    type="text"
-                    maxLength={128}
-                    value={agentCliModel}
-                    onChange={(e) => setAgentCliModel(e.target.value)}
-                    placeholder="Blank = the CLI's own default"
-                    className="w-full appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-2 font-mono text-[12.5px] text-fg outline-none"
-                  />
-                </label>
-              )}
-            </div>
+            )}
 
             <label className={`mb-1 flex items-start gap-2 ${nonClaudeCli ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
               <input
@@ -1074,6 +1070,38 @@ export function NewEpicCard({
 
             <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5" data-testid="new-epic-runtime-panel">
               <div className="mb-1.5 text-[12.5px] font-semibold text-fg">Runtime</div>
+              <div className="mb-3 min-w-0" data-testid="new-epic-cli-section">
+                <div
+                  className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
+                  title="Which coding-agent CLI runs this session. Claude Code is the default."
+                >
+                  CLI
+                </div>
+                {/* Mounted only while this face is open, like RestoreSessionPanel —
+                    so detect never runs for users who never open advanced. */}
+                {advanced && <AgentCliPicker value={agentCli} onChange={pickAgentCli} />}
+                {nonClaudeCli && (
+                  <label className="mt-2 flex flex-col gap-1">
+                    <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+                      Model (optional)
+                    </span>
+                    <input
+                      data-testid="new-epic-agent-cli-model"
+                      type="text"
+                      maxLength={128}
+                      value={agentCliModel}
+                      onChange={(e) => setAgentCliModel(e.target.value)}
+                      placeholder="Blank = the CLI's own default"
+                      className="w-full appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-2 font-mono text-[12.5px] text-fg outline-none"
+                    />
+                  </label>
+                )}
+              </div>
+              {nonClaudeCli ? (
+                <div className="font-mono text-[11px] text-fg-faint" data-testid="new-epic-runtime-cli-line">
+                  {cliLabel} · {trimmedCliModel || 'CLI default model'}
+                </div>
+              ) : (
               <div className="font-mono text-[11px] text-fg-faint">
                 {runtimeInfo ? (
                   <EffectiveRuntimeLine info={runtimeInfo} />
@@ -1084,6 +1112,7 @@ export function NewEpicCard({
                 )}
                 {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
               </div>
+              )}
               {!nonClaudeCli && (
                 <EpicRuntimeOverride
                   cwd={effectiveCwd || null}

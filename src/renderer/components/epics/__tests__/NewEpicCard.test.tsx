@@ -1687,9 +1687,61 @@ describe('NewEpicCard agent CLI choice', () => {
     await act(async () => {})
     return el
   }
+  async function openAdvanced(el: HTMLElement) {
+    click(q(el, 'new-epic-flip-to-grounding')!)
+    await act(async () => {})
+  }
+
+  it('advanced off renders no CLI picker, no install rows, and never calls detect', async () => {
+    const el = await mountReady()
+    expect(el.querySelector('[data-testid^="new-epic-agent-cli"]')).toBeNull()
+    expect(el.querySelector('[data-testid^="new-epic-agent-cli-install-"]')).toBeNull()
+    expect(q(el, 'new-epic-cli-section')).not.toBeNull()
+    expect(detectSpy).not.toHaveBeenCalled()
+  })
+
+  it('after advanced on the picker sits inside the Runtime panel', async () => {
+    const el = await mountReady()
+    await openAdvanced(el)
+    const panel = q(el, 'new-epic-runtime-panel')!
+    const section = q(el, 'new-epic-cli-section')!
+    expect(panel.contains(section)).toBe(true)
+    expect(panel.firstElementChild!.nextElementSibling).toBe(section) // right after the 'Runtime' heading, before the readout
+    expect(section.querySelector('[data-testid="new-epic-agent-cli-option-claude"]')).not.toBeNull()
+    expect(q(q(el, 'new-epic-front')!, 'new-epic-agent-cli-option-claude')).toBeNull()
+    expect(detectSpy).toHaveBeenCalled()
+  })
+
+  it('codex shows the front summary line whose change button turns advanced on', async () => {
+    const el = await mountReady()
+    await openAdvanced(el)
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    act(() => setNativeValue(q(el, 'new-epic-agent-cli-model') as HTMLInputElement, 'o3'))
+    click(q(el, 'new-epic-advanced-toggle')!)
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-option-codex')).toBeNull()
+    const front = q(el, 'new-epic-front')!
+    const summary = q(front, 'new-epic-agent-cli-summary')!
+    expect(summary.textContent).toContain('Runs on Codex · o3')
+    expect(q(front, 'new-epic-agent-cli-model')).toBeNull()
+    click(q(summary, 'new-epic-agent-cli-change')!)
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-option-codex')).not.toBeNull()
+  })
+
+  it('codex shows the Runtime CLI line instead of the Claude model line', async () => {
+    const el = await mountReady()
+    await openAdvanced(el)
+    expect(q(el, 'new-epic-runtime-cli-line')).toBeNull()
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    expect(q(el, 'new-epic-runtime-cli-line')!.textContent).toBe('Codex · CLI default model')
+    act(() => setNativeValue(q(el, 'new-epic-agent-cli-model') as HTMLInputElement, 'gpt-5'))
+    expect(q(el, 'new-epic-runtime-cli-line')!.textContent).toBe('Codex · gpt-5')
+  })
 
   it('Claude Code is the default and the create runtime carries neither agentCli key', async () => {
     const el = await mountReady()
+    await openAdvanced(el)
     expect(q(el, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
     expect(q(el, 'new-epic-agent-cli-model')).toBeNull()
     act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
@@ -1732,6 +1784,7 @@ describe('NewEpicCard agent CLI choice', () => {
 
   it('switching back to Claude Code re-enables the loop and drops the model', async () => {
     const el = await mountReady()
+    await openAdvanced(el)
     click(q(el, 'new-epic-agent-cli-option-codex')!)
     act(() => setNativeValue(q(el, 'new-epic-agent-cli-model') as HTMLInputElement, 'm'))
     click(q(el, 'new-epic-agent-cli-option-claude')!)
@@ -1753,6 +1806,8 @@ describe('NewEpicCard agent CLI choice', () => {
     const updateSpy = vi.fn(async () => {})
     usePromptSessions.setState({ updateProposedDraft: updateSpy } as never)
     const el = await mountReady({ draftEpic: draft, onDraftSaved: vi.fn() })
+    expect(q(q(el, 'new-epic-front')!, 'new-epic-agent-cli-summary')!.textContent).toContain('Runs on Codex · o3')
+    await openAdvanced(el)
     expect(q(el, 'new-epic-agent-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
     expect((q(el, 'new-epic-agent-cli-model') as HTMLInputElement).value).toBe('o3')
     click(q(el, 'new-epic-save-draft')!)

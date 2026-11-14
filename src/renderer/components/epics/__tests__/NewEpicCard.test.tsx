@@ -60,6 +60,20 @@ const resolveModelInfoSpy = vi.fn(async (): Promise<MainModelHalf> => ({
   personaEffortSource: null,
 }))
 
+// useAgentCliDetect keeps module-scope rows between tests; `cliDetectPending` forces the
+// "detect not answered yet" (rows null) state for one case without touching that module.
+const cliDetectPending = vi.hoisted(() => ({ on: false }))
+vi.mock('../../../lib/useAgentCliDetect', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../lib/useAgentCliDetect')>()
+  return {
+    ...actual,
+    useAgentCliDetect: (enabled?: boolean) => {
+      const r = actual.useAgentCliDetect(enabled)
+      return cliDetectPending.on ? { ...r, rows: null } : r
+    },
+  }
+})
+
 vi.mock('../../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
     projects: [
@@ -1814,5 +1828,128 @@ describe('NewEpicCard agent CLI choice', () => {
     await act(async () => {})
     expect(updateSpy).toHaveBeenCalled()
     expect((updateSpy.mock.calls[0] as unknown[])[1]).toMatchObject({ agentCli: 'codex', agentCliModel: 'o3', developLoop: false })
+  })
+})
+
+describe('NewEpicCard CLI follows the Actor default', () => {
+  const ALPHA = '/home/bilko/Projects/alpha'
+  const base: AgentPersona = { name: 'architect', description: 'plans', tools: [], model: null, effort: null, color: null, tags: ['feature', 'bug', 'discussion'], projects: [], action: null, actionLabel: null, path: '/a.md', body: '', overridingProjects: [] }
+  const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+  const click = (n: Element) => act(() => { n.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  const detectSpy = vi.fn(async () => [
+    { id: 'codex', label: 'Codex', installed: true, path: '/usr/bin/codex', version: '1', install: null, docs: 'https://x/codex', login: null },
+    { id: 'gemini', label: 'Gemini CLI', installed: false, path: null, version: null, install: 'npm i -g gemini', docs: 'https://x/gemini', login: null },
+  ])
+
+  beforeEach(() => {
+    cliDetectPending.on = false
+    ;(window.api as unknown as { agentCli: unknown }).agentCli = { detect: detectSpy }
+    detectSpy.mockClear()
+    usePromptSessions.setState({ approveProposed: vi.fn() } as never)
+  })
+  afterEach(() => { cliDetectPending.on = false })
+
+  async function mountReady(personas: AgentPersona[], props: Partial<React.ComponentProps<typeof NewEpicCard>> = {}) {
+    listPersonasSpy.mockResolvedValue(personas)
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} {...props} />)
+    await act(async () => {})
+    await act(async () => {})
+    return el
+  }
+  async function create(el: HTMLElement) {
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    click(q(el, 'new-epic-create')!)
+    await act(async () => {})
+    return createPromptSessionSpy.mock.calls[0][7] as Record<string, unknown>
+  }
+
+  it("persona codex (installed) + o3 creates on codex without opening advanced", async () => {
+    const el = await mountReady([{ ...base, agentCli: 'codex', agentCliModel: 'o3' }])
+    expect(detectSpy).toHaveBeenCalled()
+    expect(q(el, 'new-epic-agent-cli-option-codex')).toBeNull()
+    const summary = q(q(el, 'new-epic-front')!, 'new-epic-agent-cli-summary')!
+    expect(summary.textContent).toContain("Runs on Codex · o3 — from architect's config")
+    expect(q(el, 'new-epic-agent-cli-missing')).toBeNull()
+    const runtime = await create(el)
+    expect(runtime).toMatchObject({ agentCli: 'codex', agentCliModel: 'o3', developLoop: false })
+  })
+
+  it('persona gemini not installed shows the missing warning and sends no agentCli', async () => {
+    const el = await mountReady([{ ...base, agentCli: 'gemini', agentCliModel: 'g2' }])
+    const warn = q(q(el, 'new-epic-front')!, 'new-epic-agent-cli-missing')!
+    expect(warn.getAttribute('data-tone')).toBe('warn')
+    expect(warn.textContent).toContain("architect is set to run on Gemini CLI, which isn't installed here — this session runs on Claude Code. Open advanced to install it or pick another CLI.")
+    expect(q(el, 'new-epic-agent-cli-summary')).toBeNull()
+    const runtime = await create(el)
+    expect('agentCli' in runtime).toBe(false)
+    expect('agentCliModel' in runtime).toBe(false)
+  })
+
+  it('detect pending keeps create + save draft disabled', async () => {
+    cliDetectPending.on = true
+    const el = await mountReady([{ ...base, agentCli: 'codex' }])
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    const createBtn = q(el, 'new-epic-create') as HTMLButtonElement
+    const saveBtn = q(el, 'new-epic-save-draft') as HTMLButtonElement
+    expect(createBtn.disabled).toBe(true)
+    expect(createBtn.title).toBe('Checking agent CLIs…')
+    expect(saveBtn.disabled).toBe(true)
+    expect(saveBtn.title).toBe('Checking agent CLIs…')
+    click(createBtn)
+    await act(async () => {})
+    expect(createPromptSessionSpy).not.toHaveBeenCalled()
+  })
+
+  it('no persona CLI and advanced off makes no detect call', async () => {
+    const el = await mountReady([base])
+    expect(detectSpy).not.toHaveBeenCalled()
+    expect((q(el, 'new-epic-create') as HTMLButtonElement).title).toBe('')
+  })
+
+  it('override to Claude Code, then use-default restores codex', async () => {
+    const el = await mountReady([{ ...base, agentCli: 'codex', agentCliModel: 'o3' }])
+    click(q(el, 'new-epic-flip-to-grounding')!)
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-source')!.textContent).toBe("From architect's config (Home → Agents)")
+    expect(q(el, 'new-epic-agent-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
+    expect(q(el, 'new-epic-agent-cli-use-default')).toBeNull()
+    click(q(el, 'new-epic-agent-cli-option-claude')!)
+    expect(q(el, 'new-epic-agent-cli-source')!.textContent).toBe('Set for this session')
+    expect(q(el, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+    click(q(el, 'new-epic-agent-cli-use-default')!)
+    expect(q(el, 'new-epic-agent-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
+    expect((q(el, 'new-epic-agent-cli-model') as HTMLInputElement).value).toBe('o3')
+    // re-picking the persona's CLI carries the persona's model
+    click(q(el, 'new-epic-agent-cli-option-claude')!)
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    expect((q(el, 'new-epic-agent-cli-model') as HTMLInputElement).value).toBe('o3')
+    const runtime = await create(el)
+    expect(runtime).toMatchObject({ agentCli: 'codex', agentCliModel: 'o3' })
+  })
+
+  it('an agent change clears an override', async () => {
+    const el = await mountReady([base, { ...base, name: 'builder' }])
+    click(q(el, 'new-epic-flip-to-grounding')!)
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-source')!.textContent).toBe('Claude Code (default)')
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    expect(q(el, 'new-epic-agent-cli-source')!.textContent).toBe('Set for this session')
+    pickAgent(el, 'builder')
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-source')!.textContent).toBe('Claude Code (default)')
+    expect(q(el, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it("a draft saved with agentCli codex re-saves codex when the persona has no agentCli", async () => {
+    const { composeEpicIntake } = await import('../../../lib/epicIntake')
+    const intake = composeEpicIntake({ title: 'Saved', goal: 'Saved goal', referencePaths: [], tag: undefined, agentName: 'architect', contextInjections: { 'delegate-implementation': false } as never })
+    const draft = { id: 'draft-cli2', cwd: ALPHA, goalText: intake.goalText, claudeSessionId: 'c-2', status: 'proposed', createdAt: new Date().toISOString(), completedAt: null, agentType: 'architect', developLoop: false, agentCli: 'codex', openingPrompt: intake.openingPrompt, sections: intake.sections, source: 'NewEpicCard' } as never
+    const updateSpy = vi.fn(async () => {})
+    usePromptSessions.setState({ updateProposedDraft: updateSpy } as never)
+    const el = await mountReady([base], { draftEpic: draft, onDraftSaved: vi.fn() })
+    click(q(el, 'new-epic-save-draft')!)
+    await act(async () => {})
+    expect(updateSpy).toHaveBeenCalled()
+    expect((updateSpy.mock.calls[0] as unknown[])[1]).toMatchObject({ agentCli: 'codex', agentCliModel: null })
   })
 })

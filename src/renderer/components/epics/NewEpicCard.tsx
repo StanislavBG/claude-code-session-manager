@@ -24,6 +24,7 @@ import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, Insta
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
 import { AgentCliPicker, type AgentCliChoice } from './AgentCliPicker'
 import { agentCliLabel } from '../../lib/agentCliCatalog'
+import { useAgentCliDetect } from '../../lib/useAgentCliDetect'
 import { draftFieldsFromEpic, hasDraftContent, isEditableDraft } from '../../lib/epicDraft'
 import { RestoreSessionPanel, restorableSessionLabel, restorableSessionMeta } from './RestoreSessionPanel'
 
@@ -173,6 +174,7 @@ export function NewEpicCard({
     prevAgentRef.current = agentName
     setModelOverride('')
     setEffortOverride('')
+    setCliOverride(null)
   }, [agentName])
   const [home, setHome] = useState<string | null>(null)
   const cachedHome = useHomeDir()
@@ -214,9 +216,9 @@ export function NewEpicCard({
   // null = the human has not touched the Develop loop checkbox; once set, it always wins.
   const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(seed ? seed.developLoop : null)
   // Which CLI runs the session (third independent selection); 'claude' = Claude Code, the default.
-  const [agentCli, setAgentCli] = useState<AgentCliChoice>(() => (editDraft?.agentCli as AgentCliChoice | undefined) || 'claude')
-  const [agentCliModel, setAgentCliModel] = useState(editDraft?.agentCliModel ?? '')
-  const nonClaudeCli = agentCli !== 'claude'
+  // null = follow the Actor's configured CLI (AgentPersona.agentCli); set = a per-session pick in advanced.
+  const [cliOverride, setCliOverride] = useState<{ cli: AgentCliChoice; model: string } | null>(() =>
+    editDraft ? { cli: (editDraft.agentCli as AgentCliChoice | undefined) || 'claude', model: editDraft.agentCliModel ?? '' } : null)
 
   // Default the Actor once the personas first resolve (never after a human pick).
   useEffect(() => {
@@ -239,6 +241,18 @@ export function NewEpicCard({
 
   const agentless = agentName === NO_AGENT
   const selectedAgent = agentless ? null : agents?.find((a) => a.name === agentName) ?? null
+  // The Actor's configured CLI (Home → Agents) wins unless the human overrides it in advanced;
+  // a configured CLI that isn't installed falls back to Claude Code with a front-face warning.
+  const personaCli: AgentCliChoice | null = selectedAgent?.agentCli ?? null
+  // Top-level hook (lint:hooks). No persona CLI + advanced off = no detect call.
+  const cliDetect = useAgentCliDetect(advanced || personaCli !== null)
+  const personaRow = personaCli ? cliDetect.rows?.find((r) => r.id === personaCli) : undefined
+  const personaCliPending = !cliOverride && personaCli !== null && cliDetect.rows === null
+  const personaCliMissing = !cliOverride && personaCli !== null && cliDetect.rows !== null && !personaRow?.installed
+  const personaCliInEffect = !cliOverride && personaCli !== null && Boolean(personaRow?.installed)
+  const agentCli: AgentCliChoice = cliOverride ? cliOverride.cli : personaCliInEffect && personaCli ? personaCli : 'claude'
+  const agentCliModel = cliOverride ? cliOverride.model : personaCliInEffect ? selectedAgent?.agentCliModel ?? '' : ''
+  const nonClaudeCli = agentCli !== 'claude'
   const missionTags = missionTagsForAgent(selectedAgent)
   const missionKey = missionTags.join(',')
   // The develop loop (/develop, PRD queueing) is Claude Code only.
@@ -275,8 +289,8 @@ export function NewEpicCard({
     knownCwds,
   })
   const trimmedGoal = goal.trim()
-  const canCreate = Boolean(effectiveCwd && trimmedGoal)
-  const canSaveDraft = Boolean(effectiveCwd) && hasDraftContent({ title, goal, referenceCount: savedRefs.length + att.items.length })
+  const canCreate = Boolean(effectiveCwd && trimmedGoal) && !personaCliPending
+  const canSaveDraft = Boolean(effectiveCwd) && !personaCliPending && hasDraftContent({ title, goal, referenceCount: savedRefs.length + att.items.length })
   effectiveCwdRef.current = effectiveCwd
 
   // A pick is only good for the project it was listed in, and never once that
@@ -392,16 +406,19 @@ export function NewEpicCard({
     setDevelopLoopOverride(null)
     setSavedRefs([])
     setRestoreSession(null)
-    setAgentCli('claude')
-    setAgentCliModel('')
+    setCliOverride(null)
     att.clear()
   }
 
   // A non-Claude CLI cannot continue a Claude Code session: drop any restore pick.
   const pickAgentCli = (id: AgentCliChoice) => {
-    setAgentCli(id)
+    setCliOverride({ cli: id, model: id === personaCli ? selectedAgent?.agentCliModel ?? '' : '' })
     if (id !== 'claude') setRestoreSession(null)
   }
+  // The Actor's CLI can take effect without a pick (detect resolving): a non-Claude CLI cannot continue a Claude Code session either.
+  useEffect(() => {
+    if (nonClaudeCli && restoreSession) setRestoreSession(null)
+  }, [nonClaudeCli, restoreSession])
   const trimmedCliModel = agentCliModel.trim()
   const cliLabel = agentCliLabel(agentCli)
 
@@ -823,6 +840,19 @@ export function NewEpicCard({
               {selectedTagMission}
             </p>
 
+            {personaCliMissing && selectedAgent && personaCli && (
+              <div
+                data-testid="new-epic-agent-cli-missing"
+                data-tone="warn"
+                className="mb-3.5 rounded-md border border-honey/30 bg-honey/15 px-2.5 py-2 text-[11.5px] leading-[1.5]"
+              >
+                <Badge tone="warn">CLI not installed</Badge>
+                <span className="ml-1.5 text-fg-dim">
+                  {selectedAgent.name} is set to run on {agentCliLabel(personaCli)}, which isn't installed here — this session runs on Claude Code. Open advanced to install it or pick another CLI.
+                </span>
+              </div>
+            )}
+
             {nonClaudeCli && (
               <div
                 data-testid="new-epic-agent-cli-summary"
@@ -831,6 +861,7 @@ export function NewEpicCard({
                 <span className="min-w-0 truncate">
                   Runs on {cliLabel}
                   {trimmedCliModel ? ` · ${trimmedCliModel}` : ''}
+                  {personaCliInEffect && selectedAgent ? ` — from ${selectedAgent.name}'s config` : ''}
                 </span>
                 <button
                   type="button"
@@ -994,6 +1025,7 @@ export function NewEpicCard({
                   data-testid="new-epic-save-draft"
                   onClick={() => void handleSaveDraft()}
                   disabled={!canSaveDraft || creating}
+                  title={personaCliPending ? 'Checking agent CLIs…' : undefined}
                   className="rounded-md border border-accent-muted bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-accent hover:bg-bg-elev disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Save draft
@@ -1003,6 +1035,7 @@ export function NewEpicCard({
                   data-testid="new-epic-create"
                   onClick={() => void handleCreate()}
                   disabled={!canCreate || creating}
+                  title={personaCliPending ? 'Checking agent CLIs…' : undefined}
                   className="rounded-md bg-accent px-4 py-2 text-[12.5px] font-semibold text-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {creating ? 'Starting…' : 'Start Session'}
@@ -1079,6 +1112,27 @@ export function NewEpicCard({
                 </div>
                 {/* Mounted only while this face is open, like RestoreSessionPanel —
                     so detect never runs for users who never open advanced. */}
+                {advanced && (
+                  <div className="mb-1.5 flex min-w-0 items-center gap-2 text-[11.5px] text-fg-dim">
+                    <span data-testid="new-epic-agent-cli-source" className="min-w-0 truncate">
+                      {cliOverride
+                        ? 'Set for this session'
+                        : personaCliInEffect && selectedAgent
+                          ? `From ${selectedAgent.name}'s config (Home → Agents)`
+                          : 'Claude Code (default)'}
+                    </span>
+                    {cliOverride && (
+                      <button
+                        type="button"
+                        data-testid="new-epic-agent-cli-use-default"
+                        onClick={() => setCliOverride(null)}
+                        className="shrink-0 rounded-md border border-line bg-bg px-2 py-0.5 font-mono text-[10.5px] text-fg-dim hover:bg-bg-elev"
+                      >
+                        Use default
+                      </button>
+                    )}
+                  </div>
+                )}
                 {advanced && <AgentCliPicker value={agentCli} onChange={pickAgentCli} />}
                 {nonClaudeCli && (
                   <label className="mt-2 flex flex-col gap-1">
@@ -1090,7 +1144,7 @@ export function NewEpicCard({
                       type="text"
                       maxLength={128}
                       value={agentCliModel}
-                      onChange={(e) => setAgentCliModel(e.target.value)}
+                      onChange={(e) => setCliOverride({ cli: agentCli, model: e.target.value })}
                       placeholder="Blank = the CLI's own default"
                       className="w-full appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-2 font-mono text-[12.5px] text-fg outline-none"
                     />
@@ -1245,6 +1299,7 @@ export function NewEpicCard({
                   type="button"
                   onClick={() => void handleSaveDraft()}
                   disabled={!canSaveDraft || creating}
+                  title={personaCliPending ? 'Checking agent CLIs…' : undefined}
                   className="rounded-md border border-accent-muted bg-bg px-3.5 py-2 text-[12.5px] font-semibold text-accent hover:bg-bg-elev disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Save draft
@@ -1253,6 +1308,7 @@ export function NewEpicCard({
                   type="button"
                   onClick={() => void handleCreate()}
                   disabled={!canCreate || creating}
+                  title={personaCliPending ? 'Checking agent CLIs…' : undefined}
                   className="rounded-md bg-accent px-4 py-2 text-[12.5px] font-semibold text-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {creating ? 'Starting…' : 'Start Session'}

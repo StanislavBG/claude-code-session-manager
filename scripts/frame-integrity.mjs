@@ -274,7 +274,20 @@ async function settingsScenarios(page, vp) {
       }
       await wheelScrollers(page, c)
       await nestedFor(page, name)
-      record(`${name} (${n} rail entries)`, c.problems)
+      let area = ''
+      if (view === 'General') {
+        // Usable card area: the content scroller must keep >= 60% of the shell, or a fat fixed
+        // header has squeezed the cards (232-253 px of header left 77 px of cards at 900x650).
+        const m = await page.evaluate(() => {
+          const vis = (s) => [...document.querySelectorAll(s)].find((e) => e.getClientRects().length) ?? null
+          const content = vis('[data-testid="page-shell-content"]'), shell = vis('[data-testid="page-shell"]')
+          return { content: content?.clientHeight ?? 0, shell: shell?.clientHeight ?? 0 }
+        })
+        const pct = m.shell ? Math.round((m.content / m.shell) * 100) : 0
+        area = ` [content ${m.content}px / shell ${m.shell}px = ${pct}%]`
+        if (!m.shell || m.content < 0.6 * m.shell) c.problems.push(`usable area too small: page-shell-content ${m.content}px < 60% of page-shell ${m.shell}px`)
+      }
+      record(`${name} (${n} rail entries)${area}`, c.problems)
     } catch (e) {
       record(name, [`driver error: ${e.message.split('\n')[0]}`])
     }

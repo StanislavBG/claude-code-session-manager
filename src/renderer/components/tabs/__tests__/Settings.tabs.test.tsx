@@ -56,6 +56,17 @@ describe('Settings tabs', () => {
     }
   })
 
+  it('General keeps owned summaries in the scrolling content, not the fixed header', async () => {
+    const el = await mount()
+    const summaries = el.querySelector('[data-testid="settings-owned-summaries"]')
+    expect(summaries).not.toBeNull()
+    expect(summaries?.closest('[data-testid="page-shell-content"]')).not.toBeNull()
+    expect(summaries?.closest('[data-testid="page-shell-header"]')).toBeNull()
+    const header = el.querySelector('[data-testid="page-shell-header"]')
+    expect(header?.querySelector('[data-testid="settings-scope-note"]')).not.toBeNull()
+    expect(header?.querySelector('[data-testid="source-chip-path"]')).toBeNull()
+  })
+
   it('a summary line switches to its tab, which shows the keyed SourceChip', async () => {
     const el = await mount()
     const btn = Array.from(el.querySelectorAll('[data-testid="owned-summary-permissions"] button'))[0] as HTMLButtonElement

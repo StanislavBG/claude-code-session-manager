@@ -203,25 +203,26 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
       }
     >
       {view === 'general' && !scopeNeedsCwd(scope) ? (
-        // General renders through PageShell: everything above the cards is
-        // header (never scrolls), the group rail is subnav, the sections are
-        // the ONE content scroller. Panel's body never overflows, so nothing
-        // can slide the frame.
+        // General renders through PageShell. The header (never scrolls) holds
+        // only the scope note, the error banner and the filter toolbar; the
+        // SourceChip row and OwnedSummaries sit at the top of the ONE content
+        // scroller so the cards keep the space (a taller header left ~77 px of
+        // cards at 900x650). The group rail is subnav.
         <PageShell
           subnavWidth={192}
           header={
             <>
               {scopeNote}
               {errorBanner}
-              <div className="px-3 pt-2">
-                <SourceChip path={activePath ?? ''} />
-              </div>
-              <OwnedSummaries effective={effective} onOpenTab={setView} />
               <EffectiveCardsToolbar cards={cards} targetScope={scope} />
             </>
           }
           subnav={<EffectiveCardsRail cards={cards} />}
         >
+          <div className="px-3 pt-2">
+            <SourceChip path={activePath ?? ''} />
+          </div>
+          <OwnedSummaries effective={effective} onOpenTab={setView} />
           <EffectiveCardsSections cards={cards} targetScope={scope} onOverride={overrideInto} />
         </PageShell>
       ) : scopeNeedsCwd(scope) ? (

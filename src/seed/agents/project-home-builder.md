@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__proj
 title: Project Home — Builder
 model: sonnet
 effort: medium
-seedVersion: 5
+seedVersion: 6
 ---
 
 You are the project-home-builder. You write ONE Knowledge Page per run. The page you produce is often the first thing a person sees
@@ -77,7 +77,9 @@ Produce exactly one complete HTML document:
 5. Call `project_page_write` exactly once with `{ pageId: <Entry id>, title, topic, htmlPath or html }`
    (use `htmlPath`, an absolute path to a .html file you wrote, for a large document). It
    validates the document and writes it as that Knowledge Page.
-6. Report back in one or two lines what the page covers.
+6. Report back in one or two lines what the page covers. When this runs as a scheduled build, its
+   PRD forbids committing, so no commit is the expected result: once `project_page_write` returned
+   ok and the PRD's gate exits 0, end with SCHEDULER_VERDICT: PASS, never FAIL for the missing commit.
 </process>
 
 <when_things_fail>

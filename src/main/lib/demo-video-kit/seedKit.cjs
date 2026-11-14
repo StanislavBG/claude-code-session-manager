@@ -18,7 +18,7 @@ const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const { writeTextAtomic } = require('../util/atomicFs.cjs');
 
 const KIT_VERSION = '2';
-const KIT_FILES = ['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs'];
+const KIT_FILES = ['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs'];
 const STAMP_FILE = 'KIT_VERSION';
 
 function kitDestDir() {

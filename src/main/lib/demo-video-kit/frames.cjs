@@ -2,11 +2,11 @@
 // Demo-video kit frame sampler: open a finished video document in headless Chromium, seek
 // window.smDemo every stepS seconds, compute per-frame luma stats (input for checkBlankFrames)
 // and write a contact sheet PNG for the persona to review. Playwright is resolved at runtime
-// (same resolution as capture.cjs) and never installed here. Node builtins only.
+// (shared playwrightLoader.cjs) and never installed here. Node builtins only.
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { spawnSync } = require('child_process');
+const { loadPlaywright: defaultLoader } = require('./playwrightLoader.cjs');
 const { pathToFileURL } = require('url');
 
 const MAX_FRAMES = 120;
@@ -14,31 +14,6 @@ const VIEWPORT = { width: 1280, height: 720 };
 const TILE_W = 160;
 const SHEET_COLS = 8;
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-function tryRequire(name, paths) {
-  try { return require(require.resolve(name, { paths })); } catch { return null; }
-}
-function globalNpmRoot() {
-  try {
-    const r = spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 15000 });
-    return r.status === 0 ? String(r.stdout).trim() : '';
-  } catch { return ''; }
-}
-/** Same resolution as capture.cjs: process.cwd() first, then the global npm root. */
-function defaultLoader() {
-  for (const name of ['playwright', 'playwright-core']) {
-    const m = tryRequire(name, [process.cwd()]);
-    if (m) return m;
-  }
-  const root = globalNpmRoot();
-  if (root) {
-    for (const name of ['playwright', 'playwright-core']) {
-      const m = tryRequire(name, [root]);
-      if (m) return m;
-    }
-  }
-  return null;
-}
 
 // ---- minimal PNG codec -------------------------------------------------------------------
 const CHANNELS = { 0: 1, 2: 3, 4: 2, 6: 4 };
@@ -165,7 +140,7 @@ async function sampleFrames({ htmlPath, lengthS, stepS = 0.5, outDir, loadPlaywr
   if (!htmlPath || !outDir || !(length > 0) || !(step > 0)) return { error: 'htmlPath, outDir, lengthS > 0 and stepS > 0 are required' };
   const count = Math.floor(length / step + 1e-9) + 1;
   if (count > MAX_FRAMES) return { error: `refused: ${count} frames exceeds the ${MAX_FRAMES} frame cap` };
-  const pw = (loadPlaywright || defaultLoader)();
+  const pw = (loadPlaywright || (() => defaultLoader()))();
   const resolved = pw && typeof pw.then === 'function' ? await pw : pw;
   const chromium = resolved && resolved.chromium;
   if (!chromium) return { skipped: 'no-playwright' };

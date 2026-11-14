@@ -26,11 +26,11 @@ function setup() {
 }
 const quiet = { log() {}, warn() {} };
 
-test('fresh install copies all five files and the stamp', async () => {
+test('fresh install copies all kit files and the stamp', async () => {
   const { srcDir, destDir } = setup();
   const r = await seedDemoVideoKit({ logger: quiet, srcDir, destDir, kitVersion: '1' });
   expect(r).toEqual({ seeded: true, reason: 'fresh' });
-  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs']);
+  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs']);
   for (const f of KIT_FILES) expect(fs.readFileSync(path.join(destDir, f), 'utf8')).toBe(`// ${f} v1\n`);
   expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe('1');
 });

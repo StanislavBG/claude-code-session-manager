@@ -2,6 +2,7 @@ import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { runApiBootCheck } from './lib/apiBootCheck'
 import { registerRemoteNewSession } from './lib/remoteNewSession'
+import './fonts.css'
 import './styles.css'
 
 // Surface otherwise-silent async failures as [renderer] lines instead of the

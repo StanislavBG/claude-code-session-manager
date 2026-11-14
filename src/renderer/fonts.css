@@ -1,0 +1,113 @@
+/* Self-hosted UI fonts (latin subset, woff2, OFL — licenses alongside in assets/fonts/).
+ * Bundled so every surface gets them, including the web view, whose sandboxed
+ * srcdoc iframe drops external stylesheets. Family names match tailwind.config.js. */
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('./assets/fonts/geist-sans-latin-300-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/geist-sans-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/geist-sans-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/geist-sans-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./assets/fonts/geist-sans-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/newsreader-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/newsreader-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/newsreader-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./assets/fonts/newsreader-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/newsreader-latin-400-italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
+}
+
+/* Geist ss03 = alternate l (glyph l.ss03, verified in the font's GSUB) so
+ * capital I and lowercase l are distinguishable. */
+body {
+  font-feature-settings: 'ss03' 1;
+}

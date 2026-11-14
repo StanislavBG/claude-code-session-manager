@@ -7,7 +7,13 @@ import { SourceChip } from '../ui/SourceChip'
 import { PermissionsRulesEditor } from './Permissions'
 import { HooksEventsEditor } from './Hooks'
 import { KEY_OWNERS } from '../../lib/settingsGroups'
-import { EffectiveCards } from '../ui/EffectiveCards'
+import {
+  useEffectiveCards,
+  EffectiveCardsToolbar,
+  EffectiveCardsRail,
+  EffectiveCardsSections,
+} from '../ui/EffectiveCards'
+import { PageShell } from '../layout/PageShell'
 import { ViewTabs } from '../ui/ViewTabs'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
@@ -107,6 +113,10 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
     () => mergeScopes(parseScopedJson(files, scopePaths)),
     [files, scopePaths]
   )
+  const schema = settingsSchema()
+  // Lifted here (above the early return) so the toolbar, rail and sections —
+  // which render into separate PageShell regions — share one filter state.
+  const cards = useEffectiveCards({ node: effective, schema })
 
   const overrideInto = (path: string[], value: unknown, intoScope?: Scope) => {
     // intoScope (optional) lets callers write a delete/reset into a specific
@@ -138,6 +148,26 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
 
   const file = activePath ? files[activePath] : null
   const scopeNeedsCwd = (s: Scope) => s !== 'user' && !cwd
+
+  // `sticky` only for the non-General views, whose header still shares
+  // Panel's scroll body (moved onto PageShell by a sibling PRD).
+  const scopeNote = (sticky: boolean) => (
+    <div
+      data-testid="settings-scope-note"
+      className={`${sticky ? 'sticky top-0 z-10 ' : ''}border-b border-line bg-bg-elev px-3 py-2 text-[11.5px] leading-snug`}
+    >
+      <span className="font-semibold text-fg">{SETTINGS_SCOPE_NOTES[scope].title}</span>
+      <span className="mx-1.5 text-fg-faint">·</span>
+      <span className="text-fg-dim">{SETTINGS_SCOPE_NOTES[scope].body}</span>
+      {activePath && <span className="ml-1.5 font-mono text-fg-faint">{activePath}</span>}
+    </div>
+  )
+  const errorBanner =
+    saveError && view !== 'raw' ? (
+      <div role="alert" className="px-3 py-2 border-b border-line text-xs text-red-400">
+        {saveError}
+      </div>
+    ) : null
 
   return (
     <Panel
@@ -192,42 +222,37 @@ function SettingsComponent({ scope = 'user' }: { scope?: Scope } = {}) {
         ) : null
       }
     >
-      {(
+      {view === 'general' && !scopeNeedsCwd(scope) ? (
+        // General renders through PageShell: everything above the cards is
+        // header (never scrolls), the group rail is subnav, the sections are
+        // the ONE content scroller. Panel's body never overflows, so nothing
+        // can slide the frame.
+        <PageShell
+          subnavWidth={192}
+          header={
+            <>
+              {scopeNote(false)}
+              {errorBanner}
+              <div className="px-3 pt-2">
+                <SourceChip path={activePath ?? ''} />
+              </div>
+              <OwnedSummaries effective={effective} onOpenTab={setView} />
+              <EffectiveCardsToolbar cards={cards} targetScope={scope} />
+            </>
+          }
+          subnav={<EffectiveCardsRail cards={cards} />}
+        >
+          <EffectiveCardsSections cards={cards} targetScope={scope} onOverride={overrideInto} />
+        </PageShell>
+      ) : (
         <>
-          <div
-            data-testid="settings-scope-note"
-            className="sticky top-0 z-10 border-b border-line bg-bg-elev px-3 py-2 text-[11.5px] leading-snug"
-          >
-            <span className="font-semibold text-fg">{SETTINGS_SCOPE_NOTES[scope].title}</span>
-            <span className="mx-1.5 text-fg-faint">·</span>
-            <span className="text-fg-dim">{SETTINGS_SCOPE_NOTES[scope].body}</span>
-            {activePath && (
-              <span className="ml-1.5 font-mono text-fg-faint">{activePath}</span>
-            )}
-          </div>
-          {saveError && view !== 'raw' && (
-            <div role="alert" className="px-3 py-2 border-b border-line text-xs text-red-400">
-              {saveError}
-            </div>
-          )}
+          {scopeNote(true)}
+          {errorBanner}
           {scopeNeedsCwd(scope) ? (
             <EmptyState
               title="no active project"
               hint="open a tab in a project directory to edit project or local settings"
             />
-          ) : view === 'general' ? (
-            <>
-              <div className="px-3 pt-2">
-                <SourceChip path={activePath ?? ''} />
-              </div>
-              <OwnedSummaries effective={effective} onOpenTab={setView} />
-              <EffectiveCards
-                node={effective}
-                targetScope={scope}
-                onOverride={overrideInto}
-                schema={settingsSchema()}
-              />
-            </>
           ) : view === 'permissions' ? (
             activePath ? (
               <>

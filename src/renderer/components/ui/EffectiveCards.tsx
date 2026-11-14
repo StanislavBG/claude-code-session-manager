@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Scope } from '../../lib/scopes'
 import { SCOPE_LABELS } from '../../lib/scopes'
 import type { EffectiveNode, LeafNode } from '../../lib/mergeScopes'
@@ -6,6 +6,7 @@ import type { SchemaResolver, SchemaInfo } from '../../lib/schemaLookup'
 import { planGroups, planGroupRail, humanizeKey, type GroupRailEntry } from '../../lib/settingsGroups'
 import { resolveSettingDescription } from '../../lib/settingsDescriptionFallbacks'
 import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
+import { usePageShell } from '../layout/PageShell'
 
 /** Judgment-call icon per settings group id; 'other' is planGroups' dynamic fallback bucket. */
 const GROUP_ICONS: Record<string, AlmanacIconName> = {
@@ -47,16 +48,30 @@ const SCOPE_LABELS_SHORT: Record<Scope | 'default', string> = {
  * common types. Clicking "Explain" opens the full description, shadowed
  * values, and enum choices. Everything else (arrays, nested objects) gets
  * a "Edit in Raw view" fallback.
+ *
+ * Rendered as three pieces into a <PageShell> owned by the caller (Settings):
+ * `EffectiveCardsToolbar` → header, `EffectiveCardsRail` → subnav,
+ * `EffectiveCardsSections` → content. Their shared filter / showAdvanced /
+ * showUnset state lives in ONE place — `useEffectiveCards` — and is passed to
+ * each piece. The rail jumps via `usePageShell().scrollToAnchor`, which moves
+ * only the shell's content scroller, never the page frame.
  */
 
-interface Props {
-  node: EffectiveNode
-  targetScope: Scope
-  onOverride: OnOverride
+export interface EffectiveCardsModel {
+  filter: string
+  setFilter: (v: string) => void
+  showAdvanced: boolean
+  setShowAdvanced: (v: boolean) => void
+  showUnset: boolean
+  setShowUnset: (v: boolean) => void
+  rootNode: Extract<EffectiveNode, { kind: 'object' }> | null
   schema: SchemaResolver
+  groups: ReturnType<typeof planGroups>
+  railGroups: GroupRailEntry[]
+  visibleGroups: ReturnType<typeof planGroups>
 }
 
-export function EffectiveCards({ node, targetScope, onOverride, schema }: Props) {
+export function useEffectiveCards({ node, schema }: { node: EffectiveNode; schema: SchemaResolver }): EffectiveCardsModel {
   const [filter, setFilter] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showUnset, setShowUnset] = useState(true)
@@ -65,39 +80,15 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
   const presentKeys = rootNode ? Object.keys(rootNode.children) : []
   const knownKeys = schema.rootKeys()
   const allKeys = new Set<string>([...presentKeys, ...knownKeys])
+  const allKeysSig = Array.from(allKeys).sort().join(',')
+  const presentSig = presentKeys.join(',')
 
-  const groups = useMemo(() => planGroups(allKeys), [Array.from(allKeys).sort().join(',')])
+  const groups = useMemo(() => planGroups(allKeys), [allKeysSig])
 
   const railGroups = useMemo(
     () => planGroupRail(allKeys, new Set(presentKeys)),
-    [Array.from(allKeys).sort().join(','), presentKeys.join(',')],
+    [allKeysSig, presentSig],
   )
-
-  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null)
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
-
-  const jumpToGroup = (id: string) => {
-    const target = groups.find((g) => g.id === id)
-    if (target?.advanced && !showAdvanced) setShowAdvanced(true)
-    setPendingScrollId(id)
-  }
-
-  useEffect(() => {
-    if (!pendingScrollId) return
-    setPendingScrollId(null)
-    const container = scrollContainerRef.current
-    const el = document.getElementById(`settings-group-${pendingScrollId}`)
-    if (!container || !el) return
-    // Scroll ONLY this pane's own scrollable container. `el.scrollIntoView()`
-    // walks every scrollable ancestor to bring the target fully into the
-    // viewport — since this list is nested inside the app's outer layout
-    // scroll regions, that dragged the whole window/nav along with it
-    // (reported: "it scrolls to the section... but it moves everything and
-    // never resets"). Computing the offset within this one container and
-    // scrolling just it keeps the effect local to the settings pane.
-    const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top
-    container.scrollBy({ top: delta, behavior: 'smooth' })
-  }, [pendingScrollId])
 
   const visibleGroups = useMemo(() => {
     return groups
@@ -116,78 +107,114 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
       .filter((g) => g.keys.length > 0)
   }, [groups, filter, showAdvanced, showUnset, rootNode, schema])
 
+  return {
+    filter, setFilter, showAdvanced, setShowAdvanced, showUnset, setShowUnset,
+    rootNode, schema, groups, railGroups, visibleGroups,
+  }
+}
+
+/* --------------------------------------------------------------- Toolbar */
+
+export function EffectiveCardsToolbar({ cards, targetScope }: { cards: EffectiveCardsModel; targetScope: Scope }) {
   return (
-    <div className="h-full flex flex-col">
-      <div className="shrink-0 border-b border-line bg-bg-elev px-3 py-1.5 flex items-center gap-3 text-xs">
-        <span className="text-fg-faint">
-          writing overrides to{' '}
-          <span className="text-fg-dim font-medium">{SCOPE_LABELS[targetScope].label}</span>
-        </span>
-        <label className="flex items-center gap-1 text-fg-faint cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showUnset}
-            onChange={(e) => setShowUnset(e.target.checked)}
-            className="accent-accent"
-          />
-          show not-yet-configured
-        </label>
-        <label className="flex items-center gap-1 text-fg-faint cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showAdvanced}
-            onChange={(e) => setShowAdvanced(e.target.checked)}
-            className="accent-accent"
-          />
-          show advanced
-        </label>
-        <div className="flex-1" />
+    <div className="border-b border-line bg-bg-elev px-3 py-1.5 flex items-center gap-3 text-xs">
+      <span className="text-fg-faint">
+        writing overrides to{' '}
+        <span className="text-fg-dim font-medium">{SCOPE_LABELS[targetScope].label}</span>
+      </span>
+      <label className="flex items-center gap-1 text-fg-faint cursor-pointer">
         <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="search settings…"
-          className="bg-bg border border-line rounded px-2 py-1 text-xs text-fg w-64"
+          type="checkbox"
+          checked={cards.showUnset}
+          onChange={(e) => cards.setShowUnset(e.target.checked)}
+          className="accent-accent"
         />
-      </div>
-      <div className="flex-1 flex overflow-hidden">
-        <GroupRail groups={railGroups} onJump={jumpToGroup} />
-        <div ref={scrollContainerRef} className="flex-1 overflow-auto py-3">
-          {visibleGroups.map((g) => (
-            <Section
-              key={g.id}
-              id={g.id}
-              title={g.title}
-              summary={g.summary}
-              advanced={g.advanced}
-            >
-              {g.keys.map((k) => {
-                const child = rootNode?.children[k]
-                const info = schema.at([k])
-                return (
-                  <SettingCard
-                    key={k}
-                    keyName={k}
-                    node={child}
-                    info={info}
-                    targetScope={targetScope}
-                    onOverride={(v, intoScope) => onOverride([k], v, intoScope)}
-                  />
-                )
-              })}
-            </Section>
-          ))}
-          {visibleGroups.length === 0 && (
-            <div className="px-6 py-12 text-center text-fg-faint text-sm">
-              no settings match "{filter}"
-            </div>
-          )}
+        show not-yet-configured
+      </label>
+      <label className="flex items-center gap-1 text-fg-faint cursor-pointer">
+        <input
+          type="checkbox"
+          checked={cards.showAdvanced}
+          onChange={(e) => cards.setShowAdvanced(e.target.checked)}
+          className="accent-accent"
+        />
+        show advanced
+      </label>
+      <div className="flex-1" />
+      <input
+        value={cards.filter}
+        onChange={(e) => cards.setFilter(e.target.value)}
+        placeholder="search settings…"
+        className="bg-bg border border-line rounded px-2 py-1 text-xs text-fg w-64"
+      />
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- Sections */
+
+export function EffectiveCardsSections({
+  cards,
+  targetScope,
+  onOverride,
+}: {
+  cards: EffectiveCardsModel
+  targetScope: Scope
+  onOverride: OnOverride
+}) {
+  const { visibleGroups, rootNode, schema, filter } = cards
+  return (
+    <div className="py-3">
+      {visibleGroups.map((g) => (
+        <Section key={g.id} id={g.id} title={g.title} summary={g.summary} advanced={g.advanced}>
+          {g.keys.map((k) => {
+            const child = rootNode?.children[k]
+            const info = schema.at([k])
+            return (
+              <SettingCard
+                key={k}
+                keyName={k}
+                node={child}
+                info={info}
+                targetScope={targetScope}
+                onOverride={(v, intoScope) => onOverride([k], v, intoScope)}
+              />
+            )
+          })}
+        </Section>
+      ))}
+      {visibleGroups.length === 0 && (
+        <div className="px-6 py-12 text-center text-fg-faint text-sm">
+          no settings match "{filter}"
         </div>
-      </div>
+      )}
     </div>
   )
 }
 
 /* ------------------------------------------------------------- GroupRail */
+
+/** Must render inside a <PageShell> (uses its scrollToAnchor). */
+export function EffectiveCardsRail({ cards }: { cards: EffectiveCardsModel }) {
+  const shell = usePageShell()
+  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null)
+  const { groups, showAdvanced, setShowAdvanced } = cards
+
+  const jumpToGroup = (id: string) => {
+    const target = groups.find((g) => g.id === id)
+    if (target?.advanced && !showAdvanced) setShowAdvanced(true)
+    // Defer to an effect so a just-revealed advanced section is in the DOM.
+    setPendingScrollId(id)
+  }
+
+  useEffect(() => {
+    if (!pendingScrollId) return
+    setPendingScrollId(null)
+    shell.scrollToAnchor(`settings-group-${pendingScrollId}`, { behavior: 'smooth' })
+  }, [pendingScrollId, shell])
+
+  return <GroupRail groups={cards.railGroups} onJump={jumpToGroup} />
+}
 
 function GroupRail({
   groups,
@@ -197,10 +224,12 @@ function GroupRail({
   onJump: (id: string) => void
 }) {
   return (
-    <nav className="shrink-0 w-48 border-r border-line bg-bg-elev/30 overflow-y-auto py-3">
+    <div className="min-h-full border-r border-line bg-bg-elev/30 py-3">
       {groups.map((g) => (
         <button
           key={g.id}
+          type="button"
+          data-group-id={g.id}
           onClick={() => onJump(g.id)}
           className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-hi transition-colors"
           title={`jump to ${g.title}`}
@@ -216,7 +245,7 @@ function GroupRail({
           </span>
         </button>
       ))}
-    </nav>
+    </div>
   )
 }
 

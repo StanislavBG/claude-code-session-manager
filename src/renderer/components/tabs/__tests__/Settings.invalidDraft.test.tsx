@@ -9,7 +9,10 @@ type Override = (path: string[], value: unknown) => void
 const captured: { onOverride: Override | null } = { onOverride: null }
 
 vi.mock('../../ui/EffectiveCards', () => ({
-  EffectiveCards: (props: { onOverride: Override }) => {
+  useEffectiveCards: () => ({}),
+  EffectiveCardsToolbar: () => null,
+  EffectiveCardsRail: () => null,
+  EffectiveCardsSections: (props: { onOverride: Override }) => {
     captured.onOverride = props.onOverride
     return null
   },

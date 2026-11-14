@@ -1849,6 +1849,13 @@
  },
  {
   "ns": "promptSessions",
+  "method": "listRestorableRecent",
+  "channel": "promptSessions:list-restorable-recent",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
   "method": "readArchived",
   "channel": "promptSessions:read-archived",
   "kind": "invoke",

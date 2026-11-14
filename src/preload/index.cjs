@@ -637,6 +637,8 @@ contextBridge.exposeInMainWorld('api', {
     listArchived: (payload) => ipcRenderer.invoke('promptSessions:list-archived', payload),
     /** This project's earlier Claude Code sessions no Epic owns yet (restore-as-new-Epic picker). */
     listRestorable: (payload) => ipcRenderer.invoke('promptSessions:list-restorable', payload),
+    /** Interactive restorable sessions across every known project, newest first; each row carries its cwd. */
+    listRestorableRecent: (opts) => ipcRenderer.invoke('promptSessions:list-restorable-recent', opts),
     readArchived: (payload) => ipcRenderer.invoke('promptSessions:read-archived', payload),
     readSessionTranscript: (payload) => ipcRenderer.invoke('promptSessions:read-session-transcript', payload),
     /** Mutate-tier archive write for markCompleted (main builds the path; single-writer 'epics'). */

@@ -2806,6 +2806,9 @@ export interface SessionManagerAPI {
     listArchived: (payload: { cwd: string }) => Promise<{ ok: boolean; ids: string[]; error?: string }>;
     /** This project's earlier Claude Code sessions no Epic owns yet, newest first (restore-as-new-Epic picker). */
     listRestorable: (payload: { cwd: string }) => Promise<PromptSessionsListRestorableResult>;
+    /** Interactive (non-headless) restorable sessions across every known project, newest first.
+     *  Resolves `{ ok: false, error }` on a refused `limit` or a lister failure — never rejects. */
+    listRestorableRecent: (opts?: { limit?: number }) => Promise<PromptSessionsListRestorableRecentResult | { ok: false; error: string }>;
     readArchived: (payload: { cwd: string; epicId: string }) => Promise<{ exists: boolean; data: unknown; error?: string }>;
     readSessionTranscript: (payload: { cwd: string; sessionId: string }) => Promise<{ exists: boolean; text: string; error?: string }>;
     writeArchive: (payload: { cwd: string; epicId: string; archive: Record<string, unknown> }) => Promise<{ ok: true }>;
@@ -2925,6 +2928,22 @@ export interface PromptSessionsListRestorableResult {
   /** Transcript heads read by this call. */
   scanned: number;
   /** The walk stopped with candidates left. */
+  truncated: boolean;
+}
+
+// ─────────────────────────────────── PromptSessions list-restorable-recent (restorableSessions.cjs listRecentRestorableSessions)
+/** A RestorableSession from any known project, tagged with the project it belongs to. */
+export type RecentRestorableSession = RestorableSession & {
+  /** Project root the transcript belongs to. */
+  cwd: string;
+};
+
+export interface PromptSessionsListRestorableRecentResult {
+  /** Newest first by mtime, across projects. */
+  sessions: RecentRestorableSession[];
+  /** Projects whose transcripts were read by this call. */
+  projectsRead: number;
+  /** Some project's walk, or the project list, stopped with candidates left. */
   truncated: boolean;
 }
 

@@ -55,9 +55,10 @@ scoping scheme.
 
 ## Agent + Tag, and the AIM prompt
 
-- **Epic creation is two independent selections.** `agentType` (Actor — a persona from the Agents page,
-  `~/.claude/agents/*.md`) and `tag` (Mission — what the Epic is for) are separate axes on `PromptSession`.
-  Either may be None (see [Plain sessions](#plain-sessions)). The `tag` taxonomy is a closed union.
+- **Epic creation is three independent selections.** `agentType` (Actor — a persona from the Agents page,
+  `~/.claude/agents/*.md`), `tag` (Mission — what the Epic is for) and `agentCli` (which CLI runs it; absent =
+  Claude Code, see [Agent CLI](#agent-cli)) are separate axes on `PromptSession`. Actor and Mission may each be
+  None (see [Plain sessions](#plain-sessions)). The `tag` taxonomy is a closed union.
 - **Both libraries live on one page, Agents (`AgentLibrary.tsx`, NavKey `agent-library`).** Its Personas tab is a
   full CRUD editor (`agentLibrary.cjs`'s `savePersona`/`deletePersona`/`removeOverride`) — don't describe it as
   read-only. Its Tags tab (`TagLibrary.tsx`) IS read-only: the closed taxonomy, each tag's opening framing, and
@@ -136,6 +137,15 @@ scoping scheme.
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of
   work is the intended shape. The queue row's `renameEpic` is a cosmetic carve-out (typo, clarity), never a
   repurposing.
+
+## Context packs
+
+- **A pack is a Context Injection that carries a Claude Code plugin** (skills now; tools and hooks later) plus
+  always-on rules. It is chosen per Epic on the New Session card and stored as `PromptSession.packs`.
+- **Packs load through the CLI, not the prompt.** Each chat turn and each PRD job passes `--plugin-dir` once per
+  pack and the pack's rules via `--append-system-prompt`. PRD jobs inherit their Epic's packs.
+- **Packs ship under `plugins/packs/` and stay free** (open-core law). The grounding board only lists the
+  selected packs — it is an inspector, never the control that picks them.
 
 ## Agent CLI
 

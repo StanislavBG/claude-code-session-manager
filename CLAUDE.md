@@ -1,7 +1,7 @@
 # Claude Code Session Manager
 
 Electron desktop app — local cockpit for Claude Code CLI. Terminal + config/ops/scheduling tabs.
-Per-project state lives under `<cwd>/session-manager-operations/`.
+Per-project state: `<cwd>/session-manager-operations/`.
 
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
 before changing anything in that area.** Reference docs:
@@ -68,25 +68,27 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   Claude Code; others: desktop-only). `tag` = closed 7-tag union. `developLoop:false` = no PRDs.
 - **The opening prompt is AIM — Actor, Input, Mission, in that order**, composed only by
   `lib/epicIntake.ts`'s `composeEpicIntake`. It is framing, never a second source of truth for what the CLI loads.
+- **A context pack = plugin + always-on rules**, per Epic (`PromptSession.packs`), loaded each turn/job via
+  `--plugin-dir` + `--append-system-prompt` ([detail](session-manager-operations/architecture/domain-model.md#context-packs)).
 - **An Epic's title + objective are fixed for the life of its session.** Iterate in follow-up messages; start a
-  new Epic rather than repurposing one. (Queue-row rename is a cosmetic carve-out only.)
+  new Epic rather than repurposing one. (Queue-row rename: cosmetic only.)
 - **Lifecycle is the single `status` field** — exactly `proposed` / `active` / `completed`, specified in
   [`prompt-sessions/README.md`](session-manager-operations/prompt-sessions/README.md#lifecycle). No `draft`
-  state. **Every Epic is born `proposed`**; nothing is created directly as `active`. Don't restate the
-  lifecycle elsewhere — link there.
+  state. **Every Epic is born `proposed`**; nothing is created directly as `active`. Link there; never
+  restate it.
 - **SINGLE-CREATOR LAW: an Epic is created in exactly one place — a human pressing New Epic.** Enforced
   fail-closed in `src/main/lib/epic/epicMint.cjs`; `MINT_AUTHORITIES` has exactly two entries (the New Epic IPC
   handler, and `crossProjectFeedback.cjs`). A third entry is a domain-model change, not a convenience. There
-  is **no agent-facing proposal channel** — an agent sure that work is needed runs `/develop` inside the Epic
+  is **no agent-facing proposal channel** — an agent needing work runs `/develop` inside the Epic
   it is already in. PRDs join an existing Epic; they never conjure one.
 - **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`crossProjectFeedback.cjs`,
-  `feedback_open_session`, `send-feedback` skill); auto-approved only on a verified human quote or granted macro
-  ([domain-model.md](session-manager-operations/architecture/domain-model.md)). Same-cwd rejected — `/develop`.
+  `feedback_open_session`, `send-feedback` skill); auto-approved only on a verified human quote or granted macro.
+  Same-cwd rejected — `/develop`.
 - **A MACRO is a saved (agent, tag, prompt) hot key**, machine-local in `macroLibrary.cjs` (`macros.json`). Sessions
   hot keys are per project; a **Project Home tool is in every project**, only its output is per project. A press is
   New Session, through the same mint authority.
-- **Settings (System/Project/Local) is substrate, not per-Epic curation.** If a behavior should differ per
-  Epic, it is a Tag, an Agent persona, or a future PRD — never a plain Settings edit. `model` + `effort` are
+- **Settings (System/Project/Local) is substrate, not per-Epic curation.** Per-Epic behavior is a
+  Tag, persona, or PRD — never a Settings edit. `model` + `effort` are
   carved out per-Epic (persona frontmatter wins over the Settings default).
 - **SINGLE-WRITER LAW over the operations root** (`src/main/lib/opsOwnership.cjs`). Every
   `session-manager-operations/<namespace>/` has exactly ONE owning writer; everyone else reads. Fail-closed —
@@ -94,9 +96,9 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   paths only via its `opsPath()`. Enumeration, owners, retention:
   [session-manager-operations/CLAUDE.md](session-manager-operations/CLAUDE.md).
 - **Open-core: the APP and the Field Manual are both free, and stay free.** Never add a license check,
-  entitlement gate, trial limit, nag, or "pro" tier, and never move a feature or chapter behind a purchase.
-- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. Do
-  NOT delete/decommission the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
+  entitlement gate, trial limit, nag, or "pro" tier, and never paywall a feature or chapter.
+- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. Never
+  remove the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 
 ## Scheduler
 
@@ -107,9 +109,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 - **PRD authoring is API-only** — `scheduler_create_prd` is the only way to write a PRD.
   App not running? Stop and ask the human to start it; never hand-write one.
 - Flat scheduler/prds/ is **RETIRED** — auto-consolidated into prds-archived/ on every `reconcile()` pass.
-- Before writing a PRD, read
-  [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
-  safety rules + a pre-queue checklist (§14).
+- Before writing a PRD, read [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) — safety + checklist (§14).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
 - A `needs_review` park self-heals first; its Epic gets one grouped notice when the ladder fails or the hold ends — never mints work.

@@ -20,13 +20,17 @@
  * (MdLinkMap), the Scope options after the input's default, the row and title
  * findings count, and `onFindingsCount` (ProjectHome's Tools key button).
  *
+ * The `LAST REVIEW` section (MdLastReview) is one `window.api.projectPages.mdReview` read, on the
+ * same schedule as the scan (first show per cwd, and `Refresh`; never polled): the newest review
+ * record plus the validation records of this project's Review MD network sessions.
+ *
  * The explorer's curation (verdicts, notes, reviewed marks, record/doc folder overrides) is
  * `useMdCuration`'s, kept in this project's ui-prefs. The scan waits for it to load and sends
  * the folder overrides, rescanning when either folder list changes (never on a verdict, note
  * or reviewed mark). The explorer footer's CurationTray turns the picked docs into a Review MD
  * network launch (composeCurationBrief), so curation ends in an architect session.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { MacroEditor } from '../../../epics/MacroEditor'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
@@ -39,7 +43,9 @@ import { MdNetworkExplorer } from './MdNetworkExplorer'
 import { MdDocPreview } from './MdDocPreview'
 import { MdDocTable } from './MdDocTable'
 import { CompetitorMatrixView } from './CompetitorMatrixView'
-import type { Macro, MacroJobStatus, MdCensus, MdNetwork, MdNetworkResult } from '../../../../../preload/api'
+import { MdLastReview, pickValidationPath, type MdReviewState, type ReviewSessionLike } from './MdLastReview'
+import { usePromptSessions } from '../../../../state/promptSessions'
+import type { Macro, MacroJobStatus, MdCensus, MdNetwork, MdNetworkResult, MdReviewResult } from '../../../../../preload/api'
 
 export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
 /** A finished scan's findings count for `cwd`; null when the scan failed. */
@@ -137,6 +143,64 @@ function useMdNetworkScan(
   }, [cwd, ready, foldersKey, start])
 
   return { scan: scan?.cwd === cwd ? scan : null, refresh }
+}
+
+/** mdReview's epicIds cap (ipcSchemas projectPagesMdReview) and id shape. */
+const MD_REVIEW_MAX_IDS = 50
+const EPIC_ID_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
+
+/**
+ * Reads `cwd`'s last review record once `active` first holds for it, and again on `refresh` —
+ * never on a timer, and not when `epicIds` changes (they are read at call time). `{ ok:false }`
+ * shows in the section only; a rejected call also toasts, once per read.
+ */
+function useMdReview(cwd: string | null | undefined, active: boolean, epicIds: readonly string[]) {
+  const [state, setState] = useState<{ cwd: string; review: MdReviewState } | null>(null)
+  const requestedCwd = useRef<string | null>(null)
+  const latest = useRef(0)
+  const idsRef = useRef(epicIds)
+  idsRef.current = epicIds
+
+  const start = useCallback((forCwd: string) => {
+    requestedCwd.current = forCwd
+    const id = ++latest.current
+    setState((prev) => ({
+      cwd: forCwd,
+      review: {
+        status: 'loading',
+        result: prev?.cwd === forCwd && prev.review.status !== 'error' ? prev.review.result : null,
+      },
+    }))
+    let pending: Promise<MdReviewResult>
+    try {
+      pending = window.api.projectPages.mdReview({ cwd: forCwd, epicIds: [...idsRef.current] })
+    } catch (err) {
+      pending = Promise.reject(err)
+    }
+    pending.then(
+      (res) => {
+        if (id !== latest.current) return
+        setState({ cwd: forCwd, review: res.ok ? { status: 'ready', result: res } : { status: 'error', error: res.error } })
+      },
+      (err: unknown) => {
+        if (id !== latest.current) return
+        const message = (err instanceof Error ? err.message : String(err)) || 'Unknown error'
+        setState({ cwd: forCwd, review: { status: 'error', error: message } })
+        toast.error(`Could not read the review record: ${message}`)
+      },
+    )
+  }, [])
+
+  useEffect(() => {
+    if (!active || !cwd) return
+    if (requestedCwd.current !== cwd) start(cwd)
+  }, [active, cwd, start])
+
+  const refresh = useCallback(() => {
+    if (cwd) start(cwd)
+  }, [cwd, start])
+
+  return { review: state && state.cwd === cwd ? state.review : null, refresh }
 }
 
 const PRIMARY_CLASS =
@@ -384,6 +448,8 @@ function ReviewTool({
   launching,
   onLaunch,
   md,
+  review,
+  reviewSessions,
 }: {
   macro: Macro
   cwd?: string | null
@@ -392,6 +458,9 @@ function ReviewTool({
   launching: string | null
   onLaunch: LaunchFn
   md: UseMdCuration
+  review: MdReviewState | null
+  /** This project's Review MD network sessions, for the validation record. */
+  reviewSessions: readonly ReviewSessionLike[]
 }) {
   const { curation } = md
   const [scopePick, setScopePick] = useState<string | null>(null)
@@ -414,6 +483,11 @@ function ReviewTool({
   const scopeLabel = scopeInput?.label ?? 'Scope'
   const modeLabel = modeInput?.label ?? 'Mode'
   const curationMode = modeOptions.includes(CURATION_MODE) ? CURATION_MODE : modeDefault
+  const reviewResult = review && review.status !== 'error' ? review.result : null
+  const validationPath = useMemo(
+    () => (reviewResult ? pickValidationPath(reviewResult.record, reviewResult.validation, reviewSessions) : null),
+    [reviewResult, reviewSessions],
+  )
   const closeExplorer = () => {
     setExplore({ open: false, id: null })
     setExplorerSel(null)
@@ -478,6 +552,16 @@ function ReviewTool({
         {REVIEW_DESCRIPTION}
       </p>
       <ReviewInfo cwd={cwd} scan={scan} onRefresh={onRefresh} />
+      <MdLastReview
+        state={review}
+        validationPath={validationPath}
+        macro={macro}
+        scope={scope}
+        launching={launching}
+        onLaunch={onLaunch}
+        onOpen={(path) => setExplore({ open: true, id: path })}
+        canOpen={!!network}
+      />
       {network && <MdNetworkCards cwd={cwd} network={network} onExplore={(id) => setExplore({ open: true, id })} />}
       {network && explore.open && (
         <MdNetworkExplorer
@@ -582,7 +666,26 @@ export function ToolsPane({
   // First row by default; a pick survives list refreshes while its macro is still listed.
   const selected = editing ? null : (tools.find((m) => m.id === selectedId) ?? tools[0] ?? null)
   const md = useMdCuration(cwd)
-  const { scan, refresh } = useMdNetworkScan(cwd, selected?.id === REVIEW_MD_NETWORK_ID, md.ready, md.curation, onFindingsCount)
+  const reviewActive = selected?.id === REVIEW_MD_NETWORK_ID
+  const { scan, refresh } = useMdNetworkScan(cwd, reviewActive, md.ready, md.curation, onFindingsCount)
+  // One stable selector; the per-cwd filter is memoized (never a fresh array from a selector).
+  const sessions = usePromptSessions((s) => s.sessions)
+  const reviewSessions = useMemo(
+    () =>
+      Object.values(sessions)
+        .filter((s) => s.cwd === cwd && s.source?.macroId === REVIEW_MD_NETWORK_ID)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)),
+    [sessions, cwd],
+  )
+  const reviewEpicIds = useMemo(
+    () => reviewSessions.map((s) => s.id).filter((id) => EPIC_ID_RE.test(id)).slice(0, MD_REVIEW_MAX_IDS),
+    [reviewSessions],
+  )
+  const { review, refresh: refreshReview } = useMdReview(cwd, reviewActive, reviewEpicIds)
+  const refreshAll = useCallback(() => {
+    refresh()
+    refreshReview()
+  }, [refresh, refreshReview])
   const network = scan && scan.status !== 'error' ? scan.result : null
   const rowMeta = (m: Macro) =>
     m.id === REVIEW_MD_NETWORK_ID && network ? plural(network.findings.length, 'finding') : m.agentName
@@ -602,10 +705,12 @@ export function ToolsPane({
         macro={selected}
         cwd={cwd}
         scan={scan}
-        onRefresh={refresh}
+        onRefresh={refreshAll}
         launching={launching}
         onLaunch={onLaunch}
         md={md}
+        review={review}
+        reviewSessions={reviewSessions}
       />
     )
   else if (selected.id === COMPETITOR_MATRIX_ID)

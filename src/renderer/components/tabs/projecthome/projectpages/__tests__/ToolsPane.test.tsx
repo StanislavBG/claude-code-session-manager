@@ -4,8 +4,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ToolsPane } from '../ToolsPane'
 import { useToast } from '../../../../../state/toast'
+import { usePromptSessions } from '../../../../../state/promptSessions'
 import { composeCurationBrief, normalizeCuration } from '../../../../../lib/mdCurate'
-import type { AgentPersona, Macro, MdCensus, MdDoc, MdDocRole, MdNetwork, MdNetworkResult } from '../../../../../../preload/api'
+import type { AgentPersona, Macro, MdCensus, MdDoc, MdDocRole, MdNetwork, MdNetworkResult, MdReviewRecord, MdReviewResult } from '../../../../../../preload/api'
 
 const CWD = '/p/alpha'
 
@@ -118,6 +119,7 @@ const readJson = vi.fn()
 const writeJson = vi.fn()
 const PREFS = `${CWD}/session-manager-operations/ui-prefs/prefs.json`
 const matrix = vi.fn()
+const mdReview = vi.fn<(payload: { cwd: string; epicIds?: string[] }) => Promise<MdReviewResult>>()
 const open = vi.fn()
 const read = vi.fn()
 
@@ -135,6 +137,9 @@ beforeEach(() => {
   read.mockResolvedValue({ ok: true, text: '# Doc', size: 5 })
   matrix.mockReset()
   matrix.mockReturnValue(new Promise(() => {}))
+  mdReview.mockReset()
+  mdReview.mockReturnValue(new Promise<MdReviewResult>(() => {}))
+  usePromptSessions.setState({ sessions: {} })
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
   prefsFiles = {}
   readJson.mockReset()
@@ -147,7 +152,7 @@ beforeEach(() => {
     config: { readJson, writeJson },
     macros: { save },
     agents: { listPersonas, onChanged: () => () => {} },
-    projectPages: { mdNetwork, matrix },
+    projectPages: { mdNetwork, matrix, mdReview },
     shell: { open },
     files: { read },
   }
@@ -716,5 +721,115 @@ describe('ToolsPane Review MD network curation', () => {
     await settle()
     expect(b('md-curation-tray')!.textContent).toContain('1 doc picked')
     expect(useToast.getState().toasts.map((t) => t.kind)).toEqual(['error'])
+  })
+})
+
+describe('ToolsPane Review MD network last review', () => {
+  const b = (id: string) => document.body.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+  const RECORD_PATH = 'session-manager-operations/reviews/docs/2026-11-15-md-network.md'
+  const VALIDATION = 'session-manager-operations/reviews/validation/epic-rev-1/2026-11-15-validate.md'
+  const RECORD: MdReviewRecord = {
+    date: '2026-11-15', mode: 'Full review', modeKind: 'Full review', scope: 'the whole project', session: null,
+    baseCommit: 'bab11306fe9757cbdc1d7a40862d63c0bc30829d', owner: 'Bilko', map: 'CLAUDE.md',
+    driftCheckCommand: 'node script/drift-check.cjs --root .', findingsCounts: { 'broken-link': 0 }, censusSummary: '83 files',
+    verdicts: [{ doc: 'CLAUDE.md', verdict: 'KEEP-OWNER', owner: 'map' }], decisions: ['Approved.'], followUpPrds: ['md-claude-map'],
+    nextReviewDue: '2027-02-15', nextReviewNote: null,
+  }
+  const OK: MdReviewResult = { ok: true, record: RECORD, recordPath: RECORD_PATH, validation: { 'epic-rev-1': [VALIDATION] } }
+  const seedSessions = () =>
+    usePromptSessions.setState({
+      sessions: {
+        'epic-rev-1': { id: 'epic-rev-1', cwd: CWD, createdAt: '2026-11-14T10:00:00.000Z', source: { producer: 'new-epic-ui', macroId: REVIEW.id } } as never,
+        'epic-other': { id: 'epic-other', cwd: CWD, createdAt: '2026-11-14T10:00:00.000Z', source: { producer: 'new-epic-ui', macroId: 'sweep' } } as never,
+        'epic-elsewhere': { id: 'epic-elsewhere', cwd: '/p/beta', createdAt: '2026-11-14T10:00:00.000Z', source: { producer: 'new-epic-ui', macroId: REVIEW.id } } as never,
+      },
+    })
+  afterEach(() => vi.useRealTimers())
+
+  it('reads the record once per cwd with this project\'s review session ids, again only on Refresh', async () => {
+    seedSessions()
+    mdNetwork.mockResolvedValue(NET)
+    mdReview.mockResolvedValue(OK)
+    render({ macros: [REVIEW, SWEEP] })
+    await settle()
+    expect(mdReview.mock.calls).toEqual([[{ cwd: CWD, epicIds: ['epic-rev-1'] }]])
+    expect(q('md-last-review-path')!.textContent).toBe(RECORD_PATH)
+    render({ macros: [{ ...REVIEW }, SWEEP] })
+    act(() => row('sweep').click())
+    act(() => row(REVIEW.id).click())
+    await settle()
+    expect(mdReview).toHaveBeenCalledTimes(1)
+    act(() => q('project-home-review-refresh')!.click())
+    await settle()
+    expect(mdReview).toHaveBeenCalledTimes(2)
+    expect(mdNetwork).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not read the record while another tool shows', async () => {
+    render({ macros: [SWEEP] })
+    await settle()
+    expect(mdReview).not.toHaveBeenCalled()
+  })
+
+  it('shows the no-record line', async () => {
+    mdReview.mockResolvedValue({ ok: true, record: null, recordPath: null, validation: {} })
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(q('md-last-review-none')!.textContent).toContain('No review record exists yet')
+  })
+
+  it('Open record and Open validation record open the explorer inspector on their paths', async () => {
+    seedSessions()
+    mdNetwork.mockResolvedValue(NET)
+    mdReview.mockResolvedValue(OK)
+    render({ macros: [REVIEW] })
+    await settle()
+    act(() => q('md-last-review-open')!.click())
+    expect(b('md-explorer')).not.toBeNull()
+    expect(b('project-home-review-inspector-other')!.textContent).toContain(RECORD_PATH)
+    act(() => b('md-explorer-close')!.click())
+    expect(q('md-last-review-open-validation')!.getAttribute('data-path')).toBe(VALIDATION)
+    act(() => q('md-last-review-open-validation')!.click())
+    expect(b('project-home-review-inspector-other')!.textContent).toContain(VALIDATION)
+  })
+
+  it('Run drift check shows only when overdue and launches Drift check with the record path and command', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2027, 1, 15, 12))
+    mdReview.mockResolvedValue(OK)
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(q('md-last-review-due')).toBeNull()
+    act(() => root!.unmount())
+    root = null
+    container?.remove()
+    vi.setSystemTime(new Date(2027, 1, 16, 12))
+    const props = render({ macros: [REVIEW] })
+    await settle()
+    act(() => q('md-last-review-drift-check')!.click())
+    expect(props.onLaunch).toHaveBeenCalledTimes(1)
+    const [m, extra, inputs] = (props.onLaunch as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(m).toBe(REVIEW)
+    expect(extra).toContain(RECORD_PATH)
+    expect(extra).toContain('node script/drift-check.cjs --root .')
+    expect(inputs).toEqual({ scope: 'the whole project', mode: 'Drift check' })
+  })
+
+  it('{ ok:false } shows inline with no toast; a rejected read shows inline and toasts once', async () => {
+    mdReview.mockResolvedValue({ ok: false, error: 'refusing an ephemeral cwd' })
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(q('md-last-review-error')!.textContent).toContain('refusing an ephemeral cwd')
+    expect(useToast.getState().toasts).toEqual([])
+    act(() => root!.unmount())
+    root = null
+    container?.remove()
+    mdReview.mockRejectedValue(new Error('ipc down'))
+    render({ macros: [REVIEW] })
+    await settle()
+    render({ macros: [{ ...REVIEW }] })
+    await settle()
+    expect(q('md-last-review-error')!.textContent).toContain('ipc down')
+    expect(useToast.getState().toasts.map((t) => [t.kind, t.message])).toEqual([['error', 'Could not read the review record: ipc down']])
   })
 })

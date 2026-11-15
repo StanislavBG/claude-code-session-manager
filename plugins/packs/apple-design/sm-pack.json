@@ -1,0 +1,5 @@
+{
+  "id": "apple-design",
+  "label": "Apple · Design",
+  "description": "Human Interface Guidelines and Liquid Glass rules for iOS app UI: system type, SF Symbols, semantic colors, hit targets, safe areas, standard controls, glass on the control layer only, and accessibility settings. Adds skills for Liquid Glass adoption and HIG layout."
+}

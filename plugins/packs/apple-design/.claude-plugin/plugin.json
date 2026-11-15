@@ -1,0 +1,6 @@
+{
+  "name": "sm-pack-apple-design",
+  "version": "0.1.0",
+  "description": "Session Manager context pack: always-on Apple Human Interface Guidelines and Liquid Glass rules, plus on-demand skills for adopting Liquid Glass and for HIG layout and accessibility when designing iOS app UI in SwiftUI.",
+  "keywords": ["ios", "swiftui", "hig", "liquid-glass", "design", "accessibility", "session-manager-pack"]
+}

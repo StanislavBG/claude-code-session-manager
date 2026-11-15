@@ -27,8 +27,7 @@ machines on first boot; `templates/PRD_AUTHORING.md` is seeded into consuming pr
 
 - **`main/templates/` provenance.** `PRD_AUTHORING.md` is hand-edited and version-seeded by its
   line-1 stamp (`<!-- PRD_AUTHORING.md vN -->`) — bump it when content changes, or seeded copies
-  never refresh. `project-pages-default-home.html` is hand-maintained.
-  (Only `PRD_AUTHORING.md` is present today.)
+  never refresh.
 - **CommonJS only** in `main/` and `preload/` (`.cjs`); no ES modules there.
 - **`src/main` never requires from `scripts/`** — tooling depends on the app, not the reverse.
 - **Tests in `main/**/__tests__/*.test.cjs` are picked up by glob** in `vitest.config.ts`

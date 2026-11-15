@@ -183,6 +183,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      commit: "seed-v6",
+      bodySha256: "2f774cedfc73f0593e64fca70110c40b46c0cc0614a1dc9e4a22e847e23c2400",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        effort: "medium",
+        executorOnly: "true",
+        model: "sonnet",
+        title: "Engineering — Software Engineer",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
   ],
   "project-home-builder": [
     // Not from src/seed git history: this body was written to ~/.claude/agents by this repo's own
@@ -519,6 +531,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         title: "Project Home — Demo Video",
         model: "opus",
         effort: "max",
+      },
+    },
+    {
+      commit: "seed-v12",
+      bodySha256: "d1d613bde0b771872ecbd2e353e8f872fcca2949b51ba595a88c810f4a03bd66",
+      fm: {
+        description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        effort: "max",
+        model: "opus",
+        title: "Project Home — Demo Video",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write",
       },
     },
   ],

@@ -17,7 +17,7 @@ authors a release, a human reviews it, `web/manual/build.mjs` emits it. Enumerat
 
 [`STYLE.md`](STYLE.md) is the single writing contract for the manual's voice, reading level,
 chapter template, and component vocabulary. Read it before writing or revising any chapter —
-every chapter PRD and every `builder:manual` revision reads it first.
+every chapter PRD and every revision by the `builder` manual step (`builder/manual.md`) reads it first.
 
 ## Shape
 

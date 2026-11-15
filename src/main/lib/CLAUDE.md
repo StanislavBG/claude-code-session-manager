@@ -7,12 +7,14 @@ Shared main-process helpers (CommonJS `.cjs`). Layout source of truth: `scripts/
 - `agent-cli/` — other agent CLIs: registry, adapters, session store, turn planner, IPC.
 - `app-preview/` — Epic dev-server preview processes (spawn, URL detect, stop, orphan sweep).
 - `claude/` — claude CLI binary, caps, model/effort resolution.
+- `demo-video-kit/` — demo-video build tools (capture, sound, frames, checks), seeded to `~/.claude/session-manager/demo-video-kit/`.
 - `epic/` — Epic mint, worktrees, active index, spawn plan/cwd, transcripts.
 - `feedback-remote/` — cross-project and customer feedback conduits.
 - `git/` — git exec, worktrees, branch sweeps, job worktrees.
 - `persona-macro/` — agent persona schema/merge, macro library, builtin macros.
 - `prd/` — PRD parsing helpers, admin routes, dep-slug resolution, plan validation.
 - `process/` — child processes, kill tree, env cleaning, pid liveness, instance lock.
+- `project-pages/` — Project Home pages library, competitor matrix store/HTML, player bridge.
 - `scheduler/` — dispatch loop, session slots, gates, supervisors, queue helpers.
 - `telemetry/` — audit/ops error logs, crash and OTLP telemetry.
 - `util/` — generic pure helpers (atomic fs, kebab, home/cwd encoding, JSON extract, tail).

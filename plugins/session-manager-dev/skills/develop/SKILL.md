@@ -1,15 +1,11 @@
 ---
 name: develop
 description: >-
-  Lead a software-development task: analyze it from five angles, split it into small
-  self-contained PRDs (an independent set, or a 3-5 PRD chain), queue them for the
-  session-manager scheduler with the required gate and files, each pointing the headless
-  executor at the engineering standards file, then track them to a validated finish and report
-  back. Use whenever the user says "/develop", "develop X", "build me X", "implement X", "let's
-  code X", or otherwise starts dev work that should run as scheduled PRDs rather than inline
-  now. Home of the developer-only guidance (performance, debugging, API reuse, TDD). Keywords:
-  develop, build, implement, code, feature, refactor, bugfix, queue dev work, PRDs, PRD chain,
-  multi-angle analysis.
+  Lead a software-development task inside a Session Manager Epic: analyze it, split it into
+  small self-contained PRDs (an independent set, or a 3-5 PRD chain), queue them for the
+  session-manager scheduler, then track them to a validated finish and report back. Use when
+  the user says "/develop" or asks for code to be built, fixed or refactored as scheduled PRDs
+  rather than inline — features, bug fixes, refactors, follow-up fix waves.
 ---
 
 # /develop — plan, queue, track to done
@@ -42,8 +38,9 @@ new work. **report** = your final message to the human.
 4. **Never delegate PRD authoring.** You write scope, title, goal, criteria and notes. Calling
    `scheduler_create_prd` with your own text is not delegation.
 5. **Never restate the engineering rules.** They live in `standards.md` beside this file, with
-   the reasons behind the run rules. Interactive work uses the `test-driven-development`,
-   `systematic-debugging` skills and the built-in `/code-review` for review. Why: one copy never goes stale.
+   the reasons behind the run rules. Interactive work uses the built-in `/code-review` for
+   review (and `test-driven-development` / `systematic-debugging` skills when installed). Why:
+   one copy never goes stale.
 
 ## Phase 1 — plan and queue
 
@@ -64,15 +61,15 @@ unrelated one.
 ### Preflight — confirm the tool is even in your tool list
 
 Before drafting, check that `mcp__session-manager-scheduler__scheduler_create_prd` is in your
-tools. Why: drafts made first are wasted. It is the only sanctioned way to write a PRD. Its two
-failure modes have different fixes:
+tools. Why: drafts made first are wasted. It is the only sanctioned way to write a PRD. Its
+three failure modes have different fixes:
 
 - **(a) Tool PRESENT but ERRORS** because the session-manager app is not running. A validation
   error is not this case: fix the input and retry. **STOP. Do not write any PRD file.** Tell the
   human to start the app, then retry the same call. Why: a PRD file the API did not write is
   quarantined and never runs.
-- **(c) Create errors with "did not answer" or "Connection closed".** It may still have been written; retry the same call with the same slug (it returns the existing PRD with `alreadyExisted: true`, or per entry `applied`) and never re-issue it under a new slug. `scheduler_get_prd` accepts the bare slug.
-- **(b) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
+- **(b) Create errors with "did not answer" or "Connection closed".** It may still have been written; retry the same call with the same slug (it returns the existing PRD with `alreadyExisted: true`, or per entry `applied`) and never re-issue it under a new slug. `scheduler_get_prd` accepts the bare slug.
+- **(c) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
   registered: a **misconfiguration**, not an offline app.
   **STOP. Do not write any PRD file.** Tell the human. The app registers the server at user
   scope the first time it starts. If it is still missing, the human deletes
@@ -156,47 +153,23 @@ Never pass `parallelGroup`; it is ignored. The API writes the frontmatter, the `
 fence (three backticks + `gate`), a `# Gate` heading or a `# Files` heading in any text field —
 the API rejects that.
 
-### gate rules
+### gate and files rules
 
-1. 1–10 commands. The scheduler re-runs them, in order. Each must exit 0.
-2. Start each `&&` step with `timeout <seconds>`, for example `timeout 300 npm test &&
-   timeout 120 npm run lint`. Why: a command without a timeout can hang the run.
-3. Join steps inside one entry with `&&`.
-4. The scheduler runs gate commands without a shell, so shell syntax is refused. Outside single
-   quotes, do not use `|` `<` `>` `;` `&` (only `&&` between steps), backticks, `$`, `\`, `*`,
-   `?`, `[`, `]`, `(`, `)`, `{`, `}` or `!`. Inside double quotes, `$`, backticks and `\` are
-   refused too.
-5. Do not start a word with `#` or `~`, and do not put `~` right after `=` or `:`. `HEAD~1` is
-   fine.
-6. Put text with these characters inside single quotes, for example `rg -n 'a|b' src/`. A check
-   that needs a shell belongs in a test file that the gate runs.
-7. Keep each entry on one line, at most 500 chars, with plain spaces between words.
-8. Use `["none"]` only for docs or config with no runnable check. Write exactly `none`. Never
-   mix `none` with commands.
-9. Put `NAME=value` words before `timeout`, never after it, for example
-   `CI=1 timeout 300 npm test`. A leading `TMPDIR=$(mktemp -d) ` is allowed but not needed: the
-   scheduler gives each gate its own TMPDIR.
-10. Before queueing, run each gate command once at the current HEAD in the main checkout. If it
-    is red, scope the gate to the PRD's own test files, never a suite that is already red, and
-    say in the PRD notes which suite was red and why it was scoped out. Why: a gate that is red
-    on the base parks the job as `sentinel_fail` whatever the executor does.
-11. A gate command must not create or modify tracked files; write outputs to the per-gate TMPDIR
-    or a gitignored path. Why: a dirtied tree fails the clean-tree check.
-12. Never put a step only a human or the passage of time can complete (host cron install,
-    waiting for a live post, a live payment, an account dashboard action) in a gate or
-    criterion; keep them out of PRDs at authoring time. An executor that meets one ends
-    `SCHEDULER_VERDICT: FAIL` naming what is missing. Why: no executor can pass such a gate,
-    and queued work runs with no questions asked.
-    Live-run steps that need gitignored state follow PRD_AUTHORING.md §7 (absolute main-checkout
-    paths, artifact-only).
+The syntax rules for `gate` and `files` are in PRD_AUTHORING.md §6, and the API enforces them: it
+refuses a bad gate or path and returns warnings — read them and fix the input. Two rules only you
+can apply, because they depend on the repo at authoring time:
 
-### files rules
-
-1. 1–50 repo-relative paths. A folder ends with `/`.
-2. No absolute paths, no `~` at the start, no `..` or `.` segments, no `*` or `?`, no `\` or
-   backticks, no leading `-`. Use `/` between folders.
-3. The scheduler never runs two PRDs with overlapping files at once (held as `files-overlap`);
-   `dependsOn` is for real output or order dependencies only.
+1. Before queueing, run each gate command once at the current HEAD in the main checkout. If it
+   is red, scope the gate to the PRD's own test files, never a suite that is already red, and
+   say in the PRD notes which suite was red and why it was scoped out. Why: a gate that is red
+   on the base parks the job as `sentinel_fail` whatever the executor does.
+2. Never put a step only a human or the passage of time can complete (host cron install,
+   waiting for a live post, a live payment, an account dashboard action) in a gate or
+   criterion; keep them out of PRDs at authoring time. An executor that meets one ends
+   `SCHEDULER_VERDICT: FAIL` naming what is missing. Why: no executor can pass such a gate,
+   and queued work runs with no questions asked.
+   Live-run steps that need gitignored state follow PRD_AUTHORING.md §7 (absolute main-checkout
+   paths, artifact-only).
 
 ### What a headless run cannot do
 

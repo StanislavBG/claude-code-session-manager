@@ -116,10 +116,20 @@ test('script_first no longer closes on a command', () => {
   expect(body).not.toContain('instead of paraphrasing');
 });
 
-test('narration recipe normalizes loudness', () => {
+test('soundtrack comes from the kit mix, never a hand-written loudness filter', () => {
   const body = personaBody();
-  expect(body).toContain('loudnorm=I=-14');
-  expect(body).toContain("'-af', LOUDNESS");
+  expect(body).toContain('sound.cjs');
+  expect(body).toContain("open('mix.mp3', 'rb')");
+  expect(body).not.toContain('loudnorm=');
+  expect(body).not.toContain("'-af', LOUDNESS");
+});
+
+test('the close is never a shell command, and the scene outline lives in one place', () => {
+  const body = personaBody();
+  const cta = body.slice(body.indexOf('<call_to_action>'), body.indexOf('</call_to_action>'));
+  expect(cta).not.toContain('get-started command');
+  const board = body.slice(body.indexOf('<storyboard>'), body.indexOf('</storyboard>'));
+  expect(board).toContain('<video_structure>');
 });
 
 test('built-in macros declare a frozen background job', () => {

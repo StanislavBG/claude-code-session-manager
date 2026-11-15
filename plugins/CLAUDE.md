@@ -26,8 +26,8 @@ breaks them all, undetectably from here.
 **Path literals inside shipped skills.** A skill runs in OTHER repos, so a
 session-manager-internal path (`src/main/...`, `src/renderer/...`, bare `scripts/...`) inside one
 is a portability defect unless `$SM_ROOT`-qualified (e.g. `node "$SM_ROOT/scripts/<x>.cjs"`, with `$SM_ROOT` resolved
-to the installed package root) or removed. Current offenders, not precedent: `builder/SKILL.md` +
-`builder/0-diff/SKILL.md`, `develop/standards.md`.
+to the installed package root) or removed. `builder/manual.md` is session-manager-specific on
+purpose and runs only when `session-manager-operations/manual/manual.json` exists.
 
 ## Who consumes this
 
@@ -46,12 +46,11 @@ for live sibling consumers.
 - Do not confuse this with `.claude/` at the repo root — this repo's own unshipped local dev
   config. `.claude/agents/*.md` are per-project OVERLAYS that win over
   `~/.claude/agents/*.md` (Claude Code's own precedence, per `src/main/agentLibrary.cjs`);
-  `src/seed/agents/` is the shipped source for the four personas
-  `src/main/seedAgentPersonas.cjs` copies into `~/.claude/agents/` on first boot (see its
-  `PERSONAS` list); `builder` has no seed source
-  and exists only as this repo's overlay. Tracked on purpose: `.claude/settings.json` (guard
-  hooks) plus the `builder.md`/`project-home-builder.md` overlays (auditable edits) —
-  nothing else under `.claude/` is.
+  `src/seed/agents/` is the shipped source for the personas
+  `src/main/seedAgentPersonas.cjs` copies into `~/.claude/agents/` (its `PERSONAS` list);
+  `builder` has no seed source — the generic `~/.claude/agents/builder.md` is machine-local
+  and this repo's `.claude/agents/builder.md` overlays it. Tracked under `.claude/`:
+  `settings.json` (guard hooks), `agents/builder.md`, and the `agents/page-*.md` stewards.
 - The scheduler MCP server (`session-manager-scheduler`) is registered at USER scope in
   `~/.claude.json`, not in this repo.
 - A skill may run headless via a scheduled PRD in another project — don't rely on

@@ -1,95 +1,117 @@
 ---
 name: builder
-description: Watch the current project's git history against its published npm package and drive the next publish — diff HEAD against the last release, classify + bump the version from conventional-commit prefixes, gate on typecheck/tests, publish from an isolated git worktree (never the live working directory), keep the free Field Manual in step with what shipped, then report. Orchestrates 6 nested sub-skills (builder:diff, :classify-and-bump, :gate, :publish, :manual, :report). Use when the user says "/builder", "publish", "release", "cut a release", "bump the version", "ship to npm", "update the manual", or asks whether there's anything unpublished.
+description: Release the current project's npm package — diff HEAD against the last published version, pick the semver bump from conventional-commit prefixes, run the project's gates, publish from an isolated git worktree (never the live working directory), keep a Field Manual in step when the project has one, then report. Use when the user says "/builder" or asks to publish, release, cut a release, bump the version, ship to npm, update the manual, or whether anything is unpublished.
 ---
 
-# builder (orchestrator)
+# builder
 
-Global, project-agnostic release pipeline — works against whatever npm package the current
-project publishes (resolved via `src/main/lib/buildTarget.cjs`'s `resolveBuildTarget()`, or
-by reading `package.json` directly if that file isn't present yet). Codified from a real
-session that ran this exact sequence 4 times by hand, publishing session-manager
-v0.45.1 → v0.47.1 to npm — this skill turns that proven manual procedure into a reusable one.
+Release pipeline for whatever npm package the current project publishes. Configuration comes
+from `session-manager-operations/architecture/build-target.json` (`packageName`, `registry`,
+`versionBumpPolicy`, `gates`). When that file is absent, use `package.json`'s `name`,
+conventional-commit bumps and no declared gates, and say in the report which source you used.
 
-**Naming convention**: sub-skill directories
-are prefixed `0-`, `1-`, ... in execution order, so a plain directory listing sorts in DAG
-order without opening any file. The invocable `name:` field stays a clean colon-scoped
-identifier (`builder:diff`) without the numeric prefix.
+The decision to release was made when this skill was invoked. Once a diff exists and the gates
+pass, run straight through to publish without asking again. Stop only where a step below says
+stop.
 
-## Pipeline DAG
+## 1. Diff — what is unpublished
 
-```
-┌───────────────────────┐
-│ 0. builder:diff            │  HEAD vs. last published version (npm view, else last git tag)
-└───────────────────────┘
-      │ commit list since last release (empty → stop, nothing to do)
-      ▼
-┌───────────────────────────┐
-│ 1. builder:classify-and-bump   │  conventional-commit prefixes → patch/minor/major
-└───────────────────────────┘     (non-conventional history → ask, don't guess)
-      │ bump kind decided
-      ▼
-┌───────────────────────┐
-│ 2. builder:gate            │  npm run typecheck + npm run test:unit, both bounded
-└───────────────────────┘
-   PASS │              │ FAIL
-        ▼              ▼
-┌───────────────────────┐   STOP — report failing gate, do not publish
-│ 3. builder:publish         │  ISOLATED WORKTREE technique (see that step's own file)
-└───────────────────────┘
-      │ version bumped, tagged, pushed, published, dist-tag verified
-      ▼
-┌───────────────────────┐
-│ 4. builder:manual          │  does the Field Manual still describe reality?
-└───────────────────────┘     revise chapters → bump manual version → build bundle
-      │ manual release (or an explicit "no content change")
-      ▼
-┌───────────────────────┐
-│ 5. builder:report          │  version, commits covered, dist-tag, manual + push confirmation
-└───────────────────────┘
-```
+1. Last published point: `npm view <packageName> version` (the registry, not a local tag — a
+   tag can exist for a publish that failed). No network, or a 404 because the package was never
+   published: `git describe --tags --abbrev=0`.
+2. Resolve that version's tag (`git tag -l 'v<version>'`). If no local tag matches, compare
+   against `git describe --tags --abbrev=0` and note the discrepancy in the report.
+3. `git log <tag>..HEAD --oneline`. Empty → stop and report "nothing to publish".
 
-| Step | Input | Output | On failure/empty |
-|---|---|---|---|
-| 0. `builder:diff` | current project cwd | commit list since last published version (or last git tag) | no commits since last release → stop, report "nothing to publish" |
-| 1. `builder:classify-and-bump` | commit list | bump kind (`patch`/`minor`/`major`) | commits don't follow conventional-commit style → say so, ask the user rather than guessing |
-| 2. `builder:gate` | working tree at HEAD | typecheck + unit test result | either fails → stop, report the failure, do not publish |
-| 3. `builder:publish` | bump kind, gate-passed HEAD | published npm package, pushed tag + main | any step fails → stop, report which step and the worktree's state (don't leave it behind uncleaned unless it's evidence of the failure) |
-| 4. `builder:manual` | commit list + published version | revised chapters + a built manual release bundle, or an explicit "no content change" | build refuses (missing chapter/asset, bad slug, no free chapter) → stop and report; the npm publish already landed and is unaffected |
-| 5. `builder:report` | publish + manual result | one summary: version bumped, commits covered, npm dist-tag verified, git push confirmed, manual edition shipped or explicitly unchanged | n/a |
+## 2. Classify and bump
 
-## Hard rules — read before running any step
+Take the highest bump the whole commit list implies:
 
-- **A dirty working tree in the main repo is NOT a blocker.** The isolated-worktree
-  technique in `builder:publish` sidesteps it entirely — `npm ci` + `vite build` +
-  `npm publish` all run inside a clean worktree checked out from the just-created tag, never
-  touching the live/dirty repo. Don't hold the pipeline waiting for a clean tree; that
-  guidance is superseded by this skill.
-- **Once a diff is found and the gate passes, run the full sequence through to publish
-  without pausing for reconfirmation.** This was confirmed by the user across 4 consecutive
-  manual runs in the session that originated this skill — asking "should I publish now?"
-  after the gate is green is exactly the friction this skill exists to remove.
-- **The gate is a hard stop.** A failing `typecheck` or `test:unit` run means step 3 never
-  executes — no publish, no version bump, no tag. Report the failure and stop.
-- **The manual is a product, not a changelog.** `builder:manual` may only claim what it has
-  verified against real code, and may never invent a screenshot. A wrong instruction in a
-  guide readers follow step by step breaks their setup — hold it above the app's own docs.
-  A manual bundle that isn't pushed to the Bilko repo is not shipped; say so plainly.
-- **Never guess a version bump from unconventional commit messages.** If the commit list
-  doesn't cleanly map to `fix:`/`feat:`/`BREAKING CHANGE:` prefixes, `builder:classify-and-bump`
-  asks the user which bump to apply rather than inferring one.
+- `BREAKING CHANGE:` in a body, or `!:` after the type/scope (`feat(api)!:`) → **major**.
+- Any `feat:` / `feat(scope):` → **minor**.
+- Any `fix:` / `fix(scope):` → **patch**.
+- Only `chore:`, `docs:`, `refactor:`, `test:`, `ci:` and the like → **patch** (a release was
+  requested; these still ship in it).
 
-## Why nested skills instead of one inline sequence
+If a meaningful share of commits has no `type:` prefix at all (a bare "wip", "updates"), do not
+guess: list the unclassifiable commits and ask which bump to apply. A wrong semver bump is hard
+to walk back once published.
 
-Each step is its own file so it shows up as its own invocation in whatever surface tracks
-skill/tool calls, and so a step can be changed (a different gate command, a new registry
-target) without touching the others.
+## 3. Gate
 
-## What this skill is not
+Run each name in `build-target.json`'s `gates` as `timeout 300 npm run <gate>`, in order,
+against `HEAD`, with no `--skip` flags. With no `gates` entry, run the pre-commit checks the
+project's `CLAUDE.md` or README requires; with none documented, say so in the report. Any
+failure → stop: report the command and its real output, and that no bump, tag or publish
+happened.
 
-- Not a decision-maker on *whether* to release — it assumes the user (or an Epic) already
-  wants the next diff shipped. If there's genuine ambiguity about scope, `builder:classify-and-bump`
-  is the one step that pauses to ask.
-- Not a registry-agnostic tool — `builder:publish` is npm-specific (see `buildTarget.cjs`'s
-  `registry` field for future non-npm targets; out of scope for this version).
-- Not wired to any UI button — invoking this skill is the only entry point today.
+## 4. Publish from an isolated worktree
+
+A dirty main working tree does not block this: the build and publish run in a clean worktree
+checked out at the release tag, so nothing uncommitted in the main tree reaches the artifact.
+Run in this order:
+
+1. `npm version <bump> --no-git-tag-version` — updates `package.json` / `package-lock.json`
+   without a tag, so the tag below carries the release commit.
+2. `git add package.json package-lock.json` — only these two, never `-A`.
+3. Commit, listing the release's commits:
+   ```
+   git commit -m "chore(release): bump to v<version>
+
+   - <commit subject>
+   - ..."
+   ```
+4. `git tag v<version>`
+5. `mkdir -p "$HOME/.cache/sm-publish" && git worktree add "$HOME/.cache/sm-publish/v<version>" v<version>`
+   — never under `/tmp` or `os.tmpdir()`: some test suites (this repo's included) treat those
+   paths as fixtures and fail there.
+6. In the worktree: `npm ci`, then the gates again (step 3), then the project's build. Check
+   every `files` entry in `package.json` exists before publishing; stop on any failure.
+7. `npm publish` from inside the worktree, so `prepublishOnly` builds there too.
+   A 403 saying two-factor authentication or a bypass-2FA granular token is required is not a
+   login problem (`npm whoami` can succeed). Don't retry `npm login` or `npm publish`: run
+   `npm profile get` and `npm token list`, stop, and report the exact 403 and both results so a
+   human can supply an OTP or a token (the CLI cannot mint a granular token). An E409 "staged"
+   response means the publish waits for a human to approve it on npmjs.com — report that.
+8. Back in the main repo: `git push origin main` and `git push origin v<version>`.
+9. `git worktree remove "$HOME/.cache/sm-publish/v<version>" --force`
+10. Verify the registry. `npm view` lags for minutes, so read a cache-busted packument and the
+    tarball first:
+    ```
+    curl -s "https://registry.npmjs.org/<packageName>?t=$(date +%s)"
+    curl -sI <versions["<version>"].dist.tarball>
+    npm view <packageName> version dist-tags
+    ```
+    `dist-tags.latest` is `<version>`, the version is listed, the tarball returns 200. A stale
+    `npm view` with a current packument is lag, not failure — never republish.
+11. If `.github/workflows/release.yml` exists, the tag push started it. Wait on that run with a
+    bounded blocking watcher, then read the assets once:
+    ```
+    timeout 1200 gh run watch "$(gh run list --workflow release.yml --branch v<version> --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+    gh release view v<version> --json assets --jq '.assets[].name'
+    ```
+    Report the installer assets found (here: `.dmg`, `.exe`, `.AppImage`) and any missing. If
+    no run is listed yet, say so instead of polling.
+
+On any failing step: stop there and report the step and its output. Once the worktree exists,
+leave it only when its state is evidence for the failure; otherwise remove it (step 9) so a
+retry doesn't collide with a stale path.
+
+## 5. Manual (only when `session-manager-operations/manual/manual.json` exists)
+
+Follow [`manual.md`](manual.md). The npm publish has already landed; a manual failure never
+undoes it.
+
+## 6. Report
+
+One plain-text report, whether the pipeline finished or stopped:
+
+- **Version** previous → new, and the bump kind.
+- **Commits covered**, grouped by the rule that classified each.
+- **Gates** and their results.
+- **Registry**: packument `dist-tags` / version and tarball status.
+- **Git**: both pushes confirmed, worktree removed.
+- **Installer release**: assets found and missing, or "no release workflow".
+- **Manual**: `manual.md`'s report, "no content change", or "no manual".
+- **Stopped early?** Which step, why, its output, and anything a retry must account for
+  (a leftover worktree or local tag).

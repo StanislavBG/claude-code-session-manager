@@ -103,7 +103,7 @@ reads the working directory, so publish always happens from a clean worktree che
 release tag, never the live/dirty main working directory) and the real `prepublishOnly` chain
 (`npm run build:project-pages && npm run build:project-pages-logic && npm run project-pages:gate
 && vite build` — not a bare `vite build`) — lives in
-[`plugins/session-manager-dev/skills/builder/3-publish/SKILL.md`](../../plugins/session-manager-dev/skills/builder/3-publish/SKILL.md),
+[`plugins/session-manager-dev/skills/builder/SKILL.md`](../../plugins/session-manager-dev/skills/builder/SKILL.md) (step 4),
 not here. That skill owns the procedure; this file only states the target's requirements.
 
 ## Worked non-npm example

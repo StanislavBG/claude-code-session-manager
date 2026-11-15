@@ -43,7 +43,7 @@ parens is informational only.
 - **Working-tree dirtiness is expected here, not anomalous**: this repo runs many concurrent
   Epics/sessions against the same working directory (see project CLAUDE.md's TAB/EPIC model), so a
   dirty tree during a Builder run is very likely another session's live edit, not leftover debris.
-  Never stash or discard it. This no longer blocks publishing, though: `prepublishOnly` runs `vite
+  Never stash or discard it. It does not block publishing: `prepublishOnly` runs `vite
   build` off *whatever directory `npm publish` is invoked in* — so the publish sequence below runs
   from an isolated `git worktree` checkout of the release tag instead of the live working
   directory, which is clean by construction regardless of what other sessions are doing in the
@@ -51,7 +51,7 @@ parens is informational only.
 
 ## Publish sequence (once decided)
 
-See [`plugins/session-manager-dev/skills/builder/3-publish/SKILL.md`](../../plugins/session-manager-dev/skills/builder/3-publish/SKILL.md)
+See step 4 of [`plugins/session-manager-dev/skills/builder/SKILL.md`](../../plugins/session-manager-dev/skills/builder/SKILL.md)
 for the concrete worktree-isolated publish steps — that skill is the single source of truth for
 the mechanics, don't re-describe them here. Once the decision to publish is made, run that
 sequence straight through without pausing for confirmation at each step — the pause point is the
@@ -69,11 +69,9 @@ sequence straight through without pausing for confirmation at each step — the 
    requirement, and the CLI cannot create a granular access token (`npm token create` only
    makes classic tokens; granular/bypass-2FA tokens are npmjs.com-web-UI-only, confirmed via
    `npm help token`, 2026-08-22).
-3. **Do not treat a bypass-2FA granular token as a durable automation fix.** npm is
-   deprecating it (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/):
-   Phase 1 (early Aug 2026) already strips sensitive-op capability; Phase 2 (~Jan 2027) strips
-   publish capability entirely, leaving only staged-publish-pending-human-2FA. A bypass token
-   set up now is a several-month bridge, not a permanent unblock.
+3. **Do not treat a bypass-2FA granular token as a durable automation fix** — npm is removing
+   its publish capability (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/);
+   it is a bridge at best.
 4. There is currently **no way for this agent to publish fully unattended** end-to-end on
    this machine — either a human enables 2FA and supplies a live OTP at publish time, or a
    human mints a bypass-2FA granular token via the npmjs.com web UI and drops it in
@@ -87,17 +85,3 @@ sequence straight through without pausing for confirmation at each step — the 
 5. When blocked here: stop, do NOT retry `npm login` or `npm publish` repeatedly, report the
    exact 403 output and the `npm profile get`/`npm token list` findings, and ask the human to
    either supply an OTP-based interactive publish or a bypass-2FA token for this release.
-
-## Known one-time exceptions logged here so they aren't re-litigated
-
-- **v0.45.1** through **v0.47.1** below all landed the same day (2026-08-01), each a real npm
-  publish proving the worktree technique end-to-end, not a batch of hypotheticals.
-- **v0.45.1** — patch: `fix(browser)` allow real popup windows for identity-provider OAuth,
-  bundled with a docs commit for the browser ops README.
-- **v0.45.2** — patch: two `fix` commits, Epic Queue sidebar height + `navFace` made real state
-  instead of derived.
-- **v0.46.0** — minor: mixed `feat`/`fix`/`test` batch led by `feat(epics)` quote-reply affordance
-  and row-menu actions (rename/duplicate/delete/reopen) — feat commits in the set forced the minor
-  bump even though several commits in the same release were fixes.
-- **v0.47.1** — patch: `fix(nav)` distinct tab highlighting + project-only Epics + Dashboard vs
-  Project Home, landed as a follow-up patch directly on top of v0.47.0's larger feat/fix batch.

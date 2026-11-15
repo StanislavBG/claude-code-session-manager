@@ -30,7 +30,7 @@ before changing anything in that area.** Reference docs:
 
 | Path | Scope |
 | --- | --- |
-| [`src/CLAUDE.md`](src/CLAUDE.md), [`src/renderer/CLAUDE.md`](src/renderer/CLAUDE.md) | main/preload, renderer |
+| [`src/CLAUDE.md`](src/CLAUDE.md) (+ `main/lib`, `main/scheduler`), [`src/renderer/CLAUDE.md`](src/renderer/CLAUDE.md) | main/preload, renderer |
 | [`scripts/README.md`](scripts/README.md), [`tests/README.md`](tests/README.md) | scripts, tests |
 | [`web/README.md`](web/README.md), [`web/remote-app/CLAUDE.md`](web/remote-app/CLAUDE.md), [`web-remote/CLAUDE.md`](web-remote/CLAUDE.md) | web presence, remote app, relay |
 | [`plugins/CLAUDE.md`](plugins/CLAUDE.md) | plugins |
@@ -43,7 +43,7 @@ Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 ## Commands
 
 - `npm run dev` — Vite + Electron with HMR. `SM_DEV=1` set automatically.
-- `npm run build` — renderer build into `dist/`.
+- `npm run build` — renderer build to `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
 - `npm run test:unit` — `vitest run`. Single file: `npx vitest run <path>`. NOT `node --test`
   (can't resolve TS renderer imports).
@@ -109,7 +109,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 - Flat scheduler/prds/ is **RETIRED** — auto-consolidated into prds-archived/ on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
-  rules from two real stuck-job incidents + a pre-queue checklist (§15).
+  safety rules + a pre-queue checklist (§14).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
 - A `needs_review` park self-heals first; its Epic gets one grouped notice when the ladder fails or the hold ends — never mints work.
@@ -131,7 +131,7 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **No per-OS UI chrome** — native frame everywhere; no layering branches on `process.platform`.
 - **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
-- **`--model` must be pinned explicitly** on every `claude -p`/`claude --print` call site — unpinned drift costs.
+- **`--model` must be pinned explicitly** on every `claude -p` / `--print` call site — unpinned drift costs.
 - **The owner's real name and personal email never enter a tracked file or commit** — [why](session-manager-operations/architecture/identity-boundary.md).
 
 ## Avoid

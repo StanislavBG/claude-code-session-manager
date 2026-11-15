@@ -2,7 +2,7 @@
 
 This is the single writing contract for **The Session Manager Field Manual**. Every chapter PRD
 in the 2.0.0 plan reads this file first, and so does every future revision run by
-`builder:manual`. If a chapter's wording, structure, or markup disagrees with this file, the
+the `builder` manual step (`builder/manual.md`). If a chapter's wording, structure, or markup disagrees with this file, the
 chapter is wrong — fix the chapter, don't reinterpret this doc.
 
 ## Audience & promise

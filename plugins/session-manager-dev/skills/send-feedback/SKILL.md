@@ -6,12 +6,9 @@ description: >-
   Session Manager's cross-project conduit (the feedback_open_session MCP tool).
   Use whenever work in one repo surfaces something that is genuinely another
   repo's to fix — a bug in a sibling service, a broken contract between two
-  projects, a doc that lies about another project's behavior. Also use when the
-  user says "/send-feedback", "send this to <project>", "file this against
-  <other repo>", "tell <project> about this", or "this is a bug in X, not
-  here". NOT for work in the project you are already in — that is /develop.
-  Keywords: feedback, proposal, plan, cross-project, project to project, another repo, sibling
-  project, hand off, file against, route finding, x-folder.
+  projects, a doc that lies about another project's behavior — or when the user
+  asks to send, file or hand a finding to another project ("/send-feedback").
+  NOT for work in the project you are already in — that is /develop.
 ---
 
 # send-feedback
@@ -23,12 +20,10 @@ and never wait for a reply.
 
 ## Why this exists
 
-`/process-feedback`, `/my-feedback` and the `session-manager-operations/feedback/`
-folder were retired (2026-08-02), and the scheduler was locked down so a PRD can
-only JOIN an Epic a human already approved. Both were right. Together they left
-no way to hand a finding across a project boundary. This skill is that way back
-— narrowed to exactly one shape: **a proposal deposited in another project's
-queue, which a human there must approve before anything runs.**
+A PRD can only join an Epic a human already approved, so nothing in one project
+can start work in another. This skill is the one way across that boundary:
+**a proposal deposited in another project's queue, which a human there must
+approve before anything runs.**
 
 ## The one hard rule
 
@@ -43,9 +38,8 @@ round-trip, not a wrong write.
 | Another project on this machine | this skill |
 | Nothing actionable | say so explicitly |
 
-Per the global core rules, routing a finding is the **default action, not a
-question**. Do not ask "should I send this to X?" — send it, then report what
-you delivered.
+Routing a finding is the **default action, not a question**: a proposal starts
+nothing until a human there approves it. Send it, then report what you delivered.
 
 ## Steps
 
@@ -198,6 +192,7 @@ Two distinct failure modes — don't conflate them:
   them in the meantime so it isn't lost.
 - **`feedback_open_session` is absent from your tool list entirely** — the
   `session-manager-scheduler` MCP server isn't registered for this project.
-  That's a misconfiguration, not an offline app. Fix:
-  `claude mcp add session-manager-scheduler --scope user -- node <session-manager-repo>/scripts/scheduler-mcp-server.cjs`
-  (once at user scope covers every project).
+  That's a misconfiguration, not an offline app. Tell the human: the app
+  registers the server at user scope the first time it starts; if it is still
+  missing, delete `~/.claude/session-manager/.scheduler-mcp-seeded`, restart the
+  app, and open a new session. Never add an MCP entry yourself.

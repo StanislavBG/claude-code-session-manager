@@ -30,10 +30,10 @@ test('rule 2 and step 10 treat art like feature and bug', () => {
   expect(s).toMatch(/Queue at once when the Epic is `feature`, `bug` or `art` and scope is clear/);
 });
 
-test('gate must not write tracked files (SKILL.md, PRD_AUTHORING.md §6 and §14)', () => {
+test('gate must not write tracked files (PRD_AUTHORING.md §6 and §14; SKILL.md points there)', () => {
   const s = flat(skill());
-  expect(s).toMatch(/gate command must not create or modify tracked files/);
-  expect(s).toMatch(/per-gate TMPDIR or a gitignored path/);
+  expect(s).toMatch(/syntax rules for `gate` and `files` are in PRD_AUTHORING\.md §6/);
+  expect(s).not.toMatch(/Do not start a word with `#` or `~`/);
   const a = authoring();
   const sec6 = a.slice(a.indexOf('## §6'), a.indexOf('## §7'));
   expect(flat(sec6)).toMatch(/gate command must not create or modify tracked files/);
@@ -69,7 +69,6 @@ test('batch create, validated update fields and files-overlap are documented', (
   expect(s).toMatch(/in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist/i);
   expect(s).toMatch(/`gate`, `files` and `acceptanceCriteria` fields are validated and re-rendered/);
   expect(s).not.toMatch(/does not check them|copy the `# Gate` and/);
-  expect(s).toMatch(/never runs two PRDs with overlapping files at once \(held as `files-overlap`\)/);
   const a = flat(authoring());
   expect(a).toMatch(/never runs two PRDs with overlapping files at once \(held as `files-overlap`\)/);
   expect(a).toMatch(/`worktreeSetup`/);

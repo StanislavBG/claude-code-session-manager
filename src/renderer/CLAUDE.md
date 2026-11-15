@@ -13,14 +13,13 @@ React 18 + Vite renderer. Layout (no per-file lists — `ls` it):
 - `public/vad/` — self-hosted voice-activity assets · `testUtils/` — test helpers
 
 **Project Home's artifacts (`home.html`, `demo-video/index.html`) build as background jobs via
-`lib/useMacroLaunch.ts`** (`window.api.macros.dispatchJob` / `jobStatus`) **and `lib/projectPages/useProjectPagesOutput.ts`**;
-web/project-pages is gone.
+`lib/useMacroLaunch.ts`** (`window.api.macros.dispatchJob` / `jobStatus`) **and `lib/projectPages/useProjectPagesOutput.ts`**.
 
 **Tab registry = four files that change together:** `lib/navKey.ts` (`NavKey` union),
 `lib/screenKeys.ts`, `components/screenComponents.tsx`, `lib/navGroups.ts` (`NAV_ITEMS`). The
 count is whatever `NAV_ITEMS` says — never write a literal in a doc.
 
-**Every nav page has a steward subagent** — `.claude/agents/page-<NavKey>.md`; its principles and modes are in [`page-stewards.md`](../../session-manager-operations/architecture/page-stewards.md). Ask that steward to review a change to its page.
+**Nav pages have steward subagents** — `.claude/agents/page-<NavKey>.md` (coverage and exemptions: `scripts/check-page-stewards.cjs`); principles and modes in [`page-stewards.md`](../../session-manager-operations/architecture/page-stewards.md). If the page has a steward, ask it to review a change to its page.
 
 **Any page with a sub-menu renders in `components/layout/PageShell`** — it owns the frame (`overflow-clip`) and the one content scroller; jump to sections with `usePageShell().scrollToAnchor` / `lib/scrollWithin`, never `scrollIntoView` (`npm run lint:scroll`). Incident: [`conventions.md`](../../session-manager-operations/architecture/conventions.md#avoid).
 

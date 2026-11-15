@@ -1,0 +1,12 @@
+{
+  "name": "sm-pack-apple-swift-core",
+  "version": "0.1.0",
+  "description": "Session Manager context pack: always-on Swift 6 and SwiftUI rules plus on-demand skills for SwiftUI state, navigation and Swift concurrency when building iOS apps.",
+  "author": {
+    "name": "Bilko Bibitkov",
+    "email": "BilkoBibitkov2000@gmail.com",
+    "url": "https://bilko.run"
+  },
+  "homepage": "https://github.com/StanislavBG/claude-code-session-manager",
+  "keywords": ["swift", "swiftui", "ios", "concurrency", "context-pack", "session-manager"]
+}

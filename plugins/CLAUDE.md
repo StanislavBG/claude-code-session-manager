@@ -9,6 +9,8 @@ Part of the **AGENT LAYER** partition — see
 plugins/session-manager-dev/skills` 2026-11-06; keep in sync with `project-partition.md` and
 `seedDevPlugin.cjs`'s header count.
 
+`packs/<id>/` — context packs (plugin + `sm-pack.json` + optional `laws.md`), loaded per session by `--plugin-dir`, not the marketplace; read by `src/main/lib/packs/packCatalog.cjs`.
+
 Two manifests: root [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
 declares the one plugin (`source: "./plugins/session-manager-dev"`); the plugin's own
 [`session-manager-dev/.claude-plugin/plugin.json`](session-manager-dev/.claude-plugin/plugin.json)

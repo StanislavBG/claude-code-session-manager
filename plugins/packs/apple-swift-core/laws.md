@@ -1,0 +1,13 @@
+- Target Swift 6 with strict concurrency checking on; fix every data-race warning, never silence it with @unchecked Sendable or nonisolated(unsafe) without a written reason.
+- Make types that cross actor or task boundaries Sendable; prefer immutable structs and enums for model values.
+- Mark UI state, view models and anything touching UIKit/SwiftUI with @MainActor.
+- Use the @Observable macro for shared state; never write new ObservableObject, @Published or @StateObject code.
+- Build UI in SwiftUI first; drop to UIKit only through UIViewRepresentable when SwiftUI has no equivalent.
+- Use NavigationStack (or NavigationSplitView) with value-based navigationDestination; never use NavigationView.
+- Use async/await and structured concurrency (async let, TaskGroup, .task); never add new completion-handler or DispatchQueue code.
+- Persist app data with SwiftData; use @AppStorage only for small user preferences.
+- Never force unwrap (!) or force try (try!); use if let, guard let, ?? or throw a typed error.
+- Give every SwiftUI view a #Preview that renders it with realistic sample data.
+- Give every custom control an accessibilityLabel (plus accessibilityHint or value where it helps) and support Dynamic Type.
+- Put every user-facing string in a String Catalog (Localizable.xcstrings); never hard-code display text outside it.
+- Keep views small: extract a subview once a body grows past one screen.

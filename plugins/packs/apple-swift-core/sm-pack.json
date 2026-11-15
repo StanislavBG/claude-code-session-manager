@@ -1,0 +1,5 @@
+{
+  "id": "apple-swift-core",
+  "label": "Apple · Swift core",
+  "description": "Modern Swift 6 and SwiftUI rules for iOS apps: strict concurrency, @Observable state, NavigationStack, async/await, SwiftData, previews, accessibility and String Catalogs, plus skills for state, navigation and concurrency."
+}

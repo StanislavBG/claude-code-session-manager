@@ -31,6 +31,7 @@ const EXEMPT_PREFIXES = [
   'session-manager-operations/HUMAN_LEARN/', // historical
   'src/seed/', // seeded
   'plugins/session-manager-dev/skills/', // tool-loaded
+  'plugins/packs/', // tool-loaded (context packs, --plugin-dir)
   '.claude/agents/', // tool-loaded
   'web/promo-video/', // historical
   'src/main/templates/', // seeded

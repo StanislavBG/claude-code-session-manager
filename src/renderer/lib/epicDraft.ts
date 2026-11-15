@@ -19,6 +19,8 @@ export interface EpicDraftFields {
   effort: string | undefined
   developLoop: boolean
   injections: Record<ContextInjectionKey, boolean>
+  /** Selected context pack ids; [] when none. */
+  packs: string[]
 }
 
 /** True only for a proposed Epic a human saved here (cross-project proposals stay on EpicApprovalBar). */
@@ -60,6 +62,7 @@ export function draftFieldsFromEpic(epic: PromptSession): EpicDraftFields {
     effort: epic.effort,
     developLoop: epic.developLoop !== false,
     injections,
+    packs: epic.packs ?? [],
   }
 }
 

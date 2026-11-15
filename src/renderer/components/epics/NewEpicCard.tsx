@@ -21,7 +21,7 @@ import { missionTagsForAgent } from '../../lib/missionTags'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, resolveContextInjections, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
-import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult, RestorableSession } from '../../../preload/api'
+import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult, PackListRow, RestorableSession } from '../../../preload/api'
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
 import { AgentCliPicker, type AgentCliChoice } from './AgentCliPicker'
 import { agentCliLabel } from '../../lib/agentCliCatalog'
@@ -216,6 +216,11 @@ export function NewEpicCard({
   // synchronization effect fighting over it — a tag change simply changes
   // what an UNtouched key falls back to.
   const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>(seed?.injections ?? {})
+  // Context packs (packs.list, main-side catalog) — loaded once into component
+  // state; null = not loaded / failed. Ticked ids default off, seeded from a draft.
+  // The CLI loads packs per spawn, so they never enter the opening prompt.
+  const [packCatalog, setPackCatalog] = useState<PackListRow[] | null>(null)
+  const [selectedPacks, setSelectedPacks] = useState<string[]>(seed?.packs ?? [])
   // 'just Claude' = plain Claude Code: Agent None, Mission None, no develop loop. A reopened
   // draft starts ON only when it was saved in exactly that shape on Claude Code.
   const [justClaude, setJustClaude] = useState<boolean>(() => Boolean(
@@ -235,6 +240,17 @@ export function NewEpicCard({
     const preferred = agents.find((a) => a.name === 'architect') ?? agents[0]
     if (!agentTouchedRef.current && preferred) setAgentName(preferred.name)
   }, [agents])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await window.api.packs.list()
+        if (!cancelled && res.ok) setPackCatalog(res.packs)
+      } catch { /* no catalog = no pack checkboxes */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -265,6 +281,13 @@ export function NewEpicCard({
   const missionKey = missionTags.join(',')
   // The develop loop (/develop, PRD queueing) is Claude Code only, and off under 'just Claude'.
   const developLoop = !justClaude && !nonClaudeCli
+  // Packs apply to Claude Code only; ids not in the catalog are dropped. Catalog order.
+  const effectivePacks = useMemo<PackListRow[]>(
+    () => (nonClaudeCli || !packCatalog ? [] : packCatalog.filter((p) => selectedPacks.includes(p.id))),
+    [nonClaudeCli, packCatalog, selectedPacks],
+  )
+  const effectivePackIds = useMemo(() => effectivePacks.map((p) => p.id), [effectivePacks])
+  const packsForBoard = useMemo(() => effectivePacks.map((p) => ({ id: p.id, label: p.label })), [effectivePacks])
   const contextInjectionsOn = useMemo<Record<ContextInjectionKey, boolean>>(
     () => resolveContextInjections({ tag, agentless, developLoop, overrides: injectionOverrides }),
     [tag, agentless, developLoop, injectionOverrides],
@@ -403,11 +426,12 @@ export function NewEpicCard({
       agentPersonaName: selectedAgent?.name ?? null,
       openTerminalTabsInProject: tabs.filter((t) => t.cwd === effectiveCwd).length,
       otherEpicsInProject: Object.values(allEpics).filter((e) => e.cwd === effectiveCwd).length,
+      packs: packsForBoard,
     })
       .then((g) => { if (!cancelled) setBoard(g) })
       .catch((e) => { if (!cancelled) toast.error((e as Error).message || 'failed to read grounding sources') })
     return () => { cancelled = true }
-  }, [advanced, home, effectiveCwd, selectedAgent, tabs, allEpics])
+  }, [advanced, home, effectiveCwd, selectedAgent, tabs, allEpics, packsForBoard])
 
   const resetForm = () => {
     setCwd('')
@@ -421,6 +445,7 @@ export function NewEpicCard({
     setEffortOverride('')
     setBoard(null)
     setInjectionOverrides({})
+    setSelectedPacks([])
     setJustClaude(false)
     justClaudePrevRef.current = null
     setSavedRefs([])
@@ -484,6 +509,7 @@ export function NewEpicCard({
             agentPersonaName: selectedAgent?.name ?? null,
             openTerminalTabsInProject: tabs.filter((t) => t.cwd === effectiveCwd).length,
             otherEpicsInProject: Object.values(allEpics).filter((e) => e.cwd === effectiveCwd).length,
+            packs: packsForBoard,
           }).catch(() => null)
         : null)
     // Claude Code only loads a persona's BODY for subagents, so inject it here (best-effort).
@@ -510,6 +536,7 @@ export function NewEpicCard({
       ...(restoreSession && !editDraft && !nonClaudeCli ? { restoreSessionId: restoreSession.sessionId } : {}),
       ...(nonClaudeCli ? { agentCli } : {}),
       ...(nonClaudeCli && trimmedCliModel ? { agentCliModel: trimmedCliModel } : {}),
+      ...(effectivePackIds.length > 0 ? { packs: effectivePackIds } : {}),
     }
     return { ...intake, runtime }
   }
@@ -525,6 +552,7 @@ export function NewEpicCard({
       developLoop,
       agentCli: nonClaudeCli ? agentCli : null,
       agentCliModel: nonClaudeCli && trimmedCliModel ? trimmedCliModel : null,
+      packs: effectivePackIds.length > 0 ? effectivePackIds : null,
       openingPrompt: intake.openingPrompt,
       sections: intake.sections,
     }, 'NewEpicCard')
@@ -635,7 +663,7 @@ export function NewEpicCard({
   }
 
   // ---- Autosave: leaving the card never throws typed work away ----
-  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides, restoreSession?.sessionId ?? null, agentCli, trimmedCliModel])
+  const sig = JSON.stringify([title, goal, tag, agentName, modelOverride, effortOverride, developLoop, savedRefs, att.items.length, injectionOverrides, restoreSession?.sessionId ?? null, agentCli, trimmedCliModel, effectivePackIds])
   if (editDraft && lastSavedSigRef.current === null) lastSavedSigRef.current = sig
   const snap: AutosaveSnap = {
     cwd: effectiveCwd,
@@ -1260,6 +1288,29 @@ export function NewEpicCard({
                   </label>
                 )
               })}
+              {!nonClaudeCli && packCatalog && packCatalog.length > 0 ? (
+                <div data-testid="new-epic-packs" className="mt-1.5 border-t border-rule pt-1.5">
+                  <div className="mb-0.5 text-[11.5px] font-semibold text-fg-faint">Context packs</div>
+                  {packCatalog.map((p) => (
+                    <label key={p.id} className="flex cursor-pointer items-start gap-2 py-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedPacks.includes(p.id)}
+                        onChange={(e) => {
+                          const on = e.target.checked
+                          setSelectedPacks((prev) => (on ? (prev.includes(p.id) ? prev : [...prev, p.id]) : prev.filter((id) => id !== p.id)))
+                        }}
+                        data-testid={`new-epic-pack-${p.id}`}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="text-[12.5px] font-medium text-fg">{p.label}</span>
+                        <span className="block text-[11.5px] leading-[1.4] text-fg-faint">{p.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {board ? (

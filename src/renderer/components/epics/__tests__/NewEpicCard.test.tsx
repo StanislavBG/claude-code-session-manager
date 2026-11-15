@@ -2107,3 +2107,106 @@ describe('NewEpicCard CLI follows the Actor default', () => {
     expect((updateSpy.mock.calls[0] as unknown[])[1]).toMatchObject({ agentCli: 'codex', agentCliModel: null })
   })
 })
+
+describe('NewEpicCard context packs', () => {
+  const architect: AgentPersona = { name: 'architect', description: 'plans', tools: [], model: null, effort: null, color: null, tags: ['feature', 'bug', 'discussion'], projects: [], action: null, actionLabel: null, path: '/a.md', body: '', overridingProjects: [] }
+  const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+  const click = (n: Element) => act(() => { n.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  const PACKS = [
+    { id: 'apple-swift-core', label: 'Apple / Swift core', description: 'Swift + SwiftUI best practices', requires: {}, hasLaws: true },
+    { id: 'a11y', label: 'Accessibility', description: 'WCAG checks', requires: {}, hasLaws: false },
+  ]
+  const packsListSpy = vi.fn(async () => ({ ok: true as const, packs: PACKS }))
+
+  beforeEach(() => {
+    packsListSpy.mockClear()
+    packsListSpy.mockResolvedValue({ ok: true, packs: PACKS })
+    ;(window.api as unknown as { packs: unknown }).packs = { list: packsListSpy }
+    ;(window.api as unknown as { agentCli: unknown }).agentCli = {
+      detect: vi.fn(async () => [
+        { id: 'codex', label: 'Codex', installed: true, path: '/usr/bin/codex', version: '1', install: null, docs: 'https://x/codex', login: null },
+      ]),
+    }
+    usePromptSessions.setState({ approveProposed: vi.fn() } as never)
+    listPersonasSpy.mockResolvedValue([architect])
+  })
+
+  async function mountAdvanced() {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    click(q(el, 'new-epic-flip-to-grounding')!)
+    await act(async () => {})
+    return el
+  }
+  async function create(el: HTMLElement) {
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    click(q(el, 'new-epic-create')!)
+    await act(async () => {})
+    return createPromptSessionSpy.mock.calls[0]
+  }
+
+  it('lists packs (default off) after the injection toggles; a ticked pack is sent on create, never in the prompt', async () => {
+    const el = await mountAdvanced()
+    expect(packsListSpy).toHaveBeenCalledTimes(1)
+    const box = q(el, 'new-epic-pack-apple-swift-core') as HTMLInputElement
+    expect(box).not.toBeNull()
+    expect(box.checked).toBe(false)
+    expect(q(el, 'new-epic-packs')!.textContent).toContain('Swift + SwiftUI best practices')
+    const lastInjection = q(el, 'context-injection-toggle-delegate-implementation')!
+    expect(lastInjection.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    act(() => { box.click() })
+    const call = await create(el)
+    const runtime = call[7] as Record<string, unknown>
+    expect(runtime.packs).toEqual(['apple-swift-core'])
+    expect(String(call[5])).not.toContain('apple-swift-core')
+    expect(JSON.stringify(call[6])).not.toContain('apple-swift-core')
+  })
+
+  it('sends no packs key when nothing is ticked', async () => {
+    const el = await mountAdvanced()
+    expect(q(el, 'new-epic-pack-apple-swift-core')).not.toBeNull()
+    const runtime = (await create(el))[7] as Record<string, unknown>
+    expect('packs' in runtime).toBe(false)
+  })
+
+  it('a non-Claude CLI shows no pack checkboxes and sends no packs', async () => {
+    const el = await mountAdvanced()
+    act(() => { (q(el, 'new-epic-pack-apple-swift-core') as HTMLInputElement).click() })
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    await act(async () => {})
+    expect(el.querySelector('[data-testid^="new-epic-pack-"]')).toBeNull()
+    const runtime = (await create(el))[7] as Record<string, unknown>
+    expect('packs' in runtime).toBe(false)
+  })
+
+  it('a reopened draft restores its packs and edit-mode Save re-sends them', async () => {
+    const updateSpy = vi.fn(async () => ({}))
+    usePromptSessions.setState({ updateProposedDraft: updateSpy } as never)
+    const { composeEpicIntake } = await import('../../../lib/epicIntake')
+    const intake = composeEpicIntake({ title: 'T', goal: 'G', referencePaths: [], tag: undefined, agentName: 'architect', contextInjections: {} as never })
+    const draft = {
+      id: 'draft-p', cwd: '/home/bilko/Projects/alpha', goalText: intake.goalText, claudeSessionId: 'c-p',
+      status: 'proposed', createdAt: new Date().toISOString(), completedAt: null, agentType: 'architect',
+      openingPrompt: intake.openingPrompt, sections: intake.sections, source: 'NewEpicCard', packs: ['a11y'],
+    } as never
+    const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} onDraftSaved={vi.fn()} />)
+    await act(async () => {})
+    click(q(el, 'new-epic-flip-to-grounding')!)
+    await act(async () => {})
+    expect((q(el, 'new-epic-pack-a11y') as HTMLInputElement).checked).toBe(true)
+    expect((q(el, 'new-epic-pack-apple-swift-core') as HTMLInputElement).checked).toBe(false)
+    click(q(el, 'new-epic-save-draft')!)
+    await act(async () => {})
+    expect((updateSpy.mock.calls[0] as unknown as [string, { packs: unknown }])[1].packs).toEqual(['a11y'])
+  })
+
+  it('renders nothing when the catalog is empty or the call fails', async () => {
+    packsListSpy.mockResolvedValue({ ok: true, packs: [] })
+    let el = await mountAdvanced()
+    expect(q(el, 'new-epic-packs')).toBeNull()
+    act(() => root?.unmount()); container?.remove()
+    packsListSpy.mockRejectedValue(new Error('boom'))
+    el = await mountAdvanced()
+    expect(q(el, 'new-epic-packs')).toBeNull()
+  })
+})

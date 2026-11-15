@@ -2960,6 +2960,8 @@ export interface PromptSessionsCreateEpicPayload {
   agentCli?: 'claude' | 'codex' | 'gemini' | 'antigravity' | 'cursor' | 'opencode';
   /** Model for a non-Claude CLI; absent = that CLI's default. */
   agentCliModel?: string;
+  /** Selected context pack ids (packs.list ids); absent = none. Loaded by the CLI, never in openingPrompt. */
+  packs?: string[];
 }
 
 export interface PromptSessionsCreateEpicResult {

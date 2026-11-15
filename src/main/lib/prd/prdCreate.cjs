@@ -323,8 +323,8 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     if (row && row.developLoop === false) {
       return {
         ok: false, applied: false, status: 409,
-        error: `Epic ${input.sourcePromptId} was started with the develop loop off, so it cannot queue PRDs. `
-          + 'Start a new session with the develop loop on to queue this work.',
+        error: `Epic ${input.sourcePromptId} was started as a just Claude session (develop loop off), so it cannot queue PRDs. `
+          + "Start a new session with 'just Claude' turned off to queue this work.",
       };
     }
   }

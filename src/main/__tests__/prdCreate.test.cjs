@@ -675,7 +675,34 @@ test('createPrd resolves sourcePromptId from originClaudeSessionId when the call
   }
 });
 
-// Same real-homedir rationale as the two tests above.
+// Same real-homedir rationale as the test above.
+test('createPrd refuses a just Claude Epic with a 409 that names the just Claude switch', async () => {
+  const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-just-claude-epic-'));
+  config.addAllowedRoot(root);
+  try {
+    await writeActiveIndexFixture(root, {
+      'psess-plain': { id: 'psess-plain', claudeSessionId: 'c-plain', status: 'active', developLoop: false },
+    });
+    const prdsDir = path.join(root, 'session-manager-operations', 'scheduler', 'epics', 'psess-plain', 'prds');
+    const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+    const writePrdSpy = vi.fn(remote.writePrd);
+    remote.writePrd = writePrdSpy;
+
+    const result = await createPrd(validCreateBody({ cwd: root, sourcePromptId: 'psess-plain' }), remote);
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(409);
+    expect(result.error).toBe(
+      "Epic psess-plain was started as a just Claude session (develop loop off), so it cannot queue PRDs. "
+        + "Start a new session with 'just Claude' turned off to queue this work.",
+    );
+    expect(writePrdSpy).not.toHaveBeenCalled();
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+// Same real-homedir rationale as the tests above.
 // ──────────────────────────────────────────── worktree-cwd Epic-lookup
 // hazard (PRD: projectRootResolve.cjs) — reproduces the live starry-night-
 // ships shape: main's active-index.json has the Epic, a linked worktree's

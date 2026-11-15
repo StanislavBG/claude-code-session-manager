@@ -90,11 +90,11 @@ is required to publish packages`) even when `npm whoami` succeeds — a separate
 legacy "classic" publish token cannot satisfy it; only an account with 2FA enabled (interactive OTP
 at publish time) or a **granular access token with "bypass 2FA for write actions"** (npmjs.com web
 UI only — the CLI cannot create one) can. npm is deprecating the bypass-2FA token path itself —
-Phase 2 (~Jan 2027) removes its publish capability entirely. The durable fix, once a `release.yml`
-workflow exists, is **npm Trusted Publishing (OIDC)** — no token/2FA at all, since npm verifies the
-GitHub Actions run's own short-lived identity. Until that workflow is built, this repo has no fully
-unattended publish path; a local-worktree publish needs either a live human OTP or a (temporary,
-pre-2027) bypass-2FA token per release.
+Phase 2 (~Jan 2027) removes its publish capability entirely. The durable fix is **npm Trusted
+Publishing (OIDC)** — no token/2FA at all, since npm verifies the GitHub Actions run's own
+short-lived identity: `release.yml`'s `npm-publish` job publishes on `v*` tag push (needs a one-time
+trusted-publisher registration on npmjs.com). The fallback local-worktree publish needs either a
+live human OTP or a (temporary, pre-2027) bypass-2FA token per release.
 
 ### Publish command sequence
 

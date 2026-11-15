@@ -62,6 +62,29 @@ Run in this order:
    - ..."
    ```
 4. `git tag v<version>`
+
+**CI-publish path.** If `grep -q 'npm-publish:' .github/workflows/release.yml` succeeds, CI
+publishes on the tag push (npm Trusted Publishing, OIDC). Skip the local worktree build and
+`npm publish` (steps 5-7 and 9) and run instead:
+
+- `git push origin main` and `git push origin v<version>`.
+- Wait on the release run with a bounded blocking watcher (never an open-ended poll):
+  ```
+  timeout 1200 gh run watch "$(gh run list --workflow release.yml --branch v<version> --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+  ```
+- Verify the registry: re-read the cache-busted packument
+  `curl -s "https://registry.npmjs.org/<packageName>?t=$(date +%s)"` until `dist-tags.latest`
+  is `<version>` — at most 20 tries, 30 s apart (`sleep 30` between tries). Then do steps 10
+  (tarball 200) and 11 (installer assets) as written.
+
+If the `npm-publish` job fails, or the version never appears within the 20 tries: report the
+failing job log (`gh run view <run-id> --log-failed`), then fall back to the local worktree
+publish below (steps 5-7, 9, 10) **exactly once** — the tag is already pushed, so skip step 8.
+An E409 "staged" from that fallback still means a human approves it on npmjs.com; report that.
+
+**Local worktree path (fallback).** Projects whose `release.yml` has no `npm-publish` job (or
+have no `release.yml`) always use steps 5-11:
+
 5. `mkdir -p "$HOME/.cache/sm-publish" && git worktree add "$HOME/.cache/sm-publish/v<version>" v<version>`
    — never under `/tmp` or `os.tmpdir()`: some test suites (this repo's included) treat those
    paths as fixtures and fail there.

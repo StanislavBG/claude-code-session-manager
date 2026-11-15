@@ -72,16 +72,13 @@ sequence straight through without pausing for confirmation at each step — the 
 3. **Do not treat a bypass-2FA granular token as a durable automation fix** — npm is removing
    its publish capability (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/);
    it is a bridge at best.
-4. There is currently **no way for this agent to publish fully unattended** end-to-end on
-   this machine — either a human enables 2FA and supplies a live OTP at publish time, or a
-   human mints a bypass-2FA granular token via the npmjs.com web UI and drops it in
-   `~/.npmrc` (bridge only, see above). The durable fix is moving the publish step into a
-   GitHub Actions workflow using npm Trusted Publishing (OIDC), triggered on `v*` tag push —
-   that eliminates the token/2FA problem entirely by running the publish inside CI, which can
-   present npm with its own short-lived OIDC identity instead of any stored credential. That
-   workflow does not exist yet in this repo (only local worktree-based publish does) — file
-   it as its own PRD when the human wants unattended `/builder` restored; don't attempt to
-   build it as a side effect of a release run.
+4. **Unattended path = CI.** `.github/workflows/release.yml`'s `npm-publish` job publishes via
+   npm Trusted Publishing (OIDC) on every `v*` tag push — no stored token, no OTP, because CI
+   presents npm its own short-lived OIDC identity. It needs a one-time trusted-publisher
+   registration on npmjs.com (package Settings → Trusted Publisher → GitHub Actions, workflow
+   `release.yml`); until that exists, or when the job fails, the job reds and the local worktree
+   publish (skill step 4 fallback) is the path — which then needs a human OTP or a bypass-2FA
+   granular token in `~/.npmrc` (bridge only, see above).
 5. When blocked here: stop, do NOT retry `npm login` or `npm publish` repeatedly, report the
    exact 403 output and the `npm profile get`/`npm token list` findings, and ask the human to
    either supply an OTP-based interactive publish or a bypass-2FA token for this release.

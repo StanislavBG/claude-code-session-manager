@@ -308,3 +308,79 @@ test('checkedFiles is the last key', () => {
   const { json } = run(repo({ 'CLAUDE.md': '# Hi\n' }));
   expect(Object.keys(json)).toEqual(['root', 'map', 'notes', 'findings', 'counts', 'checkedFiles']);
 });
+
+// ── orphans (opt-in): SKILL.md's link convention, same rule as src/main/lib/mdNetworkScan.cjs ──
+
+const orphansOf = (json) => json.findings.filter((f) => f.kind === 'orphan').map((f) => f.file);
+
+test('orphans: a backticked-table map reaches its docs', () => {
+  const dir = repo({
+    'CLAUDE.md': '# Map\n\n| Doc | Covers |\n| --- | --- |\n| `docs/a.md` | A |\n| `docs/sub/b.md` | B |\n',
+    'docs/a.md': '# A\nSee [c](c.md).\n',
+    'docs/c.md': '# C\n',
+    'docs/sub/b.md': '# B\nSibling `docs/sub/d.md` and doc-relative `e/f.md`.\n',
+    'docs/sub/d.md': '# D\n',
+    'docs/sub/e/f.md': '# F\n',
+  });
+  const { json } = run(dir, '--checks', 'orphans');
+  expect(orphansOf(json)).toEqual([]);
+});
+
+test('orphans: an @-imported map reaches its docs', () => {
+  const dir = repo({
+    'CLAUDE.md': '@docs/map.md\n',
+    'docs/map.md': '# Map\n- <guide.md>\n- @rules/r.md\n',
+    'docs/guide.md': '# G\n',
+    'docs/rules/r.md': '# R\n',
+  });
+  const { json } = run(dir, '--checks', 'orphans');
+  expect(orphansOf(json)).toEqual([]);
+});
+
+test('orphans: an unreferenced doc is reported; fenced, commented and inline-code links do not count', () => {
+  const dir = repo({
+    'CLAUDE.md': '# Hi\n[a](docs/a.md)\n<!-- [x](docs/x.md) -->\n```\n[y](docs/y.md)\n@docs/y.md\n```\n`[z](docs/z.md)`\n',
+    'docs/a.md': '# A\n',
+    'docs/x.md': '# X\n',
+    'docs/y.md': '# Y\n',
+    'docs/z.md': '# Z\n',
+  });
+  const { code, json } = run(dir, '--checks', 'orphans');
+  expect(code).toBe(1);
+  expect(json.findings.filter((f) => f.kind === 'orphan')).toEqual([
+    { kind: 'orphan', file: 'docs/x.md' },
+    { kind: 'orphan', file: 'docs/y.md' },
+    { kind: 'orphan', file: 'docs/z.md' },
+  ]);
+});
+
+test('orphans: --exclude and --file limit reporting, not reachability', () => {
+  const dir = repo({
+    'CLAUDE.md': '[hub](skip/hub.md)\n',
+    'skip/hub.md': '[leaf](../docs/leaf.md)\n',
+    'skip/lost.md': '# lost\n',
+    'docs/leaf.md': '# leaf\n',
+    'docs/lost.md': '# lost\n',
+  });
+  expect(orphansOf(run(dir, '--checks', 'orphans').json)).toEqual(['docs/lost.md', 'skip/lost.md']);
+  // excluded hub still carries reachability to docs/leaf.md
+  expect(orphansOf(run(dir, '--checks', 'orphans', '--exclude', 'skip/').json)).toEqual(['docs/lost.md']);
+  expect(orphansOf(run(dir, '--checks', 'orphans', '--file', 'docs/leaf.md', '--file', 'skip/lost.md').json)).toEqual([
+    'skip/lost.md',
+  ]);
+});
+
+test('orphans: no root CLAUDE.md adds a note and no findings', () => {
+  const dir = repo({ 'README.md': '# R\n', 'docs/a.md': '# A\n' });
+  const { json } = run(dir, '--checks', 'orphans');
+  expect(orphansOf(json)).toEqual([]);
+  expect(json.notes.some((n) => /CLAUDE\.md/.test(n) && /orphan/.test(n))).toBe(true);
+});
+
+test('orphans: default --checks never reports orphan', () => {
+  const dir = repo({ 'CLAUDE.md': '# Hi\n', 'docs/lost.md': '# lost\n' });
+  const { json } = run(dir);
+  expect(orphansOf(json)).toEqual([]);
+  expect(json.counts.orphan).toBeUndefined();
+  expect(run(dir, '--checks', 'links,orphans').json.counts).toEqual({ orphan: 1 });
+});

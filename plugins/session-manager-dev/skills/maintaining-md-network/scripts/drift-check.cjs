@@ -4,7 +4,10 @@
  * drift-check.cjs — dependency-free drift check for a repo's markdown network.
  *
  *   node drift-check.cjs [--root <dir>] [--map <path>] [--file <path>]...
- *                        [--exclude <prefix>]... [--checks links,paths,limits,contents] [--strict-paths]
+ *                        [--exclude <prefix>]... [--checks links,paths,limits,contents[,orphans]] [--strict-paths]
+ *
+ * `orphans` is opt-in (not in the default set): docs no chain of references from the root
+ * CLAUDE.md reaches, by the maintaining-md-network SKILL.md link convention.
  *
  * Prints one JSON object { root, map, notes, findings, counts, checkedFiles } to stdout.
  * Exit 0 = no findings, 1 = findings, 2 = usage error / missing root.
@@ -14,7 +17,8 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const ALL_CHECKS = ['links', 'paths', 'limits', 'contents'];
+const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'orphans'];
+const DEFAULT_CHECKS = ['links', 'paths', 'limits', 'contents'];
 const LIMIT_ALWAYS_LOADED = 200;
 const LIMIT_MAP = 70;
 const CONTENTS_MIN_LINES = 100;
@@ -23,7 +27,7 @@ const CONTENTS_WINDOW = 60;
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const opts = { root: null, map: null, files: [], excludes: [], checks: ALL_CHECKS.slice(), strictPaths: false };
+  const opts = { root: null, map: null, files: [], excludes: [], checks: DEFAULT_CHECKS.slice(), strictPaths: false };
   const needValue = (i, flag) => {
     if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
       throw new UsageError(`missing value for ${flag}`);
@@ -122,6 +126,8 @@ function parseDoc(text) {
   const links = [];
   const spans = [];
   const importTokens = [];
+  const autolinks = [];
+  const refTokens = [];
   const ignoredLines = new Set();
   let fence = null;
   let inComment = false;
@@ -161,15 +167,95 @@ function parseDoc(text) {
       if (t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1);
       links.push({ line: lineNo, target: t });
     }
+    for (const am of noCode.replace(linkRe, ' ').matchAll(AUTOLINK_RE)) {
+      if (/\.md$/i.test(am[1].replace(/[?#].*$/, ''))) autolinks.push({ line: lineNo, target: am[1] });
+    }
+    for (const cm of line.matchAll(MULTI_CODE_RE)) {
+      const tok = pathToken(cm[2]);
+      if (tok !== null && !refTokens.includes(tok)) refTokens.push(tok);
+    }
     const impRe = /(?:^|\s)@(\S+)/g;
     while ((m = impRe.exec(noCode))) importTokens.push(m[1]);
     const spanRe = /`([^`]+)`/g;
     while ((m = spanRe.exec(line))) spans.push({ line: lineNo, span: m[1].trim() });
   });
-  return { lines: rawLines, links, spans, importTokens, ignoredLines };
+  return { lines: rawLines, links, spans, importTokens, autolinks, refTokens, ignoredLines };
 }
 
 const MAX_IMPORT_HOPS = 4;
+
+const AUTOLINK_RE = /<([^<>\s]{1,1024})>/g;
+const MULTI_CODE_RE = /(`+)(.{0,1024}?)\1/g;
+
+/** A backticked repo-path token (SKILL.md link convention), or null. */
+function pathToken(raw) {
+  const t = raw.trim();
+  if (t === '' || !t.includes('/') || /\s/.test(t) || /^(?:[/~$<]|http)/i.test(t)) return null;
+  const bare = t.replace(/:\d+$/, '').replace(/#.*$/, '');
+  if (bare === '' || /[*{}<>:]/.test(bare)) return null;
+  if (!bare.endsWith('/') && !/\.[A-Za-z0-9]{1,8}$/.test(bare)) return null;
+  return bare;
+}
+
+/** Repo-relative POSIX form: no `./` or trailing `/`; `.` is the root. */
+const toRepoPath = (p) => path.posix.normalize(p).replace(/\/+$/, '') || '.';
+const escapesRoot = (p) => p === '..' || p.startsWith('../') || p.startsWith('/');
+
+/**
+ * Docs a parsed doc references, by SKILL.md's link convention (the same rule as the
+ * app's src/main/lib/mdNetworkScan.cjs): markdown links and `<x.md>` autolinks resolved
+ * against the doc's folder; `@path.md` imports resolved against the doc's folder;
+ * backticked `.md` paths, repo-root form first, then doc-relative. Only targets that are
+ * docs (per `isDoc`) count.
+ */
+function docRefs(from, parsed, isDoc) {
+  const dir = path.posix.dirname(from);
+  const out = [];
+  const add = (to) => { if (to !== from && !out.includes(to)) out.push(to); };
+  for (const l of [...parsed.links, ...parsed.autolinks]) {
+    const written = l.target.trim();
+    if (written === '' || written[0] === '#' || written[0] === '/' || SCHEME_RE.test(written)) continue;
+    const target = written.replace(/[?#].*$/, '');
+    if (target === '') continue;
+    let decoded = target;
+    try { decoded = decodeURIComponent(target); } catch { /* a stray % is part of the name */ }
+    const to = toRepoPath(path.posix.join(dir, decoded));
+    if (!escapesRoot(to) && isDoc(to)) add(to);
+  }
+  for (let tok of parsed.importTokens) {
+    tok = tok.replace(/[),.;:!?'"\]]+$/, '');
+    if (!/\.md$/i.test(tok) || tok.startsWith('~') || tok.startsWith('/')) continue;
+    const to = toRepoPath(path.posix.join(dir, tok));
+    if (!escapesRoot(to) && isDoc(to)) add(to);
+  }
+  for (const tok of parsed.refTokens) {
+    if (!tok.endsWith('.md')) continue;
+    const forms = dir === '.' ? [toRepoPath(tok)] : [toRepoPath(tok), toRepoPath(path.posix.join(dir, tok))];
+    const to = forms.find((f) => !escapesRoot(f) && isDoc(f));
+    if (to !== undefined) add(to);
+  }
+  return out;
+}
+
+/** Every doc reachable from the root CLAUDE.md over docRefs, BFS. */
+function reachableDocs(root, allDocs) {
+  const docSet = new Set(allDocs);
+  docSet.add(ROOT_DOC);
+  const isDoc = (p) => docSet.has(p);
+  const seen = new Set([ROOT_DOC]);
+  const queue = [ROOT_DOC];
+  while (queue.length) {
+    const from = queue.shift();
+    let text;
+    try { text = fs.readFileSync(path.join(root, from), 'utf8'); } catch { continue; }
+    for (const to of docRefs(from, parseDoc(text), isDoc)) {
+      if (!seen.has(to)) { seen.add(to); queue.push(to); }
+    }
+  }
+  return seen;
+}
+
+const ROOT_DOC = 'CLAUDE.md';
 
 /** Claude Code `@path` imports of a doc: absolute .md paths inside root. */
 function parseImports(text, fileAbs, root) {
@@ -229,7 +315,7 @@ function hasPathsFrontmatter(text) {
 }
 
 function runDriftCheck(options) {
-  const opts = Object.assign({ root: null, map: null, files: [], excludes: [], checks: ALL_CHECKS, strictPaths: false }, options);
+  const opts = Object.assign({ root: null, map: null, files: [], excludes: [], checks: DEFAULT_CHECKS, strictPaths: false }, options);
   const root = path.resolve(opts.root || process.cwd());
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     throw new UsageError(`root is not a directory: ${root}`);
@@ -371,6 +457,15 @@ function runDriftCheck(options) {
     for (const m of missingLinks) {
       if (m.cands.some((c) => ignored.has(c))) continue;
       findings.push({ kind: 'broken-link', file: m.file, line: m.line, target: m.target });
+    }
+  }
+
+  if (checks.has('orphans')) {
+    if (!fs.existsSync(path.join(root, ROOT_DOC))) {
+      notes.push(`no root ${ROOT_DOC}; the orphans check was skipped`);
+    } else {
+      const reached = reachableDocs(root, listDocs(root).files);
+      for (const rel of docs) if (!reached.has(rel)) findings.push({ kind: 'orphan', file: rel });
     }
   }
 

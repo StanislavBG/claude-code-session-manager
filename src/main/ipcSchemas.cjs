@@ -247,6 +247,9 @@ const promptSessionsCreateEpic = z.object({
   agentCli: z.enum(['claude', 'codex', 'gemini', 'antigravity', 'cursor', 'opencode']).optional(),
   // Model passed to a non-Claude CLI; absent = that CLI's own default.
   agentCliModel: z.string().min(1).max(128).optional(),
+  // Selected context pack ids (same bounds as PromptSessionSchema.packs); absent = none.
+  // ensureEpic dedupes them and drops them for a non-Claude agentCli.
+  packs: z.array(z.string().min(1).max(64)).max(16).optional(),
 });
 
 // Renderer entry point for the "Restore a session" picker: this project's CLI

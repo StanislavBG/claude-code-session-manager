@@ -400,3 +400,36 @@ test('omitting agentCli and agentCliModel leaves the minted record unchanged', a
   expect('developLoop' in result.session).toBe(false);
   expect(result.session.status).toBe('proposed');
 });
+
+// ── Context packs (New Session card) ────────────────────────────────────────
+
+test('a create with packs stores them deduplicated, order kept', async () => {
+  const cwd = await mkCwd();
+  const result = await handler(null, { cwd, goalText: 'Swift run', packs: ['apple-swift-core', 'not-a-real-pack', 'apple-swift-core'] });
+  expect(result.session.packs).toEqual(['apple-swift-core', 'not-a-real-pack']);
+  expect(readActiveIndex(cwd).sessions[result.epicId]).toEqual(result.session);
+  expect(PromptSessionSchema.safeParse(result.session).success).toBe(true);
+});
+
+test('a create without packs, or with an empty packs array, stores no packs key', async () => {
+  const cwd = await mkCwd();
+  const none = await handler(null, { cwd, goalText: 'No packs' });
+  expect('packs' in none.session).toBe(false);
+  const empty = await handler(null, { cwd, goalText: 'Empty packs', packs: [] });
+  expect('packs' in empty.session).toBe(false);
+});
+
+test('a create with a non-Claude agentCli stores no packs', async () => {
+  const cwd = await mkCwd();
+  const result = await handler(null, { cwd, goalText: 'Codex run', agentCli: 'codex', packs: ['apple-swift-core'] });
+  expect(result.session.agentCli).toBe('codex');
+  expect('packs' in result.session).toBe(false);
+});
+
+test('ipcSchemas create-epic accepts bounded packs and rejects oversize ones', async () => {
+  const cwd = await mkCwd();
+  const s = schemas.promptSessionsCreateEpic;
+  expect(s.parse({ cwd, goalText: 'x', packs: ['apple-swift-core'] }).packs).toEqual(['apple-swift-core']);
+  expect(s.safeParse({ cwd, goalText: 'x', packs: ['p'.repeat(65)] }).success).toBe(false);
+  expect(s.safeParse({ cwd, goalText: 'x', packs: Array.from({ length: 17 }, (_, i) => `p${i}`) }).success).toBe(false);
+});

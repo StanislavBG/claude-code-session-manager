@@ -190,3 +190,33 @@ test('agentCli + agentCliModel round-trip through PromptSessionSchema and the me
   expect(merged.sessions[codex.id].agentCliModel).toBe('gpt-5.5');
   expect(merged.sessions[future.id].agentCli).toBe('future-cli');
 });
+
+test('packs: bounded string ids (unknown ids kept) round-trip; 17 entries or a 65-char id fail', () => {
+  const { promptSessionsMergeActiveIndex } = require('../ipcSchemas.cjs').schemas;
+  const base = {
+    id: 'epic-abc12345',
+    cwd: '/home/bilko/Projects/session-manager',
+    goalText: 'do the thing',
+    claudeSessionId: 'c1b2a3d4-0000-0000-0000-000000000000',
+    status: 'proposed',
+    createdAt: '2026-08-02T00:00:00.000Z',
+    completedAt: null,
+  };
+  const row = { ...base, packs: ['apple-swift-core', 'not-a-real-pack'] };
+  const parsed = PromptSessionSchema.parse(row);
+  expect(parsed.packs).toEqual(['apple-swift-core', 'not-a-real-pack']);
+  expect(PromptSessionSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+
+  const merged = promptSessionsMergeActiveIndex.parse({
+    cwd: base.cwd,
+    sessions: { [row.id]: row },
+    events: {},
+    source: 'epics',
+  });
+  expect(merged.sessions[row.id].packs).toEqual(['apple-swift-core', 'not-a-real-pack']);
+
+  const seventeen = Array.from({ length: 17 }, (_, i) => `pack-${i}`);
+  expect(PromptSessionSchema.safeParse({ ...base, packs: seventeen }).success).toBe(false);
+  expect(PromptSessionSchema.safeParse({ ...base, packs: ['p'.repeat(65)] }).success).toBe(false);
+  expect(PromptSessionSchema.safeParse({ ...base, packs: ['p'.repeat(64)] }).success).toBe(true);
+});

@@ -48,14 +48,19 @@ const promptSessionSchema = require('../promptSessionSchema.cjs');
 const { isAgentCliId, isNonClaudeAgentCli, AGENT_CLI_MODEL_RE } = require('../agent-cli/agentCliEvents.cjs');
 
 /**
- * agentCliMintFields(agentCli, agentCliModel, restoreSessionId) — validate the
+ * agentCliMintFields(agentCli, agentCliModel, restoreSessionId, packs) — validate the
  * Epic's agent-CLI options and return the record keys they add ({} for a
  * Claude Code Epic, so its on-disk shape is unchanged). Throws on any bad
  * combination. The develop loop (dev plugin, /develop, PRD API) and Restore a
  * session only work with Claude Code, so a non-Claude Epic is always
  * developLoop:false and can never adopt a CLI session.
+ *
+ * `packs` (selected context pack ids) are Claude Code only too: a non-empty
+ * array on a Claude Epic adds `packs` (deduplicated, order kept); a non-Claude
+ * Epic, or an absent/empty array, adds no `packs` key. Ids are not checked
+ * against the pack catalog here — PromptSessionSchema bounds them.
  */
-function agentCliMintFields(agentCli, agentCliModel, restoreSessionId) {
+function agentCliMintFields(agentCli, agentCliModel, restoreSessionId, packs = null) {
   const absent = agentCli === undefined || agentCli === null || agentCli === 'claude';
   if (!absent && !isAgentCliId(agentCli)) {
     throw new Error(`ensureEpic: unknown agentCli '${String(agentCli)}' — expected one of claude, codex, gemini, antigravity, cursor, opencode`);
@@ -63,7 +68,8 @@ function agentCliMintFields(agentCli, agentCliModel, restoreSessionId) {
   const modelGiven = agentCliModel !== undefined && agentCliModel !== null;
   if (absent || !isNonClaudeAgentCli(agentCli)) {
     if (modelGiven) throw new Error('ensureEpic: agentCliModel requires a non-Claude agentCli');
-    return {};
+    const unique = Array.isArray(packs) ? [...new Set(packs)] : [];
+    return unique.length > 0 ? { packs: unique } : {};
   }
   if (restoreSessionId !== null && restoreSessionId !== undefined) {
     throw new Error(`ensureEpic: Restore a session is Claude Code only — cannot restore into a '${agentCli}' Epic`);
@@ -301,7 +307,7 @@ function restoreRefusal(cwd, index, restoreSessionId, mintAuthority, deps) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, developLoop = null, mintAuthority = null, restoreSessionId = null, agentCli = null, agentCliModel = null } = {}, deps = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, developLoop = null, mintAuthority = null, restoreSessionId = null, agentCli = null, agentCliModel = null, packs = null } = {}, deps = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -312,7 +318,7 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
   return withPathLock(activeIndexPath(cwd), () => {
     // Agent-CLI rules run first — a bad id or combination throws before
     // anything (index, mirror, audit, PRD dir) is written.
-    const cliFields = agentCliMintFields(agentCli, agentCliModel, restoreSessionId);
+    const cliFields = agentCliMintFields(agentCli, agentCliModel, restoreSessionId, packs);
     if (cliFields.agentCli) developLoop = false;
     const index = readActiveIndex(cwd);
 
@@ -433,7 +439,7 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       ...(typeof effort === 'string' && effort ? { effort } : {}),
       // Only false is persisted: absent = develop loop on (byte-identical legacy shape).
       ...(developLoop === false ? { developLoop: false } : {}),
-      // Non-Claude agent CLI only (absent = Claude Code, legacy shape).
+      // Agent-CLI fields: agentCli/agentCliModel (non-Claude only) or packs (Claude only); absent = legacy shape.
       ...cliFields,
     };
 

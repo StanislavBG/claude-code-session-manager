@@ -26,18 +26,24 @@
  *   existing. A failing git call degrades to a census warning, never an error.
  *   Docs in record collections (opts.recordFolders / heuristic) leave orphans.
  *
- * Followed: inline `[text](target)` links (images too) and `<target.md>`
- * autolinks, outside code fences, inline code and HTML comments. Ignored: any
- * `scheme:` target (http(s):, mailto:, ...), `/absolute` and `//host` targets,
- * and `#anchor`-only links. `#fragment` and `?query` are stripped and the rest
- * resolves against the linking doc's folder. A target outside the project, or
- * one that does not exist, is a broken link.
+ * Followed — every reference an agent follows, matching the maintaining-md-network
+ * skill's link convention: inline `[text](target)` links (images too) and
+ * `<target.md>` autolinks, outside code fences, inline code and HTML comments;
+ * backticked `path.md` tokens (outside fences and comments) resolved repo-root
+ * first, then against the doc's folder; and `@path.md` imports resolved against
+ * the doc's folder. For links, ignored: any `scheme:` target (http(s):, mailto:,
+ * ...), `/absolute` and `//host` targets, and `#anchor`-only links; `#fragment`
+ * and `?query` are stripped and the rest resolves against the linking doc's
+ * folder; a target outside the project, or one that does not exist, is a broken
+ * link. A backticked path or import is an edge only when it resolves to a doc;
+ * one that resolves to nothing is never a broken link (the census lists dead
+ * backticked paths as deadRefs). Backticked non-.md paths are never edges.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { execGit } = require('./git/gitExec.cjs');
-const { censusMdDocs, parseGitLog } = require('./mdDocCensus.cjs');
+const { censusMdDocs, parseGitLog, importsOf } = require('./mdDocCensus.cjs');
 const { backtickPaths, assessRefs, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
 
 const ROOT_DOC = 'CLAUDE.md';
@@ -67,6 +73,7 @@ const AUTOLINK_RE = /<([^<>\s]{1,1024})>/g;
 /**
  * @typedef {{ path: string, text: string }} MdFile a doc: repo-relative POSIX path + text
  * @typedef {{ line: number, target: string, to: string, escapes: boolean }} MdLink
+ * @typedef {MdLink & { kind: 'link' | 'path' | 'import' }} MdRef a followed reference; only `link` ones can be broken
  *   `target` as written (fragment/query stripped); `to` resolved repo-relative
  * @typedef {'hub' | 'owner' | 'doc'} MdNetworkNodeType
  * @typedef {{ id: string, path: string, depth: number, type: MdNetworkNodeType, linksOut: number, linkedFrom: number }} MdNetworkNode
@@ -295,6 +302,45 @@ function linksOf(file) {
   return links;
 }
 
+/**
+ * Memo for refsOf's doc-independent parse: backticked `.md` tokens and `@` imports.
+ * @type {WeakMap<MdFile, { tokens: string[], imports: string[] }>}
+ */
+const pathRefMemo = new WeakMap();
+
+/**
+ * A doc's followed references: its markdown links (kind `link`, as linksOf),
+ * then its `@` imports and backticked `.md` paths that resolve to a doc per
+ * `isDoc` (kinds `import` / `path`, line 0). A backticked token tries the
+ * repo-root form first, then the doc-relative one.
+ * @param {MdFile} file @param {(relPath: string) => boolean} isDoc
+ * @returns {MdRef[]}
+ */
+function refsOf(file, isDoc) {
+  const from = toRepoPath(file.path);
+  let parsed = pathRefMemo.get(file);
+  if (!parsed) {
+    parsed = {
+      tokens: backtickPaths(file.text).filter((t) => t.endsWith('.md')),
+      imports: importsOf(file.text, from),
+    };
+    pathRefMemo.set(file, parsed);
+  }
+  /** @type {MdRef[]} */
+  const refs = linksOf(file).map((l) => ({ ...l, kind: /** @type {const} */ ('link') }));
+  for (const imp of parsed.imports) {
+    const to = toRepoPath(imp);
+    if (isDoc(to)) refs.push({ line: 0, target: imp, to, escapes: false, kind: 'import' });
+  }
+  const dir = path.posix.dirname(from);
+  for (const tok of parsed.tokens) {
+    const forms = dir === '.' ? [toRepoPath(tok)] : [toRepoPath(tok), toRepoPath(path.posix.join(dir, tok))];
+    const to = forms.find((f) => f !== '..' && !f.startsWith('../') && isDoc(f));
+    if (to !== undefined) refs.push({ line: 0, target: tok, to, escapes: false, kind: 'path' });
+  }
+  return refs;
+}
+
 /** @param {string} id @param {number} depth @returns {MdNetworkNodeType} */
 function nodeType(id, depth) {
   if (depth === 0) return 'hub';
@@ -334,6 +380,8 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
     const folders = foldersOf(docs.keys());
     /** @param {string} p */
     const present = (p) => p === '.' || docs.has(p) || folders.has(p) || (exists !== undefined && exists(p) === true);
+    /** @param {string} p */
+    const isDoc = (p) => docs.has(p);
 
     /** @type {Map<string, number>} */
     const depth = new Map([[rootPath, 0]]);
@@ -354,8 +402,8 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
       const file = docs.get(from);
       if (!file) continue;
       const nextDepth = (depth.get(from) ?? 0) + 1;
-      for (const link of linksOf(file)) {
-        const broken = link.escapes || !present(link.to);
+      for (const link of refsOf(file, isDoc)) {
+        const broken = link.kind === 'link' && (link.escapes || !present(link.to));
         if (broken) {
           const where = `${from}:${link.line} → ${link.target}`;
           if (!findingKeys.has(where)) {
@@ -513,16 +561,18 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
     const queued = new Set([ROOT_DOC]);
     /** @type {Set<string>} */
     const unvouched = new Set();
+    /** @param {string} p */
+    const isDocPath = (p) => docSet.has(p);
     for (let wave = [rootFile]; wave.length > 0; ) {
       /** @type {string[]} */
       const next = [];
       for (const file of wave) {
-        for (const link of linksOf(file)) {
+        for (const link of refsOf(file, isDocPath)) {
           if (link.escapes || queued.has(link.to)) continue;
           if (docSet.has(link.to)) {
             queued.add(link.to);
             next.push(link.to);
-          } else if (link.to !== '.' && !trackedSet.has(link.to) && !trackedFolders.has(link.to)) {
+          } else if (link.kind === 'link' && link.to !== '.' && !trackedSet.has(link.to) && !trackedFolders.has(link.to)) {
             unvouched.add(link.to);
           }
         }

@@ -144,6 +144,76 @@ describe('buildMdNetwork', () => {
     expect(buildMdNetwork({ files }).findings.map((f) => f.where)).toEqual(['log/', 'notes/']);
   });
 
+  it('follows backticked repo-root .md paths in a table like links', () => {
+    const r = buildMdNetwork({
+      files: [
+        doc('CLAUDE.md', '| Doc | Covers |', '| --- | --- |', '| `docs/a.md` | a |', '| `docs/b.md` | b |', '| `src/CLAUDE.md` | src |'),
+        doc('docs/a.md', 'a'),
+        doc('docs/b.md', 'b'),
+        doc('src/CLAUDE.md', 'src'),
+      ],
+    });
+    expect(r.findings).toEqual([]);
+    expect(r.edges).toEqual([
+      { from: 'CLAUDE.md', to: 'docs/a.md' },
+      { from: 'CLAUDE.md', to: 'docs/b.md' },
+      { from: 'CLAUDE.md', to: 'src/CLAUDE.md' },
+    ]);
+    expect(r.links).toBe(3);
+  });
+
+  it('follows an @-import, so the imported map and the docs it links are reachable', () => {
+    const r = buildMdNetwork({
+      files: [
+        doc('CLAUDE.md', '@docs/map.md'),
+        doc('docs/map.md', '- [a](a.md)', '- [b](sub/b.md)'),
+        doc('docs/a.md', ''),
+        doc('docs/sub/b.md', ''),
+      ],
+    });
+    expect(r.findings).toEqual([]);
+    expect(r.nodes.map((n) => [n.path, n.depth])).toEqual([
+      ['CLAUDE.md', 0],
+      ['docs/map.md', 1],
+      ['docs/a.md', 2],
+      ['docs/sub/b.md', 2],
+    ]);
+    expect(r.links).toBe(3);
+  });
+
+  it('never draws edges or findings for fenced, commented, dead or non-.md backticked paths', () => {
+    const r = buildMdNetwork({
+      files: [
+        doc('CLAUDE.md', '```', '`docs/fenced.md`', '@docs/fenced.md', '```', '<!-- `docs/commented.md` -->', '`docs/gone.md` `src/x.ts` `docs/` `@docs/ignored.md`'),
+        doc('docs/fenced.md', ''),
+        doc('docs/commented.md', ''),
+        doc('docs/ignored.md', ''),
+      ],
+      exists: (p) => p === 'src/x.ts',
+    });
+    expect(r.edges).toEqual([]);
+    expect(r.links).toBe(0);
+    expect(brokenLinks(r)).toEqual([]);
+    expect(r.findings.map((f) => [f.type, f.paths])).toEqual([['orphan', ['docs/commented.md', 'docs/fenced.md', 'docs/ignored.md']]]);
+  });
+
+  it('resolves a nested doc’s backticked path doc-relative when the root form is not a doc', () => {
+    const r = buildMdNetwork({
+      files: [
+        doc('CLAUDE.md', 'See `src/CLAUDE.md`.'),
+        doc('src/CLAUDE.md', 'Read `lib/notes.md` and `docs/top.md`.'),
+        doc('src/lib/notes.md', ''),
+        doc('docs/top.md', ''),
+      ],
+    });
+    expect(r.findings).toEqual([]);
+    expect(r.edges).toEqual([
+      { from: 'CLAUDE.md', to: 'src/CLAUDE.md' },
+      { from: 'src/CLAUDE.md', to: 'src/lib/notes.md' },
+      { from: 'src/CLAUDE.md', to: 'docs/top.md' },
+    ]);
+  });
+
   it('returns { ok: false, error } for a missing root or bad input', () => {
     expect(buildMdNetwork({ files: [doc('README.md', '')] })).toEqual({ ok: false, error: 'no CLAUDE.md at the project root' });
     const bad = buildMdNetwork({ files: null });

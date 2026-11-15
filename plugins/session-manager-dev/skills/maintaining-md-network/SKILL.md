@@ -23,6 +23,15 @@ description: >-
 
 Research and report in the first turn. Change no files until the human approves, then plan the work with `/develop`.
 
+## What counts as a link
+
+A doc reference in the map, an owner pointer or any doc is a link when it is one of:
+- a markdown link [text](path);
+- a backticked repo-root path to an existing `.md` file;
+- an @path.md import.
+
+All three count for reachability in Project Home's link map and in drift-check's orphans check. Prefer markdown links where humans read the doc rendered.
+
 ## References
 
 Each is one level deep; none links another.

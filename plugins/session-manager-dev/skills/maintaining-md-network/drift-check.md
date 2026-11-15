@@ -65,7 +65,7 @@ Rules the script applies:
 
 ## Path conventions
 
-A backticked path claims the file exists in this repo. The script checks every such span, so write paths that legitimately do not exist here in a form it skips:
+A backticked path claims the file exists in this repo and, when it names a `.md` doc, counts as a link per SKILL.md. The script checks every such span, so write paths that legitimately do not exist here in a form it skips:
 
 - A path in another repo: use a repo prefix and colon, such as Bilko:server/x.ts. The script skips it like a URL scheme. A ~/Projects/<repo>/ path also works, because a leading tilde is skipped.
 - A retired or forbidden path named on purpose: write it in plain text, without backticks. Or end its line with the `<!-- drift-check-ignore -->` marker.
@@ -141,6 +141,7 @@ Template:
 - Date: <YYYY-MM-DD>
 - Mode: Full review | Drift check
 - Scope: <folder, or the whole project>
+- Session: <Epic id of the session that ran the review>
 - Base commit: <full sha of HEAD when the review finished>
 - Owner: <name or team that owns the map>
 - Map: <path of the entry map>
@@ -171,6 +172,7 @@ Rules:
 
 - Drift-check command holds the exact flags, so the next run repeats the same scope and exclusions.
 - Base commit is a full sha. A short sha or a branch name drifts.
+- Session lets Project Home link the record to its session and validation record.
 - In a Drift check record, the Verdicts table lists only the files reviewed.
 - Next review due is also due after a major model release.
 

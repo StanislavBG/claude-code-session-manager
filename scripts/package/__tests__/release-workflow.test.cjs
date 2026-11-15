@@ -89,4 +89,47 @@ describe('release.yml', () => {
     expect(step).toMatch(/-n "\$SECRET_APPLE_API_KEY" \] && \[ -n "\$SECRET_APPLE_API_KEY_ID" \] && \[ -n "\$SECRET_APPLE_API_ISSUER"/)
     expect(step).toContain('-c.mac.notarize=true')
   })
+  describe('npm-publish job (Trusted Publishing)', () => {
+    const start = yml.indexOf('\n  npm-publish:\n')
+    const rest = start === -1 ? '' : yml.slice(start + 1)
+    const next = rest.slice(1).search(/^  [a-z][\w-]*:\s*$/m)
+    const job = next === -1 ? rest : rest.slice(0, next + 1)
+    it('exists as a top-level job on ubuntu-24.04', () => {
+      expect(start).toBeGreaterThan(-1)
+      expect(job).toContain('runs-on: ubuntu-24.04')
+    })
+    it('requests id-token: write and contents: read', () => {
+      expect(job).toMatch(/permissions:\s*\n\s+id-token: write\s*\n\s+contents: read/)
+    })
+    it('does not depend on the installer matrix', () => {
+      expect(job).not.toMatch(/^\s*needs:/m)
+    })
+    it('sets up node 22 with the npm registry-url', () => {
+      expect(job).toContain('actions/checkout@v4')
+      expect(job).toContain('actions/setup-node@v4')
+      expect(job).toContain("node-version: '22'")
+      expect(job).toContain("registry-url: 'https://registry.npmjs.org'")
+    })
+    it('upgrades npm to 11.5.1+ before publishing', () => {
+      expect(job).toContain('npm install -g npm@^11.5.1')
+      expect(job.indexOf('npm install -g npm@^11.5.1')).toBeLessThan(job.indexOf('npm publish'))
+      expect(job).toContain('npm ci')
+    })
+    it('checks the tag matches package.json and skips an already-published version', () => {
+      expect(job).toContain('${GITHUB_REF_NAME#v}')
+      expect(job).toContain('npm view')
+      expect(job).toContain('skip=true')
+      expect(job.indexOf('npm view')).toBeLessThan(job.indexOf('npm publish --access public'))
+    })
+    it('runs npm publish --access public', () => {
+      expect(job).toContain('npm publish --access public')
+    })
+    it('references no NPM_TOKEN or NODE_AUTH_TOKEN secret', () => {
+      expect(job).not.toContain('NPM_TOKEN')
+      expect(job).not.toContain('NODE_AUTH_TOKEN')
+      expect(job).not.toMatch(/secrets\./)
+      expect(yml).not.toContain('NPM_TOKEN')
+      expect(yml).not.toContain('NODE_AUTH_TOKEN')
+    })
+  })
 })

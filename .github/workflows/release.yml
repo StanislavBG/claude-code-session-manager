@@ -156,3 +156,53 @@ jobs:
     steps:
       - name: Publish draft release and mark latest
         run: gh release edit "$TAG" --repo "$REPO" --draft=false --latest
+
+  # Publishes the npm package with npm Trusted Publishing (GitHub OIDC): no stored token,
+  # so npm never stages the version for a manual 2FA approval (the local classic-token E409).
+  # One-time human step on npmjs.com: package Settings -> Trusted Publisher -> GitHub Actions,
+  # repository claude-code-session-manager, workflow release.yml.
+  # Independent of the installer matrix: an installer failure never blocks the npm publish.
+  npm-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+      # Trusted Publishing needs npm CLI 11.5.1+.
+      - run: npm install -g npm@^11.5.1
+      - run: npm ci
+      - name: Check package.json version matches the tag
+        id: version
+        shell: bash
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version $PKG_VERSION does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Skip if this version is already on npm
+        id: published
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          NAME="$(node -p "require('./package.json').name")"
+          if [ "$(npm view "$NAME@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "$NAME@$VERSION is already published; skipping npm publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      # prepublishOnly builds the renderer; Trusted Publishing adds provenance automatically.
+      - name: Publish to npm
+        if: steps.published.outputs.skip != 'true'
+        run: npm publish --access public

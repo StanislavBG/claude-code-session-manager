@@ -462,6 +462,9 @@ export type PacksListResult =
   | { ok: true; packs: PackListRow[] }
   | { ok: false; error: string };
 
+/** `packs.terminalArgs` result — `--plugin-dir`/`--append-system-prompt` args, already composed by main. */
+export type PacksTerminalArgsResult = { ok: true; args: string[] };
+
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
 export interface AgentPersona {
   name: string;
@@ -2323,6 +2326,8 @@ export interface SessionManagerAPI {
   /** Shipped context-pack catalog (New Session picker). Never rejects. */
   packs: {
     list: () => Promise<PacksListResult>;
+    /** Pack CLI args for this Epic's Terminal `claude` line; `[]` for agent-CLI/no-pack Epics or any error. */
+    terminalArgs: (payload: { cwd: string; claudeSessionId: string }) => Promise<PacksTerminalArgsResult>;
   };
   agents: {
     listPersonas: () => Promise<AgentPersona[]>;

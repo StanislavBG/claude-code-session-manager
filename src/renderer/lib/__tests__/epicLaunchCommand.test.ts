@@ -22,4 +22,25 @@ describe('buildEpicClaudeCommand', () => {
     expect(m).not.toBeNull()
     expect(JSON.parse(m![1])).toEqual({ enabledPlugins: { [DEV_PLUGIN_ENABLED_KEY]: false } })
   })
+
+  it('appends pack args, each shell-quoted, after the loop-off settings', () => {
+    const laws = "# Context packs\n\n## iOS pack\nDon't use force unwraps."
+    const cmd = buildEpicClaudeCommand({
+      sessionId: 'abc',
+      resume: false,
+      model: 'sonnet',
+      developLoop: false,
+      packArgs: ['--plugin-dir', '/p/ios', '--append-system-prompt', laws],
+    })
+    const settings = `'${JSON.stringify({ enabledPlugins: { [DEV_PLUGIN_ENABLED_KEY]: false } })}'`
+    expect(cmd).toBe(
+      `claude --dangerously-skip-permissions --session-id 'abc' --model 'sonnet' --settings ${settings}` +
+        ` '--plugin-dir' '/p/ios' '--append-system-prompt' '# Context packs\n\n## iOS pack\nDon'\\''t use force unwraps.'\r`,
+    )
+  })
+
+  it('empty pack args leave the line unchanged', () => {
+    const base = { sessionId: 'abc', resume: true, model: 'sonnet' }
+    expect(buildEpicClaudeCommand({ ...base, packArgs: [] })).toBe(buildEpicClaudeCommand(base))
+  })
 })

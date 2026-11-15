@@ -129,6 +129,8 @@ contextBridge.exposeInMainWorld('api', {
   // Context-pack catalog — display data only (remote: read).
   packs: {
     list: () => ipcRenderer.invoke('packs:list'),
+    // Pack part of an Epic Terminal `claude` line (--plugin-dir/--append-system-prompt).
+    terminalArgs: (payload) => ipcRenderer.invoke('packs:terminal-args', payload),
   },
   agents: {
     listPersonas: () => ipcRenderer.invoke('agents:list-personas'),

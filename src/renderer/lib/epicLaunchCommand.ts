@@ -15,14 +15,18 @@ export interface EpicClaudeCommandInput {
   effort?: string | null
   /** false = Epic started with the develop loop off; absent/true = on. */
   developLoop?: boolean
+  /** Context-pack CLI args from main's packs:terminal-args (`--plugin-dir`, `--append-system-prompt`);
+   *  each element is shell-quoted and appended last. Absent/empty = no packs. */
+  packArgs?: readonly string[]
 }
 
 /** The line typed into an Epic Terminal pane's shell (trailing CR included). */
-export function buildEpicClaudeCommand({ sessionId, resume, model, effort, developLoop }: EpicClaudeCommandInput): string {
+export function buildEpicClaudeCommand({ sessionId, resume, model, effort, developLoop, packArgs }: EpicClaudeCommandInput): string {
   const flag = resume ? `--resume ${shellQuote(sessionId)}` : `--session-id ${shellQuote(sessionId)}`
   const settings =
     developLoop === false
       ? ` --settings ${shellQuote(JSON.stringify({ enabledPlugins: { [DEV_PLUGIN_ENABLED_KEY]: false } }))}`
       : ''
-  return `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}${effortFlag(effort)}${settings}\r`
+  const packs = (packArgs ?? []).map((a) => ` ${shellQuote(a)}`).join('')
+  return `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}${effortFlag(effort)}${settings}${packs}\r`
 }

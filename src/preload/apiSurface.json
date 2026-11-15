@@ -378,6 +378,13 @@
   "remote": "read"
  },
  {
+  "ns": "packs",
+  "method": "terminalArgs",
+  "channel": "packs:terminal-args",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
   "ns": "agents",
   "method": "listPersonas",
   "channel": "agents:list-personas",

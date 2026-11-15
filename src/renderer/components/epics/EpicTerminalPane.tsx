@@ -26,6 +26,21 @@ const FALLBACK_MODEL = 'sonnet'
  * this Epic's claudeSessionId (see the Props doc below), the same join key
  * chatRunner.cjs passes.
  */
+/**
+ * The Epic's context-pack args (`--plugin-dir` + `--append-system-prompt`),
+ * composed main-side by packs:terminal-args — the same composePackSpawnArgs
+ * chat turns use, so Terminal loads the same packs. A failed hop = no packs
+ * (today's line).
+ */
+async function resolveEpicPackArgs(cwd: string, claudeSessionId: string): Promise<string[]> {
+  try {
+    const res = await window.api.packs.terminalArgs({ cwd, claudeSessionId })
+    return res && res.ok && Array.isArray(res.args) ? res.args : []
+  } catch {
+    return []
+  }
+}
+
 async function resolveEpicModel(cwd: string, claudeSessionId: string): Promise<string> {
   try {
     return await window.api.agents.resolveEpicModel({ cwd, claudeSessionId })
@@ -164,7 +179,8 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
         const resume = await transcriptExists(cwd, sessionId).catch(() => true)
         const model = await resolveEpicModel(cwd, sessionId)
         const effort = await resolveEpicEffort(cwd, sessionId)
-        const cmd = buildEpicClaudeCommand({ sessionId, resume, model, effort, developLoop: developLoopRef.current })
+        const packArgs = await resolveEpicPackArgs(cwd, sessionId)
+        const cmd = buildEpicClaudeCommand({ sessionId, resume, model, effort, developLoop: developLoopRef.current, packArgs })
         setTimeout(() => writeInChunks(sessionId, cmd), 1500)
       })
       .catch((err) => {

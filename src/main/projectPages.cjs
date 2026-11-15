@@ -13,6 +13,8 @@
  * mdNetwork() maps the project's markdown link network on demand
  * (lib/mdNetworkScan.cjs) for the Tools pane. matrix() reads the saved
  * Competitor matrix (lib/project-pages/competitiveMatrix.cjs readMatrix).
+ * mdReview() reads the newest Review MD network record plus each review
+ * session's validation records (lib/mdReviewRecord.cjs readMdReview).
  */
 
 const { ipcMain } = require('electron');
@@ -25,6 +27,7 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { listLibrary, migrateLegacy } = require('./lib/project-pages/pagesLibrary.cjs');
 const { scanMdNetwork } = require('./lib/mdNetworkScan.cjs');
 const { readMatrix } = require('./lib/project-pages/competitiveMatrix.cjs');
+const { readMdReview } = require('./lib/mdReviewRecord.cjs');
 
 let mainWindow = null;
 function attachWindow(window) {
@@ -114,6 +117,20 @@ async function mdNetwork({ cwd, recordFolders, docFolders }) {
     recordFolders: stripTrailingSlashes(recordFolders),
     docFolders: stripTrailingSlashes(docFolders),
   });
+}
+
+const MD_REVIEW_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project review record';
+
+/**
+ * -> MdReviewResult: the newest review record under reviews/docs/ and, per
+ * given Epic id, its reviews/validation/<id>/*.md paths — read once per call
+ * (no watcher, no cache). Resolves the project root like mdNetwork(); an
+ * ephemeral cwd gets `{ ok: false, error }`.
+ */
+async function mdReview({ cwd, epicIds }) {
+  const { root, ephemeral } = tryProjectRoot(config.validatePath(cwd));
+  if (ephemeral) return { ok: false, error: MD_REVIEW_EPHEMERAL };
+  return readMdReview(root, { epicIds });
 }
 
 const MATRIX_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project matrix';
@@ -306,6 +323,7 @@ function registerProjectPagesIpc() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('project-pages:get', v(s.projectPagesCwd, get));
   ipcMain.handle('project-pages:md-network', v(s.projectPagesMdNetwork, mdNetwork));
+  ipcMain.handle('project-pages:md-review', v(s.projectPagesMdReview, mdReview));
   ipcMain.handle('project-pages:matrix', v(s.projectPagesCwd, matrix));
   ipcMain.handle('project-pages:watch', v(s.projectPagesCwd, ({ cwd }) => watchOutput(cwd)));
   ipcMain.handle('project-pages:rename', v(s.projectPagesRename, renameEntry));
@@ -321,6 +339,7 @@ module.exports = {
   registerProjectPagesIpc,
   get,
   mdNetwork,
+  mdReview,
   matrix,
   isLibraryPath,
   renameEntry,

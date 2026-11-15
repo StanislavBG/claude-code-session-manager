@@ -1436,6 +1436,13 @@
  },
  {
   "ns": "projectPages",
+  "method": "mdReview",
+  "channel": "project-pages:md-review",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "projectPages",
   "method": "matrix",
   "channel": "project-pages:matrix",
   "kind": "invoke",

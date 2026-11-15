@@ -932,6 +932,14 @@ const projectPagesMdNetwork = z.object({
   docFolders: mdNetworkFolderList.optional(),
 }).strict();
 
+// project-pages:md-review — cwd plus optional Review MD network Epic ids whose
+// reviews/validation/<id>/ folders to list. Ids are joined onto the fs, so the
+// slug regex (same as lib/mdReviewRecord.cjs EPIC_ID_RE) is load-bearing.
+const projectPagesMdReview = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicIds: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)).max(50).optional(),
+}).strict();
+
 // ──────────────────────────────────────────── Project Home admin route
 // Real path validation is projectRootResolve.cjs + config.cjs's validatePath;
 // html content limits live in projectHomeAdminRoutes.cjs's validateHomeHtml.
@@ -1567,6 +1575,7 @@ module.exports = {
     projectBriefCwd,
     projectPagesCwd,
     projectPagesMdNetwork,
+    projectPagesMdReview,
     projectPagesRename,
     projectPagesDelete,
     projectHomeAdminWriteBody,

@@ -62,6 +62,8 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'promptSessions:read-session-transcript': { field: 'cwd', mode: 'root' },
   // Project Home > Tools > Review MD network link map (main/projectPages.cjs): cwd inside a registered root.
   'project-pages:md-network': { field: 'cwd', mode: 'root' },
+  // Project Home > Tools > Review MD network review record (main/projectPages.cjs): cwd inside a registered root.
+  'project-pages:md-review': { field: 'cwd', mode: 'root' },
   // Project Home ▸ Tools ▸ Competitor matrix (main/projectPages.cjs): read-only, cwd inside a registered root.
   'project-pages:matrix': { field: 'cwd', mode: 'root' },
   // Epic Changes view (main/lib/epic/epicChanges.cjs): diffs a repo, so cwd must sit inside a registered root.

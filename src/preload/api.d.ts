@@ -1759,6 +1759,48 @@ export interface MdNetwork {
 /** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */
 export type MdNetworkResult = MdNetwork | { ok: false; error: string };
 
+// ────────────────────────────────────────────── Project Pages: Review MD network record
+// Mirrors the JSDoc typedefs in src/main/lib/mdReviewRecord.cjs (ReviewVerdict,
+// ReviewRecord, MdReviewOk | MdReviewErr). Keep in sync by hand.
+
+/** One row of the record's per-doc verdict table. */
+export interface MdReviewVerdict {
+  doc: string;
+  verdict: string;
+  owner: string;
+}
+
+/** A parsed review record (reviews/docs/<YYYY-MM-DD>-md-network[-N].md); any field the record lacks is null/empty. */
+export interface MdReviewRecord {
+  date: string | null;
+  mode: string | null;
+  modeKind: 'Full review' | 'Drift check' | null;
+  scope: string | null;
+  session: string | null;
+  baseCommit: string | null;
+  owner: string | null;
+  map: string | null;
+  driftCheckCommand: string | null;
+  findingsCounts: Record<string, number>;
+  censusSummary: string | null;
+  verdicts: MdReviewVerdict[];
+  decisions: string[];
+  followUpPrds: string[];
+  nextReviewDue: string | null;
+  nextReviewNote: string | null;
+}
+
+/** The newest review record (null when none) plus, per requested Epic id, its validation record paths (repo-relative). */
+export interface MdReviewOk {
+  ok: true;
+  record: MdReviewRecord | null;
+  recordPath: string | null;
+  validation: Record<string, string[]>;
+}
+
+/** `{ ok: false, error }` for an ephemeral cwd or an unresolvable project root. */
+export type MdReviewResult = MdReviewOk | { ok: false; error: string };
+
 // ────────────────────────────────────────────── Project Pages: markdown doc census
 // Mirrors the JSDoc typedefs in src/main/lib/mdDocCensus.cjs.
 // Every path is repo-relative POSIX; folder strings end with '/'.
@@ -2659,6 +2701,8 @@ export interface SessionManagerAPI {
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
     /** Map the project's markdown link network from its root CLAUDE.md (read-only, bounded, no LLM) for the Tools pane. Scans on every call — no watcher, no cache. `ok:false` (with `error`) for a cwd `get` answers with empty lists (tmpdir / linked worktree), a folder that is not a git repo, or no root CLAUDE.md; rejects on an invalid cwd, like `get`. */
     mdNetwork: (payload: { cwd: string; recordFolders?: string[]; docFolders?: string[] }) => Promise<MdNetworkResult>;
+    /** Read the newest Review MD network record (reviews/docs/) and each given Epic id's validation record paths (reviews/validation/<id>/*.md). Read-only, no watcher, no cache, no LLM. `ok:false` for an ephemeral cwd; rejects on an invalid cwd or a bad Epic id. */
+    mdReview: (payload: { cwd: string; epicIds?: string[] }) => Promise<MdReviewResult>;
     /** Read the saved Competitor matrix (project-pages/matrix/matrix.json) — read-only; writes go through project_matrix_write. */
     matrix: (payload: { cwd: string }) => Promise<CompetitorMatrixResult>;
     /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */

@@ -371,6 +371,13 @@
   "remote": "deny"
  },
  {
+  "ns": "packs",
+  "method": "list",
+  "channel": "packs:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
   "ns": "agents",
   "method": "listPersonas",
   "channel": "agents:list-personas",

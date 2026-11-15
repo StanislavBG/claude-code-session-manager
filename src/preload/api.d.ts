@@ -448,6 +448,20 @@ export type AgentCliTerminalCommandResult =
   | { ok: true; command: string }
   | { ok: false; message: string };
 
+/** One `packs.list` row — display data only; pack dir and laws text stay in main. */
+export interface PackListRow {
+  id: string;
+  label: string;
+  description: string;
+  requires: { platform?: 'darwin' | 'linux' | 'win32' };
+  /** True when the pack ships an always-on laws.md. */
+  hasLaws: boolean;
+}
+
+export type PacksListResult =
+  | { ok: true; packs: PackListRow[] }
+  | { ok: false; error: string };
+
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
 export interface AgentPersona {
   name: string;
@@ -2305,6 +2319,10 @@ export interface SessionManagerAPI {
     detect: (payload?: { refresh?: boolean }) => Promise<AgentCliDetectRow[]>;
     /** The exact shell line (no trailing CR) the Epic Terminal pane types to launch/resume this Epic's CLI. */
     terminalCommand: (payload: { cwd: string; claudeSessionId: string }) => Promise<AgentCliTerminalCommandResult>;
+  };
+  /** Shipped context-pack catalog (New Session picker). Never rejects. */
+  packs: {
+    list: () => Promise<PacksListResult>;
   };
   agents: {
     listPersonas: () => Promise<AgentPersona[]>;

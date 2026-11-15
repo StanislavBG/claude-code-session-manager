@@ -126,6 +126,10 @@ contextBridge.exposeInMainWorld('api', {
     detect: (payload) => ipcRenderer.invoke('agentCli:detect', payload),
     terminalCommand: (payload) => ipcRenderer.invoke('agentCli:terminal-command', payload),
   },
+  // Context-pack catalog — display data only (remote: read).
+  packs: {
+    list: () => ipcRenderer.invoke('packs:list'),
+  },
   agents: {
     listPersonas: () => ipcRenderer.invoke('agents:list-personas'),
     savePersona: (payload) => ipcRenderer.invoke('agents:save-persona', payload),

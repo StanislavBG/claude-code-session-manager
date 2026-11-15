@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RelaySocket } from '../ws';
 import { useStore } from '../store';
 import { getTranscript, listSessionPrds } from '../remoteApi';
@@ -11,6 +11,8 @@ export type SessionTarget =
   | { kind: 'epic'; session: RemoteSession };
 
 const POLL_MS = 4000;
+/** Within this many px of the bottom the reader counts as "at the bottom" and follows new messages. */
+const STICK_PX = 80;
 const MAX_POLLS_PER_SEND = 45;
 
 const PENDING_LABEL: Record<SendChatResult['disposition'], string> = {
@@ -56,6 +58,9 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const pollCount = useRef(0);
   const olderLoaded = useRef(false);
+  const atBottom = useRef(true);
+  const justSent = useRef(false);
+  const prepend = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
 
   const loadTranscript = useCallback(async () => {
     if (!socket) return;
@@ -85,6 +90,8 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
       const r = await getTranscript(socket, deviceId, { cwd: projectCwd, sessionKey: sendTarget, limit: 10, before: nextBefore });
       const page = r?.messages ?? [];
       olderLoaded.current = true;
+      const el = transcriptRef.current;
+      if (el && page.length > 0) prepend.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
       setMessages((prev) => {
         const ids = new Set(prev.map((m) => m.uuid));
         return [...page.filter((m) => !ids.has(m.uuid)), ...prev];
@@ -103,6 +110,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
 
   const handleSent = useCallback((prompt: string, result: SendChatResult) => {
     pollCount.current = 0;
+    justSent.current = true;
     setPending({ text: prompt.trim(), disposition: result.disposition, sentAt: Date.now() });
   }, []);
 
@@ -147,11 +155,25 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
     };
   }, [socket, deviceId, liveTabId, subscribeCwd]);
 
-  // Scroll the transcript's own scroller to the newest message — never scrollIntoView, which would also scroll
-  // Cockpit's <main> (or the document) and push the composer off screen.
-  useEffect(() => {
+  const onTranscriptScroll = useCallback(() => {
     const el = transcriptRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
+  }, []);
+
+  // Scroll the transcript's own scroller — never scrollIntoView, which would also scroll Cockpit's <main> (or the
+  // document) and push the composer off screen. After 'Load earlier' keep the reader's place; otherwise follow the
+  // newest message only when the reader was at the bottom or just sent. Layout effect: adjust before paint.
+  useLayoutEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const saved = prepend.current;
+    if (saved) {
+      prepend.current = null;
+      el.scrollTop = saved.scrollTop + (el.scrollHeight - saved.scrollHeight);
+    } else if (atBottom.current || justSent.current) {
+      justSent.current = false;
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages, pending]);
 
   const disabledReason =
@@ -189,7 +211,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
         </section>
       )}
 
-      <div ref={transcriptRef} className="flex-1 min-h-0 overflow-y-auto rm-scroll px-3.5 py-3 space-y-2" data-testid="transcript">
+      <div ref={transcriptRef} onScroll={onTranscriptScroll} className="flex-1 min-h-0 overflow-y-auto rm-scroll px-3.5 py-3 space-y-2" data-testid="transcript">
         {error && <div className="text-xs text-accent" role="alert">{error}</div>}
         {hasMore && (
           <button

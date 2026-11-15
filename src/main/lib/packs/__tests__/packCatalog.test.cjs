@@ -21,14 +21,15 @@ function writePack(dir, { manifest, plugin, laws } = {}) {
   return d;
 }
 
-function expectRejected(dir) {
+/**
+ * Return the rejection error string for the pack in `dir`, or '' when the pack
+ * was listed or produced no error. Callers assert on the returned value.
+ */
+function rejectionFor(dir) {
   const r = listPacks({ packsDir: root });
-  expect(r.packs.find((p) => p.dir === path.join(root, dir))).toBeUndefined();
+  if (r.packs.some((p) => p.dir === path.join(root, dir))) return '';
   const e = r.errors.find((x) => x.dir === path.join(root, dir));
-  expect(e).toBeTruthy();
-  expect(typeof e.error).toBe('string');
-  expect(e.error.length).toBeGreaterThan(0);
-  return r;
+  return e && typeof e.error === 'string' ? e.error : '';
 }
 
 test('exports constants and bundledPacksDir points at <package root>/plugins/packs', () => {
@@ -74,36 +75,36 @@ test('getPack finds by id and returns null when absent', () => {
 test('rejects a missing or unparsable sm-pack.json', () => {
   writePack('no-manifest', { manifest: null });
   writePack('bad-json', { manifest: '{not json' });
-  expectRejected('no-manifest');
-  expectRejected('bad-json');
+  expect(rejectionFor('no-manifest')).toBe('sm-pack.json missing');
+  expect(rejectionFor('bad-json')).toMatch(/^sm-pack\.json is not valid JSON/);
 });
 
 test('rejects a non-kebab-case id', () => {
   writePack('Bad_Id', { manifest: { id: 'Bad_Id', label: 'x', description: 'x' } });
-  expectRejected('Bad_Id');
+  expect(rejectionFor('Bad_Id')).toContain('id: id must be kebab-case');
 });
 
 test('rejects an id over 40 chars', () => {
   const id = 'a'.repeat(41);
   writePack(id, { manifest: { id, label: 'x', description: 'x' } });
-  expectRejected(id);
+  expect(rejectionFor(id)).toMatch(/^sm-pack\.json invalid: id: .*40/);
 });
 
 test('rejects an id that differs from its directory name', () => {
   writePack('dir-name', { manifest: { id: 'other-name', label: 'x', description: 'x' } });
-  expectRejected('dir-name');
+  expect(rejectionFor('dir-name')).toBe('sm-pack.json id "other-name" must equal its directory name "dir-name"');
 });
 
 test('rejects a label over 60 chars and a description over 300 chars', () => {
   writePack('long-label', { manifest: { id: 'long-label', label: 'l'.repeat(61), description: 'x' } });
   writePack('long-desc', { manifest: { id: 'long-desc', label: 'x', description: 'd'.repeat(301) } });
-  expectRejected('long-label');
-  expectRejected('long-desc');
+  expect(rejectionFor('long-label')).toMatch(/^sm-pack\.json invalid: label: .*60/);
+  expect(rejectionFor('long-desc')).toMatch(/^sm-pack\.json invalid: description: .*300/);
 });
 
 test('rejects an unknown requires.platform', () => {
   writePack('bad-plat', { manifest: { id: 'bad-plat', label: 'x', description: 'x', requires: { platform: 'aix' } } });
-  expectRejected('bad-plat');
+  expect(rejectionFor('bad-plat')).toMatch(/^sm-pack\.json invalid: requires\.platform: /);
 });
 
 test('accepts each allowed platform', () => {
@@ -118,30 +119,30 @@ test('accepts each allowed platform', () => {
 test('rejects a missing or unparsable plugin.json', () => {
   writePack('no-plugin', { plugin: null });
   writePack('bad-plugin', { plugin: '{oops' });
-  expectRejected('no-plugin');
-  expectRejected('bad-plugin');
+  expect(rejectionFor('no-plugin')).toBe('.claude-plugin/plugin.json missing');
+  expect(rejectionFor('bad-plugin')).toMatch(/^\.claude-plugin\/plugin\.json is not valid JSON/);
 });
 
 test('rejects a plugin.json without a name', () => {
   writePack('no-name', { plugin: { version: '1.0.0' } });
-  expectRejected('no-name');
+  expect(rejectionFor('no-name')).toBe('.claude-plugin/plugin.json has no name');
 });
 
 test("rejects a plugin name starting with 'claude'", () => {
   writePack('reserved', { plugin: { name: 'claude-ios' } });
-  expectRejected('reserved');
+  expect(rejectionFor('reserved')).toBe('plugin name "claude-ios" must not start with "claude"');
 });
 
 test('rejects a plugin.json with defaultEnabled false', () => {
   writePack('disabled', { plugin: { name: 'sm-pack-disabled', defaultEnabled: false } });
-  expectRejected('disabled');
+  expect(rejectionFor('disabled')).toMatch(/^plugin\.json sets defaultEnabled:false/);
 });
 
 test('laws at the cap are accepted; over the cap are rejected', () => {
   writePack('at-cap', { laws: 'x'.repeat(PACK_LAWS_CHAR_CAP) });
   writePack('over-cap', { laws: 'x'.repeat(PACK_LAWS_CHAR_CAP + 1) });
-  const r = expectRejected('over-cap');
-  expect(r.packs.map((p) => p.id)).toEqual(['at-cap']);
+  expect(rejectionFor('over-cap')).toBe(`laws.md is ${PACK_LAWS_CHAR_CAP + 1} chars, over the ${PACK_LAWS_CHAR_CAP} cap`);
+  expect(listPacks({ packsDir: root }).packs.map((p) => p.id)).toEqual(['at-cap']);
 });
 
 test('one bad pack never hides the others', () => {

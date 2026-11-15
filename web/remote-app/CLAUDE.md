@@ -11,9 +11,9 @@ The phone-remote PWA (`@session-manager/app`): a **separate npm project** with i
 Root `npm run test:unit` / `test:e2e` do NOT cover it (root `playwright.config.ts` `testIgnore`).
 `npm test`: vitest runs `src/**/*.{spec,test}.{ts,tsx}`; name new tests `*.spec.*`.
 
-`tests/golden.spec.ts` is run by **no config**: this project's playwright `testDir` is
-`src/__tests__` (`*.e2e.ts`), and the spec targets a live `/projects/session-manager/` URL,
-which `vite preview` does not serve. It stays unrun; it is the Bilko publish-gate probe.
+`tests/golden.spec.ts` is run by **no config**: playwright `testDir` is `src/__tests__`
+(`*.e2e.ts`), and it targets a live `/projects/session-manager/` URL `vite preview` does not
+serve. It is the Bilko publish-gate probe.
 
 ## Two deploy targets — do not conflate
 
@@ -40,11 +40,11 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `cmd:chat:send` — send a prompt; target = epicId or main tab id.
 - `cmd:session:subscribe` — stream live updates for one session.
 - `event:remote:ready` — desktop → phone: bridge is up, commands accepted.
-- For a key-pinned browser the desktop sends the boxed `event:remote:ready` before the plaintext `e2e:ready`; `RelaySocket` holds such early boxes and dispatches them before deciding on `sas:pending`.
+- For a key-pinned browser the desktop sends boxed `event:remote:ready` before plaintext `e2e:ready`; `RelaySocket` holds early boxes and dispatches them before deciding on `sas:pending`.
 - `e2e:rekey` — desktop → phone (plaintext): drop the session key and re-send `e2e:hello`; pinned phones re-authenticate without SAS.
 
 A signed-in browser can drive any paired desktop, chosen in the header switcher (`src/devices.ts`).
-Phone-class browsers (`PHONE_QUERY` in `src/viewMode.ts`) get the drill-down as their primary UI and never load the desktop renderer; wider browsers get the full UI; the header toggle overrides this, stored under `sm-remote-view-mode`.
+Phone-class browsers (`PHONE_QUERY` in `src/viewMode.ts`) get the drill-down as primary UI, never the desktop renderer; wider browsers get the full UI; the header toggle overrides this, stored under `sm-remote-view-mode`.
 
 ## Who consumes this
 
@@ -57,7 +57,7 @@ Phone-class browsers (`PHONE_QUERY` in `src/viewMode.ts`) get the drill-down as 
   `web-remote/relay/` is dead — see [`web-remote/CLAUDE.md`](../../web-remote/CLAUDE.md).
   Never decommission the deployed relay (root `CLAUDE.md`).
 - `dist/` and `node_modules/` are build output — never hand-edit.
-- Drill-down screens fill Cockpit's `<main>` (`flex-1 min-h-0`) and never use viewport-height classes (`h-dvh`, `h-screen`, `100vh`): a nested `h-dvh` SessionScreen clipped the composer under the header (2026-11-15).
+- Drill-down screens fill Cockpit's `<main>` (`flex-1 min-h-0`), never viewport-height classes (`h-dvh`, `h-screen`, `100vh`): a nested `h-dvh` clipped the composer (2026-11-15).
 
 ## Share image
 

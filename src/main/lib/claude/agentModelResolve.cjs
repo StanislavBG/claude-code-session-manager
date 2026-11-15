@@ -85,6 +85,28 @@ function findEpicByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
   return null;
 }
 
+/**
+ * Looks up an Epic (PromptSession) row by its own Epic id — the key of the
+ * active index, or a row whose `id` matches. Same reader as
+ * findEpicByClaudeSessionId. Returns the row or null; never throws.
+ */
+function findEpicById(cwd, epicId, deps = {}) {
+  if (!cwd || !epicId) return null;
+  try {
+    const load = deps.readActiveIndex || readActiveIndex;
+    const { sessions } = load(cwd);
+    if (!sessions || typeof sessions !== 'object') return null;
+    const direct = Object.prototype.hasOwnProperty.call(sessions, epicId) ? sessions[epicId] : null;
+    if (direct && typeof direct === 'object') return direct;
+    for (const session of Object.values(sessions)) {
+      if (session && session.id === epicId) return session;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
   return findEpicByClaudeSessionId(cwd, claudeSessionId, deps)?.agentType || null;
 }
@@ -265,6 +287,7 @@ module.exports = {
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   findEpicByClaudeSessionId,
+  findEpicById,
   epicOverrideValue,
   readOverlayAwarePersonaModel,
   readOverlayAwarePersona,

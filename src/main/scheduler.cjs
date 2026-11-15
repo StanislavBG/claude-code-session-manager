@@ -156,6 +156,7 @@ const queueOps = require('./queueOps.cjs');
 const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prd/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epic/epicMint.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
@@ -4699,13 +4700,14 @@ function knownMcpServers() {
   return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [] }) {
   return [
     '-p',
     '--model', model,
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers() }),
+    ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
     '--dangerously-skip-permissions',
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
@@ -5038,6 +5040,24 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const effortResolution = resolveEpicEffort({ cwd, agentType: job.agentType, prdEffort: job.effort });
   const personaEffort = effortResolution.effort;
   const personaToolScope = buildPersonaToolScope(personaResolution.tools, { disallowed: HEADLESS_DISALLOWED_TOOLS });
+  // Epic context packs (PRD 3154): the job's Epic's selected packs load as
+  // --plugin-dir per pack, and their laws are appended AFTER the (already
+  // capped) persona body — the persona cap never applies to laws. Fresh and
+  // resume spawns alike; no Epic / no packs / an error = today's argv.
+  let packArgs = { pluginDirArgs: [], laws: '' };
+  try {
+    const packEpicId = job.epicId || job.sourcePromptId;
+    const packEpic = packEpicId ? agentModelResolve.findEpicById(cwd, packEpicId) : null;
+    const composed = packSpawnArgs.composePackSpawnArgs({ packIds: packEpic?.packs });
+    if (composed && Array.isArray(composed.pluginDirArgs)) {
+      packArgs = { pluginDirArgs: composed.pluginDirArgs, laws: typeof composed.laws === 'string' ? composed.laws : '' };
+    }
+  } catch (err) {
+    safeLog(`[scheduler] context packs skipped for ${job.slug}: ${err && err.message ? err.message : String(err)}\n`);
+  }
+  const jobSystemPrompt = packArgs.laws
+    ? (personaResolution.systemPrompt ? `${personaResolution.systemPrompt}\n\n${packArgs.laws}` : packArgs.laws)
+    : personaResolution.systemPrompt;
   safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}${effortResolution.source === 'prd' ? ' (prd)' : ''}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
 
   // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
@@ -5252,8 +5272,9 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       effort: personaEffort,
       sessionId,
       resume: !!resumeTarget,
-      systemPrompt: personaResolution.systemPrompt,
+      systemPrompt: jobSystemPrompt,
       toolScope: personaToolScope,
+      pluginDirArgs: packArgs.pluginDirArgs,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 

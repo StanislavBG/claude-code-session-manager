@@ -21,6 +21,7 @@ const cli = (...args) => execFileSync(process.execPath, [SCRIPT, ...args], { enc
 describe('real repo', () => {
   const pages = listPages(ROOT);
   const byKey = Object.fromEntries(pages.map((p) => [p.key, p]));
+  const classified = classifyPages(ROOT);
 
   test('listPages resolves faces and entries from the nav registry', () => {
     expect(byKey.extensions.entry).toBe('src/renderer/components/tabs/Extensions.tsx');
@@ -34,7 +35,7 @@ describe('real repo', () => {
   });
 
   test('classifyPages splits owned from shared', () => {
-    const c = classifyPages(ROOT);
+    const c = classified;
     const skills = c.extensions;
     expect(skills.owned).toContain('src/renderer/components/tabs/Extensions.tsx');
     const sharedFiles = skills.shared.map((s) => s.file);
@@ -56,7 +57,7 @@ describe('real repo', () => {
   });
 
   test('classifyPages attaches api usage per page', () => {
-    const c = classifyPages(ROOT);
+    const c = classified;
     const skills = [...c.extensions.api, ...c.extensions.sharedApi].find((a) => a.method === 'config.listDir');
     expect(skills).toBeTruthy();
     expect(skills.main).toContain('src/main/config.cjs');
@@ -132,11 +133,11 @@ describe('cli', () => {
     expect(Array.isArray(r.owned)).toBe(true);
     expect(Array.isArray(r.api)).toBe(true);
     expect(Array.isArray(r.tests)).toBe(true);
-  }, 60000);
+  }, 60_000);
 
   test('--duplicates --json includes shell.open', () => {
     expect(JSON.parse(cli('--duplicates', '--json')).some((d) => d.method === 'shell.open')).toBe(true);
-  }, 60000);
+  }, 60_000);
 
   test('unknown key exits 2', () => {
     const r = spawnSync(process.execPath, [SCRIPT, 'nope-page'], { encoding: 'utf8' });

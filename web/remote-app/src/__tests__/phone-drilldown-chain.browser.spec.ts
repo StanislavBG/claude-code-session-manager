@@ -105,10 +105,23 @@ beforeAll(async () => {
   }
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
   const t0 = Date.now() - 60_000;
-  const lines = [
-    { type: 'user', message: { role: 'user', content: USER_TEXT }, uuid: crypto.randomUUID(), timestamp: new Date(t0).toISOString(), sessionId: ACTIVE.claudeSessionId },
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: ASSISTANT_TEXT }] }, uuid: crypto.randomUUID(), timestamp: new Date(t0 + 5_000).toISOString(), sessionId: ACTIVE.claudeSessionId },
-  ];
+  // A long transcript (taller than any phone screen): 14 messages alternating user/assistant, earlier assistant
+  // turns long multi-sentence text. USER_TEXT and ASSISTANT_TEXT stay the newest user and assistant messages.
+  const LONG_REPLY = 'I read the relay handler, the session watcher and the transcript reader, then traced one prompt through the queue. ' +
+    'Every hop stamps its own id, the desktop answers on the connection that asked, and the transcript page comes back newest first. ' +
+    'Nothing in the chain buffers more than one frame, so a slow phone only delays its own screen. ' +
+    'The remaining risk is the layout on small screens, where a tall transcript must never push the composer out of reach. ' +
+    'I also checked that a dropped socket reconnects and resubscribes without losing the pending bubble, and that the audit log names every step it served.';
+  if (LONG_REPLY.length < 600) throw new Error(`LONG_REPLY is only ${LONG_REPLY.length} chars`);
+  const PAIRS = 7;
+  const lines: Record<string, unknown>[] = [];
+  for (let i = 0; i < PAIRS; i++) {
+    const last = i === PAIRS - 1;
+    const userText = last ? USER_TEXT : `Step ${i + 1}: what did you find in the chain?`;
+    const replyText = last ? ASSISTANT_TEXT : `Step ${i + 1}. ${LONG_REPLY}`;
+    lines.push({ type: 'user', message: { role: 'user', content: userText }, uuid: crypto.randomUUID(), timestamp: new Date(t0 + i * 6_000).toISOString(), sessionId: ACTIVE.claudeSessionId });
+    lines.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: replyText }] }, uuid: crypto.randomUUID(), timestamp: new Date(t0 + i * 6_000 + 3_000).toISOString(), sessionId: ACTIVE.claudeSessionId });
+  }
   fs.writeFileSync(transcriptFile, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
   // The harness page carries the real shell's viewport meta and its compiled Tailwind CSS, so the 390px layout
@@ -166,6 +179,7 @@ function relayAccepts(env: Record<string, unknown>): boolean {
 
 interface Harness {
   page: Page;
+  viewport: { width: number; height: number };
   /** Envelope types the browser sent to the relay (commands travel inside e2e:box). */
   browserSent: string[];
   /** Frames the fake relay dropped for failing its envelope schema. */
@@ -194,7 +208,7 @@ function harnessHtml(relayUrl: string, cfg: { deviceId: string; devicePubKey: st
 </html>`;
 }
 
-async function start(): Promise<Harness> {
+async function start(viewport: { width: number; height: number } = VIEWPORT): Promise<Harness> {
   const dk = crypto.generateKeyPairSync('ec', {
     namedCurve: 'P-256',
     publicKeyEncoding: { type: 'spki', format: 'der' },
@@ -217,6 +231,7 @@ async function start(): Promise<Harness> {
 
   const h: Harness = {
     page: null as never,
+    viewport,
     browserSent: [], rejected: [], warnings: [], pageErrors: [], http: [], stop: async () => {},
   };
 
@@ -268,7 +283,7 @@ async function start(): Promise<Harness> {
     });
   });
 
-  const context = await browser.newContext({ viewport: VIEWPORT, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
+  const context = await browser.newContext({ viewport, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
   // Records the desktop renderer's iframe if it is ever inserted, even for a moment.
   await context.addInitScript((sel: string) => {
     const w = window as unknown as { __rendererSeen: boolean };
@@ -336,8 +351,66 @@ async function checkScreen(h: Harness, name: string): Promise<void> {
   await h.page.screenshot({ path: file, animations: 'disabled' });
   console.log(`[phone-drilldown-chain] ${name}: ${file}`);
   const w = await h.page.evaluate(() => ({ doc: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-  expect(w.doc, `${name}: document scrollWidth ${w.doc} (body ${w.body}) is wider than the ${VIEWPORT.width}px phone`)
-    .toBeLessThanOrEqual(VIEWPORT.width);
+  expect(w.doc, `${name}: document scrollWidth ${w.doc} (body ${w.body}) is wider than the ${h.viewport.width}px phone`)
+    .toBeLessThanOrEqual(h.viewport.width);
+}
+
+/** The composer field on the session screen. Role-based so it holds for an <input> or a <textarea>. */
+function composerField(h: Harness): Locator {
+  return h.page.getByTestId('mic-pane').getByRole('textbox');
+}
+
+/**
+ * Geometry check, run BEFORE any fill/type/tap on the session screen (Playwright's actions scroll clipped
+ * elements into view, even inside overflow-hidden containers, which would hide the bug): the composer field
+ * is fully inside the viewport, it is the element hit at its own center, and Cockpit's <main> is not scrolled.
+ */
+async function expectComposerReachable(h: Harness, label: string): Promise<void> {
+  const field = composerField(h);
+  await shows(h, field, `${label}: the composer field`);
+  const r = await field.first().evaluate((el) => {
+    const rect = (e: Element | null) => {
+      if (!e) return null;
+      const b = e.getBoundingClientRect();
+      return { top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) };
+    };
+    const b = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    const main = document.querySelector('main');
+    return {
+      top: b.top, bottom: b.bottom, innerHeight: window.innerHeight,
+      hitIsField: hit === el,
+      hit: hit ? `${hit.tagName.toLowerCase()}${hit.getAttribute('data-testid') ? `[${hit.getAttribute('data-testid')}]` : ''}` : 'null',
+      mainScrollTop: main ? main.scrollTop : -1,
+      rects: {
+        header: rect(document.querySelector('header')),
+        main: rect(main),
+        sessionScreen: rect(document.querySelector('[data-testid=session-screen]')),
+        micPane: rect(document.querySelector('[data-testid=mic-pane]')),
+        field: rect(el),
+      },
+    };
+  });
+  const msg = `${label}: composer not reachable — field ${Math.round(r.top)}-${Math.round(r.bottom)} vs innerHeight ${r.innerHeight}, ` +
+    `elementFromPoint(center)=${r.hit}, main.scrollTop=${r.mainScrollTop}, rects=${JSON.stringify(r.rects)}`;
+  expect(r.top >= 0 && r.bottom <= r.innerHeight, msg).toBe(true);
+  expect(r.hitIsField, msg).toBe(true);
+  expect(r.mainScrollTop, msg).toBe(0);
+}
+
+/** Projects -> the project -> the active Epic, waiting for its newest seeded bubbles. */
+async function openActiveEpic(h: Harness): Promise<void> {
+  const { page } = h;
+  const projectRow = page.getByTestId('project-row').filter({ hasText: PROJECT_LABEL });
+  await shows(h, projectRow, 'The project row');
+  await projectRow.first().tap();
+  const sessionRow = page.getByTestId('session-row').filter({ hasText: ACTIVE.title });
+  await shows(h, sessionRow, 'The active Epic row');
+  await sessionRow.first().tap();
+  const bubble = (role: string, text: string) =>
+    page.locator(`[data-testid=chat-message][data-role=${role}]`).filter({ hasText: text });
+  await shows(h, bubble('user', USER_TEXT), 'The seeded user message');
+  await shows(h, bubble('assistant', ASSISTANT_TEXT), 'The seeded assistant reply');
 }
 
 describe('phone drill-down over the real chain: Cockpit -> ws.ts -> relay -> webRemote.cjs', () => {
@@ -373,8 +446,9 @@ describe('phone drill-down over the real chain: Cockpit -> ws.ts -> relay -> web
       await shows(h, bubble('user', USER_TEXT), 'The seeded user message');
       await shows(h, bubble('assistant', ASSISTANT_TEXT), 'The seeded assistant reply');
 
-      await page.getByTestId('mic-pane').locator('input').fill(PROMPT);
-      await page.getByRole('button', { name: 'Send command' }).tap();
+      await expectComposerReachable(h, '390x844');
+      await composerField(h).fill(PROMPT);
+      await page.getByRole('button', { name: /^Send/ }).tap();
       const pendingLabel = page.getByTestId('pending-label');
       await shows(h, pendingLabel, 'The pending bubble label', 20_000);
       expect(await pendingLabel.textContent()).toBe('Sent');
@@ -398,6 +472,37 @@ describe('phone drill-down over the real chain: Cockpit -> ws.ts -> relay -> web
       expect(await page.locator(RENDERER_IFRAME).count()).toBe(0);
       expect(h.pageErrors).toEqual([]);
       expect(chatCalls.length).toBe(1);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
+  it('375x667: the composer stays on screen under a long transcript', async () => {
+    const h = await start({ width: 375, height: 667 });
+    try {
+      expect(await h.page.evaluate(() => window.innerWidth)).toBe(375);
+      await openActiveEpic(h);
+      await expectComposerReachable(h, '375x667');
+      await checkScreen(h, '4-session-375x667');
+      expect(h.pageErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
+  it('390x844 with a 59px taller header (standalone-PWA safe-area-inset-top): the composer stays on screen', async () => {
+    const h = await start();
+    try {
+      await openActiveEpic(h);
+      // The first <header> in the document is Cockpit's; emulate env(safe-area-inset-top) = 59px.
+      await h.page.evaluate(() => new Promise<void>((resolve) => {
+        const header = document.querySelector('header') as HTMLElement | null;
+        if (header) header.style.height = 'calc(3rem + 59px)';
+        requestAnimationFrame(() => resolve());
+      }));
+      await expectComposerReachable(h, '390x844 tall header');
+      await checkScreen(h, '5-session-tall-header');
+      expect(h.pageErrors).toEqual([]);
     } finally {
       await h.stop();
     }

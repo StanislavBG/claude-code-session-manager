@@ -53,7 +53,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
   const [prds, setPrds] = useState<SessionPrd[]>([]);
   const [prdError, setPrdError] = useState<string | null>(null);
   const [prdsOpen, setPrdsOpen] = useState(false);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
   const pollCount = useRef(0);
   const olderLoaded = useRef(false);
 
@@ -147,7 +147,12 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
     };
   }, [socket, deviceId, liveTabId, subscribeCwd]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView?.({ block: 'end' }); }, [messages, pending]);
+  // Scroll the transcript's own scroller to the newest message — never scrollIntoView, which would also scroll
+  // Cockpit's <main> (or the document) and push the composer off screen.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, pending]);
 
   const disabledReason =
     status === 'proposed' ? 'This session is proposed — approve it on your computer first.'
@@ -155,7 +160,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
         : undefined;
 
   return (
-    <div className="flex flex-col h-dvh text-ink" data-testid="session-screen">
+    <div className="flex-1 min-h-0 flex flex-col text-ink" data-testid="session-screen">
       <header className="flex items-center gap-3 px-3 h-12 border-b border-edge bg-paper flex-shrink-0">
         <button onClick={onBack} data-track="session-back" aria-label="Back" className="min-h-touch min-w-touch text-ink active:text-accent">‹ Back</button>
         <span className="flex-1 font-serif text-lg font-semibold truncate">{title}</span>
@@ -184,7 +189,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
         </section>
       )}
 
-      <div className="flex-1 overflow-y-auto rm-scroll px-3.5 py-3 space-y-2" data-testid="transcript">
+      <div ref={transcriptRef} className="flex-1 min-h-0 overflow-y-auto rm-scroll px-3.5 py-3 space-y-2" data-testid="transcript">
         {error && <div className="text-xs text-accent" role="alert">{error}</div>}
         {hasMore && (
           <button
@@ -214,7 +219,6 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
             <div className="text-[11px] text-ink-mute text-right mt-0.5" data-testid="pending-label">{PENDING_LABEL[pending.disposition]}</div>
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       <MicPane socket={socket} deviceId={deviceId} target={sendTarget} disabledReason={disabledReason} onSent={handleSent} />

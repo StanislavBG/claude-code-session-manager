@@ -57,6 +57,7 @@ Phone-class browsers (`PHONE_QUERY` in `src/viewMode.ts`) get the drill-down as 
   `web-remote/relay/` is dead — see [`web-remote/CLAUDE.md`](../../web-remote/CLAUDE.md).
   Never decommission the deployed relay (root `CLAUDE.md`).
 - `dist/` and `node_modules/` are build output — never hand-edit.
+- Drill-down screens fill Cockpit's `<main>` (`flex-1 min-h-0`) and never use viewport-height classes (`h-dvh`, `h-screen`, `100vh`): a nested `h-dvh` SessionScreen clipped the composer under the header (2026-11-15).
 
 ## Share image
 

@@ -1142,46 +1142,85 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
     await act(async () => {})
   }
 
-  it('Agent None + Mission None + loop off starts plain: goal-only prompt, no agentType/tag, developLoop false', async () => {
+  const sw = (el: HTMLElement) => q(el, 'new-epic-just-claude')
+  const JC_NOTE = 'Just Claude — no agent, no mission, no develop loop. Your goal is sent as written.'
+
+  it('just Claude: switch sits in the header right before the advanced toggle, on both faces, and the old checkbox is gone', async () => {
     const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
-    pickAgent(el, '__none__')
-    click(q(el, 'new-epic-kind-none'))
-    expect((q(el, 'new-epic-develop-loop') as HTMLInputElement).checked).toBe(false)
+    const switches = el.querySelectorAll('[data-testid="new-epic-just-claude"]')
+    expect(switches.length).toBe(2)
+    switches.forEach((s) => {
+      expect(s.getAttribute('role')).toBe('switch')
+      expect(s.getAttribute('aria-checked')).toBe('false')
+      const label = s.nextElementSibling!
+      expect(label.textContent).toBe('advanced')
+      expect(label.nextElementSibling!.getAttribute('data-testid')).toBe('new-epic-advanced-toggle')
+      expect(s.previousElementSibling!.textContent).toBe('just Claude')
+    })
+    expect(el.querySelector('[data-testid="new-epic-develop-loop"]')).toBeNull()
+    expect(el.textContent).not.toContain('Develop loop')
+    expect(el.textContent).not.toContain('Off = plain Claude')
+  })
+
+  it('just Claude ON hides the pickers, shows the note, and sends the plain payload', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+    click(sw(el))
+    expect(sw(el).getAttribute('aria-checked')).toBe('true')
+    expect(q(el, 'new-epic-agent-picker')).toBeNull()
+    expect(el.querySelector('[data-testid^="new-epic-kind-"]')).toBeNull()
+    expect(q(el, 'new-epic-mission-description')).toBeNull()
+    expect(q(el, 'new-epic-just-claude-note').textContent).toBe(JC_NOTE)
     await start(el, 'My title', 'Do the thing')
     const args = createPromptSessionSpy.mock.calls[0]
     expect(args[2]).toBeUndefined()
     expect(args[4]).toBeUndefined()
     expect(args[7]).toMatchObject({ developLoop: false })
+    expect('agentCli' in (args[7] as object)).toBe(false)
     expect(sendSpy.mock.calls[0][0].prompt).toBe('Goal: My title\n\nDo the thing')
   })
 
-  it('develop loop defaults on, off for None+None, and a human toggle sticks', async () => {
-    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
-    const box = () => q(el, 'new-epic-develop-loop') as HTMLInputElement
-    expect(box().checked).toBe(true)
-    pickAgent(el, '__none__')
-    click(q(el, 'new-epic-kind-none'))
-    expect(box().checked).toBe(false)
-    click(box())
-    expect(box().checked).toBe(true)
-    pickAgent(el, 'architect')
-    pickAgent(el, '__none__')
-    expect(box().checked).toBe(true)
+  it('just Claude OFF restores the Agent and Mission picked before it was turned on', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion']), persona('builder', ['build', 'discussion'])])
+    pickAgent(el, 'builder')
+    click(q(el, 'new-epic-kind-discussion'))
+    click(sw(el))
+    expect(q(el, 'new-epic-agent-picker')).toBeNull()
+    click(sw(el))
+    expect(sw(el).getAttribute('aria-checked')).toBe('false')
+    expect(q(el, 'new-epic-just-claude-note')).toBeNull()
+    expect((q(el, 'new-epic-agent-select') as HTMLSelectElement).value).toBe('builder')
+    expect(q(el, 'new-epic-kind-discussion').getAttribute('aria-pressed')).toBe('true')
+    await start(el)
+    expect(createPromptSessionSpy.mock.calls[0][2]).toBe('discussion')
+    expect(createPromptSessionSpy.mock.calls[0][4]).toBe('builder')
+    expect('developLoop' in (createPromptSessionSpy.mock.calls[0][7] as object)).toBe(false)
   })
 
-  it('loop off disables loop-requiring missions, snaps a selected one to None, disables delegation and warns', async () => {
-    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+  it('just Claude OFF falls back to architect + feature when the personas loaded only while it was on', async () => {
+    let resolve: (v: AgentPersona[]) => void = () => {}
+    listPersonasSpy.mockReturnValue(new Promise<AgentPersona[]>((r) => { resolve = r }))
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    click(sw(el))
+    await act(async () => { resolve([persona('builder', ['build']), persona('architect', ['feature', 'bug', 'discussion'])]) })
+    // The async architect default must not re-pick a persona while the pickers are hidden.
+    expect(q(el, 'new-epic-agent-picker')).toBeNull()
+    click(sw(el))
+    expect((q(el, 'new-epic-agent-select') as HTMLSelectElement).value).toBe('architect')
     expect(q(el, 'new-epic-kind-feature').getAttribute('aria-pressed')).toBe('true')
-    click(q(el, 'new-epic-develop-loop'))
-    const feature = q(el, 'new-epic-kind-feature') as HTMLButtonElement
-    expect(feature.disabled).toBe(true)
-    expect(feature.title).toBe('Needs the develop loop')
-    expect(q(el, 'new-epic-kind-none').getAttribute('aria-pressed')).toBe('true')
-    expect(q(el, 'new-epic-develop-loop-warning').textContent).toContain('architect plans through /develop')
-    click(q(el, 'new-epic-flip-to-grounding'))
-    const deleg = q(el, 'context-injection-toggle-delegate-implementation') as HTMLInputElement
-    expect(deleg.disabled).toBe(true)
-    expect(deleg.checked).toBe(false)
+    await start(el)
+    expect(createPromptSessionSpy.mock.calls[0][4]).toBe('architect')
+    expect(createPromptSessionSpy.mock.calls[0][2]).toBe('feature')
+  })
+
+  it('just Claude manual Agent None + Mission None with the switch off keeps the develop loop on', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+    pickAgent(el, '__none__')
+    click(q(el, 'new-epic-kind-none'))
+    expect(sw(el).getAttribute('aria-checked')).toBe('false')
+    await start(el)
+    expect(createPromptSessionSpy.mock.calls[0][4]).toBeUndefined()
+    expect('developLoop' in (createPromptSessionSpy.mock.calls[0][7] as object)).toBe(false)
   })
 
   it('default architect + Feature carries no developLoop key', async () => {
@@ -1268,9 +1307,35 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
       expect((el.querySelector('[data-testid="new-epic-title"]') as HTMLInputElement).value).toBe('Draft title')
       expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('Draft goal')
       expect(el.querySelector('[data-testid="new-epic-kind-none"]')?.getAttribute('aria-pressed')).toBe('true')
-      expect((el.querySelector('[data-testid="new-epic-develop-loop"]') as HTMLInputElement).checked).toBe(false)
+      // An agent + loop-off draft (old checkbox) reopens with the switch off and the Agent kept.
+      expect(el.querySelector('[data-testid="new-epic-just-claude"]')?.getAttribute('aria-checked')).toBe('false')
+      expect(el.querySelector('[data-testid="new-epic-agent-picker"]')).not.toBeNull()
       expect(el.querySelector('[data-testid="new-epic-saved-ref"]')?.textContent).toContain('/refs/one.png')
       expect(el.querySelector('[data-testid="new-epic-discard-draft"]')).not.toBeNull()
+    })
+
+    it('just Claude draft seeding: a no-agent, no-mission, loop-off draft reopens with the switch on and re-saves plain', async () => {
+      const base = (await makeDraft()) as unknown as Record<string, unknown>
+      const draft = { ...base, agentType: undefined, tag: undefined } as never
+      const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+      expect(el.querySelector('[data-testid="new-epic-just-claude"]')?.getAttribute('aria-checked')).toBe('true')
+      expect(el.querySelector('[data-testid="new-epic-agent-picker"]')).toBeNull()
+      expect(el.querySelector('[data-testid="new-epic-just-claude-note"]')).not.toBeNull()
+      click(el, 'new-epic-save-draft')
+      await act(async () => {})
+      expect(updateSpy.mock.calls[0][1]).toMatchObject({ developLoop: false, agentType: null, tag: null, agentCli: null })
+    })
+
+    it('just Claude draft seeding: a no-agent draft with the loop on, or on a non-Claude CLI, reopens with the switch off', async () => {
+      const base = (await makeDraft()) as unknown as Record<string, unknown>
+      for (const over of [{ developLoop: undefined }, { agentCli: 'codex' }]) {
+        const el = mount(<NewEpicCard draftEpic={{ ...base, agentType: undefined, tag: undefined, ...over } as never} onCreated={vi.fn()} onCancel={vi.fn()} />)
+        await act(async () => {})
+        expect(el.querySelector('[data-testid="new-epic-just-claude"]')?.getAttribute('aria-checked')).toBe('false')
+        expect(el.querySelector('[data-testid="new-epic-agent-picker"]')).not.toBeNull()
+        act(() => root!.unmount())
+      }
     })
 
     it('edit-mode Save calls updateProposedDraft with the saved references and never mints', async () => {
@@ -1433,7 +1498,7 @@ describe('NewEpicCard None agent / None mission / develop loop', () => {
         expect(updateSpy).toHaveBeenCalledTimes(1)
         expect(val(el, 'new-epic-title')).toBe('Kept title')
         expect(val(el, 'new-epic-goal')).toBe('Kept goal')
-        expect((el.querySelector('[data-testid="new-epic-develop-loop"]') as HTMLInputElement).checked).toBe(false)
+        expect(el.querySelector('[data-testid="new-epic-just-claude"]')?.getAttribute('aria-checked')).toBe('false')
       })
 
       it('an edit after Save autosaves exactly once', async () => {
@@ -1807,10 +1872,8 @@ describe('NewEpicCard agent CLI choice', () => {
 
     click(q(el, 'new-epic-agent-cli-option-codex')!)
 
-    const loop = q(el, 'new-epic-develop-loop') as HTMLInputElement
-    expect(loop.checked).toBe(false)
-    expect(loop.disabled).toBe(true)
-    expect(loop.title).toBe('The develop loop needs Claude Code')
+    // The loop is forced off by the CLI, not by the just Claude switch.
+    expect(q(el, 'new-epic-just-claude')!.getAttribute('aria-checked')).toBe('false')
     expect((q(el, 'new-epic-kind-feature') as HTMLButtonElement).disabled).toBe(true)
     expect(q(el, 'new-epic-restore-chip')).toBeNull()
     expect(q(el, 'new-epic-restore-panel')).toBeNull()
@@ -1827,15 +1890,46 @@ describe('NewEpicCard agent CLI choice', () => {
     expect('restoreSessionId' in runtime).toBe(false)
   })
 
+  it('codex (loop off) disables loop-requiring missions, snaps a selected one to None, disables delegation and warns', async () => {
+    const el = await mountReady()
+    expect(q(el, 'new-epic-kind-feature')!.getAttribute('aria-pressed')).toBe('true')
+    await openAdvanced(el)
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    const feature = q(el, 'new-epic-kind-feature') as HTMLButtonElement
+    expect(feature.disabled).toBe(true)
+    expect(feature.title).toBe('Needs the develop loop')
+    expect(q(el, 'new-epic-kind-none')!.getAttribute('aria-pressed')).toBe('true')
+    expect(q(el, 'new-epic-develop-loop-warning')!.textContent).toContain('architect plans through /develop')
+    const deleg = q(el, 'context-injection-toggle-delegate-implementation') as HTMLInputElement
+    expect(deleg.disabled).toBe(true)
+    expect(deleg.checked).toBe(false)
+  })
+
+  it('just Claude ON clears a per-session codex CLI override', async () => {
+    const el = await mountReady()
+    await openAdvanced(el)
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    expect(q(el, 'new-epic-agent-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
+    click(q(el, 'new-epic-just-claude')!)
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
+    click(q(el, 'new-epic-create')!)
+    await act(async () => {})
+    const runtime = createPromptSessionSpy.mock.calls[0][7] as Record<string, unknown>
+    expect(runtime).toMatchObject({ developLoop: false })
+    expect('agentCli' in runtime).toBe(false)
+    expect('agentCliModel' in runtime).toBe(false)
+  })
+
   it('switching back to Claude Code re-enables the loop and drops the model', async () => {
     const el = await mountReady()
     await openAdvanced(el)
     click(q(el, 'new-epic-agent-cli-option-codex')!)
     act(() => setNativeValue(q(el, 'new-epic-agent-cli-model') as HTMLInputElement, 'm'))
     click(q(el, 'new-epic-agent-cli-option-claude')!)
-    const loop = q(el, 'new-epic-develop-loop') as HTMLInputElement
-    expect(loop.disabled).toBe(false)
-    expect(loop.checked).toBe(true)
+    expect(q(el, 'new-epic-just-claude')!.getAttribute('aria-checked')).toBe('false')
+    expect((q(el, 'new-epic-kind-feature') as HTMLButtonElement).disabled).toBe(false)
     act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
     click(q(el, 'new-epic-create')!)
     await act(async () => {})

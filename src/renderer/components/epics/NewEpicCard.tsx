@@ -32,7 +32,7 @@ import { RestoreSessionPanel, restorableSessionLabel, restorableSessionMeta } fr
 const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
 const GOAL_PLACEHOLDER = 'The objective, in a sentence or two — sent as the first instruction. ⌘V to attach a screenshot.'
 const RESTORE_GOAL_PLACEHOLDER = 'What should this session do next? Sent as the next message after its history.'
-const NON_CLAUDE_LOOP_TITLE = 'The develop loop needs Claude Code'
+const JUST_CLAUDE_NOTE = 'Just Claude — no agent, no mission, no develop loop. Your goal is sent as written.'
 const FRESH_DRAFT_RESTORE_NOTE = 'A saved draft keeps its own session. To continue an earlier Claude Code session, start a new session instead.'
 
 // The readiness checks Session Manager can close itself, one press each. Keyed
@@ -216,8 +216,13 @@ export function NewEpicCard({
   // synchronization effect fighting over it — a tag change simply changes
   // what an UNtouched key falls back to.
   const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>(seed?.injections ?? {})
-  // null = the human has not touched the Develop loop checkbox; once set, it always wins.
-  const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(seed ? seed.developLoop : null)
+  // 'just Claude' = plain Claude Code: Agent None, Mission None, no develop loop. A reopened
+  // draft starts ON only when it was saved in exactly that shape on Claude Code.
+  const [justClaude, setJustClaude] = useState<boolean>(() => Boolean(
+    editDraft && seed && seed.developLoop === false && seed.agentName === NO_AGENT && seed.tag === null
+    && (!editDraft.agentCli || editDraft.agentCli === 'claude')))
+  // The Agent/Mission picked just before the switch went ON, restored when it goes OFF.
+  const justClaudePrevRef = useRef<{ agentName: string; tag: EpicTag | null; touched: boolean } | null>(null)
   // Which CLI runs the session (third independent selection); 'claude' = Claude Code, the default.
   // null = follow the Actor's configured CLI (AgentPersona.agentCli); set = a per-session pick in advanced.
   const [cliOverride, setCliOverride] = useState<{ cli: AgentCliChoice; model: string } | null>(() =>
@@ -258,8 +263,8 @@ export function NewEpicCard({
   const nonClaudeCli = agentCli !== 'claude'
   const missionTags = missionTagsForAgent(selectedAgent)
   const missionKey = missionTags.join(',')
-  // The develop loop (/develop, PRD queueing) is Claude Code only.
-  const developLoop = nonClaudeCli ? false : (developLoopOverride ?? !(agentless && tag === null))
+  // The develop loop (/develop, PRD queueing) is Claude Code only, and off under 'just Claude'.
+  const developLoop = !justClaude && !nonClaudeCli
   const contextInjectionsOn = useMemo<Record<ContextInjectionKey, boolean>>(
     () => resolveContextInjections({ tag, agentless, developLoop, overrides: injectionOverrides }),
     [tag, agentless, developLoop, injectionOverrides],
@@ -416,11 +421,38 @@ export function NewEpicCard({
     setEffortOverride('')
     setBoard(null)
     setInjectionOverrides({})
-    setDevelopLoopOverride(null)
+    setJustClaude(false)
+    justClaudePrevRef.current = null
     setSavedRefs([])
     setRestoreSession(null)
     setCliOverride(null)
     att.clear()
+  }
+
+  // One click handler so React batches every setter into one render.
+  const toggleJustClaude = (on: boolean) => {
+    if (on) {
+      justClaudePrevRef.current = { agentName, tag, touched: agentTouchedRef.current }
+      // Hidden pickers: the async architect default must never re-pick a persona now.
+      agentTouchedRef.current = true
+      setAgentName(NO_AGENT)
+      setTag(null)
+      setCliOverride(null)
+      setJustClaude(true)
+      return
+    }
+    const prev = justClaudePrevRef.current
+    justClaudePrevRef.current = null
+    if (prev && prev.agentName) {
+      setAgentName(prev.agentName)
+      setTag(prev.tag)
+      agentTouchedRef.current = prev.touched
+    } else {
+      setAgentName((agents?.find((a) => a.name === 'architect') ?? agents?.[0])?.name ?? '')
+      setTag('feature')
+      agentTouchedRef.current = false
+    }
+    setJustClaude(false)
   }
 
   // A non-Claude CLI cannot continue a Claude Code session: drop any restore pick.
@@ -705,7 +737,7 @@ export function NewEpicCard({
             }`}
             style={{ backfaceVisibility: 'hidden' }}
           >
-            <NewEpicHeader eyebrow="New session" advanced={advanced} setAdvanced={setAdvanced} />
+            <NewEpicHeader eyebrow="New session" advanced={advanced} setAdvanced={setAdvanced} justClaude={justClaude} onJustClaude={toggleJustClaude} />
             <h2 className="m-0 font-serif text-2xl font-semibold tracking-[-0.3px] text-fg">
               What are we trying to achieve?
             </h2>
@@ -789,69 +821,77 @@ export function NewEpicCard({
               </div>
             )}
 
-            <div className="mb-3.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3.5">
-              <div className="min-w-0">
-                <div
-                  className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
-                  title="Who runs this session — from the Agent Library (~/.claude/agents)."
-                >
-                  Agent
-                </div>
-                <AgentPicker
-                  agents={agents ?? []}
-                  value={agentName}
-                  allowNone
-                  onChange={(name) => {
-                    agentTouchedRef.current = true
-                    setAgentName(name)
-                  }}
-                />
-              </div>
-              <div className="min-w-0">
-                <div
-                  className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
-                  title="The session's mission — from the Tag Library. Sets how eagerly /develop fires."
-                >
-                  Mission
-                </div>
-                <div className="inline-flex rounded-[10px] border border-line bg-bg p-0.5">
-                  {missionTags.map((t) => {
-                    const on = tag === t
-                    const needsLoop = !developLoop && tagLibraryEntry(t).requiresDevelopLoop
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        data-testid={`new-epic-kind-${t}`}
-                        aria-pressed={on}
-                        disabled={needsLoop}
-                        title={needsLoop ? 'Needs the develop loop' : undefined}
-                        onClick={() => setTag(t)}
-                        className={`rounded-md px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-                          on ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
-                        }`}
-                      >
-                        {tagLibraryEntry(t).label}
-                      </button>
-                    )
-                  })}
-                  <button
-                    type="button"
-                    data-testid="new-epic-kind-none"
-                    aria-pressed={tag === null}
-                    onClick={() => setTag(null)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                      tag === null ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
-                    }`}
+            {justClaude ? (
+              <p className="mb-3.5 text-[12.5px] leading-[1.5] text-fg-dim" data-testid="new-epic-just-claude-note">
+                {JUST_CLAUDE_NOTE}
+              </p>
+            ) : (
+              <>
+              <div className="mb-3.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3.5">
+                <div className="min-w-0">
+                  <div
+                    className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
+                    title="Who runs this session — from the Agent Library (~/.claude/agents)."
                   >
-                    {NO_MISSION.label}
-                  </button>
+                    Agent
+                  </div>
+                  <AgentPicker
+                    agents={agents ?? []}
+                    value={agentName}
+                    allowNone
+                    onChange={(name) => {
+                      agentTouchedRef.current = true
+                      setAgentName(name)
+                    }}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <div
+                    className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
+                    title="The session's mission — from the Tag Library. Sets how eagerly /develop fires."
+                  >
+                    Mission
+                  </div>
+                  <div className="inline-flex rounded-[10px] border border-line bg-bg p-0.5">
+                    {missionTags.map((t) => {
+                      const on = tag === t
+                      const needsLoop = !developLoop && tagLibraryEntry(t).requiresDevelopLoop
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          data-testid={`new-epic-kind-${t}`}
+                          aria-pressed={on}
+                          disabled={needsLoop}
+                          title={needsLoop ? 'Needs the develop loop' : undefined}
+                          onClick={() => setTag(t)}
+                          className={`rounded-md px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+                            on ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
+                          }`}
+                        >
+                          {tagLibraryEntry(t).label}
+                        </button>
+                      )
+                    })}
+                    <button
+                      type="button"
+                      data-testid="new-epic-kind-none"
+                      aria-pressed={tag === null}
+                      onClick={() => setTag(null)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                        tag === null ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
+                      }`}
+                    >
+                      {NO_MISSION.label}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-            <p className="mb-3.5 text-[12.5px] leading-[1.5] text-fg-dim" data-testid="new-epic-mission-description">
-              {selectedTagMission}
-            </p>
+                <p className="mb-3.5 text-[12.5px] leading-[1.5] text-fg-dim" data-testid="new-epic-mission-description">
+                  {selectedTagMission}
+                </p>
+              </>
+            )}
 
             {personaCliMissing && selectedAgent && personaCli && (
               <div
@@ -887,23 +927,6 @@ export function NewEpicCard({
               </div>
             )}
 
-            <label className={`mb-1 flex items-start gap-2 ${nonClaudeCli ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-              <input
-                type="checkbox"
-                data-testid="new-epic-develop-loop"
-                checked={developLoop}
-                disabled={nonClaudeCli}
-                title={nonClaudeCli ? NON_CLAUDE_LOOP_TITLE : undefined}
-                onChange={(e) => setDevelopLoopOverride(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="text-[12.5px] font-medium text-fg">Develop loop</span>
-                <span className="block text-[11.5px] leading-[1.4] text-fg-faint">
-                  Off = plain Claude: no /develop skill, no PRD queueing, no delegation guard.
-                </span>
-              </span>
-            </label>
             {!developLoop && selectedAgent && (selectedAgent.tags ?? []).some((t) => t === 'feature' || t === 'bug') && (
               <div
                 data-testid="new-epic-develop-loop-warning"
@@ -1062,7 +1085,7 @@ export function NewEpicCard({
             className="absolute inset-0 flex flex-col rounded-2xl border border-line bg-bg-hi px-[26px] pt-6 pb-[18px]"
             style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
           >
-            <NewEpicHeader eyebrow="New session · grounding" advanced={advanced} setAdvanced={setAdvanced} />
+            <NewEpicHeader eyebrow="New session · grounding" advanced={advanced} setAdvanced={setAdvanced} justClaude={justClaude} onJustClaude={toggleJustClaude} />
             <h2 className="m-0 font-serif text-2xl font-semibold tracking-[-0.3px] text-fg">
               What this session will know
             </h2>
@@ -1335,14 +1358,44 @@ export function NewEpicCard({
   )
 }
 
+function HeaderSwitch({ label, on, onChange, testId, title, labelClassName = '' }: {
+  label: string
+  labelClassName?: string
+  on: boolean
+  onChange: (v: boolean) => void
+  testId: string
+  title?: string
+}) {
+  return (
+    <>
+      <span className={`font-mono text-[11px] text-fg-faint ${labelClassName}`} title={title}>{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        data-testid={testId}
+        title={title}
+        onClick={() => onChange(!on)}
+        className={`flex h-[19px] w-[34px] items-center rounded-full p-0.5 ${on ? 'justify-end bg-accent' : 'justify-start bg-rule'}`}
+      >
+        <span className="h-[15px] w-[15px] rounded-full bg-bg-hi shadow" />
+      </button>
+    </>
+  )
+}
+
 function NewEpicHeader({
   eyebrow,
   advanced,
   setAdvanced,
+  justClaude,
+  onJustClaude,
 }: {
   eyebrow: string
   advanced: boolean
   setAdvanced: (v: boolean) => void
+  justClaude: boolean
+  onJustClaude: (v: boolean) => void
 }) {
   return (
     <div className="mb-1.5 flex items-center gap-2.5">
@@ -1350,17 +1403,14 @@ function NewEpicHeader({
         {eyebrow}
       </span>
       <span className="ml-auto flex items-center gap-1.5">
-        <span className="font-mono text-[11px] text-fg-faint">advanced</span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={advanced}
-          data-testid="new-epic-advanced-toggle"
-          onClick={() => setAdvanced(!advanced)}
-          className={`flex h-[19px] w-[34px] items-center rounded-full p-0.5 ${advanced ? 'justify-end bg-accent' : 'justify-start bg-rule'}`}
-        >
-          <span className="h-[15px] w-[15px] rounded-full bg-bg-hi shadow" />
-        </button>
+        <HeaderSwitch
+          label="just Claude"
+          on={justClaude}
+          onChange={onJustClaude}
+          testId="new-epic-just-claude"
+          title="Plain Claude Code — no agent, no mission, no /develop skill, no PRD queueing, no delegation guard."
+        />
+        <HeaderSwitch label="advanced" labelClassName="ml-1.5" on={advanced} onChange={setAdvanced} testId="new-epic-advanced-toggle" />
       </span>
     </div>
   )

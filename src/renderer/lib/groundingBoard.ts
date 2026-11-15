@@ -20,6 +20,8 @@ export interface GroundingItem {
   tokK: number
   present: boolean
   locked?: boolean
+  /** How many entries this row stands for, when the summary names a count (Context packs). */
+  count?: number
 }
 
 export interface GroundingGroup {
@@ -73,10 +75,17 @@ export interface GroundingBoardInput {
   /** Real counts already available client-side — no extra IPC needed. */
   openTerminalTabsInProject: number
   otherEpicsInProject: number
+  /**
+   * Context packs selected for this Epic. Display only — the board is an
+   * inspector, not a control; listing a pack here never loads it.
+   */
+  packs?: Array<{ id: string; label: string }>
 }
 
+const CONTEXT_PACKS_ITEM = 'Context packs'
+
 export async function computeGroundingBoard(input: GroundingBoardInput): Promise<GroundingGroup[]> {
-  const { home, cwd, agentPersonaPath, agentPersonaName, openTerminalTabsInProject, otherEpicsInProject } = input
+  const { home, cwd, agentPersonaPath, agentPersonaName, openTerminalTabsInProject, otherEpicsInProject, packs } = input
   const userClaudeMdPath = CLAUDE_MD_SCOPES.resolve('user', home, null)!
   const userSettingsPath = SETTINGS_SCOPES.resolve('user', home, null)!
   const projectClaudeMdPath = CLAUDE_MD_SCOPES.resolve('project', home, cwd)!
@@ -137,7 +146,7 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
       userSkills,
       mcpItem(userMcpServers),
       personaFile
-        ? { name: `agents/${agentPersonaName}.md`, detail: 'system prompt for the selected role · required', tokK: estTokK(personaFile.text), present: personaFile.exists, locked: true }
+        ? { name: `agents/${agentPersonaName}.md`, detail: 'role prompt for the selected agent · required', tokK: estTokK(personaFile.text), present: personaFile.exists, locked: true }
         : { name: 'agents/*.md', detail: 'no agent selected — no persona', tokK: 0, present: false },
     ],
   }
@@ -179,6 +188,9 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
         : branch
           ? { name: 'Epic isolation', detail: 'git worktree per session (sm-epic/<id>)', tokK: 0, present: true }
           : { name: 'Epic isolation', detail: 'not available — not a git repo', tokK: 0, present: false },
+      ...(packs && packs.length > 0
+        ? [{ name: CONTEXT_PACKS_ITEM, detail: packs.map((p) => p.label).join(', '), tokK: 0, present: true, count: packs.length }]
+        : []),
     ],
   }
 
@@ -195,7 +207,9 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
 export function summarizeGroundingBoard(groups: GroundingGroup[], readiness?: DelegationReadiness | null): string {
   const parts = groups
     .map((g) => {
-      const present = g.items.filter((i) => i.present).map((i) => i.name)
+      const present = g.items
+        .filter((i) => i.present)
+        .map((i) => (g.key === 'local' && i.name === CONTEXT_PACKS_ITEM ? `packs · ${i.count ?? 0}` : i.name))
       return present.length ? `${g.label} (${present.join(', ')})` : null
     })
     .filter((s): s is string => s !== null)

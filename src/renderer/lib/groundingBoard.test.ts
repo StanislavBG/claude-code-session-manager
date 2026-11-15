@@ -260,3 +260,43 @@ describe('summarizeGroundingBoard', () => {
     expect(summarizeGroundingBoard(groups, null)).toBe('Grounding: System (CLAUDE.md)')
   })
 })
+
+describe('context packs + persona label', () => {
+  const base = {
+    home: '/home/bilko', cwd: '/home/bilko/Projects/alpha', agentPersonaPath: null, agentPersonaName: null,
+    openTerminalTabsInProject: 0, otherEpicsInProject: 0,
+  }
+
+  it('lists selected packs as a Local item and counts them in the summary', async () => {
+    const groups = await computeGroundingBoard({
+      ...base,
+      packs: [{ id: 'ios', label: 'iOS / SwiftUI' }, { id: 'a11y', label: 'Accessibility' }],
+    })
+    const item = groups.find((g) => g.key === 'local')!.items.find((i) => i.name === 'Context packs')!
+    expect(item.detail).toBe('iOS / SwiftUI, Accessibility')
+    expect(item.present).toBe(true)
+    expect(item.tokK).toBe(0)
+    const summary = summarizeGroundingBoard(groups)
+    expect(summary).toMatch(/Local \([^)]*packs · 2[^)]*\)/)
+  })
+
+  it('adds nothing when packs are absent or empty', async () => {
+    for (const packs of [undefined, []]) {
+      const groups = await computeGroundingBoard({ ...base, packs })
+      expect(groups.find((g) => g.key === 'local')!.items.some((i) => i.name === 'Context packs')).toBe(false)
+      const withoutKey = await computeGroundingBoard(base)
+      expect(summarizeGroundingBoard(groups)).toBe(summarizeGroundingBoard(withoutKey))
+      expect(summarizeGroundingBoard(groups)).not.toContain('packs')
+    }
+  })
+
+  it('labels the persona as the role prompt for the selected agent', async () => {
+    installApi({ readText: { '/home/bilko/.claude/agents/builder.md': { exists: true, text: 'You are the builder.' } } })
+    const groups = await computeGroundingBoard({
+      ...base, agentPersonaPath: '/home/bilko/.claude/agents/builder.md', agentPersonaName: 'builder',
+    })
+    const row = groups.find((g) => g.key === 'system')!.items.find((i) => i.name === 'agents/builder.md')!
+    expect(row.detail).toBe('role prompt for the selected agent · required')
+    expect(row.detail).not.toContain('system prompt')
+  })
+})

@@ -86,6 +86,7 @@
   "mdDocCensus": ".",
   "mdDocRefs": ".",
   "mdNetworkScan": ".",
+  "mdReviewRecord": ".",
   "memoryScope": "process",
   "modelCatalog": "claude",
   "needsReviewLedger": "scheduler",

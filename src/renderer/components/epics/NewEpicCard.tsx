@@ -1148,7 +1148,7 @@ export function NewEpicCard({
                 </div>
                 {/* Mounted only while this face is open, like RestoreSessionPanel —
                     so detect never runs for users who never open advanced. */}
-                {advanced && (
+                {advanced && !justClaude && (
                   <div className="mb-1.5 flex min-w-0 items-center gap-2 text-[11.5px] text-fg-dim">
                     <span data-testid="new-epic-agent-cli-source" className="min-w-0 truncate">
                       {cliOverride
@@ -1169,7 +1169,12 @@ export function NewEpicCard({
                     )}
                   </div>
                 )}
-                {advanced && <AgentCliPicker value={agentCli} onChange={pickAgentCli} />}
+                {advanced && !justClaude && <AgentCliPicker value={agentCli} onChange={pickAgentCli} />}
+                {advanced && justClaude && (
+                  <div data-testid="new-epic-agent-cli-just-claude" className="mb-1.5 text-[11.5px] text-fg-dim">
+                    Claude Code — just Claude is on
+                  </div>
+                )}
                 {nonClaudeCli && (
                   <label className="mt-2 flex flex-col gap-1">
                     <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">

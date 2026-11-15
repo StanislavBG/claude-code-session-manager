@@ -1822,6 +1822,35 @@ describe('NewEpicCard agent CLI choice', () => {
     expect(detectSpy).toHaveBeenCalled()
   })
 
+  it('just Claude locks the CLI to Claude Code in advanced', async () => {
+    const el = await mountReady()
+    await openAdvanced(el)
+    click(q(el, 'new-epic-agent-cli-option-codex')!)
+    click(q(el, 'new-epic-just-claude')!)
+    await act(async () => {})
+    const section = q(el, 'new-epic-cli-section')!
+    expect(q(section, 'new-epic-agent-cli-source')).toBeNull()
+    expect(q(section, 'new-epic-agent-cli-use-default')).toBeNull()
+    expect(section.querySelector('[data-testid^="new-epic-agent-cli-option-"]')).toBeNull()
+    expect(q(section, 'new-epic-agent-cli-model')).toBeNull()
+    expect(q(section, 'new-epic-agent-cli-just-claude')!.textContent).toBe('Claude Code — just Claude is on')
+  })
+
+  it('turning just Claude off brings the CLI picker back', async () => {
+    const el = await mountReady()
+    await openAdvanced(el)
+    click(q(el, 'new-epic-just-claude')!)
+    await act(async () => {})
+    expect(q(el, 'new-epic-agent-cli-option-codex')).toBeNull()
+    click(q(el, 'new-epic-just-claude')!)
+    await act(async () => {})
+    const section = q(el, 'new-epic-cli-section')!
+    expect(q(section, 'new-epic-agent-cli-just-claude')).toBeNull()
+    expect(q(section, 'new-epic-agent-cli-source')!.textContent).toBe('Claude Code (default)')
+    expect(q(section, 'new-epic-agent-cli-option-codex')).not.toBeNull()
+    expect(q(section, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+  })
+
   it('codex shows the front summary line whose change button turns advanced on', async () => {
     const el = await mountReady()
     await openAdvanced(el)
@@ -1912,7 +1941,7 @@ describe('NewEpicCard agent CLI choice', () => {
     expect(q(el, 'new-epic-agent-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
     click(q(el, 'new-epic-just-claude')!)
     await act(async () => {})
-    expect(q(el, 'new-epic-agent-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+    expect(q(el, 'new-epic-agent-cli-just-claude')!.textContent).toBe('Claude Code — just Claude is on')
     act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, 'Do it'))
     click(q(el, 'new-epic-create')!)
     await act(async () => {})

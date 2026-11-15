@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RelaySocket } from '../ws';
 import { sendChat } from '../remoteApi';
 import type { SendChatResult } from '../types';
@@ -27,6 +27,17 @@ function getSR(): (new () => SR) | null {
 
 const QUICK = ['continue', 'run the tests', '/compact', 'explain the diff', 'commit'];
 
+const MAX_LINES = 6;
+
+/** Enter sends only with a fine pointer (desktop); touch keyboards get a newline. */
+function finePointer(): boolean {
+  try {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: fine)').matches;
+  } catch {
+    return false;
+  }
+}
+
 const IcoSend = () => (
   <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l16-7-6 16-3-7z" /></svg>
 );
@@ -39,7 +50,9 @@ const IcoX = () => (
 
 /**
  * Pane 3: voice (Web Speech) → editable text → cmd:chat:send on the session.
- * Falls back to a plain text box when SpeechRecognition is unavailable (iOS Safari).
+ * The composer is an auto-growing multi-line textarea (typed text is always available,
+ * with or without SpeechRecognition). Quick chips only fill the composer; nothing is
+ * sent without an explicit Send.
  * No audio leaves the browser; STT runs in the browser. A recording indicator is
  * shown whenever the mic is live (privacy invariant).
  */
@@ -50,9 +63,25 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
   const [err, setErr] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const recRef = useRef<SR | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Exact composer text produced by the last chip tap; cleared on typing and after a send.
+  const chipFill = useRef<string | null>(null);
   const supported = !!getSR();
 
   useEffect(() => () => { try { recRef.current?.stop(); } catch { /* */ } }, []);
+
+  useLayoutEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    const cs = window.getComputedStyle(el);
+    const line = parseFloat(cs.lineHeight);
+    const lineH = Number.isFinite(line) && line > 0 ? line : 20;
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const padBottom = parseFloat(cs.paddingBottom) || 0;
+    const maxPx = MAX_LINES * lineH + padTop + padBottom;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`;
+  }, [text]);
 
   useEffect(() => { if (sheetOpen) trackScreen('mic-sheet'); }, [sheetOpen]);
 
@@ -78,11 +107,18 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
 
   const stopMic = () => { try { recRef.current?.stop(); } catch { /* */ } setListening(false); };
 
-  const send = async (msg?: string) => {
-    const data = (msg ?? text).trim();
-    if (!data || !socket || disabledReason) return;
+  const fillChip = (q: string) => {
+    const next = text === '' ? q : `${text} ${q}`;
+    chipFill.current = next;
+    setText(next);
+    taRef.current?.focus();
+  };
+
+  const send = async () => {
+    const data = text.trim();
+    if (!data || !socket || disabledReason || sending) return;
     if (!target) { setErr('Session no longer available'); return; }
-    const source = msg !== undefined ? 'chip' : sheetOpen ? 'voice' : 'text';
+    const source = sheetOpen ? 'voice' : chipFill.current === text ? 'chip' : 'text';
     setSending(true);
     setErr(null);
     trackFlow('chat-send', 'start', { source });
@@ -90,6 +126,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
       const result = await sendChat(socket, deviceId, { target, prompt: data });
       trackFlow('chat-send', 'success', { source });
       setText('');
+      chipFill.current = null;
       setSheetOpen(false);
       onSent?.(data, result);
     } catch (e: any) {
@@ -109,7 +146,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
             key={q}
             data-track="mic-chip"
             data-track-redact=""
-            onClick={() => send(q)}
+            onClick={() => fillChip(q)}
             disabled={sending || !!disabledReason}
             className="flex-shrink-0 rounded-full border border-edge bg-card text-ink-soft font-mono text-xs px-3.5 py-1.5 active:bg-panel disabled:opacity-50 whitespace-nowrap"
           >
@@ -122,29 +159,32 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
       <section className="border-t border-edge bg-panel px-3.5 py-3 safe-bottom flex-shrink-0" data-testid="mic-pane">
         {disabledReason && <div className="text-xs text-ink-soft mb-2" data-testid="mic-disabled-reason">{disabledReason}</div>}
         {err && <div className="text-xs text-accent mb-2" role="alert">{err}</div>}
-        <div className="flex items-center gap-2.5">
-          <div className="flex-1 flex items-center bg-card border border-edge rounded-[22px] pl-4 pr-1.5 h-[46px]">
-            <input
+        <div className="flex items-end gap-2.5">
+          <div className="flex-1 flex items-end bg-card border border-edge rounded-[22px] pl-4 pr-1.5 py-1 min-h-[46px]">
+            <textarea
+              ref={taRef}
+              rows={1}
               value={text}
               disabled={!!disabledReason}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={supported ? 'Message this session…' : 'Type a command…'}
-              className="flex-1 bg-transparent border-0 outline-none text-[14.5px] text-ink placeholder:text-ink-mute"
-              onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+              onChange={(e) => { chipFill.current = null; setText(e.target.value); }}
+              placeholder="Message this session…"
+              className="flex-1 min-w-0 resize-none overflow-y-auto max-h-[136px] bg-transparent border-0 outline-none py-2 leading-5 text-[14.5px] text-ink placeholder:text-ink-mute"
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+                if (!finePointer()) return;
+                e.preventDefault();
+                void send();
+              }}
             />
-            {text.trim()
-              ? (
-                <button
-                  data-track="mic-send"
-                  onClick={() => send()}
-                  disabled={sending || !!disabledReason}
-                  className="w-9 h-9 rounded-full bg-accent text-white grid place-items-center disabled:opacity-50"
-                  aria-label="Send command"
-                >
-                  <IcoSend />
-                </button>
-              )
-              : <span className="w-9" />}
+            <button
+              data-track="mic-send"
+              onClick={() => { void send(); }}
+              disabled={sending || !text.trim() || !!disabledReason}
+              className="w-9 h-9 flex-shrink-0 ml-1.5 rounded-full bg-accent text-white grid place-items-center disabled:opacity-50"
+              aria-label="Send message"
+            >
+              <IcoSend />
+            </button>
           </div>
           {supported && (
             <button
@@ -211,7 +251,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
               </button>
               <button
                 data-track="mic-sheet-send"
-                onClick={() => { stopMic(); send(); }}
+                onClick={() => { stopMic(); void send(); }}
                 disabled={!text.trim() || sending}
                 className="flex-[1.4] inline-flex items-center justify-center gap-2 bg-accent text-white h-[52px] rounded-2xl text-[15px] font-semibold disabled:bg-panel disabled:text-ink-mute"
               >

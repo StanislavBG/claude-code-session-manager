@@ -36,8 +36,8 @@ describe('MicPane telemetry', () => {
 
   it('tags the text send button', () => {
     renderMic();
-    fireEvent.change(screen.getByPlaceholderText('Type a command…'), { target: { value: 'hi' } });
-    expect(screen.getByLabelText('Send command').getAttribute('data-track')).toBe('mic-send');
+    fireEvent.change(screen.getByPlaceholderText('Message this session…'), { target: { value: 'hi' } });
+    expect(screen.getByLabelText('Send message').getAttribute('data-track')).toBe('mic-send');
   });
 
   it('tags the start-mic button and sheet buttons, emitting mic-sheet screen', () => {
@@ -57,10 +57,14 @@ describe('MicPane telemetry', () => {
     expect(tracked).toEqual(expect.arrayContaining(['mic-sheet-close', 'mic-sheet-cancel', 'mic-sheet-send']));
   });
 
-  it('emits chat-send start/success for a chip, without message text', async () => {
+  it('chip fills the composer; Send emits chat-send start/success for a chip, without message text', async () => {
     sendChat.mockResolvedValue({});
     renderMic();
     fireEvent.click(screen.getByText('continue'));
+    expect((screen.getByPlaceholderText('Message this session…') as HTMLTextAreaElement).value).toBe('continue');
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(trackFlow).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Send message'));
     await waitFor(() => expect(trackFlow).toHaveBeenCalledWith('chat-send', 'success', { source: 'chip' }));
     expect(trackFlow).toHaveBeenCalledWith('chat-send', 'start', { source: 'chip' });
     expect(JSON.stringify(trackFlow.mock.calls)).not.toContain('continue');
@@ -69,8 +73,8 @@ describe('MicPane telemetry', () => {
   it('emits chat-send fail with send-error', async () => {
     sendChat.mockRejectedValue(new Error('boom'));
     renderMic();
-    fireEvent.change(screen.getByPlaceholderText('Type a command…'), { target: { value: 'secret' } });
-    fireEvent.click(screen.getByLabelText('Send command'));
+    fireEvent.change(screen.getByPlaceholderText('Message this session…'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByLabelText('Send message'));
     await waitFor(() =>
       expect(trackFlow).toHaveBeenCalledWith('chat-send', 'fail', { source: 'text', reason: 'send-error' }));
     expect(JSON.stringify(trackFlow.mock.calls)).not.toContain('secret');

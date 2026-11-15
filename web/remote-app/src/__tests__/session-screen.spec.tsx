@@ -59,8 +59,8 @@ describe('SessionScreen', () => {
   it('sends with epicId as target', async () => {
     const socket = makeSocket();
     renderScreen(socket);
-    fireEvent.change(screen.getByPlaceholderText(/Type a command|Message this session/), { target: { value: 'go' } });
-    fireEvent.click(screen.getByLabelText('Send command'));
+    fireEvent.change(screen.getByPlaceholderText('Message this session…'), { target: { value: 'go' } });
+    fireEvent.click(screen.getByLabelText('Send message'));
     await waitFor(() => expect(socket.sendCommand).toHaveBeenCalledWith(
       'cmd:chat:send', 'dev1', { tabId: 'epic-1', prompt: 'go' }));
   });
@@ -68,15 +68,15 @@ describe('SessionScreen', () => {
   it('shows the error when a send is refused', async () => {
     const socket = makeSocket({ 'cmd:chat:send': () => ({ payload: { error: 'nope' } }) });
     renderScreen(socket);
-    fireEvent.change(screen.getByPlaceholderText(/Type a command|Message this session/), { target: { value: 'go' } });
-    fireEvent.click(screen.getByLabelText('Send command'));
+    fireEvent.change(screen.getByPlaceholderText('Message this session…'), { target: { value: 'go' } });
+    fireEvent.click(screen.getByLabelText('Send message'));
     expect(await screen.findByText(/refused this request/)).toBeInTheDocument();
   });
 
   it('disables the composer for a proposed session', async () => {
     renderScreen(makeSocket(), { ...EPIC, status: 'proposed' });
     expect(screen.getByText('This session is proposed — approve it on your computer first.')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Type a command|Message this session/)).toBeDisabled();
+    expect(screen.getByPlaceholderText('Message this session…')).toBeDisabled();
     expect(screen.getByText('continue')).toBeDisabled();
   });
 
@@ -108,8 +108,8 @@ describe('SessionScreen', () => {
   });
 
   const send = async (text: string) => {
-    fireEvent.change(screen.getByPlaceholderText(/Type a command|Message this session/), { target: { value: text } });
-    fireEvent.click(screen.getByLabelText('Send command'));
+    fireEvent.change(screen.getByPlaceholderText('Message this session…'), { target: { value: text } });
+    fireEvent.click(screen.getByLabelText('Send message'));
   };
 
   it.each([

@@ -18,6 +18,10 @@ describe('tagLibrary', () => {
     expect(missionLabel(null)).toBe('None')
     expect(missionLabel(undefined)).toBe('None')
   })
+  it("labels the art mission '3D Art'", () => {
+    expect(tagLibraryEntry('art').label).toBe('3D Art')
+    expect(missionLabel('art')).toBe('3D Art')
+  })
   it('keeps 7 tags', () => {
     expect(TAG_GROUP_ORDER).toHaveLength(7)
   })

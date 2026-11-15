@@ -81,7 +81,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
   },
   {
     tag: 'art',
-    label: '3D art / animation',
+    label: '3D Art',
     description:
       'Blender modeling, rigging, skinning and animation work whose source of truth is a .blend file. Decomposition into PRDs executed by an art persona is the expected next step, same as feature/bug.',
     developEagerness: 'expected-default',

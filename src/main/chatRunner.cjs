@@ -50,6 +50,8 @@ const telemetryCounters = require('./lib/telemetry/telemetryCounters.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs');
+// Called through the module object (not destructured) so tests can inject a catalog.
+const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
@@ -643,11 +645,31 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     const effortFlags = isAgentCli ? [] : effortArgs(resolveEpicEffort({ cwd, claudeSessionId: sessionId }).effort);
 
     // Develop-loop-off Epics launch with the dev plugin disabled for this session only.
+    // The Epic's selected context packs ride every turn: --plugin-dir per pack + their laws
+    // via --append-system-prompt (each turn is a fresh process, so every turn must carry them).
     let loopOffArgs = [];
+    /** @type {string[]} */ let packPluginDirArgs = [];
+    let packLaws = '';
     if (!isAgentCli) {
       try {
-        loopOffArgs = developLoopOffSettingsArgs(agentModelResolve.findEpicByClaudeSessionId(cwd, sessionId));
-      } catch { /* lookup failure = launch as today */ }
+        const epic = agentModelResolve.findEpicByClaudeSessionId(cwd, sessionId);
+        loopOffArgs = developLoopOffSettingsArgs(epic);
+        const packArgs = packSpawnArgs.composePackSpawnArgs({ packIds: epic?.packs });
+        packPluginDirArgs = Array.isArray(packArgs.pluginDirArgs) ? packArgs.pluginDirArgs : [];
+        packLaws = typeof packArgs.laws === 'string' ? packArgs.laws : '';
+      } catch (e) {
+        // Lookup or compose failure: launch without packs (loop-off args kept if already resolved).
+        packPluginDirArgs = [];
+        packLaws = '';
+        try {
+          logs.writeLine({
+            scope: 'chatRunner',
+            level: 'warn',
+            message: `context packs skipped for this turn: ${/** @type {Error} */ (e)?.message || String(e)}`,
+            meta: { tabId, sessionId },
+          });
+        } catch { /* logging must never fail a turn */ }
+      }
     }
 
     // Main is authoritative about --resume vs --session-id AND the spawn cwd, and it decides
@@ -702,6 +724,8 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         ...effortFlags,
         '--dangerously-skip-permissions',
         ...loopOffArgs,
+        ...packPluginDirArgs,
+        ...(packLaws ? ['--append-system-prompt', packLaws] : []),
         '--output-format', 'stream-json',
         '--verbose',
       ];

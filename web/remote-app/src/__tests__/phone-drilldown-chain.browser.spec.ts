@@ -490,6 +490,70 @@ describe('phone drill-down over the real chain: Cockpit -> ws.ts -> relay -> web
     }
   }, 120_000);
 
+  it('375x667: a chip only fills the composer, then a typed three-line message grows the composer and reaches the chat queue', async () => {
+    const h = await start({ width: 375, height: 667 });
+    const { page } = h;
+    try {
+      await openActiveEpic(h);
+      await expectComposerReachable(h, '375x667 multi-line');
+      const field = composerField(h).first();
+
+      // A quick chip only fills the composer; nothing reaches the chat queue.
+      const beforeChip = chatCalls.length;
+      await page.getByRole('button', { name: 'continue', exact: true }).tap();
+      await expect.poll(() => field.inputValue(), { timeout: 5_000 }).toBe('continue');
+      await page.waitForTimeout(500); // a chip that sent would have reached the queue by now
+      expect(chatCalls.length, `the 'continue' chip sent instead of filling.\n  ${await diag(h)}`).toBe(beforeChip);
+      await field.fill('');
+      expect(await field.inputValue()).toBe('');
+
+      // Type three lines with Shift+Enter between them; the composer grows and stays on screen.
+      const oneLineHeight = (await field.boundingBox())!.height;
+      await field.tap();
+      const LINES = ['first line', 'second line', 'third line'];
+      for (let i = 0; i < LINES.length; i++) {
+        if (i > 0) await page.keyboard.press('Shift+Enter');
+        await page.keyboard.type(LINES[i]);
+      }
+      const multi = LINES.join('\n');
+      expect(await field.inputValue()).toBe(multi);
+      expect(chatCalls.length, 'typing sent the message').toBe(beforeChip);
+      const geo = await page.evaluate(() => {
+        const ta = document.querySelector('[data-testid=mic-pane] textarea') as HTMLTextAreaElement;
+        const btn = document.querySelector('[data-testid=mic-pane] button[aria-label="Send message"]') as HTMLButtonElement;
+        const t = ta.getBoundingClientRect();
+        const b = btn.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return {
+          top: t.top, bottom: t.bottom, height: t.height, innerHeight: window.innerHeight,
+          hitIsSend: !!hit && (hit === btn || btn.contains(hit)),
+          hit: hit ? hit.outerHTML.slice(0, 120) : 'null',
+        };
+      });
+      const geoMsg = `textarea ${JSON.stringify(geo)} (one-line height ${oneLineHeight})`;
+      expect(geo.height, geoMsg).toBeGreaterThan(oneLineHeight);
+      expect(geo.top >= 0 && geo.bottom <= geo.innerHeight, geoMsg).toBe(true);
+      expect(geo.hitIsSend, geoMsg).toBe(true);
+
+      // Send: exactly one new chat-queue call carrying the three lines, newlines included.
+      const beforeSend = chatCalls.length;
+      await page.getByRole('button', { name: 'Send message' }).tap();
+      const pendingLabel = page.getByTestId('pending-label');
+      await shows(h, pendingLabel, 'The pending bubble label', 20_000);
+      expect(await pendingLabel.textContent()).toBe('Sent');
+      expect(chatCalls.length, await diag(h)).toBe(beforeSend + 1);
+      const [epicId, prompt] = chatCalls[beforeSend];
+      expect(epicId).toBe(ACTIVE.id);
+      expect(prompt).toBe(multi);
+      const pendingText = await page.getByTestId('pending-message').innerText();
+      for (const l of LINES) expect(pendingText).toContain(l);
+      await checkScreen(h, '6-session-375x667-multiline-sent');
+      expect(h.pageErrors).toEqual([]);
+    } finally {
+      await h.stop();
+    }
+  }, 120_000);
+
   it('390x844 with a 59px taller header (standalone-PWA safe-area-inset-top): the composer stays on screen', async () => {
     const h = await start();
     try {

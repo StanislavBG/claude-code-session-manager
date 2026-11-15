@@ -29,7 +29,7 @@
  *     row never takes an interactive row's place. Per-kind budgets exist because
  *     a project with claude -p automation has ~98% headless transcripts: one
  *     shared budget listed 48 headless + 2 interactive rows on this repo;
- *   - memoises the claimed-id scan per cwd on each ops file's mtimeMs:size, so
+ *   - memoises the claimed-id scan per cwd on each ops file's stat key (keyOf), so
  *     an unchanged Epic file is never re-read (epicTranscriptPath.cjs's shape).
  *     The list path scans through fs.promises (claimedClaudeSessionIdsAsync): a
  *     cold scan reads every archived Epic file, which blocked 191 ms when sync.
@@ -131,16 +131,23 @@ function __resetCacheForTests() {
 /**
  * The memo key. One formatter for both stat paths, so each reader can reuse
  * the records the other wrote.
+ *
+ * mtimeMs:size alone served stale ids: a rewrite that swaps one claudeSessionId
+ * for another is always the same size (UUIDs are fixed-length), and it keeps
+ * its mtime when it lands within one timestamp tick (coarse-mtime filesystems)
+ * or has its mtime restored. dev:ino changes on every tmp+rename write (how
+ * atomicFs writes Epic files), and ctime moves on every write and can't be
+ * set back from user space.
  * @param {import('node:fs').Stats} s
- * @returns {string} `mtimeMs:size`
+ * @returns {string} `dev:ino:ctimeMs:mtimeMs:size`
  */
 function keyOf(s) {
-  return `${s.mtimeMs}:${s.size}`;
+  return `${s.dev}:${s.ino}:${s.ctimeMs}:${s.mtimeMs}:${s.size}`;
 }
 
 /**
  * @param {string} file
- * @returns {string} `mtimeMs:size`, or 'missing'
+ * @returns {string} keyOf(stat), or 'missing'
  */
 function statKey(file) {
   try {
@@ -153,7 +160,7 @@ function statKey(file) {
 /**
  * statKey through fs.promises.
  * @param {string} file
- * @returns {Promise<string>} `mtimeMs:size`, or 'missing'
+ * @returns {Promise<string>} keyOf(stat), or 'missing'
  */
 async function statKeyAsync(file) {
   try {
@@ -257,7 +264,7 @@ function isArchiveName(name) {
 
 /**
  * First half of the per-file archive-record update both readers share: the
- * memo's record while the file's mtimeMs:size is unchanged, else null.
+ * memo's record while the file's stat key is unchanged, else null.
  * @param {Map<string, ArchiveRec>} prevFiles
  * @param {string} name
  * @param {string} key
@@ -296,7 +303,7 @@ function commitClaimed(cwd, entry) {
 /**
  * Every claudeSessionId an Epic of this project owns: active-index.json plus
  * each archived prompt-sessions/<id>.json. Memoised per cwd on each file's
- * mtimeMs:size, so an unchanged file is never re-read (one statSync per file per
+ * stat key (keyOf), so an unchanged file is never re-read (one statSync per file per
  * call); the memo is shared with claimedClaudeSessionIdsAsync. A cwd with no ops
  * root (relative, tmpdir or linked worktree) cannot hold Epics, so it owns
  * nothing. Sync, for the mint gate (checkRestorableSessionSync).
@@ -333,7 +340,7 @@ function claimedClaudeSessionIds(cwd, deps) {
  * claimedClaudeSessionIds through fs.promises (readdir, stat and readFile, at
  * most 16 files in flight), for the list path. A cold scan reads every archived
  * Epic file; done sync it blocked the main loop for 191 ms. Same memo as the
- * sync reader, so either one re-reads only the files whose mtimeMs:size changed
+ * sync reader, so either one re-reads only the files whose stat key changed
  * since the last scan by either. active-index.json stays a readActiveIndex read,
  * memoised on its own key as in the sync reader.
  * @param {string} cwd Project cwd (mapped to its ops root by opsPath).
@@ -828,6 +835,7 @@ function checkRestorableSessionSync(cwd, sessionId, deps) {
 
 module.exports = {
   SESSION_ID_RE,
+  keyOf,
   claimedClaudeSessionIds,
   claimedClaudeSessionIdsAsync,
   listRestorableSessions,

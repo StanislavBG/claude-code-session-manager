@@ -15,7 +15,8 @@
  *
  * Bounded: never enumerates ~/.claude/projects, only stats its candidate list.
  * The active-index.json read and the archive scan are memoised per cwd on
- * mtimeMs + size (same shape as transcripts.cjs's usageCache) because
+ * restorableSessions.cjs's keyOf (dev:ino:ctimeMs:mtimeMs:size; mtimeMs:size
+ * alone misses a same-size, same-mtime rewrite — see keyOf) because
  * usageFor() can call this for up to 500 ids in one IPC.
  *
  * Ops-root hazard (see epicSpawnCwd.cjs): `cwd` here is the PROJECT cwd used
@@ -29,7 +30,7 @@ const { encodeCwd } = require('../util/encodeCwd.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 const { resolveEpicSpawnCwd } = require('./epicSpawnCwd.cjs');
 
-/** Map<cwd, { key, sessions }> — active-index.json parse, keyed on mtime+size. */
+/** Map<cwd, { key, sessions }> — active-index.json parse, keyed on keyOf(stat). */
 const indexCache = new Map();
 /** Map<cwd, { dirKey, files: Map<name,{key,sid,dir}>, byId: Map<sid,string[]> }> */
 const archiveCache = new Map();
@@ -45,8 +46,8 @@ function emptyResult() {
 
 function statKey(statSync, p) {
   try {
-    const s = statSync(p);
-    return `${s.mtimeMs}:${s.size}`;
+    // Lazy: restorableSessions.cjs is heavier than this module needs at load.
+    return require('./restorableSessions.cjs').keyOf(statSync(p));
   } catch {
     return 'missing';
   }

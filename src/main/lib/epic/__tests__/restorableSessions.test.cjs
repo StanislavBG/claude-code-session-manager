@@ -67,12 +67,26 @@ function writeIndex(sessions) {
   fs.writeFileSync(path.join(promptDir(), 'active-index.json'), JSON.stringify({ sessions, events: {} }));
 }
 
+/**
+ * An archived Epic file, written as production writes it: tmp + rename
+ * (atomicFs), so every rewrite is a new inode. The mtime is then forced, which
+ * leaves a same-size rewrite with the same mtimeMs:size as the file it replaced.
+ */
 function writeArchive(epicId, claudeSessionId, mtimeSec = T0) {
   fs.mkdirSync(promptDir(), { recursive: true });
   const file = path.join(promptDir(), `${epicId}.json`);
-  fs.writeFileSync(file, JSON.stringify({ session: { id: epicId, claudeSessionId, status: 'completed' }, events: {}, status: 'completed' }));
+  atomicFs.writeJsonAtomicSync(file, { session: { id: epicId, claudeSessionId, status: 'completed' }, events: {}, status: 'completed' });
   fs.utimesSync(file, mtimeSec, mtimeSec);
   return file;
+}
+
+/**
+ * A fixture project dir with its own `.git`, so ops-root resolution
+ * (classifyCwd's ancestor walk) stops at the fixture and never depends on
+ * what the ~1,000 sibling test files put above it in the shared TMPDIR.
+ */
+function mkProject(dir) {
+  fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
 }
 
 beforeEach(() => {
@@ -80,7 +94,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-rs-'));
   home = path.join(root, 'home');
   cwd = path.join(root, 'project');
-  fs.mkdirSync(cwd, { recursive: true });
+  mkProject(cwd);
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -308,20 +322,36 @@ test('checkRestorableSessionSync refuses a non-UUID id before touching the files
   expect(check(uuid(1))).toEqual({ ok: true, transcriptPath: transcript(uuid(1)) });
 });
 
-test('the claimed-id memo re-reads only an Epic file whose mtime:size changed', () => {
+test('the claimed-id memo re-reads only an Epic file that was rewritten', () => {
   writeArchive('epic-a', uuid(1), T0);
   writeArchive('epic-b', uuid(2), T0);
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(2)]);
 
   const reads = vi.spyOn(atomicFs, 'readJsonOrSync');
-  writeArchive('epic-a', uuid(3), T0); // same size and mtime: stays memoised (still reports uuid(1))
-  writeArchive('epic-b', uuid(4), T0 + 5); // new mtime: re-read
+  // epic-a untouched: served from the memo. epic-b rewritten: re-read.
+  writeArchive('epic-b', uuid(4), T0 + 5);
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4)]);
   expect(reads.mock.calls.map(([p]) => path.basename(p))).toEqual(['epic-b.json']);
 
   writeIndex({ e: { id: 'e', claudeSessionId: uuid(5) } }); // active-index.json appears: picked up, archives untouched
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(5)]);
   expect(reads).toHaveBeenCalledTimes(1);
+});
+
+test('a same-size rewrite that keeps its mtime is not served stale from the memo, sync or async', async () => {
+  // Swapping one claudeSessionId for another never changes the size (UUIDs are
+  // fixed-length); with the mtime kept, mtimeMs:size alone cannot see the rewrite.
+  const file = writeArchive('epic-a', uuid(1), T0);
+  const before = fs.statSync(file);
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+
+  writeArchive('epic-a', uuid(2), T0);
+  const after = fs.statSync(file);
+  expect([after.mtimeMs, after.size]).toEqual([before.mtimeMs, before.size]);
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(2)]);
+
+  writeArchive('epic-a', uuid(3), T0);
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(3)]);
 });
 
 test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-reads only a changed Epic file via fs.promises', async () => {
@@ -342,8 +372,8 @@ test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-r
   const readFile = vi.spyOn(fs.promises, 'readFile');
   const readFileSync = vi.spyOn(fs, 'readFileSync');
   const statSync = vi.spyOn(fs, 'statSync');
-  writeArchive('epic-a', uuid(3), T0); // same size and mtime: stays memoised (still reports uuid(1))
-  writeArchive('epic-b', uuid(4), T0 + 5); // new mtime: re-read
+  // epic-a untouched: served from the memo. epic-b rewritten: re-read.
+  writeArchive('epic-b', uuid(4), T0 + 5);
   expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
   expect(onArchives(readFile)).toEqual(['epic-b.json']);
   expect(onArchives(readFileSync)).toEqual([]);
@@ -361,7 +391,7 @@ test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-r
 function inProject(p, fn) {
   const saved = cwd;
   cwd = p;
-  try { fs.mkdirSync(p, { recursive: true }); return fn(); } finally { cwd = saved; }
+  try { mkProject(p); return fn(); } finally { cwd = saved; }
 }
 
 /** Four projects, each with a transcript dir whose mtime orders them A (newest) … D. */

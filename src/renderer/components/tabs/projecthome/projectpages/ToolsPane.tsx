@@ -21,8 +21,10 @@
  * findings count, and `onFindingsCount` (ProjectHome's Tools key button).
  *
  * The `LAST REVIEW` section (MdLastReview) is one `window.api.projectPages.mdReview` read, on the
- * same schedule as the scan (first show per cwd, and `Refresh`; never polled): the newest review
- * record plus the validation records of this project's Review MD network sessions.
+ * same schedule as the scan (first show per cwd, and `Refresh`; never polled) plus whenever the
+ * listed review-run id list changes: the newest review record plus the validation records of this
+ * project's Review MD network sessions. `REVIEW RUNS` (ReviewRuns) lists those sessions newest
+ * first with a reviewRunStatus label and an Open button; the newest also feeds the row meta.
  *
  * The explorer's curation (verdicts, notes, reviewed marks, record/doc folder overrides) is
  * `useMdCuration`'s, kept in this project's ui-prefs. The scan waits for it to load and sends
@@ -43,9 +45,13 @@ import { MdNetworkExplorer } from './MdNetworkExplorer'
 import { MdDocPreview } from './MdDocPreview'
 import { MdDocTable } from './MdDocTable'
 import { CompetitorMatrixView } from './CompetitorMatrixView'
-import { MdLastReview, pickValidationPath, type MdReviewState, type ReviewSessionLike } from './MdLastReview'
-import { usePromptSessions } from '../../../../state/promptSessions'
-import type { Macro, MacroJobStatus, MdCensus, MdNetwork, MdNetworkResult, MdReviewResult } from '../../../../../preload/api'
+import { MdLastReview, localDate, pickValidationPath, type MdReviewState, type ReviewSessionLike } from './MdLastReview'
+import { usePromptSessions, type PromptSession } from '../../../../state/promptSessions'
+import { useChat } from '../../../../state/chat'
+import { useScheduleState } from '../../../../state/scheduleState'
+import { useScheduledPrds } from '../../../../lib/useScheduledPrds'
+import { reviewRuns, reviewRunStatus, type ReviewRunStatus } from '../../../../lib/mdReviewRuns'
+import type { ScheduleJob, Macro, MacroJobStatus, MdCensus, MdNetwork, MdNetworkResult, MdReviewResult } from '../../../../../preload/api'
 
 export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
 /** A finished scan's findings count for `cwd`; null when the scan failed. */
@@ -56,6 +62,7 @@ const COMPETITOR_MATRIX_ID = 'builtin-competitor-matrix'
 /** Pages / Videos launch these from their own tabs. */
 const LIBRARY_MACRO_IDS: readonly string[] = ['builtin-project-home', 'builtin-demo-video']
 const NO_SCOPES: readonly string[] = []
+const EMPTY_JOBS: ScheduleJob[] = []
 /** The Mode a curation launch asks for when the macro offers it. */
 const CURATION_MODE = 'Full review'
 
@@ -150,9 +157,9 @@ const MD_REVIEW_MAX_IDS = 50
 const EPIC_ID_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
 
 /**
- * Reads `cwd`'s last review record once `active` first holds for it, and again on `refresh` —
- * never on a timer, and not when `epicIds` changes (they are read at call time). `{ ok:false }`
- * shows in the section only; a rejected call also toasts, once per read.
+ * Reads `cwd`'s last review record once `active` first holds for it, again whenever the `epicIds`
+ * list changes while active, and on `refresh` — never on a timer. `{ ok:false }` shows in the
+ * section only; a rejected call also toasts, once per read.
  */
 function useMdReview(cwd: string | null | undefined, active: boolean, epicIds: readonly string[]) {
   const [state, setState] = useState<{ cwd: string; review: MdReviewState } | null>(null)
@@ -160,9 +167,12 @@ function useMdReview(cwd: string | null | undefined, active: boolean, epicIds: r
   const latest = useRef(0)
   const idsRef = useRef(epicIds)
   idsRef.current = epicIds
+  const idsKey = epicIds.join(',')
+  const requestedIds = useRef<string | null>(null)
 
   const start = useCallback((forCwd: string) => {
     requestedCwd.current = forCwd
+    requestedIds.current = idsRef.current.join(',')
     const id = ++latest.current
     setState((prev) => ({
       cwd: forCwd,
@@ -193,8 +203,8 @@ function useMdReview(cwd: string | null | undefined, active: boolean, epicIds: r
 
   useEffect(() => {
     if (!active || !cwd) return
-    if (requestedCwd.current !== cwd) start(cwd)
-  }, [active, cwd, start])
+    if (requestedCwd.current !== cwd || requestedIds.current !== idsKey) start(cwd)
+  }, [active, cwd, idsKey, start])
 
   const refresh = useCallback(() => {
     if (cwd) start(cwd)
@@ -450,6 +460,8 @@ function ReviewTool({
   md,
   review,
   reviewSessions,
+  runs,
+  onOpenSession,
 }: {
   macro: Macro
   cwd?: string | null
@@ -461,6 +473,9 @@ function ReviewTool({
   review: MdReviewState | null
   /** This project's Review MD network sessions, for the validation record. */
   reviewSessions: readonly ReviewSessionLike[]
+  /** The same sessions with their derived status, for REVIEW RUNS. */
+  runs: readonly ReviewRunRow[]
+  onOpenSession?: (epicId: string) => void
 }) {
   const { curation } = md
   const [scopePick, setScopePick] = useState<string | null>(null)
@@ -562,6 +577,7 @@ function ReviewTool({
         onOpen={(path) => setExplore({ open: true, id: path })}
         canOpen={!!network}
       />
+      <ReviewRuns runs={runs} onOpenSession={onOpenSession} />
       {network && <MdNetworkCards cwd={cwd} network={network} onExplore={(id) => setExplore({ open: true, id })} />}
       {network && explore.open && (
         <MdNetworkExplorer
@@ -626,6 +642,58 @@ function ReviewTool({
   )
 }
 
+export interface ReviewRunRow {
+  epic: PromptSession
+  status: ReviewRunStatus
+}
+
+/** Local YYYY-MM-DD of an ISO timestamp; the raw string when it does not parse. */
+function runDate(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : localDate(d)
+}
+
+/** This project's Review MD network sessions, newest first, each with its status and Open. */
+function ReviewRuns({ runs, onOpenSession }: { runs: readonly ReviewRunRow[]; onOpenSession?: (epicId: string) => void }) {
+  return (
+    <section data-testid="md-review-runs" aria-label="Review runs" className="flex flex-none flex-col gap-2">
+      <h3 className="m-0 font-mono text-[10.5px] font-normal tracking-[.1em] text-fg-faint">REVIEW RUNS</h3>
+      {runs.length === 0 ? (
+        <p data-testid="md-review-runs-none" className="m-0 text-[12.5px] text-fg-faint">
+          No review runs yet — Run review starts one.
+        </p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+          {runs.map(({ epic, status }) => (
+            <li
+              key={epic.id}
+              data-testid="md-review-run"
+              data-epic-id={epic.id}
+              className="flex items-center gap-3 rounded-lg border border-rule-structural px-3 py-2"
+            >
+              <span data-testid="md-review-run-date" className="font-mono text-[11.5px] text-fg-dim">
+                {runDate(epic.createdAt)}
+              </span>
+              <span data-testid="md-review-run-status" className="min-w-0 flex-1 truncate text-[12.5px] text-fg">
+                {status}
+              </span>
+              <button
+                type="button"
+                data-testid="md-review-run-open"
+                disabled={!onOpenSession}
+                onClick={() => onOpenSession?.(epic.id)}
+                className="h-7 flex-none rounded-[7px] border border-rule-structural bg-bg-hi px-2.5 text-[12px] font-semibold text-fg cursor-pointer hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Open
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 /** Mounted only while open, so personas are read on demand — the Sessions hot-key editor's agent source. */
 function AddTool({ cwd, onClose }: { cwd: string; onClose: () => void }) {
   const agents = useAgentPersonas()
@@ -670,13 +738,11 @@ export function ToolsPane({
   const { scan, refresh } = useMdNetworkScan(cwd, reviewActive, md.ready, md.curation, onFindingsCount)
   // One stable selector; the per-cwd filter is memoized (never a fresh array from a selector).
   const sessions = usePromptSessions((s) => s.sessions)
-  const reviewSessions = useMemo(
-    () =>
-      Object.values(sessions)
-        .filter((s) => s.cwd === cwd && s.source?.macroId === REVIEW_MD_NETWORK_ID)
-        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)),
-    [sessions, cwd],
-  )
+  const events = usePromptSessions((s) => s.events)
+  const chats = useChat((s) => s.chats)
+  const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
+  const prds = useScheduledPrds(cwd)
+  const reviewSessions = useMemo(() => reviewRuns(sessions, cwd), [sessions, cwd])
   const reviewEpicIds = useMemo(
     () => reviewSessions.map((s) => s.id).filter((id) => EPIC_ID_RE.test(id)).slice(0, MD_REVIEW_MAX_IDS),
     [reviewSessions],
@@ -686,9 +752,18 @@ export function ToolsPane({
     refresh()
     refreshReview()
   }, [refresh, refreshReview])
+  const validation = review && review.status !== 'error' ? (review.result?.validation ?? null) : null
+  const runs = useMemo<ReviewRunRow[]>(() => {
+    const snapshots = { sessions, chats, jobs, prds, events }
+    return reviewSessions.map((epic) => ({ epic, status: reviewRunStatus(epic.id, snapshots, validation?.[epic.id]) }))
+  }, [reviewSessions, sessions, chats, jobs, prds, events, validation])
   const network = scan && scan.status !== 'error' ? scan.result : null
-  const rowMeta = (m: Macro) =>
-    m.id === REVIEW_MD_NETWORK_ID && network ? plural(network.findings.length, 'finding') : m.agentName
+  const rowMeta = (m: Macro) => {
+    if (m.id !== REVIEW_MD_NETWORK_ID) return m.agentName
+    const base = network ? plural(network.findings.length, 'finding') : m.agentName
+    const last = runs[0]
+    return last ? `${base} · last run ${runDate(last.epic.createdAt)} · ${last.status}` : base
+  }
 
   let content: ReactNode
   if (editing) content = <AddTool cwd={cwd} onClose={() => setAdding(false)} />
@@ -711,6 +786,8 @@ export function ToolsPane({
         md={md}
         review={review}
         reviewSessions={reviewSessions}
+        runs={runs}
+        onOpenSession={onOpenSession}
       />
     )
   else if (selected.id === COMPETITOR_MATRIX_ID)

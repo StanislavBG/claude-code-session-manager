@@ -5,6 +5,10 @@ import { act } from 'react-dom/test-utils'
 import { ToolsPane } from '../ToolsPane'
 import { useToast } from '../../../../../state/toast'
 import { usePromptSessions } from '../../../../../state/promptSessions'
+import { useChat } from '../../../../../state/chat'
+import { useScheduleState } from '../../../../../state/scheduleState'
+import { __resetScheduledPrdsForTests } from '../../../../../lib/useScheduledPrds'
+import { localDate } from '../MdLastReview'
 import { composeCurationBrief, normalizeCuration } from '../../../../../lib/mdCurate'
 import type { AgentPersona, Macro, MdCensus, MdDoc, MdDocRole, MdNetwork, MdNetworkResult, MdReviewRecord, MdReviewResult } from '../../../../../../preload/api'
 
@@ -122,6 +126,7 @@ const matrix = vi.fn()
 const mdReview = vi.fn<(payload: { cwd: string; epicIds?: string[] }) => Promise<MdReviewResult>>()
 const open = vi.fn()
 const read = vi.fn()
+const listPrds = vi.fn()
 
 beforeEach(() => {
   save.mockReset()
@@ -139,7 +144,12 @@ beforeEach(() => {
   matrix.mockReturnValue(new Promise(() => {}))
   mdReview.mockReset()
   mdReview.mockReturnValue(new Promise<MdReviewResult>(() => {}))
-  usePromptSessions.setState({ sessions: {} })
+  usePromptSessions.setState({ sessions: {}, events: {} })
+  useChat.setState({ chats: {} })
+  useScheduleState.setState({ snapshot: null, loaded: false })
+  __resetScheduledPrdsForTests()
+  listPrds.mockReset()
+  listPrds.mockResolvedValue([])
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
   prefsFiles = {}
   readJson.mockReset()
@@ -155,6 +165,7 @@ beforeEach(() => {
     projectPages: { mdNetwork, matrix, mdReview },
     shell: { open },
     files: { read },
+    schedule: { listPrds },
   }
 })
 
@@ -831,5 +842,76 @@ describe('ToolsPane Review MD network last review', () => {
     await settle()
     expect(q('md-last-review-error')!.textContent).toContain('ipc down')
     expect(useToast.getState().toasts.map((t) => [t.kind, t.message])).toEqual([['error', 'Could not read the review record: ipc down']])
+  })
+})
+
+describe('ToolsPane Review MD network review runs', () => {
+  const epic = (id: string, createdAt: string, over: Record<string, unknown> = {}) =>
+    ({ id, cwd: CWD, status: 'active', createdAt, source: { producer: 'new-epic-ui', macroId: REVIEW.id }, ...over }) as never
+  const OLD = '2026-11-10T18:00:00.000Z'
+  const NEW = '2026-11-14T18:00:00.000Z'
+  const seed = () =>
+    usePromptSessions.setState({
+      sessions: {
+        'epic-old': epic('epic-old', OLD),
+        'epic-new': epic('epic-new', NEW),
+        'epic-other': epic('epic-other', NEW, { source: { producer: 'new-epic-ui', macroId: 'sweep' } }),
+        'epic-elsewhere': epic('epic-elsewhere', NEW, { cwd: '/p/beta' }),
+      },
+    })
+  const OK: MdReviewResult = { ok: true, record: null, recordPath: null, validation: { 'epic-old': ['v/epic-old/validate.md'] } }
+  const runRows = () => Array.from(container!.querySelectorAll('[data-testid="md-review-run"]')) as HTMLElement[]
+  const meta = () => row(REVIEW.id).querySelector('[data-testid="project-home-tool-meta"]')!.textContent
+
+  it('lists this project\'s review runs newest first with date, status and Open', async () => {
+    seed()
+    useChat.setState({ chats: { 'epic-new': { running: true, queuedPosition: 0 } as never } })
+    mdReview.mockResolvedValue(OK)
+    const onOpenSession = vi.fn()
+    render({ macros: [REVIEW], onOpenSession })
+    await settle()
+    expect(runRows().map((r) => r.getAttribute('data-epic-id'))).toEqual(['epic-new', 'epic-old'])
+    expect(runRows().map((r) => r.querySelector('[data-testid="md-review-run-date"]')!.textContent)).toEqual([
+      localDate(new Date(NEW)),
+      localDate(new Date(OLD)),
+    ])
+    expect(runRows().map((r) => r.querySelector('[data-testid="md-review-run-status"]')!.textContent)).toEqual(['reporting', 'validated'])
+    act(() => (runRows()[1].querySelector('[data-testid="md-review-run-open"]') as HTMLButtonElement).click())
+    expect(onOpenSession).toHaveBeenCalledWith('epic-old')
+    expect(q('md-review-runs-none')).toBeNull()
+  })
+
+  it('shows one none-yet line with no runs', async () => {
+    mdReview.mockResolvedValue({ ok: true, record: null, recordPath: null, validation: {} })
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(runRows()).toEqual([])
+    expect(q('md-review-runs-none')!.textContent).toContain('No review runs yet')
+  })
+
+  it('row meta adds the last run date and status; findings count alone without runs', async () => {
+    mdNetwork.mockResolvedValue(NET)
+    mdReview.mockResolvedValue(OK)
+    render({ macros: [REVIEW] })
+    await settle()
+    const findings = meta()
+    expect(findings).toMatch(/^\d+ findings?$/)
+    act(() => seed())
+    await settle()
+    expect(meta()).toBe(`${findings} · last run ${localDate(new Date(NEW))} · reported`)
+  })
+
+  it('refetches the review read with the run ids when the id list changes', async () => {
+    mdReview.mockResolvedValue(OK)
+    render({ macros: [REVIEW] })
+    await settle()
+    expect(mdReview.mock.calls).toEqual([[{ cwd: CWD, epicIds: [] }]])
+    act(() => seed())
+    await settle()
+    expect(mdReview.mock.calls[1]).toEqual([{ cwd: CWD, epicIds: ['epic-new', 'epic-old'] }])
+    expect(runRows()[1].querySelector('[data-testid="md-review-run-status"]')!.textContent).toBe('validated')
+    act(() => usePromptSessions.setState({ sessions: { ...usePromptSessions.getState().sessions } }))
+    await settle()
+    expect(mdReview).toHaveBeenCalledTimes(2)
   })
 })

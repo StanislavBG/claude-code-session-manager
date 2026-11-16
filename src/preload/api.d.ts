@@ -1650,6 +1650,8 @@ export interface ProjectVideoMeta {
   id: string;
   title: string;
   kind: 'project-demo' | 'blog-post' | 'feature';
+  /** The `Video target:` text the video was built for (a post path or URL, or a feature name); absent for a Project demo. */
+  target?: string;
   style: string;
   lengthS: number;
   createdAt: string;

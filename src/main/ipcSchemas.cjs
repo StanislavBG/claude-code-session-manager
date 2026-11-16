@@ -978,6 +978,7 @@ const projectVideoMeta = z.object({
   id: entryId,
   title: z.string().min(1).max(120),
   kind: z.enum(['project-demo', 'blog-post', 'feature']),
+  target: z.string().max(300).optional(),
   style: z.string().max(40),
   lengthS: z.number().int().min(5).max(60),
   createdAt: z.string().datetime(),

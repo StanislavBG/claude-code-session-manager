@@ -27,6 +27,9 @@ describe('projectVideoMeta', () => {
   test('rejects check missing ok', () => {
     const v = video(); v.report.checks = [{ id: 'a', detail: 'd' }]; expect(ok(v)).toBe(false);
   });
+  test('accepts target', () => expect(ok({ ...video(), kind: 'blog-post', target: 'blog/posts/git-viewer.md' })).toBe(true));
+  test('rejects 301-char target', () => expect(ok({ ...video(), target: 'x'.repeat(301) })).toBe(false));
+  test('rejects unknown key alongside target', () => expect(ok({ ...video(), target: 't', audience: 'devs' })).toBe(false));
 });
 
 describe('projectPageMeta', () => {
@@ -46,6 +49,12 @@ describe('admin write bodies', () => {
     const body = { videoId: 'v1', title: 'T', kind: 'feature', lengthS: 30, html: '<p/>', meta: m };
     expect(schemas.projectVideoAdminWriteBody.safeParse(body).success).toBe(true);
     expect(schemas.projectVideoAdminWriteBody.safeParse({ ...body, meta: { ...m, id: 'x' } }).success).toBe(false);
+  });
+  test('video body: meta may carry target', () => {
+    const { id, createdAt, ...m } = video();
+    delete m.report.bytes;
+    const body = { videoId: 'v1', title: 'T', kind: 'feature', lengthS: 30, html: '<p/>', meta: { ...m, kind: 'feature', target: 'Changes tab' } };
+    expect(schemas.projectVideoAdminWriteBody.safeParse(body).success).toBe(true);
   });
   test('ENTRY_ID_RE exported', () => expect(ENTRY_ID_RE.test('_character')).toBe(false));
 });

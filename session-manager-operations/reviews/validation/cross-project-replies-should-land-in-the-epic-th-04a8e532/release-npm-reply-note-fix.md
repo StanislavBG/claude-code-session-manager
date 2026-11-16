@@ -10,6 +10,8 @@
 - Local fallback (once): `npm publish` printed `+ claude-code-session-manager@0.136.1`. Worktree removed.
 - Registry evidence: cache-busted packument polled 12 times (~6 min): dist-tags.latest still 0.136.0, 0.136.1 not under versions, tarball URL 404. Consistent with a staged publish awaiting approval. Not republished, no new version.
 - Installer assets (GitHub release v0.136.1): .dmg (arm64, x64), .zip, .exe (win-x64, win-arm64, win), .AppImage, latest*.yml. None missing.
-- Manual: skipped, because the npm version is not live.
+- Manual (builder step 5): no content change. No chapter names feedback_open_session, feedback_reply or replyThread; the fix only changes a tool-response note. Bumped manual.json documentsAppVersion 0.136.0 -> 0.136.1 only; manual version stays 2.5.0, no manual release, no gaps.
 
-NOT LIVE: owner must approve v0.136.1 on npmjs.com. Re-check the packument afterwards; no republish, bump or tag is needed.
+- Registry evidence (live): checked 12:39 PM PST on 2026-11-16. Cache-busted packument dist-tags = {"latest":"0.136.1"}; `versions` includes 0.136.1; tarball HTTP 200. The owner approved the staged publish on npmjs.com. No republish, bump or tag was made by this fix job.
+
+RELEASE: PUBLISHED v0.136.1

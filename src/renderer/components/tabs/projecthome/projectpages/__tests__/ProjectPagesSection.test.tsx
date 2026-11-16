@@ -76,7 +76,7 @@ const vEntry = (id: string, title: string, mtimeMs: number, over: any = {}, meta
 const NEW_K = kEntry('b', 'Newer page', 2000)
 const OLD_K = kEntry('a', 'Older page', 1000)
 const NEW_V = vEntry('v2', 'Newer video', 2000)
-const OLD_V = vEntry('v1', 'Older video', 1000, { kind: 'blog-post', lengthS: 60, report: { lufs: null, readingGrade: null, checks: [], bytes: 1 } })
+const OLD_V = vEntry('v1', 'Older video', 1000, { kind: 'blog-post', target: 'content/writing/post.md', lengthS: 60, report: { lufs: null, readingGrade: null, checks: [], bytes: 1 } })
 
 function props(over: Record<string, unknown> = {}) {
   return { tab: 'pages', knowledge: [], videos: [], loaded: true, macros: MACROS, launching: null, onLaunch: () => {}, ...over } as any
@@ -362,10 +362,33 @@ describe('ProjectPagesSection', () => {
       expect(byTestId('composer-title')?.textContent).toBe('Regenerate “Older video”')
       expect(byTestId('composer-eyebrow')?.textContent).toBe('REBUILDING · v1')
       act(() => byTestId('composer-generate')!.click())
-      // OLD_V: blog-post · Fun · 60s · no character
+      // OLD_V: blog-post · content/writing/post.md · Fun · 60s · no character
       expect(onLaunch.mock.calls).toEqual([
-        [DEMO_MACRO, 'Video kind: Blog post\nVideo style: Fun\nVideo length: 60\nCharacter: off\nReplace entry: v1'],
+        [DEMO_MACRO, 'Video kind: Blog post\nVideo target: content/writing/post.md\nVideo style: Fun\nVideo length: 60\nCharacter: off\nReplace entry: v1'],
       ])
+    })
+
+    it('Regenerate… of a legacy blog-post video with no meta.target blocks Generate until a target is typed', async () => {
+      const LEGACY_V = vEntry('v0', 'Legacy video', 500, { kind: 'blog-post', lengthS: 60 })
+      expect(LEGACY_V.meta.target).toBeUndefined()
+      const onLaunch = vi.fn()
+      const el = mount(<ProjectPagesSection {...props({ videos: [NEW_V, LEGACY_V], onLaunch, tab: 'videos' })} />)
+      await flush()
+      act(() => (el.querySelector('[data-testid="video-item"][data-id="v0"]') as HTMLElement).click())
+      act(() => byTestId('project-home-regenerate', el)!.click())
+      expect(byTestId('composer-eyebrow')?.textContent).toBe('REBUILDING · v0')
+      const gen = () => byTestId('composer-generate') as HTMLButtonElement
+      expect(gen().disabled).toBe(true)
+      act(() => gen().click())
+      expect(onLaunch).not.toHaveBeenCalled()
+      typeInto(byTestId('composer-target'), 'content/writing/other.md')
+      expect(gen().disabled).toBe(false)
+      act(() => gen().click())
+      expect(onLaunch).toHaveBeenCalledTimes(1)
+      const [m, lines] = onLaunch.mock.calls[0]
+      expect(m).toBe(DEMO_MACRO)
+      expect(lines).toContain('Video target: content/writing/other.md')
+      expect(lines.endsWith('Replace entry: v0')).toBe(true)
     })
 
     it('gives VideosPane the video macro\'s job: a queued video build disables Generate video, a page build does not', async () => {

@@ -17,6 +17,7 @@ import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTur
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { BackgroundBuildStatus } from './BackgroundBuildStatus'
 import { BuildResultCard } from './BuildResultCard'
+import { CrossProjectReplyCard, CrossProjectReplyReceipt } from './CrossProjectReplyCard'
 import { useMacros } from '../../lib/useMacros'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
@@ -284,6 +285,14 @@ function ResponseEvent({
   // after every hook above so the branch never changes hook order.
   if (event.notice === 'build-done' || event.notice === 'build-failed') {
     return <BuildResultCard event={event} cwd={cwd} epicId={epicId} onOpenProjectHome={openProjectHome} />
+  }
+  // A reply from another project (feedback_reply) and the sender's receipt —
+  // also after every hook above, so hook order never changes.
+  if (event.notice === 'cross-project-reply') {
+    return <CrossProjectReplyCard event={event} />
+  }
+  if (event.notice === 'cross-project-reply-sent') {
+    return <CrossProjectReplyReceipt event={event} />
   }
   // A 'response' event with outcome 'needs_review' is written exclusively by
   // scheduler.cjs's flushDueReviewNotices once a parked job's self-heal ladder gives up or its

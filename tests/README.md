@@ -115,6 +115,16 @@ If either fails, keep the test or move its assertions into the scenario test fir
 
 - `tests/smoke/darwin-boot.spec.ts` has no platform guard: on Linux it runs as a free extra boot smoke.
 
+## Environment gotchas
+
+- Before trusting a local-only red, rerun with every `SM_*` var and `CLAUDECODE` unset — an Epic chat
+  leaks `SM_CHAT_SESSION_ID`/`SM_PROJECT_ROOT`; the sandbox pins `SM_MEMINFO_PATH` (globalSetup).
+- Stub `SM_CLAUDE_BIN` scripts commit into `process.cwd()`: any new claude-binary spawn (e.g. a
+  `--version` probe) must pass a neutral `cwd` such as `os.tmpdir()` (see `claudeBin.cjs`).
+- Stubs prove nothing at the spawn/Electron/systemd/launcher seams — run a real-path probe before
+  trusting VERIFIED on such a change.
+- A file red in the full suite but green alone and untouched by the diff is environment, not the change.
+
 Test-quality reports: [`quality/MUTATION.md`](quality/MUTATION.md), [`quality/REPORT.md`](quality/REPORT.md).
 
 ## E2E budget

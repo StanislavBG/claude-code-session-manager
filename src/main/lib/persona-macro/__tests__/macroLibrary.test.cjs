@@ -444,9 +444,9 @@ test('the real demo-video v4 copy with a late updatedAt upgrades to the current 
   expect(m.prompt).toBe(real.prompt);
 });
 
-test('re-stamped project-home v2 and demo-video v6 copies upgrade to v3 and v8', async () => {
+test('re-stamped project-home v2 and demo-video v6 copies upgrade to the current builtinVersion', async () => {
   const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
-  for (const [id, shipped, next] of [['builtin-project-home', 2, 3], ['builtin-demo-video', 6, 8]]) {
+  for (const [id, shipped] of [['builtin-project-home', 2], ['builtin-demo-video', 6]]) {
     const real = BUILTIN_MACROS.find((b) => b.id === id);
     expect(typeof real.priorPrompts[shipped - 1]).toBe('string');
     seedStored({
@@ -462,7 +462,7 @@ test('re-stamped project-home v2 and demo-video v6 copies upgrade to v3 and v8',
     });
     const listed = await lib.listMacros({ filePath, listPersonas: async () => [], builtins: BUILTIN_MACROS });
     const m = listed.find((x) => x.id === real.id);
-    expect(m.builtinVersion).toBe(next);
+    expect(m.builtinVersion).toBe(real.builtinVersion);
     expect(m.prompt).toBe(real.prompt);
   }
 });

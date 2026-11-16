@@ -51,17 +51,37 @@ export function inboundFeedbackOrigin(epic: Pick<PromptSession, 'source'>): Inbo
   const tail =
     (source.fromEpicId ? ` (session ${source.fromEpicId})` : '')
     + (proposal?.originAsk ? ` — raised while working on: ${proposal.originAsk}` : '')
+  const fromName = basename(fromCwd)
+  const replyOf = threadRef(source.replyOf)
+  const replyTo = threadRef(source.replyTo)
+  const baseLabel = macroLabel ? `${fromName} · ${macroLabel}` : fromName
+  const baseTitle = macroLabel
+    ? `Auto-started by macro "${macroLabel}" from ${fromCwd}${tail}.`
+    : `Proposed by another project: ${fromCwd}${tail}`
+      + '. Verify the claim against this codebase before approving — the sender has not read it.'
   return {
     fromCwd,
     ...(source.fromEpicId ? { fromEpicId: source.fromEpicId } : {}),
-    label: macroLabel ? `${basename(fromCwd)} · ${macroLabel}` : basename(fromCwd),
-    title: macroLabel
-      ? `Auto-started by macro "${macroLabel}" from ${fromCwd}${tail}.`
-      : `Proposed by another project: ${fromCwd}${tail}`
-        + '. Verify the claim against this codebase before approving — the sender has not read it.',
+    label: replyOf ? `${baseLabel} · reply to ${replyOf.epicId}` : baseLabel,
+    title:
+      (replyOf ? `Reply to Epic ${replyOf.epicId} from ${fromName}. ` : '')
+      + baseTitle
+      + (replyTo
+        ? ` Asked by session ${replyTo.epicId} in ${basename(replyTo.cwd) || replyTo.cwd}`
+          + ' — answer it with feedback_reply.'
+        : ''),
     proposal,
     seriesLabel: series ? `Part ${series.index} of ${series.total} · ${series.title}` : null,
   }
+}
+
+/** Defensive read of a stored reply-thread link (`source.replyTo` /
+ *  `source.replyOf`): null unless it carries a string epicId and cwd. */
+function threadRef(raw: unknown): { cwd: string; epicId: string } | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.epicId !== 'string' || !r.epicId || typeof r.cwd !== 'string' || !r.cwd) return null
+  return { cwd: r.cwd, epicId: r.epicId }
 }
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string')

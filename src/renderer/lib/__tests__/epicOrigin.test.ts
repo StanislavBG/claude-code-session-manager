@@ -141,3 +141,37 @@ describe('inboundFeedbackOrigin', () => {
     expect(origin?.title).toMatch(/has not read it/)
   })
 })
+
+describe('inboundFeedbackOrigin reply thread', () => {
+  const base = { producer: 'cross-project-feedback' as const, fromCwd: '/home/bilko/Projects/Bilko', fromEpicId: 'epic-9' }
+
+  it('names the asking Epic and the replying project for source.replyOf', () => {
+    const o = inboundFeedbackOrigin({ source: { ...base, replyOf: { cwd: '/home/bilko/Projects/session-manager', epicId: 'epic-ask' } } })
+    expect(o?.label).toBe('Bilko · reply to epic-ask')
+    expect(o?.title).toContain('Reply to Epic epic-ask from Bilko')
+  })
+
+  it('names the asking session and feedback_reply for source.replyTo', () => {
+    const o = inboundFeedbackOrigin({
+      source: { ...base, replyTo: { cwd: '/home/bilko/Projects/Bilko', epicId: 'epic-9', claudeSessionId: 's9' } },
+    })
+    expect(o?.label).toBe('Bilko')
+    expect(o?.title).toContain('Asked by session epic-9 in Bilko')
+    expect(o?.title).toContain('feedback_reply')
+  })
+
+  it('produces exactly the plain output when neither field is set (or a link is malformed)', () => {
+    const plain = inboundFeedbackOrigin({ source: base })
+    expect(plain).toEqual({
+      fromCwd: '/home/bilko/Projects/Bilko',
+      fromEpicId: 'epic-9',
+      label: 'Bilko',
+      title: 'Proposed by another project: /home/bilko/Projects/Bilko (session epic-9)'
+        + '. Verify the claim against this codebase before approving — the sender has not read it.',
+      proposal: null,
+      seriesLabel: null,
+    })
+    expect(inboundFeedbackOrigin({ source: { ...base, replyOf: { cwd: '', epicId: 'x' } } as any })).toEqual(plain)
+    expect(inboundFeedbackOrigin({ source: { ...base, replyTo: 'nope' } as any })).toEqual(plain)
+  })
+})

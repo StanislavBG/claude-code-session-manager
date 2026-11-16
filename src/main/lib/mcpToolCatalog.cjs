@@ -298,9 +298,32 @@ const MCP_TOOL_CATALOG = [
       + 'lands as `proposed` and runs only if a human in the RECEIVING project presses "Approve & start". '
       + 'With a verified autoStart + humanRequestQuote the result status is `auto-approved` and the session '
       + 'starts on its own; otherwise it stays proposed (check the note for the reason). '
-      + 'There is no callback and no reply channel — do not wait for an answer, and do not tell the user '
-      + 'the other project has "been fixed" or "is working on it". Report only that the proposal was '
-      + 'delivered, or that the session was auto-approved and is starting.',
+      + 'Do not block waiting for an answer, and do not tell the user the other project has "been fixed" '
+      + 'or "is working on it". Report only that the proposal was delivered, or that the session was '
+      + 'auto-approved and is starting. The receiving session can answer later with feedback_reply; that '
+      + 'answer lands in your Epic as an event and a new prompt.',
+  },
+  {
+    name: 'feedback_reply',
+    group: 'feedback',
+    purpose: 'Answer the project that asked. Only for a session that was opened by ANOTHER project\'s '
+      + 'feedback_open_session: the reply lands in the Epic that asked — as an event on its chain plus its '
+      + 'next chat prompt — not as a new proposed session.',
+    whenToUse: 'Use once the work the other project asked for is verified (outcome "done"), or when you are '
+      + 'blocked or need an answer from it (outcome "blocked" / "question"). Send "done" only after the work '
+      + 'is verified — name the commit or version in the message.',
+    whenNotToUse: 'Do not use for a NEW request to another project — that is feedback_open_session. It is refused '
+      + 'for any other target than the Epic that asked (toEpicId may only restate it), refused in a session '
+      + 'that was not opened by another project, and refused inside a scheduled job — a job reports in its result.',
+    exampleArgs: {
+      message: 'Fixed in commit abc1234 and released in v1.2.3; the admin API now returns field F.',
+      outcome: 'done',
+      referencePaths: ['/home/bilko/Projects/other-project/src/api.ts'],
+    },
+    notes: 'Capped at 3 replies per thread. Identity comes from this session only; it cannot be passed in. '
+      + 'The result delivery is "delivered" (into the asking session), "event-only" (recorded on the asking '
+      + 'Epic, its session not prompted) or "fallback" (the asking Epic could not take it, so a new proposed '
+      + 'session opened in that project). Never report that the other project acted on the reply.',
   },
   {
     name: 'project_home_write',
@@ -592,7 +615,18 @@ const MCP_RECIPES = [
     steps: [
       'Call feedback_list_projects to get the exact toCwd for the receiving project — never guess a path.',
       'Call feedback_open_session with toCwd, fromCwd, a one-line title, and a self-contained body (symptom, where observed, expected behavior, suspected cause).',
-      'The call only delivers a PROPOSED session in the receiving project — nothing runs until a human there presses Approve & start; there is no reply channel.',
+      'The call only delivers a PROPOSED session in the receiving project — nothing runs until a human there presses Approve & start.',
+      'The receiving session can answer with feedback_reply; the answer lands in your Epic as an event and a new prompt.',
+    ],
+  },
+  {
+    id: 'reply-to-the-project-that-asked',
+    title: 'Reply to the project that asked',
+    steps: [
+      'Confirm this session was opened by another project\'s feedback_open_session — feedback_reply refuses any other session.',
+      'Do the work and verify it (gate green, commit landed, release named if it needs one).',
+      'Call feedback_reply with message (what was done, with commit/version) and outcome "done" — or "blocked" / "question" when you cannot finish.',
+      'Read the result delivery: "delivered", "event-only" or "fallback". Report only that; never say the other project acted. At most 3 replies per thread.',
     ],
   },
 ];

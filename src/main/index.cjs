@@ -97,6 +97,9 @@ chatRunner.registerAdminRoute(adminHttp);
 // several projects' operations roots open, so it performs the cross-folder
 // write (lib/feedback-remote/crossProjectFeedback.cjs).
 crossProjectFeedback.registerAdminRoute(adminHttp);
+// Its return leg: the receiving session answers INTO the Epic that asked
+// (lib/feedback-remote/crossProjectReply.cjs).
+require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminHttp);
 require('./lib/feedback-remote/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');

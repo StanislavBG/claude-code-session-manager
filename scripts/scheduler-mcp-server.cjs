@@ -10,6 +10,7 @@
  *
  *   feedback_list_projects()       -> GET  /admin/feedback/targets
  *   feedback_open_session({ ... }) -> POST /admin/feedback/open-session
+ *   feedback_reply({ message, outcome, ... }) -> POST /admin/feedback/reply
  *
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
  *   project_demo_video_write({ cwd?, html? | htmlPath? }) -> POST /admin/project-home/demo-video/write
@@ -539,6 +540,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'feedback_reply',
+    description: descriptionFor('feedback_reply'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'The answer for the Epic that asked: what was done (with commit/version), what blocks it, or the question. Self-contained — the reader cannot see your project.' },
+        outcome: { type: 'string', enum: ['done', 'blocked', 'question'], description: "'done' only after the work is verified; 'blocked' or 'question' otherwise." },
+        referencePaths: {
+          type: 'array', items: { type: 'string' },
+          description: 'Optional absolute paths worth reading, appended as Reference lines',
+        },
+        toEpicId: { type: 'string', description: 'Optional: the asking Epic id. May only restate the thread\'s own target — any other id is refused.' },
+      },
+      required: ['message', 'outcome'],
+    },
+  },
+  {
     name: 'project_home_write',
     description: descriptionFor('project_home_write'),
     inputSchema: {
@@ -1029,12 +1047,54 @@ async function handleCallTool(request) {
       let note = '';
       if (result?.ok !== false) {
         if (result?.status === 'auto-approved') {
-          note = ' — the session was auto-approved and is starting in the receiving project. No reply channel; the work is not done yet.';
+          note = ' — the session was auto-approved and is starting in the receiving project; the work is not done yet. The receiving session can answer into this Epic with feedback_reply.';
         } else {
-          note = ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. No reply channel.';
+          note = ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. The receiving session can answer into this Epic with feedback_reply.';
           if (result?.autoStart && result.autoStart.granted === false && result.autoStart.reason) {
             note += ` Auto-start was requested but not granted: ${result.autoStart.reason}`;
           }
+        }
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
+    }
+    if (name === 'feedback_reply') {
+      // Only the Epic's own interactive session can reply: a scheduled job has
+      // no chat identity, and its work is reported in its result instead.
+      if (process.env.SM_SCHEDULER_JOB_SLUG) {
+        return errorResult(
+          `refused: feedback_reply was called from inside headless scheduled job '${process.env.SM_SCHEDULER_JOB_SLUG}'. `
+          + "A scheduled job never replies to another project. Report the outcome in your final result so the Epic's own session can reply with feedback_reply.",
+        );
+      }
+      if (!args || typeof args.message !== 'string' || !args.message.trim()) {
+        return errorResult('missing required argument: message');
+      }
+      if (typeof args.outcome !== 'string' || !args.outcome) {
+        return errorResult('missing required argument: outcome');
+      }
+      const payload = { ...args };
+      // Identity comes only from this process's env — never from the caller.
+      delete payload.originClaudeSessionId;
+      delete payload.originProjectRoot;
+      if (process.env.SM_CHAT_SESSION_ID) {
+        payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
+      }
+      if (process.env.SM_PROJECT_ROOT) {
+        payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
+      }
+      payload.fromCwd = process.cwd();
+      const result = await adminRequest('POST', '/admin/feedback/reply', payload);
+      // Say only where the reply landed — never that the other project acted.
+      let note = '';
+      if (result?.ok !== false) {
+        if (result?.delivery === 'delivered') {
+          note = ' — delivered into the asking session; it has not acted on it yet.';
+        } else if (result?.delivery === 'event-only') {
+          note = " — delivered as an event only on the asking Epic; its session was not prompted"
+            + `${result.reason ? ` (${result.reason})` : ''}.`;
+        } else if (result?.delivery === 'fallback') {
+          note = ' — the asking Epic could not take it, so the reply fell back to a new proposed session in that project'
+            + `${result.fallbackEpicId ? ` (${result.fallbackEpicId})` : ''}; a human there must approve it.`;
         }
       }
       return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };

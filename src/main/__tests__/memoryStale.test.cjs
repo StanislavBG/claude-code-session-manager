@@ -170,3 +170,79 @@ test('danglingLinks lists outLinks with no matching memory file', () => {
   assert.deepEqual(r[0].danglingLinks, ['missing']);
   assert.deepEqual(r[1].outLinks, []);
 });
+
+const { makeLinkResolver } = require('../lib/memoryStale.cjs');
+const fm = (name, rest = '') => `---\nname: ${name}\ndescription: d\n---\n${rest}`;
+
+test('a [[kebab-name]] link resolves to a snake_case file via its frontmatter name', () => {
+  const entries = [
+    { name: 'release_v0136.md', mtimeMs: NOW - 200 * DAY_MS, body: fm('release-v0136', 'see [[cross-project-replies-plan]]') },
+    { name: 'cross_project_replies_plan.md', mtimeMs: NOW - 200 * DAY_MS, body: fm('cross-project-replies-plan', 'from [[release-v0136]]') },
+  ];
+  const [rel, cross] = scoreMemories({ entries, now: NOW, existsPath: () => true });
+  assert.deepEqual(rel.outLinks, ['cross_project_replies_plan']);
+  assert.deepEqual(rel.danglingLinks, []);
+  assert.equal(rel.inboundLinks, 1);
+  assert.equal(rel.stale, false);
+  assert.deepEqual(cross.outLinks, ['release_v0136']);
+  assert.equal(cross.inboundLinks, 1);
+  assert.equal(cross.stale, false);
+});
+
+test('a link by filename stem still resolves', () => {
+  const entries = [
+    { name: 'a.md', mtimeMs: NOW, body: 'see [[release_v0136]]' },
+    { name: 'release_v0136.md', mtimeMs: NOW, body: fm('release-v0136') },
+  ];
+  const [a, rel] = scoreMemories({ entries, now: NOW, existsPath: () => true });
+  assert.deepEqual(a.outLinks, ['release_v0136']);
+  assert.deepEqual(a.danglingLinks, []);
+  assert.equal(rel.inboundLinks, 1);
+});
+
+test('a target matching neither stem nor name is dangling', () => {
+  const entries = [
+    { name: 'a.md', mtimeMs: NOW, body: '[[no-such-memory]]' },
+    { name: 'release_v0136.md', mtimeMs: NOW, body: fm('release-v0136') },
+  ];
+  const [a, rel] = scoreMemories({ entries, now: NOW, existsPath: () => true });
+  assert.deepEqual(a.outLinks, ['no-such-memory']);
+  assert.deepEqual(a.danglingLinks, ['no-such-memory']);
+  assert.equal(rel.inboundLinks, 0);
+});
+
+test('a self-link by frontmatter name is excluded from outLinks and inbound', () => {
+  const entries = [
+    { name: 'release_v0136.md', mtimeMs: NOW - 200 * DAY_MS, body: fm('release-v0136', 'me: [[release-v0136]] [[Release V0136]]') },
+  ];
+  const [r] = scoreMemories({ entries, now: NOW, existsPath: () => true });
+  assert.deepEqual(r.outLinks, []);
+  assert.deepEqual(r.danglingLinks, []);
+  assert.equal(r.inboundLinks, 0);
+  assert.equal(r.stale, true);
+});
+
+test('normalized collisions: exact stem wins, else first filename by sort, deterministically', () => {
+  const entries = [
+    { name: 'foo_bar.md', mtimeMs: NOW, body: fm('zzz') },
+    { name: 'foo-bar.md', mtimeMs: NOW, body: fm('yyy') },
+    { name: 'b_note.md', mtimeMs: NOW, body: fm('shared-name') },
+    { name: 'a_note.md', mtimeMs: NOW, body: fm('shared-name') },
+  ];
+  const resolve = makeLinkResolver(entries);
+  assert.equal(resolve('foo_bar'), 'foo_bar');
+  assert.equal(resolve('foo-bar'), 'foo-bar');
+  assert.equal(resolve('Foo Bar'), 'foo-bar'); // '-' sorts before '_'
+  assert.equal(resolve('shared-name'), 'a_note');
+  assert.equal(resolve('Shared__Name'), 'a_note');
+  assert.equal(resolve('zzz'), 'foo_bar');
+  assert.equal(resolve('nothing'), null);
+  // stem beats a frontmatter name with the same normalized key
+  const r2 = makeLinkResolver([
+    { name: 'a.md', body: fm('target-x') },
+    { name: 'target_x.md', body: fm('other') },
+  ]);
+  assert.equal(r2('target-x'), 'target_x');
+  // input order does not change the result
+  assert.equal(makeLinkResolver([...entries].reverse())('shared-name'), 'a_note');
+});

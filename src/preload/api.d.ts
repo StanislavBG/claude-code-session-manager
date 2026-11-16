@@ -1535,6 +1535,8 @@ export interface MemoryStaleEntry {
   ageDays: number;
   inboundLinks: number;
   deadRefs: string[];
+  /** Refs whose path was git-renamed to an existing target — not dead. */
+  movedRefs: { from: string; to: string }[];
   stale: boolean;
   reasons: string[];
   description: string | null;

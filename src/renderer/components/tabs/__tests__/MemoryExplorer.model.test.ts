@@ -15,7 +15,7 @@ const entries = [
   { name: 'gamma.md', path: '/m/gamma.md', mtimeMs: NOW - 10 * DAY, bytes: 200 },
 ]
 const se = (name: string, o: object = {}) => ({
-  name, ageDays: 0, inboundLinks: 0, deadRefs: [], stale: false, reasons: [],
+  name, ageDays: 0, inboundLinks: 0, deadRefs: [], movedRefs: [], stale: false, reasons: [],
   description: null, type: null, originSessionId: null, outLinks: [], danglingLinks: [], ...o,
 })
 const stale = {

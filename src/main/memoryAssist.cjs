@@ -13,8 +13,8 @@ const path = require('node:path');
 const { extractJson } = require('./lib/util/extractJson.cjs');
 const { runClaudeP: realRunClaudeP } = require('./lib/claude/runClaudeP.cjs');
 const realSessionSlots = require('./lib/scheduler/sessionSlots.cjs');
-const { scoreMemories } = require('./lib/memoryStale.cjs');
-const { makeRefResolver, listTrackedFiles } = require('./lib/memoryRefResolve.cjs');
+const { scoreMemories, makeLinkResolver } = require('./lib/memoryStale.cjs');
+const { makeRefResolver, listTrackedFiles, listRenames } = require('./lib/memoryRefResolve.cjs');
 const { collectMdNetwork } = require('./lib/memoryMdNetwork.cjs');
 
 const MODEL = 'sonnet';
@@ -51,10 +51,16 @@ function selectAskFiles(files, contextName) {
     const ctxName = withMd(contextName);
     const ctx = pool.find((f) => f.name === ctxName);
     if (ctx) {
+      // Follow [[links]] by filename stem or frontmatter name, as scoreMemories does.
+      const resolveLink = makeLinkResolver(pool);
       const linked = new Set([ctxName]);
       let m;
       WIKILINK_RE.lastIndex = 0;
-      while ((m = WIKILINK_RE.exec(ctx.body)) !== null) linked.add(withMd(m[1].trim()));
+      while ((m = WIKILINK_RE.exec(ctx.body)) !== null) {
+        const target = m[1].trim();
+        const stem = resolveLink(target);
+        linked.add(withMd(stem === null ? target : stem));
+      }
       pool = pool.filter((f) => linked.has(f.name));
     }
   }
@@ -143,7 +149,12 @@ const ACTIONS = new Set(['update', 'delete', 'fold', 'keep']);
 const FOLD_MAX_LINES = 3;
 const FOLD_MAX_CHARS = 600;
 
-async function proposeFix({ name, dir, cwd } = {}, deps = {}) {
+/**
+ * extraBases / projectRoots / renames are the resolution inputs memoryTool
+ * derives for the project (ops root, registered roots, git rename map); a
+ * missing `renames` is read from git here, once.
+ */
+async function proposeFix({ name, dir, cwd, extraBases = [], projectRoots = [], renames } = {}, deps = {}) {
   const fail = (error) => ({ ok: false, action: 'keep', summary: '', reason: '', content: '', fold: null, error });
   if (typeof name !== 'string' || !name || name !== path.basename(name) || !name.endsWith('.md')) return fail('invalid memory name');
   const files = await (deps.readDir || defaultReadDir)(dir);
@@ -152,12 +163,17 @@ async function proposeFix({ name, dir, cwd } = {}, deps = {}) {
 
   const tracked = Array.isArray(deps.trackedFiles) ? deps.trackedFiles : await listTrackedFiles(cwd);
   const readFile = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
-  const resolver = makeRefResolver({ cwd, trackedFiles: tracked, ...(deps.exists ? { exists: deps.exists } : {}) });
-  const [scored] = scoreMemories({ entries: [entry], now: Date.now(), existsPath: resolver });
+  const resolver = makeRefResolver({ cwd, trackedFiles: tracked, extraBases, ...(deps.exists ? { exists: deps.exists } : {}) });
+  const renameMap = renames instanceof Map ? renames : await (deps.listRenames || listRenames)(cwd);
+  const renamedTo = (rel) => renameMap.get(rel) || null;
+  // Moved refs land in scored.movedRefs, never deadRefs, so they are not reported as unresolved.
+  const [scored] = scoreMemories({ entries: [entry], now: Date.now(), existsPath: resolver, projectRoots, renamedTo });
   const unresolved = {};
   for (const dead of scored.deadRefs) {
     const base = path.posix.basename(dead);
-    unresolved[dead] = tracked.filter((p) => path.posix.basename(p) === base).slice(0, MAX_SUGGESTIONS);
+    const target = renamedTo(dead);
+    const byBase = tracked.filter((p) => path.posix.basename(p) === base && p !== target);
+    unresolved[dead] = (target ? [target, ...byBase] : byBase).slice(0, MAX_SUGGESTIONS);
   }
   const network = collectMdNetwork({ cwd, memoryBody: entry.body, trackedFiles: tracked, readFile });
 

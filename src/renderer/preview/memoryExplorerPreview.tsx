@@ -216,6 +216,7 @@ const memory = {
         ageDays: Math.floor((Date.now() - m.mtimeMs) / DAY),
         inboundLinks: [...mems.values()].filter((x) => linksOf(x).includes(s)).length,
         deadRefs: m.deadRefs,
+        movedRefs: [],
         stale: m.stale,
         reasons: m.stale ? [staleReason(m)] : [],
         description: m.description,

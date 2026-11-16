@@ -183,3 +183,32 @@ test('slot released when runClaudeP fails or throws', async () => {
   assert.equal(t.ok, false);
   assert.deepEqual(b.calls.release, ['tok']);
 });
+
+test('ask contextName follows [[links]] by frontmatter name (kebab link → snake file)', () => {
+  const net = [
+    { name: 'release_v0136.md', mtimeMs: 3, body: '---\nname: release-v0136\n---\nSee [[cross-project-replies-plan]].' },
+    { name: 'cross_project_replies_plan.md', mtimeMs: 2, body: '---\nname: cross-project-replies-plan\n---\nREPLIES BODY' },
+    { name: 'unrelated.md', mtimeMs: 1, body: '---\nname: unrelated\n---\nUNRELATED BODY' },
+  ];
+  const p = buildAskPrompt({ question: 'q', files: net, contextName: 'release_v0136.md' });
+  assert.ok(p.includes('<memory_file name="cross_project_replies_plan.md">'));
+  assert.ok(p.includes('REPLIES BODY'));
+  assert.ok(!p.includes('UNRELATED BODY'));
+});
+
+test('proposeFix: rename target listed first for a dead ref; a moved ref is not unresolved', async () => {
+  const body = '---\ndescription: a\n---\nSee `src/main/old/helper.cjs` and `src/gone/thing.cjs` and `src/was/moved.cjs`.';
+  const m = makeDeps({ out: JSON.stringify(J({ action: 'keep' })) });
+  m.deps.readDir = async () => [{ name: 'alpha.md', mtimeMs: 1, body }];
+  // Tracked: helper.cjs resolves via suffix, so it is never dead.
+  m.deps.trackedFiles = ['src/main/old/helper.cjs', 'lib/thing.cjs', 'CLAUDE.md'];
+  m.deps.exists = (abs) => abs.endsWith('/src/now/moved.cjs');
+  const renames = new Map([
+    ['src/gone/thing.cjs', 'src/renamed/thing.cjs'], // target absent → stays dead, listed first
+    ['src/was/moved.cjs', 'src/now/moved.cjs'],      // target exists → moved, not unresolved
+  ]);
+  await proposeFix({ name: 'alpha.md', dir: '/m', cwd: '/c', renames }, m.deps);
+  const p = m.calls.run[0].prompt;
+  assert.ok(p.includes('- src/gone/thing.cjs — candidates: src/renamed/thing.cjs, lib/thing.cjs'));
+  assert.ok(!p.includes('- src/was/moved.cjs —'));
+});

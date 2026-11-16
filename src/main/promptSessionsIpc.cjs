@@ -166,4 +166,4 @@ function registerPromptSessionsReadHandlers() {
   ipcMain.handle('promptSessions:read-session-transcript', v(s.promptSessionsReadSessionTranscript, ({ cwd, sessionId }) => readSessionTranscript(cwd, sessionId)));
 }
 
-module.exports = { makeRegisteredRootsCache, __resetRegisteredRootsCacheForTests, loadActiveIndex, listArchived, readArchived, readSessionTranscript, writeArchive, registerPromptSessionsReadHandlers };
+module.exports = { defaultProjectRoots, makeRegisteredRootsCache, __resetRegisteredRootsCacheForTests, loadActiveIndex, listArchived, readArchived, readSessionTranscript, writeArchive, registerPromptSessionsReadHandlers };

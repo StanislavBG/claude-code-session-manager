@@ -32,7 +32,7 @@ const config = require('./config.cjs');
 
 const { MEMORY_SLUG_RE: SLUG_RE } = require('./lib/memorySlug.cjs');
 const { scoreMemories } = require('./lib/memoryStale.cjs');
-const { makeRefResolver, listTrackedFiles } = require('./lib/memoryRefResolve.cjs');
+const { makeRefResolver, listTrackedFiles, listRenames } = require('./lib/memoryRefResolve.cjs');
 const { addIndexLine, removeIndexLines, indexHealth } = require('./lib/memoryIndex.cjs');
 const {
   resolveWorkspaceMemoryDir,
@@ -297,7 +297,50 @@ async function create({ workspace, name, description, cwd, agent }) {
  * the dead-ref existence check. Absent/invalid cwd disables dead-ref
  * detection entirely rather than mass-flagging memories.
  */
-async function stale({ workspace, cwd, agent }) {
+/**
+ * Registered project roots as scoreMemories projectRoots ({name: basename, root}).
+ * Source is promptSessionsIpc.defaultProjectRoots (persisted tabs + every
+ * project Claude has seen) — the one registry; each normalized to its project
+ * root, home-validated, deduped.
+ */
+function registeredProjectRoots(source) {
+  const { projectRootOf } = require('./lib/activeSessions.cjs');
+  const seen = new Set();
+  const out = [];
+  let raw = [];
+  try { raw = source() || []; } catch { raw = []; }
+  for (const r of raw) {
+    if (typeof r !== 'string' || !r || !path.isAbsolute(r)) continue;
+    let root;
+    try { root = config.validatePath(projectRootOf(r) || r); } catch { continue; }
+    if (seen.has(root)) continue;
+    seen.add(root);
+    const name = path.basename(root);
+    if (name) out.push({ name, root });
+  }
+  return out;
+}
+
+/**
+ * The resolution inputs every memory ref check shares for one validated
+ * project dir: the project's ops root (via opsOwnership, skipped when it
+ * cannot be derived or fails the home boundary), the registered project
+ * roots, and the git rename map. `deps.projectRoots` overrides the registry
+ * source (tests).
+ */
+async function resolutionInputs(baseDir, deps = {}) {
+  const extraBases = [];
+  try {
+    const opsRoot = config.validatePath(require('./lib/opsOwnership.cjs').resolveOpsRoot(baseDir));
+    extraBases.push(opsRoot);
+  } catch { /* no ops root for this cwd: skip */ }
+  const source = deps.projectRoots || require('./promptSessionsIpc.cjs').defaultProjectRoots;
+  const projectRoots = registeredProjectRoots(source);
+  const renames = await listRenames(baseDir);
+  return { extraBases, projectRoots, renames };
+}
+
+async function stale({ workspace, cwd, agent }, deps = {}) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
   let dir;
   try { dir = (await resolveDir({ workspace: ws, cwd, agent })).dir; }
@@ -320,8 +363,17 @@ async function stale({ workspace, cwd, agent }) {
     }
   }
   let existsPath = () => true;
+  let projectRoots = [];
+  let renamedTo = () => null;
   if (baseDir) {
-    const resolveRef = makeRefResolver({ cwd: baseDir, trackedFiles: await listTrackedFiles(baseDir) });
+    const inputs = await resolutionInputs(baseDir, deps);
+    projectRoots = inputs.projectRoots;
+    renamedTo = (rel) => inputs.renames.get(rel) || null;
+    const resolveRef = makeRefResolver({
+      cwd: baseDir,
+      trackedFiles: await listTrackedFiles(baseDir),
+      extraBases: inputs.extraBases,
+    });
     existsPath = (relPath, roots = []) => {
       const full = path.resolve(baseDir, relPath);
       if (full !== baseDir && !full.startsWith(baseDir + path.sep)) return false;
@@ -347,7 +399,7 @@ async function stale({ workspace, cwd, agent }) {
   }
 
   const index = indexHealth({ indexText: await readIndexText(dir), files: r.entries.map((e) => e.name).filter((n) => n.endsWith('.md')) });
-  return { entries: scoreMemories({ entries, now: Date.now(), existsPath }), workspace: ws, error: null, index };
+  return { entries: scoreMemories({ entries, now: Date.now(), existsPath, projectRoots, renamedTo }), workspace: ws, error: null, index };
 }
 
 /** Agents (user + project) with their `memory:` frontmatter scope. */
@@ -397,7 +449,8 @@ async function proposeFix({ name, ...t }) {
     cwd = config.validatePath(t.cwd);
     dir = (await resolveDir(t)).dir;
   } catch (e) { return fail(e.message); }
-  return require('./memoryAssist.cjs').proposeFix({ name, dir, cwd });
+  const { extraBases, projectRoots, renames } = await resolutionInputs(cwd);
+  return require('./memoryAssist.cjs').proposeFix({ name, dir, cwd, extraBases, projectRoots, renames });
 }
 
 function registerMemoryHandlers() {

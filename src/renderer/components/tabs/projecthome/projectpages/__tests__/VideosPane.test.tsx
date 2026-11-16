@@ -394,6 +394,47 @@ describe('VideosPane content column', () => {
   })
 })
 
+describe('VideosPane recorded target', () => {
+  const POST = video('post-video', 'Post video', HOUR, {
+    kind: 'blog-post',
+    style: 'Professional',
+    lengthS: 60,
+    target: 'content/writing/post.md',
+  })
+  const PLAIN = video('plain-demo', 'Plain demo', 3 * HOUR)
+
+  it('shows a blog-post entry\'s target on its row and in the title-bar sub', () => {
+    mount({ entries: [POST, PLAIN] })
+    const target = rows()[0].querySelector<HTMLElement>('[data-col="target"]')!
+    expect(target.textContent).toBe('content/writing/post.md')
+    expect(target.getAttribute('title')).toBe('content/writing/post.md')
+    expect(target.className).toContain('truncate')
+    expect(tid('project-home-video-sub')?.textContent).toBe('blog-post · content/writing/post.md · 60s · professional · 1h ago')
+  })
+
+  it('shows neither for a project-demo entry without a target, nor for a blank one', () => {
+    const BLANK = video('blank', 'Blank', 4 * HOUR, { kind: 'feature', target: '   ' })
+    mount({ entries: [PLAIN, BLANK] })
+    expect(rows()[0].querySelector('[data-col="target"]')).toBeNull()
+    expect(rows()[1].querySelector('[data-col="target"]')).toBeNull()
+    expect(tid('project-home-video-sub')?.textContent).toBe('project-demo · 30s · auto · 3h ago')
+    click(rows()[1])
+    expect(tid('project-home-video-sub')?.textContent).toBe('feature · 30s · auto · 4h ago')
+  })
+
+  it('Regenerate… pre-fills the recorded target and enables Generate', () => {
+    const onLaunch = vi.fn()
+    mount({ entries: [POST], onLaunch })
+    click(tid('project-home-regenerate'))
+    expect((tid('composer-target') as HTMLInputElement).value).toBe('content/writing/post.md')
+    expect((tid('composer-generate') as HTMLButtonElement).disabled).toBe(false)
+    click(tid('composer-generate'))
+    expect(onLaunch.mock.calls).toEqual([
+      [DEMO, 'Video kind: Blog post\nVideo target: content/writing/post.md\nVideo style: Professional\nVideo length: 60\nCharacter: off\nReplace entry: post-video'],
+    ])
+  })
+})
+
 describe('VideosPane Generate and Regenerate', () => {
   it('Generate video opens the video composer and launches builtin-demo-video with its lines joined', () => {
     const onLaunch = vi.fn()

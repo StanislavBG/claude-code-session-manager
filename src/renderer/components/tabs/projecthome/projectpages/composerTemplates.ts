@@ -331,14 +331,14 @@ export function pageCfgFromEntry(id: string, meta: ProjectPageMeta | null): { tp
   return { tplId, cfg: tplId === 'custom' ? { ...cfg, topic: meta?.topic ?? '' } : cfg }
 }
 
-/** Regenerate pre-fill for a video: kind / style / length / Character from `meta`, target empty. */
+/** Regenerate pre-fill for a video: kind / target / style / length / Character from `meta` (target `''` when unrecorded). */
 export function videoCfgFromEntry(meta: ProjectVideoMeta): { tplId: string; cfg: VideoCfg } {
   const { tplId, kind } = videoKindFor(meta.kind)
   return {
     tplId,
     cfg: {
       kind,
-      target: '',
+      target: meta.target?.trim() ?? '',
       style: meta.style,
       length: meta.lengthS > 30 ? 60 : 30,
       mascot: meta.character !== null,

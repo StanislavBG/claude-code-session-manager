@@ -141,10 +141,13 @@ function videoBuildSub(lines: readonly string[] | undefined): string {
     .join(' · ')
 }
 
-/** Title-bar sub: `<kind> · <len>s · <style> · <ago>`; just `<ago>` for an entry with unreadable meta. */
+/**
+ * Title-bar sub: `<kind> · <target> · <len>s · <style> · <ago>` (the target only when recorded and
+ * non-blank); just `<ago>` for an entry with unreadable meta.
+ */
 function videoSub(entry: ProjectVideoEntry): string {
   const m = entry.meta
-  const parts = m ? [m.kind, `${m.lengthS}s`, m.style.trim().toLowerCase()] : []
+  const parts = m ? [m.kind, videoTarget(m), `${m.lengthS}s`, m.style.trim().toLowerCase()] : []
   return [...parts, createdLabel(entry)].filter(Boolean).join(' · ')
 }
 
@@ -203,8 +206,15 @@ function VideoBuildingRow({ title, lengthS, status }: { title: string; lengthS: 
   )
 }
 
+/** The trimmed `meta.target`, or null when missing or blank. */
+function videoTarget(m: ProjectVideoMeta): string | null {
+  const t = typeof m.target === 'string' ? m.target.trim() : ''
+  return t || null
+}
+
 function videoRow(e: ProjectVideoEntry): LibraryRow {
   const m = e.meta
+  const target = m ? videoTarget(m) : null
   return {
     id: e.id,
     title: m?.title,
@@ -219,6 +229,11 @@ function videoRow(e: ProjectVideoEntry): LibraryRow {
           ) : (
             <span data-col="title" className="break-words text-xs text-red-400">
               {`${e.id}: ${e.error ?? 'unreadable meta'}`}
+            </span>
+          )}
+          {target && (
+            <span data-col="target" title={target} className="truncate font-mono text-[10.5px] text-fg-faint">
+              {target}
             </span>
           )}
           <span data-col="meta" className="font-mono text-[10.5px] text-fg-faint">

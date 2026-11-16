@@ -294,7 +294,7 @@ describe('pageCfgFromEntry', () => {
 })
 
 describe('videoCfgFromEntry', () => {
-  it('maps the kind slug to its display name and template, keeping style, with an empty target', () => {
+  it('maps the kind slug to its display name and template, keeping style, with an empty target when none was recorded', () => {
     expect(videoCfgFromEntry(videoMeta({ kind: 'project-demo', style: 'Fun', lengthS: 30, character: 'otter' }))).toEqual({
       tplId: 'demo',
       cfg: { kind: 'Project demo', target: '', style: 'Fun', length: 30, mascot: true, focus: '' },
@@ -307,6 +307,16 @@ describe('videoCfgFromEntry', () => {
       tplId: 'feature',
       cfg: { kind: 'Feature', target: '', style: 'Kinetic typography', length: 30, mascot: false, focus: '' },
     })
+  })
+
+  it('pre-fills the trimmed meta.target, so a Blog post that recorded one can generate', () => {
+    const withTarget = videoCfgFromEntry(videoMeta({ kind: 'blog-post', target: '  content/writing/post.md ' }))
+    expect(withTarget.cfg.target).toBe('content/writing/post.md')
+    expect(canGenerate('video', withTarget.tplId, withTarget.cfg)).toBe(true)
+    const without = videoCfgFromEntry(videoMeta({ kind: 'blog-post' }))
+    expect(without.cfg.target).toBe('')
+    expect(canGenerate('video', without.tplId, without.cfg)).toBe(false)
+    expect(videoCfgFromEntry(videoMeta({ kind: 'feature', target: 'Scheduler' })).cfg.target).toBe('Scheduler')
   })
 
   it('is 60 seconds only when lengthS > 30', () => {

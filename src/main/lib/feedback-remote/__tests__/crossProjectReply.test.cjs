@@ -309,7 +309,7 @@ test('archived X: the reply opens a proposed Epic in A linking X, with X goal re
   }));
   const d = deps('sent');
   const r = await sendFeedbackReply(input(b), d);
-  expect(r).toMatchObject({ ok: true, delivery: 'fallback', reason: 'missing' });
+  expect(r).toMatchObject({ ok: true, delivery: 'fallback', reason: 'missing', receiptOnReplyingEpic: true });
   expect(d.calls).toHaveLength(0);
   const f = expectFallbackEpic(a, b, 'missing');
   expect(r.fallbackEpicId).toBe(f.id);
@@ -341,6 +341,36 @@ test('fallbacks count toward the per-thread cap', async () => {
   }
   expect((await sendFeedbackReply(input(b), deps())).status).toBe(429);
   expect(fallbackEpics(a)).toHaveLength(MAX_REPLIES_PER_THREAD);
+});
+
+// ---------------------------------------------------------------------------
+// Receipt durability — the receipt on Y is the cap's only record
+// ---------------------------------------------------------------------------
+
+/** The real appender, except receipts on Y come back { ok: false } — what
+ *  appendResponseEventWithReason returns for a failed read/write. */
+function failingReceiptAppender() {
+  const real = require('../../../promptSessionEvents.cjs').appendResponseEventWithReason;
+  return async (cwd, epicId, text, meta) => (meta && meta.notice === 'cross-project-reply-sent'
+    ? { ok: false, reason: 'error' }
+    : real(cwd, epicId, text, meta));
+}
+
+test('a receipt that did not land is reported, never claimed (delivered and fallback paths)', async () => {
+  const { b } = await setup();
+  const delivered = await sendFeedbackReply(input(b), deps('sent', { appendEvent: failingReceiptAppender() }));
+  expect(delivered).toMatchObject({ ok: true, delivery: 'delivered', receiptOnReplyingEpic: false, receiptError: 'error' });
+  expect(events(b, 'psess-y')).toHaveLength(1);
+
+  const { a: a2, b: b2 } = await setup({ xOverrides: { status: 'completed' } });
+  const fell = await sendFeedbackReply(input(b2), deps('sent', { appendEvent: failingReceiptAppender() }));
+  expect(fell).toMatchObject({ ok: true, delivery: 'fallback', receiptOnReplyingEpic: false, receiptError: 'error' });
+  expect(fallbackEpics(a2)).toHaveLength(1);
+  expect(events(b2, 'psess-y')).toHaveLength(1);
+
+  const { b: b3 } = await setup();
+  expect(await sendFeedbackReply(input(b3), deps('sent'))).toMatchObject({ ok: true, receiptOnReplyingEpic: true });
+  expect(events(b3, 'psess-y').at(-1).notice).toBe('cross-project-reply-sent');
 });
 
 // ---------------------------------------------------------------------------

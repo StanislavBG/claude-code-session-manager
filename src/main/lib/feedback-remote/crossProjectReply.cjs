@@ -149,6 +149,25 @@ function originalRequest(y) {
   };
 }
 
+/**
+ * receiptFields(appendResult) → { receiptOnReplyingEpic, receiptError? }
+ *
+ * The receipt on Y is the per-thread cap's only record, and
+ * appendResponseEventWithReason never throws — a failed write (a transient
+ * read mapped to 'no-index', a write 'error') comes back as { ok: false }.
+ * Discarding that result let a reply resolve ok with no receipt on disk, so
+ * the caller and the cap both believed a write had landed that had not.
+ * The reply itself already happened, so the result stays ok (a resend would
+ * duplicate it), but it says the receipt is missing and why.
+ */
+function receiptFields(appendResult) {
+  if (appendResult && appendResult.ok) return { receiptOnReplyingEpic: true };
+  return {
+    receiptOnReplyingEpic: false,
+    receiptError: (appendResult && appendResult.reason) || 'append-failed',
+  };
+}
+
 function countReceipts(cwd, epicId) {
   const events = readActiveIndex(cwd).events[epicId];
   return Array.isArray(events) ? events.filter((e) => e && e.notice === RECEIPT_NOTICE).length : 0;
@@ -251,7 +270,7 @@ async function sendFeedbackReply(input, deps = {}) {
       if (!opened || !opened.ok || typeof opened.epicId !== 'string') return opened;
       const project = path.basename(targetCwd);
       // Receipt on Y — counts toward the per-thread cap like a delivered reply.
-      await appendEvent(replierCwd, yId,
+      const receipt = await appendEvent(replierCwd, yId,
         `Reply to ${rt.epicId} in ${project} fell back to a new proposed session ${opened.epicId} in ${project} (${reason}).`,
         {
           notice: RECEIPT_NOTICE,
@@ -277,6 +296,7 @@ async function sendFeedbackReply(input, deps = {}) {
         toEpicId: rt.epicId,
         fallbackEpicId: opened.epicId,
         receiptOnAskingEpic,
+        ...receiptFields(receipt),
         repliesUsed: sent + 1,
         repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
       };
@@ -313,7 +333,7 @@ async function sendFeedbackReply(input, deps = {}) {
     const delivery = disposition === 'sent' || disposition === 'queued' ? 'delivered' : 'event-only';
 
     // 6. Receipt on Y (counts toward the cap).
-    await appendEvent(replierCwd, yId,
+    const receipt = await appendEvent(replierCwd, yId,
       `Reply sent to ${x.id} in ${path.basename(targetCwd)} (${outcome}, ${delivery}).`,
       {
         notice: RECEIPT_NOTICE,
@@ -336,6 +356,7 @@ async function sendFeedbackReply(input, deps = {}) {
       delivery,
       toCwd: targetCwd,
       toEpicId: x.id,
+      ...receiptFields(receipt),
       repliesUsed: sent + 1,
       repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
       ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),

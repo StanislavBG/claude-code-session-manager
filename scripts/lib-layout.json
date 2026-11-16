@@ -21,6 +21,7 @@
   "crashTelemetry": "telemetry",
   "autoStartedSession": "feedback-remote",
   "crossProjectFeedback": "feedback-remote",
+  "crossProjectReply": "feedback-remote",
   "customerFeedbackAdminRoutes": "feedback-remote",
   "customerFeedbackClient": "feedback-remote",
   "customerFeedbackInbox": "feedback-remote",

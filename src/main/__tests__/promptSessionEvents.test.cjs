@@ -322,3 +322,29 @@ test('does not throw broadcasting before a window is attached, or after it is de
   expect(destroyedWindow.webContents.send).not.toHaveBeenCalled();
   attachWindow(null);
 });
+
+test('copies meta.reply (whitelisted keys only) onto the appended event', async () => {
+  await writeIndex({
+    sessions: { 'psess-r': { id: 'psess-r', cwd, status: 'active' } },
+    events: { 'psess-r': [{ id: 'pevt-r1', promptSessionId: 'psess-r', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' }] },
+  });
+  const r = await appendResponseEventWithReason(cwd, 'psess-r', 'REPLY FROM ANOTHER PROJECT: …', {
+    notice: 'cross-project-reply',
+    reply: { fromCwd: '/p/b', fromEpicId: 'psess-y', outcome: 'done', referencePaths: ['a.md'], smuggled: 'no' },
+  });
+  expect(r.ok).toBe(true);
+  const onDisk = JSON.parse(await fsp.readFile(promptSessionActiveIndexPath(cwd), 'utf8'));
+  const ev = onDisk.events['psess-r'][1];
+  expect(ev.notice).toBe('cross-project-reply');
+  expect(ev.reply).toEqual({ fromCwd: '/p/b', fromEpicId: 'psess-y', outcome: 'done', referencePaths: ['a.md'] });
+});
+
+test('no reply key when meta.reply is absent', async () => {
+  await writeIndex({
+    sessions: { 'psess-n': { id: 'psess-n', cwd, status: 'active' } },
+    events: { 'psess-n': [{ id: 'pevt-n1', promptSessionId: 'psess-n', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' }] },
+  });
+  await appendResponseEventWithReason(cwd, 'psess-n', 'x', { notice: 'job-not-queued' });
+  const onDisk = JSON.parse(await fsp.readFile(promptSessionActiveIndexPath(cwd), 'utf8'));
+  expect('reply' in onDisk.events['psess-n'][1]).toBe(false);
+});

@@ -73,7 +73,8 @@ function mintEventId() {
  * same meta arg and are copied the same way, as is `notice` (PRD 2950 — a
  * marker like 'job-not-queued', or PRD 3116's 'build-done'/'build-failed', the
  * renderer turns into a distinct notice) and `buildOutput` (PRD 3116 — `{ kind,
- * id, title }` of a macro build's saved entry). All
+ * id, title }` of a macro build's saved entry), and `reply` (`{ fromCwd,
+ * fromEpicId, outcome, referencePaths }` — a cross-project reply's origin). All
  * keys are added to the event object only when present in `meta`, never as
  * `undefined`-valued keys, so events appended without them serialize
  * identically to before.
@@ -109,6 +110,12 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
       if (meta && meta.buildOutput && typeof meta.buildOutput === 'object') {
         const { kind, id, title } = meta.buildOutput;
         event.buildOutput = { kind, id, title };
+      }
+      // Cross-project reply provenance (crossProjectReply.cjs) — whitelisted
+      // keys only, so a caller can't smuggle arbitrary fields onto the chain.
+      if (meta && meta.reply && typeof meta.reply === 'object') {
+        const { fromCwd, fromEpicId, outcome, referencePaths } = meta.reply;
+        event.reply = { fromCwd, fromEpicId, outcome, referencePaths };
       }
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });

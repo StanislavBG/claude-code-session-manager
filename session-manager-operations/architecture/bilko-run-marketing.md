@@ -35,6 +35,7 @@ Key files in `~/Projects/Bilko/` for session-manager's listing:
   payment resolve to `session_manager` at `/checkout/success` (which thanks the buyer and links the free
   reader) and in the webhook, instead of falling back to `contentgrade_pro` (success page) or
   `audiencedecoder_report` (webhook).
+- Promo film: build/render it from this repo's `web/promo-video/` (`node build-timeline.mjs`, `node render.mjs`), publish as `Bilko:public/apps/session-manager/promo.mp4`, and bump the `?v=` query on the film source (`FILM_SRC`) whenever promo.mp4 changes — the host caches video for a day.
 - `Bilko:src/data/packages.ts` / `Bilko:src/data/standalone-projects.json` — registry entries for the `/projects` grid
   and the npm-package card.
 

@@ -15,6 +15,7 @@ Two manifests: root [`.claude-plugin/marketplace.json`](../.claude-plugin/market
 declares the one plugin (`source: "./plugins/session-manager-dev"`); the plugin's own
 [`session-manager-dev/.claude-plugin/plugin.json`](session-manager-dev/.claude-plugin/plugin.json)
 carries the `description` shown in the marketplace UI — list only shipped skills.
+Bumping a plugin's `plugin.json` version requires bumping its entry in `.claude-plugin/marketplace.json` in the same PRD (PRD 3140 was refuted for missing it).
 
 `src/main/seedDevPlugin.cjs` is the first-boot offline installer — installs this plugin from its
 bundled marketplace (no GitHub/registry call) as a default on a fresh machine, then marks

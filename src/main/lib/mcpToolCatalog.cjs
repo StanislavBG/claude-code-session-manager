@@ -300,8 +300,10 @@ const MCP_TOOL_CATALOG = [
       + 'starts on its own; otherwise it stays proposed (check the note for the reason). '
       + 'Do not block waiting for an answer, and do not tell the user the other project has "been fixed" '
       + 'or "is working on it". Report only that the proposal was delivered, or that the session was '
-      + 'auto-approved and is starting. The receiving session can answer later with feedback_reply; that '
-      + 'answer lands in your Epic as an event and a new prompt.',
+      + 'auto-approved and is starting. The receiving session can answer later with feedback_reply only '
+      + 'when the call comes from a Session Manager Epic chat session that Session Manager can identify; that '
+      + 'answer lands in your Epic as an event and a new prompt. From a scheduled job or a plain terminal '
+      + 'session there is no reply path — check the result note.',
   },
   {
     name: 'feedback_reply',
@@ -616,7 +618,7 @@ const MCP_RECIPES = [
       'Call feedback_list_projects to get the exact toCwd for the receiving project — never guess a path.',
       'Call feedback_open_session with toCwd, fromCwd, a one-line title, and a self-contained body (symptom, where observed, expected behavior, suspected cause).',
       'The call only delivers a PROPOSED session in the receiving project — nothing runs until a human there presses Approve & start.',
-      'The receiving session can answer with feedback_reply; the answer lands in your Epic as an event and a new prompt.',
+      'The receiving session can answer with feedback_reply only when the call comes from a Session Manager Epic chat session that Session Manager can identify; the answer lands in your Epic as an event and a new prompt.',
     ],
   },
   {

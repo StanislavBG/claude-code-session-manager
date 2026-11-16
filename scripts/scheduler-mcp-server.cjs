@@ -1044,12 +1044,18 @@ async function handleCallTool(request) {
       // that is either a PROPOSAL a human must approve or, when the human's own
       // request was verified, one that is auto-approved and starting. It never
       // reports the work as done.
+      // The feedback_reply promise holds only when the server stamped a reply
+      // thread (source.replyTo); an unidentified sender (scheduled job,
+      // terminal session) gets no thread, so say so instead.
       let note = '';
       if (result?.ok !== false) {
+        const replyLine = result?.replyThread === true
+          ? ' The receiving session can answer into this Epic with feedback_reply.'
+          : ' No reply path: Session Manager could not identify the sending session, so no answer will come back here; ask the human to follow up.';
         if (result?.status === 'auto-approved') {
-          note = ' — the session was auto-approved and is starting in the receiving project; the work is not done yet. The receiving session can answer into this Epic with feedback_reply.';
+          note = ' — the session was auto-approved and is starting in the receiving project; the work is not done yet.' + replyLine;
         } else {
-          note = ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. The receiving session can answer into this Epic with feedback_reply.';
+          note = ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start.' + replyLine;
           if (result?.autoStart && result.autoStart.granted === false && result.autoStart.reason) {
             note += ` Auto-start was requested but not granted: ${result.autoStart.reason}`;
           }

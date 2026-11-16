@@ -895,6 +895,7 @@ test('replyTo stamped when fromEpicId resolves via originClaudeSessionId', async
   expect(epic.openingPrompt).toContain('feedback_reply');
   expect(r.note).toMatch(/can answer into this session .* with feedback_reply/);
   expect(r.note).not.toMatch(/There is no callback/);
+  expect(r.replyThread).toBe(true);
   expect(resolveReplyTo(from, s.epicId)).toEqual({ cwd: from, epicId: s.epicId, claudeSessionId: s.sessionId });
 });
 
@@ -909,6 +910,7 @@ test('replyTo omitted when the sender is unresolved (scheduler job, no originCla
   expect(epic.openingPrompt).not.toContain('feedback_reply');
   expect(r.note).toMatch(/No reply path exists because the sending session could not be identified/);
   expect(r.note).not.toMatch(/There is no callback/);
+  expect(r.replyThread).toBe(false);
 });
 
 test('replyTo omitted when the sender Epic has no claudeSessionId', async () => {

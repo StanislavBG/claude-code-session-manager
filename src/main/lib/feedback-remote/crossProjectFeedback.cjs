@@ -780,6 +780,9 @@ async function openFeedbackSession(input, deps = {}) {
     status: auto.granted ? 'auto-approved' : 'proposed',
     ...(v.autoStart || macroAuto ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
     receiptOnOriginEpic,
+    // True only when source.replyTo was stamped — the MCP note keys its
+    // feedback_reply promise off this, never off the delivery alone.
+    replyThread: Boolean(replyTo),
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
     note: (macroGranted

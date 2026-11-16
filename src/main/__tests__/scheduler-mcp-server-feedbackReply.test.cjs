@@ -152,3 +152,38 @@ test('catalog documents feedback_reply and drops the "no reply channel" wording'
   const src = require('node:fs').readFileSync(SERVER_PATH, 'utf8');
   expect(src).not.toContain('No reply channel');
 });
+
+// feedback_open_session: the MCP note promises a feedback_reply thread only
+// when the server says one was stamped (result.replyThread === true).
+const REPLY_SENTENCE = 'The receiving session can answer into this Epic with feedback_reply.';
+const NO_REPLY_SENTENCE = ' No reply path: Session Manager could not identify the sending session, so no answer will come back here; ask the human to follow up.';
+const OPEN_ARGS = { toCwd: '/p/to', fromCwd: '/p/from', title: 't', body: 'b' };
+const openCall = (h) => h({ params: { name: 'feedback_open_session', arguments: OPEN_ARGS } });
+
+test.each([
+  ['auto-approved', true],
+  ['auto-approved', false],
+  ['auto-approved', undefined],
+  ['proposed', true],
+  ['proposed', false],
+  ['proposed', undefined],
+])('feedback_open_session %s with replyThread %s gets a truthful reply note', async (status, replyThread) => {
+  const body = { ok: true, status, epicId: 'e1' };
+  if (replyThread !== undefined) body.replyThread = replyThread;
+  const { handleCallTool } = await setup(body, {});
+  const text = (await openCall(handleCallTool)).content[0].text;
+  if (replyThread === true) {
+    expect(text).toContain(REPLY_SENTENCE);
+    expect(text).not.toContain(NO_REPLY_SENTENCE);
+  } else {
+    expect(text).not.toContain('can answer into this Epic with feedback_reply');
+    expect(text).toContain(NO_REPLY_SENTENCE);
+  }
+  expect(text).toContain(status === 'auto-approved' ? 'auto-approved and is starting' : 'PROPOSED session');
+});
+
+test('feedback_open_session catalog limits the feedback_reply promise to an identified Epic chat session', () => {
+  const { MCP_TOOL_CATALOG, composeDescription } = require('../lib/mcpToolCatalog.cjs');
+  const open = composeDescription(MCP_TOOL_CATALOG.find((e) => e.name === 'feedback_open_session'));
+  expect(open).toMatch(/only when the call comes from a Session Manager Epic chat session that Session Manager can identify/);
+});

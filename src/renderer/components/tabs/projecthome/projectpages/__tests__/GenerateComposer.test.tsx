@@ -166,16 +166,16 @@ describe('GenerateComposer — Generate mode', () => {
   it('a focus chip appends to the focus text', () => {
     mount(<GenerateComposer kind="page" onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
     expect(Array.from(document.querySelectorAll('[data-testid="composer-chip"]')).map((c) => c.textContent)).toEqual([
-      '+ Lead with the scheduler',
+      '+ Lead with what it does best',
       '+ Keep install to one line',
-      '+ Say it runs locally',
+      '+ Name who it is for',
     ])
-    click(chip('Lead with the scheduler'))
-    expect(focusBox().value).toBe('Lead with the scheduler')
-    type(focusBox(), 'Lead with the scheduler first.')
-    click(chip('Say it runs locally'))
-    expect(focusBox().value).toBe('Lead with the scheduler first. Say it runs locally')
-    expect(lines()?.endsWith(' · Lead with the scheduler first. Say it runs locally')).toBe(true)
+    click(chip('Lead with what it does best'))
+    expect(focusBox().value).toBe('Lead with what it does best')
+    type(focusBox(), 'Lead with what it does best first.')
+    click(chip('Name who it is for'))
+    expect(focusBox().value).toBe('Lead with what it does best first. Name who it is for')
+    expect(lines()?.endsWith(' · Lead with what it does best first. Name who it is for')).toBe(true)
   })
 
   it('passes the exact page lines to onGenerate, with no entry to replace', () => {

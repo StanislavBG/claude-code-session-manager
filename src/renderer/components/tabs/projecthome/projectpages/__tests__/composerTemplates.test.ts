@@ -86,7 +86,9 @@ const videoMeta = (over: Partial<ProjectVideoMeta> = {}): ProjectVideoMeta => ({
 describe('template data — prototype lines 779–856, verbatim', () => {
   it('PAGE_TEMPLATES are the prototype PAGE_TPLS in order, without lede/sample', () => {
     expect(PAGE_TEMPLATES.map((t) => t.id)).toEqual(['overview', 'how', 'faq', 'start', 'recent', 'custom'])
-    expect(PAGE_TEMPLATES).toEqual(protoRows('PAGE_TPLS').map(withoutProtoOnly))
+    // Deliberate deviation: chips and covers are project-neutral (checked below), so they are not compared.
+    const neutral = ({ chips: _chips, covers: _covers, ...rest }: Row) => rest
+    expect(PAGE_TEMPLATES.map((t) => neutral({ ...t }))).toEqual(protoRows('PAGE_TPLS').map(withoutProtoOnly).map(neutral))
     for (const t of PAGE_TEMPLATES) {
       expect(t).not.toHaveProperty('lede')
       expect(t).not.toHaveProperty('sample')
@@ -96,8 +98,10 @@ describe('template data — prototype lines 779–856, verbatim', () => {
   it('VIDEO_TEMPLATES are the prototype VIDEO_TPLS in order', () => {
     expect(VIDEO_TEMPLATES.map((t) => t.id)).toEqual(['demo', 'feature', 'blog', 'whiteboard', 'custom'])
     // One deliberate deviation: the Feature template names no default feature (a blank target blocks Generate).
+    // Second deviation: chips are project-neutral (checked below), so they are not compared.
+    const noChips = ({ chips: _chips, ...rest }: Row) => rest
     const proto = protoRows('VIDEO_TPLS').map((r) => (r.id === 'feature' ? { ...r, target: '' } : r))
-    expect(VIDEO_TEMPLATES).toEqual(proto)
+    expect(VIDEO_TEMPLATES.map((t) => noChips({ ...t }))).toEqual(proto.map(noChips))
   })
 
   it('option lists are the prototype AUDIENCES / LENGTHS / READS / KINDS / STYLES', () => {
@@ -359,5 +363,20 @@ describe('addChip', () => {
       'Lead with the scheduler. Say it runs locally',
     )
     expect(addChip('No jargon;', 'Show a real PRD')).toBe('No jargon. Show a real PRD')
+  })
+})
+
+describe('template chips and covers are project-neutral', () => {
+  // Templates show in every project, so no suggestion may name a Session Manager feature.
+  const BANNED = [
+    'scheduler', 'prd', 'queue', 'main process', 'renderer', 'claude cli', 'web remote', 'dormant',
+    'telemetry', '--simple', 'field manual', 'agent tools', 'install line', 'page build',
+  ]
+  it('no chip, cover, scene, topic or target names a Session Manager feature', () => {
+    const texts: string[] = []
+    for (const t of PAGE_TEMPLATES) texts.push(...t.chips, ...t.covers, t.topic ?? '')
+    for (const t of VIDEO_TEMPLATES) texts.push(...t.chips, ...t.scenes, t.target ?? '')
+    const hits = texts.flatMap((s) => BANNED.filter((b) => s.toLowerCase().includes(b)).map((b) => `${b} in "${s}"`))
+    expect(hits).toEqual([])
   })
 })

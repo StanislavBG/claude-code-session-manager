@@ -5,6 +5,11 @@
  * (template data lines 779–856, behaviour 1006–1043) — per its DESIGN_SPEC.md §2, §3 and §8.3,
  * minus the prototype-only `lede` / `sample` fields and the raw-hex style values.
  *
+ * Deliberate deviation from the prototype: every template's chips and covers are project-neutral.
+ * The templates show in every project, so they never name a Session Manager feature (the
+ * prototype's chips do, e.g. "Lead with the scheduler"). Ids, names, blurbs, scenes and styles
+ * stay verbatim.
+ *
  * Pure: no React, no preload bridge, no store. The Generate composer, the empty state's template
  * cards and Regenerate all read from here, so the prompt lines a builder receives stay one shape.
  */
@@ -99,7 +104,7 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = [
     length: 'Standard',
     reads: ['docs', 'tree', 'git'],
     covers: ['What it is', 'Who it’s for', 'Key features', 'Structure', 'How to run it', 'Key commands'],
-    chips: ['Lead with the scheduler', 'Keep install to one line', 'Say it runs locally'],
+    chips: ['Lead with what it does best', 'Keep install to one line', 'Name who it is for'],
   },
   {
     id: 'how',
@@ -109,8 +114,8 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = [
     audience: 'Contributors',
     length: 'In-depth',
     reads: ['docs', 'tree'],
-    covers: ['The pieces', 'Main process', 'Renderer', 'Agent tools', 'One flow, end to end'],
-    chips: ['Trace one page build end to end', 'Explain dormant tabs', 'Include the web remote'],
+    covers: ['The pieces', 'How they connect', 'Key modules', 'One flow, end to end'],
+    chips: ['Trace one request end to end', 'Name the key files', 'Include a diagram'],
   },
   {
     id: 'faq',
@@ -120,8 +125,8 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = [
     audience: 'Newcomers',
     length: 'Brief',
     reads: ['docs'],
-    covers: ['Getting started', 'Privacy & telemetry', 'Everyday use', 'Troubleshooting'],
-    chips: ['Cover Windows setup', 'Eight questions max', 'Include the telemetry opt-out'],
+    covers: ['Getting started', 'Everyday use', 'Configuration', 'Troubleshooting'],
+    chips: ['Cover setup on each OS', 'Eight questions max', 'Include the common errors'],
   },
   {
     id: 'start',
@@ -133,7 +138,7 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = [
     length: 'Brief',
     reads: ['docs', 'tree'],
     covers: ['Install', 'First run', 'Key commands', 'Where next'],
-    chips: ['Assume a fresh machine', 'Show --simple mode', 'Link the Field Manual'],
+    chips: ['Assume a fresh machine', 'Show the first command', 'Link the docs'],
   },
   {
     id: 'recent',
@@ -157,7 +162,7 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = [
     length: 'Standard',
     reads: ['docs', 'tree', 'git'],
     covers: ['Shaped by your topic'],
-    chips: ['A glossary of terms', 'Compare with the plain claude CLI', 'The security model'],
+    chips: ['A glossary of terms', 'Compare with the alternatives', 'The security model'],
   },
 ]
 
@@ -171,7 +176,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     length: 30,
     mascot: true,
     scenes: ['The problem', 'What it is', 'Three key features', 'Try it'],
-    chips: ['End on the install line', 'Feature the scheduler', 'Keep it upbeat'],
+    chips: ['Close on the project link', 'Lead with the main feature', 'Keep it upbeat'],
   },
   {
     id: 'feature',
@@ -183,7 +188,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     length: 30,
     mascot: false,
     scenes: ['Why it exists', 'How it works', 'Try it'],
-    chips: ['Show a real PRD', 'Mention the queue-health linter', 'No jargon'],
+    chips: ['Show it step by step', 'Name who it helps', 'No jargon'],
   },
   {
     id: 'blog',
@@ -206,7 +211,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     length: 60,
     mascot: true,
     scenes: ['The pieces', 'How they connect', 'One request, end to end', 'Recap'],
-    chips: ['Draw the main process and renderer', 'Trace one message', 'Slow, calm pace'],
+    chips: ['Draw the main pieces', 'Trace one task end to end', 'Slow, calm pace'],
   },
   {
     id: 'custom',

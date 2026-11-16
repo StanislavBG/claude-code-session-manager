@@ -12,5 +12,6 @@ await page.evaluate(() => document.fonts.ready);
 const out = join(here, '..', 'public', 'og.png');
 await page.screenshot({ path: out, type: 'png' });
 await browser.close();
-// 256-colour palette keeps the bundle under the Bilko budget gate (~100 KB vs ~310 KB). Needs ImageMagick.
+// 256-colour palette: ~100 KB vs ~255 KB in full colour, with no visible loss (PSNR 42.6 dB). Kept by choice,
+// not for a host limit: bilko.run loads og.png as its /projects hero and X fetches it for previews. Needs ImageMagick.
 execFileSync('convert', [out, '-dither', 'FloydSteinberg', '-colors', '256', '-define', 'png:compression-level=9', `PNG8:${out}`]);

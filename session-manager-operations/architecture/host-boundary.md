@@ -119,7 +119,7 @@ that partition's producers should be building *toward* once `git subtree split -
 gates, serving infrastructure:
 - A publish gate blocked by host-side misconfiguration or a missing host devDependency.
 - A Clerk auth failure, a Stripe webhook/entitlement bug, a relay outage or protocol issue.
-- A request to add/adjust a registry entry, budget, or redirect that only Bilko's own hosting
+- A request to add/adjust a registry entry or redirect that only Bilko's own hosting
   tooling can perform.
 
 **Never route to Bilko — this is `/develop` here, or blocked on the extraction:**

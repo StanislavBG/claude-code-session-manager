@@ -23,7 +23,7 @@ serve. It is the Bilko publish-gate probe.
 2. **Standalone Render static site** declared by `render.yaml` (`sm-app`,
    `session-manager.bilko.run`) — not how this ships today.
 
-Bundle budget 200 KB gz; xterm stays off the critical path. Voice is browser Web Speech →
+xterm stays off the critical path. Voice is browser Web Speech →
 text; no audio crosses the wire. Browser auth is the host's Clerk.
 
 ## Desktop command protocol

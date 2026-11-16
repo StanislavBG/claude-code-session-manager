@@ -50,6 +50,7 @@ const MAX_REPLIES_PER_THREAD = 3;
 const REPLY_OUTCOMES = Object.freeze(['done', 'blocked', 'question']);
 const RECEIPT_NOTICE = 'cross-project-reply-sent';
 const REPLY_NOTICE = 'cross-project-reply';
+const FALLBACK_NOTICE = 'cross-project-reply-fallback';
 
 /** Per-Y promise chain: cap check → deliver → receipt run one at a time. */
 const threadLocks = new Map();
@@ -135,6 +136,19 @@ function defaultResolveEpicId(cwd, claudeSessionId) {
   return require('../prd/prdCreate.cjs').resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId);
 }
 
+/** The request Y was opened with: its title (goalText), source.proposal, and
+ *  the sources of its 'reference' intake sections. */
+function originalRequest(y) {
+  const sections = Array.isArray(y.sections) ? y.sections : [];
+  return {
+    title: typeof y.goalText === 'string' ? y.goalText : '',
+    proposal: (y.source && y.source.proposal && typeof y.source.proposal === 'object') ? y.source.proposal : {},
+    referencePaths: sections
+      .filter((s) => s && s.part === 'reference' && typeof s.source === 'string' && s.source)
+      .map((s) => s.source),
+  };
+}
+
 function countReceipts(cwd, epicId) {
   const events = readActiveIndex(cwd).events[epicId];
   return Array.isArray(events) ? events.filter((e) => e && e.notice === RECEIPT_NOTICE).length : 0;
@@ -146,6 +160,8 @@ function countReceipts(cwd, epicId) {
  * input: { message, outcome, referencePaths?, toEpicId?, fromCwd,
  *          originProjectRoot?, originClaudeSessionId }
  * deps:  { sendPrompt, appendEvent, resolveEpicId, appendAudit, openFallback }
+ *        openFallback defaults to crossProjectFeedback.openReplyFallbackSession;
+ *        pass null to get a 409 fallbackNeeded instead.
  */
 async function sendFeedbackReply(input, deps = {}) {
   const sendPrompt = deps.sendPrompt || defaultSendPrompt;
@@ -210,20 +226,60 @@ async function sendFeedbackReply(input, deps = {}) {
       return bad(429, `reply limit of ${MAX_REPLIES_PER_THREAD} reached for this thread`);
     }
 
+    // The fallback (default: crossProjectFeedback.openReplyFallbackSession,
+    // the only cross-project mint authority) opens a NEW proposed Epic in the
+    // asking project. `openFallback: null` disables it (409 fallbackNeeded).
+    const openFallback = Object.prototype.hasOwnProperty.call(deps, 'openFallback')
+      ? deps.openFallback
+      : (args) => feedbackConduit().openReplyFallbackSession(args);
     const fallback = async (reason) => {
-      if (typeof deps.openFallback === 'function') {
-        return deps.openFallback({
-          reason,
-          toCwd: targetCwd,
-          fromCwd: replierCwd,
-          fromEpicId: yId,
-          message,
-          outcome,
-          referencePaths,
-          originClaudeSessionId,
-        });
+      if (typeof openFallback !== 'function') {
+        return bad(409, `the asking Epic cannot take a reply: ${reason}`, { fallbackNeeded: true, reason });
       }
-      return bad(409, `the asking Epic cannot take a reply: ${reason}`, { fallbackNeeded: true, reason });
+      const opened = await openFallback({
+        reason,
+        toCwd: targetCwd,
+        toEpicId: rt.epicId,
+        fromCwd: replierCwd,
+        fromEpicId: yId,
+        message,
+        outcome,
+        referencePaths,
+        originClaudeSessionId,
+        original: originalRequest(y),
+      });
+      if (!opened || !opened.ok || typeof opened.epicId !== 'string') return opened;
+      const project = path.basename(targetCwd);
+      // Receipt on Y — counts toward the per-thread cap like a delivered reply.
+      await appendEvent(replierCwd, yId,
+        `Reply to ${rt.epicId} in ${project} fell back to a new proposed session ${opened.epicId} in ${project} (${reason}).`,
+        {
+          notice: RECEIPT_NOTICE,
+          allowInactive: true,
+          reply: { fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths, fallbackEpicId: opened.epicId, reason },
+        });
+      // Best-effort receipt on X, only while X is still in A's active index.
+      let receiptOnAskingEpic = false;
+      try {
+        if (readActiveIndex(targetCwd).sessions[rt.epicId]) {
+          const r = await appendEvent(targetCwd, rt.epicId,
+            `A reply from ${path.basename(replierCwd)} (${outcome}) could not be delivered here (${reason}); `
+            + `it opened as a new proposed session ${opened.epicId}.`,
+            { notice: FALLBACK_NOTICE, allowInactive: true, reply: { fromCwd: replierCwd, fromEpicId: yId, outcome, fallbackEpicId: opened.epicId } });
+          receiptOnAskingEpic = !!(r && r.ok);
+        }
+      } catch { receiptOnAskingEpic = false; }
+      return {
+        ok: true,
+        delivery: 'fallback',
+        reason,
+        toCwd: targetCwd,
+        toEpicId: rt.epicId,
+        fallbackEpicId: opened.epicId,
+        receiptOnAskingEpic,
+        repliesUsed: sent + 1,
+        repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
+      };
     };
 
     // 5. Deliver.

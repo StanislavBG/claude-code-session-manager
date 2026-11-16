@@ -35,6 +35,9 @@ async function mkProject(prefix) {
   config.addAllowedRoot(cwd);
   tmpDirs.push(cwd);
   fs.mkdirSync(path.join(cwd, 'session-manager-operations'), { recursive: true });
+  // ensureEpic checks the persona file exists; the fallback mints as 'architect'.
+  fs.mkdirSync(path.join(cwd, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.claude', 'agents', 'architect.md'), '---\nname: architect\n---\nFixture persona.\n');
   return fs.realpathSync(cwd);
 }
 
@@ -62,8 +65,19 @@ async function setup({ xOverrides = {}, ySource } = {}) {
       status: 'active',
       claudeSessionId: 'cs-y',
       goalText: 'Relay drops a frame',
+      sections: [
+        { kind: 'input', part: 'grounding', label: 'Grounding', text: 'g', source: a },
+        { kind: 'input', part: 'reference', label: 'Reference', text: 'Reference: docs/original-spec.md', source: 'docs/original-spec.md' },
+        { kind: 'mission', part: 'goal', label: 'Goal', text: 'Goal: Relay drops a frame' },
+      ],
       source: ySource === undefined
-        ? { producer: 'cross-project-feedback', fromCwd: a, fromEpicId: 'psess-x', replyTo: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x' } }
+        ? {
+            producer: 'cross-project-feedback',
+            fromCwd: a,
+            fromEpicId: 'psess-x',
+            replyTo: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x' },
+            proposal: { motivation: 'Phones lose a frame', acceptanceCriteria: ['First frame arrives'], plan: [], outOfScope: [] },
+          }
         : ySource,
     },
   });
@@ -213,9 +227,9 @@ test('replyTo.cwd outside allowed roots, not an SM project, or the replier itsel
   expect((await sendFeedbackReply(input(b), deps())).status).toBe(400);
 });
 
-test('X completed → 409 fallbackNeeded; nothing sent, no receipt', async () => {
+test('X completed with openFallback disabled → 409 fallbackNeeded; nothing sent, no receipt', async () => {
   const { a, b } = await setup({ xOverrides: { status: 'completed' } });
-  const d = deps();
+  const d = deps('sent', { openFallback: null });
   const r = await sendFeedbackReply(input(b), d);
   expect(r).toMatchObject({ ok: false, status: 409, fallbackNeeded: true });
   expect(d.calls).toHaveLength(0);
@@ -223,22 +237,110 @@ test('X completed → 409 fallbackNeeded; nothing sent, no receipt', async () =>
   expect(events(b, 'psess-y')).toHaveLength(1);
 });
 
-test('X missing, or claudeSessionId mismatch → 409', async () => {
+test('X missing, or claudeSessionId mismatch, with openFallback disabled → 409', async () => {
   const { b } = await setup({ xOverrides: { claudeSessionId: 'cs-new' } });
-  expect((await sendFeedbackReply(input(b), deps())).status).toBe(409);
+  expect((await sendFeedbackReply(input(b), deps('sent', { openFallback: null }))).status).toBe(409);
   const { a, b: b2 } = await setup();
   writeIndex(a, {});
-  expect((await sendFeedbackReply(input(b2), deps())).status).toBe(409);
+  expect((await sendFeedbackReply(input(b2), deps('sent', { openFallback: null }))).status).toBe(409);
 });
 
-test('a refused send goes to openFallback when provided, and its result is returned', async () => {
+test('a refused send goes to an injected openFallback with the original request', async () => {
   const { b } = await setup();
   const seen = [];
-  const d = deps('refused', { openFallback: async (args) => { seen.push(args); return { ok: true, delivery: 'fallback' }; } });
+  const d = deps('refused', { openFallback: async (args) => { seen.push(args); return { ok: true, epicId: 'psess-f', toCwd: args.toCwd }; } });
   const r = await sendFeedbackReply(input(b), d);
-  expect(r).toEqual({ ok: true, delivery: 'fallback' });
+  expect(r).toMatchObject({ ok: true, delivery: 'fallback', fallbackEpicId: 'psess-f', toEpicId: 'psess-x' });
   expect(seen[0].reason).toMatch(/^send-refused/);
-  expect(events(b, 'psess-y').some((e) => e.notice === 'cross-project-reply-sent')).toBe(false);
+  expect(seen[0].toEpicId).toBe('psess-x');
+  expect(seen[0].original).toEqual({
+    title: 'Relay drops a frame',
+    proposal: expect.objectContaining({ motivation: 'Phones lose a frame' }),
+    referencePaths: ['docs/original-spec.md'],
+  });
+  expect(events(b, 'psess-y').at(-1).text).toMatch(/fell back to a new proposed session psess-f in /);
+});
+
+// ---------------------------------------------------------------------------
+// Default fallback — a new PROPOSED Epic in the asking project
+// ---------------------------------------------------------------------------
+
+function fallbackEpics(a) {
+  return Object.values(readActiveIndex(a).sessions)
+    .filter((s) => s.source && s.source.replyOf);
+}
+
+function expectFallbackEpic(a, b, reason) {
+  const minted = fallbackEpics(a);
+  expect(minted).toHaveLength(1);
+  const f = minted[0];
+  expect(f.status).toBe('proposed');
+  expect(f.tag).toBe('discussion');
+  expect(f.agentType).toBe('architect');
+  expect(f.source).toMatchObject({
+    producer: 'cross-project-feedback',
+    fromCwd: b,
+    fromEpicId: 'psess-y',
+    replyOf: { cwd: a, epicId: 'psess-x' },
+  });
+  expect(f.source.autoApprove).toBeUndefined();
+  expect(f.goalText).toBe(`Reply from ${path.basename(b)}: Relay drops a frame`);
+  const p = f.openingPrompt;
+  expect(p).toContain('Ask B something');
+  expect(p).toContain('psess-x');
+  expect(p).toContain(reason);
+  expect(p).toContain('Relay drops a frame');
+  expect(p).toContain('Phones lose a frame');
+  expect(p).toContain('First frame arrives');
+  expect(p).toContain('Fixed in commit abc123.');
+  expect(p).toContain('done');
+  expect(p).toContain('Reference: docs/original-spec.md');
+  expect(p).toContain('Reference: src/relay.cjs');
+  return f;
+}
+
+test('archived X: the reply opens a proposed Epic in A linking X, with X goal read from the archive', async () => {
+  const { a, b } = await setup();
+  writeIndex(a, {});
+  fs.writeFileSync(opsPath(a, 'prompt-sessions', 'psess-x.json'), JSON.stringify({
+    session: { id: 'psess-x', status: 'completed', goalText: 'Ask B something' },
+    events: [],
+    archivedAt: '2026-01-02T00:00:00.000Z',
+  }));
+  const d = deps('sent');
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'fallback', reason: 'missing' });
+  expect(d.calls).toHaveLength(0);
+  const f = expectFallbackEpic(a, b, 'missing');
+  expect(r.fallbackEpicId).toBe(f.id);
+  expect(events(b, 'psess-y').at(-1)).toMatchObject({ notice: 'cross-project-reply-sent' });
+  expect(events(b, 'psess-y').at(-1).text).toContain(f.id);
+});
+
+test('completed X: proposed Epic in A, receipt on Y and a best-effort receipt on X', async () => {
+  const { a, b } = await setup({ xOverrides: { status: 'completed' } });
+  const r = await sendFeedbackReply(input(b), deps('sent'));
+  expect(r).toMatchObject({ ok: true, delivery: 'fallback', reason: 'not-active' });
+  const f = expectFallbackEpic(a, b, 'not-active');
+  expect(events(a, 'psess-x').at(-1).text).toContain(f.id);
+});
+
+test('refused send: proposed Epic in A carrying both sets of reference paths', async () => {
+  const { a, b } = await setup();
+  const r = await sendFeedbackReply(input(b, { referencePaths: ['src/relay.cjs', 'docs/original-spec.md'] }), deps('refused'));
+  expect(r).toMatchObject({ ok: true, delivery: 'fallback' });
+  expect(r.reason).toMatch(/^send-refused/);
+  const f = expectFallbackEpic(a, b, 'send-refused');
+  expect(f.openingPrompt.split('Reference: docs/original-spec.md')).toHaveLength(2);
+});
+
+test('fallbacks count toward the per-thread cap', async () => {
+  const { a, b } = await setup({ xOverrides: { status: 'completed' } });
+  for (let i = 0; i < MAX_REPLIES_PER_THREAD; i++) {
+    expect((await sendFeedbackReply(input(b), deps())).ok).toBe(true);
+  }
+  expect((await sendFeedbackReply(input(b), deps())).status).toBe(429);
+  expect(fallbackEpics(a)).toHaveLength(MAX_REPLIES_PER_THREAD);
 });
 
 // ---------------------------------------------------------------------------

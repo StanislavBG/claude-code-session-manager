@@ -86,7 +86,8 @@ const {
   MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
 } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
-const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
+const { OPS_ROOT_DIR, opsPath } = require('../opsOwnership.cjs');
+const { readJsonOrSync } = require('../util/atomicFs.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { isEphemeralCwd } = require('../ephemeralCwd.cjs');
 
@@ -795,6 +796,160 @@ async function openFeedbackSession(input, deps = {}) {
 }
 
 /**
+ * readEpicGoal(cwd, epicId) → string | null
+ *
+ * An Epic's goalText from the active index, or — for an archived Epic no
+ * longer in the index — from its `prompt-sessions/<epicId>.json` file
+ * (archived shape `.session.goalText`; flat mirror shape `.goalText`).
+ * Read-only; never throws.
+ */
+function readEpicGoal(cwd, epicId) {
+  if (typeof cwd !== 'string' || !cwd || typeof epicId !== 'string' || !epicId) return null;
+  try {
+    const row = readActiveIndex(cwd).sessions[epicId];
+    const goal = row && typeof row.goalText === 'string' ? singleLine(row.goalText) : '';
+    if (goal) return goal;
+  } catch { /* fall through to the per-Epic file */ }
+  let file;
+  try {
+    file = opsPath(cwd, 'prompt-sessions', `${epicId}.json`);
+  } catch {
+    return null;
+  }
+  const doc = readJsonOrSync(file, null);
+  if (!doc || typeof doc !== 'object') return null;
+  const raw = doc.session && typeof doc.session === 'object' && typeof doc.session.goalText === 'string'
+    ? doc.session.goalText
+    : (typeof doc.goalText === 'string' ? doc.goalText : '');
+  return singleLine(raw) || null;
+}
+
+function fallbackReasonText(reason) {
+  const r = String(reason || 'unknown');
+  if (r === 'missing') return 'missing: the asking session is no longer in its project\'s active Sessions (archived or removed)';
+  if (r === 'not-active') return 'not-active: the asking session is not active (completed or not yet started)';
+  if (r === 'session-mismatch') return 'session-mismatch: the asking session now runs a different Claude session';
+  if (r.startsWith('send-refused')) return `${r}: the app refused to send the reply into the asking session`;
+  return r;
+}
+
+/**
+ * openReplyFallbackSession(input, deps?) → { ok, epicId, toCwd, ... } | { ok: false, status, error }
+ *
+ * The fallback leg of feedback_reply (crossProjectReply.cjs): when the asking
+ * Epic X in project A cannot take the reply, this mints a NEW `proposed`
+ * Epic in A that links X (source.replyOf) and carries X's goal, the original
+ * request and both sets of reference paths. It is minted here — through this
+ * module's MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK — because the SINGLE-CREATOR
+ * LAW allows no third mint authority. Never auto-approved.
+ *
+ * input: { reason, toCwd, toEpicId, fromCwd, fromEpicId, message, outcome,
+ *          referencePaths, original: { title, proposal, referencePaths } }
+ * deps:  { ensureEpic, appendAudit }
+ */
+async function openReplyFallbackSession(input = {}, deps = {}) {
+  const mint = deps.ensureEpic || ensureEpic;
+  const audit = deps.appendAudit || appendAuditEvent;
+  const bad = (status, error) => ({ ok: false, status, error });
+
+  const message = typeof input.message === 'string' ? input.message.trim() : '';
+  if (!message) return bad(400, 'message is required');
+  const toEpicId = typeof input.toEpicId === 'string' ? input.toEpicId : '';
+  if (!toEpicId) return bad(400, 'toEpicId (the asking Epic) is required');
+  const fromEpicId = typeof input.fromEpicId === 'string' && input.fromEpicId ? input.fromEpicId : null;
+  let toCwd;
+  let fromCwd;
+  try {
+    toCwd = config.validatePath(path.resolve(String(input.toCwd || '')));
+    fromCwd = config.validatePath(path.resolve(String(input.fromCwd || '')));
+  } catch (e) {
+    return bad(400, `cwd rejected: ${e.message}`);
+  }
+  if (!isSessionManagerProject(toCwd)) return bad(400, `${toCwd} is not a Session Manager project`);
+  if (toCwd === fromCwd) return bad(400, 'the reply fallback must land in a DIFFERENT project');
+
+  const original = input.original && typeof input.original === 'object' ? input.original : {};
+  const proposal = original.proposal && typeof original.proposal === 'object' ? original.proposal : {};
+  const originalTitle = singleLine(original.title) || '(untitled request)';
+  const motivation = typeof proposal.motivation === 'string' ? proposal.motivation.trim() : '';
+  const strList = (xs) => (Array.isArray(xs) ? xs.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : []);
+  const acceptanceCriteria = strList(proposal.acceptanceCriteria).slice(0, MAX_LIST_ITEMS);
+  const referencePaths = [...new Set([...strList(original.referencePaths), ...strList(input.referencePaths)])]
+    .slice(0, MAX_REFERENCES);
+  const outcome = singleLine(input.outcome) || 'unknown';
+  const reason = singleLine(input.reason) || 'unknown';
+  const xGoal = readEpicGoal(toCwd, toEpicId);
+  const replierName = path.basename(fromCwd) || fromCwd;
+
+  const title = `Reply from ${replierName}: ${originalTitle}`.slice(0, MAX_TITLE_CHARS);
+  const body = [
+    `This reply could not be delivered into the asking session ${toEpicId}, so it opened as a new proposed `
+      + `session instead. Why it fell back: ${fallbackReasonText(reason)}.`,
+    `Asking session: ${toEpicId}${xGoal ? ` — goal: "${xGoal.slice(0, MAX_ORIGIN_ASK_CHARS)}"` : ' — goal unknown'}.`,
+    `Original request (sent from this project to ${replierName}): ${originalTitle}`,
+    `## Reply (outcome: ${outcome})\n${message}`,
+  ].join('\n\n');
+
+  const originAsk = xGoal ? xGoal.slice(0, MAX_ORIGIN_ASK_CHARS) : null;
+  const { openingPrompt, sections } = composeFeedbackIntake({
+    fromCwd,
+    fromEpicId,
+    title,
+    body,
+    agentName: DEFAULT_FEEDBACK_AGENT,
+    referencePaths,
+    originAsk,
+    motivation,
+    acceptanceCriteria,
+  });
+
+  const replyOf = { cwd: toCwd, epicId: toEpicId };
+  let minted;
+  try {
+    minted = await mint(toCwd, {
+      goalText: title,
+      tag: DEFAULT_FEEDBACK_TAG,
+      agentType: DEFAULT_FEEDBACK_AGENT,
+      status: 'proposed',
+      openingPrompt,
+      sections,
+      source: {
+        producer: 'cross-project-feedback',
+        fromCwd,
+        ...(fromEpicId ? { fromEpicId } : {}),
+        replyOf,
+        proposal: {
+          motivation,
+          originAsk,
+          plan: strList(proposal.plan).slice(0, MAX_LIST_ITEMS),
+          acceptanceCriteria,
+          outOfScope: strList(proposal.outOfScope).slice(0, MAX_LIST_ITEMS),
+          series: null,
+        },
+      },
+      mintAuthority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+    });
+  } catch (e) {
+    return bad(500, `could not open the reply fallback session: ${e.message}`);
+  }
+
+  try {
+    audit('epic_cross_project_reply_fallback', {
+      cwd: toCwd,
+      epicId: minted.epicId,
+      replyOf,
+      fromCwd,
+      fromEpicId,
+      outcome,
+      reason,
+      title,
+    });
+  } catch { /* audit is best-effort */ }
+
+  return { ok: true, epicId: minted.epicId, toCwd, fromCwd, replyOf, reason, title, status: 'proposed' };
+}
+
+/**
  * listFeedbackTargets() → { projects: [{ cwd, lastActivity }], scanned, truncated }
  *
  * Which projects can receive feedback. Resolved the same way CLAUDE.md
@@ -941,6 +1096,8 @@ module.exports = {
   resolveReplyTo,
   validateFeedbackInput,
   openFeedbackSession,
+  readEpicGoal,
+  openReplyFallbackSession,
   listFeedbackTargets,
   registerAdminRoute,
 };

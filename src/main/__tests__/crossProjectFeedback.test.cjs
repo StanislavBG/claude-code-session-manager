@@ -28,7 +28,11 @@ const {
   listFeedbackTargets,
   isSessionManagerProject,
   quoteNamesTarget,
+  openReplyFallbackSession,
+  readEpicGoal,
   MAX_BODY_CHARS,
+  MAX_TITLE_CHARS,
+  MAX_REFERENCES,
 } = require('../lib/feedback-remote/crossProjectFeedback.cjs');
 const { readActiveIndex, MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK, MINT_AUTHORITIES } = require('../lib/epic/epicMint.cjs');
 const { assertValidPromptSession } = require('../lib/promptSessionSchema.cjs');
@@ -568,6 +572,92 @@ test('composeFeedbackIntake omits the actor line unless BOTH name and descriptio
 // ---------------------------------------------------------------------------
 // The mint-authority envelope itself
 // ---------------------------------------------------------------------------
+
+function replyFallbackInput(to, from, overrides = {}) {
+  return {
+    reason: 'not-active',
+    toCwd: to,
+    toEpicId: 'psess-x',
+    fromCwd: from,
+    fromEpicId: 'psess-y',
+    message: 'Done.',
+    outcome: 'done',
+    referencePaths: ['b.md', 'a.md'],
+    original: { title: 'Original ask', proposal: { motivation: 'M', acceptanceCriteria: ['AC1'] }, referencePaths: ['a.md'] },
+    ...overrides,
+  };
+}
+
+test('openReplyFallbackSession mints proposed via the cross-project authority and never stamps autoApprove', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const minted = [];
+  const audits = [];
+  const r = await openReplyFallbackSession(
+    replyFallbackInput(to, from, { autoStart: true, humanRequestQuote: 'please', autoApprove: { requestedBy: 'human' } }),
+    {
+      ensureEpic: async (cwd, opts) => { minted.push({ cwd, opts }); return { epicId: 'psess-f' }; },
+      appendAudit: (kind, fields) => audits.push({ kind, fields }),
+    },
+  );
+  expect(r).toMatchObject({ ok: true, epicId: 'psess-f', toCwd: to });
+  expect(minted).toHaveLength(1);
+  const { cwd, opts } = minted[0];
+  expect(cwd).toBe(to);
+  expect(opts).toMatchObject({
+    status: 'proposed',
+    tag: 'discussion',
+    agentType: 'architect',
+    mintAuthority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+    source: { producer: 'cross-project-feedback', fromCwd: from, fromEpicId: 'psess-y', replyOf: { cwd: to, epicId: 'psess-x' } },
+  });
+  expect(opts.source).not.toHaveProperty('autoApprove');
+  expect(opts.source.proposal).toMatchObject({ motivation: 'M', acceptanceCriteria: ['AC1'] });
+  expect(opts.openingPrompt.match(/^Reference: a\.md$/gm)).toHaveLength(1);
+  expect(opts.openingPrompt).toContain('Reference: b.md');
+  expect(audits[0].kind).toBe('epic_cross_project_reply_fallback');
+});
+
+test('openReplyFallbackSession caps the title and the reference list', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  let seen = null;
+  const many = Array.from({ length: MAX_REFERENCES + 5 }, (_, i) => `r${i}.md`);
+  await openReplyFallbackSession(
+    replyFallbackInput(to, from, { referencePaths: many, original: { title: 'x'.repeat(400), referencePaths: ['o.md'] } }),
+    { ensureEpic: async (_c, opts) => { seen = opts; return { epicId: 'psess-f' }; }, appendAudit: () => {} },
+  );
+  expect(seen.goalText.length).toBeLessThanOrEqual(MAX_TITLE_CHARS);
+  expect(seen.goalText.startsWith(`Reply from ${path.basename(from)}: `)).toBe(true);
+  expect(seen.sections.filter((s) => s.part === 'reference')).toHaveLength(MAX_REFERENCES);
+});
+
+test('openReplyFallbackSession mints a real proposed Epic with no autoApprove', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const r = await openReplyFallbackSession(replyFallbackInput(to, from), { appendAudit: () => {} });
+  expect(r.ok).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.status).toBe('proposed');
+  expect(epic.source.autoApprove).toBeUndefined();
+  expect(epic.source.replyOf).toEqual({ cwd: to, epicId: 'psess-x' });
+});
+
+test('readEpicGoal: active index, archived and flat files, and null when unreadable', async () => {
+  const cwd = await mkProject();
+  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'active-index.json'), JSON.stringify({ sessions: { 'psess-a': { id: 'psess-a', goalText: 'Active goal' } }, events: {} }));
+  fs.writeFileSync(path.join(dir, 'psess-b.json'), JSON.stringify({ session: { goalText: 'Archived goal' } }));
+  fs.writeFileSync(path.join(dir, 'psess-c.json'), JSON.stringify({ id: 'psess-c', goalText: 'Flat goal' }));
+  fs.writeFileSync(path.join(dir, 'psess-d.json'), '{not json');
+  expect(readEpicGoal(cwd, 'psess-a')).toBe('Active goal');
+  expect(readEpicGoal(cwd, 'psess-b')).toBe('Archived goal');
+  expect(readEpicGoal(cwd, 'psess-c')).toBe('Flat goal');
+  expect(readEpicGoal(cwd, 'psess-d')).toBeNull();
+  expect(readEpicGoal(cwd, 'psess-none')).toBeNull();
+  expect(readEpicGoal('/definitely/not/here', 'psess-a')).toBeNull();
+});
 
 test('there are exactly two mint authorities', () => {
   expect(MINT_AUTHORITIES).toHaveLength(2);

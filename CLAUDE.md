@@ -81,9 +81,9 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   handler, and `crossProjectFeedback.cjs`). A third entry is a domain-model change, not a convenience. There
   is **no agent-facing proposal channel** — an agent needing work runs `/develop` inside the Epic
   it is already in. PRDs join an existing Epic; they never conjure one.
-- **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`crossProjectFeedback.cjs`,
-  `feedback_open_session`, `send-feedback` skill); auto-approved only on a verified human quote or granted macro.
-  Same-cwd rejected — `/develop`.
+- **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`feedback_open_session`);
+  a reply on its thread lands in the asking Epic via `feedback_reply`. Auto-approved only on a verified
+  human quote or macro. Same-cwd → `/develop`.
 - **A MACRO is a saved (agent, tag, prompt) hot key**, machine-local in `macroLibrary.cjs` (`macros.json`). Sessions
   hot keys are per project; a **Project Home tool is in every project**, only its output is per project. A press is
   New Session, through the same mint authority.

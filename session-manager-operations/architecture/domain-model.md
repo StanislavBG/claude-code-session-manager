@@ -234,8 +234,24 @@ scoping scheme.
   be real directories, and the target must already have a `session-manager-operations/` dir. Provenance rides
   on the Epic (`EpicSource.producer: 'cross-project-feedback'` + `fromCwd`/`fromEpicId`), which
   `lib/epicOrigin.ts` renders as a chip so the receiving human sees the claim came from an agent that never
-  read their codebase. There is no reply channel; a receipt event chained onto the sending Epic is the whole
-  loop.
+  read their codebase. A receipt event is chained onto the sending Epic.
+- **A reply on an existing thread lands in the Epic that asked, not as a new proposed Epic.** When the sender
+  resolves to an Epic with a Claude session, the receiving Epic is stamped `source.replyTo = { cwd, epicId,
+  claudeSessionId }`. The receiving session answers with `feedback_reply` (`crossProjectReply.cjs`,
+  `POST /admin/feedback/reply`; args `message`, `outcome: done | blocked | question`, `referencePaths`):
+  - Delivery is an event on the asking Epic's chain (notice `cross-project-reply`) plus the next prompt of its own
+    Claude session (`chatRunner.enqueueExternalPrompt`, which resumes it even with its tab closed). The prompt is
+    framed as another project's agent's claim — verify before acting.
+  - The origin is external, never `'human'`: it never enters `humanPromptLedger`, so a reply can never be
+    replayed as an auto-start `humanRequestQuote`.
+  - Thread rule: the replier is resolved only from its own `SM_CHAT_SESSION_ID` (scheduler jobs cannot reply), must
+    be a `cross-project-feedback` Epic with a complete `replyTo`, and may target only `replyTo.epicId`. Anything
+    off-thread is refused — a new request is `feedback_open_session`'s job.
+  - Cap: 3 replies per thread (receipts on the replying Epic, serialized per thread).
+  - Fallback: if the asking Epic is missing, not `active`, or its Claude session changed, the reply mints a NEW
+    `proposed` Epic in the asking project carrying `source.replyOf = { cwd, epicId }`, through the same
+    `MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK` (`openReplyFallbackSession`), never auto-approved. `MINT_AUTHORITIES`
+    stays at two entries.
 - **Verified human request auto-starts a cross-project proposal.** The mint is unchanged — the Epic is still born
   `proposed`. When the tool call carries `autoStart: true` + `humanRequestQuote`, main stamps `source.autoApprove`
   only if the quote is verified, and the receiving renderer then approves and starts it through the normal

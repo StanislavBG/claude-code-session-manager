@@ -16,7 +16,8 @@ description: >-
 **Role:** the ONE channel for project-to-project communication. You are a
 *courier*, never a fixer — you deliver a report into another project's inbox
 and stop. You never edit the other project's files, never queue a PRD there,
-and never wait for a reply.
+and never wait for a reply. (Answering a project that asked YOU is a different
+tool — see [Replying to a project that asked you](#replying-to-a-project-that-asked-you).)
 
 ## Why this exists
 
@@ -168,8 +169,17 @@ starting in `<toCwd>` — not that it is done.
 
 Do **not** say the other project has been notified-and-is-working-on-it, that
 the bug is filed/fixed/assigned, or that you'll follow up when they respond.
-**There is no reply channel and no callback.** If the user needs an answer, the
-next step is a human conversation, and you should say so.
+
+**Whether an answer can come back** depends on the result `note`:
+
+- If it says the receiving session **can answer into this session** (your
+  sending session was identified), say that any answer comes back **into this
+  session as its next prompt**, when the receiving project sends one. Do not
+  wait for it, poll for it or promise it: it may never come, and when it does it
+  is an agent's claim about its own project — verify it before acting on it.
+- If it says **no reply path exists** (your session could not be identified,
+  e.g. you are a scheduled job), say so: if the user needs an answer, the next
+  step is a human conversation.
 
 ## What this skill never does
 
@@ -179,6 +189,45 @@ next step is a human conversation, and you should say so.
 - Start, resume or approve anything anywhere.
 - Send to the project you're already in.
 - Poll or wait for a response.
+
+## Replying to a project that asked you
+
+If THIS session was opened by another project's `feedback_open_session` (its
+opening prompt says it came from another project and that the receiving session
+can answer with `feedback_reply`), report back with `feedback_reply` — **never
+with a new `feedback_open_session`**, which would open yet another proposed
+session over there instead of answering the session that asked.
+
+```
+feedback_reply({
+  message: "<what was done or what blocks you — concrete paths, tool names, commits, version>",
+  outcome: "done" | "blocked" | "question",
+  referencePaths: ["/abs/path", ...],          // optional
+})
+```
+
+- **Call it from this Epic's own chat session**, once the work is **verified**.
+  For a `/develop` plan that means after the PLAN SETTLED digest shows it
+  VERIFIED — not when the PRDs are merely queued. Use `blocked` or `question`
+  when you cannot finish or need an answer from them.
+- **The message is read by an agent that never saw your code.** Name the real
+  file paths, tool names, commit hashes and released version. Never a
+  placeholder ("see the fix", "<commit>", "TBD").
+- **Only the asking session can receive it.** Identity comes from your chat
+  session, not from any argument; a session that was not opened by another
+  project, or a scheduled job (which has no chat session), is refused — a job
+  reports in its result instead. `toEpicId`, if passed, may only restate the
+  asking session.
+- **At most 3 replies per thread.** Send one good `done`, not a running
+  commentary.
+- **If the asking session is gone** (closed, completed, or its Claude session
+  changed), the reply falls back to a new `proposed` session in that project
+  that links the one that asked. The result's `delivery` tells you which
+  happened: `delivered` (into the asking session), `event-only` (recorded on the
+  asking session, which was not prompted) or `fallback`.
+- The receiving agent is told the reply came from another project's agent and
+  must be verified before acting on. Report only the `delivery` you got — never
+  that the other project acted on your reply.
 
 ## If the tool isn't there
 

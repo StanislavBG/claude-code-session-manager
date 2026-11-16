@@ -7,9 +7,10 @@
  * `Review MD network` link switches Project Home to Tools.
  *
  * The primary button quick-launches the template's defaults (`onQuick`). A template whose defaults
- * cannot generate — the page Custom topic, which has no topic yet — reads `Name a topic` and opens the
- * composer on itself (`onCustomize`) instead: the same `canGenerate` rule that disables the
- * composer's own button. Customize always opens the composer on that template.
+ * cannot generate opens the composer on itself (`onCustomize`) instead, never `onQuick`: the page
+ * Custom topic (no topic yet) reads `Name a topic`, the Blog post video `Name a post` and the Feature
+ * video `Name a feature` (no target yet) — the same `canGenerate` rule that disables the composer's
+ * own button. Customize always opens the composer on that template.
  *
  * Presentational: PagesPane / VideosPane own the launch and the composer. The root keeps the panes'
  * old `knowledge-page-empty` / `video-page-empty` testid.
@@ -101,8 +102,8 @@ interface StarterCard {
   tone: PreviewTone
   /** Video cards only: the style the strip shows. */
   style?: VideoStyleId
-  /** The defaults cannot generate (no topic yet): the primary button opens the composer instead. */
-  needsTopic: boolean
+  /** The defaults cannot generate (no topic / target yet): the label of the primary button, which opens the composer instead; null when the defaults launch. */
+  nameLabel: string | null
 }
 
 /** Prototype `cards()`, from the shared templates; static, so built once. */
@@ -115,7 +116,7 @@ const CARDS: Record<LibraryKind, readonly StarterCard[]> = {
     eyebrow: `PAGE · ${t.page.toUpperCase()}`,
     lines: t.covers.slice(0, PREVIEW_LINES),
     tone: PAGE_TONE,
-    needsTopic: !canGenerate('page', t.id, pageDefaults(t.id)),
+    nameLabel: canGenerate('page', t.id, pageDefaults(t.id)) ? null : 'Name a topic',
   })),
   video: VIDEO_TEMPLATES.map((t) => ({
     id: t.id,
@@ -126,7 +127,11 @@ const CARDS: Record<LibraryKind, readonly StarterCard[]> = {
     lines: t.scenes.slice(0, PREVIEW_LINES),
     tone: VIDEO_TONES[t.style],
     style: t.style,
-    needsTopic: !canGenerate('video', t.id, videoDefaults(t.id)),
+    nameLabel: canGenerate('video', t.id, videoDefaults(t.id))
+      ? null
+      : t.kind === 'Feature'
+        ? 'Name a feature'
+        : 'Name a post',
   })),
 }
 
@@ -220,7 +225,7 @@ export function LibraryEmptyState({
                     disabled={disabled}
                     title={title}
                     onClick={() => {
-                      if (card.needsTopic) {
+                      if (card.nameLabel) {
                         setPressed(null)
                         onCustomize(card.id)
                         return
@@ -230,7 +235,7 @@ export function LibraryEmptyState({
                     }}
                     className={PRIMARY_CLASS}
                   >
-                    {card.needsTopic ? 'Name a topic' : starting && pressed === card.id ? 'Starting…' : 'Generate'}
+                    {card.nameLabel ? card.nameLabel : starting && pressed === card.id ? 'Starting…' : 'Generate'}
                   </button>
                   <button
                     type="button"

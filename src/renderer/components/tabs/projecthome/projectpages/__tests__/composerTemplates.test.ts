@@ -95,7 +95,9 @@ describe('template data — prototype lines 779–856, verbatim', () => {
 
   it('VIDEO_TEMPLATES are the prototype VIDEO_TPLS in order', () => {
     expect(VIDEO_TEMPLATES.map((t) => t.id)).toEqual(['demo', 'feature', 'blog', 'whiteboard', 'custom'])
-    expect(VIDEO_TEMPLATES).toEqual(protoRows('VIDEO_TPLS'))
+    // One deliberate deviation: the Feature template names no default feature (a blank target blocks Generate).
+    const proto = protoRows('VIDEO_TPLS').map((r) => (r.id === 'feature' ? { ...r, target: '' } : r))
+    expect(VIDEO_TEMPLATES).toEqual(proto)
   })
 
   it('option lists are the prototype AUDIENCES / LENGTHS / READS / KINDS / STYLES', () => {
@@ -169,7 +171,7 @@ describe('pageDefaults / videoDefaults', () => {
     })
     expect(videoDefaults('feature')).toEqual({
       kind: 'Feature',
-      target: 'Scheduler / PRD queue',
+      target: '',
       style: 'Kinetic typography',
       length: 30,
       mascot: false,
@@ -242,7 +244,7 @@ describe('videoPromptLines', () => {
   })
 
   it('names a non-empty target for the other kinds', () => {
-    expect(videoPromptLines(videoDefaults('feature'))).toEqual([
+    expect(videoPromptLines({ ...videoDefaults('feature'), target: 'Scheduler / PRD queue' })).toEqual([
       'Video kind: Feature',
       'Video target: Scheduler / PRD queue',
       'Video style: Kinetic typography',
@@ -329,10 +331,19 @@ describe('canGenerate', () => {
     expect(canGenerate('page', 'start', pageDefaults('start'))).toBe(true)
   })
 
-  it('is true for the fixed pages and for every video', () => {
+  it('is true for the fixed pages', () => {
     expect(canGenerate('page', 'overview', pageDefaults('overview'))).toBe(true)
     expect(canGenerate('page', 'faq', { ...pageDefaults('faq'), reads: [] })).toBe(true)
-    for (const t of VIDEO_TEMPLATES) expect(canGenerate('video', t.id, videoDefaults(t.id))).toBe(true)
+  })
+
+  it('is false for a Blog post or Feature video with a blank target; a Project demo always generates', () => {
+    expect(canGenerate('video', 'blog', videoDefaults('blog'))).toBe(false)
+    expect(canGenerate('video', 'feature', { ...videoDefaults('feature'), target: '' })).toBe(false)
+    expect(canGenerate('video', 'blog', { ...videoDefaults('blog'), target: 'x' })).toBe(true)
+    expect(canGenerate('video', 'feature', { ...videoDefaults('feature'), target: 'x' })).toBe(true)
+    for (const id of ['demo', 'whiteboard', 'custom']) expect(canGenerate('video', id, videoDefaults(id))).toBe(true)
+    expect(canGenerate('video', 'demo', { ...videoDefaults('demo'), kind: 'Blog post', target: '  ' })).toBe(false)
+    expect(VIDEO_TEMPLATES.find((t) => t.id === 'feature')?.target).toBe('')
   })
 })
 

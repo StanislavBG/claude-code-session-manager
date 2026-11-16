@@ -260,6 +260,21 @@ describe('VideosPane list column', () => {
     expect(onLaunch.mock.calls).toEqual([[DEMO, DEMO_LINES]])
   })
 
+  it('in the empty state, the Blog post and Feature cards open the composer instead of launching', () => {
+    for (const tpl of ['blog', 'feature']) {
+      const onLaunch = vi.fn()
+      const el = mount({ entries: [], onLaunch })
+      const empty = tid('video-page-empty', el)!
+      click(tid('template-card-quick', empty.querySelector(`[data-tpl="${tpl}"]`)!))
+      expect(tid('project-home-composer')).not.toBeNull()
+      expect(document.querySelector(`[data-testid="composer-template"][aria-pressed="true"]`)?.getAttribute('data-tpl')).toBe(tpl)
+      expect(onLaunch).not.toHaveBeenCalled()
+      act(() => root?.unmount())
+      root = null
+      document.body.innerHTML = ''
+    }
+  })
+
   it('lays the list beside the content as the 252px | 1fr grid Pages uses', () => {
     mount()
     const grid = tid('project-home-library')!
@@ -397,6 +412,7 @@ describe('VideosPane Generate and Regenerate', () => {
     mount({ onLaunch })
     click(tid('project-home-generate'))
     click(document.querySelector<HTMLElement>('[data-testid="composer-template"][data-tpl="feature"]'))
+    type(tid('composer-target'), 'Scheduler / PRD queue')
     type(tid('composer-focus'), 'No jargon')
     click(tid('composer-generate'))
     expect(onLaunch.mock.calls).toEqual([
@@ -422,9 +438,12 @@ describe('VideosPane Generate and Regenerate', () => {
     click(rows()[1])
     click(tid('project-home-regenerate'))
     expect(tid('composer-title')?.textContent).toBe('Regenerate “Release notes”')
+    // Regenerate opens with a blank target; a Blog post needs it named before Generate enables.
+    expect((tid('composer-generate') as HTMLButtonElement).disabled).toBe(true)
+    type(tid('composer-target'), 'docs/release-notes.md')
     click(tid('composer-generate'))
     expect(onLaunch.mock.calls).toEqual([
-      [DEMO, 'Video kind: Blog post\nVideo style: Professional\nVideo length: 60\nCharacter: off\nReplace entry: release-notes'],
+      [DEMO, 'Video kind: Blog post\nVideo target: docs/release-notes.md\nVideo style: Professional\nVideo length: 60\nCharacter: off\nReplace entry: release-notes'],
     ])
   })
 
@@ -465,6 +484,7 @@ describe('VideosPane Generate and Regenerate', () => {
     click(tid('composer-generate'))
     click(tid('project-home-generate'))
     click(document.querySelector<HTMLElement>('[data-testid="composer-template"][data-tpl="feature"]'))
+    type(tid('composer-target'), 'Scheduler / PRD queue')
     click(tid('composer-generate'))
     click(tid('project-home-generate'))
     click(document.querySelector<HTMLElement>('[data-testid="composer-template"][data-tpl="blog"]'))

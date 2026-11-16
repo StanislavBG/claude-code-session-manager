@@ -335,14 +335,14 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
                   <Segmented label="Kind" options={VIDEO_KINDS} value={form.cfg.kind} onPick={(k) => setVideo({ kind: k })} />
                   {form.cfg.kind !== 'Project demo' && (
                     <label className="flex flex-col gap-[7px]">
-                      <FieldLabel note="optional" testId="composer-target-label">
+                      <FieldLabel note="required" required testId="composer-target-label">
                         {form.cfg.kind === 'Feature' ? 'Feature' : 'Post'}
                       </FieldLabel>
                       <input
                         data-testid="composer-target"
                         value={form.cfg.target}
                         onChange={(e) => setVideo({ target: e.target.value })}
-                        placeholder={form.cfg.kind === 'Feature' ? 'Feature name, e.g. Scheduler / PRD queue' : 'Post path or URL'}
+                        placeholder={form.cfg.kind === 'Feature' ? 'Name one feature, e.g. the search box' : 'Post path or URL'}
                         className={INPUT}
                       />
                     </label>

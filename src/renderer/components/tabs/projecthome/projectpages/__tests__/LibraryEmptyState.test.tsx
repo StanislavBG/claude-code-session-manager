@@ -102,7 +102,7 @@ const START_LINES =
 const FAQ_LINES = 'Page: FAQ\nAudience: Newcomers\nLength: Brief\nRead from: README & docs'
 const DEMO_LINES = 'Video kind: Project demo\nVideo style: Auto\nVideo length: 30\nCharacter: on'
 const FEATURE_LINES =
-  'Video kind: Feature\nVideo target: Scheduler / PRD queue\nVideo style: Kinetic typography\nVideo length: 30\nCharacter: off'
+  'Video kind: Feature\nVideo target: The search box\nVideo style: Kinetic typography\nVideo length: 30\nCharacter: off'
 const WHITEBOARD_LINES = 'Video kind: Project demo\nVideo style: Animated whiteboard\nVideo length: 60\nCharacter: on'
 
 function emptyProps(over: Partial<LibraryEmptyStateProps> = {}): LibraryEmptyStateProps {
@@ -178,7 +178,7 @@ describe('LibraryEmptyState', () => {
     expect(tid('library-empty-title', empty)?.textContent).toBe('Show the project in under a minute')
     expect(tid('library-empty-text', empty)?.textContent).toBe(VIDEO_TEXT)
     expect(cards().map((c) => c.getAttribute('data-tpl'))).toEqual(VIDEO_TEMPLATES.map((t) => t.id))
-    expect(quickLabels()).toEqual(VIDEO_TEMPLATES.map(() => 'Generate'))
+    expect(quickLabels()).toEqual(['Generate', 'Name a feature', 'Name a post', 'Generate', 'Generate'])
     expect(VIDEO_TEMPLATES.map((t) => preview(t.id).getAttribute('data-style'))).toEqual(VIDEO_TEMPLATES.map((t) => t.style))
     expect(preview('demo').classList.contains('bg-bg-elev')).toBe(true)
     expect(preview('feature').classList.contains('bg-accent')).toBe(true)
@@ -199,6 +199,18 @@ describe('LibraryEmptyState', () => {
     // The video Custom card is a brief, not a topic: its defaults launch as-is.
     click(quick('custom'))
     expect(onQuick.mock.calls).toEqual([['custom']])
+  })
+
+  it('the Blog post and Feature video cards read Name a post / Name a feature and ask for the composer', () => {
+    const onQuick = vi.fn()
+    const onCustomize = vi.fn()
+    mount(<LibraryEmptyState {...emptyProps({ kind: 'video', onQuick, onCustomize })} />)
+    expect(quick('blog').textContent).toBe('Name a post')
+    expect(quick('feature').textContent).toBe('Name a feature')
+    click(quick('blog'))
+    click(quick('feature'))
+    expect(onCustomize.mock.calls).toEqual([['blog'], ['feature']])
+    expect(onQuick).not.toHaveBeenCalled()
   })
 
   it('lays the cards out as an auto-fill grid (min 230px, gap 14px) in a 1000px centered column', () => {
@@ -317,8 +329,10 @@ describe('PagesPane / VideosPane empty state', () => {
     )
     const onVideo = vi.fn()
     rerender(<VideosPane {...videosProps({ onLaunch: onVideo })} />)
-    for (const t of VIDEO_TEMPLATES) click(quick(t.id))
-    expect(onVideo.mock.calls).toEqual(VIDEO_TEMPLATES.map((t) => [DEMO, videoPromptLines(videoDefaults(t.id)).join('\n')]))
+    // Blog post and Feature have no target yet: their primary opens the composer instead (tested below).
+    const quickVideos = VIDEO_TEMPLATES.filter((t) => t.kind === 'Project demo')
+    for (const t of quickVideos) click(quick(t.id))
+    expect(onVideo.mock.calls).toEqual(quickVideos.map((t) => [DEMO, videoPromptLines(videoDefaults(t.id)).join('\n')]))
     expect(tid('project-home-composer')).toBeNull()
   })
 
@@ -359,8 +373,12 @@ describe('PagesPane / VideosPane empty state', () => {
     expect(empty.textContent).not.toContain('No videos yet.')
     expect(tid('project-home-generate')).toBeNull()
     click(quick('demo'))
-    click(quick('feature'))
     expect(tid('project-home-composer')).toBeNull()
+    click(quick('feature'))
+    expect(tid('project-home-composer')).not.toBeNull()
+    expect(onLaunch.mock.calls).toEqual([[DEMO, DEMO_LINES]])
+    type(tid('composer-target') as HTMLInputElement, 'The search box')
+    click(tid('composer-generate'))
     expect(onLaunch.mock.calls).toEqual([
       [DEMO, DEMO_LINES],
       [DEMO, FEATURE_LINES],

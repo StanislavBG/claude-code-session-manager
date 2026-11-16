@@ -178,7 +178,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     name: 'Feature spotlight',
     blurb: 'One feature, shown step by step.',
     kind: 'Feature',
-    target: 'Scheduler / PRD queue',
+    target: '',
     style: 'Kinetic typography',
     length: 30,
     mascot: false,
@@ -342,9 +342,13 @@ export function videoCfgFromEntry(meta: ProjectVideoMeta): { tplId: string; cfg:
   }
 }
 
-/** Whether the composer's primary button is enabled: only a Custom topic page without a topic is blocked. */
+/**
+ * Whether the composer's primary button is enabled. Blocked: a Custom topic page without a topic, and a
+ * Blog post or Feature video without a target (the builder would otherwise guess one). A Project demo
+ * video always generates.
+ */
 export function canGenerate(kind: 'page' | 'video', tplId: string, cfg: PageCfg | VideoCfg): boolean {
-  if (kind === 'video') return true
+  if (kind === 'video') return 'kind' in cfg && (cfg.kind === 'Project demo' || cfg.target.trim() !== '')
   if (pageTemplate(tplId).page !== 'Custom topic') return true
   return 'topic' in cfg && cfg.topic.trim() !== ''
 }

@@ -33,6 +33,7 @@ import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
 import { isRecognitionSupported } from './lib/speechRecognition'
 import { useDensity } from './lib/useDensity'
+import { useCrossProjectReplyToast } from './lib/useCrossProjectReplyToast'
 import { log } from './lib/logger'
 
 // Module-scope once-flag for the unsupported warning. Survives StrictMode
@@ -53,6 +54,8 @@ export function App() {
   // Without a caller the hook is dead code and the class is never applied
   // (the LeftNav-footer toggle that used to call it was dropped).
   useDensity()
+  // One app-wide toast when a cross-project reply lands in any Epic.
+  useCrossProjectReplyToast()
   // The layout store's registry covers every NavKey screen (screenKeys.ts);
   // openPanel/focusPanel are the single routing path every nav entry point
   // (sidebar, CommandPalette, keyboard shortcuts, forced-terminal toggles)

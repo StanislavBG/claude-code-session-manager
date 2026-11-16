@@ -246,3 +246,47 @@ test('normalized collisions: exact stem wins, else first filename by sort, deter
   // input order does not change the result
   assert.equal(makeLinkResolver([...entries].reverse())('shared-name'), 'a_note');
 });
+
+test('projectRoots: a root is added when its name appears as a whole word, case-insensitive', () => {
+  const entries = [
+    { name: 'm1.md', mtimeMs: NOW, body: 'the bilko-run relay lives in `server/sm-relay/router.ts`' },
+    { name: 'm2.md', mtimeMs: NOW, body: 'Bilko owns `server/sm-relay/router.ts`' },
+    { name: 'm3.md', mtimeMs: NOW, body: 'notbilkos mentions `server/sm-relay/router.ts`' },
+  ];
+  const existsPath = (rel, roots = []) => roots.includes('/home/u/Projects/Bilko');
+  const result = scoreMemories({
+    entries, now: NOW, existsPath,
+    projectRoots: [{ name: 'Bilko', root: '/home/u/Projects/Bilko' }, { name: 'a.b', root: '/home/u/x' }],
+  });
+  assert.deepEqual(result[0].deadRefs, []);
+  assert.deepEqual(result[1].deadRefs, []);
+  assert.deepEqual(result[2].deadRefs, ['server/sm-relay/router.ts']);
+});
+
+test('moved refs split from dead refs and do not mark stale', () => {
+  const entries = [
+    { name: 'm.md', mtimeMs: NOW, body: 'see `src/main/lib/gitWorktree.cjs` and `src/gone/x.cjs` and `src/also/y.cjs`' },
+    { name: 'n.md', mtimeMs: NOW, body: 'only `src/main/lib/gitWorktree.cjs` here' },
+  ];
+  const live = new Set(['src/main/lib/git/gitWorktree.cjs']);
+  const renames = { 'src/main/lib/gitWorktree.cjs': 'src/main/lib/git/gitWorktree.cjs', 'src/also/y.cjs': 'src/also/z.cjs' };
+  const result = scoreMemories({
+    entries, now: NOW,
+    existsPath: (rel) => live.has(rel),
+    renamedTo: (rel) => renames[rel] ?? null,
+  });
+  const [m, n] = result;
+  assert.deepEqual(m.movedRefs, [{ from: 'src/main/lib/gitWorktree.cjs', to: 'src/main/lib/git/gitWorktree.cjs' }]);
+  assert.deepEqual(m.deadRefs, ['src/gone/x.cjs', 'src/also/y.cjs']);
+  assert.equal(m.stale, true);
+  assert.equal(m.reasons.length, 1);
+  assert.deepEqual(n.movedRefs, [{ from: 'src/main/lib/gitWorktree.cjs', to: 'src/main/lib/git/gitWorktree.cjs' }]);
+  assert.deepEqual(n.deadRefs, []);
+  assert.equal(n.stale, false);
+  assert.deepEqual(n.reasons, []);
+});
+
+test('movedRefs is an empty array when nothing moved (default renamedTo)', () => {
+  const result = scoreMemories({ entries: [{ name: 'a.md', mtimeMs: NOW, body: 'x' }], now: NOW, existsPath: () => true });
+  assert.deepEqual(result[0].movedRefs, []);
+});

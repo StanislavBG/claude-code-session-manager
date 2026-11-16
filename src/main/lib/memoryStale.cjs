@@ -131,18 +131,38 @@ function extractRoots(body) {
   return out;
 }
 
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * scoreMemories({ entries, now, existsPath })
+ * Compile projectRoots ({name, root}[]) into whole-word, case-insensitive
+ * matchers. A word boundary is any non-[A-Za-z0-9_] char, so 'Bilko' matches
+ * 'bilko-run' but not 'notbilkos'.
+ */
+function compileProjectRoots(projectRoots) {
+  return projectRoots
+    .filter((p) => p && typeof p.name === 'string' && p.name !== '' && typeof p.root === 'string' && p.root !== '')
+    .map((p) => ({ root: p.root, re: new RegExp(`(?<![A-Za-z0-9_])${escapeRegExp(p.name)}(?![A-Za-z0-9_])`, 'i') }));
+}
+
+/**
+ * scoreMemories({ entries, now, existsPath, projectRoots, renamedTo })
  *
  * entries: Array<{ name, mtimeMs, body }>
  * now: ms epoch
  * existsPath: (relPath: string, roots?: string[]) => boolean
+ * projectRoots: Array<{ name, root }> — a root joins a memory's roots when its
+ *   name appears in the body as a whole word (case-insensitive)
+ * renamedTo: (relPath) => string | null — git rename target; a dead candidate
+ *   whose target exists is reported in movedRefs, not deadRefs, and is not stale
  *
  * Complexity: O(total body bytes) — a single pass per entry to extract
  * wikilink targets and dead-ref candidates; the inbound-link fold is
  * O(entries + total links), NOT O(n^2) substring scans.
  */
-function scoreMemories({ entries, now, existsPath }) {
+function scoreMemories({ entries, now, existsPath, projectRoots = [], renamedTo = () => null }) {
+  const projectMatchers = compileProjectRoots(projectRoots);
   // Signal 2 (pass 1): per-entry set of wikilink targets, each resolved to its
   // canonical filename stem (raw text when unresolved), deduped so repeated
   // links to the same memory within one body count once toward its inbound
@@ -182,7 +202,17 @@ function scoreMemories({ entries, now, existsPath }) {
 
     const candidates = extractCandidates(e.body);
     const roots = extractRoots(e.body);
-    const deadRefs = candidates.filter((c) => !existsPath(c, roots));
+    for (const { root, re } of projectMatchers) {
+      if (!roots.includes(root) && re.test(e.body)) roots.push(root);
+    }
+    const deadRefs = [];
+    const movedRefs = [];
+    for (const c of candidates) {
+      if (existsPath(c, roots)) continue;
+      const to = renamedTo(c);
+      if (typeof to === 'string' && to !== '' && to !== c && existsPath(to, roots)) movedRefs.push({ from: c, to });
+      else deadRefs.push(c);
+    }
 
     const reasons = [];
     if (deadRefs.length > 0) {
@@ -208,6 +238,7 @@ function scoreMemories({ entries, now, existsPath }) {
       ageDays,
       inboundLinks,
       deadRefs,
+      movedRefs,
       stale: deadRefs.length > 0 || oldAndUnlinked,
       reasons,
     };

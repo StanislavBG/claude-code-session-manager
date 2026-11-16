@@ -48,6 +48,10 @@ const EpicSourceSchema = z.object({
   // Zod strips undeclared keys on the merge path; a stricter shape could make dropInvalidSessions (ipcSchemas.cjs) drop a whole row holding an older or malformed value.
   proposal: z.unknown().optional(),
   autoApprove: z.unknown().optional(),
+  // Cross-project thread: replyTo = the asking Epic a reply goes back to
+  // ({ cwd, epicId, claudeSessionId }); replyOf = the Epic a reply answers.
+  replyTo: z.unknown().optional(),
+  replyOf: z.unknown().optional(),
 });
 
 // Mirrors EpicIntakeSection (src/renderer/lib/epicIntake.ts) — the labeled

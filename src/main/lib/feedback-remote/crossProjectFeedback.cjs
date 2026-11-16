@@ -177,6 +177,34 @@ function resolveOriginAsk(fromCwd, fromEpicId) {
   }
 }
 
+/**
+ * resolveReplyTo(fromCwd, fromEpicId) → { cwd, epicId, claudeSessionId } | null
+ *
+ * The thread back to the sending Epic, stamped on the receiving Epic as
+ * source.replyTo. Null when the sender is unresolved (e.g. a scheduler job
+ * with no chat session id) or its Epic carries no claudeSessionId — a reply
+ * needs a live session to land in. Never throws.
+ */
+function resolveReplyTo(fromCwd, fromEpicId) {
+  if (typeof fromCwd !== 'string' || !fromCwd || typeof fromEpicId !== 'string' || !fromEpicId) return null;
+  let claudeSessionId = null;
+  try {
+    const epic = readActiveIndex(fromCwd).sessions[fromEpicId];
+    claudeSessionId = epic && typeof epic.claudeSessionId === 'string' ? epic.claudeSessionId : null;
+  } catch {
+    claudeSessionId = null;
+  }
+  if (!claudeSessionId) return null;
+  return { cwd: fromCwd, epicId: fromEpicId, claudeSessionId };
+}
+
+function replyNote(replyTo) {
+  return replyTo
+    ? `The receiving session can answer into this session (${replyTo.epicId}) with feedback_reply.`
+    : 'No reply path exists because the sending session could not be identified, so the receiving session '
+      + 'cannot answer back. If you need an answer, ask the human to follow up.';
+}
+
 function seriesLine(series) {
   return series ? `Part ${series.index} of ${series.total} — ${singleLine(series.title)}` : '';
 }
@@ -217,6 +245,7 @@ function composeFeedbackIntake({
   acceptanceCriteria = [],
   outOfScope = [],
   series = null,
+  replyTo = null,
 } = {}) {
   const trimmedTitle = singleLine(title);
   const trimmedBody = String(body ?? '').trim();
@@ -246,7 +275,12 @@ function composeFeedbackIntake({
       `This session is INBOUND FEEDBACK from another project: ${origin}.${askClause} `
       + 'Nobody in this project wrote the report below — an agent working in that project did, and it '
       + 'may be wrong about this codebase. Verify the claim against the code here before acting on it, '
-      + 'and if it does not hold, say so and close the session rather than building against it.',
+      + 'and if it does not hold, say so and close the session rather than building against it.'
+      + (replyTo
+        ? ' When the work is done, blocked, or needs an answer, call feedback_reply from this session '
+          + '(not from a PRD, and never a new feedback_open_session); the answer lands in the asking session '
+          + `${singleLine(replyTo.epicId)} in ${path.basename(singleLine(replyTo.cwd)) || singleLine(replyTo.cwd)}.`
+        : ''),
     source: fromCwd,
   });
 
@@ -625,6 +659,7 @@ async function openFeedbackSession(input, deps = {}) {
   }
 
   const originAsk = resolveOriginAsk(v.fromCwd, v.fromEpicId);
+  const replyTo = resolveReplyTo(v.fromCwd, v.fromEpicId);
 
   const { goalText, openingPrompt, sections } = composeFeedbackIntake({
     fromCwd: v.fromCwd,
@@ -640,6 +675,7 @@ async function openFeedbackSession(input, deps = {}) {
     acceptanceCriteria: v.acceptanceCriteria,
     outOfScope: v.outOfScope,
     series: v.series,
+    replyTo,
   });
 
   // The Epic's stored identity is the one-line title, not the whole report —
@@ -658,6 +694,7 @@ async function openFeedbackSession(input, deps = {}) {
         producer: 'cross-project-feedback',
         fromCwd: v.fromCwd,
         ...(v.fromEpicId ? { fromEpicId: v.fromEpicId } : {}),
+        ...(replyTo ? { replyTo } : {}),
         ...(auto.granted
           ? {
               autoApprove: macroGranted
@@ -744,17 +781,15 @@ async function openFeedbackSession(input, deps = {}) {
     receiptOnOriginEpic,
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
-    note: macroGranted
+    note: (macroGranted
       ? `Auto-approved by the "${auto.macroLabel}" macro (${auto.macroId}), which the human launched this session `
         + 'from and which allows auto-start in this project: the session is starting in the receiving project. '
-        + 'There is no callback: if you need an answer, ask the human to follow up.'
       : auto.granted
       ? 'Auto-approved at the human\'s explicit request (verified against their chat prompt): the session '
-        + 'is starting in the receiving project. There is no callback: if you need an answer, ask the human '
-        + 'to follow up.'
+        + 'is starting in the receiving project. '
       : 'Delivered as a PROPOSED session in the receiving project\'s Sessions queue. Nothing runs and no '
-        + 'tokens are spent until a human in that project presses Approve & start. There is no callback: '
-        + 'if you need an answer, ask the human to follow up.',
+        + 'tokens are spent until a human in that project presses Approve & start. ')
+      + replyNote(replyTo),
     goalText,
   };
 }
@@ -903,6 +938,7 @@ module.exports = {
   isSessionManagerProject,
   composeFeedbackIntake,
   resolveOriginAsk,
+  resolveReplyTo,
   validateFeedbackInput,
   openFeedbackSession,
   listFeedbackTargets,

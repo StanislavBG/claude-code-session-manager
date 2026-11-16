@@ -22,6 +22,7 @@ const config = require('../config.cjs');
 const {
   composeFeedbackIntake,
   resolveOriginAsk,
+  resolveReplyTo,
   validateFeedbackInput,
   openFeedbackSession,
   listFeedbackTargets,
@@ -778,4 +779,87 @@ test('macro denied: no originClaudeSessionId', async () => {
   await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
   const r = await runMacro(to, from, null, [macroFor(to)]);
   expect(r.status).toBe('proposed');
+});
+
+// ---------------------------------------------------------------------------
+// Reply thread — source.replyTo
+// ---------------------------------------------------------------------------
+
+const { EpicSourceSchema } = require('../lib/promptSessionSchema.cjs');
+
+test('replyTo stamped when fromEpicId resolves via originClaudeSessionId', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from);
+  const r = await openFeedbackSession(
+    payload(to, from, { originClaudeSessionId: s.sessionId }),
+    { appendResponseEventIfKnown: async () => true },
+  );
+  expect(r.ok).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.source.fromEpicId).toBe(s.epicId);
+  expect(epic.source.replyTo).toEqual({ cwd: from, epicId: s.epicId, claudeSessionId: s.sessionId });
+  const grounding = epic.sections.find((x) => x.part === 'grounding');
+  expect(grounding.text).toContain('feedback_reply');
+  expect(grounding.text).toContain(`asking session ${s.epicId} in ${path.basename(from)}`);
+  expect(epic.openingPrompt).toContain('feedback_reply');
+  expect(r.note).toMatch(/can answer into this session .* with feedback_reply/);
+  expect(r.note).not.toMatch(/There is no callback/);
+  expect(resolveReplyTo(from, s.epicId)).toEqual({ cwd: from, epicId: s.epicId, claudeSessionId: s.sessionId });
+});
+
+test('replyTo omitted when the sender is unresolved (scheduler job, no originClaudeSessionId)', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const r = await openFeedbackSession(payload(to, from), { appendResponseEventIfKnown: async () => true });
+  expect(r.ok).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.source.fromEpicId).toBeUndefined();
+  expect(epic.source.replyTo).toBeUndefined();
+  expect(epic.openingPrompt).not.toContain('feedback_reply');
+  expect(r.note).toMatch(/No reply path exists because the sending session could not be identified/);
+  expect(r.note).not.toMatch(/There is no callback/);
+});
+
+test('replyTo omitted when the sender Epic has no claudeSessionId', async () => {
+  const from = await mkProject();
+  const idxPath = path.join(from, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  fs.mkdirSync(path.dirname(idxPath), { recursive: true });
+  fs.writeFileSync(idxPath, JSON.stringify({ sessions: { e1: { goalText: 'x' } } }));
+  expect(resolveReplyTo(from, 'e1')).toBeNull();
+  expect(resolveReplyTo(from, 'missing')).toBeNull();
+  expect(resolveReplyTo(from, null)).toBeNull();
+  expect(resolveReplyTo('/definitely/not/there', 'e1')).toBeNull();
+});
+
+test('grounding mentions feedback_reply only with replyTo; byte-identical without it', () => {
+  const base = { fromCwd: '/p/a', fromEpicId: 'e1', title: 'T', body: 'B' };
+  const plain = composeFeedbackIntake(base);
+  const g0 = plain.sections.find((x) => x.part === 'grounding').text;
+  expect(g0).not.toContain('feedback_reply');
+  expect(g0).toBe(
+    'This session is INBOUND FEEDBACK from another project: a (/p/a, session e1). '
+    + 'Nobody in this project wrote the report below — an agent working in that project did, and it '
+    + 'may be wrong about this codebase. Verify the claim against the code here before acting on it, '
+    + 'and if it does not hold, say so and close the session rather than building against it.',
+  );
+  const threaded = composeFeedbackIntake({ ...base, replyTo: { cwd: '/p/a', epicId: 'e1', claudeSessionId: 'c1' } });
+  const g1 = threaded.sections.find((x) => x.part === 'grounding').text;
+  expect(g1.startsWith(g0)).toBe(true);
+  expect(g1).toContain('call feedback_reply from this session');
+  expect(g1).toContain('never a new feedback_open_session');
+  expect(g1).toContain('asking session e1 in a.');
+  expect(threaded.sections.map((x) => x.part)).toEqual(plain.sections.map((x) => x.part));
+});
+
+test('EpicSourceSchema.parse keeps replyTo and replyOf', () => {
+  const src = {
+    producer: 'cross-project-feedback',
+    fromCwd: '/p/a',
+    replyTo: { cwd: '/p/a', epicId: 'e1', claudeSessionId: 'c1' },
+    replyOf: { cwd: '/p/b', epicId: 'e2' },
+  };
+  const parsed = EpicSourceSchema.parse(src);
+  expect(parsed.replyTo).toEqual(src.replyTo);
+  expect(parsed.replyOf).toEqual(src.replyOf);
 });

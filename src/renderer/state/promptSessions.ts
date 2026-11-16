@@ -49,6 +49,10 @@ export interface EpicSource {
   autoApprove?:
     | { requestedBy: 'human'; quote: string; verifiedAt: string; fromClaudeSessionId: string }
     | { requestedBy: 'macro'; macroId: string; macroLabel: string; verifiedAt: string; fromClaudeSessionId: string }
+  /** 'cross-project-feedback' only — the asking Epic a feedback_reply lands in; absent when the sender was unresolved. */
+  replyTo?: { cwd: string; epicId: string; claudeSessionId: string }
+  /** The Epic (in another project) that this one's reply answers. */
+  replyOf?: { cwd: string; epicId: string }
 }
 
 export interface PromptSession {
@@ -260,9 +264,11 @@ export interface PromptSessionEvent {
    *  distinct amber "build not queued" notice. Absent on every other event.
    *  PRD 3116 — 'build-done' / 'build-failed' = a macro's background-build PRD
    *  finished (scheduler.cjs notifyOriginatingTab). */
-  notice?: 'job-not-queued' | 'build-done' | 'build-failed'
+  notice?: 'job-not-queued' | 'build-done' | 'build-failed' | 'cross-project-reply' | 'cross-project-reply-sent'
   /** PRD 3116 — the saved Project Home entry a 'build-done' notice names. */
   buildOutput?: { kind: 'video' | 'knowledge'; id: string; title: string }
+  /** The cross-project reply a 'cross-project-reply' / 'cross-project-reply-sent' notice carries. */
+  reply?: { fromCwd: string; fromEpicId: string; outcome: 'done' | 'blocked' | 'question'; referencePaths: string[] }
 }
 
 /**

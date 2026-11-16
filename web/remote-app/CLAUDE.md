@@ -58,6 +58,7 @@ Phone-class browsers (`PHONE_QUERY` in `src/viewMode.ts`) get the drill-down as 
   Never decommission the deployed relay (root `CLAUDE.md`).
 - `dist/` and `node_modules/` are build output — never hand-edit.
 - Drill-down screens fill Cockpit's `<main>` (`flex-1 min-h-0`), never viewport-height classes (`h-dvh`, `h-screen`, `100vh`): a nested `h-dvh` clipped the composer (2026-11-15).
+- [Relay rules](RELAY.md)
 
 ## Share image
 

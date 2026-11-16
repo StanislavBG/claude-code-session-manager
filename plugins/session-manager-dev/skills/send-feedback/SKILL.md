@@ -42,6 +42,8 @@ round-trip, not a wrong write.
 Routing a finding is the **default action, not a question**: a proposal starts
 nothing until a human there approves it. Send it, then report what you delivered.
 
+`scheduler_create_prd` resolves its Epic against the CALLING project (a foreign `cwd` only narrows the search), so cross-project work always goes through `feedback_open_session`, never `create_prd`.
+
 ## Steps
 
 ### 1. Confirm it's really theirs

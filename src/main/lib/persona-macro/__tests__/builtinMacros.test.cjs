@@ -23,10 +23,10 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v8 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v9 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(8);
-  expect(macro.priorPrompts).toHaveLength(7);
+  expect(macro.builtinVersion).toBe(9);
+  expect(macro.priorPrompts).toHaveLength(8);
   expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
   for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
@@ -155,8 +155,8 @@ test('built-in macros declare a frozen background job', () => {
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(8);
-  expect(demo.priorPrompts).toHaveLength(7);
+  expect(demo.builtinVersion).toBe(9);
+  expect(demo.priorPrompts).toHaveLength(8);
 });
 
 // The Project Home Generate composer always sends these lines (design-mocks/project-home-v2/DESIGN_SPEC.md
@@ -182,8 +182,8 @@ test('Project Home v3 honours the Audience, Length and Read from lines and keeps
 
 test('Demo Video v7+ honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(demo.builtinVersion).toBe(8);
-  expect(demo.priorPrompts).toHaveLength(7);
+  expect(demo.builtinVersion).toBe(9);
+  expect(demo.priorPrompts).toHaveLength(8);
   // priorPrompts[5] is the shipped v6 prompt, byte for byte; v7 kept every v6 clause
   expect(sha256(demo.priorPrompts[5])).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
   for (const clause of priorClauses(demo.priorPrompts[5]).slice(1)) expect(demo.prompt).toContain(clause);
@@ -194,15 +194,37 @@ test('Demo Video v7+ honours Video kind/style/length and Character on|off lines 
 
 test('Demo Video v8 only rewrites the first sentence of the shipped v7 prompt', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  const v7 = demo.priorPrompts.at(-1);
-  // the last prior prompt is the shipped v7 prompt, byte for byte
+  const v7 = demo.priorPrompts[6];
+  const v8 = demo.priorPrompts[7];
+  // priorPrompts[6] is the shipped v7 prompt, byte for byte
   expect(sha256(v7)).toBe('c909ac2ffb96ba54f72cd4a7f08f5ea98f26480cdb5c47640debc7d1807c224f');
   const v7Opening = 'Generate a character and cute animated JavaScript video';
   const v8Opening = 'Generate a cute animated JavaScript video with an original mascot character unless a Character: off line says otherwise,';
   expect(v7.startsWith(v7Opening)).toBe(true);
-  expect(demo.prompt.startsWith(v8Opening)).toBe(true);
+  expect(v8.startsWith(v8Opening)).toBe(true);
   // everything after the opening words is unchanged
-  expect(demo.prompt.slice(v8Opening.length)).toBe(v7.slice(v7Opening.length));
+  expect(v8.slice(v8Opening.length)).toBe(v7.slice(v7Opening.length));
+});
+
+const V9_INSERT = "A Blog post or Feature kind with no 'Video target:' line, or with a target you cannot find in the repository or read at its URL, also means that same whole-project demo: never pick a post or feature yourself, say so in your report, and save the kind as project-demo. When the target makes claims about how this project works, check each one against the code: drop a claim the code contradicts or attribute it to the post, and never narrate it as fact about the project.";
+
+test('Demo Video v9 adds the no-target and target-claims rules and keeps every v8 clause', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const v8 = demo.priorPrompts[7];
+  // priorPrompts[7] is the shipped v8 prompt, byte for byte
+  expect(sha256(v8)).toBe('089a1e9e8903f232ef1881cfaf556d334cef19169391275f0c0d88eeab1d6b7d');
+  for (const t of ['never pick a post or feature yourself', 'save the kind as project-demo', 'check each one against the code']) {
+    expect(demo.prompt).toContain(t);
+  }
+  for (const clause of priorClauses(v8)) expect(demo.prompt).toContain(clause);
+  // v9 is v8 with exactly the inserted text after the Project demo sentence
+  const anchor = "A 'Video kind: Project demo' line means that same whole-project demo.";
+  expect(v8.split(anchor)).toHaveLength(2);
+  expect(demo.prompt).toBe(v8.replace(anchor, `${anchor} ${V9_INSERT}`));
+});
+
+test('every built-in macro keeps builtinVersion === priorPrompts.length + 1', () => {
+  for (const m of BUILTIN_MACROS) expect(m.builtinVersion).toBe(m.priorPrompts.length + 1);
 });
 
 test('builtin-review-md-network is a job-less project-home macro with scope + mode inputs', () => {
@@ -210,7 +232,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
-  expect(sha('builtin-demo-video')).toBe('609f327979161a0fdffe442d7d6255b63b46301b3a867d29a17f05b0d8e9f002');
+  expect(sha('builtin-demo-video')).toBe('41ddc08d55b1319720efb1857910a9542f739a0ff1124cf180ad200f2b4adf39');
   expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');

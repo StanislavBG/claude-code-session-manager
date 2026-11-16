@@ -342,3 +342,40 @@ test('builtin-cpu-audit is a job-less project-home architect macro with scope + 
   expect(r.prompt).toContain('Run scenario to measure: idle, then its typical everyday load.');
   expect(r.prompt).not.toContain('{{');
 });
+
+function personaSection(tag) {
+  const body = personaBody();
+  return body.slice(body.indexOf(`<${tag}>`), body.indexOf(`</${tag}>`));
+}
+
+test('persona v13: no target or an unfound target means a Project demo, never a guessed post', () => {
+  const fm = frontmatter(fs.readFileSync(personaPath, 'utf8'));
+  expect(Number(fm.seedVersion) >= 13).toBe(true);
+  const kt = personaSection('kind_and_target');
+  for (const needle of ['no `Video target:` line', 'cannot find in the repository or read at its URL', 'whatever `Video kind:` says', 'never pick a post or feature yourself', 'report', '`project-demo`', 'no `meta.target`', 'Entry id:']) {
+    expect(kt).toContain(needle);
+  }
+});
+
+test('persona v13: a post or feature text is a claim, checked against the source tree', () => {
+  const kt = personaSection('kind_and_target');
+  for (const needle of ['a claim, not a source of truth', 'against the source tree', 'the post says', 'never narrate it as fact about the project']) {
+    expect(kt).toContain(needle);
+  }
+});
+
+test('persona v13: step 8 lists exactly the meta keys the save route accepts', () => {
+  const proc = personaSection('process');
+  const step8 = proc.slice(proc.indexOf('\n8. '), proc.indexOf('\n9. '));
+  for (const key of ['`title`', '`kind`', '`target`', '`style`', '`lengthS`', '`character`', '`sources`', '`report`', '`macroVersion`', '`seedVersion`', '`model`', '`effort`', '{claim, source, ref}', 'verbatim span', 'rejected']) {
+    expect(step8).toContain(key);
+  }
+  expect(step8).not.toContain('audience');
+  expect(step8).not.toContain('the Kind and Target lines');
+});
+
+test('persona and the builtin-demo-video prompt share the no-guess rule', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  expect(demo.prompt).toContain('never pick a post or feature yourself');
+  expect(personaBody()).toContain('never pick a post or feature yourself');
+});

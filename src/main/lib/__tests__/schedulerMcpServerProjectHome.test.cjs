@@ -336,7 +336,7 @@ test('project_page_write and project_video_write are listed with catalog descrip
   const page = TOOLS.find((t) => t.name === 'project_page_write');
   const video = TOOLS.find((t) => t.name === 'project_video_write');
   expect(page.inputSchema.required).toEqual(['pageId', 'title']);
-  expect(video.inputSchema.required).toEqual(['videoId', 'title', 'kind', 'lengthS']);
+  expect(video.inputSchema.required).toEqual(['videoId', 'title', 'kind', 'lengthS', 'meta']);
   for (const [tool, name] of [[page, 'project_page_write'], [video, 'project_video_write']]) {
     expect(tool.inputSchema.properties.htmlPath.type).toBe('string');
     expect(tool.description).toBe(composeDescription(MCP_TOOL_CATALOG.find((e) => e.name === name)));

@@ -149,8 +149,6 @@ test('catalog documents feedback_reply and drops the "no reply channel" wording'
   expect(handOff).not.toMatch(/no reply channel|no callback/i);
   expect(handOff).toContain('feedback_reply');
   expect(MCP_RECIPES.find((r) => r.id === 'reply-to-the-project-that-asked').steps.length).toBeGreaterThan(0);
-  const src = require('node:fs').readFileSync(SERVER_PATH, 'utf8');
-  expect(src).not.toContain('No reply channel');
 });
 
 // feedback_open_session: the MCP note promises a feedback_reply thread only

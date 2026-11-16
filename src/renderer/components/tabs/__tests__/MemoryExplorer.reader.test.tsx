@@ -12,7 +12,7 @@ let root: Root | null = null
 const row: MemoryRow = {
   name: 'feedback_x.md', slug: 'feedback_x', path: '/m/feedback_x.md', description: 'Lead desc',
   bytes: 2048, mtimeMs: 0, ageDays: 3, stale: false, staleReasons: [], ageOnlyStale: false,
-  deadRefs: [], broken: false, danglingLinks: [], outLinks: [], inLinks: [], notIndexed: false,
+  deadRefs: [], movedRefs: [], broken: false, danglingLinks: [], outLinks: [], inLinks: [], notIndexed: false,
   clusterId: null, type: 'project', originSessionId: 'de0e5dbe-1234',
 }
 const IDLE = { state: 'idle', diff: [], summary: '', action: 'update', reason: '', fold: null }

@@ -16,7 +16,7 @@ let root: Root | null = null
 
 const mk = (slug: string, stale: boolean, ageDays: number): MemoryRow => ({
   name: `${slug}.md`, slug, path: `/m/${slug}.md`, description: '', bytes: 1, mtimeMs: 0, ageDays,
-  stale, staleReasons: [], ageOnlyStale: false, deadRefs: [], broken: false, danglingLinks: [],
+  stale, staleReasons: [], ageOnlyStale: false, deadRefs: [], movedRefs: [], broken: false, danglingLinks: [],
   outLinks: [], inLinks: [], notIndexed: false, clusterId: null, type: null, originSessionId: null,
 })
 const rows = [mk('fresh_a', false, 3), mk('old_b', true, 40)]

@@ -59,7 +59,20 @@ describe('buildRows', () => {
   })
   it('falls back with null stale/agg', () => {
     const r = buildRows(entries, null, null, NOW)[0]
-    expect(r).toMatchObject({ description: '', outLinks: [], inLinks: [], clusterId: null, stale: false, broken: false, notIndexed: false })
+    expect(r).toMatchObject({ description: '', outLinks: [], inLinks: [], clusterId: null, stale: false, broken: false, notIndexed: false, movedRefs: [] })
+  })
+  it('maps movedRefs; moved-only row is not broken', () => {
+    const moved = [{ from: 'src/old.ts', to: 'src/new.ts' }]
+    const s2 = { ...stale, entries: [se('alpha.md', { movedRefs: moved })] }
+    const r = buildRows(entries, s2, null, NOW).find((x) => x.slug === 'alpha')!
+    expect(r.movedRefs).toEqual(moved)
+    expect(r.broken).toBe(false)
+    expect(by('alpha').movedRefs).toEqual([])
+  })
+  it('movedRefs defaults to [] when the stale entry lacks it', () => {
+    const { movedRefs: _m, ...noMoved } = se('alpha.md')
+    const s3 = { ...stale, entries: [noMoved] } as unknown as typeof stale
+    expect(buildRows(entries, s3, null, NOW).find((x) => x.slug === 'alpha')!.movedRefs).toEqual([])
   })
 })
 

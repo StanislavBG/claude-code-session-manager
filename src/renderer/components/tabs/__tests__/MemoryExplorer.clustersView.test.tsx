@@ -12,7 +12,7 @@ let root: Root | null = null
 function row(over: Partial<MemoryRow> = {}): MemoryRow {
   return {
     name: 'a.md', slug: 'a', path: '/m/a.md', description: '', bytes: 1, mtimeMs: 0,
-    ageDays: 1, stale: false, staleReasons: [], ageOnlyStale: false, deadRefs: [], broken: false,
+    ageDays: 1, stale: false, staleReasons: [], ageOnlyStale: false, deadRefs: [], movedRefs: [], broken: false,
     danglingLinks: [], outLinks: [], inLinks: [], notIndexed: false, clusterId: null, type: null,
     originSessionId: null, ...over,
   }

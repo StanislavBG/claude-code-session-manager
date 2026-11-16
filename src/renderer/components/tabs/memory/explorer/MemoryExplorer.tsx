@@ -50,6 +50,13 @@ function stripFront(src: string): string {
   return (m ? src.slice(m[0].length) : src).replace(/^\s*\n/, '')
 }
 
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Rewrite every backticked `from` (optionally `from:<line>`) to `to`, keeping the line suffix. */
+function rewriteMovedPath(body: string, from: string, to: string): string {
+  return body.replace(new RegExp('`' + escapeRe(from) + '(:\\d+)?`', 'g'), (_m, line: string | undefined) => '`' + to + (line ?? '') + '`')
+}
+
 function readStoredScopeKey(): string {
   try {
     const v = localStorage.getItem(SCOPE_LS_KEY)
@@ -140,7 +147,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const archivedRows = useMemo<MemoryRow[]>(
     () => ex.archived.map((name) => ({
       name, slug: stem(name), path: `${ex.dir}/${name}`, description: '', bytes: 0, mtimeMs: 0, ageDays: 0,
-      stale: false, staleReasons: [], ageOnlyStale: false, deadRefs: [], broken: false, danglingLinks: [],
+      stale: false, staleReasons: [], ageOnlyStale: false, deadRefs: [], movedRefs: [], broken: false, danglingLinks: [],
       outLinks: [], inLinks: [], notIndexed: false, clusterId: null, type: null, originSessionId: null,
     })),
     [ex.archived, ex.dir],
@@ -367,6 +374,27 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     if (!selRow) return
     const row = selRow
     if (await actions.removeLink(row.name, slug)) say(`Dead link removed from ${row.slug}`)
+  }
+
+  const updatePath = async (ref: { from: string; to: string }) => {
+    if (!selRow) return
+    const row = selRow
+    try {
+      const current = await actions.read(row.name)
+      if (current === null) return
+      const before = stripFront(current)
+      const next = rewriteMovedPath(before, ref.from, ref.to)
+      if (next === before) {
+        toast.error(`${ref.from} is not referenced in backticks in ${row.slug}`)
+        await actions.refresh()
+        return
+      }
+      // saveBody refreshes list + stale data on success and toasts on failure.
+      if (!(await actions.saveBody(row.name, next))) return
+      say(`Updated ${ref.from} → ${ref.to} in ${row.slug}`, () => { void actions.saveBody(row.name, before) })
+    } catch (e) {
+      toast.error(`Path update failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   const askAbout = () => {
@@ -597,6 +625,8 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 known={known}
                 onOpen={openBySlug}
                 onRemoveLink={(slug) => { void removeLink(slug) }}
+                onUpdatePath={(ref) => { void updatePath(ref) }}
+                onReviewPath={() => { void runFix() }}
                 onAskAbout={askAbout}
               />
             </div>

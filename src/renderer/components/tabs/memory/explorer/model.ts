@@ -25,6 +25,8 @@ export interface MemoryRow {
   staleReasons: string[]
   ageOnlyStale: boolean
   deadRefs: string[]
+  /** Git-renamed refs — fixable in place; never make a row Broken. */
+  movedRefs: { from: string; to: string }[]
   broken: boolean
   danglingLinks: string[]
   outLinks: string[]
@@ -99,6 +101,7 @@ export function buildRows(
       staleReasons: s?.reasons ?? [],
       ageOnlyStale: isStale && deadRefs.length === 0,
       deadRefs,
+      movedRefs: s?.movedRefs ?? [],
       broken: deadRefs.length > 0 || danglingLinks.length > 0,
       danglingLinks,
       outLinks: s?.outLinks ?? [],

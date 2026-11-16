@@ -7,6 +7,8 @@ interface Props {
   onOpen: (slug: string) => void
   onRemoveLink: (slug: string) => void
   onAskAbout: () => void
+  onUpdatePath: (ref: { from: string; to: string }) => void
+  onReviewPath: () => void
 }
 
 const LABEL = 'text-[10px] tracking-[.08em] font-semibold text-fg-dim'
@@ -33,7 +35,7 @@ function LinkCard({
   )
 }
 
-export const LinksRail = memo(function LinksRail({ row, onOpen, onRemoveLink, onAskAbout }: Props) {
+export const LinksRail = memo(function LinksRail({ row, onOpen, onRemoveLink, onAskAbout, onUpdatePath, onReviewPath }: Props) {
   return (
     <aside
       data-testid="mx-links"
@@ -60,6 +62,31 @@ export const LinksRail = memo(function LinksRail({ row, onOpen, onRemoveLink, on
               <span className="text-[12px] text-fg-dim">No outgoing links.</span>
             )}
           </div>
+          {row.movedRefs.length + row.deadRefs.length > 0 && (
+            <div className="flex flex-col gap-[6px]">
+              <span className={LABEL}>PATHS · {row.movedRefs.length + row.deadRefs.length}</span>
+              {row.movedRefs.map((m, i) => (
+                <LinkCard
+                  key={`moved-${m.from}`}
+                  testid={`mx-path-moved-${i}`}
+                  slug={m.from}
+                  dangling={false}
+                  sub={`moved to ${m.to} · click to update`}
+                  onClick={() => onUpdatePath({ from: m.from, to: m.to })}
+                />
+              ))}
+              {row.deadRefs.map((p, i) => (
+                <LinkCard
+                  key={`dead-${p}`}
+                  testid={`mx-path-dead-${i}`}
+                  slug={p}
+                  dangling
+                  sub="not found anywhere · review with assistant"
+                  onClick={onReviewPath}
+                />
+              ))}
+            </div>
+          )}
           <div className="flex flex-col gap-[6px]">
             <span className={LABEL}>LINKED FROM · {row.inLinks.length}</span>
             {row.inLinks.map((slug) => (

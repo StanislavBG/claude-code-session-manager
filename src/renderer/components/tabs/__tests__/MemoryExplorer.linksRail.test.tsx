@@ -12,14 +12,14 @@ let root: Root | null = null
 function row(over: Partial<MemoryRow> = {}): MemoryRow {
   return {
     name: 'a.md', slug: 'a', path: '/m/a.md', description: 'desc a', bytes: 2048, mtimeMs: 0,
-    ageDays: 3, stale: false, staleReasons: [], ageOnlyStale: false, deadRefs: [], broken: false,
+    ageDays: 3, stale: false, staleReasons: [], ageOnlyStale: false, deadRefs: [], movedRefs: [], broken: false,
     danglingLinks: [], outLinks: [], inLinks: [], notIndexed: false, clusterId: null, type: null,
     originSessionId: null, ...over,
   }
 }
 
 function mount(r: MemoryRow | null) {
-  const fns = { onOpen: vi.fn(), onRemoveLink: vi.fn(), onAskAbout: vi.fn() }
+  const fns = { onOpen: vi.fn(), onRemoveLink: vi.fn(), onAskAbout: vi.fn(), onUpdatePath: vi.fn(), onReviewPath: vi.fn() }
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -88,5 +88,32 @@ describe('LinksRail', () => {
     expect(ask.textContent).toContain('Is this still accurate?')
     click(ask)
     expect(f.onAskAbout).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders moved and dead path cards; moved click updates, dead click reviews', () => {
+    const f = mount(row({
+      movedRefs: [{ from: 'src/old.ts', to: 'src/new.ts' }],
+      deadRefs: ['src/gone.ts'],
+      broken: true,
+    }))
+    expect(q('mx-links')!.textContent).toContain('PATHS · 2')
+    const moved = q('mx-path-moved-0')!
+    expect(moved.textContent).toContain('src/new.ts')
+    expect(moved.textContent).toContain('click to update')
+    expect(moved.className).toContain('border-rule-inner')
+    const dead = q('mx-path-dead-0')!
+    expect(dead.textContent).toContain('src/gone.ts')
+    expect(dead.textContent).toContain('not found anywhere')
+    expect(dead.className).toContain('border-accent-muted')
+    click(moved)
+    expect(f.onUpdatePath).toHaveBeenCalledWith({ from: 'src/old.ts', to: 'src/new.ts' })
+    expect(f.onReviewPath).not.toHaveBeenCalled()
+    click(dead)
+    expect(f.onReviewPath).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the PATHS section when there are no path problems', () => {
+    mount(row())
+    expect(q('mx-links')!.textContent).not.toContain('PATHS')
   })
 })

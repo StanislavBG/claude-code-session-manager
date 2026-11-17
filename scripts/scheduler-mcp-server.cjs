@@ -168,6 +168,37 @@ function resolveCwdArg(args) {
   return process.env.SM_PROJECT_ROOT || process.cwd();
 }
 
+// This server is registered from a checkout that can be newer than the
+// running app; its version goes into the version-skew message below.
+const MCP_SERVER_VERSION = (() => {
+  try { return require('../package.json').version; } catch { return 'unknown'; }
+})();
+
+// The transport's own unknown-route 404 (localAdminHttp handleRequest). Apps
+// up to v0.136.2 send exactly { ok:false, error:'not found' }; newer ones add
+// unknownRoute. Route handlers' own 'not found' replies use HTTP 200
+// (reset-job) or other error text (GET /admin/scheduler/prd), so they never match.
+function isUnknownRouteReply(status, body) {
+  if (status !== 404 || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+  if (body.ok !== false) return false;
+  if (typeof body.unknownRoute === 'string') return true;
+  return Object.keys(body).length === 2 && body.error === 'not found';
+}
+
+function unknownRouteError(method, urlPath, body) {
+  const pathname = String(urlPath).split('?')[0];
+  const appVersion = body && typeof body.appVersion === 'string' && body.appVersion
+    ? ` (running app: v${body.appVersion})` : '';
+  const err = new Error(
+    `the running Session Manager app has no route ${method} ${pathname}: the app${appVersion} is older than `
+    + `this MCP server (v${MCP_SERVER_VERSION}). Restart Session Manager (Command Palette: 'Reboot app (drain first)') `
+    + 'and call again.',
+  );
+  // Tagged so callers can add a tool-specific hint (feedback_reply does).
+  err.code = 'SM_UNKNOWN_ROUTE';
+  return err;
+}
+
 async function readAdminConfig() {
   const raw = await fsp.readFile(adminTokenPath(), 'utf8');
   const parsed = JSON.parse(raw);
@@ -198,11 +229,14 @@ async function adminRequest(method, urlPath, body) {
     if (err?.cause?.code === 'ECONNREFUSED') throw new Error(NOT_RUNNING_ERROR);
     throw new Error(busyError(err?.cause?.code || err?.name || 'unknown'));
   }
+  let json;
   try {
-    return await res.json();
+    json = await res.json();
   } catch {
     throw new Error(`admin API answered HTTP ${res.status} with a non-JSON body`);
   }
+  if (isUnknownRouteReply(res.status, json)) throw unknownRouteError(method, urlPath, json);
+  return json;
 }
 
 // session_manager_help's live half. The catalog/recipes below are static and
@@ -1089,7 +1123,17 @@ async function handleCallTool(request) {
         payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
       }
       payload.fromCwd = process.cwd();
-      const result = await adminRequest('POST', '/admin/feedback/reply', payload);
+      let result;
+      try {
+        result = await adminRequest('POST', '/admin/feedback/reply', payload);
+      } catch (err) {
+        if (err && err.code === 'SM_UNKNOWN_ROUTE') {
+          return errorResult(`${err.message} feedback_reply needs Session Manager v0.136.0 or later. `
+            + 'Until the app is restarted, send your answer with feedback_open_session to the asking project; '
+            + 'it opens there as a new proposed session.');
+        }
+        throw err;
+      }
       // Say only where the reply landed — never that the other project acted.
       let note = '';
       if (result?.ok !== false) {

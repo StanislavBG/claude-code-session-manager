@@ -38,6 +38,11 @@ const fsp = require('node:fs/promises');
 const config = require('../../config.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 
+// Reported on unknown-route 404s so a newer scheduler-mcp-server.cjs can tell
+// the agent which app version lacks the route. Read once; omitted if unreadable.
+let APP_VERSION = null;
+try { APP_VERSION = require('../../../../package.json').version || null; } catch { APP_VERSION = null; }
+
 /**
  * Mode-aware token file path, resolved fresh on every call (never cached at
  * module load) so a dev/e2e launch never collides with a production
@@ -145,7 +150,15 @@ function createAdminHttp() {
     try {
       const handler = routes.get(`${req.method} ${urlObj.pathname}`);
       if (!handler) {
-        sendJson(res, 404, { ok: false, error: 'not found' });
+        // Keep error 'not found' so older MCP servers still see the same key;
+        // unknownRoute marks this as transport-level (version skew), not a
+        // route handler's own 'not found'.
+        sendJson(res, 404, {
+          ok: false,
+          error: 'not found',
+          unknownRoute: `${req.method} ${urlObj.pathname}`,
+          ...(APP_VERSION ? { appVersion: APP_VERSION } : {}),
+        });
         return;
       }
       await handler(req, res, urlObj.searchParams);

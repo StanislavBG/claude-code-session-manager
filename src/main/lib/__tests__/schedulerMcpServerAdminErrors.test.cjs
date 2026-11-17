@@ -89,3 +89,54 @@ test('500 with non-JSON body -> error naming 500', async () => {
   expect(result.content[0].text).toContain('500');
   expect(result.content[0].text).not.toContain('is not running');
 });
+
+function jsonServer(status, body) {
+  return http.createServer((req, res) => {
+    req.resume();
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  });
+}
+
+test('legacy 404 {ok:false,error:"not found"} -> skew text naming the route and Reboot app', async () => {
+  const port = await listen(jsonServer(404, { ok: false, error: 'not found' }));
+  const mod = await setup(port);
+  const result = await call(mod);
+  expect(result.isError).toBe(true);
+  const text = result.content[0].text;
+  expect(text).toMatch(/GET \/admin\/[^\s?]+/);
+  expect(text).not.toContain('?');
+  expect(text).toContain('older than this MCP server');
+  expect(text).toContain(`v${require('../../../../package.json').version}`);
+  expect(text).toContain('Reboot app');
+});
+
+test('404 with unknownRoute + appVersion -> skew text naming the app version', async () => {
+  const port = await listen(jsonServer(404, { ok: false, error: 'not found', unknownRoute: 'GET /admin/x', appVersion: '0.1.0' }));
+  const mod = await setup(port);
+  const result = await call(mod);
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('v0.1.0');
+  expect(result.content[0].text).toContain('Reboot app');
+});
+
+const resetJob = (mod) => mod.handleCallTool({ params: { name: 'scheduler_reset_job', arguments: { slug: 'nope' } } });
+
+test('HTTP 200 not-found body (reset-job unknown slug) passes through unchanged', async () => {
+  const port = await listen(jsonServer(200, { ok: false, error: 'not found' }));
+  const mod = await setup(port);
+  const result = await resetJob(mod);
+  expect(result.isError).toBeUndefined();
+  const text = result.content[0].text;
+  expect(text).toBe(JSON.stringify({ ok: false, error: 'not found' }));
+  expect(text).toContain('"error":"not found"');
+  expect(text).not.toContain('older than this MCP server');
+});
+
+test('HTTP 404 with other error text passes through unchanged', async () => {
+  const port = await listen(jsonServer(404, { ok: false, error: 'invalid slug' }));
+  const mod = await setup(port);
+  const text = (await resetJob(mod)).content[0].text;
+  expect(text).toBe(JSON.stringify({ ok: false, error: 'invalid slug' }));
+  expect(text).not.toContain('older than this MCP server');
+});

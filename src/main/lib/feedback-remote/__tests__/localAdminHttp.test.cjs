@@ -100,8 +100,13 @@ test('unregistered path/method returns 404', async () => {
   const admin = createAdminHttp();
   const { port, token } = await admin.start();
   try {
-    const res = await request(port, { path: '/nope', token });
+    const res = await request(port, { path: '/nope?x=1', token });
     expect(res.status).toBe(404);
+    const appVersion = require('../../../../../package.json').version;
+    expect(res.json).toEqual({ ok: false, error: 'not found', unknownRoute: 'GET /nope', appVersion });
+    const post = await request(port, { method: 'POST', path: '/admin/missing', token, body: {} });
+    expect(post.status).toBe(404);
+    expect(post.json.unknownRoute).toBe('POST /admin/missing');
   } finally {
     await admin.stop();
   }

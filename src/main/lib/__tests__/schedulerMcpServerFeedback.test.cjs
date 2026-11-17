@@ -31,7 +31,7 @@ afterEach(async () => {
   while (tmpDirs.length) await fsp.rm(tmpDirs.pop(), { recursive: true, force: true });
 });
 
-function startFakeAdminServer(token, body) {
+function startFakeAdminServer(token, body, status = 200) {
   const requests = [];
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -40,7 +40,7 @@ function startFakeAdminServer(token, body) {
       req.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf8');
         requests.push({ url: req.url, body: raw ? JSON.parse(raw) : undefined });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(body));
       });
     });
@@ -48,10 +48,10 @@ function startFakeAdminServer(token, body) {
   });
 }
 
-async function setup(body, sessionId) {
+async function setup(body, sessionId, status = 200) {
   const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mcp-fb-'));
   tmpDirs.push(homeDir);
-  const { server, requests } = await startFakeAdminServer('t', body);
+  const { server, requests } = await startFakeAdminServer('t', body, status);
   servers.push(server);
   const tokenPath = path.join(homeDir, '.claude', 'session-manager', 'admin-api.json');
   await fsp.mkdir(path.dirname(tokenPath), { recursive: true });
@@ -91,4 +91,14 @@ test('not-granted reason is appended without args.autoStart', async () => {
   const { handleCallTool } = await setup({ ok: true, status: 'proposed', autoStart: { granted: false, reason: 'nope' } }, 'real');
   const r = await call(handleCallTool, BASE);
   expect(r.content[0].text).toContain('not granted: nope');
+});
+
+test('feedback_reply against an app without the route -> skew error naming v0.136.0 and feedback_open_session', async () => {
+  const { handleCallTool } = await setup({ ok: false, error: 'not found' }, 'real', 404);
+  const r = await handleCallTool({ params: { name: 'feedback_reply', arguments: { message: 'm', outcome: 'answered' } } });
+  expect(r.isError).toBe(true);
+  const text = r.content[0].text;
+  expect(text).toContain('POST /admin/feedback/reply');
+  expect(text).toContain('v0.136.0');
+  expect(text).toContain('feedback_open_session');
 });

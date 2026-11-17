@@ -246,7 +246,9 @@ scoping scheme.
     replayed as an auto-start `humanRequestQuote`.
   - Thread rule: the replier is resolved only from its own `SM_CHAT_SESSION_ID` (scheduler jobs cannot reply), must
     be a `cross-project-feedback` Epic with a complete `replyTo`, and may target only `replyTo.epicId`. Anything
-    off-thread is refused — a new request is `feedback_open_session`'s job.
+    off-thread is refused — a new request is `feedback_open_session`'s job. A request Epic minted before reply
+    threads (no `replyTo`, no `replyOf`) threads to `source.fromEpicId` in `source.fromCwd`, without the
+    Claude-session check.
   - Cap: 3 replies per thread (receipts on the replying Epic, serialized per thread).
   - Fallback: if the asking Epic is missing, not `active`, or its Claude session changed, the reply mints a NEW
     `proposed` Epic in the asking project carrying `source.replyOf = { cwd, epicId }`, through the same

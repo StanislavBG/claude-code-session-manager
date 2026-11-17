@@ -17,6 +17,9 @@
  *     never for scheduler jobs) — never from an agent-supplied Epic id;
  *   - Y must be a cross-project-feedback Epic carrying a complete replyTo;
  *     anything else is a NEW request, which is feedback_open_session's job;
+ *   - LEGACY: a request Epic minted before reply threads (no replyTo, no
+ *     replyOf) threads to source.fromEpicId in source.fromCwd, without the
+ *     Claude-session check;
  *   - the target is replyTo.epicId and nothing else (toEpicId may only
  *     restate it);
  *   - at most MAX_REPLIES_PER_THREAD replies per Y, serialized per Y in
@@ -212,16 +215,11 @@ async function sendFeedbackReply(input, deps = {}) {
   if (!y) return bad(403, 'no Epic in the calling project owns this chat session — cannot reply');
 
   // 3. Thread.
-  const src = y.source || {};
-  const rt = src.replyTo;
-  const threadComplete = src.producer === 'cross-project-feedback' && rt && typeof rt === 'object'
-    && typeof rt.cwd === 'string' && rt.cwd
-    && typeof rt.epicId === 'string' && rt.epicId
-    && typeof rt.claudeSessionId === 'string' && rt.claudeSessionId;
-  if (!threadComplete) {
-    return bad(400, 'this session is not answering a cross-project request with a reply thread — '
-      + 'a new request to another project goes through feedback_open_session');
-  }
+  const resolved = resolveThread(y.source || {});
+  if (!resolved.ok) return bad(400, resolved.error);
+  const rt = resolved.thread;
+  const legacy = resolved.legacy;
+  const threadField = legacy ? { thread: 'legacy' } : {};
   if (input.toEpicId !== undefined && input.toEpicId !== null && input.toEpicId !== rt.epicId) {
     return bad(403, `this session may only reply to Epic ${rt.epicId}, the one that asked`);
   }
@@ -229,7 +227,7 @@ async function sendFeedbackReply(input, deps = {}) {
   try {
     targetCwd = config.validatePath(path.resolve(rt.cwd));
   } catch (e) {
-    return bad(400, `replyTo.cwd rejected: ${e.message}`);
+    return bad(400, `${legacy ? 'source.fromCwd' : 'replyTo.cwd'} rejected: ${e.message}`);
   }
   if (!feedbackConduit().isSessionManagerProject(targetCwd)) {
     return bad(400, `${targetCwd} is not a Session Manager project`);
@@ -296,6 +294,7 @@ async function sendFeedbackReply(input, deps = {}) {
         toEpicId: rt.epicId,
         fallbackEpicId: opened.epicId,
         receiptOnAskingEpic,
+        ...threadField,
         ...receiptFields(receipt),
         repliesUsed: sent + 1,
         repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
@@ -306,7 +305,10 @@ async function sendFeedbackReply(input, deps = {}) {
     const x = readActiveIndex(targetCwd).sessions[rt.epicId];
     if (!x) return fallback('missing');
     if (x.status !== 'active') return fallback('not-active');
-    if (x.claudeSessionId !== rt.claudeSessionId) return fallback('session-mismatch');
+    // Legacy threads carry no session pin; X's own (1:1, life-long) session is the one that asked.
+    if (legacy ? !(typeof x.claudeSessionId === 'string' && x.claudeSessionId) : x.claudeSessionId !== rt.claudeSessionId) {
+      return fallback('session-mismatch');
+    }
 
     const prompt = composeReplyPrompt({
       fromCwd: replierCwd,
@@ -349,6 +351,7 @@ async function sendFeedbackReply(input, deps = {}) {
       fromEpicId: yId,
       outcome,
       delivery,
+      ...threadField,
     });
 
     return {
@@ -356,12 +359,55 @@ async function sendFeedbackReply(input, deps = {}) {
       delivery,
       toCwd: targetCwd,
       toEpicId: x.id,
+      ...threadField,
       ...receiptFields(receipt),
       repliesUsed: sent + 1,
       repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
       ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),
     };
   });
+}
+
+const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
+
+/**
+ * resolveThread(src) — pure. The thread a replying Epic's `source` names:
+ *   { ok: true, thread: { cwd, epicId, claudeSessionId }, legacy } or { ok: false, error }.
+ * A complete replyTo → legacy false. A pre-reply-thread request Epic (no
+ * replyTo key, no replyOf, fromCwd + fromEpicId set) → legacy true, no
+ * session pin. Every refusal says why and points at feedback_open_session.
+ */
+function resolveThread(src) {
+  const s = src && typeof src === 'object' ? src : {};
+  const isRequest = s.producer === 'cross-project-feedback';
+  const rt = s.replyTo;
+  if (isRequest && rt && typeof rt === 'object'
+    && nonEmpty(rt.cwd) && nonEmpty(rt.epicId) && nonEmpty(rt.claudeSessionId)) {
+    return { ok: true, thread: { cwd: rt.cwd, epicId: rt.epicId, claudeSessionId: rt.claudeSessionId }, legacy: false };
+  }
+  if (s.replyOf) {
+    return {
+      ok: false,
+      error: 'this session is itself a reply that could not be delivered, so it has no thread to answer — '
+        + 'a new request to another project goes through feedback_open_session',
+    };
+  }
+  const hasReplyTo = Object.prototype.hasOwnProperty.call(s, 'replyTo');
+  if (isRequest && !hasReplyTo && nonEmpty(s.fromCwd)) {
+    if (nonEmpty(s.fromEpicId)) {
+      return { ok: true, thread: { cwd: s.fromCwd, epicId: s.fromEpicId, claudeSessionId: null }, legacy: true };
+    }
+    return {
+      ok: false,
+      error: 'the sending session was not identified when this request was opened, so there is no thread to answer — '
+        + `send a new request to ${s.fromCwd} with feedback_open_session`,
+    };
+  }
+  return {
+    ok: false,
+    error: 'this session is not answering a cross-project request with a reply thread — '
+      + 'a new request to another project goes through feedback_open_session',
+  };
 }
 
 /** Registers POST /admin/feedback/reply on the loopback admin transport —

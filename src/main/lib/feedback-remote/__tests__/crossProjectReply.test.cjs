@@ -428,3 +428,95 @@ test('route: a refusal maps to its status', async () => {
   expect(res.status).toBe(403);
   expect(res.body.ok).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// Legacy request Epics (minted before reply threads: no replyTo, no replyOf)
+// ---------------------------------------------------------------------------
+
+async function setupLegacy(opts = {}) {
+  const legacySource = (a) => ({
+    producer: 'cross-project-feedback',
+    fromCwd: a,
+    fromEpicId: 'psess-x',
+    proposal: { motivation: 'Phones lose a frame', acceptanceCriteria: ['First frame arrives'], plan: [], outOfScope: [] },
+  });
+  // setup() creates `a` itself, so rewrite Y's source once it exists.
+  const { a, b } = await setup({ xOverrides: opts.xOverrides });
+  const file = opsPath(b, 'prompt-sessions', 'active-index.json');
+  const idx = JSON.parse(fs.readFileSync(file, 'utf8'));
+  idx.sessions['psess-y'].source = legacySource(a);
+  fs.writeFileSync(file, JSON.stringify(idx));
+  return { a, b };
+}
+
+test('legacy request Epic with an active X → delivered on thread "legacy", prompt sent with X\'s own session', async () => {
+  const { a, b } = await setupLegacy({ xOverrides: { claudeSessionId: 'cs-x-own' } });
+  const d = deps('sent');
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'delivered', thread: 'legacy', toEpicId: 'psess-x' });
+  expect(d.calls).toHaveLength(1);
+  expect(d.calls[0][0]).toBe('psess-x');
+  expect(d.calls[0][2]).toEqual({ sessionId: 'cs-x-own', cwd: a });
+  expect(events(a, 'psess-x').at(-1).notice).toBe('cross-project-reply');
+  expect(d.audits[0].fields).toMatchObject({ thread: 'legacy', epicId: 'psess-x' });
+});
+
+test('legacy request Epic with X missing → fallback with toEpicId = fromEpicId, thread "legacy"', async () => {
+  const { a, b } = await setupLegacy();
+  writeIndex(a, {});
+  const seen = [];
+  const d = deps('sent', { openFallback: async (args) => { seen.push(args); return { ok: true, epicId: 'psess-f', toCwd: args.toCwd }; } });
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'fallback', reason: 'missing', thread: 'legacy' });
+  expect(seen[0]).toMatchObject({ reason: 'missing', toEpicId: 'psess-x', toCwd: a });
+  expect(d.calls).toHaveLength(0);
+});
+
+test('legacy request Epic: X without a claudeSessionId → session-mismatch fallback', async () => {
+  const { b } = await setupLegacy({ xOverrides: { claudeSessionId: '' } });
+  const r = await sendFeedbackReply(input(b), deps('sent', { openFallback: null }));
+  expect(r).toMatchObject({ status: 409, reason: 'session-mismatch' });
+});
+
+test('legacy request Epic: toEpicId other than fromEpicId → 403', async () => {
+  const { b } = await setupLegacy();
+  const d = deps();
+  const r = await sendFeedbackReply(input(b, { toEpicId: 'psess-other' }), d);
+  expect(r.status).toBe(403);
+  expect(r.error).toContain('psess-x');
+  expect(d.calls).toHaveLength(0);
+});
+
+test('reply-fallback Epic (source.replyOf) → 400 saying it is itself an undelivered reply', async () => {
+  const { a, b } = await setup({ ySource: undefined });
+  const file = opsPath(b, 'prompt-sessions', 'active-index.json');
+  const idx = JSON.parse(fs.readFileSync(file, 'utf8'));
+  idx.sessions['psess-y'].source = { producer: 'cross-project-feedback', fromCwd: a, fromEpicId: 'psess-x', replyOf: { cwd: a, epicId: 'psess-z' } };
+  fs.writeFileSync(file, JSON.stringify(idx));
+  const d = deps();
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r.status).toBe(400);
+  expect(r.error).toMatch(/itself a reply that could not be delivered/);
+  expect(r.error).toContain('feedback_open_session');
+  expect(d.calls).toHaveLength(0);
+});
+
+test('cross-project request with no fromEpicId → 400 naming fromCwd and feedback_open_session', async () => {
+  const { b } = await setup({ ySource: { producer: 'cross-project-feedback', fromCwd: '/home/u/proj-a' } });
+  const r = await sendFeedbackReply(input(b), deps());
+  expect(r.status).toBe(400);
+  expect(r.error).toMatch(/sending session was not identified/);
+  expect(r.error).toContain('/home/u/proj-a');
+  expect(r.error).toContain('feedback_open_session');
+});
+
+test('incomplete replyTo object (even with fromEpicId) → 400 as before', async () => {
+  const { a, b } = await setup({ ySource: undefined });
+  const file = opsPath(b, 'prompt-sessions', 'active-index.json');
+  const idx = JSON.parse(fs.readFileSync(file, 'utf8'));
+  idx.sessions['psess-y'].source = { producer: 'cross-project-feedback', fromCwd: a, fromEpicId: 'psess-x', replyTo: { cwd: a, epicId: 'psess-x' } };
+  fs.writeFileSync(file, JSON.stringify(idx));
+  const r = await sendFeedbackReply(input(b), deps());
+  expect(r.status).toBe(400);
+  expect(r.error).toMatch(/not answering a cross-project request with a reply thread/);
+});

@@ -48,7 +48,7 @@ test('constants and base resolution', () => {
 
 test('validateSubmission trims and rejects bad input', () => {
   expect(cf.validateSubmission({ title: '  hi ', body: ' yo ', tag: 'bug' })).toEqual({
-    ok: true, value: { title: 'hi', body: 'yo', tag: 'bug' },
+    ok: true, value: { title: 'hi', body: 'yo', tag: 'bug', images: [] },
   });
   expect(cf.validateSubmission({ title: ' ', body: 'x', tag: 'bug' }).ok).toBe(false);
   expect(cf.validateSubmission({ title: 'x', body: '', tag: 'bug' }).ok).toBe(false);
@@ -81,7 +81,7 @@ test('submit success posts the wire body and stores the item', async () => {
   expect(f.calls[0].init.signal).toBeDefined();
   expect(r.item).toEqual({
     id: 'fb1', receipt: 'rc1', tag: 'discussion', title: 'T', body: 'B', submittedAt: 1000,
-    status: 'open', statusNote: null, statusAt: null, seenStatusAt: null,
+    status: 'open', statusNote: null, statusAt: null, seenStatusAt: null, imageCount: 0,
   });
   const items = await cf.list(deps(f));
   expect(items).toHaveLength(1);
@@ -152,4 +152,68 @@ test('markSeen and unseenCount', async () => {
   expect(cf.unseenCount(await cf.list(deps(null)))).toBe(1);
   await cf.markSeen(undefined, deps(null));
   expect(cf.unseenCount(await cf.list(deps(null)))).toBe(0);
+});
+
+const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+const JPG = 'data:image/jpeg;base64,/9j/4AAQ';
+const IMGS = [{ dataUrl: PNG, mime: 'image/png' }, { dataUrl: JPG, mime: 'image/jpeg' }];
+
+test('MAX_IMAGES is 5', () => {
+  expect(cf.MAX_IMAGES).toBe(5);
+});
+
+test('submit sends images in the POST body and stores only imageCount', async () => {
+  const f = mkFetch(201, { id: 'fbi', imageCount: 2 });
+  const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', images: IMGS }, deps(f));
+  const sent = JSON.parse(f.calls[0].init.body);
+  expect(sent.images).toEqual(IMGS);
+  expect(r.ok).toBe(true);
+  expect('warning' in r).toBe(false);
+  expect(r.item.imageCount).toBe(2);
+  const raw = fs.readFileSync(storeFile, 'utf8');
+  expect(raw).not.toContain('data:image');
+});
+
+test('submit without images has no images key', async () => {
+  const f = mkFetch(201, { id: 'fbn' });
+  const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', images: [] }, deps(f));
+  expect('images' in JSON.parse(f.calls[0].init.body)).toBe(false);
+  expect(r.ok).toBe(true);
+  expect('warning' in r).toBe(false);
+  expect(r.item.imageCount).toBe(0);
+});
+
+test('submit warns when the host omits imageCount or reports 0', async () => {
+  const msg = 'Sent without the images — the feedback service does not accept images yet.';
+  const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', images: IMGS }, deps(mkFetch(201, { id: 'o1' })));
+  expect(r).toMatchObject({ ok: true, warning: msg });
+  expect(r.item.imageCount).toBe(0);
+  const r0 = await cf.submit({ title: 'T', body: 'B', tag: 'bug', images: IMGS }, deps(mkFetch(201, { id: 'o2', imageCount: 0 })));
+  expect(r0.warning).toBe(msg);
+});
+
+test('submit warns on a partial imageCount', async () => {
+  const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', images: IMGS }, deps(mkFetch(201, { id: 'p1', imageCount: 1 })));
+  expect(r.ok).toBe(true);
+  expect(r.warning).toBe('Only 1 of 2 images were accepted by the feedback service.');
+  expect(r.item.imageCount).toBe(1);
+});
+
+test('invalid image entries are rejected without fetching', async () => {
+  const bad = [
+    [{ dataUrl: 'data:image/svg+xml;base64,PHN2Zz4=', mime: 'image/svg+xml' }],
+    [{ dataUrl: 'https://x.test/a.png', mime: 'image/png' }],
+    [{ dataUrl: 'data:image/png;base64,' + 'A'.repeat(2000000), mime: 'image/png' }],
+    [{ dataUrl: PNG }],
+    'not-an-array',
+    Array.from({ length: 6 }, () => ({ dataUrl: PNG, mime: 'image/png' })),
+  ];
+  for (const images of bad) {
+    const f = mkFetch(201, { id: 'x' });
+    const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', images }, deps(f));
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe('string');
+    expect(f.calls).toHaveLength(0);
+  }
+  expect(cf.validateSubmission({ title: 'T', body: 'B', tag: 'bug', images: IMGS }).ok).toBe(true);
 });

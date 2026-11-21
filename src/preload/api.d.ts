@@ -703,6 +703,8 @@ export interface CustomerFeedbackItem {
   statusNote: string | null;
   statusAt: number | string | null;
   seenStatusAt: number | string | null;
+  /** Images the feedback host confirmed it stored (0 when none were sent). */
+  imageCount?: number;
 }
 
 export interface CustomerFeedbackInboxItem {
@@ -2511,8 +2513,14 @@ export interface SessionManagerAPI {
     configPath: () => Promise<string>;
   };
   customerFeedback: {
-    submit: (p: { title: string; body: string; tag: CustomerFeedbackTag }) => Promise<
-      { ok: true; item: CustomerFeedbackItem } | { ok: false; error: string }
+    /** `images` are raw data URLs; main prepares (validates/downscales) them before sending. */
+    submit: (p: {
+      title: string;
+      body: string;
+      tag: CustomerFeedbackTag;
+      images?: { dataUrl: string }[];
+    }) => Promise<
+      { ok: true; item: CustomerFeedbackItem; warning?: string } | { ok: false; error: string }
     >;
     list: () => Promise<CustomerFeedbackItem[]>;
     refreshStatus: () => Promise<

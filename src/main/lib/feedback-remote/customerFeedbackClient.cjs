@@ -25,12 +25,16 @@ const MAX_ITEMS = 500;
 const MAX_LOOKUP = 100;
 const TIMEOUT_MS = 15000;
 const SCHEMA_VERSION = 1;
+const MAX_IMAGES = 5;
+const MAX_IMAGE_DATA_URL = 2000000;
+const IMAGE_DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,/;
 const RATE_LIMIT_ERROR = 'Too many submissions — try again in a minute.';
 
 /**
  * @typedef {{ id: string, receipt: string|null, tag: string, title: string, body: string,
  *   submittedAt: number, status: string, statusNote: string|null,
- *   statusAt: number|string|null, seenStatusAt: number|string|null }} FeedbackItem
+ *   statusAt: number|string|null, seenStatusAt: number|string|null, imageCount?: number }} FeedbackItem
+ * @typedef {{ dataUrl: string, mime: string }} FeedbackImage
  * @typedef {{ fetchImpl?: typeof fetch, storeFile?: string, now?: () => number, appVersion?: string }} Deps
  */
 
@@ -49,8 +53,30 @@ function fromWireType(type) {
 }
 
 /**
- * @param {{ title?: unknown, body?: unknown, tag?: unknown }} input
- * @returns {{ ok: true, value: { title: string, body: string, tag: string } } | { ok: false, error: string }}
+ * Re-checks shape and size of already-prepared images (feedbackImages.cjs does the real prep).
+ * @param {unknown} raw
+ * @returns {{ ok: true, images: FeedbackImage[] } | { ok: false, error: string }}
+ */
+function validateImages(raw) {
+  if (raw === undefined || raw === null) return { ok: true, images: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'Images must be a list.' };
+  if (raw.length > MAX_IMAGES) return { ok: false, error: `Attach at most ${MAX_IMAGES} images.` };
+  /** @type {FeedbackImage[]} */
+  const images = [];
+  for (const entry of raw) {
+    const e = entry && typeof entry === 'object' ? /** @type {{ dataUrl?: unknown, mime?: unknown }} */ (entry) : {};
+    if (typeof e.dataUrl !== 'string' || typeof e.mime !== 'string' || !IMAGE_DATA_URL_RE.test(e.dataUrl)) {
+      return { ok: false, error: 'Each image must be a PNG, JPEG, WebP or GIF data URL.' };
+    }
+    if (e.dataUrl.length > MAX_IMAGE_DATA_URL) return { ok: false, error: 'An image is too large to send.' };
+    images.push({ dataUrl: e.dataUrl, mime: e.mime });
+  }
+  return { ok: true, images };
+}
+
+/**
+ * @param {{ title?: unknown, body?: unknown, tag?: unknown, images?: unknown }} input
+ * @returns {{ ok: true, value: { title: string, body: string, tag: string, images: FeedbackImage[] } } | { ok: false, error: string }}
  */
 function validateSubmission(input) {
   const src = input || {};
@@ -64,7 +90,9 @@ function validateSubmission(input) {
   if (typeof tag !== 'string' || !TAGS.includes(/** @type {any} */ (tag))) {
     return { ok: false, error: `Tag must be one of: ${TAGS.join(', ')}.` };
   }
-  return { ok: true, value: { title, body, tag } };
+  const imgs = validateImages(src.images);
+  if (!imgs.ok) return imgs;
+  return { ok: true, value: { title, body, tag, images: imgs.images } };
 }
 
 function defaultStoreFile() {
@@ -137,15 +165,24 @@ async function errorText(res, fallback) {
 }
 
 /**
- * @param {{ title?: unknown, body?: unknown, tag?: unknown }} input
+ * @param {number} acked @param {number} sent @returns {string|null}
+ */
+function imageWarning(acked, sent) {
+  if (sent === 0 || acked === sent) return null;
+  if (acked <= 0) return 'Sent without the images — the feedback service does not accept images yet.';
+  return `Only ${acked} of ${sent} images were accepted by the feedback service.`;
+}
+
+/**
+ * @param {{ title?: unknown, body?: unknown, tag?: unknown, images?: unknown }} input
  * @param {Deps} [deps]
- * @returns {Promise<{ ok: true, item: FeedbackItem } | { ok: false, error: string }>}
+ * @returns {Promise<{ ok: true, item: FeedbackItem, warning?: string } | { ok: false, error: string }>}
  */
 async function submit(input, deps) {
   const v = validateSubmission(input);
   if (!v.ok) return v;
   const c = ctx(deps);
-  const { title, body, tag } = v.value;
+  const { title, body, tag, images } = v.value;
   try {
     const res = await c.fetchImpl(`${resolveFeedbackBase()}/api/projects/${FEEDBACK_SLUG}/feedback`, {
       method: 'POST',
@@ -156,6 +193,7 @@ async function submit(input, deps) {
         title,
         description: body,
         client: { app: 'session-manager', version: c.appVersion, platform: process.platform },
+        ...(images.length > 0 ? { images } : {}),
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -164,6 +202,8 @@ async function submit(input, deps) {
     /** @type {any} */
     const j = await res.json().catch(() => null);
     if (!j || typeof j.id !== 'string' || !j.id) return { ok: false, error: 'Feedback service returned an unexpected response.' };
+    const acked = typeof j.imageCount === 'number' ? j.imageCount : 0;
+    const warning = imageWarning(acked, images.length);
     /** @type {FeedbackItem} */
     const item = {
       id: j.id,
@@ -176,9 +216,10 @@ async function submit(input, deps) {
       statusNote: null,
       statusAt: null,
       seenStatusAt: null,
+      imageCount: images.length ? acked : 0,
     };
     await mutateStore(c.storeFile, (items) => [item, ...items]);
-    return { ok: true, item };
+    return { ok: true, item, ...(warning ? { warning } : {}) };
   } catch (e) {
     return { ok: false, error: `Could not reach the feedback service: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -249,6 +290,7 @@ module.exports = {
   TAGS,
   MAX_TITLE,
   MAX_BODY,
+  MAX_IMAGES,
   resolveFeedbackBase,
   toWireType,
   fromWireType,

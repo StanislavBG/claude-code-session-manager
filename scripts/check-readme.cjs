@@ -15,9 +15,20 @@
 //
 // Only text between markers is ever rewritten; everything else stays
 // byte-identical. Unknown names, unclosed or duplicated regions exit 1.
+//
+// Check mode also proves the README is agent-friendly (one diagnostic line
+// per failure): prose Flesch-Kincaid grade <= MAX_GRADE, only https:// or
+// #anchor links, repo blob/tree links name tracked paths, size <= MAX_BYTES,
+// and <!-- list:NAME --> regions name exactly the skills / packs / personas.
 
 const fs = require('fs')
 const path = require('path')
+const { execFileSync } = require('child_process')
+const { pathToFileURL } = require('url')
+
+const MAX_GRADE = 8.0
+const MAX_BYTES = 24000
+const REPO_URL = 'https://github.com/StanislavBG/claude-code-session-manager'
 
 const MARKER_RE = /<!-- (\/?)gen:([A-Za-z0-9_-]+) -->/g
 
@@ -123,17 +134,168 @@ function run(text, rendered, write) {
   return { code: messages.length ? 1 : 0, messages, text }
 }
 
-function main() {
+// ── Agent-friendly rules: pure, (text, injected inputs) → diagnostic lines ──
+
+const lineOf = (text, idx) => text.slice(0, idx).split('\n').length
+
+// Blank out fenced code blocks and inline code spans (newlines kept, so line
+// numbers stay true): a link written inside code is an example, not a link.
+function maskCode(text) {
+  const blank = (s) => s.replace(/[^\n]/g, ' ')
+  const lines = text.split('\n')
+  let fence = null
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^ {0,3}(`{3,}|~{3,})/)
+    if (fence) {
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null
+      lines[i] = blank(lines[i])
+    } else if (m) {
+      fence = m[1]
+      lines[i] = blank(lines[i])
+    }
+  }
+  return lines.join('\n').replace(/(`+)[^\n]*?\1/g, blank)
+}
+
+function checkGrade(text, { markdownToProse, fleschKincaidGrade }) {
+  const grade = (md) => fleschKincaidGrade(markdownToProse(md))
+  const overall = grade(text)
+  if (overall <= MAX_GRADE) return []
+  const sections = []
+  let cur = { title: '(before first ## section)', lines: [] }
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('## ')) { sections.push(cur); cur = { title: line.trim(), lines: [] } }
+    cur.lines.push(line)
+  }
+  sections.push(cur)
+  const graded = sections
+    .map((s) => ({ title: s.title, g: grade(s.lines.join('\n')) }))
+    .sort((a, b) => b.g - a.g)
+  return [
+    `README.md: prose reading grade ${overall.toFixed(1)} is above the max of ${MAX_GRADE.toFixed(1)}. Section grades, highest first:`,
+    ...graded.map((s) => `  ${s.g.toFixed(1)}  ${s.title}`),
+  ]
+}
+
+function linkTargets(text) {
+  const masked = maskCode(text.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' ')))
+  const out = []
+  // Inline Markdown links and images: [text](target "title") / ![alt](<target>)
+  for (const m of masked.matchAll(/!?\[[^\]\n]*\]\(\s*(<[^>\n]*>|[^\s)]+)/g)) {
+    out.push({ target: m[1].replace(/^<|>$/g, ''), idx: m.index })
+  }
+  // Reference definitions: [ref]: target
+  for (const m of masked.matchAll(/^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]*>|\S+)/gm)) {
+    out.push({ target: m[1].replace(/^<|>$/g, ''), idx: m.index })
+  }
+  // HTML href / src attributes
+  for (const m of masked.matchAll(/<[A-Za-z][^>]*>/g)) {
+    for (const a of m[0].matchAll(/\s(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+      out.push({ target: a[1] ?? a[2] ?? a[3], idx: m.index + a.index })
+    }
+  }
+  return out.sort((a, b) => a.idx - b.idx)
+}
+
+function checkLinks(text) {
+  return linkTargets(text)
+    .filter(({ target }) => !target.startsWith('https://') && !target.startsWith('#'))
+    .map(({ target, idx }) => `README.md:${lineOf(text, idx)}: link target ${target} must be an absolute https:// URL or a #anchor`)
+}
+
+function checkRepoLinks(text, trackedFiles) {
+  const tracked = new Set(trackedFiles)
+  const esc = REPO_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(esc + '/(blob|tree)/main/([^\\s)"\'<>`\\]]+)', 'g')
+  const out = []
+  for (const m of text.matchAll(re)) {
+    let p = m[2].split('#')[0].split('?')[0].replace(/[.,;:!]+$/, '').replace(/\/+$/, '')
+    try { p = decodeURIComponent(p) } catch { /* keep raw */ }
+    const ok = m[1] === 'blob'
+      ? tracked.has(p)
+      : p === '' || tracked.has(p) || trackedFiles.some((f) => f.startsWith(p + '/'))
+    if (!ok) out.push(`README.md:${lineOf(text, m.index)}: ${m[1]} link names ${p}, which is not a tracked path (git ls-files)`)
+  }
+  return out
+}
+
+function checkSize(text) {
+  const bytes = Buffer.byteLength(text, 'utf8')
+  return bytes > MAX_BYTES ? [`README.md is ${bytes} bytes, over the max of ${MAX_BYTES} bytes`] : []
+}
+
+const LIST_NAMES = ['skills', 'packs', 'personas']
+
+function checkLists(text, expected) {
+  const out = []
+  for (const name of LIST_NAMES) {
+    const open = `<!-- list:${name} -->`
+    const close = `<!-- /list:${name} -->`
+    const start = text.indexOf(open)
+    if (start === -1) continue
+    const end = text.indexOf(close, start + open.length)
+    if (end === -1) { out.push(`README.md:${lineOf(text, start)}: unclosed list region ${name} (no ${close})`); continue }
+    const listed = new Set()
+    for (const line of text.slice(start + open.length, end).split(/\r?\n/)) {
+      const t = line.trim()
+      if (!/^(\||[-*+]\s|\d+[.)]\s)/.test(t)) continue
+      const m = t.match(/`([^`]+)`/)
+      if (m) listed.add(m[1].trim().replace(/^\//, ''))
+    }
+    const want = new Set(expected[name] || [])
+    const missing = [...want].filter((n) => !listed.has(n)).sort()
+    const extra = [...listed].filter((n) => !want.has(n)).sort()
+    if (missing.length) out.push(`README.md: list ${name} is missing: ${missing.join(', ')}`)
+    if (extra.length) out.push(`README.md: list ${name} has extra names not on disk: ${extra.join(', ')}`)
+  }
+  return out
+}
+
+function loadListNames(repoRoot) {
+  const dirsWith = (dir, marker) => fs.readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, marker)))
+    .map((d) => d.name).sort()
+  return {
+    skills: dirsWith(path.join(repoRoot, 'plugins', 'session-manager-dev', 'skills'), 'SKILL.md'),
+    packs: dirsWith(path.join(repoRoot, 'plugins', 'packs'), 'sm-pack.json'),
+    personas: fs.readdirSync(path.join(repoRoot, 'src', 'seed', 'agents'))
+      .filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort(),
+  }
+}
+
+function runRules(text, inputs) {
+  return [
+    ...checkGrade(text, inputs.readability),
+    ...checkLinks(text),
+    ...checkRepoLinks(text, inputs.trackedFiles),
+    ...checkSize(text),
+    ...checkLists(text, inputs.listNames),
+  ]
+}
+
+async function main() {
   const repoRoot = path.join(__dirname, '..')
   const readmePath = path.join(repoRoot, 'README.md')
   const write = process.argv.includes('--write')
   const text = fs.readFileSync(readmePath, 'utf8')
   const res = run(text, renderRegions(loadSources(repoRoot)), write)
   for (const m of res.messages) console.error(m)
-  if (write && res.code === 0 && res.changed) fs.writeFileSync(readmePath, res.text)
-  process.exit(res.code)
+  if (write) {
+    if (res.code === 0 && res.changed) fs.writeFileSync(readmePath, res.text)
+    process.exit(res.code)
+  }
+  const trackedFiles = execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    .split('\n').filter(Boolean)
+  const readability = await import(pathToFileURL(path.join(repoRoot, 'web', 'manual', 'readability.mjs')).href)
+  const diags = runRules(text, { readability, trackedFiles, listNames: loadListNames(repoRoot) })
+  for (const d of diags) console.error(d)
+  process.exit(res.code || (diags.length ? 1 : 0))
 }
 
-module.exports = { loadSources, renderRegions, applyRegions, run }
+module.exports = {
+  loadSources, renderRegions, applyRegions, run,
+  checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, loadListNames, runRules,
+  MAX_GRADE, MAX_BYTES,
+}
 
-if (require.main === module) main()
+if (require.main === module) main().catch((err) => { console.error(err); process.exit(1) })

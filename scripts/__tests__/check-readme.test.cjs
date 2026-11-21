@@ -11,7 +11,10 @@ import { test, expect } from 'vitest';
 const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
-const { loadSources, renderRegions, applyRegions, run } = require('../check-readme.cjs');
+const {
+  loadSources, renderRegions, applyRegions, run,
+  checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, MAX_GRADE, MAX_BYTES,
+} = require('../check-readme.cjs');
 const { MCP_TOOL_CATALOG } = require('../../src/main/lib/mcpToolCatalog.cjs');
 
 const fakeSources = () => ({
@@ -104,4 +107,94 @@ test('real sources: mcp-tools has exactly MCP_TOOL_CATALOG.length data rows', ()
   for (const row of table.slice(2)) expect(row.split('|').length).toBe(6);
   expect(sources.nodeFloor).toMatch(/^\d+\.\d+\.\d+$/);
   expect(sources.skills.length).toBeGreaterThan(0);
+});
+
+// ── Agent-friendly README rules ─────────────────────────────────────────────
+
+async function loadReadability() {
+  return import(/* @vite-ignore */ path.resolve(__dirname, '..', '..', 'web', 'manual', 'readability.mjs'));
+}
+
+test('MAX_GRADE and MAX_BYTES are exported with their values', () => {
+  expect(MAX_GRADE).toBe(8.0);
+  expect(MAX_BYTES).toBe(24000);
+});
+
+test('grade rule: plain prose passes', async () => {
+  const r = await loadReadability();
+  const md = '# Title\n\nThe cat sat on the mat.\n\n## Use it\n\nRun the app. It is fast.\n';
+  expect(checkGrade(md, r)).toEqual([]);
+});
+
+test('grade rule: dense prose fails with overall and per-section grades, highest first', async () => {
+  const r = await loadReadability();
+  const dense = 'The epistemological ramifications of postmodern hermeneutical interpretation necessitate an interdisciplinary reconceptualization of institutionalized pedagogical methodologies.';
+  const md = '# Title\n\nIntro text here.\n\n## Easy\n\nThe dog ran.\n\n## Hard\n\n' + dense + '\n';
+  const out = checkGrade(md, r);
+  expect(out.length).toBeGreaterThan(2);
+  expect(out[0]).toMatch(/grade \d+\.\d .*8\.0/);
+  const hard = out.findIndex((l) => l.includes('## Hard'));
+  const easy = out.findIndex((l) => l.includes('## Easy'));
+  expect(hard).toBeGreaterThan(0);
+  expect(easy).toBeGreaterThan(hard);
+});
+
+test('link rule: https links and #anchors pass', () => {
+  const md = '[a](https://x.dev/a) ![i](https://x.dev/i.png "t")\n[top](#top)\n<a href="https://x.dev">x</a> <img src="https://x.dev/y.png">\n';
+  expect(checkLinks(md)).toEqual([]);
+});
+
+test('link rule: relative, http:// and file:// targets fail with line numbers', () => {
+  const md = 'ok\n[rel](docs/a.md)\n![img](http://x.dev/i.png)\n<a href="file:///etc/x">x</a>\n<img src=\'./y.png\'>\n';
+  const out = checkLinks(md);
+  expect(out).toHaveLength(4);
+  expect(out[0]).toMatch(/README\.md:2: .*docs\/a\.md/);
+  expect(out[1]).toMatch(/README\.md:3: .*http:\/\/x\.dev/);
+  expect(out[2]).toMatch(/README\.md:4: .*file:\/\//);
+  expect(out[3]).toMatch(/README\.md:5: .*\.\/y\.png/);
+});
+
+const GH = 'https://github.com/StanislavBG/claude-code-session-manager';
+const TRACKED = ['README.md', 'docs/guide.md', 'plugins/packs/apple-design/sm-pack.json'];
+
+test('repo-link rule: blob and tree links to tracked paths pass (anchor/query removed)', () => {
+  const md = `[g](${GH}/blob/main/docs/guide.md#install)\n[p](${GH}/tree/main/plugins/packs?x=1)\n[r](${GH}/blob/main/README.md)\n`;
+  expect(checkRepoLinks(md, TRACKED)).toEqual([]);
+});
+
+test('repo-link rule: missing blob and tree paths fail with line numbers', () => {
+  const md = `x\n[g](${GH}/blob/main/docs/gone.md#a)\n[t](${GH}/tree/main/plugin)\n`;
+  const out = checkRepoLinks(md, TRACKED);
+  expect(out).toHaveLength(2);
+  expect(out[0]).toMatch(/README\.md:2: .*docs\/gone\.md/);
+  expect(out[1]).toMatch(/README\.md:3: .*plugin/);
+});
+
+test('size rule: at the cap passes, over it fails printing the size', () => {
+  expect(checkSize('a'.repeat(24000))).toEqual([]);
+  const out = checkSize('é'.repeat(12001)); // 24002 bytes
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatch(/24002 bytes/);
+});
+
+const NAMES = { skills: ['develop', 'builder'], packs: ['apple-design'], personas: ['architect', 'dev-lead'] };
+
+test('list rule: complete lists pass; absent regions are skipped', () => {
+  const md = [
+    '<!-- list:skills -->',
+    '| Skill | What |', '| --- | --- |', '| `/develop` | plan |', '| `/builder` | ship |',
+    '<!-- /list:skills -->',
+    '<!-- list:personas -->', '- `architect` — plans', '* `dev-lead` runs `x`', '<!-- /list:personas -->',
+  ].join('\n');
+  expect(checkLists(md, NAMES)).toEqual([]);
+  expect(checkLists('# nothing\n', NAMES)).toEqual([]);
+});
+
+test('list rule: missing and extra names are both reported', () => {
+  const md = '<!-- list:packs -->\n- `apple-swift` pack\n<!-- /list:packs -->\n<!-- list:skills -->\n1. `develop`\n<!-- /list:skills -->\n';
+  const out = checkLists(md, NAMES).join('\n');
+  expect(out).toMatch(/packs.*missing.*apple-design/);
+  expect(out).toMatch(/packs.*extra.*apple-swift/);
+  expect(out).toMatch(/skills.*missing.*builder/);
+  expect(checkLists('<!-- list:skills -->\n- `develop`\n', NAMES).join('\n')).toMatch(/unclosed/);
 });

@@ -17,6 +17,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-conditional-hooks.cjs | `npm run lint:hooks` (in `lint`) | no |
 | check-epic-transcripts.cjs | manual read-only diagnostic (`--json`); also surfaced as a non-fatal warning in `npm run health` | no |
 | check-doc-hierarchy.cjs | `npm run lint:docs` (in `lint`) | no |
+| check-readme.cjs | `npm run readme:build` (`--write`) fills the README's generated regions; `npm run lint:readme` checks the README (run by `lint` and `prepublishOnly`) | no |
 | check-explicit-any.cjs | `npm run lint:any` (in `lint`) — bans explicit `any`/`@ts-ignore` in renderer+preload; per-line `// lint-allow-any: <reason>` | no |
 | check-main-ts-check.cjs | `npm run lint:main-ts-check` (in `lint`) — `tsconfig.main.json` `include` ⇔ `// @ts-check` first line, both directions; explicit list only, `checkJs` false | no |
 | check-renderer-storage.cjs | `npm run lint:renderer-storage` (in `lint`) — ratchet-bans `localStorage.`/`sessionStorage.` in `src/renderer` outside an explicit ALLOWLIST (Epic stateless-ui-review) | no |

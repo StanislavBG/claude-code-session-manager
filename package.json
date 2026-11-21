@@ -47,7 +47,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.main.json",
     "start": "electron .",
     "prepack": "node scripts/write-build-info.cjs",
-    "prepublishOnly": "node scripts/write-build-info.cjs && npm run build",
+    "prepublishOnly": "node scripts/write-build-info.cjs && npm run build && npm run lint:readme",
     "test:unit": "vitest run",
     "test:unit:stability": "bash scripts/test-unit-stability.sh",
     "bench": "node scripts/bench/main-bench.cjs",

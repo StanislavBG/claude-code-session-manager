@@ -29,6 +29,10 @@ test('prepublishOnly writes build info first and builds the web target', () => {
   assert.match(expand(s), /vite build --config vite\.web\.config\.ts/);
 });
 
+test('prepublishOnly ends by checking the README', () => {
+  assert.match(pkg.scripts.prepublishOnly, / && npm run lint:readme$/);
+});
+
 test('every dist* entry in files is the outDir of a vite config the scripts run', () => {
   const run = expand(pkg.scripts.prepublishOnly) + ' ' + expand(pkg.scripts.build);
   const configs = ['vite.config.ts'];

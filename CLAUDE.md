@@ -50,7 +50,7 @@ Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
 - `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + doc hierarchy (`lint:docs`); run with typecheck.
 - `npm run health` — `src/main/health.cjs` (exit 0 = GREEN).
-- `npm publish` — `prepublishOnly` = build-info + `npm run build`. Tag `latest`.
+- `npm publish` — `prepublishOnly`: build-info, build, lint:readme. Tag latest.
   Published as `claude-code-session-manager`; [distribution detail](session-manager-operations/architecture/conventions.md#distribution).
 
 ## Domain model — the laws

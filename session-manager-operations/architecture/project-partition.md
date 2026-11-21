@@ -38,7 +38,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `web-remote/` | WEB PRESENCE | app/ moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
 | `bilko.listing.json` | WEB PRESENCE | bilko.run card listing (full `listing` object, incl. `shareImage` → `web/remote-app/public/og.png`); synced into the Bilko registry on every `publish_static_project`. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
-| `README.md` | DESKTOP HARNESS | Also shipped in the npm `files` array as end-user install docs. |
+| `README.md` | DESKTOP HARNESS | Also shipped in the npm `files` array as the agent-first npm landing page; its generated regions and reading level are checked by `npm run lint:readme`. |
 | `node_modules/`, `.git/` | *(excluded)* | Dependency cache / VCS internals — not partition members. |
 | `<path>` (stray 0-byte file at repo root) | *(excluded)* | Untracked leftover artifact, foreign to this PRD's work — not touched here. |
 

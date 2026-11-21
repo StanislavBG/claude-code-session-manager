@@ -459,11 +459,11 @@ const MCP_TOOL_CATALOG = [
     name: 'customer_feedback_list',
     group: 'customer-feedback',
     purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "
-      + 'from the {F} feedback panel), optionally pulling new items from the feedback service first.',
+      + 'from the Feedback panel), optionally pulling new items from the feedback service first.',
     whenToUse: 'Use to inspect what customers have submitted and each item\'s status. `pull` defaults to true '
       + '(fetch new items first); pass `includeHidden: true` to include moderated-away items.',
     whenNotToUse: 'WHEN NOT TO USE IT: this only works on the owner\'s machine (it needs the owner token) and is read-only. '
-      + 'Turning an item into an Epic is done by the human via Open as Epic in the {F} feedback panel — there is no tool '
+      + 'Turning an item into an Epic is done by the human via Open as Epic in the Feedback panel — there is no tool '
       + 'for it. A finding that belongs to another local project uses feedback_open_session instead.',
     exampleArgs: { pull: true, includeHidden: false },
     notes: 'Returns { ok, items, pulled? }. Not-configured machines get { ok:false, error } as an error result. '
@@ -478,7 +478,7 @@ const MCP_TOOL_CATALOG = [
       + 'note the customer sees, via the session-manager app\'s admin API.',
     whenToUse: 'Use after inspecting an item with customer_feedback_list, to mark it in progress, resolved, or wontfix.',
     whenNotToUse: 'WHEN NOT TO USE IT: this changes status only. Turning an item into an Epic is done by the human via '
-      + 'Open as Epic in the {F} feedback panel — there is no tool for it. Cross-project findings use '
+      + 'Open as Epic in the Feedback panel — there is no tool for it. Cross-project findings use '
       + 'feedback_open_session. Never mark an item resolved unless the work has actually landed.',
     exampleArgs: { id: 'fb_123', status: 'resolved', note: 'Fixed in 0.97.0' },
     notes: 'The note is shown to the customer; keep it short (the inbox enforces a maximum length).',
@@ -486,17 +486,27 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'customer_feedback_submit',
     group: 'customer-feedback',
-    purpose: 'Send one piece of feedback about Session Manager itself (bug | feature | discussion) to its maintainers, '
-      + 'the same submission the {F} feedback panel makes, via the session-manager app\'s admin API.',
-    whenToUse: 'Use only when the human asks to send feedback about Session Manager itself. Draft a title (max 120 chars) '
-      + 'and body (max 4000 chars) from the conversation, show the human the exact title, body and tag, and call only '
-      + 'after they agree.',
+    purpose: 'Send one piece of feedback about Session Manager itself (bug | feature | discussion) to its maintainers — '
+      + 'a one-line goal, a description, and up to 5 PNG/JPEG/WebP/GIF images given by absolute path — the same '
+      + 'submission the Feedback panel makes, via the session-manager app\'s admin API.',
+    whenToUse: 'Use only when the human asks to send feedback about Session Manager itself. Draft a goal (one line, max '
+      + '120 chars) and a description (max 4000 chars) from the conversation. For images, use the `Attached: <path>` '
+      + 'lines of images the human pasted into this chat, or files the human named — absolute paths only, at most 5. '
+      + 'Show the human the exact goal, description, tag and image list, and call only after they agree.',
     whenNotToUse: 'WHEN NOT TO USE IT: a bug in the project being worked on is /develop; a finding for another local '
-      + 'project is feedback_open_session. Never call it on your own initiative. Never include secrets, tokens, '
-      + 'customer data or private file contents in the title or body.',
-    exampleArgs: { title: 'Feedback panel: prefill from the current session', body: 'What happened, what I expected, steps.', tag: 'feature' },
-    notes: 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). Returns { ok, item }; '
-      + '{ ok:false, error } comes back as an error result. The home directory is redacted to ~ before sending.',
+      + 'project is feedback_open_session. Never call it on your own initiative. Never attach an image the human did '
+      + 'not ask to send. Never include secrets, tokens, customer data or private file contents in the goal, '
+      + 'description or images.',
+    exampleArgs: {
+      goal: 'Feedback panel: prefill from the current session',
+      description: 'What happened, what I expected, steps.',
+      tag: 'feature',
+      imagePaths: ['/home/me/Pictures/feedback-panel.png'],
+    },
+    notes: 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). Returns { ok, item, '
+      + 'warning? }; a warning means the text was sent but the feedback service did not accept every image — tell the '
+      + 'human which images did not go. { ok:false, error } comes back as an error result. The home directory is '
+      + 'redacted to ~ before sending.',
   },
   {
     name: 'macro_list',

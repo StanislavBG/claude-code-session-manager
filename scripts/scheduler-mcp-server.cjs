@@ -25,7 +25,7 @@
  *   macro_delete({ id }) -> POST /admin/macros/delete
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
- *   customer_feedback_submit({ title, body, tag }) -> POST /admin/customer-feedback/submit
+ *   customer_feedback_submit({ goal, description, tag, imagePaths? }) -> POST /admin/customer-feedback/submit
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -781,11 +781,17 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Short title, max 120 chars. Show it to the human before calling.' },
-        body: { type: 'string', description: 'Feedback text, max 4000 chars. No secrets, tokens, customer data or private file contents.' },
+        goal: { type: 'string', description: 'One line, max 120 chars: what the human wants or what went wrong. Show it to the human before calling.' },
+        description: { type: 'string', description: 'Details, max 4000 chars: what happened, what was expected, steps. No secrets, tokens, customer data or private file contents.' },
         tag: { type: 'string', enum: ['bug', 'feature', 'discussion'], description: 'Kind of feedback.' },
+        imagePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: 5,
+          description: 'Optional: absolute paths of up to 5 PNG, JPEG, WebP or GIF images the human asked to include — for example the Attached: <path> lines of images pasted into this chat. Images are sent as-is; large PNG/JPEG are downscaled; anything that is not an image is refused.',
+        },
       },
-      required: ['title', 'body', 'tag'],
+      required: ['goal', 'description', 'tag'],
     },
   },
   {
@@ -851,7 +857,7 @@ function macroDeleteRefusal() {
 function customerFeedbackSubmitRefusal() {
   return humanSessionRefusal(
     'refused: customer_feedback_submit runs only in a Session Manager chat or terminal session, because feedback is sent only when a human asks. '
-    + 'Say in your final result what the feedback is; the human can send it from the {F} feedback panel.',
+    + 'Say in your final result what the feedback is; the human can send it from the Feedback panel.',
   );
 }
 
@@ -1319,10 +1325,17 @@ async function handleCallTool(request) {
     if (name === 'customer_feedback_submit') {
       const refusal = customerFeedbackSubmitRefusal();
       if (refusal) return refusal;
-      if (!args || typeof args.title !== 'string' || typeof args.body !== 'string' || typeof args.tag !== 'string') {
-        return errorResult('missing or invalid required argument(s): title, body, tag');
+      if (!args || typeof args.goal !== 'string' || typeof args.description !== 'string' || typeof args.tag !== 'string') {
+        return errorResult('missing or invalid required argument(s): goal, description, tag');
       }
-      const result = await adminRequest('POST', '/admin/customer-feedback/submit', { title: args.title, body: args.body, tag: args.tag });
+      const imagePaths = args.imagePaths;
+      if (imagePaths !== undefined
+        && (!Array.isArray(imagePaths) || imagePaths.length > 5 || !imagePaths.every((p) => typeof p === 'string'))) {
+        return errorResult('invalid argument: imagePaths must be an array of at most 5 absolute file path strings');
+      }
+      const payload = { title: args.goal, body: args.description, tag: args.tag };
+      if (imagePaths && imagePaths.length > 0) payload.imagePaths = imagePaths;
+      const result = await adminRequest('POST', '/admin/customer-feedback/submit', payload);
       if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_submit failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }

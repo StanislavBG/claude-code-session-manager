@@ -1,6 +1,6 @@
 /**
  * schedulerMcpServerCustomerFeedback.test.cjs — the customer_feedback_list /
- * customer_feedback_set_status MCP tools wrapping the customer-feedback admin routes.
+ * customer_feedback_set_status / customer_feedback_submit MCP tools wrapping the customer-feedback admin routes.
  * Same HOME-repointing pattern as schedulerMcpServerProjectHome.test.cjs —
  * see that file's header for why.
  *
@@ -183,7 +183,9 @@ function withEnv(vars, fn) {
   });
 }
 
-test('submit is listed with its catalog description and a required title/body/tag schema', async () => {
+const HUMAN = { SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined };
+
+test('submit is listed with its catalog description and a required goal/description/tag schema', async () => {
   const homeDir = await mkTmp();
   const { TOOLS } = requireServerWithHome(homeDir);
   const tool = TOOLS.find((t) => t.name === SUBMIT_TOOL_NAME);
@@ -191,14 +193,22 @@ test('submit is listed with its catalog description and a required title/body/ta
   expect(tool).toBeTruthy();
   expect(entry.group).toBe('customer-feedback');
   expect(tool.description).toBe(composeDescription(entry));
-  expect(tool.inputSchema.required).toEqual(['title', 'body', 'tag']);
+  expect(tool.inputSchema.required).toEqual(['goal', 'description', 'tag']);
+  expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['description', 'goal', 'imagePaths', 'tag']);
+  expect(tool.inputSchema.properties.goal.type).toBe('string');
+  expect(tool.inputSchema.properties.description.type).toBe('string');
   expect(tool.inputSchema.properties.tag.enum).toEqual(['bug', 'feature', 'discussion']);
+  expect(tool.inputSchema.properties.imagePaths).toMatchObject({ type: 'array', items: { type: 'string' }, maxItems: 5 });
+  expect(entry.exampleArgs).toHaveProperty('goal');
+  expect(entry.exampleArgs).toHaveProperty('description');
+  expect(entry.exampleArgs).toHaveProperty('imagePaths');
+  expect(entry.exampleArgs).not.toHaveProperty('title');
 });
 
-test('submit forwards title/body/tag to the route in a human session', async () => {
+test('submit maps goal/description to title/body and omits imagePaths when absent', async () => {
   const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_1' } });
-  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined }, () =>
-    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 'Panel: x', body: 'details', tag: 'feature' }));
+  const result = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'Panel: x', description: 'details', tag: 'feature' }));
   expect(result.isError).toBeFalsy();
   expect(JSON.parse(result.content[0].text)).toEqual({ ok: true, item: { id: 'fb_1' } });
   expect(requests).toHaveLength(1);
@@ -207,10 +217,46 @@ test('submit forwards title/body/tag to the route in a human session', async () 
   expect(requests[0].body).toEqual({ title: 'Panel: x', body: 'details', tag: 'feature' });
 });
 
+test('submit omits an empty imagePaths array', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_1' } });
+  await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', imagePaths: [] }));
+  expect(requests[0].body).toEqual({ title: 'g', body: 'd', tag: 'bug' });
+});
+
+test('submit forwards imagePaths', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_2' } });
+  const imagePaths = ['/tmp/a.png', '/tmp/b.jpg'];
+  const result = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', imagePaths }));
+  expect(result.isError).toBeFalsy();
+  expect(requests[0].body).toEqual({ title: 'g', body: 'd', tag: 'bug', imagePaths });
+});
+
+test('submit refuses a non-array or 6-entry imagePaths without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: null });
+  for (const imagePaths of ['/tmp/a.png', ['/a', '/b', '/c', '/d', '/e', '/f'], ['/a', 3]]) {
+    const result = await withEnv(HUMAN, () =>
+      callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', imagePaths }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('imagePaths');
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('submit passes a warning through in the text result', async () => {
+  const body = { ok: true, item: { id: 'fb_3' }, warning: '1 of 2 images was not accepted' };
+  const { handleCallTool } = await setup(body);
+  const result = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', imagePaths: ['/tmp/a.png', '/tmp/b.png'] }));
+  expect(result.isError).toBeFalsy();
+  expect(JSON.parse(result.content[0].text)).toEqual(body);
+});
+
 test('submit returns an error result on {ok:false}', async () => {
   const { handleCallTool } = await setup({ ok: false, error: 'invalid submission: tag: bad' });
-  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined }, () =>
-    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', body: 'b', tag: 'bug' }));
+  const result = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 't', description: 'b', tag: 'bug' }));
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toContain('invalid submission');
 });
@@ -218,25 +264,26 @@ test('submit returns an error result on {ok:false}', async () => {
 test('submit is refused in a headless scheduled job without a request', async () => {
   const { handleCallTool, requests } = await setup({ ok: true, item: null });
   const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: 'some-job' }, () =>
-    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', body: 'b', tag: 'bug' }));
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 't', description: 'b', tag: 'bug' }));
   expect(result.isError).toBe(true);
-  expect(result.content[0].text).toContain('{F} feedback panel');
+  expect(result.content[0].text).toContain('Feedback panel');
   expect(requests).toHaveLength(0);
 });
 
 test('submit is refused without SM_CHAT_SESSION_ID without a request', async () => {
   const { handleCallTool, requests } = await setup({ ok: true, item: null });
   const result = await withEnv({ SM_CHAT_SESSION_ID: undefined, SM_SCHEDULER_JOB_SLUG: undefined }, () =>
-    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', body: 'b', tag: 'bug' }));
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 't', description: 'b', tag: 'bug' }));
   expect(result.isError).toBe(true);
-  expect(result.content[0].text).toContain('{F} feedback panel');
+  expect(result.content[0].text).toContain('Feedback panel');
   expect(requests).toHaveLength(0);
 });
 
-test('submit rejects missing args without a request', async () => {
+test('submit rejects missing or legacy args without a request', async () => {
   const { handleCallTool, requests } = await setup({ ok: true, item: null });
-  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: undefined }, () =>
-    callTool(handleCallTool, SUBMIT_TOOL_NAME, { title: 't', tag: 'bug' }));
-  expect(result.isError).toBe(true);
+  for (const args of [{ goal: 't', tag: 'bug' }, { title: 't', body: 'b', tag: 'bug' }, { goal: 't', description: 'b' }]) {
+    const result = await withEnv(HUMAN, () => callTool(handleCallTool, SUBMIT_TOOL_NAME, args));
+    expect(result.isError).toBe(true);
+  }
   expect(requests).toHaveLength(0);
 });

@@ -119,6 +119,18 @@ test('aliases say so and no page text invites <script>', () => {
   expect(entry('project_video_write').exampleArgs).toHaveProperty('lengthS');
 });
 
+test('customer_feedback_submit text covers goal, description, images, consent and warning; no {F} wording', () => {
+  const e = MCP_TOOL_CATALOG.find((x) => x.name === 'customer_feedback_submit');
+  const text = composeDescription(e);
+  for (const s of ['goal', 'description', 'up to 5', 'PNG/JPEG/WebP/GIF', 'absolute path', 'Attached: <path>',
+    'exact goal, description, tag and image list', 'only after they agree', 'Never attach an image the human did not ask to send',
+    'warning']) {
+    expect(text).toContain(s);
+  }
+  expect(Object.keys(e.exampleArgs).sort()).toEqual(['description', 'goal', 'imagePaths', 'tag']);
+  for (const x of MCP_TOOL_CATALOG) expect(composeDescription(x)).not.toContain('{F}');
+});
+
 test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-another-project', () => {
   const ids = MCP_RECIPES.map((r) => r.id);
   expect(ids).toContain('queue-work-via-develop');

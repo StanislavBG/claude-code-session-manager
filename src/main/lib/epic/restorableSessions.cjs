@@ -275,15 +275,24 @@ function memoHit(prevFiles, name, key) {
   return hit && hit.key === key ? hit : null;
 }
 
+/** A record key no stat key equals, so memoHit never serves it. */
+const UNREAD_KEY = 'unread';
+
 /**
  * Second half: the record for an archived Epic file read at `key`. A missing,
- * empty or malformed file (`doc` null) owns nothing.
+ * empty or malformed file (`doc` null) owns nothing for this call, and its
+ * record gets UNREAD_KEY so the next call re-reads it: readJsonOr* return null
+ * on ANY error, so a transient failure (EMFILE, a read between tmp write and
+ * rename) looks the same, and memoising it under the file's unchanged stat key
+ * would drop that Epic's claim until the file is next rewritten — listing an
+ * Epic-owned session as restorable (breaks Epic:session = 1:1).
  * @param {string} key
  * @param {unknown} doc
  * @returns {ArchiveRec}
  */
 function archiveRec(key, doc) {
-  return { key, sid: doc && typeof doc === 'object' ? sessionIdOf(/** @type {Row} */ (doc).session) : null };
+  if (!doc || typeof doc !== 'object') return { key: UNREAD_KEY, sid: null };
+  return { key, sid: sessionIdOf(/** @type {Row} */ (doc).session) };
 }
 
 /**

@@ -354,6 +354,25 @@ test('a same-size rewrite that keeps its mtime is not served stale from the memo
   expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(3)]);
 });
 
+test('a failed read of an unchanged archived Epic file is not memoised: the next call re-reads it, sync and async', async () => {
+  writeArchive('epic-a', uuid(1), T0);
+
+  // A transient failure (EMFILE, a read between tmp write and rename) makes readJsonOr* return null.
+  vi.spyOn(atomicFs, 'readJsonOrSync').mockReturnValueOnce(null);
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([]);
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+
+  __resetCacheForTests();
+  vi.spyOn(atomicFs, 'readJsonOr').mockResolvedValueOnce(null);
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([]);
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1)]);
+  // ...and the sync reader, sharing that memo, does not inherit the failed read either.
+  __resetCacheForTests();
+  vi.spyOn(atomicFs, 'readJsonOr').mockResolvedValueOnce(null);
+  await claimedClaudeSessionIdsAsync(cwd, deps());
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+});
+
 test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-reads only a changed Epic file via fs.promises', async () => {
   writeIndex({ live: { id: 'live', claudeSessionId: uuid(9), status: 'active' } });
   writeArchive('epic-a', uuid(1), T0);
@@ -372,17 +391,18 @@ test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-r
   const readFile = vi.spyOn(fs.promises, 'readFile');
   const readFileSync = vi.spyOn(fs, 'readFileSync');
   const statSync = vi.spyOn(fs, 'statSync');
-  // epic-a untouched: served from the memo. epic-b rewritten: re-read.
+  // epic-a untouched: served from the memo. epic-b rewritten: re-read. epic-bad
+  // read null, which is never memoised (a transient failure reads null too), so it is re-read.
   writeArchive('epic-b', uuid(4), T0 + 5);
   expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
-  expect(onArchives(readFile)).toEqual(['epic-b.json']);
+  expect(onArchives(readFile).sort()).toEqual(['epic-b.json', 'epic-bad.json']);
   expect(onArchives(readFileSync)).toEqual([]);
   expect(onArchives(statSync)).toEqual([]);
 
-  // The sync reader starts from the memo the async one wrote: nothing changed since, so nothing is re-read.
+  // The sync reader starts from the memo the async one wrote: only the unmemoised epic-bad is re-read.
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
-  expect(onArchives(readFileSync)).toEqual([]);
-  expect(onArchives(readFile)).toEqual(['epic-b.json']);
+  expect(onArchives(readFileSync)).toEqual(['epic-bad.json']);
+  expect(onArchives(readFile).sort()).toEqual(['epic-b.json', 'epic-bad.json']);
 });
 
 // ── listRecentRestorableSessions: machine-wide, bounded merge ──────────────

@@ -122,6 +122,19 @@ scoping scheme.
   An xhigh/max persona makes every press open MacroCostDialog (useMacroCostPrompt, mounted once in App.tsx);
   'Run at <lower>' (default medium) is per launch: chat Epic `effort` override or build PRD `effort`
   frontmatter (in-process only; resolveEpicEffort's 'prd' rung outranks the persona); no macro or persona is edited.
+  A script (a cron job or systemd timer) may start a macro only when a human ticked 'Can be started by a script'
+  (`scriptStart`) on it; that flag is set only in the macro editor, never by an agent's macro_save.
+  `POST /admin/macros/run {cwd, id, inputs?, effort?}` (`macroAdminRoutes.cjs`) refuses (400) builtin, job and
+  unmarked macros, then hands the press payload to the renderer (`chat:external-new-session`), which runs the
+  same New Epic UI path as a press: `MINT_AUTHORITY_NEW_EPIC_UI`, so `MINT_AUTHORITIES` stays two. The Epic
+  keeps `source.macroId`, its source reads `Script <agent>`, and its opening prompt is origin `'external'`, so a
+  script's text is never recorded as a verified human quote. Dedupe: while that macro's Epic is still running in
+  the cwd (or a start is in flight) the route returns it with `alreadyRunning: true` instead of a second start.
+  With no app window open (or the renderer not answering) it is a 503 and nothing starts. There is no macro_run
+  MCP tool on purpose: an agent that could start macros would be a third Epic creator; the human's tick is the
+  consent, and an agent needing work runs `/develop` in its own Epic. Example systemd unit line (`$$` is systemd's
+  literal `$`; jq builds the JSON body so no nested quotes need escaping; replace MACRO_ID):
+  `ExecStart=/usr/bin/sh -c 'f=$$HOME/.claude/session-manager/admin-api.json; CWD=/path/to/project ID=MACRO_ID jq -nc {cwd:env.CWD}+{id:env.ID} | curl -sf --max-time 60 --oauth2-bearer $$(jq -r .token $$f) -H content-type:application/json -d @- http://127.0.0.1:$$(jq -r .port $$f)/admin/macros/run'`
 - **A Project Home tool is app-level, not per project.** A macro with `surface: 'project-home'` (Project Home ▸
   Tools, plus the Pages / Videos library built-ins) is part of Session Manager and shown in every project
   (`projects: ['*']`); only what it generates — pages, videos, the matrix, the Epics it opens — is per project.
@@ -267,7 +280,8 @@ scoping scheme.
     identity to match and can never auto-start. Agent-initiated proposals still wait for a human.
 - **A granted macro press also auto-starts a cross-project proposal.** Second ground beside the verified quote;
   the mint is still `proposed` and the receiving renderer approves it through the same `approveProposed` path
-  (`source.autoApprove.requestedBy: 'macro'`). The human pressing the macro and listing the target is the consent:
+  (`source.autoApprove.requestedBy: 'macro'`). The consent is the human pressing the macro, or the human's
+  'Can be started by a script' tick for a script start (same macro ground), plus listing the target:
   - The setting (`autoStartTargets`: Off / All / Selected) is set only in the macro editor. The agent passes no
     flag and no quote.
   - The sender Epic is resolved only from `SM_CHAT_SESSION_ID`, never from the agent-supplied `fromEpicId`, and

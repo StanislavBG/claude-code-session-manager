@@ -15,6 +15,10 @@
  * caller is join-only and throws rather than conjuring an Epic. Agents that
  * are sure work is needed run /develop inside the Epic they are already in;
  * agents that are not sure say so and let the human open an Epic.
+ * A script start of a macro a human marked 'Can be started by a script'
+ * (POST /admin/macros/run) reaches this mint through the renderer's New Epic
+ * UI path (the same IPC handler as a press) and adds no mint authority —
+ * MINT_AUTHORITIES stays two.
  *
  * The Epic registry is the renderer's own store: the per-cwd
  * `session-manager-operations/prompt-sessions/active-index.json`

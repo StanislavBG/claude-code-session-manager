@@ -84,6 +84,31 @@ let _configCache = null;
 let _configCacheAt = 0;
 let _repairNeeded = false; // relay rejected the device token (invalid_token / 401): terminal until re-pair
 let _destroyed = false; // set at app shutdown to stop reconnect loops
+let _frameAssembler = null; // inbound e2e:frame reassembly (lazy; reset with all clients)
+let _frameSweepTimer = null;
+const FRAME_SWEEP_MS = 30_000;
+
+// Abilities this desktop advertises in event:remote:ready; web clients only send
+// boxed e2e:frame sequences to desktops listing 'e2e-frames'.
+const REMOTE_CAPABILITIES = Object.freeze(['e2e-frames']);
+
+function getFrameAssembler() {
+  if (!_frameAssembler) {
+    const { createFrameAssembler } = require('./lib/feedback-remote/remoteFrameAssembler.cjs');
+    _frameAssembler = createFrameAssembler();
+  }
+  return _frameAssembler;
+}
+
+function startFrameSweep() {
+  stopFrameSweep();
+  _frameSweepTimer = setInterval(() => { if (_frameAssembler) _frameAssembler.sweep(); }, FRAME_SWEEP_MS);
+  _frameSweepTimer.unref?.();
+}
+
+function stopFrameSweep() {
+  if (_frameSweepTimer) { clearInterval(_frameSweepTimer); _frameSweepTimer = null; }
+}
 
 // E2E session state — reset on each new WS connection.
 // .state: 'idle' | 'pending_sas' | 'authenticated' | 'failed'
@@ -254,6 +279,7 @@ function resetE2e() {
 
 // Mark one client's session failed without touching any other client.
 function failClient(client) {
+  if (_frameAssembler) _frameAssembler.dropClient(client.key);
   client.e2e = makeState('failed');
   client.peerPubKey = null;
   client.deviceId = null;
@@ -383,6 +409,7 @@ function scheduleReconnect() {
 async function disconnect() {
   cancelReconnect();
   stopHeartbeat();
+  stopFrameSweep();
   resetE2e();
   if (_ws) {
     const ws = _ws;
@@ -453,6 +480,7 @@ async function connect() {
     _backoffMs = BACKOFF_INIT_MS;
     _missedPongs = 0;
     startHeartbeat();
+    startFrameSweep();
     // Update lastConnectedAt without exposing token
     invalidateConfigCache(); // a pin written since the last cached read must not be overwritten
     loadConfig().then(async (c) => {
@@ -479,6 +507,7 @@ async function connect() {
 
   ws.on('close', (code) => {
     stopHeartbeat();
+    stopFrameSweep();
     stopAllSessionWatches();
     resetE2e();
     if (_ws === ws) _ws = null;
@@ -561,6 +590,7 @@ function pruneSessionWatchers() {
 /** Tear down one client (its PTY streams + subscriptions) without touching others. */
 function teardownClient(key) {
   _lastRekeyMs.delete(key);
+  if (_frameAssembler) _frameAssembler.dropClient(key);
   const rec = _clients.teardown(key);
   pruneSessionWatchers();
   return rec;
@@ -568,6 +598,7 @@ function teardownClient(key) {
 
 /** Tear down every client — no client keeps a PTY stream or subscription afterwards. */
 function teardownAllClients() {
+  _frameAssembler = null; // drops every client's partial frames
   const n = _clients.teardownAll();
   pruneSessionWatchers();
   return n;
@@ -717,7 +748,7 @@ function stopAllSessionWatches() {
 function finalizeE2eAuthenticated(logMessage, client) {
   logs.writeLine({ scope: 'webRemote', level: 'info', message: logMessage });
   broadcastStatus();
-  if (client && loadConfigSync().remoteEnabled) pushEventTo(client, 'event:remote:ready', { ts: Date.now() });
+  if (client && loadConfigSync().remoteEnabled) pushEventTo(client, 'event:remote:ready', { ts: Date.now(), capabilities: [...REMOTE_CAPABILITIES] });
 }
 
 // ─── Message handling & command dispatch ─────────────────────────────────────
@@ -897,6 +928,10 @@ async function handleMessage(raw, device) {
     } catch {
       return;
     }
+    if (inner && typeof inner === 'object' && inner.type === 'e2e:frame') {
+      await handleFrame(inner, device, client);
+      return;
+    }
     // Dispatch as if it arrived unencrypted
     await dispatchEnvelope(inner, device, client);
     return;
@@ -911,6 +946,31 @@ async function handleMessage(raw, device) {
     return;
   }
   await dispatchEnvelope(envelope, device, client);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One decrypted e2e:frame slice of a browser→desktop message too large for the relay's
+ * 256 KB cap. Only authenticated clients of an enabled remote are buffered; a completed
+ * message goes through the normal dispatchEnvelope gates.
+ */
+async function handleFrame(inner, device, client) {
+  if (client.e2e.state !== 'authenticated') return;
+  if (!(await loadConfig()).remoteEnabled) {
+    if (_frameAssembler) _frameAssembler.dropClient(client.key); // kill switch: free any partial
+    return;
+  }
+  const payload = inner.payload;
+  const result = getFrameAssembler().accept(client.key, payload);
+  if (result.status === 'complete') {
+    await dispatchEnvelope(result.envelope, device, client);
+    return;
+  }
+  if (result.status !== 'refused') return;
+  const msgId = payload && typeof payload.msgId === 'string' && UUID_RE.test(payload.msgId) ? payload.msgId : undefined;
+  await auditLog(new Date().toISOString(), 'e2e:frame', device.deviceId, msgId, `refused:${result.reason}`, client);
+  if (msgId) respond(msgId, { error: 'rejected' }, undefined, client);
 }
 
 const IPC_INVOKE_MAX_CALLS = 50;
@@ -1600,9 +1660,11 @@ function destroy() {
     _ws = null;
   }
   stopHeartbeat();
+  stopFrameSweep();
 }
 
 module.exports = {
+  REMOTE_CAPABILITIES,
   loadConfig,
   setIpcDispatcher,
   attachWindow,

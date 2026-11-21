@@ -9,4 +9,6 @@ Linked from [`CLAUDE.md`](CLAUDE.md). Read before touching the relay path or rem
 - The Bilko relay drops any envelope whose `id` is not a UUID (`invalid_envelope`) — batched `ipc:result`
   ids like `<uuid>.<n>` stalled the web UI (2026-11-05). All `config:*` channels are `deny` remotely (`apiSurface.json`).
 - Relay limits: 256 KB per message (socket closed past it; chunk at ≤180 KB) and ~1 msg/s sustained
-  browser→desktop (batch calls). Phones keep the drill-down + its `cmd:*` handlers — never retire them.
+  browser→desktop (batch calls). Browser→desktop messages over 180 KB travel as boxed `e2e:frame` sequences
+  (`remoteFrameAssembler.cjs` ⇄ `web/remote-app/src/frames.ts`), sent only to desktops advertising
+  `'e2e-frames'` in `event:remote:ready` `capabilities`. Phones keep the drill-down + its `cmd:*` handlers — never retire them.

@@ -96,6 +96,7 @@ describe('web-remote pinned hello frame order', () => {
     const inner = decryptBox(sent[0].payload.nonce, sent[0].payload.ciphertext, key)
     const parsed = typeof inner === 'string' ? JSON.parse(inner) : inner
     expect(parsed.type).toBe('event:remote:ready')
+    expect(parsed.payload.capabilities).toEqual(['e2e-frames'])
   })
 
   it('unpinned key: only e2e:ready, state pending_sas', async () => {

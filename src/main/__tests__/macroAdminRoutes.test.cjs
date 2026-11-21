@@ -665,3 +665,262 @@ test('a plain create writes one audit event with a null quote', async () => {
   expect(ev[0].originClaudeSessionId).toBeNull();
   expect(ev[0].created).toBe(true);
 });
+
+// --- POST /admin/macros/run -------------------------------------------------
+
+const http = require('node:http');
+
+function runEvents(macroId) {
+  return readTail(1_000_000)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.kind === 'admin_macro_run' && e.macroId === macroId);
+}
+
+let epicSeq = 0;
+function makeRunDeps({ result, busy = () => false, personas = ['builder'] } = {}) {
+  const launches = [];
+  return {
+    launches,
+    deps: {
+      onChanged: () => {},
+      startExternalNewSession: async (p) => {
+        launches.push(p);
+        if (result) return typeof result === 'function' ? result(p) : result;
+        epicSeq += 1;
+        return { ok: true, epicId: `epic-run-${process.pid}-${epicSeq}` };
+      },
+      isTabBusy: busy,
+      listPersonas: async () => personas.map((name) => ({ name })),
+    },
+  };
+}
+
+async function setupRun(opts = {}, macroFields = {}) {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const macro = await macroLib.saveMacro({
+    label: 'Daily digest',
+    agentName: 'builder',
+    tag: 'build',
+    prompt: 'Digest {{topic}} for {{days}} days',
+    inputs: [
+      { name: 'topic', label: 'Topic', default: 'news' },
+      { name: 'days', label: 'Days', default: '1' },
+    ],
+    projects: [fs.realpathSync(cwd)],
+    scriptStart: true,
+    ...macroFields,
+  }, { filePath });
+  const stored = (await macroLib.listMacros({ filePath })).find((m) => m.id === macro.id);
+  const adminHttp = makeFakeAdminHttp();
+  const { launches, deps } = makeRunDeps(opts);
+  registerAdminRoute(adminHttp, deps, { filePath });
+  const run = (body) => adminHttp.call('POST', '/admin/macros/run', { body: { cwd, id: stored.id, ...body } });
+  return { cwd, realCwd: fs.realpathSync(cwd), filePath, adminHttp, launches, macro: stored, run };
+}
+
+function writeIndex(cwd, sessions) {
+  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'active-index.json'), JSON.stringify({ sessions, events: {} }));
+}
+
+test('run route registers when startExternalNewSession is injected', () => {
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp, makeRunDeps().deps);
+  expect(adminHttp.routes.has('POST /admin/macros/run')).toBe(true);
+});
+
+test('run: starts with defaults + overrides, exact payload, one audit event', async () => {
+  const s = await setupRun();
+  const { status, body } = await s.run({ inputs: { topic: 'rust' }, effort: 'high' });
+  expect(status).toBe(200);
+  expect(body.ok).toBe(true);
+  expect(body.alreadyRunning).toBe(false);
+  expect(s.launches).toEqual([{
+    cwd: s.realCwd,
+    agentName: 'builder',
+    tag: 'build',
+    title: 'Daily digest',
+    prompt: 'Digest rust for 1 days',
+    macroId: s.macro.id,
+    via: 'script',
+    effort: 'high',
+  }]);
+  const ev = runEvents(s.macro.id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({ route: '/admin/macros/run', cwd: s.realCwd, macroId: s.macro.id, epicId: body.epicId, alreadyRunning: false });
+});
+
+test('run: payload has no effort key when effort is omitted', async () => {
+  const s = await setupRun();
+  const { status } = await s.run({});
+  expect(status).toBe(200);
+  expect('effort' in s.launches[0]).toBe(false);
+  expect(s.launches[0].prompt).toBe('Digest news for 1 days');
+});
+
+test('run: every refusal is a 400 and launches nothing', async () => {
+  const s = await setupRun();
+  const cases = [
+    { id: undefined },
+    { id: '' },
+    { id: 'builtin-project-home' },
+    { id: 'nope-abc123' },
+    { inputs: { undeclared: 'x' } },
+    { inputs: { topic: 5 } },
+    { inputs: { topic: 'x'.repeat(2001) } },
+    { inputs: Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`k${i}`, 'v'])) },
+    { inputs: 'topic=x' },
+    { effort: 'turbo' },
+    { inputs: { topic: 'x'.repeat(600) } }, // renderMacroPrompt failure (over input max)
+  ];
+  for (const c of cases) {
+    const body = { ...c };
+    if ('id' in c && c.id === undefined) {
+      const r = await s.adminHttp.call('POST', '/admin/macros/run', { body: { cwd: s.cwd } });
+      expect(r.status).toBe(400);
+      continue;
+    }
+    const r = await s.run(body);
+    expect(r.status, JSON.stringify(c).slice(0, 80)).toBe(400);
+    expect(r.body.ok).toBe(false);
+  }
+  expect(s.launches).toEqual([]);
+  expect(runEvents(s.macro.id)).toEqual([]);
+});
+
+test('run: macro not visible in cwd is refused', async () => {
+  const s = await setupRun();
+  const other = await mkProjectCwd();
+  const r = await s.adminHttp.call('POST', '/admin/macros/run', { body: { cwd: other, id: s.macro.id } });
+  expect(r.status).toBe(400);
+  expect(s.launches).toEqual([]);
+});
+
+test("run: macro without scriptStart is refused naming 'Can be started by a script'", async () => {
+  const s = await setupRun({}, { scriptStart: false });
+  const r = await s.run({});
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain('Can be started by a script');
+  expect(s.launches).toEqual([]);
+});
+
+test('run: unlisted persona is refused', async () => {
+  const s = await setupRun({ personas: ['someone-else'] });
+  const r = await s.run({});
+  expect(r.status).toBe(400);
+  expect(s.launches).toEqual([]);
+});
+
+test('run: a job macro is refused', async () => {
+  const s = await setupRun();
+  const orig = macroLib.listMacros;
+  macroLib.listMacros = async (o) => (await orig(o)).map((m) => (m.id === s.macro.id ? { ...m, job: { kind: 'x' } } : m));
+  try {
+    const r = await s.run({});
+    expect(r.status).toBe(400);
+  } finally {
+    macroLib.listMacros = orig;
+  }
+  expect(s.launches).toEqual([]);
+});
+
+test('run: a busy open Epic of this macro is returned, nothing launched', async () => {
+  const s = await setupRun({ busy: (id) => id === 'epic-busy' });
+  writeIndex(s.realCwd, {
+    'epic-busy': { id: 'epic-busy', status: 'active', source: { producer: 'new-epic-ui', macroId: s.macro.id } },
+  });
+  const r = await s.run({});
+  expect(r.status).toBe(200);
+  expect(r.body).toEqual({ ok: true, epicId: 'epic-busy', alreadyRunning: true });
+  expect(s.launches).toEqual([]);
+  expect(runEvents(s.macro.id)).toEqual([]);
+});
+
+test('run: an idle or completed Epic of this macro does not block a start', async () => {
+  const s = await setupRun({ busy: () => false });
+  writeIndex(s.realCwd, {
+    a: { id: 'a', status: 'active', source: { producer: 'new-epic-ui', macroId: s.macro.id } },
+  });
+  const r = await s.run({});
+  expect(r.body.alreadyRunning).toBe(false);
+  expect(s.launches).toHaveLength(1);
+});
+
+test('run: a second call within 60 s returns the Epic this route just started', async () => {
+  const s = await setupRun();
+  const first = await s.run({});
+  const second = await s.run({});
+  expect(second.status).toBe(200);
+  expect(second.body).toEqual({ ok: true, epicId: first.body.epicId, alreadyRunning: true });
+  expect(s.launches).toHaveLength(1);
+  // Once that Epic is completed, a new start goes through.
+  writeIndex(s.realCwd, { [first.body.epicId]: { id: first.body.epicId, status: 'completed', source: { producer: 'new-epic-ui', macroId: s.macro.id } } });
+  const third = await s.run({});
+  expect(third.body.alreadyRunning).toBe(false);
+  expect(s.launches).toHaveLength(2);
+});
+
+test('run: concurrent calls launch once; the second gets alreadyRunning', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = await setupRun({ result: async () => { await gate; return { ok: true, epicId: 'epic-conc' }; } });
+  const p1 = s.run({});
+  const p2 = s.run({});
+  await new Promise((r) => setTimeout(r, 20));
+  release();
+  const [a, b] = await Promise.all([p1, p2]);
+  expect(s.launches).toHaveLength(1);
+  expect([a.body.alreadyRunning, b.body.alreadyRunning].sort()).toEqual([false, true]);
+  expect(b.body.epicId).toBe('epic-conc');
+});
+
+test('run: launch failures are 503 with no audit event', async () => {
+  const s = await setupRun({ result: { ok: false, reason: 'no-window', error: 'Session Manager window is not open' } });
+  const r = await s.run({});
+  expect(r.status).toBe(503);
+  expect(r.body).toEqual({ ok: false, error: 'Session Manager window is not open' });
+  expect(runEvents(s.macro.id)).toEqual([]);
+
+  const t = await setupRun({ result: { ok: false, reason: 'timeout', error: 'x' } });
+  const rt = await t.run({});
+  expect(rt.status).toBe(503);
+  expect(rt.body.error).toMatch(/may still start.*Sessions queue/);
+  expect(runEvents(t.macro.id)).toEqual([]);
+});
+
+test('run: on a real localAdminHttp server, a POST without the Bearer token is refused', async () => {
+  const { createAdminHttp, TOKEN_PATH } = require('../lib/feedback-remote/localAdminHttp.cjs');
+  const prev = process.env.SM_ADMIN_TOKEN_PATH;
+  const tokenPath = path.join(path.dirname(TOKEN_PATH), `admin-api.macro-run-test-${process.pid}.json`);
+  process.env.SM_ADMIN_TOKEN_PATH = tokenPath;
+  const s = await setupRun();
+  const admin = createAdminHttp();
+  const { deps, launches } = makeRunDeps();
+  registerAdminRoute(admin, deps, { filePath: s.filePath });
+  const { port, token } = await admin.start();
+  const post = (auth) => new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ cwd: s.cwd, id: s.macro.id });
+    const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) };
+    if (auth) headers.Authorization = `Bearer ${auth}`;
+    const req = http.request({ hostname: '127.0.0.1', port, method: 'POST', path: '/admin/macros/run', headers }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end(payload);
+  });
+  try {
+    expect(await post(undefined)).toBe(401);
+    expect(await post('wrong-token')).toBe(401);
+    expect(launches).toEqual([]);
+    expect(await post(token)).toBe(200);
+    expect(launches).toHaveLength(1);
+  } finally {
+    await admin.stop();
+    fs.rmSync(tokenPath, { force: true });
+    if (prev === undefined) delete process.env.SM_ADMIN_TOKEN_PATH;
+    else process.env.SM_ADMIN_TOKEN_PATH = prev;
+  }
+});

@@ -32,6 +32,18 @@
  * Every successful save appends one `admin_macro_save` audit event and calls
  * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
  * matching the IPC handlers in index.cjs.
+ *
+ * POST /admin/macros/run {cwd, id, inputs?, effort?}
+ *                                -> { ok, epicId, alreadyRunning }
+ * Starts a saved macro from a script (e.g. a systemd timer) through the
+ * renderer's press path (deps.startExternalNewSession: same persona, tag, AIM
+ * prompt and source.macroId, so autoStartTargets apply). Refused (400, no
+ * launch) unless a human ticked 'Can be started by a script' (scriptStart)
+ * on a visible, non-builtin, non-job macro whose persona is listed. {{inputs}}
+ * = the macro's defaults overlaid by `inputs`. While that macro's Epic is
+ * still running in the cwd it returns that Epic (alreadyRunning:true) instead
+ * of a second start. A launch failure is a 503 with no audit event.
+ *   curl -s -X POST "http://127.0.0.1:$(jq -r .port ~/.claude/session-manager/admin-api.json)/admin/macros/run" -H "Authorization: Bearer $(jq -r .token ~/.claude/session-manager/admin-api.json)" -H 'Content-Type: application/json' -d '{"cwd":"/abs/project","id":"<macro-id>"}'
  */
 'use strict';
 
@@ -40,6 +52,8 @@ const { resolveCwd } = require('./projectHomeAdminRoutes.cjs');
 const macroLibrary = require('../persona-macro/macroLibrary.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { findHumanPromptContaining } = require('./humanPromptLedger.cjs');
+const { readActiveIndex } = require('../epic/epicMint.cjs');
+const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
 
 const EVERY_PROJECT_RE = /(^|[^a-z0-9])(every|all|each)\s+(of\s+)?(my\s+|the\s+|our\s+)?projects?($|[^a-z0-9])/;
 
@@ -250,11 +264,165 @@ function deleteHandler(onChanged, libOpts) {
   };
 }
 
-function registerAdminRoute(adminHttp, { onChanged } = {}, opts = {}) {
+const RUN_INPUT_MAX_KEYS = 20;
+const RUN_INPUT_MAX_LEN = 2000;
+const RECENT_START_MS = 60_000;
+const OPEN_STATUSES = new Set(['proposed', 'active']);
+/** `${cwd}\u0000${id}` -> { epicId, at } — starts made by this route. */
+const recentRuns = new Map();
+/** `${cwd}\u0000${id}` -> Promise<{ok, epicId?}> — runs still awaiting the renderer. */
+const inProgressRuns = new Map();
+
+const SCRIPT_START_HINT = "the human can tick 'Can be started by a script' in the macro editor";
+
+/** The open Epic this macro is already running in `cwd`, or null. */
+function findRunningEpic(cwd, id, isTabBusy) {
+  const index = readActiveIndex(cwd);
+  for (const epic of Object.values(index.sessions)) {
+    if (!epic || typeof epic !== 'object' || !OPEN_STATUSES.has(epic.status)) continue;
+    const src = epic.source;
+    if (!src || src.producer !== 'new-epic-ui' || src.macroId !== id) continue;
+    if (typeof epic.id === 'string' && isTabBusy(epic.id)) return epic.id;
+  }
+  const key = `${cwd}\u0000${id}`;
+  const recent = recentRuns.get(key);
+  if (recent && Date.now() - recent.at < RECENT_START_MS) {
+    const entry = index.sessions[recent.epicId];
+    // Not in the index yet = just minted and still being persisted: open.
+    const open = entry ? OPEN_STATUSES.has(entry.status) : !index.tombstones[recent.epicId];
+    if (open) return recent.epicId;
+  } else if (recent) {
+    recentRuns.delete(key);
+  }
+  return null;
+}
+
+/** Returns an error string, or null when `inputs` is acceptable for `macro`. */
+function validateRunInputs(inputs, macro) {
+  if (inputs === undefined) return null;
+  if (inputs === null || typeof inputs !== 'object' || Array.isArray(inputs)) return 'inputs must be an object';
+  const keys = Object.keys(inputs);
+  if (keys.length > RUN_INPUT_MAX_KEYS) return `inputs: at most ${RUN_INPUT_MAX_KEYS} keys`;
+  const declared = new Set((macro.inputs || []).map((i) => i.name));
+  for (const k of keys) {
+    if (!declared.has(k)) return `inputs: ${k} is not an input of macro ${macro.id}`;
+    const v = inputs[k];
+    if (typeof v !== 'string') return `inputs: ${k} must be a string`;
+    if (v.length > RUN_INPUT_MAX_LEN) return `inputs: ${k} is longer than ${RUN_INPUT_MAX_LEN} characters`;
+  }
+  return null;
+}
+
+function runHandler(deps, libOpts) {
+  const listPersonas = deps.listPersonas || ((...a) => require('../../agentLibrary.cjs').listPersonas(...a));
+  return async (req, res) => {
+    const body = await readJsonBody(req, res);
+    if (!body) return;
+    const resolved = resolveCwd(body.cwd);
+    if (!resolved.ok) {
+      sendJson(res, resolved.status, { ok: false, error: resolved.error });
+      return;
+    }
+    const cwd = resolved.cwd;
+    const bad = (error) => sendJson(res, 400, { ok: false, error });
+    const id = body.id;
+    if (typeof id !== 'string' || !id) return bad('id is required');
+    if (id.startsWith('builtin-')) return bad('built-in macros cannot be started through this route');
+    const macros = await macroLibrary.listMacros(libOpts);
+    const macro = macros.find((m) => m.id === id);
+    if (!macro) return bad(`macro not found: ${id}`);
+    if (!macroLibrary.macroVisibleIn(macro, cwd)) return bad(`macro ${id} is not visible to ${cwd}`);
+    if (macro.job) return bad(`macro ${id} runs a job, not a session; it cannot be started through this route`);
+    if (macro.scriptStart !== true) {
+      return bad(`macro ${id} is not marked 'Can be started by a script'; ${SCRIPT_START_HINT}`);
+    }
+    const personas = await listPersonas();
+    if (!personas.some((a) => a.name === macro.agentName)) return bad(`unknown agent: ${macro.agentName}`);
+    const inputsError = validateRunInputs(body.inputs, macro);
+    if (inputsError) return bad(inputsError);
+    const effort = body.effort;
+    if (effort !== undefined && !PRD_EFFORT_LEVELS.includes(effort)) {
+      return bad(`effort must be one of: ${PRD_EFFORT_LEVELS.join(', ')}`);
+    }
+    const rendered = macroLibrary.renderMacroPrompt(macro.prompt, macro.inputs, {
+      ...macroLibrary.defaultMacroValues(macro.inputs),
+      ...(body.inputs || {}),
+    });
+    if (!rendered.ok) return bad(rendered.error);
+
+    const key = `${cwd}\u0000${id}`;
+    const pending = inProgressRuns.get(key);
+    if (pending) {
+      const first = await pending;
+      if (first.ok) {
+        sendJson(res, 200, { ok: true, epicId: first.epicId, alreadyRunning: true });
+      } else {
+        sendJson(res, 503, { ok: false, error: first.error || 'launch failed' });
+      }
+      return;
+    }
+    const running = findRunningEpic(cwd, id, deps.isTabBusy || (() => false));
+    if (running) {
+      sendJson(res, 200, { ok: true, epicId: running, alreadyRunning: true });
+      return;
+    }
+
+    const payload = {
+      cwd,
+      agentName: macro.agentName,
+      tag: macro.tag,
+      title: macro.label,
+      prompt: rendered.prompt,
+      macroId: macro.id,
+      via: 'script',
+      ...(effort !== undefined ? { effort } : {}),
+    };
+    const launch = (async () => {
+      try {
+        return await deps.startExternalNewSession(payload);
+      } catch (e) {
+        return { ok: false, reason: 'launch-failed', error: e?.message ?? 'launch failed' };
+      }
+    })();
+    inProgressRuns.set(key, launch);
+    let result;
+    try {
+      result = await launch;
+      if (result && result.ok) recentRuns.set(key, { epicId: result.epicId, at: Date.now() });
+    } finally {
+      inProgressRuns.delete(key);
+    }
+    if (!result || !result.ok) {
+      const error = result?.reason === 'timeout'
+        ? 'timed out waiting for the window; the session may still start, check the Sessions queue before retrying'
+        : result?.error || 'launch failed';
+      sendJson(res, 503, { ok: false, error });
+      return;
+    }
+    appendAuditEvent('admin_macro_run', {
+      route: '/admin/macros/run',
+      cwd,
+      macroId: macro.id,
+      epicId: result.epicId,
+      alreadyRunning: false,
+    });
+    sendJson(res, 200, { ok: true, epicId: result.epicId, alreadyRunning: false });
+  };
+}
+
+/**
+ * @param {{ onChanged?: () => void, startExternalNewSession?: (p: object) => Promise<any>,
+ *   isTabBusy?: (tabId: string) => boolean, listPersonas?: () => Promise<Array<{name: string}>> }} deps
+ */
+function registerAdminRoute(adminHttp, deps = {}, opts = {}) {
+  const { onChanged } = deps;
   const libOpts = opts.filePath ? { filePath: opts.filePath } : undefined;
   adminHttp.registerRoute('GET', '/admin/macros', listHandler(onChanged, libOpts));
   adminHttp.registerRoute('POST', '/admin/macros/save', saveHandler(onChanged, libOpts));
   adminHttp.registerRoute('POST', '/admin/macros/delete', deleteHandler(onChanged, libOpts));
+  if (typeof deps.startExternalNewSession === 'function') {
+    adminHttp.registerRoute('POST', '/admin/macros/run', runHandler(deps, libOpts));
+  }
 }
 
 module.exports = {

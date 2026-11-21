@@ -176,12 +176,12 @@ Tools:
 | `feedback_open_session` | feedback | `toCwd`, `fromCwd`, `title`, `motivation`, `acceptanceCriteria`, `body` | Hand a finding to another project as a proposed session there. |
 | `feedback_reply` | feedback | `message`, `outcome` | Answer the project that sent this session its feedback. |
 | `project_home_write` | project-home | `html` | Write the Overview page of Project Home (same as project_page_write). |
-| `project_page_write` | project-home | `pageId`, `title` | Write one HTML knowledge page for Project Home. |
+| `project_page_write` | project-home | `pageId`, `title`, one of `html` / `htmlPath` | Write one HTML knowledge page for Project Home. |
 | `project_matrix_read` | project-home | — | Read the saved competitor feature matrix and its schema. |
-| `project_matrix_write` | project-home | — | Save the competitor feature matrix as one JSON object. |
-| `project_video_write` | project-home | `videoId`, `title`, `kind`, `lengthS`, `meta` | Save one self-contained HTML video for Project Home. |
-| `project_demo_video_write` | project-home | — | Save a 30-second or 1-minute demo video (same as project_video_write). |
-| `project_character_write` | project-home | `json` | Save the reusable character used in this project's videos. |
+| `project_matrix_write` | project-home | one of `matrix` / `matrixPath` | Save the competitor feature matrix as one JSON object. |
+| `project_video_write` | project-home | `videoId`, `title`, `kind`, `lengthS`, `meta`, one of `html` / `htmlPath` | Save one self-contained HTML video for Project Home. |
+| `project_demo_video_write` | project-home | one of `html` / `htmlPath` | Save a 30-second or 1-minute demo video (same as project_video_write). |
+| `project_character_write` | project-home | `json`, one of `js` / `jsPath` | Save the reusable character used in this project's videos. |
 | `customer_feedback_list` | customer-feedback | — | List feedback that users sent to the owner's inbox. |
 | `customer_feedback_set_status` | customer-feedback | `id`, `status` | Set the status of one feedback item, with an optional note. |
 | `customer_feedback_submit` | customer-feedback | `goal`, `description`, `tag` | Send feedback about Session Manager to its maintainers. |

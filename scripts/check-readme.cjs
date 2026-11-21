@@ -56,7 +56,9 @@ function renderRegions(sources) {
   const rows = sources.catalog.map((entry) => {
     const tool = byName.get(entry.name)
     const req = (tool && tool.inputSchema && tool.inputSchema.required) || []
-    const args = req.length ? req.map(code).join(', ') : '—'
+    const oneOf = (entry.requiredOneOf || []).map((g) => 'one of ' + g.map(code).join(' / '))
+    const parts = [...req.map(code), ...oneOf]
+    const args = parts.length ? parts.join(', ') : '—'
     return `| ${code(entry.name)} | ${cell(entry.group)} | ${args} | ${cell(entry.summary)} |`
   })
   return {

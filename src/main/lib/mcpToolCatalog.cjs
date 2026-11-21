@@ -30,6 +30,10 @@ const CatalogEntrySchema = z.object({
   whenNotToUse: z.string().min(1),
   exampleArgs: z.record(z.string(), z.unknown()),
   notes: z.string().nullable(),
+  // Arg groups the handler refuses a call without ('exactly one of'). README
+  // table only — never enters composeDescription, and never becomes a
+  // oneOf/anyOf in inputSchema (the Claude API refuses those at top level).
+  requiredOneOf: z.array(z.array(z.string()).min(2)).optional(),
 });
 
 const RecipeSchema = z.object({
@@ -362,6 +366,7 @@ const MCP_TOOL_CATALOG = [
   },
   {
     name: 'project_page_write',
+    requiredOneOf: [['html', 'htmlPath']],
     group: 'project-home',
     purpose: "Write one knowledge page for this project's Project Home — ONE self-contained HTML document identified by `pageId` — "
       + "via the session-manager app's admin API. Writing an existing pageId replaces that page.",
@@ -397,6 +402,7 @@ const MCP_TOOL_CATALOG = [
   },
   {
     name: 'project_matrix_write',
+    requiredOneOf: [['matrix', 'matrixPath']],
     group: 'project-home',
     purpose: "Save this project's competitive feature matrix — ONE JSON object matching the schema project_matrix_read returns — "
       + "via the session-manager app's admin API. Each call replaces the whole stored matrix.",
@@ -413,6 +419,7 @@ const MCP_TOOL_CATALOG = [
   },
   {
     name: 'project_video_write',
+    requiredOneOf: [['html', 'htmlPath']],
     group: 'project-home',
     purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "
       + "via the session-manager app's admin API. Writing an existing videoId replaces that video.",
@@ -436,6 +443,7 @@ const MCP_TOOL_CATALOG = [
   },
   {
     name: 'project_demo_video_write',
+    requiredOneOf: [['html', 'htmlPath']],
     group: 'project-home',
     purpose: "ALIAS of project_video_write that adds a project-demo video: write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — as a new "
       + "project-demo entry under session-manager-operations/project-pages/videos/<id>/ via the session-manager app's admin API. "
@@ -462,6 +470,7 @@ const MCP_TOOL_CATALOG = [
   },
   {
     name: 'project_character_write',
+    requiredOneOf: [['js', 'jsPath']],
     group: 'project-home',
     purpose: "Write this project's reusable video character — a `character.json` descriptor plus a `character.js` drawing module — to "
       + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same mascot.",

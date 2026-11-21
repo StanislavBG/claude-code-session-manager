@@ -249,3 +249,56 @@ test('summaries read at grade 8 or lower on average, none above grade 12', async
 test.each(MCP_TOOL_CATALOG)('$name composeDescription ignores summary', (entry) => {
   expect(composeDescription({ ...entry, summary: 'Changed.' })).toBe(composeDescription(entry));
 });
+
+// requiredOneOf: groups of args where the handler refuses a call missing the
+// whole group ('exactly one of'). README renders it; live descriptions don't.
+const ONE_OF_TOOLS = MCP_TOOL_CATALOG.filter((e) => e.requiredOneOf);
+
+test('requiredOneOf is set on exactly the tools whose handler resolves exactly one of a group', () => {
+  expect(ONE_OF_TOOLS.map((e) => e.name).sort()).toEqual([
+    'project_character_write',
+    'project_demo_video_write',
+    'project_matrix_write',
+    'project_page_write',
+    'project_video_write',
+  ]);
+});
+
+test('requiredOneOf schema: optional, groups of 2+ names', () => {
+  const base = { name: 't', group: 'help', purpose: 'p', summary: 'A summary line here', whenToUse: 'u', whenNotToUse: 'n', exampleArgs: {}, notes: null };
+  expect(() => CatalogEntrySchema.parse(base)).not.toThrow();
+  expect(() => CatalogEntrySchema.parse({ ...base, requiredOneOf: [['a', 'b']] })).not.toThrow();
+  expect(() => CatalogEntrySchema.parse({ ...base, requiredOneOf: [['a']] })).toThrow();
+  expect(() => CatalogEntrySchema.parse({ ...base, requiredOneOf: ['a'] })).toThrow();
+});
+
+test.each(ONE_OF_TOOLS)('$name requiredOneOf names exist in its inputSchema.properties', (entry) => {
+  const tool = TOOLS.find((t) => t.name === entry.name);
+  const props = Object.keys(tool.inputSchema.properties || {});
+  for (const group of entry.requiredOneOf) {
+    expect(group.length).toBeGreaterThanOrEqual(2);
+    for (const arg of group) expect(props).toContain(arg);
+  }
+});
+
+test.each(ONE_OF_TOOLS)('$name handler refuses a call missing a whole requiredOneOf group', async (entry) => {
+  const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
+  const saved = process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  delete process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  try {
+    for (const group of entry.requiredOneOf) {
+      const args = { ...entry.exampleArgs };
+      for (const arg of group) delete args[arg];
+      const result = await handleCallTool({ params: { name: entry.name, arguments: args } });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('exactly one of');
+    }
+  } finally {
+    if (saved !== undefined) process.env.SM_SCHEDULER_JOB_MCP_TOOLS = saved;
+  }
+});
+
+test.each(MCP_TOOL_CATALOG)('$name composeDescription ignores requiredOneOf', (entry) => {
+  expect(composeDescription({ ...entry, requiredOneOf: [['zz_a', 'zz_b']] })).toBe(composeDescription(entry));
+  expect(composeDescription(entry)).not.toContain('zz_a');
+});

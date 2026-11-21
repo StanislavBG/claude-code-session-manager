@@ -48,6 +48,26 @@ test('mcp-tools renders a table, one row per catalog entry in order', () => {
   ].join('\n'));
 });
 
+test('mcp-tools renders requiredOneOf groups after required args', () => {
+  const src = fakeSources()
+  src.catalog = [
+    { name: 'tool_a', group: 'scheduler', summary: 'Both', requiredOneOf: [['html', 'htmlPath']] },
+    { name: 'tool_b', group: 'help', summary: 'Only one-of', requiredOneOf: [['matrix', 'matrixPath'], ['js', 'jsPath']] },
+    { name: 'tool_c', group: 'help', summary: 'Neither' },
+  ]
+  src.tools = [
+    { name: 'tool_a', inputSchema: { required: ['pageId', 'title'] } },
+    { name: 'tool_b', inputSchema: {} },
+    { name: 'tool_c', inputSchema: { required: [] } },
+  ]
+  const rows = renderRegions(src)['mcp-tools'].split('\n').slice(2)
+  expect(rows).toEqual([
+    '| `tool_a` | scheduler | `pageId`, `title`, one of `html` / `htmlPath` | Both |',
+    '| `tool_b` | help | one of `matrix` / `matrixPath`, one of `js` / `jsPath` | Only one-of |',
+    '| `tool_c` | help | — | Neither |',
+  ])
+})
+
 test('mcp-recipes renders one list item per recipe; inline counts render', () => {
   const r = renderRegions(fakeSources());
   expect(r['mcp-recipes']).toBe('- `r-one` — Recipe one\n- `r-two` — Recipe two');

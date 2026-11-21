@@ -99,27 +99,41 @@ export function refusalMessage(reason?: string): string {
       return 'Your computer no longer has this session open. Go back and refresh the list.';
     case 'empty-prompt':
       return 'Type a message first.';
+    case 'attachment-invalid':
+      return 'Your computer could not accept one of the images (unsupported type or too large).';
     default:
       return 'Your computer did not accept this message.';
   }
+}
+
+/** One image as sent over cmd:chat:send — base64 `data`, no data: prefix. */
+export interface ChatImage {
+  name: string;
+  mime: string;
+  data: string;
 }
 
 /** `target` is the epicId for Epics, or mainTabId for a project's main session — never claudeSessionId. */
 export async function sendChat(
   socket: CommandSocket,
   deviceId: string,
-  args: { target: string; prompt: string },
+  args: { target: string; prompt: string; images?: ChatImage[] },
 ): Promise<SendChatResult> {
-  const r = await call<{ disposition?: string; reason?: string } | null>(
+  const payload: { tabId: string; prompt: string; images?: ChatImage[] } = { tabId: args.target, prompt: args.prompt };
+  if (args.images && args.images.length > 0) payload.images = args.images;
+  const r = await call<{ disposition?: string; reason?: string; attachments?: unknown } | null>(
     socket,
     deviceId,
     'cmd:chat:send',
-    { tabId: args.target, prompt: args.prompt },
+    payload,
   );
   const d = r?.disposition;
   if (d === 'refused') throw new RemoteError(refusalMessage(r?.reason));
   if (d === 'sent' || d === 'queued' || d === 'unconfirmed') {
-    return { disposition: d, reason: r?.reason };
+    const attachments = Array.isArray(r?.attachments)
+      ? (r!.attachments as unknown[]).filter((a): a is string => typeof a === 'string')
+      : undefined;
+    return { disposition: d, reason: r?.reason, attachments };
   }
   return { disposition: 'unconfirmed' };
 }

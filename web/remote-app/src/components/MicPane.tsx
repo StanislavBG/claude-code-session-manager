@@ -3,14 +3,19 @@ import type { RelaySocket } from '../ws';
 import { sendChat } from '../remoteApi';
 import type { SendChatResult } from '../types';
 import { trackFlow, trackScreen } from '../telemetry';
+import { useStore } from '../store';
+import { ImageAttachError, MAX_IMAGES_PER_SEND, prepareImage, type PreparedImage } from '../imageAttach';
 
 interface Props {
   socket: RelaySocket | null;
   deviceId: string;
   target: string | null;
   disabledReason?: string;
-  onSent?: (prompt: string, result: SendChatResult) => void;
+  onSent?: (prompt: string, result: SendChatResult, images?: { name: string; previewUrl: string }[]) => void;
 }
+
+const NEEDS_UPDATE = 'Update Session Manager on your computer to send images from your phone.';
+const CAP_MESSAGE = `Up to ${MAX_IMAGES_PER_SEND} images per message`;
 
 // Minimal Web Speech typings (not in standard lib.dom).
 type SR = {
@@ -44,6 +49,9 @@ const IcoSend = () => (
 const IcoMic = () => (
   <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0014 0M12 18v3M9 21h6" /></svg>
 );
+const IcoClip = () => (
+  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9" /></svg>
+);
 const IcoX = () => (
   <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
 );
@@ -62,6 +70,12 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [images, setImages] = useState<PreparedImage[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  const canSendImages = useStore((s) => s.capabilitiesByDevice[deviceId]?.includes('chat-images') === true);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  // Count of images in the tray plus ones being prepared, so concurrent adds respect the cap.
+  const imageCount = useRef(0);
   const recRef = useRef<SR | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   // Exact composer text produced by the last chip tap; cleared on typing and after a send.
@@ -114,21 +128,80 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
     taRef.current?.focus();
   };
 
+  const addFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    if (!canSendImages) { setErr(NEEDS_UPDATE); return; }
+    setErr(null);
+    setPreparing(true);
+    try {
+      for (const file of files) {
+        if (imageCount.current >= MAX_IMAGES_PER_SEND) { setErr(CAP_MESSAGE); break; }
+        imageCount.current += 1;
+        try {
+          const img = await prepareImage(file);
+          setImages((prev) => [...prev, img]);
+        } catch (e: any) {
+          imageCount.current -= 1;
+          const reason = e instanceof ImageAttachError ? e.message : e?.message || 'failed';
+          setErr(`Couldn't attach ${file.name || 'image'}: ${reason}`);
+        }
+      }
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const openPicker = () => {
+    if (!canSendImages) { setErr(NEEDS_UPDATE); return; }
+    fileRef.current?.click();
+  };
+
+  const removeImage = (idx: number) => {
+    imageCount.current = Math.max(0, imageCount.current - 1);
+    setImages((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const files: File[] = [];
+    const items = cd.items ? Array.from(cd.items) : [];
+    for (const it of items) {
+      if (it.kind !== 'file' || !(it.type || '').startsWith('image/')) continue;
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+    if (files.length === 0 && cd.files) {
+      for (const f of Array.from(cd.files)) if ((f.type || '').startsWith('image/')) files.push(f);
+    }
+    if (files.length === 0) return;
+    e.preventDefault();
+    void addFiles(files);
+  };
+
   const send = async () => {
     const data = text.trim();
-    if (!data || !socket || disabledReason || sending) return;
+    if ((!data && images.length === 0) || !socket || disabledReason || sending) return;
+    if (images.length > 0 && !canSendImages) { setErr(NEEDS_UPDATE); return; }
     if (!target) { setErr('Session no longer available'); return; }
+    const sentImages = images;
     const source = sheetOpen ? 'voice' : chipFill.current === text ? 'chip' : 'text';
     setSending(true);
     setErr(null);
     trackFlow('chat-send', 'start', { source });
     try {
-      const result = await sendChat(socket, deviceId, { target, prompt: data });
+      const result = await sendChat(socket, deviceId, {
+        target,
+        prompt: data,
+        images: sentImages.map(({ name, mime, data: b64 }) => ({ name, mime, data: b64 })),
+      });
       trackFlow('chat-send', 'success', { source });
       setText('');
       chipFill.current = null;
       setSheetOpen(false);
-      onSent?.(data, result);
+      imageCount.current = Math.max(0, imageCount.current - sentImages.length);
+      setImages((prev) => prev.filter((img) => !sentImages.includes(img)));
+      onSent?.(data, result, sentImages.map(({ name, previewUrl }) => ({ name, previewUrl })));
     } catch (e: any) {
       trackFlow('chat-send', 'fail', { source, reason: 'send-error' });
       setErr(e?.message || 'send failed');
@@ -159,14 +232,59 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
       <section className="border-t border-edge bg-panel px-3.5 py-3 safe-bottom flex-shrink-0" data-testid="mic-pane">
         {disabledReason && <div className="text-xs text-ink-soft mb-2" data-testid="mic-disabled-reason">{disabledReason}</div>}
         {err && <div className="text-xs text-accent mb-2" role="alert">{err}</div>}
+        {images.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto rm-scroll mb-2" data-testid="mic-attach-tray">
+            {images.map((img, i) => (
+              <div key={`${i}-${img.name}`} className="relative flex-shrink-0 w-14 h-14" data-testid="mic-attach-thumb">
+                <img src={img.previewUrl} alt={img.name} className="w-14 h-14 rounded-xl object-cover border border-edge" />
+                <button
+                  type="button"
+                  data-track="mic-attach-remove"
+                  onClick={() => removeImage(i)}
+                  aria-label="Remove image"
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-ink text-white grid place-items-center"
+                >
+                  <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2.5">
-          <div className="flex-1 flex items-end bg-card border border-edge rounded-[22px] pl-4 pr-1.5 py-1 min-h-[46px]">
+          <div className="flex-1 flex items-end bg-card border border-edge rounded-[22px] pl-1.5 pr-1.5 py-1 min-h-[46px]">
+            <button
+              type="button"
+              data-track="mic-attach"
+              data-testid="mic-attach"
+              onClick={openPicker}
+              disabled={sending || preparing || !!disabledReason}
+              aria-label="Attach images"
+              aria-busy={preparing || undefined}
+              title={preparing ? 'Preparing…' : undefined}
+              className="w-9 h-9 flex-shrink-0 mr-1 rounded-full text-ink-soft grid place-items-center disabled:opacity-50"
+            >
+              {preparing ? <span className="text-[10px] font-mono">Preparing…</span> : <IcoClip />}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              data-testid="mic-attach-input"
+              onChange={(e) => {
+                const files = e.target.files ? Array.from(e.target.files) : [];
+                e.target.value = '';
+                void addFiles(files);
+              }}
+            />
             <textarea
               ref={taRef}
               rows={1}
               value={text}
               disabled={!!disabledReason}
               onChange={(e) => { chipFill.current = null; setText(e.target.value); }}
+              onPaste={onPaste}
               placeholder="Message this session…"
               className="flex-1 min-w-0 resize-none overflow-y-auto max-h-[136px] bg-transparent border-0 outline-none py-2 leading-5 text-[14.5px] text-ink placeholder:text-ink-mute"
               onKeyDown={(e) => {
@@ -179,7 +297,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason, onSe
             <button
               data-track="mic-send"
               onClick={() => { void send(); }}
-              disabled={sending || !text.trim() || !!disabledReason}
+              disabled={sending || (!text.trim() && images.length === 0) || !!disabledReason}
               className="w-9 h-9 flex-shrink-0 ml-1.5 rounded-full bg-accent text-white grid place-items-center disabled:opacity-50"
               aria-label="Send message"
             >

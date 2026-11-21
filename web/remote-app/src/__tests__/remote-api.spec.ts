@@ -103,6 +103,22 @@ describe('remoteApi', () => {
       expect(err).toBeInstanceOf(RemoteError);
       expect(err.message).toBe(refusalMessage('proposed'));
     });
+    it('returns attachments from the response', async () => {
+      expect(await send({ disposition: 'sent', attachments: ['/tmp/a.png', 3] })).toEqual({
+        disposition: 'sent',
+        reason: undefined,
+        attachments: ['/tmp/a.png'],
+      });
+    });
+    it('sends images as payload.images only when non-empty', async () => {
+      const s = fake({ disposition: 'sent' });
+      const images = [{ name: 'a.png', mime: 'image/png', data: 'AAAA' }];
+      await sendChat(s as any, 'd', { target: 'e', prompt: '', images });
+      expect(s.sendCommand).toHaveBeenCalledWith('cmd:chat:send', 'd', { tabId: 'e', prompt: '', images });
+      const s2 = fake({ disposition: 'sent' });
+      await sendChat(s2 as any, 'd', { target: 'e', prompt: 'hi', images: [] });
+      expect(s2.sendCommand.mock.calls[0][2]).toEqual({ tabId: 'e', prompt: 'hi' });
+    });
     it('opaque error keeps REFUSED_MESSAGE', async () => {
       const err: any = await send({ error: 'nope' }).catch((e) => e);
       expect(err.message).toBe(REFUSED_MESSAGE);
@@ -117,6 +133,7 @@ describe('remoteApi', () => {
       ['completed', 'This session is completed, so it cannot take new messages. Start a new session instead.'],
       ['unknown-target', 'Your computer no longer has this session open. Go back and refresh the list.'],
       ['empty-prompt', 'Type a message first.'],
+      ['attachment-invalid', 'Your computer could not accept one of the images (unsupported type or too large).'],
       ['weird', 'Your computer did not accept this message.'],
       [undefined, 'Your computer did not accept this message.'],
     ])('%s', (reason, msg) => {

@@ -96,6 +96,8 @@ export interface TranscriptPage {
 export interface SendChatResult {
   disposition: 'sent' | 'queued' | 'unconfirmed';
   reason?: string;
+  /** Desktop-side paths of the images it saved for this message (newer desktops only). */
+  attachments?: string[];
 }
 
 export interface SessionPrd {

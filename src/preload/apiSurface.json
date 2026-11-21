@@ -39,14 +39,21 @@
   "method": "createProjectFolder",
   "channel": "app:create-project-folder",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "parentDir",
+   "name"
+  ]
  },
  {
   "ns": "app",
   "method": "gitBranch",
   "channel": "app:git-branch",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "app",
@@ -60,7 +67,10 @@
   "method": "archiveProject",
   "channel": "app:archive-project",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "encoded"
+  ]
  },
  {
   "ns": "app",
@@ -123,35 +133,50 @@
   "method": "delegationReadiness",
   "channel": "app:delegation-readiness",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "app",
   "method": "installPrdWriteGuard",
   "channel": "app:install-prd-write-guard",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "app",
   "method": "installDestructiveGitGuard",
   "channel": "app:install-destructive-git-guard",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "app",
   "method": "installInlineImplementationGuard",
   "channel": "app:install-inline-implementation-guard",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "app",
   "method": "installSelfScheduleGuard",
   "channel": "app:install-self-schedule-guard",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "app",
@@ -207,7 +232,10 @@
   "method": "alive",
   "channel": "pty:alive",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "tabIds"
+  ]
  },
  {
   "ns": "pty",
@@ -242,28 +270,42 @@
   "method": "unsubscribe",
   "channel": "transcript:unsubscribe",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "tabId"
+  ]
  },
  {
   "ns": "transcripts",
   "method": "closeTab",
   "channel": "transcript:close",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "tabId"
+  ]
  },
  {
   "ns": "transcripts",
   "method": "buffer",
   "channel": "transcript:buffer",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "tabId"
+  ]
  },
  {
   "ns": "transcripts",
   "method": "page",
   "channel": "transcript:page",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "tabId",
+   "startLine",
+   "endLine"
+  ]
  },
  {
   "ns": "transcripts",
@@ -277,21 +319,33 @@
   "method": "pathFor",
   "channel": "transcript:path",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd",
+   "sessionUuid"
+  ]
  },
  {
   "ns": "transcripts",
   "method": "exists",
   "channel": "transcript:exists",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd",
+   "sessionUuid"
+  ]
  },
  {
   "ns": "transcripts",
   "method": "usageFor",
   "channel": "transcript:usageFor",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd",
+   "sessionIds"
+  ]
  },
  {
   "ns": "transcripts",
@@ -550,7 +604,13 @@
   "method": "write",
   "channel": "log:write",
   "kind": "send",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "scope",
+   "level",
+   "message",
+   "meta"
+  ]
  },
  {
   "ns": "logs",
@@ -564,7 +624,10 @@
   "method": "readJson",
   "channel": "config:read-json",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "config",
@@ -578,56 +641,87 @@
   "method": "writeJson",
   "channel": "config:write-json",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path",
+   "data",
+   "writer"
+  ]
  },
  {
   "ns": "config",
   "method": "writeText",
   "channel": "config:write-text",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path",
+   "text",
+   "writer"
+  ]
  },
  {
   "ns": "config",
   "method": "listDir",
   "channel": "config:list-dir",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path",
+   "opts"
+  ]
  },
  {
   "ns": "config",
   "method": "exists",
   "channel": "config:exists",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "config",
   "method": "canWrite",
   "channel": "config:can-write",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "config",
   "method": "watch",
   "channel": "config:watch",
   "kind": "send",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "paths",
+   "opts"
+  ]
  },
  {
   "ns": "config",
   "method": "unwatch",
   "channel": "config:unwatch",
   "kind": "send",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "paths",
+   "opts"
+  ]
  },
  {
   "ns": "config",
   "method": "parseImports",
   "channel": "config:parse-imports",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "config",
@@ -753,21 +847,30 @@
   "method": "list",
   "channel": "watchers:list",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "tabId"
+  ]
  },
  {
   "ns": "watchers",
   "method": "remove",
   "channel": "watchers:remove",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "watcherId"
+  ]
  },
  {
   "ns": "watchers",
   "method": "killTab",
   "channel": "watchers:kill-tab",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "tabId"
+  ]
  },
  {
   "ns": "watchers",
@@ -963,56 +1066,87 @@
   "method": "list",
   "channel": "files:list",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "path",
+   "showHidden"
+  ]
  },
  {
   "ns": "files",
   "method": "read",
   "channel": "files:read",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "files",
   "method": "write",
   "channel": "files:write",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "path",
+   "content"
+  ]
  },
  {
   "ns": "files",
   "method": "create",
   "channel": "files:create",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "parentPath",
+   "name",
+   "kind"
+  ]
  },
  {
   "ns": "files",
   "method": "rename",
   "channel": "files:rename",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "path",
+   "newName"
+  ]
  },
  {
   "ns": "files",
   "method": "delete",
   "channel": "files:delete",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "files",
   "method": "duplicate",
   "channel": "files:duplicate",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "path"
+  ]
  },
  {
   "ns": "files",
   "method": "saveBinary",
   "channel": "files:save-binary",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "path",
+   "base64",
+   "writer"
+  ]
  },
  {
   "ns": "docEdit",
@@ -1068,7 +1202,10 @@
   "method": "setSessionSlots",
   "channel": "schedule:set-session-slots",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cap"
+  ]
  },
  {
   "ns": "schedule",
@@ -1082,7 +1219,11 @@
   "method": "resetJob",
   "channel": "schedule:reset-job",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "slug",
+   "cwd"
+  ]
  },
  {
   "ns": "schedule",
@@ -1138,28 +1279,42 @@
   "method": "readPrd",
   "channel": "schedule:read-prd",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "slug"
+  ]
  },
  {
   "ns": "schedule",
   "method": "readLog",
   "channel": "schedule:read-log",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "runId",
+   "slug"
+  ]
  },
  {
   "ns": "schedule",
   "method": "writePrd",
   "channel": "schedule:write-prd",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "slug",
+   "body"
+  ]
  },
  {
   "ns": "schedule",
   "method": "listPrds",
   "channel": "schedule:list-prds",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "schedule",
@@ -1173,7 +1328,10 @@
   "method": "queueHealth",
   "channel": "schedule:queue-health",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "schedule",
@@ -1201,21 +1359,30 @@
   "method": "archivePrds",
   "channel": "schedule:archive-prd",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "slugs"
+  ]
  },
  {
   "ns": "schedule",
   "method": "retagPrds",
   "channel": "schedule:retag-prd",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "items"
+  ]
  },
  {
   "ns": "schedule",
   "method": "adoptPrd",
   "channel": "schedule:adopt-prd",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "slug"
+  ]
  },
  {
   "ns": "schedule",
@@ -1229,7 +1396,10 @@
   "method": "getHistory",
   "channel": "schedule:get-history",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "limit"
+  ]
  },
  {
   "ns": "supervisor",
@@ -1264,7 +1434,8 @@
   "method": "list",
   "channel": "plugins:list",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": []
  },
  {
   "ns": "plugins",
@@ -1306,91 +1477,139 @@
   "method": "writeText",
   "channel": "clipboard:write-text",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "text"
+  ]
  },
  {
   "ns": "memory",
   "method": "list",
   "channel": "memory:list",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "read",
   "channel": "memory:read",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "name",
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "write",
   "channel": "memory:write",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "name",
+   "content"
+  ]
  },
  {
   "ns": "memory",
   "method": "delete",
   "channel": "memory:delete",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "name",
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "create",
   "channel": "memory:create",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "name",
+   "description"
+  ]
  },
  {
   "ns": "memory",
   "method": "aggregate",
   "channel": "memory:aggregate",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "workspace",
+   "refresh",
+   "cwd"
+  ]
  },
  {
   "ns": "memory",
   "method": "stale",
   "channel": "memory:stale",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "agents",
   "channel": "memory:agents",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "memory",
   "method": "verify",
   "channel": "memory:verify",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "name",
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "archive",
   "channel": "memory:archive",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "name",
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "restore",
   "channel": "memory:restore",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "name",
+   "...target"
+  ]
  },
  {
   "ns": "memory",
   "method": "listArchived",
   "channel": "memory:listArchived",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "...target"
+  ]
  },
  {
   "ns": "memory",
@@ -1411,35 +1630,53 @@
   "method": "get",
   "channel": "project-brief:get",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "projectBrief",
   "method": "refresh",
   "channel": "project-brief:refresh",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "projectBrief",
   "method": "setPin",
   "channel": "project-brief:set-pin",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd",
+   "block",
+   "pinned"
+  ]
  },
  {
   "ns": "projectBrief",
   "method": "update",
   "channel": "project-brief:update",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd",
+   "patch"
+  ]
  },
  {
   "ns": "projectPages",
   "method": "get",
   "channel": "project-pages:get",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "projectPages",
@@ -1467,28 +1704,45 @@
   "method": "watch",
   "channel": "project-pages:watch",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "projectPages",
   "method": "unwatch",
   "channel": "project-pages:unwatch",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "projectPages",
   "method": "rename",
   "channel": "project-pages:rename",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd",
+   "kind",
+   "id",
+   "title"
+  ]
  },
  {
   "ns": "projectPages",
   "method": "delete",
   "channel": "project-pages:delete",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd",
+   "kind",
+   "id"
+  ]
  },
  {
   "ns": "projectPages",
@@ -1502,21 +1756,36 @@
   "method": "append",
   "channel": "promptSessionTranscript:append",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd",
+   "epicId",
+   "...turn"
+  ]
  },
  {
   "ns": "promptSessionTranscript",
   "method": "read",
   "channel": "promptSessionTranscript:read",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd",
+   "epicId",
+   "limit"
+  ]
  },
  {
   "ns": "epicDelegationStats",
   "method": "get",
   "channel": "epicDelegationStats:get",
   "kind": "invoke",
-  "remote": "read"
+  "remote": "read",
+  "pack": [
+   "cwd",
+   "epicId",
+   "claudeSessionId"
+  ]
  },
  {
   "ns": "epicChanges",
@@ -1530,21 +1799,31 @@
   "method": "append",
   "channel": "auditLog:append",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "kind",
+   "...fields"
+  ]
  },
  {
   "ns": "git",
   "method": "status",
   "channel": "git:status",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "git",
   "method": "fileStatus",
   "channel": "git:file-status",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "cwd"
+  ]
  },
  {
   "ns": "updater",
@@ -1579,7 +1858,10 @@
   "method": "setEnabled",
   "channel": "updater:set-enabled",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "enabled"
+  ]
  },
  {
   "ns": "updater",
@@ -1649,21 +1931,30 @@
   "method": "pair",
   "channel": "webRemote:pair",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "otp"
+  ]
  },
  {
   "ns": "webRemote",
   "method": "revokeDevice",
   "channel": "webRemote:revoke-device",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "deviceId"
+  ]
  },
  {
   "ns": "webRemote",
   "method": "auditTail",
   "channel": "webRemote:audit-tail",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "lines"
+  ]
  },
  {
   "ns": "webRemote",
@@ -1691,7 +1982,10 @@
   "method": "confirmSas",
   "channel": "webRemote:confirm-sas",
   "kind": "invoke",
-  "remote": "deny"
+  "remote": "deny",
+  "pack": [
+   "clientKey"
+  ]
  },
  {
   "ns": "webRemote",
@@ -1712,7 +2006,10 @@
   "method": "cancel",
   "channel": "chat:cancel",
   "kind": "invoke",
-  "remote": "mutate"
+  "remote": "mutate",
+  "pack": [
+   "tabId"
+  ]
  },
  {
   "ns": "chat",

@@ -21,6 +21,18 @@ describe('remoteApi', () => {
     for (const r of rows as any[]) expect(typeof api[r.ns][r.method], `${r.ns}.${r.method}`).toBe('function')
   })
 
+  it('packs positional params into one object when the row has pack (files.saveBinary)', () => {
+    const { api, sent } = setup()
+    void api.files.saveBinary('/p/a.png', 'QUJD', 'epics')
+    expect(sent[0]).toMatchObject({ type: 'sm-ipc', channel: 'files:save-binary', args: [{ path: '/p/a.png', base64: 'QUJD', writer: 'epics' }] })
+  })
+
+  it('spreads "...name" pack entries (memory.read)', () => {
+    const { api, sent } = setup()
+    void api.memory.read('n', { cwd: '/c', agent: 'a' })
+    expect(sent[0].args).toEqual([{ name: 'n', cwd: '/c', agent: 'a' }])
+  })
+
   it('invoke round-trips through the parent', async () => {
     const { api, sent, deliver } = setup()
     const r = find((x) => x.kind === 'invoke' && x.remote === 'read' && x.channel === 'app:version')

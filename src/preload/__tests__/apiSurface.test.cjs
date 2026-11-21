@@ -21,8 +21,8 @@ require.cache[electronPath] = {
   exports: {
     contextBridge: { exposeInMainWorld: (_name, api) => { exposedApi = api; } },
     ipcRenderer: {
-      invoke: (channel) => { recorded.push({ kind: 'invoke', channel }); return Promise.resolve({ ok: true }); },
-      send: (channel) => { recorded.push({ kind: 'send', channel }); },
+      invoke: (channel, ...rest) => { recorded.push({ kind: 'invoke', channel, rest }); return Promise.resolve({ ok: true }); },
+      send: (channel, ...rest) => { recorded.push({ kind: 'send', channel, rest }); },
       on: (channel) => { recorded.push({ kind: 'on', channel }); },
       removeListener: () => {},
     },
@@ -118,4 +118,58 @@ test('appPreview rows carry the expected channels and remote policies', () => {
     ['list', 'appPreview:list', 'invoke', 'read'],
     ['onChanged', 'appPreview:changed', 'on', 'read'],
   ]);
+});
+
+// Rows whose preload wrapper transforms args in a way `pack` cannot describe. Pinned (not skipped):
+// the exact preload output for the sentinel call must still match, so a change here fails loudly.
+const KNOWN_UNDESCRIBED = {
+  'config.readText': [{ path: '$0', maxBytes: undefined }], // deny; (path, opts) -> { path, maxBytes: opts?.maxBytes }
+  'voice.setRecording': [true], // deny; !!coercion
+  'voice.setTtsEnabled': [true], // !!coercion; remote forwards the raw boolean
+  'memory.ask': [{ question: undefined }], // single object arg with nested target flattened
+  'memory.proposeFix': [{ name: undefined }], // same
+  'updater.install': [{ force: false }], // deny; force === true
+};
+
+const CONDITIONAL_TRUTHY = { 'memory.aggregate': { refresh: true } };
+
+test('every invoke/send row: pack (or its absence) matches what the real preload sends', () => {
+  const table = require('../apiSurface.cjs');
+  const SENT = ['$0', '$1', '$2', '$3'];
+  const failures = [];
+  for (const r of table) {
+    if (r.kind !== 'invoke' && r.kind !== 'send') {
+      assert.ok(!('pack' in r), `${key(r)}: pack is only valid on invoke/send rows`);
+      continue;
+    }
+    const fn = exposedApi[r.ns][r.method];
+    const spreads = new Set((r.pack || []).map((k, i) => (k.startsWith('...') ? i : -1)).filter((i) => i >= 0));
+    const args = SENT.map((s, i) => (spreads.has(i) ? { workspace: s } : s));
+    recorded = [];
+    const res = fn(...args);
+    if (res && typeof res.catch === 'function') res.catch(() => {});
+    const { rest } = recorded[0];
+    const k = key(r);
+    if (KNOWN_UNDESCRIBED[k]) {
+      assert.ok(!r.pack, `${k} is KNOWN_UNDESCRIBED so must not carry pack`);
+      try { assert.deepStrictEqual(rest, KNOWN_UNDESCRIBED[k]); } catch { failures.push(`${k}: undescribed shape changed: ${JSON.stringify(rest)}`); }
+      continue;
+    }
+    if (r.pack) {
+      const expected = {};
+      r.pack.forEach((name, i) => {
+        if (name.startsWith('...')) Object.assign(expected, args[i]);
+        else expected[name] = args[i];
+      });
+      Object.assign(expected, CONDITIONAL_TRUTHY[k]); // preload emits `true` instead of the truthy sentinel
+      const ok = rest.length === 1 && rest[0] && typeof rest[0] === 'object' && !Array.isArray(rest[0])
+        && JSON.stringify(Object.keys(rest[0])) === JSON.stringify(Object.keys(expected))
+        && Object.keys(expected).every((n) => rest[0][n] === expected[n]);
+      if (!ok) failures.push(`${k}: pack ${JSON.stringify(r.pack)} but preload sent ${JSON.stringify(rest)}`);
+    } else {
+      const ok = rest.length <= SENT.length && rest.every((v, i) => v === SENT[i]);
+      if (!ok) failures.push(`${k}: no pack, but preload does not forward positionally: ${JSON.stringify(rest)}`);
+    }
+  }
+  assert.deepStrictEqual(failures, [], failures.join('\n'));
 });

@@ -1,6 +1,19 @@
 import rows from '../../preload/apiSurface.json'
 
-type Row = { ns: string; method: string; channel: string; kind: 'invoke' | 'send' | 'on' | 'on-dynamic'; remote: 'read' | 'mutate' | 'deny' }
+type Row = { ns: string; method: string; channel: string; kind: 'invoke' | 'send' | 'on' | 'on-dynamic'; remote: 'read' | 'mutate' | 'deny'; pack?: string[] }
+
+/** Rebuild the single object arg preload packs positional params into (see apiSurface.cjs `pack`). */
+function shapeArgs(r: Row, args: unknown[]): unknown[] {
+  if (!r.pack) return args
+  const obj: Record<string, unknown> = {}
+  r.pack.forEach((name, i) => {
+    if (name.startsWith('...')) {
+      const v = args[i]
+      if (v && typeof v === 'object') Object.assign(obj, v)
+    } else obj[name] = args[i]
+  })
+  return [obj]
+}
 
 export const DENY_MESSAGE = 'Not available in the web version'
 
@@ -57,11 +70,11 @@ export function createRemoteApi(opts: RemoteApiOptions = {}): Record<string, Rec
         new Promise((resolve, reject) => {
           const id = nextId++
           pending.set(id, { resolve, reject })
-          parent.postMessage({ type: 'sm-ipc', id, channel: r.channel, args }, targetOrigin)
+          parent.postMessage({ type: 'sm-ipc', id, channel: r.channel, args: shapeArgs(r, args) }, targetOrigin)
         })
     } else if (r.kind === 'send') {
       ns[r.method] = (...args: unknown[]) => {
-        parent.postMessage({ type: 'sm-ipc', id: nextId++, channel: r.channel, args }, targetOrigin)
+        parent.postMessage({ type: 'sm-ipc', id: nextId++, channel: r.channel, args: shapeArgs(r, args) }, targetOrigin)
       }
     } else {
       const dynamic = r.kind === 'on-dynamic'

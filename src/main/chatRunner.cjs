@@ -1219,6 +1219,49 @@ function requestExternalNewSession(payload) {
   broadcast('chat:external-new-session', payload);
 }
 
+// Awaited sibling of requestExternalNewSession for the admin route
+// (POST /admin/macros/run): tags the payload with a requestId and resolves
+// once the renderer reports which Epic it minted. Never rejects.
+const EXTERNAL_NEW_SESSION_TIMEOUT_MS = 30000;
+const pendingExternalNewSessions = new Map(); // requestId -> { resolve, timer }
+
+/**
+ * @returns {Promise<{ ok: true, epicId: string } | { ok: false, reason: 'no-window'|'timeout'|'launch-failed', error: string }>}
+ */
+function startExternalNewSession(payload) {
+  if (!hasLiveWindow()) {
+    return Promise.resolve({ ok: false, reason: 'no-window', error: 'Session Manager window is not open' });
+  }
+  const requestId = require('node:crypto').randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingExternalNewSessions.delete(requestId);
+      resolve({ ok: false, reason: 'timeout', error: 'renderer did not report the new session in time' });
+    }, EXTERNAL_NEW_SESSION_TIMEOUT_MS);
+    timer.unref?.();
+    pendingExternalNewSessions.set(requestId, { resolve, timer });
+    broadcast('chat:external-new-session', { ...payload, requestId });
+  });
+}
+
+function settleExternalNewSession({ requestId, ok, epicId, error }) {
+  const entry = pendingExternalNewSessions.get(requestId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingExternalNewSessions.delete(requestId);
+  if (ok && epicId) entry.resolve({ ok: true, epicId });
+  else entry.resolve({ ok: false, reason: 'launch-failed', error: error || 'renderer could not start the session' });
+}
+
+// Read-only: is a chat turn for this tab running, being dispatched, parked
+// behind a worktree mint, or queued?
+function isTabBusy(tabId) {
+  return inFlight.has(tabId)
+    || dispatching.has(tabId)
+    || pendingStart.has(tabId)
+    || waiting.some((w) => w.tabId === tabId);
+}
+
 /**
  * Registers the admin-HTTP entry point for enqueueExternalPrompt, mirroring
  * prdCreate.cjs's registerAdminRoute pattern (auth is the injected transport's
@@ -1294,6 +1337,10 @@ function registerChatHandlers() {
     settleExternalSend(payload);
   }));
 
+  ipcMain.handle('chat:external-new-session-result', validated(schemas.chatExternalNewSessionResult, async (payload) => {
+    settleExternalNewSession(payload);
+  }));
+
   ipcMain.handle('chat:cancel', async (_e, payload) => {
     let tabId;
     try { tabId = schemas.chatCancel.parse(payload).tabId; } catch { return; }
@@ -1332,5 +1379,9 @@ module.exports = {
   settleExternalSend,
   EXTERNAL_SEND_ACK_TIMEOUT_MS,
   requestExternalNewSession,
+  startExternalNewSession,
+  settleExternalNewSession,
+  isTabBusy,
+  EXTERNAL_NEW_SESSION_TIMEOUT_MS,
   registerAdminRoute,
 };

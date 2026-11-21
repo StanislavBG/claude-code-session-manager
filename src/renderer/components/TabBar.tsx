@@ -7,14 +7,17 @@ import { useTabDragReorder } from './useTabDragReorder'
 import { useDocumentVisible } from '../lib/useDocumentVisible'
 import { useCustomerFeedback, unseenStatusCount } from '../state/customerFeedback'
 import { CustomerFeedbackPanel } from './customerFeedback/CustomerFeedbackPanel'
+import { Tooltip } from './ui/Tooltip'
 
 /**
  * TabBar — the TOP information bar.
  *
  * Deliberately limited to navigation only: the machine "Home" pill plus one
  * tab per open project (TAB = cwd = Main Project). The one deliberate
- * non-navigation entry point is the far-right "{F}" feedback button — a user
- * action (send feedback), not status. It used to also carry an
+ * non-navigation entry point is the far-right "Feedback" button — a user
+ * action (send feedback), not status. Hovering or focusing it shows a
+ * thank-you tooltip (FEEDBACK_TOOLTIP) pointing users at the Feedback MCP,
+ * so they can also send feedback from any session via their agent. It used to also carry an
  * app-name + version block on the right, which duplicated the version already
  * shown in AlmanacFooter and made the strip do two jobs; app identity lives in
  * the native window title and the footer's version chip. Don't re-add branding,
@@ -30,6 +33,10 @@ import { CustomerFeedbackPanel } from './customerFeedback/CustomerFeedbackPanel'
  * keyboard all still reach an off-screen tab.
  */
 const ACTIVITY_WINDOW_MS = 30_000
+
+/** Hover/focus text for the far-right Feedback button (also its `title`). */
+export const FEEDBACK_TOOLTIP =
+  'Thank you for using the product — feedback is much appreciated. For convenience, ask your agent to send it via the Feedback MCP, directly from any session.'
 
 export function TabBar() {
   // Subscribe per-slice. A bare `useSessions()` returns a fresh object every
@@ -187,22 +194,24 @@ export function TabBar() {
         })}
       </div>
       <span className="w-px self-stretch my-1.5 bg-line" />
-      <button
-        onClick={togglePanel}
-        title="Send feedback"
-        aria-label="Send feedback"
-        aria-expanded={feedbackPanelOpen}
-        data-testid="tabbar-customer-feedback"
-        className="relative flex items-center px-3.5 py-1.5 mb-1 rounded-full text-[13px] font-mono shrink-0 transition-colors text-fg-dim hover:text-fg hover:bg-bg-hi/40"
-      >
-        {'{F}'}
-        {feedbackUnseen && (
-          <span
-            className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-accent"
-            data-testid="customer-feedback-unseen-dot"
-          />
-        )}
-      </button>
+      <Tooltip content={FEEDBACK_TOOLTIP}>
+        <button
+          onClick={togglePanel}
+          title={FEEDBACK_TOOLTIP}
+          aria-label="Send feedback"
+          aria-expanded={feedbackPanelOpen}
+          data-testid="tabbar-customer-feedback"
+          className="relative flex items-center px-3.5 py-1.5 mb-1 rounded-full text-[13px] font-mono shrink-0 transition-colors text-fg-dim hover:text-fg hover:bg-bg-hi/40"
+        >
+          Feedback
+          {feedbackUnseen && (
+            <span
+              className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-accent"
+              data-testid="customer-feedback-unseen-dot"
+            />
+          )}
+        </button>
+      </Tooltip>
       <CustomerFeedbackPanel />
     </div>
   )

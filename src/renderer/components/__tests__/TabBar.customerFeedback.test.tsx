@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { TabBar } from '../TabBar'
+import { TabBar, FEEDBACK_TOOLTIP } from '../TabBar'
 import { useLayout, DEFAULT_LAYOUT } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
 import { useCustomerFeedback } from '../../state/customerFeedback'
@@ -24,7 +24,7 @@ const item = (over: Partial<CustomerFeedbackItem> = {}): CustomerFeedbackItem =>
   ...over,
 })
 
-describe('TabBar {F} feedback button', () => {
+describe('TabBar Feedback button', () => {
   let container: HTMLDivElement
   let root: Root
   const load = vi.fn(async () => {})
@@ -68,11 +68,34 @@ describe('TabBar {F} feedback button', () => {
     await mount()
     const btn = q('tabbar-customer-feedback')!
     expect(btn).not.toBeNull()
-    expect(btn.textContent).toBe('{F}')
+    expect(btn.textContent).toBe('Feedback')
+    expect(btn.textContent).not.toContain('{F}')
+    expect(btn.getAttribute('title')).toBe(FEEDBACK_TOOLTIP)
     expect(btn.getAttribute('aria-label')).toBe('Send feedback')
     const strip = container.querySelector('.no-scrollbar') as HTMLElement
     expect(strip.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the thank-you tooltip on hover and on focus', async () => {
+    const text =
+      'Thank you for using the product — feedback is much appreciated. For convenience, ask your agent to send it via the Feedback MCP, directly from any session.'
+    expect(FEEDBACK_TOOLTIP).toBe(text)
+    await mount()
+    const btn = q('tabbar-customer-feedback')!
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    })
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(text)
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
+    })
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await act(async () => {
+      btn.focus()
+    })
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(text)
   })
 
   it('opens the panel on click', async () => {

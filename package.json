@@ -67,6 +67,8 @@
     "identity:scan": "bash scripts/identity-guard.sh tree",
     "lint:hooks": "node scripts/check-conditional-hooks.cjs",
     "lint:docs": "node scripts/check-doc-hierarchy.cjs",
+    "lint:readme": "node scripts/check-readme.cjs",
+    "readme:build": "node scripts/check-readme.cjs --write",
     "lint:paths": "node scripts/check-ops-path-literals.cjs",
     "lint:any": "node scripts/check-explicit-any.cjs",
     "lint:main-ts-check": "node scripts/check-main-ts-check.cjs",

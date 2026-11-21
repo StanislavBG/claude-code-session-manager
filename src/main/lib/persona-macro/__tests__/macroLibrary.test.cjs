@@ -659,6 +659,36 @@ test('autoStartTargets: update omitted keeps, [] deletes, non-empty replaces; su
   expect('autoStartTargets' in reread).toBe(false);
 });
 
+test('scriptStart: create stores only true; false/omitted leaves the key absent', async () => {
+  const a = await lib.saveMacro(base({ scriptStart: true }), opts);
+  expect(a.scriptStart).toBe(true);
+  const b = await lib.saveMacro(base({ scriptStart: false }), opts);
+  expect('scriptStart' in b).toBe(false);
+  const c = await lib.saveMacro(base(), opts);
+  expect('scriptStart' in c).toBe(false);
+});
+
+test('scriptStart: update omitted keeps, false deletes, true sets; survives file round trip', async () => {
+  const a = await lib.saveMacro(base(), opts);
+  const set = await lib.saveMacro(base({ id: a.id, scriptStart: true }), opts);
+  expect(set.scriptStart).toBe(true);
+  const kept = await lib.saveMacro(base({ id: a.id, label: 'Renamed' }), opts);
+  expect(kept.scriptStart).toBe(true);
+  expect((await lib.listMacros(opts)).find((m) => m.id === a.id).scriptStart).toBe(true);
+  expect(JSON.parse(fs.readFileSync(filePath, 'utf8')).macros.find((m) => m.id === a.id).scriptStart).toBe(true);
+  const cleared = await lib.saveMacro(base({ id: a.id, scriptStart: false }), opts);
+  expect('scriptStart' in cleared).toBe(false);
+  expect('scriptStart' in (await lib.listMacros(opts)).find((m) => m.id === a.id)).toBe(false);
+});
+
+test('scriptStart: a stored macro without it parses unchanged; non-boolean rejected', async () => {
+  const a = await lib.saveMacro(base(), opts);
+  const parsed = lib.MacroSchema.parse(a);
+  expect('scriptStart' in parsed).toBe(false);
+  expect(lib.MacroSchema.parse({ ...a, scriptStart: true }).scriptStart).toBe(true);
+  expect(() => lib.MacroSaveSchema.parse(base({ scriptStart: 'yes' }))).toThrow();
+});
+
 test('autoStartTargets rejects relative paths', async () => {
   await expect(lib.saveMacro(base({ autoStartTargets: ['rel/dir'] }), opts)).rejects.toThrow();
 });

@@ -317,6 +317,33 @@ test('admin save never sets autoStartTargets on create and leaves a stored list 
   }
 });
 
+test('admin save never sets scriptStart on create and leaves a stored true untouched on update', async () => {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const adminHttp = makeFakeAdminHttp();
+  const { onChanged } = makeHandlers();
+  registerAdminRoute(adminHttp, { onChanged }, { filePath });
+  const macroLibrary = require('../lib/persona-macro/macroLibrary.cjs');
+
+  const created = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, label: 'Scripty', agentName: 'builder', tag: 'build', prompt: 'x', scriptStart: true },
+  });
+  expect(created.status).toBe(200);
+  expect('scriptStart' in created.body.macro).toBe(false);
+
+  const id = created.body.macro.id;
+  await macroLibrary.saveMacro({ id, label: 'Scripty', agentName: 'builder', tag: 'build', prompt: 'x', scriptStart: true }, { filePath });
+  for (const ss of [true, false]) {
+    const upd = await adminHttp.call('POST', '/admin/macros/save', {
+      body: { cwd, id, label: 'Scripty2', agentName: 'builder', tag: 'build', prompt: 'x', scriptStart: ss },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.body.macro.scriptStart).toBe(true);
+  }
+  const stored = (await macroLibrary.listMacros({ filePath })).find((m) => m.id === id);
+  expect(stored.scriptStart).toBe(true);
+});
+
 // --- POST /admin/macros/delete ----------------------------------------------
 
 const { readTail } = require('../lib/telemetry/auditLog.cjs');

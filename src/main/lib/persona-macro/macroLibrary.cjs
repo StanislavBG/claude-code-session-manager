@@ -167,6 +167,8 @@ const MacroSchema = z.object({
   inputs: MacroInputsSchema.optional(),
   // Projects this macro's session may start work in without approval. Set only by the app's IPC save.
   autoStartTargets: MacroProjectsSchema.optional(),
+  // Human consent that a local script may start this macro (POST /admin/macros/run). Set only by the app's IPC save.
+  scriptStart: z.boolean().optional(),
 }).superRefine(refineInputs);
 
 const MacroSaveSchema = z.object({
@@ -184,6 +186,8 @@ const MacroSaveSchema = z.object({
   inputs: MacroInputsSchema.optional(),
   // Omitted keeps the stored list on update; `[]` clears it.
   autoStartTargets: MacroProjectsSchema.optional(),
+  // Human consent that a local script may start this macro (POST /admin/macros/run). Set only by the app's IPC save.
+  scriptStart: z.boolean().optional(),
 }).superRefine(refineInputs);
 
 const MacroDeleteSchema = z.object({ id: MacroIdSchema });
@@ -617,6 +621,8 @@ async function saveMacro(input, opts = {}) {
       } else {
         saved.autoStartTargets = normalizeProjects(parsed.autoStartTargets);
       }
+      if (parsed.scriptStart === true) saved.scriptStart = true;
+      else if (parsed.scriptStart === false) delete saved.scriptStart;
       assertPlaceholdersDeclared(saved);
       macros[idx] = saved;
     } else {
@@ -639,6 +645,7 @@ async function saveMacro(input, opts = {}) {
       if (parsed.autoStartTargets && parsed.autoStartTargets.length > 0) {
         saved.autoStartTargets = normalizeProjects(parsed.autoStartTargets);
       }
+      if (parsed.scriptStart === true) saved.scriptStart = true;
       assertPlaceholdersDeclared(saved);
       macros.push(saved);
     }

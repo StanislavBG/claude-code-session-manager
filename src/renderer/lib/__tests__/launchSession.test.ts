@@ -67,6 +67,13 @@ describe('launchSession', () => {
     expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
   })
 
+  it("passes origin 'external' to send only when set", async () => {
+    await launchSession({ ...input, origin: 'external' })
+    expect(send).toHaveBeenLastCalledWith({ tabId: 'e1', sessionId: 'c1', cwd: '/p', prompt: 'OPEN', origin: 'external' })
+    await launchSession(input)
+    expect(send.mock.calls[1][0]).not.toHaveProperty('origin')
+  })
+
   it('forwards macroId as the runtime argument only when set', async () => {
     await launchSession({ ...input, macroId: 'm9' })
     expect(createPromptSession.mock.calls[0][7]).toEqual({ macroId: 'm9' })

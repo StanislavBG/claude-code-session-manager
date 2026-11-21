@@ -7,20 +7,24 @@ vi.mock('../../state/toast', () => ({ toast: { error: (m: string) => toastError(
 
 import { registerRemoteNewSession } from '../remoteNewSession'
 
-const payload: { cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string } = {
+const payload: {
+  cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string
+  requestId?: string; via?: 'script'; effort?: string
+} = {
   cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', prompt: 'do it',
 }
 let fire: (e: typeof payload) => Promise<void>
 const unsub = vi.fn()
 const logWrite = vi.fn()
 const macrosList = vi.fn()
+const reportResult = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
   macrosList.mockResolvedValue([])
   ;(globalThis as unknown as { window: unknown }).window = {
     api: {
-      chat: { onExternalNewSession: (h: typeof fire) => ((fire = h), unsub) },
+      chat: { onExternalNewSession: (h: typeof fire) => ((fire = h), unsub), reportExternalNewSessionResult: reportResult },
       agents: { listPersonas: async () => [{ name: 'dev-lead', description: 'builds' }] },
       macros: { list: macrosList },
       logs: { write: logWrite },
@@ -81,5 +85,36 @@ describe('registerRemoteNewSession', () => {
     registerRemoteNewSession()
     await fire({ ...payload, macroId: 'm1' })
     expect(launchSession.mock.calls[0][0]).not.toHaveProperty('run')
+  })
+
+  it("starts a script payload with source 'Script <agent>', origin 'external', effort, macroId, and reports the epicId", async () => {
+    launchSession.mockResolvedValue({ epicId: 'e7', claudeSessionId: 's' })
+    registerRemoteNewSession()
+    await fire({ ...payload, via: 'script', macroId: 'm1', effort: 'high', requestId: 'r1' })
+    expect(launchSession).toHaveBeenCalledWith({
+      cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', goal: 'do it', agentDescription: 'builds',
+      source: 'Script dev-lead', origin: 'external', macroId: 'm1', effort: 'high',
+    })
+    expect(reportResult).toHaveBeenCalledWith({ requestId: 'r1', ok: true, epicId: 'e7' })
+  })
+
+  it('a phone payload gets no origin or effort and no report without requestId', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e', claudeSessionId: 's' })
+    registerRemoteNewSession()
+    await fire({ ...payload, effort: '' })
+    const arg = launchSession.mock.calls[0][0]
+    expect(arg.source).toBe('WebRemote dev-lead')
+    expect(arg).not.toHaveProperty('origin')
+    expect(arg).not.toHaveProperty('effort')
+    expect(reportResult).not.toHaveBeenCalled()
+  })
+
+  it('reports ok:false with the error when launchSession throws, keeping toast + log', async () => {
+    launchSession.mockRejectedValue(new Error('boom'))
+    registerRemoteNewSession()
+    await fire({ ...payload, via: 'script', requestId: 'r2' })
+    expect(reportResult).toHaveBeenCalledWith({ requestId: 'r2', ok: false, error: 'boom' })
+    expect(toastError).toHaveBeenCalled()
+    expect(logWrite).toHaveBeenCalledWith('webRemote', 'warn', expect.any(String))
   })
 })

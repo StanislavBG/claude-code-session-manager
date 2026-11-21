@@ -27,6 +27,8 @@ export interface LaunchSessionInput {
   effort?: string
   /** Default true. false = mint only: the Epic stays proposed (no approve, no opening prompt, no job). */
   approve?: boolean
+  /** 'external' = a script-typed opening prompt: never recorded as a verified human quote. Absent = 'human'. */
+  origin?: 'external'
 }
 
 /**
@@ -48,7 +50,7 @@ export async function resolvePersonaBody(
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, run, extraInstructions, effort, approve = true } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, run, extraInstructions, effort, approve = true, origin } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
   if (!title) throw new Error('launchSession: title is required')
@@ -89,6 +91,7 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     sessionId: session.claudeSessionId,
     cwd,
     prompt: openingPrompt,
+    ...(origin ? { origin } : {}),
   })
   return { epicId: session.id, claudeSessionId: session.claudeSessionId }
 }

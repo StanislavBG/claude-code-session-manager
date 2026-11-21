@@ -6,9 +6,21 @@
  */
 import { launchSession } from './launchSession'
 import { toast } from '../state/toast'
+import type { ChatExternalNewSessionResult } from '../../preload/api'
+
+/** Answer main's awaited request; a failed report is logged, never thrown into the handler. */
+function report(result: ChatExternalNewSessionResult): void {
+  Promise.resolve()
+    .then(() => window.api.chat.reportExternalNewSessionResult(result))
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('webRemote', 'warn', `external new-session result report failed for ${result.requestId}: ${msg}`)
+    })
+}
 
 export function registerRemoteNewSession(): () => void {
-  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId }) => {
+  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, requestId, via, effort }) => {
+    const isScript = via === 'script'
     try {
       let agentDescription: string | undefined
       try {
@@ -28,14 +40,20 @@ export function registerRemoteNewSession(): () => void {
       const marker = '\n\nAdditional instructions: '
       const at = prompt.indexOf(marker)
       const extra = isJob && at >= 0 ? prompt.slice(at + marker.length) : ''
-      await launchSession({
-        cwd, agentName, tag, title, goal: prompt, agentDescription, source: 'WebRemote ' + agentName,
+      const { epicId } = await launchSession({
+        cwd, agentName, tag, title, goal: prompt, agentDescription,
+        source: isScript ? `Script ${agentName}` : 'WebRemote ' + agentName,
+        // A script-typed prompt must never enter humanPromptLedger as a verified human quote.
+        ...(isScript ? { origin: 'external' as const } : {}),
         ...(macroId ? { macroId } : {}),
         ...(isJob ? { run: 'job' as const } : {}),
         ...(extra ? { extraInstructions: extra } : {}),
+        ...(typeof effort === 'string' && effort ? { effort } : {}),
       })
+      if (requestId) report({ requestId, ok: true, epicId })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      if (requestId) report({ requestId, ok: false, error: msg })
       toast.error(`Phone session start failed: ${msg}`)
       window.api?.logs?.write('webRemote', 'warn', `phone session start failed for ${agentName} in ${cwd}: ${msg}`)
     }

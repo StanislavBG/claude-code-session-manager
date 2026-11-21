@@ -15,10 +15,13 @@ declare module 'ws' {
     send(data: string | ArrayBuffer | ArrayBufferView, cb?: (err?: Error) => void): void;
     terminate(): void;
     on(event: 'message', listener: (this: WebSocket, data: RawData, isBinary: boolean) => void): this;
+    on(event: 'close', listener: (this: WebSocket, code: number, reason: Buffer) => void): this;
+    close(code?: number, data?: string | Buffer): void;
   }
 
   export interface ServerOptions {
     server?: HTTPServer | HTTPSServer;
+    maxPayload?: number;
   }
 
   export class WebSocketServer extends EventEmitter {

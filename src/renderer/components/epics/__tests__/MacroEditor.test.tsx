@@ -37,7 +37,7 @@ describe('MacroEditor', () => {
     mount()
     act(() => { setValue(q('macro-label') as HTMLInputElement, ' Go '); setValue(q('macro-prompt') as HTMLTextAreaElement, 'Do it') })
     await act(async () => { q('macro-save').click() })
-    expect(save).toHaveBeenCalledWith({ label: 'Go', agentName: 'architect', tag: 'feature', prompt: 'Do it', projects: [CWD], surface: 'sessions', autoStartTargets: [] })
+    expect(save).toHaveBeenCalledWith({ label: 'Go', agentName: 'architect', tag: 'feature', prompt: 'Do it', projects: [CWD], surface: 'sessions', autoStartTargets: [], scriptStart: false })
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -182,6 +182,40 @@ describe('MacroEditor', () => {
       const closed = projs().find((p) => p.title === '/p/closed')!
       expect(closed.checked).toBe(true)
       expect(await saved()).toEqual(['/p/closed'])
+    })
+  })
+
+  describe('script start', () => {
+    const box = () => q('macro-editor-script-start') as HTMLInputElement
+    const fill = () => act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+
+    it('is unchecked for a new macro, with its label and hint, and saves scriptStart: false', async () => {
+      mount()
+      expect(box().checked).toBe(false)
+      expect(container.textContent).toContain('Can be started by a script')
+      expect(container.textContent).toContain('A local script with the admin token (for example a systemd timer) may start this macro with POST /admin/macros/run, without a press. Its Can start work in other projects setting applies to those runs too.')
+      fill()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ scriptStart: false, autoStartTargets: [] }))
+    })
+
+    it('ticking it saves scriptStart: true alongside autoStartTargets', async () => {
+      mount()
+      fill()
+      act(() => box().click())
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ scriptStart: true, autoStartTargets: [] }))
+    })
+
+    it('starts checked from a macro with scriptStart: true; unticking saves false', async () => {
+      mount({ macro: mac({ scriptStart: true }) })
+      expect(box().checked).toBe(true)
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].scriptStart).toBe(true)
+      save.mockClear()
+      act(() => box().click())
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].scriptStart).toBe(false)
     })
   })
 

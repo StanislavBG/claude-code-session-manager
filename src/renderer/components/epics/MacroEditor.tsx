@@ -65,6 +65,7 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
     const extra = (storedTargets ?? []).filter((c) => c !== '*' && c !== cwd)
     return Array.from(new Set([...open, ...extra]))
   }, [tabs, cwd, storedTargets])
+  const [scriptStart, setScriptStart] = useState(macro?.scriptStart === true)
   const [saving, setSaving] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -144,6 +145,7 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
         projects,
         ...(macro?.builtin ? {} : { surface }),
         autoStartTargets: autoMode === 'all' ? ['*'] : autoMode === 'selected' ? autoSelected : [],
+        scriptStart,
         ...(hadInputs || inputs.length > 0
           ? {
               inputs: inputs.map((i) => ({
@@ -368,6 +370,21 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
           ))}
         <div className="text-[11px] text-fg-faint">
           Work this macro sends to another project starts without approval.
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
+          <input
+            type="checkbox"
+            data-testid="macro-editor-script-start"
+            checked={scriptStart}
+            onChange={(e) => setScriptStart(e.target.checked)}
+          />
+          Can be started by a script
+        </label>
+        <div className="text-[11px] text-fg-faint">
+          A local script with the admin token (for example a systemd timer) may start this macro with POST /admin/macros/run, without a press. Its Can start work in other projects setting applies to those runs too.
         </div>
       </div>
 

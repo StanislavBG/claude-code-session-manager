@@ -14,7 +14,7 @@
 | MCP server | `session-manager-scheduler`. It uses stdio. The app adds it for you. It needs the app to be running. |
 | Plugin | `session-manager-dev@session-manager` |
 | Agent CLIs | Claude Code is the default. Codex, Gemini CLI, Antigravity CLI, Cursor Agent and OpenCode work in Chat and Terminal only. |
-| Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `~/.local/state/session-manager/`. |
+| Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `~/.local/state/session-manager/`, or `$XDG_STATE_HOME/session-manager/` when `XDG_STATE_HOME` is set. |
 | Telemetry | Anonymous and on by default. Turn it off with `SM_TELEMETRY=0`. |
 | License | MIT |
 
@@ -195,7 +195,7 @@ Rules the server enforces:
 
 - A new PRD must join a session that a person already approved. The server never creates a session.
 - A new PRD must have a `gate` and a `files` list.
-- A headless job cannot queue PRDs. Only planning personas such as `architect` can.
+- A headless job cannot queue PRDs, unless it runs as `architect`. A session a person is in can queue PRDs.
 - A job with `SM_SCHEDULER_JOB_MCP_TOOLS` set can call only the tools in that list.
 - A pause set by an agent ends after 30 minutes. A pause set by a person stays until `scheduler_resume`.
 
@@ -214,9 +214,11 @@ A script can start a macro with `POST /admin/macros/run`. This only works for a 
 On first launch, the app installs this plugin with no network. It comes from the bundled `session-manager` marketplace. The app keeps it up to date. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
 
 ```bash
-claude plugin marketplace add <app folder>
+claude plugin marketplace add StanislavBG/claude-code-session-manager
 claude plugin install session-manager-dev@session-manager
 ```
+
+`/develop` and `/send-feedback` call the MCP server. So the app must be running for them.
 
 <!-- list:skills -->
 | Skill | Use it to |
@@ -276,7 +278,7 @@ The app copies these into `~/.claude/agents/` on first launch.
 | Guard hook shims | `~/.claude/session-manager/hooks/`. A project uses them once you accept its setup banner. | Do not accept the banner. |
 | App state | `~/.claude/session-manager/` | None |
 | Project folder | `<repo>/session-manager-operations/` | None |
-| Session worktrees | `~/.local/state/session-manager/` | None |
+| Session worktrees | `~/.local/state/session-manager/`, or `$XDG_STATE_HOME/session-manager/` when `XDG_STATE_HOME` is set | None |
 | Telemetry | Sent to bilko.run | `SM_TELEMETRY=0` |
 
 ### Check it worked
@@ -315,6 +317,7 @@ Then have an agent call `session_manager_help` with no args.
 | `SM_SEED_DEV_PLUGIN_DISABLE=1` | Do not install the plugin. |
 | `SM_SEED_AGENT_PERSONAS_DISABLE=1` | Do not copy personas. |
 | `SM_SEED_DEMO_VIDEO_KIT_DISABLE=1` | Do not copy the demo video kit. |
+| `SM_WORKTREE_ROOT` | Moves where session and job worktrees are made. |
 | `SM_SCHEDULER_HOME` | Moves app state away from `~/.claude/session-manager/`. Use it for tests. |
 | `ELECTRON_MIRROR` | Where `npx` gets Electron from. |
 

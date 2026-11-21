@@ -1,6 +1,7 @@
 import { getWsTicket, RELAY_WSS_URL } from './api';
 import { loadKeyPair, saveKeyPair } from './e2eKeyStore';
 import type { Envelope } from './types';
+import { chunkFrames, serializedBytes, SendBudget, FRAME_DATA_BYTES } from './frames';
 
 type EventHandler = (envelope: Envelope) => void;
 type RespHandler = (envelope: Envelope) => void;
@@ -9,7 +10,7 @@ interface PendingCmd {
   deviceId?: string;
   resolve: RespHandler;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>; // unset until the command is fully on the socket
 }
 
 // E2E session state per device (browser-side P-256 ECDH + AES-256-GCM)
@@ -27,6 +28,12 @@ const CMD_TIMEOUT_MS = 15_000;
 const PING_INTERVAL_MS = 30_000;
 // Max e2e:box frames held per session while the handshake is in flight
 const HELD_BOX_CAP = 16;
+// Desktop's FRAME_LIMITS (src/main/lib/feedback-remote/remoteFrameAssembler.cjs)
+const MAX_FRAMED_BYTES = 25 * 1024 * 1024;
+const MAX_FRAMES = 200;
+// Bounds on capability lists accepted from event:remote:ready
+const MAX_CAPABILITIES = 32;
+const MAX_CAPABILITY_LEN = 64;
 
 // ── WebCrypto E2E helpers ──────────────────────────────────────────────────
 
@@ -257,6 +264,10 @@ export class RelaySocket {
 
   // E2E sessions: deviceId → session state
   private e2eSessions = new Map<string, E2ESession>();
+  // Capabilities each desktop advertised in its boxed event:remote:ready
+  private capabilities = new Map<string, Set<string>>();
+  // Paces e2e:frame sends under the relay's per-browser leaky bucket
+  private sendBudget = new SendBudget();
 
   constructor(private readonly onStatusChange?: (connected: boolean) => void) {}
 
@@ -380,9 +391,29 @@ export class RelaySocket {
     if (deviceId !== undefined) {
       const s = this.e2eSessions.get(deviceId);
       if (s) { s.sessionKey = null; s.held = []; }
+      this.capabilities.delete(deviceId);
       return;
     }
     for (const s of this.e2eSessions.values()) { s.sessionKey = null; s.held = []; }
+    this.capabilities.clear();
+  }
+
+  /** True if the device's last event:remote:ready advertised `cap`. */
+  hasCapability(deviceId: string, cap: string): boolean {
+    return this.capabilities.get(deviceId)?.has(cap) === true;
+  }
+
+  private recordCapabilities(inner: Envelope): void {
+    if (inner.type !== 'event:remote:ready' || !inner.deviceId) return;
+    const raw = (inner.payload as { capabilities?: unknown } | undefined)?.capabilities;
+    const caps = new Set<string>();
+    if (Array.isArray(raw)) {
+      for (const c of raw) {
+        if (caps.size >= MAX_CAPABILITIES) break;
+        if (typeof c === 'string' && c.length <= MAX_CAPABILITY_LEN) caps.add(c);
+      }
+    }
+    this.capabilities.set(inner.deviceId, caps);
   }
 
   private rejectPending(deviceId: string | undefined, reason: string): void {
@@ -430,8 +461,11 @@ export class RelaySocket {
         }
         return;
       }
-      const inner = await this.openBox(msg, session.sessionKey);
-      if (inner) await this.dispatchAsync({ ...inner, deviceId: inner.deviceId ?? deviceId });
+      const opened = await this.openBox(msg, session.sessionKey);
+      if (!opened) return;
+      const inner = { ...opened, deviceId: opened.deviceId ?? deviceId };
+      this.recordCapabilities(inner);
+      await this.dispatchAsync(inner);
       return;
     }
 
@@ -476,6 +510,7 @@ export class RelaySocket {
           if (!opened) continue;
           const inner = { ...opened, deviceId: opened.deviceId ?? deviceId };
           if (inner.type === 'event:remote:ready') sawRemoteReady = true;
+          this.recordCapabilities(inner);
           try {
             await this.dispatchAsync(inner);
           } catch (e) {
@@ -583,50 +618,34 @@ export class RelaySocket {
     const inner: Envelope = { type, id, deviceId, payload, ts: Date.now() };
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const fail = (e: Error) => {
+        if (timer) clearTimeout(timer);
         this.pending.delete(id);
-        reject(new Error(`timeout waiting for resp:${id}`));
-      }, CMD_TIMEOUT_MS);
-
-      this.pending.set(id, { resolve, reject, timer, deviceId });
-
-      const session = this.e2eSessions.get(deviceId);
-      if (session?.sessionKey) {
-        // Encrypt the inner command — relay sees only opaque bytes
-        encryptBox(JSON.stringify(inner), session.sessionKey)
-          .then(({ nonce, ciphertext }) => {
-            const sent = this.sendRaw({
-              type: 'e2e:box',
-              id,           // echoed so relay can correlate, outer id ≠ inner id
-              deviceId,
-              payload: { nonce, ciphertext },
-              ts: Date.now(),
-            });
-            if (!sent) {
-              clearTimeout(timer);
-              this.pending.delete(id);
-              reject(new Error('not connected'));
-            }
-          })
-          .catch((e) => {
-            clearTimeout(timer);
+        reject(e);
+      };
+      // The response timer starts once the last byte is handed to the socket,
+      // so a long paced framed send can't time out before the desktop sees it.
+      this.pending.set(id, { resolve, reject, deviceId });
+      this.sendBoxedOrFramed(inner, deviceId)
+        .then((sent) => {
+          const entry = this.pending.get(id);
+          if (!entry) return; // already settled (connection lost / destroyed / answered)
+          if (!sent) { fail(new Error('not connected')); return; }
+          timer = setTimeout(() => {
             this.pending.delete(id);
-            reject(e);
-          });
-      } else {
-        // Plaintext fallback: no E2E session established yet
-        if (!this.sendRaw(inner)) {
-          clearTimeout(timer);
-          this.pending.delete(id);
-          reject(new Error('not connected'));
-        }
-      }
+            reject(new Error(`timeout waiting for resp:${id}`));
+          }, CMD_TIMEOUT_MS);
+          entry.timer = timer;
+        })
+        .catch((e: unknown) => fail(e instanceof Error ? e : new Error(String(e))));
     });
   }
 
   /**
    * Fire-and-forget envelope (no resp:<id> pending entry) — used by the renderer bridge,
-   * whose replies arrive as ipc:result / ipc:event frames. Boxed when an E2E session exists.
+   * whose replies arrive as ipc:result / ipc:event frames. Boxed when an E2E session exists;
+   * framed like sendCommand when the inner envelope exceeds FRAME_DATA_BYTES.
    */
   async sendEnvelope(
     type: string,
@@ -635,12 +654,62 @@ export class RelaySocket {
     id: string = crypto.randomUUID(),
   ): Promise<boolean> {
     const inner: Envelope = { type, id, deviceId, payload, ts: Date.now() };
+    return this.sendBoxedOrFramed(inner, deviceId);
+  }
+
+  /**
+   * One send path for both send methods. Small envelopes go out as one e2e:box (or plaintext
+   * before the handshake); larger ones as boxed, paced e2e:frame slices when the desktop
+   * advertises 'e2e-frames'. Rejects with 'Message too large…' — sending nothing — otherwise.
+   * Resolves false when the socket is not open.
+   */
+  private async sendBoxedOrFramed(inner: Envelope, deviceId: string): Promise<boolean> {
+    const bytes = serializedBytes(inner);
     const session = this.e2eSessions.get(deviceId);
-    if (session?.sessionKey) {
-      const { nonce, ciphertext } = await encryptBox(JSON.stringify(inner), session.sessionKey);
-      return this.sendRaw({ type: 'e2e:box', id, deviceId, payload: { nonce, ciphertext }, ts: Date.now() });
+    const key = session?.sessionKey ?? null;
+
+    if (bytes <= FRAME_DATA_BYTES) {
+      if (!key) return this.sendRaw(inner); // plaintext fallback: no E2E session yet
+      const { nonce, ciphertext } = await encryptBox(JSON.stringify(inner), key);
+      // outer id echoes inner id so the relay can correlate
+      return this.sendRaw({ type: 'e2e:box', id: inner.id, deviceId, payload: { nonce, ciphertext }, ts: Date.now() });
     }
-    return this.sendRaw(inner);
+
+    if (!key) throw new Error(`Message too large (${bytes} bytes) to send without an E2E session`);
+    if (!this.hasCapability(deviceId, 'e2e-frames')) {
+      throw new Error(`Message too large (${bytes} bytes): desktop does not support e2e-frames`);
+    }
+    if (bytes > MAX_FRAMED_BYTES) {
+      throw new Error(`Message too large (${bytes} bytes, limit ${MAX_FRAMED_BYTES})`);
+    }
+    const frames = chunkFrames(inner);
+    if (frames.length > MAX_FRAMES) {
+      throw new Error(`Message too large (${frames.length} frames, limit ${MAX_FRAMES})`);
+    }
+
+    for (const { seq, total, data } of frames) {
+      await this.sendBudget.take();
+      // A reset/rekey mid-send drops the key; the desktop would discard the remaining frames.
+      const current = this.e2eSessions.get(deviceId)?.sessionKey;
+      if (current !== key) return false;
+      const frame: Envelope = {
+        type: 'e2e:frame',
+        id: crypto.randomUUID(),
+        deviceId,
+        payload: { msgId: inner.id, seq, total, data },
+        ts: Date.now(),
+      };
+      const { nonce, ciphertext } = await encryptBox(JSON.stringify(frame), key);
+      const sent = this.sendRaw({
+        type: 'e2e:box',
+        id: crypto.randomUUID(),
+        deviceId,
+        payload: { nonce, ciphertext },
+        ts: Date.now(),
+      });
+      if (!sent) return false;
+    }
+    return true;
   }
 
   sendRaw(msg: unknown): boolean {
@@ -693,6 +762,7 @@ export class RelaySocket {
     }
     this.pending.clear();
     this.e2eSessions.clear();
+    this.capabilities.clear();
     this.listeners.clear();
     this.ws?.close();
   }

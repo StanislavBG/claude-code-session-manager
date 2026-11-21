@@ -570,6 +570,8 @@ contextBridge.exposeInMainWorld('api', {
     },
     /** Reports the renderer's disposition for an external send back to main. */
     reportExternalSendResult: (result) => ipcRenderer.invoke('chat:external-send-result', result),
+    /** Reports the minted epicId (or an error) for a requestId-carrying external new-session back to main. */
+    reportExternalNewSessionResult: (result) => ipcRenderer.invoke('chat:external-new-session-result', result),
     /** Fires when a paired phone asks main to start a new Session. */
     onExternalNewSession: (handler) => {
       const listener = (_e, payload) => handler(payload);

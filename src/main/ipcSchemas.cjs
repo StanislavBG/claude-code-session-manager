@@ -1203,6 +1203,16 @@ const chatExternalSendResult = z.object({
   reason: z.enum(['terminal-attached', 'completed', 'unknown-target', 'empty-prompt']).optional(),
 });
 
+// Renderer's report of what it did with a chat:external-new-session that
+// carried a requestId (POST /admin/macros/run). Mirrors
+// ChatExternalNewSessionResult in preload/api.d.ts.
+const chatExternalNewSessionResult = z.object({
+  requestId: z.string().min(1).max(64),
+  ok: z.boolean(),
+  epicId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional(),
+  error: z.string().max(500).optional(),
+}).strict();
+
 // Phone drill-down reads. cwd is re-checked against the open tabs in
 // webRemote.cjs; sessionKey becomes a transcript filename lookup so it is
 // restricted to a session-id charset (no '/', so no traversal).
@@ -1621,6 +1631,7 @@ module.exports = {
     chatClassifyTicket,
     chatExternalSend,
     chatExternalSendResult,
+    chatExternalNewSessionResult,
     remoteSessionCreate,
     remoteProjectSessions,
     remoteSessionTranscript,

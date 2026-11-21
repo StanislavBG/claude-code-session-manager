@@ -400,6 +400,8 @@ export interface Macro {
   inputs?: MacroInput[];
   /** Projects ('*' or absolute cwds) this macro's session may start work in without approval. */
   autoStartTargets?: string[];
+  /** True lets a script start this macro via POST /admin/macros/run. */
+  scriptStart?: boolean;
   /** Set only on built-ins whose press builds in the background. */
   job?: MacroJob;
 }
@@ -429,6 +431,8 @@ export interface MacroSaveInput {
   inputs?: MacroInput[];
   /** Same omit/clear semantics as `inputs`. */
   autoStartTargets?: string[];
+  /** True lets a script start this macro via POST /admin/macros/run. */
+  scriptStart?: boolean;
 }
 
 /** One `agentCli.detect` row — a non-Claude agent CLI and whether it is installed. */
@@ -2168,6 +2172,15 @@ export interface ChatExternalSendResult {
   reason?: ChatExternalSendRefusalReason;
 }
 
+/** What the renderer did with a `chat:external-new-session` that carried a requestId (POST /admin/macros/run), reported back to main. */
+export interface ChatExternalNewSessionResult {
+  requestId: string;
+  ok: boolean;
+  /** The minted Epic's id when `ok`. */
+  epicId?: string;
+  error?: string;
+}
+
 export type CreateProjectFolderResult =
   | { ok: true; path: string }
   | { ok: false; code: 'invalid-name' | 'invalid-parent' | 'exists' | 'io'; error: string; path?: string };
@@ -2838,9 +2851,22 @@ export interface SessionManagerAPI {
     onExternalSend: (handler: (e: ChatExternalSendEvent) => void) => () => void;
     /** Reports what the renderer did with an external send (echoing its requestId) back to main. */
     reportExternalSendResult: (result: ChatExternalSendResult) => Promise<void>;
+    /** Reports the minted epicId (or an error) for an external new-session that carried a requestId back to main. */
+    reportExternalNewSessionResult: (result: ChatExternalNewSessionResult) => Promise<void>;
     /** Fires when a paired phone asks main to start a new Session (payload pre-validated in main). */
     onExternalNewSession: (
-      handler: (e: { cwd: string; agentName: string; tag: AgentPersonaTag; title: string; prompt: string; macroId?: string }) => void,
+      handler: (e: {
+        cwd: string;
+        agentName: string;
+        tag: AgentPersonaTag;
+        title: string;
+        prompt: string;
+        macroId?: string;
+        /** Set when main awaits the result; echo it back via `reportExternalNewSessionResult`. */
+        requestId?: string;
+        via?: 'script';
+        effort?: string;
+      }) => void,
     ) => () => void;
     /** Classify a queued PromptTicket's text as 'inline' (run through
      *  chatRunner) or 'develop' (dispatch to /develop for PRD decomposition).

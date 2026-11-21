@@ -105,6 +105,7 @@ export function UrlCallout({ url }: { url: string }) {
 // Live (streaming) bubble markdown re-parse interval — see useThrottledValue.
 const LIVE_MARKDOWN_THROTTLE_MS = 100
 const MARKDOWN_PATH_RE = /\.(?:md|markdown)(?::\d+)*$/i
+const NO_FALLBACK_CWDS: string[] = []
 
 // Same callout shape as UrlCallout, for bare file-path mentions (e.g. a pasted
 // clipboard image path) — the label opens the file (reusing the same
@@ -113,10 +114,13 @@ const MARKDOWN_PATH_RE = /\.(?:md|markdown)(?::\d+)*$/i
 function FileCallout({
   path,
   cwd,
+  fallbackCwds = NO_FALLBACK_CWDS,
   inlinePreview = false,
 }: {
   path: string
   cwd: string
+  /** Extra roots tried (in order) when a relative path is missing under `cwd`. */
+  fallbackCwds?: string[]
   /** Renders a "Preview" toggle that shows the file's content inline via
    *  MarkdownPreview instead of navigating away to the Editor screen — set
    *  only by PromptSessionConversation (PRD 805), which has no Editor screen
@@ -137,7 +141,7 @@ function FileCallout({
       }
     })
   }
-  const onOpen = () => { void openLinkifiedFilePath(path, cwd) }
+  const onOpen = () => { void openLinkifiedFilePath(path, cwd, fallbackCwds) }
   const canPreview = inlinePreview && MARKDOWN_PATH_RE.test(path)
   const onTogglePreview = async () => {
     if (previewOpen) {
@@ -147,7 +151,7 @@ function FileCallout({
     setPreviewOpen(true)
     if (previewText === null && !previewLoading) {
       setPreviewLoading(true)
-      const text = await readLinkifiedFileText(path, cwd)
+      const text = await readLinkifiedFileText(path, cwd, fallbackCwds)
       setPreviewLoading(false)
       setPreviewText(text ?? '')
     }
@@ -1037,6 +1041,7 @@ export function nearestPrecedingUserPrompt(turns: ChatTurn[], index: number): st
 function TurnComponent({
   turn,
   cwd,
+  linkCwd,
   tabId,
   sessionId,
   runActive = false,
@@ -1054,6 +1059,11 @@ function TurnComponent({
 }: {
   turn: ChatTurn
   cwd: string
+  /** Primary root for resolving relative file links in this turn (clicks,
+   *  FileCallout, inline preview) — EpicDetail passes the Epic's live git
+   *  worktree dir, so a file the Epic created but hasn't merged resolves.
+   *  `cwd` becomes the fallback. Omitted = links resolve against `cwd`. */
+  linkCwd?: string
   tabId: string
   /** The tab's claude session id — needed to send the question card's
    *  combined reply (QuestionCard.tsx) and the consent-notice Retry through
@@ -1122,6 +1132,12 @@ function TurnComponent({
    *  Only read by the 'question' branch; default 'open'. */
   questionCardState?: QuestionCardState
 }) {
+  // File links resolve against linkCwd (the Epic's worktree) first, then cwd.
+  const linkRoot = linkCwd || cwd
+  const linkFallbacks = useMemo(
+    () => (linkCwd && linkCwd !== cwd ? [cwd] : NO_FALLBACK_CWDS),
+    [linkCwd, cwd],
+  )
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
   // happen after these hooks run.
@@ -1453,7 +1469,7 @@ function TurnComponent({
             <div
               ref={bodyRef}
               className={`prose-chat text-sm leading-relaxed ${bodyTone} ${isPlan ? 'prose-chat--plan' : ''}`}
-              onClick={(e) => { void handleChatLinkClick(e, cwd) }}
+              onClick={(e) => { void handleChatLinkClick(e, linkRoot, linkFallbacks) }}
               dangerouslySetInnerHTML={{ __html: shownHtml }}
             />
             {(clamped.truncated || bodyExpanded) && clampBodyChars !== null && (
@@ -1470,7 +1486,7 @@ function TurnComponent({
               <UrlCallout key={url} url={url} />
             ))}
             {filePaths.map((path) => (
-              <FileCallout key={path} path={path} cwd={cwd} inlinePreview={inlineFilePreview} />
+              <FileCallout key={path} path={path} cwd={linkRoot} fallbackCwds={linkFallbacks} inlinePreview={inlineFilePreview} />
             ))}
           </>
         )}

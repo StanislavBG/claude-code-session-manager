@@ -18,12 +18,14 @@ type ResolvedFile = ReturnType<typeof resolveFileLinkTarget>
  * Resolves a linkified file-path token to an actually-existing file, reading
  * its text along the way — shared by openLinkifiedFilePath (opens in the
  * Editor) and readLinkifiedFileText (read-only, for inline preview). Tries
- * the given cwd first, then falls back to other open tabs' cwds for a
- * relative token, exactly as before this was split out.
+ * the given cwd first, then (relative tokens only) each `fallbackCwds` root in
+ * order — e.g. an Epic chat passes its live git worktree as `cwd` and the main
+ * checkout as the fallback — then other open tabs' cwds.
  */
 async function resolveReadableFile(
   raw: string,
   cwd: string,
+  fallbackCwds: string[] = [],
 ): Promise<{ target: ResolvedFile; text: string } | null> {
   const filePath = raw.replace(/(?::\d+)+$/, '')
 
@@ -34,7 +36,7 @@ async function resolveReadableFile(
   // resolved path stays inside the home-scoping boundary before ever opening
   // it in the Editor — reuse files:read's existing assertInsideHome check
   // (files.cjs) rather than re-implementing path validation in the renderer.
-  // The same check runs again below for every cross-tab fallback candidate.
+  // The same check runs again below for every fallback / cross-tab candidate.
   const primaryRead = await window.api.files.read(primary.absPath)
   if (!primaryRead.ok && primaryRead.error?.startsWith('path outside home') && !isUnderProject(primary.absPath, cwd)) {
     toast.error("That path is outside the project and can't be opened.")
@@ -42,29 +44,47 @@ async function resolveReadableFile(
   }
   if (primaryRead.ok) return { target: primary, text: primaryRead.text }
 
+  let triedFallbacks = 0
   let triedOtherTabs = 0
 
-  // A mention like "projectsRegistry.ts" may name a real file that simply
-  // lives under a DIFFERENT open tab's cwd than the one the chip was rendered
-  // in (the assistant can discuss another project mid-conversation). Only
-  // relative tokens benefit — an absolute path resolves the same regardless
-  // of cwd, so there's nothing to retry.
+  // Only relative tokens benefit from another root — an absolute path
+  // resolves the same regardless of cwd, so there's nothing to retry.
   if (!isAbsoluteLinkPath(mapGitBashPath(filePath))) {
-    const otherCwds = Array.from(
-      new Set(useSessions.getState().tabs.map((t) => t.cwd).filter((c) => c && c !== cwd)),
-    )
-    for (const otherCwd of otherCwds) {
-      const candidate = resolveFileLinkTarget(raw, otherCwd)
+    const tried = new Set<string>([cwd])
+    const tryRoot = async (root: string) => {
+      const candidate = resolveFileLinkTarget(raw, root)
       const candidateRead = await window.api.files.read(candidate.absPath)
+      // Outside-home or ENOENT — either way this candidate isn't a match.
+      return candidateRead.ok ? { target: candidate, text: candidateRead.text } : null
+    }
+
+    // Caller-supplied roots first (e.g. the Epic worktree's main checkout).
+    for (const root of fallbackCwds) {
+      if (!root || tried.has(root)) continue
+      tried.add(root)
+      triedFallbacks++
+      const hit = await tryRoot(root)
+      if (hit) return hit
+    }
+
+    // A mention like "projectsRegistry.ts" may name a real file that simply
+    // lives under a DIFFERENT open tab's cwd than the one the chip was
+    // rendered in (the assistant can discuss another project mid-conversation).
+    const otherCwds = Array.from(new Set(useSessions.getState().tabs.map((t) => t.cwd)))
+    for (const otherCwd of otherCwds) {
+      if (!otherCwd || tried.has(otherCwd)) continue
+      tried.add(otherCwd)
       triedOtherTabs++
-      if (candidateRead.ok) return { target: candidate, text: candidateRead.text }
-      // Outside-home or ENOENT — either way this candidate isn't a match;
-      // move on to the next open tab's cwd.
+      const hit = await tryRoot(otherCwd)
+      if (hit) return hit
     }
   }
 
   const tabWord = triedOtherTabs === 1 ? 'tab' : 'tabs'
-  toast.error(`${primaryRead.error || 'Not found'} under ${cwd} (tried ${triedOtherTabs} other open ${tabWord})`)
+  const fallbackPart = triedFallbacks > 0
+    ? `${triedFallbacks} fallback ${triedFallbacks === 1 ? 'root' : 'roots'}, `
+    : ''
+  toast.error(`${primaryRead.error || 'Not found'} under ${cwd} (tried ${fallbackPart}${triedOtherTabs} other open ${tabWord})`)
   return null
 }
 
@@ -73,9 +93,9 @@ async function resolveReadableFile(
  * Shared by the inline click handler below and FileCallout's click-to-open
  * (TerminalChat.tsx) so both surfaces validate/resolve identically.
  */
-export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void> {
+export async function openLinkifiedFilePath(raw: string, cwd = '', fallbackCwds: string[] = []): Promise<void> {
   if (!raw) return
-  const resolved = await resolveReadableFile(raw, cwd)
+  const resolved = await resolveReadableFile(raw, cwd, fallbackCwds)
   if (!resolved) return
   useEditor.getState().openFile(resolved.target.absPath, { line: resolved.target.line, col: resolved.target.col })
   window.dispatchEvent(new CustomEvent('sm:open-editor'))
@@ -88,15 +108,16 @@ export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void
  * which renders the result through MarkdownPreview rather than navigating
  * away from the scoped conversation.
  */
-export async function readLinkifiedFileText(raw: string, cwd = ''): Promise<string | null> {
+export async function readLinkifiedFileText(raw: string, cwd = '', fallbackCwds: string[] = []): Promise<string | null> {
   if (!raw) return null
-  const resolved = await resolveReadableFile(raw, cwd)
+  const resolved = await resolveReadableFile(raw, cwd, fallbackCwds)
   return resolved?.text ?? null
 }
 
 export async function handleChatLinkClick(
   e: MouseEvent,
   cwd = '',
+  fallbackCwds: string[] = [],
 ): Promise<void> {
   const target = e.target as HTMLElement
   const a = target.closest('a')
@@ -112,5 +133,5 @@ export async function handleChatLinkClick(
   const fileEl = target.closest(`[${FILE_LINK_ATTR}]`)
   if (!fileEl) return
   const raw = fileEl.getAttribute(FILE_LINK_ATTR) ?? ''
-  await openLinkifiedFilePath(raw, cwd)
+  await openLinkifiedFilePath(raw, cwd, fallbackCwds)
 }

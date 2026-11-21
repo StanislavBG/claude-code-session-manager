@@ -433,4 +433,36 @@ describe('Turn — chat turn visuals restyle (PRD chat-turn-visuals)', () => {
     expect(bubble.getAttribute('title')).toMatch(/^you ·/)
     expect(el.querySelector('[data-testid="chat-turn-quote"]')).not.toBeNull()
   })
+  it('resolves a clicked file link against linkCwd first, with cwd as fallback', async () => {
+    const { api } = installWindowApiMock()
+    const read = vi.fn(async (p: string) =>
+      p === '/tmp/wt/src/only-in-worktree.ts'
+        ? { ok: true, text: 'x', error: null, size: 1 }
+        : { ok: false, text: '', error: 'ENOENT', size: 0 },
+    )
+    ;(api as any).files = { read }
+    const { useEditor } = await import('../../state/editor')
+    const openFile = vi.fn()
+    useEditor.setState({ openFile } as any)
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const { FILE_LINK_ATTR } = await import('../../lib/chatFileLinks')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: { id: 't-link', role: 'assistant', text: 'See src/only-in-worktree.ts for details.', at: Date.now() } as any,
+        cwd: '/tmp/proj',
+        linkCwd: '/tmp/wt',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+      } as any),
+    )
+    const chip = el.querySelector(`.prose-chat [${FILE_LINK_ATTR}]`) as HTMLElement
+    expect(chip).not.toBeNull()
+    await act(async () => {
+      chip.click()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(read.mock.calls[0][0]).toBe('/tmp/wt/src/only-in-worktree.ts')
+    expect(openFile).toHaveBeenCalledWith('/tmp/wt/src/only-in-worktree.ts', expect.anything())
+  })
 })

@@ -668,6 +668,13 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const epicId = promptSession.id
   const { cwd, claudeSessionId: sessionId } = promptSession
   const isCompleted = promptSession.status === 'completed'
+  // Chat file links resolve against the Epic's live worktree first (files it
+  // created but hasn't merged), falling back to the main checkout (`cwd`).
+  const liveWorktree = promptSession.worktree
+  const linkCwd =
+    liveWorktree && (liveWorktree.status === 'active' || liveWorktree.status === 'needs_merge_resolution')
+      ? liveWorktree.dir
+      : undefined
 
   const chat = useChat((s) => s.chats[epicId])
   const hydrate = useChat((s) => s.hydrate)
@@ -1215,6 +1222,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       <Turn
                         turn={t}
                         cwd={cwd}
+                        linkCwd={linkCwd}
                         tabId={epicId}
                         sessionId={sessionId}
                         runActive={running && t.role === 'assistant' && i === lastAssistantIndex}
@@ -1314,6 +1322,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                     at: Date.now(),
                   }}
                   cwd={cwd}
+                  linkCwd={linkCwd}
                   tabId={epicId}
                   sessionId={sessionId}
                   runActive

@@ -12,13 +12,13 @@ function mount(html: string): HTMLElement {
   return container
 }
 
-function fireClick(container: HTMLElement, target: Element, cwd?: string) {
+function fireClick(container: HTMLElement, target: Element, cwd?: string, fallbackCwds?: string[]) {
   const preventDefault = vi.fn()
   const event = {
     target,
     preventDefault,
   } as unknown as Parameters<typeof handleChatLinkClick>[0]
-  return { result: handleChatLinkClick(event, cwd), preventDefault }
+  return { result: handleChatLinkClick(event, cwd, fallbackCwds), preventDefault }
 }
 
 describe('handleChatLinkClick', () => {
@@ -210,5 +210,61 @@ describe('handleChatLinkClick', () => {
     await fireClick(container, container.firstElementChild!, '/home/user/project').result
     const shown = err.mock.calls.some((c) => String(c[0]).includes('outside the project'))
     expect(shown).toBe(expectToast)
+  })
+  describe('fallbackCwds (Epic worktree first, then main checkout)', () => {
+    const worktree = '/home/user/.wt/epic-1'
+    const main = '/home/user/project'
+    const ok = { ok: true, text: 'hi', error: null, size: 2 }
+    const missing = { ok: false, text: '', error: 'ENOENT: no such file or directory', size: 0 }
+
+    beforeEach(() => {
+      useSessions.setState({ tabs: [] } as any)
+    })
+
+    it('opens the fallback root when the relative path is missing under cwd', async () => {
+      ;(window.api.files.read as ReturnType<typeof vi.fn>).mockImplementation(async (p: string) =>
+        p === `${main}/src/new.ts` ? ok : missing,
+      )
+      const openFileMock = vi.fn()
+      useEditor.setState({ openFile: openFileMock })
+      const container = mount(`<span ${FILE_LINK_ATTR}="src/new.ts"></span>`)
+      await fireClick(container, container.firstElementChild!, worktree, [main]).result
+      expect(openFileMock).toHaveBeenCalledWith(`${main}/src/new.ts`, { line: undefined, col: undefined })
+    })
+
+    it('prefers the primary root when the file exists in both', async () => {
+      const read = window.api.files.read as ReturnType<typeof vi.fn>
+      read.mockResolvedValue(ok)
+      const openFileMock = vi.fn()
+      useEditor.setState({ openFile: openFileMock })
+      const container = mount(`<span ${FILE_LINK_ATTR}="src/new.ts"></span>`)
+      await fireClick(container, container.firstElementChild!, worktree, [main]).result
+      expect(openFileMock).toHaveBeenCalledWith(`${worktree}/src/new.ts`, { line: undefined, col: undefined })
+      expect(read).not.toHaveBeenCalledWith(`${main}/src/new.ts`)
+    })
+
+    it('ignores fallbacks for an absolute path', async () => {
+      const read = window.api.files.read as ReturnType<typeof vi.fn>
+      read.mockResolvedValue(missing)
+      const openFileMock = vi.fn()
+      useEditor.setState({ openFile: openFileMock })
+      const { toast } = await import('../../state/toast')
+      const err = vi.spyOn(toast, 'error')
+      const container = mount(`<span ${FILE_LINK_ATTR}="/home/user/abs/file.ts"></span>`)
+      await fireClick(container, container.firstElementChild!, worktree, [main]).result
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(read).toHaveBeenCalledWith('/home/user/abs/file.ts')
+      expect(openFileMock).not.toHaveBeenCalled()
+      expect(err.mock.calls.some((c) => String(c[0]).includes('fallback'))).toBe(false)
+    })
+
+    it('counts the extra roots tried in the not-found toast', async () => {
+      ;(window.api.files.read as ReturnType<typeof vi.fn>).mockResolvedValue(missing)
+      const { toast } = await import('../../state/toast')
+      const err = vi.spyOn(toast, 'error')
+      const container = mount(`<span ${FILE_LINK_ATTR}="src/none.ts"></span>`)
+      await fireClick(container, container.firstElementChild!, worktree, [main, worktree]).result
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('tried 1 fallback root'))
+    })
   })
 })

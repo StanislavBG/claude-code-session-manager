@@ -205,3 +205,47 @@ test('project_demo_video_write whenToUse advertises 5-60 seconds', () => {
   expect(demo.whenToUse).toContain('5-60 seconds');
   expect(demo.whenToUse).not.toContain('5-30');
 });
+
+// ── summary field (readme-mcp-tool-summaries) ─────────────────────────────
+// `summary` is the one plain-language line the npm README's generated MCP
+// tool table shows. It must stay out of the live description.
+
+const BANNED_SUMMARY_PHRASES = ['admin API', 'THE ONLY', 'session-manager app'];
+
+test.each(MCP_TOOL_CATALOG)('$name has a schema-valid plain-language summary', (entry) => {
+  expect(typeof entry.summary).toBe('string');
+  expect(() => CatalogEntrySchema.shape.summary.parse(entry.summary)).not.toThrow();
+  expect(entry.summary).toMatch(/^[A-Z]/);
+  expect(entry.summary.endsWith('.')).toBe(true);
+  for (const phrase of BANNED_SUMMARY_PHRASES) expect(entry.summary).not.toContain(phrase);
+});
+
+test('summary schema rejects pipes, backticks, newlines and bad lengths', () => {
+  const s = CatalogEntrySchema.shape.summary;
+  expect(() => s.parse('Too short')).toThrow();
+  expect(() => s.parse('x'.repeat(91))).toThrow();
+  expect(() => s.parse('Has a | pipe in it.')).toThrow();
+  expect(() => s.parse('Has a `tick` in it.')).toThrow();
+  expect(() => s.parse('Two lines\nin this one.')).toThrow();
+  expect(() => s.parse('A fine summary line.')).not.toThrow();
+});
+
+test('catalog has 30 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(30);
+  const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
+  expect(new Set(summaries).size).toBe(summaries.length);
+});
+
+test('summaries read at grade 8 or lower on average, none above grade 12', async () => {
+  const { fleschKincaidGrade } = await import(
+    /* @vite-ignore */ path.resolve(__dirname, '../../../../web/manual/readability.mjs')
+  );
+  const grades = MCP_TOOL_CATALOG.map((e) => ({ name: e.name, grade: fleschKincaidGrade(e.summary) }));
+  const mean = grades.reduce((sum, g) => sum + g.grade, 0) / grades.length;
+  expect(mean).toBeLessThanOrEqual(8.0);
+  expect(grades.filter((g) => g.grade > 12.0)).toEqual([]);
+});
+
+test.each(MCP_TOOL_CATALOG)('$name composeDescription ignores summary', (entry) => {
+  expect(composeDescription({ ...entry, summary: 'Changed.' })).toBe(composeDescription(entry));
+});

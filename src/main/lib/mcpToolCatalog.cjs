@@ -25,6 +25,7 @@ const CatalogEntrySchema = z.object({
   name: z.string().min(1),
   group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback']),
   purpose: z.string().min(1),
+  summary: z.string().min(10).max(90).regex(/^[^|`\n]+$/),
   whenToUse: z.string().min(1),
   whenNotToUse: z.string().min(1),
   exampleArgs: z.record(z.string(), z.unknown()),
@@ -42,6 +43,7 @@ const MCP_TOOL_CATALOG = [
     name: 'scheduler_reset_job',
     group: 'scheduler',
     purpose: "Reset a stuck scheduler job by slug via the session-manager app's admin API.",
+    summary: 'Reset a stuck job so the scheduler runs it again.',
     whenToUse: 'Use after diagnosing why a job is stuck (e.g. via scheduler_get_prd/scheduler_list_jobs) and deciding it should re-run from pending.',
     whenNotToUse: 'Do not use as a first move on a "needs_review" job without reading it first — reset just clears status, it does not answer the question the job raised.',
     exampleArgs: { slug: 'add-mcp-tool-catalog', force: false },
@@ -51,6 +53,7 @@ const MCP_TOOL_CATALOG = [
     name: 'scheduler_pause',
     group: 'scheduler',
     purpose: "Pause NEW job dispatch for every project on this machine (machine-wide, not per-repo) via the session-manager app's admin API.",
+    summary: 'Pause new job starts for every project on this machine.',
     whenToUse: 'Use only when the human asks you to stop dispatch everywhere, or for a machine-wide emergency. Pass a `reason`. Running jobs are never killed.',
     whenNotToUse: "NEVER use it to protect one repo's git/branch state or a single Epic's work — it freezes every project's scheduler. Do not use it to cancel a running job (use scheduler_cancel_job) or as a workaround for a stuck queue.",
     exampleArgs: { reason: 'machine-wide emergency: disk full' },
@@ -60,6 +63,7 @@ const MCP_TOOL_CATALOG = [
     name: 'scheduler_resume',
     group: 'scheduler',
     purpose: "Clear any scheduler pause (manual or automatic) via the session-manager app's admin API.",
+    summary: 'Lift a scheduler pause so jobs start again.',
     whenToUse: 'Use to restart dispatch after scheduler_pause, or to lift an auto-pause you have judged stale.',
     whenNotToUse: 'Do not use to retry a parked needs_review job — that is scheduler_reset_job.',
     exampleArgs: {},
@@ -69,6 +73,7 @@ const MCP_TOOL_CATALOG = [
     name: 'scheduler_list_jobs',
     group: 'scheduler',
     purpose: "List scheduler jobs via the session-manager app's admin API.",
+    summary: 'List queued, running and finished jobs on this machine.',
     whenToUse: 'Use for a quick overview of live queue-row status (pending/running/completed/failed/needs_review) across the machine.',
     whenNotToUse: 'For PRD content (frontmatter/body) rather than just job status, or for filtering by cwd/Epic, use scheduler_list_prds instead.',
     exampleArgs: {},
@@ -110,6 +115,7 @@ const MCP_TOOL_CATALOG = [
       + 'or folders this PRD may change; The scheduler never runs two PRDs with overlapping files at once '
       + '(dispatch holds the later one), so `dependsOn` is for real output or order dependencies, not for '
       + 'avoiding file clashes.',
+    summary: 'Queue one PRD (a written work order) in an Epic a human approved.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS — NEVER hand-write a PRD file. '
@@ -145,6 +151,7 @@ const MCP_TOOL_CATALOG = [
       + 'any advisory warnings. Like scheduler_create_prd it only writes files; the queue rows are derived by the '
       + 'next reconcile pass. All entries must resolve to the same project and Epic; top-level cwd, sourcePromptId '
       + 'and origin fields are forwarded the same way as scheduler_create_prd.',
+    summary: 'Queue a whole plan of PRDs in one all-or-nothing call.',
     whenToUse: 'Use to queue a whole plan at once, validate PRD included: dependsOn may name other entries of the same call by bare slug (earlier or later), so a chain needs no ordering of calls.',
     whenNotToUse: 'Do not use for a single PRD — use scheduler_create_prd. Not callable from inside a headless scheduled job (same refusal as scheduler_create_prd). If the app is not running, stop and ask the human to start it; never hand-write PRD files.',
     exampleArgs: {
@@ -172,6 +179,7 @@ const MCP_TOOL_CATALOG = [
       + 'limit 100, max 500) sorted by slug ascending — check `hasMore`/`total` in the response before assuming you '
       + "received every PRD; page further with `offset`. Default fields are compact (no parallelGroup/estimateMinutes/"
       + 'sourcePromptId/epicId/archivedStatus) — pass fields:"full" to restore them.',
+    summary: 'List PRDs and their job status, by project, Epic or status.',
     whenToUse: 'Use to survey PRDs by project/Epic/status before deciding which one to read, update, reset, or archive.',
     whenNotToUse: 'Do not assume a page without `hasMore` is the full result set without checking `total` — page further with `offset` first.',
     exampleArgs: { cwd: '/home/bilko/Projects/session-manager', status: 'needs_review' },
@@ -182,6 +190,7 @@ const MCP_TOOL_CATALOG = [
     group: 'scheduler',
     purpose: "THE ONLY SUPPORTED WAY to read one PRD's full body + parsed frontmatter (live or archived) via the "
       + "session-manager app's admin API.",
+    summary: 'Read one PRD in full, with its frontmatter.',
     whenToUse: 'Use before editing/resetting a PRD, or to answer what a needs_review job actually asked.',
     whenNotToUse: 'For a fleet-wide overview instead of one PRD, use scheduler_list_prds.',
     exampleArgs: { slug: 'add-mcp-tool-catalog' },
@@ -198,6 +207,7 @@ const MCP_TOOL_CATALOG = [
       + 'Patching dependsOn to a non-empty array replaces it wholesale (validated against existing PRD slugs, '
       + 'same resolver scheduler_create_prd uses); patching it to an explicit empty array CLEARS the dependency — '
       + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents).',
+    summary: 'Edit a PRD that has not run yet or has stopped.',
     whenToUse: 'Use to fix a PRD\'s spec before it runs, or to fix a parked (needs_review or failed) or skipped PRD before you reset it with scheduler_reset_job.',
     whenNotToUse: 'Do not use on a running or completed job. Do not reset first and edit second: the reset job can start before the edit lands.',
     exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 8 } },
@@ -208,6 +218,7 @@ const MCP_TOOL_CATALOG = [
     group: 'scheduler',
     purpose: "THE ONLY SUPPORTED WAY to archive one or more PRDs (move to prds-archived/) via the session-manager "
       + "app's admin API.",
+    summary: 'Archive PRDs that are done or no longer needed.',
     whenToUse: 'Use once a batch of PRDs is done and should stop showing up in default (live) listings.',
     whenNotToUse: 'Do not archive a PRD you still expect to reset/re-run — archived PRDs are not part of the live scheduling loop.',
     exampleArgs: { slugs: ['add-mcp-tool-catalog'] },
@@ -222,6 +233,7 @@ const MCP_TOOL_CATALOG = [
       + '(completed/failed/needs_review) — nothing to cancel. A cancelled running job\'s commits are never landed on '
       + 'the base branch; they stay on the job branch, reported in the result as landed:false plus '
       + 'jobBranch/jobBranchSha.',
+    summary: 'Cancel a job that has not finished.',
     whenToUse: 'Use to stop a running or pending job that should not continue (e.g. it was queued in error, or scope changed underneath it).',
     whenNotToUse: 'Do not use on an already-terminal job (completed/failed/needs_review) — use scheduler_reset_job if it should run again.',
     exampleArgs: { slug: 'add-mcp-tool-catalog' },
@@ -232,6 +244,7 @@ const MCP_TOOL_CATALOG = [
     group: 'scheduler',
     purpose: "THE ONLY SUPPORTED WAY to rewrite a PRD's parallelGroup and/or estimateMinutes frontmatter (and, if "
       + "parallelGroup changes, its NN- filename prefix) via the session-manager app's admin API.",
+    summary: "Change a PRD's group number or time estimate.",
     whenToUse: 'Use to correct an estimate or renumber a PRD file after it was created.',
     whenNotToUse: 'Do not use parallelGroup as an ordering/dependency barrier — it is only a unique-per-PRD display hint; use dependsOn on scheduler_create_prd/scheduler_update_prd for real ordering.',
     exampleArgs: { items: [{ slug: 'add-mcp-tool-catalog', estimateMinutes: 10 }] },
@@ -243,6 +256,7 @@ const MCP_TOOL_CATALOG = [
     purpose: "Push a prompt into an already-open tab's chat queue via the session-manager app's admin "
       + 'API. The renderer resolves the tab (must currently be open) and runs the prompt through '
       + 'the same queued-vs-immediate path as a manual send.',
+    summary: 'Send a prompt to a session tab that is already open.',
     whenToUse: 'Use to programmatically continue a conversation in a tab that is already open in the running app.',
     whenNotToUse: 'Do not use to start new work in a project you are not already chatting in — that is /develop (scheduler_create_prd) or feedback_open_session.',
     exampleArgs: { tabId: 'a1b2c3d4-tab-id', prompt: 'Please continue with the next step.' },
@@ -254,6 +268,7 @@ const MCP_TOOL_CATALOG = [
     group: 'feedback',
     purpose: 'List the OTHER projects on this machine that can receive feedback (i.e. that Session Manager '
       + 'already manages — they have a session-manager-operations/ directory).',
+    summary: 'List the other projects on this machine that can take feedback.',
     whenToUse: "Call this FIRST when you need the exact `toCwd` for feedback_open_session and are not certain of it — never guess a path.",
     whenNotToUse: 'A project missing from this list has simply never been opened in Session Manager; ask the human to open it once rather than inventing a path.',
     exampleArgs: {},
@@ -266,6 +281,7 @@ const MCP_TOOL_CATALOG = [
       + "PROPOSED session in the receiving project's own Sessions queue, carrying your report as its "
       + 'opening prompt and stamped with where it came from. Session Manager performs the cross-folder '
       + 'write; you never write another project\'s files yourself.',
+    summary: 'Hand a finding to another project as a proposed session there.',
     whenToUse: 'Use when work in this project surfaces something that is genuinely another project\'s to fix. '
       + 'Write for a human who must approve it and has never seen your project. Lead with WHY: `motivation` '
       + 'in the originating human\'s terms. Then give the full `plan` (required for tag "feature") and '
@@ -311,6 +327,7 @@ const MCP_TOOL_CATALOG = [
     purpose: 'Answer the project that asked. Only for a session that was opened by ANOTHER project\'s '
       + 'feedback_open_session: the reply lands in the Epic that asked — as an event on its chain plus its '
       + 'next chat prompt — not as a new proposed session.',
+    summary: 'Answer the project that sent this session its feedback.',
     whenToUse: 'Use once the work the other project asked for is verified (outcome "done"), or when you are '
       + 'blocked or need an answer from it (outcome "blocked" / "question"). Send "done" only after the work '
       + 'is verified — name the commit or version in the message.',
@@ -333,6 +350,7 @@ const MCP_TOOL_CATALOG = [
     purpose: "ALIAS of project_page_write for the Overview page: write this project's Project Home Overview page — ONE self-contained HTML document — to "
       + "session-manager-operations/project-pages/knowledge/overview/ via the session-manager app's admin API. "
       + 'Prefer project_page_write for any new knowledge page.',
+    summary: 'Write the Overview page of Project Home (same as project_page_write).',
     whenToUse: 'Use when asked to generate or refresh the project home Overview page. Compose the whole page yourself '
       + '(inline <style> only — scripts never run in a page; data: URIs for assets) from what is really true about the project, then '
       + 'pass the full document as `html`.',
@@ -347,6 +365,7 @@ const MCP_TOOL_CATALOG = [
     group: 'project-home',
     purpose: "Write one knowledge page for this project's Project Home — ONE self-contained HTML document identified by `pageId` — "
       + "via the session-manager app's admin API. Writing an existing pageId replaces that page.",
+    summary: 'Write one HTML knowledge page for Project Home.',
     whenToUse: 'Use when asked to document a topic of the project as a page (architecture, how-to, status). Compose the whole page yourself '
       + 'with inline <style> only — scripts never run in a page — from what is really true about the project, then pass it as `html` '
       + 'or, for a large document, write it to a local .html file and pass its absolute path as `htmlPath`.',
@@ -367,6 +386,7 @@ const MCP_TOOL_CATALOG = [
     group: 'project-home',
     purpose: "Load this project's saved competitive feature matrix (session-manager-operations/project-pages/matrix/matrix.json) "
       + "together with its JSON Schema, via the session-manager app's admin API — the warm start for a competitive-analysis run.",
+    summary: 'Read the saved competitor feature matrix and its schema.',
     whenToUse: 'Call FIRST in a competitive-analysis run, before any research: start from the saved products, groups and features '
       + 'instead of a cold start, and shape every edit to the returned `schema`. `matrix` is null when none has been saved yet.',
     whenNotToUse: 'Do not use to save — use project_matrix_write. Do not read matrix.json from disk yourself: '
@@ -380,6 +400,7 @@ const MCP_TOOL_CATALOG = [
     group: 'project-home',
     purpose: "Save this project's competitive feature matrix — ONE JSON object matching the schema project_matrix_read returns — "
       + "via the session-manager app's admin API. Each call replaces the whole stored matrix.",
+    summary: 'Save the competitor feature matrix as one JSON object.',
     whenToUse: 'Use once, at the end of a competitive-analysis run, to save the finished matrix. Build the whole object from '
       + 'project_matrix_read\'s result plus what your research really found, then pass it as `matrix` or — preferred for a large '
       + 'matrix — write it to a local .json file and pass its absolute path as `matrixPath`. Pass `model` to record which model wrote it.',
@@ -395,6 +416,7 @@ const MCP_TOOL_CATALOG = [
     group: 'project-home',
     purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "
       + "via the session-manager app's admin API. Writing an existing videoId replaces that video.",
+    summary: 'Save one self-contained HTML video for Project Home.',
     whenToUse: 'Use when asked to make a project video (demo, marketing). Compose the whole document yourself (inline <style>/<script>, '
       + 'data: URIs for assets, CSS/JS-driven animation) from what is really true about the project, declare `kind` and `lengthS`, '
       + 'then pass the document as `html` or — preferred when it embeds a base64 audio/image data URI — as an absolute `htmlPath`.',
@@ -418,6 +440,7 @@ const MCP_TOOL_CATALOG = [
     purpose: "ALIAS of project_video_write that adds a project-demo video: write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — as a new "
       + "project-demo entry under session-manager-operations/project-pages/videos/<id>/ via the session-manager app's admin API. "
       + 'project_video_write is the primary video tool; use this alias only for a quick project-demo.',
+    summary: 'Save a 30-second or 1-minute demo video (same as project_video_write).',
     whenToUse: 'Use when asked to generate or refresh the demo video. Compose the whole document yourself '
       + '(inline <style>/<script>, data: URIs for assets, CSS/JS-driven animation) from what is really true about '
       + 'the project, declare its length with <meta name="sm-demo-duration" content="N"> (5-60 seconds), then '
@@ -442,6 +465,7 @@ const MCP_TOOL_CATALOG = [
     group: 'project-home',
     purpose: "Write this project's reusable video character — a `character.json` descriptor plus a `character.js` drawing module — to "
       + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same mascot.",
+    summary: "Save the reusable character used in this project's videos.",
     whenToUse: 'Use once per project, before building character videos, to save the mascot you designed. Pass `json` (the descriptor object or its JSON text) '
       + 'and the module as `js` or — preferred for large modules — an absolute `jsPath` to a local .js file. Pass `replace: true` only to deliberately overwrite an existing character.',
     whenNotToUse: 'Never fabricate content. Do not use to write a video — use project_video_write. The call is rejected (409) when a character already exists and `replace` is not set, '
@@ -460,6 +484,7 @@ const MCP_TOOL_CATALOG = [
     group: 'customer-feedback',
     purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "
       + 'from the Feedback panel), optionally pulling new items from the feedback service first.',
+    summary: "List feedback that users sent to the owner's inbox.",
     whenToUse: 'Use to inspect what customers have submitted and each item\'s status. `pull` defaults to true '
       + '(fetch new items first); pass `includeHidden: true` to include moderated-away items.',
     whenNotToUse: 'WHEN NOT TO USE IT: this only works on the owner\'s machine (it needs the owner token) and is read-only. '
@@ -476,6 +501,7 @@ const MCP_TOOL_CATALOG = [
     group: 'customer-feedback',
     purpose: 'Set the status of one customer feedback item (open | in_progress | resolved | wontfix) with an optional '
       + 'note the customer sees, via the session-manager app\'s admin API.',
+    summary: 'Set the status of one feedback item, with an optional note.',
     whenToUse: 'Use after inspecting an item with customer_feedback_list, to mark it in progress, resolved, or wontfix.',
     whenNotToUse: 'WHEN NOT TO USE IT: this changes status only. Turning an item into an Epic is done by the human via '
       + 'Open as Epic in the Feedback panel — there is no tool for it. Cross-project findings use '
@@ -489,6 +515,7 @@ const MCP_TOOL_CATALOG = [
     purpose: 'Send one piece of feedback about Session Manager itself (bug | feature | discussion) to its maintainers — '
       + 'a one-line goal, a description, and up to 5 PNG/JPEG/WebP/GIF images given by absolute path — the same '
       + 'submission the Feedback panel makes, via the session-manager app\'s admin API.',
+    summary: 'Send feedback about Session Manager to its maintainers.',
     whenToUse: 'Use only when the human asks to send feedback about Session Manager itself. Draft a goal (one line, max '
       + '120 chars) and a description (max 4000 chars) from the conversation. For images, use the `Attached: <path>` '
       + 'lines of images the human pasted into this chat, or files the human named — absolute paths only, at most 5. '
@@ -515,6 +542,7 @@ const MCP_TOOL_CATALOG = [
       + "in the Sessions tab's HOT KEYS strip or as tools in Project Home ▸ Tools, via the session-manager app's admin API. "
       + "Each macro's `surface` tells where it shows: 'sessions' = Sessions HOT KEYS strip, 'project-home' = a tool in "
       + 'Project Home ▸ Tools, shown in every project (only what it generates is per project).',
+    summary: "List this project's saved one-click macros.",
     whenToUse: 'Use to see what macros already exist for this project (including machine-wide `*` macros and '
       + 'built-ins) before deciding whether to add, update or delete one.',
     whenNotToUse: 'WHEN NOT TO USE IT: macros are scoped to the caller\'s own project — this only ever returns '
@@ -528,6 +556,7 @@ const MCP_TOOL_CATALOG = [
     purpose: "Create or update one of this project's HOT KEYS macros — a saved (agentName, tag, prompt) "
       + 'one-click button — via the session-manager app\'s admin API, through the same macroLibrary.cjs store '
       + 'the Sessions HOT KEYS strip reads from.',
+    summary: 'Create or change a saved one-click macro (agent, mission, prompt).',
     whenToUse: 'Pass `id` to update an existing macro already visible to this project; omit `id` to create a new '
       + 'one scoped to this project. Use for things like a "Publish git + npm" macro a human will press '
       + 'repeatedly, when they have asked for that macro to exist. A surface \'project-home\' macro is a Project Home '
@@ -568,6 +597,7 @@ const MCP_TOOL_CATALOG = [
     group: 'macros',
     purpose: "Remove one of this project's HOT KEYS macros via the session-manager app's admin API, through the same "
       + 'macroLibrary.cjs store the Sessions HOT KEYS strip reads from, so an open strip updates at once.',
+    summary: 'Delete one saved macro.',
     whenToUse: 'Use when the human has asked for that macro to go, for example after its work moved to another project. '
       + 'Get the `id` from macro_list first.',
     whenNotToUse: "WHEN NOT TO USE IT: a macro is a HUMAN's one-click button and this cannot be undone — never delete one "
@@ -588,6 +618,7 @@ const MCP_TOOL_CATALOG = [
       + "tool's description is composed from, this project's multi-tool recipes, and this machine's "
       + 'delegation-readiness state (tells apart "not registered", "registered but dead" — the process '
       + 'won\'t even answer tools/list — and "registered and answering").',
+    summary: 'Start here: list every tool, or explain one tool or recipe.',
     whenToUse: 'Call with no arguments for the full grouped tool list plus recipe titles. Pass `tool` (a tool '
       + 'name) for that one tool\'s full entry, including its exampleArgs. Pass `topic` (a recipe id) for that '
       + 'recipe\'s step-by-step instructions. Pass both to get both sections in one call.',

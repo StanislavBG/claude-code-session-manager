@@ -161,7 +161,7 @@ describe('SessionActionsBar', () => {
       setValue(q(el, 'macro-prompt') as HTMLTextAreaElement, 'Scan everything')
     })
     await act(async () => { q(el, 'macro-save')!.click() })
-    expect(save).toHaveBeenCalledWith({ label: 'Scan', agentName: 'scout', tag: 'bug', prompt: 'Scan everything', projects: [CWD], surface: 'sessions', autoStartTargets: [] })
+    expect(save).toHaveBeenCalledWith({ label: 'Scan', agentName: 'scout', tag: 'bug', prompt: 'Scan everything', projects: [CWD], surface: 'sessions', autoStartTargets: [], scriptStart: false })
     expect(q(el, 'macro-editor')).toBeNull()
 
     library = [macro({ id: 'new1', label: 'Scan' })]

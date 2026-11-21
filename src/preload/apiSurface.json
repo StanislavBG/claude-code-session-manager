@@ -1786,6 +1786,13 @@
  },
  {
   "ns": "chat",
+  "method": "reportExternalNewSessionResult",
+  "channel": "chat:external-new-session-result",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "chat",
   "method": "onExternalNewSession",
   "channel": "chat:external-new-session",
   "kind": "on",

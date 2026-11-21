@@ -183,3 +183,32 @@ test('a throwing submit never throws out of the handler', async () => {
   expect(r.status).toBeGreaterThanOrEqual(500);
   expect(r.body).toEqual({ ok: false, error: 'boom' });
 });
+
+test('submit forwards absolute imagePaths to the injected submit', async () => {
+  const { adminHttp, calls } = setupSubmit();
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', {
+    body: { title: 't', body: 'b', tag: 'bug', imagePaths: ['/tmp/a.png', '/tmp/b.jpg'] },
+  });
+  expect(r.status).toBe(200);
+  expect(calls).toEqual([{ title: 't', body: 'b', tag: 'bug', imagePaths: ['/tmp/a.png', '/tmp/b.jpg'] }]);
+});
+
+test('submit refuses a relative imagePaths entry with 400 before any submit', async () => {
+  const { adminHttp, calls } = setupSubmit();
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', {
+    body: { title: 't', body: 'b', tag: 'bug', imagePaths: ['/tmp/a.png', 'rel/b.png'] },
+  });
+  expect(r.status).toBe(400);
+  expect(r.body).toEqual({ ok: false, error: 'imagePaths must be absolute paths' });
+  expect(calls).toEqual([]);
+});
+
+test('submit success passes the submit warning through', async () => {
+  const warning = 'Only 1 of 2 images were accepted by the feedback service.';
+  const { adminHttp } = setupSubmit({ ok: true, item: { id: 'f1' }, warning });
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', {
+    body: { title: 't', body: 'b', tag: 'bug', imagePaths: ['/tmp/a.png'] },
+  });
+  expect(r.status).toBe(200);
+  expect(r.body).toEqual({ ok: true, item: { id: 'f1' }, warning });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-const { registerCustomerFeedbackHandlers } = require('../customerFeedbackIpc.cjs');
+const { registerCustomerFeedbackHandlers, submitFeedback } = require('../customerFeedbackIpc.cjs');
 
 const CHANNELS = [
   'customerFeedback:submit', 'customerFeedback:list', 'customerFeedback:refresh-status',
@@ -30,11 +30,11 @@ describe('customerFeedbackIpc', () => {
     expect([...handlers.keys()].sort()).toEqual([...CHANNELS].sort());
   });
 
-  it('rejects a malformed submit before reaching submit', () => {
+  it('rejects a malformed submit before reaching submit', async () => {
     const { handlers, client } = setup();
     expect(() => handlers.get('customerFeedback:submit')({}, { title: 'x', body: 'y', tag: 'nope' })).toThrow();
     expect(client.submit).not.toHaveBeenCalled();
-    handlers.get('customerFeedback:submit')({}, { title: 'x', body: 'y', tag: 'bug' });
+    await handlers.get('customerFeedback:submit')({}, { title: 'x', body: 'y', tag: 'bug' });
     expect(client.submit).toHaveBeenCalledTimes(1);
   });
 
@@ -56,5 +56,36 @@ describe('customerFeedbackIpc', () => {
     expect(warn).toHaveBeenCalled();
     expect(warn.mock.calls[0].join(' ')).not.toContain('boom');
     warn.mockRestore();
+  });
+
+  it('IPC submit forwards images through prepare to client.submit', async () => {
+    const { handlers, client } = setup();
+    const url = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    await handlers.get('customerFeedback:submit')({}, { title: 'x', body: 'y', tag: 'bug', images: [{ dataUrl: url }] });
+    expect(client.submit).toHaveBeenCalledTimes(1);
+    const arg = client.submit.mock.calls[0][0];
+    expect(arg).toMatchObject({ title: 'x', body: 'y', tag: 'bug' });
+    expect(arg.images).toHaveLength(1);
+    expect(arg.images[0]).toMatchObject({ dataUrl: url, mime: 'image/png' });
+  });
+
+  it('submitFeedback maps images + imagePaths into prepare and returns the client result (warning included)', async () => {
+    const prepared = [{ dataUrl: 'data:image/png;base64,AA', mime: 'image/png', bytes: 1 }];
+    const prepare = vi.fn(async () => ({ ok: true, images: prepared }));
+    const result = { ok: true, item: { id: 'f1' }, warning: 'Only 0 of 1' };
+    const client = { submit: vi.fn(async () => result) };
+    const r = await submitFeedback(
+      { title: 't', body: 'b', tag: 'feature', images: [{ dataUrl: 'data:x' }], imagePaths: ['/a.png'] }, client, prepare);
+    expect(prepare).toHaveBeenCalledWith([{ dataUrl: 'data:x' }, { path: '/a.png' }]);
+    expect(client.submit).toHaveBeenCalledWith({ title: 't', body: 'b', tag: 'feature', images: prepared });
+    expect(r).toBe(result);
+  });
+
+  it('a prepare error short-circuits client.submit', async () => {
+    const prepare = vi.fn(async () => ({ ok: false, error: 'Image 1 (a.png) could not be found.' }));
+    const client = { submit: vi.fn() };
+    const r = await submitFeedback({ title: 't', body: 'b', tag: 'bug', imagePaths: ['/a.png'] }, client, prepare);
+    expect(r).toEqual({ ok: false, error: 'Image 1 (a.png) could not be found.' });
+    expect(client.submit).not.toHaveBeenCalled();
   });
 });

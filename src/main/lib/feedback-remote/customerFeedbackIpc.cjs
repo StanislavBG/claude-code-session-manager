@@ -14,11 +14,25 @@ function getClient() {
 }
 
 /**
- * Exactly the panel's submit call. @param {{ title: string, body: string, tag: string }} p
+ * The one submit path for the panel IPC and the admin route: prepares any
+ * attached images (renderer data URLs and/or absolute file paths) once via
+ * feedbackImages.prepareFeedbackImages, then calls client.submit. A prepare
+ * error resolves { ok: false, error } without submitting; otherwise the
+ * client's result (including any `warning`) is returned unchanged.
+ * @param {{ title: string, body: string, tag: string, images?: { dataUrl: string }[], imagePaths?: string[] }} p
  * @param {any} [client]
+ * @param {(inputs: { dataUrl?: string, path?: string }[]) => Promise<any>} [prepare]
  */
-function submitFeedback(p, client = getClient()) {
-  return client.submit(p);
+async function submitFeedback(p, client = getClient(), prepare = require('./feedbackImages.cjs').prepareFeedbackImages) {
+  const inputs = [
+    ...(p.images || []).map((i) => ({ dataUrl: i.dataUrl })),
+    ...(p.imagePaths || []).map((x) => ({ path: x })),
+  ];
+  const prepared = await prepare(inputs);
+  if (!prepared || !prepared.ok) {
+    return { ok: false, error: prepared && typeof prepared.error === 'string' ? prepared.error : 'Images could not be prepared.' };
+  }
+  return client.submit({ title: p.title, body: p.body, tag: p.tag, images: prepared.images });
 }
 
 /**

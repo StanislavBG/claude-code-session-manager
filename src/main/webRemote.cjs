@@ -90,7 +90,7 @@ const FRAME_SWEEP_MS = 30_000;
 
 // Abilities this desktop advertises in event:remote:ready; web clients only send
 // boxed e2e:frame sequences to desktops listing 'e2e-frames'.
-const REMOTE_CAPABILITIES = Object.freeze(['e2e-frames']);
+const REMOTE_CAPABILITIES = Object.freeze(['e2e-frames', 'chat-images']);
 
 function getFrameAssembler() {
   if (!_frameAssembler) {
@@ -1329,33 +1329,75 @@ function getDispatchMap() {
     // client — in-process call, no admin HTTP hop needed since webRemote
     // already runs inside the Electron main process (PRD 753).
     'cmd:chat:send': async (payload) => {
-      const parsed = schemas.chatExternalSend.parse(payload);
+      const result = schemas.remoteChatSend.safeParse(payload);
+      if (!result.success) {
+        const issues = result.error.issues;
+        if (issues.length > 0 && issues.every((i) => i.path[0] === 'images')) {
+          return { ok: false, disposition: 'refused', reason: 'attachment-invalid' };
+        }
+        throw result.error;
+      }
+      const parsed = result.data;
       const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
       const data = await sessionsStore.load();
       const tabs = data?.tabs ?? [];
-      // Resolve the target in main: an open tab, or an ACTIVE Epic (by id or
-      // claudeSessionId) of an open project. Anything else is a structured refusal.
       const outcome = (r) => ({
         ok: r.disposition !== 'refused',
         disposition: r.disposition,
         ...(r.reason ? { reason: r.reason } : {}),
       });
-      if (tabs.some((t) => t.sessionId === parsed.tabId || t.id === parsed.tabId)) {
-        return outcome(await chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt));
-      }
-      for (const tab of tabs) {
-        const sessions = Object.values(readActiveIndex(tab.cwd)?.sessions ?? {});
-        const epic = sessions.find((e) => e && (e.id === parsed.tabId || e.claudeSessionId === parsed.tabId));
-        if (!epic) continue;
-        if (epic.status !== 'active' || !epic.claudeSessionId) {
-          return { ok: false, disposition: 'refused', reason: epic.status === 'proposed' ? 'proposed' : 'not-active' };
+      // 1. Resolve the target BEFORE writing anything: an open tab, or an ACTIVE
+      //    Epic (by id or claudeSessionId) of an open project. Anything else is a
+      //    structured refusal.
+      let target = null;
+      const openTab = tabs.find((t) => t && (t.sessionId === parsed.tabId || t.id === parsed.tabId));
+      if (openTab) {
+        target = { id: parsed.tabId, extra: undefined, projectCwd: openTab.cwd };
+      } else {
+        for (const tab of tabs) {
+          const sessions = Object.values(readActiveIndex(tab.cwd)?.sessions ?? {});
+          const epic = sessions.find((e) => e && (e.id === parsed.tabId || e.claudeSessionId === parsed.tabId));
+          if (!epic) continue;
+          if (epic.status !== 'active' || !epic.claudeSessionId) {
+            return { ok: false, disposition: 'refused', reason: epic.status === 'proposed' ? 'proposed' : 'not-active' };
+          }
+          target = {
+            id: epic.id,
+            extra: { sessionId: epic.claudeSessionId, cwd: epic.cwd || tab.cwd },
+            projectCwd: tab.cwd,
+          };
+          break;
         }
-        return outcome(await chatRunner.enqueueExternalPrompt(epic.id, parsed.prompt, {
-          sessionId: epic.claudeSessionId,
-          cwd: epic.cwd || tab.cwd,
-        }));
       }
-      return { ok: false, disposition: 'refused', reason: 'unknown-target' };
+      if (!target) return { ok: false, disposition: 'refused', reason: 'unknown-target' };
+
+      const enqueue = (prompt) => (target.extra
+        ? chatRunner.enqueueExternalPrompt(target.id, prompt, target.extra)
+        : chatRunner.enqueueExternalPrompt(target.id, prompt));
+
+      const images = parsed.images ?? [];
+      if (images.length === 0) return outcome(await enqueue(parsed.prompt));
+
+      // 2. Save images under the owning open tab's project (never logged: no
+      //    image data or names reach the audit trail).
+      const { saveChatImages, composeAttachedPrompt, removeSavedAttachments } = require('./lib/epic/epicAttachments.cjs');
+      // projectCwd is an open tab's cwd: register it with the write boundary
+      // (as promptSessionsIpc does) so the save never depends on a pty having spawned.
+      require('./config.cjs').addAllowedRoot(validatePath(target.projectCwd));
+      const saved = await saveChatImages({ projectCwd: target.projectCwd, images });
+      if (!saved.ok) return { ok: false, disposition: 'refused', reason: 'attachment-invalid' };
+
+      // 3. Enqueue; only a definite refusal removes the files ('unconfirmed' may
+      //    still land, so its files stay).
+      let r;
+      try {
+        r = await enqueue(composeAttachedPrompt(parsed.prompt, saved.paths));
+      } catch (err) {
+        await removeSavedAttachments(target.projectCwd, saved.paths);
+        throw err;
+      }
+      if (r.disposition === 'refused') await removeSavedAttachments(target.projectCwd, saved.paths);
+      return { ...outcome(r), attachments: saved.names };
     },
 
     'cmd:session:options': async () => {

@@ -144,12 +144,12 @@ describe('web-remote e2e:frame reassembly', () => {
 
   it('event:remote:ready carries capabilities', async () => {
     await setup()
-    expect(webRemote.REMOTE_CAPABILITIES).toEqual(['e2e-frames'])
+    expect(webRemote.REMOTE_CAPABILITIES).toEqual(['e2e-frames', 'chat-images'])
     expect(Object.isFrozen(webRemote.REMOTE_CAPABILITIES)).toBe(true)
     webRemote.__test.finalizeE2eAuthenticated('test', webRemote.__test.getClient('connA'))
     const [ev] = decoded()
     expect(ev.type).toBe('event:remote:ready')
-    expect(ev.payload.capabilities).toEqual(['e2e-frames'])
+    expect(ev.payload.capabilities).toEqual(['e2e-frames', 'chat-images'])
     expect(typeof ev.payload.ts).toBe('number')
   })
 })

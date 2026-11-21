@@ -37,7 +37,7 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `cmd:session:options` — agents, tags, macros, and the `macroInputs` capability flag.
 - `cmd:session:create` — start a session; optional `macroId` + `inputs`, the desktop renders the macro's `{{name}}` placeholders.
 - `cmd:app:info` — SAS-gated; version, platform, hostname (names desktops in the switcher).
-- `cmd:chat:send` — send a prompt; target = epicId or main tab id.
+- `cmd:chat:send` — send a prompt; target = epicId or main tab id. Optional `images` (≤6 `{name,mime,data}`, base64) are saved as Epic attachments and appended as `Attached:` lines — send only when `event:remote:ready` lists the `chat-images` capability.
 - `cmd:session:subscribe` — stream live updates for one session.
 - `event:remote:ready` — desktop → phone: bridge is up, commands accepted.
 - For a key-pinned browser the desktop sends boxed `event:remote:ready` before plaintext `e2e:ready`; `RelaySocket` holds early boxes and dispatches them before deciding on `sas:pending`.

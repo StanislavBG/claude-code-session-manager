@@ -1195,6 +1195,28 @@ const chatExternalSend = z.object({
   ),
 });
 
+// Phone remote's cmd:chat:send — chatExternalSend plus up to 6 images (saved
+// as Epic attachments by epicAttachments.cjs). Prompt may be empty when at
+// least one image is sent. Deep validation (magic bytes, decoded size) is
+// saveChatImages' job; this bounds the wire shape.
+const remoteChatImage = z.object({
+  name: z.string().min(1).max(128),
+  mime: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+  data: z.string().min(1).max(4200000),
+});
+
+const remoteChatSend = z.object({
+  tabId: z.string().min(1).max(128),
+  prompt: z.string().refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
+    `prompt must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
+  ),
+  images: z.array(remoteChatImage).max(6).optional(),
+}).refine(
+  (v) => v.prompt.trim().length > 0 || (Array.isArray(v.images) && v.images.length > 0),
+  { message: 'prompt or at least one image is required', path: ['prompt'] },
+);
+
 // Renderer's report of what it did with a `chat:external-send` (mirrors
 // ChatExternalSendResult in preload/api.d.ts).
 const chatExternalSendResult = z.object({
@@ -1630,6 +1652,7 @@ module.exports = {
     chatCancel,
     chatClassifyTicket,
     chatExternalSend,
+    remoteChatSend,
     chatExternalSendResult,
     chatExternalNewSessionResult,
     remoteSessionCreate,

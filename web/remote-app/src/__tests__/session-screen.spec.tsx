@@ -170,4 +170,93 @@ describe('SessionScreen', () => {
       vi.useRealTimers();
     }
   });
+
+  describe('attachments', () => {
+    const png = (name = 'shot.png') => new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' });
+    const pick = (files: File[]) => fireEvent.change(screen.getByTestId('mic-attach-input'), { target: { files } });
+    const enableImages = () => useStore.getState().setDeviceCapabilities('dev1', ['chat-images']);
+
+    it('renders trailing Attached lines as chips with the file name only', async () => {
+      const socket = makeSocket({
+        'cmd:session:transcript': () => ({ payload: { messages: [
+          { role: 'user', text: 'look\n\nAttached: /home/me/.sm/att/abc12345-shot.png\nAttached: /home/me/.sm/att/two.jpg', ts: 1, uuid: 'a' },
+          { role: 'assistant', text: 'plain reply', ts: 2, uuid: 'b' },
+        ], hasMore: false } }),
+      });
+      renderScreen(socket);
+      const msgs = await screen.findAllByTestId('chat-message');
+      const chips = screen.getAllByTestId('message-attachment');
+      expect(chips.map((c) => c.textContent)).toEqual(['📎shot.png', '📎two.jpg']);
+      expect(msgs[0].textContent).not.toContain('/home/me');
+      expect(msgs[0].textContent).toContain('look');
+      expect(msgs[1].textContent).toBe('plain reply');
+      expect(msgs[1].querySelector('[data-testid="message-attachment"]')).toBeNull();
+    });
+
+    it('shows the sent images as thumbnails in the pending bubble', async () => {
+      enableImages();
+      const socket = makeSocket({ 'cmd:chat:send': () => ({ payload: { disposition: 'sent' } }) });
+      renderScreen(socket);
+      await screen.findAllByTestId('chat-message');
+      pick([png()]);
+      await waitFor(() => expect(screen.getByLabelText('Send message')).not.toBeDisabled());
+      await send('see this');
+      const bubble = await screen.findByTestId('pending-message');
+      const img = bubble.querySelector('img') as HTMLImageElement;
+      expect(img).not.toBeNull();
+      expect(img.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+      expect(img.getAttribute('alt')).toBe('shot.png');
+      expect(img.style.maxHeight).toBe('96px');
+      expect(bubble).toHaveTextContent('see this');
+    });
+
+    it('image-only send: clears once a user message contains a returned attachment path', async () => {
+      enableImages();
+      let echoed = false;
+      const socket = makeSocket({
+        'cmd:chat:send': () => ({ payload: { disposition: 'sent', attachments: ['/home/me/.sm/att/abc12345-shot.png'] } }),
+        'cmd:session:transcript': () => ({ payload: { messages: [
+          { role: 'user', text: 'hello', ts: 1, uuid: 'a' },
+          ...(echoed ? [{ role: 'user', text: 'Attached: /home/me/.sm/att/abc12345-shot.png', ts: 3, uuid: 'n' }] : []),
+        ], hasMore: false } }),
+      });
+      renderScreen(socket);
+      await screen.findAllByTestId('chat-message');
+      pick([png()]);
+      await waitFor(() => expect(screen.getByLabelText('Send message')).not.toBeDisabled());
+      fireEvent.click(screen.getByLabelText('Send message'));
+      await screen.findByTestId('pending-message');
+      // An earlier user message must not clear it via an empty-string match.
+      fireEvent.click(screen.getByText('Refresh'));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.getByTestId('pending-message')).toBeInTheDocument();
+      echoed = true;
+      fireEvent.click(screen.getByText('Refresh'));
+      await waitFor(() => expect(screen.queryByTestId('pending-message')).toBeNull());
+    });
+
+    it('image-only send: clears once a user message newer than the send appears', async () => {
+      enableImages();
+      let echoed = false;
+      const socket = makeSocket({
+        'cmd:chat:send': () => ({ payload: { disposition: 'sent' } }),
+        'cmd:session:transcript': () => ({ payload: { messages: [
+          { role: 'user', text: 'hello', ts: 1, uuid: 'a' },
+          ...(echoed ? [{ role: 'user', text: 'Attached: /elsewhere/img.png', ts: Date.now(), uuid: 'n' }] : []),
+        ], hasMore: false } }),
+      });
+      renderScreen(socket);
+      await screen.findAllByTestId('chat-message');
+      pick([png()]);
+      await waitFor(() => expect(screen.getByLabelText('Send message')).not.toBeDisabled());
+      fireEvent.click(screen.getByLabelText('Send message'));
+      await screen.findByTestId('pending-message');
+      fireEvent.click(screen.getByText('Refresh'));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.getByTestId('pending-message')).toBeInTheDocument();
+      echoed = true;
+      fireEvent.click(screen.getByText('Refresh'));
+      await waitFor(() => expect(screen.queryByTestId('pending-message')).toBeNull());
+    });
+  });
 });

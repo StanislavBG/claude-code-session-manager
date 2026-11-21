@@ -5,6 +5,7 @@ import { getTranscript, listSessionPrds } from '../remoteApi';
 import type { ChatMessage, RemoteSession, SendChatResult, SessionPrd } from '../types';
 import StatePane from './StatePane';
 import MicPane from './MicPane';
+import { splitAttachedLines } from '../attachedLines';
 
 export type SessionTarget =
   | { kind: 'main'; mainTabId: string; title: string }
@@ -25,6 +26,21 @@ interface Pending {
   text: string;
   disposition: SendChatResult['disposition'];
   sentAt: number;
+  /** Thumbnails of the images sent with this message (phone-side data URLs). */
+  images?: { name: string; previewUrl: string }[];
+  /** Desktop-side paths the desktop saved those images to, when it reports them. */
+  attachments?: string[];
+}
+
+/** Grace window for clock skew when an image-only send is matched by a newer user message. */
+const ECHO_SKEW_MS = 2000;
+
+function isEchoed(pending: Pending, messages: ChatMessage[]): boolean {
+  const users = messages.filter((m) => m.role === 'user');
+  if (pending.text) return users.some((m) => m.text.includes(pending.text));
+  const paths = (pending.attachments ?? []).filter(Boolean);
+  if (paths.length > 0 && users.some((m) => paths.some((p) => m.text.includes(p)))) return true;
+  return users.some((m) => m.ts >= pending.sentAt - ECHO_SKEW_MS);
 }
 
 interface Props {
@@ -108,16 +124,22 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
 
   useEffect(() => { void loadTranscript(); }, [loadTranscript]);
 
-  const handleSent = useCallback((prompt: string, result: SendChatResult) => {
+  const handleSent = useCallback((prompt: string, result: SendChatResult, images?: { name: string; previewUrl: string }[]) => {
     pollCount.current = 0;
     justSent.current = true;
-    setPending({ text: prompt.trim(), disposition: result.disposition, sentAt: Date.now() });
+    setPending({
+      text: prompt.trim(),
+      disposition: result.disposition,
+      sentAt: Date.now(),
+      images: images && images.length > 0 ? images : undefined,
+      attachments: result.attachments,
+    });
   }, []);
 
   // The pending bubble goes away once the transcript echoes the prompt.
   useEffect(() => {
     if (!pending) return;
-    if (messages.some((m) => m.role === 'user' && m.text.includes(pending.text))) setPending(null);
+    if (isEchoed(pending, messages)) setPending(null);
   }, [messages, pending]);
 
   // Re-fetch when the live state settles (turn finished / needs input).
@@ -223,7 +245,9 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
             Load earlier
           </button>
         )}
-        {messages.map((m) => (
+        {messages.map((m) => {
+          const { body, attachments } = splitAttachedLines(m.text);
+          return (
           <div
             key={m.uuid}
             data-testid="chat-message"
@@ -232,12 +256,41 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
               m.role === 'user' ? 'ml-auto bg-accent text-white' : `mr-auto bg-card border border-edge text-ink${m.live ? ' opacity-70 italic' : ''}`
             }`}
           >
-            {m.text}
+            {attachments.length === 0 ? m.text : (
+              <>
+                {body}
+                <div className={`flex flex-wrap gap-1.5${body ? ' mt-1.5' : ''}`}>
+                  {attachments.map((a, i) => (
+                    <span
+                      key={`${a.path}-${i}`}
+                      data-testid="message-attachment"
+                      title={a.path}
+                      className={`inline-flex items-center gap-1 max-w-full rounded-full px-2 py-0.5 text-xs font-mono truncate ${
+                        m.role === 'user' ? 'bg-white/20 text-white' : 'bg-panel border border-edge text-ink-soft'
+                      }`}
+                    >
+                      <span aria-hidden="true">📎</span>
+                      <span className="truncate">{a.label}</span>
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-        ))}
+          );
+        })}
         {pending && (
           <div className="max-w-[85%] ml-auto" data-testid="pending-message">
-            <div className="rounded-2xl px-3.5 py-2 text-[14.5px] whitespace-pre-wrap break-words bg-accent text-white opacity-70">{pending.text}</div>
+            <div className="rounded-2xl px-3.5 py-2 text-[14.5px] whitespace-pre-wrap break-words bg-accent text-white opacity-70">
+              {pending.images && (
+                <div className={`flex flex-wrap gap-1.5 justify-end${pending.text ? ' mb-1.5' : ''}`} data-testid="pending-images">
+                  {pending.images.map((img, i) => (
+                    <img key={`${img.name}-${i}`} src={img.previewUrl} alt={img.name} style={{ maxHeight: 96 }} className="rounded-lg max-w-full object-contain" />
+                  ))}
+                </div>
+              )}
+              {pending.text}
+            </div>
             <div className="text-[11px] text-ink-mute text-right mt-0.5" data-testid="pending-label">{PENDING_LABEL[pending.disposition]}</div>
           </div>
         )}

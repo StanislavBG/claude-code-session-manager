@@ -124,6 +124,7 @@
   "refireCap": "scheduler",
   "remoteClientSessions": "feedback-remote",
   "remoteE2eCrypto": "feedback-remote",
+  "remoteFrameAssembler": "feedback-remote",
   "reservationExpiry": "scheduler",
   "reviewNotice": "scheduler",
   "runClaudeP": "claude",

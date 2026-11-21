@@ -126,8 +126,6 @@ const KNOWN_UNDESCRIBED = {
   'config.readText': [{ path: '$0', maxBytes: undefined }], // deny; (path, opts) -> { path, maxBytes: opts?.maxBytes }
   'voice.setRecording': [true], // deny; !!coercion
   'voice.setTtsEnabled': [true], // !!coercion; remote forwards the raw boolean
-  'memory.ask': [{ question: undefined }], // single object arg with nested target flattened
-  'memory.proposeFix': [{ name: undefined }], // same
   'updater.install': [{ force: false }], // deny; force === true
 };
 

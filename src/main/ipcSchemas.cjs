@@ -824,7 +824,7 @@ const memoryStale = z.object({
   agent: MEMORY_AGENT,
 }).strict();
 
-// memory:verify/archive/restore/listArchived/ask/proposeFix — Memory Explorer actions.
+// memory:verify/archive/restore/listArchived — Memory Explorer actions (ask/proposeFix wrap memoryNamed below).
 const memoryNamed = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   name: z.string().regex(MEMORY_SLUG_RE),
@@ -834,15 +834,38 @@ const memoryNamed = z.object({
 const memoryVerify = memoryNamed;
 const memoryArchive = memoryNamed;
 const memoryRestore = memoryNamed;
-const memoryProposeFix = memoryNamed;
 const memoryListArchived = memoryList;
-const memoryAsk = z.object({
+
+// memory:ask / memory:proposeFix receive the renderer's raw single object
+// ({ question|name, target, contextName? }) from BOTH the Electron preload and
+// the relay remote (remoteApi.ts forwards positionally). Flatten `target`'s
+// truthy addressing keys onto the top level (target wins) and drop a falsy
+// contextName, so askMemory/proposeFix see the same flat payload as before.
+// A target carrying any other key (or a non-object target) is left in place
+// so the inner .strict() schema rejects it.
+const MEMORY_TARGET_KEYS = ['workspace', 'cwd', 'agent'];
+/** @param {unknown} input */
+function flattenMemoryTarget(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const { target, ...rest } = /** @type {Record<string, unknown>} */ (input);
+  if (!rest.contextName) delete rest.contextName;
+  if (target === undefined || target === null) return rest;
+  if (typeof target !== 'object' || Array.isArray(target)
+    || Object.keys(target).some((k) => !MEMORY_TARGET_KEYS.includes(k))) {
+    return { ...rest, target };
+  }
+  const t = /** @type {Record<string, unknown>} */ (target);
+  for (const k of MEMORY_TARGET_KEYS) if (t[k]) rest[k] = t[k];
+  return rest;
+}
+const memoryProposeFix = z.preprocess(flattenMemoryTarget, memoryNamed);
+const memoryAsk = z.preprocess(flattenMemoryTarget, z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   question: z.string().min(1).max(4000),
   contextName: z.string().regex(MEMORY_SLUG_RE).optional(),
   cwd: MEMORY_CWD,
   agent: MEMORY_AGENT,
-}).strict();
+}).strict());
 
 const memoryAgents = z.object({
   cwd: MEMORY_CWD,

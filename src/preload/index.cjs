@@ -409,9 +409,9 @@ contextBridge.exposeInMainWorld('api', {
     archive: (name, target) => ipcRenderer.invoke('memory:archive', { name, ...memoryTarget(target) }),
     restore: (name, target) => ipcRenderer.invoke('memory:restore', { name, ...memoryTarget(target) }),
     listArchived: (target) => ipcRenderer.invoke('memory:listArchived', memoryTarget(target)),
-    ask: ({ question, target, contextName }) =>
-      ipcRenderer.invoke('memory:ask', { question, ...(contextName ? { contextName } : {}), ...memoryTarget(target) }),
-    proposeFix: ({ name, target }) => ipcRenderer.invoke('memory:proposeFix', { name, ...memoryTarget(target) }),
+    // Forwarded unchanged: main's schema flattens `target` (same shape as the relay remote sends).
+    ask: (arg) => ipcRenderer.invoke('memory:ask', arg),
+    proposeFix: (arg) => ipcRenderer.invoke('memory:proposeFix', arg),
   },
   projectBrief: {
     get: (cwd) => ipcRenderer.invoke('project-brief:get', { cwd }),

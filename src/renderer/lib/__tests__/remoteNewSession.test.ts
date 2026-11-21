@@ -62,7 +62,7 @@ describe('registerRemoteNewSession', () => {
     registerRemoteNewSession()
     await expect(fire(payload)).resolves.toBeUndefined()
     expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/^Phone session start failed:/))
-    expect(logWrite).toHaveBeenCalledWith('webRemote', 'warn', expect.any(String))
+    expect(logWrite).toHaveBeenCalledWith('webRemote', 'warn', expect.stringMatching(/^phone session start failed for /))
   })
 
   it("routes a job macro through launchSession run 'job' with the extra instructions", async () => {
@@ -116,5 +116,20 @@ describe('registerRemoteNewSession', () => {
     expect(reportResult).toHaveBeenCalledWith({ requestId: 'r2', ok: false, error: 'boom' })
     expect(toastError).toHaveBeenCalled()
     expect(logWrite).toHaveBeenCalledWith('webRemote', 'warn', expect.any(String))
+  })
+
+  it('truncates a long script failure report to 500 chars and words the toast + log for scripts', async () => {
+    const long = 'x'.repeat(2000)
+    launchSession.mockRejectedValue(new Error(long))
+    registerRemoteNewSession()
+    await fire({ ...payload, via: 'script', requestId: 'r3' })
+    await Promise.resolve()
+    expect(reportResult).toHaveBeenCalledTimes(1)
+    const reported = reportResult.mock.calls[0][0]
+    expect(reported).toEqual({ requestId: 'r3', ok: false, error: long.slice(0, 500) })
+    expect(reported.error).toHaveLength(500)
+    expect(toastError).toHaveBeenCalledWith(`Script session start failed: ${long}`)
+    expect(toastError.mock.calls[0][0]).toMatch(/^Script session start failed/)
+    expect(logWrite).toHaveBeenCalledWith('webRemote', 'warn', `script session start failed for dev-lead in /p: ${long}`)
   })
 })

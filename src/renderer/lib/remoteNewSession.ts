@@ -53,9 +53,11 @@ export function registerRemoteNewSession(): () => void {
       if (requestId) report({ requestId, ok: true, epicId })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      if (requestId) report({ requestId, ok: false, error: msg })
-      toast.error(`Phone session start failed: ${msg}`)
-      window.api?.logs?.write('webRemote', 'warn', `phone session start failed for ${agentName} in ${cwd}: ${msg}`)
+      // main's chatExternalNewSessionResult caps error at 500; an over-long report is rejected and the caller times out.
+      if (requestId) report({ requestId, ok: false, error: msg.slice(0, 500) })
+      const label = isScript ? 'Script' : 'Phone'
+      toast.error(`${label} session start failed: ${msg}`)
+      window.api?.logs?.write('webRemote', 'warn', `${label.toLowerCase()} session start failed for ${agentName} in ${cwd}: ${msg}`)
     }
   })
 }

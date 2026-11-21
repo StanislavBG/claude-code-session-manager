@@ -1,126 +1,377 @@
 # claude-code-session-manager
 
-Local cockpit for the Claude Code CLI (the default; sessions can also run Codex, Gemini CLI, Antigravity CLI, Cursor Agent or OpenCode) — multi-tab terminal, configuration surface, scheduler, voice dictation, and live observability, all in one Electron desktop app.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->30<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
-## The 30-second pitch
+## Facts
 
-You already use the `claude` CLI. This wraps it in a cockpit so you can run multiple sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, talk to it with your microphone, and watch transcripts in real time — without ever leaving the window. Claude Code is the default. A session can also run Codex, Gemini CLI, Antigravity CLI, Cursor Agent or OpenCode instead, in Chat and Terminal; macros, phone launches and scheduled PRDs stay on Claude Code.
+| Key | Value |
+| --- | --- |
+| Kind | Desktop app built on Electron. It is not a library. It has no JS API. |
+| Run | `npx claude-code-session-manager@latest` |
+| Installers | Mac `.dmg` and `.zip` (`arm64`, `x64`). Windows `.exe` (`x64`, `arm64`). Linux `AppImage` (`x64`). Get them from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest). |
+| Needs | The Claude Code CLI, installed and signed in with your own account. `git`. Node <!-- gen:node-floor -->22.12.0<!-- /gen:node-floor --> or newer, for `npx` only. |
+| npx platforms | Linux and macOS. On Windows, use the installer. |
+| MCP server | `session-manager-scheduler`. It uses stdio. The app adds it for you. It needs the app to be running. |
+| Plugin | `session-manager-dev@session-manager` |
+| Agent CLIs | Claude Code is the default. Codex, Gemini CLI, Antigravity CLI, Cursor Agent and OpenCode work in Chat and Terminal only. |
+| Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `~/.local/state/session-manager/`. |
+| Telemetry | Anonymous and on by default. Turn it off with `SM_TELEMETRY=0`. |
+| License | MIT |
 
-New tabs open as a lightweight **chat box** and stay dormant — no PTY, no `claude` process — until you actually send a message, so a window full of tabs costs almost nothing. Prefer a single bare terminal? Launch with `--simple`.
+## Not
 
-Single-author hobby project. Linux and macOS only. Free, MIT, anonymous opt-out telemetry (see [Privacy](#privacy)).
+- It is not a hosted or cloud service. It is a desktop app. Your sessions and files stay on your machine.
+- It is not made, backed or supported by Anthropic. One person builds it as an open-source project.
+- It does not give you Claude access or replace a Claude plan. You need Claude Code, signed in with your own account.
+- It has no paid, pro or trial tier. The app and the Field Manual are both free.
+- It is not a team or business product. It has no support deal and no uptime promise.
+- It is not a library. You cannot `import` it.
 
-## Features tour
+## Features
 
-- **Dormant tabs + chat box** — every new tab opens as a chat box and stays dormant (no PTY, no `claude` process) until you send the first message. The headless chat-run engine drives it through `claude -p` with `stream-json`, session resume, and a stop signal, so a tab is a real conversation without holding a live terminal open. Hydrate into a full terminal whenever you need one.
-- **Simple mode** — `npx claude-code-session-manager@latest --simple` boots a chrome-free, single-terminal cockpit: no nav, no tabs, no config surface, just one `claude` session in the launch directory.
-- **Cmd-K command palette** — commands organised into bands (session, voice, scheduler, config, nav). Fuzzy filter, emit-only dispatch so commands stay decoupled from views.
-- **Sidebar groups** — the left nav is organised into three groups: Workspace (where you do the work), Configure (how Claude behaves), and Tools (one-off utilities).
-- **Scheduler / PRD queue** — PRDs live under `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` and the scheduler picks them up as headless `claude -p` jobs. Author them through the `scheduler_create_prd` MCP tool. Multi-select bulk archive and reset. Queue-health linter catches unbounded poll loops and post-AC overrun patterns before they burn tokens.
-- **Memory tab** — workspace-scoped memory entries that the `memory_20250818` tool can read and write, surfaced as a real UI rather than a JSON blob.
-- **Hooks** — all 29 documented events with inline tooltips explaining what each event fires on. Definitions editor plus a test-fire runner so you can verify a hook without rebuilding state.
-- **Plugins** — manifest inspector for installed plugins plus a Discover panel that lists first-party plugins with one-click install (pty-wrapped `claude plugin install`).
-- **MCP servers** — five transports (stdio, http, streamable-http, ws, sse) with a reserved-name linter so you don't waste a launch on a server Claude refuses to load.
-- **Voice** — local Moonshine ASR (English) plus Silero VAD running in a Web Worker. Push-to-talk hotkey, continuous listening, auto-submit, and barge-in that ducks TTS playback. Nothing leaves the machine.
-- **Toast notifications + 4-scope drift surfacing** — non-fatal errors land in a corner toast instead of being swallowed. Settings show drift across the default / user / project / local scopes so you always know which value actually wins.
-## Install
+A few words first. A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind of work. A **persona** is an agent's role file. A **worktree** is a separate copy of the repo on its own git branch. A **PRD** is a written work order that the scheduler runs.
+
+### Sessions
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Sessions | Each session has an agent, a Mission and an agent CLI. | You pick who does the work, and what kind. | Sessions |
+| Missions | There are seven: Feature, Bug, Discussion, Build, Project Home Builder, 3D Art, Portfolio Optimization. | Each Mission gives the agent a fitting start. | New session form |
+| Life cycle | A session is `proposed`, then `active`, then `completed`. | You can see what is waiting, running and done. | Sessions |
+| Human start | Only a person can create a session. Agents cannot. | No agent can make work for itself. | New session button |
+| Own copy | An active session runs in its own worktree, on branch `sm-epic/<id>`. | Many sessions can work on one repo at once. | On disk |
+| Chat and Terminal | These are two views of one CLI session. | Switch views and keep the same chat. | Session view |
+| Idle tabs | A tab starts no process until you send the first message. | Many open tabs cost almost nothing. | Sessions |
+| Changes | Shows what the session changed. | You can review the work before you merge it. | Session, Changes tab |
+| App preview | Runs one `npm` script per session on a free port. It opens the first local URL in your browser. | You can see the app from that session's copy. | Session view |
+
+### Scheduler
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Headless jobs | Runs each PRD as a `claude -p` job with a pinned `--model`. | Work goes on while you do other things. | Scheduler |
+| Run modes | `when-available` runs jobs while usage is under a set limit. `manual` runs a job only when you press Run. | Work fits inside your plan's limits. | Scheduler |
+| Order | A PRD waits for the PRDs named in its `dependsOn`. | Steps run in the right order. | PRD fields |
+| No clashes | Two PRDs that touch the same file never run at once. | Jobs do not break each other's edits. | Scheduler |
+| One slot pool | One pool of slots for the whole machine, plus a free-memory check. | The machine does not run out of memory. | Scheduler |
+| Retry first | A job that stops in `needs_review` tries to fix itself first. | Fewer stuck jobs need a person. | Scheduler |
+
+### Checking the work
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Gate | Each PRD lists commands that must pass. The job runs them last. | A job only passes when its checks pass. | PRD `# Gate` |
+| Validator | A last job checks each PRD of a plan. It writes `VERIFIED` or `REFUTED` to a record file. | A second agent checks the first one's claims. | Scheduler |
+| Guard hooks | Four hooks: `guard-destructive-git`, `guard-inline-implementation`, `guard-prd-writes`, `guard-self-schedule`. | They block risky git commands and stray work. | Project `.claude/settings.json` |
+
+### Agents, Missions and macros
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Agents library | Lists the personas on this machine. You can edit them. | You see each agent's role in one place. | Agents |
+| Macros | A macro saves an agent, a Mission and a prompt. One press starts one new session. | You can repeat common work fast. | Sessions |
+| Context packs | A pack adds a plugin and rules to one session. | A session gets extra skills only when it needs them. | New session form |
+
+### Claude Code settings
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| CLAUDE.md | Edits your `~/.claude/CLAUDE.md`. | You set rules for every session. | CLAUDE.md |
+| Claude config | Shows one project's `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, skills and memory folder. | You see what Claude loads for that repo. | Claude config |
+| Settings | Edits `settings.json` for each scope. It shows which scope wins. | You know which value is live. | Settings |
+| Hooks | Edits hooks. You can test-fire one. | You can check a hook before you rely on it. | Settings |
+| Extensions | Lists skills, MCP servers and plugins. | You see what is installed. | Extensions |
+
+### Project Home
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Pages | Shows pages about the project. | New people learn the project fast. | Project Home |
+| Videos | Shows short demo videos. | You can show what the project does. | Project Home |
+| Competitor matrix | Compares the project with others, feature by feature. | You see where you lead and where you lag. | Project Home |
+| Video character | A saved look for the people in demo videos. | Videos look the same over time. | Project Home |
+| Written by agents | Agents write all of these through MCP tools. | You do not have to write them by hand. | MCP tools |
+
+### Across projects
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Cross-project feedback | An agent sends a finding to another repo on this machine. It lands there as a `proposed` session. | A bug gets fixed in the repo that owns it. | `/send-feedback` |
+| Feedback to the maker | You send feedback about the app. | The maker hears what is wrong. | Feedback panel |
+
+### See what is going on
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Dashboard | Shows every project and every active session on this machine. | You see all work in one place. | Dashboard |
+| Usage meters | Show how much of your plan's limits you used. | You know when work will slow down. | Dashboard |
+| History | Shows spend, tokens and time across all projects. | You see where your usage goes. | History |
+| File Explorer | Browse and edit files. | You can fix a file without a second app. | File Explorer |
+
+### Input and remote
+
+| Feature | What it does | Why it helps | Where |
+| --- | --- | --- | --- |
+| Voice input | Turns speech into text on your machine. Nothing leaves it. | You can talk instead of type. | App Settings |
+| Recording light | A light shows on top of every screen while the mic is on. | You always know when the mic is on. | Top of window |
+| Phone remote | Drive the app from your phone through the bilko.run relay. | You can check work when you are away. | App Settings |
+| Simple mode | `--simple` opens one plain terminal. | Use it when you want just a terminal. | Launch flag |
+| Command palette | `Cmd-K` or `Ctrl-K` opens a list of commands. | You can run any command from the keys. | Anywhere |
+
+## Headless surface (for agents)
+
+### MCP server
+
+The MCP server is `session-manager-scheduler`. It lets an agent queue PRDs, read the queue, write Project Home pages and more.
+
+The app adds it at user scope in `~/.claude.json` on first launch. To add it by hand, run:
 
 ```bash
-npx claude-code-session-manager@latest
+claude mcp add session-manager-scheduler --scope user -- node <app>/scripts/scheduler-mcp-server.cjs
 ```
 
-### Installers
+In an installed build, the command is the app's own binary, with `-e ELECTRON_RUN_AS_NODE=1`.
 
-Prefer a double-click install? Download from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest):
+The server needs the app to be running. Each call goes to the app's local HTTP API. The token for it is in `~/.claude/session-manager/admin-api.json`.
 
-- **Mac** — `.dmg` (Apple Silicon and Intel)
-- **Windows** — `.exe`
-- **Linux** — `AppImage`
+Two ways it can fail:
 
-The installer needs no Node.js, compiler or Electron download. git and the Claude Code CLI are detected on first launch and installed from the in-app Setup checklist using their official installers.
+- A tool returns an error that says the app is not running. Start the app, then try again.
+- The tools are not in your tool list. The server is not added. Delete `~/.claude/session-manager/.scheduler-mcp-seeded` and restart the app.
 
-### npx
+Start with `session_manager_help`:
 
-Linux and macOS only. Needs Node.js 22.12+ (Electron 42's installer needs it) and Claude Code installed and signed in — Claude Code's native installer does not bring Node with it. The first launch downloads Electron (~200 MB) and uses node-pty's prebuilt terminal binary (no compiler needed on supported platforms). Subsequent launches are instant from the npx cache.
+- No args: it lists every tool.
+- `tool`: it explains one tool, with example args.
+- `topic`: it shows one recipe.
 
-Only on platforms without a node-pty prebuild: macOS needs Xcode Command Line Tools (`xcode-select --install`).
-Linux needs `build-essential` and `python3` in that case.
+Recipes:
 
-## Quick start
+<!-- gen:mcp-recipes -->
+- `queue-work-via-develop` — Queue work into an already-approved Epic (/develop)
+- `unstick-needs-review-job` — Unstick a job stuck in needs_review
+- `hand-finding-to-another-project` — Hand a finding to another project
+- `reply-to-the-project-that-asked` — Reply to the project that asked
+<!-- /gen:mcp-recipes -->
 
-1. Run the install command above.
-2. The app opens on the Overview tab — you should see a fresh session ready to go.
-3. Hit Cmd-K (Ctrl-K on Linux) and try `terminal new`, `voice start`, or `scheduler open`.
-4. Create a PRD with the `scheduler_create_prd` MCP tool and watch the Scheduler pick it up.
-5. On first run the microphone setup wizard opens automatically; then use the push-to-talk hotkey (see Voice setup) to dictate.
+Tools:
 
-## Privacy
+<!-- gen:mcp-tools -->
+| Tool | Group | Required args | What it does |
+| --- | --- | --- | --- |
+| `scheduler_reset_job` | scheduler | `slug` | Reset a stuck job so the scheduler runs it again. |
+| `scheduler_pause` | scheduler | — | Pause new job starts for every project on this machine. |
+| `scheduler_resume` | scheduler | — | Lift a scheduler pause so jobs start again. |
+| `scheduler_list_jobs` | scheduler | — | List queued, running and finished jobs on this machine. |
+| `scheduler_create_prd` | scheduler | `title`, `goal`, `acceptanceCriteria`, `implementationNotes`, `gate`, `files` | Queue one PRD (a written work order) in an Epic a human approved. |
+| `scheduler_create_prds` | scheduler | `prds` | Queue a whole plan of PRDs in one all-or-nothing call. |
+| `scheduler_list_prds` | scheduler | — | List PRDs and their job status, by project, Epic or status. |
+| `scheduler_get_prd` | scheduler | `slug` | Read one PRD in full, with its frontmatter. |
+| `scheduler_update_prd` | scheduler | `slug` | Edit a PRD that has not run yet or has stopped. |
+| `scheduler_archive_prd` | scheduler | `slugs` | Archive PRDs that are done or no longer needed. |
+| `scheduler_cancel_job` | scheduler | `slug` | Cancel a job that has not finished. |
+| `scheduler_retag_prd` | scheduler | `items` | Change a PRD's group number or time estimate. |
+| `chat_send_prompt` | chat | `tabId`, `prompt` | Send a prompt to a session tab that is already open. |
+| `feedback_list_projects` | feedback | — | List the other projects on this machine that can take feedback. |
+| `feedback_open_session` | feedback | `toCwd`, `fromCwd`, `title`, `motivation`, `acceptanceCriteria`, `body` | Hand a finding to another project as a proposed session there. |
+| `feedback_reply` | feedback | `message`, `outcome` | Answer the project that sent this session its feedback. |
+| `project_home_write` | project-home | `html` | Write the Overview page of Project Home (same as project_page_write). |
+| `project_page_write` | project-home | `pageId`, `title` | Write one HTML knowledge page for Project Home. |
+| `project_matrix_read` | project-home | — | Read the saved competitor feature matrix and its schema. |
+| `project_matrix_write` | project-home | — | Save the competitor feature matrix as one JSON object. |
+| `project_video_write` | project-home | `videoId`, `title`, `kind`, `lengthS`, `meta` | Save one self-contained HTML video for Project Home. |
+| `project_demo_video_write` | project-home | — | Save a 30-second or 1-minute demo video (same as project_video_write). |
+| `project_character_write` | project-home | `json` | Save the reusable character used in this project's videos. |
+| `customer_feedback_list` | customer-feedback | — | List feedback that users sent to the owner's inbox. |
+| `customer_feedback_set_status` | customer-feedback | `id`, `status` | Set the status of one feedback item, with an optional note. |
+| `customer_feedback_submit` | customer-feedback | `goal`, `description`, `tag` | Send feedback about Session Manager to its maintainers. |
+| `macro_list` | macros | — | List this project's saved one-click macros. |
+| `macro_save` | macros | `label`, `agentName`, `tag`, `prompt` | Create or change a saved one-click macro (agent, mission, prompt). |
+| `macro_delete` | macros | `id` | Delete one saved macro. |
+| `session_manager_help` | help | — | Start here: list every tool, or explain one tool or recipe. |
+<!-- /gen:mcp-tools -->
 
-**Anonymous product telemetry is on by default.** It posts event, log, error, and crash records to bilko.run. Opt out with `SM_TELEMETRY=0` or Settings → Telemetry. Details: [telemetry.md](session-manager-operations/architecture/telemetry.md).
+Rules the server enforces:
 
-- The Content-Security-Policy restricts `connect-src` to four hosts: `api.anthropic.com` (so the in-app `/usage` panel can read the billing endpoint), `registry.npmjs.org`, `json.schemastore.org`, and `www.schemastore.org`.
-- All settings, skills, hooks, scheduler PRDs, transcripts, and voice configuration stay on disk under `~/.claude/`. The agent CLI you choose (`claude` by default) is the only network egress for AI work — the cockpit never proxies your prompts.
-- The recording-status pill is always mounted at the top of the window whenever the microphone is hot, above every other UI layer. There is no way to record without seeing the indicator.
+- A new PRD must join a session that a person already approved. The server never creates a session.
+- A new PRD must have a `gate` and a `files` list.
+- A headless job cannot queue PRDs. Only planning personas such as `architect` can.
+- A job with `SM_SCHEDULER_JOB_MCP_TOOLS` set can call only the tools in that list.
+- A pause set by an agent ends after 30 minutes. A pause set by a person stays until `scheduler_resume`.
 
-## Voice setup
+### Headless jobs
 
-- The mic setup wizard auto-opens on first run. It enumerates your input devices, lets you pick one, records a sample utterance, and persists the choice in `voice.json`.
-- Push-to-talk defaults to Cmd+Option+V on macOS and Ctrl+Shift+Space elsewhere. Hold or toggle, configurable in the Voice tab.
-- Models download once on first use, then run entirely locally via onnxruntime-web.
-- Auto-submit fires Enter at a configurable countdown (default 6 s); the mic stays open across turns until silence (default 30 s) or an explicit stop.
+Each PRD runs as one `claude -p` job with a pinned `--model`. It runs as the persona named in the PRD. The default is `dev-lead`. The job works in its own worktree. It runs the PRD's gate, then commits. Its last line is a verdict such as `SCHEDULER_VERDICT: PASS`.
 
-## Scheduler / PRD workflow
+### Scripts
 
-A PRD is a self-contained markdown file with frontmatter (`title`, absolute `cwd`, `estimateMinutes`) and a body that `claude -p` runs without conversation context. They live under `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` and are authored through the `scheduler_create_prd` MCP tool.
+A script can start a macro with `POST /admin/macros/run`. This only works for a macro that a person marked "Can be started by a script".
 
-Three run modes:
+## Skills
 
-- `manual` — only fires when you click Run.
-- `on-reset` — fires at the next 5-hour usage reset.
-- `when-available` — the default. Polls the billing usage endpoint every ten minutes and fires when tokens fall below the configured threshold. Auto-pauses if a job hits a rate limit, auto-resumes at the next reset.
+### Plugin session-manager-dev
 
-The queue-health linter scans every queued PRD for two patterns that have caused real stuck jobs in this project: unbounded poll loops with unsatisfiable conditions, and post-AC fixture generators that overrun the acceptance criteria. Both incidents are documented in [`src/main/templates/PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md).
+On first launch, the app installs this plugin with no network. It comes from the bundled `session-manager` marketplace. The app keeps it up to date. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
 
-## Keyboard cheatsheet
+```bash
+claude plugin marketplace add <app folder>
+claude plugin install session-manager-dev@session-manager
+```
 
-| Key | Action |
-|---|---|
-| Cmd-K / Ctrl-K | Open command palette |
-| Alt-1 … Alt-5 | Activate tab 1–5 |
-| Cmd/Ctrl-N | Open / Start Project |
-| Cmd/Ctrl-Shift-R | Restart the app |
-| Cmd/Ctrl-Shift-S | Restart terminal in active tab |
-| Cmd/Ctrl-R | Reload app window |
-| F12 | Toggle developer tools |
-| Cmd/Ctrl-Q | Quit |
+<!-- list:skills -->
+| Skill | Use it to |
+| --- | --- |
+| `/develop` | Split work into PRDs, queue them, and track them until they are checked. |
+| `/builder` | Publish the project's npm package and keep its Field Manual in step. |
+| `/send-feedback` | Send a finding to a different project on this machine. |
+| `/maintaining-md-network` | Review a project's `CLAUDE.md` and docs so each fact lives in one place. |
+<!-- /list:skills -->
 
-## Architecture
+### Context packs
 
-Electron 42 with a CommonJS main process and a Vite-built React 18 renderer. xterm and node-pty drive the terminals. zustand owns renderer state. Moonshine via `@huggingface/transformers` plus Silero VAD via `@ricky0123/vad-web` runs voice on-device through onnxruntime-web. Tailwind for styling. Single-author project, no backwards-compat shims — when something needs renaming, it gets renamed.
+You pick packs for each session. A pack adds its skills and rules to that session only.
 
-## Contributing / development
+<!-- list:packs -->
+| Pack | What it adds | Skills |
+| --- | --- | --- |
+| `apple-design` | Apple design rules for iOS app screens. | `hig-layout-and-accessibility`, `liquid-glass-adoption` |
+| `apple-swift-core` | Swift 6 and SwiftUI rules for iOS apps. | `swift-concurrency`, `swiftui-state-and-navigation` |
+<!-- /list:packs -->
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, pre-PR checks, and how to open an issue/PR,
-and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Report security issues
-via [SECURITY.md](SECURITY.md), not a public issue.
+### Agent personas
+
+The app copies these into `~/.claude/agents/` on first launch.
+
+<!-- list:personas -->
+| Persona | Role |
+| --- | --- |
+| `architect` | Talks with you, plans the work, and splits it into PRDs. |
+| `dev-lead` | Runs one PRD, start to finish, with no one watching. |
+| `validator` | Checks a finished plan, one PRD at a time. |
+| `project-home-builder` | Writes one page for Project Home. |
+| `demo-video-builder` | Makes a short demo video for Project Home. |
+| `competitive-analyst` | Builds the competitor matrix. |
+| `competitive-researcher` | Looks up one rival product for the matrix. |
+| `blender-artist` | Makes 3D game art in Blender. |
+<!-- /list:personas -->
+
+## Install
+
+### Pick a path
+
+| Path | How | Needs | Platforms |
+| --- | --- | --- | --- |
+| Installer | Download from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest). | Nothing else. The app helps you set up `git` and Claude Code. | macOS, Windows, Linux |
+| npx | `npx claude-code-session-manager@latest` | The Node version in [Facts](#facts), `git`, Claude Code | Linux, macOS |
+| From source | `git clone`, `npm install`, `npm run dev` | Node, `git`, Claude Code | Linux, macOS |
+
+### What the first launch changes
+
+| What | Where | Turn off |
+| --- | --- | --- |
+| MCP server entry | `~/.claude.json` | `SM_SEED_SCHEDULER_MCP_DISABLE=1` |
+| Plugin | `~/.claude/plugins/` | `SM_SEED_DEV_PLUGIN_DISABLE=1` |
+| Personas | `~/.claude/agents/`. Old copies are backed up to `~/.claude/session-manager/persona-backups/`. Files you edited are left alone. | `SM_SEED_AGENT_PERSONAS_DISABLE=1` |
+| Demo video kit | `~/.claude/session-manager/demo-video-kit/` | `SM_SEED_DEMO_VIDEO_KIT_DISABLE=1` |
+| Guard hook shims | `~/.claude/session-manager/hooks/`. A project uses them once you accept its setup banner. | Do not accept the banner. |
+| App state | `~/.claude/session-manager/` | None |
+| Project folder | `<repo>/session-manager-operations/` | None |
+| Session worktrees | `~/.local/state/session-manager/` | None |
+| Telemetry | Sent to bilko.run | `SM_TELEMETRY=0` |
+
+### Check it worked
+
+```bash
+claude mcp get session-manager-scheduler
+claude plugin list
+```
+
+Then have an agent call `session_manager_help` with no args.
+
+### If it fails
+
+| Problem | Fix |
+| --- | --- |
+| Node is too old | Install the Node version in [Facts](#facts) or newer. Or use the installer. |
+| The Electron download failed | Try again. Or set `ELECTRON_MIRROR` to a mirror you can reach. |
+| No `node-pty` build for your platform | macOS: run `xcode-select --install`. Linux: install `build-essential` and `python3`. |
+| Anything else | Read the logs. Linux: `~/.config/claude-code-session-manager/logs`. macOS: `~/Library/Application Support/claude-code-session-manager/logs`. Windows: `%APPDATA%\claude-code-session-manager\logs`. |
+
+## Reference
+
+### Flags
+
+| Flag | What it does |
+| --- | --- |
+| `--simple` | Opens one plain terminal with no other screens. |
+| `--ozone-platform=x11` or `--ozone-platform=wayland` | Linux only. Picks the display system. On Wayland with `DISPLAY` set, the app picks `x11` for you. |
+
+### Env vars
+
+| Var | What it does |
+| --- | --- |
+| `SM_TELEMETRY=0` | Turns off telemetry. |
+| `SM_SEED_SCHEDULER_MCP_DISABLE=1` | Do not add the MCP server. |
+| `SM_SEED_DEV_PLUGIN_DISABLE=1` | Do not install the plugin. |
+| `SM_SEED_AGENT_PERSONAS_DISABLE=1` | Do not copy personas. |
+| `SM_SEED_DEMO_VIDEO_KIT_DISABLE=1` | Do not copy the demo video kit. |
+| `SM_SCHEDULER_HOME` | Moves app state away from `~/.claude/session-manager/`. Use it for tests. |
+| `ELECTRON_MIRROR` | Where `npx` gets Electron from. |
+
+### Network
+
+Your prompts go only to the agent CLI you chose. The app never sends them anywhere else. The app itself talks to:
+
+| Host | Why |
+| --- | --- |
+| `api.anthropic.com` | Reads your usage, for the meters and the scheduler. |
+| `registry.npmjs.org` | Checks for a new app version. |
+| `json.schemastore.org`, `www.schemastore.org` | Checks JSON files as you edit them. |
+| bilko.run | Telemetry and the phone remote relay. |
+
+### Keyboard
+
+| Key | What it does |
+| --- | --- |
+| `Cmd-K` / `Ctrl-K` | Open the command palette |
+| `Alt-1` to `Alt-5` | Go to tab 1 to 5 |
+| `Cmd/Ctrl-N` | Open or start a project |
+| `Cmd/Ctrl-Shift-R` | Restart the app |
+| `Cmd/Ctrl-Shift-S` | Restart the terminal in this tab |
+| `Cmd/Ctrl-R` | Reload the window |
+| `F12` | Show or hide dev tools |
+| `Cmd/Ctrl-Q` | Quit |
+| `Cmd+Option+V` (macOS), `Ctrl+Shift+Space` (others) | Push to talk. You can change it in App Settings. |
+
+## Development
 
 ```bash
 git clone https://github.com/StanislavBG/claude-code-session-manager
 cd claude-code-session-manager
 npm install
-npm run dev          # Vite + Electron with HMR (SM_DEV=1)
-npm run typecheck    # tsc --noEmit, must pass before commits
-npm run lint         # unstable selectors, conditional hooks, unregistered tests
-npm run test:unit    # vitest run
-npm run test:e2e     # Playwright Electron under xvfb-run (Linux)
+npm run dev
+npm run typecheck
+npm run lint
+npm run test:unit
+npm run test:e2e
 ```
 
-PRs welcome. Before authoring a scheduler PRD, read [`src/main/templates/PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) — the two stuck-job postmortems in there will save you tokens.
+Read [CONTRIBUTING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CONTRIBUTING.md) before you open a PR. Report security bugs as told in [SECURITY.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/SECURITY.md), not in a public issue. See also [CODE_OF_CONDUCT.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CODE_OF_CONDUCT.md). Read [PRD_AUTHORING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/src/main/templates/PRD_AUTHORING.md) before you write a PRD.
 
-Enjoying Session Manager? [☕ Buy me a coffee](https://bilko.run/coffee) — the app stays free either way.
+Run `npm run readme:build` after you change MCP tools, skills, packs, personas or `engines`. `npm run lint` fails if this page is out of date.
 
-Building something with agents? [Talk to Bilko for a free hour](https://bilko.run/book?utm_source=session-manager&utm_medium=readme).
+## Links
+
+| Link | URL |
+| --- | --- |
+| Field Manual | https://bilko.run/manual |
+| Product page | https://bilko.run/projects/session-manager/ |
+| Source | https://github.com/StanislavBG/claude-code-session-manager |
+| Releases | https://github.com/StanislavBG/claude-code-session-manager/releases |
+| Issues | https://github.com/StanislavBG/claude-code-session-manager/issues |
+| Buy me a coffee | https://bilko.run/coffee |
+| Talk to Bilko | https://bilko.run/book?utm_source=session-manager&utm_medium=readme |
 
 ## License
 
-MIT. Built by one person on evenings and weekends.
+MIT. The app and the Field Manual are free. There is no paid tier.

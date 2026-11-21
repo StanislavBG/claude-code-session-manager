@@ -1,7 +1,7 @@
 {
   "name": "claude-code-session-manager",
   "version": "0.138.0",
-  "description": "Local cockpit for the Claude Code CLI — multi-tab terminal, full config surface, scheduler, voice dictation, and live observability.",
+  "description": "Free desktop app for Claude Code: run many sessions, each in its own git worktree; queue work that runs headless within your usage limits; agents drive it through an MCP server and skills.",
   "type": "module",
   "main": "src/main/index.cjs",
   "bin": {
@@ -79,7 +79,7 @@
     "lint:e2e-budget": "node scripts/check-e2e-budget.cjs",
     "lint:scroll": "node scripts/check-scroll-into-view.cjs",
     "check:frame": "node scripts/frame-integrity.mjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage && npm run lint:test-smells && npm run lint:page-stewards && npm run lint:e2e-budget && npm run lint:scroll",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage && npm run lint:test-smells && npm run lint:page-stewards && npm run lint:e2e-budget && npm run lint:scroll && npm run lint:readme",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [
@@ -92,12 +92,18 @@
     "cli",
     "cockpit",
     "mcp",
+    "mcp-server",
     "agents",
     "hooks",
     "scheduler",
     "voice",
     "speech-to-text",
-    "prd"
+    "prd",
+    "claude-code-plugin",
+    "skills",
+    "git-worktree",
+    "headless",
+    "desktop-app"
   ],
   "author": "bilkobibitkov",
   "license": "MIT",

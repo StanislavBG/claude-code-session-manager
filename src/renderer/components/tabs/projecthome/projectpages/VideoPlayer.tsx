@@ -1,5 +1,5 @@
 /**
- * One saved video in the same sandboxed iframe DemoVideoFrame uses
+ * One saved video in a sandboxed iframe
  * (allow-scripts only, smfile:// src), driven through the player bridge
  * protocol (src/main/lib/project-pages/playerBridge.cjs): we post
  * {smPlayer:1, cmd} to the frame and accept {smPlayer:1, type:'state'}

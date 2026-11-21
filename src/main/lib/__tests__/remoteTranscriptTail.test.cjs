@@ -80,6 +80,34 @@ describe('buildRemoteConversation', () => {
     assert.ok(out.messages[1].text.endsWith('…'));
   });
 
+  const attached = (n) => Array.from({ length: n }, (_, i) => `Attached: /tmp/sm-attachments/img-${i}.png`).join('\n');
+
+  it('keeps the trailing Attached block through the 2000 history prompt cap', () => {
+    const block = attached(3);
+    const out = buildRemoteConversation({ exchanges: [ex(1, 'b'.repeat(5000) + '\n\n' + block, 'r')] });
+    const text = out.messages[0].text;
+    assert.ok(text.length <= 2000);
+    assert.ok(text.endsWith('…\n\n' + block));
+    assert.ok(text.startsWith('bbb'));
+  });
+
+  it('keeps only whole leading Attached lines when the block alone exceeds the cap', () => {
+    const block = attached(60);
+    const out = buildRemoteConversation({ exchanges: [ex(1, 'body\n\n' + block, 'r')] });
+    const text = out.messages[0].text;
+    assert.ok(text.length <= 2000);
+    const lines = text.split('\n');
+    assert.ok(lines.every((l) => /^Attached: .+$/.test(l)));
+    assert.deepEqual(lines, block.split('\n').slice(0, lines.length));
+    assert.ok((text + '\n' + block.split('\n')[lines.length]).length > 2000);
+  });
+
+  it('leaves plain long prompts capped exactly as before', () => {
+    const plain = 'p'.repeat(1500) + '\nAttached: not-trailing\n' + 'q'.repeat(1500);
+    const out = buildRemoteConversation({ exchanges: [ex(1, plain, 'r')] });
+    assert.equal(out.messages[0].text, plain.slice(0, 1999) + '…');
+  });
+
   it('never throws on malformed entries', () => {
     const out = buildRemoteConversation({ exchanges: [null, { ts: 5 }, ex(1)], tail: [null, 3] });
     assert.deepEqual(out.messages.map((m) => m.text), ['p1', 'r1']);
@@ -146,6 +174,14 @@ describe('readRecentChatMessages', () => {
     assert.deepEqual(await readRecentChatMessages(path.join(dir, 'nope.jsonl')), []);
     assert.deepEqual(await readRecentChatMessages(undefined), []);
     assert.deepEqual(await readRecentChatMessages(42), []);
+  });
+
+  it('keeps the trailing Attached block under the 4000 live cap', async () => {
+    const block = ['a', 'b', 'c'].map((n) => `Attached: /tmp/sm-attachments/${n}.png`).join('\n');
+    write([u('x'.repeat(5000) + '\n\n' + block)]);
+    const [m] = await readRecentChatMessages(file);
+    assert.ok(m.text.length <= 4000);
+    assert.equal(m.text, 'x'.repeat(4000 - 2 - block.length - 1) + '…\n\n' + block);
   });
 
   it('truncates long text to 4000 chars with a trailing ellipsis', async () => {

@@ -28,8 +28,39 @@ function textOf(content) {
     .join('\n');
 }
 
-function cap(text, max) {
+const ATTACHED_LINE = /^Attached: .+$/;
+
+function capHead(text, max) {
   return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+/**
+ * Cap text at `max` chars. A trailing block of `Attached: <path>` lines (image
+ * sends append it) survives: only the body before it is cut, so the phone can
+ * still render attachment chips. Without such a block this is a plain head cap.
+ */
+function cap(text, max) {
+  if (text.length <= max) return text;
+  const lines = text.split('\n');
+  let i = lines.length;
+  while (i > 0 && ATTACHED_LINE.test(lines[i - 1])) i--;
+  if (i === lines.length) return capHead(text, max);
+  const block = lines.slice(i);
+  const blockText = block.join('\n');
+  if (blockText.length <= max - 2) {
+    const body = lines.slice(0, i).join('\n').trimEnd();
+    const budget = max - 2 - blockText.length;
+    if (!body || budget < 1) return blockText;
+    return capHead(body, budget) + '\n\n' + blockText;
+  }
+  // Block alone overflows: whole lines from its start, no body.
+  let out = '';
+  for (const line of block) {
+    const next = out ? out + '\n' + line : line;
+    if (next.length > max) break;
+    out = next;
+  }
+  return out || capHead(block[0], max);
 }
 
 function truncate(text) {

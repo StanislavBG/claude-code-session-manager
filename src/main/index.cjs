@@ -1,3 +1,16 @@
+// Dead-stdio guard — must be the first statement. After the launching terminal
+// closes, writes to the inherited stdout/stderr fail EIO/EPIPE and would surface
+// as one uncaughtException per console line. The notice goes to the file logger
+// (required lazily: logs.cjs pulls in electron's app), never to the dead stream.
+try {
+  require('./lib/process/stdioGuard.cjs').guardStdio({
+    log: ({ stream, code }) => {
+      try {
+        require('./logs.cjs').writeLine({ scope: 'main', level: 'warn', message: 'stdio stream dead; output to it is dropped', meta: { stream, code } });
+      } catch { /* best-effort */ }
+    },
+  });
+} catch { /* the guard must never stop boot */ }
 // Boot diagnostic (SM_BOOT_DIAG=1, set by the packaged smoke): one stderr line that
 // shows whether `electron` resolved to the built-in module or ran in node mode.
 if (process.env.SM_BOOT_DIAG === '1') {
@@ -1339,11 +1352,16 @@ app.whenReady().then(async () => {
     console.error(`[insideHome] SELF-CHECK FAILED: ${bootHomeSelfCheck.error}; sessions will not be able to spawn`);
   }
 
+  // A dead-stdio write error (EIO/EPIPE after the terminal closed) is reported
+  // and logged at most once per process; every other error as before.
+  const shouldReportUncaught = require('./lib/process/stdioGuard.cjs').createUncaughtReportFilter();
   process.on('uncaughtException', (err) => {
-    try {
-      require('./lib/telemetry/telemetryClient.cjs').reportError({ name: 'uncaughtException', msg: err?.message, stack: err?.stack });
-    } catch { /* telemetry must never break the existing handling below */ }
-    logs.writeLine({ scope: 'main', level: 'error', message: 'uncaughtException', meta: { error: err?.message, stack: err?.stack } });
+    if (shouldReportUncaught(err)) {
+      try {
+        require('./lib/telemetry/telemetryClient.cjs').reportError({ name: 'uncaughtException', msg: err?.message, stack: err?.stack });
+      } catch { /* telemetry must never break the existing handling below */ }
+      logs.writeLine({ scope: 'main', level: 'error', message: 'uncaughtException', meta: { error: err?.message, stack: err?.stack } });
+    }
   });
   process.on('unhandledRejection', (reason) => {
     const r = reason instanceof Error ? { error: reason.message, stack: reason.stack } : { reason: String(reason) };

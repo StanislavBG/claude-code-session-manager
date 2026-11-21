@@ -1,10 +1,12 @@
 /**
  * CustomerFeedbackPanel — full-height panel docked to the LEFT edge where a
- * user submits Header/Body/tag feedback and sees every item they have sent
- * with its resolution status. Driven entirely by useCustomerFeedback; mirrors
+ * user submits Goal/Description/tag feedback plus up to 5 images (paste, drop
+ * or the Add images picker) and sees every item they have sent with its
+ * resolution status. Images go to main as raw data URLs; main validates and
+ * downscales them. Driven entirely by useCustomerFeedback; mirrors
  * HomeSessionDrawer's portal/ESC/backdrop/slide pattern, mirrored to the left.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Z } from '../../lib/zLayers'
 import { useCustomerFeedback } from '../../state/customerFeedback'
@@ -12,6 +14,7 @@ import { useToast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { openFreeHour } from '../../lib/freeHour'
 import { CustomerFeedbackInbox } from './CustomerFeedbackInbox'
+import { useAttachments } from '../epics/attachments'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
 const STATUS_LABEL: Record<CustomerFeedbackStatus, string> = {
@@ -29,10 +32,22 @@ const TAGS: { tag: CustomerFeedbackTag; label: string }[] = [
 
 const TAG_LABEL: Record<CustomerFeedbackTag, string> = { bug: 'Bug', feature: 'Feature', discussion: 'Discussion' }
 
-const SESSION_PHRASE = 'Send this to Session Manager as feedback.'
+const SESSION_PHRASE = 'Send this to Session Manager as feedback, with any screenshots I attached.'
 
 const TITLE_MAX = 120
 const BODY_MAX = 4000
+const IMAGE_MAX = 5
+const IMAGE_MAX_BYTES = 25 * 1024 * 1024
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+function readDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result))
+    r.onerror = () => reject(r.error ?? new Error(`could not read ${file.name || 'image'}`))
+    r.readAsDataURL(file)
+  })
+}
 
 export function CustomerFeedbackPanel() {
   const panelOpen = useCustomerFeedback((s) => s.panelOpen)
@@ -50,6 +65,8 @@ export function CustomerFeedbackPanel() {
   const showToast = useToast((s) => s.show)
   const [entered, setEntered] = useState(false)
   const [mcpReady, setMcpReady] = useState(false)
+  const att = useAttachments()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const sorted = useMemo(() => [...items].sort((a, b) => b.submittedAt - a.submittedAt), [items])
 
@@ -109,6 +126,37 @@ export function CustomerFeedbackPanel() {
 
   const blank = draft.title.trim() === '' || draft.body.trim() === ''
 
+  const addImages = (files: FileList | File[] | null | undefined) => {
+    const list = files ? Array.from(files) : []
+    if (list.length === 0) return
+    const accepted: File[] = []
+    for (const f of list) {
+      const name = f.name || 'pasted image'
+      if (!IMAGE_TYPES.includes(f.type)) {
+        showToast('error', `${name} is not a PNG, JPEG, WebP or GIF image.`)
+      } else if (f.size > IMAGE_MAX_BYTES) {
+        showToast('error', `${name} is over 25 MB.`)
+      } else if (att.items.length + accepted.length >= IMAGE_MAX) {
+        showToast('error', `You can attach up to ${IMAGE_MAX} images.`)
+        break
+      } else {
+        accepted.push(f)
+      }
+    }
+    if (accepted.length) att.add(accepted)
+  }
+
+  const onSubmit = async () => {
+    let images: { dataUrl: string }[]
+    try {
+      images = await Promise.all(att.items.map(async (i) => ({ dataUrl: await readDataUrl(i.file) })))
+    } catch (e) {
+      showToast('error', `Could not read an image: ${e instanceof Error ? e.message : String(e)}`)
+      return
+    }
+    if (await submit(images)) att.clear()
+  }
+
   const copyPhrase = async () => {
     if (await copyText(SESSION_PHRASE)) showToast('info', 'Copied — paste it into your session.')
     else showToast('error', 'Could not copy to the clipboard.')
@@ -149,8 +197,24 @@ export function CustomerFeedbackPanel() {
             className="grid gap-3"
             onSubmit={(e) => {
               e.preventDefault()
-              if (!blank && !submitting) void submit()
+              if (!blank && !submitting) void onSubmit()
             }}
+            onPaste={(e) => {
+              const files = e.clipboardData?.files
+              if (!files || files.length === 0) return
+              e.preventDefault()
+              addImages(files)
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer?.types?.includes('Files')) e.preventDefault()
+            }}
+            onDrop={(e) => {
+              const files = e.dataTransfer?.files
+              if (!files || files.length === 0) return
+              e.preventDefault()
+              addImages(files)
+            }}
+            data-testid="customer-feedback-form"
           >
             {mcpReady && (
               <div className="flex items-start gap-2">
@@ -171,7 +235,7 @@ export function CustomerFeedbackPanel() {
             )}
             <label className="grid gap-1">
               <span className="flex justify-between font-mono text-[11px] uppercase tracking-[0.05em] text-fg-dim">
-                <span>Header</span>
+                <span>Goal</span>
                 <span>
                   {draft.title.length}/{TITLE_MAX}
                 </span>
@@ -185,7 +249,7 @@ export function CustomerFeedbackPanel() {
               />
             </label>
             <label className="grid gap-1">
-              <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-fg-dim">Body</span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-fg-dim">Description</span>
               <textarea
                 value={draft.body}
                 maxLength={BODY_MAX}
@@ -195,6 +259,58 @@ export function CustomerFeedbackPanel() {
                 data-testid="customer-feedback-body"
               />
             </label>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={att.items.length >= IMAGE_MAX}
+                  className="rounded-md border border-line bg-bg px-2.5 py-1 text-[12px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-50"
+                  title="Add images — or paste a screenshot or drop images onto the form"
+                  data-testid="customer-feedback-add-images"
+                >
+                  Add images
+                </button>
+                <span className="font-mono text-[11px] text-fg-dim">
+                  {att.items.length}/{IMAGE_MAX} images
+                </span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={IMAGE_TYPES.join(',')}
+                  className="hidden"
+                  onChange={(e) => {
+                    addImages(e.target.files)
+                    e.target.value = ''
+                  }}
+                  data-testid="customer-feedback-images-input"
+                />
+              </div>
+              {att.items.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {att.items.map((i) => (
+                    <div
+                      key={i.id}
+                      className="relative h-16 w-16 overflow-hidden rounded-md border border-line bg-bg"
+                      data-testid="customer-feedback-image"
+                    >
+                      {i.url && <img src={i.url} alt={i.name} className="h-full w-full object-cover" />}
+                      <button
+                        type="button"
+                        onClick={() => att.remove(i.id)}
+                        aria-label={`Remove ${i.name}`}
+                        title="Remove"
+                        className="absolute right-0.5 top-0.5 rounded bg-black/60 px-1 text-[11px] leading-4 text-white hover:bg-black/80"
+                        data-testid="customer-feedback-image-remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex gap-2" role="group" aria-label="Feedback type">
               {TAGS.map(({ tag, label }) => (
                 <button
@@ -212,7 +328,8 @@ export function CustomerFeedbackPanel() {
               ))}
             </div>
             <p className="m-0 text-[11.5px] text-fg-dim">
-              Your feedback is sent to bilko.run. Please don&apos;t paste secrets, keys or passwords.
+              Your feedback, including any screenshots, is sent to bilko.run. Please don&apos;t include secrets, keys
+              or passwords.
             </p>
             <button
               type="submit"

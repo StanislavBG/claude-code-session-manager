@@ -45,7 +45,7 @@ describe('customerFeedback store', () => {
     s.setState({ items: [item({ id: 'old' })] as never })
     s.getState().setDraft({ title: 'T', body: 'B', tag: 'feature' })
     cf.submit.mockResolvedValue({ ok: true, item: item({ id: 'new' }) })
-    await s.getState().submit()
+    expect(await s.getState().submit([])).toBe(true)
     expect(cf.submit).toHaveBeenCalledWith({ title: 'T', body: 'B', tag: 'feature' })
     expect(s.getState().items.map((i) => i.id)).toEqual(['new', 'old'])
     expect(s.getState().draft).toEqual({ title: '', body: '', tag: 'bug' })
@@ -58,14 +58,27 @@ describe('customerFeedback store', () => {
     const { useCustomerFeedback: s, errSpy } = await load()
     s.getState().setDraft({ title: 'T', body: 'B' })
     cf.submit.mockResolvedValueOnce({ ok: false, error: 'nope' })
-    await s.getState().submit()
+    expect(await s.getState().submit()).toBe(false)
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('nope'))
     expect(s.getState().draft.title).toBe('T')
     cf.submit.mockRejectedValueOnce(new Error('net down'))
-    await s.getState().submit()
+    expect(await s.getState().submit()).toBe(false)
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('net down'))
     expect(s.getState().draft.body).toBe('B')
     expect(s.getState().submitting).toBe(false)
+  })
+
+  it('submit passes images and shows a returned warning as a toast', async () => {
+    const cf = installApi()
+    const { useCustomerFeedback: s } = await load()
+    const { toast } = await import('../toast')
+    const warnSpy = vi.spyOn(toast, 'warn')
+    s.getState().setDraft({ title: 'T', body: 'B' })
+    cf.submit.mockResolvedValue({ ok: true, item: item(), warning: '1 image was dropped' })
+    const images = [{ dataUrl: 'data:image/png;base64,AA==' }, { dataUrl: 'data:image/jpeg;base64,BB==' }]
+    expect(await s.getState().submit(images)).toBe(true)
+    expect(cf.submit).toHaveBeenCalledWith({ title: 'T', body: 'B', tag: 'bug', images })
+    expect(warnSpy).toHaveBeenCalledWith('1 image was dropped')
   })
 
   it('ignores a second submit while one is in flight', async () => {

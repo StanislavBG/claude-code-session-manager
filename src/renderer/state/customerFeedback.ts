@@ -51,7 +51,8 @@ interface CustomerFeedbackState {
   togglePanel: () => void
   setDraft: (partial: Partial<FeedbackDraft>) => void
   load: () => Promise<void>
-  submit: () => Promise<void>
+  /** Resolves true when the host accepted the item. `images` are raw data URLs. */
+  submit: (images?: { dataUrl: string }[]) => Promise<boolean>
   refreshStatus: () => Promise<void>
   markSeen: () => Promise<void>
   loadOwnerInfo: () => Promise<void>
@@ -103,19 +104,23 @@ export const useCustomerFeedback = create<CustomerFeedbackState>((set, get) => {
 
     load: () => guarded('Feedback load failed', reloadItems),
 
-    submit: async () => {
-      if (get().submitting) return
+    submit: async (images) => {
+      if (get().submitting) return false
       set({ submitting: true })
       try {
-        const r = await api().submit(get().draft)
+        const draft = get().draft
+        const r = await api().submit(images && images.length > 0 ? { ...draft, images } : draft)
         if (r.ok) {
           set((s) => ({ items: [r.item, ...s.items], draft: emptyDraft() }))
           toast.info('Feedback sent — thank you')
-        } else {
-          toast.error(`Feedback not sent: ${r.error}`)
+          if (r.warning) toast.warn(r.warning)
+          return true
         }
+        toast.error(`Feedback not sent: ${r.error}`)
+        return false
       } catch (e) {
         toast.error(`Feedback not sent: ${errText(e)}`)
+        return false
       } finally {
         set({ submitting: false })
       }

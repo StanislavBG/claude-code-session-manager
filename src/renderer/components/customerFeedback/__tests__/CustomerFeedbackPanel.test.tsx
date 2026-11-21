@@ -149,7 +149,7 @@ describe('CustomerFeedbackPanel', () => {
 
   it('free-hour link opens the booking URL and does not submit or close', async () => {
     const open = vi.fn(async () => ({ ok: true }))
-    const submit = vi.fn(async () => {})
+    const submit = vi.fn(async () => false)
     useCustomerFeedback.setState({ submit })
     ;(window as unknown as { api: unknown }).api = { shell: { open } }
     await mount()
@@ -174,6 +174,150 @@ describe('CustomerFeedbackPanel', () => {
     expect(text).not.toContain('pricing')
   })
 
+  it('labels the fields Goal and Description and warns about screenshots', async () => {
+    await mount()
+    const text = q('customer-feedback-panel')!.textContent ?? ''
+    expect(text).toContain('Goal')
+    expect(text).toContain('0/120')
+    expect(text).toContain('Description')
+    expect(text).not.toContain('Header')
+    expect(text).toContain('including any screenshots, is sent to bilko.run')
+  })
+
+  describe('images', () => {
+    let created = 0
+    let revoked: string[] = []
+    const png = (name: string, size = 10, type = 'image/png') => {
+      const f = new File([new Uint8Array(4)], name, { type })
+      if (size !== 10) Object.defineProperty(f, 'size', { value: size })
+      return f
+    }
+    const pick = async (files: File[]) => {
+      const input = q('customer-feedback-images-input') as HTMLInputElement
+      Object.defineProperty(input, 'files', { value: files, configurable: true })
+      await act(async () => {
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+    const thumbs = () => document.querySelectorAll('[data-testid="customer-feedback-image"]')
+    let show: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      created = 0
+      revoked = []
+      URL.createObjectURL = vi.fn(() => `blob:${++created}`)
+      URL.revokeObjectURL = vi.fn((u: string) => void revoked.push(u))
+      show = vi.fn()
+      useToast.setState({ show } as never)
+      ;(window as unknown as { api: unknown }).api = {}
+    })
+
+    it('Add images opens a multiple image-only file input', async () => {
+      await mount()
+      const input = q('customer-feedback-images-input') as HTMLInputElement
+      const click = vi.spyOn(input, 'click').mockImplementation(() => {})
+      q('customer-feedback-add-images')!.click()
+      expect(click).toHaveBeenCalled()
+      expect(input.multiple).toBe(true)
+      expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif')
+    })
+
+    it('two picked images render two thumbnails; remove drops one and revokes its URL', async () => {
+      await mount()
+      await pick([png('a.png'), png('b.png')])
+      expect(thumbs()).toHaveLength(2)
+      await act(async () => {
+        ;(document.querySelector('[data-testid="customer-feedback-image-remove"]') as HTMLElement).click()
+      })
+      expect(thumbs()).toHaveLength(1)
+      expect(revoked).toEqual(['blob:1'])
+    })
+
+    it('refuses a 6th image, a non-image and a file over 25 MB with an error toast', async () => {
+      await mount()
+      await pick([png('1.png'), png('2.png'), png('3.png'), png('4.png'), png('5.png')])
+      expect(thumbs()).toHaveLength(5)
+      await pick([png('6.png')])
+      expect(thumbs()).toHaveLength(5)
+      expect(show).toHaveBeenCalledWith('error', expect.stringContaining('up to 5'))
+      act(() => {
+        ;(document.querySelector('[data-testid="customer-feedback-image-remove"]') as HTMLElement).click()
+      })
+      show.mockClear()
+      await pick([png('notes.txt', 10, 'text/plain')])
+      expect(show).toHaveBeenCalledWith('error', expect.stringContaining('notes.txt'))
+      await pick([png('huge.png', 26 * 1024 * 1024)])
+      expect(show).toHaveBeenCalledWith('error', expect.stringContaining('25 MB'))
+      expect(thumbs()).toHaveLength(4)
+    })
+
+    it('accepts a pasted image', async () => {
+      await mount()
+      const ev = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(ev, 'clipboardData', { value: { files: [png('shot.png')] } })
+      await act(async () => {
+        q('customer-feedback-body')!.dispatchEvent(ev)
+      })
+      expect(thumbs()).toHaveLength(1)
+    })
+
+    it('accepts a dropped image', async () => {
+      await mount()
+      const ev = new Event('drop', { bubbles: true, cancelable: true })
+      Object.defineProperty(ev, 'dataTransfer', { value: { files: [png('d.png')], types: ['Files'] } })
+      await act(async () => {
+        q('customer-feedback-form')!.dispatchEvent(ev)
+      })
+      expect(thumbs()).toHaveLength(1)
+    })
+
+    const flushAll = async () => {
+      for (let i = 0; i < 10; i++) {
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0))
+        })
+      }
+    }
+
+    it('submit passes two data URLs and clears images on success', async () => {
+      const submit = vi.fn(async (_images?: { dataUrl: string }[]) => true)
+      useCustomerFeedback.setState({ submit, draft: { title: 'G', body: 'D', tag: 'bug' } })
+      await mount()
+      await pick([png('a.png'), png('b.png')])
+      await act(async () => {
+        q('customer-feedback-submit')!.click()
+      })
+      await flushAll()
+      expect(submit).toHaveBeenCalledTimes(1)
+      const images = submit.mock.calls[0][0]!
+      expect(images).toHaveLength(2)
+      for (const im of images) expect(im.dataUrl).toMatch(/^data:image\/png;base64,/)
+      expect(thumbs()).toHaveLength(0)
+      expect(revoked.sort()).toEqual(['blob:1', 'blob:2'])
+    })
+
+    it('keeps images when submit fails', async () => {
+      const submit = vi.fn(async () => false)
+      useCustomerFeedback.setState({ submit, draft: { title: 'G', body: 'D', tag: 'bug' } })
+      await mount()
+      await pick([png('a.png'), png('b.png')])
+      await act(async () => {
+        q('customer-feedback-submit')!.click()
+      })
+      await flushAll()
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(thumbs()).toHaveLength(2)
+    })
+
+    it('revokes object URLs on unmount', async () => {
+      await mount()
+      await pick([png('a.png')])
+      act(() => root?.unmount())
+      root = null
+      expect(revoked).toEqual(['blob:1'])
+    })
+  })
+
   it('renders a <script> title as literal text', async () => {
     useCustomerFeedback.setState({ items: [item({ title: '<script>alert(1)</script>' })] })
     await mount()
@@ -183,7 +327,7 @@ describe('CustomerFeedbackPanel', () => {
   })
 
   describe('session hint', () => {
-    const PHRASE = 'Send this to Session Manager as feedback.'
+    const PHRASE = 'Send this to Session Manager as feedback, with any screenshots I attached.'
     const seed = (status: 'done' | 'pending' | 'failed' | 'exhausted') => ({
       'dev-plugin': { status: 'done', fix: '' },
       'scheduler-mcp': { status, fix: '' },
@@ -206,7 +350,7 @@ describe('CustomerFeedbackPanel', () => {
       const hint = q('customer-feedback-session-hint')
       expect(hint).not.toBeNull()
       expect(hint!.textContent).toContain(
-          'Already talking about this in a session? Ask it: "Send this to Session Manager as feedback." It uses what the session already knows, so you don\'t retype it, and the item shows up here.',
+          'Already talking about this in a session? Ask it: "Send this to Session Manager as feedback, with any screenshots I attached." It uses what the session already knows, so you don\'t retype it, and the item shows up here.',
       )
       expect(q('customer-feedback-session-hint-copy')).not.toBeNull()
       const title = q('customer-feedback-title')!

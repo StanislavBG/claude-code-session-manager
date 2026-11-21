@@ -8,6 +8,7 @@ import type { PromptSession } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
 import { useEpicReview, selectEpicComments, selectEpicNote } from '../../state/epicReview'
 import { toast } from '../../state/toast'
+import { useEditor } from '../../state/editor'
 import { composeReviewMessage, type ReviewComment, type ReviewSide } from '../../lib/reviewMessage'
 import { DiffFileView, type DiffCommentAnchor } from './DiffFileView'
 import { canCompose } from './EpicComposer'
@@ -44,6 +45,33 @@ function anchorKeys(file: DiffFile): Set<string> {
     }
   }
   return keys
+}
+
+/** Worktree statuses whose dir still holds the Epic's live, unmerged edits. */
+const LIVE_WORKTREE_STATUSES: ReadonlySet<string> = new Set(['active', 'needs_merge_resolution'])
+
+const ACTION_BTN = 'rounded border border-line px-2 py-0.5 text-fg-dim hover:text-fg'
+
+/** Absolute path of a worktree-relative diff path ('/' join, leading './' stripped). */
+function worktreePath(root: string, rel: string): string {
+  return `${root.replace(/\/+$/, '')}/${rel.replace(/^(\.\/)+/, '')}`
+}
+
+/** shell.open with every failure (ok:false, rejection, sync throw) surfaced as a toast. */
+function shellOpen(as: 'openPath' | 'revealPath', path: string, what: string): void {
+  const fail = (msg: string) => toast.error(`Couldn't ${what}: ${msg}`)
+  try {
+    window.api.shell
+      .open({ as, path })
+      .then(
+        (r) => {
+          if (!r.ok) fail(r.error ?? path)
+        },
+        (err: unknown) => fail(errorMessage(err)),
+      )
+  } catch (err) {
+    fail(errorMessage(err))
+  }
 }
 
 function sendHint(status: PromptSession['status']): string | null {
@@ -162,6 +190,53 @@ export function EpicChangesView({ promptSession, onSent }: Props) {
     toast.error(`Comments not sent (${result.reason}) — your drafts are kept.`)
   }
 
+  const { worktree } = promptSession
+  const liveRoot = worktree && LIVE_WORKTREE_STATUSES.has(worktree.status) ? worktree.dir : null
+
+  const fileActions = (root: string, file: DiffFile) => {
+    const abs = worktreePath(root, file.path)
+    const run = (e: React.MouseEvent, fn: () => void) => {
+      e.stopPropagation()
+      fn()
+    }
+    return (
+      <>
+        <button
+          type="button"
+          data-testid="epic-changes-open-file"
+          title={`Open ${abs} with the default app`}
+          onClick={(e) => run(e, () => shellOpen('openPath', abs, `open ${file.path}`))}
+          className={ACTION_BTN}
+        >
+          Open
+        </button>
+        <button
+          type="button"
+          data-testid="epic-changes-edit-file"
+          title={`Open ${abs} in the Editor`}
+          onClick={(e) =>
+            run(e, () => {
+              useEditor.getState().openFile(abs)
+              window.dispatchEvent(new CustomEvent('sm:open-editor'))
+            })
+          }
+          className={ACTION_BTN}
+        >
+          Open in Editor
+        </button>
+        <button
+          type="button"
+          data-testid="epic-changes-reveal-file"
+          title={`Reveal ${abs} in the file manager`}
+          onClick={(e) => run(e, () => shellOpen('revealPath', abs, `reveal ${file.path}`))}
+          className={ACTION_BTN}
+        >
+          Reveal
+        </button>
+      </>
+    )
+  }
+
   let fileIndex = 0
   let body: React.ReactNode
   if (load.kind === 'loading') {
@@ -215,6 +290,7 @@ export function EpicChangesView({ promptSession, onSent }: Props) {
                   file={file}
                   comments={fileComments}
                   defaultCollapsed={idx >= EXPANDED_FILE_LIMIT || file.additions + file.deletions > LARGE_FILE_LINES}
+                  actions={section.live && liveRoot && file.status !== 'deleted' ? fileActions(liveRoot, file) : undefined}
                   onAddComment={(anchor: DiffCommentAnchor, text: string) =>
                     addComment(epicId, {
                       ...anchor,
@@ -245,11 +321,22 @@ export function EpicChangesView({ promptSession, onSent }: Props) {
           {' · '}
           {comments.length} draft {comments.length === 1 ? 'comment' : 'comments'}
         </span>
+        {liveRoot && (
+          <button
+            type="button"
+            data-testid="epic-changes-show-folder"
+            title={`Open ${liveRoot}`}
+            onClick={() => shellOpen('openPath', liveRoot, 'open the worktree folder')}
+            className={`ml-auto ${ACTION_BTN}`}
+          >
+            Show folder
+          </button>
+        )}
         <button
           type="button"
           data-testid="epic-changes-refresh"
           onClick={fetchChanges}
-          className="ml-auto rounded border border-line px-2 py-0.5 text-fg-dim hover:text-fg"
+          className={`${liveRoot ? '' : 'ml-auto '}${ACTION_BTN}`}
         >
           Refresh
         </button>

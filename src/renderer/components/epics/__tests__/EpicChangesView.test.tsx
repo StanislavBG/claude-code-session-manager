@@ -7,6 +7,7 @@ import { EpicChangesView } from '../EpicChangesView'
 import { useChat } from '../../../state/chat'
 import { useEpicReview } from '../../../state/epicReview'
 import { toast } from '../../../state/toast'
+import { useEditor } from '../../../state/editor'
 import type { PromptSession } from '../../../state/promptSessions'
 import type { EpicChanges, EpicChangeSection, DiffFile } from '../../../../preload/api'
 import { flushAsync } from '../../../testUtils/domFlush'
@@ -17,8 +18,10 @@ vi.mock('../../../state/toast', () => ({
 
 const getSpy = vi.fn<(args: { cwd: string; epicId: string }) => Promise<EpicChanges>>()
 const sendSpy = vi.fn()
+const shellOpenSpy = vi.fn<(opts: { as: string; path: string }) => Promise<{ ok: boolean; error?: string }>>()
+const openFileSpy = vi.fn()
 
-;(globalThis as any).window.api = { epicChanges: { get: getSpy } }
+;(globalThis as any).window.api = { epicChanges: { get: getSpy }, shell: { open: shellOpenSpy } }
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -105,6 +108,10 @@ beforeEach(() => {
   useChat.setState({ send: sendSpy } as any)
   useEpicReview.setState({ byEpic: {} })
   vi.mocked(toast.error).mockClear()
+  shellOpenSpy.mockReset()
+  shellOpenSpy.mockResolvedValue({ ok: true })
+  openFileSpy.mockReset()
+  useEditor.setState({ openFile: openFileSpy } as any)
 })
 
 afterEach(() => {
@@ -257,5 +264,96 @@ describe('EpicChangesView', () => {
     await flushAsync()
     expect(q('epic-changes-empty')).not.toBeNull()
     expect(container!.querySelectorAll('[data-testid="diff-file"]')).toHaveLength(0)
+  })
+
+  describe('live worktree file actions', () => {
+    const WT = '/home/u/.local/state/session-manager/wt/epic-1'
+    const withWorktree = (status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled' = 'active') =>
+      epic({ worktree: { dir: WT, branch: 'sm-epic/epic-1', baseCwd: '/home/u/alpha', status } })
+    const untracked = (): DiffFile => ({ ...file('out/report.md'), status: 'added' })
+    const deleted = (): DiffFile => ({ ...file('gone.ts'), status: 'deleted' })
+
+    it('shows Open / Open in Editor / Reveal on a live untracked file with the absolute worktree path', async () => {
+      getSpy.mockResolvedValue(ok([section({ files: [untracked()] })]))
+      const onOpenEditor = vi.fn()
+      window.addEventListener('sm:open-editor', onOpenEditor)
+      mount(createElement(EpicChangesView, { promptSession: withWorktree() }))
+      await flushAsync()
+      const abs = `${WT}/out/report.md`
+      act(() => q('epic-changes-open-file')!.click())
+      expect(shellOpenSpy).toHaveBeenLastCalledWith({ as: 'openPath', path: abs })
+      act(() => q('epic-changes-reveal-file')!.click())
+      expect(shellOpenSpy).toHaveBeenLastCalledWith({ as: 'revealPath', path: abs })
+      act(() => q('epic-changes-edit-file')!.click())
+      expect(openFileSpy).toHaveBeenCalledWith(abs)
+      expect(onOpenEditor).toHaveBeenCalledTimes(1)
+      window.removeEventListener('sm:open-editor', onOpenEditor)
+      // Clicking an action never collapses the file.
+      expect(q('diff-file-toggle')!.getAttribute('aria-expanded')).toBe('true')
+    })
+
+    it('strips a leading ./ from the file path', async () => {
+      getSpy.mockResolvedValue(ok([section({ files: [file('./x/y.ts')] })]))
+      mount(createElement(EpicChangesView, { promptSession: withWorktree('needs_merge_resolution') }))
+      await flushAsync()
+      act(() => q('epic-changes-open-file')!.click())
+      expect(shellOpenSpy).toHaveBeenLastCalledWith({ as: 'openPath', path: `${WT}/x/y.ts` })
+    })
+
+    it('renders no actions on a deleted file', async () => {
+      getSpy.mockResolvedValue(ok([section({ files: [deleted()] })]))
+      mount(createElement(EpicChangesView, { promptSession: withWorktree() }))
+      await flushAsync()
+      expect(q('epic-changes-open-file')).toBeNull()
+      expect(q('epic-changes-edit-file')).toBeNull()
+      expect(q('epic-changes-reveal-file')).toBeNull()
+    })
+
+    it('renders no actions on a non-live section', async () => {
+      getSpy.mockResolvedValue(ok([section({ kind: 'prd', key: 'prd:x', label: 'PRD x', live: false, files: [untracked()] })]))
+      mount(createElement(EpicChangesView, { promptSession: withWorktree() }))
+      await flushAsync()
+      expect(container!.querySelectorAll('[data-testid="diff-file"]')).toHaveLength(1)
+      expect(q('epic-changes-open-file')).toBeNull()
+      expect(q('epic-changes-show-folder')).not.toBeNull()
+    })
+
+    it.each(['merged', 'disabled'] as const)('renders no actions or Show folder when worktree status is %s', async (status) => {
+      getSpy.mockResolvedValue(ok([section({ files: [untracked()] })]))
+      mount(createElement(EpicChangesView, { promptSession: withWorktree(status) }))
+      await flushAsync()
+      expect(q('epic-changes-open-file')).toBeNull()
+      expect(q('epic-changes-show-folder')).toBeNull()
+    })
+
+    it('renders no actions or Show folder without a worktree', async () => {
+      getSpy.mockResolvedValue(ok([section({ files: [untracked()] })]))
+      mount(createElement(EpicChangesView, { promptSession: epic() }))
+      await flushAsync()
+      expect(q('epic-changes-open-file')).toBeNull()
+      expect(q('epic-changes-show-folder')).toBeNull()
+    })
+
+    it('Show folder opens the worktree dir', async () => {
+      getSpy.mockResolvedValue(ok([section()]))
+      mount(createElement(EpicChangesView, { promptSession: withWorktree() }))
+      await flushAsync()
+      act(() => q('epic-changes-show-folder')!.click())
+      expect(shellOpenSpy).toHaveBeenCalledWith({ as: 'openPath', path: WT })
+    })
+
+    it('reports a rejected or failed shell.open via toast.error', async () => {
+      getSpy.mockResolvedValue(ok([section({ files: [untracked()] })]))
+      mount(createElement(EpicChangesView, { promptSession: withWorktree() }))
+      await flushAsync()
+      shellOpenSpy.mockRejectedValueOnce(new Error('path outside home'))
+      act(() => q('epic-changes-open-file')!.click())
+      await flushAsync()
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('path outside home'))
+      shellOpenSpy.mockResolvedValueOnce({ ok: false, error: 'no opener' })
+      act(() => q('epic-changes-show-folder')!.click())
+      await flushAsync()
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('no opener'))
+    })
   })
 })

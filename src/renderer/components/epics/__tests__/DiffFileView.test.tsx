@@ -238,4 +238,21 @@ describe('DiffFileView', () => {
     expect(el.querySelectorAll('[data-testid^="diff-line-comment-"]').length).toBe(0)
     expect(q(el, 'diff-comment-c1')).not.toBeNull()
   })
+
+  it('renders the actions slot in the header next to the path', () => {
+    const { el } = mount({
+      actions: createElement('button', { 'data-testid': 'custom-action' }, 'Act'),
+    })
+    const action = q(el, 'custom-action')
+    expect(action).not.toBeNull()
+    const slot = q(el, 'diff-file-actions')!
+    expect(slot.contains(action)).toBe(true)
+    expect(q(el, 'diff-file-path')!.nextElementSibling).toBe(slot)
+  })
+
+  it('renders no actions slot without the prop', () => {
+    const { el } = mount()
+    expect(q(el, 'diff-file-actions')).toBeNull()
+    expect(q(el, 'diff-file-path')!.nextElementSibling!.getAttribute('data-testid')).toBe('diff-file-status')
+  })
 })

@@ -18,6 +18,8 @@ export interface DiffFileViewProps {
   comments: ReviewComment[]
   defaultCollapsed?: boolean
   readOnly?: boolean
+  /** Extra header controls rendered right after the file path (absent = header unchanged). */
+  actions?: ReactNode
   onAddComment(anchor: DiffCommentAnchor, body: string): void
   onUpdateComment(id: string, body: string): void
   onRemoveComment(id: string): void
@@ -135,6 +137,7 @@ export function DiffFileView({
   comments,
   defaultCollapsed = false,
   readOnly = false,
+  actions,
   onAddComment,
   onUpdateComment,
   onRemoveComment,
@@ -371,6 +374,11 @@ export function DiffFileView({
         <span data-testid="diff-file-path" className="truncate font-mono text-fg">
           {title}
         </span>
+        {actions != null && (
+          <span data-testid="diff-file-actions" className="flex shrink-0 items-center gap-1">
+            {actions}
+          </span>
+        )}
         <span data-testid="diff-file-status" className={`rounded px-1.5 text-[11px] ${badge.cls}`}>
           {badge.label}
         </span>

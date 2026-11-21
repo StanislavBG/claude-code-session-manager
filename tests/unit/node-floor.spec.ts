@@ -75,9 +75,14 @@ describe('engines.node floor', () => {
   })
 
   it('is the floor the README install section states', () => {
-    const [major, minor] = nodeFloor()!
+    // scripts/check-readme.cjs renders engines.node (minus `>=`) into this inline region.
     const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
-    expect(readme).toContain(`Needs Node.js ${major}.${minor}+`)
+    const match = readme.match(/<!-- gen:node-floor -->([^<]*)<!-- \/gen:node-floor -->/)
+    expect(match, 'README.md has no gen:node-floor region').not.toBeNull()
+    const stated = match![1]
+    expect(stated).toBe(pkg.engines.node.replace(/^\s*>=\s*/, '').trim())
+    const [major, minor] = nodeFloor()!
+    expect(stated.split('.').slice(0, 2).map(Number)).toEqual([major, minor])
   })
 
   it('landing-page price-tag notes: installer needs no Node, npx command states the floor', () => {

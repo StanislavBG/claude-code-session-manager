@@ -21,7 +21,7 @@ Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subs
 | [telemetry.md](telemetry.md) | anonymous telemetry data model and dedup | LAW-RATIONALE |
 | [identity-boundary.md](identity-boundary.md) | public-repo persona rule, identity guard, machine setup | LAW-RATIONALE |
 | [page-stewards.md](page-stewards.md) | per-page steward subagents and the six page principles | REFERENCE |
-| [customer-feedback.md](customer-feedback.md) | {F} customer feedback: three stores, bilko.run wire contract, lifecycle | REFERENCE |
+| [customer-feedback.md](customer-feedback.md) | Feedback button customer feedback: three stores, bilko.run wire contract, lifecycle | REFERENCE |
 | [application-menu.md](application-menu.md) | Electron application menu structure | REFERENCE |
 | [heap-snapshot-diagnostics.md](heap-snapshot-diagnostics.md) | renderer heap-snapshot procedure | RUNBOOK |
 | [build-target.json](build-target.json) | **live runtime config** read by `src/main/lib/buildTarget.cjs`, `.claude/agents/builder.md` and the builder plugin skill — never move it | — |

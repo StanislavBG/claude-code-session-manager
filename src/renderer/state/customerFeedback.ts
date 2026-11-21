@@ -1,7 +1,7 @@
 /**
  * customerFeedback.ts — zustand store over window.api.customerFeedback.
  *
- * Single state source for the {F} button, the feedback panel and the owner
+ * Single state source for the Feedback button, the feedback panel and the owner
  * inbox. Island store: imports no other renderer store (toast is a module-level
  * helper, not a store subscription). Components compute badges with the plain
  * `unseenStatusCount` function — never return a freshly built value from a selector.

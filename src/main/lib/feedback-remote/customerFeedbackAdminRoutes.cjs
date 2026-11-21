@@ -8,7 +8,7 @@
  *   POST /admin/customer-feedback/submit {title, body, tag, imagePaths?} -> { ok, item, warning? } | { ok:false, error }
  *
  * submit is the customer path (no owner token needed): it runs the exact
- * submit the {F} panel's customerFeedback:submit IPC uses
+ * submit the Feedback panel's customerFeedback:submit IPC uses
  * (customerFeedbackIpc.submitFeedback -> customerFeedbackClient.submit), so the
  * item + receipt land in the same local mirror. os.homedir() is replaced with
  * `~` in title and body first; the body text is never echoed or logged.

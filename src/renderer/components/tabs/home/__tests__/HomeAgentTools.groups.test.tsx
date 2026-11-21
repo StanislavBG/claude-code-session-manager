@@ -10,6 +10,7 @@ const tools = GROUPS.map((group) => ({
   name: `tool_in_${group.replace(/-/g, '_')}`,
   group,
   purpose: `Purpose for ${group}`,
+  summary: `Summary for ${group}`,
   whenToUse: '',
   whenNotToUse: '',
   exampleArgs: {},
@@ -41,7 +42,10 @@ describe('HomeAgentTools groups', () => {
     const sections = container.querySelectorAll('[data-testid^="home-agent-group-"]')
     expect(sections.length).toBe(8)
     const text = container.textContent ?? ''
-    for (const t of tools) expect(text).toContain(t.name)
+    for (const t of tools) {
+      expect(text).toContain(t.name)
+      expect(text).toContain(t.summary)
+    }
     expect(text).toContain('Project Home')
     expect(text).toContain('Macros')
     expect(text).toContain('Customer feedback')

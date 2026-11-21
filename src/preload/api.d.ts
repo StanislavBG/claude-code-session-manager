@@ -283,12 +283,16 @@ export type McpCheckResult =
  *  HomeAgentTools section. */
 export interface McpToolCatalogEntry {
   name: string;
-  group: 'scheduler' | 'chat' | 'feedback' | 'help';
+  group: 'scheduler' | 'chat' | 'feedback' | 'help' | 'project-home' | 'macros' | 'customer-feedback';
   purpose: string;
+  /** Plain one-line summary (10-90 chars) — the Dashboard row text. */
+  summary: string;
   whenToUse: string;
   whenNotToUse: string;
   exampleArgs: Record<string, unknown>;
   notes: string | null;
+  /** Arg groups the handler refuses a call without ('exactly one of'). */
+  requiredOneOf?: string[][];
 }
 
 export interface McpRecipe {

@@ -5,13 +5,22 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { HomeAgentTools } from '../HomeAgentTools'
 import { useSessions } from '../../../../state/sessions'
+// The exact object the main process's `mcp:catalog` IPC handler returns (src/main/index.cjs
+// passes MCP_TOOL_CATALOG through verbatim — no zod schema, no field mapping).
+import { createRequire } from 'node:module'
+import type { McpToolCatalogEntry } from '../../../../../preload/api'
+
+const nodeRequire = createRequire(import.meta.url)
+const { MCP_TOOL_CATALOG } = nodeRequire('../../../../../main/lib/mcpToolCatalog.cjs') as {
+  MCP_TOOL_CATALOG: McpToolCatalogEntry[]
+}
 
 const LONG = 'Write a new PRD file. '.repeat(70)
 const CATALOG = {
   ok: true,
   tools: [
-    { name: 'scheduler_create_prd', group: 'scheduler', purpose: LONG, whenToUse: 'WTU-A', whenNotToUse: 'WNTU-A', exampleArgs: { a: 1 }, notes: null },
-    { name: 'chat_send_prompt', group: 'chat', purpose: 'Push a prompt into an open tab.', whenToUse: 'WTU-B', whenNotToUse: 'WNTU-B', exampleArgs: {}, notes: null },
+    { name: 'scheduler_create_prd', group: 'scheduler', purpose: LONG, summary: 'Create one PRD file in an Epic.', whenToUse: 'WTU-A', whenNotToUse: 'WNTU-A', exampleArgs: { a: 1 }, notes: null },
+    { name: 'chat_send_prompt', group: 'chat', purpose: 'Push a prompt into an open tab.', summary: 'Send a prompt to an open tab.', whenToUse: 'WTU-B', whenNotToUse: 'WNTU-B', exampleArgs: {}, notes: null },
   ],
   recipes: [],
 }
@@ -53,15 +62,16 @@ describe('HomeAgentTools', () => {
     expect(delegationReadiness).not.toHaveBeenCalled()
   })
 
-  it('expands to every tool name and purpose exactly once, dropping the verbose fields', async () => {
+  it('expands to every tool name and summary exactly once, dropping the verbose fields', async () => {
     catalog.mockResolvedValue(CATALOG)
     await mount()
     act(() => { (container.querySelector('[data-testid="home-agent-tools-toggle"]') as HTMLButtonElement).click() })
     const text = container.textContent ?? ''
     for (const t of CATALOG.tools) {
       expect(text.split(t.name).length - 1).toBe(1)
-      expect(text.split(t.purpose).length - 1).toBe(1)
+      expect(text.split(t.summary).length - 1).toBe(1)
     }
+    expect(text).not.toContain(LONG.trim())
     expect(text).not.toContain('WTU-A')
     expect(text).not.toContain('WNTU-A')
     expect(text).not.toContain('example call')
@@ -69,13 +79,31 @@ describe('HomeAgentTools', () => {
     expect(buttons.some((b) => b.textContent?.includes('Copy example'))).toBe(false)
   })
 
-  it('clamps the purpose to one line and carries the full text in title', async () => {
+  it('shows the summary as the one-line row text and carries the full purpose in title', async () => {
     catalog.mockResolvedValue(CATALOG)
     await mount()
     act(() => { (container.querySelector('[data-testid="home-agent-tools-toggle"]') as HTMLButtonElement).click() })
-    const purpose = container.querySelector('[data-testid="home-agent-tool-purpose"]') as HTMLElement
-    expect(purpose.className).toContain('line-clamp-1')
-    expect(purpose.getAttribute('title')).toBe(LONG)
+    const rows = Array.from(container.querySelectorAll('[data-testid="home-agent-tool-purpose"]')) as HTMLElement[]
+    expect(rows.length).toBe(CATALOG.tools.length)
+    CATALOG.tools.forEach((t, i) => {
+      expect(rows[i].textContent).toBe(t.summary)
+      expect(rows[i].getAttribute('title')).toBe(t.purpose)
+      expect(rows[i].className).toContain('line-clamp-1')
+    })
+  })
+
+  it('renders the real catalog served over mcp:catalog with every summary intact', async () => {
+    const real = MCP_TOOL_CATALOG
+    expect(real.length).toBeGreaterThan(0)
+    catalog.mockResolvedValue({ ok: true, tools: real, recipes: [] })
+    await mount()
+    act(() => { (container.querySelector('[data-testid="home-agent-tools-toggle"]') as HTMLButtonElement).click() })
+    for (const t of real) {
+      expect(typeof t.summary).toBe('string')
+      const row = container.querySelector(`[data-testid="home-agent-tool-${t.name}"] [data-testid="home-agent-tool-purpose"]`) as HTMLElement
+      expect(row.textContent).toBe(t.summary)
+      expect(row.getAttribute('title')).toBe(t.purpose)
+    }
   })
 
   it('renders the fallback line without a toast when the catalog is not ok', async () => {

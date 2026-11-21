@@ -1,6 +1,7 @@
 /**
  * HomeAgentTools — collapsed-by-default, extremely abridged MCP tool catalog on
- * the machine-wide Dashboard: each tool's name + a one-line purpose, nothing
+ * the machine-wide Dashboard: each tool's name + its one-line summary (full
+ * purpose on hover), nothing
  * else. Replaces the old Project Home "Agent tools" block; the catalog is
  * cwd-independent, so it belongs here. Per-project delegation readiness lives
  * in NewEpicCard's readiness banner, not here.
@@ -8,8 +9,8 @@
 import { useState } from 'react'
 import { useMcpCatalog } from '../../../lib/useMcpAgentTools'
 
-// Mirrors the group enum in src/main/lib/mcpToolCatalog.cjs. The preload type
-// still narrows `group` to 4 values, so groups are handled as plain strings here.
+// Mirrors the group enum in src/main/lib/mcpToolCatalog.cjs. Groups are handled as
+// plain strings so an entry from a newer catalog still renders under its raw name.
 const GROUP_LABELS: Record<string, string> = {
   scheduler: 'Scheduler',
   chat: 'Chat',
@@ -81,7 +82,7 @@ export function HomeAgentTools() {
                     title={tool.purpose}
                     className="min-w-0 line-clamp-1 text-xs text-fg-dim"
                   >
-                    {tool.purpose}
+                    {tool.summary}
                   </span>
                 </div>
               ))}

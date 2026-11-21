@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useStore } from '../store';
-import { createReadyFallback, READY_FALLBACK_MS } from '../App';
+import { createReadyFallback, READY_FALLBACK_MS, readyCapabilities } from '../App';
 
 describe('markRemoteReady', () => {
   beforeEach(() => {
@@ -117,5 +117,36 @@ describe('createReadyFallback', () => {
     expect(useStore.getState().remoteReady).toBe(false);
     useStore.getState().setPendingSas(sas);
     expect(useStore.getState().pendingSas).toEqual(sas);
+  });
+});
+
+describe('event:remote:ready capabilities', () => {
+  beforeEach(() => { useStore.setState({ capabilitiesByDevice: {} }); });
+  const apply = (deviceId: string, payload: unknown) =>
+    useStore.getState().setDeviceCapabilities(deviceId, readyCapabilities(payload));
+
+  it('records advertised capabilities per device', () => {
+    apply('d1', { capabilities: ['e2e-frames', 'chat-images'] });
+    expect(useStore.getState().capabilitiesByDevice.d1).toEqual(['e2e-frames', 'chat-images']);
+  });
+
+  it('older desktop (no capabilities field) reads as []', () => {
+    apply('d1', { capabilities: ['chat-images'] });
+    apply('d1', {});
+    expect(useStore.getState().capabilitiesByDevice.d1).toEqual([]);
+    expect(readyCapabilities(undefined)).toEqual([]);
+  });
+
+  it('malformed capabilities (non-array) read as []', () => {
+    apply('d1', { capabilities: 'chat-images' });
+    expect(useStore.getState().capabilitiesByDevice.d1).toEqual([]);
+    expect(readyCapabilities({ capabilities: { 0: 'x' } })).toEqual([]);
+  });
+
+  it('drops non-strings and out-of-range lengths, caps at 32 entries', () => {
+    expect(readyCapabilities({ capabilities: ['ok', '', 'x'.repeat(65), 'y'.repeat(64), 7, null] }))
+      .toEqual(['ok', 'y'.repeat(64)]);
+    const many = Array.from({ length: 40 }, (_, i) => `c${i}`);
+    expect(readyCapabilities({ capabilities: many })).toEqual(many.slice(0, 32));
   });
 });

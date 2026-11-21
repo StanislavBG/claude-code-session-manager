@@ -40,6 +40,9 @@ interface AppState {
   readyDeviceIds: string[];
   /** Cached desktop names/platform, hydrated from localStorage. */
   deviceMeta: Record<string, DeviceMeta>;
+  /** Capabilities each desktop advertised on its current connection (memory only, never persisted).
+   *  Select a primitive: `s.capabilitiesByDevice[id]?.includes('chat-images') === true` — never `?? []`. */
+  capabilitiesByDevice: Record<string, string[]>;
 
   setMe: (me: MeResponse | null) => void;
   setDevices: (devices: Device[]) => void;
@@ -48,6 +51,7 @@ interface AppState {
   /** User-initiated switch: persist as preferred, then activate. */
   chooseDevice: (deviceId: string) => void;
   setDeviceMeta: (deviceId: string, meta: DeviceMeta) => void;
+  setDeviceCapabilities: (deviceId: string, caps: string[]) => void;
   setWsConnected: (v: boolean) => void;
   setScreen: (s: Screen) => void;
 
@@ -88,6 +92,7 @@ export const useStore = create<AppState>((set, get) => ({
   keyMismatchDeviceIds: [],
   readyDeviceIds: [],
   deviceMeta: {},
+  capabilitiesByDevice: {},
 
   setMe: (me) => set({ me }),
   setDevices: (devices) =>
@@ -124,7 +129,11 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ deviceMeta: { ...s.deviceMeta, [deviceId]: meta } }));
     saveDeviceMeta(deviceId, meta);
   },
-  setWsConnected: (wsConnected) => set(wsConnected ? { wsConnected } : { wsConnected, remoteReady: false, readyFallbackExpired: false }),
+  setDeviceCapabilities: (deviceId, caps) =>
+    set((s) => ({ capabilitiesByDevice: { ...s.capabilitiesByDevice, [deviceId]: caps } })),
+  setWsConnected: (wsConnected) => set(wsConnected
+    ? { wsConnected }
+    : { wsConnected, remoteReady: false, readyFallbackExpired: false, capabilitiesByDevice: {} }),
   setScreen: (screen) => set({ screen }),
 
   goProjects: () => set({ route: { view: 'projects' } }),
@@ -136,7 +145,7 @@ export const useStore = create<AppState>((set, get) => ({
   reset: () => set({
     route: { view: 'projects' }, stateByTab: {},
     activeDeviceId: null, awaitingDesktopConfirm: false, remoteReady: false, readyFallbackExpired: false,
-    readyDeviceIds: [],
+    readyDeviceIds: [], capabilitiesByDevice: {},
   }),
 
   setPendingSas: (pendingSas) =>
@@ -159,9 +168,14 @@ export const useStore = create<AppState>((set, get) => ({
     awaitingDesktopConfirm: false, readyFallbackExpired: true, refreshKey: s.refreshKey + 1,
   })),
   clearRemoteReady: (deviceId) => set((s) => {
-    if (deviceId === undefined) return { readyDeviceIds: [], remoteReady: false, readyFallbackExpired: false };
+    if (deviceId === undefined) {
+      return { readyDeviceIds: [], remoteReady: false, readyFallbackExpired: false, capabilitiesByDevice: {} };
+    }
     const readyDeviceIds = s.readyDeviceIds.filter((id) => id !== deviceId);
-    return deviceId === s.activeDeviceId ? { readyDeviceIds, remoteReady: false, readyFallbackExpired: false } : { readyDeviceIds };
+    const { [deviceId]: _gone, ...capabilitiesByDevice } = s.capabilitiesByDevice;
+    return deviceId === s.activeDeviceId
+      ? { readyDeviceIds, capabilitiesByDevice, remoteReady: false, readyFallbackExpired: false }
+      : { readyDeviceIds, capabilitiesByDevice };
   }),
   addKeyMismatch: (deviceId) =>
     set((s) => ({
@@ -172,7 +186,9 @@ export const useStore = create<AppState>((set, get) => ({
   forgetDevice: (deviceId) =>
     set((s) => {
       const { [deviceId]: _gone, ...deviceMeta } = s.deviceMeta;
+      const { [deviceId]: _caps, ...capabilitiesByDevice } = s.capabilitiesByDevice;
       return {
+        capabilitiesByDevice,
         readyDeviceIds: s.readyDeviceIds.filter((id) => id !== deviceId),
         keyMismatchDeviceIds: s.keyMismatchDeviceIds.filter((id) => id !== deviceId),
         deviceMeta,

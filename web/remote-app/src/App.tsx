@@ -36,6 +36,15 @@ export default function App() {
 /** How long to wait after sas:pending for event:remote:ready before asking anyway. */
 export const READY_FALLBACK_MS = 20_000;
 
+/** Capabilities a desktop advertised in event:remote:ready; an older desktop sends none → []. */
+export function readyCapabilities(payload: unknown): string[] {
+  const raw = (payload as { capabilities?: unknown } | null | undefined)?.capabilities;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((c): c is string => typeof c === 'string' && c.length >= 1 && c.length <= 64)
+    .slice(0, 32);
+}
+
 /**
  * Fallback timer for version skew (an older desktop never sends event:remote:ready).
  * arm() restarts the countdown; clear() cancels it. On expiry `onReady` fires so the
@@ -174,6 +183,8 @@ function AppInner() {
       const sasFlow = !!st.pendingSas || st.awaitingDesktopConfirm || st.readyFallbackExpired;
       if (m.deviceId) useStore.getState().markRemoteReady(m.deviceId);
       else if (active) useStore.getState().markRemoteReady(active);
+      const capsId = m.deviceId ?? active;
+      if (capsId) useStore.getState().setDeviceCapabilities(capsId, readyCapabilities(m.payload));
       if (!m.deviceId || m.deviceId === active) {
         fallback.clear();
         trackFlow('pair', sasFlow ? 'success' : 'resumed');

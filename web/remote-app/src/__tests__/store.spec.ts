@@ -118,6 +118,29 @@ describe('session store', () => {
     });
   });
 
+  it('device capabilities: set per device, cleared per device and on disconnect, never persisted', () => {
+    vi.clearAllMocks();
+    useStore.setState({ capabilitiesByDevice: {} });
+    useStore.getState().setDeviceCapabilities('a', ['chat-images']);
+    useStore.getState().setDeviceCapabilities('b', ['e2e-frames']);
+    expect(useStore.getState().capabilitiesByDevice).toEqual({ a: ['chat-images'], b: ['e2e-frames'] });
+    useStore.getState().clearRemoteReady('a');
+    expect(useStore.getState().capabilitiesByDevice).toEqual({ b: ['e2e-frames'] });
+    useStore.getState().setDeviceCapabilities('a', ['chat-images']);
+    useStore.getState().clearRemoteReady();
+    expect(useStore.getState().capabilitiesByDevice).toEqual({});
+    useStore.getState().setDeviceCapabilities('a', ['chat-images']);
+    useStore.getState().setWsConnected(false);
+    expect(useStore.getState().capabilitiesByDevice).toEqual({});
+    useStore.getState().setDeviceCapabilities('a', ['chat-images']);
+    useStore.getState().forgetDevice('a');
+    expect(useStore.getState().capabilitiesByDevice).toEqual({});
+    useStore.getState().setDeviceCapabilities('a', ['chat-images']);
+    useStore.getState().reset();
+    expect(useStore.getState().capabilitiesByDevice).toEqual({});
+    expect(dev.saveDeviceMeta).not.toHaveBeenCalled();
+  });
+
   it('forgetDevice drops ready, key-mismatch and meta for that id only', () => {
     const meta = { name: 'n', platform: null, version: null, seenAt: 1 };
     useStore.setState({

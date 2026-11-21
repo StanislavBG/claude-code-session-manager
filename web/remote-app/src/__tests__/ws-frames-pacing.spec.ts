@@ -121,11 +121,15 @@ const FRAMES = 3;
 
 // WebCrypto settles outside fake timers; setImmediate is left real so these ticks do too.
 const tick = () => new Promise<void>((r) => setImmediate(r));
-async function until(cond: () => boolean, label: string) {
-  for (let i = 0; i < 500; i++) {
+// Bounded by real elapsed time, not a tick count: under CPU load AES-GCM can need far more ticks.
+// performance.now() is real (fake() fakes Date, not performance), so never read Date here.
+async function until(cond: () => boolean, label: string, timeoutMs = 10_000) {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
     if (cond()) return;
     await tick();
   }
+  if (cond()) return;
   throw new Error(`until: ${label}`);
 }
 function track<T>(p: Promise<T>) {

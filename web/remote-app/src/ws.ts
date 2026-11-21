@@ -34,6 +34,14 @@ const MAX_FRAMES = 200;
 // Bounds on capability lists accepted from event:remote:ready
 const MAX_CAPABILITIES = 32;
 const MAX_CAPABILITY_LEN = 64;
+// Relay's MAX_MSG_BYTES (256 KiB) minus 4 KiB headroom; sendRaw refuses anything larger
+const MAX_WIRE_BYTES = 256 * 1024 - 4 * 1024;
+// Framed send: poll bufferedAmount this often, at most this many times per frame
+const BUFFER_POLL_MS = 50;
+const BUFFER_POLL_MAX = 200;
+// Framed send: frame-sending phase deadline per frame
+const FRAME_DEADLINE_MS = 3000;
+const wireEncoder = new TextEncoder();
 
 // ── WebCrypto E2E helpers ──────────────────────────────────────────────────
 
@@ -268,6 +276,8 @@ export class RelaySocket {
   private capabilities = new Map<string, Set<string>>();
   // Paces e2e:frame sends under the relay's per-browser leaky bucket
   private sendBudget = new SendBudget();
+  // Abort callbacks of in-flight framed sends; a relay 'error' envelope fires them all
+  private framedAborts = new Set<(err: Error) => void>();
 
   constructor(private readonly onStatusChange?: (connected: boolean) => void) {}
 
@@ -303,6 +313,13 @@ export class RelaySocket {
           msg = JSON.parse(evt.data as string) as Envelope;
         } catch {
           return;
+        }
+        // The relay's error envelope is uncorrelated (fresh id): any in-flight framed upload
+        // may have lost a frame, so abort them all rather than leave a silent partial upload.
+        if (msg?.type === 'error' && this.framedAborts.size > 0) {
+          const code = (msg as { code?: unknown }).code;
+          const err = new Error(`Upload interrupted: relay error ${typeof code === 'string' ? code : 'unknown'}`);
+          for (const abort of [...this.framedAborts]) abort(err);
         }
         this.inbound = this.inbound
           .then(() => this.dispatchAsync(msg))
@@ -687,37 +704,94 @@ export class RelaySocket {
       throw new Error(`Message too large (${frames.length} frames, limit ${MAX_FRAMES})`);
     }
 
-    for (const { seq, total, data } of frames) {
-      await this.sendBudget.take();
-      // A reset/rekey mid-send drops the key; the desktop would discard the remaining frames.
-      const current = this.e2eSessions.get(deviceId)?.sessionKey;
-      if (current !== key) return false;
-      const frame: Envelope = {
-        type: 'e2e:frame',
-        id: crypto.randomUUID(),
-        deviceId,
-        payload: { msgId: inner.id, seq, total, data },
-        ts: Date.now(),
-      };
-      const { nonce, ciphertext } = await encryptBox(JSON.stringify(frame), key);
-      const sent = this.sendRaw({
-        type: 'e2e:box',
-        id: crypto.randomUUID(),
-        deviceId,
-        payload: { nonce, ciphertext },
-        ts: Date.now(),
-      });
-      if (!sent) return false;
-    }
-    return true;
+    return this.sendFrames(inner, frames, deviceId, key);
   }
 
-  sendRaw(msg: unknown): boolean {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
+  /**
+   * Send boxed e2e:frame slices, paced by SendBudget and by the socket's bufferedAmount
+   * (queued frames would otherwise reach the relay back-to-back). Rejects with 'Upload
+   * stalled' / 'Upload interrupted' / 'Upload timed out' and sends no further frames.
+   */
+  private async sendFrames(
+    inner: Envelope,
+    frames: ReturnType<typeof chunkFrames>,
+    deviceId: string,
+    key: CryptoKey,
+  ): Promise<boolean> {
+    const total = frames.length;
+    let failure: Error | null = null;
+    let abortWith!: (err: Error) => void;
+    const aborted = new Promise<never>((_, reject) => {
+      abortWith = (err: Error) => {
+        if (failure) return;
+        failure = err;
+        reject(err);
+      };
+    });
+    aborted.catch(() => undefined);
+    const abort = (err: Error) => abortWith(err);
+    const deadline = setTimeout(
+      () => abort(new Error(`Upload timed out after ${total * FRAME_DEADLINE_MS} ms (${total} frames)`)),
+      total * FRAME_DEADLINE_MS,
+    );
+    this.framedAborts.add(abort);
+    const guard = <T>(p: Promise<T>): Promise<T> => Promise.race([p, aborted]);
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    const check = () => { if (failure) throw failure; };
+
+    try {
+      for (const { seq, data } of frames) {
+        if (seq > 0) {
+          let checks = 0;
+          while ((this.ws?.bufferedAmount ?? 0) > 0) {
+            checks++;
+            if (checks >= BUFFER_POLL_MAX) {
+              throw new Error(`Upload stalled: socket buffer did not drain before frame ${seq + 1}/${total}`);
+            }
+            await guard(sleep(BUFFER_POLL_MS));
+          }
+        }
+        check();
+        await guard(this.sendBudget.take());
+        check();
+        // A reset/rekey mid-send drops the key; the desktop would discard the remaining frames.
+        const current = this.e2eSessions.get(deviceId)?.sessionKey;
+        if (current !== key) return false;
+        const frame: Envelope = {
+          type: 'e2e:frame',
+          id: crypto.randomUUID(),
+          deviceId,
+          payload: { msgId: inner.id, seq, total, data },
+          ts: Date.now(),
+        };
+        const { nonce, ciphertext } = await guard(encryptBox(JSON.stringify(frame), key));
+        check();
+        const sent = this.sendRaw(
+          { type: 'e2e:box', id: crypto.randomUUID(), deviceId, payload: { nonce, ciphertext }, ts: Date.now() },
+          true, // SendBudget.take() already counted it
+        );
+        if (!sent) return false;
+      }
       return true;
+    } finally {
+      clearTimeout(deadline);
+      this.framedAborts.delete(abort);
     }
-    return false;
+  }
+
+  /**
+   * The single choke point for outbound messages. Refuses (false, nothing sent) anything over
+   * MAX_WIRE_BYTES or when the socket is not open. Every non-ping send is noted in SendBudget
+   * unless the caller already counted it via take() (`counted`).
+   */
+  sendRaw(msg: unknown, counted = false): boolean {
+    const ws = this.ws;
+    if (ws?.readyState !== WebSocket.OPEN) return false;
+    const text = JSON.stringify(msg);
+    if (wireEncoder.encode(text).length > MAX_WIRE_BYTES) return false;
+    ws.send(text);
+    if (!counted && (msg as { type?: unknown } | null)?.type !== 'ping') this.sendBudget.note();
+    return true;
   }
 
   private startPing(): void {

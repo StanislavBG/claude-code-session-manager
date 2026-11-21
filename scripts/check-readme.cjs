@@ -18,7 +18,8 @@
 //
 // Check mode also proves the README is agent-friendly (one diagnostic line
 // per failure): prose Flesch-Kincaid grade <= MAX_GRADE, only https:// or
-// #anchor links, repo blob/tree links name tracked paths, size <= MAX_BYTES,
+// #anchor links, repo blob/tree links name tracked or untracked-not-ignored paths, every gen/list
+// region exists, each ## section scores <= MAX_SECTION_GRADE, size <= MAX_BYTES,
 // and <!-- list:NAME --> regions name exactly the skills / packs / personas.
 
 const fs = require('fs')
@@ -27,9 +28,11 @@ const { execFileSync } = require('child_process')
 const { pathToFileURL } = require('url')
 
 const MAX_GRADE = 8.0
+const MAX_SECTION_GRADE = 8.0
 const MAX_BYTES = 24000
 const REPO_URL = 'https://github.com/StanislavBG/claude-code-session-manager'
 
+const GEN_NAMES = ['mcp-tools', 'mcp-recipes', 'mcp-tool-count', 'skill-count', 'node-floor']
 const MARKER_RE = /<!-- (\/?)gen:([A-Za-z0-9_-]+) -->/g
 
 function loadSources(repoRoot) {
@@ -157,24 +160,42 @@ function maskCode(text) {
   return lines.join('\n').replace(/(`+)[^\n]*?\1/g, blank)
 }
 
-function checkGrade(text, { markdownToProse, fleschKincaidGrade }) {
-  const grade = (md) => fleschKincaidGrade(markdownToProse(md))
-  const overall = grade(text)
-  if (overall <= MAX_GRADE) return []
+const MIN_SECTION_WORDS = 40
+
+// Split on lines starting with `## ` (outside fenced code). The part before
+// the first heading is the preamble.
+function splitSections(text) {
+  const lines = text.split(/\r?\n/)
+  const masked = maskCode(text).split(/\r?\n/)
   const sections = []
   let cur = { title: '(before first ## section)', lines: [] }
-  for (const line of text.split(/\r?\n/)) {
-    if (line.startsWith('## ')) { sections.push(cur); cur = { title: line.trim(), lines: [] } }
-    cur.lines.push(line)
+  for (let i = 0; i < lines.length; i++) {
+    if (masked[i].startsWith('## ')) { sections.push(cur); cur = { title: lines[i].trim(), lines: [] } }
+    cur.lines.push(lines[i])
   }
   sections.push(cur)
-  const graded = sections
-    .map((s) => ({ title: s.title, g: grade(s.lines.join('\n')) }))
-    .sort((a, b) => b.g - a.g)
-  return [
-    `README.md: prose reading grade ${overall.toFixed(1)} is above the max of ${MAX_GRADE.toFixed(1)}. Section grades, highest first:`,
-    ...graded.map((s) => `  ${s.g.toFixed(1)}  ${s.title}`),
-  ]
+  return sections.map((s) => ({ title: s.title, text: s.lines.join('\n') }))
+}
+
+// The whole page must score <= MAX_GRADE, and so must the preamble and every
+// `## ` section with at least MIN_SECTION_WORDS prose words: a page average
+// can hide one dense section.
+function checkGrade(text, { markdownToProse, fleschKincaidGrade }) {
+  const overall = fleschKincaidGrade(markdownToProse(text))
+  const graded = splitSections(text).map((s) => {
+    const prose = markdownToProse(s.text)
+    return { title: s.title, words: (prose.match(/\S+/g) || []).length, g: fleschKincaidGrade(prose) }
+  })
+  const failing = graded.filter((s) => s.words >= MIN_SECTION_WORDS && s.g > MAX_SECTION_GRADE)
+  const out = []
+  if (overall > MAX_GRADE) {
+    out.push(`README.md: prose reading grade ${overall.toFixed(1)} is above the max of ${MAX_GRADE.toFixed(1)}. Section grades, highest first:`)
+    out.push(...[...graded].sort((a, b) => b.g - a.g).map((s) => `  ${s.g.toFixed(1)}  ${s.title}`))
+  }
+  for (const s of failing.sort((a, b) => b.g - a.g)) {
+    out.push(`README.md: section ${s.title} has reading grade ${s.g.toFixed(1)}, above the max of ${MAX_SECTION_GRADE.toFixed(1)}`)
+  }
+  return out
 }
 
 function linkTargets(text) {
@@ -214,9 +235,20 @@ function checkRepoLinks(text, trackedFiles) {
     const ok = m[1] === 'blob'
       ? tracked.has(p)
       : p === '' || tracked.has(p) || trackedFiles.some((f) => f.startsWith(p + '/'))
-    if (!ok) out.push(`README.md:${lineOf(text, m.index)}: ${m[1]} link names ${p}, which is not a tracked path (git ls-files)`)
+    if (!ok) out.push(`README.md:${lineOf(text, m.index)}: ${m[1]} link names ${p}, which is not a known repo path (git ls-files --cached --others --exclude-standard)`)
   }
   return out
+}
+
+// Tracked plus untracked-not-ignored paths (as check-doc-hierarchy.cjs), so a
+// new file linked before its first commit counts. No shell.
+// A tracked file deleted from the working tree is not known: the link is dead.
+function listKnownPaths(repoRoot) {
+  const ls = (...args) => execFileSync('git', ['ls-files', '-z', ...args], {
+    cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+  }).split('\0').filter(Boolean)
+  const deleted = new Set(ls('--deleted'))
+  return ls('--cached', '--others', '--exclude-standard').filter((f) => !deleted.has(f))
 }
 
 function checkSize(text) {
@@ -225,6 +257,18 @@ function checkSize(text) {
 }
 
 const LIST_NAMES = ['skills', 'packs', 'personas']
+
+// Deleting a region must not pass silently: every gen and list region must exist.
+function checkRequiredRegions(text) {
+  const out = []
+  for (const name of GEN_NAMES) {
+    if (!text.includes(`<!-- gen:${name} -->`)) out.push(`README.md: required gen region ${name} is missing (<!-- gen:${name} -->)`)
+  }
+  for (const name of LIST_NAMES) {
+    if (!text.includes(`<!-- list:${name} -->`)) out.push(`README.md: required list region ${name} is missing (<!-- list:${name} -->)`)
+  }
+  return out
+}
 
 function checkLists(text, expected) {
   const out = []
@@ -251,13 +295,19 @@ function checkLists(text, expected) {
   return out
 }
 
+// Packs come from the validated catalog; a pack it rejects is a diagnostic.
+// Personas stay a folder listing (seedAgentPersonas.cjs pulls in electron);
+// seedAgentPersonas.test.cjs proves the folder equals its PERSONAS.
 function loadListNames(repoRoot) {
-  const dirsWith = (dir, marker) => fs.readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, marker)))
-    .map((d) => d.name).sort()
+  const skillsDir = path.join(repoRoot, 'plugins', 'session-manager-dev', 'skills')
+  const { listPacks } = require(path.join(repoRoot, 'src', 'main', 'lib', 'packs', 'packCatalog.cjs'))
+  const catalog = listPacks({ packsDir: path.join(repoRoot, 'plugins', 'packs') })
   return {
-    skills: dirsWith(path.join(repoRoot, 'plugins', 'session-manager-dev', 'skills'), 'SKILL.md'),
-    packs: dirsWith(path.join(repoRoot, 'plugins', 'packs'), 'sm-pack.json'),
+    skills: fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && fs.existsSync(path.join(skillsDir, d.name, 'SKILL.md')))
+      .map((d) => d.name).sort(),
+    packs: catalog.packs.map((p) => p.id).sort(),
+    errors: catalog.errors.map((e) => `${path.relative(repoRoot, e.dir) || e.dir}: ${e.error}`),
     personas: fs.readdirSync(path.join(repoRoot, 'src', 'seed', 'agents'))
       .filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort(),
   }
@@ -266,10 +316,12 @@ function loadListNames(repoRoot) {
 function runRules(text, inputs) {
   return [
     ...checkGrade(text, inputs.readability),
+    ...checkRequiredRegions(text),
     ...checkLinks(text),
     ...checkRepoLinks(text, inputs.trackedFiles),
     ...checkSize(text),
     ...checkLists(text, inputs.listNames),
+    ...(inputs.listNames.errors || []),
   ]
 }
 
@@ -284,8 +336,7 @@ async function main() {
     if (res.code === 0 && res.changed) fs.writeFileSync(readmePath, res.text)
     process.exit(res.code)
   }
-  const trackedFiles = execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-    .split('\n').filter(Boolean)
+  const trackedFiles = listKnownPaths(repoRoot)
   const readability = await import(pathToFileURL(path.join(repoRoot, 'web', 'manual', 'readability.mjs')).href)
   const diags = runRules(text, { readability, trackedFiles, listNames: loadListNames(repoRoot) })
   for (const d of diags) console.error(d)
@@ -294,8 +345,8 @@ async function main() {
 
 module.exports = {
   loadSources, renderRegions, applyRegions, run,
-  checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, loadListNames, runRules,
-  MAX_GRADE, MAX_BYTES,
+  checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, checkRequiredRegions, loadListNames, runRules,
+  listKnownPaths, MAX_GRADE, MAX_SECTION_GRADE, MAX_BYTES,
 }
 
 if (require.main === module) main().catch((err) => { console.error(err); process.exit(1) })

@@ -709,3 +709,11 @@ test('competitive-analyst: tools carry both project_matrix tools and the web too
     'WebSearch', 'WebFetch', 'Agent',
   ]) expect(tools).toContain(t);
 });
+
+test('PERSONAS equals the persona files in src/seed/agents', () => {
+  const { PERSONAS } = require('../seedAgentPersonas.cjs');
+  const onDisk = fs.readdirSync(path.join(__dirname, '..', '..', 'seed', 'agents'))
+    .filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort();
+  expect(Array.isArray(PERSONAS)).toBe(true);
+  expect([...PERSONAS].sort()).toEqual(onDisk);
+});

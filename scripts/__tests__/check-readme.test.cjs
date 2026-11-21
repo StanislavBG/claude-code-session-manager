@@ -14,7 +14,11 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const {
   loadSources, renderRegions, applyRegions, run,
   checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, MAX_GRADE, MAX_BYTES,
+  checkRequiredRegions, loadListNames, listKnownPaths, runRules, MAX_SECTION_GRADE,
 } = require('../check-readme.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const { execFileSync } = require('node:child_process');
 const { MCP_TOOL_CATALOG } = require('../../src/main/lib/mcpToolCatalog.cjs');
 
 const fakeSources = () => ({
@@ -197,4 +201,141 @@ test('list rule: missing and extra names are both reported', () => {
   expect(out).toMatch(/packs.*extra.*apple-swift/);
   expect(out).toMatch(/skills.*missing.*builder/);
   expect(checkLists('<!-- list:skills -->\n- `develop`\n', NAMES).join('\n')).toMatch(/unclosed/);
+});
+
+// ── Section grading, required regions, known paths, pack source ────────────
+
+const EASY = 'The dog ran to the park. It was a nice day. The sun was out. ';
+const DENSE = 'The epistemological ramifications of postmodern hermeneutical interpretation necessitate an interdisciplinary reconceptualization of institutionalized pedagogical methodologies. ';
+
+test('MAX_SECTION_GRADE is exported as 8.0', () => {
+  expect(MAX_SECTION_GRADE).toBe(8.0);
+});
+
+test('section grade rule: easy sections pass; short dense sections (< 40 words) are skipped', async () => {
+  const r = await loadReadability();
+  const md = '# T\n\n' + EASY.repeat(6) + '\n\n## Easy\n\n' + EASY.repeat(6) + '\n\n## Tiny\n\n' + DENSE + '\n\n## More\n\n' + EASY.repeat(30) + '\n';
+  expect(checkGrade(md, r)).toEqual([]);
+});
+
+test('section grade rule: one dense section fails even when the page average passes', async () => {
+  const r = await loadReadability();
+  const md = '# T\n\n' + EASY.repeat(40) + '\n\n## Hard part\n\n' + DENSE.repeat(4) + '\n\n## Easy\n\n' + EASY.repeat(40) + '\n';
+  expect(r.fleschKincaidGrade(r.markdownToProse(md))).toBeLessThanOrEqual(MAX_GRADE);
+  const out = checkGrade(md, r);
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatch(/section ## Hard part has reading grade \d+\.\d, above the max of 8\.0/);
+});
+
+test('section grade rule: a dense preamble fails, named as the text before the first ## section', async () => {
+  const r = await loadReadability();
+  const md = '# T\n\n' + DENSE.repeat(4) + '\n\n## Easy\n\n' + EASY.repeat(80) + '\n';
+  const out = checkGrade(md, r);
+  expect(out.some((l) => /section \(before first ## section\) has reading grade/.test(l))).toBe(true);
+});
+
+test('section grade rule: a ## line inside fenced code is not a section heading', async () => {
+  const r = await loadReadability();
+  const md = '# T\n\n' + EASY.repeat(10) + '\n\n```\n## not a heading\n```\n\n' + EASY.repeat(10) + '\n';
+  expect(checkGrade(md, r)).toEqual([]);
+});
+
+const ALL_REGIONS = [
+  '<!-- gen:mcp-tools -->', 'x', '<!-- /gen:mcp-tools -->',
+  '<!-- gen:mcp-recipes -->', 'x', '<!-- /gen:mcp-recipes -->',
+  'n <!-- gen:mcp-tool-count -->1<!-- /gen:mcp-tool-count --> s <!-- gen:skill-count -->1<!-- /gen:skill-count --> v <!-- gen:node-floor -->1<!-- /gen:node-floor -->',
+  '<!-- list:skills -->', '<!-- /list:skills -->',
+  '<!-- list:packs -->', '<!-- /list:packs -->',
+  '<!-- list:personas -->', '<!-- /list:personas -->',
+].join('\n');
+
+test('region rule: a README with every gen and list region passes', () => {
+  expect(checkRequiredRegions(ALL_REGIONS)).toEqual([]);
+});
+
+test('region rule: each missing gen or list region is named', () => {
+  const md = ALL_REGIONS.replace(/<!-- \/?gen:skill-count -->/g, '').replace(/<!-- \/?list:packs -->/g, '').replace(/<!-- \/?gen:mcp-tools -->/g, '');
+  const out = checkRequiredRegions(md);
+  expect(out).toHaveLength(3);
+  expect(out.join('\n')).toMatch(/gen region skill-count is missing/);
+  expect(out.join('\n')).toMatch(/gen region mcp-tools is missing/);
+  expect(out.join('\n')).toMatch(/list region packs is missing/);
+  expect(checkRequiredRegions('# empty\n')).toHaveLength(8);
+});
+
+test('region rule: runRules reports a deleted region (exit 1 in main)', async () => {
+  const readability = await loadReadability();
+  const out = runRules('# Hi\n\nThe cat sat.\n', { readability, trackedFiles: [], listNames: NAMES });
+  expect(out.join('\n')).toMatch(/list region personas is missing/);
+});
+
+test('repo-link rule: known paths include untracked, not ignored files', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-readme-git-'));
+  try {
+    const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+    git('init', '-q');
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'ignored.md\n');
+    fs.writeFileSync(path.join(dir, 'tracked.md'), 't');
+    git('add', 'tracked.md', '.gitignore');
+    fs.mkdirSync(path.join(dir, 'new dir'));
+    fs.writeFileSync(path.join(dir, 'new dir', 'fresh.md'), 'u');
+    fs.writeFileSync(path.join(dir, 'ignored.md'), 'i');
+    fs.writeFileSync(path.join(dir, 'gone.md'), 'g');
+    git('add', 'gone.md');
+    fs.rmSync(path.join(dir, 'gone.md'));
+    const known = listKnownPaths(dir);
+    expect(known).not.toContain('gone.md');
+    expect(known).toContain('tracked.md');
+    expect(known).toContain('new dir/fresh.md');
+    expect(known).not.toContain('ignored.md');
+    const ok = `[n](${GH}/blob/main/new%20dir/fresh.md) [d](${GH}/tree/main/new%20dir)\n`;
+    expect(checkRepoLinks(ok, known)).toEqual([]);
+    const bad = `[i](${GH}/blob/main/ignored.md)\n`;
+    expect(checkRepoLinks(bad, known)).toHaveLength(1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function writeFakeRepo(dir, packs) {
+  fs.mkdirSync(path.join(dir, 'plugins', 'session-manager-dev', 'skills', 'develop'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'plugins', 'session-manager-dev', 'skills', 'develop', 'SKILL.md'), 'x');
+  fs.mkdirSync(path.join(dir, 'src', 'seed', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'seed', 'agents', 'architect.md'), 'x');
+  // loadListNames requires the catalog from <repoRoot>/src/main/lib/packs — point it at the real one.
+  fs.mkdirSync(path.join(dir, 'src', 'main', 'lib', 'packs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'main', 'lib', 'packs', 'packCatalog.cjs'),
+    `module.exports = require(${JSON.stringify(path.join(REPO_ROOT, 'src', 'main', 'lib', 'packs', 'packCatalog.cjs'))});\n`);
+  for (const [id, manifest, plugin] of packs) {
+    const p = path.join(dir, 'plugins', 'packs', id);
+    fs.mkdirSync(path.join(p, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(p, 'sm-pack.json'), JSON.stringify(manifest));
+    fs.writeFileSync(path.join(p, '.claude-plugin', 'plugin.json'), JSON.stringify(plugin));
+  }
+}
+
+test('pack source: real repo packs equal listPacks() ids', () => {
+  const { listPacks } = require('../../src/main/lib/packs/packCatalog.cjs');
+  const names = loadListNames(REPO_ROOT);
+  expect(names.packs).toEqual(listPacks().packs.map((p) => p.id).sort());
+  expect(names.packs.length).toBeGreaterThan(0);
+  expect(names.errors).toEqual([]);
+});
+
+test('pack source: a valid pack is listed; a folder listPacks() rejects is not, and is reported', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-readme-packs-'));
+  try {
+    writeFakeRepo(dir, [
+      ['good-pack', { id: 'good-pack', label: 'Good', description: 'ok' }, { name: 'good-pack' }],
+      ['bad-pack', { id: 'other-id', label: 'Bad', description: 'id mismatch' }, { name: 'bad-pack' }],
+    ]);
+    const names = loadListNames(dir);
+    expect(names.packs).toEqual(['good-pack']);
+    expect(names.skills).toEqual(['develop']);
+    expect(names.personas).toEqual(['architect']);
+    expect(names.errors).toHaveLength(1);
+    expect(names.errors[0]).toMatch(/bad-pack.*must equal its directory name/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

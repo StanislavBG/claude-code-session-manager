@@ -20,6 +20,7 @@
     "src/main/lib/feedback-remote/customerFeedbackClient.cjs",
     "src/main/lib/feedback-remote/customerFeedbackInbox.cjs",
     "src/main/lib/feedback-remote/customerFeedbackIpc.cjs",
+    "src/main/lib/feedback-remote/feedbackImages.cjs",
     "src/main/lib/claudeConfig.cjs",
     "src/main/lib/effectiveSettings.cjs",
     "src/main/lib/mdNetworkScan.cjs",

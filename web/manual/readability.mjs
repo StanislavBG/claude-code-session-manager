@@ -62,6 +62,100 @@ export function htmlToProse(html) {
   return text;
 }
 
+/** Drop fenced code blocks: a line opened by 3+ backticks or tildes (up to 3
+ * spaces of indent) through the closing fence of the same character and at
+ * least the same length. An unclosed fence runs to the end of the input. */
+function stripFencedBlocks(md) {
+  const out = [];
+  let fence = null;
+  for (const line of md.split('\n')) {
+    if (fence) {
+      const close = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const open = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (open) {
+      fence = open[1];
+      out.push('');
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Append a sentence-ending '.' unless the text already ends with . ! or ?. */
+function endSentence(text) {
+  const t = text.trim();
+  if (!t) return '';
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+/** Convert Markdown into plain prose for Flesch-Kincaid scoring: code, URLs,
+ * comments and markup are dropped, and every heading, list item, blockquote
+ * line, table cell and paragraph ends a sentence. */
+export function markdownToProse(md) {
+  if (!md) return '';
+
+  let text = String(md).replace(/\r\n?/g, '\n');
+  text = stripFencedBlocks(text);
+  text = text.replace(/<!--[\s\S]*?-->/g, ' ');
+  text = text.replace(/(`+)[\s\S]*?\1/g, ' ');
+  text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');
+  text = text.replace(/!\[[^\]]*\]\[[^\]]*\]/g, ' ');
+  text = text.replace(/^ {0,3}\[[^\]]+\]:\s*\S.*$/gm, '');
+  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  text = text.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
+  text = text.replace(/<https?:\/\/[^>\s]*>/gi, ' ');
+  text = text.replace(/https?:\/\/[^\s<>()[\]]*[^\s<>()[\].,;:!?'"]/gi, ' ');
+  text = text.replace(/<\/?[A-Za-z][^>]*>/g, ' ');
+  text = text.replace(/\*\*|__/g, '');
+
+  const sentences = [];
+  let paragraph = [];
+  const flush = () => {
+    const s = endSentence(paragraph.join(' '));
+    if (s) sentences.push(s);
+    paragraph = [];
+  };
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    // Blank lines and thematic breaks / setext underlines end a paragraph.
+    if (!line || /^([-*_=])(\s*\1){2,}$/.test(line) || /^=+$/.test(line)) {
+      flush();
+      continue;
+    }
+    if (line.includes('|')) {
+      flush();
+      const cells = line.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+      const nonEmpty = cells.filter(Boolean);
+      if (nonEmpty.length && nonEmpty.every((c) => /^[\s:-]+$/.test(c))) continue;
+      for (const cell of nonEmpty) {
+        const s = endSentence(cell);
+        if (s) sentences.push(s);
+      }
+      continue;
+    }
+    const heading = line.match(/^#{1,6}(?:\s+|$)(.*?)(?:\s+#+)?$/);
+    const quote = line.match(/^(?:>\s?)+(.*)$/);
+    let item = (quote ? quote[1] : heading ? heading[1] : line).trim();
+    const list = item.match(/^(?:[-*+]|\d+[.)])(?:\s+|$)(.*)$/);
+    if (list) item = list[1];
+    if (heading || quote || list) {
+      flush();
+      const s = endSentence(item);
+      if (s) sentences.push(s);
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flush();
+
+  return decodeEntities(sentences.join(' ')).replace(/\s+/g, ' ').trim();
+}
+
 /** Count syllables in one word: lowercase, strip non-letters, count vowel
  * groups, drop a trailing silent "e" (but not "le"), minimum 1. */
 export function countSyllables(word) {

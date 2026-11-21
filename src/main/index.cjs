@@ -2,15 +2,7 @@
 // closes, writes to the inherited stdout/stderr fail EIO/EPIPE and would surface
 // as one uncaughtException per console line. The notice goes to the file logger
 // (required lazily: logs.cjs pulls in electron's app), never to the dead stream.
-try {
-  require('./lib/process/stdioGuard.cjs').guardStdio({
-    log: ({ stream, code }) => {
-      try {
-        require('./logs.cjs').writeLine({ scope: 'main', level: 'warn', message: 'stdio stream dead; output to it is dropped', meta: { stream, code } });
-      } catch { /* best-effort */ }
-    },
-  });
-} catch { /* the guard must never stop boot */ }
+try { require('./lib/process/bootStdioGuard.cjs').installBootStdioGuard(); } catch { /* the guard must never stop boot */ }
 // Boot diagnostic (SM_BOOT_DIAG=1, set by the packaged smoke): one stderr line that
 // shows whether `electron` resolved to the built-in module or ran in node mode.
 if (process.env.SM_BOOT_DIAG === '1') {
@@ -1358,15 +1350,7 @@ app.whenReady().then(async () => {
 
   // A dead-stdio write error (EIO/EPIPE after the terminal closed) is reported
   // and logged at most once per process; every other error as before.
-  const shouldReportUncaught = require('./lib/process/stdioGuard.cjs').createUncaughtReportFilter();
-  process.on('uncaughtException', (err) => {
-    if (shouldReportUncaught(err)) {
-      try {
-        require('./lib/telemetry/telemetryClient.cjs').reportError({ name: 'uncaughtException', msg: err?.message, stack: err?.stack });
-      } catch { /* telemetry must never break the existing handling below */ }
-      logs.writeLine({ scope: 'main', level: 'error', message: 'uncaughtException', meta: { error: err?.message, stack: err?.stack } });
-    }
-  });
+  process.on('uncaughtException', require('./lib/process/bootStdioGuard.cjs').createUncaughtExceptionHandler({ reportError: (p) => require('./lib/telemetry/telemetryClient.cjs').reportError(p), writeLine: (e) => logs.writeLine(e) }));
   process.on('unhandledRejection', (reason) => {
     const r = reason instanceof Error ? { error: reason.message, stack: reason.stack } : { reason: String(reason) };
     try {

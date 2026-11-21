@@ -111,6 +111,20 @@ function checkBlankFrames(frames, threshold = DEFAULT_BLANK_STDDEV) {
     bad.length ? `blank frame(s) at ${bad.map((f) => `${f.t}s`).join(', ')}` : `${list.length} frame(s) non-blank`);
 }
 
+// Project Home's VideoPlayer draws the only control bar; a video that draws its own
+// shows a second one under it. The injected player bridge script is not the video's.
+const PLAYER_BRIDGE_BLOCK_RE = /<script\b[^>]*\bdata-sm-player-bridge\b[^>]*>[\s\S]*?<\/script\s*>/gi;
+const CONTROL_PATTERNS = [
+  ['button', /<button\b/i],
+  ['input', /<input\b/i],
+  ['audio controls', /<audio\b[^>]*\scontrols\b/i],
+  ['video controls', /<video\b[^>]*\scontrols\b/i],
+];
+function ownPlaybackControls(html) {
+  const h = String(html || '').replace(PLAYER_BRIDGE_BLOCK_RE, '');
+  return CONTROL_PATTERNS.filter(([, re]) => re.test(h)).map(([what]) => what);
+}
+
 function checkHtmlLimits({ html, bytes, lengthS } = {}) {
   const h = String(html || '');
   const size = Number.isFinite(bytes) ? bytes : Buffer.byteLength(h);
@@ -122,6 +136,8 @@ function checkHtmlLimits({ html, bytes, lengthS } = {}) {
   if (!dur) problems.push('sm-demo-duration meta missing');
   else if (Number(dur[1]) !== Number(lengthS)) problems.push(`sm-demo-duration ${dur[1]} != ${lengthS}`);
   if (!/window\.smDemo\s*=/.test(h) || !/scenes\s*:/.test(h)) problems.push('window.smDemo with scenes missing');
+  const controls = ownPlaybackControls(h);
+  if (controls.length) problems.push(`own playback controls: ${controls.join(', ')}`);
   return result('htmlLimits', problems.length === 0, problems.length ? problems.join('; ') : `${size} bytes within cap ${cap}`);
 }
 

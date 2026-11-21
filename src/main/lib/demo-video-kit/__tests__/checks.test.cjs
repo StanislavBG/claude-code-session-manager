@@ -41,6 +41,29 @@ describe('demo-video-kit checks', () => {
     expect(c.checkHtmlLimits({ html: '<p>x</p>', lengthS: 30 }).ok).toBe(false);
     expect(c.checkHtmlLimits({ html: HTML(30), bytes: 2 * 1024 * 1024 + 1, lengthS: 30 }).ok).toBe(false);
   });
+  it('html limits: own playback controls fail with the reason', () => {
+    const clean = HTML(30);
+    expect(c.checkHtmlLimits({ html: clean, lengthS: 30 }).ok).toBe(true);
+    for (const [frag, what] of [
+      ['<button id="play">Play</button>', 'button'],
+      ['<INPUT type="range">', 'input'],
+      ['<audio src="a.mp3" controls></audio>', 'audio controls'],
+      ['<Video CONTROLS src="v.mp4"></video>', 'video controls'],
+    ]) {
+      const r = c.checkHtmlLimits({ html: clean + frag, lengthS: 30 });
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain(`own playback controls: ${what}`);
+    }
+    expect(c.checkHtmlLimits({ html: clean + '<audio src="a.mp3"></audio>', lengthS: 30 }).ok).toBe(true);
+  });
+  it('html limits: the injected player bridge is not counted', () => {
+    const { injectPlayerBridge } = require('../../project-pages/playerBridge.cjs');
+    const bridged = injectPlayerBridge(`<html><head></head><body>${HTML(30)}</body></html>`);
+    expect(bridged).toContain('data-sm-player-bridge');
+    expect(c.checkHtmlLimits({ html: bridged, lengthS: 30 }).ok).toBe(true);
+    const bridgedWithButton = '<script data-sm-player-bridge>var s="<button>";</script>' + HTML(30);
+    expect(c.checkHtmlLimits({ html: bridgedWithButton, lengthS: 30 }).ok).toBe(true);
+  });
   it('runChecks returns entries', () => {
     const r = c.runChecks({ captions: ['hi'], closing: 'Done.' });
     expect(r.map((x) => x.id)).toEqual(['captions', 'closing']);

@@ -165,3 +165,25 @@ test('pages/write refuses the reserved competitive-matrix id and writes nothing;
   expect(w.body.ok).toBe(true);
   expect(fs.existsSync(path.join(pageDir, 'index.html'))).toBe(true);
 });
+
+test('videos/write refuses a video that draws its own button, with the htmlLimits reason', async () => {
+  const cwd = await mkProjectCwd();
+  const html = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
+    + '<body><canvas id="c"></canvas><button>Play</button><script>window.smDemo = { scenes: [] };</script></body></html>';
+  const meta = {
+    style: 'plain', character: null, sources: [],
+    report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [] },
+    macroVersion: 1, seedVersion: 1, model: 'm', effort: 'low', title: 'T', kind: 'project-demo', lengthS: 15,
+  };
+  const body = { cwd, videoId: 'my-vid', title: 'My video', kind: 'project-demo', lengthS: 15, html, meta };
+  const r = await setup().call('POST', '/admin/project-home/videos/write', { body });
+  expect(r.status).toBe(400);
+  expect(r.body.ok).toBe(false);
+  expect(JSON.stringify(r.body)).toContain('htmlLimits check failed');
+  expect(JSON.stringify(r.body)).toContain('own playback controls: button');
+  expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'project-pages', 'videos'))).toBe(false);
+
+  const clean = html.replace('<button>Play</button>', '');
+  const ok = await setup().call('POST', '/admin/project-home/videos/write', { body: { ...body, html: clean } });
+  expect(ok.status).toBe(200);
+});

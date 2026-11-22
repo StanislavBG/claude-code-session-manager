@@ -1119,6 +1119,7 @@ epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();
 registerProjectPagesIpc();
+require('./lib/tasks/taskIpc.cjs').registerTaskIpc({ ipcMain });
 ipcMain.handle('promptSessionTranscript:append', validated(schemas.promptSessionTranscriptAppend, async ({ cwd, epicId, role, text, at, eventId }) => {
   const ok = await promptSessionTranscript.appendTurn(cwd, epicId, { role, text, at, eventId });
   return { ok };

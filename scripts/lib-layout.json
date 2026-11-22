@@ -11,6 +11,7 @@
   "taskLedger": "tasks",
   "taskSwitch": "tasks",
   "taskRun": "tasks",
+  "taskIpc": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

@@ -1396,6 +1396,26 @@ const historyDashboard = z.object({
   rangeDays: z.union([z.literal(30), z.literal(60), z.literal(90), z.literal(0)]),
 }).strict();
 
+// ──────────────────────────────────────────── Tasks (lib/tasks/taskIpc.cjs)
+const TaskCwd = z.string().min(1).max(4096).refine((s) => path.isAbsolute(s), 'cwd must be absolute');
+const TaskFilter = z.string().min(1).max(512).optional();
+const TaskListQuery = z.object({
+  cwd: TaskCwd,
+  since: TaskFilter,
+  until: TaskFilter,
+  pipeline: TaskFilter,
+  runId: TaskFilter,
+  step: TaskFilter,
+  agent: TaskFilter,
+  status: TaskFilter,
+  source: TaskFilter,
+  limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).optional(),
+}).strict();
+const TaskGetQuery = z.object({ cwd: TaskCwd, id: z.string().min(1).max(200) }).strict();
+const TaskSwitchQuery = z.object({ cwd: TaskCwd }).strict();
+const TaskSwitchSet = z.object({ cwd: TaskCwd, enabled: z.boolean() }).strict();
+
 // ──────────────────────────────────────────── Voice (F1/F5/F7/F8)
 // Mirrors voiceSettings.cjs isValidConfig / isValidDevicePref / isValid…
 // validators (ad-hoc on disk). Schemas here gate the IPC boundary so a
@@ -1681,6 +1701,10 @@ module.exports = {
     archiveProject,
     historyAggregate,
     historyDashboard,
+    TaskListQuery,
+    TaskGetQuery,
+    TaskSwitchQuery,
+    TaskSwitchSet,
     voiceSetHotkey,
     voiceSetDevicePref,
     voiceSetTurnDetector,

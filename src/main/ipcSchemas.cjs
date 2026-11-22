@@ -1055,18 +1055,11 @@ const projectPagesCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 
-// project-pages:md-network — cwd plus optional human folder overrides for the
-// census. Folders are repo-relative path PREFIXES used only for classification
-// (never joined onto the fs), so the shape check here is the whole contract.
-const mdNetworkFolder = z.string().min(1).max(512).refine(
-  (f) => !f.startsWith('/') && !f.includes('\\') && !f.includes('\0') && !f.split('/').includes('..'),
-  { message: "folder must be repo-relative (no leading '/', backslash, NUL or '..' segment)" },
-);
-const mdNetworkFolderList = z.array(mdNetworkFolder).max(50);
+// project-pages:md-network — cwd only. History folders come from the tracked
+// .session-manager.json mdNetwork.history and the census heuristic; the IPC
+// carries no folder overrides (.strict() rejects recordFolders/docFolders).
 const projectPagesMdNetwork = z.object({
   cwd: z.string().min(1).max(4096),
-  recordFolders: mdNetworkFolderList.optional(),
-  docFolders: mdNetworkFolderList.optional(),
 }).strict();
 
 // project-pages:md-review — cwd plus optional Epic ids whose plan-records/<id>/

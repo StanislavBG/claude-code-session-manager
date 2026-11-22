@@ -371,23 +371,20 @@ test('project-pages:md-network returns the scanner result for a repo cwd and ref
   expect(refused).toEqual({ ok: false, error: expect.stringMatching(/ephemeral/) });
 });
 
-test('project-pages:md-network passes folder overrides to the scan and rejects a .. entry', async () => {
+test('project-pages:md-network takes { cwd } only and rejects folder overrides', async () => {
   registerProjectPagesIpc();
   const mdNetwork = ipcHandlers.get('project-pages:md-network');
   const cwd = await mkFixtureRepo();
 
-  const result = await mdNetwork({}, { cwd, recordFolders: ['docs/'], docFolders: [] });
+  const result = await mdNetwork({}, { cwd });
   expect(result.ok).toBe(true);
-  expect(result).toEqual(await scanMdNetwork(fs.realpathSync(cwd), {}, { recordFolders: ['docs'], docFolders: [] }));
-  expect(result.census.collections).toEqual([expect.objectContaining({ folder: 'docs/', source: 'override' })]);
+  expect(result).toEqual(await scanMdNetwork(fs.realpathSync(cwd)));
 
   const call = async (payload) => mdNetwork({}, payload); // validated() throws synchronously
-  for (const bad of [['../outside'], ['docs/../..'], ['/abs'], ['a\\b'], ['']]) {
-    await expect(call({ cwd, recordFolders: bad })).rejects.toThrow();
-    await expect(call({ cwd, docFolders: bad })).rejects.toThrow();
-  }
-  await expect(call({ cwd, recordFolders: Array.from({ length: 51 }, (_, i) => `f${i}`) })).rejects.toThrow();
+  await expect(call({ cwd, recordFolders: ['docs/'] })).rejects.toThrow();
+  await expect(call({ cwd, docFolders: ['docs/'] })).rejects.toThrow();
   await expect(call({ cwd, extra: 1 })).rejects.toThrow();
+  await expect(call({})).rejects.toThrow();
 });
 
 // ─── project-pages:matrix ──────────────────────────────────────────────────

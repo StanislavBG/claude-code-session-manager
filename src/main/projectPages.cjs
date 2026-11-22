@@ -96,27 +96,17 @@ async function get({ cwd }) {
 
 const MD_NETWORK_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project to scan';
 
-/** Strip trailing slashes ('docs/' -> 'docs'); undefined stays undefined. */
-const stripTrailingSlashes = (folders) => folders && folders.map((f) => f.replace(/\/+$/, ''));
-
 /**
  * -> MdNetworkResult: the project's markdown link network from its root
  * CLAUDE.md, scanned once per call (no watcher, no cache). `cwd` is validated
  * like get() (an invalid path rejects); a cwd get() answers with EMPTY() gets
- * `{ ok: false, error }`.
- *
- * `recordFolders` / `docFolders` are a human's census overrides (mark a folder
- * as machine-written records, or as real docs). They are only repo-relative
- * path prefixes for classification and never reach the file system — only
- * `cwd` is a path that is resolved or read.
+ * `{ ok: false, error }`. History folders come only from the tracked
+ * .session-manager.json mdNetwork.history and the census heuristic.
  */
-async function mdNetwork({ cwd, recordFolders, docFolders }) {
+async function mdNetwork({ cwd }) {
   const { root, ephemeral } = tryProjectRoot(config.validatePath(cwd));
   if (ephemeral) return { ok: false, error: MD_NETWORK_EPHEMERAL };
-  return scanMdNetwork(root, {}, {
-    recordFolders: stripTrailingSlashes(recordFolders),
-    docFolders: stripTrailingSlashes(docFolders),
-  });
+  return scanMdNetwork(root);
 }
 
 const MD_REVIEW_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git worktree): no project review record';

@@ -193,13 +193,19 @@ End every plan with exactly one validate PRD:
 4. Criteria: one per PRD, citing it by slug
    (under `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic-id>/`; find it by
    slug under prds/ or prds-archived/, possibly a timestamped subfolder. Why: runtime namespaces such as `session-manager-operations/scheduler/` carry their own `.gitignore`
-   (runtime-ops-namespaces-self-ignore), so they are never in the validator's job worktree. The last: write and commit
-   `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`, relative to the repository root
-   (`git rev-parse --show-toplevel`), not to any subdirectory you `cd`'d into to run a gate.
+   (runtime-ops-namespaces-self-ignore), so they are never in the validator's job worktree. The last: write
+   `session-manager-operations/plan-records/<epic-id>/<validate-slug>.md`, relative to the repository root
+   (`git rev-parse --show-toplevel`), not to any subdirectory you `cd`'d into to run a gate. Never
+   commit it; the scheduler copies it to the main checkout.
 5. Notes: "Work as the validator persona — the procedure is your system prompt." and a line
    `Base: <sha>`, the SHA from step 11.
-6. `gate: ["none"]`; `files`: the record path. Why: the validator re-runs each PRD's gate
+6. `gate: ["none"]`; `files`: the record path
+   `session-manager-operations/plan-records/<epic-id>/<validate-slug>.md`. It is never committed:
+   the API declares the PRD artifact-only. Why: the validator re-runs each PRD's gate
    itself, and a REFUTED PRD is still a successful validation.
+
+A per-run record from any other PRD (ship, deploy, audit) also goes under
+`session-manager-operations/plan-records/<epic-id>/`; never name a git-ignored ops path in `files` to get it force-added.
 
 The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTED — <reason>`
 per PRD. Queue the validate PRD in the same `scheduler_create_prds` call as the plan (its `dependsOn` may name that call's entries); with single creates it goes last: in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist. The
@@ -257,14 +263,16 @@ Rules:
       wave would repeat it. A Not validated list means validate exactly those PRDs here. All
       `VERIFIED` with nothing open means Done: write the final report.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, including each PRD an earlier
-   validator refuted, no Critical or Important finding is open, and its record is committed.
+   validator refuted, no Critical or Important finding is open, and its record exists in the main checkout's
+   `session-manager-operations/plan-records/<epic-id>/`.
    Never "done with caveats": a REFUTED PRD gets a fix wave, or after its second refutation an
    open entry in the final report for the human to decide.
 
 ### Final report
 
 1. What landed: each PRD slug and its commit.
-2. The validation record path.
+2. The validation record path; the record exists in the main checkout's
+   `session-manager-operations/plan-records/<epic-id>/`.
 3. Minor findings deferred.
 4. Anything still open.
 5. Any warning kept or validator skipped.

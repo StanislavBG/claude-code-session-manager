@@ -133,7 +133,7 @@ Drift check mode reviews only what changed since the last review.
 
 Every review, Full or Drift check, ends with one dated record, committed with the work. It is the next drift check's baseline.
 
-Path: session-manager-operations/reviews/docs/<YYYY-MM-DD>-md-network.md (or the project's own reviews folder). Use one record per day; a second record on the same date takes a -2 suffix (and -3, and so on). Commit it last, so Base commit is the commit just before it.
+Path: session-manager-operations/reviews/docs/<YYYY-MM-DD>-md-network.md (or the project's own reviews folder). Use one record per day; a second record on the same date takes a -2 suffix (and -3, and so on). Commit it last, so Base commit is the commit just before it. When `git check-ignore -q <record path>` exits 0, git ignores the path: do not commit or force-add the record, and set Base commit to HEAD.
 
 Template:
 

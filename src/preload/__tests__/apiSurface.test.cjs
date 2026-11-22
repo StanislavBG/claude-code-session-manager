@@ -132,24 +132,27 @@ test('appPreview rows carry the expected channels and remote policies', () => {
   ]);
 });
 
-// Video review approvals are a human decision in the desktop app: the phone relay may list, never decide.
-test('projectPages video review rows: reviewList is read, reviewDecide is desktop-only (deny)', () => {
+// Video review approvals and retries are human actions in the desktop app: the phone relay may list, never decide or retry.
+test('projectPages video review rows: reviewList is read, reviewDecide and reviewRetry are desktop-only (deny)', () => {
   const table = require('../apiSurface.cjs');
   const rows = table.filter((r) => r.ns === 'projectPages' && /^review/.test(r.method))
     .map((r) => [r.method, r.channel, r.kind, r.remote]);
   assert.deepStrictEqual(rows, [
     ['reviewList', 'project-videos:review-list', 'invoke', 'read'],
     ['reviewDecide', 'project-videos:review-decide', 'invoke', 'deny'],
+    ['reviewRetry', 'project-videos:review-retry', 'invoke', 'deny'],
   ]);
 });
 
-test('projectPages.reviewList / reviewDecide forward their payload object unchanged', async () => {
+test('projectPages.reviewList / reviewDecide / reviewRetry forward their payload object unchanged', async () => {
   recorded = [];
   await exposedApi.projectPages.reviewList({ cwd: '/p' });
   await exposedApi.projectPages.reviewDecide({ cwd: '/p', entryId: 'e1', decision: 'changes', note: 'n' });
+  await exposedApi.projectPages.reviewRetry({ cwd: '/p', entryId: 'e1' });
   assert.deepStrictEqual(recorded.map((r) => [r.channel, r.rest]), [
     ['project-videos:review-list', [{ cwd: '/p' }]],
     ['project-videos:review-decide', [{ cwd: '/p', entryId: 'e1', decision: 'changes', note: 'n' }]],
+    ['project-videos:review-retry', [{ cwd: '/p', entryId: 'e1' }]],
   ]);
 });
 

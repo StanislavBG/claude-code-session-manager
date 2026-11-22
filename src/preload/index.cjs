@@ -450,6 +450,7 @@ contextBridge.exposeInMainWorld('api', {
     delete: (cwd, kind, id) => ipcRenderer.invoke('project-pages:delete', { cwd, kind, id }),
     reviewList: (payload) => ipcRenderer.invoke('project-videos:review-list', payload),
     reviewDecide: (payload) => ipcRenderer.invoke('project-videos:review-decide', payload),
+    reviewRetry: (payload) => ipcRenderer.invoke('project-videos:review-retry', payload),
     onChanged: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('project-pages:changed', listener);

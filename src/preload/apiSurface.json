@@ -1808,6 +1808,13 @@
  },
  {
   "ns": "projectPages",
+  "method": "reviewRetry",
+  "channel": "project-videos:review-retry",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "projectPages",
   "method": "onChanged",
   "channel": "project-pages:changed",
   "kind": "on",

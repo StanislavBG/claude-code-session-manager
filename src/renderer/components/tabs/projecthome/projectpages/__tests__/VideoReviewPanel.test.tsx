@@ -14,6 +14,8 @@ function review(entryId: string, status: VideoReview['status'], over: Partial<Vi
   return {
     entryId,
     status,
+    job: null,
+    canRetry: false,
     dispatch: {
       entryId,
       macroId: 'burrow-episode',

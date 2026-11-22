@@ -912,6 +912,8 @@ describe('VideosPane tool entries: review panel, badges and Regenerate', () => {
       },
       material: status === 'building' ? null : { entryId, text: 'Script', images: [], savedAt: isoAgo(HOUR) },
       decision: null,
+      job: null,
+      canRetry: false,
     }
   }
   const toolStatus = (over: Partial<MacroJobStatus>) => status({ macroId: 'burrow-episode', ...over })

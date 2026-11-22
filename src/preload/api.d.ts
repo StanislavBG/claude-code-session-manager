@@ -1890,7 +1890,7 @@ export interface ProjectPagesGetResult {
 
 // ────────────────────────────────────────────── Project Pages: video review step
 // Mirrors src/main/lib/project-pages/videoReview.cjs (readReview / listReviews) and
-// src/main/lib/project-pages/videoReviewIpc.cjs (project-videos:review-list / review-decide).
+// src/main/lib/project-pages/videoReviewIpc.cjs (project-videos:review-list / review-decide / review-retry).
 
 /** Lifecycle of one Video tool entry's human review step. */
 export type VideoReviewStatus = 'building' | 'waiting' | 'approved' | 'changes-requested';
@@ -1942,6 +1942,20 @@ export interface VideoReview {
   status: VideoReviewStatus | null;
   material: VideoReviewMaterial | null;
   decision: VideoReviewDecision | null;
+  /** The queue job of dispatch.slug (jobStatusesBySlug), or null when there is no dispatch or no job row. */
+  job: VideoReviewJob | null;
+  /** True only for an approved entry whose recorded final-stage run ended failed (retryable()). */
+  canRetry: boolean;
+}
+
+/** The queue job behind an entry's recorded dispatch; `state` follows stateOf in macroJobStatus.cjs. */
+export interface VideoReviewJob {
+  slug: string;
+  state: 'queued' | 'running' | 'done' | 'failed';
+  /** Raw queue status. */
+  status: string | null;
+  /** One-line failure reason; null unless state === 'failed'. */
+  reason: string | null;
 }
 
 export interface VideoReviewListPayload {
@@ -1959,6 +1973,16 @@ export interface VideoReviewDecidePayload {
 export type VideoReviewDecideResult =
   | { ok: true; slug: string; stage: string; decision: VideoReviewDecision }
   | { ok: false; error: string };
+
+export interface VideoReviewRetryPayload {
+  cwd: string;
+  entryId: string;
+}
+
+/** The final-stage dispatch result (macroJobDispatch); writes no decision. */
+export type VideoReviewRetryResult =
+  | { ok: true; slug: string; epicId: string; entryId?: string | null; stage?: string }
+  | { ok: false; error: string; activeSlug?: string };
 
 // ────────────────────────────────────────────── Project Pages: markdown link network
 // Mirrors the JSDoc typedefs of the same names in src/main/lib/mdNetworkScan.cjs.
@@ -3065,6 +3089,8 @@ export interface SessionManagerAPI {
     reviewList: (payload: VideoReviewListPayload) => Promise<VideoReview[]>;
     /** The human review decision for a 'waiting' entry: 'approve' queues the final run in the building Epic, 'changes' re-runs the review stage with the note. Desktop only (never via the phone relay); one in-flight decide per entry. */
     reviewDecide: (payload: VideoReviewDecidePayload) => Promise<VideoReviewDecideResult>;
+    /** Re-dispatch the final stage of an approved entry whose final run failed (canRetry), reusing the recorded approval and inputs. Desktop only (never via the phone relay); one in-flight decide/retry per entry. */
+    reviewRetry: (payload: VideoReviewRetryPayload) => Promise<VideoReviewRetryResult>;
     /** Fires whenever a watched cwd's knowledge/videos library is added/changed/removed, carrying the freshly read library result. */
     onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
   };

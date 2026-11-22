@@ -8,6 +8,7 @@ import { TerminalAppearanceCard } from './home/TerminalAppearanceCard'
 import { SettingsTelemetry } from './SettingsTelemetry'
 import { SettingsRemote } from './SettingsRemote'
 import { SettingsUpdates } from './SettingsUpdates'
+import { SettingsStartAtLogin } from './SettingsStartAtLogin'
 import { SettingsOpsRetention } from './SettingsOpsRetention'
 import { DataModel } from './DataModel'
 import { useDensity } from '../../lib/useDensity'
@@ -67,6 +68,7 @@ function Startup() {
   return (
     <div className="p-4 max-w-3xl space-y-3 text-sm">
       <Toggle checked={openHome} onChange={toggle} disabled={saving} label="Open to Home on launch" />
+      <SettingsStartAtLogin />
     </div>
   )
 }

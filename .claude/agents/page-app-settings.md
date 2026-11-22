@@ -35,6 +35,8 @@ Reads and writes Session Manager's own files, never Claude Code's `settings.json
 - Telemetry is anonymous, on by default and opt-out (`SM_TELEMETRY=0`); the bilko.run relay stays live (root
   `CLAUDE.md`). The Storage map is the hand-maintained `src/renderer/lib/dataModelErd.ts`, changed in the same commit
   as the shapes it mirrors.
+- 'Start at login' (Startup tab, `SettingsStartAtLogin.tsx`) reads and writes the system's own login item through
+  `window.api.loginItem` and has no preference file; it re-reads `loginItem.status()` every time the tab opens.
 - A tab can be pre-selected by `openPanel('app-settings', '<tab>')` (`usePanelTabHint` in `src/renderer/state/layout.ts`).
 
 ## Boundaries

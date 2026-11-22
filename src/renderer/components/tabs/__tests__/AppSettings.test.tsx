@@ -25,6 +25,10 @@ let root: Root
 beforeEach(async () => {
   ;(window as unknown as { api: unknown }).api = {
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
+    loginItem: {
+      status: vi.fn().mockResolvedValue({ supported: true, enabled: false, mechanism: 'xdg-autostart', starts: 'npx', entryPath: null, reason: null }),
+      setEnabled: vi.fn(),
+    },
     config: {
       readText: vi.fn().mockResolvedValue({ exists: true, mtimeMs: 0 }),
       onChanged: vi.fn(() => () => {}),
@@ -71,5 +75,7 @@ describe('AppSettings', () => {
     await click('Startup')
     expect(container.textContent).toContain('Open to Home on launch')
     expect(chips()[0]).toContain('app-prefs.json')
+    expect(container.querySelector('[data-testid="settings-start-at-login"]')).not.toBeNull()
+    expect(container.textContent).toContain('Start at login')
   })
 })

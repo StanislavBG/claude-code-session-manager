@@ -27,6 +27,7 @@
   "customerFeedbackClient": "feedback-remote",
   "needsYouStore": "feedback-remote",
   "needsYouAdminRoutes": "feedback-remote",
+  "needsYouIpc": "feedback-remote",
   "customerFeedbackInbox": "feedback-remote",
   "customerFeedbackIpc": "feedback-remote",
   "humanPromptLedger": "feedback-remote",

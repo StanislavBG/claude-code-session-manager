@@ -103,9 +103,14 @@ macroAdminRoutes.registerAdminRoute(adminHttp, {
 });
 chatRunner.registerAdminRoute(adminHttp);
 // Outside apps' "Needs you" items (lib/feedback-remote/needsYouStore.cjs); changes broadcast `needsYou:changed`.
+function broadcastNeedsYouChanged() {
+  sendIfAlive(mainWindow, 'needsYou:changed', {});
+}
 require('./lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(adminHttp, {
-  onChanged: () => sendIfAlive(mainWindow, 'needsYou:changed', {}),
+  onChanged: broadcastNeedsYouChanged,
 });
+// The Dashboard's side: list open items + record the owner's answer (same broadcast).
+require('./lib/feedback-remote/needsYouIpc.cjs').registerNeedsYouIpc({ ipcMain, onChanged: broadcastNeedsYouChanged });
 // Project-to-project feedback conduit — the app is the only process holding
 // several projects' operations roots open, so it performs the cross-folder
 // write (lib/feedback-remote/crossProjectFeedback.cjs).

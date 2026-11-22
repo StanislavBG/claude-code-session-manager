@@ -811,6 +811,14 @@ const macrosDispatchJob = z.object({
   effort: z.enum(/** @type {[string, ...string[]]} */ ([...PRD_EFFORT_LEVELS])).optional(),
 });
 const macrosJobStatus = z.object({ cwd: z.string().min(1).max(4096) });
+// Dashboard "Needs you" (lib/feedback-remote/needsYouIpc.cjs): list takes no payload; answer
+// names one item + the chosen option. needsYouStore.cjs re-validates app/id and the option.
+const needsYouList = z.object({}).strict().optional();
+const needsYouAnswer = z.object({
+  app: z.string().min(1).max(40),
+  id: z.string().min(1).max(200),
+  answer: z.string().min(1).max(80),
+}).strict();
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
@@ -1752,6 +1760,8 @@ module.exports = {
     macrosRemoveFromProject,
     macrosDispatchJob,
     macrosJobStatus,
+    needsYouList,
+    needsYouAnswer,
     agentsGetPersonaBody,
     agentsResolveModelInfo,
     modelsCatalog,

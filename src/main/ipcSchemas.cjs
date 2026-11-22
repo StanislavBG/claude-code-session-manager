@@ -821,12 +821,17 @@ const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
 const macrosRemoveFromProject = MacroRemoveFromProjectSchema;
-// Background macro job (macroJobIpc.cjs): press a built-in macro as a scheduler PRD inside an existing Epic.
+// Background macro job (macroJobIpc.cjs): press a built-in macro or project Video tool as a scheduler PRD inside an existing Epic.
 const macrosDispatchJob = z.object({
   cwd: z.string().min(1).max(4096),
   macroId: z.string().min(1).max(128),
   epicId: z.string().min(1).max(200),
   extraInstructions: z.string().max(4000).optional(),
+  // A project Video tool's input values. No `review` key: an unknown key is
+  // stripped, so only the main-side review-decision IPC can pass a decision.
+  inputValues: z.record(z.string().max(128), z.string().max(4000))
+    .refine((o) => Object.keys(o).length <= 20, 'at most 20 input values')
+    .optional(),
   effort: z.enum(/** @type {[string, ...string[]]} */ ([...PRD_EFFORT_LEVELS])).optional(),
 });
 const macrosJobStatus = z.object({ cwd: z.string().min(1).max(4096) });

@@ -1,6 +1,6 @@
 'use strict';
 import { describe, it, expect } from 'vitest';
-const { macroJobStatuses, HISTORY_TAIL_BYTES } = require('../macroJobStatus.cjs');
+const { macroJobStatuses, HISTORY_TAIL_BYTES, REASON_MAX } = require('../macroJobStatus.cjs');
 
 const builtins = [{ id: 'a', job: {} }, { id: 'b', job: {} }, { id: 'c' }];
 const CWD = '/p';
@@ -50,5 +50,52 @@ describe('macroJobStatuses', () => {
       expect(await macroJobStatuses({ cwd: CWD }, { loadJobs: async () => [], readHistoryTail: bad, builtins })).toEqual([]);
     }
     expect(HISTORY_TAIL_BYTES).toBe(524288);
+  });
+});
+
+describe('macroJobStatuses — project Video tools', () => {
+  const tool = (over = {}) => ({ id: 't1', surface: 'project-video', projects: [CWD], job: { review: true }, ...over });
+  const review = (entryId, slug, stage, status) => ({ entryId, dispatch: { slug, stage }, status });
+  const run = (rows, { macros = [tool()], reviews = [], hist: h = '' } = {}) => macroJobStatuses({ cwd: CWD }, {
+    loadJobs: async () => rows, readHistoryTail: async () => h, builtins, macros, listReviews: async () => reviews,
+  });
+
+  it('reports a tool like a built-in with entryId matched by slug; other tools are left out', async () => {
+    const macros = [tool(), tool({ id: 't2', projects: ['/other'] }), tool({ id: 't3', surface: 'project-home' }), tool({ id: 't4', job: undefined })];
+    const rows = ['t1', 't2', 't3', 't4'].map((id) => ({ cwd: CWD, macroId: id, slug: `s-${id}`, status: 'running', epicId: 'e' }));
+    const res = await run(rows, { macros, reviews: [review('vid-x', 'other'), review('vid-1', 's-t1', 'review', 'building')] });
+    expect(res).toEqual([{ macroId: 't1', epicId: 'e', slug: 's-t1', state: 'running', status: 'running', reason: null, startedAt: null, finishedAt: null, entryId: 'vid-1' }]);
+    expect((await run([{ cwd: CWD, macroId: 't1', slug: 'nope', status: 'pending' }]))[0].entryId).toBeNull();
+    // history fallback works for a tool too
+    expect((await run([], { hist: hist({ cwd: CWD, macroId: 't1', slug: 'h', status: 'completed' }) }))[0]).toMatchObject({ slug: 'h', state: 'done' });
+  });
+
+  it("a failed or needs_review run carries a one-line reason of at most 200 chars", async () => {
+    for (const status of ['failed', 'needs_review']) {
+      const [r] = await run([{ cwd: CWD, macroId: 't1', slug: 's', status, error: `\n  first line ${'y'.repeat(300)}\nsecond line` }]);
+      expect(r.state).toBe('failed');
+      expect(r.reason.startsWith('first line')).toBe(true);
+      expect(r.reason).not.toContain('second');
+      expect(r.reason.length).toBe(REASON_MAX);
+      expect(REASON_MAX).toBe(200);
+    }
+    const [b] = await macroJobStatuses({ cwd: CWD }, { loadJobs: async () => [{ cwd: CWD, macroId: 'a', status: 'needs_review', error: 'one\ntwo' }], readHistoryTail: async () => '', builtins });
+    expect(b.reason).toBe('one');
+  });
+
+  it("a completed review-stage run whose entry is 'waiting' reports awaiting_review", async () => {
+    const row = { cwd: CWD, macroId: 't1', slug: 's', status: 'completed' };
+    expect((await run([row], { reviews: [review('vid-1', 's', 'review', 'waiting')] }))[0]).toMatchObject({ status: 'awaiting_review', entryId: 'vid-1' });
+    expect((await run([row], { reviews: [review('vid-1', 's', 'review', 'approved')] }))[0].status).toBe('completed');
+    expect((await run([row], { reviews: [review('vid-1', 's', 'final', 'waiting')] }))[0].status).toBe('completed');
+    expect((await run([{ ...row, status: 'running' }], { reviews: [review('vid-1', 's', 'review', 'waiting')] }))[0].status).toBe('running');
+  });
+
+  it('a throwing listReviews yields entryId null; built-ins never read reviews', async () => {
+    const [r] = await macroJobStatuses({ cwd: CWD }, { loadJobs: async () => [{ cwd: CWD, macroId: 't1', slug: 's', status: 'running' }], readHistoryTail: async () => '', builtins, macros: [tool()], listReviews: async () => { throw new Error('x'); } });
+    expect(r.entryId).toBeNull();
+    let called = 0;
+    await macroJobStatuses({ cwd: CWD }, { loadJobs: async () => [{ cwd: CWD, macroId: 'a', status: 'running' }], readHistoryTail: async () => '', builtins, listReviews: async () => { called++; return []; } });
+    expect(called).toBe(0);
   });
 });

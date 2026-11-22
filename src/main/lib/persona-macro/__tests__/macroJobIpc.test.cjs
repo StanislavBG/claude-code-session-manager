@@ -1,6 +1,7 @@
 'use strict';
 import { describe, it, expect, vi } from 'vitest';
-const { registerMacroJobIpc } = require('../macroJobIpc.cjs');
+const { registerMacroJobIpc, runToolJob } = require('../macroJobIpc.cjs');
+const videoReview = require('../../project-pages/videoReview.cjs');
 const { schemas } = require('../../../ipcSchemas.cjs');
 
 function setup(over = {}) {
@@ -13,6 +14,8 @@ function setup(over = {}) {
     createPrd: vi.fn(async () => ({ ok: true })),
     loadJobs: vi.fn(async () => []),
     archivePrd: vi.fn(async () => ({})),
+    listMacros: vi.fn(async () => []),
+    videoReview: { recordDispatch: vi.fn(async () => ({ ok: true })) },
     ...over,
   };
   registerMacroJobIpc(ipcMain, deps);
@@ -164,7 +167,121 @@ describe('macros:job-status', () => {
     const { handlers, deps } = setup({ macroJobStatuses, readHistoryTail });
     expect(await handlers['macros:job-status']({}, { cwd: '/p' })).toEqual([{ macroId: 'a' }]);
     expect(deps.validatePath).toHaveBeenCalledWith('/p');
-    expect(macroJobStatuses).toHaveBeenCalledWith({ cwd: '/p' }, { loadJobs: deps.loadJobs, readHistoryTail });
+    expect(macroJobStatuses).toHaveBeenCalledWith({ cwd: '/p' }, { loadJobs: deps.loadJobs, macros: [], readHistoryTail });
     await expect(handlers['macros:job-status']({}, {})).rejects.toThrow();
+  });
+});
+
+const tool = (over = {}) => ({
+  id: 'tool-v', label: 'Short video', surface: 'project-video', projects: ['/p'],
+  agentName: 'demo-video-builder', tag: 'feature', prompt: 'Make {{topic}}',
+  inputs: [{ name: 'topic', label: 'Topic', required: true }],
+  job: { estimateMinutes: 10 }, ...over,
+});
+
+describe('macrosDispatchJob schema — inputValues', () => {
+  it('accepts at most 20 string values of at most 4000 chars', () => {
+    const vals = (n, len = 1) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, 'x'.repeat(len)]));
+    expect(schemas.macrosDispatchJob.parse({ ...good, inputValues: vals(20, 4000) }).inputValues).toEqual(vals(20, 4000));
+    expect(schemas.macrosDispatchJob.safeParse({ ...good, inputValues: vals(21) }).success).toBe(false);
+    expect(schemas.macrosDispatchJob.safeParse({ ...good, inputValues: vals(1, 4001) }).success).toBe(false);
+    expect(schemas.macrosDispatchJob.safeParse({ ...good, inputValues: { a: 1 } }).success).toBe(false);
+    expect(schemas.macrosDispatchJob.safeParse({ ...good, inputValues: ['a'] }).success).toBe(false);
+  });
+
+  it('has no review key: a press cannot send a review decision', async () => {
+    const parsed = schemas.macrosDispatchJob.parse({ ...good, review: { decision: 'approved', at: 'now' } });
+    expect('review' in parsed).toBe(false);
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { handlers } = setup({ dispatchMacroJob });
+    await handlers['macros:dispatch-job']({}, { ...good, inputValues: { topic: 't' }, review: { decision: 'approved', at: 'now' } });
+    const args = dispatchMacroJob.mock.calls[0][0];
+    expect('review' in args).toBe(false);
+    expect(args.inputValues).toEqual({ topic: 't' });
+  });
+});
+
+describe('runToolJob', () => {
+  it('macros:dispatch-job passes the library macros and inputValues to dispatch', async () => {
+    const macros = [tool()];
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { handlers, deps } = setup({ dispatchMacroJob, listMacros: vi.fn(async () => macros) });
+    await handlers['macros:dispatch-job']({}, { ...good, macroId: 'tool-v', inputValues: { topic: 'cats' } });
+    expect(deps.listMacros).toHaveBeenCalled();
+    const [args, d] = dispatchMacroJob.mock.calls[0];
+    expect(args).toMatchObject({ macroId: 'tool-v', inputValues: { topic: 'cats' } });
+    expect(d.macros).toBe(macros);
+  });
+
+  it('holds the active-Epic check and forwards review to dispatch', async () => {
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { deps } = setup({ dispatchMacroJob });
+    expect(await runToolJob(deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e2' })).toMatchObject({ ok: false });
+    expect(dispatchMacroJob).not.toHaveBeenCalled();
+    const review = { decision: 'approved', at: '2026-11-22' };
+    await runToolJob(deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1', review });
+    expect(dispatchMacroJob.mock.calls[0][0].review).toBe(review);
+  });
+
+  it('records the dispatch after every ok project-video tool dispatch (review or not), with the real dispatcher', async () => {
+    for (const job of [{ estimateMinutes: 10, review: true }, { estimateMinutes: 10 }]) {
+      const macros = [tool({ job })];
+      const recordDispatch = vi.fn(async () => ({ ok: true }));
+      const { deps } = setup({ listMacros: vi.fn(async () => macros), videoReview: { recordDispatch } });
+      const r = await runToolJob(deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1', inputValues: { topic: 'cats' }, extraInstructions: 'short' });
+      expect(r.ok).toBe(true);
+      expect(recordDispatch).toHaveBeenCalledTimes(1);
+      expect(recordDispatch).toHaveBeenCalledWith('/p', r.entryId, {
+        macroId: 'tool-v', epicId: 'e1', slug: r.slug, stage: job.review ? 'review' : 'final',
+        inputValues: { topic: 'cats' }, extraInstructions: 'short',
+      });
+    }
+  });
+
+  it('records nothing for a built-in, a failed dispatch or a tool of another project; a failed record keeps the result', async () => {
+    const recordDispatch = vi.fn(async () => ({ ok: true }));
+    const ok = vi.fn(async () => ({ ok: true, slug: 's', entryId: 'vid-1', stage: null }));
+    const s1 = setup({ dispatchMacroJob: ok, videoReview: { recordDispatch }, listMacros: vi.fn(async () => [tool({ projects: ['/other'] })]) });
+    await runToolJob(s1.deps, { cwd: '/p', macroId: 'demo-video', epicId: 'e1' });
+    await runToolJob(s1.deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1' });
+    const s2 = setup({ dispatchMacroJob: vi.fn(async () => ({ ok: false, error: 'x' })), videoReview: { recordDispatch }, listMacros: vi.fn(async () => [tool()]) });
+    await runToolJob(s2.deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1' });
+    expect(recordDispatch).not.toHaveBeenCalled();
+    const throwing = { recordDispatch: vi.fn(async () => { throw new Error('disk'); }) };
+    const s3 = setup({ dispatchMacroJob: ok, videoReview: throwing, listMacros: vi.fn(async () => [tool()]) });
+    expect(await runToolJob(s3.deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1' })).toEqual({ ok: true, slug: 's', entryId: 'vid-1', stage: null });
+    expect(throwing.recordDispatch).toHaveBeenCalledWith('/p', 'vid-1', expect.objectContaining({ stage: 'final', inputValues: {}, extraInstructions: '' }));
+  });
+
+  it("videoReview.REVIEW_MATERIAL_REL is the material path macroJobDispatch gates on", async () => {
+    const createPrd = vi.fn(async () => ({ ok: true }));
+    const { deps } = setup({ createPrd, listMacros: vi.fn(async () => [tool({ job: { estimateMinutes: 10, review: true } })]) });
+    const r = await runToolJob(deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1', inputValues: { topic: 'cats' } });
+    expect(r.stage).toBe('review');
+    const input = createPrd.mock.calls[0][0];
+    expect(input.artifactPaths).toEqual([videoReview.REVIEW_MATERIAL_REL.split('{id}').join(r.entryId)]);
+    expect(input.gate[0]).toContain(videoReview.REVIEW_MATERIAL_REL.split('{id}').join(r.entryId));
+  });
+
+  it("the job-not-queued notice names a library tool's label", async () => {
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const { handlers } = setup({
+      appendResponseEventWithReason,
+      dispatchMacroJob: vi.fn(async () => ({ ok: false, error: 'boom' })),
+      listMacros: vi.fn(async () => [tool()]),
+    });
+    await handlers['macros:dispatch-job']({}, { ...good, macroId: 'tool-v' });
+    expect(appendResponseEventWithReason.mock.calls[0][2]).toContain('Short video background build was not queued: boom');
+  });
+});
+
+describe('macros:job-status — library macros', () => {
+  it('passes macros from listMacros and an injected listReviews', async () => {
+    const macros = [tool()];
+    const macroJobStatuses = vi.fn(async () => []);
+    const listReviews = vi.fn();
+    const { handlers, deps } = setup({ macroJobStatuses, listReviews, listMacros: vi.fn(async () => macros) });
+    await handlers['macros:job-status']({}, { cwd: '/p' });
+    expect(macroJobStatuses).toHaveBeenCalledWith({ cwd: '/p' }, { loadJobs: deps.loadJobs, macros, listReviews });
   });
 });

@@ -286,6 +286,18 @@ The app copies these into `~/.claude/agents/` on first launch.
 | Session worktrees | `~/.local/state/session-manager/`, or `$XDG_STATE_HOME/session-manager/` when `XDG_STATE_HOME` is set | None |
 | Telemetry | Sent to bilko.run | `SM_TELEMETRY=0` |
 
+### Start at login
+
+This is off by default. Turn it on in App Settings, Startup.
+
+An npx install starts through `npx claude-code-session-manager@latest`. So each login fetches the newest release. If that fails within two minutes, it tries once more with the cached copy. The script is `~/.claude/session-manager/start-at-login.sh`. On Linux, a desktop entry in `~/.config/autostart/` runs it. On macOS, a launch agent in `~/Library/LaunchAgents/` runs it.
+
+A packaged build starts the installed app. On macOS and Windows, it is one of the system's login items. A Linux AppImage uses the autostart folder too.
+
+To remove it, turn the switch off, or delete these files: `claude-code-session-manager.desktop` on Linux, `run.bilko.session-manager.login.plist` on macOS, and the script. For a packaged macOS or Windows build, remove it from the system's login items.
+
+It is not offered for an npx install on Windows, or in a dev run.
+
 ### Check it worked
 
 ```bash

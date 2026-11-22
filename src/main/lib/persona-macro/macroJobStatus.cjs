@@ -152,4 +152,39 @@ async function macroJobStatuses(
   return out;
 }
 
-module.exports = { macroJobStatuses, HISTORY_TAIL_BYTES, REASON_MAX, AWAITING_REVIEW };
+/**
+ * Per run slug, the job state of that run: the newest live queue row for cwd,
+ * else the newest row in the project's history tail (read at most once).
+ * Value is null when no row with that slug exists for cwd. Never throws.
+ */
+async function jobStatusesBySlug({ cwd, slugs } = {}, { loadJobs, readHistoryTail = defaultReadHistoryTail } = {}) {
+  const wanted = [...new Set((Array.isArray(slugs) ? slugs : []).filter((s) => typeof s === 'string' && s))];
+  if (!wanted.length) return {};
+  const set = new Set(wanted);
+  let live = [];
+  try {
+    const rows = typeof loadJobs === 'function' ? await loadJobs() : [];
+    live = Array.isArray(rows) ? rows.filter((r) => r && r.cwd === cwd && set.has(r.slug)) : [];
+  } catch { live = []; }
+
+  let history = null; // lazily read once, only if some slug has no live row
+  const loadHistory = async () => {
+    if (history) return history;
+    try {
+      history = parseHistory(await readHistoryTail(cwd)).filter((r) => set.has(r.slug) && (!r.cwd || r.cwd === cwd));
+    } catch { history = []; }
+    return history;
+  };
+
+  const out = {};
+  for (const slug of wanted) {
+    let row = newest(live.filter((r) => r.slug === slug));
+    if (!row) row = newest((await loadHistory()).filter((r) => r.slug === slug));
+    if (!row) { out[slug] = null; continue; }
+    const { state, status, reason, startedAt, finishedAt } = toStatus(row.macroId ?? null, row);
+    out[slug] = { slug, state, status, reason, startedAt, finishedAt };
+  }
+  return out;
+}
+
+module.exports = { macroJobStatuses, jobStatusesBySlug, HISTORY_TAIL_BYTES, REASON_MAX, AWAITING_REVIEW };

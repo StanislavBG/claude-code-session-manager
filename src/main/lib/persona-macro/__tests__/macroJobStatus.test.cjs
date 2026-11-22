@@ -99,3 +99,67 @@ describe('macroJobStatuses — project Video tools', () => {
     expect(called).toBe(0);
   });
 });
+
+describe('jobStatusesBySlug', () => {
+  const { jobStatusesBySlug } = require('../macroJobStatus.cjs');
+  const KEYS = ['finishedAt', 'reason', 'slug', 'startedAt', 'state', 'status'];
+  const run = (slugs, rows, h = '') => jobStatusesBySlug({ cwd: CWD, slugs }, { loadJobs: async () => rows, readHistoryTail: async () => h });
+
+  it('a failed live row gives state failed with its reason, exact shape', async () => {
+    const res = await run(['s1'], [{ cwd: CWD, slug: 's1', status: 'failed', error: 'boom\nmore', macroId: 'm', epicId: 'e', startedAt: 't1', finishedAt: 't2' }]);
+    expect(Object.keys(res)).toEqual(['s1']);
+    expect(Object.keys(res.s1).sort()).toEqual(KEYS);
+    expect(res.s1).toEqual({ slug: 's1', state: 'failed', status: 'failed', reason: 'boom', startedAt: 't1', finishedAt: 't2' });
+  });
+
+  it('a needs_review row gives failed; a running row gives running', async () => {
+    const res = await run(['a', 'b'], [{ cwd: CWD, slug: 'a', status: 'needs_review' }, { cwd: CWD, slug: 'b', status: 'running' }]);
+    expect(res.a.state).toBe('failed');
+    expect(res.a.reason).toBe('Ended as needs_review');
+    expect(res.b).toMatchObject({ state: 'running', reason: null });
+  });
+
+  it('finds a row only in history, reading the tail once', async () => {
+    let calls = 0;
+    const h = hist({ cwd: CWD, slug: 'h1', status: 'completed', finishedAt: '2026-01-01T00:00:00Z' }, { cwd: CWD, slug: 'h2', status: 'failed', error: 'x' }, { cwd: '/other', slug: 'h3', status: 'completed' }) + '\n{"torn';
+    const res = await jobStatusesBySlug({ cwd: CWD, slugs: ['h1', 'h2', 'h3'] }, { loadJobs: async () => [], readHistoryTail: async () => { calls++; return h; } });
+    expect(calls).toBe(1);
+    expect(res.h1).toMatchObject({ state: 'done', status: 'completed' });
+    expect(res.h2).toMatchObject({ state: 'failed', reason: 'x' });
+    expect(res.h3).toBeNull();
+  });
+
+  it('a live row beats a history row; history is not read when every slug is live', async () => {
+    let calls = 0;
+    const res = await jobStatusesBySlug({ cwd: CWD, slugs: ['s'] }, {
+      loadJobs: async () => [{ cwd: CWD, slug: 's', status: 'running' }, { cwd: '/other', slug: 's', status: 'failed' }],
+      readHistoryTail: async () => { calls++; return hist({ cwd: CWD, slug: 's', status: 'failed', finishedAt: '2030-01-01T00:00:00Z' }); },
+    });
+    expect(res.s.state).toBe('running');
+    expect(calls).toBe(0);
+  });
+
+  it('several rows for one slug resolve to the newest', async () => {
+    const res = await run(['s'], [{ cwd: CWD, slug: 's', status: 'completed', finishedAt: '2026-02-01T00:00:00Z' }, { cwd: CWD, slug: 's', status: 'failed', finishedAt: '2026-01-01T00:00:00Z' }]);
+    expect(res.s.state).toBe('done');
+  });
+
+  it('an unknown slug gives null', async () => {
+    expect(await run(['nope'], [{ cwd: CWD, slug: 's', status: 'running' }])).toEqual({ nope: null });
+  });
+
+  it('empty or missing slugs return {} without loading jobs', async () => {
+    let called = 0;
+    const loadJobs = async () => { called++; return []; };
+    expect(await jobStatusesBySlug({ cwd: CWD, slugs: [] }, { loadJobs })).toEqual({});
+    expect(await jobStatusesBySlug({ cwd: CWD }, { loadJobs })).toEqual({});
+    expect(await jobStatusesBySlug()).toEqual({});
+    expect(called).toBe(0);
+  });
+
+  it('a loadJobs or readHistoryTail throw gives null values, never a throw', async () => {
+    const boom = async () => { throw new Error('x'); };
+    expect(await jobStatusesBySlug({ cwd: CWD, slugs: ['a', 'b'] }, { loadJobs: boom, readHistoryTail: boom })).toEqual({ a: null, b: null });
+    expect(await jobStatusesBySlug({ cwd: CWD, slugs: ['a'] }, { loadJobs: async () => [], readHistoryTail: boom })).toEqual({ a: null });
+  });
+});

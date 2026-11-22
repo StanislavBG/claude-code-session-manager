@@ -102,6 +102,10 @@ macroAdminRoutes.registerAdminRoute(adminHttp, {
   isTabBusy: chatRunner.isTabBusy,
 });
 chatRunner.registerAdminRoute(adminHttp);
+// Outside apps' "Needs you" items (lib/feedback-remote/needsYouStore.cjs); changes broadcast `needsYou:changed`.
+require('./lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(adminHttp, {
+  onChanged: () => sendIfAlive(mainWindow, 'needsYou:changed', {}),
+});
 // Project-to-project feedback conduit — the app is the only process holding
 // several projects' operations roots open, so it performs the cross-folder
 // write (lib/feedback-remote/crossProjectFeedback.cjs).

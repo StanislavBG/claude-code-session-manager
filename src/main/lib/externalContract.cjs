@@ -25,4 +25,63 @@ function contractInfo() {
   return { contractVersion: CONTRACT_VERSION, appVersion: APP_VERSION };
 }
 
-module.exports = { CONTRACT_VERSION, contractInfo };
+/** Recursively freeze a plain object/array literal. */
+function deepFreeze(v) {
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) deepFreeze(v[k]);
+    Object.freeze(v);
+  }
+  return v;
+}
+
+/**
+ * The outside contract — what an outside app may depend on. Every list here
+ * is checked against the code by src/main/__tests__/externalContract.shape.test.cjs;
+ * changing one changes contractFingerprint(), which must then be recorded
+ * under a new CONTRACT_VERSION in CONTRACT_FINGERPRINTS.
+ */
+const CONTRACT = deepFreeze({
+  routes: [
+    { method: 'GET', path: '/__admin/health' },
+    { method: 'POST', path: '/admin/feedback/open-session' },
+    { method: 'POST', path: '/admin/macros/run' },
+    { method: 'GET', path: '/admin/epics' },
+    { method: 'GET', path: '/admin/epic' },
+    { method: 'GET', path: '/admin/events' },
+  ],
+  tools: {
+    feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
+    epic_list: { required: ['cwd'] },
+    epic_get: { required: ['cwd'] },
+  },
+  epicStates: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open'],
+  epicRecordFields: [
+    'epicId', 'cwd', 'title', 'goal', 'tag', 'agentType', 'status', 'state', 'blocked', 'prds',
+    'verified', 'refuted', 'unvalidated', 'externalRef', 'source', 'createdAt', 'completedAt',
+  ],
+  receiptFields: ['jobs', 'chat'],
+  epicStateChangedFields: ['cwd', 'epicId', 'from', 'to', 'blockedKind', 'externalRef'],
+  eventKinds: ['epic_state_changed', 'job_transition'],
+  adminApiFields: ['port', 'token', 'appVersion', 'contractVersion'],
+});
+
+/** JSON with object keys sorted at every level (arrays keep their order). */
+function stableStringify(v) {
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/** @returns {string} sha256 hex of the manifest in stable key order. */
+function contractFingerprint() {
+  return require('node:crypto').createHash('sha256').update(stableStringify(CONTRACT)).digest('hex');
+}
+
+/** Fingerprint recorded for each contract version. */
+const CONTRACT_FINGERPRINTS = Object.freeze({
+  1: '4556eaa9820335f18800fca1d1210d01265283ecc98d3d53c2872d55451c18c3',
+});
+
+module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

@@ -78,13 +78,13 @@ const MAX_TAIL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_LIMIT = 100;
 
 /**
- * Read exchanges for a project, newest-first. Bounded to MAX_TAIL_BYTES from
- * the end of the file so large logs never block the main thread.
+ * Parse the last MAX_TAIL_BYTES of the project's exchanges.jsonl into records,
+ * oldest-first. Missing/unreadable file → []. Malformed lines are skipped.
  *
- * @param {{ cwd: string, sessionId?: string, limit?: number, offset?: number }}
+ * @param {string} cwd
  * @returns {Promise<object[]>}
  */
-async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0 }) {
+async function readTailRecords(cwd) {
   const filePath = exchangesFilePath(cwd);
 
   let stat;
@@ -122,6 +122,18 @@ async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0
       if (rec && typeof rec.ts === 'string') records.push(rec);
     } catch { /* skip malformed */ }
   }
+  return records;
+}
+
+/**
+ * Read exchanges for a project, newest-first. Bounded to MAX_TAIL_BYTES from
+ * the end of the file so large logs never block the main thread.
+ *
+ * @param {{ cwd: string, sessionId?: string, limit?: number, offset?: number }}
+ * @returns {Promise<object[]>}
+ */
+async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0 }) {
+  const records = await readTailRecords(cwd);
 
   // Newest-first
   records.reverse();
@@ -133,4 +145,57 @@ async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0
   return filtered.slice(offset, offset + limit);
 }
 
-module.exports = { recordExchange, listExchanges };
+// The needs-input marker. chatRunner.cjs records a turn that ended by asking
+// the human questions as `<answerBody>\n\n[asked: q1 | q2]`; this is its one home.
+const ASKED_PREFIX = '\n\n[asked: ';
+const ASKED_SEPARATOR = ' | ';
+
+/**
+ * Build the `result` string recorded for a needs-input turn.
+ *
+ * @param {string} answerBody
+ * @param {string[]} questions
+ * @returns {string}
+ */
+function formatAskedResult(answerBody, questions) {
+  return `${answerBody}${ASKED_PREFIX}${questions.join(ASKED_SEPARATOR)}]`;
+}
+
+/**
+ * True only for a string that ends with the `[asked: ...]` marker block.
+ *
+ * @param {unknown} result
+ * @returns {boolean}
+ */
+function resultAwaitsInput(result) {
+  if (typeof result !== 'string' || !result.endsWith(']')) return false;
+  const at = result.lastIndexOf(ASKED_PREFIX);
+  if (at === -1) return false;
+  // The marker block is a single line — nothing after it may start a new one.
+  return !result.slice(at + ASKED_PREFIX.length).includes('\n');
+}
+
+/**
+ * Sessions (Claude session ids) whose newest exchange in this project is still
+ * waiting for the human's answer. Reads at most MAX_TAIL_BYTES of the log.
+ *
+ * @param {string} cwd
+ * @returns {Promise<Set<string>>}
+ */
+async function awaitingInputSessions(cwd) {
+  const waiting = new Set();
+  for (const rec of await readTailRecords(cwd)) {
+    if (typeof rec.sessionId !== 'string' || !rec.sessionId) continue;
+    if (resultAwaitsInput(rec.result)) waiting.add(rec.sessionId);
+    else waiting.delete(rec.sessionId);
+  }
+  return waiting;
+}
+
+module.exports = {
+  recordExchange,
+  listExchanges,
+  formatAskedResult,
+  resultAwaitsInput,
+  awaitingInputSessions,
+};

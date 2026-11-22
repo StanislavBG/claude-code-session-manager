@@ -40,7 +40,7 @@ const { spawn } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
-const { recordExchange } = require('./exchanges.cjs');
+const { recordExchange, formatAskedResult } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
 const { extractJson } = require('./lib/util/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
@@ -939,7 +939,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
                 sessionId,
                 cwd,
                 prompt,
-                result: `${signal.answerBody}\n\n[asked: ${signal.questions.join(' | ')}]`,
+                result: formatAskedResult(signal.answerBody, signal.questions),
                 promptId,
               }).catch((err) => {
                 console.error('[chatRunner] recordExchange failed:', err?.message ?? err);

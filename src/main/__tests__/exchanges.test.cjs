@@ -120,3 +120,83 @@ describe('recordExchange', () => {
     assert.equal(r2.sessionId, 's2');
   });
 });
+
+describe('formatAskedResult / resultAwaitsInput', () => {
+  test('formatAskedResult builds the exact needs-input string', () => {
+    const { formatAskedResult } = require('../exchanges.cjs');
+    assert.equal(
+      formatAskedResult('Here is my plan.', ['Which DB?', 'Ship today?']),
+      'Here is my plan.\n\n[asked: Which DB? | Ship today?]',
+    );
+    assert.equal(formatAskedResult('Body', ['One?']), 'Body\n\n[asked: One?]');
+  });
+
+  test('resultAwaitsInput is true only for a string ending with the marker block', () => {
+    const { formatAskedResult, resultAwaitsInput } = require('../exchanges.cjs');
+    assert.equal(resultAwaitsInput(formatAskedResult('Body', ['Q1?', 'Q2?'])), true);
+    assert.equal(resultAwaitsInput(formatAskedResult('', ['Q?'])), true);
+    assert.equal(resultAwaitsInput('Plain answer.'), false);
+    assert.equal(resultAwaitsInput('Body\n\n[asked: Q?]\n\nmore text after'), false);
+    assert.equal(resultAwaitsInput('Body [asked: Q?]'), false);
+    assert.equal(resultAwaitsInput(''), false);
+    assert.equal(resultAwaitsInput(undefined), false);
+    assert.equal(resultAwaitsInput(null), false);
+    assert.equal(resultAwaitsInput(42), false);
+  });
+});
+
+describe('awaitingInputSessions', () => {
+  function writeRows(cwd, lines) {
+    const p = exchangesLogPath(cwd);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, lines.join('\n') + '\n');
+  }
+  const row = (sessionId, result, ts = new Date().toISOString()) =>
+    JSON.stringify({ ts, sessionId, cwd: '/x', prompt: 'p', result, summary: 's', model: 'm' });
+
+  test('returns sessions whose newest row awaits input', async () => {
+    const { awaitingInputSessions, formatAskedResult } = require('../exchanges.cjs');
+    const cwd = mkTmpProject();
+    writeRows(cwd, [
+      row('waiting', formatAskedResult('Body', ['Q?'])),
+      row('done', 'plain answer'),
+    ]);
+    const set = await awaitingInputSessions(cwd);
+    assert.ok(set instanceof Set);
+    assert.deepEqual([...set], ['waiting']);
+  });
+
+  test('a later unmarked row for the same session removes it', async () => {
+    const { awaitingInputSessions, formatAskedResult } = require('../exchanges.cjs');
+    const cwd = mkTmpProject();
+    writeRows(cwd, [
+      row('a', formatAskedResult('Body', ['Q?'])),
+      row('b', formatAskedResult('Body', ['Q?'])),
+      row('a', 'answered and finished'),
+      row('c', 'plain'),
+      row('c', formatAskedResult('Again', ['Q2?'])),
+    ]);
+    const set = await awaitingInputSessions(cwd);
+    assert.deepEqual([...set].sort(), ['b', 'c']);
+  });
+
+  test('missing file gives an empty Set', async () => {
+    const { awaitingInputSessions } = require('../exchanges.cjs');
+    const set = await awaitingInputSessions(mkTmpProject());
+    assert.ok(set instanceof Set);
+    assert.equal(set.size, 0);
+  });
+
+  test('malformed lines are skipped', async () => {
+    const { awaitingInputSessions, formatAskedResult } = require('../exchanges.cjs');
+    const cwd = mkTmpProject();
+    writeRows(cwd, [
+      row('w', formatAskedResult('Body', ['Q?'])),
+      '{not json',
+      'garbage line',
+      row('x', formatAskedResult('Body', ['Q?'])),
+    ]);
+    const set = await awaitingInputSessions(cwd);
+    assert.deepEqual([...set].sort(), ['w', 'x']);
+  });
+});

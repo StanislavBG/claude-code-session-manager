@@ -232,6 +232,46 @@ describe('readMdReview', () => {
     });
   });
 
+  it('merges plan-records with the legacy folder; plan-records wins a name clash', async () => {
+    const ops = path.join(root, 'session-manager-operations');
+    const plan = path.join(ops, 'plan-records', 'epic-1');
+    const legacy = path.join(ops, 'reviews', 'validation', 'epic-1');
+    fs.mkdirSync(plan, { recursive: true });
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(plan, '0003-c.md'), 'x');
+    fs.writeFileSync(path.join(plan, '0002-b.md'), 'new');
+    fs.writeFileSync(path.join(plan, 'skip.json'), '{}');
+    fs.writeFileSync(path.join(legacy, '0002-b.md'), 'old');
+    fs.writeFileSync(path.join(legacy, '0001-a.md'), 'x');
+
+    const r = await readMdReview(root, { epicIds: ['epic-1'] });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.validation).toEqual({
+      'epic-1': [
+        'session-manager-operations/reviews/validation/epic-1/0001-a.md',
+        'session-manager-operations/plan-records/epic-1/0002-b.md',
+        'session-manager-operations/plan-records/epic-1/0003-c.md',
+      ],
+    });
+  });
+
+  it('lists plan-records alone when there is no legacy folder', async () => {
+    const plan = path.join(root, 'session-manager-operations', 'plan-records', 'epic-2');
+    fs.mkdirSync(plan, { recursive: true });
+    fs.writeFileSync(path.join(plan, 'x.md'), 'x');
+    const r = await readMdReview(root, { epicIds: ['epic-2'] });
+    expect(r.ok && r.validation).toEqual({ 'epic-2': ['session-manager-operations/plan-records/epic-2/x.md'] });
+  });
+
+  it('still lists legacy-only history when plan-records is absent', async () => {
+    const legacy = path.join(root, 'session-manager-operations', 'reviews', 'validation', 'epic-3');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'old.md'), 'x');
+    const r = await readMdReview(root, { epicIds: ['epic-3'] });
+    expect(r.ok && r.validation).toEqual({ 'epic-3': ['session-manager-operations/reviews/validation/epic-3/old.md'] });
+  });
+
   it('reads at most 256 KB of the record', async () => {
     const docs = path.join(root, 'session-manager-operations', 'reviews', 'docs');
     fs.mkdirSync(docs, { recursive: true });

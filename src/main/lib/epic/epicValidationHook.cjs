@@ -43,12 +43,32 @@ function defaultReadActiveIndex(cwd) {
   }
 }
 
+/** The digest's record-folder lines: absolute main-checkout paths when cwd resolves. */
+function recordFolderLines(cwd, epicId) {
+  try {
+    if (typeof cwd === 'string' && cwd) {
+      const { opsPath } = require('../opsOwnership.cjs');
+      return [
+        `Plan record folder (on disk in the main checkout, not committed): ${opsPath(cwd, 'plan-records', epicId)}${path.sep}`,
+        `Legacy validation record folder: ${opsPath(cwd, 'reviews', 'validation', epicId)}${path.sep}`,
+      ];
+    }
+  } catch { /* fall through to the relative form */ }
+  return [
+    `Plan record folder (relative to the project root): session-manager-operations/plan-records/${epicId}/`,
+    `Legacy validation record folder: session-manager-operations/reviews/validation/${epicId}/`,
+  ];
+}
+
 /**
  * buildSettledDigest — pure builder for the ONE plan-digest prompt.
  * Empty sections are omitted. `notValidatedReason` explains why the
- * settle.uncovered slugs were not sent to a sweep validator.
+ * settle.uncovered slugs were not sent to a sweep validator. `cwd` is the
+ * project root: plan records live on disk in its main checkout
+ * (plan-records/<epicId>/, never committed), so the digest names that
+ * absolute folder plus the legacy reviews/validation/<epicId>/ one.
  */
-function buildSettledDigest(settle, { epicId, notValidatedReason } = {}) {
+function buildSettledDigest(settle, { epicId, notValidatedReason, cwd } = {}) {
   const s = settle || {};
   const verified = s.verified || [];
   const refuted = s.refuted || [];
@@ -58,7 +78,7 @@ function buildSettledDigest(settle, { epicId, notValidatedReason } = {}) {
   const notValidated = (s.uncovered || []).map((u) => (typeof u === 'string' ? u : u.slug));
   const lines = [
     `PLAN SETTLED — no PRD of this session is pending or running. This is ONE digest, not a per-PRD request.`,
-    `Validation record folder (relative to the repository root): session-manager-operations/reviews/validation/${epicId}/`,
+    ...recordFolderLines(cwd, epicId),
     'Do NOT re-verify VERIFIED PRDs — a validator already checked them.',
   ];
   if (verified.length) {
@@ -200,7 +220,7 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
       }
     }
 
-    const prompt = buildSettledDigest(digestSettle, { epicId, notValidatedReason });
+    const prompt = buildSettledDigest(digestSettle, { epicId, notValidatedReason, cwd });
     sendPrompt(epicId, prompt, { origin: 'scheduler' });
     await appendResponseEvent(
       cwd, epicId,

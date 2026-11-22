@@ -16,7 +16,10 @@
  * - newestRecordName(names) — pure: the newest record file name, or null.
  * - parseReviewRecord(text) — pure: the template fields; never throws.
  * - readMdReview(root, { epicIds }) — newest record + validation record paths
- *   under reviews/validation/<epicId>/ for each safe Epic id.
+ *   for each safe Epic id, read from disk in plan-records/<epicId>/ (the
+ *   machine-local, never-committed namespace) merged with the legacy
+ *   reviews/validation/<epicId>/ history. On a file-name clash the
+ *   plan-records copy wins.
  */
 
 const fsp = require('node:fs/promises');
@@ -244,11 +247,14 @@ async function readMdReview(root, opts = {}) {
   /** @type {string} */
   let docsDir;
   /** @type {string} */
-  let validationDir;
+  let planRecordsDir;
+  /** @type {string} */
+  let legacyValidationDir;
   try {
     projectRoot = resolveProjectRoot(root);
     docsDir = opsPath(root, 'reviews', 'docs');
-    validationDir = opsPath(root, 'reviews', 'validation');
+    planRecordsDir = opsPath(root, 'plan-records');
+    legacyValidationDir = opsPath(root, 'reviews', 'validation');
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -273,12 +279,19 @@ async function readMdReview(root, opts = {}) {
   const ids = Array.isArray(opts.epicIds) ? opts.epicIds : [];
   for (const id of ids) {
     if (typeof id !== 'string' || !EPIC_ID_RE.test(id) || validation[id]) continue;
-    const dir = path.join(validationDir, id);
-    const files = (await listDir(dir))
-      .filter((e) => e.isFile() && e.name.endsWith('.md'))
-      .map((e) => rel(projectRoot, path.join(dir, e.name)))
-      .sort();
-    validation[id] = files;
+    /** @type {Map<string, string>} file name -> repo-relative path */
+    const byName = new Map();
+    // plan-records first so its copy wins a name clash with the legacy folder.
+    for (const base of [planRecordsDir, legacyValidationDir]) {
+      const dir = path.join(base, id);
+      for (const e of await listDir(dir)) {
+        if (!e.isFile() || !e.name.endsWith('.md') || byName.has(e.name)) continue;
+        byName.set(e.name, rel(projectRoot, path.join(dir, e.name)));
+      }
+    }
+    // Ordered by file name so the last entry is the newest record (the
+    // renderer's pickValidationPath takes the last one).
+    validation[id] = [...byName.keys()].sort().map((n) => /** @type {string} */ (byName.get(n)));
   }
 
   return { ok: true, record, recordPath, validation };

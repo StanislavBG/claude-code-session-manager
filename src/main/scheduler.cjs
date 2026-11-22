@@ -12820,8 +12820,23 @@ const remote = {
 
     const { frontmatter: fm, body: origBody } = parsePrdFile(raw);
     if (frontmatter) {
+      // riskTools: same validator createPrd uses (prdCreate.normalizeRiskTools),
+      // so update and create can never disagree. Refused before any write; an
+      // explicit [] removes the key.
+      const clearRiskTools = Array.isArray(frontmatter.riskTools) && frontmatter.riskTools.length === 0;
+      let riskTools;
+      if (frontmatter.riskTools !== undefined && !clearRiskTools) {
+        const rt = prdCreate.normalizeRiskTools(frontmatter.riskTools);
+        if (!rt.ok) return { ok: false, error: rt.error };
+        riskTools = rt.value;
+      }
       for (const key of Object.keys(frontmatter)) {
         if (frontmatter[key] === undefined) continue;
+        if (key === 'riskTools') {
+          if (clearRiskTools) delete fm.riskTools;
+          else fm.riskTools = riskTools;
+          continue;
+        }
         fm[key] = frontmatter[key];
       }
     }

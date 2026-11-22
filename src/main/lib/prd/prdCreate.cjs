@@ -35,8 +35,32 @@ const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveI
 const { splitFrontmatter, PRD_EFFORT_LEVELS, formatQuotedInlineList } = require('./prdFrontmatter.cjs');
 const { parseRule: parseToolRiskRule } = require('../claude/toolRiskMarks.cjs');
 
-// Cap on riskTools entries — mirrors ipcSchemas.cjs schedulerCreatePrd.riskTools.
+// Cap on riskTools entries — mirrors ipcSchemas.cjs RiskToolsSchema.
 const RISK_TOOLS_MAX = 20;
+
+/**
+ * Validate + normalize a `riskTools` value — the ONE check shared by
+ * createPrd and scheduler.cjs's updatePrd so create and update can never
+ * disagree. Each entry must parse under toolRiskMarks.parseRule; entries are
+ * de-duplicated in order and capped at RISK_TOOLS_MAX.
+ * @returns {{ ok: true, value: string[] } | { ok: false, error: string }}
+ */
+function normalizeRiskTools(value) {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: 'riskTools must be an array of tool-risk rule strings when given' };
+  }
+  const seen = [];
+  for (const rule of value) {
+    if (parseToolRiskRule(rule) === null) {
+      return { ok: false, error: `riskTools entry ${JSON.stringify(rule)} is not a valid tool-risk rule — use mcp__<server>__<tool>, mcp__<server>__*, Bash(<cmd>) or Bash(<cmd>:*)` };
+    }
+    if (!seen.includes(rule)) seen.push(rule);
+  }
+  if (seen.length > RISK_TOOLS_MAX) {
+    return { ok: false, error: `riskTools has ${seen.length} entries; the maximum is ${RISK_TOOLS_MAX}` };
+  }
+  return { ok: true, value: seen };
+}
 const { sizingWarnings } = require('./prdSizing.cjs');
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
@@ -631,20 +655,9 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // riskTools: tool-risk rule strings (toolRiskMarks.parseRule grammar) this PRD
   // is cleared to call. Refused before NN allocation; de-duplicated in order.
   if (input.riskTools != null) {
-    if (!Array.isArray(input.riskTools)) {
-      return { ok: false, applied: false, status: 400, error: 'riskTools must be an array of tool-risk rule strings when given' };
-    }
-    const seen = [];
-    for (const rule of input.riskTools) {
-      if (parseToolRiskRule(rule) === null) {
-        return { ok: false, applied: false, status: 400, error: `riskTools entry ${JSON.stringify(rule)} is not a valid tool-risk rule — use mcp__<server>__<tool>, mcp__<server>__*, Bash(<cmd>) or Bash(<cmd>:*)` };
-      }
-      if (!seen.includes(rule)) seen.push(rule);
-    }
-    if (seen.length > RISK_TOOLS_MAX) {
-      return { ok: false, applied: false, status: 400, error: `riskTools has ${seen.length} entries; the maximum is ${RISK_TOOLS_MAX}` };
-    }
-    input = { ...input, riskTools: seen };
+    const rt = normalizeRiskTools(input.riskTools);
+    if (!rt.ok) return { ok: false, applied: false, status: 400, error: rt.error };
+    input = { ...input, riskTools: rt.value };
   }
 
   // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied
@@ -1303,6 +1316,8 @@ module.exports = {
   resolveSourcePromptIdFromClaudeSession,
   createPrd,
   createPrdBatch,
+  normalizeRiskTools,
+  RISK_TOOLS_MAX,
   findCrossEpicDuplicates,
   validateFixesShape,
   FIXES_MAX,

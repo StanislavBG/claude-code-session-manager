@@ -435,6 +435,11 @@ const DepSlugSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/);
 // large /develop plan depends on every other slug in the plan, so this must
 // stay well above the largest plan size the PRD authoring flow allows.
 const MAX_DEPENDS_ON = 100;
+// Tool-risk rule strings a PRD is cleared to call — shared by schedulerCreatePrd
+// and adminPrdFrontmatterPatch so create and update accept the same shape.
+// The rule grammar (toolRiskMarks.parseRule), de-dup and cap are re-checked by
+// prdCreate.cjs's normalizeRiskTools on both paths.
+const RiskToolsSchema = z.array(z.string().min(1).max(200)).max(20);
 // Wave-authoring decision (scheduler wave-disposition PRD), shared between
 // schedulerCreatePrd (authoring time) and adminPrdFrontmatterPatch (the
 // after-the-fact change path) so both can never disagree on what a valid
@@ -483,7 +488,7 @@ const schedulerCreatePrd = z.object({
   artifactPaths: z.array(z.string().min(1).max(1024).regex(NO_NEWLINE_RE, 'must not contain newlines')).max(50).optional(),
   // Tool-risk rule strings this PRD is cleared to call (toolRiskMarks.parseRule
   // grammar, re-checked + de-duplicated in prdCreate.cjs; written as `riskTools`).
-  riskTools: z.array(z.string().min(1).max(200)).max(20).optional(),
+  riskTools: RiskToolsSchema.optional(),
   // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
   // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
   // sessions key literally equals this value; the renderer only ever sends
@@ -708,6 +713,10 @@ const adminPrdFrontmatterPatch = z.object({
   // chain) rewrites this alongside dependsOn via the same
   // schedule:set-prd-disposition path (see prdDisposition.cjs).
   disposition: PrdDispositionSchema.optional(),
+  // Patchable after creation too, with the SAME shape as create. updatePrd
+  // re-checks a non-empty list with normalizeRiskTools; an explicit `[]`
+  // removes the key from the PRD file.
+  riskTools: RiskToolsSchema.optional(),
 });
 
 const adminUpdatePrd = z.object({

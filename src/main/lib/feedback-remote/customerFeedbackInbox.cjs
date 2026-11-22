@@ -222,7 +222,55 @@ function sinceBefore(receivedAt) {
 }
 
 /**
+ * One image GET (full dataUrls). Returns the wire items array, or null on non-200 / bad JSON.
+ * Network errors throw to the caller.
+ * @param {ReturnType<typeof ctx>} c @param {string} base @param {string} token @param {string} since @param {number} limit
+ * @returns {Promise<any[]|null>}
+ */
+async function fetchImagePage(c, base, token, since, limit) {
+  const qs = new URLSearchParams({ since, limit: String(limit) });
+  const res = await c.fetchImpl(`${base}?${qs.toString()}`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (res.status !== 200) return null;
+  /** @type {any} */
+  const j = await res.json().catch(() => null);
+  return j && Array.isArray(j.items) ? j.items : null;
+}
+
+/**
+ * Write one item's missing images from its wire entry `w`.
+ * @param {ReturnType<typeof ctx>} c @param {InboxItem} item @param {any} w
+ * @returns {Promise<{ paths: (string|null)[], count: number }>}
+ */
+async function writeItemImages(c, item, w) {
+  let count = 0;
+  const images = item.images || [];
+  /** @type {(string|null)[]} */
+  const paths = images.map((im) => im.path);
+  for (let i = 0; i < images.length; i++) {
+    if (paths[i] && (await fileExists(/** @type {string} */ (paths[i])))) continue;
+    paths[i] = null;
+    const dec = decodeImage(w.images[i], images[i].mime);
+    if (!dec) continue;
+    const ext = /** @type {Record<string, string>} */ (ATTACHMENT_MIMES)[dec.mime];
+    if (!ext) continue;
+    const file = path.join(c.imagesDir, item.id, `${i + 1}${ext}`);
+    try {
+      await atomicFs.writeTextAtomic(file, dec.buf, { mode: 0o600 });
+      paths[i] = file;
+      count++;
+    } catch { /* disk error: leave null, retry next pull */ }
+  }
+  return { paths, count };
+}
+
+/**
  * Download + cache images for up to MAX_IMAGE_FETCHES items. Never throws, never logs bytes.
+ * Asks for `limit=1` first (the host returns full images for every item after `since`); retries
+ * with `limit=MAX_IMAGE_FETCHES` only when the item is missing (several items in the same second).
+ * Any uncached item found in any response is cached from it and gets no GET of its own.
  * @param {ReturnType<typeof ctx>} c @param {string} base @param {string} token @param {string[]} fetchedIds
  * @returns {Promise<number>} images written
  */
@@ -241,41 +289,30 @@ async function cacheImages(c, base, token, fetchedIds) {
     if (!Array.isArray(item.images) || !item.images.length) continue;
     if (await needsImages(item)) todo.push(item);
   }
+  const byId = new Map(todo.map((i) => [i.id, i]));
+  /** @type {Set<string>} */
+  const done = new Set();
   /** @type {Map<string, (string|null)[]>} */
   const written = new Map();
   let count = 0;
+  const has = (/** @type {any[]|null} */ page, /** @type {string} */ id) => !!page && page.some((x) => x && x.id === id);
   for (const item of todo) {
+    if (done.has(item.id)) continue;
     try {
       const since = sinceBefore(item.receivedAt);
       if (!since) continue;
-      const qs = new URLSearchParams({ since, limit: String(MAX_IMAGE_FETCHES) });
-      const res = await c.fetchImpl(`${base}?${qs.toString()}`, {
-        headers: { authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      if (res.status !== 200) continue;
-      /** @type {any} */
-      const j = await res.json().catch(() => null);
-      const w = j && Array.isArray(j.items) ? j.items.find((/** @type {any} */ x) => x && x.id === item.id) : null;
-      if (!w || !Array.isArray(w.images)) continue;
-      const images = item.images || [];
-      /** @type {(string|null)[]} */
-      const paths = images.map((im) => im.path);
-      for (let i = 0; i < images.length; i++) {
-        if (paths[i] && (await fileExists(/** @type {string} */ (paths[i])))) continue;
-        paths[i] = null;
-        const dec = decodeImage(w.images[i], images[i].mime);
-        if (!dec) continue;
-        const ext = /** @type {Record<string, string>} */ (ATTACHMENT_MIMES)[dec.mime];
-        if (!ext) continue;
-        const file = path.join(c.imagesDir, item.id, `${i + 1}${ext}`);
-        try {
-          await atomicFs.writeTextAtomic(file, dec.buf, { mode: 0o600 });
-          paths[i] = file;
-          count++;
-        } catch { /* disk error: leave null, retry next pull */ }
+      let page = await fetchImagePage(c, base, token, since, 1);
+      if (!has(page, item.id)) page = await fetchImagePage(c, base, token, since, MAX_IMAGE_FETCHES);
+      if (!page) continue;
+      for (const w of page) {
+        if (!w || typeof w.id !== 'string' || done.has(w.id) || !Array.isArray(w.images)) continue;
+        const target = byId.get(w.id);
+        if (!target) continue;
+        const r = await writeItemImages(c, target, w);
+        written.set(w.id, r.paths);
+        count += r.count;
+        done.add(w.id);
       }
-      written.set(item.id, paths);
     } catch { /* network / timeout: leave paths null, retry next pull (error intentionally dropped; no bytes, no token) */ }
   }
   if (written.size) {

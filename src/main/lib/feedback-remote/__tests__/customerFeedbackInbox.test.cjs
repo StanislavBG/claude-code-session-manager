@@ -185,7 +185,7 @@ test('caches a 3-image item in order with extensions and 0o600; one targeted GET
   expect(f.calls).toHaveLength(2);
   const u = new URL(f.calls[1].url);
   expect(u.searchParams.get('since')).toBe('2026-01-01T00:00:00.000Z');
-  expect(u.searchParams.get('limit')).toBe('20');
+  expect(u.searchParams.get('limit')).toBe('1');
   expect(u.searchParams.has('images')).toBe(false);
   expect(f.calls[1].init.headers.authorization).toBe(`Bearer ${TOKEN}`);
   const d = path.join(dir, 'imgs', 'c1');
@@ -205,6 +205,55 @@ test('caches a 3-image item in order with extensions and 0o600; one targeted GET
 
   const ok = await inbox.readCachedImage('c1', 1, imgDeps(f2));
   expect(ok).toEqual({ ok: true, dataUrl: durl('image/jpeg', JPG) });
+});
+
+/** Image GETs answered by `byLimit[limit]` (wire items); page GET returns `pageItems`. */
+function limitFetch(pageItems, byLimit) {
+  return mkFetch((url) => {
+    if (url.includes('images=none')) return { status: 200, json: { items: pageItems, nextSince: 'S', nextModeratedSince: null } };
+    const limit = new URL(url).searchParams.get('limit');
+    return { status: 200, json: { items: byLimit[limit] || [], nextSince: null, nextModeratedSince: null } };
+  });
+}
+const imageLimits = (f) => f.calls.filter((c) => !c.url.includes('images=none'))
+  .map((c) => new URL(c.url).searchParams.get('limit'));
+
+test('same-second miss on limit=1 retries once with limit=20 and caches', async () => {
+  const f = limitFetch([wire('s2', { images: [meta('image/png', PNG)] })], {
+    1: [wire('s1')],
+    20: [wire('s1'), wire('s2', { images: [full('image/png', PNG)] })],
+  });
+  const r = await inbox.pull(imgDeps(f));
+  expect(r).toEqual({ ok: true, fetched: 1, pages: 1, imagesCached: 1 });
+  expect(imageLimits(f)).toEqual(['1', '20']);
+  for (const c of f.calls.slice(1)) {
+    const u = new URL(c.url);
+    expect(u.searchParams.get('since')).toBe('2026-01-01T00:00:01.000Z');
+    expect(u.searchParams.has('images')).toBe(false);
+    expect(c.init.headers.authorization).toBe(`Bearer ${TOKEN}`);
+  }
+  expect(fs.existsSync(path.join(dir, 'imgs', 's2', '1.png'))).toBe(true);
+});
+
+test('one response holding two uncached items caches both with one image GET', async () => {
+  const f = limitFetch([wire('d1', { images: [meta('image/png', PNG)] }), wire('d2', { images: [meta('image/gif', GIF)] })], {
+    1: [wire('d1', { images: [full('image/png', PNG)] }), wire('d2', { images: [full('image/gif', GIF)] })],
+  });
+  const r = await inbox.pull(imgDeps(f));
+  expect(r).toEqual({ ok: true, fetched: 2, pages: 1, imagesCached: 2 });
+  expect(imageLimits(f)).toEqual(['1']);
+  const items = (await inbox.list({}, imgDeps(f))).items;
+  expect(items.find((i) => i.id === 'd1').images[0].path).toBe(path.join(dir, 'imgs', 'd1', '1.png'));
+  expect(items.find((i) => i.id === 'd2').images[0].path).toBe(path.join(dir, 'imgs', 'd2', '1.gif'));
+});
+
+test('both image GETs miss: paths stay null, pull ok', async () => {
+  const f = limitFetch([wire('n1', { images: [meta('image/png', PNG)] })], { 1: [wire('n0')], 20: [wire('n0')] });
+  const r = await inbox.pull(imgDeps(f));
+  expect(r).toEqual({ ok: true, fetched: 1, pages: 1, imagesCached: 0 });
+  expect(imageLimits(f)).toEqual(['1', '20']);
+  expect((await inbox.list({}, imgDeps(f))).items[0].images[0].path).toBeNull();
+  expect(fs.existsSync(path.join(dir, 'imgs', 'n1'))).toBe(false);
 });
 
 test('mime-mismatch / malformed entries stay null with no file', async () => {

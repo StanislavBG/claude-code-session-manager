@@ -117,6 +117,9 @@ If either fails, keep the test or move its assertions into the scenario test fir
 
 ## Environment gotchas
 
+- `src/main/__tests__/installedPackagesMatch.test.cjs` guards that every direct dependency in node_modules (which job worktrees link from the main checkout) is present and satisfies package.json, so gates never test packages the release does not ship.
+- When it fails it lists each package as name, declared range, installed version; run `npm install` in the main checkout, then rerun — never loosen the range or skip the test.
+
 - Before trusting a local-only red, rerun with every `SM_*` var and `CLAUDECODE` unset — an Epic chat
   leaks `SM_CHAT_SESSION_ID`/`SM_PROJECT_ROOT`; the sandbox pins `SM_MEMINFO_PATH` (globalSetup).
 - Stub `SM_CLAUDE_BIN` scripts commit into `process.cwd()`: any new claude-binary spawn (e.g. a

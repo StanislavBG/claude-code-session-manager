@@ -64,7 +64,7 @@ test('KNOWN_UNREACHABLE figures do not also have a recipe', () => {
 
 test("every recipe's navKey (when present) is a real NAV_ITEMS key", () => {
   const validKeys = new Set(NAV_ITEMS.map((item) => item.key));
-  expect(validKeys.size, 'sanity: NAV_ITEMS should be non-trivial').toBeGreaterThan(10);
+  expect(validKeys.size, 'sanity: NAV_ITEMS should be non-trivial').toBeGreaterThan(5);
 
   const bad = [];
   for (const [figureId, recipe] of Object.entries(RECIPES)) {

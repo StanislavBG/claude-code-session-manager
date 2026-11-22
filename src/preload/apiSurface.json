@@ -1020,6 +1020,13 @@
   "remote": "mutate"
  },
  {
+  "ns": "customerFeedback",
+  "method": "inboxImage",
+  "channel": "customerFeedback:inbox-image",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
   "ns": "diagnostics",
   "method": "takeHeapSnapshot",
   "channel": "diagnostics:heap-snapshot",

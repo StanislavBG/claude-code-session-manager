@@ -107,6 +107,15 @@ test('every listed MCP tool exists with exactly the listed required arguments', 
   }
 });
 
+test("every listed MCP tool's requiredOneOf equals its MCP_TOOL_CATALOG entry (absent on both sides is equal)", () => {
+  const { MCP_TOOL_CATALOG } = require('../lib/mcpToolCatalog.cjs');
+  for (const [name, spec] of Object.entries(CONTRACT.tools)) {
+    const entry = MCP_TOOL_CATALOG.find((t) => t.name === name);
+    expect(entry, `catalog entry ${name}`).toBeTruthy();
+    expect(entry.requiredOneOf ?? null, `tool ${name} requiredOneOf`).toEqual(spec.requiredOneOf ?? null);
+  }
+});
+
 test('states and event kinds equal the code lists', () => {
   const { EPIC_OUTSIDE_STATES } = require('../lib/epic/epicOutsideState.cjs');
   const { OUTSIDE_EVENT_KINDS } = require('../lib/telemetry/auditEvents.cjs');
@@ -159,4 +168,44 @@ test('record and receipt field names equal the keys getEpicRecord builds with re
   expect(rec).toBeTruthy();
   expect(Object.keys(rec)).toEqual([...CONTRACT.epicRecordFields, 'receipt']);
   expect(Object.keys(rec.receipt)).toEqual([...CONTRACT.receiptFields]);
+});
+
+// ── epic_state_changed keys from a real watcher row read back by readEventsAfter ──
+
+test('an epic_state_changed event from the watcher carries only listed keys and always the core ones', async () => {
+  const { configureEpicStateWatcher, runEpicStateWatch } = require('../lib/epic/epicStateWatcher.cjs');
+  const { readEventsAfter } = require('../lib/telemetry/auditEvents.cjs');
+  const cwd = await mkTmp('sm-contract-watch-cwd-');
+  const ps = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(ps, { recursive: true });
+  const session = (id, extra = {}) => ({
+    id, cwd, goalText: `Title ${id}`, claudeSessionId: `sess-${id}`, status: 'active',
+    tag: 'feature', agentType: 'architect', createdAt: '2026-11-01T00:00:00.000Z', ...extra,
+  });
+  const writeIndex = (list) => fs.writeFileSync(path.join(ps, 'active-index.json'), JSON.stringify({
+    sessions: Object.fromEntries(list.map((s) => [s.id, s])), events: {},
+  }));
+  configureEpicStateWatcher({ isTabBusy: () => false, projectRoots: () => [cwd] });
+  try {
+    writeIndex([session('e-1', { source: { externalRef: 'ref-1' } }), session('e-gone')]);
+    await runEpicStateWatch({ cwds: [cwd], jobs: [] }); // seeds silently
+    writeIndex([session('e-1', { source: { externalRef: 'ref-1' } }), session('e-new', { createdAt: '2026-11-03T00:00:00.000Z' })]);
+    const failed = { epicId: 'e-1', slug: '0001-x', status: 'failed', finishedAt: '2026-11-02T00:00:00.000Z' };
+    const changes = await runEpicStateWatch({ cwds: [cwd], jobs: [failed] });
+    expect(changes.length).toBe(3);
+  } finally {
+    configureEpicStateWatcher({ isTabBusy: () => false });
+  }
+
+  const { events } = readEventsAfter({ after: 'start', kinds: ['epic_state_changed'] });
+  expect(events).toHaveLength(3);
+  const allowed = new Set(CONTRACT.epicStateChangedFields);
+  const seen = new Set();
+  for (const ev of events) {
+    for (const k of Object.keys(ev)) { expect(allowed.has(k), `unlisted key ${k}`).toBe(true); seen.add(k); }
+    for (const k of ['at', 'kind', 'cwd', 'epicId', 'to']) expect(ev, `required key ${k}`).toHaveProperty(k);
+    expect(ev.kind).toBe('epic_state_changed');
+  }
+  // The rows exercised every listed key at least once.
+  expect([...seen].sort()).toEqual([...CONTRACT.epicStateChangedFields].sort());
 });

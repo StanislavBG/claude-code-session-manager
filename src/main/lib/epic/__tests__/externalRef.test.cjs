@@ -38,34 +38,37 @@ test('exactly 200 characters → ok', () => {
   expect(normalizeExternalRef('a'.repeat(200))).toEqual({ ok: true, value: 'a'.repeat(200) });
 });
 
-function expectRejected(value) {
+// The shape of a rejection: not ok, a non-empty error string, and no value.
+const REJECTED = { ok: false, hasError: true, hasValue: false };
+function rejection(value) {
   const r = normalizeExternalRef(value);
-  expect(r.ok).toBe(false);
-  expect(typeof r.error).toBe('string');
-  expect(r.error.length).toBeGreaterThan(0);
-  expect(r).not.toHaveProperty('value');
+  return {
+    ok: r.ok,
+    hasError: typeof r.error === 'string' && r.error.length > 0,
+    hasValue: Object.prototype.hasOwnProperty.call(r, 'value'),
+  };
 }
 
 test('empty after trim → rejected', () => {
-  expectRejected('   ');
-  expectRejected('');
+  expect(rejection('   ')).toEqual(REJECTED);
+  expect(rejection('')).toEqual(REJECTED);
 });
 
 test('201 characters → rejected', () => {
-  expectRejected('a'.repeat(201));
+  expect(rejection('a'.repeat(201))).toEqual(REJECTED);
 });
 
 test('a space inside → rejected', () => {
-  expectRejected('self 42');
+  expect(rejection('self 42')).toEqual(REJECTED);
 });
 
 test('a newline inside → rejected', () => {
-  expectRejected('self\n42');
+  expect(rejection('self\n42')).toEqual(REJECTED);
 });
 
 test('a number → rejected, never thrown', () => {
-  expectRejected(42);
-  expectRejected({});
+  expect(rejection(42)).toEqual(REJECTED);
+  expect(rejection({})).toEqual(REJECTED);
 });
 
 test('EpicSourceSchema parses a source without externalRef', () => {

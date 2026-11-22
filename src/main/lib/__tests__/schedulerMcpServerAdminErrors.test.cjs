@@ -206,3 +206,31 @@ test('compareVersions compares dotted numbers and ignores a pre-release suffix',
   expect(compareVersions('1.2.3-beta.1', '1.2.3')).toBe(0);
   expect(compareVersions('1.2', '1.2.0')).toBe(0);
 });
+
+// ---- feedback_reply: its own hint after the missing-route message promises nothing about a restart ----
+
+test('feedback_reply on unknown-route 404 -> missing-route message, then a hint with no restart advice', async () => {
+  const port = await listen(jsonServer(404, { ok: false, error: 'not found', unknownRoute: 'POST /admin/feedback/reply', appVersion: '0.1.0' }));
+  const mod = await setup(port);
+  // This suite may itself run inside a scheduled job; feedback_reply refuses there.
+  const savedSlug = process.env.SM_SCHEDULER_JOB_SLUG;
+  delete process.env.SM_SCHEDULER_JOB_SLUG;
+  let result;
+  try {
+    result = await mod.handleCallTool({ params: { name: 'feedback_reply', arguments: { message: 'answer', outcome: 'answered' } } });
+  } finally {
+    if (savedSlug !== undefined) process.env.SM_SCHEDULER_JOB_SLUG = savedSlug;
+  }
+  expect(result.isError).toBe(true);
+  const text = result.content[0].text;
+  const routeMsg = mod.unknownRouteMessage({
+    method: 'POST', pathname: '/admin/feedback/reply', appVersion: '0.1.0',
+    serverVersion: require('../../../../package.json').version, fromCheckout: true,
+  });
+  expect(text.startsWith(routeMsg)).toBe(true);
+  const hint = text.slice(routeMsg.length);
+  expect(hint).toContain('feedback_reply needs Session Manager v0.136.0 or later.');
+  expect(hint).toContain('Until the running app has this route, send your answer with feedback_open_session to the asking project');
+  expect(hint).toContain('it opens there as a new proposed session.');
+  expect(hint).not.toMatch(/restart/i);
+});

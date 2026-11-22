@@ -1261,7 +1261,7 @@ async function handleCallTool(request) {
       } catch (err) {
         if (err && err.code === 'SM_UNKNOWN_ROUTE') {
           return errorResult(`${err.message} feedback_reply needs Session Manager v0.136.0 or later. `
-            + 'Until the app is restarted, send your answer with feedback_open_session to the asking project; '
+            + 'Until the running app has this route, send your answer with feedback_open_session to the asking project; '
             + 'it opens there as a new proposed session.');
         }
         throw err;

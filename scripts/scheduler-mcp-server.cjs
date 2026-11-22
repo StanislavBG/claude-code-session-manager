@@ -54,7 +54,7 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { createStdioServer } = require('../src/main/lib/mcpStdioServer.cjs');
 const { PRD_WORK_TYPES } = require('../src/main/lib/prd/workTypeLibrary.cjs');
-const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
+const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription, FIXES_INPUT_SCHEMA } = require('../src/main/lib/mcpToolCatalog.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
 const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX, REVIEW_IMAGE_BYTES_MAX } = require('../src/main/lib/project-pages/videoReview.cjs');
 
@@ -388,6 +388,7 @@ const CREATE_PRD_ITEM_SCHEMA = {
       type: 'array', items: { type: 'string' },
       description: 'Optional: exact NN-prefixed slugs (e.g. "3412-fix-x") of other Epics\' PRDs that share this PRD\'s bare slug. The write is refused as a cross-Epic duplicate unless every one is listed here; list them only for a deliberate duplicate — otherwise add them to dependsOn instead.',
     },
+    fixes: FIXES_INPUT_SCHEMA,
     disposition: {
       type: 'string',
       enum: ['append', 'new-head'],

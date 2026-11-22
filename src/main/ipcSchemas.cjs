@@ -16,6 +16,7 @@ const { AgentPersonaSaveSchema, PersonaNameSchema, ProjectCwdSchema } = require(
 const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroRemoveFromProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 const { MAX_SLOTS } = require('./lib/scheduler/sessionSlots.cjs');
 const { PRD_EFFORT_LEVELS } = require('./lib/prd/prdFrontmatter.cjs');
+const { MISS_KINDS } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 // Aliased: this file already has a looser, exchanges-only SESSION_ID_RE (Exchanges section).
 const { SESSION_ID_RE: RESTORABLE_SESSION_ID_RE } = require('./lib/epic/restorableSessions.cjs');
 
@@ -463,6 +464,14 @@ const schedulerCreatePrd = z.object({
   // share this PRD's bare slug. createPrd refuses such a duplicate (409) unless
   // this lists every one of them (prdCreate.cjs findCrossEpicDuplicates).
   allowDuplicateOf: z.array(z.string().min(1).max(160).regex(/^\d+-[A-Za-z0-9][\w.-]*$/, 'must be an exact NN-prefixed slug')).max(MAX_DEPENDS_ON).optional(),
+  // The earlier PRDs this PRD repairs (PRD prd-fixes-field). Bounds mirror
+  // prdCreate.cjs FIXES_MAX / FIX_REASON_MAX; createPrd resolves each prd to an
+  // existing NN slug and re-checks the shape (validateFixesShape).
+  fixes: z.array(z.object({
+    prd: z.string().min(1).max(160),
+    missKind: z.enum(/** @type {[string, ...string[]]} */ ([...MISS_KINDS])),
+    reason: z.string().min(1).max(200),
+  })).min(1).max(20).optional(),
   // Explicit wave-authoring decision (scheduler wave-disposition PRD) — only
   // meaningful (and only stamped) when this PRD joins an Epic that already
   // has incomplete PRDs and lands as a wave root (no dependsOn of its own);

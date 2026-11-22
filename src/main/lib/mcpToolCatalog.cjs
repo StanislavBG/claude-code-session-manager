@@ -20,6 +20,7 @@
 'use strict';
 
 const { z } = require('zod');
+const { MISS_KINDS } = require('./scheduler/validatorVerdictSchema.cjs');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
@@ -826,7 +827,29 @@ function composeDescription(entry) {
   return [entry.purpose, entry.whenToUse, entry.whenNotToUse, entry.notes].filter(Boolean).join(' ');
 }
 
+// `fixes` input of scheduler_create_prd / each scheduler_create_prds entry
+// (PRD prd-fixes-api-surface). scheduler-mcp-server.cjs puts this exact
+// fragment into its shared create-PRD item schema; the missKind enum is built
+// from MISS_KINDS so it can never drift from the validator's list.
+const FIXES_DESCRIPTION = 'Optional: the earlier PRDs this PRD repairs, each with its miss kind and a one-line reason. '
+  + 'Name every PRD whose bug this PRD fixes; one that already had a VERIFIED verdict counts as a validator miss (escape).';
+const FIXES_INPUT_SCHEMA = Object.freeze({
+  type: 'array',
+  description: FIXES_DESCRIPTION,
+  items: {
+    type: 'object',
+    properties: {
+      prd: { type: 'string', description: 'NN-slug or bare slug of the earlier PRD this one repairs.' },
+      missKind: { type: 'string', enum: [...MISS_KINDS], description: 'Kind of miss the earlier PRD had.' },
+      reason: { type: 'string', description: 'One line: what was wrong with it.' },
+    },
+    required: ['prd', 'missKind', 'reason'],
+  },
+});
+
 module.exports = {
+  FIXES_DESCRIPTION,
+  FIXES_INPUT_SCHEMA,
   MCP_TOOL_CATALOG,
   MCP_RECIPES,
   CatalogEntrySchema,

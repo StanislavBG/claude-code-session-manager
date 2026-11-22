@@ -9,6 +9,8 @@ import { useChat } from '../state/chat'
 import { composeEpicIntake } from './epicIntake'
 import { defaultContextInjectionsForTag } from './contextInjections'
 import type { EpicTag } from './tagLibrary'
+import type { EpicIntakeFields } from './epicIntake'
+import type { PromptSessionsCreateEpicPayload } from '../../preload/api'
 
 export interface LaunchSessionInput {
   cwd: string
@@ -31,6 +33,18 @@ export interface LaunchSessionInput {
   approve?: boolean
   /** 'external' = a script-typed opening prompt: never recorded as a verified human quote. Absent = 'human'. */
   origin?: 'external'
+  /** A predecessor Epic's handoff note; becomes the opening prompt's Handoff input entry. */
+  handoff?: EpicIntakeFields['handoff']
+  /** Per-Epic model override; omitted keeps the persona's / Settings default. */
+  model?: string
+  /** Context packs loaded each turn (PromptSession.packs). */
+  packs?: string[]
+  /** Agent CLI for the Epic; absent = Claude Code. */
+  agentCli?: PromptSessionsCreateEpicPayload['agentCli']
+  /** Model for a non-Claude agent CLI. */
+  agentCliModel?: string
+  /** false = no PRDs for this Epic; absent/true keeps the default. */
+  developLoop?: boolean
 }
 
 /**
@@ -52,7 +66,7 @@ export async function resolvePersonaBody(
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, effort, approve = true, origin } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, effort, approve = true, origin, handoff, model, packs, agentCli, agentCliModel, developLoop } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
   if (!title) throw new Error('launchSession: title is required')
@@ -66,12 +80,18 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     agentName,
     agentDescription,
     contextInjections: defaultContextInjectionsForTag(tag),
+    ...(handoff ? { handoff } : {}),
     ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
   })
   const runtime = {
     ...(macroId ? { macroId } : {}),
     ...(typeof externalRef === 'string' && externalRef ? { externalRef } : {}),
     ...(effort ? { effort } : {}),
+    ...(model ? { model } : {}),
+    ...(packs ? { packs } : {}),
+    ...(agentCli ? { agentCli } : {}),
+    ...(agentCliModel ? { agentCliModel } : {}),
+    ...(developLoop === false ? { developLoop: false } : {}),
   }
   const session = await usePromptSessions
     .getState()

@@ -90,6 +90,36 @@ describe('launchSession', () => {
     expect(createPromptSession.mock.calls[0][7]).toEqual({ macroId: 'm9', effort: 'medium' })
   })
 
+  it('passes handoff to composeEpicIntake only when set', async () => {
+    const handoff = { fromEpicId: 'e0', text: 'carry on' }
+    await launchSession({ ...input, handoff })
+    expect(composeEpicIntake).toHaveBeenLastCalledWith(expect.objectContaining({ handoff }))
+    await launchSession(input)
+    expect(vi.mocked(composeEpicIntake).mock.calls[1][0]).not.toHaveProperty('handoff')
+  })
+
+  it('forwards model, packs, agentCli and agentCliModel in the runtime argument when set', async () => {
+    await launchSession({ ...input, model: 'opus' })
+    expect(createPromptSession.mock.calls[0][7]).toEqual({ model: 'opus' })
+    await launchSession({ ...input, packs: ['p1', 'p2'] })
+    expect(createPromptSession.mock.calls[1][7]).toEqual({ packs: ['p1', 'p2'] })
+    await launchSession({ ...input, agentCli: 'codex' as never })
+    expect(createPromptSession.mock.calls[2][7]).toEqual({ agentCli: 'codex' })
+    await launchSession({ ...input, agentCliModel: 'gpt-x' })
+    expect(createPromptSession.mock.calls[3][7]).toEqual({ agentCliModel: 'gpt-x' })
+    await launchSession({ ...input, macroId: 'm9', effort: 'high', model: 'opus', packs: ['p1'], agentCli: 'codex' as never, agentCliModel: 'gpt-x' })
+    expect(createPromptSession.mock.calls[4][7]).toEqual({
+      macroId: 'm9', effort: 'high', model: 'opus', packs: ['p1'], agentCli: 'codex', agentCliModel: 'gpt-x',
+    })
+  })
+
+  it('forwards developLoop: false only when the input says false', async () => {
+    await launchSession({ ...input, developLoop: false })
+    expect(createPromptSession.mock.calls[0][7]).toEqual({ developLoop: false })
+    await launchSession({ ...input, developLoop: true })
+    expect(createPromptSession.mock.calls[1]).toHaveLength(7)
+  })
+
   it("run 'job': forwards a chosen effort to dispatchJob, omits the key when unset", async () => {
     dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e1' })
     await launchSession({ ...input, macroId: 'm9', run: 'job', effort: 'medium' })

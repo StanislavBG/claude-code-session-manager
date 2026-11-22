@@ -22,6 +22,14 @@
  * stepper; terminal appearance lives on App settings; Data Model has its own nav row.
  *
  * Data sources are all existing zustand stores; nothing new on the backend.
+ *
+ * Refresh model: this panel stays mounted for the app's life, so mount-time
+ * loads alone would show launch-time data. `useDashboardRefresh`
+ * (src/renderer/lib/useDashboardRefresh.ts) re-reads every card's source —
+ * known projects, Epics per project, the scheduler queue, usage, and the
+ * outside needs-you items — each time the page is opened (at most every 30 s),
+ * and immediately on the Hero's Refresh button. It is the page's only
+ * Epic-hydrate path; the Hero stamps the last refresh time or the failed sources.
  */
 
 import { memo, useMemo, useEffect, useState, type ReactNode } from 'react'
@@ -40,6 +48,8 @@ import { projectNameFromCwd } from '../../lib/knownProjectAggregate'
 import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
 import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { useOutsideNeedsYou } from '../../lib/useOutsideNeedsYou'
+import { usePanelFocus } from '../../lib/panelFocus'
+import { useDashboardRefresh } from '../../lib/useDashboardRefresh'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { runSchedulerNow } from '../../lib/schedulerActions'
 import { projectColorFor } from '../../lib/projectColor'
@@ -70,17 +80,29 @@ interface HomeProps {
   onNavigate?: (k: NavKey) => void
 }
 
-function HomeComponent({ onNavigate }: HomeProps) {
-  const greeting = useMemo(() => {
-    const h = new Date().getHours()
-    if (h < 5)  return 'Up late'
-    if (h < 12) return 'Good morning'
-    if (h < 18) return 'Good afternoon'
-    return 'Good evening'
-  }, [])
+function greetingForHour(h: number): string {
+  if (h < 5)  return 'Up late'
+  if (h < 12) return 'Good morning'
+  if (h < 18) return 'Good afternoon'
+  return 'Good evening'
+}
 
-  useHydrateKnownEpics()
-  const { rows: needsRows, answer: answerOutside } = useNeedsYouRows()
+function HomeComponent({ onNavigate }: HomeProps) {
+  const { rows: needsRows, answer: answerOutside, reloadOutside } = useNeedsYouRows()
+  const focused = usePanelFocus()
+  const { projects } = useKnownProjects()
+  // Unique real cwds, identity-stable on their joined key, so the hook's
+  // per-cwd hydrate only re-runs when the set of projects actually changes.
+  const cwdsKey = useMemo(() => [...new Set(projects.map((p) => p.cwd))].join('\n'), [projects])
+  const cwds = useMemo(() => (cwdsKey ? cwdsKey.split('\n') : []), [cwdsKey])
+  const { refresh, refreshing, lastRefreshedAt, failedSources } = useDashboardRefresh({ focused, cwds, extra: reloadOutside })
+
+  // Recomputed from the current hour on every refresh, not frozen at mount.
+  const greeting = useMemo(() => {
+    void lastRefreshedAt
+    return greetingForHour(new Date().getHours())
+  }, [lastRefreshedAt])
+
   const projectRows = useHomeProjectRows()
   const tabs = useSessions((s) => s.tabs)
   const addTab = useSessions((s) => s.addTab)
@@ -101,6 +123,11 @@ function HomeComponent({ onNavigate }: HomeProps) {
           needsCount={needsRows.length}
           onNavigate={onNavigate}
           onOpenNewEpic={() => setNewEpicOpen(true)}
+          onRefresh={refresh}
+          refreshing={refreshing}
+          lastRefreshedAt={lastRefreshedAt}
+          failedSources={failedSources}
+          focused={focused}
         />
         <div
           data-testid="home-panel-grid"
@@ -167,11 +194,11 @@ function useHomeProjectRows(): HomeProjectRow[] {
 // ────────────────────────────────────────────────────────────────────
 type OutsideAnswer = ReturnType<typeof useOutsideNeedsYou>['answer']
 
-function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer } {
+function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer; reloadOutside: () => void } {
   const sessions = usePromptSessions((s) => s.sessions)
   const chats = useChatSignals()
   const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
-  const { items: outside, answer } = useOutsideNeedsYou()
+  const { items: outside, answer, reload: reloadOutside } = useOutsideNeedsYou()
   const rows = useMemo(() => {
     const proposed: Record<string, { id: string; cwd: string; goalText: string; tag?: string }> = {}
     for (const id of Object.keys(sessions)) {
@@ -180,7 +207,7 @@ function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer } {
     }
     return buildNeedsYouRows(proposed, chats, jobs, Date.now(), outside)
   }, [sessions, chats, jobs, outside])
-  return { rows, answer }
+  return { rows, answer, reloadOutside }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -248,13 +275,18 @@ export function HomeHeaderWithLegend({
   needsCount,
   onNavigate,
   onOpenNewEpic,
+  onRefresh,
+  refreshing,
+  lastRefreshedAt,
+  failedSources,
+  focused,
 }: {
   greeting: string
   projectCount: number
   needsCount: number
   onNavigate?: (k: NavKey) => void
   onOpenNewEpic: () => void
-}) {
+} & HeroRefreshProps) {
   const [legendOpen, setLegendOpen] = useState(false)
   return (
     <>
@@ -266,11 +298,29 @@ export function HomeHeaderWithLegend({
         onOpenNewEpic={onOpenNewEpic}
         legendOpen={legendOpen}
         onToggleLegend={() => setLegendOpen((v) => !v)}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        lastRefreshedAt={lastRefreshedAt}
+        failedSources={failedSources}
+        focused={focused}
       />
       {legendOpen && <InteractionsLegend />}
     </>
   )
 }
+
+/** Optional — with no `onRefresh`, Hero renders neither the button nor the stamp. */
+interface HeroRefreshProps {
+  /** useDashboardRefresh().refresh */
+  onRefresh?: () => void
+  refreshing?: boolean
+  lastRefreshedAt?: number | null
+  failedSources?: string[]
+  /** Panel focus — the stamp only ticks while the page is visible. */
+  focused?: boolean
+}
+
+const REFRESH_STAMP_TICK_MS = 15_000
 
 // ────────────────────────────────────────────────────────────────────
 // Hero — "This machine" kicker + greeting with live session-slot count.
@@ -283,6 +333,11 @@ function Hero({
   onOpenNewEpic,
   legendOpen,
   onToggleLegend,
+  onRefresh,
+  refreshing = false,
+  lastRefreshedAt = null,
+  failedSources,
+  focused = true,
 }: {
   greeting: string
   projectCount: number
@@ -291,8 +346,20 @@ function Hero({
   onOpenNewEpic: () => void
   legendOpen: boolean
   onToggleLegend: () => void
-}) {
+} & HeroRefreshProps) {
   const slots = useSessionSlots()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!focused) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), REFRESH_STAMP_TICK_MS)
+    return () => clearInterval(id)
+  }, [focused, lastRefreshedAt])
+
+  const failed = failedSources ?? []
+  const stamp = failed.length > 0
+    ? `Refresh failed: ${failed.join(', ')}`
+    : lastRefreshedAt != null ? `Updated ${formatAgo(lastRefreshedAt, now)}` : null
 
   const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0
@@ -327,6 +394,19 @@ function Hero({
         </h1>
       </div>
       <div className="ml-auto flex gap-2 shrink-0">
+        {onRefresh && stamp && (
+          <span
+            data-testid="home-updated-at"
+            className={`font-mono text-[11px] self-center ${failed.length > 0 ? 'text-honey-dark' : 'text-fg-faint'}`}
+          >
+            {stamp}
+          </span>
+        )}
+        {onRefresh && (
+          <HeroButton testId="home-refresh" disabled={refreshing} onClick={onRefresh}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </HeroButton>
+        )}
         <HeroButton onClick={onToggleLegend}>{legendOpen ? 'Hide interactions' : 'Interactions'}</HeroButton>
         <HeroButton onClick={() => onNavigate?.('history')}>All history</HeroButton>
         <HeroButton primary onClick={onOpenNewEpic}>New epic</HeroButton>
@@ -351,6 +431,7 @@ function Hero({
 //   Recent row         — lib/homeSessionRows.ts, lib/useKnownProjects.ts
 //   Project row        — lib/homeProjectRows.ts, lib/homeOpenProject.ts
 //   New session        — lib/homeOpenProject.ts, the New session picker in this file
+//   Refresh            — lib/useDashboardRefresh.ts, the Hero in this file
 // ────────────────────────────────────────────────────────────────────
 const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
   { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
@@ -359,6 +440,7 @@ const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
   { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view.' },
   { term: 'Recent row', description: 'Click resume to open a new Terminal tab that resumes that transcript session.' },
   { term: 'Project row', description: 'Click a project to activate its open Terminal tab, or open a new dormant one.' },
+  { term: 'Refresh', description: 'Re-reads every card now. The page also refreshes itself whenever you open it, at most every 30 s.' },
   { term: 'New session', description: 'Opens a project picker; confirming activates-or-opens that project\'s tab and lands you in its Sessions workspace to start the session.' },
 ]
 
@@ -380,14 +462,22 @@ function InteractionsLegend() {
   )
 }
 
-function HeroButton({ children, onClick, primary }: { children: ReactNode; onClick: () => void; primary?: boolean }) {
+function HeroButton({ children, onClick, primary, disabled, testId }: {
+  children: ReactNode
+  onClick: () => void
+  primary?: boolean
+  disabled?: boolean
+  testId?: string
+}) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      data-testid={testId}
       className={
         primary
           ? 'rounded-lg bg-accent text-bg-hi px-4 py-2 text-[12.5px] font-semibold hover:bg-accent-dark'
-          : 'rounded-lg border border-line bg-bg-hi px-4 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev'
+          : 'rounded-lg border border-line bg-bg-hi px-4 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-50'
       }
     >
       {children}
@@ -760,25 +850,6 @@ export function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] })
       )}
     </div>
   )
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Epic hydration — active + archived PromptSessions for every known cwd, so
-// Active/Recent sessions can resolve Epic titles. Mirrors EpicsWorkspace's
-// knownCwds hydrate loop.
-// ────────────────────────────────────────────────────────────────────
-function useHydrateKnownEpics(): void {
-  const { projects } = useKnownProjects()
-  // Unique real cwds only — hydrating a fabricated `candidatePath` decode used
-  // to fire two IPC reads per transcript folder (thousands of them) against
-  // directories that never existed. See lib/knownProjectAggregate.ts.
-  const knownCwdsKey = useMemo(() => projects.map((p) => p.cwd).join('\n'), [projects])
-  useEffect(() => {
-    for (const cwd of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
-      void usePromptSessions.getState().hydrate(cwd)
-      void usePromptSessions.getState().hydrateArchived(cwd)
-    }
-  }, [knownCwdsKey])
 }
 
 // ────────────────────────────────────────────────────────────────────

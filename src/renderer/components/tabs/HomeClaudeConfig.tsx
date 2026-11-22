@@ -8,7 +8,9 @@
  * Per-tab redesign is NOT here — each tab renders today's page as it is.
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ConfigBand, type ConfigBandTab } from '../claudeConfig/ConfigBand'
+import { ConfigBand, ConfigSearchResults, useConfigSearch, type ConfigBandTab } from '../claudeConfig/ConfigBand'
+import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSearch'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
 import { useLayout } from '../../state/layout'
@@ -44,6 +46,8 @@ const DRAWER_TITLE: Record<DrawerTab, string> = {
 
 const asCount = (n: number | null | undefined): number | undefined => (n == null ? undefined : n)
 
+const loadHomeSearchItems = () => loadConfigSearchItems({ scope: 'home', cwd: null, api: window.api })
+
 function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: HomeConfigTab }) {
   const [tab, setTab] = useState<HomeConfigTab>(initialTab)
   const [drawer, setDrawer] = useState(false)
@@ -68,6 +72,13 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
   const add = useCallback(() => setDrawer(true), [])
   const addMcp = useCallback((ctx: McpAddContext) => { setMcpCtx(ctx); setDrawer(true) }, [])
   const toggleLearn = useCallback(() => setLearnOpen((o) => !o), [])
+  // A chosen search result opens its tab and leaves its id for that tab to select.
+  const chooseResult = useCallback((item: ConfigSearchItem) => {
+    if (!isHomeConfigTab(item.tab)) return
+    selectTab(item.tab)
+    useConfigSearchFocus.getState().set(item.tab, item.id)
+  }, [selectTab])
+  const search = useConfigSearch({ load: loadHomeSearchItems, loadKey: 'home', onChoose: chooseResult })
 
   const bandTabs = useMemo<ConfigBandTab<HomeConfigTab>[]>(() => {
     const countOf: Partial<Record<HomeConfigTab, number | undefined>> = {
@@ -92,6 +103,8 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
         activeKey={tab}
         onSelect={selectTab}
         onLearn={toggleLearn}
+        {...search.bandProps}
+        searchPanel={<ConfigSearchResults {...search.panelProps} tabs={bandTabs} />}
       />
       {learnOpen && learn && (
         <div className="shrink-0 border-b border-line bg-bg-elev px-7 py-4 max-h-[40vh] overflow-y-auto" data-testid="home-claude-config-learn">

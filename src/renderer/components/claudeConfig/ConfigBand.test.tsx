@@ -3,7 +3,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
-import { ConfigBand, type ConfigBandTab } from './ConfigBand'
+import { useState } from 'react'
+import { ConfigBand, ConfigSearchResults, type ConfigBandTab } from './ConfigBand'
+import type { ConfigSearchGroup } from '../../lib/configSearch'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -101,5 +103,108 @@ describe('ConfigBand', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(onSearch).toHaveBeenLastCalledWith('model')
+  })
+})
+
+describe('ConfigBand search panel', () => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  const input = () => container.querySelector<HTMLInputElement>('input[type="search"]')!
+  const panel = () => container.querySelector('[data-testid="config-search-panel"]')
+
+  function Harness({ onKey }: { onKey?: (k: string) => void }) {
+    const [query, setQuery] = useState('')
+    return (
+      <ConfigBand
+        eyebrow="E"
+        title="T"
+        scopePath="~/p"
+        tabs={TABS}
+        activeKey="mcp"
+        onSelect={vi.fn()}
+        searchQuery={query}
+        onSearch={setQuery}
+        onSearchKeyDown={(e) => onKey?.(e.key)}
+        searchPanel={<div data-testid="results">results for {query}</div>}
+      />
+    )
+  }
+
+  function type(value: string) {
+    act(() => {
+      setter.call(input(), value)
+      input().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  it('shows the panel only while focused with a non-empty query', () => {
+    act(() => root.render(<Harness />))
+    expect(panel()).toBeNull()
+    act(() => input().focus())
+    expect(panel()).toBeNull()
+    type('mod')
+    expect(panel()?.textContent).toContain('results for mod')
+    act(() => input().blur())
+    expect(panel()).toBeNull()
+  })
+
+  it("'/' focuses the field unless focus is in an input, textarea or contenteditable", () => {
+    act(() => root.render(<Harness />))
+    act(() => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })) })
+    expect(document.activeElement).toBe(input())
+    act(() => input().blur())
+    const other = document.createElement('textarea')
+    document.body.appendChild(other)
+    other.focus()
+    act(() => { other.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })) })
+    expect(document.activeElement).toBe(other)
+    other.remove()
+  })
+
+  it('Esc clears the query and blurs the field; other keys reach onSearchKeyDown', () => {
+    const keys: string[] = []
+    act(() => root.render(<Harness onKey={(k) => keys.push(k)} />))
+    act(() => input().focus())
+    type('mod')
+    act(() => { input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    expect(keys).toEqual(['ArrowDown'])
+    act(() => { input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(input().value).toBe('')
+    expect(document.activeElement).not.toBe(input())
+    expect(panel()).toBeNull()
+  })
+})
+
+describe('ConfigSearchResults', () => {
+  const groups: ConfigSearchGroup[] = [
+    { tab: 'settings', total: 7, items: [{ tab: 'settings', id: 'settings:model', title: 'model', detail: 'Model' }] },
+    { tab: 'mcp', total: 1, items: [{ tab: 'mcp', id: 'mcp:one', title: 'one', detail: 'MCP server' }] },
+  ]
+
+  it('groups rows under each tab label with its total and marks the active row', () => {
+    act(() => {
+      root.render(<ConfigSearchResults groups={groups} loading={false} activeIndex={1} tabs={TABS} onChoose={vi.fn()} onHover={vi.fn()} />)
+    })
+    const heads = Array.from(container.querySelectorAll('[data-testid="config-search-group"]')).map((g) => g.textContent)
+    expect(heads[0]).toContain('Settings')
+    expect(heads[0]).toContain('7')
+    expect(heads[1]).toContain('MCP')
+    const rows = Array.from(container.querySelectorAll('[role="option"]'))
+    expect(rows.map((r) => r.getAttribute('aria-selected'))).toEqual(['false', 'true'])
+  })
+
+  it("says 'No matches' when there are no groups", () => {
+    act(() => {
+      root.render(<ConfigSearchResults groups={[]} loading={false} activeIndex={0} tabs={TABS} onChoose={vi.fn()} onHover={vi.fn()} />)
+    })
+    expect(container.textContent).toContain('No matches')
+  })
+
+  it('clicking a row chooses its item', () => {
+    const onChoose = vi.fn()
+    act(() => {
+      root.render(<ConfigSearchResults groups={groups} loading={false} activeIndex={0} tabs={TABS} onChoose={onChoose} onHover={vi.fn()} />)
+    })
+    act(() => (container.querySelectorAll('[role="option"]')[1] as HTMLElement).click())
+    expect(onChoose).toHaveBeenCalledWith(groups[1].items[0])
   })
 })

@@ -229,7 +229,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   // `/` opens the palette unless the user is typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName?.toLowerCase() ?? ''
       if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return

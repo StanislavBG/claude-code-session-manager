@@ -7,8 +7,20 @@
  * ConfigWorkbench.dc.html band markup). Colors are app tokens only — the band's
  * `#2a221a` is `bg-fg` with `text-bg-hi` (DESIGN_SPEC.md §4 token note).
  */
-import { useRef, type KeyboardEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
+import { Z } from '../../lib/zLayers'
+import { searchConfig, type ConfigSearchGroup, type ConfigSearchItem } from '../../lib/configSearch'
+import { toast } from '../../state/toast'
 
 export interface ConfigBandTab<K extends string = string> {
   key: K
@@ -29,8 +41,18 @@ export interface ConfigBandProps<K extends string = string> {
   tabs: ReadonlyArray<ConfigBandTab<K>>
   activeKey: K
   onSelect: (key: K) => void
-  /** Called with the query as the user types in "Search all config". */
+  /** Called with the query as the user types in "Search all config" (and with '' on Esc). */
   onSearch?: (query: string) => void
+  /** Controls the field's value; omit to let the band own it. */
+  searchQuery?: string
+  /** Called each time the field gains focus (e.g. to load search items lazily). */
+  onSearchFocus?: () => void
+  /** Keys pressed in the field other than Esc (which the band handles: clear + blur). */
+  onSearchKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void
+  /** Results panel shown under the field while it has focus and a non-empty query. */
+  searchPanel?: ReactNode
+  /** The field's element, for callers that blur it after a choice. */
+  searchInputRef?: RefObject<HTMLInputElement>
   /** Called when the LEARN link is pressed. */
   onLearn?: () => void
 }
@@ -48,9 +70,51 @@ export function ConfigBand<K extends string = string>({
   activeKey,
   onSelect,
   onSearch,
+  searchQuery,
+  onSearchFocus,
+  onSearchKeyDown,
+  searchPanel,
+  searchInputRef,
   onLearn,
 }: ConfigBandProps<K>) {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const ownInputRef = useRef<HTMLInputElement>(null)
+  const inputRef = searchInputRef ?? ownInputRef
+  const [ownQuery, setOwnQuery] = useState('')
+  const query = searchQuery ?? ownQuery
+  const [focused, setFocused] = useState(false)
+
+  const setQuery = (q: string) => {
+    if (searchQuery === undefined) setOwnQuery(q)
+    onSearch?.(q)
+  }
+
+  // '/' jumps to the search field unless the user is already typing somewhere. Capture phase +
+  // preventDefault, so a tab's own '/' shortcut (Memory's palette) sees it as handled.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return
+      const t = e.target instanceof HTMLElement ? e.target : null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable || t.closest('[contenteditable="true"]'))) return
+      if (!inputRef.current) return
+      e.preventDefault()
+      inputRef.current.focus()
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [inputRef])
+
+  const onFieldKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setQuery('')
+      e.currentTarget.blur()
+      return
+    }
+    onSearchKeyDown?.(e)
+  }
+
+  const showPanel = focused && query.trim() !== '' && searchPanel != null
 
   const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let next = -1
@@ -119,17 +183,34 @@ export function ConfigBand<K extends string = string>({
 
       <span className="flex-1" />
 
-      <label className="flex items-center gap-2.5 w-[250px] h-10 px-3 rounded-[10px] bg-bg/[0.08] border border-bg/[0.14] text-[13px] text-bg-hi/60 focus-within:border-bg/30">
-        <AlmanacIcon name="search" size={15} className="shrink-0" />
-        <input
-          type="search"
-          aria-label="Search all config"
-          placeholder="Search all config"
-          onChange={(e) => onSearch?.(e.target.value)}
-          className="flex-1 min-w-0 bg-transparent outline-none text-bg-hi placeholder:text-bg-hi/60"
-        />
-        <kbd className="font-mono text-[11px] px-1.5 py-px rounded border border-bg/20">/</kbd>
-      </label>
+      <div className="relative">
+        <label className="flex items-center gap-2.5 w-[250px] h-10 px-3 rounded-[10px] bg-bg/[0.08] border border-bg/[0.14] text-[13px] text-bg-hi/60 focus-within:border-bg/30">
+          <AlmanacIcon name="search" size={15} className="shrink-0" />
+          <input
+            ref={inputRef}
+            type="search"
+            aria-label="Search all config"
+            placeholder="Search all config"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => { setFocused(true); onSearchFocus?.() }}
+            onBlur={() => setFocused(false)}
+            onKeyDown={onFieldKeyDown}
+            className="flex-1 min-w-0 bg-transparent outline-none text-bg-hi placeholder:text-bg-hi/60"
+          />
+          <kbd className="font-mono text-[11px] px-1.5 py-px rounded border border-bg/20">/</kbd>
+        </label>
+        {showPanel && (
+          <div
+            data-testid="config-search-panel"
+            // Keep focus in the field while a row is pressed, so the click still lands.
+            onMouseDown={(e) => e.preventDefault()}
+            className={`absolute right-0 top-full mt-1.5 w-[380px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-bg-hi text-fg shadow-lg whitespace-normal ${Z.dialog}`}
+          >
+            {searchPanel}
+          </div>
+        )}
+      </div>
 
       <button
         type="button"
@@ -140,4 +221,131 @@ export function ConfigBand<K extends string = string>({
       </button>
     </div>
   )
+}
+
+// ───────────────────────────────────────────── search results
+
+export interface ConfigSearchResultsProps {
+  groups: ConfigSearchGroup[]
+  /** Items are still loading. */
+  loading: boolean
+  /** Index into the flattened rows (group order, then row order). */
+  activeIndex: number
+  /** The band's tabs, for each group's label. */
+  tabs: ReadonlyArray<ConfigBandTab>
+  onChoose: (item: ConfigSearchItem) => void
+  onHover: (index: number) => void
+}
+
+/** "Search all config" results: one section per tab (label + total), its best rows below. */
+export function ConfigSearchResults({ groups, loading, activeIndex, tabs, onChoose, onHover }: ConfigSearchResultsProps) {
+  if (loading) return <div className="px-3.5 py-3 text-[12.5px] text-fg-dim">Loading…</div>
+  if (groups.length === 0) return <div className="px-3.5 py-3 text-[12.5px] text-fg-dim">No matches</div>
+  let index = 0
+  return (
+    <div role="listbox" aria-label="Config search results" className="py-1.5">
+      {groups.map((g) => (
+        <div key={g.tab} className="py-1">
+          <div
+            data-testid="config-search-group"
+            className="flex items-center justify-between px-3.5 pt-1 pb-0.5 text-[10.5px] font-semibold tracking-[0.08em] uppercase text-fg-dim"
+          >
+            <span>{tabs.find((t) => t.key === g.tab)?.label ?? g.tab}</span>
+            <span className="font-mono">{g.total}</span>
+          </div>
+          {g.items.map((item) => {
+            const i = index++
+            const active = i === activeIndex
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => onChoose(item)}
+                onMouseEnter={() => onHover(i)}
+                className={`w-full text-left px-3.5 py-1.5 flex items-baseline gap-2 min-w-0 ${active ? 'bg-bg-elev' : ''}`}
+              >
+                <span className="text-[13px] font-medium text-fg truncate">{item.title}</span>
+                {item.detail && <span className="text-[11.5px] text-fg-dim truncate">{item.detail}</span>}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export interface UseConfigSearchInput {
+  /** Reads every searchable item; called on the field's first focus per `loadKey`. */
+  load: () => Promise<ConfigSearchItem[]>
+  /** Identity of what `load` reads (e.g. the cwd); a change drops loaded items. */
+  loadKey: string
+  onChoose: (item: ConfigSearchItem) => void
+}
+
+/**
+ * The state behind "Search all config": lazy-loaded items, the query, grouped results and
+ * the active row, plus the ConfigBand props and ConfigSearchResults props that wire them.
+ */
+export function useConfigSearch({ load, loadKey, onChoose }: UseConfigSearchInput) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [loaded, setLoaded] = useState<{ key: string; items: ConfigSearchItem[] } | null>(null)
+  const requested = useRef<string | null>(null)
+
+  const items = loaded && loaded.key === loadKey ? loaded.items : null
+  const groups = useMemo(() => (items ? searchConfig(items, query) : []), [items, query])
+  const flat = useMemo(() => groups.flatMap((g) => g.items), [groups])
+
+  const onSearchFocus = useCallback(() => {
+    if (requested.current === loadKey) return
+    requested.current = loadKey
+    load().then(
+      (list) => setLoaded({ key: loadKey, items: list }),
+      (err: unknown) => {
+        toast.error(`Search all config: ${err instanceof Error ? err.message : String(err)}`)
+        setLoaded({ key: loadKey, items: [] })
+      },
+    )
+  }, [load, loadKey])
+
+  const onSearch = useCallback((q: string) => {
+    setQuery(q)
+    setActiveIndex(0)
+  }, [])
+
+  const choose = useCallback(
+    (item: ConfigSearchItem) => {
+      onChoose(item)
+      setQuery('')
+      setActiveIndex(0)
+      inputRef.current?.blur()
+    },
+    [onChoose],
+  )
+
+  const onSearchKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (flat.length === 0) return
+        const step = e.key === 'ArrowDown' ? 1 : -1
+        setActiveIndex((i) => (i + step + flat.length) % flat.length)
+      } else if (e.key === 'Enter') {
+        const item = flat[Math.min(activeIndex, flat.length - 1)]
+        if (!item) return
+        e.preventDefault()
+        choose(item)
+      }
+    },
+    [flat, activeIndex, choose],
+  )
+
+  return {
+    bandProps: { searchQuery: query, onSearch, onSearchFocus, onSearchKeyDown, searchInputRef: inputRef },
+    panelProps: { groups, loading: items === null, activeIndex, onChoose: choose, onHover: setActiveIndex },
+  }
 }

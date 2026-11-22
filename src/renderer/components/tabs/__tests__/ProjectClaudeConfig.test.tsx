@@ -9,6 +9,7 @@ import { getNavItemsForFace } from '../../../lib/navGroups'
 import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
 import { useConfig } from '../../../state/config'
+import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 import { HOME, PROJECT_CWD, PROJECT_TAB } from './_navfaceHarness'
 
 vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
@@ -130,6 +131,7 @@ beforeEach(() => {
   useLayout.setState({ navFace: 'project' })
   useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
   useConfig.setState({ files: {}, watchRefs: {} })
+  useConfigSearchFocus.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -291,5 +293,56 @@ describe('ProjectClaudeConfig', () => {
     await mount()
     expect(container.textContent).toContain('no active project')
     expect(q('config-band')).toBeNull()
+  })
+
+  describe('Search all config', () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Search all config"]')!
+    const key = (k: string) => act(() => { input().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })) })
+    async function focusAndType(value: string) {
+      await act(async () => { input().focus() })
+      await flush()
+      act(() => {
+        setter.call(input(), value)
+        input().dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+
+    it('loads this project\'s items on first focus and shows results grouped by tab', async () => {
+      api.config.readJson.mockImplementation(async (p: string) => {
+        const data = p.endsWith('/.mcp.json') ? { mcpServers: { 'model-srv': { command: 'npx' } } } : {}
+        return { raw: JSON.stringify(data), data, exists: true, mtimeMs: 1, parseError: null, error: null }
+      })
+      await mount()
+      expect(container.querySelector('[data-testid="config-search-panel"]')).toBeNull()
+      await focusAndType('model')
+      const groups = Array.from(container.querySelectorAll('[data-testid="config-search-group"]')).map((g) => g.textContent ?? '')
+      expect(groups.map((g) => g.replace(/\d+$/, ''))).toEqual(['Settings', 'MCP'])
+      const rows = container.querySelectorAll('[data-testid="config-search-panel"] [role="option"]')
+      expect(rows.length).toBeGreaterThan(1)
+      expect(rows.length).toBeLessThanOrEqual(10)
+      expect(rows[0].textContent).toContain('model')
+    })
+
+    it('Enter on a result switches the tab and records the item in configSearchFocus', async () => {
+      await mount()
+      await focusAndType('model')
+      key('Enter')
+      await flush()
+      expect(q('project-claude-config-panel-settings')).not.toBeNull()
+      expect(useConfigSearchFocus.getState()).toMatchObject({ tab: 'settings', id: 'settings:model' })
+      expect(input().value).toBe('')
+    })
+
+    it("'/' focuses the field and Esc clears it", async () => {
+      await mount()
+      await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })) })
+      expect(document.activeElement).toBe(input())
+      await focusAndType('zzzz')
+      expect(q('config-search-panel')?.textContent).toContain('No matches')
+      key('Escape')
+      expect(input().value).toBe('')
+      expect(q('config-search-panel')).toBeNull()
+    })
   })
 })

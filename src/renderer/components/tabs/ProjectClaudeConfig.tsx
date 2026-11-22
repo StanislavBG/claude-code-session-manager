@@ -20,7 +20,9 @@
  * - Skills    — Skills at project scope (<cwd>/.claude/skills/).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ConfigBand, type ConfigBandTab } from '../claudeConfig/ConfigBand'
+import { ConfigBand, ConfigSearchResults, useConfigSearch, type ConfigBandTab } from '../claudeConfig/ConfigBand'
+import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSearch'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
 import { SourceChip, shortenHome } from '../ui/SourceChip'
@@ -277,6 +279,17 @@ function ProjectClaudeConfigComponent() {
   const openMcpAdd = useCallback((ctx: McpAddContext) => setMcpAdd(ctx), [])
   const closeMcpAdd = useCallback(() => setMcpAdd(null), [])
   const toggleLearn = useCallback(() => setLearnOpen((o) => !o), [])
+  // A chosen search result opens its tab and leaves its id for that tab to select.
+  const chooseResult = useCallback((item: ConfigSearchItem) => {
+    if (!isConfigTab(item.tab)) return
+    selectTab(item.tab)
+    useConfigSearchFocus.getState().set(item.tab, item.id)
+  }, [selectTab])
+  const loadSearchItems = useCallback(
+    () => loadConfigSearchItems({ scope: 'project', cwd, api: window.api }),
+    [cwd],
+  )
+  const search = useConfigSearch({ load: loadSearchItems, loadKey: cwd ?? '', onChoose: chooseResult })
 
   const bandTabs = useMemo<ConfigBandTab<ConfigTab>[]>(() => {
     const md = counts.claudeMd
@@ -313,6 +326,8 @@ function ProjectClaudeConfigComponent() {
         activeKey={tab}
         onSelect={selectTab}
         onLearn={toggleLearn}
+        {...search.bandProps}
+        searchPanel={<ConfigSearchResults {...search.panelProps} tabs={bandTabs} />}
       />
       {learnOpen && learn && (
         <div className="shrink-0 border-b border-line bg-bg-elev px-7 py-4 max-h-[40vh] overflow-y-auto" data-testid="project-claude-config-learn">

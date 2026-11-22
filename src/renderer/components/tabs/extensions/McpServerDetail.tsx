@@ -1,21 +1,22 @@
 /**
  * McpServerDetail — the detail pane for one configured MCP server, in the Claude config design
- * (design-mocks/claude-config renders 12-home-mcp / 08-project-mcp), keeping the Extensions 3a
- * decisions (design-mocks/extensions-3a/DESIGN_SPEC.md §4, §7).
+ * (design-mocks/claude-config renders 12-home-mcp / 08-project-mcp, DESIGN_SPEC.md §5.5).
  *
  * Header: an eyebrow `ORIGIN · TRANSPORT · SCOPE · <file> › mcpServers › <name>`, the mono name and
- * a status pill from the server's last mcpChecks result, and Check again / Edit JSON on the right.
- * There is no Enabled switch: Claude Code has no per-server enabled field (spec §7.1). A check
- * runs only on a click (Check again, or the Tools card's Check <name>) — never on mount.
+ * a status pill from the server's last mcpChecks result, and Check again / Edit JSON on the right —
+ * after an "Approved" toggle for a project server (`approval`, the page's disabledMcpjsonServers).
+ * There is no Enabled switch: Claude Code has no per-server enabled field. A check runs only on a
+ * click (Check again, or the Tools card's Check <name>) — never on mount.
  *
- * Body: a COMMAND card (`<command> <args…>`, or URL for a remote server) with Copy; an
+ * Body: a COMMAND card (`<command> <args…>`, or URL for a remote server) with a copy-icon Copy; an
  * ENVIRONMENT · N card for a stdio server, or HEADERS · N for a remote one, every value masked until
- * its row is revealed, with `+ Add variable` / `+ Add header`; a TOOLS · N card with the first 8 tools
- * as chips plus `+N more`, and `checked <ago>`. `footer` (the page's SaveBar, `Saved — matches
- * <file>`) closes the body. Edit JSON swaps COMMAND / ENVIRONMENT / TOOLS for today's full
- * per-server form, passed in as `editor`, so no field is lost (§7.2).
+ * its row's Show is pressed, with `+ Add variable` / `+ Add header`; a TOOLS · N card with the first
+ * 8 tools as chips plus `+N more`, and `checked <ago>`. The footer closes the body: only
+ * `Saved — matches <file>` (`cleanLabel`) while there is nothing to save, else `footer` (the page's
+ * SaveBar with Save / Revert). Edit JSON swaps COMMAND / ENVIRONMENT / TOOLS for today's full
+ * per-server form, passed in as `editor`, so no field is lost.
  *
- * A server an enabled plugin adds (`plugin` set) opens read-only (spec §4 FROM PLUGINS): a `plugin`
+ * A server an enabled plugin adds (`plugin` set) opens read-only (FROM PLUGINS): a `plugin`
  * transport and `via the <plugin> plugin · read-only` in the eyebrow, COMMAND and TOOLS only, and no
  * Edit JSON or + Add — it is checked like any other server but never edited here.
  *
@@ -24,6 +25,8 @@
  */
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { ConfigCard } from '../../claudeConfig/ConfigLayout'
+import { AlmanacIcon } from '../../layout/AlmanacIcon'
+import { Toggle } from '../../ui/Toggle'
 import { mcpCheckKey, useMcpChecks } from '../../../state/mcpChecks'
 import { toast } from '../../../state/toast'
 import { copyText } from '../../../lib/clipboard'
@@ -112,6 +115,26 @@ const LINK_CLASS = 'text-[13px] font-semibold text-accent hover:text-accent-dark
 
 const EYEBROW_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint'
 
+/** A project server's approval, as the page reads it from <cwd>/.claude/settings.json. */
+export interface McpApproval {
+  /** Not listed in `disabledMcpjsonServers`. */
+  approved: boolean
+  busy: boolean
+  onChange: (approved: boolean) => void
+}
+
+/** The footer while there is nothing to save: a sage dot and `Saved — matches <file>`, no buttons. */
+export function McpSavedLine({ label }: { label: string }) {
+  return (
+    <div className="px-3 py-1.5 flex items-center text-xs">
+      <span data-testid="savebar-clean" className="min-w-0 flex items-center gap-[7px] text-fg-faint">
+        <span aria-hidden="true" className="shrink-0 w-1.5 h-1.5 rounded-full bg-sage" />
+        <span className="truncate">{label}</span>
+      </span>
+    </div>
+  )
+}
+
 export interface McpServerDetailProps {
   name: string
   server: McpServer
@@ -131,8 +154,12 @@ export interface McpServerDetailProps {
   onEditingChange?: (editing: boolean) => void
   /** Today's full per-server form, shown while `editing`. */
   editor?: ReactNode
-  /** Closes the body — the page's SaveBar (`Saved — matches <file>`). */
+  /** Closes the body while there are unsaved edits — the page's SaveBar (Save / Revert). */
   footer?: ReactNode
+  /** Set while there is nothing to save: the footer is only this line (`Saved — matches <file>`). */
+  cleanLabel?: string
+  /** A project server's Approved toggle; absent = no approval step (user scope, plugins). */
+  approval?: McpApproval
 }
 
 export function McpServerDetail({
@@ -148,6 +175,8 @@ export function McpServerDetail({
   onEditingChange,
   editor,
   footer,
+  cleanLabel,
+  approval,
 }: McpServerDetailProps) {
   const readOnly = plugin !== undefined
   const editing = !readOnly && editingProp
@@ -217,6 +246,15 @@ export function McpServerDetail({
               On in every project
             </span>
           ) : null}
+          {approval && !readOnly ? (
+            <span
+              data-testid="mcp-detail-approved"
+              title="disabledMcpjsonServers in .claude/settings.json"
+              className="mr-2 inline-flex text-[13px]"
+            >
+              <Toggle checked={approval.approved} disabled={approval.busy} onChange={approval.onChange} label="Approved" />
+            </span>
+          ) : null}
           <button
             type="button"
             data-testid="mcp-check-again"
@@ -274,7 +312,13 @@ export function McpServerDetail({
             />
           </>
         )}
-        {footer !== undefined ? <div className="-mx-3">{footer}</div> : null}
+        {cleanLabel !== undefined ? (
+          <div className="-mx-3">
+            <McpSavedLine label={cleanLabel} />
+          </div>
+        ) : footer !== undefined ? (
+          <div className="-mx-3">{footer}</div>
+        ) : null}
       </div>
     </div>
   )
@@ -307,8 +351,11 @@ function CommandCard({ server, readOnly }: { server: McpServer; readOnly: boolea
           data-testid="mcp-command-copy"
           onClick={() => void copy()}
           disabled={!line}
-          className="shrink-0 text-[13px] text-fg-dim hover:text-fg disabled:opacity-50 disabled:hover:text-fg-dim"
+          className="shrink-0 inline-flex items-center gap-[7px] text-[13px] text-fg-dim hover:text-fg disabled:opacity-50 disabled:hover:text-fg-dim"
         >
+          <span aria-hidden="true" data-testid="mcp-command-copy-icon" className="inline-flex shrink-0">
+            <AlmanacIcon name="copy" size={15} />
+          </span>
           Copy
         </button>
       }

@@ -1,9 +1,17 @@
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { SaveBar } from '../ui/SaveBar'
+import { Toggle } from '../ui/Toggle'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { ConfigFileCard, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
-import { McpServerDetail, MCP_CHECK_LABEL, MCP_DOT_CLASS, type McpCheckState } from './extensions/McpServerDetail'
+import {
+  McpServerDetail,
+  McpSavedLine,
+  MCP_CHECK_LABEL,
+  MCP_DOT_CLASS,
+  type McpApproval,
+  type McpCheckState,
+} from './extensions/McpServerDetail'
 import {
   classifyProvenance,
   provenanceKey,
@@ -37,12 +45,13 @@ import type { InstalledPlugin, McpCheckRequest, McpCheckResult } from '../../../
  *
  * Layout is the Claude config design (design-mocks/claude-config renders 12-home-mcp,
  * 08-project-mcp) on the shared ConfigLayout kit: a SERVER FILE card (`edited <age>`, the file ›
- * mcpServers, and the scope note — or, in a project, the approval gating of
- * <cwd>/.claude/settings.json), `Check all N` + `+ Add`, then one row per server with its status dot,
- * name, transport and `<origin> · <status>`. The Extensions 3a decisions stay
- * (design-mocks/extensions-3a/DESIGN_SPEC.md §4, §7): one status dot per server from the mcpChecks
- * store (checks run only on Check all / Check again — never on mount), no per-server enabled
- * switch, and a server always selected. The selected server opens in extensions/McpServerDetail.tsx;
+ * mcpServers, and the scope note — or, in a project, the "Auto-approve all servers" toggle), `Check
+ * all N` + `+ Add`, then one row per server, in the order the file lists them, with its status dot,
+ * name, transport and `<origin> · <status>`. Project approval (design-mocks/claude-config
+ * DESIGN_SPEC.md §5.5) is that toggle plus an "Approved" toggle in each server's detail header — the
+ * `enableAllProjectMcpServers` / `disabledMcpjsonServers` keys of <cwd>/.claude/settings.json. One
+ * status dot per server comes from the mcpChecks store (checks run only on Check all / Check again —
+ * never on mount), there is no per-server enabled switch, and a server is always selected. The selected server opens in extensions/McpServerDetail.tsx;
  * its Edit JSON shows today's full per-server form (McpServerEditor below) in the detail's body.
  *
  * User scope adds FROM PLUGINS (spec §4): the servers each enabled plugin adds (its .mcp.json, read
@@ -370,6 +379,9 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
 
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Project approval lives in <cwd>/.claude/settings.json; user scope has no approval step.
+  const approval = useMcpProjectApproval(scope === 'project' ? cwd : null)
+
   // FROM PLUGINS is user scope only: enabled plugins are a user-scope setting.
   const [pluginServers, setPluginServers] = useState<PluginMcpServer[]>([])
   useEffect(() => {
@@ -409,7 +421,8 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
 
   const file = files[path]
   const { full, servers, err } = file ? parse(file.draftRaw) : { full: {}, servers: {}, err: null }
-  const names = Object.keys(servers).sort()
+  // File order, as Claude Code and the file itself list them — never re-sorted.
+  const names = Object.keys(servers)
   const needle = filter.trim().toLowerCase()
   const listed = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
   const listedPlugins = needle ? pluginServers.filter((p) => p.name.toLowerCase().includes(needle)) : pluginServers
@@ -497,6 +510,9 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   const addItems = [{ label: 'New server', testId: 'mcp-new-server', onSelect: addServer }]
   if (onAdd) addItems.push({ label: 'Browse catalog…', testId: 'mcp-browse-catalog', onSelect: () => onAdd({ scope, cwd }) })
 
+  // With nothing to save (no edits, no error) the footer is only `Saved — matches <file>`; the
+  // SaveBar's Save / Revert appear once there is an unsaved edit.
+  const savedLabel = file && !file.dirty && !saveError && !err && !file.parseError ? `Saved — matches ${fileName}` : undefined
   // A plugin server is read-only: nothing of it is saved here, so it gets no SaveBar.
   const saveBar = file ? (
     <SaveBar
@@ -552,12 +568,25 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
               <span aria-hidden="true" className="w-[7px] h-[7px] shrink-0 rounded-full bg-sage" />
               On in every project · no approval step
             </span>
-          ) : (
-            <span data-testid="mcp-scope-note">Only in this project · each server needs approval</span>
-          )
+          ) : undefined
         }
       >
-        {scope === 'project' && cwd ? <McpProjectGating cwd={cwd} names={names} /> : null}
+        {approval ? (
+          <div
+            data-testid="mcp-gating"
+            title={`enableAllProjectMcpServers in ${cwd}/.claude/settings.json`}
+            className="flex items-center px-2.5 py-1.5 rounded-lg bg-bg-elev text-[12.5px]"
+          >
+            <span data-testid="mcp-enable-all" className="contents">
+              <Toggle
+                checked={approval.enableAll}
+                disabled={approval.busy}
+                onChange={approval.setEnableAll}
+                label="Auto-approve all servers"
+              />
+            </span>
+          </div>
+        ) : null}
       </ConfigFileCard>
       <div className="flex items-center gap-2">
         <button
@@ -698,6 +727,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
       checkRequest={requestFor(selected)}
       origin={originOf(selected, servers[selected])}
       onChange={(s) => updateServer(selected, s)}
+      approval={approval ? approvalFor(approval, selected) : undefined}
       editing={jsonFor === selected}
       onEditingChange={(on) => setJsonFor(on ? selected : null)}
       editor={
@@ -713,6 +743,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
         ) : null
       }
       footer={saveBar}
+      cleanLabel={savedLabel}
     />
   ) : (
     // No server left: the SaveBar still saves the removal of the last one.
@@ -723,7 +754,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
           hint={onAdd ? '+ Add starts a new one or browses the catalog.' : '+ Add starts a new one.'}
         />
       </div>
-      {saveBar}
+      {savedLabel !== undefined ? <McpSavedLine label={savedLabel} /> : saveBar}
     </div>
   )
 
@@ -1028,83 +1059,77 @@ function KVEditor({
   )
 }
 
+/** Project approval as the page reads and writes it; null outside a project. */
+interface McpProjectApproval {
+  /** `enableAllProjectMcpServers === true`. */
+  enableAll: boolean
+  /** `disabledMcpjsonServers` — the servers whose Approved toggle is off. */
+  disabled: string[]
+  busy: boolean
+  setEnableAll: (on: boolean) => void
+  setApproved: (name: string, on: boolean) => void
+}
+
+function approvalFor(a: McpProjectApproval, name: string): McpApproval {
+  return { approved: !a.disabled.includes(name), busy: a.busy, onChange: (on) => a.setApproved(name, on) }
+}
+
 /**
- * Project gating for .mcp.json servers, inside the SERVER FILE card: `enableAllProjectMcpServers`
- * (Auto-approve all servers) and `disabledMcpjsonServers` (the per-server Approved boxes), both in
- * <cwd>/.claude/settings.json, written through claudeConfig.patch (key-scoped, never a whole-file
- * write). This is project approval, not an enabled switch — Claude Code has none per server.
+ * Project approval for .mcp.json servers (DESIGN_SPEC.md §5.5): `enableAllProjectMcpServers` (the
+ * SERVER FILE card's "Auto-approve all servers") and `disabledMcpjsonServers` (each detail header's
+ * "Approved"), both in <cwd>/.claude/settings.json, written through claudeConfig.patch (key-scoped,
+ * never a whole-file write). This is project approval, not an enabled switch — Claude Code has none
+ * per server. `cwd` null = no approval step (user scope): returns null and reads nothing.
  */
-function McpProjectGating({ cwd, names }: { cwd: string; names: string[] }) {
-  const target = { fileId: 'settings' as const, scope: 'project' as const, cwd }
+function useMcpProjectApproval(cwd: string | null): McpProjectApproval | null {
   const [disabled, setDisabled] = useState<string[]>([])
-  const [enableAll, setEnableAll] = useState(false)
+  const [enableAll, setEnableAllState] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    if (!cwd) return
     let alive = true
     const load = () =>
       window.api.claudeConfig
-        .read(target)
+        .read({ fileId: 'settings', scope: 'project', cwd })
         .then((r) => {
           if (!alive) return
           const d = r.data as { disabledMcpjsonServers?: unknown; enableAllProjectMcpServers?: unknown } | null
           setDisabled(Array.isArray(d?.disabledMcpjsonServers) ? (d!.disabledMcpjsonServers as string[]) : [])
-          setEnableAll(d?.enableAllProjectMcpServers === true)
+          setEnableAllState(d?.enableAllProjectMcpServers === true)
         })
-        .catch(() => {})
+        .catch((e: unknown) => {
+          if (alive) toast.error(`Could not read MCP approval: ${e instanceof Error ? e.message : String(e)}`)
+        })
     load()
     const off = window.api.config?.onChanged?.(() => { load() })
     return () => { alive = false; off?.() }
   }, [cwd])
 
+  if (!cwd) return null
+
   const patch = async (key: string, value: unknown) => {
     setBusy(true)
     try {
-      await window.api.claudeConfig.patch({ ...target, keyPath: [key], value })
+      await window.api.claudeConfig.patch({ fileId: 'settings', scope: 'project', cwd, keyPath: [key], value })
     } catch (e) {
       toast.error((e as Error).message || 'save failed')
     } finally {
       setBusy(false)
     }
   }
-  const toggleServer = async (n: string, on: boolean) => {
-    const next = on ? disabled.filter((d) => d !== n) : [...new Set([...disabled, n])]
-    setDisabled(next)
-    await patch('disabledMcpjsonServers', next.length ? next : undefined)
+  return {
+    enableAll,
+    disabled,
+    busy,
+    setEnableAll: (on) => {
+      setEnableAllState(on)
+      void patch('enableAllProjectMcpServers', on ? true : undefined)
+    },
+    setApproved: (name, on) => {
+      const next = on ? disabled.filter((d) => d !== name) : [...new Set([...disabled, name])]
+      setDisabled(next)
+      void patch('disabledMcpjsonServers', next.length ? next : undefined)
+    },
   }
-
-  return (
-    <div data-testid="mcp-gating" className="flex flex-col gap-1.5 px-2.5 py-2 rounded-lg bg-bg-elev text-[12.5px] text-fg-dim">
-      <label className="flex items-center gap-2" title="enableAllProjectMcpServers">
-        <input
-          type="checkbox"
-          data-testid="mcp-enable-all"
-          checked={enableAll}
-          disabled={busy}
-          onChange={(e) => { setEnableAll(e.target.checked); patch('enableAllProjectMcpServers', e.target.checked ? true : undefined) }}
-        />
-        Auto-approve all servers
-      </label>
-      {names.length > 0 ? (
-        <div className="flex flex-col gap-1 pt-1 border-t border-line">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Approved</span>
-          {names.map((n) => (
-            <label key={n} className="flex items-center gap-2 font-mono text-xs" title="disabledMcpjsonServers">
-              <input
-                type="checkbox"
-                data-testid={`mcp-gate-${n}`}
-                checked={!disabled.includes(n)}
-                disabled={busy}
-                onChange={(e) => toggleServer(n, e.target.checked)}
-              />
-              <span className="truncate">{n}</span>
-            </label>
-          ))}
-        </div>
-      ) : null}
-      <span className="truncate text-[11px] text-fg-faint" title={`${cwd}/.claude/settings.json`}>
-        in .claude/settings.json
-      </span>
-    </div>
-  )
 }

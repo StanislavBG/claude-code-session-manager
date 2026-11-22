@@ -96,4 +96,73 @@ describe('McpServerDetail TOOLS chips', () => {
     expect(container.textContent).toContain('Saved — matches ~/.claude.json')
     expect(container.querySelector('[role="switch"]')).toBeNull()
   })
+
+  it('Copy carries the copy icon', () => {
+    render(connected(1))
+    const copy = q('mcp-command-copy')!
+    expect(copy.textContent).toBe('Copy')
+    expect(copy.querySelector('[data-testid="mcp-command-copy-icon"] svg')).not.toBeNull()
+  })
+})
+
+describe('McpServerDetail footer and approval', () => {
+  function renderWith(props: Partial<Parameters<typeof McpServerDetail>[0]>) {
+    act(() => {
+      root.render(
+        <McpServerDetail
+          name="burrow"
+          server={{ type: 'http', url: 'http://127.0.0.1:8767/mcp', headers: { 'x-bot-id': 'bot-secret-42' } }}
+          scope="project"
+          fileLabel=".mcp.json"
+          checkRequest={null}
+          origin="community"
+          footer={
+            <span>
+              <button type="button">Revert</button>
+              <button type="button">Save</button>
+            </span>
+          }
+          {...props}
+        />,
+      )
+    })
+  }
+  const buttons = () => Array.from(container.querySelectorAll('button')).map((b) => b.textContent)
+
+  it('clean: only "Saved — matches <file>", no Save / Revert', () => {
+    renderWith({ cleanLabel: 'Saved — matches .mcp.json' })
+    expect(q('savebar-clean')!.textContent).toBe('Saved — matches .mcp.json')
+    expect(buttons()).not.toContain('Save')
+    expect(buttons()).not.toContain('Revert')
+  })
+
+  it('dirty: the footer (Save / Revert) replaces the saved line', () => {
+    renderWith({})
+    expect(q('savebar-clean')).toBeNull()
+    expect(buttons()).toEqual(expect.arrayContaining(['Save', 'Revert']))
+  })
+
+  it('masks header values until Show is pressed, like env values', () => {
+    renderWith({ cleanLabel: 'Saved — matches .mcp.json' })
+    expect(q('mcp-headers')!.textContent).toContain('Headers · 1')
+    expect(q('mcp-headers-value-x-bot-id')!.textContent).toBe('••••••••')
+    expect(container.innerHTML).not.toContain('bot-secret-42')
+    expect(q('mcp-headers-reveal-x-bot-id')!.textContent).toBe('Show')
+    act(() => q('mcp-headers-reveal-x-bot-id')!.click())
+    expect(q('mcp-headers-value-x-bot-id')!.textContent).toBe('bot-secret-42')
+    expect(q('mcp-headers-reveal-x-bot-id')!.textContent).toBe('Hide')
+  })
+
+  it('an "Approved" toggle in the header reflects and changes approval; none without approval', () => {
+    const onChange = vi.fn()
+    renderWith({ approval: { approved: true, busy: false, onChange } })
+    const sw = q('mcp-detail-approved')!.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(q('mcp-detail-approved')!.textContent).toBe('Approved')
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    act(() => sw.click())
+    expect(onChange).toHaveBeenCalledWith(false)
+
+    renderWith({ approval: undefined })
+    expect(q('mcp-detail-approved')).toBeNull()
+  })
 })

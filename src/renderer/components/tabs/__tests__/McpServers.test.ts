@@ -83,12 +83,12 @@ describe('McpLibrary install payload', () => {
 const CLAUDE_JSON = `${HOME}/.claude.json`
 const MCP_JSON = `${PROJECT_CWD}/.mcp.json`
 
-// Listed sorted: alpha (Anthropic package), beta (remote URL → Community), delta, gamma (Local).
+// Listed in file order: alpha (Anthropic package), beta (remote URL → Community), delta, gamma (Local).
 const SERVERS: Record<string, unknown> = {
-  gamma: { command: 'node', args: ['gamma.js'] },
   alpha: { command: 'npx', args: ['-y', '@anthropic-ai/alpha-mcp'] },
-  delta: { command: 'node', args: ['delta.js'] },
   beta: { type: 'http', url: 'https://beta.example.com/mcp' },
+  delta: { command: 'node', args: ['delta.js'] },
+  gamma: { command: 'node', args: ['gamma.js'] },
 }
 
 const userReq = (name: string): McpCheckRequest => ({ source: 'user', name })
@@ -312,6 +312,13 @@ describe('McpServers list column', () => {
     expect(transport('beta')).toBe('http')
   })
 
+  it('lists servers in the order the file has them, not alphabetically, and selects the first of them', async () => {
+    installApi({ zeta: { command: 'z' }, playwright: { command: 'p' }, alpha: { command: 'a' } })
+    await mount()
+    expect(rowNames()).toEqual(['zeta', 'playwright', 'alpha'])
+    expect(selectedRows()).toEqual(['zeta'])
+  })
+
   it('never probes on mount: neither mcp.status nor mcp.checkServer runs until asked', async () => {
     const api = installApi()
     await mount()
@@ -427,7 +434,7 @@ describe('McpServers list column', () => {
     expect(onAdd).toHaveBeenCalledWith({ scope: 'user', cwd: null })
   })
 
-  it('project scope names <cwd>/.mcp.json, keeps the approval gating in the SERVER FILE card, and checks project servers by cwd', async () => {
+  it('project scope names <cwd>/.mcp.json, puts an "Auto-approve all servers" toggle in the SERVER FILE card, and checks project servers by cwd', async () => {
     const checkAll = vi.fn(async () => {})
     useMcpChecks.setState({ checkAll })
     useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
@@ -437,9 +444,11 @@ describe('McpServers list column', () => {
     const card = q('config-file-card')!
     expect(card.querySelector('.font-mono')!.textContent).toBe('~/Projects/alpha/.mcp.json › mcpServers')
     expect(card.querySelector('[data-testid="mcp-gating"]')).not.toBeNull()
-    expect(card.querySelector('[data-testid="mcp-enable-all"]')).not.toBeNull()
-    expect(card.querySelector('[data-testid="mcp-gate-srv"]')).not.toBeNull()
+    expect(card.querySelector('[data-testid="mcp-enable-all"] [role="switch"]')).not.toBeNull()
     expect(card.textContent).toContain('Auto-approve all servers')
+    // The old per-server checkbox list is gone: no checkboxes anywhere, no gate rows in the card.
+    expect(container!.querySelector('input[type="checkbox"]')).toBeNull()
+    expect(card.querySelector('[data-testid^="mcp-gate-"]')).toBeNull()
     expect(selectedRows()).toEqual(['srv'])
     expect(q('mcp-detail-scope')!.textContent).toBe('Project scope')
     expect(q('mcp-detail-keypath')!.textContent).toBe('.mcp.json › mcpServers › srv')
@@ -447,6 +456,62 @@ describe('McpServers list column', () => {
 
     await click(q('mcp-check-all'))
     expect(checkAll).toHaveBeenCalledWith([{ source: 'project', name: 'srv', cwd: PROJECT_CWD }])
+  })
+})
+
+describe('McpServers project approval', () => {
+  const SETTINGS = { fileId: 'settings', scope: 'project', cwd: PROJECT_CWD }
+  const switchIn = (id: string) => q(id)!.querySelector<HTMLButtonElement>('[role="switch"]')!
+
+  async function mountProject(settings: Record<string, unknown>) {
+    useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+    const api = installApi({ one: { command: 'x' }, two: { command: 'y' } })
+    api.claudeConfig.read.mockResolvedValue({ path: '', data: settings })
+    await mount({ scope: 'project' })
+    return api
+  }
+
+  it('reads both keys from <cwd>/.claude/settings.json into the two toggles', async () => {
+    const api = await mountProject({ enableAllProjectMcpServers: true, disabledMcpjsonServers: ['one'] })
+    expect(api.claudeConfig.read).toHaveBeenCalledWith(SETTINGS)
+    expect(switchIn('mcp-enable-all').getAttribute('aria-checked')).toBe('true')
+    expect(detailName()).toBe('one')
+    expect(q('mcp-detail-approved')!.textContent).toContain('Approved')
+    expect(switchIn('mcp-detail-approved').getAttribute('aria-checked')).toBe('false')
+    await click(q('mcp-row-two'))
+    expect(switchIn('mcp-detail-approved').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('"Auto-approve all servers" writes enableAllProjectMcpServers (true on, removed off)', async () => {
+    const api = await mountProject({})
+    await click(switchIn('mcp-enable-all'))
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith({ ...SETTINGS, keyPath: ['enableAllProjectMcpServers'], value: true })
+    expect(switchIn('mcp-enable-all').getAttribute('aria-checked')).toBe('true')
+    await click(switchIn('mcp-enable-all'))
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith({ ...SETTINGS, keyPath: ['enableAllProjectMcpServers'], value: undefined })
+  })
+
+  it('the detail header\'s "Approved" toggle writes disabledMcpjsonServers (listed when off, removed when none)', async () => {
+    const api = await mountProject({ disabledMcpjsonServers: ['two'] })
+    expect(switchIn('mcp-detail-approved').getAttribute('aria-checked')).toBe('true')
+    await click(switchIn('mcp-detail-approved'))
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith({ ...SETTINGS, keyPath: ['disabledMcpjsonServers'], value: ['two', 'one'] })
+    expect(switchIn('mcp-detail-approved').getAttribute('aria-checked')).toBe('false')
+
+    await click(q('mcp-row-two'))
+    await click(switchIn('mcp-detail-approved'))
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith({ ...SETTINGS, keyPath: ['disabledMcpjsonServers'], value: ['one'] })
+    await click(q('mcp-row-one'))
+    await click(switchIn('mcp-detail-approved'))
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith({ ...SETTINGS, keyPath: ['disabledMcpjsonServers'], value: undefined })
+  })
+
+  it('user scope has no approval step: no Auto-approve toggle, no Approved toggle, no settings read', async () => {
+    const api = installApi()
+    await mount()
+    expect(q('mcp-gating')).toBeNull()
+    expect(q('mcp-detail-approved')).toBeNull()
+    expect(api.claudeConfig.read).not.toHaveBeenCalled()
   })
 })
 
@@ -729,18 +794,23 @@ describe('McpServers detail', () => {
     expect(q('mcp-edit-json')).not.toBeNull()
   })
 
-  it('the SaveBar closes the detail with "Saved — matches <file>", shows the save shortcut, and Ctrl+S saves while focus is in the pane', async () => {
+  it('the detail closes with only "Saved — matches <file>" while clean; Save / Revert (with the shortcut) appear once dirty, and Ctrl+S saves while focus is in the pane', async () => {
     const api = installApi()
     await mount()
     expect(q('savebar-clean')!.textContent).toBe('Saved — matches ~/.claude.json')
     expect(q('mcp-detail')!.contains(q('savebar-clean'))).toBe(true)
-    expect(saveButton()!.querySelector('kbd')?.textContent).toBe('Ctrl S')
-    expect(saveButton()!.getAttribute('aria-keyshortcuts')).toBe('Control+S')
+    // Clean: no Save, no Revert.
+    expect(saveButton()).toBeUndefined()
+    expect(buttonByText('Revert')).toBeUndefined()
 
     await click(q('mcp-env-add'))
     await typeInto(q('mcp-env-new-key') as HTMLInputElement, 'REGION')
     await click(q('mcp-env-add-confirm'))
     expect(useConfig.getState().files[CLAUDE_JSON].dirty).toBe(true)
+    expect(q('savebar-clean')).toBeNull()
+    expect(buttonByText('Revert')).not.toBeUndefined()
+    expect(saveButton()!.querySelector('kbd')?.textContent).toBe('Ctrl S')
+    expect(saveButton()!.getAttribute('aria-keyshortcuts')).toBe('Control+S')
 
     q('mcp-row-alpha')!.focus()
     await act(async () => {
@@ -836,11 +906,11 @@ describe('McpServers FROM PLUGINS', () => {
     expect(q('mcp-detail-status')!.dataset.status).toBe('failed')
     expect(q(`mcp-plugin-status-${STRIPE_ID}`)!.textContent).toBe('via the stripe plugin · failed')
 
-    // Back to a config server: the editable detail and the SaveBar return.
+    // Back to a config server: the editable detail and its saved line return.
     await click(q('mcp-row-beta'))
     expect(detailName()).toBe('beta')
     expect(q('mcp-edit-json')).not.toBeNull()
-    expect(saveButton()).toBeDefined()
+    expect(q('savebar-clean')!.textContent).toBe('Saved — matches ~/.claude.json')
   })
 
   it('Check all includes the listed plugin servers', async () => {
@@ -900,7 +970,7 @@ describe('McpServers config-search focus', () => {
       useConfigSearchFocus.getState().set('mcp', 'mcp:gamma')
     })
     await flush()
-    expect(rowNames()).toEqual(['alpha', 'beta', 'delta', 'eps', 'gamma', 'zeta'])
+    expect(rowNames()).toEqual(['alpha', 'beta', 'delta', 'gamma', 'eps', 'zeta'])
     expect(selectedRows()).toEqual(['gamma'])
     expect(detailName()).toBe('gamma')
     expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })

@@ -3,6 +3,7 @@ import type { TabChat, ChatTurn } from '../state/chat'
 import type { ScheduleJob, PrdListItem } from '../../preload/api'
 import type { EpicUsage } from '../state/epicUsage'
 import { formatCompactCount } from './formatCompactCount'
+import { epicHasOpenQuestion, parkedJobLine } from './needsHuman'
 
 /**
  * Already-selected store snapshots the Epics workspace joins across —
@@ -55,7 +56,8 @@ export function splitTitleAndGoal(goalText: string): { title: string; goal: stri
  * Precedence, highest first: `completed` → `proposed` → `needs` (chat
  * needs-input) → `refuted` (a PRD claimed success and this Epic's own
  * validation pass caught it not delivering) → `failed` (any job with status
- * 'failed') → `attention` (any job with status 'needs_review') → `running` →
+ * 'failed') → `attention` (any job with status 'needs_review' — a park the
+ * scheduler is self-healing, never a question) → `running` →
  * `queued` → `active`.
  *
  * `refuted` ranks above `failed` deliberately (PRD 987): a PRD that reported
@@ -79,8 +81,7 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
   if (session?.status === 'proposed') return 'proposed'
 
   const chat = snapshots.chats[epicId]
-  const hasPendingNeedsInput = (chat?.ticketHistory ?? []).some((t) => t.status === 'needs-input')
-  if (hasPendingNeedsInput) return 'needs'
+  if (epicHasOpenQuestion(epicId, snapshots.chats)) return 'needs'
 
   const epicEvents = snapshots.events?.[epicId] ?? []
   const hasRefutedPrd = epicEvents.some((e) => e.kind === 'response' && e.validation === 'refuted')
@@ -131,7 +132,8 @@ export function epicQueuedDetail(epicId: string, snapshots: EpicSnapshots): stri
   }
   const needsReviewJob = epicJobs.find((j) => j.status === 'needs_review')
   if (needsReviewJob) {
-    return `needs review — PRD ${needsReviewJob.slug} is asking a question`
+    // A park is the scheduler's own self-heal, never a question for the human.
+    return parkedJobLine(needsReviewJob)
   }
   const chat = snapshots.chats[epicId]
   const chatQueuedPosition = chat?.queuedPosition ?? 0

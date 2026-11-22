@@ -144,6 +144,20 @@ describe('epicDerive.epicDisplayStatus', () => {
     expect(epicDisplayStatus('epic-1', snapshots)).toBe('attention')
   })
 
+  it('a needs_review job never yields status needs — only an open chat question does', () => {
+    const parkedOnly = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [makeJob({ status: 'needs_review', error: 'no_verdict' } as any)],
+    })
+    expect(epicDisplayStatus('epic-1', parkedOnly)).not.toBe('needs')
+    const otherEpicQuestion = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      chats: { 'epic-2': makeChat({ ticketHistory: [{ status: 'needs-input' }] } as any) },
+      jobs: [makeJob({ status: 'needs_review' })],
+    })
+    expect(epicDisplayStatus('epic-1', otherEpicQuestion)).toBe('attention')
+  })
+
   it('CORE (PRD 987): returns refuted when a response event validation is refuted, ranked above failed', () => {
     const snapshots = makeSnapshots({
       sessions: { 'epic-1': makeSession() },
@@ -230,7 +244,16 @@ describe('epicDerive.epicQueuedDetail', () => {
       jobs: [makeJob({ slug: '964-epic-detail-agent-readout', status: 'needs_review' })],
     })
     expect(epicQueuedDetail('epic-1', snapshots)).toBe(
-      'needs review — PRD 964-epic-detail-agent-readout is asking a question',
+      'PRD 964-epic-detail-agent-readout is parked and the scheduler is fixing it — nothing is needed from you.',
+    )
+  })
+
+  it('adds the park cause from the needs_review job error', () => {
+    const snapshots = makeSnapshots({
+      jobs: [makeJob({ slug: '964-x', status: 'needs_review', error: 'sentinel_fail: gate red' } as any)],
+    })
+    expect(epicQueuedDetail('epic-1', snapshots)).toBe(
+      'PRD 964-x is parked and the scheduler is fixing it — nothing is needed from you. Its checks did not pass.',
     )
   })
 

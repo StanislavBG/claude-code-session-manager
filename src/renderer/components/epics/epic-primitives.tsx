@@ -23,10 +23,10 @@ const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: st
   refuted:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'refuted — claimed done, not delivered' },
   // A PRD in this Epic came back broken — must be re-scoped or re-queued.
   failed:    { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'failed' },
-  // A PRD in this Epic parked itself asking a question — the primary
-  // "Architect must act" state. Distinct from 'needs', which is a stalled
-  // CHAT run, not a PRD.
-  attention: { bg: 'bg-butter/25',      text: 'text-fg-dim',      dot: 'bg-butter',      label: 'needs review' },
+  // A PRD in this Epic is parked (needs_review) while the scheduler
+  // self-heals it — not a question, nothing for the human to answer. 'needs'
+  // ('needs you', an open chat question) stays the only question state.
+  attention: { bg: 'bg-butter/25',      text: 'text-fg-dim',      dot: 'bg-butter',      label: 'being fixed' },
   // Mock (epics-mock.jsx E_STATUS): queued is a FILLED tan pill (#ece0c6) —
   // only active (resting) is the outline variant. Dot is solid muteband (tan),
   // distinct from active's fg-faint grey — in compact rows (dot only, no label text)

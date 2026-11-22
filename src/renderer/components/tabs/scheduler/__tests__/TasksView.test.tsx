@@ -102,6 +102,43 @@ describe('TasksView', () => {
     expect(q('[data-testid="task-detail"]')).toBeNull()
   })
 
+  it('hides the step and model cells while a row is selected, shows them otherwise', async () => {
+    api.tasks.get.mockReset().mockResolvedValue({ ok: true, task: { ...rows[0], body: { taskId: 't1', prompt: 'hi', output: 'yo' } } })
+    await render('/p')
+    const row = () => q('[data-testid="tasks-row-t2"]')!
+    expect(row().querySelector('[data-testid="tasks-cell-step"]')!.textContent).toBe('edit')
+    expect(row().querySelector('[data-testid="tasks-cell-model"]')!.textContent).toBe('opus')
+    expect(qa('[data-testid="tasks-cell-step"]')).toHaveLength(3)
+    expect(qa('[data-testid="tasks-cell-model"]')).toHaveLength(3)
+    await act(async () => { (q('[data-testid="tasks-row-t1"]') as HTMLButtonElement).click() })
+    await act(async () => { await Promise.resolve() })
+    expect(qa('[data-testid="tasks-cell-step"]')).toHaveLength(0)
+    expect(qa('[data-testid="tasks-cell-model"]')).toHaveLength(0)
+    // status chip + badge share one shrinkable, wrapping cell; rows keep right padding
+    const chip = row().querySelector('[data-testid="tasks-status-chip"]')!
+    const badge = row().querySelector('[data-testid="tasks-badge-direct"]')!
+    const cell = chip.parentElement!
+    expect(cell).toBe(badge.parentElement)
+    expect(cell.className).toMatch(/\bmin-w-0\b/)
+    expect(cell.className).toMatch(/\bflex-wrap\b/)
+    expect(row().className).toMatch(/\bpr-2\b/)
+    act(() => { (q('[data-testid="task-detail-close"]') as HTMLButtonElement).click() })
+    expect(qa('[data-testid="tasks-cell-step"]')).toHaveLength(3)
+    expect(qa('[data-testid="tasks-cell-model"]')).toHaveLength(3)
+  })
+
+  it('renders the switch in its own header row above the filters', async () => {
+    await render('/p')
+    const header = q('[data-testid="tasks-header"]')!
+    expect(header).not.toBeNull()
+    expect(header.contains(q('[data-testid="tasks-switch"]'))).toBe(true)
+    expect(header.querySelector('select')).toBeNull()
+    const filters = q('[data-testid="tasks-filters"]')!
+    expect(filters.contains(q('[data-testid="tasks-filter-agent"]'))).toBe(true)
+    expect(filters.contains(q('[data-testid="tasks-switch"]'))).toBe(false)
+    expect(header.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('builds filter options from the rows and refetches on filter change', async () => {
     await render('/p')
     const agentSel = q('[data-testid="tasks-filter-agent"]') as HTMLSelectElement

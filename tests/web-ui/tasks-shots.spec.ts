@@ -43,6 +43,27 @@ async function assertShot(page: Page, detail: boolean) {
   }
 }
 
+/** Drill-down open: every chip/badge sits inside the list column with >=4px to its right edge; no row overflows. */
+async function assertRowsFit(page: Page, scheme: string) {
+  const col = await page.getByTestId('tasks-list').boundingBox()
+  expect(col, `${scheme}: tasks-list box`).not.toBeNull()
+  const right = col!.x + col!.width
+  for (const id of ['tasks-status-chip', 'tasks-badge-direct']) {
+    const items = await page.getByTestId(id).all()
+    expect(items.length, `${scheme}: ${id} count`).toBeGreaterThan(0)
+    for (const [i, el] of items.entries()) {
+      const b = await el.boundingBox()
+      expect(b, `${scheme}: ${id}[${i}] box`).not.toBeNull()
+      expect(b!.x, `${scheme}: ${id}[${i}] left`).toBeGreaterThanOrEqual(col!.x)
+      expect(b!.y, `${scheme}: ${id}[${i}] top`).toBeGreaterThanOrEqual(col!.y)
+      expect(b!.x + b!.width, `${scheme}: ${id}[${i}] right edge`).toBeLessThanOrEqual(right - 4)
+    }
+  }
+  const overflow = await page.$$eval('button[data-testid^="tasks-row-"]', (els) =>
+    els.filter((e) => e.scrollWidth > e.clientWidth).map((e) => `${e.getAttribute('data-testid')} ${e.scrollWidth}>${e.clientWidth}`))
+  expect(overflow, `${scheme}: rows overflowing`).toEqual([])
+}
+
 test('Scheduler Tasks screenshots: list + detail, light + dark, at 1592x1040', async () => {
   if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
     execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
@@ -76,11 +97,17 @@ test('Scheduler Tasks screenshots: list + detail, light + dark, at 1592x1040', a
       await assertShot(page, false)
       await page.waitForTimeout(300) // fonts settle
       await page.screenshot({ path: path.join(OUT, `tasks-list-${scheme}.png`) })
+      const swClosed = await page.getByTestId('tasks-switch').boundingBox()
 
       await page.getByTestId(DETAIL_ROW).click()
       await expect(page.getByTestId(DETAIL_ROW)).toHaveAttribute('aria-pressed', 'true')
       await assertShot(page, true)
       await page.waitForTimeout(300)
+      const swOpen = await page.getByTestId('tasks-switch').boundingBox()
+      expect(swClosed, `${scheme}: switch box (closed)`).not.toBeNull()
+      expect(swOpen, `${scheme}: switch box (open)`).not.toBeNull()
+      expect([swOpen!.x, swOpen!.y], `${scheme}: switch moved when the drill-down opened`).toEqual([swClosed!.x, swClosed!.y])
+      await assertRowsFit(page, scheme)
       await page.screenshot({ path: path.join(OUT, `tasks-detail-${scheme}.png`) })
       await ctx.close()
     }

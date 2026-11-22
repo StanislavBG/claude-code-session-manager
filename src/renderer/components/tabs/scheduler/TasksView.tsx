@@ -200,6 +200,9 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
     return out
   }, [rows, seen, filters])
 
+  // Step + model cells hide while the drill-down is open (both show there), so the narrowed row fits.
+  const detailOpen = selectedId !== null
+
   // Client-side filter too, so the view is exact even if the ledger ignores a key.
   const groups = useMemo(() => {
     const visible = rows.filter((t) => FILTER_KEYS.every((k) => !filters[k] || rowValue(t, k) === filters[k]))
@@ -217,7 +220,21 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
   return (
     <div className="h-full flex min-h-0" data-testid="tasks-view">
     <div className="flex-1 min-w-0 h-full overflow-y-auto px-9 py-4" data-testid="tasks-list">
-      <div className="flex items-center gap-3 flex-wrap mb-3">
+      <div className="flex items-center mb-2" data-testid="tasks-header">
+        <label className="flex items-center gap-2 text-[12px] text-fg-dim" title="While off, scripts that call the Tasks endpoint get HTTP 403.">
+          <input
+            type="checkbox"
+            data-testid="tasks-switch"
+            checked={switchOn === true}
+            disabled={switchOn === null}
+            onChange={(e) => { void toggleSwitch(e.target.checked) }}
+            className="cursor-pointer"
+          />
+          <span className="text-fg">Scripts may run Tasks</span>
+          <span className="text-fg-faint">— while off, scripts get 403.</span>
+        </label>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap mb-3" data-testid="tasks-filters">
         {FILTER_KEYS.map((k) => (
           <label key={k} className="flex items-center gap-1 text-[12px] text-fg-dim">
             <span className="capitalize">{k}</span>
@@ -240,18 +257,6 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
             </select>
           </label>
         ))}
-        <label className="ml-auto flex items-center gap-2 text-[12px] text-fg-dim" title="While off, scripts that call the Tasks endpoint get HTTP 403.">
-          <input
-            type="checkbox"
-            data-testid="tasks-switch"
-            checked={switchOn === true}
-            disabled={switchOn === null}
-            onChange={(e) => { void toggleSwitch(e.target.checked) }}
-            className="cursor-pointer"
-          />
-          <span className="text-fg">Scripts may run Tasks</span>
-          <span className="text-fg-faint">— while off, scripts get 403.</span>
-        </label>
       </div>
 
       {loaded && groups.length === 0 && (
@@ -273,24 +278,30 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
                   data-testid={`tasks-row-${t.taskId}`}
                   onClick={() => setSelectedId(t.taskId)}
                   aria-pressed={selectedId === t.taskId}
-                  className={`w-full text-left px-2 py-1 flex items-center gap-3 text-[12px] hover:bg-bg-elev border-b border-line last:border-b-0 ${selectedId === t.taskId ? 'bg-bg-elev' : ''}`}
+                  className={`w-full text-left pl-2 pr-2 py-1 flex items-center gap-3 text-[12px] hover:bg-bg-elev border-b border-line last:border-b-0 ${selectedId === t.taskId ? 'bg-bg-elev' : ''}`}
                 >
                   <span className="w-[170px] shrink-0 font-mono text-fg-dim">{formatTaskStart(t.startedAt)}</span>
-                  <span className="w-[90px] shrink-0 truncate text-fg-faint" title={t.caller?.step}>{t.caller?.step ?? '—'}</span>
+                  {!detailOpen && (
+                    <span data-testid="tasks-cell-step" className="w-[90px] shrink-0 truncate text-fg-faint" title={t.caller?.step}>{t.caller?.step ?? '—'}</span>
+                  )}
                   <span className="w-[120px] shrink-0 truncate text-fg">{t.agent ?? '—'}</span>
-                  <span className="w-[90px] shrink-0 truncate text-fg-dim">{t.model ?? '—'}</span>
+                  {!detailOpen && (
+                    <span data-testid="tasks-cell-model" className="w-[90px] shrink-0 truncate text-fg-dim">{t.model ?? '—'}</span>
+                  )}
                   <span className="w-[70px] shrink-0 font-mono text-fg-dim">{formatTaskDuration(t.durationMs)}</span>
                   <span className="w-[70px] shrink-0 font-mono text-fg-dim">{typeof t.costUsd === 'number' ? usd(t.costUsd) : '—'}</span>
-                  <StatusChip t={t} />
-                  {t.source === 'direct' && (
-                    <span
-                      data-testid="tasks-badge-direct"
-                      title="Imported: this call ran directly, outside Session Manager's slot cap."
-                      className="inline-block px-1.5 py-px rounded border border-honey/50 text-honey-dark text-[11px] whitespace-nowrap"
-                    >
-                      ran without SM
-                    </span>
-                  )}
+                  <span className="flex-1 min-w-0 flex flex-wrap items-center gap-1">
+                    <StatusChip t={t} />
+                    {t.source === 'direct' && (
+                      <span
+                        data-testid="tasks-badge-direct"
+                        title="Imported: this call ran directly, outside Session Manager's slot cap."
+                        className="inline-block px-1.5 py-px rounded border border-honey/50 text-honey-dark text-[11px] whitespace-nowrap"
+                      >
+                        ran without SM
+                      </span>
+                    )}
+                  </span>
                 </button>
               ))}
             </div>

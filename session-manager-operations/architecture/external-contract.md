@@ -144,6 +144,95 @@ Answer to a repeat:
 { "ok": true, "epicId": "ps-def456", "existing": true, "alreadyRunning": false, "externalRef": "digest:2026-11-21" }
 ```
 
+### Replies
+
+A handoff made with `feedback_open_session` can ask for its reply as an event. Code:
+`src/main/lib/feedback-remote/crossProjectFeedback.cjs` (`replyMode`) and
+`src/main/lib/feedback-remote/crossProjectReply.cjs` (`sendFeedbackReply`, `replyAsEvent`).
+
+`replyMode` is an optional field on `feedback_open_session` / `POST /admin/feedback/open-session`:
+
+| Value | What a reply does |
+| --- | --- |
+| `prompt` (default) | Wakes the asking Epic's chat with the reply. If that Epic cannot take it, a new proposed session opens in the asking project. |
+| `event` | Records the reply as data in the audit log. For an app that keeps its own records and has no chat. |
+
+Any other value is `400`. Leaving it out, or `null`, means `prompt`.
+
+In `event` mode no chat is prompted and no fallback session is opened. This holds also when the asking
+Epic is gone or not active, and when the sender had no Epic at all. Only the asking `fromCwd` is needed.
+When the asking Epic is still active, the reply is also added to its event list, but its chat is not woken.
+
+Result fields of the first call:
+
+| Field | Meaning |
+| --- | --- |
+| `replyThread` | `true` when the new Epic has a way to reply back. Always `true` in `event` mode. In `prompt` mode it is `false` when the sending Epic could not be found. |
+| `replyMode` | `"event"`, present only in `event` mode. Absent in `prompt` mode. |
+
+A repeat call with the same `externalRef` (`status: "existing"`) carries neither field.
+
+The receiving session answers with `feedback_reply` (`message`, `outcome`: `done`, `blocked` or
+`question`). At most 3 replies per handoff. In `event` mode the reply answers `delivery: "event-only"`,
+`reason: "asker-requested-event"`, and writes one `epic_cross_project_reply` row to the audit log.
+
+Read those rows with `GET /admin/events?kinds=epic_cross_project_reply` (cursor rules as in section 4).
+A `prompt`-mode reply writes a row of the same kind with fewer fields and no `mode`; skip rows where
+`mode` is not `"event"`.
+
+The event-mode `epic_cross_project_reply` row:
+
+| Field | Meaning |
+| --- | --- |
+| `at` | ISO time the row was written. |
+| `kind` | `"epic_cross_project_reply"`. |
+| `cwd` | The asking project (your `fromCwd`). |
+| `epicId` | The asking Epic, or `null` when the sender had none. |
+| `fromCwd` | The replying project (the handoff's `toCwd`). |
+| `fromEpicId` | The replying Epic (the one the handoff opened). |
+| `outcome` | `done`, `blocked` or `question`. |
+| `delivery` | `"event-only"`. |
+| `mode` | `"event"`. |
+| `externalRef` | Your handoff's `externalRef`. Present only when the handoff had one. |
+| `message` | The reply text, cut to its first **2000 characters**. |
+| `referencePaths` | Paths the reply points at, at most 10. |
+
+Match a reply to your own record by `externalRef`. Send one on every handoff you want to follow; without
+it, a reply can only be told apart by `fromEpicId`.
+
+Request:
+
+```text
+GET /admin/events?after=2026-11-21T17:00:00.000Z~1&kinds=epic_cross_project_reply
+```
+
+Answer:
+
+```json
+{
+  "ok": true,
+  "events": [
+    {
+      "at": "2026-11-21T17:42:10.512Z",
+      "kind": "epic_cross_project_reply",
+      "cwd": "/home/me/Projects/planner",
+      "epicId": null,
+      "fromCwd": "/home/me/Projects/site",
+      "fromEpicId": "ps-abc123",
+      "outcome": "done",
+      "delivery": "event-only",
+      "mode": "event",
+      "externalRef": "planner:task/4821",
+      "message": "The November post is live at /blog/nov.",
+      "referencePaths": ["drafts/nov.md"]
+    }
+  ],
+  "next": "2026-11-21T17:42:10.512Z~1",
+  "more": false,
+  "gap": false
+}
+```
+
 ## 3. Reads — an Epic's state and cost
 
 Code: `src/main/lib/epic/epicAdminRoutes.cjs` (routes), `src/main/lib/epic/epicOutsideRead.cjs` (the

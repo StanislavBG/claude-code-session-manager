@@ -101,6 +101,9 @@ const ScheduleJobSchema = z
     // PRD frontmatter `effort` — a per-run level from a macro press (outranks the persona's).
     effort: z.string().nullable().optional(),
     statusHistory: z.array(ScheduleJobStatusHistoryEntrySchema).optional(),
+    // PRD frontmatter `fixes` — the earlier PRDs this one repairs, copied onto
+    // the row at discovery by reconcile() (validationQuality.cjs reads it).
+    fixes: z.array(z.object({ prd: z.string(), missKind: z.string(), reason: z.string() }).passthrough()).optional(),
     // Opt-in exclusive-lease PRD flag (PRD 1107) — serializes this job against
     // every other job machine-wide for its run so a timing-sensitive gate
     // (frame time, performance fence) measures without CPU contention. See

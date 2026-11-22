@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { splitFrontmatter, parseInlineList, PRD_EFFORT_LEVELS } = require('../lib/prd/prdFrontmatter.cjs');
+const { splitFrontmatter, parseInlineList, parseFixes, PRD_EFFORT_LEVELS } = require('../lib/prd/prdFrontmatter.cjs');
 const { deriveEpicIdFromPrdPath } = require('../lib/prd/prdLocations.cjs');
 const { parseFilesSection } = require('../lib/prd/prdGateFiles.cjs');
 const { reportDanglingAgentTypeOnce } = require('../lib/prd/prdAgentType.cjs');
@@ -112,6 +112,9 @@ async function parsePrdRaw(filePath) {
     // queue row is completed (a slug with no row is treated as already
     // done/archived, matching retireCompletedSlugs semantics).
     dependsOn: parseDependsOn(fm.dependsOn),
+    // Earlier PRDs this one repairs ({ prd, missKind, reason }[]); null when
+    // absent/malformed/empty. reconcile() copies it onto the queue row.
+    fixes: (() => { const l = typeof fm.fixes === 'string' ? parseFixes(fm.fixes) : null; return l && l.length ? l : null; })(),
     // Declared touch-list from the body's `# Files` section ([] when absent).
     files: parseFilesSection(body),
     // Provenance stamp (PRD-authoring lockdown): set only by prdCreate.cjs's

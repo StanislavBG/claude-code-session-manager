@@ -2272,6 +2272,12 @@ async function reconcilePass(state) {
     // (commitGuardVerdict, isFixPlanBeyondDepthCap, the fix-plan-completion
     // checks) reads this stamp instead of re-deriving it from the name.
     entry.isFixPlan = classifyDiscoveredFixPlan(p, slug);
+    // Validator-quality provenance: the PRD's `fixes` frontmatter rides on the
+    // row (and into history.jsonl) so validationQuality never re-reads PRD
+    // files. Absent/empty → no key at all.
+    if (Array.isArray(p.fixes) && p.fixes.length > 0) {
+      entry.fixes = p.fixes.map((f) => ({ prd: f.prd, missKind: f.missKind, reason: f.reason }));
+    }
     // Stamp investigationDepth relative to the original job it heals, so
     // selectAutoFixTargets/spawnInvestigation can bound the fix-of-a-fix
     // recursion (see MAX_INVESTIGATION_DEPTH). Non-fix-plan jobs get no

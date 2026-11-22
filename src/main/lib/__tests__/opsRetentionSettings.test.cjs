@@ -37,6 +37,7 @@ test('read returns DEFAULTS when the file is missing', () => {
     auditLogMonths: 6,
     reservedMarkersKeep: 100,
     tasksDays: 30,
+    planRecordsDays: 14,
   });
   expect(settings.DEFAULTS).not.toHaveProperty('archivedTranscripts');
   expect(settings.storePath()).toBe(path.join(home, '.claude', 'session-manager', 'ops-retention.json'));
@@ -144,6 +145,55 @@ test('preview reports eligible bytes and deletes nothing', () => {
   expect(r.tmp.bytes).toBe(20);
   expect(r.runLogs).toEqual({ files: expect.any(Number), bytes: expect.any(Number) });
   expect(snapshot(home)).toEqual(before);
+});
+
+test('planRecordsDays: default 14, clamps to [1, 3650], validates, sanitizes stored', () => {
+  expect(settings.DEFAULTS.planRecordsDays).toBe(14);
+  expect(settings.BOUNDS.planRecordsDays).toEqual([1, 3650]);
+  expect(settings.validatePatch({ planRecordsDays: 0 })).toEqual({ planRecordsDays: 1 });
+  expect(settings.validatePatch({ planRecordsDays: 99999 })).toEqual({ planRecordsDays: 3650 });
+  expect(() => settings.validatePatch({ planRecordsDays: 'x' })).toThrow(/planRecordsDays/);
+  expect(settings.write({ planRecordsDays: 7.4 }).planRecordsDays).toBe(7);
+  expect(settings.read().planRecordsDays).toBe(7);
+  writeRaw(JSON.stringify({ planRecordsDays: 'bad', tasksDays: 9 }));
+  expect(settings.read().planRecordsDays).toBe(14);
+  expect(settings.readStored()).toEqual({ tasksDays: 9 });
+  writeRaw(JSON.stringify({ planRecordsDays: -5 }));
+  expect(settings.read().planRecordsDays).toBe(1);
+});
+
+test('preview reports plan-record folders it would prune for a project root, deleting nothing', () => {
+  const plansRoot = path.join(home, 'plans');
+  fs.mkdirSync(path.join(plansRoot, 'runs'), { recursive: true });
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-ops-retention-proj-'));
+  try {
+    const ops = path.join(project, 'session-manager-operations');
+    const records = path.join(ops, 'plan-records');
+    const now = Date.now();
+    const old = (now - 30 * DAY) / 1000;
+    for (const id of ['done-epic', 'live-epic', 'orphan-epic', 'fresh-orphan']) {
+      fs.mkdirSync(path.join(records, id), { recursive: true });
+      const f = path.join(records, id, 'p.md');
+      fs.writeFileSync(f, 'x');
+      if (id !== 'fresh-orphan') fs.utimesSync(f, old, old);
+    }
+    fs.mkdirSync(path.join(ops, 'prompt-sessions'), { recursive: true });
+    fs.writeFileSync(path.join(ops, 'prompt-sessions', 'done-epic.json'), JSON.stringify({
+      session: { status: 'completed', completedAt: new Date(now - 20 * DAY).toISOString() },
+    }));
+    fs.writeFileSync(path.join(ops, 'prompt-sessions', 'live-epic.json'), JSON.stringify({ status: 'active' }));
+    const base = { runsDir: path.join(plansRoot, 'runs'), plansRoot, jobs: [], now };
+    expect(settings.preview(base)).not.toHaveProperty('planRecords');
+    const before = snapshot(project);
+    expect(settings.preview({ ...base, projectRoot: project }).planRecords).toEqual({ folders: 2 });
+    expect(settings.preview({ ...base, projectRoot: project, epicStatus: () => ({ status: 'active' }) }).planRecords)
+      .toEqual({ folders: 0 });
+    settings.write({ planRecordsDays: 60 });
+    expect(settings.preview({ ...base, projectRoot: project }).planRecords).toEqual({ folders: 0 });
+    expect(snapshot(project)).toEqual(before);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
 });
 
 test('registerIpc wires get/set/preview; set validates', async () => {

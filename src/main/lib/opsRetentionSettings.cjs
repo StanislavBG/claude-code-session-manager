@@ -3,8 +3,10 @@
  *
  * Storage: ~/.claude/session-manager/ops-retention.json
  * Shape (DEFAULTS): { runLogs:{maxAgeDays,keepPerSlug}, runsArchiveDays, auditLogMonths,
- *   reservedMarkersKeep, tasksDays }
+ *   reservedMarkersKeep, tasksDays, planRecordsDays }
  * tasksDays: Task ledger day files + bodies (lib/tasks/taskLedger.cjs pruneOld).
+ * planRecordsDays: plan-records/<epic-id>/ folders of completed/orphan Epics
+ *   (lib/scheduler/planRecordRetention.cjs prunePlanRecords).
  * Archived transcripts are kept forever (fixed policy, not a setting).
  *
  * Top-level in lib/ (no domain fits: read by scheduler, telemetry and epic sweeps alike).
@@ -24,6 +26,7 @@ const DEFAULTS = Object.freeze({
   auditLogMonths: 6,
   reservedMarkersKeep: 100,
   tasksDays: 30,
+  planRecordsDays: 14,
 });
 
 // [min, max] per integer field; out-of-range values clamp, non-integers round.
@@ -34,6 +37,7 @@ const BOUNDS = Object.freeze({
   auditLogMonths: [1, 120],
   reservedMarkersKeep: [1, 100000],
   tasksDays: [1, 3650],
+  planRecordsDays: [1, 3650],
 });
 
 function storePath() {
@@ -67,7 +71,7 @@ function validatePatch(patch) {
         if (rk !== 'maxAgeDays' && rk !== 'keepPerSlug') throw new Error(`Invalid ops retention config: runLogs.${rk}`);
         out.runLogs[rk] = num(`runLogs.${rk}`, rv);
       }
-    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays') {
+    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays' || k === 'planRecordsDays') {
       out[k] = num(k, v);
     } else {
       throw new Error(`Invalid ops retention config: unknown key ${k}`);
@@ -91,7 +95,7 @@ function sanitizeStored(data) {
       };
     }
   }
-  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays']) {
+  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays', 'planRecordsDays']) {
     const v = int(key, data[key]);
     if (v !== undefined) out[key] = v;
   }
@@ -117,6 +121,7 @@ function withDefaults(stored) {
     auditLogMonths: s.auditLogMonths ?? DEFAULTS.auditLogMonths,
     reservedMarkersKeep: s.reservedMarkersKeep ?? DEFAULTS.reservedMarkersKeep,
     tasksDays: s.tasksDays ?? DEFAULTS.tasksDays,
+    planRecordsDays: s.planRecordsDays ?? DEFAULTS.planRecordsDays,
   };
 }
 
@@ -140,7 +145,9 @@ function write(patch) {
 
 /**
  * Dry-run report of what each policy would free, via the sweeps' own
- * eligibility code. Read-only. opts: { now, runsDir, plansRoot, jobs, liveKeys }.
+ * eligibility code. Read-only. opts: { now, runsDir, plansRoot, jobs, liveKeys,
+ *   projectRoot, epicStatus }. planRecords is reported only when projectRoot is given;
+ *   epicStatus defaults to reading that project's prompt-sessions/<id>.json.
  */
 function preview(opts) {
   const o = opts || {};
@@ -171,10 +178,23 @@ function preview(opts) {
     dryRun: true,
   });
   const tmp = staleTmpSweep.sweepStaleTmp(plansRoot, { now, dryRun: true });
+  let planRecords = null;
+  if (o.projectRoot) {
+    const planRecordRetention = require('./scheduler/planRecordRetention.cjs');
+    const pr = planRecordRetention.prunePlanRecords({
+      projectRoot: o.projectRoot,
+      epicStatus: typeof o.epicStatus === 'function' ? o.epicStatus : planRecordRetention.defaultEpicStatus(o.projectRoot),
+      now,
+      days: s.planRecordsDays,
+      dryRun: true,
+    });
+    planRecords = { folders: pr.removed.length };
+  }
   return {
     runLogs: { files: report.eligible.reduce((n, e) => n + e.removeFiles.length, 0) + report.dodFiles.length, bytes: report.eligibleSummary.bytes },
     runsArchive: { entries: archive.removedFiles, bytes: archive.freedBytes },
     tmp: { files: tmp.removedFiles, bytes: tmp.freedBytes },
+    ...(planRecords ? { planRecords } : {}),
   };
 }
 

@@ -112,6 +112,7 @@
   "personaToolScope": "claude",
   "pidAlive": "process",
   "planRecordHarvest": "scheduler",
+  "planRecordRetention": "scheduler",
   "planValidator": "prd",
   "prdAdminRoutes": "prd",
   "prdAgentType": "prd",

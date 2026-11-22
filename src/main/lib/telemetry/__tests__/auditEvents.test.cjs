@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
-const { readEventsAfter, OUTSIDE_EVENT_KINDS, INVALID_AUDIT_CURSOR } = require('../auditEvents.cjs');
+const { readEventsAfter, OUTSIDE_EVENT_KINDS, INVALID_AUDIT_CURSOR, MAX_ARCHIVE_GZ_BYTES } = require('../auditEvents.cjs');
 
 let root;
 beforeAll(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'auditevents-')); });
@@ -187,4 +187,29 @@ test('two rows sharing one at across the rotation boundary are each returned exa
   expect(second.gap).toBe(false);
   const third = readEventsAfter({ after: second.next, target });
   expect(third.events.map((e) => e.n)).toEqual(['live2']);
+});
+
+test('MAX_ARCHIVE_GZ_BYTES is 16 MB', () => {
+  expect(MAX_ARCHIVE_GZ_BYTES).toBe(16 * 1024 * 1024);
+});
+
+test('an archive over maxArchiveGzBytes is skipped: gap true, live rows only', () => {
+  const target = logDir(
+    [row(10, 'epic_state_changed', { n: 'live1' }), row(11, 'epic_state_changed', { n: 'live2' })],
+    [row(1, 'epic_state_changed', { n: 'a1' }), row(2, 'epic_state_changed', { n: 'a2' })],
+  );
+  const r = readEventsAfter({ after: `${T(1)}~1`, target, maxArchiveGzBytes: 8 });
+  expect(r.gap).toBe(true);
+  expect(r.events.map((e) => e.n)).toEqual(['live1', 'live2']);
+  expect(r.next).toBe(`${T(11)}~1`);
+});
+
+test('an archive under maxArchiveGzBytes is read as before', () => {
+  const target = logDir(
+    [row(10, 'epic_state_changed', { n: 'live1' })],
+    [row(1, 'epic_state_changed', { n: 'a1' }), row(2, 'epic_state_changed', { n: 'a2' })],
+  );
+  const r = readEventsAfter({ after: `${T(1)}~1`, target, maxArchiveGzBytes: 1024 * 1024 });
+  expect(r.gap).toBe(false);
+  expect(r.events.map((e) => e.n)).toEqual(['a2', 'live1']);
 });

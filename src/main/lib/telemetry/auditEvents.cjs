@@ -14,7 +14,9 @@
  * rows sharing the cursor's at is visible) or the whole file is covered. Only when
  * the cursor is at or before the live file's first row is the newest rotated
  * archive (`audit-log-YYYY-MM.jsonl.gz`, same folder) unzipped in memory and its
- * rows prepended. gap = the cursor predates the oldest row still readable.
+ * rows prepended — unless its compressed size exceeds MAX_ARCHIVE_GZ_BYTES (or the
+ * maxArchiveGzBytes option), in which case it is skipped and gap is true.
+ * gap = the cursor predates the oldest row still readable.
  *
  * Assumes rows are appended in non-decreasing `at` order (they are: appendAuditEvent
  * stamps `now` at append time). Rows that fail to parse or lack a string `at` are skipped.
@@ -32,6 +34,8 @@ const DEFAULT_KINDS = Object.freeze(['epic_state_changed']);
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 const INITIAL_WINDOW = 1024 * 1024;
+/** Largest compressed archive loadArchive will unzip in memory; a bigger one is skipped (gap true). */
+const MAX_ARCHIVE_GZ_BYTES = 16 * 1024 * 1024;
 const START = 'start';
 const CURSOR_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)~(\d+)$/;
 const CURSOR_FORM = "expected '<ISO timestamp>~<count>' (e.g. 2026-11-01T00:00:00.000Z~1) or 'start'";
@@ -82,17 +86,24 @@ function loadLive(target, boundaryAt, initialWindow) {
   }
 }
 
-/** Newest rotated archive's rows (in memory), or [] when none / unreadable. */
-function loadArchive(target) {
+/**
+ * Newest rotated archive's rows (in memory). rows = [] when none / unreadable;
+ * skipped = true when its compressed size is over `maxGzBytes` (never read).
+ * @returns {{ rows: object[], skipped: boolean }}
+ */
+function loadArchive(target, maxGzBytes) {
   const dir = path.dirname(target);
   const base = path.basename(target, path.extname(target));
   const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}-\\d{2}\\.jsonl\\.gz$`);
   let names;
-  try { names = fs.readdirSync(dir).filter((f) => re.test(f)).sort(); } catch { return []; }
-  if (!names.length) return [];
+  const none = { rows: [], skipped: false };
+  try { names = fs.readdirSync(dir).filter((f) => re.test(f)).sort(); } catch { return none; }
+  if (!names.length) return none;
+  const file = path.join(dir, names[names.length - 1]);
   try {
-    return parseRows(zlib.gunzipSync(fs.readFileSync(path.join(dir, names[names.length - 1]))).toString('utf8').split('\n').filter(Boolean));
-  } catch { return []; }
+    if (fs.statSync(file).size > maxGzBytes) return { rows: [], skipped: true };
+    return { rows: parseRows(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8').split('\n').filter(Boolean)), skipped: false };
+  } catch { return none; }
 }
 
 /** Annotate each row with its 1-based occurrence among rows sharing its `at`. */
@@ -111,11 +122,12 @@ function withOrdinals(rows) {
 const cursorOf = (at, n) => `${at}~${n}`;
 
 /**
- * @param {{ after?: string, kinds?: string[], limit?: number, target?: string, initialWindow?: number }} [opts]
+ * @param {{ after?: string, kinds?: string[], limit?: number, target?: string, initialWindow?: number, maxArchiveGzBytes?: number }} [opts]
  * @returns {{ events: object[], next: string, more: boolean, gap: boolean }}
  */
-function readEventsAfter({ after, kinds, limit, target, initialWindow } = {}) {
+function readEventsAfter({ after, kinds, limit, target, initialWindow, maxArchiveGzBytes } = {}) {
   const file = target ?? auditLogPath();
+  const maxGz = Number.isFinite(maxArchiveGzBytes) && maxArchiveGzBytes >= 0 ? maxArchiveGzBytes : MAX_ARCHIVE_GZ_BYTES;
   const win = Number.isFinite(initialWindow) && initialWindow > 0 ? initialWindow : INITIAL_WINDOW;
   const kindSet = new Set(Array.isArray(kinds) && kinds.length ? kinds : DEFAULT_KINDS);
   const lim = Number.isInteger(limit) && limit > 0 ? Math.min(limit, MAX_LIMIT) : DEFAULT_LIMIT;
@@ -140,8 +152,9 @@ function readEventsAfter({ after, kinds, limit, target, initialWindow } = {}) {
     const live = loadLive(file, cur.at, win);
     rows = live.rows;
     if (live.whole && (!rows.length || cur.at <= rows[0].at)) {
-      rows = loadArchive(file).concat(rows);
-      gap = rows.length > 0 && cur.at < rows[0].at;
+      const archive = loadArchive(file, maxGz);
+      rows = archive.rows.concat(rows);
+      gap = archive.skipped || (rows.length > 0 && cur.at < rows[0].at);
     }
   }
 
@@ -160,4 +173,4 @@ function readEventsAfter({ after, kinds, limit, target, initialWindow } = {}) {
   return { events, next, more, gap };
 }
 
-module.exports = { OUTSIDE_EVENT_KINDS, readEventsAfter, CURSOR_FORM, INVALID_AUDIT_CURSOR };
+module.exports = { OUTSIDE_EVENT_KINDS, readEventsAfter, CURSOR_FORM, INVALID_AUDIT_CURSOR, MAX_ARCHIVE_GZ_BYTES };

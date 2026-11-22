@@ -53,8 +53,8 @@ export function DocOutline({ text, scrollRef, onJump, showStats }: Props) {
 
   if (headings.length === 0) {
     return (
-      <div className="w-56 shrink-0 border-r border-line bg-bg-elev flex flex-col">
-        <div className="flex-1 p-3 text-[11px] text-fg-faint">no headings</div>
+      <div className="w-56 shrink-0 border-r border-line bg-bg-elev flex flex-col" data-testid="doc-outline">
+        <div className="flex-1 p-3 text-[11px] text-fg-faint">No headings in this file.</div>
         {showStats && <FileStats text={text} />}
       </div>
     )
@@ -77,7 +77,7 @@ export function DocOutline({ text, scrollRef, onJump, showStats }: Props) {
   const minLevel = Math.min(...headings.map((h) => h.level))
 
   return (
-    <div className="w-56 shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
+    <div className="w-56 shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0" data-testid="doc-outline">
       <div className="flex-1 min-h-0 overflow-auto overscroll-contain">
         <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-fg-faint border-b border-line">Outline</div>
         <nav className="py-1">

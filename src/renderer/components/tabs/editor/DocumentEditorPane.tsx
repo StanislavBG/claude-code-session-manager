@@ -10,6 +10,8 @@
  *   - Body: ONE mode at a time, never side by side. Document = WYSIWYG
  *     (TiptapBody) — or the rendered preview for a read-only file, which Tiptap
  *     cannot lock; Markdown = raw source (Monaco) under the markdown toolbar.
+ *   - Outline (with the THIS FILE lines · words · ~tokens block) is closed
+ *     inline and starts open in full screen; the toggle opens/closes it.
  *   - Status bar: save state, words · ~tokens, position, Revert, Save Ctrl S.
  *
  * It is **controlled**: the caller owns the text, the dirty flag and the save /
@@ -120,8 +122,14 @@ export function DocumentEditorPane({
   const markdown = isMarkdown(path)
 
   const [mode, setMode] = useState<DocMode>(() => toDocMode(defaultMode))
-  const [showOutline, setShowOutline] = useState(true)
   const [fullScreen, setFullScreen] = useState(false)
+  // Outline is closed inline and starts open in full screen (design: DocEditor
+  // `outlineOn = state.outline ?? full`). The toggle overrides it until the
+  // next full-screen change, which re-applies that default.
+  const [outlineOverride, setOutlineOverride] = useState<boolean | null>(null)
+  const showOutline = outlineOverride ?? fullScreen
+  const enterFullScreen = useCallback(() => { setOutlineOverride(null); setFullScreen(true) }, [])
+  const exitFullScreen = useCallback(() => { setOutlineOverride(null); setFullScreen(false) }, [])
   const [cursor, setCursor] = useState<CursorInfo | null>(null)
 
   const markedLines = useMemo(
@@ -142,11 +150,11 @@ export function DocumentEditorPane({
   useEffect(() => {
     if (!fullScreen) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setFullScreen(false)
+      if (e.key === 'Escape') exitFullScreen()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fullScreen])
+  }, [fullScreen, exitFullScreen])
 
   // Non-markdown files have no Document view: always the source editor.
   const effMode: DocMode = markdown ? mode : 'markdown'
@@ -220,7 +228,7 @@ export function DocumentEditorPane({
         {fullScreen && (
           <button
             type="button"
-            onClick={() => setFullScreen(false)}
+            onClick={exitFullScreen}
             data-testid="document-exit-fullscreen"
             className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium text-fg border border-line rounded hover:bg-bg-hi"
             title="Exit full screen (Esc)"
@@ -250,7 +258,7 @@ export function DocumentEditorPane({
         {markdown && (
           <button
             type="button"
-            onClick={() => setShowOutline((v) => !v)}
+            onClick={() => setOutlineOverride(!showOutline)}
             data-testid="document-outline-toggle"
             aria-pressed={showOutline}
             className={`px-2 py-0.5 text-[11px] rounded ${showOutline ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`}
@@ -284,7 +292,7 @@ export function DocumentEditorPane({
         {!fullScreen && (
           <button
             type="button"
-            onClick={() => setFullScreen(true)}
+            onClick={enterFullScreen}
             data-testid="document-fullscreen"
             className="px-2 py-0.5 text-[11px] text-fg-dim border border-line rounded hover:text-fg hover:bg-bg-hi"
             title="Full screen"

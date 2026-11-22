@@ -1,6 +1,8 @@
 /**
  * MarkdownToolbar — a lightweight formatting strip over the Monaco buffer for
  * markdown files (the Google-Docs toolbar feel, but it edits markdown source).
+ * Labels are the literal syntax each button writes (design: DocEditor `isMd`):
+ * H1 H2 H3 **B** _I_ `code` - List 1. List > Quote [Link].
  *
  * It drives the live editor instance handed up from CodeEditorPane: wrap actions
  * (bold/italic/code) surround the selection; line actions (heading/list/quote)
@@ -23,13 +25,13 @@ const BTNS: Btn[] = [
   { kind: 'prefix', label: 'H1', title: 'Heading 1', prefix: '# ' },
   { kind: 'prefix', label: 'H2', title: 'Heading 2', prefix: '## ' },
   { kind: 'prefix', label: 'H3', title: 'Heading 3', prefix: '### ' },
-  { kind: 'wrap', label: 'B', title: 'Bold', before: '**', after: '**' },
-  { kind: 'wrap', label: 'I', title: 'Italic', before: '_', after: '_' },
-  { kind: 'wrap', label: '<>', title: 'Inline code', before: '`', after: '`' },
-  { kind: 'prefix', label: '• List', title: 'Bullet list', prefix: '- ' },
+  { kind: 'wrap', label: '**B**', title: 'Bold', before: '**', after: '**' },
+  { kind: 'wrap', label: '_I_', title: 'Italic', before: '_', after: '_' },
+  { kind: 'wrap', label: '`code`', title: 'Inline code', before: '`', after: '`' },
+  { kind: 'prefix', label: '- List', title: 'Bullet list', prefix: '- ' },
   { kind: 'prefix', label: '1. List', title: 'Numbered list', prefix: '1. ' },
-  { kind: 'prefix', label: '" Quote', title: 'Blockquote', prefix: '> ' },
-  { kind: 'link', label: 'Link', title: 'Insert link' },
+  { kind: 'prefix', label: '> Quote', title: 'Blockquote', prefix: '> ' },
+  { kind: 'link', label: '[Link]', title: 'Insert link' },
 ]
 
 export function MarkdownToolbar({ getEditor }: Props) {
@@ -66,10 +68,11 @@ export function MarkdownToolbar({ getEditor }: Props) {
     <div className="flex items-center gap-0.5 px-2 h-7 shrink-0 border-b border-line bg-bg-elev">
       {BTNS.map((b) => (
         <button
+          type="button"
           key={b.label}
           onClick={() => apply(b)}
           title={b.title}
-          className="px-1.5 py-0.5 text-[10px] text-fg-dim hover:text-fg hover:bg-bg-hi rounded font-medium"
+          className="px-1.5 py-0.5 text-[10px] text-fg-dim hover:text-fg hover:bg-bg-hi rounded font-mono font-medium"
         >
           {b.label}
         </button>

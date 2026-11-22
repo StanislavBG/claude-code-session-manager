@@ -111,14 +111,22 @@ describe('DocumentEditorPane — title bar + mode switch', () => {
     expect(q(el, 'code-pane')).not.toBeNull()
   })
 
-  it('toggles the outline, which lists headings and the file metrics', () => {
+  it('starts with the outline closed; the toggle opens and closes it, and THIS FILE lives only inside it', () => {
     const el = mount({ path: MD, value: '# Alpha\n## Beta\n' })
     const outlineLinks = () => Array.from(el.querySelectorAll('nav button')).map((b) => b.textContent)
+    expect(outlineLinks()).toEqual([])
+    expect(q(el, 'doc-outline-stats')).toBeNull()
+    expect(el.textContent).not.toMatch(/this file/i)
+    expect(q(el, 'document-outline-toggle')?.getAttribute('aria-pressed')).toBe('false')
+
+    act(() => q(el, 'document-outline-toggle')!.click())
     expect(outlineLinks()).toEqual(['Alpha', 'Beta'])
+    expect(q(el, 'doc-outline')?.contains(q(el, 'doc-outline-stats'))).toBe(true)
     expect(q(el, 'doc-outline-stats')?.textContent).toContain('2 lines')
 
     act(() => q(el, 'document-outline-toggle')!.click())
     expect(outlineLinks()).toEqual([])
+    expect(q(el, 'doc-outline-stats')).toBeNull()
   })
 })
 
@@ -139,6 +147,20 @@ describe('DocumentEditorPane — full screen', () => {
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
     expect(pane.className).not.toContain('fixed')
     expect(q(el, 'document-exit-fullscreen')).toBeNull()
+  })
+
+  it('full screen starts with the outline open; the toggle still closes it; exiting closes it again', () => {
+    const el = mount({ path: MD, value: '# Alpha\n' })
+    expect(q(el, 'doc-outline')).toBeNull()
+    act(() => q(el, 'document-fullscreen')!.click())
+    expect(q(el, 'doc-outline')).not.toBeNull()
+    expect(q(el, 'doc-outline-stats')).not.toBeNull()
+    act(() => q(el, 'document-outline-toggle')!.click())
+    expect(q(el, 'doc-outline')).toBeNull()
+    act(() => q(el, 'document-outline-toggle')!.click())
+    expect(q(el, 'doc-outline')).not.toBeNull()
+    act(() => q(el, 'document-exit-fullscreen')!.click())
+    expect(q(el, 'doc-outline')).toBeNull()
   })
 
   it('the Exit full screen button also exits', () => {

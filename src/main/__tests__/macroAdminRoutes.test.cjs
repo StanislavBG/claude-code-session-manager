@@ -1030,3 +1030,48 @@ test('run+externalRef: a launch failure is a 503, records nothing and writes no 
   expect(await lookupExternalRef({ cwd: s.realCwd, externalRef: 'fail-1' })).toBeNull();
   expect(runEvents(s.macro.id)).toEqual([]);
 });
+
+function setupRunWithRecorder(recorder) {
+  return (async () => {
+    const s = await setupRun();
+    const adminHttp = makeFakeAdminHttp();
+    const { launches, deps } = makeRunDeps();
+    registerAdminRoute(adminHttp, { ...deps, recordExternalRef: recorder }, { filePath: s.filePath });
+    const run = (body) => adminHttp.call('POST', '/admin/macros/run', { body: { cwd: s.cwd, id: s.macro.id, ...body } });
+    return { ...s, launches, run };
+  })();
+}
+
+test('run+externalRef: a record that fails once is retried; 200 without externalRefRecorded', async () => {
+  let calls = 0;
+  const s = await setupRunWithRecorder(async (args) => {
+    calls += 1;
+    if (calls === 1) throw new Error('disk hiccup');
+    return recordExternalRef(args);
+  });
+  const r = await s.run({ externalRef: 'retry-ok' });
+  expect(r.status).toBe(200);
+  expect(calls).toBe(2);
+  expect(r.body).toEqual({ ok: true, epicId: r.body.epicId, alreadyRunning: false, externalRef: 'retry-ok' });
+  expect(await lookupExternalRef({ cwd: s.realCwd, externalRef: 'retry-ok' })).toMatchObject({ epicId: r.body.epicId });
+});
+
+test('run+externalRef: a record that fails twice still answers 200 with externalRefRecorded: false', async () => {
+  let calls = 0;
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => { warns.push(a.join(' ')); };
+  let r;
+  let s;
+  try {
+    s = await setupRunWithRecorder(async () => { calls += 1; throw new Error('disk full'); });
+    r = await s.run({ externalRef: 'retry-fail' });
+  } finally {
+    console.warn = origWarn;
+  }
+  expect(r.status).toBe(200);
+  expect(calls).toBe(2);
+  expect(r.body).toEqual({ ok: true, epicId: r.body.epicId, alreadyRunning: false, externalRef: 'retry-fail', externalRefRecorded: false });
+  expect(s.launches).toHaveLength(1);
+  expect(warns.some((w) => /recordExternalRef/.test(w) && /disk full/.test(w))).toBe(true);
+});

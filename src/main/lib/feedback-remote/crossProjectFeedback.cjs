@@ -663,10 +663,38 @@ async function openFeedbackSession(input, deps = {}) {
     }
     const result = await mintFeedbackSession(v, input, deps, collaborators);
     if (result.ok) {
-      await recordExternalRef({ cwd: v.toCwd, externalRef, epicId: result.epicId, producer: FEEDBACK_PRODUCER, fromCwd: v.fromCwd });
+      const recorded = await recordExternalRefWithRetry(
+        deps.recordExternalRef || recordExternalRef,
+        { cwd: v.toCwd, externalRef, epicId: result.epicId, producer: FEEDBACK_PRODUCER, fromCwd: v.fromCwd },
+        '[crossProjectFeedback]',
+      );
+      // The Epic exists either way; say plainly that a repeat may not find it.
+      if (!recorded) return { ...result, externalRefRecorded: false };
     }
     return result;
   });
+}
+
+/**
+ * recordExternalRefWithRetry(record, args, logTag) → Promise<boolean>
+ *
+ * Runs after a successful mint, so a failure must never fail the call: try
+ * once, retry once, then warn and report false so the caller can add
+ * `externalRefRecorded: false` to its success answer.
+ */
+async function recordExternalRefWithRetry(record, args, logTag) {
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await record(args);
+      return true;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  console.warn(`${logTag} recordExternalRef failed twice for ${JSON.stringify(args.externalRef)} → ${args.epicId}:`,
+    lastErr?.message ?? lastErr);
+  return false;
 }
 
 const FEEDBACK_PRODUCER = 'cross-project-feedback';
@@ -1150,6 +1178,7 @@ module.exports = {
   resolveReplyTo,
   validateFeedbackInput,
   openFeedbackSession,
+  recordExternalRefWithRetry,
   readEpicGoal,
   openReplyFallbackSession,
   listFeedbackTargets,

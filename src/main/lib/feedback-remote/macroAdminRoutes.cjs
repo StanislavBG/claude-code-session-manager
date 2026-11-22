@@ -502,13 +502,17 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
       sendJson(res, 503, { ok: false, error: launchFailureError(result) });
       return;
     }
-    try {
-      await recordExternalRef({ cwd, externalRef, epicId: result.epicId, producer: 'new-epic-ui', macroId: macro.id });
-    } catch (e) {
-      // The session already started; the open-session scan in
-      // findEpicByExternalRef (source.externalRef) still finds it next time.
-      console.warn('[macroAdminRoutes] recordExternalRef failed:', e?.message ?? e);
-    }
+    // The session already started; a failed write is retried once, then
+    // reported as externalRefRecorded: false (the open-session scan in
+    // findEpicByExternalRef still finds it while it is open).
+    // Required lazily: crossProjectFeedback.cjs is a heavy module this file
+    // otherwise never loads.
+    const { recordExternalRefWithRetry } = require('./crossProjectFeedback.cjs');
+    const recorded = await recordExternalRefWithRetry(
+      deps.recordExternalRef || recordExternalRef,
+      { cwd, externalRef, epicId: result.epicId, producer: 'new-epic-ui', macroId: macro.id },
+      '[macroAdminRoutes]',
+    );
     appendAuditEvent('admin_macro_run', {
       route: '/admin/macros/run',
       cwd,
@@ -517,7 +521,10 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
       alreadyRunning: false,
       externalRef,
     });
-    sendJson(res, 200, { ok: true, epicId: result.epicId, alreadyRunning: false, externalRef });
+    sendJson(res, 200, {
+      ok: true, epicId: result.epicId, alreadyRunning: false, externalRef,
+      ...(recorded ? {} : { externalRefRecorded: false }),
+    });
   });
 }
 

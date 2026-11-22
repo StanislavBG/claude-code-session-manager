@@ -1065,3 +1065,46 @@ test('two concurrent calls with the same externalRef produce one Epic', async ()
   const ids = Object.values(readActiveIndex(to).sessions).filter((x) => x.source && x.source.externalRef === 'self:action/race');
   expect(ids.length).toBe(1);
 });
+
+test('a recordExternalRef that fails once is retried: normal success, no externalRefRecorded key', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  let calls = 0;
+  const r = await openFeedbackSession(payload(to, from, { externalRef: 'self:action/retry-ok' }), {
+    appendResponseEventIfKnown: async () => true,
+    recordExternalRef: async (args) => {
+      calls += 1;
+      if (calls === 1) throw new Error('disk hiccup');
+      return recordExternalRef(args);
+    },
+  });
+  expect(r.ok).toBe(true);
+  expect(calls).toBe(2);
+  expect('externalRefRecorded' in r).toBe(false);
+  expect(await lookupExternalRef({ cwd: to, externalRef: 'self:action/retry-ok' })).toMatchObject({ epicId: r.epicId });
+});
+
+test('a recordExternalRef that fails twice still returns success with externalRefRecorded: false and warns', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  let calls = 0;
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => { warns.push(a.join(' ')); };
+  let r;
+  try {
+    r = await openFeedbackSession(payload(to, from, { externalRef: 'self:action/retry-fail' }), {
+      appendResponseEventIfKnown: async () => true,
+      recordExternalRef: async () => { calls += 1; throw new Error('disk full'); },
+    });
+  } finally {
+    console.warn = origWarn;
+  }
+  expect(r.ok).toBe(true);
+  expect(r.epicId).toBeTruthy();
+  expect(r.externalRef).toBe('self:action/retry-fail');
+  expect(r.externalRefRecorded).toBe(false);
+  expect(calls).toBe(2);
+  expect(readActiveIndex(to).sessions[r.epicId]).toBeTruthy();
+  expect(warns.some((w) => /recordExternalRef/.test(w) && /disk full/.test(w))).toBe(true);
+});

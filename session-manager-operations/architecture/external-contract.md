@@ -195,8 +195,8 @@ Checked in this order; the first that fits wins.
 | `needs_input` | The agent asked a question and the chat is idle, waiting for a human. |
 | `blocked` | Something stopped the work; see `blocked.kind`. |
 | `working` | The chat is busy, or a PRD job is pending or running. |
-| `verified` | Work PRDs completed and every one has a VERIFIED verdict newer than its finish. |
-| `in_review` | Some completed work PRDs still wait for a validator verdict. |
+| `verified` | Work PRDs completed and every one has a VERIFIED verdict newer than its finish. Finished PRDs are known from the Epic's check-in events as well as from the queue, so this holds after the queue rows are gone. |
+| `in_review` | Some completed work PRDs still wait for a validator verdict. Finished PRDs are known from the Epic's check-in events as well as from the queue. |
 | `open` | Active, with nothing running and nothing to review. |
 
 ### Blocked kinds

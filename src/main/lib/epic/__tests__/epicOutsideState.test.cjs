@@ -132,3 +132,88 @@ test('malformed inputs never throw; inputs are not mutated', () => {
   const jobs = Object.freeze([Object.freeze(job('1-a', 'completed'))]);
   expect(computeEpicOutsideState({ session: Object.freeze(session()), events, jobs }).state).toBe('verified');
 });
+
+// --- Finished PRDs known from check-in events once their queue rows are gone ---
+const { knownPrdSlugs } = require('../epicOutsideState.cjs');
+const checkin = (slug, min, outcome = 'completed', extra = {}) => ({
+  kind: 'response',
+  at: at(min),
+  prdSlug: slug,
+  outcome,
+  validation: 'unvalidated',
+  text: `PRD ${slug} ${outcome}`,
+  ...extra,
+});
+
+test('no live rows: 22 checked-in PRDs each verified after its check-in → verified', () => {
+  const events = [];
+  for (let i = 1; i <= 22; i++) events.push(checkin(`${i}-work-${i}`, i, 'completed', { agentType: 'dev-lead' }));
+  for (let i = 1; i <= 22; i++) events.push(verdict(`work-${i}`, 30));
+  events.push(checkin('23-validate-plan', 31, 'completed', { agentType: 'validator' }));
+  events.push(checkin('24-validate-plan-b', 32, 'completed'));
+  const r = run({ events });
+  expect(r.state).toBe('verified');
+  expect(r.unvalidated).toEqual([]);
+  expect(r.prds).toEqual({ total: 24, pending: 0, running: 0, completed: 24, failed: 0, needsReview: 0, quarantined: 0, skipped: 0 });
+});
+
+test('a check-in with no verdict and no row is unvalidated → in_review', () => {
+  const r = run({ events: [checkin('1-a', 1)] });
+  expect(r.state).toBe('in_review');
+  expect(r.unvalidated).toEqual(['a']);
+  expect(r.prds.total).toBe(1);
+});
+
+test('a verdict older than the newest completed check-in leaves the PRD unvalidated', () => {
+  const r = run({ events: [checkin('1-a', 1), verdict('a', 2), checkin('1-a', 5)] });
+  expect(r.unvalidated).toEqual(['a']);
+  expect(r.state).toBe('in_review');
+});
+
+test('a live row wins over an older check-in', () => {
+  const r = run({ jobs: [job('1-a', 'running')], events: [checkin('1-a', 1, 'failed')] });
+  expect(r.state).toBe('working');
+  expect(r.blocked).toBeNull();
+  expect(r.prds).toMatchObject({ total: 1, running: 1, failed: 0 });
+});
+
+test('a failed check-in with no row blocks', () => {
+  const r = run({ events: [checkin('1-a', 1), verdict('a', 2), checkin('2-b', 3, 'failed')] });
+  expect(r.state).toBe('blocked');
+  expect(r.blocked.kind).toBe('failed');
+  expect(r.blocked.prds.map((p) => p.slug)).toEqual(['b']);
+  expect(r.prds).toMatchObject({ total: 2, completed: 1, failed: 1 });
+});
+
+test('a needs_review check-in with no row blocks', () => {
+  const r = run({ events: [checkin('1-a', 1, 'needs_review')] });
+  expect(r.blocked).toMatchObject({ kind: 'needs_review', prds: [{ slug: 'a' }] });
+});
+
+test('a failed check-in does not block when its live row is cancelled', () => {
+  const r = run({ jobs: [job('1-a', 'failed', { cancelledAt: at(2) })], events: [checkin('1-a', 1, 'failed')] });
+  expect(r.blocked).toBeNull();
+});
+
+test('a completed re-run after a failed check-in clears it', () => {
+  const r = run({ events: [checkin('1-a', 1, 'failed'), checkin('1-a', 5), verdict('a', 6)] });
+  expect(r.blocked).toBeNull();
+  expect(r.state).toBe('verified');
+  expect(r.prds).toMatchObject({ total: 1, completed: 1, failed: 0 });
+});
+
+test('an unknown status counts only in total', () => {
+  const r = run({ events: [checkin('1-a', 1, 'weird')] });
+  expect(r.prds).toEqual({ total: 1, pending: 0, running: 0, completed: 0, failed: 0, needsReview: 0, quarantined: 0, skipped: 0 });
+  expect(r.state).toBe('open');
+});
+
+test('knownPrdSlugs: union of rows and check-ins, full slugs, sorted, no repeats', () => {
+  const slugs = knownPrdSlugs({
+    session: session(),
+    jobs: [job('2-b', 'running'), job('9-x', 'completed', { epicId: 'other' })],
+    events: [checkin('1-a', 1), checkin('1-a', 2), checkin('2-b', 1, 'failed'), verdict('c', 3), checkin('3-validate-plan', 4)],
+  });
+  expect(slugs).toEqual(['1-a', '2-b', '3-validate-plan']);
+  expect(knownPrdSlugs()).toEqual([]);
+});

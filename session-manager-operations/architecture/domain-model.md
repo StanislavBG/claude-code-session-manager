@@ -146,6 +146,19 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   session-manager's Project Home only, missing from every other project. Project Home personas run unforked in
   every project, with no project overlay body (session-manager's project-home-builder overlay was removed on
   2026-11-08).
+  **Exception — a Project Video tool (`surface: 'project-video'`) belongs to ONE project.** It is that project's own
+  video tool, shown only in its Project Home ▸ Video, never in Tools, Hot keys or another project: its `projects`
+  is exactly one absolute cwd — never `'*'`, never widened, never given a second project (`saveMacro` and
+  `setMacroProject` refuse; `widenProjectHomeScope` leaves it alone). It may carry its own `job`
+  (`{ estimateMinutes, repoPaths?, review? }`, `MacroJobSchema`) — the estimate shown before a press, the repo
+  paths the job may read, and an optional human review stage — and `saveMacro` refuses `job` on every other
+  surface and on built-ins. Why: a project's video recipes (Burrow's episode tools, 9:16) are that project's
+  content, not Session Manager's, so they must not leak into every install the way a Project Home tool does —
+  and they leave Hot keys because a press is a background build, not a New Session. With `review: true` the first
+  run only saves review material (`project_video_review_write`) to `videos/<id>/review/`; **only a human click**
+  (`project-videos:review-decide` → `videoReview.writeDecision`) approves it or asks for changes. No agent tool
+  or route writes `decision.json`, so an agent can never approve its own review and the final build only follows
+  a human's say-so. Files: [project-pages/README.md](../project-pages/README.md#review-step-videosidreview).
 - **An Epic's title + objective are fixed for the life of its session, and are its first prompt.** The New Epic
   card composes both through `composeEpicIntake` and sends the objective at creation; nothing rewrites
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of

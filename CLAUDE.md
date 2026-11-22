@@ -71,7 +71,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   a reply on its thread lands in the asking Epic via `feedback_reply`. Auto-approved only on a verified
   human quote or macro. Same-cwd → `/develop`.
 - **A MACRO is a saved (agent, tag, prompt) hot key** (`macroLibrary.cjs`), per project; a **Project Home tool is
-  global** (output per project). Press = New Session (one mint); a script may start one only if a human
+  global** (output per project); a **Project Video tool** (`surface: 'project-video'`) is one project's, shown only
+  in its Project Home ▸ Video. Press = New Session (one mint); a script may start one only if a human
   ticked 'Can be started by a script' (POST /admin/macros/run).
 - **Settings (System/Project/Local) is substrate, not per-Epic curation.** Per-Epic behavior is a
   Tag, persona, or PRD — never a Settings edit. `model` + `effort` are

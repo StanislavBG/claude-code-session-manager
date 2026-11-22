@@ -174,6 +174,7 @@ the project. A project holds many of each; the folder listing IS the library (no
 project-pages/
   knowledge/<id>/index.html + meta.json     one folder per Knowledge Page
   videos/<id>/index.html   + meta.json      one folder per video
+  videos/<id>/review/                       the human review step of a Project Video tool (below)
   videos/_character/                        shared mascot assets; never an entry, skipped by
                                             the lister, the watcher, rename and delete
 ```
@@ -188,11 +189,34 @@ atomically as writer `project-home`. Storage code: `src/main/lib/project-pages/p
 - **Knowledge** (`projectPageMeta`): `id`, `title` (1-120), `topic` (<=120), `createdAt`
   (ISO datetime), `model` (<=60).
 - **Video** (`projectVideoMeta`): `id`, `title` (1-120), `kind` (`project-demo` | `blog-post`
-  | `feature`), `style` (<=40), `lengthS` (int 5-60), `createdAt`, `character` (<=80 or
+  | `feature` | `episode`), `target` (<=300, optional), `aspect` (`16:9` | `9:16`, optional), `style` (<=40), `lengthS` (int 5-60), `createdAt`, `character` (<=80 or
   null), `sources[]` (`{claim, source, ref}`, <=40), `report` (`lufs`, `truePeakDb`,
   `speechS`, `readingGrade`, all number|null; `checks[]` of `{id, ok, detail}`; `bytes`),
   `macroVersion`, `seedVersion`, `model`, `effort`. The server stamps `id`, `createdAt` and
   `report.bytes`.
+- **`kind: 'episode'`** is a project's own series video, made by a Project Video tool (e.g. Burrow's
+  episode tools); the library built-in never picks it.
+- **`aspect`** is read from the document's `<meta name="sm-demo-aspect" content="16:9|9:16">`
+  (`projectHomeAdminRoutes.cjs`); any other value is refused, no tag means `16:9`, and a caller's
+  `meta.aspect` is ignored — the document is the one source. An entry with no `aspect` (older
+  entries) is treated as `16:9`.
+
+### Review step: videos/<id>/review/
+
+A Project Video tool (`surface: 'project-video'`, one project's tool, shown only in its Project
+Home ▸ Video) whose `job` has `review: true` stops after a first run for a human review. Its
+records live in the entry's `review/` folder, written as writer `project-home` through
+`lib/project-pages/videoReview.cjs` (the one writer; tmp+rename via `util/atomicFs.cjs`):
+
+| File | Written by | When |
+| --- | --- | --- |
+| `dispatch.json` | the app (`macroJobIpc.cjs` → `recordDispatch`) | each time the tool's job is queued: `{entryId, macroId, epicId, slug, stage, inputValues, extraInstructions, dispatchedAt}` |
+| `material.json` + `image-1.<ext>` .. `image-N.<ext>` | `project_video_review_write` → `POST /admin/project-home/videos/review/write` → `writeMaterial` | the review-stage run: text (<=32000 chars) + 1-6 PNG/JPEG/WebP images (<=2 MiB each, checked by magic bytes); refused without a `dispatch.json`; replaces the earlier material and images |
+| `decision.json` | **only** the human decision (`project-videos:review-decide` → `writeDecision`) | `approve` (with `at`) or `changes` (with `note`); refused without material or when already decided |
+
+No agent tool or route writes `decision.json`. `reviewStatus` derives `building` / `waiting` /
+`approved` / `changes-requested` from the newest record; `project-videos:review-list` lists them.
+Why only a human approves: [domain-model.md](../architecture/domain-model.md).
 
 ### Write tools and routes
 

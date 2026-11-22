@@ -18,10 +18,12 @@ interface Props {
   path?: string
   /** Edit mode: status-bar Revert — back to the file as it is on disk. */
   onRevert?: () => void
+  /** Edit mode: baseline the editor marks changed lines against (Edit first from Claude's update). */
+  changedFrom?: string
 }
 
 function MemoryEditorPaneImpl({
-  mode, name, title, onTitle, body, onBody, onSave, onCancel, saving, dirty, path, onRevert,
+  mode, name, title, onTitle, body, onBody, onSave, onCancel, saving, dirty, path, onRevert, changedFrom,
 }: Props) {
   if (mode === 'none') {
     return (
@@ -44,6 +46,7 @@ function MemoryEditorPaneImpl({
           onSave={() => { if (!saving && dirty) onSave() }}
           onRevert={onRevert}
           dirty={dirty}
+          changedFrom={changedFrom}
           defaultMode="document"
         />
       </div>

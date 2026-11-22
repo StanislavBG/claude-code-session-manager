@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import type { MemoryRow } from './model'
 
 interface Props {
@@ -15,6 +15,47 @@ interface Props {
   checkBusy?: boolean
   /** The file is open in the editor: the Ask card gives way to an editing note. */
   editing?: boolean
+  /** The open editor started from Claude's update (Edit first). */
+  editingSuggestion?: boolean
+  /** A finished check: how long it took (timed in the renderer) and the facts its result carries. */
+  check?: { elapsedMs: number; evidence: string[] } | null
+}
+
+/** m:ss of a duration in milliseconds. */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+function CheckedCard({ elapsedMs, evidence }: { elapsedMs: number; evidence: string[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div
+      data-testid="mx-links-checked"
+      className="flex flex-col gap-2 px-4 py-3.5 rounded-[14px] border border-rule-inner bg-bg-hi"
+    >
+      <div className="flex items-center gap-2">
+        <span aria-hidden className="w-[7px] h-[7px] rounded-full bg-sage-dark shrink-0" />
+        <span className={`${LABEL} flex-1`}>CHECKED IN {formatElapsed(elapsedMs)}</span>
+        {evidence.length > 0 && (
+          <button
+            type="button"
+            data-testid="mx-links-evidence"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="text-[12px] font-medium text-accent hover:text-fg"
+          >
+            Evidence {open ? '▴' : '▾'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <ul data-testid="mx-links-evidence-list" className="m-0 pl-4 list-disc text-[12px] leading-normal text-fg-dim">
+          {evidence.map((e) => <li key={e} className="break-words">{e}</li>)}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 const LABEL = 'text-[11px] tracking-[.1em] font-semibold text-fg-faint'
@@ -42,7 +83,7 @@ function LinkCard({
 }
 
 export const LinksRail = memo(function LinksRail({
-  row, onOpen, onRemoveLink, onAskAbout, onUpdatePath, onReviewPath, onCheck, checkBusy, editing,
+  row, onOpen, onRemoveLink, onAskAbout, onUpdatePath, onReviewPath, onCheck, checkBusy, editing, editingSuggestion, check,
 }: Props) {
   return (
     <aside
@@ -111,7 +152,19 @@ export const LinksRail = memo(function LinksRail({
               <span className="text-[12px] text-fg-dim">Nothing links here yet.</span>
             )}
           </div>
-          {editing ? (
+          {editing && editingSuggestion ? (
+            <div
+              data-testid="mx-links-started"
+              className="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] border border-honey/60 bg-butter/20 text-[12.5px] leading-normal text-fg"
+            >
+              <span className={`${LABEL} uppercase !text-honey-dark`}>Started from Claude's update</span>
+              <span>
+                The suggested change is already in the editor, and the lines it touched are marked. Change anything
+                before you save.
+              </span>
+              <span className="text-fg-dim">Revert goes back to the file on disk.</span>
+            </div>
+          ) : editing ? (
             <div
               data-testid="mx-links-editing"
               className="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] border border-dashed border-rule-structural text-[12px] leading-normal text-fg-dim"
@@ -122,6 +175,8 @@ export const LinksRail = memo(function LinksRail({
                 <span className="font-mono break-all">{row.name}</span>.
               </span>
             </div>
+          ) : check ? (
+            <CheckedCard elapsedMs={check.elapsedMs} evidence={check.evidence} />
           ) : (
             <div
               data-testid="mx-links-askclaude"

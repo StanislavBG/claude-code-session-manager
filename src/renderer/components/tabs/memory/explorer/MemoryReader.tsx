@@ -2,8 +2,7 @@ import { memo, useMemo, useState, type ReactNode } from 'react'
 import { Z } from '../../../../lib/zLayers'
 import { renderChatMarkdown } from '../../../../lib/renderChatMarkdown'
 import type { MemoryRow } from './model'
-
-interface DiffLine { sign: '−' | '+' | ' '; text: string }
+import { MemorySuggestionCard, type Suggestion } from './MemorySuggestionCard'
 
 interface Props {
   row: MemoryRow
@@ -21,17 +20,13 @@ interface Props {
   onArchive: () => void
   onRestore: () => void
   onAskDelete: () => void
-  fix: {
-    state: 'idle' | 'checking' | 'proposed'
-    diff: DiffLine[]
-    summary: string
-    action: 'update' | 'delete' | 'fold' | 'keep'
-    reason: string
-    fold: { target: string; anchor: string; insert: string } | null
-  }
+  fix: Suggestion & { state: 'idle' | 'checking' | 'proposed' }
+  /** The editor was opened from Claude's update (Edit first), not from the file. */
+  editingSuggestion?: boolean
   appliedStill?: boolean
   onFix: () => void
   onApplyFix: () => void
+  onEditFirst: () => void
   onDiscardFix: () => void
   onVerify: () => void
 }
@@ -46,20 +41,6 @@ const PROSE =
   '[&_p]:m-0 [&_h4]:mt-1.5 [&_h4]:mb-0 [&_h4]:text-[11px] [&_h4]:tracking-[.08em] [&_h4]:font-semibold [&_h4]:text-accent ' +
   '[&_code]:font-mono [&_code]:text-[12.5px] [&_code]:bg-bg-elev [&_code]:px-1 [&_code]:rounded-[3px] ' +
   '[&_ul]:m-0 [&_ul]:pl-5 [&_ul]:list-disc [&_ol]:m-0 [&_ol]:pl-5 [&_ol]:list-decimal'
-
-const ACTION_UI = {
-  update: { apply: 'Apply', hint: 'Writes the file' },
-  delete: { apply: 'Archive', hint: 'Moves to .archive — undoable' },
-  keep: { apply: 'Mark verified', hint: 'Touches the file, clears age staleness' },
-  fold: { apply: 'Copy for an Epic', hint: 'Memory stays until the doc change lands' },
-} as const
-
-function actionHeader(fix: Props['fix']): string {
-  if (fix.action === 'delete') return 'Suggested: archive this memory'
-  if (fix.action === 'fold') return `Suggested: move into ${fix.fold?.target ?? 'a doc'}`
-  if (fix.action === 'keep') return 'Looks accurate — keep'
-  return 'Suggested update'
-}
 
 function formatSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
@@ -114,9 +95,15 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
             <span data-testid="mx-reader-title" className="truncate font-mono text-[27px] font-semibold tracking-[-0.015em] text-fg">
               {row.slug}
             </span>
-            {p.editing && (
-              <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-butter/50 text-honey-dark">Editing</span>
-            )}
+            {p.editing ? (
+              <span data-testid="mx-reader-pill" className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-butter/50 text-honey-dark">
+                {p.editingSuggestion ? "Editing Claude's update" : 'Editing'}
+              </span>
+            ) : !p.archived && fix.state === 'proposed' ? (
+              <span data-testid="mx-reader-pill" className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-butter/50 text-honey-dark">
+                Suggestion ready
+              </span>
+            ) : null}
           </div>
         </div>
         {!p.archived && (
@@ -238,60 +225,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
       )}
 
       {!p.archived && fix.state === 'proposed' && (
-        <div className="mx-9 mt-3 border border-honey rounded-md overflow-hidden bg-bg-hi">
-          <div className="px-3 py-[9px] bg-butter/40 text-[12.5px] text-honey-dark font-semibold">{actionHeader(fix)}</div>
-          <div className="px-3 py-2 text-[12.5px] text-fg flex flex-col gap-0.5">
-            <span data-testid="mx-reader-summary">{fix.summary}</span>
-            {fix.reason && <span data-testid="mx-reader-reason" className="text-fg-dim">{fix.reason}</span>}
-          </div>
-          {fix.action === 'fold' && fix.fold && (
-            <>
-              <div className="px-3 py-1.5 border-t border-rule-inner text-[11.5px] text-fg-dim font-mono break-all">
-                {fix.fold.target} · {fix.fold.anchor || 'append at end'}
-              </div>
-              {fix.fold.insert.split('\n').map((line, i) => (
-                <div
-                  key={i}
-                  className="grid grid-cols-[20px_1fr] px-3 py-1.5 font-mono text-xs leading-normal border-t border-rule-inner bg-sage/20 text-sage-dark"
-                >
-                  <span>+</span>
-                  <span className="whitespace-pre-wrap break-words">{line}</span>
-                </div>
-              ))}
-            </>
-          )}
-          {fix.action === 'update' && fix.diff.map((d, i) => (
-            <div
-              key={i}
-              className={`grid grid-cols-[20px_1fr] px-3 py-1.5 font-mono text-xs leading-normal border-t border-rule-inner ${
-                d.sign === '−' ? 'bg-accent-muted/30 text-accent-dark' : d.sign === '+' ? 'bg-sage/20 text-sage-dark' : 'text-fg-dim'
-              }`}
-            >
-              <span>{d.sign}</span>
-              <span className="whitespace-pre-wrap break-words">{d.text}</span>
-            </div>
-          ))}
-          <div className="flex gap-2 px-3 py-2.5 border-t border-rule-structural items-center">
-            <button
-              type="button"
-              data-testid="mx-reader-apply"
-              onClick={p.onApplyFix}
-              className="text-xs font-medium h-7 px-3 rounded-[5px] bg-fg text-bg"
-            >
-              {ACTION_UI[fix.action].apply}
-            </button>
-            <button
-              type="button"
-              data-testid="mx-reader-discard"
-              onClick={p.onDiscardFix}
-              className="text-xs font-medium h-7 px-3 rounded-[5px] border border-rule text-fg"
-            >
-              Discard
-            </button>
-            <span className="flex-1" />
-            <span className="text-[11.5px] text-fg-dim">{ACTION_UI[fix.action].hint}</span>
-          </div>
-        </div>
+        <MemorySuggestionCard fix={fix} onApply={p.onApplyFix} onEditFirst={p.onEditFirst} onDiscard={p.onDiscardFix} />
       )}
 
       {row.broken && !row.stale && (

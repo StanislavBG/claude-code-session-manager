@@ -24,24 +24,38 @@ import { ClustersView } from './ClustersView'
 import { SearchPalette } from './SearchPalette'
 import { DeleteMemoryDialog } from './DeleteMemoryDialog'
 import { UndoBar } from './UndoBar'
+import { ACTION_UI, type Suggestion } from './MemorySuggestionCard'
 
 const SCOPE_LS_KEY = 'sm.memoryTab.scope'
 const AGENT_PREFIX = 'agent:'
 
 type Mode = 'read' | 'edit' | 'new'
 type Overlay = 'learn' | 'palette' | 'delete' | null
-interface Fix {
+interface Fix extends Suggestion {
   state: 'idle' | 'checking' | 'proposed'
-  diff: { sign: '−' | '+' | ' '; text: string }[]
-  summary: string
-  action: 'update' | 'delete' | 'fold' | 'keep'
-  reason: string
-  fold: { target: string; anchor: string; insert: string } | null
+  /** Wall time of the check, measured here in the renderer. */
+  elapsedMs: number
 }
 interface UndoMsg { message: string; undo?: () => void }
 
 const NEW_TEMPLATE = 'One-line summary of the fact or rule.\n\n**Why:**\n\n**How to apply:**'
-const IDLE_FIX: Fix = { state: 'idle', diff: [], summary: '', action: 'update', reason: '', fold: null }
+const IDLE_FIX: Fix = { state: 'idle', diff: [], summary: '', action: 'update', reason: '', fold: null, elapsedMs: 0 }
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/** Only facts the proposeFix result itself carries — never inferred ones. */
+function evidenceOf(fix: Fix): string[] {
+  const out = [`Verdict: ${ACTION_UI[fix.action].label.toLowerCase()}`]
+  if (fix.action === 'update') {
+    const removed = fix.diff.filter((d) => d.sign === '−').length
+    const added = fix.diff.filter((d) => d.sign === '+').length
+    out.push(`${plural(removed, 'line')} removed · ${plural(added, 'line')} added`)
+  }
+  if (fix.action === 'fold' && fix.fold) {
+    out.push(`${plural(fix.fold.insert.split('\n').length, 'line')} into ${fix.fold.target}`)
+    out.push(fix.fold.anchor ? `After: ${fix.fold.anchor}` : 'Appended at the end')
+  }
+  return out
+}
 const stem = (s: string): string => s.replace(/\.md$/, '')
 const basename = (p: string | null): string => (p ? p.split(/[\\/]/).filter(Boolean).pop() ?? p : 'workspace')
 
@@ -130,6 +144,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [fix, setFix] = useState<Fix>(IDLE_FIX)
   const [proposed, setProposed] = useState('')
+  const [suggestEdit, setSuggestEdit] = useState(false)
   const [appliedSlug, setAppliedSlug] = useState<string | null>(null)
   const [undo, setUndo] = useState<UndoMsg | null>(null)
   const [askCtx, setAskCtx] = useState<string | null>(null)
@@ -177,6 +192,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const select = useCallback((name: string | null) => {
     setSelected(name)
     setMode('read')
+    setSuggestEdit(false)
     setFix(IDLE_FIX)
     setAppliedSlug(null)
     setOverlay(null)
@@ -187,6 +203,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     setQuery('')
     setOverlay(null)
     setFix(IDLE_FIX)
+    setSuggestEdit(false)
     setMode((m) => (m === 'edit' || m === 'new' ? 'read' : m))
   }, [])
 
@@ -249,6 +266,16 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     if (content === null) return
     setDraft(content)
     setDraftOrig(content)
+    setSuggestEdit(false)
+    setMode('edit')
+  }
+
+  // Edit first: Claude's proposed file is the unsaved value; the file on disk is the baseline the editor marks against.
+  const editFirst = () => {
+    if (content === null || fix.state !== 'proposed' || fix.action !== 'update') return
+    setDraft(proposed)
+    setDraftOrig(content)
+    setSuggestEdit(true)
     setMode('edit')
   }
 
@@ -260,10 +287,12 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     if (current === null) return
     setDraft(current)
     setDraftOrig(current)
+    setSuggestEdit(false)
   }
 
   const leaveEdit = () => {
     if (editDirty && !window.confirm('Discard unsaved changes to this memory?')) return
+    setSuggestEdit(false)
     setMode('read')
   }
 
@@ -279,10 +308,20 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
         select(file)
         say(`Created ${stem(file)}`)
       } else if (mode === 'edit' && selRow) {
-        const ok = await actions.saveFile(selRow.name, draft)
+        const row = selRow
+        const before = draftOrig
+        const fromClaude = suggestEdit
+        const ok = await actions.saveFile(row.name, draft)
         if (!ok) return
         setMode('read')
-        say(`Saved ${selRow.slug}`)
+        setSuggestEdit(false)
+        if (fromClaude) {
+          setFix(IDLE_FIX)
+          setAppliedSlug(row.slug)
+          say(`Applied edited fix to ${row.slug}`, () => { void actions.saveFile(row.name, before) })
+        } else {
+          say(`Saved ${row.slug}`)
+        }
       }
     } finally {
       setSaving(false)
@@ -298,6 +337,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     if (!selRow || content === null) return
     const row = selRow
     setFix({ ...IDLE_FIX, state: 'checking' })
+    const t0 = performance.now()
     const r = await actions.proposeFix(row.name)
     if (!r.ok) { setFix(IDLE_FIX); return }
     setProposed(r.content)
@@ -308,6 +348,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
       action: r.action,
       reason: r.reason,
       fold: r.fold,
+      elapsedMs: performance.now() - t0,
     })
   }
 
@@ -336,12 +377,13 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
       setFix(IDLE_FIX)
       say('Fold copied — paste it into a New Epic')
     } else {
-      const before = stripFront(content)
+      // Undo restores the file byte-for-byte as it was on disk before Apply.
+      const before = content
       const ok = await actions.saveBody(row.name, stripFront(proposed))
       if (!ok) return
       setFix(IDLE_FIX)
       setAppliedSlug(row.slug)
-      say(`Applied fix to ${row.slug}`, () => { void actions.saveBody(row.name, before) })
+      say(`Applied fix to ${row.slug}`, () => { void actions.saveFile(row.name, before) })
     }
   }
 
@@ -420,6 +462,11 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
 
   const ctxName = (slug: string | null): string | undefined =>
     slug ? rows.find((r) => r.slug === slug)?.name ?? `${slug}.md` : undefined
+
+  const check = useMemo(
+    () => (fix.state === 'proposed' ? { elapsedMs: fix.elapsedMs, evidence: evidenceOf(fix) } : null),
+    [fix],
+  )
 
   const counts = useMemo(() => navCounts(rows), [rows])
   const clusterCounts = useMemo(() => {
@@ -625,6 +672,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                     clusterDot={clusterDot(selRow.clusterId)}
                     archived={isArchivedSel}
                     editing={mode === 'edit'}
+                    editingSuggestion={mode === 'edit' && suggestEdit}
                     editor={mode === 'edit' ? (
                       <MemoryEditorPane
                         mode="edit"
@@ -637,6 +685,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                         onSave={() => { void save() }}
                         onCancel={leaveEdit}
                         onRevert={() => { void revertEdit() }}
+                        changedFrom={suggestEdit ? draftOrig : undefined}
                         saving={saving}
                         dirty={editDirty}
                       />
@@ -652,6 +701,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                     appliedStill={appliedSlug === selRow.slug && selRow.stale}
                     onFix={() => { void runFix() }}
                     onApplyFix={() => { void applyFix() }}
+                    onEditFirst={editFirst}
                     onDiscardFix={() => setFix(IDLE_FIX)}
                     onVerify={() => { void verify() }}
                   />
@@ -681,6 +731,8 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 onCheck={() => { void runFix() }}
                 checkBusy={fix.state !== 'idle' || content === null}
                 editing={mode === 'edit'}
+                editingSuggestion={mode === 'edit' && suggestEdit}
+                check={mode === 'edit' ? null : check}
               />
             </div>
           )}

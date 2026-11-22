@@ -114,7 +114,36 @@ const enrichedCwds = new Set<string>()
 /** Unforced `refreshKnownProjects()` calls within this gap of the last finished scan are no-ops. */
 export const KNOWN_PROJECTS_REFRESH_MIN_GAP_MS = 30_000
 
+/**
+ * A folder whose cached `row.lastSession` is within this window of now is
+ * re-listed on every incremental rescan: a folder's directory mtime moves when
+ * a transcript is added or removed, not when one is appended to.
+ */
+export const KNOWN_PROJECTS_ACTIVE_WINDOW_MS = 6 * 60 * 60 * 1000
+
 type ScanMode = 'initial' | 'refresh'
+/** 'full' lists every folder; 'incremental' re-lists only new, changed or recently active ones. */
+type ListingMode = 'full' | 'incremental'
+
+interface FolderListing {
+  /** The folder's mtime from the root listing it was listed under. */
+  dirMtimeMs: number
+  row: ProjectRow
+  /** That folder's newest RECENT_SESSIONS_KEEP transcripts, newest first. */
+  recent: RecentRow[]
+}
+/** encoded folder → its last listing; refilled for every folder a scan lists. */
+const folderCache = new Map<string, FolderListing>()
+/** `Date.now()` taken before the root listing of the last scan that completed; 0 = none. */
+let lastListingStartedAt = 0
+
+function canReuseListing(e: DirEntry, cached: FolderListing | undefined, now: number): cached is FolderListing {
+  if (!cached || lastListingStartedAt === 0) return false
+  if (typeof e.mtimeMs !== 'number' || !Number.isFinite(e.mtimeMs)) return false
+  if (e.mtimeMs >= lastListingStartedAt) return false
+  if (now - cached.row.lastSession <= KNOWN_PROJECTS_ACTIVE_WINDOW_MS) return false
+  return true
+}
 
 function notify() {
   subscribers.forEach((fn) => fn())
@@ -180,30 +209,37 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results
 }
 
-async function runScan(home: string, mode: ScanMode): Promise<void> {
+async function runScan(home: string, mode: ScanMode, listing: ListingMode): Promise<void> {
   const token = ++scanToken
   archivedDuringScan.clear()
   if (mode === 'initial') setState({ loading: true, resolving: true })
   try {
+    const startedAt = Date.now()
     const r = await window.api.config.listDir(`${home}/.claude/projects`, { dirsOnly: true })
     if (token !== scanToken) return
     const entries = r.entries as DirEntry[]
+    const listed = new Set(entries.map((e) => e.name))
+    for (const key of [...folderCache.keys()]) if (!listed.has(key)) folderCache.delete(key)
     const recent: RecentRow[] = []
     const next = await mapWithConcurrency(entries, SCAN_CONCURRENCY, async (e): Promise<ProjectRow> => {
+      const cached = folderCache.get(e.name)
+      if (listing === 'incremental' && canReuseListing(e, cached, startedAt)) {
+        recent.push(...cached.recent)
+        return cached.row
+      }
       const files = await window.api.config.listDir(e.path, { filesOnly: true })
       const jsonl = (files.entries as DirEntry[]).filter((f) => f.name.endsWith('.jsonl'))
-      for (const f of jsonl) {
-        recent.push({
-          sessionId: f.name.replace(/\.jsonl$/, ''),
-          projectEncoded: e.name,
-          path: f.path,
-          mtimeMs: f.mtimeMs,
-          sizeBytes: f.size,
-        })
-      }
+      const folderRecent: RecentRow[] = jsonl.map((f) => ({
+        sessionId: f.name.replace(/\.jsonl$/, ''),
+        projectEncoded: e.name,
+        path: f.path,
+        mtimeMs: f.mtimeMs,
+        sizeBytes: f.size,
+      }))
+      recent.push(...folderRecent)
       const lastSession = jsonl.reduce((m, f) => Math.max(m, f.mtimeMs), 0)
       const sizeBytes = jsonl.reduce((s, f) => s + f.size, 0)
-      return {
+      const row: ProjectRow = {
         encoded: e.name,
         displayPath: candidatePath(e.name),
         sessionCount: jsonl.length,
@@ -211,6 +247,9 @@ async function runScan(home: string, mode: ScanMode): Promise<void> {
         path: e.path,
         sizeBytes,
       }
+      folderRecent.sort((a, b) => b.mtimeMs - a.mtimeMs)
+      folderCache.set(e.name, { dirMtimeMs: e.mtimeMs, row, recent: folderRecent.slice(0, RECENT_SESSIONS_KEEP) })
+      return row
     })
     if (token !== scanToken) return
     const rows = next.filter((row) => !archivedDuringScan.has(row.encoded))
@@ -242,7 +281,10 @@ async function runScan(home: string, mode: ScanMode): Promise<void> {
       })
     }
     await runEnrichment(rows, token, mode, prevLastSession)
-    if (token === scanToken) lastScanFinishedAt = Date.now()
+    if (token === scanToken) {
+      lastScanFinishedAt = Date.now()
+      lastListingStartedAt = startedAt
+    }
   } catch (err) {
     console.error('[useKnownProjects] scan failed:', err)
     if (mode === 'refresh') throw err
@@ -347,6 +389,10 @@ async function runEnrichment(
  * previous data stays published until the new data replaces it. Deduped
  * against any scan in flight; unforced calls within
  * KNOWN_PROJECTS_REFRESH_MIN_GAP_MS of the last finished scan are no-ops.
+ * An unforced rescan re-lists only folders that are new, whose directory mtime
+ * is at or after the previous listing's start, or that were active within
+ * KNOWN_PROJECTS_ACTIVE_WINDOW_MS; the rest reuse `folderCache`. A forced
+ * rescan (the Dashboard's Refresh button) re-lists every folder.
  * No-op before the hook has started a first scan. Rejects when the rescan
  * fails, leaving the previous state untouched.
  */
@@ -354,7 +400,7 @@ export function refreshKnownProjects(opts: { force?: boolean } = {}): Promise<vo
   if (!scannedForHome) return Promise.resolve()
   if (inFlight) return inFlight
   if (!opts.force && Date.now() - lastScanFinishedAt < KNOWN_PROJECTS_REFRESH_MIN_GAP_MS) return Promise.resolve()
-  inFlight = runScan(scannedForHome, 'refresh').finally(() => { inFlight = null })
+  inFlight = runScan(scannedForHome, 'refresh', opts.force ? 'full' : 'incremental').finally(() => { inFlight = null })
   return inFlight
 }
 
@@ -369,6 +415,8 @@ export function __resetKnownProjectsForTests(): void {
   unresolvedSignature.clear()
   archivedDuringScan.clear()
   enrichedCwds.clear()
+  folderCache.clear()
+  lastListingStartedAt = 0
   ownerMap = null
   ownerMapKey = null
 }
@@ -388,7 +436,7 @@ export function useKnownProjects() {
     if (!home) return
     if (scannedForHome === home) return
     scannedForHome = home
-    inFlight = runScan(home, 'initial').finally(() => { inFlight = null })
+    inFlight = runScan(home, 'initial', 'full').finally(() => { inFlight = null })
   }, [home])
 
   const { rows, recentSessions, enriched, loading, resolving } = state

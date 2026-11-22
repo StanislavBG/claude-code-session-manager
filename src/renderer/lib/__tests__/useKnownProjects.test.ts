@@ -7,6 +7,7 @@ import {
   __resetKnownProjectsForTests,
   buildWorktreeOwnerMap,
   CWD_RESOLVE_MAX_BYTES,
+  KNOWN_PROJECTS_ACTIVE_WINDOW_MS,
   KNOWN_PROJECTS_REFRESH_MIN_GAP_MS,
   refreshKnownProjects,
   useKnownProjects,
@@ -104,12 +105,16 @@ function setupFs() {
     rootFail: false,
     /** package.json path → gate; holds that cwd's enrichment until released. */
     jsonGate: {} as Record<string, Promise<void>>,
+    /** folder path → its directory mtime as the root listing reports it (default 1). */
+    dirMtime: {} as Record<string, number>,
   }
   const listDir = vi.fn(async (path: string) => {
     if (path === ROOT) {
       if (ctl.rootGate) await ctl.rootGate
       if (ctl.rootFail) throw new Error('boom')
-      return { entries: Object.keys(folders).map((p) => ({ name: p.slice(ROOT.length + 1), path: p })) }
+      return {
+        entries: Object.keys(folders).map((p) => ({ name: p.slice(ROOT.length + 1), path: p, mtimeMs: ctl.dirMtime[p] ?? 1 })),
+      }
     }
     return { entries: folders[path] ?? [] }
   })
@@ -443,5 +448,102 @@ describe('enrichment stage', () => {
     expect(final['-p-a']).toMatchObject({ cwd: '/p/a', name: 'a' })
     expect(final['-p-c']).toMatchObject({ cwd: '/p/c', name: 'c' })
     act(() => root.unmount())
+  })
+})
+
+describe('incremental listing', () => {
+  const T0 = 100 * KNOWN_PROJECTS_ACTIVE_WINDOW_MS
+  const VISIT = T0 + KNOWN_PROJECTS_REFRESH_MIN_GAP_MS
+  const listingsOf = (fs: ReturnType<typeof setupFs>, dir: string) =>
+    fs.listDir.mock.calls.filter(([p]) => p === dir).length
+
+  async function mountAt(fs: ReturnType<typeof setupFs>) {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(T0)
+    const probe = await mountProbe()
+    now.mockReturnValue(VISIT)
+    return { ...probe, now, baseA: listingsOf(fs, fs.a), baseB: listingsOf(fs, fs.b) }
+  }
+
+  it('does not list an old unchanged folder on an unforced rescan', async () => {
+    const fs = setupFs()
+    const { ref, unmount, baseA, baseB } = await mountAt(fs)
+    const rows = ref.current!.rows
+    await act(async () => { await refreshKnownProjects() })
+    expect(fs.listDir.mock.calls.filter(([p]) => p === ROOT)).toHaveLength(2)
+    expect(listingsOf(fs, fs.a)).toBe(baseA)
+    expect(listingsOf(fs, fs.b)).toBe(baseB)
+    expect(ref.current!.rows).toEqual(rows)
+    unmount()
+  })
+
+  it('lists a folder whose directory mtime moved since the previous listing started', async () => {
+    const fs = setupFs()
+    const { ref, unmount, baseA, baseB } = await mountAt(fs)
+    fs.folders[fs.a].push(file(fs.a, 's9.jsonl', 900))
+    fs.ctl.dirMtime[fs.a] = T0
+    await act(async () => { await refreshKnownProjects() })
+    expect(listingsOf(fs, fs.a)).toBe(baseA + 1)
+    expect(listingsOf(fs, fs.b)).toBe(baseB)
+    expect(ref.current!.recentSessions.map((r) => r.sessionId)).toEqual(['s9', 's2', 's1'])
+    unmount()
+  })
+
+  it('lists a folder active within the 6 h window even when its directory mtime is old', async () => {
+    const fs = setupFs()
+    const recentMs = VISIT - KNOWN_PROJECTS_ACTIVE_WINDOW_MS + 1
+    fs.folders[fs.a] = [file(fs.a, 's1.jsonl', recentMs)]
+    const { ref, unmount, baseA, baseB } = await mountAt(fs)
+    fs.folders[fs.a] = [file(fs.a, 's1.jsonl', recentMs + 5, 99)] // appended: dir mtime unchanged
+    await act(async () => { await refreshKnownProjects() })
+    expect(listingsOf(fs, fs.a)).toBe(baseA + 1)
+    expect(listingsOf(fs, fs.b)).toBe(baseB)
+    expect(ref.current!.rows.find((r) => r.encoded === '-p-a')).toMatchObject({ lastSession: recentMs + 5, sizeBytes: 99 })
+    unmount()
+  })
+
+  it('a forced rescan lists every folder', async () => {
+    const fs = setupFs()
+    const { unmount, baseA, baseB } = await mountAt(fs)
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    expect(listingsOf(fs, fs.a)).toBe(baseA + 1)
+    expect(listingsOf(fs, fs.b)).toBe(baseB + 1)
+    unmount()
+  })
+
+  it('publishes the same rows and recentSessions as a full rescan', async () => {
+    const fs = setupFs()
+    fs.folders[fs.a] = Array.from({ length: 15 }, (_, i) => file(fs.a, `a${i}.jsonl`, 1000 + i * 2))
+    fs.folders[fs.b] = Array.from({ length: 15 }, (_, i) => file(fs.b, `b${i}.jsonl`, 1001 + i * 2))
+    const c = `${ROOT}/-p-c`
+    fs.folders[c] = [file(c, 'c1.jsonl', 5000)]
+    fs.cwdOf[c] = '/p/c'
+    const { ref, unmount, now } = await mountAt(fs)
+    await act(async () => { await refreshKnownProjects() })
+    const incRows = ref.current!.rows
+    const incRecent = ref.current!.recentSessions
+    expect(incRecent).toHaveLength(20)
+    now.mockReturnValue(VISIT + KNOWN_PROJECTS_REFRESH_MIN_GAP_MS)
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    expect(ref.current!.rows).toEqual(incRows)
+    expect(ref.current!.recentSessions).toEqual(incRecent)
+    expect(incRecent[0].sessionId).toBe('c1')
+    unmount()
+  })
+
+  it('drops a folder missing from the root listing from rows, recentSessions and the cache', async () => {
+    const fs = setupFs()
+    const { ref, unmount, now, baseB } = await mountAt(fs)
+    const bFiles = fs.folders[fs.b]
+    delete fs.folders[fs.b]
+    await act(async () => { await refreshKnownProjects() })
+    expect(ref.current!.rows.map((r) => r.encoded)).toEqual(['-p-a'])
+    expect(ref.current!.recentSessions.map((r) => r.projectEncoded)).toEqual(['-p-a'])
+    // Back with an old directory mtime: no cache entry left, so it is listed afresh.
+    fs.folders[fs.b] = bFiles
+    now.mockReturnValue(VISIT + KNOWN_PROJECTS_REFRESH_MIN_GAP_MS)
+    await act(async () => { await refreshKnownProjects() })
+    expect(listingsOf(fs, fs.b)).toBe(baseB + 1)
+    expect(ref.current!.rows.map((r) => r.encoded).sort()).toEqual(['-p-a', '-p-b'])
+    unmount()
   })
 })

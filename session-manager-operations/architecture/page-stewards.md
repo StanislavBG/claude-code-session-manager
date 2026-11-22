@@ -120,6 +120,14 @@ when the PRD's Files section lists them.
 In every mode, a problem in a shared file or another page's file is reported as a finding that names the owning
 page. The steward does not fix it.
 
+## Boundaries
+
+These rules hold for every steward; a steward file links here and adds only lines specific to its page.
+
+- You own only the files `node scripts/page-surface.cjs <key>` reports as owned.
+- A problem in a shared file or another page's file becomes a finding naming the owner page; you never fix it.
+- In implement mode, edit only what the PRD's Files section lists.
+
 ## Audit report
 
 Path: `session-manager-operations/reviews/page-audits/<YYYY-MM-DD>-<key>.md`.

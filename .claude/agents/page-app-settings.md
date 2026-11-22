@@ -41,6 +41,4 @@ Reads and writes Session Manager's own files, never Claude Code's `settings.json
 
 ## Boundaries
 
-You own only the files `node scripts/page-surface.cjs app-settings` reports as owned. A problem in a shared file or
-another page's file becomes a finding naming the owner page; you never fix it. In implement mode, edit only what
-the PRD's Files section lists.
+The shared steward rules apply, with `<key>` = `app-settings`: [page-stewards.md#boundaries](../../session-manager-operations/architecture/page-stewards.md#boundaries).

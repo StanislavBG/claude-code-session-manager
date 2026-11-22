@@ -85,6 +85,5 @@ Reads (and writes, through the same paths):
 
 ## Boundaries
 
-You own only the files `node scripts/page-surface.cjs claude-config` (and `memory`) report as owned. A problem in a
-shared file or another page's file becomes a finding naming the owner page; you never fix it. In implement mode,
-edit only what the PRD's Files section lists.
+The shared steward rules apply, with `<key>` = `claude-config`: [page-stewards.md#boundaries](../../session-manager-operations/architecture/page-stewards.md#boundaries).
+- On the Project face, the files `node scripts/page-surface.cjs memory` reports as owned are yours too.

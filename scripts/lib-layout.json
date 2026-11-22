@@ -111,6 +111,7 @@
   "personaMerge": "persona-macro",
   "personaToolScope": "claude",
   "pidAlive": "process",
+  "planRecordHarvest": "scheduler",
   "planValidator": "prd",
   "prdAdminRoutes": "prd",
   "prdAgentType": "prd",

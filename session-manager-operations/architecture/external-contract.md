@@ -242,14 +242,13 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 | Route | MCP tool | Query / args | Answer |
 | --- | --- | --- | --- |
 | `GET /admin/epics` | `epic_list` | `cwd` (absolute), `state?` (one of the eight states), `limit?` (1–200, default 50), `offset?` (default 0) | `{ ok, epics, total, limit, offset, hasMore }` |
-| `GET /admin/epic` | `epic_get` | `cwd` (optional when `id` is given), exactly one of `id` or `externalRef`, `receipt?` (`1` or `true`; the tool takes a boolean) | `{ ok, epic }` or `404 { ok: false, error: "not found" }` |
+| `GET /admin/epic` | `epic_get` | `cwd` (optional when `id` is given), exactly one of `id` or `externalRef`, `receipt?` (`1` or `true`; the tool takes a boolean) | `{ ok, epic }`, `404 { ok: false, error: "not found" }`, or `409 { ok: false, error: "ambiguous epic id", cwds }` (`id` without `cwd` only) |
 
 - `epic_list` / `GET /admin/epics` lists only **open** Epics (`proposed` or `active`), newest first. When
   `hasMore` is true the tool adds a `note`; ask again with a higher `offset`.
 - `epic_get` / `GET /admin/epic` also finds a **completed** Epic, from its archive.
 - `GET /admin/epic?id=<epicId>` without `cwd` looks the Epic up across the registered projects: none is
-  `404 { ok: false, error: "not found" }`; more than one is `409 { ok: false, error: "ambiguous epic id", cwds }`.
-  `externalRef` always needs `cwd`.
+  `404`; more than one is `409`. `externalRef` always needs `cwd`.
 - A bad query is `400 { ok: false, error: "invalid query", details }`. A `cwd` that is not absolute or has
   no `session-manager-operations/` folder is `400` with the reason. A project Session Manager has never
   opened reads as empty (list) or `404` (get).

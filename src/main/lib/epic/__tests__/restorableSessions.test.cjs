@@ -621,3 +621,77 @@ test('listRecentRestorableSessions skips a project whose read fails and never th
   const broken = await listRecentRestorableSessions({ deps: { homeDir: home, allProjectCwds: () => { throw new Error('boom'); } } });
   expect(broken).toEqual({ sessions: [], projectsRead: 0, truncated: false });
 });
+
+/** Yield to the event loop until `cond()` holds (bounded). */
+async function until(cond) {
+  for (let i = 0; i < 500 && !cond(); i++) await new Promise((r) => setImmediate(r));
+  expect(cond()).toBe(true);
+}
+
+for (const order of ['complete-first', 'incomplete-first']) {
+  test(`two overlapping list calls of one cwd each act on their own claim scan (${order})`, async () => {
+    const file = writeArchive('epic-a', uuid(1), T0);
+    writeSession(uuid(1), { mtimeSec: T0 + 2 });
+    writeSession(uuid(2), { mtimeSec: T0 + 1 }); // unclaimed
+    const realAsync = fs.promises.readFile;
+    const content = fs.readFileSync(file, 'utf8');
+    /** @type {{ resolve: (v: string) => void, reject: (e: Error) => void }[]} */
+    const pending = [];
+    vi.spyOn(fs.promises, 'readFile').mockImplementation((p, ...rest) => {
+      if (String(p) !== file) return realAsync.call(fs.promises, p, ...rest);
+      return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+    });
+
+    const a = list(); // scan A: its archive read fails, then its retry fails
+    const b = list(); // scan B: its archive read succeeds
+    await until(() => pending.length === 2);
+    const [a1, b1] = pending;
+    a1.reject(ioError());
+    await until(() => pending.length === 3);
+    const a2 = pending[2];
+    if (order === 'complete-first') { b1.resolve(content); a2.reject(ioError()); }
+    else { a2.reject(ioError()); b1.resolve(content); }
+
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra).toEqual({ sessions: [], hiddenClaimed: 0, scanned: 0, truncated: false });
+    expect(ids(rb)).toEqual([uuid(2)]);
+    expect(rb.hiddenClaimed).toBe(1);
+  });
+}
+
+/** ENOENT as fs raises it for a file removed since readdir listed it. */
+const goneError = () => Object.assign(new Error('ENOENT: no such file or directory, open'), { code: 'ENOENT' });
+
+test('an archived Epic file gone between readdir and read (ENOENT) claims nothing, is not incomplete and is not retried, sync', () => {
+  const file = writeArchive('epic-a', uuid(1), T0);
+  writeSession(uuid(1));
+  const realSync = fs.readFileSync;
+  const readFileSync = vi.spyOn(fs, 'readFileSync').mockImplementation((p, ...rest) => {
+    if (String(p) === file) throw goneError();
+    return realSync.call(fs, p, ...rest);
+  });
+  expect(check(uuid(1))).toEqual({ ok: true, transcriptPath: transcript(uuid(1)) });
+  expect(archiveReads(readFileSync)).toEqual(['epic-a.json']);
+  __resetCacheForTests();
+  readFileSync.mockClear();
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([]);
+  expect(archiveReads(readFileSync)).toEqual(['epic-a.json']);
+});
+
+test('an archived Epic file gone between readdir and read (ENOENT) claims nothing, is not incomplete and is not retried, async', async () => {
+  const file = writeArchive('epic-a', uuid(1), T0);
+  writeSession(uuid(1));
+  const realAsync = fs.promises.readFile;
+  const readFile = vi.spyOn(fs.promises, 'readFile').mockImplementation(async (p, ...rest) => {
+    if (String(p) === file) throw goneError();
+    return realAsync.call(fs.promises, p, ...rest);
+  });
+  const r = await list();
+  expect(ids(r)).toEqual([uuid(1)]);
+  expect(r.hiddenClaimed).toBe(0);
+  expect(archiveReads(readFile)).toEqual(['epic-a.json']);
+  __resetCacheForTests();
+  readFile.mockClear();
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([]);
+  expect(archiveReads(readFile)).toEqual(['epic-a.json']);
+});

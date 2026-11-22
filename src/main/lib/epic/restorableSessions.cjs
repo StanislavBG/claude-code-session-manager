@@ -116,9 +116,16 @@ const LATE_ROW_HINTS = ['"last-prompt"', '"custom-title"', '"summary"'];
 
 /**
  * One cwd's claimed-id memo. The sync and the async reader both read and write it.
- * `incomplete`: an archived Epic file could not be read even on retry during
- * the scan that wrote this entry, so its id set may miss a claim.
- * @typedef {{ indexKey: string, indexIds: string[], files: Map<string, ArchiveRec>, incomplete: boolean }} ClaimedEntry
+ * Completeness is not stored here: each scan returns its own (ClaimScan), so a
+ * concurrent scan of the same cwd overwriting this entry cannot change what
+ * another scan's caller acts on.
+ * @typedef {{ indexKey: string, indexIds: string[], files: Map<string, ArchiveRec> }} ClaimedEntry
+ */
+
+/**
+ * One claim scan's result. `incomplete`: an archived Epic file could not be
+ * read even on retry during this scan, so `ids` may miss a claim.
+ * @typedef {{ ids: Set<string>, incomplete: boolean }} ClaimScan
  */
 
 /** @type {Map<string, ClaimedEntry>} */
@@ -366,17 +373,6 @@ function archiveRec(key, read, onUnreadable) {
 }
 
 /**
- * Whether the last claim scan of `cwd` (by either reader) left an archived
- * Epic file unread, so its id set may be missing a claim.
- * @param {string} cwd
- * @returns {boolean}
- */
-function claimScanIncomplete(cwd) {
-  const entry = claimedCache.get(cwd);
-  return !!(entry && entry.incomplete);
-}
-
-/**
  * Store `entry` as `cwd`'s memo and return the ids it claims.
  * @param {string} cwd
  * @param {ClaimedEntry} entry
@@ -402,8 +398,18 @@ function commitClaimed(cwd, entry) {
  * @returns {Set<string>}
  */
 function claimedClaudeSessionIds(cwd, deps) {
+  return scanClaimedSync(cwd, deps).ids;
+}
+
+/**
+ * claimedClaudeSessionIds plus this scan's own completeness.
+ * @param {string} cwd
+ * @param {RestorableDeps} [deps]
+ * @returns {ClaimScan}
+ */
+function scanClaimedSync(cwd, deps) {
   const dir = promptSessionsDirOf(cwd);
-  if (!dir) return new Set();
+  if (!dir) return { ids: new Set(), incomplete: false };
   const d = deps || {};
   const prev = claimedCache.get(cwd);
   const indexKey = statKey(path.join(dir, ACTIVE_INDEX));
@@ -432,7 +438,7 @@ function claimedClaudeSessionIds(cwd, deps) {
     if (read.io) read = readArchiveSync(file); // one immediate retry
     files.set(name, archiveRec(key, read, markIncomplete));
   }
-  return commitClaimed(cwd, { indexKey, indexIds, files, incomplete });
+  return { ids: commitClaimed(cwd, { indexKey, indexIds, files }), incomplete };
 }
 
 /**
@@ -447,8 +453,18 @@ function claimedClaudeSessionIds(cwd, deps) {
  * @returns {Promise<Set<string>>}
  */
 async function claimedClaudeSessionIdsAsync(cwd, deps) {
+  return (await scanClaimedAsync(cwd, deps)).ids;
+}
+
+/**
+ * claimedClaudeSessionIdsAsync plus this scan's own completeness.
+ * @param {string} cwd
+ * @param {RestorableDeps} [deps]
+ * @returns {Promise<ClaimScan>}
+ */
+async function scanClaimedAsync(cwd, deps) {
   const dir = promptSessionsDirOf(cwd);
-  if (!dir) return new Set();
+  if (!dir) return { ids: new Set(), incomplete: false };
   const d = deps || {};
   const prev = claimedCache.get(cwd);
   const indexKey = await statKeyAsync(path.join(dir, ACTIVE_INDEX));
@@ -480,7 +496,7 @@ async function claimedClaudeSessionIdsAsync(cwd, deps) {
   /** @type {Map<string, ArchiveRec>} */
   const files = new Map();
   names.forEach((name, k) => files.set(name, recs[k])); // readdir order, as the sync reader
-  return commitClaimed(cwd, { indexKey, indexIds, files, incomplete });
+  return { ids: commitClaimed(cwd, { indexKey, indexIds, files }), incomplete };
 }
 
 /**
@@ -734,10 +750,13 @@ async function listRestorableSessions({ cwd, limit = DEFAULT_LIMIT, deps } = { c
   const candidates = await statCandidates(dir, names.filter(isTranscriptName));
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
 
-  const claimed = lowerSet(await claimedClaudeSessionIdsAsync(projectCwd, d));
+  const scan = await scanClaimedAsync(projectCwd, d);
   // An Epic file that could not be read may own any candidate: list nothing
   // for this call rather than offer an Epic-owned session. The next call retries.
-  if (claimScanIncomplete(projectCwd)) return result;
+  // Decided from this scan's own result, never the shared memo (a concurrent
+  // scan of this cwd may have overwritten it during the await).
+  if (scan.incomplete) return result;
+  const claimed = lowerSet(scan.ids);
   /** @type {Candidate[]} */
   const open = [];
   for (const c of candidates) {
@@ -937,8 +956,9 @@ function checkRestorableSessionSync(cwd, sessionId, deps) {
       ? `Session ${sessionId} in ${dir} records no cwd in its first 64 KiB, so it cannot be shown to belong to ${projectCwd}.`
       : `Session ${sessionId} in ${dir} was recorded in ${recordedCwd}, not ${projectCwd}.`);
   }
-  const claimed = lowerSet(claimedClaudeSessionIds(projectCwd, d));
-  if (claimScanIncomplete(projectCwd)) {
+  const scan = scanClaimedSync(projectCwd, d);
+  const claimed = lowerSet(scan.ids);
+  if (scan.incomplete) {
     return refuse('claim_check_unreadable', `Cannot restore session ${sessionId} in ${dir} yet: the claim check could not read an Epic file in ${projectCwd}, so it cannot rule out that an Epic already owns this session. Try again.`);
   }
   if (claimed.has(sessionId.toLowerCase())) {

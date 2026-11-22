@@ -8,7 +8,7 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { seedDemoVideoKit, KIT_FILES, KIT_VERSION, kitDestDir } = require('../seedKit.cjs');
+const { seedDemoVideoKit, KIT_FILES, KIT_VERSION, KIT_DIGEST, kitDigest, kitDestDir } = require('../seedKit.cjs');
 
 const tmp = [];
 afterEach(() => {
@@ -79,8 +79,44 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 2 (bed NaN fix must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('2');
+test('KIT_VERSION is bumped to 3 (own-playback-controls check must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('3');
+});
+
+test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {
+  const actual = kitDigest(path.join(__dirname, '..'));
+  expect(
+    actual,
+    `A demo-video kit file changed but KIT_DIGEST did not. Bump KIT_VERSION in seedKit.cjs (so installed kits are refreshed) and update KIT_DIGEST to '${actual}'.`,
+  ).toBe(KIT_DIGEST);
+});
+
+test('kitDigest is sha256 over sorted relative path + NUL + bytes, and changes when a file changes', () => {
+  const crypto = require('node:crypto');
+  const { srcDir } = setup();
+  const h = crypto.createHash('sha256');
+  for (const f of [...KIT_FILES].sort()) {
+    h.update(f); h.update(Buffer.from([0])); h.update(fs.readFileSync(path.join(srcDir, f)));
+  }
+  const expected = h.digest('hex');
+  expect(kitDigest(srcDir)).toBe(expected);
+  fs.writeFileSync(path.join(srcDir, 'checks.cjs'), '// changed\n');
+  expect(kitDigest(srcDir)).not.toBe(expected);
+});
+
+test('a stamp-2 install with a stale checks.cjs is refreshed to the real source and stamped 3', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-v2-'));
+  tmp.push(root);
+  const destDir = path.join(root, 'kit');
+  fs.mkdirSync(destDir, { recursive: true });
+  const srcDir = path.join(__dirname, '..');
+  for (const f of KIT_FILES) fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
+  fs.writeFileSync(path.join(destDir, 'checks.cjs'), '// stale v2 checks without own-playback-controls\n');
+  fs.writeFileSync(path.join(destDir, 'KIT_VERSION'), '2\n');
+  const r = await seedDemoVideoKit({ logger: quiet, destDir });
+  expect(r).toEqual({ seeded: true, reason: 'updated' });
+  expect(fs.readFileSync(path.join(destDir, 'checks.cjs'))).toEqual(fs.readFileSync(path.join(srcDir, 'checks.cjs')));
+  expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe('3');
 });
 
 test('every seeded kit file loads standalone from a copied kit folder', async () => {

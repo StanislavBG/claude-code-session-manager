@@ -23,6 +23,22 @@
  *   A req/res 'close' before the reply aborts the wait or the run
  *   ('caller_gone'); the route disables the socket timeout (runs are long).
  *
+ *   GET /admin/tasks?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=
+ *     → { ok, tasks, total, hasMore } from taskLedger.listTasks. Each task has
+ *     exactly TASK_FIELDS (no prompt/output text). Works whatever the switch.
+ *   GET /admin/task?cwd=&id=
+ *     → { ok, task } — TASK_FIELDS plus prompt, output, stderrTail, envelope
+ *     (and the truncation flags) from the body file; 404 unknown_task.
+ *   POST /admin/tasks/import  (body ≤ 8 MiB)
+ *     { cwd, records: 1-100 } — direct `claude -p` calls a caller made while
+ *     Session Manager was down. 403 tasks_disabled when the switch is off.
+ *     Each record is validated on its own and recorded with
+ *     taskLedger.appendImported (source 'direct'); a known (cwd, importId) is
+ *     skipped. costUsd is recomputed with costOfUsage when usage is present
+ *     (the caller's figure is kept as cliCostUsd).
+ *     → { ok, imported, alreadyImported, rejected: [{ index, error }] }.
+ *   Read and import routes take a cwd that must be a project root (400).
+ *
  * No caller environment variable ever reaches the child (buildTaskEnv adds
  * only the Task markers to process.env). Auth/loopback binding are the
  * injected localAdminHttp.cjs transport's job (see index.cjs).
@@ -37,6 +53,8 @@ const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { resolveProjectRoot } = require('../opsOwnership.cjs');
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_IMPORT_BODY_BYTES = 8 * 1024 * 1024;
+const MAX_IMPORT_RECORDS = 100;
 const MAX_SYSTEM_PROMPT_BYTES = 100 * 1024;
 const SWITCH_HINT = "Turn on 'Scripts may run Tasks' for this project on the Scheduler → Tasks page (a human-only switch).";
 
@@ -81,6 +99,96 @@ const bodySchema = z.object({
   }).strict().default({}),
   runtime: runtimeSchema.default({ outputFormat: 'json' }),
 }).strict();
+
+/** Outcome statuses an imported record may carry: the ledger's end statuses (taskRun + route). */
+const IMPORT_STATUSES = /** @type {const} */ ([
+  'ok', 'error', 'rate_limited', 'timeout', 'spawn_failed', 'caller_gone', 'slot_timeout', 'too_many_waiting', 'interrupted',
+]);
+
+/** The keys of one Task in GET /admin/tasks (and the summary part of GET /admin/task). */
+const TASK_FIELDS = Object.freeze([
+  'taskId', 'source', 'importId', 'importedAt', 'agent', 'missionId', 'model', 'effort', 'priority', 'caller',
+  'outputFormat', 'timeoutSec', 'slotWaitSec', 'sessionId', 'persisted', 'startedAt', 'endedAt', 'status',
+  'exitCode', 'signal', 'durationMs', 'slotWaitMs', 'usage', 'costUsd', 'cliCostUsd', 'numTurns', 'quota',
+  'promptBytes', 'promptSha256', 'outputBytes', 'outputSha256',
+]);
+
+/** @param {Record<string, any>} t a folded ledger Task → exactly TASK_FIELDS (missing → null). */
+function publicTask(t) {
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const k of TASK_FIELDS) out[k] = t[k] === undefined ? null : t[k];
+  if (!out.source) out.source = 'sm';
+  if (out.caller == null) out.caller = {};
+  out.persisted = t.persisted === true;
+  return out;
+}
+
+const isoDate = z.string().refine((s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && Number.isFinite(Date.parse(s)), { message: 'must be an ISO date' });
+
+const listQuerySchema = z.object({
+  cwd: z.string().min(1),
+  since: isoDate.optional(),
+  until: isoDate.optional(),
+  pipeline: z.string().max(200).optional(),
+  runId: z.string().max(200).optional(),
+  step: z.string().max(200).optional(),
+  agent: z.string().max(200).optional(),
+  status: z.string().max(100).optional(),
+  source: z.enum(['sm', 'direct']).optional(),
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(200)).optional(),
+  offset: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(0)).optional(),
+}).strict();
+
+const getQuerySchema = z.object({
+  cwd: z.string().min(1),
+  id: z.string().min(1).max(200),
+}).strict();
+
+const callerSchema = z.object({
+  pipeline: z.string().max(200).optional(),
+  runId: z.string().max(200).optional(),
+  step: z.string().max(200).optional(),
+  attempt: z.number().int().min(0).optional(),
+}).strict();
+
+const usageNumber = z.number().int().min(0).optional();
+const importRecordSchema = z.object({
+  importId: z.string().min(1).max(200),
+  agent: z.string().min(1).max(200).optional(),
+  model: z.string().min(1).max(200),
+  effort: z.string().min(1).max(50).optional(),
+  missionId: z.string().min(1).max(200),
+  caller: callerSchema.optional(),
+  startedAt: isoDate,
+  durationMs: z.number().int().min(0),
+  status: z.enum(IMPORT_STATUSES),
+  exitCode: z.number().int().nullable().optional(),
+  usage: z.object({
+    input_tokens: usageNumber,
+    output_tokens: usageNumber,
+    cache_read_input_tokens: usageNumber,
+    cache_creation_input_tokens: usageNumber,
+  }).passthrough().optional(),
+  costUsd: z.number().min(0).nullable().optional(),
+  sessionId: z.string().uuid().optional(),
+  persisted: z.boolean().optional(),
+  prompt: z.string().optional(),
+  output: z.string().optional(),
+  envelope: z.unknown().optional(),
+}).strict().refine((r) => r.persisted !== true || Boolean(r.sessionId), { message: 'persisted: true needs a sessionId' });
+
+const importBodySchema = z.object({
+  cwd: z.string().min(1),
+  records: z.array(z.unknown()).min(1).max(MAX_IMPORT_RECORDS),
+}).strict();
+
+/** First zod issue as one line: "<path>: <message>". */
+function issueText(/** @type {any} */ error) {
+  const i = error && error.issues && error.issues[0];
+  if (!i) return 'invalid record';
+  return `${i.path && i.path.length ? `${i.path.join('.')}: ` : ''}${i.message}`;
+}
 
 /**
  * Default persona resolution — the spawn-time resolvers chatRunner.cjs uses.
@@ -370,6 +478,164 @@ function registerAdminRoute(adminHttp, deps = {}) {
       res.removeListener('close', onClose);
     }
   });
+
+  /** @returns {string} the project root, or throws when `cwd` is not one. */
+  const rootOf = (/** @type {string} */ cwd) => {
+    const root = projectRoot(cwd, { opsInternal: 'refuse' });
+    if (path.resolve(root) !== path.resolve(cwd)) throw new Error(`cwd is not a project root (its root is "${root}")`);
+    return root;
+  };
+
+  adminHttp.registerRoute('GET', '/admin/tasks', async (/** @type {any} */ _req, /** @type {any} */ res, /** @type {any} */ query) => {
+    const parsed = listQuerySchema.safeParse(Object.fromEntries(query ?? []));
+    if (!parsed.success) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: parsed.error.issues });
+      return;
+    }
+    const { cwd: rawCwd, ...filters } = parsed.data;
+    let cwd;
+    try { cwd = rootOf(rawCwd); } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    try {
+      const r = await ledger().listTasks(cwd, { ...filters, now: now() });
+      sendJson(res, 200, { ok: true, tasks: r.tasks.map(publicTask), total: r.total, hasMore: r.hasMore });
+    } catch (e) {
+      sendJson(res, 500, { ok: false, error: 'ledger_read_failed', details: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  adminHttp.registerRoute('GET', '/admin/task', async (/** @type {any} */ _req, /** @type {any} */ res, /** @type {any} */ query) => {
+    const parsed = getQuerySchema.safeParse(Object.fromEntries(query ?? []));
+    if (!parsed.success) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: parsed.error.issues });
+      return;
+    }
+    let cwd;
+    try { cwd = rootOf(parsed.data.cwd); } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    let t;
+    try {
+      t = await ledger().getTask(cwd, parsed.data.id, { now: now() });
+    } catch (e) {
+      sendJson(res, 500, { ok: false, error: 'ledger_read_failed', details: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    if (!t) {
+      sendJson(res, 404, { ok: false, error: 'unknown_task', id: parsed.data.id });
+      return;
+    }
+    const body = t.body || {};
+    sendJson(res, 200, {
+      ok: true,
+      task: {
+        ...publicTask(t),
+        prompt: typeof body.prompt === 'string' ? body.prompt : null,
+        promptTruncated: body.promptTruncated === true,
+        output: typeof body.output === 'string' ? body.output : null,
+        outputTruncated: body.outputTruncated === true,
+        stderrTail: typeof body.stderrTail === 'string' ? body.stderrTail : null,
+        envelope: body.envelope === undefined ? null : body.envelope,
+      },
+    });
+  });
+
+  /** project root → tail of its import chain: concurrent imports of one project run one at a time (dedupe stays exact). */
+  const importChains = new Map();
+
+  adminHttp.registerRoute('POST', '/admin/tasks/import', async (/** @type {any} */ req, /** @type {any} */ res) => {
+    let raw;
+    try {
+      raw = await readBody(req, MAX_IMPORT_BODY_BYTES);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    let json;
+    try { json = JSON.parse(raw || '{}'); } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: 'body is not valid JSON' });
+      return;
+    }
+    const parsed = importBodySchema.safeParse(json);
+    if (!parsed.success) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: parsed.error.issues });
+      return;
+    }
+    let cwd;
+    try { cwd = rootOf(parsed.data.cwd); } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid_request', details: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    if (!taskSwitch().isTaskSwitchOn(cwd)) {
+      sendJson(res, 403, { ok: false, error: 'tasks_disabled', hint: SWITCH_HINT });
+      return;
+    }
+
+    const work = async () => {
+      let imported = 0;
+      let alreadyImported = 0;
+      /** @type {{ index: number, error: string }[]} */
+      const rejected = [];
+      const seen = new Set();
+      const records = parsed.data.records;
+      for (let index = 0; index < records.length; index += 1) {
+        const r = importRecordSchema.safeParse(records[index]);
+        if (!r.success) { rejected.push({ index, error: issueText(r.error) }); continue; }
+        const rec = r.data;
+        try {
+          if (seen.has(rec.importId) || await ledger().hasImport(cwd, rec.importId)) {
+            alreadyImported += 1;
+            continue;
+          }
+          seen.add(rec.importId);
+          const startedMs = Date.parse(rec.startedAt);
+          const priced = rec.usage ? costFor(rec.model, { usage: rec.usage }, costOfUsage) : null;
+          const callerCost = typeof rec.costUsd === 'number' ? rec.costUsd : null;
+          await ledger().appendImported(cwd, {
+            taskId: newId(),
+            importId: rec.importId,
+            importedAt: new Date(now()).toISOString(),
+            agent: rec.agent ?? null,
+            missionId: rec.missionId,
+            model: rec.model,
+            effort: rec.effort ?? null,
+            caller: rec.caller ?? {},
+            startedAt: new Date(startedMs).toISOString(),
+            endedAt: new Date(startedMs + rec.durationMs).toISOString(),
+            durationMs: rec.durationMs,
+            status: rec.status,
+            exitCode: rec.exitCode ?? null,
+            usage: rec.usage ?? null,
+            costUsd: rec.usage ? (priced ?? callerCost) : callerCost,
+            cliCostUsd: callerCost,
+            sessionId: rec.sessionId ?? null,
+            persisted: rec.persisted === true,
+            prompt: rec.prompt ?? '',
+            output: rec.output ?? '',
+            envelope: rec.envelope === undefined ? null : rec.envelope,
+          });
+          imported += 1;
+        } catch (e) {
+          rejected.push({ index, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return { ok: true, imported, alreadyImported, rejected };
+    };
+
+    const prev = importChains.get(cwd) || Promise.resolve();
+    const next = prev.catch(() => {}).then(work);
+    importChains.set(cwd, next);
+    try {
+      sendJson(res, 200, await next);
+    } catch (e) {
+      sendJson(res, 500, { ok: false, error: 'import_failed', details: e instanceof Error ? e.message : String(e) });
+    } finally {
+      if (importChains.get(cwd) === next) importChains.delete(cwd);
+    }
+  });
 }
 
-module.exports = { registerAdminRoute, MAX_BODY_BYTES };
+module.exports = { registerAdminRoute, MAX_BODY_BYTES, MAX_IMPORT_BODY_BYTES, TASK_FIELDS, IMPORT_STATUSES };

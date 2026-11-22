@@ -74,7 +74,7 @@ function setup(over = {}) {
     ...over,
   };
   let handler;
-  registerAdminRoute({ registerRoute: (m, u, h) => { expect(`${m} ${u}`).toBe('POST /admin/tasks'); handler = h; } }, deps);
+  registerAdminRoute({ registerRoute: (m, u, h) => { if (`${m} ${u}` === 'POST /admin/tasks') handler = h; } }, deps);
   const call = async (body, { res = fakeRes(), req = fakeReq(body) } = {}) => {
     await handler(req, res);
     return res;

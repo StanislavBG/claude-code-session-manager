@@ -53,6 +53,9 @@ const CONTRACT = deepFreeze({
     { method: 'POST', path: '/admin/needs-you/withdraw' },
     { method: 'GET', path: '/admin/needs-you' },
     { method: 'POST', path: '/admin/tasks' },
+    { method: 'GET', path: '/admin/tasks' },
+    { method: 'GET', path: '/admin/task' },
+    { method: 'POST', path: '/admin/tasks/import' },
   ],
   tools: {
     feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
@@ -85,6 +88,13 @@ const CONTRACT = deepFreeze({
   ],
   // Keys of a needs_you_answered row (feedback-remote/needsYouIpc.cjs) as readEventsAfter returns it; externalRef only when the item has one.
   needsYouAnsweredFields: ['at', 'kind', 'app', 'id', 'answer', 'externalRef'],
+  // Keys of one Task in GET /admin/tasks (tasks/taskAdminRoutes.cjs TASK_FIELDS); GET /admin/task adds the text fields.
+  taskFields: [
+    'taskId', 'source', 'importId', 'importedAt', 'agent', 'missionId', 'model', 'effort', 'priority', 'caller',
+    'outputFormat', 'timeoutSec', 'slotWaitSec', 'sessionId', 'persisted', 'startedAt', 'endedAt', 'status',
+    'exitCode', 'signal', 'durationMs', 'slotWaitMs', 'usage', 'costUsd', 'cliCostUsd', 'numTurns', 'quota',
+    'promptBytes', 'promptSha256', 'outputBytes', 'outputSha256',
+  ],
   eventKinds: ['epic_state_changed', 'job_transition', 'epic_cross_project_reply', 'needs_you_answered'],
   adminApiFields: ['port', 'token', 'appVersion', 'contractVersion'],
 });
@@ -105,8 +115,8 @@ function contractFingerprint() {
 
 /** Fingerprint recorded for each contract version. */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks), so its fingerprint was replaced, not bumped.
-  1: 'ef00d8f637d0b4e138b7b245e1702acc4834a235dec7976a76c582d25589e0e6',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields), so its fingerprint was replaced, not bumped.
+  1: '72d82612f96cf080e2fc49247e755afe2c2a700085b3d35ec5ade30afe6b8ed6',
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

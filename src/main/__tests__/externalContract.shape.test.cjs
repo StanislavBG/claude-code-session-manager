@@ -328,3 +328,37 @@ test('a needs_you_answered event read back carries only needsYouAnsweredFields',
   expect(events[0]).toMatchObject({ kind: 'needs_you_answered', app: 'portfolio', id: 'q-2', answer: 'yes', externalRef: 'portfolio:action-2' });
   expect(Object.keys(events[0]).sort()).toEqual([...CONTRACT.needsYouAnsweredFields].sort());
 });
+
+// ── Task keys from the real GET /admin/tasks route over a real ledger ──
+
+test('the Task routes are registered and a Task from GET /admin/tasks has exactly taskFields', async () => {
+  const { registerAdminRoute, TASK_FIELDS } = require('../lib/tasks/taskAdminRoutes.cjs');
+  const ledger = require('../lib/tasks/taskLedger.cjs');
+  const handlers = new Map();
+  const cwd = await mkTmp('sm-contract-tasks-cwd-');
+  registerAdminRoute({ registerRoute: (m, p, h) => { handlers.set(`${m} ${p}`, h); } }, { resolveProjectRoot: (c) => c });
+  const listed = CONTRACT.routes.filter((r) => r.path.startsWith('/admin/task')).map((r) => `${r.method} ${r.path}`);
+  expect(listed.sort()).toEqual(['GET /admin/task', 'GET /admin/tasks', 'POST /admin/tasks', 'POST /admin/tasks/import']);
+  for (const r of listed) expect(handlers.has(r), r).toBe(true);
+  expect([...TASK_FIELDS]).toEqual([...CONTRACT.taskFields]);
+
+  const prevHomedir = os.homedir;
+  const home = await mkTmp('sm-contract-tasks-home-');
+  os.homedir = () => home;
+  try {
+    await ledger.appendTaskStart(cwd, { taskId: 't-1', startedAt: new Date().toISOString(), agent: 'dev-lead', model: 'm', prompt: 'p' });
+    await ledger.appendTaskEnd(cwd, { taskId: 't-1', status: 'ok', output: 'o' });
+    const res = {
+      statusCode: 0, body: '',
+      writeHead(code) { this.statusCode = code; return this; },
+      end(chunk) { if (chunk) this.body += String(chunk); },
+    };
+    await handlers.get('GET /admin/tasks')({}, res, new URLSearchParams({ cwd }));
+    expect(res.statusCode).toBe(200);
+    const { tasks } = JSON.parse(res.body);
+    expect(tasks).toHaveLength(1);
+    expect(Object.keys(tasks[0])).toEqual([...CONTRACT.taskFields]);
+  } finally {
+    os.homedir = prevHomedir;
+  }
+});

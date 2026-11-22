@@ -639,6 +639,32 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
 - `status` in a `200` is the run's outcome: `ok`, `error`, `rate_limited`, `timeout`, `spawn_failed`. Closing
   the connection before the answer cancels the wait or the run (ledger status `caller_gone`).
 
+### Reading Tasks and importing direct calls
+
+| Route | Query / body | Answer |
+| --- | --- | --- |
+| `GET /admin/tasks` | `?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=` | `200 { ok: true, tasks, total, hasMore }` |
+| `GET /admin/task` | `?cwd=&id=` | `200 { ok: true, task }` |
+| `POST /admin/tasks/import` | `{ cwd, records: [...] }` (1-100 records, body ≤ 8 MiB) | `200 { ok: true, imported, alreadyImported, rejected: [{ index, error }] }` |
+
+- `cwd` must be the absolute project root (`400 invalid_request` otherwise). The two read routes work whatever
+  the switch state; the import route answers `403 tasks_disabled` when it is off.
+- `GET /admin/tasks`: newest first. `since`/`until` are inclusive ISO timestamps; `pipeline`/`runId`/`step`
+  match `caller`; `source` is `sm` (run by Session Manager) or `direct` (imported, shown as "ran without SM");
+  `limit` 1-200 (default 50), `offset` ≥ 0. Each task has exactly the `taskFields` keys of
+  `externalContract.cjs` (absent values are `null`) and never prompt or output text.
+- `GET /admin/task` adds `prompt`, `promptTruncated`, `output`, `outputTruncated`, `stderrTail`, `envelope`
+  (each text capped at 1 MiB). An unknown id answers `404 unknown_task`.
+- Import hands over the `claude -p` calls a caller made itself while Session Manager was down. A record is
+  `{ importId, agent?, model, effort?, missionId, caller?, startedAt (ISO), durationMs, status, exitCode?,
+  usage?, costUsd?, sessionId? (uuid), persisted?, prompt?, output?, envelope? }`; `status` is one of `ok`,
+  `error`, `rate_limited`, `timeout`, `spawn_failed`, `caller_gone`, `slot_timeout`, `too_many_waiting`,
+  `interrupted`. Unknown keys are rejected. Each record is checked on its own: a bad one lands in `rejected`
+  and the rest are recorded. A `(cwd, importId)` already recorded (or repeated in the batch) counts as
+  `alreadyImported` — a retry is safe. With `usage`, `costUsd` is recomputed from Session Manager's prices
+  (your figure is kept as `cliCostUsd`). `persisted: true` needs a `sessionId`; that session is then skipped
+  by History like a persisted Task.
+
 ## 8. Not part of the contract
 
 Do not build on these. They change without a version bump.

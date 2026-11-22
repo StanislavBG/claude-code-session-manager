@@ -314,10 +314,10 @@ describe('ProjectClaudeConfig', () => {
     expect(panel('settings')).not.toBeNull()
     expect(q('project-claude-config-source')).toBeNull()
     expect(q('settings-file-project')?.getAttribute('aria-checked')).toBe('true')
-    expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`])
+    expect(chips()).toEqual([])
     await pickLocal()
     expect(q('settings-file-local')?.getAttribute('aria-checked')).toBe('true')
-    expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`])
+    expect(chips()).toEqual([])
 
     await pick('MCP')
     expect(panel('mcp')).not.toBeNull()
@@ -369,22 +369,22 @@ describe('ProjectClaudeConfig', () => {
     expect(useConfig.getState().files[MD]?.dirty).toBe(true)
   })
 
-  it('Settings tab shows SettingsEpicIsolation once, under a SourceChip naming its real file', async () => {
+  it('Settings tab has no Epic isolation strip above the page; it is a rail entry naming its real file', async () => {
     await mount()
     await pick('Settings')
-    const section = q('project-claude-config-epic-isolation')
-    expect(section).not.toBeNull()
-    const chip = section!.querySelector('[data-testid="source-chip-path"]')!
-    const card = section!.querySelector('[data-testid="settings-epic-isolation"]')!
-    expect(chip.textContent).toBe(`${SHORT}/${EPIC_CFG}`)
-    expect(chip.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(q('project-claude-config-epic-isolation')).toBeNull()
+    expect(q('settings-epic-isolation')).toBeNull()
+    expect(chips()).toEqual([])
+    await act(async () => {
+      q('settings-row-epic-isolation')!.click()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    const card = q('settings-epic-isolation')!
+    expect(card.textContent).toContain(EPIC_CFG)
     expect(container.querySelectorAll('[data-testid="settings-epic-isolation"]')).toHaveLength(1)
-    const box = card.querySelector('[data-testid="settings-epic-isolation-checkbox"]') as HTMLInputElement
-    expect(box.checked).toBe(true)
+    const sw = card.querySelector('[data-testid="settings-epic-isolation-toggle"] [role="switch"]')!
+    expect(sw.getAttribute('aria-checked')).toBe('true')
     expect(api.promptSessions.getWorktreeDisabled).toHaveBeenCalledWith({ cwd: PROJECT_CWD })
-    // Same section, still once, on the Local scope.
-    await pickLocal()
-    expect(container.querySelectorAll('[data-testid="settings-epic-isolation"]')).toHaveLength(1)
   })
 
   it('asks for a project tab when none is active', async () => {

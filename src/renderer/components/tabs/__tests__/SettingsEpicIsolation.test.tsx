@@ -11,14 +11,27 @@ import { SettingsEpicIsolation } from '../SettingsEpicIsolation'
  * just one project. Reuses SaveBar's dirty/save/revert shape.
  */
 
+/** What the card's SourceChip reads (home dir + file mtime). */
+function chipApi() {
+  return {
+    app: { homeDir: vi.fn().mockResolvedValue('/home/u') },
+    config: { readText: vi.fn().mockResolvedValue({ exists: false, mtimeMs: 0 }), onChanged: vi.fn(() => () => {}) },
+  }
+}
+
 function installWindowApiMock(opts: { disabled?: boolean } = {}) {
   const getWorktreeDisabled = vi.fn().mockResolvedValue({ disabled: opts.disabled ?? false })
   const setWorktreeDisabled = vi.fn(async ({ disabled }: { cwd: string; disabled: boolean }) => ({ disabled }))
   ;(window as unknown as { api: unknown }).api = {
+    ...chipApi(),
     promptSessions: { getWorktreeDisabled, setWorktreeDisabled },
   }
   return { getWorktreeDisabled, setWorktreeDisabled }
 }
+
+/** The shared Toggle's switch button — the card no longer renders a raw checkbox. */
+const toggle = (el: HTMLElement) =>
+  el.querySelector('[data-testid="settings-epic-isolation-toggle"] [role="switch"]') as HTMLButtonElement
 
 async function flushAsync() {
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -54,8 +67,8 @@ describe('SettingsEpicIsolation (PRD 1035)', () => {
       await flushAsync()
     })
     expect(getWorktreeDisabled).toHaveBeenCalledWith({ cwd: '/proj/alpha' })
-    const checkbox = el.querySelector('[data-testid="settings-epic-isolation-checkbox"]') as HTMLInputElement
-    expect(checkbox.checked).toBe(false)
+    const checkbox = toggle(el)
+    expect(checkbox.getAttribute('aria-checked')).toBe('false')
     // No dirty SaveBar shown until the human actually changes the value.
     expect(el.textContent).not.toContain('unsaved')
   })
@@ -66,8 +79,8 @@ describe('SettingsEpicIsolation (PRD 1035)', () => {
     await act(async () => {
       await flushAsync()
     })
-    const checkbox = el.querySelector('[data-testid="settings-epic-isolation-checkbox"]') as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
+    const checkbox = toggle(el)
+    expect(checkbox.getAttribute('aria-checked')).toBe('true')
   })
 
   it('toggling the checkbox shows unsaved state, and Save persists it via setWorktreeDisabled', async () => {
@@ -76,11 +89,11 @@ describe('SettingsEpicIsolation (PRD 1035)', () => {
     await act(async () => {
       await flushAsync()
     })
-    const checkbox = el.querySelector('[data-testid="settings-epic-isolation-checkbox"]') as HTMLInputElement
+    const checkbox = toggle(el)
     act(() => {
       checkbox.click()
     })
-    expect(checkbox.checked).toBe(true)
+    expect(checkbox.getAttribute('aria-checked')).toBe('true')
     expect(el.textContent).toContain('unsaved')
 
     const saveButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Save')!
@@ -92,14 +105,26 @@ describe('SettingsEpicIsolation (PRD 1035)', () => {
     expect(el.textContent).not.toContain('unsaved')
   })
 
-  it('degrades to an unchecked, still-usable toggle when window.api has no promptSessions surface', async () => {
-    ;(window as unknown as { api: unknown }).api = {}
+  it('renders on the design: ConfigDetailHeader + ConfigCard naming its file, no raw checkbox', async () => {
+    installWindowApiMock({ disabled: false })
     const el = mount(createElement(SettingsEpicIsolation, { cwd: '/proj/alpha' }))
     await act(async () => {
       await flushAsync()
     })
-    const checkbox = el.querySelector('[data-testid="settings-epic-isolation-checkbox"]') as HTMLInputElement
-    expect(checkbox.checked).toBe(false)
+    expect(el.querySelector('[data-testid="config-detail-header"]')?.textContent).toContain('Epic isolation')
+    const card = el.querySelector('[data-testid="config-card"]')!
+    expect(card.textContent).toContain('session-manager-operations/prompt-sessions/epic-worktree-config.json')
+    expect(el.querySelector('input[type="checkbox"]')).toBeNull()
+  })
+
+  it('degrades to an unchecked, still-usable toggle when window.api has no promptSessions surface', async () => {
+    ;(window as unknown as { api: unknown }).api = chipApi()
+    const el = mount(createElement(SettingsEpicIsolation, { cwd: '/proj/alpha' }))
+    await act(async () => {
+      await flushAsync()
+    })
+    const checkbox = toggle(el)
+    expect(checkbox.getAttribute('aria-checked')).toBe('false')
     expect(checkbox.disabled).toBe(false)
   })
 })

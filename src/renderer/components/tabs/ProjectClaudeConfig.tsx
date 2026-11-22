@@ -12,9 +12,8 @@
  * - CLAUDE.md — ClaudeMdWorkbench over <cwd>/CLAUDE.md (Project) and <cwd>/CLAUDE.local.md
  *               (Local) as radio rows, loaded and saved through useConfig loadText/saveText. Save never forces, so the store's mtime
  *               conflict check still refuses to overwrite a copy that changed on disk.
- * - Settings  — Settings.tsx at project or local scope, below the Epic worktree isolation
- *               toggle, which sits under a chip naming its own file: it is Session Manager's
- *               per-project setting, not a settings.json key.
+ * - Settings  — Settings.tsx at project or local scope; its rail's 'Epic isolation' entry holds
+ *               Session Manager's per-project worktree toggle (not a settings.json key).
  * - MCP       — McpServers at project scope (<cwd>/.mcp.json); Add… opens the catalog drawer
  *               at that same scope.
  * - Skills    — Skills at project scope (<cwd>/.claude/skills/).
@@ -34,13 +33,12 @@ import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSe
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
-import { SourceChip, shortenHome } from '../ui/SourceChip'
+import { shortenHome } from '../ui/SourceChip'
 import { EmptyState } from '../ui/EmptyState'
 import { ClaudeMdWorkbench, type ClaudeMdRoot } from '../claudeConfig/ClaudeMdWorkbench'
 import { HomeSessionDrawer } from './home/HomeSessionDrawer'
 import { Memory } from './Memory'
 import { Settings } from './Settings'
-import { SettingsEpicIsolation } from './SettingsEpicIsolation'
 import { McpServers, type McpAddContext } from './McpServers'
 import { Skills } from './Skills'
 import { McpLibrary, InsertPresetMenu } from './Library'
@@ -71,10 +69,6 @@ const PROJECT_CLAUDE_CONFIG_TABS: ReadonlyArray<{ key: ConfigTab; label: string;
 const TABS = PROJECT_CLAUDE_CONFIG_TABS
 
 const isConfigTab = (t: string): t is ConfigTab => TABS.some((o) => o.key === t)
-
-/** Where main keeps the per-project isolation toggle: opsPath(cwd, 'prompt-sessions', …) in epicWorktreeProjectConfig.cjs. */
-const epicWorktreeConfigPath = (cwd: string) =>
-  `${cwd}/session-manager-operations/prompt-sessions/epic-worktree-config.json`
 
 /** The files and folders each tab's count reads — also the paths whose changes re-count. */
 function countSources(cwd: string, memoryDir: string | null) {
@@ -239,21 +233,11 @@ function ClaudeMdTab({ home, cwd, scope, onScopeChange }: {
   )
 }
 
-/** Settings at the chosen scope (its file card's radio rows own the Project / Local choice), below the Epic isolation toggle shown with its own file. */
-function SettingsTab({ cwd, scope, onScopeChange }: { cwd: string; scope: ProjectScope; onScopeChange: (scope: ProjectScope) => void }) {
+/** Settings at the chosen scope (its file card's radio rows own the Project / Local choice; Epic isolation is a rail entry). */
+function SettingsTab({ scope, onScopeChange }: { scope: ProjectScope; onScopeChange: (scope: ProjectScope) => void }) {
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div data-testid="project-claude-config-epic-isolation" className="shrink-0">
-        <div className="flex items-center gap-2 border-b border-line bg-bg-elev px-3 pt-2 pb-1.5 text-[11px] text-fg-dim">
-          <span className="font-semibold text-fg">Epic isolation</span>
-          <span className="truncate">Session Manager's own setting for this project, not a settings.json key</span>
-          <SourceChip path={epicWorktreeConfigPath(cwd)} />
-        </div>
-        <SettingsEpicIsolation cwd={cwd} />
-      </div>
-      <div className="flex-1 min-h-0">
-        <Settings scope={scope} onScopeChange={onScopeChange} />
-      </div>
+      <Settings scope={scope} onScopeChange={onScopeChange} />
     </div>
   )
 }
@@ -334,7 +318,7 @@ function ProjectClaudeConfigComponent() {
       <div className="flex-1 min-h-0" data-testid={`project-claude-config-panel-${tab}`}>
         {tab === 'memory' && <Memory />}
         {tab === 'claude-md' && <ClaudeMdTab home={home} cwd={cwd} scope={mdScope} onScopeChange={setMdScope} />}
-        {tab === 'settings' && <SettingsTab cwd={cwd} scope={settingsScope} onScopeChange={setSettingsScope} />}
+        {tab === 'settings' && <SettingsTab scope={settingsScope} onScopeChange={setSettingsScope} />}
         {tab === 'mcp' && <McpServers scope="project" onAdd={openMcpAdd} />}
         {tab === 'skills' && <Skills scope="project" />}
       </div>

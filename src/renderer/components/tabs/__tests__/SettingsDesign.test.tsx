@@ -30,6 +30,10 @@ function installApi() {
     return { raw, text: raw, data: data ?? null, exists: !!data, mtimeMs: data ? Date.now() - 3 * 86_400_000 : 0, parseError: null, error: null }
   }
   const api = {
+    promptSessions: {
+      getWorktreeDisabled: vi.fn().mockResolvedValue({ disabled: false }),
+      setWorktreeDisabled: vi.fn(async ({ disabled }: { cwd: string; disabled: boolean }) => ({ disabled })),
+    },
     claudeConfig: { patch: vi.fn().mockResolvedValue({ ok: true, path: '', data: {} }) },
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
     config: {
@@ -142,6 +146,37 @@ describe('Settings — ConfigWorkbench design', () => {
     expect(el.textContent).toContain('PreToolUse')
     await act(async () => Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '{ } Raw JSON')!.click())
     expect(q(el, 'settings-raw-editor')).not.toBeNull()
+  })
+
+  it('Home: no Epic isolation rail entry (it is per-project)', async () => {
+    disk = {}
+    const el = await mount('user')
+    expect(q(el, 'settings-row-hooks')).not.toBeNull()
+    expect(q(el, 'settings-row-epic-isolation')).toBeNull()
+    expect(q(el, 'settings-epic-isolation')).toBeNull()
+  })
+
+  it('Project: Epic isolation rail entry below Permissions and Hooks; its toggle writes the per-project setting', async () => {
+    disk = {}
+    const el = await mount('project')
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-testid^="settings-row-"]')).map((r) => r.dataset.testid)
+    expect(rows).toEqual(['settings-row-permissions', 'settings-row-hooks', 'settings-row-epic-isolation'])
+    expect(q(el, 'settings-epic-isolation')).toBeNull()
+    await act(async () => {
+      q(el, 'settings-row-epic-isolation')!.click()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(q(el, 'settings-row-epic-isolation')?.getAttribute('aria-current')).toBe('true')
+    const api = (window as unknown as { api: ReturnType<typeof installApi> }).api
+    expect(api.promptSessions.getWorktreeDisabled).toHaveBeenCalledWith({ cwd: PROJECT_CWD })
+    const sw = q(el, 'settings-epic-isolation-toggle')!.querySelector<HTMLElement>('[role="switch"]')!
+    await act(async () => sw.click())
+    await act(async () => {
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Save')!.click()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(api.promptSessions.setWorktreeDisabled).toHaveBeenCalledWith({ cwd: PROJECT_CWD, disabled: true })
+    expect(api.claudeConfig.patch).not.toHaveBeenCalled()
   })
 
   it('Project: the radio rows switch the file between Project and Local', async () => {

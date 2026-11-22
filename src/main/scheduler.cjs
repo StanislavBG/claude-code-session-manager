@@ -51,7 +51,8 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const { startDispatchLoop } = require('./lib/scheduler/dispatchLoop.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 const { randomUUID } = require('node:crypto');
-const { execFile, execFileSync } = require('node:child_process');
+const { execFile, execFileSync, spawnSync } = require('node:child_process');
+const { buildJobSandboxSettings, sandboxDependencies } = require('./lib/claude/jobSandboxPolicy.cjs');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
@@ -5010,6 +5011,8 @@ const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
  * before `--dangerously-skip-permissions`; the caller must also grant
  * StructuredOutput in the tool scope — probe 2026-11-22 (CLI 2.1.325): a scoped
  * run without it silently ignores the schema. null/absent = today's argv.
+ * `sandboxArgs` (buildJobSandboxSettings(...).argv) replaces the single
+ * `--dangerously-skip-permissions` element at the same position; null/empty = today's argv.
  * The prompt is NOT in argv: callers send it on the child's stdin
  * (withChildAndLog's `stdinText`). Linux caps a single argv element at 128 KB,
  * and a large prompt failed with spawn E2BIG before the job started (the
@@ -5022,7 +5025,7 @@ function knownMcpServers() {
   return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [], jsonSchema = null }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [], jsonSchema = null, sandboxArgs = null }) {
   return [
     '-p',
     '--model', model,
@@ -5031,13 +5034,48 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers() }),
     ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
     ...(jsonSchema && typeof jsonSchema === 'object' ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
-    '--dangerously-skip-permissions',
+    ...(Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions']),
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
     '--output-format', 'stream-json',
     '--verbose',
     ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]),
   ];
+}
+
+// ---------- job sandbox dependencies ----------
+
+// Computed once per process: which OS-sandbox binaries exist, and (linux)
+// whether bwrap can actually create namespaces here. Never throws — any
+// failure degrades to the tool-rules level with the reason recorded.
+/** @type {{ available: boolean, missing: string[] }|null} */
+let jobSandboxDeps = null;
+
+function whichOnPath(name) {
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch { /* next */ }
+  }
+  return null;
+}
+
+function resolveJobSandboxDeps() {
+  if (process.env.SM_JOB_SANDBOX === '0') return { available: false, missing: ['disabled by SM_JOB_SANDBOX=0'] };
+  if (jobSandboxDeps) return jobSandboxDeps;
+  try {
+    let deps = sandboxDependencies({ platform: process.platform, which: whichOnPath });
+    if (deps.available && process.platform === 'linux') {
+      const r = spawnSync(whichOnPath('bwrap') || 'bwrap',
+        ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--unshare-net', '--unshare-pid', '--', 'true'],
+        { timeout: 5000, stdio: 'ignore' });
+      if (r.error || r.status !== 0) deps = { available: false, missing: ['bwrap self-test failed'] };
+    }
+    jobSandboxDeps = deps;
+  } catch (e) {
+    jobSandboxDeps = { available: false, missing: [`sandbox dependency probe failed: ${(e && e.message) || e}`] };
+  }
+  return jobSandboxDeps;
 }
 
 // ---------- execution ----------
@@ -5593,7 +5631,19 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
     // Distinct comm (`sm-claude-job`) + slug-labelled argv0 for System Monitor.
     // Both keep the word `claude`, which the /\bclaude\b/ reaper gates need.
+    const sandboxPolicy = buildJobSandboxSettings({
+      agentType: job.agentType || 'dev-lead',
+      worktreeDir: spawnCwd,
+      projectRoot: cwd,
+      homeDir: os.homedir(),
+      tmpDir: os.tmpdir(),
+      deps: resolveJobSandboxDeps(),
+    });
+    const sandboxMeta = sandboxPolicy.summary;
+    safeLog(`[scheduler] sandbox: level=${sandboxMeta.level} profile=${sandboxMeta.profile ?? 'none'} ` +
+      `network=${sandboxMeta.network ? (sandboxMeta.network.join(',') || 'none') : 'unrestricted'} reason=${sandboxMeta.reason ?? 'none'}\n`);
     const jobArgs = buildClaudeSpawnArgs({
+      sandboxArgs: sandboxPolicy.argv,
       model: personaResolution.model,
       effort: personaEffort,
       sessionId,
@@ -5611,7 +5661,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       const errMsg = `argv too large: ${oversized.flag} is ${oversized.bytes} bytes, over the ${launchFailure.MAX_ARG_BYTES}-byte per-argument limit; not spawned`;
       safeLog(`[scheduler] ${errMsg}\n`);
       closeFd();
-      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
+      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta });
       resolve({ exitCode: -1, durationMs: 0, error: errMsg, launchError: 'argv_too_large', sessionId });
       return;
     }
@@ -5663,7 +5713,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           sl(`\n[scheduler] ${errMsg}\n`);
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
-          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied });
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied });
           resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId,
             ...(launchFailure.isArgvTooLargeSpawnError(error?.message) ? { launchError: 'argv_too_large' } : {}) });
           return;
@@ -5726,6 +5776,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
+          sandbox: sandboxMeta,
           ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
         });
@@ -6272,7 +6323,10 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
       args: [
         '-p',
         '--model', 'opus',
-        '--dangerously-skip-permissions',
+        ...buildJobSandboxSettings({
+          agentType: 'investigation', worktreeDir: cwd, projectRoot: cwd,
+          homeDir: os.homedir(), tmpDir: os.tmpdir(), deps: resolveJobSandboxDeps(),
+        }).argv,
         ...headlessPermissionArgs(),
         '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
         '--output-format', 'stream-json',

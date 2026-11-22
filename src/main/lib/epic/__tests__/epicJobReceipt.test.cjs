@@ -68,3 +68,35 @@ test('missing runs folder returns zeros and does not reject', async () => {
     runs: 0, costUsd: 0, costKnownRuns: 0, outputTokens: 0, numTurns: 0, durationMs: 0, byPrd: [],
   });
 });
+
+test('slugs with a slash, backslash, "." or ".." are dropped; files they would reach are never read', async () => {
+  const RUN = '2026-10-22T01-00-00-000Z';
+  addRun(RUN, '100-a', { exitCode: 0, numTurns: 2, outputTokens: 10, totalCostUsd: 1, finishedAt: 1000, durationMs: 5 });
+  const runDir = path.join(root, RUN);
+  const bait = JSON.stringify({ cwd: CWD, exitCode: 9, numTurns: 1000, outputTokens: 1000, totalCostUsd: 1000, durationMs: 1000 });
+  // '../leak' from inside the run dir reaches <root>/leak.meta.json — outside the run folder.
+  fs.writeFileSync(path.join(root, 'leak.meta.json'), bait);
+  // '../../leak' reaches the runs root's parent.
+  const parentBait = path.join(path.dirname(root), `${path.basename(root)}-leak.meta.json`);
+  fs.writeFileSync(parentBait, bait);
+  // Where '.', '..', 'sub\\leak' and 'sub/leak' would land.
+  fs.writeFileSync(path.join(runDir, '..meta.json'), bait);
+  fs.writeFileSync(path.join(runDir, '...meta.json'), bait);
+  fs.writeFileSync(path.join(runDir, 'sub\\leak.meta.json'), bait);
+  fs.mkdirSync(path.join(runDir, 'sub'));
+  fs.writeFileSync(path.join(runDir, 'sub', 'leak.meta.json'), bait);
+  try {
+    const r = await gatherEpicJobReceipt({
+      cwd: CWD,
+      slugs: ['../leak', `../../${path.basename(root)}-leak`, 'sub/leak', 'sub\\leak', '..\\leak', '.', '..', '100-a'],
+      sinceMs: SINCE,
+      runsRoot: root,
+    });
+    expect(r).toEqual({
+      runs: 1, costUsd: 1, costKnownRuns: 1, outputTokens: 10, numTurns: 2, durationMs: 5,
+      byPrd: [{ slug: '100-a', runs: 1, costUsd: 1, lastExitCode: 0, lastFinishedAt: 1000 }],
+    });
+  } finally {
+    fs.rmSync(parentBait, { force: true });
+  }
+});

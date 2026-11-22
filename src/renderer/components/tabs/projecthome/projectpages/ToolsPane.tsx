@@ -20,11 +20,11 @@
  * (MdFixList) cards, the Scope options after the input's default, the row and title
  * findings count (fix-list rows), and `onFindingsCount` (ProjectHome's Tools key button).
  *
- * The `LAST REVIEW` section (MdLastReview) is one `window.api.projectPages.mdReview` read, on the
+ * The one-line review history (MdLastReview) is one `window.api.projectPages.mdReview` read, on the
  * same schedule as the scan (first show per cwd, and `Refresh`; never polled) plus whenever the
  * listed review-run id list changes: the newest review record plus the validation records of this
- * project's Review MD network sessions. `REVIEW RUNS` (ReviewRuns) lists those sessions newest
- * first with a reviewRunStatus label and an Open button; the newest also feeds the row meta.
+ * project's Review MD network sessions. Those sessions (`runs`, newest first, each with a
+ * reviewRunStatus label) give the line its runs count and `Open run`; the newest also feeds the row meta.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
@@ -395,7 +395,7 @@ function ReviewTool({
   review: MdReviewState | null
   /** This project's Review MD network sessions, for the validation record. */
   reviewSessions: readonly ReviewSessionLike[]
-  /** The same sessions with their derived status, for REVIEW RUNS. */
+  /** The same sessions with their derived status, newest first — the review line's count and Open run. */
   runs: readonly ReviewRunRow[]
   onOpenSession?: (epicId: string) => void
 }) {
@@ -496,8 +496,10 @@ function ReviewTool({
         onLaunch={onLaunch}
         onOpen={(path) => setExplore({ open: true, id: path })}
         canOpen={!!network}
+        runCount={runs.length}
+        newestRunId={runs[0]?.epic.id ?? null}
+        onOpenRun={onOpenSession}
       />
-      <ReviewRuns runs={runs} onOpenSession={onOpenSession} />
       {network && <MdNetworkCards cwd={cwd} network={network} onExplore={(id) => setExplore({ open: true, id })} />}
       {network && explore.open && (
         <MdNetworkExplorer
@@ -546,47 +548,6 @@ export interface ReviewRunRow {
 function runDate(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : localDate(d)
-}
-
-/** This project's Review MD network sessions, newest first, each with its status and Open. */
-function ReviewRuns({ runs, onOpenSession }: { runs: readonly ReviewRunRow[]; onOpenSession?: (epicId: string) => void }) {
-  return (
-    <section data-testid="md-review-runs" aria-label="Review runs" className="flex flex-none flex-col gap-2">
-      <h3 className="m-0 font-mono text-[10.5px] font-normal tracking-[.1em] text-fg-faint">REVIEW RUNS</h3>
-      {runs.length === 0 ? (
-        <p data-testid="md-review-runs-none" className="m-0 text-[12.5px] text-fg-faint">
-          No review runs yet — Run review starts one.
-        </p>
-      ) : (
-        <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-          {runs.map(({ epic, status }) => (
-            <li
-              key={epic.id}
-              data-testid="md-review-run"
-              data-epic-id={epic.id}
-              className="flex items-center gap-3 rounded-lg border border-rule-structural px-3 py-2"
-            >
-              <span data-testid="md-review-run-date" className="font-mono text-[11.5px] text-fg-dim">
-                {runDate(epic.createdAt)}
-              </span>
-              <span data-testid="md-review-run-status" className="min-w-0 flex-1 truncate text-[12.5px] text-fg">
-                {status}
-              </span>
-              <button
-                type="button"
-                data-testid="md-review-run-open"
-                disabled={!onOpenSession}
-                onClick={() => onOpenSession?.(epic.id)}
-                className="h-7 flex-none rounded-[7px] border border-rule-structural bg-bg-hi px-2.5 text-[12px] font-semibold text-fg cursor-pointer hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Open
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  )
 }
 
 /** Mounted only while open, so personas are read on demand — the Sessions hot-key editor's agent source. */

@@ -86,34 +86,47 @@ function render(over: Partial<Props> = {}) {
 const q = (id: string) => container!.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 
 describe('MdLastReview', () => {
-  it('renders the family-frame record in full', () => {
-    render({ today: '2026-11-15' })
-    expect(q('md-last-review-path')!.textContent).toBe(RECORD_PATH)
-    expect(q('md-last-review-date')!.textContent).toBe('2026-11-15')
-    expect(q('md-last-review-mode')!.textContent).toBe('Full review (audit ran 2026-11-12; approved 2026-11-15)')
-    expect(q('md-last-review-scope')!.textContent).toBe('the whole project')
-    const base = q('md-last-review-base')!
-    expect(base.textContent).toBe('bab11306')
-    expect(base.getAttribute('title')).toBe('bab11306fe9757cbdc1d7a40862d63c0bc30829d')
-    expect(q('md-last-review-map')!.textContent).toBe('CLAUDE.md')
-    expect(q('md-last-review-findings')!.textContent).toBe('broken-link 0 · missing-path 0 · over-line-limit 0 · no-contents-list 0')
-    expect(q('md-last-review-census')!.textContent).toMatch(/^83 files, 4570 lines/)
-    const rows = Array.from(container!.querySelectorAll('[data-testid="md-last-review-verdict"]'))
-    expect(rows).toHaveLength(3)
-    expect(Array.from(rows[1].querySelectorAll('td')).map((td) => td.textContent)).toEqual([
-      'services/mail-intake/README.md', 'SHRINK-TO-POINTER', 'docs/household-email.md',
-    ])
-    expect(q('md-last-review-decisions')!.querySelectorAll('li')).toHaveLength(2)
-    expect(Array.from(q('md-last-review-followups')!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(FAMILY_FRAME.followUpPrds)
-    expect(q('md-last-review-next')!.textContent).toBe('2027-02-15, or sooner after a major model release.')
+  it('with a record renders one line: date, mode, runs count, Open record and Open run — no detail sections', () => {
+    const onOpenRun = vi.fn()
+    const props = render({ today: '2026-11-15', runCount: 3, newestRunId: 'epic-new', onOpenRun })
+    expect(q('md-last-review-line')!.textContent).toBe('Last review 2026-11-15 · Full review · 3 runs')
+    expect(q('md-last-review-line')!.getAttribute('data-path')).toBe(RECORD_PATH)
     expect(q('md-last-review-due')).toBeNull()
+    expect(q('md-last-review-drift-check')).toBeNull()
     expect(q('md-last-review-open-validation')).toBeNull()
+    for (const gone of ['md-last-review-verdicts', 'md-last-review-decisions', 'md-last-review-followups', 'md-last-review-census']) {
+      expect(q(gone)).toBeNull()
+    }
+    expect(container!.textContent).not.toContain('LAST REVIEW')
+    act(() => q('md-last-review-open')!.click())
+    expect(props.onOpen).toHaveBeenCalledWith(RECORD_PATH)
+    act(() => q('md-last-review-open-run')!.click())
+    expect(onOpenRun).toHaveBeenCalledWith('epic-new')
   })
 
-  it('with no record says none exists yet and that Run review writes one', () => {
+  it('says 1 run, falls back to the raw mode, and hides Open run with no runs', () => {
+    render({ state: ready({ ...FAMILY_FRAME, modeKind: null, mode: 'Custom' }), runCount: 1 })
+    expect(q('md-last-review-line')!.textContent).toBe('Last review 2026-11-15 · Custom · 1 run')
+    act(() => root!.unmount())
+    root = null
+    render({ runCount: 0 })
+    expect(q('md-last-review-line')!.textContent).toBe('Last review 2026-11-15 · Full review · 0 runs')
+    expect(q('md-last-review-open-run')).toBeNull()
+  })
+
+  it('with no record reads No review yet — Run review starts one.', () => {
     render({ state: ready(null) })
-    expect(q('md-last-review-none')!.textContent).toBe('No review record exists yet. Run review writes one when the review finishes.')
+    expect(q('md-last-review-none')!.textContent).toBe('No review yet — Run review starts one.')
     expect(q('md-last-review-open')).toBeNull()
+    expect(q('md-last-review-line')).toBeNull()
+    expect(q('md-last-review-drift-check')).toBeNull()
+  })
+
+  it('with no record but a run still offers Open run', () => {
+    const onOpenRun = vi.fn()
+    render({ state: ready(null), runCount: 1, newestRunId: 'epic-a', onOpenRun })
+    act(() => q('md-last-review-open-run')!.click())
+    expect(onOpenRun).toHaveBeenCalledWith('epic-a')
   })
 
   it('shows an error inline', () => {
@@ -141,7 +154,9 @@ describe('MdLastReview', () => {
     root = null
     render()
     expect(q('md-last-review-due')!.textContent).toContain('Review due')
-    expect(q('md-last-review-drift-check')).not.toBeNull()
+    expect(q('md-last-review-drift-check')!.textContent).toBe('Run drift check')
+    // Still one line: the due marker and drift check sit inside it.
+    expect(q('md-last-review')!.children.length).toBeLessThanOrEqual(5)
   })
 
   it('Run drift check launches the macro in Drift check mode naming the record and its command', () => {

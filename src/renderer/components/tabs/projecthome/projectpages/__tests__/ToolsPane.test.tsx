@@ -712,7 +712,7 @@ describe('ToolsPane Review MD network last review', () => {
     render({ macros: [REVIEW, SWEEP] })
     await settle()
     expect(mdReview.mock.calls).toEqual([[{ cwd: CWD, epicIds: ['epic-rev-1'] }]])
-    expect(q('md-last-review-path')!.textContent).toBe(RECORD_PATH)
+    expect(q('md-last-review-line')!.getAttribute('data-path')).toBe(RECORD_PATH)
     render({ macros: [{ ...REVIEW }, SWEEP] })
     act(() => row('sweep').click())
     act(() => row(REVIEW.id).click())
@@ -734,7 +734,7 @@ describe('ToolsPane Review MD network last review', () => {
     mdReview.mockResolvedValue({ ok: true, record: null, recordPath: null, validation: {} })
     render({ macros: [REVIEW] })
     await settle()
-    expect(q('md-last-review-none')!.textContent).toContain('No review record exists yet')
+    expect(q('md-last-review-none')!.textContent).toBe('No review yet — Run review starts one.')
   })
 
   it('Open record and Open validation record open the explorer inspector on their paths', async () => {
@@ -808,33 +808,33 @@ describe('ToolsPane Review MD network review runs', () => {
       },
     })
   const OK: MdReviewResult = { ok: true, record: null, recordPath: null, validation: { 'epic-old': ['v/epic-old/validate.md'] } }
-  const runRows = () => Array.from(container!.querySelectorAll('[data-testid="md-review-run"]')) as HTMLElement[]
+  const RECORD_FOR_LINE: MdReviewRecord = {
+    date: '2026-11-15', mode: 'Full review', modeKind: 'Full review', scope: null, session: null, baseCommit: null, owner: null,
+    map: null, driftCheckCommand: null, findingsCounts: {}, censusSummary: null, verdicts: [], decisions: [], followUpPrds: [],
+    nextReviewDue: null, nextReviewNote: null,
+  }
   const meta = () => row(REVIEW.id).querySelector('[data-testid="project-home-tool-meta"]')!.textContent
 
-  it('lists this project\'s review runs newest first with date, status and Open', async () => {
+  it('folds the runs into the review line: count, newest run\'s Open, no REVIEW RUNS section', async () => {
     seed()
-    useChat.setState({ chats: { 'epic-new': { running: true, queuedPosition: 0 } as never } })
-    mdReview.mockResolvedValue(OK)
+    mdReview.mockResolvedValue({ ...OK, record: RECORD_FOR_LINE, recordPath: 'r.md' })
     const onOpenSession = vi.fn()
     render({ macros: [REVIEW], onOpenSession })
     await settle()
-    expect(runRows().map((r) => r.getAttribute('data-epic-id'))).toEqual(['epic-new', 'epic-old'])
-    expect(runRows().map((r) => r.querySelector('[data-testid="md-review-run-date"]')!.textContent)).toEqual([
-      localDate(new Date(NEW)),
-      localDate(new Date(OLD)),
-    ])
-    expect(runRows().map((r) => r.querySelector('[data-testid="md-review-run-status"]')!.textContent)).toEqual(['reporting', 'validated'])
-    act(() => (runRows()[1].querySelector('[data-testid="md-review-run-open"]') as HTMLButtonElement).click())
-    expect(onOpenSession).toHaveBeenCalledWith('epic-old')
-    expect(q('md-review-runs-none')).toBeNull()
+    expect(q('md-review-runs')).toBeNull()
+    expect(container!.textContent).not.toContain('REVIEW RUNS')
+    expect(q('md-last-review-line')!.textContent).toBe('Last review 2026-11-15 · Full review · 2 runs')
+    expect(q('md-last-review-open-run')!.getAttribute('data-epic-id')).toBe('epic-new')
+    act(() => q('md-last-review-open-run')!.click())
+    expect(onOpenSession).toHaveBeenCalledWith('epic-new')
   })
 
-  it('shows one none-yet line with no runs', async () => {
+  it('shows one none-yet line with no runs and no record', async () => {
     mdReview.mockResolvedValue({ ok: true, record: null, recordPath: null, validation: {} })
     render({ macros: [REVIEW] })
     await settle()
-    expect(runRows()).toEqual([])
-    expect(q('md-review-runs-none')!.textContent).toContain('No review runs yet')
+    expect(q('md-last-review-open-run')).toBeNull()
+    expect(q('md-last-review-none')!.textContent).toBe('No review yet — Run review starts one.')
   })
 
   it('row meta adds the last run date and status; findings count alone without runs', async () => {
@@ -857,7 +857,7 @@ describe('ToolsPane Review MD network review runs', () => {
     act(() => seed())
     await settle()
     expect(mdReview.mock.calls[1]).toEqual([{ cwd: CWD, epicIds: ['epic-new', 'epic-old'] }])
-    expect(runRows()[1].querySelector('[data-testid="md-review-run-status"]')!.textContent).toBe('validated')
+    expect(meta()).toBe(`architect · last run ${localDate(new Date(NEW))} · reported`)
     act(() => usePromptSessions.setState({ sessions: { ...usePromptSessions.getState().sessions } }))
     await settle()
     expect(mdReview).toHaveBeenCalledTimes(2)

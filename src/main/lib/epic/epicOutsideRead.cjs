@@ -19,6 +19,9 @@ const { computeEpicOutsideState } = require('./epicOutsideState.cjs');
 const { findEpicByExternalRef } = require('./externalRefIndex.cjs');
 const { awaitingInputSessions } = require('../../exchanges.cjs');
 const { readArchived, defaultProjectRoots, makeRegisteredRootsCache } = require('../../promptSessionsIpc.cjs');
+const { gatherEpicJobReceipt } = require('./epicJobReceipt.cjs');
+const { summarizeTranscriptFile } = require('./transcriptUsage.cjs');
+const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -134,33 +137,84 @@ async function openRecord(cwd, epicId, session, index, jobs, awaiting, isTabBusy
   return buildRecord(cwd, epicId, session, eventsOf(index, epicId), jobs, needsInput, chatBusy);
 }
 
-function archivedRecord(cwd, epicId, projectRoots, jobs) {
+/** The archived (completed) session + its events, or null. */
+function archivedEntry(cwd, epicId, projectRoots) {
   try {
     const res = readArchived(cwd, epicId, { projectRoots });
     const data = res && res.exists ? res.data : null;
     if (!isObj(data) || !str(data.archivedAt) || !isObj(data.session)) return null;
-    const session = { ...data.session, status: 'completed' };
-    const events = Array.isArray(data.events) ? data.events : [];
-    return buildRecord(cwd, epicId, session, events, jobs, false, false);
+    return {
+      session: { ...data.session, status: 'completed' },
+      events: Array.isArray(data.events) ? data.events : [],
+    };
   } catch {
     return null;
   }
+}
+
+/** Job-run cost for the Epic's PRD slugs since the session was created; null on failure. */
+async function jobsReceipt(cwd, epicId, session, jobs, runsRoot) {
+  try {
+    const slugs = jobs
+      .filter((r) => isObj(r) && (r.epicId === epicId || r.sourcePromptId === epicId))
+      .map((r) => str(r.slug))
+      .filter(Boolean);
+    const created = Date.parse(session.createdAt);
+    return await gatherEpicJobReceipt({
+      cwd,
+      slugs,
+      sinceMs: Number.isFinite(created) ? created : undefined,
+      runsRoot,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Token usage of the Epic's chat transcript; null when no file is found or on failure. */
+async function chatReceipt(cwd, session, resolveTranscriptPath) {
+  try {
+    const claudeSessionId = str(session.claudeSessionId);
+    if (!claudeSessionId) return null;
+    const hit = resolveTranscriptPath({ cwd, claudeSessionId });
+    // The real resolver hands back its first candidate even when nothing exists.
+    if (!isObj(hit) || !str(hit.path) || hit.existsAnywhere === false) return null;
+    return await summarizeTranscriptFile(hit.path);
+  } catch {
+    return null;
+  }
+}
+
+async function buildReceipt(cwd, epicId, session, jobs, runsRoot, resolveTranscriptPath) {
+  const [jobsPart, chatPart] = await Promise.all([
+    jobsReceipt(cwd, epicId, session, jobs, runsRoot),
+    chatReceipt(cwd, session, resolveTranscriptPath),
+  ]);
+  return { jobs: jobsPart, chat: chatPart };
 }
 
 /**
  * One Epic by id or externalRef: open from the active index, else completed
  * from its archive file (only when archivedAt is set). Null on no match.
  *
+ * `receipt: true` adds `receipt: { jobs, chat }` — jobs = gatherEpicJobReceipt
+ * over the Epic's job slugs since createdAt, chat = summarizeTranscriptFile of
+ * the resolved transcript (null when none). Each part is null on failure.
+ * Without it no run folder or transcript is read. `runsRoot` and
+ * `resolveTranscriptPath` are injectable for tests.
+ *
  * @param {string} cwd
- * @param {{ id?: string, externalRef?: string, isTabBusy?: (epicId: string) => boolean | Promise<boolean>, listJobs?: () => any, projectRoots?: () => string[] }} [opts]
+ * @param {{ id?: string, externalRef?: string, receipt?: boolean, isTabBusy?: (epicId: string) => boolean | Promise<boolean>, listJobs?: () => any, projectRoots?: () => string[], runsRoot?: string, resolveTranscriptPath?: (a: { cwd: string, claudeSessionId: string }) => any }} [opts]
  */
 async function getEpicRecord(cwd, opts = {}) {
   try {
     const {
-      id, externalRef,
+      id, externalRef, receipt,
       isTabBusy = () => false,
       listJobs = () => [],
       projectRoots = defaultProjectRoots,
+      runsRoot,
+      resolveTranscriptPath = resolveEpicTranscriptPath,
     } = isObj(opts) ? opts : {};
     if (!isRegistered(cwd, projectRoots)) return null;
 
@@ -172,13 +226,22 @@ async function getEpicRecord(cwd, opts = {}) {
     if (!epicId) return null;
 
     const index = readActiveIndex(cwd);
-    const session = openSession(index, epicId);
+    const open = openSession(index, epicId);
     const jobs = await loadJobs(listJobs);
-    if (session) {
+    let session;
+    let record;
+    if (open) {
+      session = open;
       const awaiting = await loadAwaiting(cwd);
-      return await openRecord(cwd, epicId, session, index, jobs, awaiting, isTabBusy);
+      record = await openRecord(cwd, epicId, open, index, jobs, awaiting, isTabBusy);
+    } else {
+      const archived = archivedEntry(cwd, epicId, projectRoots);
+      if (!archived) return null;
+      session = archived.session;
+      record = buildRecord(cwd, epicId, session, archived.events, jobs, false, false);
     }
-    return archivedRecord(cwd, epicId, projectRoots, jobs);
+    if (receipt !== true) return record;
+    return { ...record, receipt: await buildReceipt(cwd, epicId, session, jobs, runsRoot, resolveTranscriptPath) };
   } catch {
     return null;
   }

@@ -207,3 +207,116 @@ test('list: open Epics only, newest first, state filter, paging, one read per ca
   const capped = await listOpenEpicRecords(cwd, opts(cwd, { limit: 10000 }));
   expect(capped.limit).toBe(200);
 });
+
+// ── receipt (opt-in) ────────────────────────────────────────────────────────
+
+const ZERO_JOBS = { runs: 0, costUsd: 0, costKnownRuns: 0, outputTokens: 0, numTurns: 0, durationMs: 0, byPrd: [] };
+
+function writeMeta(runsRoot, runId, slug, meta) {
+  fs.mkdirSync(path.join(runsRoot, runId), { recursive: true });
+  fs.writeFileSync(path.join(runsRoot, runId, `${slug}.meta.json`), JSON.stringify(meta));
+}
+
+function writeTranscript(dir, id) {
+  const p = path.join(dir, `${id}.jsonl`);
+  const rows = [
+    { type: 'user', message: { role: 'user', content: 'hello there!' } },
+    { type: 'assistant', message: { id: 'm1', model: 'claude-x', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 20, output_tokens: 7 } } },
+  ];
+  fs.writeFileSync(p, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  return p;
+}
+
+test('receipt: absent by default and nothing is read for it', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-1', cwd)]);
+  let resolverCalls = 0;
+  const resolveTranscriptPath = () => { resolverCalls++; return { path: null, candidates: [], existsAnywhere: false, existingPaths: [] }; };
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', resolveTranscriptPath, runsRoot: '/nonexistent' }));
+  expect(rec).not.toHaveProperty('receipt');
+  expect(resolverCalls).toBe(0);
+  const off = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', receipt: false, resolveTranscriptPath }));
+  expect(off).not.toHaveProperty('receipt');
+  expect(resolverCalls).toBe(0);
+});
+
+test('receipt: jobs from run metadata since createdAt, chat from the transcript', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const runsRoot = await mkTmp('sm-outside-read-runs-');
+  const tdir = await mkTmp('sm-outside-read-tx-');
+  setup(cwd, [session('e-1', cwd)]);
+  const tpath = writeTranscript(tdir, 'sess-e-1');
+  writeMeta(runsRoot, '2026-11-02T00-00-00-000Z', '0001-do-thing', { cwd, totalCostUsd: 1.5, outputTokens: 100, numTurns: 3, durationMs: 1000, exitCode: 0, finishedAt: 1 });
+  writeMeta(runsRoot, '2026-11-03T00-00-00-000Z', '0001-do-thing', { cwd, totalCostUsd: 0.5, outputTokens: 50, numTurns: 2, durationMs: 500, exitCode: 0, finishedAt: 2 });
+  // before createdAt → excluded; another Epic's slug → excluded
+  writeMeta(runsRoot, '2026-10-01T00-00-00-000Z', '0001-do-thing', { cwd, totalCostUsd: 99 });
+  writeMeta(runsRoot, '2026-11-02T00-00-00-000Z', '0099-other', { cwd, totalCostUsd: 99 });
+  const listJobs = () => [
+    { epicId: 'e-1', slug: '0001-do-thing', status: 'completed' },
+    { epicId: 'e-other', slug: '0099-other', status: 'completed' },
+  ];
+  const seen = [];
+  const resolveTranscriptPath = (a) => { seen.push(a); return { path: tpath, candidates: [tpath], existsAnywhere: true, existingPaths: [tpath] }; };
+
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', receipt: true, listJobs, runsRoot, resolveTranscriptPath }));
+  expect(seen).toEqual([{ cwd, claudeSessionId: 'sess-e-1' }]);
+  expect(rec.receipt.jobs).toEqual({
+    runs: 2, costUsd: 2, costKnownRuns: 2, outputTokens: 150, numTurns: 5, durationMs: 1500,
+    byPrd: [{ slug: '0001-do-thing', runs: 2, costUsd: 2, lastExitCode: 0, lastFinishedAt: 2 }],
+  });
+  expect(rec.receipt.chat).toMatchObject({ calls: 1, inputTokens: 10, cacheWriteTokens: 5, cacheReadTokens: 20, outputTokens: 7, largestContext: 35, models: { 'claude-x': 1 } });
+  const { receipt: _r, ...rest } = rec;
+  expect(rest).toEqual(await getEpicRecord(cwd, opts(cwd, { id: 'e-1', listJobs })));
+});
+
+test('receipt: no transcript gives chat null, no jobs gives the zero result, failures null only that part', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const runsRoot = await mkTmp('sm-outside-read-runs-');
+  setup(cwd, [session('e-1', cwd)]);
+  const missing = { path: null, candidates: [], existsAnywhere: false, existingPaths: [] };
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', receipt: true, runsRoot, resolveTranscriptPath: () => missing }));
+  expect(rec.receipt).toEqual({ jobs: ZERO_JOBS, chat: null });
+
+  // the real resolver returns its first candidate even when no file exists
+  const ghost = { path: '/no/such/file.jsonl', candidates: ['/no/such/file.jsonl'], existsAnywhere: false, existingPaths: [] };
+  const rec2 = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', receipt: true, runsRoot, resolveTranscriptPath: () => ghost }));
+  expect(rec2.receipt.chat).toBeNull();
+
+  const rec3 = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', receipt: true, runsRoot, resolveTranscriptPath: () => { throw new Error('boom'); } }));
+  expect(rec3.epicId).toBe('e-1');
+  expect(rec3.receipt).toEqual({ jobs: ZERO_JOBS, chat: null });
+});
+
+test('receipt: a completed Epic read from the archive gets one too', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const runsRoot = await mkTmp('sm-outside-read-runs-');
+  const tdir = await mkTmp('sm-outside-read-tx-');
+  setup(cwd, []);
+  writeFile(cwd, 'e-done.json', {
+    session: session('e-done', cwd, { status: 'completed', createdAt: '2026-11-01T00:00:00.000Z' }),
+    events: [],
+    archivedAt: '2026-11-05T00:00:01.000Z',
+  });
+  const tpath = writeTranscript(tdir, 'sess-e-done');
+  writeMeta(runsRoot, '2026-11-02T00-00-00-000Z', '0002-x', { cwd, totalCostUsd: 0.25, exitCode: 1, finishedAt: 5 });
+  const listJobs = () => [{ sourcePromptId: 'e-done', slug: '0002-x', status: 'failed' }];
+  const seen = [];
+  const resolveTranscriptPath = (a) => { seen.push(a); return { path: tpath, candidates: [tpath], existsAnywhere: true, existingPaths: [tpath] }; };
+
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-done', receipt: true, listJobs, runsRoot, resolveTranscriptPath }));
+  expect(rec.state).toBe('closed');
+  expect(seen).toEqual([{ cwd, claudeSessionId: 'sess-e-done' }]);
+  expect(rec.receipt.jobs).toMatchObject({ runs: 1, costUsd: 0.25, byPrd: [{ slug: '0002-x', runs: 1, costUsd: 0.25, lastExitCode: 1, lastFinishedAt: 5 }] });
+  expect(rec.receipt.chat).toMatchObject({ calls: 1, outputTokens: 7 });
+});
+
+test('receipt: listOpenEpicRecords never computes one', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-1', cwd)]);
+  let resolverCalls = 0;
+  const resolveTranscriptPath = () => { resolverCalls++; return { path: null, candidates: [], existsAnywhere: false, existingPaths: [] }; };
+  const page = await listOpenEpicRecords(cwd, opts(cwd, { receipt: true, resolveTranscriptPath }));
+  expect(page.epics).toHaveLength(1);
+  expect(page.epics[0]).not.toHaveProperty('receipt');
+  expect(resolverCalls).toBe(0);
+});

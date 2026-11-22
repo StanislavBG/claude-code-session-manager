@@ -77,9 +77,15 @@ const {
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
   readSpawnedPidFromLog, readLogMtimeMs, isClaudeArgv,
 } = require('./lib/scheduler/reaperHelpers.cjs');
-const { resolveProjectRoot, ensureRuntimeIgnores, RUNTIME_NAMESPACES, opsPath } = require('./lib/opsOwnership.cjs');
+const { resolveProjectRoot, ensureRuntimeIgnores, RUNTIME_NAMESPACES, opsPath, assertOpsWrite } = require('./lib/opsOwnership.cjs');
 const { BUILTIN_MACROS } = require('./lib/persona-macro/builtinMacros.cjs');
-const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
+const {
+  sweepStrandedJobBranches,
+  loadBranchSweepBackoff,
+  saveBranchSweepBackoff,
+  takeUnreportedGiveUps,
+  emptyBackoffState: emptyBranchSweepBackoffState,
+} = require('./lib/git/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
 const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/scheduler/gateAuthority.cjs');
@@ -8863,29 +8869,63 @@ function runQueueHealthSweep(jobs) {
 }
 
 // Cross-cycle "already attempted" memory for the branch sweep (PRD 1135) —
-// in-memory only, keyed `"<cwd>::<branch>"`. Resets on restart, same as
-// consecutiveRapidRateLimitsBySlug above; the goal is "don't retry a
-// permanently-conflicting branch every cycle forever" while the process
-// stays up, not durability across a restart.
+// in-memory only, keyed `"<cwd>::<branch>"`: at most one attempt per branch
+// per process lifetime. Durability across restarts is the persisted backoff
+// state below (PRD 3494), not this set.
 const branchSweepAttempted = new Set();
+// Fallback backoff state for a project whose ops root cannot be written
+// (ephemeral/unprovable cwd) — keyed by cwd, lives for the process only.
+const branchSweepBackoffFallback = new Map();
+const BRANCH_SWEEP_NEEDS_YOU_APP = 'session-manager';
+const BRANCH_SWEEP_BACKOFF_FILE = 'branch-sweep-backoff.json';
+
+/** Persisted backoff file for `cwd` (scheduler namespace), or null when unwritable. */
+function branchSweepBackoffFile(cwd) {
+  try {
+    const file = opsPath(cwd, 'scheduler', BRANCH_SWEEP_BACKOFF_FILE);
+    assertOpsWrite(file, 'scheduler');
+    return file;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Recover any `sm-job/*` branch left stranded (unmerged, owning row terminal
  * or gone) across every known project — the other half of PRD 1135's
  * invariant alongside the reaper's liveness check above: that check stops
  * NEW stranding, this sweep recovers anything stranded before it (or by a
- * crash the liveness check can't cover). Read-only reporting plus AT MOST one
- * bounded integrateBranch attempt per branch per process lifetime (see
- * branchSweepAttempted) — never forces anything, never deletes a branch.
- * Hangs off the same cadence as runQueueHealthSweep. Never throws.
+ * crash the liveness check can't cover). At most one bounded integrateBranch
+ * attempt per branch per process lifetime (branchSweepAttempted), gated by a
+ * persisted per-(cwd, branch) failure count with exponential backoff
+ * (PRD 3494): after BRANCH_SWEEP_MAX_FAILURES failures, or once the owning
+ * PRD is skipped/superseded, the branch is given up on — one
+ * branch_sweep_gave_up audit row per branch, then one cleanup summary (audit
+ * row + Needs-you notice) for the pass that stopped any, never one per boot.
+ * Never forces anything, never deletes a branch. Never throws.
  */
-async function runBranchSweep(jobs) {
+async function runBranchSweep(jobs, deps = {}) {
   if (process.env.SM_BRANCH_SWEEP_DISABLE === '1') return;
+  const audit = deps.audit ?? appendAuditEvent;
+  const store = deps.store ?? needsYouStore;
+  const now = deps.now ?? Date.now();
+  const stopped = [];
   try {
-    for (const cwd of allProjectCwds()) {
+    for (const cwd of (deps.cwds ?? allProjectCwds())) {
+      const file = branchSweepBackoffFile(cwd);
+      let state;
+      try {
+        state = file
+          ? await loadBranchSweepBackoff(file)
+          : (branchSweepBackoffFallback.get(cwd) ?? emptyBranchSweepBackoffState());
+      } catch {
+        state = emptyBranchSweepBackoffState();
+      }
       let sweep;
       try {
-        sweep = await sweepStrandedJobBranches({ cwd, jobs, attemptedBranches: branchSweepAttempted });
+        sweep = await sweepStrandedJobBranches({
+          cwd, jobs, attemptedBranches: branchSweepAttempted, backoff: { state, now },
+        });
       } catch (e) {
         console.warn(`[scheduler] branch sweep error for ${cwd}`, e?.message);
         continue;
@@ -8893,10 +8933,12 @@ async function runBranchSweep(jobs) {
       for (const r of sweep.results) {
         if (r.action === 'integrated') {
           console.log(`[scheduler] branch-sweep: merged stranded branch ${r.branch} into ${cwd} HEAD`);
-          appendAuditEvent('branch_sweep_integrated', { cwd, branch: r.branch, slug: r.slug });
+          audit('branch_sweep_integrated', { cwd, branch: r.branch, slug: r.slug });
         } else if (r.action === 'conflict') {
-          console.warn(`[scheduler] branch-sweep: ${r.branch} could not be integrated: ${r.integration?.reason}`);
-          appendAuditEvent('branch_sweep_conflict', { cwd, branch: r.branch, slug: r.slug, reason: r.integration?.reason });
+          console.warn(`[scheduler] branch-sweep: ${r.branch} could not be integrated (failure ${r.failures}): ${r.integration?.reason}`);
+          audit('branch_sweep_conflict', {
+            cwd, branch: r.branch, slug: r.slug, reason: r.integration?.reason, failures: r.failures,
+          });
           if (r.slug) {
             await mutate((s) => {
               const j = s.jobs.find((x) => x.slug === r.slug);
@@ -8905,9 +8947,56 @@ async function runBranchSweep(jobs) {
           }
         }
       }
+      const gaveUp = takeUnreportedGiveUps(state);
+      for (const g of gaveUp) {
+        console.warn(`[scheduler] branch-sweep: gave up on ${g.branch} in ${cwd} (${g.reason}); branch left in place`);
+        audit('branch_sweep_gave_up', { cwd, branch: g.branch, slug: g.slug, reason: g.reason, failures: g.failures });
+        stopped.push({ cwd, ...g });
+      }
+      if (sweep.changed || gaveUp.length) {
+        if (file) {
+          try {
+            await saveBranchSweepBackoff(file, state);
+          } catch (e) {
+            console.warn(`[scheduler] branch sweep backoff save failed for ${cwd}`, e?.message);
+          }
+        } else {
+          branchSweepBackoffFallback.set(cwd, state);
+        }
+      }
     }
+    if (stopped.length) await reportBranchSweepGaveUp(stopped, { audit, store, now });
   } catch (e) {
     console.warn('[scheduler] branch sweep error', e?.message);
+  }
+}
+
+/**
+ * One cleanup summary for the branches a sweep pass stopped retrying: a
+ * branch_sweep_cleanup_summary audit row plus one Needs-you notice. Only
+ * called for a pass that newly gave up on something, so a reboot with nothing
+ * new reports nothing.
+ */
+async function reportBranchSweepGaveUp(stopped, { audit, store, now }) {
+  const lines = stopped.map((s) => `${s.cwd}: ${s.branch} (${s.reason})`);
+  audit('branch_sweep_cleanup_summary', {
+    count: stopped.length,
+    branches: stopped.map((s) => ({ cwd: s.cwd, branch: s.branch, slug: s.slug, reason: s.reason })),
+  });
+  const head = 'Stopped retrying these sm-job branches (conflicted 3 times or their PRD was skipped/superseded). '
+    + 'Nothing was deleted — merge or delete each by hand:\n';
+  let why = head + lines.join('\n');
+  if (why.length > 1000) why = `${why.slice(0, 980)}\n… (${stopped.length} total)`;
+  try {
+    const result = await store.postNeedsYou({
+      app: BRANCH_SWEEP_NEEDS_YOU_APP,
+      id: `branch-sweep-gave-up-${now}`,
+      title: `Branch sweep gave up on ${stopped.length} stranded branch${stopped.length === 1 ? '' : 'es'}`,
+      why,
+    });
+    if (result?.changed && mainWindow) sendIfAlive(mainWindow, 'needsYou:changed', {});
+  } catch (e) {
+    console.error('[scheduler] branch-sweep cleanup Needs-you post failed', e?.message ?? e);
   }
 }
 

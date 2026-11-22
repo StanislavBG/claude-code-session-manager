@@ -251,9 +251,11 @@ export function AgentDetail({
       : "each project's local copy in its .claude/agents/ wins there"
 
   return (
-    // Content-sized (no min-h-0): when the cards + editor outgrow the pane, the detail grows and
-    // ConfigWorkbench's detail column — the one scroller — scrolls it, padding and status bar included.
-    <div data-testid="agent-detail" className="flex-1 shrink-0 flex flex-col">
+    // At least pane-sized, never capped (min-h-full, no min-h-0): the editor (flex-1) takes the height
+    // left under the cards, so its status bar ends the first view. When cards + the editor's 320px floor
+    // outgrow the pane, the detail grows and ConfigWorkbench's detail column — the one scroller —
+    // scrolls it, padding and status bar included.
+    <div data-testid="agent-detail" className="flex-1 shrink-0 min-h-full flex flex-col">
       <ConfigDetailHeader
         eyebrow={`AGENT · USER · ${compactPath(path, home)}`}
         title={obj.name}
@@ -459,7 +461,7 @@ export function AgentDetail({
         <div
           data-testid="agent-detail-editor"
           data-busy={busy ? 'true' : undefined}
-          className="flex-1 shrink-0 min-h-[480px] grid rounded-[14px] border border-line bg-bg-hi overflow-hidden"
+          className="flex-1 shrink-0 min-h-[320px] grid rounded-[14px] border border-line bg-bg-hi overflow-hidden"
         >
           <DocumentEditorPane
             path={path}

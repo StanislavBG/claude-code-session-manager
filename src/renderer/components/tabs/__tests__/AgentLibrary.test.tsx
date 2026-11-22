@@ -349,14 +349,17 @@ describe('AgentLibrary', () => {
     }
   })
 
-  it('the detail grows with its content (scrolled by the workbench) and the editor keeps a minimum height', async () => {
+  it('the detail fills the pane at least, grows with its content (scrolled by the workbench), and the editor takes the rest', async () => {
     const el = await mount()
     const detail = el.querySelector('[data-testid="agent-detail"]')!
     expect(detail.parentElement!.getAttribute('data-testid')).toBe('config-workbench-detail')
-    expect(detail.className).not.toContain('min-h-0')
-    expect(detail.className).toContain('shrink-0')
+    const detailCls = detail.className.split(/\s+/)
+    for (const c of ['flex', 'flex-col', 'min-h-full', 'shrink-0']) expect(detailCls).toContain(c)
+    expect(detailCls).not.toContain('min-h-0')
     expect(el.querySelector('[data-testid="agent-detail-body"]')!.className).not.toContain('min-h-0')
-    expect(el.querySelector('[data-testid="agent-detail-editor"]')!.className).toMatch(/min-h-\[\d+px\]/)
+    const editorCls = el.querySelector('[data-testid="agent-detail-editor"]')!.className.split(/\s+/)
+    for (const c of ['flex-1', 'min-h-[320px]']) expect(editorCls).toContain(c)
+    expect(editorCls).not.toContain('min-h-[480px]')
   })
 
   it('the ⋯ menu carries re-check and the model catalog info', async () => {

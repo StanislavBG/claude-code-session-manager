@@ -139,6 +139,10 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
           expect(editor!.y - (card!.y + card!.height)).toBeLessThan(40)
           expect(editor!.y).toBeLessThan(VIEWPORT.height - 100)
           expect(await panel.getByTestId('agent-runtime-card').evaluate((el) => el.nextElementSibling?.getAttribute('data-testid'))).toBe('agent-detail-editor')
+          // The editor fills the rest of the pane: its status bar sits in the first view, no scroll (wave-5 Minor 1).
+          expect(await page.getByTestId('config-workbench-detail').evaluate((el) => el.scrollTop)).toBe(0)
+          const status = await panel.getByTestId('editor-status-bar').boundingBox()
+          expect(status!.y + status!.height).toBeLessThanOrEqual(VIEWPORT.height)
           await editorChrome(panel)
         },
       },

@@ -35,11 +35,13 @@ const TOTALS_MODEL_ID = '';
 const FINALIZED_MODEL_ID = '__finalized__';
 const FINALIZED_PROJECT_ID = '';
 // Bumped when a bucket/finalized-marker line's shape changes in a way that
-// requires re-deriving it from transcripts (v1 → v2 added `activeMinutes`).
+// requires re-deriving it from transcripts (v1 → v2 added `activeMinutes`;
+// v2 → v3 counts each model call once — earlier versions over-counted calls,
+// so a day still finalized at v<3 reads high).
 // isDateFinalized() gates on this so old-shape finalized days get re-scanned
 // by the existing finalizeClosedDays() budget/resume loop instead of a new
 // migration path.
-const ROLLUP_VERSION = 2;
+const ROLLUP_VERSION = 3;
 
 function rollupKey(date, projectDir, modelId) {
   return `${date}|${projectDir}|${modelId}`;
@@ -98,6 +100,22 @@ function isDateFinalized(mergedMap, date) {
 }
 
 /**
+ * Sorted dates whose finalized marker was written below ROLLUP_VERSION (no
+ * `v` counts as v1). These are days the finalize pass could not recount —
+ * typically because their transcripts are gone — so their stored numbers come
+ * from an older counting scheme. A date with no marker is not legacy.
+ */
+function legacyFinalizedDates(mergedMap) {
+  const dates = [];
+  for (const bucket of mergedMap.values()) {
+    if (bucket.projectDir !== FINALIZED_PROJECT_ID || bucket.modelId !== FINALIZED_MODEL_ID) continue;
+    if (!bucket.finalizedAt) continue;
+    if ((bucket.v ?? 1) < ROLLUP_VERSION) dates.push(bucket.date);
+  }
+  return dates.sort();
+}
+
+/**
  * Append bucket entries (append-only) to the rollup file, then compact
  * (dedupe + rewrite) if the file has grown past COMPACT_THRESHOLD_BYTES.
  * Uses config.cjs's validatePath/validateWrite for boundary safety and
@@ -142,6 +160,7 @@ module.exports = {
   mergeRollupLines,
   readRollup,
   isDateFinalized,
+  legacyFinalizedDates,
   appendRollupDays,
   compact,
 };

@@ -161,3 +161,23 @@ test('zero-scan guarantee: computeDashboard never reads PROJECTS_DIR / transcrip
 
   readdirSpy.mockRestore();
 });
+
+test('dashboard: legacyDates lists in-range days whose finalized marker predates ROLLUP_VERSION; their rows are still served', async () => {
+  const { d2, d1, d0 } = await seedThreeDayFixture();
+  const old = daysAgo(400);
+  await historyRollup.appendRollupDays([
+    // d1 re-finalized at the current version → no longer legacy.
+    { date: d1, projectDir: historyRollup.FINALIZED_PROJECT_ID, modelId: historyRollup.FINALIZED_MODEL_ID, finalizedAt: 333, v: historyRollup.ROLLUP_VERSION },
+    // Out-of-range legacy day (outside rangeDays=30) must not appear.
+    { date: old, projectDir: 'proj-a', modelId: historyRollup.TOTALS_MODEL_ID, promptCount: 7, sessionCount: 1, activeMinutes: 1, v: 2 },
+    { date: old, projectDir: historyRollup.FINALIZED_PROJECT_ID, modelId: historyRollup.FINALIZED_MODEL_ID, finalizedAt: 1, v: 2 },
+  ]);
+
+  const result = await historyDashboard.computeDashboard({ rangeDays: 30 });
+  expect(result.legacyDates).toEqual([d2]);
+  expect(result.days.find((d) => d.date === d2).byProject['proj-a'].promptCount).toBe(4);
+  expect(result.provisionalDates).toEqual([d0]);
+
+  const all = await historyDashboard.computeDashboard({ rangeDays: 0 });
+  expect(all.legacyDates).toEqual([old, d2]);
+});

@@ -1367,6 +1367,8 @@ export interface HistoryDashboardResult {
   generatedAt: number;
   /** Dates included in `days` that are NOT yet finalized (typically just today). */
   provisionalDates: string[];
+  /** Dates in range finalized under an older rollup version (counted before once-per-call counting; read high). */
+  legacyDates: string[];
 }
 
 

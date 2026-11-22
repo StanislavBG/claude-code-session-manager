@@ -197,6 +197,9 @@ async function computeDashboard(req) {
   addRowToTotals(prevTotals, computeRowCost(prevRow));
 
   const provisionalDates = sortedDates.filter((d) => !finalizedDates.has(d));
+  // Days finalized under an older ROLLUP_VERSION that the finalize pass could
+  // not recount (transcripts gone) — their rows are still served as-is.
+  const legacyDates = historyRollup.legacyFinalizedDates(map).filter((d) => d >= from && d <= to);
 
   return {
     from,
@@ -209,6 +212,7 @@ async function computeDashboard(req) {
     toolsByProject,
     generatedAt: Date.now(),
     provisionalDates,
+    legacyDates,
   };
 }
 

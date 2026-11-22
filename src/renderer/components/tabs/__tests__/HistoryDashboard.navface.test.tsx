@@ -93,6 +93,7 @@ function buildRaw(): HistoryDashboardResult {
     toolsByProject: {},
     generatedAt: 0,
     provisionalDates: [],
+    legacyDates: [],
   }
 }
 

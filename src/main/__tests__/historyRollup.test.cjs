@@ -96,6 +96,23 @@ test('rollupKey is stable and distinguishes date/project/model', () => {
   expect(historyRollup.rollupKey('2026-07-01', 'proj-a', 'sonnet')).toBe(a);
 });
 
+test('ROLLUP_VERSION is 3 (each model call counted once)', () => {
+  expect(historyRollup.ROLLUP_VERSION).toBe(3);
+});
+
+test('legacyFinalizedDates: v2 marker is legacy, v3 marker is not, a day with no marker is not', () => {
+  const M = historyRollup.FINALIZED_MODEL_ID;
+  const P = historyRollup.FINALIZED_PROJECT_ID;
+  const map = historyRollup.mergeRollupLines([
+    JSON.stringify({ date: '2026-07-03', projectDir: P, modelId: M, finalizedAt: 1, v: 2 }),
+    JSON.stringify({ date: '2026-07-01', projectDir: P, modelId: M, finalizedAt: 1 }),
+    JSON.stringify({ date: '2026-07-02', projectDir: P, modelId: M, finalizedAt: 1, v: 3 }),
+    JSON.stringify({ date: '2026-07-04', projectDir: 'proj-a', modelId: historyRollup.TOTALS_MODEL_ID, promptCount: 1, v: 2 }),
+  ]);
+  expect(historyRollup.legacyFinalizedDates(map)).toEqual(['2026-07-01', '2026-07-03']);
+  expect(historyRollup.legacyFinalizedDates(new Map())).toEqual([]);
+});
+
 test('mergeRollupLines: last-write-wins per key', () => {
   const lines = [
     JSON.stringify({ date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 10 }),

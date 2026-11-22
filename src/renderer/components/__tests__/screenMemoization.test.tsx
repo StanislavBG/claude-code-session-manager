@@ -4,7 +4,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { renderScreenComponent, type ScreenRenderCtx } from '../screenComponents'
-import { Extensions } from '../tabs/Extensions'
+import { HomeClaudeConfig } from '../tabs/HomeClaudeConfig'
 import { Settings } from '../tabs/Settings'
 import { Memory } from '../tabs/Memory'
 import { AppSettings } from '../tabs/AppSettings'
@@ -91,9 +91,9 @@ function countedWrap(real: { type: (props: unknown) => ReactNode } | ((props: un
   })
 }
 
-vi.mock('../tabs/Extensions', async (importOriginal) => {
+vi.mock('../tabs/HomeClaudeConfig', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
-  return { ...actual, Extensions: countedWrap(actual.Extensions as never, 'extensions') }
+  return { ...actual, HomeClaudeConfig: countedWrap(actual.HomeClaudeConfig as never, 'extensions') }
 })
 vi.mock('../tabs/Settings', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -193,7 +193,7 @@ function installBroadWindowApiMock() {
  * path Suspense doesn't honor.
  */
 const FIVE_SCREENS: Record<string, (props: object) => ReactNode> = {
-  extensions: Extensions,
+  extensions: HomeClaudeConfig,
   settings: Settings,
   memory: Memory,
   'app-settings': AppSettings,

@@ -145,6 +145,10 @@ Path: `session-manager-operations/reviews/page-audits/<YYYY-MM-DD>-<key>.md`.
 
 - The steward of NavKey `<k>` is `.claude/agents/page-<k>.md`, with `name: page-<k>` and a pinned `model`.
 - The roster is `NAV_ITEMS` itself; never write a page list or a page count in a doc.
+- A tab of a page has no steward of its own: the page's steward owns every tab. `.claude/agents/page-claude-config.md`
+  owns all Claude config tabs, and also the Project-face twin (NavKey `memory`) until that key's own steward
+  exists. A NavKey kept only as a `NAV_KEY_ALIASES` entry in `src/renderer/lib/navGroups.ts` is not a page.
+  A persona for it is an orphan.
 - `scripts/check-page-stewards.cjs` (`npm run lint:page-stewards`) enforces coverage.
 - `scripts/page-surface.cjs` derives each page's files.
 - Both scripts land in sibling PRDs, so they are cited in code spans, not markdown links: `npm run lint:docs`

@@ -1,15 +1,23 @@
 // @vitest-environment jsdom
-import { createElement } from 'react'
+import { createElement, Fragment } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { useConfig } from '../../../state/config'
 import { flushAsync } from '../../../testUtils/domFlush'
 
-vi.mock('../editor/DocumentEditorPane', () => ({
-  DocumentEditorPane: ({ path, value, readOnly }: any) =>
-    createElement('div', { 'data-testid': 'document-editor-pane', 'data-path': path, 'data-readonly': String(!!readOnly) }, value),
-}))
+vi.mock('../editor/DocumentEditorPane', async () => {
+  const { stubStatusBar } = await import('./_docPaneStatusBar')
+  return {
+    DocumentEditorPane: (p: any) =>
+      createElement(
+        Fragment,
+        null,
+        createElement('div', { 'data-testid': 'document-editor-pane', 'data-path': p.path, 'data-readonly': String(!!p.readOnly) }, p.value),
+        stubStatusBar(p),
+      ),
+  }
+})
 
 const { SystemPrompt } = await import('../SystemPrompt')
 

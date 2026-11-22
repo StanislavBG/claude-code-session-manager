@@ -136,21 +136,22 @@ describe('SystemPrompt is user-scope only', () => {
       await Promise.resolve()
     })
     expect(api.config.readText.mock.calls.every((c) => String(c[0]) === USER_CLAUDE_MD)).toBe(true)
-    expect(el.textContent).toContain(USER_CLAUDE_MD)
+    expect(el.querySelector('[data-testid="config-detail-header"]')?.textContent).toContain('~/.claude/CLAUDE.md')
   })
 })
 
 describe('SystemPrompt states which file it edits and how far it reaches', () => {
-  const note = (el: HTMLElement) =>
-    el.querySelector('[data-testid="system-prompt-scope-note"]')?.textContent ?? ''
-
-  it('names the real file, its machine-wide reach, and where project files are handled instead', async () => {
+  it('names the file in the header and its reach in the row + load order, with no explainer paragraph', async () => {
     const el = await mount()
-    expect(note(el)).toContain('User system prompt')
-    expect(note(el)).toContain('~/.claude/CLAUDE.md')
-    expect(note(el)).toContain('every session it starts on this machine')
-    expect(note(el)).toContain('not edited here')
-    // The resolved absolute path, not just the ~ shorthand.
-    expect(note(el)).toContain(USER_CLAUDE_MD)
+    expect(el.querySelector('[data-testid="system-prompt-scope-note"]')).toBeNull()
+    expect(el.textContent).not.toContain('User system prompt')
+    const header = el.querySelector('[data-testid="config-detail-header"]')?.textContent ?? ''
+    expect(header).toContain('~/.claude/CLAUDE.md')
+    expect(header).toContain('YOUR INSTRUCTIONS FOR EVERY PROJECT')
+    expect(el.querySelector('[data-testid="referenced-file-root"]')?.textContent).toContain('User · every project on this machine')
+    expect(el.querySelector('[data-testid="referenced-file-root"]')?.getAttribute('title')).toBe(USER_CLAUDE_MD)
+    const loads = el.querySelector('[data-testid="claude-md-session-loads"]')?.textContent ?? ''
+    expect(loads).toContain('EVERY SESSION LOADS')
+    expect(loads).toContain('this file · every project')
   })
 })

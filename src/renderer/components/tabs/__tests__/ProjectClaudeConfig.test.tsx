@@ -18,15 +18,20 @@ vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
 vi.mock('../../ui/MarkdownEditor', () => ({ MarkdownEditor: () => createElement('div') }))
 vi.mock('../../ui/JsonEditor', () => ({ JsonEditor: () => createElement('div') }))
 // The document pane is a stand-in that shows its value and can "type" one line.
-vi.mock('../editor/DocumentEditorPane', () => ({
-  DocumentEditorPane: (p: { path: string; value: string; onChange: (v: string) => void }) =>
-    createElement(
-      'div',
-      { 'data-testid': 'doc-editor', 'data-path': p.path },
-      createElement('pre', { 'data-testid': 'doc-editor-text' }, p.value),
-      createElement('button', { type: 'button', 'data-testid': 'doc-editor-type', onClick: () => p.onChange(`${p.value}edited\n`) }, 'type'),
-    ),
-}))
+vi.mock('../editor/DocumentEditorPane', async () => {
+  const { stubStatusBar } = await import('./_docPaneStatusBar')
+  return {
+    DocumentEditorPane: (p: { path: string; value: string; onChange: (v: string) => void; emptyState?: unknown }) =>
+      createElement(
+        'div',
+        { 'data-testid': 'doc-editor', 'data-path': p.path },
+        createElement('pre', { 'data-testid': 'doc-editor-text' }, p.value),
+        p.emptyState as never,
+        createElement('button', { type: 'button', 'data-testid': 'doc-editor-type', onClick: () => p.onChange(`${p.value}edited\n`) }, 'type'),
+        stubStatusBar(p),
+      ),
+  }
+})
 
 const SHORT = '~' + PROJECT_CWD.slice(HOME.length)
 const MEM_DIR = `${HOME}/.claude/projects/${PROJECT_CWD.replace(/\//g, '-')}/memory`
@@ -113,6 +118,13 @@ async function pickLocal() {
   const rows = Array.from(container.querySelectorAll('[role="radiogroup"] [role="radio"]')) as HTMLElement[]
   const b = q('settings-file-local') ?? rows.find((x) => x.textContent?.includes('CLAUDE.local.md'))
   if (!b) throw new Error('no Local radio row')
+  await act(async () => { b.click() })
+  await flush()
+}
+/** The document pane's status-bar Save (the CLAUDE.md tab's only footer). */
+async function clickSave() {
+  const b = q('editor-save')
+  if (!b) throw new Error('no editor Save')
   await act(async () => { b.click() })
   await flush()
 }
@@ -321,9 +333,17 @@ describe('ProjectClaudeConfig', () => {
     await pick('CLAUDE.md')
     expect(q('doc-editor')?.dataset.path).toBe(MD)
     expect(q('doc-editor-text')?.textContent).toBe('# alpha rules\n')
+    // No explainer paragraph or file-age chip; Insert preset sits behind the header's ⋯.
+    expect(q('project-claude-md')?.textContent).not.toContain('Project instructions')
+    expect(q('project-claude-md')?.querySelector('[data-testid="source-chip-path"]')).toBeNull()
+    expect(q('insert-preset-button')).toBeNull()
+    await act(async () => { q('claude-md-more')!.click() })
+    expect(q('claude-md-more-menu')?.querySelector('[data-testid="insert-preset-button"]')).not.toBeNull()
+    await act(async () => { q('claude-md-more')!.click() })
+    expect(container.querySelectorAll('[data-testid="editor-status-bar"]')).toHaveLength(1)
 
     await act(async () => { q('doc-editor-type')!.click() })
-    await clickText('Save')
+    await clickSave()
     expect(api.config.writeText).toHaveBeenCalledWith(MD, '# alpha rules\nedited\n')
     expect(disk[MD].text).toBe('# alpha rules\nedited\n')
     expect(useConfig.getState().files[MD]?.dirty).toBe(false)
@@ -332,7 +352,7 @@ describe('ProjectClaudeConfig', () => {
     expect(q('doc-editor')?.dataset.path).toBe(LOCAL_MD)
     expect(q('doc-editor-text')?.textContent).toBe('# my local notes\n')
     await act(async () => { q('doc-editor-type')!.click() })
-    await clickText('Save')
+    await clickSave()
     expect(disk[LOCAL_MD].text).toBe('# my local notes\nedited\n')
   })
 
@@ -342,7 +362,7 @@ describe('ProjectClaudeConfig', () => {
     await act(async () => { q('doc-editor-type')!.click() })
     // Another editor wrote the file after this draft was loaded.
     disk[MD] = { text: '# rewritten elsewhere\n', mtimeMs: 50 }
-    await clickText('Save')
+    await clickSave()
     expect(api.config.writeText).not.toHaveBeenCalled()
     expect(disk[MD].text).toBe('# rewritten elsewhere\n')
     expect(q('project-claude-md')?.textContent).toContain('changed on disk')

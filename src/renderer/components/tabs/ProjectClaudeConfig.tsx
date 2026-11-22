@@ -43,7 +43,7 @@ import { Settings } from './Settings'
 import { SettingsEpicIsolation } from './SettingsEpicIsolation'
 import { McpServers, type McpAddContext } from './McpServers'
 import { Skills } from './Skills'
-import { McpLibrary } from './Library'
+import { McpLibrary, InsertPresetMenu } from './Library'
 import { useConfig } from '../../state/config'
 import { usePanelTabHint } from '../../state/layout'
 import { useActiveTab } from '../../lib/useActiveTab'
@@ -75,19 +75,6 @@ const isConfigTab = (t: string): t is ConfigTab => TABS.some((o) => o.key === t)
 /** Where main keeps the per-project isolation toggle: opsPath(cwd, 'prompt-sessions', …) in epicWorktreeProjectConfig.cjs. */
 const epicWorktreeConfigPath = (cwd: string) =>
   `${cwd}/session-manager-operations/prompt-sessions/epic-worktree-config.json`
-
-const CLAUDE_MD_NOTES: Record<ProjectScope, { title: string; body: string }> = {
-  project: {
-    title: 'Project instructions',
-    body:
-      'This is the real <project>/CLAUDE.md on disk, normally checked into git. The claude CLI loads it into every session started in this project, for anyone who clones it.',
-  },
-  local: {
-    title: 'Local instructions',
-    body:
-      'This is the real <project>/CLAUDE.local.md on disk: your own notes for this project on this machine, kept out of git. The claude CLI loads it alongside CLAUDE.md.',
-  },
-}
 
 /** The files and folders each tab's count reads — also the paths whose changes re-count. */
 function countSources(cwd: string, memoryDir: string | null) {
@@ -219,8 +206,8 @@ function ClaudeMdTab({ home, cwd, scope, onScopeChange }: {
   )
   const roots = useMemo(() => {
     const out: ClaudeMdRoot[] = []
-    if (paths.project) out.push({ path: paths.project, label: 'Project · in git', eyebrow: 'PROJECT INSTRUCTIONS' })
-    if (paths.local) out.push({ path: paths.local, label: 'Local · this machine', eyebrow: 'LOCAL INSTRUCTIONS' })
+    if (paths.project) out.push({ path: paths.project, label: 'Project · shared via git', eyebrow: 'PROJECT INSTRUCTIONS' })
+    if (paths.local) out.push({ path: paths.local, label: 'Local · this machine only', eyebrow: 'LOCAL INSTRUCTIONS' })
     return out
   }, [paths])
   const onSelectRoot = useCallback(
@@ -236,7 +223,6 @@ function ClaudeMdTab({ home, cwd, scope, onScopeChange }: {
 
   const active = paths[scope]
   if (!active) return <EmptyState title="loading…" />
-  const note = CLAUDE_MD_NOTES[scope]
 
   return (
     <div data-testid="project-claude-md" className="flex flex-col h-full min-h-0">
@@ -247,13 +233,7 @@ function ClaudeMdTab({ home, cwd, scope, onScopeChange }: {
         activeRoot={active}
         onSelectRoot={onSelectRoot}
         empty={empty}
-        note={
-          <div className="shrink-0 text-[11.5px] leading-snug">
-            <span className="font-semibold text-fg">{note.title}</span>
-            <span className="mx-1.5 text-fg-faint">·</span>
-            <span className="text-fg-dim">{note.body}</span>
-          </div>
-        }
+        moreMenu={({ importSelected }) => <InsertPresetMenu path={active} disabled={importSelected} />}
       />
     </div>
   )

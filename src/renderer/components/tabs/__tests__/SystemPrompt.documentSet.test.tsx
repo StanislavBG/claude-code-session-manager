@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement } from 'react'
+import { createElement, Fragment } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -22,19 +22,27 @@ import { readActivePresetIds } from '../../../lib/presetBlock'
  * see which path the host handed it, what text, and whether it was read-only.
  */
 
-vi.mock('../editor/DocumentEditorPane', () => ({
-  DocumentEditorPane: ({ path, value, readOnly, onChange }: any) =>
-    createElement(
-      'div',
-      {
-        'data-testid': 'document-editor-pane',
-        'data-path': path,
-        'data-readonly': String(!!readOnly),
-        onClick: () => onChange(`${value}EDIT`),
-      },
-      value,
-    ),
-}))
+vi.mock('../editor/DocumentEditorPane', async () => {
+  const { stubStatusBar } = await import('./_docPaneStatusBar')
+  return {
+    DocumentEditorPane: (p: any) =>
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          'div',
+          {
+            'data-testid': 'document-editor-pane',
+            'data-path': p.path,
+            'data-readonly': String(!!p.readOnly),
+            onClick: () => p.onChange(`${p.value}EDIT`),
+          },
+          p.value,
+        ),
+        stubStatusBar(p),
+      ),
+  }
+})
 
 const { SystemPrompt } = await import('../SystemPrompt')
 
@@ -144,8 +152,8 @@ describe('SystemPrompt renders its document set through the shared document view
     await click(rows(el)[0])
     await click(pane(el)) // stub's onClick appends 'EDIT' to the buffer
 
-    const save = Array.from(el.querySelectorAll('button')).find((b) => /save/i.test(b.textContent ?? ''))
-    expect(save).toBeDefined()
+    const save = el.querySelector('[data-testid="editor-save"]')
+    expect(save).not.toBeNull()
     await click(save as HTMLElement)
 
     expect(writeText).toHaveBeenCalledTimes(1)
@@ -265,12 +273,16 @@ describe('SystemPrompt renders its document set through the shared document view
 })
 
 describe('SystemPrompt Insert preset menu', () => {
-  it('has no Editor/Presets toggle, shows a SourceChip, and inserts a preset into the same draft', async () => {
+  it('has no Editor/Presets toggle or file-age chip, and inserts a preset from the header ⋯ menu', async () => {
     const el = await mount()
     const labels = Array.from(el.querySelectorAll('button')).map((b) => b.textContent?.trim())
     expect(labels).not.toContain('Presets')
     expect(labels).not.toContain('Editor')
     expect(el.textContent).toContain('~/.claude/CLAUDE.md')
+    expect(el.querySelector('[data-testid="source-chip-path"]')).toBeNull()
+    // Insert preset is not a header button; it lives behind the detail header's ⋯.
+    expect(el.querySelector('[data-testid="insert-preset-button"]')).toBeNull()
+    await click(el.querySelector('[data-testid="claude-md-more"]') as HTMLElement)
 
     const preset = CATALOG_PROMPT_PRESETS[0]
     await click(el.querySelector('[data-testid="insert-preset-button"]') as HTMLElement)
@@ -292,7 +304,7 @@ describe('SystemPrompt keeps CLAUDE.md in step with disk through the shared useC
     writeText.mockResolvedValueOnce({ ok: false, error: 'disk full' })
     const el = await mount()
     await click(pane(el)) // dirty the root
-    await click(button(el, /save/i))
+    await click(el.querySelector('[data-testid="editor-save"]') as HTMLElement)
 
     expect(writeText).toHaveBeenCalledTimes(1)
     expect(el.textContent).toContain('disk full')

@@ -102,6 +102,11 @@ interface Props {
    * mode highlights the changed blocks. Omit for no marks.
    */
   changedFrom?: string
+  /**
+   * Shown in place of the document body (title bar and status bar stay) — e.g. the
+   * "file does not exist yet" prompt of an uncreated CLAUDE.md (DESIGN_SPEC §5.1).
+   */
+  emptyState?: React.ReactNode
 }
 
 export function DocumentEditorPane({
@@ -117,6 +122,7 @@ export function DocumentEditorPane({
   headerRight,
   hideStatusBar,
   changedFrom,
+  emptyState,
 }: Props) {
   const prefs = useEditorPrefs()
   const markdown = isMarkdown(path)
@@ -303,7 +309,9 @@ export function DocumentEditorPane({
       </div>
 
       <div className="flex-1 min-h-0">
-        {markdown ? (
+        {emptyState ? (
+          <div className="h-full min-h-0 overflow-auto" data-testid="document-empty">{emptyState}</div>
+        ) : markdown ? (
           <div className="flex h-full overflow-clip">
             {showOutline && (
               <DocOutline

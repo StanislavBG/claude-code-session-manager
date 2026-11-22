@@ -3,26 +3,30 @@
  * Project), built on ConfigLayout. Design: design-mocks/claude-config renders 10 (Home) and
  * 06 (Project), DESIGN_SPEC.md §2-3, copy in ConfigWorkbench.dc.html.
  *
- * Left column: a FILE + ITS IMPORTS card — one radio row per root file the host offers
- * (Home: ~/.claude/CLAUDE.md; Project: CLAUDE.md and CLAUDE.local.md), then every file the
- * selected root `@`-imports (resolved by main's `config:parse-imports`), each with its line
- * count, plus a ~N tokens estimate (chars/4) for the whole set — then the EVERY SESSION LOADS
- * order. Detail: ConfigDetailHeader + the shared DocumentEditorPane (Document mode), reading
- * and saving through the config store (loadText / saveText, mtime-checked), with the SaveBar
- * beneath it. A root file that does not exist yet shows the designed empty state.
+ * Left column: a file card (Home: FILE + ITS IMPORTS; Project: INSTRUCTIONS FILE) — one radio
+ * row per root file the host offers (Home: ~/.claude/CLAUDE.md; Project: CLAUDE.md and
+ * CLAUDE.local.md), then every file the selected root `@`-imports (resolved by main's
+ * `config:parse-imports`), each named relative to the root's folder with its line count, plus
+ * a ~N tokens estimate (chars/4) for the whole set — then the load order (Home: EVERY SESSION
+ * LOADS; Project: A SESSION HERE LOADS). Detail: ConfigDetailHeader (actions behind one `⋯`
+ * menu) + the shared DocumentEditorPane (Document mode), reading and saving through the config
+ * store (loadText / saveText, mtime-checked). The pane's own status bar is the only footer:
+ * this component passes it dirty / isNew / onSave / onRevert. A root file that does not exist
+ * yet keeps the full editor chrome with the empty-state prompt inside the document.
  *
- * The design's `Draft it with /init` button is omitted: the app has no action that runs /init.
+ * The design's `Draft it with /init` button is omitted (DESIGN_SPEC §5.1).
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ConfigWorkbench, ConfigDetailHeader } from './ConfigLayout'
 import { DocumentEditorPane } from '../tabs/editor/DocumentEditorPane'
-import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { shortenHome } from '../ui/SourceChip'
 import { useConfig } from '../../state/config'
 import { toast } from '../../state/toast'
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { basename } from '../../lib/basename'
+import { dirname, segments } from '../../lib/pathSep'
+import { Z } from '../../lib/zLayers'
 import { estimateTokens } from '../../lib/estimateTokens'
 import type { ImportRef } from '../../../preload/api'
 
@@ -38,9 +42,22 @@ export function countLines(text: string): number {
   return text.replace(/\n$/, '').split('\n').length
 }
 
+/**
+ * `path` relative to the folder `dir` (`rules/git.md`, `../shared/x.md`), '/'-joined.
+ * Falls back to `path` itself when the two share no root (another drive).
+ */
+export function relativeTo(path: string, dir: string): string {
+  const a = segments(path)
+  const b = segments(dir)
+  if (!a.length || !b.length || a[0] !== b[0]) return path
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return [...Array<string>(b.length - i).fill('..'), ...a.slice(i)].join('/')
+}
+
 export interface ClaudeMdRoot {
   path: string
-  /** Row subtitle, e.g. `Project · in git`. */
+  /** Row subtitle, e.g. `Project · shared via git`. */
   label: string
   /** Header eyebrow continuation, e.g. `PROJECT INSTRUCTIONS`. */
   eyebrow: string
@@ -56,10 +73,11 @@ export interface ClaudeMdWorkbenchProps {
   onSelectRoot?: (path: string) => void
   /** Empty-state copy for a root file that does not exist yet. */
   empty: { title: string; body: string }
-  /** Optional explanatory note under the header. */
-  note?: ReactNode
-  /** Extra header actions (Insert preset, SourceChip…); the function form learns whether an import is on screen. */
-  headerActions?: ReactNode | ((state: { importSelected: boolean }) => ReactNode)
+  /**
+   * Contents of the detail header's `⋯` menu (Insert preset…); the function form learns
+   * whether an import is on screen. Omit for no menu.
+   */
+  moreMenu?: ReactNode | ((state: { importSelected: boolean }) => ReactNode)
   /** Prefix for the missing / read-only import notes' test ids. */
   testIdPrefix?: string
 }
@@ -184,22 +202,12 @@ function FileRow({ name, trailing, meta, selected, testId, title, onSelect }: Fi
   )
 }
 
-function SessionLoads({ scope }: { scope: 'user' | 'project' }) {
-  const steps =
-    scope === 'user'
-      ? [
-          { path: '~/.claude/CLAUDE.md', note: 'this file · every project', here: true },
-          { path: '<project>/CLAUDE.md', note: 'per project · in its Claude config', here: false },
-          { path: '<project>/CLAUDE.local.md', note: 'per project · that machine only', here: false },
-        ]
-      : [
-          { path: '~/.claude/CLAUDE.md', note: 'global · edited in Home', here: false },
-          { path: '<project>/CLAUDE.md', note: 'project · in git · edited here', here: true },
-          { path: '<project>/CLAUDE.local.md', note: 'local · this machine · edited here', here: true },
-        ]
+interface LoadStep { path: string; note: string; here: boolean }
+
+function SessionLoads({ scope, steps }: { scope: 'user' | 'project'; steps: ReadonlyArray<LoadStep> }) {
   return (
     <div data-testid="claude-md-session-loads" className="flex flex-col px-1">
-      <span className={`${EYEBROW} mb-3`}>EVERY SESSION LOADS</span>
+      <span className={`${EYEBROW} mb-3`}>{scope === 'user' ? 'EVERY SESSION LOADS' : 'A SESSION HERE LOADS'}</span>
       {steps.map((s, i) => (
         <div key={s.path} className="flex gap-3">
           <div className="flex flex-col items-center">
@@ -216,6 +224,58 @@ function SessionLoads({ scope }: { scope: 'user' | 'project' }) {
   )
 }
 
+/** The detail header's `⋯` button; its popover holds whatever the host passes (Insert preset…). */
+function DetailMoreMenu({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+
+  // Escape or a mousedown outside the trigger + popover closes it.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        data-testid="claude-md-more"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="h-9 w-9 inline-flex items-center justify-center rounded-[10px] bg-bg-hi border border-line text-fg-dim hover:text-fg hover:border-rule focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="More actions"
+          data-testid="claude-md-more-menu"
+          className={`absolute ${Z.dialog} right-0 top-[42px] min-w-[200px] p-[5px] flex flex-col gap-1 bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ClaudeMdWorkbench({
   home,
   scope,
@@ -223,8 +283,7 @@ export function ClaudeMdWorkbench({
   activeRoot,
   onSelectRoot,
   empty,
-  note,
-  headerActions,
+  moreMenu,
   testIdPrefix = 'claude-md',
 }: ClaudeMdWorkbenchProps) {
   const files = useConfig((s) => s.files)
@@ -352,6 +411,28 @@ export function ClaudeMdWorkbench({
     estimateTokens(rootFile.draftRaw) +
     importPaths.reduce((n, p) => n + estimateTokens(textOf(p)?.text ?? ''), 0)
 
+  const rootDir = dirname(activeRoot)
+  const rootStatus = (p: string): 'missing' | 'present' | 'unknown' => {
+    const info = textOf(p)
+    return info == null ? 'unknown' : info.exists ? 'present' : 'missing'
+  }
+  const loadSteps: LoadStep[] =
+    scope === 'user'
+      ? [
+          { path: '~/.claude/CLAUDE.md', note: 'this file · every project', here: true },
+          { path: '<project>/CLAUDE.md', note: 'per project · in its Claude config', here: false },
+          { path: '<project>/CLAUDE.local.md', note: 'per project · that machine only', here: false },
+        ]
+      : [
+          { path: '~/.claude/CLAUDE.md', note: 'global · edited in Home', here: false },
+          ...roots.map((r) => {
+            const here = r.path === activeRoot
+            const missing = rootStatus(r.path) === 'missing'
+            const note = here ? (missing ? 'this file · not created' : 'this file') : missing ? 'not created' : 'edited here'
+            return { path: basename(r.path), note, here }
+          }),
+        ]
+
   const activeMeta = roots.find((r) => r.path === activeRoot)
   const eyebrow = selectedRef
     ? `${shortenHome(selectedRef.path, home)} · IMPORTED BY ${basename(activeRoot)}`
@@ -361,7 +442,7 @@ export function ClaudeMdWorkbench({
     <>
       <div data-testid="claude-md-file-card" role="radiogroup" aria-label="Instruction files" className="px-3.5 pt-3.5 pb-3 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-1.5">
         <div className="flex items-center px-0.5 pb-1">
-          <span className={`flex-1 ${EYEBROW}`}>FILE + ITS IMPORTS</span>
+          <span className={`flex-1 ${EYEBROW}`}>{scope === 'user' ? 'FILE + ITS IMPORTS' : 'INSTRUCTIONS FILE'}</span>
           <span className="text-[11.5px] text-fg-faint">~{totalTokens.toLocaleString()} tokens</span>
         </div>
         {roots.map((r) => {
@@ -388,7 +469,7 @@ export function ClaudeMdWorkbench({
               return (
                 <FileRow
                   key={ref.path}
-                  name={basename(ref.path)}
+                  name={relativeTo(ref.path, rootDir)}
                   trailing={
                     missing ? (
                       <span data-testid="referenced-file-missing" className="text-amber-400/90">missing</span>
@@ -407,8 +488,30 @@ export function ClaudeMdWorkbench({
           </div>
         )}
       </div>
-      <SessionLoads scope={scope} />
+      <SessionLoads scope={scope} steps={loadSteps} />
     </>
+  )
+
+  const menuContent = typeof moreMenu === 'function' ? moreMenu({ importSelected: !!selectedRef }) : moreMenu
+  const emptyPrompt = (
+    <div data-testid="claude-md-empty" className="flex justify-center px-10 py-12">
+      <div className="w-full max-w-[640px] flex flex-col gap-3.5">
+        <p className="font-serif text-[30px] leading-tight text-fg-faint">
+          {empty.title}
+          <span aria-hidden className="inline-block w-0.5 h-7 ml-1 align-[-5px] bg-accent" />
+        </p>
+        <p className="max-w-[520px] text-[15px] leading-relaxed text-fg-dim">{empty.body}</p>
+        <div className="mt-1.5 flex gap-2.5">
+          <button
+            type="button"
+            onClick={() => setTypingIn(activeRoot)}
+            className="h-[38px] px-4 rounded-[9px] border border-line bg-bg text-sm font-medium text-fg hover:bg-bg-elev focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            Just start typing
+          </button>
+        </div>
+      </div>
+    </div>
   )
 
   const detail = (
@@ -417,12 +520,16 @@ export function ClaudeMdWorkbench({
         eyebrow={eyebrow}
         title={basename(docPath)}
         pill={selectedRef ? undefined : rootMissing ? 'Not created' : 'Loaded in every session'}
-        actions={typeof headerActions === 'function' ? headerActions({ importSelected: !!selectedRef }) : headerActions}
+        actions={menuContent == null || menuContent === false ? undefined : <DetailMoreMenu>{menuContent}</DetailMoreMenu>}
       />
       <div className="flex-1 min-h-0 flex flex-col px-9 py-5 gap-3">
-        {note}
         {doc?.loadError && (
           <div role="alert" className="shrink-0 text-[11px] text-red-400">{doc.loadError}</div>
+        )}
+        {saveError && (
+          <div role="alert" data-testid={`${testIdPrefix}-save-error`} className="shrink-0 text-[11px] text-red-400">
+            {basename(docPath)} {saveError}
+          </div>
         )}
         {importMissing && (
           <div data-testid={`${testIdPrefix}-missing-note`} className="shrink-0 text-[11px] text-amber-400/90">
@@ -435,57 +542,24 @@ export function ClaudeMdWorkbench({
           </div>
         )}
         <div className="flex-1 min-h-[320px] flex flex-col rounded-[14px] border border-line bg-bg-hi overflow-hidden">
-          {showEmpty ? (
-            <div data-testid="claude-md-empty" className="flex-1 flex items-start justify-center px-10 py-16">
-              <div className="max-w-[560px] flex flex-col gap-3">
-                <p className="font-serif text-[28px] leading-tight text-fg-dim">{empty.title}</p>
-                <p className="text-sm leading-relaxed text-fg-dim">{empty.body}</p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTypingIn(activeRoot)}
-                    className="h-9 px-4 rounded-[10px] border border-line bg-bg text-[13.5px] font-semibold text-fg hover:bg-bg-elev focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-                  >
-                    Just start typing
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            doc && (
-              <div className="flex-1 min-h-0">
-                <DocumentEditorPane
-                  // Remount per document so view mode / outline never carry over.
-                  key={docPath}
-                  path={docPath}
-                  value={docText}
-                  readOnly={readOnly}
-                  defaultMode="document"
-                  onChange={(v) => {
-                    setSaveError(null)
-                    setDraft(docPath, v)
-                  }}
-                  onSave={() => { void save() }}
-                />
-              </div>
-            )
-          )}
-          {doc && !readOnly && (
-            <div className="shrink-0 border-t border-line">
-              <SaveBar
-                dirty={doc.dirty}
-                busy={doc.busy}
-                parseError={saveError}
-                lastSavedAt={doc.lastSavedAt}
-                leading={
-                  <span>
-                    {docText.length.toLocaleString()} chars · ~{estimateTokens(docText).toLocaleString()} tokens
-                    {!doc.exists && ' · file will be created on save'}
-                    {doc.exists && selectedRef && ' · editing an imported file'}
-                  </span>
-                }
-                onSave={() => { void save() }}
-                onRevert={revert}
+          {doc && (
+            <div className="flex-1 min-h-0">
+              <DocumentEditorPane
+                // Remount per document so view mode / outline never carry over.
+                key={docPath}
+                path={docPath}
+                value={docText}
+                readOnly={readOnly}
+                defaultMode="document"
+                dirty={readOnly ? undefined : doc.dirty}
+                isNew={!readOnly && !doc.exists}
+                emptyState={showEmpty ? emptyPrompt : undefined}
+                onChange={(v) => {
+                  setSaveError(null)
+                  setDraft(docPath, v)
+                }}
+                onSave={readOnly ? undefined : () => { void save() }}
+                onRevert={readOnly ? undefined : revert}
               />
             </div>
           )}

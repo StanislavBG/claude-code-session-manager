@@ -10618,6 +10618,15 @@ let gateShadowPending = null;
 let gateShadowSlug = null;
 
 
+// Boot-reverify park errors, keyed by the verifierVerdict they pair with.
+// They state only what happened: the self-heal ladder may still reopen the
+// job, so they must not claim a human has to act.
+const PARK_ERRORS = Object.freeze({
+  no_run_artifacts: 'no run artifacts — parked',
+  autofix_no_plan: 'auto-fix investigation produced no fix plan after retry — parked',
+  autofix_plan_unqueued: 'auto-fix investigation produced a fix plan that never reached the queue — parked',
+});
+
 async function reverifyNeedsReview() {
   const snap = await readQueue();
   // isGuardParkedWithoutAutoFix rows are NOT isRescanCandidate (their
@@ -10909,25 +10918,25 @@ async function reverifyNeedsReview() {
       for (const j of s.jobs) {
         if (unresolvableSet.has(j.slug)) {
           j.verifierVerdict = 'no_run_artifacts';
-          j.error = 'no run artifacts — manual review';
+          j.error = PARK_ERRORS.no_run_artifacts;
         } else if (exhaustedSet.has(j.slug)) {
           j.verifierVerdict = 'autofix_no_plan';
-          j.error = 'auto-fix investigation produced no fix plan after retry — manual review';
+          j.error = PARK_ERRORS.autofix_no_plan;
         } else if (planUnqueuedSet.has(j.slug)) {
           j.verifierVerdict = 'autofix_plan_unqueued';
-          j.error = 'auto-fix investigation produced a fix plan that never reached the queue — manual review';
+          j.error = PARK_ERRORS.autofix_plan_unqueued;
         }
       }
     });
     if (unresolvable.length) {
-      console.log(`[scheduler] boot reverify: no run artifacts for ${unresolvable.map((j) => j.slug).join(', ')} — flagged for manual review`);
+      console.log(`[scheduler] boot reverify: no run artifacts for ${unresolvable.map((j) => j.slug).join(', ')} — parked`);
     }
     if (exhaustedAutoFix.length) {
-      console.log(`[scheduler] boot reverify: auto-fix retry exhausted for ${exhaustedAutoFix.map((j) => j.slug).join(', ')} — flagged for manual review`);
+      console.log(`[scheduler] boot reverify: auto-fix retry exhausted for ${exhaustedAutoFix.map((j) => j.slug).join(', ')} — parked`);
     }
     if (planUnqueued.length) {
       for (const j of planUnqueued) {
-        console.log(`[scheduler] boot reverify: auto-fix plan never queued for ${j.slug} — flagged for manual review`);
+        console.log(`[scheduler] boot reverify: auto-fix plan never queued for ${j.slug} — parked`);
       }
     }
     await broadcast();
@@ -12818,6 +12827,7 @@ queueOps.bindQueueAccess({
 });
 
 module.exports = {
+  PARK_ERRORS,
   applyDepHoldNotices,
   _resetDepHoldNoticesForTests,
   readValidatorGateMs,

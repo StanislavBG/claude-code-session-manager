@@ -275,3 +275,15 @@ test('a slug that parks twice produces two independent entry/resolution pairs, n
   expect(rollup.byLadderRung['manual-reset']).toBe(1);
   expect(rollup.byLadderRung['reverify']).toBe(1);
 });
+
+// ---- boot reverify park errors (reverifyNeedsReview annotation) ----
+// The self-heal ladder can still reopen these jobs, so the error must state
+// only what happened and never claim a human has to act.
+test('boot reverify park errors say "parked", keyed by unchanged verifierVerdict values', () => {
+  const { PARK_ERRORS } = require('../scheduler.cjs');
+  expect(Object.isFrozen(PARK_ERRORS)).toBe(true);
+  expect(Object.keys(PARK_ERRORS).sort()).toEqual(['autofix_no_plan', 'autofix_plan_unqueued', 'no_run_artifacts']);
+  expect(PARK_ERRORS.no_run_artifacts).toBe('no run artifacts — parked');
+  expect(PARK_ERRORS.autofix_no_plan).toBe('auto-fix investigation produced no fix plan after retry — parked');
+  expect(PARK_ERRORS.autofix_plan_unqueued).toBe('auto-fix investigation produced a fix plan that never reached the queue — parked');
+});

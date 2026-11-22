@@ -222,6 +222,27 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
 }
 
 /**
+ * Short body fills (wave-7 Minor 1): the screenshot agent's prompt is about as tall as the free
+ * space, so it can't tell flex-1 from content height. Click a stub agent whose prompt is one line
+ * ('builder') at 1592x1040: only flex-1 can stretch its editor to the detail column's visible
+ * bottom. Runs after every PNG is written and writes none itself.
+ */
+async function shortBodyFills(page: Page) {
+  await rows(page).filter({ hasText: 'builder' }).filter({ hasNotText: 'demo-video-builder' }).first().click()
+  const header = page.getByTestId('config-detail-header').first()
+  await expect(header).toContainText('~/.claude/agents/builder.md')
+  await expect(page.getByTestId('tiptap-editor')).toContainText('You are builder.')
+  const detail = page.getByTestId('config-workbench-detail')
+  const bottom = await detail.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return r.top + el.clientTop + el.clientHeight
+  })
+  const editor = await page.getByTestId('agent-detail-editor').boundingBox()
+  expect(bottom - (editor!.y + editor!.height)).toBeGreaterThanOrEqual(0)
+  expect(bottom - (editor!.y + editor!.height)).toBeLessThanOrEqual(48)
+}
+
+/**
  * Short pane (wave-6 Minor 2): with the Agents tab still open, shrink the viewport to 1592x700 so
  * the detail column is the single scroller. The editor keeps its 320px floor, and scrolling the
  * column to its end (scrollTop, never scrollIntoView) brings the status bar inside the column's
@@ -310,7 +331,10 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         await page.screenshot({ path: file })
         written.push(file)
       }
-      if (face === 'home') await shortPane(page)
+      if (face === 'home') {
+        await shortBodyFills(page)
+        await shortPane(page)
+      }
       await ctx.close()
     }
   } finally {

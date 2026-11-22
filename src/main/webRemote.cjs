@@ -1218,6 +1218,12 @@ function respond(msgId, payload, typeOverride, client) {
   }
 }
 
+// A 'project-video' macro is a background Video tool run only from the desktop's
+// Project Home ▸ Video — the phone remote neither lists nor starts one.
+function isRemoteMacro(macro) {
+  return macro.surface !== 'project-video';
+}
+
 // Lazy-loaded dispatch map — avoids circular require at module load time.
 let _dispatchMap = null;
 
@@ -1410,7 +1416,7 @@ function getDispatchMap() {
         projects: tabs.map((t) => ({ cwd: t.cwd, title: t.label })),
         agents: personas.map((a) => ({ name: a.name, description: a.description })),
         tags: EpicTagSchema.options,
-        macros: await macroLibrary.listMacros(),
+        macros: (await macroLibrary.listMacros()).filter(isRemoteMacro),
         macroInputs: true,
       };
     },
@@ -1430,7 +1436,9 @@ function getDispatchMap() {
         const macroLibrary = require('./lib/persona-macro/macroLibrary.cjs');
         const macros = await macroLibrary.listMacros();
         const macro = macros.find((m) => m.id === parsed.macroId);
-        if (!macro || !macroLibrary.macroVisibleIn(macro, parsed.cwd)) throw new Error('unknown macro');
+        if (!macro || !isRemoteMacro(macro) || !macroLibrary.macroVisibleIn(macro, parsed.cwd)) {
+          throw new Error('unknown macro');
+        }
         const result = macroLibrary.renderMacroPrompt(parsed.prompt, macro.inputs, parsed.inputs ?? {});
         if (!result.ok) throw new Error(result.error);
         prompt = result.prompt;

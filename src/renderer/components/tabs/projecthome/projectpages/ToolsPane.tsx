@@ -25,12 +25,6 @@
  * listed review-run id list changes: the newest review record plus the validation records of this
  * project's Review MD network sessions. `REVIEW RUNS` (ReviewRuns) lists those sessions newest
  * first with a reviewRunStatus label and an Open button; the newest also feeds the row meta.
- *
- * The explorer's curation (verdicts, notes, reviewed marks, record/doc folder overrides) is
- * `useMdCuration`'s, kept in this project's ui-prefs. The scan waits for it to load and sends
- * the folder overrides, rescanning when either folder list changes (never on a verdict, note
- * or reviewed mark). The explorer footer's CurationTray turns the picked docs into a Review MD
- * network launch (composeCurationBrief), so curation ends in an architect session.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
@@ -38,8 +32,6 @@ import { MacroEditor } from '../../../epics/MacroEditor'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { useAgentPersonas } from '../../../../lib/useAgentPersonas'
 import { toast } from '../../../../state/toast'
-import { useMdCuration, type UseMdCuration } from '../../../../lib/useMdCuration'
-import { composeCurationBrief, type MdCuration } from '../../../../lib/mdCurate'
 import { MdNetworkCards } from './MdLinkMap'
 import { MdNetworkExplorer } from './MdNetworkExplorer'
 import { MdDocPreview } from './MdDocPreview'
@@ -51,7 +43,7 @@ import { useChat } from '../../../../state/chat'
 import { useScheduleState } from '../../../../state/scheduleState'
 import { useScheduledPrds } from '../../../../lib/useScheduledPrds'
 import { reviewRuns, reviewRunStatus, type ReviewRunStatus } from '../../../../lib/mdReviewRuns'
-import type { ScheduleJob, Macro, MacroJobStatus, MdCensus, MdNetwork, MdNetworkResult, MdReviewResult } from '../../../../../preload/api'
+import type { ScheduleJob, Macro, MacroJobStatus, MdNetwork, MdNetworkResult, MdReviewResult } from '../../../../../preload/api'
 
 export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
 /** A finished scan's findings count for `cwd`; null when the scan failed. */
@@ -63,8 +55,6 @@ const COMPETITOR_MATRIX_ID = 'builtin-competitor-matrix'
 const LIBRARY_MACRO_IDS: readonly string[] = ['builtin-project-home', 'builtin-demo-video']
 const NO_SCOPES: readonly string[] = []
 const EMPTY_JOBS: ScheduleJob[] = []
-/** The Mode a curation launch asks for when the macro offers it. */
-const CURATION_MODE = 'Full review'
 
 const REVIEW_DESCRIPTION =
   'Maps CLAUDE.md and every doc it leads to, so agents start from one short entry map and find each fact in exactly one place — with nothing stale.'
@@ -78,37 +68,25 @@ type MdNetworkScan =
   | { cwd: string; status: 'ready'; result: MdNetwork }
   | { cwd: string; status: 'error'; error: string }
 
-/** The folder overrides a scan sends (useMdCuration's recordFolders / docFolders). */
-interface ScanFolders {
-  recordFolders: string[]
-  docFolders: string[]
-}
-
 /**
- * Scans `cwd` once `ready` (its curation loaded) and `active` (the Review MD network view shows)
- * first hold for it, again whenever `folders` changes, and on `refresh` — never on a timer. A scan a newer one replaced is dropped. `{ ok:false }`
+ * Scans `cwd` once `active` (the Review MD network view shows) first holds for it, and again on
+ * `refresh` — never on a timer. A scan a newer one replaced is dropped. `{ ok:false }`
  * (nothing to map: not a git repo, no root CLAUDE.md) shows in the pane only; a rejected call
  * also toasts, once per scan.
  */
 function useMdNetworkScan(
   cwd: string | null | undefined,
   active: boolean,
-  ready: boolean,
-  folders: ScanFolders,
   onFindingsCount?: FindingsCountFn,
 ) {
   const [scan, setScan] = useState<MdNetworkScan | null>(null)
-  // `${cwd}\n${folders}` of the last scan started, so only a cwd or folder change rescans.
-  const requestedKey = useRef<string | null>(null)
+  // The cwd of the last scan started, so only a cwd change rescans.
+  const requestedCwd = useRef<string | null>(null)
   const latest = useRef(0)
-  const foldersKey = JSON.stringify([folders.recordFolders, folders.docFolders])
-  const foldersRef = useRef(folders)
-  foldersRef.current = folders
 
   const start = useCallback(
-    (forCwd: string, key: string) => {
-      requestedKey.current = key
-      const { recordFolders, docFolders } = foldersRef.current
+    (forCwd: string) => {
+      requestedCwd.current = forCwd
       const id = ++latest.current
       setScan((prev) => ({
         cwd: forCwd,
@@ -117,7 +95,7 @@ function useMdNetworkScan(
       }))
       let pending: Promise<MdNetworkResult>
       try {
-        pending = window.api.projectPages.mdNetwork({ cwd: forCwd, recordFolders, docFolders })
+        pending = window.api.projectPages.mdNetwork({ cwd: forCwd })
       } catch (err) {
         pending = Promise.reject(err)
       }
@@ -140,14 +118,13 @@ function useMdNetworkScan(
   )
 
   useEffect(() => {
-    if (!active || !ready || !cwd) return
-    const key = `${cwd}\n${foldersKey}`
-    if (requestedKey.current !== key) start(cwd, key)
-  }, [active, ready, cwd, foldersKey, start])
+    if (!active || !cwd) return
+    if (requestedCwd.current !== cwd) start(cwd)
+  }, [active, cwd, start])
 
   const refresh = useCallback(() => {
-    if (cwd && ready) start(cwd, `${cwd}\n${foldersKey}`)
-  }, [cwd, ready, foldersKey, start])
+    if (cwd) start(cwd)
+  }, [cwd, start])
 
   return { scan: scan?.cwd === cwd ? scan : null, refresh }
 }
@@ -395,62 +372,6 @@ function SelectionSync({ id, onChange }: { id: string | null; onChange: (id: str
   return null
 }
 
-/**
- * The explorer footer: how many docs carry a verdict, Clear (drops every verdict) and Review
- * picked docs, which launches the review macro with composeCurationBrief's Scope and
- * additional instructions, then closes the explorer.
- */
-function CurationTray({
-  macro,
-  curation,
-  census,
-  mode,
-  launching,
-  onLaunch,
-  onClear,
-  onClose,
-}: {
-  macro: Macro
-  curation: MdCuration
-  census: MdCensus
-  mode: string
-  launching: string | null
-  onLaunch: LaunchFn
-  onClear: () => void
-  onClose: () => void
-}) {
-  const brief = composeCurationBrief(curation, census)
-  return (
-    <div data-testid="md-curation-tray" className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-      <span data-testid="md-curation-count" className="flex-1 text-[12.5px] text-fg-dim">
-        {`${plural(brief.picked, 'doc')} picked`}
-      </span>
-      <button
-        type="button"
-        data-testid="md-curation-clear"
-        disabled={Object.keys(curation.verdicts).length === 0}
-        onClick={onClear}
-        className="inline-flex h-[30px] flex-none items-center rounded-md border border-rule-structural bg-bg-hi px-3 text-[12px] font-semibold text-fg-dim cursor-pointer hover:border-fg-faint hover:text-fg disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        Clear
-      </button>
-      <button
-        type="button"
-        data-testid="md-curation-review"
-        disabled={brief.picked === 0 || launching !== null}
-        onClick={() => {
-          onLaunch(macro, brief.extraInstructions, { scope: brief.scope, mode })
-          onClose()
-        }}
-        className={PRIMARY_CLASS}
-      >
-        <AlmanacIcon name="sparkle" size={14} />
-        {launching === macro.id ? 'Starting…' : 'Review picked docs'}
-      </button>
-    </div>
-  )
-}
-
 function ReviewTool({
   macro,
   cwd,
@@ -458,7 +379,6 @@ function ReviewTool({
   onRefresh,
   launching,
   onLaunch,
-  md,
   review,
   reviewSessions,
   runs,
@@ -470,7 +390,6 @@ function ReviewTool({
   onRefresh: () => void
   launching: string | null
   onLaunch: LaunchFn
-  md: UseMdCuration
   review: MdReviewState | null
   /** This project's Review MD network sessions, for the validation record. */
   reviewSessions: readonly ReviewSessionLike[]
@@ -478,7 +397,6 @@ function ReviewTool({
   runs: readonly ReviewRunRow[]
   onOpenSession?: (epicId: string) => void
 }) {
-  const { curation } = md
   const [scopePick, setScopePick] = useState<string | null>(null)
   const [modePick, setModePick] = useState<string | null>(null)
   const [explore, setExplore] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
@@ -498,7 +416,6 @@ function ReviewTool({
   const mode = modePick !== null && modeOptions.includes(modePick) ? modePick : modeDefault
   const scopeLabel = scopeInput?.label ?? 'Scope'
   const modeLabel = modeInput?.label ?? 'Mode'
-  const curationMode = modeOptions.includes(CURATION_MODE) ? CURATION_MODE : modeDefault
   const reviewResult = review && review.status !== 'error' ? review.result : null
   const validationPath = useMemo(
     () => (reviewResult ? pickValidationPath(reviewResult.record, reviewResult.validation, reviewSessions) : null),
@@ -612,20 +529,6 @@ function ReviewTool({
                 )
               : undefined
           }
-          footer={
-            network.census ? (
-              <CurationTray
-                macro={macro}
-                curation={curation}
-                census={network.census}
-                mode={curationMode}
-                launching={launching}
-                onLaunch={onLaunch}
-                onClear={md.clearVerdicts}
-                onClose={closeExplorer}
-              />
-            ) : undefined
-          }
         />
       )}
     </>
@@ -723,9 +626,8 @@ export function ToolsPane({
   const tools = toolMacros(macros)
   // First row by default; a pick survives list refreshes while its macro is still listed.
   const selected = editing ? null : (tools.find((m) => m.id === selectedId) ?? tools[0] ?? null)
-  const md = useMdCuration(cwd)
   const reviewActive = selected?.id === REVIEW_MD_NETWORK_ID
-  const { scan, refresh } = useMdNetworkScan(cwd, reviewActive, md.ready, md.curation, onFindingsCount)
+  const { scan, refresh } = useMdNetworkScan(cwd, reviewActive, onFindingsCount)
   // One stable selector; the per-cwd filter is memoized (never a fresh array from a selector).
   const sessions = usePromptSessions((s) => s.sessions)
   const events = usePromptSessions((s) => s.events)
@@ -773,7 +675,6 @@ export function ToolsPane({
         onRefresh={refreshAll}
         launching={launching}
         onLaunch={onLaunch}
-        md={md}
         review={review}
         reviewSessions={reviewSessions}
         runs={runs}

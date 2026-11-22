@@ -9,7 +9,6 @@ import { useChat } from '../../../../../state/chat'
 import { useScheduleState } from '../../../../../state/scheduleState'
 import { __resetScheduledPrdsForTests } from '../../../../../lib/useScheduledPrds'
 import { localDate } from '../MdLastReview'
-import { composeCurationBrief, normalizeCuration } from '../../../../../lib/mdCurate'
 import type { AgentPersona, Macro, MdCensus, MdDoc, MdDocRole, MdNetwork, MdNetworkResult, MdReviewRecord, MdReviewResult } from '../../../../../../preload/api'
 
 const CWD = '/p/alpha'
@@ -114,9 +113,9 @@ function deferred<T>() {
 
 const save = vi.fn()
 const listPersonas = vi.fn()
-const mdNetwork = vi.fn<(payload: { cwd: string; recordFolders?: string[]; docFolders?: string[] }) => Promise<MdNetworkResult>>()
+const mdNetwork = vi.fn<(payload: { cwd: string }) => Promise<MdNetworkResult>>()
 /** The scan payload for `cwd` with no folder overrides. */
-const scanOf = (cwd: string, recordFolders: string[] = [], docFolders: string[] = []) => ({ cwd, recordFolders, docFolders })
+const scanOf = (cwd: string) => ({ cwd })
 /** In-memory ui-prefs files, by path (window.api.config). */
 let prefsFiles: Record<string, unknown> = {}
 const readJson = vi.fn()
@@ -424,8 +423,8 @@ describe('ToolsPane Review MD network link map', () => {
     mdNetwork.mockReturnValue(scan.promise)
     render({ macros: [REVIEW, SWEEP] })
     expect(infoText()).toBe('Scanning docs…')
-    // The scan waits for the project's curation to load, then sends its folder overrides.
-    expect(mdNetwork).not.toHaveBeenCalled()
+    // The scan starts on mount and sends only the cwd.
+    expect(mdNetwork.mock.calls).toEqual([[scanOf(CWD)]])
     await settle()
     expect(mdNetwork.mock.calls).toEqual([[scanOf(CWD)]])
     expect(infoText()).toBe('Scanning docs…')
@@ -639,83 +638,22 @@ describe('ToolsPane Review MD network explorer', () => {
   })
 })
 
-describe('ToolsPane Review MD network curation', () => {
+describe('ToolsPane Review MD network explorer', () => {
   const b = (id: string) => document.body.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
   const click = (el: Element | null) => {
     if (!el) throw new Error('missing element')
     act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   }
   const cardNode = (id: string) => q('md-link-map')!.querySelector(`[data-testid="md-link-map-node"][data-node-id="${id}"]`)
-  const SAVED = {
-    verdicts: { 'src/CLAUDE.md': 'update', 'notes/a.md': 'delete', 'not/in/census.md': 'keep' },
-    notes: { 'notes/a.md': 'superseded by the README' },
-    reviewedAt: {},
-    recordFolders: [],
-    docFolders: [],
-  }
-  const savedCuration = () => (prefsFiles[PREFS] as { mdCuration: { verdicts: Record<string, string>; recordFolders: string[] } }).mdCuration
 
-  async function openExplorer(over: Partial<Props> = {}) {
-    const props = render({ macros: [REVIEW], ...over })
-    await settle()
-    click(q('md-link-map-expand'))
-    return props
-  }
-
-  it('Review picked docs launches the review with the composed brief and Full review, then closes the explorer', async () => {
-    prefsFiles[PREFS] = { mdCuration: SAVED }
-    mdNetwork.mockResolvedValue(NET)
-    const props = await openExplorer()
-    expect(b('md-curation-tray')!.textContent).toContain('2 docs picked')
-    click(b('md-curation-review'))
-    const brief = composeCurationBrief(normalizeCuration(SAVED), NET.census!)
-    expect(brief.extraInstructions).toContain('superseded by the README')
-    expect(props.onLaunch).toHaveBeenCalledTimes(1)
-    expect(props.onLaunch).toHaveBeenCalledWith(REVIEW, brief.extraInstructions, { scope: brief.scope, mode: 'Full review' })
-    expect(brief.scope).toBe('these docs: notes/a.md, src/CLAUDE.md')
-    expect(b('md-explorer')).toBeNull()
-  })
-
-  it('without a Full review option the launch takes the mode default', async () => {
-    prefsFiles[PREFS] = { mdCuration: SAVED }
-    mdNetwork.mockResolvedValue(NET)
-    const custom = { ...REVIEW, inputs: [REVIEW.inputs![0], { name: 'mode', label: 'Mode', options: ['Drift check', 'Quick'], default: 'Quick', required: true }] }
-    const props = await openExplorer({ macros: [custom] })
-    click(b('md-curation-review'))
-    expect((props.onLaunch as ReturnType<typeof vi.fn>).mock.calls[0][2]).toMatchObject({ mode: 'Quick' })
-  })
-
-  it('Review picked docs is disabled with nothing picked or while a launch runs', async () => {
-    mdNetwork.mockResolvedValue(NET)
-    await openExplorer()
-    expect(b('md-curation-tray')!.textContent).toContain('0 docs picked')
-    expect((b('md-curation-review') as HTMLButtonElement).disabled).toBe(true)
-    prefsFiles[PREFS] = { mdCuration: SAVED }
-    act(() => root!.unmount())
-    root = null
-    container?.remove()
-    await openExplorer({ launching: 'sweep' })
-    expect((b('md-curation-review') as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('Clear removes every saved verdict and persists, without a rescan', async () => {
-    prefsFiles[PREFS] = { mdCuration: SAVED }
-    mdNetwork.mockResolvedValue(NET)
-    await openExplorer()
-    expect(b('md-curation-tray')!.textContent).toContain('2 docs picked')
-    click(b('md-curation-clear'))
-    await settle()
-    expect(b('md-curation-tray')!.textContent).toContain('0 docs picked')
-    expect(savedCuration().verdicts).toEqual({})
-    expect(mdNetwork).toHaveBeenCalledTimes(1)
-  })
-
-  it('the explorer preview and docs table carry no curation controls', async () => {
+  it('the explorer has no review tray and its preview and docs table carry no curation controls', async () => {
     mdNetwork.mockResolvedValue(NET)
     render({ macros: [REVIEW] })
     await settle()
     click(cardNode('src/CLAUDE.md'))
     await settle()
+    expect(b('md-explorer')).not.toBeNull()
+    expect(b('md-curation-tray')).toBeNull()
     expect(b('md-doc-preview')).not.toBeNull()
     expect(b('md-doc-preview-curation')).toBeNull()
     click(b('md-explorer-view-docs'))
@@ -724,15 +662,12 @@ describe('ToolsPane Review MD network curation', () => {
     expect(b('md-doc-table-folder-records')).toBeNull()
   })
 
-  it('a failed curation write toasts and keeps the in-memory state', async () => {
-    prefsFiles[PREFS] = { mdCuration: SAVED }
+  it('a stale mdCuration ui-prefs entry does not change the scan payload', async () => {
+    prefsFiles[PREFS] = { mdCuration: { verdicts: {}, notes: {}, reviewedAt: {}, recordFolders: ['logs/'], docFolders: ['notes/'] } }
     mdNetwork.mockResolvedValue(NET)
-    await openExplorer()
-    writeJson.mockRejectedValue(new Error('remote config writes are off'))
-    click(b('md-curation-clear'))
+    render({ macros: [REVIEW] })
     await settle()
-    expect(b('md-curation-tray')!.textContent).toContain('0 docs picked')
-    expect(useToast.getState().toasts.map((t) => t.kind)).toEqual(['error'])
+    expect(mdNetwork.mock.calls).toEqual([[scanOf(CWD)]])
   })
 })
 

@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { MdCensus, MdDoc } from '../../../preload/api'
-import {
-  EMPTY_CURATION, STALE_DAYS, composeCurationBrief, docFlags, normalizeCuration, relativeAge, usageLine,
-  type MdCuration,
-} from '../mdCurate'
+import type { MdDoc } from '../../../preload/api'
+import { STALE_DAYS, docFlags, relativeAge, usageLine } from '../mdCurate'
 
 const DAY = 86_400_000
 const NOW = Date.UTC(2026, 10, 13)
@@ -15,22 +12,9 @@ function doc(p: Partial<MdDoc> & { path: string }): MdDoc {
   }
 }
 
-function census(docs: MdDoc[]): MdCensus {
-  return {
-    docs, collections: [],
-    counts: { tracked: docs.length, network: docs.length, records: 0, unlinked: 0, byRole: { map: 0, scoped: 0, agent: 0, record: 0, doc: 0 } },
-    gitWindow: { commits: 1, oldestMs: null }, warnings: [],
-  }
-}
-
-function cur(p: Partial<MdCuration>): MdCuration {
-  return { ...EMPTY_CURATION, ...p }
-}
-
 describe('constants', () => {
-  it('STALE_DAYS is 90 and EMPTY_CURATION is empty', () => {
+  it('STALE_DAYS is 90', () => {
     expect(STALE_DAYS).toBe(90)
-    expect(EMPTY_CURATION).toEqual({ verdicts: {}, notes: {}, reviewedAt: {}, recordFolders: [], docFolders: [] })
   })
 })
 
@@ -94,91 +78,5 @@ describe('relativeAge', () => {
     expect(relativeAge(NOW - 35 * DAY, NOW)).toBe('5w ago')
     expect(relativeAge(NOW - 215 * DAY, NOW)).toBe('7mo ago')
     expect(relativeAge(NOW - 800 * DAY, NOW)).toBe('2y ago')
-  })
-})
-
-describe('normalizeCuration', () => {
-  it('never throws on junk', () => {
-    for (const raw of [null, undefined, 1, 'x', [], { verdicts: 5 }, { verdicts: [1], notes: null }]) {
-      expect(normalizeCuration(raw)).toEqual(EMPTY_CURATION)
-    }
-  })
-  it('drops malformed entries and keeps good ones', () => {
-    const c = normalizeCuration({
-      verdicts: { 'a.md': 'keep', 'b.md': 'nope', 'c.md': 3, '': 'keep' },
-      notes: { 'a.md': 'hi', 'b.md': 7 },
-      reviewedAt: { 'a.md': 5, 'b.md': 'x', 'c.md': Number.NaN },
-      recordFolders: ['v/', 3, '', 'v/'],
-      docFolders: 'nope',
-    })
-    expect(c).toEqual({ verdicts: { 'a.md': 'keep' }, notes: { 'a.md': 'hi' }, reviewedAt: { 'a.md': 5 }, recordFolders: ['v/'], docFolders: [] })
-  })
-  it('caps sizes', () => {
-    const verdicts: Record<string, string> = {}
-    const reviewedAt: Record<string, number> = {}
-    for (let i = 0; i < 2500; i++) { verdicts[`d${i}.md`] = 'delete'; reviewedAt[`d${i}.md`] = i }
-    const folders = Array.from({ length: 80 }, (_, i) => `f${i}/`)
-    const c = normalizeCuration({ verdicts, reviewedAt, notes: { 'a.md': 'x'.repeat(500) }, recordFolders: folders, docFolders: folders })
-    expect(Object.keys(c.verdicts)).toHaveLength(2000)
-    expect(Object.keys(c.reviewedAt)).toHaveLength(2000)
-    expect(c.notes['a.md']).toHaveLength(280)
-    expect(c.recordFolders).toHaveLength(50)
-    expect(c.docFolders).toHaveLength(50)
-  })
-})
-
-describe('composeCurationBrief', () => {
-  const docs = census([doc({ path: 'a.md' }), doc({ path: 'b.md' }), doc({ path: 'c.md' })])
-
-  it('whole project when nothing is picked; ignores verdicts on unknown paths', () => {
-    const r = composeCurationBrief(cur({ verdicts: { 'gone.md': 'delete' } }), docs)
-    expect(r.picked).toBe(0)
-    expect(r.scope).toBe('the whole project')
-    expect(r.extraInstructions).toBe('')
-  })
-
-  it('lists picked docs in scope and follows the template', () => {
-    const r = composeCurationBrief(cur({
-      verdicts: { 'a.md': 'keep', 'b.md': 'delete', 'c.md': 'delete', 'gone.md': 'merge' },
-      notes: { 'b.md': 'obsolete' },
-      recordFolders: ['v/'],
-      docFolders: ['docs/'],
-    }), docs)
-    expect(r.picked).toBe(3)
-    expect(r.scope).toBe('these docs: a.md, b.md, c.md')
-    expect(r.extraInstructions).toBe([
-      'Human curation from the Project Home MD network explorer. Treat each verdict as the human\'s decision: verify it against the code, then plan the changes.',
-      'KEEP: a.md',
-      'DELETE: b.md (note: obsolete), c.md',
-      'Record folders (machine-written; keep them out of the map): v/',
-      'Count as docs, not records: docs/',
-    ].join('\n'))
-  })
-
-  it('folder-only curation still writes instructions', () => {
-    const r = composeCurationBrief(cur({ recordFolders: ['v/'] }), docs)
-    expect(r.scope).toBe('the whole project')
-    expect(r.extraInstructions).toContain('Record folders (machine-written; keep them out of the map): v/')
-  })
-
-  it('more than 8 picked, or a scope over 600 chars, points at the instructions', () => {
-    const many = census(Array.from({ length: 9 }, (_, i) => doc({ path: `d${i}.md` })))
-    const verdicts = Object.fromEntries(many.docs.map((d) => [d.path, 'update' as const]))
-    expect(composeCurationBrief(cur({ verdicts }), many).scope).toBe('the 9 docs listed in the additional instructions')
-    const long = census([doc({ path: `${'x'.repeat(400)}.md` }), doc({ path: `${'y'.repeat(400)}.md` })])
-    const lv = Object.fromEntries(long.docs.map((d) => [d.path, 'keep' as const]))
-    expect(composeCurationBrief(cur({ verdicts: lv }), long).scope).toBe('the 2 docs listed in the additional instructions')
-  })
-
-  it('caps extraInstructions at 4000 chars with a trailer', () => {
-    const big = census(Array.from({ length: 500 }, (_, i) => doc({ path: `docs/some/long/folder/name/file-${i}.md` })))
-    const verdicts = Object.fromEntries(big.docs.map((d) => [d.path, 'delete' as const]))
-    const r = composeCurationBrief(cur({ verdicts }), big)
-    expect(r.picked).toBe(500)
-    expect(r.extraInstructions.length).toBeLessThanOrEqual(4000)
-    const m = /… and (\d+) more not listed$/.exec(r.extraInstructions)
-    expect(m).not.toBeNull()
-    const listed = (r.extraInstructions.match(/file-\d+\.md/g) ?? []).length
-    expect(listed + Number(m![1])).toBe(500)
   })
 })

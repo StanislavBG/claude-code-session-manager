@@ -1,43 +1,13 @@
 /**
- * Pure helpers for the Project Home MD network explorer's curation tray: a
- * plain-language usage line per doc, staleness/currency flags, relative ages,
- * the `mdCuration` shape kept in per-project ui-prefs, and
- * `composeCurationBrief`, which turns the human's verdicts into the Scope and
- * additional instructions of a Review MD network launch.
- * No React, no window access.
+ * Pure helpers for the Project Home MD network explorer's doc preview and docs
+ * table: a plain-language usage line per doc, staleness/currency flags and
+ * relative ages. No React, no window access.
  */
-import type { MdCensus, MdDoc } from '../../preload/api'
+import type { MdDoc } from '../../preload/api'
 
 export const STALE_DAYS = 90
 
-export type MdVerdict = 'keep' | 'update' | 'merge' | 'delete'
-
-export interface MdCuration {
-  verdicts: Record<string, MdVerdict>
-  notes: Record<string, string>
-  reviewedAt: Record<string, number>
-  recordFolders: string[]
-  docFolders: string[]
-}
-
-export const EMPTY_CURATION: MdCuration = Object.freeze({
-  verdicts: Object.freeze({}) as Record<string, MdVerdict>,
-  notes: Object.freeze({}) as Record<string, string>,
-  reviewedAt: Object.freeze({}) as Record<string, number>,
-  recordFolders: Object.freeze([]) as unknown as string[],
-  docFolders: Object.freeze([]) as unknown as string[],
-}) as MdCuration
-
 const DAY_MS = 86_400_000
-const MAX_PATHS = 2000
-const MAX_NOTE = 280
-const MAX_FOLDERS = 50
-const MAX_KEY = 4096
-/** ipcSchemas.cjs caps a launch's extraInstructions at 4000 chars. */
-const MAX_EXTRA = 4000
-const MAX_SCOPE = 600
-const MAX_SCOPE_DOCS = 8
-const VERDICTS: readonly MdVerdict[] = ['keep', 'update', 'merge', 'delete']
 
 function dirOf(path: string): string {
   const i = path.lastIndexOf('/')
@@ -94,111 +64,4 @@ export function relativeAge(ms: number | null, nowMs: number): string {
   if (days < 60) return `${Math.floor(days / 7)}w ago`
   if (days < 365) return `${Math.floor(days / 30)}mo ago`
   return `${Math.floor(days / 365)}y ago`
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function goodKey(k: string): boolean {
-  return k.length > 0 && k.length <= MAX_KEY
-}
-
-function folders(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
-  const out: string[] = []
-  for (const f of raw) {
-    if (out.length >= MAX_FOLDERS) break
-    if (typeof f === 'string' && goodKey(f) && !out.includes(f)) out.push(f)
-  }
-  return out
-}
-
-export function normalizeCuration(raw: unknown): MdCuration {
-  const c: MdCuration = { verdicts: {}, notes: {}, reviewedAt: {}, recordFolders: [], docFolders: [] }
-  try {
-    if (!isRecord(raw)) return c
-    if (isRecord(raw.verdicts)) {
-      let n = 0
-      for (const [k, v] of Object.entries(raw.verdicts)) {
-        if (n >= MAX_PATHS) break
-        if (goodKey(k) && typeof v === 'string' && (VERDICTS as readonly string[]).includes(v)) { c.verdicts[k] = v as MdVerdict; n++ }
-      }
-    }
-    if (isRecord(raw.notes)) {
-      let n = 0
-      for (const [k, v] of Object.entries(raw.notes)) {
-        if (n >= MAX_PATHS) break
-        if (goodKey(k) && typeof v === 'string' && v.trim()) { c.notes[k] = v.slice(0, MAX_NOTE); n++ }
-      }
-    }
-    if (isRecord(raw.reviewedAt)) {
-      let n = 0
-      for (const [k, v] of Object.entries(raw.reviewedAt)) {
-        if (n >= MAX_PATHS) break
-        if (goodKey(k) && typeof v === 'number' && Number.isFinite(v)) { c.reviewedAt[k] = v; n++ }
-      }
-    }
-    c.recordFolders = folders(raw.recordFolders)
-    c.docFolders = folders(raw.docFolders)
-  } catch { /* malformed prefs never throw — keep what was salvaged */ }
-  return c
-}
-
-const HEADER = 'Human curation from the Project Home MD network explorer. Treat each verdict as the human\'s decision: verify it against the code, then plan the changes.'
-// Room for "\n… and N more not listed" with any realistic N.
-const TRAILER_RESERVE = 40
-
-/**
- * Builds a Review MD network launch's Scope + additional instructions from the
- * human's verdicts. Only verdicts on paths present in `census.docs` count.
- * `extraInstructions` is '' when there is nothing to say (no picked docs and no
- * folder overrides); otherwise it follows the explorer template and never
- * exceeds 4000 chars — items are added while they fit, then a
- * '… and N more not listed' trailer counts the rest.
- */
-export function composeCurationBrief(c: MdCuration, census: MdCensus): { scope: string; extraInstructions: string; picked: number } {
-  const known = new Set(census.docs.map((d) => d.path))
-  const byVerdict: Record<MdVerdict, string[]> = { keep: [], update: [], merge: [], delete: [] }
-  for (const [path, v] of Object.entries(c.verdicts)) {
-    if (known.has(path) && byVerdict[v]) byVerdict[v].push(path)
-  }
-  const pickedPaths = VERDICTS.flatMap((v) => byVerdict[v].sort())
-  const picked = pickedPaths.length
-
-  let scope = 'the whole project'
-  if (picked > 0) {
-    const listed = `these docs: ${[...pickedPaths].sort().join(', ')}`
-    scope = picked <= MAX_SCOPE_DOCS && listed.length <= MAX_SCOPE ? listed : `the ${picked} docs listed in the additional instructions`
-  }
-
-  const groups: { label: string; items: string[] }[] = [
-    ...VERDICTS.map((v) => ({
-      label: `${v.toUpperCase()}: `,
-      items: byVerdict[v].map((p) => (c.notes[p] ? `${p} (note: ${c.notes[p]})` : p)),
-    })),
-    { label: 'Record folders (machine-written; keep them out of the map): ', items: c.recordFolders },
-    { label: 'Count as docs, not records: ', items: c.docFolders },
-  ].filter((g) => g.items.length > 0)
-
-  if (groups.length === 0) return { scope, extraInstructions: '', picked }
-
-  const total = groups.reduce((n, g) => n + g.items.length, 0)
-  let text = HEADER
-  let added = 0
-  let full = false
-  for (const g of groups) {
-    if (full) break
-    let line = ''
-    for (const item of g.items) {
-      const next = line ? `${line}, ${item}` : `\n${g.label}${item}`
-      if (text.length + next.length > MAX_EXTRA - TRAILER_RESERVE) { full = true; break }
-      line = next
-      added++
-    }
-    text += line
-  }
-  const rest = total - added
-  if (rest > 0) text += `\n… and ${rest} more not listed`
-  return { scope, extraInstructions: text.slice(0, MAX_EXTRA), picked }
 }

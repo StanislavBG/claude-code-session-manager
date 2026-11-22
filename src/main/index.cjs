@@ -126,6 +126,8 @@ require('./lib/epic/epicAdminRoutes.cjs').registerAdminRoute(adminHttp, {
   isTabBusy: chatRunner.isTabBusy,
   listJobs: () => scheduler.remote.listJobs(),
 });
+// Validator quality numbers per project for outside callers (read-only).
+require('./validationQualityHandlers.cjs').registerAdminRoute(adminHttp);
 // Persona roster + per-project effective model/effort for outside apps (read-only).
 require('./lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Task primitive: one headless claude -p run for a project, under the slot cap (POST /admin/tasks).
@@ -148,6 +150,7 @@ const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayTo
 const runLogRetention = require('./lib/scheduler/runLogRetention.cjs');
 const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
 const { registerLoopEfficiencyHandlers } = require('./loopEfficiencyHandlers.cjs');
+const { registerValidationQualityHandlers } = require('./validationQualityHandlers.cjs');
 const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('./lib/scheduler/watchdogHelpers.cjs');
 const { createIntradayRefresh } = require('./lib/intradayRefresh.cjs');
 const schedulerConfig = require('./lib/scheduler/schedulerConfig.cjs');
@@ -1122,6 +1125,7 @@ queueOps.registerQueueOpsHandlers({ retireCompletedSlugs: scheduler.retireComple
 registerHistoryAggregatorHandlers();
 registerHistoryDashboardHandlers();
 registerLoopEfficiencyHandlers();
+registerValidationQualityHandlers();
 pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 activeIndexMerge.registerActiveIndexMergeHandlers();

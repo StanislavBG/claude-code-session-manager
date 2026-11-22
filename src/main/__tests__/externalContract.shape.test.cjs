@@ -83,6 +83,7 @@ test('every listed admin route is registered by its module', async () => {
   require('../lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(fake, { listPersonas: async () => [] });
   require('../lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(fake);
   require('../lib/tasks/taskAdminRoutes.cjs').registerAdminRoute(fake);
+  require('../validationQualityHandlers.cjs').registerAdminRoute(fake);
 
   // The health route lives inside localAdminHttp.cjs itself — check it on a real server.
   const admin = createAdminHttp();

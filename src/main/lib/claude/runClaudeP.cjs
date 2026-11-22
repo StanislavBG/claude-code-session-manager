@@ -16,8 +16,10 @@
  */
 
 const { spawn } = require('node:child_process');
+const os = require('node:os');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./claudeCliCaps.cjs');
+const { buildJobSandboxSettings } = require('./jobSandboxPolicy.cjs');
 const { feedChildStdin } = require('../process/childStdin.cjs');
 const { withProcRole } = require('../process/cleanEnv.cjs');
 
@@ -29,10 +31,13 @@ async function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, syste
   return new Promise((resolve) => {
     let bin;
     try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
+    // No spawn cwd is set, so the child inherits process.cwd() — the sandbox roots there.
+    const sandboxDir = process.cwd();
+    const sandbox = buildJobSandboxSettings({ agentType: 'aux', worktreeDir: sandboxDir, projectRoot: sandboxDir, homeDir: os.homedir(), tmpDir: os.tmpdir(), deps: { available: false, missing: [] } });
     const args = [
       '-p',
       '--model', model,
-      '--dangerously-skip-permissions',
+      ...sandbox.argv,
       ...headlessPermissionArgs(),
       '--strict-mcp-config',
       '--output-format', 'text',

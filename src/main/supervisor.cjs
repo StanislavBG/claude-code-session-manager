@@ -18,6 +18,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
+const { buildJobSandboxSettings } = require('./lib/claude/jobSandboxPolicy.cjs');
 const { withProcRole } = require('./lib/process/cleanEnv.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
@@ -247,13 +248,16 @@ async function runProbe(claudeBin, prompt) {
     let child;
     try {
       const target = claudeSpawnTarget('aux', 'supervisor', claudeBin);
+      // No spawn cwd is set, so the child inherits process.cwd() — the sandbox roots there.
+      const sandboxDir = process.cwd();
+      const sandbox = buildJobSandboxSettings({ agentType: 'aux', worktreeDir: sandboxDir, projectRoot: sandboxDir, homeDir: os.homedir(), tmpDir: os.tmpdir(), deps: { available: false, missing: [] } });
       child = spawn(target.command, [
         '-p',
         '--model', 'claude-haiku-5-5',
         '--no-session-persistence',
         '--output-format', 'json',
         '--max-budget-usd', '0.50',
-        '--dangerously-skip-permissions',
+        ...sandbox.argv,
         ...headlessPermissionArgs(),
         '--strict-mcp-config',
         '--allowedTools', 'Bash',

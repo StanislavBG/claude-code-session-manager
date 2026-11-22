@@ -41,3 +41,27 @@ process.exit(0);
   for (const a of argv) expect(Buffer.byteLength(a, 'utf8')).toBeLessThan(131072);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('argv carries the tool-rules sandbox: one skip-permissions, one --settings denying ~/.npmrc', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runclaudep-'));
+  const argvFile = path.join(dir, 'argv.json');
+  process.env.SM_CLAUDE_BIN = writeClaudeStub({
+    body: `
+if (process.argv.indexOf('-p') < 0) { process.stdout.write('stub 0.0.0\\n'); process.exit(0); }
+require('node:fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
+readPrompt();
+process.stdout.write('ok');
+process.exit(0);
+`,
+  });
+  const res = await runClaudeP('hello', { model: 'sonnet', timeoutMs: 60_000 });
+  expect(res.ok).toBe(true);
+  const argv = JSON.parse(fs.readFileSync(argvFile, 'utf8'));
+  expect(argv.filter((a) => a === '--dangerously-skip-permissions')).toHaveLength(1);
+  const settingsIdx = argv.reduce((acc, a, i) => (a === '--settings' ? [...acc, i] : acc), []);
+  expect(settingsIdx).toHaveLength(1);
+  const settings = JSON.parse(argv[settingsIdx[0] + 1]);
+  expect(settings.permissions.deny).toContain(`Read(/${path.join(os.homedir(), '.npmrc')})`);
+  expect(['--allowedTools', '--disallowedTools', '--mcp-config']).not.toContain(argv[settingsIdx[0] - 1]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

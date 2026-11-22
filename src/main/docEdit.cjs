@@ -18,8 +18,10 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
+const { buildJobSandboxSettings } = require('./lib/claude/jobSandboxPolicy.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const { withProcRole } = require('./lib/process/cleanEnv.cjs');
 const { extractJson } = require('./lib/util/extractJson.cjs');
@@ -94,10 +96,13 @@ async function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemP
   return new Promise((resolve) => {
     let bin;
     try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
+    // No spawn cwd is set, so the child inherits process.cwd() — the sandbox roots there.
+    const sandboxDir = process.cwd();
+    const sandbox = buildJobSandboxSettings({ agentType: 'aux', worktreeDir: sandboxDir, projectRoot: sandboxDir, homeDir: os.homedir(), tmpDir: os.tmpdir(), deps: { available: false, missing: [] } });
     const args = [
       '-p',
       '--model', model,
-      '--dangerously-skip-permissions',
+      ...sandbox.argv,
       ...headlessPermissionArgs(),
       '--strict-mcp-config',
       '--output-format', 'text',

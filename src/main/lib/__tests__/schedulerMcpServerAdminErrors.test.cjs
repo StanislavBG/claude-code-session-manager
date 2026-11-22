@@ -98,7 +98,7 @@ function jsonServer(status, body) {
   });
 }
 
-test('legacy 404 {ok:false,error:"not found"} -> skew text naming the route and Reboot app', async () => {
+test('legacy 404 {ok:false,error:"not found"} -> skew text naming the route, both versions', async () => {
   const port = await listen(jsonServer(404, { ok: false, error: 'not found' }));
   const mod = await setup(port);
   const result = await call(mod);
@@ -106,9 +106,11 @@ test('legacy 404 {ok:false,error:"not found"} -> skew text naming the route and 
   const text = result.content[0].text;
   expect(text).toMatch(/GET \/admin\/[^\s?]+/);
   expect(text).not.toContain('?');
-  expect(text).toContain('older than this MCP server');
+  expect(text).toContain('version not reported');
   expect(text).toContain(`v${require('../../../../package.json').version}`);
-  expect(text).toContain('Reboot app');
+  // This test tree is a git checkout (or worktree), so the checkout wording applies.
+  expect(text).toContain('runs from a source checkout');
+  expect(text).not.toContain('Restart Session Manager');
 });
 
 test('404 with unknownRoute + appVersion -> skew text naming the app version', async () => {
@@ -117,7 +119,7 @@ test('404 with unknownRoute + appVersion -> skew text naming the app version', a
   const result = await call(mod);
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toContain('v0.1.0');
-  expect(result.content[0].text).toContain('Reboot app');
+  expect(result.content[0].text).toContain('runs from a source checkout');
 });
 
 const resetJob = (mod) => mod.handleCallTool({ params: { name: 'scheduler_reset_job', arguments: { slug: 'nope' } } });
@@ -130,7 +132,7 @@ test('HTTP 200 not-found body (reset-job unknown slug) passes through unchanged'
   const text = result.content[0].text;
   expect(text).toBe(JSON.stringify({ ok: false, error: 'not found' }));
   expect(text).toContain('"error":"not found"');
-  expect(text).not.toContain('older than this MCP server');
+  expect(text).not.toContain('has no route');
 });
 
 test('HTTP 404 with other error text passes through unchanged', async () => {
@@ -138,5 +140,69 @@ test('HTTP 404 with other error text passes through unchanged', async () => {
   const mod = await setup(port);
   const text = (await resetJob(mod)).content[0].text;
   expect(text).toBe(JSON.stringify({ ok: false, error: 'invalid slug' }));
-  expect(text).not.toContain('older than this MCP server');
+  expect(text).not.toContain('has no route');
+});
+
+// ---- unknownRouteMessage: the advice is chosen from evidence, not assumed ----
+
+function pureMod() {
+  delete require.cache[require.resolve(SERVER_PATH)];
+  return require(SERVER_PATH);
+}
+
+test('from a checkout: says the version does not identify the code; no plain restart fix', () => {
+  const { unknownRouteMessage } = pureMod();
+  const msg = unknownRouteMessage({
+    method: 'GET', pathname: '/admin/epic', appVersion: '0.137.0', serverVersion: '0.138.0', fromCheckout: true,
+  });
+  expect(msg).toContain('GET /admin/epic');
+  expect(msg).toContain('v0.137.0');
+  expect(msg).toContain('v0.138.0');
+  expect(msg).toContain('runs from a source checkout');
+  expect(msg).toContain('does not say which code it has');
+  expect(msg).toContain('may not be in any published release yet');
+  expect(msg).toContain('only once a release containing this route is installed');
+  expect(msg).not.toContain('Restart Session Manager');
+  expect(msg).not.toContain('is older than');
+});
+
+test('not from a checkout, app 0.9.0 < server 0.10.0 (numeric compare): older app, restart advice', () => {
+  const { unknownRouteMessage } = pureMod();
+  const msg = unknownRouteMessage({
+    method: 'POST', pathname: '/admin/x', appVersion: '0.9.0', serverVersion: '0.10.0', fromCheckout: false,
+  });
+  expect(msg).toContain('POST /admin/x');
+  expect(msg).toContain('v0.9.0');
+  expect(msg).toContain('v0.10.0');
+  expect(msg).toContain('is older than this MCP server');
+  expect(msg).toContain("Restart Session Manager (Command Palette: 'Reboot app (drain first)')");
+});
+
+test('not from a checkout, app reported no version: older app, restart advice', () => {
+  const { unknownRouteMessage } = pureMod();
+  const msg = unknownRouteMessage({
+    method: 'GET', pathname: '/admin/x', appVersion: null, serverVersion: '0.10.0', fromCheckout: false,
+  });
+  expect(msg).toContain('version not reported');
+  expect(msg).toContain('Reboot app (drain first)');
+});
+
+test('not from a checkout, equal versions: restart alone will not help', () => {
+  const { unknownRouteMessage } = pureMod();
+  const msg = unknownRouteMessage({
+    method: 'GET', pathname: '/admin/x', appVersion: '0.138.0', serverVersion: '0.138.0', fromCheckout: false,
+  });
+  expect(msg).toContain('v0.138.0');
+  expect(msg).toContain('A restart alone will not help');
+  expect(msg).toContain('must be updated to a build that has this route');
+  expect(msg).not.toContain('Restart Session Manager');
+  expect(msg).not.toContain('is older than');
+});
+
+test('compareVersions compares dotted numbers and ignores a pre-release suffix', () => {
+  const { compareVersions } = pureMod();
+  expect(compareVersions('0.9.0', '0.10.0')).toBeLessThan(0);
+  expect(compareVersions('0.10.0', '0.9.0')).toBeGreaterThan(0);
+  expect(compareVersions('1.2.3-beta.1', '1.2.3')).toBe(0);
+  expect(compareVersions('1.2', '1.2.0')).toBe(0);
 });

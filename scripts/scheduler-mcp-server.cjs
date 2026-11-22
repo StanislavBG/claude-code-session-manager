@@ -174,11 +174,33 @@ function resolveCwdArg(args) {
   return process.env.SM_PROJECT_ROOT || process.cwd();
 }
 
-// This server is registered from a checkout that can be newer than the
-// running app; its version goes into the version-skew message below.
+// This server's package.json version. When it runs from a source checkout
+// that number does not identify the code (the checkout can be far past the
+// release it names), so the unknown-route message below never treats it as
+// proof that a restart helps.
 const MCP_SERVER_VERSION = (() => {
   try { return require('../package.json').version; } catch { return 'unknown'; }
 })();
+
+// True when the package root holding this script has a .git entry (a folder
+// in a clone, a file in a git worktree). Existence check only; no git spawn.
+const MCP_SERVER_FROM_CHECKOUT = (() => {
+  try { return require('node:fs').existsSync(path.join(__dirname, '..', '.git')); } catch { return false; }
+})();
+
+// Numeric compare of dotted versions; anything after a hyphen is ignored.
+// Returns <0, 0 or >0, or NaN when either side has no usable number.
+function compareVersions(a, b) {
+  const parse = (v) => String(v).split('-')[0].split('.').map((n) => Number(n));
+  const pa = parse(a);
+  const pb = parse(b);
+  if (pa.some(Number.isNaN) || pb.some(Number.isNaN)) return NaN;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
 
 // The transport's own unknown-route 404 (localAdminHttp handleRequest). Apps
 // up to v0.136.2 send exactly { ok:false, error:'not found' }; newer ones add
@@ -191,15 +213,31 @@ function isUnknownRouteReply(status, body) {
   return Object.keys(body).length === 2 && body.error === 'not found';
 }
 
+// Pure: states only what is known, and picks the advice from evidence.
+function unknownRouteMessage({ method, pathname, appVersion, serverVersion, fromCheckout }) {
+  const appLabel = appVersion ? `v${appVersion}` : 'version not reported';
+  const head = `the running Session Manager app (${appLabel}) has no route ${method} ${pathname}. `
+    + `This MCP server is v${serverVersion}.`;
+  if (fromCheckout) {
+    return `${head} This MCP server runs from a source checkout, so its version number does not say which code it has. `
+      + 'The route may not be in any published release yet. '
+      + 'Restarting the app helps only once a release containing this route is installed.';
+  }
+  const cmp = appVersion ? compareVersions(appVersion, serverVersion) : -1;
+  if (!appVersion || cmp < 0) {
+    return `${head} The app is older than this MCP server. `
+      + "Restart Session Manager (Command Palette: 'Reboot app (drain first)') and call again.";
+  }
+  return `${head} A restart alone will not help. `
+    + 'Session Manager must be updated to a build that has this route.';
+}
+
 function unknownRouteError(method, urlPath, body) {
   const pathname = String(urlPath).split('?')[0];
-  const appVersion = body && typeof body.appVersion === 'string' && body.appVersion
-    ? ` (running app: v${body.appVersion})` : '';
-  const err = new Error(
-    `the running Session Manager app has no route ${method} ${pathname}: the app${appVersion} is older than `
-    + `this MCP server (v${MCP_SERVER_VERSION}). Restart Session Manager (Command Palette: 'Reboot app (drain first)') `
-    + 'and call again.',
-  );
+  const appVersion = body && typeof body.appVersion === 'string' && body.appVersion ? body.appVersion : null;
+  const err = new Error(unknownRouteMessage({
+    method, pathname, appVersion, serverVersion: MCP_SERVER_VERSION, fromCheckout: MCP_SERVER_FROM_CHECKOUT,
+  }));
   // Tagged so callers can add a tool-specific hint (feedback_reply does).
   err.code = 'SM_UNKNOWN_ROUTE';
   return err;
@@ -1491,4 +1529,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = { TOOLS, handleCallTool, HELP_POINTER, NOT_RUNNING_ERROR, busyError };
+module.exports = {
+  TOOLS, handleCallTool, HELP_POINTER, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions,
+};

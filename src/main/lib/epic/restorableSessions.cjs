@@ -44,8 +44,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { encodeCwd } = require('../util/encodeCwd.cjs');
-// Module object, not destructured: the memo test spies on readJsonOrSync.
-const atomicFs = require('../util/atomicFs.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 
 /** A Claude Code session id: hex UUID 8-4-4-4-12, either case. */
@@ -93,7 +91,7 @@ const LATE_ROW_HINTS = ['"last-prompt"', '"custom-title"', '"summary"'];
  *   budgets full, or at the 400-read cap.
  */
 
-/** @typedef {'invalid_id'|'not_found'|'cwd_mismatch'|'claimed'} RefusalCode */
+/** @typedef {'invalid_id'|'not_found'|'cwd_mismatch'|'claimed'|'claim_check_unreadable'} RefusalCode */
 /** @typedef {{ ok: true, transcriptPath: string }} RestorableOk */
 /** @typedef {{ ok: false, code: RefusalCode, message: string }} RestorableRefusal */
 
@@ -118,7 +116,9 @@ const LATE_ROW_HINTS = ['"last-prompt"', '"custom-title"', '"summary"'];
 
 /**
  * One cwd's claimed-id memo. The sync and the async reader both read and write it.
- * @typedef {{ indexKey: string, indexIds: string[], files: Map<string, ArchiveRec> }} ClaimedEntry
+ * `incomplete`: an archived Epic file could not be read even on retry during
+ * the scan that wrote this entry, so its id set may miss a claim.
+ * @typedef {{ indexKey: string, indexIds: string[], files: Map<string, ArchiveRec>, incomplete: boolean }} ClaimedEntry
  */
 
 /** @type {Map<string, ClaimedEntry>} */
@@ -279,20 +279,101 @@ function memoHit(prevFiles, name, key) {
 const UNREAD_KEY = 'unread';
 
 /**
- * Second half: the record for an archived Epic file read at `key`. A missing,
- * empty or malformed file (`doc` null) owns nothing for this call, and its
- * record gets UNREAD_KEY so the next call re-reads it: readJsonOr* return null
- * on ANY error, so a transient failure (EMFILE, a read between tmp write and
- * rename) looks the same, and memoising it under the file's unchanged stat key
- * would drop that Epic's claim until the file is next rewritten — listing an
- * Epic-owned session as restorable (breaks Epic:session = 1:1).
+ * One read of an archived Epic file: `{ io: true }` when the read itself
+ * failed (EMFILE, EACCES, EIO…), else `{ doc }` with `doc` null for an empty
+ * file, invalid JSON or a non-object. A file gone since readdir (ENOENT) owns
+ * nothing, so it reads as `{ doc: null }`: atomicFs writes by tmp+rename, which
+ * never leaves the target missing. Not atomicFs.readJsonOr*: they return the
+ * fallback for both a parse error and an I/O error. Goes through the `fs`
+ * module object so tests can spy on readFileSync / promises.readFile.
+ * @typedef {{ io: true } | { io?: false, doc: object|null }} ArchiveRead
+ */
+
+/**
+ * @param {string} raw
+ * @returns {ArchiveRead}
+ */
+function parseArchive(raw) {
+  if (raw.trim() === '') return { doc: null };
+  try {
+    const doc = JSON.parse(raw);
+    return { doc: doc && typeof doc === 'object' ? doc : null };
+  } catch {
+    return { doc: null };
+  }
+}
+
+/** @param {unknown} err */
+function isGone(err) {
+  return !!err && typeof err === 'object' && /** @type {{ code?: unknown }} */ (err).code === 'ENOENT';
+}
+
+/**
+ * @param {string} file
+ * @returns {ArchiveRead}
+ */
+function readArchiveSync(file) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    return isGone(err) ? { doc: null } : { io: true };
+  }
+  return parseArchive(raw);
+}
+
+/**
+ * @param {string} file
+ * @returns {Promise<ArchiveRead>}
+ */
+async function readArchiveAsync(file) {
+  let raw;
+  try {
+    raw = await fs.promises.readFile(file, 'utf8');
+  } catch (err) {
+    return isGone(err) ? { doc: null } : { io: true };
+  }
+  return parseArchive(raw);
+}
+
+/**
+ * Second half: the record for an archived Epic file read at `key`, from the
+ * result of reading it and (after an I/O failure) of reading it once more.
+ * Three cases:
+ *  - parsed to an object: its session's claudeSessionId, memoised under `key`;
+ *  - read fine but empty, invalid JSON or not an object: owns nothing, and
+ *    that is memoised under `key` too, so an unchanged bad file is not re-read
+ *    on every call (a rewrite changes the stat key and is read again);
+ *  - the read failed twice (`io`): owns nothing for this call, gets UNREAD_KEY
+ *    so the next call re-reads it, and `onUnreadable` marks the scan
+ *    incomplete. Memoising it under the file's unchanged stat key would drop
+ *    that Epic's claim until the file is next rewritten, and using the set
+ *    without the claim would list or restore an Epic-owned session (breaks
+ *    Epic:session = 1:1), so consumers fail closed on an incomplete scan.
  * @param {string} key
- * @param {unknown} doc
+ * @param {ArchiveRead} read
+ * @param {() => void} onUnreadable
  * @returns {ArchiveRec}
  */
-function archiveRec(key, doc) {
-  if (!doc || typeof doc !== 'object') return { key: UNREAD_KEY, sid: null };
+function archiveRec(key, read, onUnreadable) {
+  if (read.io) {
+    onUnreadable();
+    return { key: UNREAD_KEY, sid: null };
+  }
+  const { doc } = read;
+  if (!doc) return { key, sid: null };
   return { key, sid: sessionIdOf(/** @type {Row} */ (doc).session) };
+}
+
+/**
+ * Whether the last claim scan of `cwd` (by either reader) left an archived
+ * Epic file unread, so its id set may be missing a claim.
+ * @param {string} cwd
+ * @returns {boolean}
+ */
+function claimScanIncomplete(cwd) {
+  const entry = claimedCache.get(cwd);
+  return !!(entry && entry.incomplete);
 }
 
 /**
@@ -337,12 +418,21 @@ function claimedClaudeSessionIds(cwd, deps) {
   }
   /** @type {Map<string, ArchiveRec>} */
   const files = new Map();
+  let incomplete = false;
+  const markIncomplete = () => { incomplete = true; };
   for (const name of names) {
     const file = path.join(dir, name);
     const key = statKey(file);
-    files.set(name, memoHit(prevFiles, name, key) || archiveRec(key, atomicFs.readJsonOrSync(file, null)));
+    const hit = memoHit(prevFiles, name, key);
+    if (hit) {
+      files.set(name, hit);
+      continue;
+    }
+    let read = readArchiveSync(file);
+    if (read.io) read = readArchiveSync(file); // one immediate retry
+    files.set(name, archiveRec(key, read, markIncomplete));
   }
-  return commitClaimed(cwd, { indexKey, indexIds, files });
+  return commitClaimed(cwd, { indexKey, indexIds, files, incomplete });
 }
 
 /**
@@ -373,16 +463,24 @@ async function claimedClaudeSessionIdsAsync(cwd, deps) {
   }
   /** @type {ArchiveRec[]} */
   const recs = new Array(names.length);
+  let incomplete = false;
+  const markIncomplete = () => { incomplete = true; };
   await forEachBounded(names.length, async (k) => {
     const file = path.join(dir, names[k]);
     const key = await statKeyAsync(file);
-    // atomicFs.readJsonOr is fs.promises.readFile + JSON.parse; malformed → null.
-    recs[k] = memoHit(prevFiles, names[k], key) || archiveRec(key, await atomicFs.readJsonOr(file, null));
+    const hit = memoHit(prevFiles, names[k], key);
+    if (hit) {
+      recs[k] = hit;
+      return;
+    }
+    let read = await readArchiveAsync(file);
+    if (read.io) read = await readArchiveAsync(file); // one immediate retry
+    recs[k] = archiveRec(key, read, markIncomplete);
   });
   /** @type {Map<string, ArchiveRec>} */
   const files = new Map();
   names.forEach((name, k) => files.set(name, recs[k])); // readdir order, as the sync reader
-  return commitClaimed(cwd, { indexKey, indexIds, files });
+  return commitClaimed(cwd, { indexKey, indexIds, files, incomplete });
 }
 
 /**
@@ -637,6 +735,9 @@ async function listRestorableSessions({ cwd, limit = DEFAULT_LIMIT, deps } = { c
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
 
   const claimed = lowerSet(await claimedClaudeSessionIdsAsync(projectCwd, d));
+  // An Epic file that could not be read may own any candidate: list nothing
+  // for this call rather than offer an Epic-owned session. The next call retries.
+  if (claimScanIncomplete(projectCwd)) return result;
   /** @type {Candidate[]} */
   const open = [];
   for (const c of candidates) {
@@ -836,7 +937,11 @@ function checkRestorableSessionSync(cwd, sessionId, deps) {
       ? `Session ${sessionId} in ${dir} records no cwd in its first 64 KiB, so it cannot be shown to belong to ${projectCwd}.`
       : `Session ${sessionId} in ${dir} was recorded in ${recordedCwd}, not ${projectCwd}.`);
   }
-  if (lowerSet(claimedClaudeSessionIds(projectCwd, d)).has(sessionId.toLowerCase())) {
+  const claimed = lowerSet(claimedClaudeSessionIds(projectCwd, d));
+  if (claimScanIncomplete(projectCwd)) {
+    return refuse('claim_check_unreadable', `Cannot restore session ${sessionId} in ${dir} yet: the claim check could not read an Epic file in ${projectCwd}, so it cannot rule out that an Epic already owns this session. Try again.`);
+  }
+  if (claimed.has(sessionId.toLowerCase())) {
     return refuse('claimed', `Session ${sessionId} in ${dir} already belongs to an Epic in this project.`);
   }
   return { ok: true, transcriptPath };

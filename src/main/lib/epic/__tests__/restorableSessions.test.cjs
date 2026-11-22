@@ -89,6 +89,33 @@ function mkProject(dir) {
   fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
 }
 
+/** Basenames of the archived Epic files (not active-index.json) a read spy saw. */
+const archiveReads = (spy) => spy.mock.calls.map(([p]) => String(p))
+  .filter((p) => path.dirname(p) === promptDir() && path.basename(p) !== 'active-index.json')
+  .map((p) => path.basename(p));
+
+/** An I/O error as fs raises it (not ENOENT, which reads as "gone, owns nothing"). */
+const ioError = () => Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+
+/**
+ * Make the next `times` sync and async reads of `file` throw an I/O error
+ * (`only` limits it to one side); every other read goes through. Returns the two spies.
+ */
+function failArchiveReads(file, times, only) {
+  const left = { sync: only === 'async' ? 0 : times, async: only === 'sync' ? 0 : times };
+  const realSync = fs.readFileSync;
+  const realAsync = fs.promises.readFile;
+  const readFileSync = vi.spyOn(fs, 'readFileSync').mockImplementation((p, ...rest) => {
+    if (String(p) === file && left.sync > 0) { left.sync -= 1; throw ioError(); }
+    return realSync.call(fs, p, ...rest);
+  });
+  const readFile = vi.spyOn(fs.promises, 'readFile').mockImplementation(async (p, ...rest) => {
+    if (String(p) === file && left.async > 0) { left.async -= 1; throw ioError(); }
+    return realAsync.call(fs.promises, p, ...rest);
+  });
+  return { readFileSync, readFile };
+}
+
 beforeEach(() => {
   __resetCacheForTests();
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-rs-'));
@@ -327,15 +354,15 @@ test('the claimed-id memo re-reads only an Epic file that was rewritten', () => 
   writeArchive('epic-b', uuid(2), T0);
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(2)]);
 
-  const reads = vi.spyOn(atomicFs, 'readJsonOrSync');
+  const reads = vi.spyOn(fs, 'readFileSync');
   // epic-a untouched: served from the memo. epic-b rewritten: re-read.
   writeArchive('epic-b', uuid(4), T0 + 5);
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4)]);
-  expect(reads.mock.calls.map(([p]) => path.basename(p))).toEqual(['epic-b.json']);
+  expect(archiveReads(reads)).toEqual(['epic-b.json']);
 
   writeIndex({ e: { id: 'e', claudeSessionId: uuid(5) } }); // active-index.json appears: picked up, archives untouched
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(5)]);
-  expect(reads).toHaveBeenCalledTimes(1);
+  expect(archiveReads(reads)).toEqual(['epic-b.json']);
 });
 
 test('a same-size rewrite that keeps its mtime is not served stale from the memo, sync or async', async () => {
@@ -355,22 +382,98 @@ test('a same-size rewrite that keeps its mtime is not served stale from the memo
 });
 
 test('a failed read of an unchanged archived Epic file is not memoised: the next call re-reads it, sync and async', async () => {
-  writeArchive('epic-a', uuid(1), T0);
+  const file = writeArchive('epic-a', uuid(1), T0);
 
-  // A transient failure (EMFILE, a read between tmp write and rename) makes readJsonOr* return null.
-  vi.spyOn(atomicFs, 'readJsonOrSync').mockReturnValueOnce(null);
+  // A transient I/O failure (EMFILE, EIO) on the read and on its one retry.
+  failArchiveReads(file, 2);
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([]);
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
 
   __resetCacheForTests();
-  vi.spyOn(atomicFs, 'readJsonOr').mockResolvedValueOnce(null);
+  vi.restoreAllMocks();
+  failArchiveReads(file, 2);
   expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([]);
   expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1)]);
   // ...and the sync reader, sharing that memo, does not inherit the failed read either.
   __resetCacheForTests();
-  vi.spyOn(atomicFs, 'readJsonOr').mockResolvedValueOnce(null);
+  vi.restoreAllMocks();
+  failArchiveReads(file, 2, 'async');
   await claimedClaudeSessionIdsAsync(cwd, deps());
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+});
+
+test('an archived Epic file that reads fine but is empty, invalid JSON or not an object is memoised as owning nothing, sync and async', async () => {
+  writeArchive('epic-a', uuid(1), T0);
+  fs.writeFileSync(path.join(promptDir(), 'epic-empty.json'), '  \n');
+  fs.writeFileSync(path.join(promptDir(), 'epic-bad.json'), '{"session": ');
+  fs.writeFileSync(path.join(promptDir(), 'epic-num.json'), '42');
+  const bad = ['epic-bad.json', 'epic-empty.json', 'epic-num.json'];
+
+  const readFileSync = vi.spyOn(fs, 'readFileSync');
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+  expect(archiveReads(readFileSync).sort()).toEqual(['epic-a.json', ...bad]);
+  readFileSync.mockClear();
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+  expect(archiveReads(readFileSync)).toEqual([]);
+
+  __resetCacheForTests();
+  const readFile = vi.spyOn(fs.promises, 'readFile');
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1)]);
+  expect(archiveReads(readFile).sort()).toEqual(['epic-a.json', ...bad]);
+  readFile.mockClear();
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1)]);
+  expect(archiveReads(readFile)).toEqual([]);
+});
+
+test('an I/O read failure of an archived Epic file is retried once in the same call, sync and async', async () => {
+  const file = writeArchive('epic-a', uuid(1), T0);
+  writeSession(uuid(1));
+
+  const sync = failArchiveReads(file, 1);
+  expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1)]);
+  expect(archiveReads(sync.readFileSync)).toEqual(['epic-a.json', 'epic-a.json']);
+  expect(check(uuid(1))).toMatchObject({ ok: false, code: 'claimed' });
+
+  __resetCacheForTests();
+  vi.restoreAllMocks();
+  const both = failArchiveReads(file, 1);
+  expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1)]);
+  expect(archiveReads(both.readFile)).toEqual(['epic-a.json', 'epic-a.json']);
+  __resetCacheForTests();
+  expect(await list()).toMatchObject({ sessions: [], hiddenClaimed: 1 });
+});
+
+test('when the retry fails too, the record is not memoised and listRestorableSessions lists no rows for that call', async () => {
+  const file = writeArchive('epic-a', uuid(1), T0);
+  writeSession(uuid(1), { mtimeSec: T0 + 2 });
+  writeSession(uuid(2), { mtimeSec: T0 + 1 }); // unclaimed: listed once the scan is complete
+  const { readFile } = failArchiveReads(file, 2);
+
+  expect(await list()).toEqual({ sessions: [], hiddenClaimed: 0, scanned: 0, truncated: false });
+  expect(archiveReads(readFile)).toEqual(['epic-a.json', 'epic-a.json']);
+  // Not memoised: the next call reads the file again, claims uuid(1) and lists uuid(2).
+  const r = await list();
+  expect(archiveReads(readFile)).toEqual(['epic-a.json', 'epic-a.json', 'epic-a.json']);
+  expect(ids(r)).toEqual([uuid(2)]);
+  expect(r.hiddenClaimed).toBe(1);
+});
+
+test('when the retry fails too, checkRestorableSessionSync refuses with a retryable reason', () => {
+  const file = writeArchive('epic-a', uuid(1), T0);
+  writeSession(uuid(1));
+  writeSession(uuid(2));
+  failArchiveReads(file, 4);
+
+  // Even an id no readable Epic claims is refused: the unread file could own it.
+  for (const sid of [uuid(1), uuid(2)]) {
+    const res = check(sid);
+    expect(res).toMatchObject({ ok: false, code: 'claim_check_unreadable' });
+    expect(res.message).toContain('could not read an Epic file');
+    expect(res.message).toContain('Try again');
+  }
+  // The I/O failure has cleared: the same check now answers on the real claim.
+  expect(check(uuid(1))).toMatchObject({ ok: false, code: 'claimed' });
+  expect(check(uuid(2))).toEqual({ ok: true, transcriptPath: transcript(uuid(2)) });
 });
 
 test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-reads only a changed Epic file via fs.promises', async () => {
@@ -385,24 +488,22 @@ test('claimedClaudeSessionIdsAsync equals the sync set, shares its memo and re-r
   expect(sorted(asyncIds)).toEqual(sorted(syncIds));
 
   // Calls that touched an archived Epic file (active-index.json stays a sync readActiveIndex read).
-  const onArchives = (spy) => spy.mock.calls.map(([p]) => String(p))
-    .filter((p) => path.dirname(p) === promptDir() && path.basename(p) !== 'active-index.json')
-    .map((p) => path.basename(p));
+  const onArchives = archiveReads;
   const readFile = vi.spyOn(fs.promises, 'readFile');
   const readFileSync = vi.spyOn(fs, 'readFileSync');
   const statSync = vi.spyOn(fs, 'statSync');
   // epic-a untouched: served from the memo. epic-b rewritten: re-read. epic-bad
-  // read null, which is never memoised (a transient failure reads null too), so it is re-read.
+  // read fine but is malformed, which is memoised as owning nothing, so it is not re-read.
   writeArchive('epic-b', uuid(4), T0 + 5);
   expect(sorted(await claimedClaudeSessionIdsAsync(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
-  expect(onArchives(readFile).sort()).toEqual(['epic-b.json', 'epic-bad.json']);
+  expect(onArchives(readFile).sort()).toEqual(['epic-b.json']);
   expect(onArchives(readFileSync)).toEqual([]);
   expect(onArchives(statSync)).toEqual([]);
 
-  // The sync reader starts from the memo the async one wrote: only the unmemoised epic-bad is re-read.
+  // The sync reader starts from the memo the async one wrote: no archived Epic file is re-read.
   expect(sorted(claimedClaudeSessionIds(cwd, deps()))).toEqual([uuid(1), uuid(4), uuid(9)]);
-  expect(onArchives(readFileSync)).toEqual(['epic-bad.json']);
-  expect(onArchives(readFile).sort()).toEqual(['epic-b.json', 'epic-bad.json']);
+  expect(onArchives(readFileSync)).toEqual([]);
+  expect(onArchives(readFile).sort()).toEqual(['epic-b.json']);
 });
 
 // ── listRecentRestorableSessions: machine-wide, bounded merge ──────────────

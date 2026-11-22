@@ -36,6 +36,9 @@
  *   as link targets) is never dead; one naming exactly one tracked file or
  *   folder by suffix (`lib/x.ts`) resolves to it, two or more make it an
  *   ambiguousRef. A failing git call degrades to a census warning, never an error.
+ *   `duplicates` is mdDuplicates.findDuplicates over every read doc except
+ *   history prefixes and record-collection docs; a failure degrades to [] plus
+ *   a census warning.
  *   Docs in record collections (opts.recordFolders / heuristic) leave orphans.
  *
  * Followed — every reference an agent follows, matching the maintaining-md-network
@@ -59,6 +62,8 @@ const { censusMdDocs, parseGitLog, recordCollectionDocs } = require('./mdDocCens
 const { assessRefs, suffixIndex, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
 // The link convention (links, imports, backticked paths) is written once, in the skill's mdLinks.cjs.
 const { linksOf, importsOf, backtickPaths, toRepoPath } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
+// Called through the module object (mdDuplicates.findDuplicates), so a test can stub it.
+const mdDuplicates = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdDuplicates.cjs');
 
 const ROOT_DOC = 'CLAUDE.md';
 const MAX_DOCS = 2000;
@@ -106,7 +111,8 @@ const MD_RE = /\.md$/i;
  * @typedef {{ ok: true, root: string, nodes: MdNetworkNode[], edges: MdNetworkEdge[], findings: MdNetworkFinding[], docs: number, links: number, scopes: string[] }} MdLinkNetwork
  * @typedef {MdLinkNetwork | { ok: false, error: string }} MdLinkNetworkResult
  * @typedef {import('./mdDocCensus.cjs').MdCensus} MdCensus
- * @typedef {MdLinkNetwork & { census: MdCensus }} MdNetwork
+ * @typedef {{ a: string, b: string, sharedRuns: number, samples: string[], copy?: true }} MdDuplicatePair
+ * @typedef {MdLinkNetwork & { census: MdCensus, duplicates: MdDuplicatePair[] }} MdNetwork
  * @typedef {MdNetwork | { ok: false, error: string }} MdNetworkResult
  * @typedef {{ recordFolders?: string[], docFolders?: string[] }} ScanOpts
  */
@@ -690,9 +696,20 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
 
     // Record-collection docs leave orphans and are never walked, linked or not.
     const records = new Set(recordCollectionDocs(census));
-    if (records.size === 0) return { ...network, census };
+
+    // Duplication over living docs only: never history, never record collections.
+    /** @type {MdDuplicatePair[]} */
+    let duplicates = [];
+    try {
+      const living = files.filter((f) => f.path === ROOT_DOC || (!records.has(f.path) && !hasPrefix(f.path, history)));
+      duplicates = mdDuplicates.findDuplicates(living);
+    } catch (err) {
+      census.warnings.push(`duplicates unavailable: ${errorText(err)}`);
+    }
+
+    if (records.size === 0) return { ...network, census, duplicates };
     const pruned = buildMdNetwork({ ...networkInput, records });
-    return pruned.ok ? { ...pruned, census } : pruned;
+    return pruned.ok ? { ...pruned, census, duplicates } : pruned;
   } catch (err) {
     return { ok: false, error: errorText(err) };
   }

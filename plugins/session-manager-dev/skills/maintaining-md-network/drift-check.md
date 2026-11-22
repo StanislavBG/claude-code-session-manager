@@ -25,7 +25,7 @@ node <skill base dir>/scripts/drift-check.cjs --root <repo>
 | `--map <path>` | The entry map. Default: the first file that holds the maintainer comment, searched in this order: the root CLAUDE.md, the root AGENTS.md, then the `.md` files those two import directly with at-sign imports (see below). |
 | `--file <path>` | Check only this file. Repeat for each file. Default: every tracked `.md` file (all `.md` files outside `.git` and `node_modules` when the repo is not git). |
 | `--exclude <prefix>` | Skip files whose repo-relative path starts with the prefix. Repeat as needed. |
-| `--checks <list>` | Comma list from `links`, `paths`, `limits`, `contents`, `orphans`. Default: the first four. `orphans` is opt-in: it reports docs the root CLAUDE.md never reaches, by the [link convention](SKILL.md#what-counts-as-a-link) in SKILL.md. |
+| `--checks <list>` | Comma list from `links`, `paths`, `limits`, `contents`, `orphans`, `duplicates`. Default: the first four. `orphans` is opt-in: it reports docs the root CLAUDE.md never reaches, by the [link convention](SKILL.md#what-counts-as-a-link) in SKILL.md. `duplicates` is opt-in: it reports pairs of checked docs that share the same text. |
 | `--strict-paths` | Report `unanchored-path` findings, and treat a link starting with `/` that matches no file as broken. Off by default. |
 
 A flag that needs a value fails if the value is missing or starts with `--`.
@@ -53,6 +53,7 @@ One JSON object on stdout, with its keys in this order:
 | `over-line-limit` | file, lines, expandedLines, limit | A CLAUDE.md, AGENTS.md or unscoped `.claude/rules` file has more than 200 lines, or the map has more than 70. `expandedLines` counts the file plus every `.md` it pulls in with an at-sign import (up to 4 hops, each file once); the limit applies to `expandedLines`. |
 | `no-contents-list` | file, lines | A doc over 100 lines has no Contents heading and no list of anchor links near the top. |
 | `orphan` | file | Only with `--checks orphans` (opt-in). No chain of references from the root CLAUDE.md reaches this checked doc, by SKILL.md's [link convention](SKILL.md#what-counts-as-a-link): markdown links and `<x.md>` autolinks, backticked `.md` paths (repo-root form first, then doc-relative) and at-sign imports, outside fences and HTML comments. All tracked docs carry reachability; `--exclude` and `--file` only limit what is reported. No root CLAUDE.md adds a note instead. Keep record collections out with `--exclude`. |
+| `duplicate` | file, other, sharedRuns, detail (also `type: 'duplicate'`) | Only with `--checks duplicates` (opt-in). Two checked docs share at least 10 distinct runs of 8 consecutive words (`scripts/mdDuplicates.cjs` `findDuplicates`, the same function the app's scan runs); `file` is the first doc in path order, `other` the second. Code fences and link targets are ignored; text found in more than 6 docs is boilerplate and skipped. Keep history and record collections out with `--exclude`. |
 
 Links and code spans inside fenced code blocks and HTML comments are ignored.
 

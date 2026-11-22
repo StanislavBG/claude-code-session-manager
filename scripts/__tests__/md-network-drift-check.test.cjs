@@ -384,3 +384,22 @@ test('orphans: default --checks never reports orphan', () => {
   expect(json.counts.orphan).toBeUndefined();
   expect(run(dir, '--checks', 'links,orphans').json.counts).toEqual({ orphan: 1 });
 });
+
+// ── duplicates (opt-in): mdDuplicates.findDuplicates, the same function the app's scan runs ──
+
+test('duplicates: a paragraph written in two docs is one finding and exits 1; off by default', () => {
+  const shared = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ');
+  const dir = repo({
+    'CLAUDE.md': '# Map\n[a](docs/a.md) [b](docs/b.md)\n',
+    'docs/a.md': `# A\n\n${shared}\n`,
+    'docs/b.md': `# B\n\nIntro.\n\n${shared}\n`,
+  });
+  expect(run(dir).code).toBe(0);
+  const { code, json } = run(dir, '--checks', 'duplicates');
+  expect(code).toBe(1);
+  expect(json.findings).toHaveLength(1);
+  expect(json.findings[0]).toMatchObject({ type: 'duplicate', file: 'docs/a.md', other: 'docs/b.md', sharedRuns: 23 });
+  expect(json.findings[0].detail).toMatch(/docs\/b\.md/);
+  expect(json.counts).toEqual({ duplicate: 1 });
+  expect(run(dir, '--checks', 'duplicates', '--exclude', 'docs/b.md').code).toBe(0);
+});

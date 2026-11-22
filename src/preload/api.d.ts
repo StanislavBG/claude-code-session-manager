@@ -1931,6 +1931,19 @@ export interface MdNetworkOrphan {
 export type MdNetworkFinding = MdNetworkBrokenLink | MdNetworkOrphan;
 
 /**
+ * Two docs that share the same text (src/main/lib/mdNetworkScan.cjs via mdDuplicates.cjs
+ * findDuplicates): `sharedRuns` distinct 8-word runs in common, up to 3 shared passages in
+ * `samples`, `copy` when the shared runs cover at least 90% of the larger doc.
+ */
+export interface MdDuplicatePair {
+  a: string;
+  b: string;
+  sharedRuns: number;
+  samples: string[];
+  copy?: boolean;
+}
+
+/**
  * A project's markdown link network, mapped from its root CLAUDE.md, plus a per-doc
  * census of every tracked .md (role, size, git recency, dead/stale refs, code mentions).
  * Orphan findings leave out docs the census puts in a record collection.
@@ -1951,6 +1964,8 @@ export interface MdNetwork {
   scopes: string[];
   /** Every tracked .md; docs left unread past the 2000 cap have `lines`/`bytes` null. A failed git call adds a `warnings` entry, never an error. */
   census: MdCensus;
+  /** Duplicated text between living docs (never history or record-collection docs), most shared first. A failure is `[]` plus a `census.warnings` entry. Optional only so older fixtures/results without it still type-check; the scan always sets it. */
+  duplicates?: MdDuplicatePair[];
 }
 
 /** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */

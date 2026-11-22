@@ -4,10 +4,12 @@
  * drift-check.cjs — dependency-free drift check for a repo's markdown network.
  *
  *   node drift-check.cjs [--root <dir>] [--map <path>] [--file <path>]...
- *                        [--exclude <prefix>]... [--checks links,paths,limits,contents[,orphans]] [--strict-paths]
+ *                        [--exclude <prefix>]... [--checks links,paths,limits,contents[,orphans][,duplicates]] [--strict-paths]
  *
  * `orphans` is opt-in (not in the default set): docs no chain of references from the root
- * CLAUDE.md reaches, by the maintaining-md-network SKILL.md link convention.
+ * CLAUDE.md reaches, by the maintaining-md-network SKILL.md link convention. `duplicates` is opt-in
+ * too: pairs of checked docs sharing the same text, from mdDuplicates.findDuplicates (the function
+ * the app's src/main/lib/mdNetworkScan.cjs runs).
  *
  * Prints one JSON object { root, map, notes, findings, counts, checkedFiles } to stdout.
  * Exit 0 = no findings, 1 = findings, 2 = usage error / missing root.
@@ -19,8 +21,9 @@ const { spawnSync } = require('child_process');
 // The link convention (links, imports, backticked paths; code and comments skipped) is written
 // once, in the sibling mdLinks.cjs — same folder, so this script stays dependency-free.
 const { linksOf, rawLinksOf, visibleLine, importsOf, backtickPaths, toRepoPath } = require('./mdLinks.cjs');
+const { findDuplicates } = require('./mdDuplicates.cjs');
 
-const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'orphans'];
+const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'orphans', 'duplicates'];
 const DEFAULT_CHECKS = ['links', 'paths', 'limits', 'contents'];
 const LIMIT_ALWAYS_LOADED = 200;
 const LIMIT_MAP = 70;
@@ -284,11 +287,13 @@ function runDriftCheck(options) {
   const findings = [];
   const missing = []; // { file, line, target, cands }
   const missingLinks = []; // same shape; broken-link candidates, dropped when gitignored
+  const dupDocs = []; // { path, text } of every checked doc, for the duplicates check
 
   for (const rel of docs) {
     const abs = path.join(root, rel);
     let text;
     try { text = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+    if (checks.has('duplicates')) dupDocs.push({ path: rel, text });
     const docDir = path.dirname(abs);
     const needParse = checks.has('links') || checks.has('paths') || checks.has('contents');
     const parsed = needParse ? parseDoc(text) : null;
@@ -387,6 +392,20 @@ function runDriftCheck(options) {
     } else {
       const reached = reachableDocs(root, listDocs(root).files);
       for (const rel of docs) if (!reached.has(rel)) findings.push({ kind: 'orphan', file: rel });
+    }
+  }
+
+  if (checks.has('duplicates')) {
+    for (const d of findDuplicates(dupDocs)) {
+      const what = d.copy ? 'is a full copy of' : `shares ${d.sharedRuns} 8-word runs with`;
+      findings.push({
+        kind: 'duplicate',
+        type: 'duplicate',
+        file: d.a,
+        other: d.b,
+        sharedRuns: d.sharedRuns,
+        detail: `${d.a} ${what} ${d.b}; keep the text in one and link to it from the other.`,
+      });
     }
   }
 

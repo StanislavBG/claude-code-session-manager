@@ -520,6 +520,52 @@ describe('scanMdNetwork with injected git and fs', () => {
     }
   });
 
+  it('reports duplicated text between living docs, never against history or record docs', async () => {
+    const shared = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ');
+    const records = Array.from({ length: 25 }, (_, i) => `records/r-${String(i).padStart(2, '0')}.md`);
+    const tracked = ['CLAUDE.md', 'docs/a.md', 'docs/b.md', 'past/old.md', ...records];
+    const texts = {
+      ...Object.fromEntries(records.map((p) => [p, ''])),
+      'CLAUDE.md': '[a](docs/a.md) [b](docs/b.md) [old](past/old.md)',
+      'docs/a.md': `# A\n\n${shared}\n\nOnly in a.`,
+      'docs/b.md': `# B\n\nIntro to b.\n\n${shared}`,
+      'past/old.md': `# Old\n\n${shared}`,
+      'records/r-00.md': `# Rec\n\n${shared}`,
+    };
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'md-network-dup-'));
+    try {
+      fs.writeFileSync(path.join(base, '.session-manager.json'), JSON.stringify({ mdNetwork: { history: ['past/'] } }));
+      const deps = fakeRepo({ tracked: ['.session-manager.json', ...tracked], texts }).deps;
+      const r = await scanMdNetwork(base, { ...deps, readFile: async (abs) => deps.readFile(path.join('/repo', path.relative(base, abs))) });
+      expect(r.ok).toBe(true);
+      expect(r.census.collections.map((c) => c.folder)).toEqual(['records/']);
+      expect(r.duplicates).toHaveLength(1);
+      expect(r.duplicates[0]).toMatchObject({ a: 'docs/a.md', b: 'docs/b.md', sharedRuns: 23 });
+      expect(r.duplicates[0].samples[0]).toContain('word0 word1');
+      expect(r.census.warnings).toEqual([]);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('degrades a duplicates failure to [] plus a census warning', async () => {
+    const tracked = ['CLAUDE.md'];
+    const texts = { 'CLAUDE.md': '# Map' };
+    const dupMod = require('../../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdDuplicates.cjs');
+    const real = dupMod.findDuplicates;
+    dupMod.findDuplicates = () => {
+      throw new Error('boom');
+    };
+    try {
+      const r = await scanMdNetwork('/repo', fakeRepo({ tracked, texts }).deps);
+      expect(r.ok).toBe(true);
+      expect(r.duplicates).toEqual([]);
+      expect(r.census.warnings).toEqual(['duplicates unavailable: boom']);
+    } finally {
+      dupMod.findDuplicates = real;
+    }
+  });
+
   it('returns the missing-root error when CLAUDE.md cannot be found', async () => {
     const r = await scanMdNetwork('/repo', {
       execGit: async () => 'README.md\0',

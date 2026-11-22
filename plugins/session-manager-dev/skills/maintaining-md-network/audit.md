@@ -59,6 +59,8 @@ Record these fields for each file:
 
 Do the lines and dates in one pass over the file list, not one command per file by hand. Find the writer of a suspect file with `git grep -n "<file name>" -- '*.js' '*.cjs' '*.ts' '*.py' '*.sh'`.
 
+Check each CLAUDE.md and AGENTS.md pair, at the root and in every folder, against the pair rule in [placement.md](placement.md#agentsmd-and-claudemd). Report each pair that breaks it.
+
 Then report the share of markdown that is machine-written history or runtime state: files and lines of that kind, divided by all markdown files and lines. The drift-check script does not compute this share. Compute it by hand, per top-level folder:
 
 ```

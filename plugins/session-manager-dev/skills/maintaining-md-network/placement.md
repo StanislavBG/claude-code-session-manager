@@ -24,7 +24,7 @@ Rules:
 | Kind of instruction | Put it in | Rule and source |
 | --- | --- | --- |
 | Map, commands Claude must run, critical gotchas | Root CLAUDE.md or AGENTS.md | Loaded every session, so keep it under 200 lines. Hold only pointers, the commands Claude must run and critical gotchas: only what an agent can't find in the code. Sources: memory, large-codebases blog. |
-| Both CLAUDE.md and AGENTS.md exist | One file imports the other | Import the shared file with `@path` so one file owns the text. Source: memory. |
+| Both CLAUDE.md and AGENTS.md exist, at the root or in any folder | AGENTS.md holds the text; CLAUDE.md is a stub that starts with `@AGENTS.md` | The pair rule. Full text: [AGENTS.md and CLAUDE.md](#agentsmd-and-claudemd). Sources: Claude CLI 2.1.325, Codex AGENTS.md guide. |
 | Project structure, file listings and feature tours | A directory pointer, or a command that prints the listing | The code is the source of truth, and a hand-kept tour in CLAUDE.md drifts. Replace the tour with one line naming the directory, or with a command such as `git ls-files <dir>`. This applies to small apps too. Sources: best-practices, large-codebases blog. |
 | Conventions for one folder | That folder's CLAUDE.md, or a `.claude/rules` file with `paths:` frontmatter | Folder files load when Claude works there; path-scoped rules load only when matching files are touched. Sources: memory, steering article. |
 | Procedures: releases, deploys, review checklists | A skill | A skill loads on demand, so its steps cost nothing until used. Sources: skills best practices, steering article. |
@@ -33,6 +33,35 @@ Rules:
 | Notes for human maintainers | An HTML block comment (`<!-- ... -->`) | Block comments are stripped before the file loads, so they cost no context. Source: memory. |
 | Progress records and history | Progress files and git history | Let the next session read them to pick up where the last stopped. Source: long-running harnesses article. |
 | Maintainer of a doc | One named maintainer per doc, reviewed every 3-6 months | Assign an owner so the doc is not left to drift. Source: large-codebases blog. |
+
+## AGENTS.md and CLAUDE.md
+
+The pair rule:
+
+- AGENTS.md holds every instruction line of its folder. The root AGENTS.md is the entry map.
+- A CLAUDE.md beside it starts with the line `@AGENTS.md`.
+- Below that line, CLAUDE.md may add only lines true for Claude Code alone. It never repeats a line AGENTS.md already states.
+- The same pair rule applies in every scoped folder.
+- Size budgets count the pair together: AGENTS.md plus its CLAUDE.md.
+- AGENTS.md links with markdown links, not `@`-imports. Codex and other tools do not follow `@`-imports.
+
+Why the stub: verified facts, Claude CLI 2.1.325 (binary and live `claude -p` runs):
+
+- Option `instructionFiles`: `claude-md`, `claude-md-or-agents-md` (default), `claude-md-and-agents-md`, `managed-only`.
+- Default mode: a project with only AGENTS.md gets it loaded.
+- Default mode: if the project's CLAUDE.md does not import AGENTS.md, AGENTS.md is never seen.
+- Default mode: a CLAUDE.md that is just `@AGENTS.md` loads it.
+- Nested: in a project with any CLAUDE.md, a nested AGENTS.md alone is never auto-loaded.
+- Nested: a nested CLAUDE.md stub (`@AGENTS.md`) beside it loads it when Claude reads that folder.
+- CLAUDE.md, `.claude/CLAUDE.md` and CLAUDE.local.md at or above the root all count as "has a CLAUDE.md". A stray CLAUDE.local.md silently turns the AGENTS.md fallback off.
+- So the stub makes the pair load in every mode except `managed-only`, and also on older CLIs and in `claude-md` mode.
+- In `claude-md-and-agents-md` mode, an imported AGENTS.md is not loaded twice.
+
+Codex facts (developers.openai.com/codex/guides/agents-md):
+
+- Codex reads AGENTS.md, then any `project_doc_fallback_filenames`, once per folder from the git root down to the cwd.
+- It reads them at start only, up to `project_doc_max_bytes` (32 KiB by default).
+- It does not follow `@`-imports.
 
 ## Size and load rules
 
@@ -54,3 +83,5 @@ Rules:
 - https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start: root file holds pointers only, assign an owner, review every 3-6 months.
 - https://claude.com/resources/articles/steering-claude-code-skills-hooks-rules-subagents-and-more: which mechanism fits which kind of instruction (rules, skills, hooks, subagents).
 - https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents: progress records and git history serve as memory across sessions.
+- https://developers.openai.com/codex/guides/agents-md: how Codex finds and reads AGENTS.md.
+- Claude CLI 2.1.325 binary and live `claude -p` runs: the `instructionFiles` modes and the AGENTS.md load behaviour above.

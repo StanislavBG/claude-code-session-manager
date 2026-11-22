@@ -34,12 +34,13 @@ All three count for reachability in Project Home's link map and in drift-check's
 
 ## References
 
-Each is one level deep; none links another.
+Each is one level deep; none links another, except audit.md's census step, which links placement.md's pair rule.
 
 - [placement.md](placement.md): read when deciding where a kind of instruction belongs, or what moves into a skill, rule, hook or subagent.
 - [audit.md](audit.md): read for steps 1-4 (census, audiences, links, truth check), the time box and the subagent brief.
 - [plan.md](plan.md): read for the report contents, verdicts, history and runtime state, the `/develop` order and cross-repo routing.
 - [drift-check.md](drift-check.md): read for Drift check mode, running the script and the review record.
+- [migrate-to-agents-md.md](migrate-to-agents-md.md): read when moving a project's CLAUDE.md text into AGENTS.md.
 
 The script is `<skill base dir>/scripts/drift-check.cjs`.
 

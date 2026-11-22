@@ -7,7 +7,6 @@ import { flushAsync } from '../../../testUtils/domFlush'
 
 const HOME = '/home/test'
 const KEY = 'demo@market'
-const FOOTNOTE = 'Plugin contents also appear, read-only, in Skills and MCP Servers — tagged with the plugin that added them.'
 
 interface FakePlugin {
   name: string
@@ -53,7 +52,12 @@ function installApi(
         }))
         return { ok: true, error: null, entries }
       }),
-      readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
+      readText: vi.fn(async (path: string) => {
+        const p = plugins.find((x) => path.startsWith(`${installPathOf(x)}/commands/`))
+        if (!p) return { exists: false, text: '' }
+        const base = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '')
+        return { exists: true, text: `---\ndescription: Runs ${base}.\n---\n` }
+      }),
       watch: vi.fn(),
       unwatch: vi.fn(),
       onChanged: vi.fn(() => () => {}),
@@ -76,7 +80,7 @@ function installApi(
   return api
 }
 
-describe('Plugins cards: enable switch, inline uninstall, toolbar, chips', () => {
+describe('Plugins list + detail: enable switch, file card, filter, + Add, inline uninstall', () => {
   let container: HTMLDivElement
   beforeEach(() => {
     vi.resetModules()
@@ -97,13 +101,14 @@ describe('Plugins cards: enable switch, inline uninstall, toolbar, chips', () =>
   }
 
   const q = (sel: string) => container.querySelector(sel) as HTMLElement | null
-  const cardNames = () =>
-    Array.from(container.querySelectorAll('[data-testid="plugin-card"] [data-testid="plugin-card-name"]')).map((n) => n.textContent)
+  const rows = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="config-list-row"]'))
+  const rowNames = () => rows().map((r) => r.querySelector('.font-mono')?.textContent)
+  const rowFor = (name: string) => rows().find((r) => r.querySelector('.font-mono')?.textContent === name) as HTMLElement
   const menuButton = (label: string) =>
     Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menu"] button')).find((b) => b.textContent === label) as HTMLButtonElement
 
   function typeFilter(value: string) {
-    const input = q('[data-testid="extensions-toolbar-filter"]') as HTMLInputElement
+    const input = q('input[type="search"]') as HTMLInputElement
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
     act(() => {
       setValue.call(input, value)
@@ -111,25 +116,118 @@ describe('Plugins cards: enable switch, inline uninstall, toolbar, chips', () =>
     })
   }
 
-  async function confirmUninstall(name: string) {
-    act(() => (q('[data-testid="plugin-menu"]') as HTMLButtonElement).click())
-    act(() => menuButton(`Uninstall ${name}`).click())
-    act(() => (q('[data-testid="plugin-uninstall"]') as HTMLButtonElement).click())
-    await flushAsync(10)
-  }
-
-  it('shows the switch bound to list().enabled and toggling calls setEnabled then re-lists', async () => {
-    const api = installApi()
+  it('toggling a row switch calls plugins.setEnabled (the enabledPlugins write) without selecting the row, then re-lists', async () => {
+    const api = installApi({ plugins: [{ name: 'alpha' }, { name: 'demo' }] })
     const root = await mount()
-    const sw = container.querySelector('[data-testid="plugin-enabled-switch"]') as HTMLButtonElement
+    const demo = rowFor('demo')
+    expect(demo.getAttribute('aria-selected')).toBe('false')
+    const sw = demo.querySelector('[data-testid="plugin-enabled-switch"]') as HTMLButtonElement
     expect(sw.getAttribute('role')).toBe('switch')
     expect(sw.getAttribute('aria-checked')).toBe('false')
+    expect(demo.className).toContain('opacity-60')
     const before = api.plugins.list.mock.calls.length
     act(() => sw.click())
     await flushAsync(10)
     expect(api.plugins.setEnabled).toHaveBeenCalledWith({ key: KEY, enabled: true })
     expect(api.plugins.list.mock.calls.length).toBeGreaterThan(before)
-    expect((container.querySelector('[data-testid="plugin-enabled-switch"]') as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    const after = rowFor('demo')
+    expect(after.getAttribute('aria-selected')).toBe('false')
+    expect((after.querySelector('[data-testid="plugin-enabled-switch"]') as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    expect(after.className).not.toContain('opacity-60')
+    act(() => root.unmount())
+  })
+
+  it('the detail Enabled switch makes the same enabledPlugins write', async () => {
+    const api = installApi({ plugins: [{ name: 'demo', enabled: true }] })
+    const root = await mount()
+    const sw = q('[data-testid="plugin-detail-switch"]') as HTMLButtonElement
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    act(() => sw.click())
+    await flushAsync(10)
+    expect(api.plugins.setEnabled).toHaveBeenCalledWith({ key: KEY, enabled: false })
+    expect((q('[data-testid="plugin-detail-switch"]') as HTMLElement).getAttribute('aria-checked')).toBe('false')
+    act(() => root.unmount())
+  })
+
+  it('renders the PLUGINS file card with the on count, manifest path and enabledPlugins note', async () => {
+    installApi({ plugins: [{ name: 'demo', enabled: true }, { name: 'other' }, { name: 'third', enabled: true }] })
+    const root = await mount()
+    const card = q('[data-testid="config-file-card"]') as HTMLElement
+    expect(card.textContent).toContain('PLUGINS')
+    expect(card.textContent).toContain('2 on')
+    expect(card.textContent).toContain('~/.claude/plugins/installed_plugins.json')
+    expect(card.textContent).toContain('On/off is saved in settings.json › enabledPlugins')
+    act(() => root.unmount())
+  })
+
+  it('rows show the mono name and "<marketplace> · <contents>"; the filter matches name or description', async () => {
+    installApi({
+      plugins: [
+        { name: 'demo', description: 'Does the demo thing', enabled: true, commands: ['go.md', 'stop.md'] },
+        { name: 'other', description: 'Formats tables' },
+      ],
+    })
+    const root = await mount()
+    expect(rowNames()).toEqual(['demo', 'other'])
+    expect(rowFor('demo').textContent).toContain('market · 2 commands')
+    expect(rowFor('other').textContent).toContain('market · empty')
+
+    typeFilter('TABLES')
+    expect(rowNames()).toEqual(['other'])
+    typeFilter('dem')
+    expect(rowNames()).toEqual(['demo'])
+    typeFilter('nothing-matches')
+    expect(rowNames()).toEqual([])
+    expect(container.textContent).toContain('No plugins match')
+    typeFilter('')
+    expect(rowNames()).toEqual(['demo', 'other'])
+    act(() => root.unmount())
+  })
+
+  it('"+ Add" calls onAdd (the catalog drawer)', async () => {
+    installApi()
+    const onAdd = vi.fn()
+    const root = await mount({ onAdd })
+    const add = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '+ Add') as HTMLButtonElement
+    act(() => add.click())
+    expect(onAdd).toHaveBeenCalledTimes(1)
+    act(() => root.unmount())
+  })
+
+  it('the detail shows eyebrow, name, description, what it adds, install path and the saved line; no update control', async () => {
+    installApi({ plugins: [{ name: 'demo', description: 'Does the demo thing', commands: ['go.md', 'stop.md'] }] })
+    const onJump = vi.fn()
+    const root = await mount({ onJump })
+    const header = q('[data-testid="config-detail-header"]') as HTMLElement
+    expect(header.textContent).toContain('PLUGIN · MARKET · V1.0.0 · USER SCOPE')
+    expect(header.textContent).toContain('demo')
+    expect(header.textContent).toContain('Enabled')
+    expect(header.textContent).not.toMatch(/up to date/i)
+    const cards = Array.from(container.querySelectorAll('[data-testid="config-card"]')).map((c) => c.textContent ?? '')
+    expect(cards[0]).toContain("DESCRIPTION · FROM THE PLUGIN'S MANIFEST")
+    expect(cards[0]).toContain('Does the demo thing')
+    expect(cards[1]).toContain('WHAT IT ADDS · 2 COMMANDS')
+    expect(Array.from(container.querySelectorAll('[data-testid="plugin-adds-command"]')).map((r) => r.textContent)).toEqual([
+      '/goRuns go.',
+      '/stopRuns stop.',
+    ])
+    expect(cards[2]).toContain('INSTALLED AT')
+    expect(q('[data-testid="plugin-install-path"]')?.textContent).toBe('/p/demo')
+    expect(q('[data-testid="config-saved-line"]')?.textContent).toBe('Saved — matches settings.json › enabledPlugins')
+
+    act(() => (q('[data-testid="plugin-open-in-skills"]') as HTMLButtonElement).click())
+    expect(onJump).toHaveBeenCalledWith('skills')
+    act(() => root.unmount())
+  })
+
+  it('selecting a row shows its detail', async () => {
+    installApi({ plugins: [{ name: 'alpha' }, { name: 'demo' }] })
+    const root = await mount()
+    expect(rowFor('alpha').getAttribute('aria-selected')).toBe('true')
+    act(() => rowFor('demo').click())
+    await flushAsync(10)
+    expect(rowFor('demo').getAttribute('aria-selected')).toBe('true')
+    expect(q('[data-testid="config-detail-header"]')?.textContent).toContain('demo')
     act(() => root.unmount())
   })
 
@@ -140,6 +238,11 @@ describe('Plugins cards: enable switch, inline uninstall, toolbar, chips', () =>
     const root = await mount()
 
     act(() => (q('[data-testid="plugin-menu"]') as HTMLButtonElement).click())
+    expect(Array.from(container.querySelectorAll('[role="menu"] button')).map((b) => b.textContent)).toEqual([
+      'Reveal in File Explorer',
+      'Copy path',
+      'Uninstall demo',
+    ])
     act(() => menuButton('Uninstall demo').click())
     expect(q('[role="menu"]')?.textContent).toContain('Uninstall demo?')
     act(() => menuButton('Cancel').click())
@@ -160,69 +263,19 @@ describe('Plugins cards: enable switch, inline uninstall, toolbar, chips', () =>
     installApi({ uninstall: { ok: false, exitCode: 1, error: 'boom' } })
     const root = await mount()
     const { useToast } = await import('../../../state/toast')
-    await confirmUninstall('demo')
+    act(() => (q('[data-testid="plugin-menu"]') as HTMLButtonElement).click())
+    act(() => menuButton('Uninstall demo').click())
+    act(() => (q('[data-testid="plugin-uninstall"]') as HTMLButtonElement).click())
+    await flushAsync(10)
     expect(useToast.getState().toasts.some((t) => t.kind === 'error' && t.message.includes('boom'))).toBe(true)
     act(() => root.unmount())
   })
 
-  it('renders the toolbar summary, one card per plugin and the footnote; the filter matches name or description', async () => {
-    installApi({
-      plugins: [
-        { name: 'demo', description: 'Does the demo thing', enabled: true },
-        { name: 'other', description: 'Formats tables' },
-      ],
-    })
-    const root = await mount()
-    expect(q('[data-testid="extensions-toolbar-summary"]')?.textContent).toBe('2 installed · 1 enabled')
-    expect((q('[data-testid="extensions-toolbar-filter"]') as HTMLInputElement).placeholder).toBe('Filter plugins')
-    expect(cardNames()).toEqual(['demo', 'other'])
-    expect(container.textContent).toContain(FOOTNOTE)
-
-    typeFilter('TABLES')
-    expect(cardNames()).toEqual(['other'])
-    typeFilter('dem')
-    expect(cardNames()).toEqual(['demo'])
-    typeFilter('nothing-matches')
-    expect(cardNames()).toEqual([])
-    expect(container.textContent).toContain('No plugins match')
-    // The summary always counts every installed plugin, not just the filtered ones.
-    expect(q('[data-testid="extensions-toolbar-summary"]')?.textContent).toBe('2 installed · 1 enabled')
-    typeFilter('')
-    expect(cardNames()).toEqual(['demo', 'other'])
-    act(() => root.unmount())
-  })
-
-  it('one accent "+ Add plugin" whose "Browse catalog…" item calls onAdd', async () => {
-    installApi()
-    const onAdd = vi.fn()
-    const root = await mount({ onAdd })
-    const add = q('[data-testid="plugins-add"]') as HTMLButtonElement
-    expect(add.textContent).toBe('+ Add plugin')
-    act(() => add.click())
-    const browse = q('[data-testid="plugins-add-catalog"]') as HTMLButtonElement
-    expect(browse.textContent).toBe('Browse catalog…')
-    act(() => browse.click())
-    expect(onAdd).toHaveBeenCalledTimes(1)
-    act(() => root.unmount())
-  })
-
-  it('a contents chip hands its tab to onJump', async () => {
-    installApi({ plugins: [{ name: 'demo', commands: ['go.md', 'stop.md'] }] })
-    const onJump = vi.fn()
-    const root = await mount({ onJump })
-    const chip = q('[data-testid="plugin-chip-commands"]') as HTMLButtonElement
-    expect(chip.textContent).toBe('2 commands ›')
-    act(() => chip.click())
-    expect(onJump).toHaveBeenCalledWith('skills')
-    act(() => root.unmount())
-  })
-
-  it('shows an empty card, not a table, when nothing is installed', async () => {
+  it('shows an empty card when nothing is installed', async () => {
     installApi({ plugins: [] })
     const root = await mount()
-    expect(container.querySelector('table')).toBeNull()
     expect(q('[data-testid="plugins-empty"]')?.textContent).toContain('No plugins installed')
-    expect(q('[data-testid="extensions-toolbar-summary"]')?.textContent).toBe('0 installed · 0 enabled')
+    expect(q('[data-testid="config-file-card"]')?.textContent).toContain('0 on')
     act(() => root.unmount())
   })
 })

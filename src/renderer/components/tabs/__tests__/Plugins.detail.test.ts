@@ -12,10 +12,9 @@ vi.mock('../../ui/MarkdownEditor', () => ({
 }))
 
 /**
- * Clicking an installed plugin's card name navigates to a full drill-in page
- * (PluginHomePage) in place of the cards: one-line header, meta strip,
- * left section index, and real skill/agent data. A back link returns to
- * the list.
+ * Selecting an installed plugin's row shows its PluginDetail beside the list: eyebrow + name header,
+ * the manifest description, what it adds (real skill/agent/command/MCP data) and where it is installed.
+ * The detail re-reads its components live; a skill row opens the read-only SkillHomePage in its place.
  */
 
 const HOME = '/home/test'
@@ -148,7 +147,7 @@ function installWindowApiMock() {
 
 const flush = () => flushAsync(5)
 
-describe('Plugins drill-in page', () => {
+describe('Plugins detail', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -162,16 +161,14 @@ describe('Plugins drill-in page', () => {
     container.remove()
   })
 
-  /** The PluginCard whose name button reads `name`. */
-  const cardFor = (name: string) =>
-    Array.from(container.querySelectorAll('[data-testid="plugin-card"]')).find(
-      (c) => c.querySelector('[data-testid="plugin-card-name"]')?.textContent === name,
-    ) as HTMLElement
-  const cards = () => Array.from(container.querySelectorAll('[data-testid="plugin-card"]'))
-  /** Clicking a card's name opens its drill-in. */
-  const openCard = (card: HTMLElement) => (card.querySelector('[data-testid="plugin-card-name"]') as HTMLButtonElement).click()
+  const cards = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="config-list-row"]'))
+  /** The list row whose mono title reads `name`. */
+  const cardFor = (name: string) => cards().find((c) => c.querySelector('.font-mono')?.textContent === name) as HTMLElement
+  /** Clicking a row selects it and shows its detail. */
+  const openCard = (card: HTMLElement) => card.click()
+  const detailText = () => container.querySelector('[data-testid="config-workbench-detail"]')?.textContent ?? ''
 
-  it('navigates to the plugin home page on a card name click, shows header/meta/sections, and returns via back link', async () => {
+  it('shows the selected plugin in the detail: header, description, what it adds, install path', async () => {
     const api = installWindowApiMock()
     const { Plugins } = await import('../Plugins')
 
@@ -181,60 +178,26 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    const demoRow = cardFor('demo')
-    expect(demoRow).toBeTruthy()
-
-    // Description renders as its own line on the card when the manifest has
-    // one, and a card whose manifest has none shows just the name.
-    const descDiv = demoRow.querySelector('[data-testid="plugin-card-description"]') as HTMLElement | null
-    expect(descDiv?.textContent).toBe(DEMO_MANIFEST.description)
-    expect(descDiv?.getAttribute('title')).toBe(DEMO_MANIFEST.description)
-    const bareRow = cardFor('bare')
-    expect(bareRow.querySelector('[data-testid="plugin-card-name"]')?.textContent).toBe('bare')
-    expect(bareRow.querySelector('[data-testid="plugin-card-description"]')).toBeFalsy()
+    // Rows sort by name, so `bare` (no manifest) is selected first.
+    expect(cardFor('bare').getAttribute('aria-selected')).toBe('true')
+    expect(cardFor('demo').textContent).toContain('marketplace-a · 1 skill · 1 agent')
 
     act(() => {
-      openCard(demoRow)
+      openCard(cardFor('demo'))
     })
     await flush()
 
-    // Cards are gone; page header shows name, version, back link.
-    expect(container.querySelector('[data-testid="plugin-card"]')).toBeFalsy()
-    const text = container.textContent ?? ''
+    expect(cardFor('demo').getAttribute('aria-selected')).toBe('true')
+    const text = detailText()
+    expect(text).toContain('PLUGIN · MARKETPLACE-A · V1.2.3 · USER SCOPE')
     expect(text).toContain('demo')
-    expect(text).toContain('v1.2.3')
-    expect(text).toContain('Plugins')
-
-    // Meta strip.
-    expect(text).toContain('Ada Author')
-    expect(text).toContain('MIT')
-    expect(text).toContain('example.com/demo')
-
-    // Section index + real skill/agent data.
+    expect(text).toContain(DEMO_MANIFEST.description)
+    expect(text).toContain('WHAT IT ADDS · 1 SKILL · 1 AGENT')
     expect(text).toContain('my-skill')
     expect(text).toContain('Does the skill thing.')
-
-    const agentsButton = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.trim().startsWith('Agents'),
-    ) as HTMLButtonElement
-    expect(agentsButton).toBeTruthy()
-    act(() => {
-      agentsButton.click()
-    })
-    await flush()
-    expect(container.textContent).toContain('my-agent')
-    expect(container.textContent).toContain('Reviews things carefully.')
-
-    // Back link returns to the list view.
-    const backLink = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('Plugins'),
-    ) as HTMLButtonElement
-    expect(backLink).toBeTruthy()
-    act(() => {
-      backLink.click()
-    })
-    await flush()
-    expect(container.querySelector('[data-testid="plugin-card"]')).toBeTruthy()
+    expect(text).toContain('my-agent')
+    expect(text).toContain('Reviews things carefully.')
+    expect(text).toContain('~/.claude/plugins/demo')
 
     expect(api.config.readJson).toHaveBeenCalled()
     act(() => root.unmount())
@@ -289,7 +252,7 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    // Plugin Home body (section index) is replaced by the full-page Skill Home.
+    // The detail is replaced by the full-page Skill Home.
     const text = container.textContent ?? ''
     expect(text).toContain('my-skill')
     expect(text).toContain('demo')
@@ -305,8 +268,8 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    // Back to Plugin Home's Skills section list — not the outer Plugins cards.
-    expect(container.querySelector('[data-testid="plugin-card"]')).toBeFalsy()
+    // Back to the plugin's detail, with the list still beside it.
+    expect(cards().length).toBe(2)
     const afterBackText = container.textContent ?? ''
     expect(afterBackText).toContain('my-skill')
     expect(afterBackText).toContain('Does the skill thing.')
@@ -315,7 +278,7 @@ describe('Plugins drill-in page', () => {
     act(() => root.unmount())
   })
 
-  it('handles a plugin with no manifest: shows directory name and just PATH, no crash', async () => {
+  it('handles a plugin with no manifest: shows directory name, path and a no-manifest note, no crash', async () => {
     installWindowApiMock()
     const { Plugins } = await import('../Plugins')
 
@@ -333,11 +296,11 @@ describe('Plugins drill-in page', () => {
     })
     await flush()
 
-    const text = container.textContent ?? ''
+    const text = detailText()
     expect(text).toContain('bare')
-    expect(text).toContain(NO_MANIFEST_PATH)
-    // No author/license/homepage keys since manifest is absent.
-    expect(text).not.toContain('AUTHOR')
+    expect(text).toContain('~/.claude/plugins/bare')
+    expect(text).toContain('This plugin has no manifest.')
+    expect(text).toContain('PLUGIN · MARKETPLACE-A · V0.0.1 · USER SCOPE')
 
     act(() => root.unmount())
   })
@@ -360,18 +323,10 @@ describe('Plugins drill-in page', () => {
     ;({ Plugins } = await import('../Plugins'))
   })
 
-  it('keeps the open drill-in mounted, with its selected section, across an external manifest change', async () => {
+  it('keeps the open detail mounted across an external manifest change', async () => {
     const api = installWindowApiMock()
     const root = createRoot(container)
     await openDemoDrillIn(root)
-
-    const agentsButton = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.trim().startsWith('Agents'),
-    ) as HTMLButtonElement
-    act(() => {
-      agentsButton.click()
-    })
-    await flush()
     expect(container.textContent).toContain('Reviews things carefully.')
 
     // Hold the re-read open so the refresh is observably in flight.
@@ -391,7 +346,7 @@ describe('Plugins drill-in page', () => {
     await flush()
     expect(container.textContent).not.toContain('scanning plugins')
     expect(container.textContent).toContain('Reviews things carefully.')
-    expect(container.querySelector('[data-testid="plugin-card"]')).toBeFalsy()
+    expect(cardFor('demo').getAttribute('aria-selected')).toBe('true')
     act(() => root.unmount())
   })
 
@@ -446,7 +401,7 @@ describe('Plugins drill-in page', () => {
 
     expect(cards().length).toBe(2)
     expect(cardFor('demo')).toBeTruthy()
-    expect(cardFor('bare').textContent).toContain('inspection failed')
+    expect(cardFor('bare').textContent).toContain('marketplace-a · inspection failed')
     act(() => root.unmount())
   })
 
@@ -484,23 +439,16 @@ describe('Plugins drill-in page', () => {
       })
     }
 
-    const openSection = async (label: string) => {
+    const openSection = async () => {
       const root = createRoot(container)
       await openDemoDrillIn(root)
-      const btn = Array.from(container.querySelectorAll('button')).find((b) =>
-        b.textContent?.trim().startsWith(label),
-      ) as HTMLButtonElement | undefined
-      if (btn && !btn.disabled) {
-        act(() => btn.click())
-        await flush()
-      }
       return root
     }
 
     it('lists servers declared inline in plugin.json mcpServers', async () => {
       const api = installWindowApiMock()
       overlay(api, { manifest: { ...DEMO_MANIFEST, mcpServers: { inline: { command: 'node-inline' } } } })
-      const root = await openSection('MCP server')
+      const root = await openSection()
       expect(container.textContent).toContain('inline')
       expect(container.textContent).toContain('node-inline')
       act(() => root.unmount())
@@ -513,7 +461,7 @@ describe('Plugins drill-in page', () => {
         dirs: { [`${PLUGIN_PATH}/custom-cmds`]: ['deploy.md', 'notes.txt'] },
         text: { [`${PLUGIN_PATH}/custom-cmds/deploy.md`]: '---\ndescription: Ships it.\n---\nbody\n' },
       })
-      const root = await openSection('Commands')
+      const root = await openSection()
       expect(container.textContent).toContain('deploy')
       expect(container.textContent).toContain('Ships it.')
       expect(container.textContent).not.toContain('notes')
@@ -525,7 +473,7 @@ describe('Plugins drill-in page', () => {
       const exists = api.config.exists.getMockImplementation()!
       api.config.exists.mockImplementation(async (p: string) => p === `${PLUGIN_PATH}/.mcp.json` || exists(p))
       overlay(api, { mcpJson: { alpha: { command: 'run-alpha' }, beta: { url: 'https://beta.example' } } })
-      const root = await openSection('MCP server')
+      const root = await openSection()
       expect(container.textContent).toContain('alpha')
       expect(container.textContent).toContain('run-alpha')
       expect(container.textContent).toContain('beta')
@@ -539,7 +487,7 @@ describe('Plugins drill-in page', () => {
         manifest: { ...DEMO_MANIFEST, commands: ['../escape'] },
         dirs: { [`${HOME}/.claude/plugins/escape`]: ['evil.md'] },
       })
-      const root = await openSection('Commands')
+      const root = await openSection()
       expect(container.textContent).not.toContain('evil')
       expect(api.config.listDir.mock.calls.some((c) => String(c[0]).includes('escape'))).toBe(false)
       expect(warn).toHaveBeenCalled()
@@ -551,7 +499,7 @@ describe('Plugins drill-in page', () => {
     it('does not crash on a wrong-typed hooks value in plugin.json', async () => {
       const api = installWindowApiMock()
       overlay(api, { manifest: { ...DEMO_MANIFEST, hooks: 42, commands: 7, mcpServers: 'x' } })
-      const root = await openSection('Agents')
+      const root = await openSection()
       expect(container.textContent).toContain('my-agent')
       expect(toastError).not.toHaveBeenCalled()
       act(() => root.unmount())
@@ -564,13 +512,6 @@ describe('Plugins drill-in page', () => {
 
     const openAgents = async (api: ReturnType<typeof installWindowApiMock>, root: ReturnType<typeof createRoot>) => {
       await openDemoDrillIn(root)
-      const agentsButton = Array.from(container.querySelectorAll('button')).find((b) =>
-        b.textContent?.trim().startsWith('Agents'),
-      ) as HTMLButtonElement
-      act(() => {
-        agentsButton.click()
-      })
-      await flush()
       api.config.listDir.mockClear()
     }
     const advance = async (ms: number) => {
@@ -586,7 +527,7 @@ describe('Plugins drill-in page', () => {
       vi.useRealTimers()
     })
 
-    it('reloads once after a change on agents/ and shows the new agent; rapid events coalesce; close unwatches', async () => {
+    it('reloads once after a change on agents/ and shows the new agent; rapid events coalesce; leaving unwatches', async () => {
       const api = installWindowApiMock()
       const root = createRoot(container)
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -613,11 +554,9 @@ describe('Plugins drill-in page', () => {
       expect(container.textContent).toContain('new-agent')
       expect(container.textContent).toContain('Freshly added.')
 
-      const backLink = Array.from(container.querySelectorAll('button')).find((b) =>
-        b.textContent?.includes('Plugins'),
-      ) as HTMLButtonElement
+      // Selecting another plugin unmounts this detail and drops its watch.
       api.config.unwatch.mockClear()
-      act(() => backLink.click())
+      act(() => openCard(cardFor('bare')))
       await flush()
       expect(api.config.unwatch).toHaveBeenCalledWith(expect.arrayContaining([`${PLUGIN_PATH}/agents`]), { depth: 0 })
       act(() => root.unmount())
@@ -673,7 +612,7 @@ describe('Plugins drill-in page', () => {
       name, path: `${dir}/${name}`, isDirectory: true, isFile: false, mtimeMs: 0, size: 0,
     })
 
-    it('shows the same skill count in the row and the list when only some folders hold a SKILL.md', async () => {
+    it('shows the same skill count in the row and the detail when only some folders hold a SKILL.md', async () => {
       const api = installWindowApiMock()
       const list = api.config.listDir.getMockImplementation()!
       const text = api.config.readText.getMockImplementation()!
@@ -698,13 +637,10 @@ describe('Plugins drill-in page', () => {
       expect(demo.textContent).not.toContain('3 skills')
       act(() => openCard(demo))
       await flush()
-      const skillsButton = Array.from(container.querySelectorAll('button')).find((b) =>
-        b.textContent?.trim().startsWith('Skills'),
-      ) as HTMLButtonElement
-      expect(skillsButton.textContent).toContain('2')
-      expect(container.textContent).toContain('alpha')
-      expect(container.textContent).toContain('beta')
-      expect(container.textContent).not.toContain('empty')
+      expect(detailText()).toContain('2 SKILLS')
+      expect(detailText()).toContain('alpha')
+      expect(detailText()).toContain('beta')
+      expect(detailText()).not.toContain('empty')
       act(() => root.unmount())
     })
 
@@ -733,8 +669,12 @@ describe('Plugins drill-in page', () => {
 
       const rows = cards()
       expect(rows).toHaveLength(2)
-      const scopeCells = rows.map((r) => r.querySelector('[data-testid="plugin-scope"]')?.textContent)
-      expect([...scopeCells].sort()).toEqual(['Project scope', 'User scope'])
+      const metas = rows.map((r) => r.textContent ?? '')
+      expect(metas.filter((m) => m.includes('project scope'))).toHaveLength(1)
+      const projectRow = rows.find((r) => r.textContent?.includes('project scope'))!
+      act(() => openCard(projectRow))
+      await flush()
+      expect(detailText()).toContain('PROJECT SCOPE')
       act(() => root.unmount())
     })
 

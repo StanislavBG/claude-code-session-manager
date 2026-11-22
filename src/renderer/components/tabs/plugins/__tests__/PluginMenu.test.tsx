@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { PluginCard, type PluginCardProps, type PluginJumpTab } from '../PluginCard'
+import { PluginMenu, type PluginMenuProps } from '../PluginMenu'
 import type { PluginRow } from '../../../../lib/pluginContents'
 import { useLayout } from '../../../../state/layout'
 import { REVEAL_HINT_PREFIX } from '../../../../lib/revealInFileExplorer'
@@ -12,8 +12,7 @@ import { flushAsync } from '../../../../testUtils/domFlush'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 /**
- * One installed plugin as a 3a card (DESIGN_SPEC §5): switch, name (opens the drill-in), contents
- * chips that jump to the tab or page holding them, the cache path, and a ⋯ menu whose Uninstall
+ * The ⋯ menu on a plugin's detail header: Reveal in File Explorer, Copy path, and an Uninstall that
  * confirms inline.
  */
 
@@ -75,90 +74,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function render(over: Partial<PluginCardProps> = {}) {
-  const props: PluginCardProps = {
+function render(over: Partial<PluginMenuProps> = {}) {
+  const props: PluginMenuProps = {
     row: makeRow(),
-    home: HOME,
     busy: false,
-    onToggle: vi.fn(),
-    onOpen: vi.fn(),
     onUninstall: vi.fn(),
-    onJump: vi.fn(),
     ...over,
   }
-  act(() => root.render(<PluginCard {...props} />))
+  act(() => root.render(<PluginMenu {...props} />))
   return props
 }
 
 const q = (sel: string) => container.querySelector(sel) as HTMLElement | null
-const chips = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid^="plugin-chip-"]'))
-const chip = (kind: string) => q(`[data-testid="plugin-chip-${kind}"]`) as HTMLButtonElement
 const menuItems = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menu"] button'))
 const menuItem = (label: string) => menuItems().find((b) => b.textContent?.trim() === label) as HTMLButtonElement
 const openMenu = () => act(() => (q('[data-testid="plugin-menu"]') as HTMLButtonElement).click())
 
-describe('PluginCard', () => {
-  it('lays the card out per DESIGN_SPEC §5 and shows switch, name, version, scope, description and the ~ cache path', () => {
-    render()
-    const card = q('[data-testid="plugin-card"]') as HTMLElement
-    expect(card.className.split(/\s+/)).toEqual(
-      expect.arrayContaining(['grid', 'grid-cols-[36px_minmax(0,1fr)_auto]', 'bg-bg-hi', 'border', 'border-line', 'rounded-[10px]']),
-    )
-    const sw = q('[data-testid="plugin-enabled-switch"]') as HTMLButtonElement
-    expect(sw.getAttribute('role')).toBe('switch')
-    expect(sw.getAttribute('aria-checked')).toBe('true')
-    expect(q('[data-testid="plugin-card-name"]')?.textContent).toBe('stripe')
-    expect(card.textContent).toContain('v0.11.17')
-    expect(q('[data-testid="plugin-scope"]')?.textContent).toBe('User scope')
-    expect(q('[data-testid="plugin-card-description"]')?.textContent).toBe('Stripe development plugin for Claude')
-    const path = q('[data-testid="plugin-card-path"]') as HTMLElement
-    expect(path.textContent).toBe('~/.claude/plugins/cache/claude-plugins-official/stripe/0.11.17')
-    expect(path.getAttribute('title')).toBe(PATH)
-  })
-
-  it('the switch calls onToggle and the name opens the drill-in', () => {
-    const props = render()
-    act(() => (q('[data-testid="plugin-enabled-switch"]') as HTMLButtonElement).click())
-    expect(props.onToggle).toHaveBeenCalledWith(props.row)
-    act(() => (q('[data-testid="plugin-card-name"]') as HTMLButtonElement).click())
-    expect(props.onOpen).toHaveBeenCalledWith(props.row)
-  })
-
-  it('the switch is disabled while busy', () => {
-    render({ busy: true })
-    expect((q('[data-testid="plugin-enabled-switch"]') as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('renders one chip per non-empty kind: skills/commands/MCP jump to a tab, agents/hooks open their page', () => {
-    const onJump = vi.fn<(tab: PluginJumpTab) => void>()
-    render({ onJump })
-    expect(chips().map((c) => c.textContent)).toEqual(['10 skills ›', '2 commands ›', 'MCP server ›', '1 agent ↗', '7 hooks ↗'])
-
-    act(() => chip('skills').click())
-    act(() => chip('commands').click())
-    act(() => chip('mcp').click())
-    expect(onJump.mock.calls).toEqual([['skills'], ['skills'], ['mcp']])
-
-    act(() => chip('agents').click())
-    act(() => chip('hooks').click())
-    expect(openPanel.mock.calls).toEqual([['agent-library'], ['settings', 'hooks']])
-  })
-
-  it('hides zero-count chips and pluralizes by count', () => {
-    render({ row: makeRow({ skills: 1, commands: 0, agents: 3, hooks: 1, mcpServers: 0, hasMcp: false }) })
-    expect(chips().map((c) => c.textContent)).toEqual(['1 skill ›', '3 agents ↗', '1 hook ↗'])
-  })
-
-  it('counts MCP servers when a plugin adds more than one', () => {
-    render({ row: makeRow({ skills: 0, commands: 0, agents: 0, hooks: 0, mcpServers: 3 }) })
-    expect(chips().map((c) => c.textContent)).toEqual(['3 MCP servers ›'])
-  })
-
-  it('shows no chips for an empty plugin', () => {
-    render({ row: makeRow({ skills: 0, commands: 0, agents: 0, hooks: 0, mcpServers: 0, hasMcp: false }) })
-    expect(chips()).toHaveLength(0)
-  })
-
+describe('PluginMenu', () => {
   it('the ⋯ menu sits on the dialog z rung and lists Reveal, Copy path, a divider and Uninstall <name>', () => {
     render()
     expect(q('[role="menu"]')).toBeNull()

@@ -14,9 +14,9 @@ const SkillReferenceGraph = lazy(() =>
 )
 
 /**
- * Full-page skill drill-in, one level deeper than PluginHomePage: header row
+ * Full-page skill drill-in, opened from a skill row in PluginDetail: header row
  * (back to the plugin + skill name), thin meta strip, and a full-height
- * list/graph body. Mirrors PluginHomePage's own header/meta/body shape so it
+ * list/graph body. Keeps its own header/meta/body shape so it
  * reads as a sibling page, not a different design system.
  */
 export function SkillHomePage({

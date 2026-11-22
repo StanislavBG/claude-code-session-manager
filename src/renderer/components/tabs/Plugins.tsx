@@ -1,25 +1,17 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
-import { ProvenanceBadge } from '../ui/ProvenanceBadge'
-import { Badge } from '../ui/Badge'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { DirEntry, SeedStatus } from '../../../preload/api'
-import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
+import { failedPluginRow, inspectPluginDir, summarizePluginContents, type PluginRow } from '../../lib/pluginContents'
 import {
-  failedPluginRow,
-  inspectPluginDir,
-  listOrEmpty,
-  readMdEntries,
-  readPluginManifest,
-  resolvePluginComponents,
-  type AgentEntry,
-  type McpEntry,
-  type PluginRow,
-} from '../../lib/pluginContents'
-import { SkillHomePage } from './plugins/PluginSkillBrowser'
-import { PluginCard, pluginProvInput, type PluginJumpTab } from './plugins/PluginCard'
-import { ExtensionsToolbar } from './extensions/ExtensionsToolbar'
+  ConfigFileCard,
+  ConfigListRow,
+  ConfigListToolbar,
+  ConfigWorkbench,
+} from '../claudeConfig/ConfigLayout'
+import { PluginDetail, type PluginJumpTab } from './plugins/PluginDetail'
+import { PluginSwitch } from './plugins/PluginSwitch'
 import { useLayout } from '../../state/layout'
 import { toast, useToast } from '../../state/toast'
 
@@ -37,30 +29,55 @@ interface InstalledPluginsManifest {
   plugins: Record<string, InstalledPluginEntry[]>
 }
 
-const FOOTNOTE = 'Plugin contents also appear, read-only, in Skills and MCP Servers — tagged with the plugin that added them.'
+const MANIFEST_LABEL = '~/.claude/plugins/installed_plugins.json'
+const ENABLED_NOTE = 'On/off is saved in settings.json › enabledPlugins'
 
-/** Without an `onJump` from the Extensions page, a chip opens that page on the tab through its tab hint. */
+/** Without an `onJump` from the hosting page, `Open in Skills →` opens Extensions on that tab through its tab hint. */
 const jumpViaLayout = (tab: PluginJumpTab) => useLayout.getState().openPanel('extensions', tab)
 
-/** A plugin matches the filter when its name, manifest name or description contains it (case-insensitive). */
+/** A plugin matches the filter when its name, manifest name, marketplace or description contains it (case-insensitive). */
 function matchesFilter(r: PluginRow, needle: string): boolean {
-  return [r.name, r.manifest?.name, r.manifest?.description].some((s) => typeof s === 'string' && s.toLowerCase().includes(needle))
+  return [r.name, r.manifest?.name, r.marketplace, r.manifest?.description].some(
+    (s) => typeof s === 'string' && s.toLowerCase().includes(needle),
+  )
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** `<marketplace> · 3 commands · 6 agents` — zero counts left out; a non-user install names its scope. */
+export function pluginRowMeta(r: PluginRow): string {
+  const c = summarizePluginContents(r)
+  const parts: string[] = []
+  if (r.marketplace) parts.push(r.marketplace)
+  if (r.error) parts.push('inspection failed')
+  else {
+    const kinds = [
+      c.commands > 0 ? plural(c.commands, 'command', 'commands') : null,
+      c.skills > 0 ? plural(c.skills, 'skill', 'skills') : null,
+      c.agents > 0 ? plural(c.agents, 'agent', 'agents') : null,
+      c.hooks > 0 ? plural(c.hooks, 'hook', 'hooks') : null,
+      c.mcpServers > 0 ? plural(c.mcpServers, 'MCP server', 'MCP servers') : null,
+    ].filter((k): k is string => k !== null)
+    parts.push(...(kinds.length > 0 ? kinds : ['empty']))
+  }
+  if (r.scope && r.scope !== 'user') parts.push(`${r.scope} scope`)
+  return parts.join(' · ')
 }
 
 interface PluginsProps {
-  /** Opens the catalog drawer (the `+ Add plugin` menu's `Browse catalog…`). */
+  /** Opens the catalog drawer (`+ Add`). */
   onAdd?: () => void
-  /** Switches the Extensions tab for a card's `›` chip. */
+  /** Switches the hosting page's tab for `Open in Skills →`. */
   onJump?: (tab: PluginJumpTab) => void
 }
 
 /**
  * Installed plugins come from `~/.claude/plugins/installed_plugins.json` (written by the `claude` CLI; installs
- * happen via the catalog drawer or `claude plugin install`). Each entry's `installPath` bundles skills,
- * subagents, and hooks. In the 3a design (DESIGN_SPEC §5) each plugin is a PluginCard — enable switch
- * (settings.json enabledPlugins), contents chips that jump to the tab holding them, and a ⋯ menu with
- * Uninstall — under the shared ExtensionsToolbar; the card's name opens the PluginHomePage drill-in.
- * Editing a plugin's components would duplicate the Skills/Subagents/Hooks tabs — out of scope.
+ * happen via the catalog drawer or `claude plugin install`). Laid out on the Claude config workbench
+ * (design-mocks/claude-config render 14): a PLUGINS file card, Filter + `+ Add`, one row per install with its
+ * enable switch (settings.json enabledPlugins), and a PluginDetail for the selected one — manifest description,
+ * what it adds, where it is installed, and a ⋯ menu with Uninstall. Editing a plugin's components would
+ * duplicate the Skills/Agents/Hooks tabs — out of scope.
  */
 function PluginsComponent({ onAdd, onJump }: PluginsProps) {
   const home = useHomeDir()
@@ -191,7 +208,7 @@ function PluginsComponent({ onAdd, onJump }: PluginsProps) {
     }
   }
 
-  // The card's ⋯ menu has already confirmed inline; no native confirm here.
+  // The detail's ⋯ menu has already confirmed inline; no native confirm here.
   const onUninstall = async (r: PluginRow) => {
     if (!r.marketplace) return
     setBusyKey(r.key ?? r.name)
@@ -206,6 +223,7 @@ function PluginsComponent({ onAdd, onJump }: PluginsProps) {
     }
   }
 
+
   const exhaustedSeeders = useMemo(() => {
     if (!seedStatus) return []
     return (Object.keys(seedStatus) as Array<keyof SeedStatus>).filter(
@@ -213,94 +231,98 @@ function PluginsComponent({ onAdd, onJump }: PluginsProps) {
     )
   }, [seedStatus, dismissedSeeders])
 
-  const seedBanner =
-    exhaustedSeeders.length > 0 ? (
-      <SeedStatusBanner
-        seeders={exhaustedSeeders}
-        seedStatus={seedStatus!}
-        onDismiss={(id) => setDismissedSeeders((prev) => new Set(prev).add(id))}
-        onOpenLibrary={() => onAdd?.()}
-      />
-    ) : null
-
-  const selectedRow = selected ? rows.find((r) => r.path === selected) ?? null : null
-
   const enabledCount = useMemo(() => rows.filter((r) => r.enabled === true).length, [rows])
   const needle = filter.trim().toLowerCase()
   const visibleRows = useMemo(() => (needle ? rows.filter((r) => matchesFilter(r, needle)) : rows), [rows, needle])
-  const addPrimary = useMemo(
-    () => ({
-      label: '+ Add plugin',
-      testId: 'plugins-add',
-      items: [{ label: 'Browse catalog…', testId: 'plugins-add-catalog', onSelect: () => onAdd?.() }],
-    }),
-    [onAdd],
-  )
-  const openRow = useCallback((r: PluginRow) => setSelected(r.path), [])
+  // The picked row while it is still installed and visible; otherwise the first visible row.
+  const selectedRow = visibleRows.find((r) => r.path === selected) ?? visibleRows[0] ?? null
+  const add = useCallback(() => onAdd?.(), [onAdd])
   const jump = onJump ?? jumpViaLayout
+  const isBusy = (r: PluginRow) => busyKey !== null && busyKey === (r.key ?? r.name)
 
-  // The drill-in replaces the whole tab body; it carries its own header and `← Plugins` back link.
-  if (selectedRow) {
-    return <PluginHomePage key={selectedRow.path} row={selectedRow} home={home} onBack={() => setSelected(null)} />
-  }
+  const list = (
+    <>
+      <ConfigFileCard eyebrow="PLUGINS" badge={`${enabledCount} on`} path={MANIFEST_LABEL} note={ENABLED_NOTE} />
+      <ConfigListToolbar filter={filter} onFilterChange={setFilter} placeholder="Filter" primaryLabel="+ Add" onPrimary={add} />
+      {loading && rows.length === 0 ? null : loadError && rows.length === 0 ? null : rows.length === 0 ? (
+        <div
+          data-testid="plugins-empty"
+          className="flex flex-col gap-1 px-3 py-3 border border-dashed border-rule rounded-xl text-[13px] text-fg-dim"
+        >
+          <span className="font-semibold text-fg">No plugins installed</span>
+          <span>
+            Use + Add, or run <code className="font-mono text-xs">claude plugin install</code>.
+          </span>
+        </div>
+      ) : visibleRows.length === 0 ? (
+        <p className="px-1 text-[13px] text-fg-dim">No plugins match “{filter.trim()}”.</p>
+      ) : (
+        <div role="listbox" aria-label="Installed plugins" className="flex flex-col gap-1">
+          {visibleRows.map((r) => (
+            <ConfigListRow
+              key={r.path}
+              title={r.name}
+              meta={pluginRowMeta(r)}
+              muted={r.enabled !== true}
+              selected={selectedRow?.path === r.path}
+              onSelect={() => setSelected(r.path)}
+              trailing={
+                <PluginSwitch
+                  name={r.name}
+                  enabled={r.enabled === true}
+                  disabled={!r.key || isBusy(r)}
+                  onToggle={() => void onToggle(r)}
+                />
+              }
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+
+  const detail = selectedRow ? (
+    <PluginDetail
+      key={selectedRow.path}
+      row={selectedRow}
+      home={home}
+      busy={isBusy(selectedRow)}
+      onToggle={(r) => void onToggle(r)}
+      onUninstall={(r) => void onUninstall(r)}
+      onJump={jump}
+    />
+  ) : loading ? (
+    <EmptyState title="scanning plugins…" />
+  ) : loadError ? null : rows.length === 0 ? (
+    <EmptyState title="No plugins installed" hint="+ Add browses the plugin catalog." />
+  ) : (
+    <EmptyState title="No plugin matches the filter" />
+  )
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <ExtensionsToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        placeholder="Filter plugins"
-        summary={`${rows.length} installed · ${enabledCount} enabled`}
-        primary={addPrimary}
-      />
-      {seedBanner}
+      {exhaustedSeeders.length > 0 ? (
+        <SeedStatusBanner
+          seeders={exhaustedSeeders}
+          seedStatus={seedStatus!}
+          onDismiss={(id) => setDismissedSeeders((prev) => new Set(prev).add(id))}
+          onOpenLibrary={add}
+        />
+      ) : null}
       {loadError ? (
         <div role="alert" className="shrink-0 px-3 py-2 border-b border-line bg-red-950/20 text-xs text-red-300">
           {loadError}
           {rows.length > 0 ? ' — showing the last known list' : null}
         </div>
       ) : null}
-      <div className="flex-1 min-h-0 overflow-auto">
-        {loading && rows.length === 0 ? (
-          <EmptyState title="scanning plugins…" />
-        ) : loadError && rows.length === 0 ? null : (
-          <div className="flex flex-col gap-3 p-4">
-            {rows.length === 0 ? (
-              <div
-                data-testid="plugins-empty"
-                className="flex flex-col gap-1 px-[18px] py-4 border border-dashed border-rule rounded-[10px] text-[13px] text-fg-dim"
-              >
-                <span className="font-semibold text-fg">No plugins installed</span>
-                <span>
-                  Use + Add plugin, or run <code className="font-mono text-xs">claude plugin install</code>.
-                </span>
-              </div>
-            ) : visibleRows.length === 0 ? (
-              <p className="px-1 text-[13px] text-fg-dim">No plugins match “{filter.trim()}”.</p>
-            ) : (
-              visibleRows.map((r) => (
-                <PluginCard
-                  key={r.path}
-                  row={r}
-                  home={home}
-                  busy={busyKey !== null && busyKey === (r.key ?? r.name)}
-                  onToggle={(row) => void onToggle(row)}
-                  onOpen={openRow}
-                  onUninstall={(row) => void onUninstall(row)}
-                  onJump={jump}
-                />
-              ))
-            )}
-            <p className="px-1 text-xs text-fg-faint">{FOOTNOTE}</p>
-          </div>
-        )}
-      </div>
+      <ConfigWorkbench list={list} detail={detail} />
     </div>
   )
 }
 
-// Memoized: Extensions passes stable onAdd/onJump callbacks; own data comes from store/IPC hooks inside.
+// Memoized: hosts pass stable onAdd/onJump callbacks; own data comes from store/IPC hooks inside.
 export const Plugins = memo(PluginsComponent)
+
 
 const SEEDER_LABELS: Record<keyof SeedStatus, string> = {
   'dev-plugin': 'session-manager-dev plugin',
@@ -356,419 +378,6 @@ function SeedStatusBanner({
   )
 }
 
-const DETAIL_RELOAD_DEBOUNCE_MS = 250
-/** Plugin component locations (relative to the install path) that feed the drill-in. */
-const COMPONENT_WATCH_SUFFIXES = [
-  'hooks/hooks.json',
-  '.mcp.json',
-  '.lsp.json',
-  'agents',
-  'skills',
-  'commands',
-  '.claude-plugin/plugin.json',
-] as const
-
-type SectionKey = 'skills' | 'agents' | 'commands' | 'mcp' | 'hooks' | 'monitors' | 'lsp' | 'files'
-
-/**
- * Full-page plugin drill-in ("mockup 2a"): one-line header, thin meta strip,
- * and a left section index beside a full-height component listing. Replaces
- * the Installed table in place (Plugins.tsx swaps it in on row click).
- */
-function PluginHomePage({
-  row,
-  home,
-  onBack,
-}: {
-  row: PluginRow
-  home: string | null
-  onBack: () => void
-}) {
-  const [skills, setSkills] = useState<PluginSkillEntry[]>([])
-  const [agents, setAgents] = useState<AgentEntry[]>([])
-  const [commands, setCommands] = useState<AgentEntry[]>([])
-  const [mcpServers, setMcpServers] = useState<McpEntry[]>([])
-  const [files, setFiles] = useState<string[]>([])
-  const [active, setActive] = useState<SectionKey>('skills')
-  const [browsingSkill, setBrowsingSkill] = useState<PluginSkillEntry | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  const [watchPaths, setWatchPaths] = useState<string[]>([])
-  const loadSeq = useRef(0)
-  const activePicked = useRef(false)
-
-  const loadDetail = useCallback(async () => {
-    if (!home) return
-    const seq = ++loadSeq.current
-    try {
-      const { manifest } = await readPluginManifest(row.path)
-      const [skillsDir, comps, binFiles] = await Promise.all([
-        resolveInstalledPluginSkillsDir(row.path),
-        resolvePluginComponents(row.path, manifest),
-        listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
-      ])
-      const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
-      const [agentEntries, commandEntries] = await Promise.all([
-        readMdEntries(comps.agentFiles),
-        readMdEntries(comps.commandFiles),
-      ])
-      const mcpEntries: McpEntry[] = comps.mcpServers
-      const existing = await Promise.all(
-        [...new Set([...COMPONENT_WATCH_SUFFIXES.map((x) => `${row.path}/${x}`), ...comps.sourcePaths])].map(
-          async (p) => ((await window.api.config.exists(p)) ? p : null),
-        ),
-      )
-
-      if (seq !== loadSeq.current) return
-      setSkills(skillEntries)
-      setAgents(agentEntries)
-      setCommands(commandEntries)
-      setMcpServers(mcpEntries)
-      setFiles(binFiles)
-      const nextWatch = existing.filter((p): p is string => p !== null)
-      setWatchPaths((prev) => (prev.join('\0') === nextWatch.join('\0') ? prev : nextWatch))
-      if (!activePicked.current) {
-        activePicked.current = true
-        setActive(
-          skillEntries.length > 0
-            ? 'skills'
-            : agentEntries.length > 0
-              ? 'agents'
-              : commandEntries.length > 0
-                ? 'commands'
-              : mcpEntries.length > 0
-                ? 'mcp'
-                : row.hooks > 0
-                  ? 'hooks'
-                  : row.monitors > 0
-                    ? 'monitors'
-                    : row.hasLsp
-                      ? 'lsp'
-                      : 'files',
-        )
-      }
-    } catch (err) {
-      if (seq !== loadSeq.current) return
-      toast.error(`Failed to load plugin contents: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      if (seq === loadSeq.current) setLoading(false)
-    }
-  }, [row.path, row.name, row.hooks, row.monitors, row.hasLsp, home])
-
-  useEffect(() => {
-    setLoading(true)
-    void loadDetail()
-    return () => {
-      loadSeq.current += 1
-    }
-  }, [loadDetail])
-
-  // Coalesce change bursts (250 ms), and never run two reloads at once: a
-  // change landing mid-reload queues exactly one trailing reload.
-  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const reloading = useRef(false)
-  const reloadAgain = useRef(false)
-  const runReload = useCallback(async () => {
-    if (reloading.current) {
-      reloadAgain.current = true
-      return
-    }
-    reloading.current = true
-    try {
-      do {
-        reloadAgain.current = false
-        await loadDetail()
-      } while (reloadAgain.current)
-    } finally {
-      reloading.current = false
-    }
-  }, [loadDetail])
-  const onComponentChange = useCallback(() => {
-    if (reloadTimer.current) clearTimeout(reloadTimer.current)
-    reloadTimer.current = setTimeout(() => {
-      reloadTimer.current = null
-      void runReload()
-    }, DETAIL_RELOAD_DEBOUNCE_MS)
-  }, [runReload])
-  useEffect(
-    () => () => {
-      if (reloadTimer.current) clearTimeout(reloadTimer.current)
-    },
-    [],
-  )
-  useConfigDirWatch(watchPaths, onComponentChange, { depth: 0 })
-
-  const sections: Array<{ key: SectionKey; label: string; count: number }> = [
-    { key: 'skills', label: 'Skills', count: skills.length },
-    { key: 'agents', label: 'Agents', count: agents.length },
-    { key: 'commands', label: 'Commands', count: commands.length },
-    { key: 'mcp', label: 'MCP server', count: mcpServers.length },
-    { key: 'hooks', label: 'Hooks', count: row.hooks },
-    { key: 'monitors', label: 'Monitors', count: row.monitors },
-    { key: 'lsp', label: 'LSP', count: row.hasLsp ? 1 : 0 },
-    { key: 'files', label: 'Bin', count: files.length },
-  ]
-
-  const author = row.manifest?.author
-    ? typeof row.manifest.author === 'string'
-      ? row.manifest.author
-      : row.manifest.author.name ?? null
-    : null
-  const openHomepage = async (url: string) => {
-    const result = await window.api.shell.open({ as: 'external', url })
-    if (!result.ok) toast.error(result.error ?? `Failed to open ${url}`)
-  }
-
-  if (browsingSkill) {
-    return (
-      <SkillHomePage
-        key={browsingSkill.id}
-        pluginName={row.manifest?.name ?? row.name}
-        skills={skills}
-        initialSelectedId={browsingSkill.id}
-        onBack={() => setBrowsingSkill(null)}
-      />
-    )
-  }
-
-  return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
-      {/* Header: one row, back link + name + version + description + badges. */}
-      <div className="shrink-0 h-11 flex items-baseline gap-3.5 px-3 border-b border-line bg-bg">
-        <button type="button" onClick={onBack} className="font-mono text-accent hover:underline shrink-0 text-xs">
-          ← Plugins
-        </button>
-        <span className="font-serif text-[22px] text-fg shrink-0 truncate max-w-[16rem]">
-          {row.manifest?.name ?? row.name}
-        </span>
-        {row.manifest?.version ? (
-          <span className="font-mono text-fg-faint text-xs shrink-0">v{row.manifest.version}</span>
-        ) : null}
-        {row.manifest?.description ? (
-          <span className="text-fg-dim text-xs min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-            {row.manifest.description}
-          </span>
-        ) : (
-          <span className="flex-1" />
-        )}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <ProvenanceBadge input={pluginProvInput(row)} />
-          {row.hasMcp ? <Badge tone="accent">MCP</Badge> : null}
-        </div>
-      </div>
-
-      {/* Meta strip: thin muted row, omits keys the manifest lacks. */}
-      {row.manifest ? (
-        <div className="shrink-0 h-[26px] flex items-center gap-[18px] px-3 bg-bg-elev border-b border-line text-[9px] font-mono uppercase tracking-wide overflow-hidden">
-          {author ? (
-            <span className="text-fg-dim truncate">
-              <span className="text-fg-faint">Author </span>
-              {author}
-            </span>
-          ) : null}
-          {row.manifest.license ? (
-            <span className="text-fg-dim truncate">
-              <span className="text-fg-faint">License </span>
-              {row.manifest.license}
-            </span>
-          ) : null}
-          {row.manifest.homepage ? (
-            <button
-              onClick={() => openHomepage(row.manifest!.homepage!)}
-              className="text-accent hover:underline truncate normal-case"
-              title={row.manifest.homepage}
-            >
-              <span className="text-fg-faint uppercase">Homepage </span>
-              {row.manifest.homepage}
-            </button>
-          ) : null}
-          <span className="ml-auto text-fg-faint truncate normal-case">{row.path}</span>
-        </div>
-      ) : (
-        <div className="shrink-0 h-[26px] flex items-center px-3 bg-bg-elev border-b border-line text-[9px] font-mono uppercase tracking-wide overflow-hidden">
-          <span className="ml-auto text-fg-faint truncate normal-case">{row.path}</span>
-        </div>
-      )}
-
-      {/* Body: 170px section index + full-height content column. */}
-      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: '170px 1fr' }}>
-        <div className="min-h-0 overflow-auto bg-bg-elev border-r border-line py-1">
-          {sections.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              disabled={s.count === 0}
-              onClick={() => setActive(s.key)}
-              className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
-                s.count === 0
-                  ? 'text-fg-faint opacity-50 cursor-default'
-                  : active === s.key
-                    ? 'bg-bg-hi text-fg'
-                    : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-              }`}
-            >
-              <span>{s.label}</span>
-              {s.count > 0 ? <span className="font-mono text-fg-faint">{s.count}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className="min-h-0 overflow-auto">
-          {loading ? (
-            <EmptyState title="scanning…" />
-          ) : (
-            <SectionContent
-              active={active}
-              row={row}
-              skills={skills}
-              agents={agents}
-              commands={commands}
-              mcpServers={mcpServers}
-              files={files}
-              onOpenSkill={setBrowsingSkill}
-            />
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function SectionContent({
-  active,
-  row,
-  skills,
-  agents,
-  commands,
-  mcpServers,
-  files,
-  onOpenSkill,
-}: {
-  active: SectionKey
-  row: PluginRow
-  skills: PluginSkillEntry[]
-  agents: AgentEntry[]
-  commands: AgentEntry[]
-  mcpServers: McpEntry[]
-  files: string[]
-  onOpenSkill: (skill: PluginSkillEntry) => void
-}) {
-  if (active === 'skills') {
-    if (skills.length === 0) return <EmptyState title="no components" />
-    return (
-      <div>
-        {skills.map((s, i) => (
-          <ContentRow
-            key={s.id}
-            n={i + 1}
-            name={s.name ?? s.id}
-            description={s.description}
-            onClick={() => onOpenSkill(s)}
-          />
-        ))}
-      </div>
-    )
-  }
-  if (active === 'agents') {
-    if (agents.length === 0) return <EmptyState title="no components" />
-    return (
-      <div>
-        {agents.map((a, i) => (
-          <ContentRow key={a.id} n={i + 1} name={a.name ?? a.id} description={a.description} />
-        ))}
-      </div>
-    )
-  }
-  if (active === 'commands') {
-    if (commands.length === 0) return <EmptyState title="no components" />
-    return (
-      <div>
-        {commands.map((c, i) => (
-          <ContentRow key={c.id} n={i + 1} name={c.name ?? c.id} description={c.description} />
-        ))}
-      </div>
-    )
-  }
-  if (active === 'mcp') {
-    if (mcpServers.length === 0) return <EmptyState title="no components" />
-    return (
-      <div>
-        {mcpServers.map((m, i) => (
-          <ContentRow key={m.id} n={i + 1} name={m.name} description={m.description} />
-        ))}
-      </div>
-    )
-  }
-  if (active === 'hooks') {
-    if (row.hooks === 0) return <EmptyState title="no components" />
-    return (
-      <div>
-        <ContentRow
-          n={1}
-          name={`${row.hooks} ${row.hooks === 1 ? 'hook' : 'hooks'} configured`}
-          description={`${row.path}/hooks/hooks.json`}
-        />
-      </div>
-    )
-  }
-  if (active === 'monitors') {
-    if (row.monitors === 0) return <EmptyState title="no components" />
-    return (
-      <div>
-        <ContentRow
-          n={1}
-          name={`${row.monitors} ${row.monitors === 1 ? 'monitor' : 'monitors'} configured`}
-          description={`${row.path}/monitors/monitors.json`}
-        />
-      </div>
-    )
-  }
-  if (active === 'lsp') {
-    if (!row.hasLsp) return <EmptyState title="no components" />
-    return (
-      <div>
-        <ContentRow n={1} name="LSP server enabled" description={`${row.path}/.lsp.json`} />
-      </div>
-    )
-  }
-  if (files.length === 0) return <EmptyState title="no components" />
-  return (
-    <div>
-      {files.map((f, i) => (
-        <ContentRow key={f} n={i + 1} name={f} description={null} />
-      ))}
-    </div>
-  )
-}
-
-function ContentRow({
-  n,
-  name,
-  description,
-  onClick,
-}: {
-  n: number
-  name: string
-  description: string | null
-  onClick?: () => void
-}) {
-  const Tag = onClick ? 'button' : 'div'
-  return (
-    <Tag
-      onClick={onClick}
-      className={`w-full flex items-baseline gap-2.5 py-[9px] px-3 border-b border-line text-left min-w-0 ${
-        onClick ? 'hover:bg-bg-hi cursor-pointer' : ''
-      }`}
-    >
-      <span className="font-serif text-fg-faint text-xs shrink-0 w-6 text-right">
-        {String(n).padStart(2, '0')}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="font-mono font-semibold text-accent truncate">{name}</div>
-        {description ? <div className="text-fg-dim text-xs truncate">{description}</div> : null}
-      </div>
-    </Tag>
-  )
-}
 
 const INSPECT_CONCURRENCY = 4
 

@@ -322,7 +322,8 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   built. Home still reports queue state, and those links route through `openPanel`, which asserts
   `navFace: 'project'` for any PROJECT-only NavKey (`isProjectOnlyNavKey`).
 - On disk, per project: PRD sources in `scheduler/epics/<epic-id>/prds/` (every new PRD mints or joins an Epic
-  via `epicMint.cjs`), queue + history shards in `session-manager-operations/scheduler/state/` (`queueStore.cjs`). A flat scheduler/prds/
+  via `epicMint.cjs`), queue + history shards in `session-manager-operations/scheduler/state/` (`queueStore.cjs`), and plan records (validator + ship/deploy) in the `plan-records/` runtime namespace (writer
+  `scheduler`; git-ignored, never committed, pruned after the Epic completes). A flat scheduler/prds/
   is auto-consolidated into `session-manager-operations/scheduler/prds-archived/` at the top of every `reconcile()` pass, so a file dropped there
   while the app runs is swept before it can become a queue row. Machine-level state is runtime only:
   `~/.claude/session-manager/scheduler-machine.json`, run logs under `~/.claude/session-manager/scheduled-plans/runs/`, and the session

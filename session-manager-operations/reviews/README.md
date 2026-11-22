@@ -29,6 +29,10 @@ just because its subject has since changed or been removed — see below.
   (`global-settings-inventory.md`), a frozen point-in-time global-settings inventory.
 - `2026-09-12-agent-layer-consumers.md` — moved from `../architecture/`
   (`agent-layer-consumers.md`), the external-consumer survey for the AGENT LAYER partition.
+- `validation/<epic-id>/` — **legacy plan-record history**: validator and ship/deploy records
+  committed before `../plan-records/` existed. Frozen; nothing new is written here. New records
+  live in [`../plan-records/`](../plan-records/README.md) — runtime state, git-ignored, never
+  committed, pruned `planRecordsDays` after their Epic completes.
 - `2026-08-07-heap-snapshot-validation.md` — the dated mechanism-validation lab report split
   out of `../architecture/heap-snapshot-diagnostics.md`.
 

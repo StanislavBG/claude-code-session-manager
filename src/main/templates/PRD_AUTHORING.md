@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v21 -->
+<!-- PRD_AUTHORING.md v22 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -74,6 +74,8 @@ Rule: every PRD needs these fields.
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 
 `planId` is written by the API, never by you. It groups PRDs into the plan (wave) they belong to: an `append` PRD, or one with an explicit `dependsOn`, inherits the `planId` of the PRD it attaches behind; a fresh PRD mints a new one. The Scheduler groups a plan card as a validate PRD (slug `validate-*`) plus everything it depends on, titled by that PRD's title.
+
+Records: a validate PRD's record, and the ship/deploy record of a release or deploy PRD, is written to `session-manager-operations/plan-records/<epic-id>/<slug>.md` — machine-local runtime state the scheduler copies to the main checkout and prunes `planRecordsDays` after the Epic completes. A record is never committed and never force-added (`git add -f`); don't list it in `# Files` or a commit step. Why: records used to be committed under `reviews/validation/`, and they piled up in every project with no cleanup.
 
 Artifact-only PRDs (`deliverable: artifact` + `artifactPaths: [...]`) — use this ONLY when every deliverable is a file the repo deliberately git-excludes, so "no commit" is the correct outcome, not a miss.
 1. Every artifact path is listed in `artifactPaths` and is relative, never `..`.

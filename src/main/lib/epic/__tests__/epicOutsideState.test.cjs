@@ -217,3 +217,16 @@ test('knownPrdSlugs: union of rows and check-ins, full slugs, sorted, no repeats
   expect(slugs).toEqual(['1-a', '2-b', '3-validate-plan']);
   expect(knownPrdSlugs()).toEqual([]);
 });
+
+test('refuted reason: taken from the event reason field when it is a string', () => {
+  const e = { ...verdict('a', 5, 'refuted', 'text reason'), reason: 'field reason — with a dash' };
+  const r = run({ jobs: [job('1-a', 'completed')], events: [e] });
+  expect(r.refuted).toEqual([{ slug: 'a', reason: 'field reason — with a dash' }]);
+});
+
+test('refuted reason: falls back to the text split when the event has no reason string', () => {
+  const r = run({ jobs: [job('1-a', 'completed')], events: [{ ...verdict('a', 5, 'refuted', 'from text'), reason: 42 }] });
+  expect(r.refuted).toEqual([{ slug: 'a', reason: 'from text' }]);
+  const r2 = run({ jobs: [job('1-a', 'completed')], events: [verdict('a', 5, 'refuted', 'only text')] });
+  expect(r2.refuted).toEqual([{ slug: 'a', reason: 'only text' }]);
+});

@@ -181,7 +181,7 @@ function computeEpicOutsideState(args) {
   const refuted = [];
   for (const [bare, { event }] of verdicts) {
     if (event.validation === 'verified') verified.push(bare);
-    else refuted.push({ slug: bare, reason: cut(refutedReason(event.text)) });
+    else refuted.push({ slug: bare, reason: cut(typeof event.reason === 'string' ? event.reason : refutedReason(event.text)) });
   }
   verified.sort();
   refuted.sort(bySlug);

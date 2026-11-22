@@ -104,6 +104,7 @@ test('an open Epic record joins session, events, jobs, needs-input and busy', as
     source: { producer: 'portfolio', fromCwd: '/elsewhere', fromEpicId: 'e-x', macroId: 'm-1' },
     createdAt: '2026-11-01T00:00:00.000Z',
     completedAt: null,
+    verdicts: [],
   });
 
   // chatBusy flips to working; needsInput from the exchanges log.
@@ -445,4 +446,84 @@ test('findEpicProject: an unsafe id is refused before projectRoots is consulted;
   expect(calls).toBe(0);
   expect(findEpicProject('e-1', { projectRoots: () => { throw new Error('boom'); } })).toBeNull();
   expect(findEpicProject('e-1', { projectRoots: () => [null, 'relative/path', 7] })).toBeNull();
+});
+
+// ── verdicts from plan-records/<epic>/*.verdicts.json ───────────────────────
+
+function verdictDir(cwd, epicId) {
+  return path.join(cwd, 'session-manager-operations', 'plan-records', epicId);
+}
+
+function writeVerdictFile(cwd, epicId, name, body) {
+  fs.mkdirSync(verdictDir(cwd, epicId), { recursive: true });
+  fs.writeFileSync(path.join(verdictDir(cwd, epicId), name), typeof body === 'string' ? body : JSON.stringify(body));
+}
+
+const crit = (met, missKind) => ({ id: '1', met, evidence: 'checked', ...(missKind ? { missKind } : {}) });
+const entry = (prd, verdict, reason = '') => ({
+  prd,
+  verdict,
+  reason,
+  criteria: [verdict === 'REFUTED' ? crit(false, 'missing-test') : crit(true)],
+  findings: [],
+});
+const file = (validator, at, verdicts) => ({ validator, runId: `run-${validator}`, at, schedulerVerdict: 'PASS', verdicts });
+
+test('verdicts: two validator files, the newer wins per PRD, sorted by prd', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-v', cwd)]);
+  writeVerdictFile(cwd, 'e-v', 'validate-a.verdicts.json', file('validate-a', '2026-11-02T00:00:00.000Z', [
+    entry('0002-zeta', 'REFUTED', 'no test'),
+    entry('0001-alpha', 'VERIFIED'),
+  ]));
+  writeVerdictFile(cwd, 'e-v', 'validate-b.verdicts.json', file('validate-b', '2026-11-03T00:00:00.000Z', [
+    entry('0003-zeta', 'VERIFIED'),
+  ]));
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-v' }));
+  expect(rec.verdicts).toEqual([
+    { prd: 'alpha', verdict: 'VERIFIED', reason: '', criteria: [crit(true)], findings: [], validator: 'validate-a', at: '2026-11-02T00:00:00.000Z' },
+    { prd: 'zeta', verdict: 'VERIFIED', reason: '', criteria: [crit(true)], findings: [], validator: 'validate-b', at: '2026-11-03T00:00:00.000Z' },
+  ]);
+});
+
+test('verdicts: an older file read later does not override the newer one', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-v', cwd)]);
+  writeVerdictFile(cwd, 'e-v', 'a.verdicts.json', file('a', '2026-11-05T00:00:00.000Z', [entry('1-x', 'REFUTED', 'bad')]));
+  writeVerdictFile(cwd, 'e-v', 'b.verdicts.json', file('b', '2026-11-01T00:00:00.000Z', [entry('1-x', 'VERIFIED')]));
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-v' }));
+  expect(rec.verdicts.map((v) => [v.prd, v.verdict, v.reason, v.validator])).toEqual([['x', 'REFUTED', 'bad', 'a']]);
+});
+
+test('verdicts: an invalid or unreadable file is skipped', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-v', cwd)]);
+  writeVerdictFile(cwd, 'e-v', 'good.verdicts.json', file('good', '2026-11-02T00:00:00.000Z', [entry('1-a', 'VERIFIED')]));
+  // REFUTED with an empty reason fails parseValidatorVerdict.
+  writeVerdictFile(cwd, 'e-v', 'bad.verdicts.json', file('bad', '2026-11-09T00:00:00.000Z', [entry('1-a', 'REFUTED', '')]));
+  writeVerdictFile(cwd, 'e-v', 'broken.verdicts.json', '{ not json');
+  writeVerdictFile(cwd, 'e-v', 'array.verdicts.json', '[]');
+  writeVerdictFile(cwd, 'e-v', 'notes.md', '## 1-a REFUTED');
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-v' }));
+  expect(rec.verdicts.map((v) => [v.prd, v.verdict, v.validator])).toEqual([['a', 'VERIFIED', 'good']]);
+});
+
+test('verdicts: a missing folder gives []; an Epic with no files gives []', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-none', cwd), session('e-empty', cwd)]);
+  fs.mkdirSync(verdictDir(cwd, 'e-empty'), { recursive: true });
+  expect((await getEpicRecord(cwd, opts(cwd, { id: 'e-none' }))).verdicts).toEqual([]);
+  expect((await getEpicRecord(cwd, opts(cwd, { id: 'e-empty' }))).verdicts).toEqual([]);
+});
+
+test('verdicts: a completed Epic from the archive reads them too', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  writeFile(cwd, 'e-done.json', {
+    archivedAt: '2026-11-04T00:00:00.000Z',
+    session: session('e-done', cwd, { status: 'completed', completedAt: '2026-11-04T00:00:00.000Z' }),
+    events: [],
+  });
+  writeVerdictFile(cwd, 'e-done', 'v.verdicts.json', file('v', '2026-11-03T00:00:00.000Z', [entry('7-done', 'VERIFIED')]));
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-done' }));
+  expect(rec.verdicts.map((v) => v.prd)).toEqual(['done']);
 });

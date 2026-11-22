@@ -26,6 +26,11 @@ const { gatherEpicJobReceipt } = require('./epicJobReceipt.cjs');
 const { summarizeTranscriptFile } = require('./transcriptUsage.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 const { isSafeEpicId } = require('../prd/prdLocations.cjs');
+const fs = require('node:fs');
+const { opsPath } = require('../opsOwnership.cjs');
+const { readJsonOrSync } = require('../util/atomicFs.cjs');
+const { parseValidatorVerdict } = require('../scheduler/validatorVerdictSchema.cjs');
+const { bareSlug } = require('../prd/depSlugResolve.cjs');
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -145,6 +150,63 @@ function splitGoal(goalText) {
   return { title: head || null, goal: tail || null };
 }
 
+const atMs = (v) => (typeof v === 'string' ? Date.parse(v) : NaN);
+
+/**
+ * Checked validator verdicts for an Epic, from the scheduler's
+ * plan-records/<epicId>/*.verdicts.json files ({ validator, runId, at,
+ * schedulerVerdict, verdicts }). Newest `at` per bare PRD slug wins (a file
+ * with no parseable `at` loses to any dated one; later file name wins a tie);
+ * sorted by prd. Unreadable or invalid files are skipped; a missing folder
+ * gives []. Read-only; never throws.
+ *
+ * @param {string} cwd
+ * @param {string} epicId
+ * @returns {{ prd: string, verdict: string, reason: string, criteria: any[], findings: any[], validator: string|null, at: string|null }[]}
+ */
+function readVerdictFiles(cwd, epicId) {
+  try {
+    if (!isSafeEpicId(epicId)) return [];
+    const dir = opsPath(cwd, 'plan-records', epicId);
+    let names;
+    try { names = fs.readdirSync(dir); } catch { return []; }
+    const best = new Map(); // bare -> { entry, t }
+    for (const name of names.filter((n) => n.endsWith('.verdicts.json')).sort()) {
+      const data = readJsonOrSync(path.join(dir, name), null);
+      if (!isObj(data)) continue;
+      const input = { schedulerVerdict: data.schedulerVerdict, verdicts: data.verdicts };
+      if (typeof data.failReason === 'string') input.failReason = data.failReason;
+      const parsed = parseValidatorVerdict(input);
+      if (!parsed.ok) continue;
+      const fileAt = str(data.at);
+      const t = atMs(fileAt);
+      for (const v of parsed.value.verdicts) {
+        const bare = bareSlug(v.prd);
+        const prev = best.get(bare);
+        const newer = !prev
+          || (Number.isFinite(t) && (!Number.isFinite(prev.t) || t >= prev.t))
+          || (!Number.isFinite(t) && !Number.isFinite(prev.t));
+        if (!newer) continue;
+        best.set(bare, {
+          t,
+          entry: {
+            prd: bare,
+            verdict: v.verdict,
+            reason: v.reason,
+            criteria: v.criteria,
+            findings: v.findings,
+            validator: str(data.validator),
+            at: fileAt,
+          },
+        });
+      }
+    }
+    return [...best.values()].map((b) => b.entry).sort((a, b) => (a.prd < b.prd ? -1 : a.prd > b.prd ? 1 : 0));
+  } catch {
+    return [];
+  }
+}
+
 function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
   const computed = computeEpicOutsideState({ session: { ...session, id: epicId }, events, jobs, needsInput, chatBusy });
   const source = isObj(session.source) ? session.source : {};
@@ -172,6 +234,7 @@ function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
     },
     createdAt: str(session.createdAt),
     completedAt: str(session.completedAt),
+    verdicts: readVerdictFiles(cwd, epicId),
   };
 }
 
@@ -357,4 +420,4 @@ async function listOpenEpicRecords(cwd, opts = {}) {
   }
 }
 
-module.exports = { listOpenEpicRecords, getEpicRecord, findEpicProject };
+module.exports = { readVerdictFiles, listOpenEpicRecords, getEpicRecord, findEpicProject };

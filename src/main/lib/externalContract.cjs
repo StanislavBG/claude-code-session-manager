@@ -69,7 +69,7 @@ const CONTRACT = deepFreeze({
   epicStates: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open'],
   epicRecordFields: [
     'epicId', 'cwd', 'title', 'goal', 'tag', 'agentType', 'status', 'state', 'blocked', 'prds',
-    'verified', 'refuted', 'unvalidated', 'externalRef', 'source', 'createdAt', 'completedAt',
+    'verified', 'refuted', 'unvalidated', 'externalRef', 'source', 'createdAt', 'completedAt', 'verdicts',
   ],
   receiptFields: ['jobs', 'chat'],
   epicStateChangedFields: ['at', 'kind', 'cwd', 'epicId', 'from', 'to', 'blockedKind', 'externalRef'],
@@ -124,7 +124,11 @@ function contractFingerprint() {
  */
 const CONTRACT_FINGERPRINTS = Object.freeze({
   // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields, then task_list + task_get), so its first fingerprint was replaced, not appended.
-  1: Object.freeze(['5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101']),
+  // Additive since: epicRecordFields + 'verdicts' (checked validator verdicts from plan-records/*.verdicts.json).
+  1: Object.freeze([
+    '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
+    '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',
+  ]),
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

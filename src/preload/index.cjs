@@ -448,6 +448,8 @@ contextBridge.exposeInMainWorld('api', {
     unwatch: (cwd) => ipcRenderer.invoke('project-pages:unwatch', { cwd }),
     rename: (cwd, kind, id, title) => ipcRenderer.invoke('project-pages:rename', { cwd, kind, id, title }),
     delete: (cwd, kind, id) => ipcRenderer.invoke('project-pages:delete', { cwd, kind, id }),
+    reviewList: (payload) => ipcRenderer.invoke('project-videos:review-list', payload),
+    reviewDecide: (payload) => ipcRenderer.invoke('project-videos:review-decide', payload),
     onChanged: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('project-pages:changed', listener);

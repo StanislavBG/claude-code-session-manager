@@ -1888,6 +1888,78 @@ export interface ProjectPagesGetResult {
   demoVideo: { path: string; mtimeMs: number } | null;
 }
 
+// ────────────────────────────────────────────── Project Pages: video review step
+// Mirrors src/main/lib/project-pages/videoReview.cjs (readReview / listReviews) and
+// src/main/lib/project-pages/videoReviewIpc.cjs (project-videos:review-list / review-decide).
+
+/** Lifecycle of one Video tool entry's human review step. */
+export type VideoReviewStatus = 'building' | 'waiting' | 'approved' | 'changes-requested';
+
+/** dispatch.json — the tool run that is building (or last built) the entry. */
+export interface VideoReviewDispatch {
+  entryId: string;
+  macroId: string;
+  /** The Epic that built the entry; approvals run there. */
+  epicId: string | null;
+  /** The queued PRD slug of the run. */
+  slug: string;
+  /** e.g. 'review' or 'final'. */
+  stage: string;
+  inputValues: Record<string, string>;
+  extraInstructions: string;
+  /** ISO timestamp. */
+  dispatchedAt: string;
+}
+
+/** material.json — what the tool saved for the human to look at. */
+export interface VideoReviewMaterial {
+  entryId: string;
+  /** Plain text — never render as HTML. */
+  text: string;
+  /** Review images; `path` is absolute — load via smfile://. */
+  images: { name: string; path: string }[];
+  /** ISO timestamp. */
+  savedAt: string;
+}
+
+/** decision.json — the human decision (written only by review-decide). */
+export interface VideoReviewDecision {
+  entryId: string;
+  decision: 'approve' | 'changes';
+  /** Present when decision === 'changes'. */
+  note?: string;
+  /** Local-time stamp ('2026-11-22 13:05 PST'), present when decision === 'approve'. */
+  at?: string;
+  /** ISO timestamp. */
+  decidedAt: string;
+}
+
+/** One entry with a review folder, as returned by `projectPages.reviewList`. */
+export interface VideoReview {
+  entryId: string;
+  dispatch: VideoReviewDispatch | null;
+  /** null only when the folder holds no records at all. */
+  status: VideoReviewStatus | null;
+  material: VideoReviewMaterial | null;
+  decision: VideoReviewDecision | null;
+}
+
+export interface VideoReviewListPayload {
+  cwd: string;
+}
+
+export interface VideoReviewDecidePayload {
+  cwd: string;
+  entryId: string;
+  decision: 'approve' | 'changes';
+  /** Required (non-blank, at most 2000 chars) when decision === 'changes'. */
+  note?: string;
+}
+
+export type VideoReviewDecideResult =
+  | { ok: true; slug: string; stage: string; decision: VideoReviewDecision }
+  | { ok: false; error: string };
+
 // ────────────────────────────────────────────── Project Pages: markdown link network
 // Mirrors the JSDoc typedefs of the same names in src/main/lib/mdNetworkScan.cjs.
 // Every path is repo-relative POSIX.
@@ -2989,6 +3061,10 @@ export interface SessionManagerAPI {
     rename: (cwd: string, kind: 'knowledge' | 'video', id: string, title: string) => Promise<{ ok: true; title: string }>;
     /** Remove exactly one library entry folder. Rejects on a bad id or missing entry. */
     delete: (cwd: string, kind: 'knowledge' | 'video', id: string) => Promise<{ ok: true }>;
+    /** List every Video tool entry with a review folder, newest record first. Read-only; rejects on an invalid cwd. */
+    reviewList: (payload: VideoReviewListPayload) => Promise<VideoReview[]>;
+    /** The human review decision for a 'waiting' entry: 'approve' queues the final run in the building Epic, 'changes' re-runs the review stage with the note. Desktop only (never via the phone relay); one in-flight decide per entry. */
+    reviewDecide: (payload: VideoReviewDecidePayload) => Promise<VideoReviewDecideResult>;
     /** Fires whenever a watched cwd's knowledge/videos library is added/changed/removed, carrying the freshly read library result. */
     onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
   };

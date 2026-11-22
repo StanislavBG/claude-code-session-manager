@@ -639,6 +639,7 @@ async function finalizeClosedDays({ budgetMs, dryRun = false, cursorPath } = {})
   const buckets = new Map();
   let partial = false;
   let walkedLast = lastDir;
+  const taskIds = await taskSessionIdSet();
 
   for (const projEntry of projectDirs) {
     if (deadline !== null && Date.now() >= deadline) {
@@ -657,6 +658,7 @@ async function finalizeClosedDays({ budgetMs, dryRun = false, cursorPath } = {})
     const stated = [];
     for (const fileEntry of files) {
       if (!fileEntry.name.endsWith('.jsonl')) continue;
+      if (isTaskTranscript(fileEntry.name, taskIds)) continue;
       const filePath = path.join(projectDir, fileEntry.name);
       try { stated.push({ filePath, stat: await fsp.stat(filePath) }); } catch { continue; }
     }
@@ -775,6 +777,7 @@ async function computeIntradayBuckets() {
   }
 
   const dirEntries = projectDirs.filter((e) => e.isDirectory());
+  const taskIds = await taskSessionIdSet();
 
   // Directory count (thousands) is far smaller than file count (tens of
   // thousands), so stat-ing every directory concurrently is cheap and tells
@@ -807,6 +810,7 @@ async function computeIntradayBuckets() {
       intradayDirRegistry.set(d.encodedCwd, { mtimeMs: d.mtimeMs, fileNames });
     }
     for (const name of fileNames) {
+      if (isTaskTranscript(name, taskIds)) continue;
       const filePath = path.join(d.dirPath, name);
       if (intradayNotToday.has(filePath)) continue;
       fileCandidates.push({ filePath, encodedCwd: d.encodedCwd });
@@ -876,6 +880,57 @@ async function refreshIntradayToday() {
   return { date: today, projectsUpdated: buckets.size, strategy: INTRADAY_STRATEGY };
 }
 
+// ── persisted Task transcripts ────────────────────────────────────────────────
+//
+// A Task that persists its claude session (runtime.persistSession / resume)
+// leaves a transcript under ~/.claude/projects/ AND an sm-task ledger row that
+// historyDashboard joins in. Counting the transcript too would double it, so
+// every rollup-feeding walk skips `<sessionId>.jsonl` for a persisted Task id.
+// The ledger's start line is written before the process spawns, so a mid-run
+// pass never meets a Task transcript whose id is not yet in this Set.
+
+let taskReadersOverride = null;
+
+/** Test-only: inject { listTaskProjects, listPersistedSessionIds }; null restores the real modules. */
+function setTaskSessionReadersForTests(readers) {
+  taskReadersOverride = readers || null;
+}
+
+/**
+ * Set of persisted Task session ids across every project in
+ * taskSwitch.listTaskProjects(). Never throws: a failed project listing yields
+ * an empty Set, a failed ledger read skips that project only.
+ */
+async function taskSessionIdSet(deps = taskReadersOverride) {
+  const ids = new Set();
+  let listTaskProjects;
+  let listPersistedSessionIds;
+  try {
+    listTaskProjects = deps?.listTaskProjects ?? require('./lib/tasks/taskSwitch.cjs').listTaskProjects;
+    listPersistedSessionIds = deps?.listPersistedSessionIds ?? require('./lib/tasks/taskLedger.cjs').listPersistedSessionIds;
+  } catch {
+    return ids;
+  }
+  let projects;
+  try { projects = await listTaskProjects(); } catch { return ids; }
+  if (!Array.isArray(projects)) return ids;
+  for (const p of projects) {
+    const cwd = typeof p === 'string' ? p : p?.cwd;
+    if (typeof cwd !== 'string' || !cwd) continue;
+    try {
+      const got = await listPersistedSessionIds(cwd);
+      if (got) for (const id of got) if (typeof id === 'string' && id) ids.add(id);
+    } catch {
+      // Unreadable ledger: this project's ids are skipped; the pass goes on.
+    }
+  }
+  return ids;
+}
+
+function isTaskTranscript(fileName, taskIds) {
+  return taskIds.size > 0 && taskIds.has(fileName.replace(/\.jsonl$/, ''));
+}
+
 // ── aggregate ─────────────────────────────────────────────────────────────────
 
 async function aggregate(req) {
@@ -919,6 +974,7 @@ async function aggregate(req) {
   } catch {
     return { rows: [], partial: false, truncated: false, scannedMs: Date.now() - t0, cacheSavingsUsd: 0, rollupDays: 0, liveDays: 0 };
   }
+  const taskIds = await taskSessionIdSet();
 
   outer:
   for (const projEntry of projectDirs) {
@@ -935,6 +991,7 @@ async function aggregate(req) {
 
     for (const fileEntry of files) {
       if (!fileEntry.name.endsWith('.jsonl')) continue;
+      if (isTaskTranscript(fileEntry.name, taskIds)) continue;
       const filePath = path.join(projectDir, fileEntry.name);
 
       let stat;
@@ -1088,6 +1145,8 @@ module.exports = {
   rollupMapToRows,
   mapWithConcurrency,
   resetIntradayRegistryForTests,
+  setTaskSessionReadersForTests,
+  taskSessionIdSet,
   INTRADAY_STAT_CONCURRENCY,
   // exported for historyDashboard.cjs (pure, no I/O at require-time; reused
   // rather than re-implemented so date-range math stays in one place)

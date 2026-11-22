@@ -924,3 +924,109 @@ test('run: on a real localAdminHttp server, a POST without the Bearer token is r
     else process.env.SM_ADMIN_TOKEN_PATH = prev;
   }
 });
+
+// --- POST /admin/macros/run with externalRef ---------------------------------
+
+const { recordExternalRef, lookupExternalRef } = require('../lib/epic/externalRefIndex.cjs');
+
+test('run+externalRef: an invalid value is a 400 and launches nothing', async () => {
+  const s = await setupRun();
+  for (const externalRef of [5, '', '   ', 'has space', 'x'.repeat(201), { a: 1 }, ['a']]) {
+    const r = await s.run({ externalRef });
+    expect(r.status, JSON.stringify(externalRef).slice(0, 40)).toBe(400);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.error).toMatch(/externalRef/);
+  }
+  expect(s.launches).toEqual([]);
+  expect(runEvents(s.macro.id)).toEqual([]);
+});
+
+test('run+externalRef: first call launches with the ref, records it, audits it, returns it', async () => {
+  const s = await setupRun();
+  const r = await s.run({ externalRef: '  2026-11-21  ' });
+  expect(r.status).toBe(200);
+  expect(r.body).toEqual({ ok: true, epicId: r.body.epicId, alreadyRunning: false, externalRef: '2026-11-21' });
+  expect(s.launches).toHaveLength(1);
+  expect(s.launches[0]).toMatchObject({ cwd: s.realCwd, macroId: s.macro.id, via: 'script', externalRef: '2026-11-21' });
+  const entry = await lookupExternalRef({ cwd: s.realCwd, externalRef: '2026-11-21' });
+  expect(entry).toMatchObject({ epicId: r.body.epicId, producer: 'new-epic-ui', macroId: s.macro.id });
+  const ev = runEvents(s.macro.id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({ epicId: r.body.epicId, alreadyRunning: false, externalRef: '2026-11-21' });
+});
+
+test('run+externalRef: a repeat call returns the existing Epic, launches nothing, no audit row', async () => {
+  let busyId = null;
+  const s = await setupRun({ busy: (id) => id === busyId });
+  const first = await s.run({ externalRef: 'day-1' });
+  expect(first.status).toBe(200);
+  const second = await s.run({ externalRef: 'day-1' });
+  expect(second.status).toBe(200);
+  expect(second.body).toEqual({ ok: true, epicId: first.body.epicId, existing: true, alreadyRunning: false, externalRef: 'day-1' });
+  busyId = first.body.epicId;
+  const third = await s.run({ externalRef: 'day-1' });
+  expect(third.body).toEqual({ ok: true, epicId: first.body.epicId, existing: true, alreadyRunning: true, externalRef: 'day-1' });
+  // Still found after the Epic completed and left the active index.
+  writeIndex(s.realCwd, {});
+  const fourth = await s.run({ externalRef: 'day-1' });
+  expect(fourth.body.epicId).toBe(first.body.epicId);
+  expect(fourth.body.existing).toBe(true);
+  expect(s.launches).toHaveLength(1);
+  expect(runEvents(s.macro.id)).toHaveLength(1);
+});
+
+test('run+externalRef: an index entry from another producer or macro is a 409', async () => {
+  const s = await setupRun();
+  await recordExternalRef({ cwd: s.realCwd, externalRef: 'from-feedback', epicId: 'epic-fb', producer: 'cross-project-feedback' });
+  const a = await s.run({ externalRef: 'from-feedback' });
+  expect(a.status).toBe(409);
+  expect(a.body.ok).toBe(false);
+  await recordExternalRef({ cwd: s.realCwd, externalRef: 'other-macro', epicId: 'epic-om', producer: 'new-epic-ui', macroId: 'some-other-macro' });
+  const b = await s.run({ externalRef: 'other-macro' });
+  expect(b.status).toBe(409);
+  expect(s.launches).toEqual([]);
+  expect(runEvents(s.macro.id)).toEqual([]);
+});
+
+test('run+externalRef: a new ref starts a session even while another Epic of the macro is busy', async () => {
+  const s = await setupRun({ busy: (id) => id === 'epic-busy' });
+  writeIndex(s.realCwd, {
+    'epic-busy': { id: 'epic-busy', status: 'active', source: { producer: 'new-epic-ui', macroId: s.macro.id } },
+  });
+  const r = await s.run({ externalRef: 'day-2' });
+  expect(r.status).toBe(200);
+  expect(r.body.alreadyRunning).toBe(false);
+  expect(r.body.epicId).not.toBe('epic-busy');
+  expect(s.launches).toHaveLength(1);
+  // A ref-less call still gets the macro-wide shortcut.
+  const plain = await s.run({});
+  expect(plain.body).toEqual({ ok: true, epicId: 'epic-busy', alreadyRunning: true });
+  // And a just-started ref run does not block a different ref.
+  const other = await s.run({ externalRef: 'day-3' });
+  expect(other.body.alreadyRunning).toBe(false);
+  expect(s.launches).toHaveLength(2);
+});
+
+test('run+externalRef: concurrent calls with the same ref share one launch', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = await setupRun({ result: async () => { await gate; return { ok: true, epicId: 'epic-ref-conc' }; } });
+  const p1 = s.run({ externalRef: 'same' });
+  const p2 = s.run({ externalRef: 'same' });
+  await new Promise((r) => setTimeout(r, 20));
+  release();
+  const [a, b] = await Promise.all([p1, p2]);
+  expect(s.launches).toHaveLength(1);
+  expect(a.body.epicId).toBe('epic-ref-conc');
+  expect(b.body.epicId).toBe('epic-ref-conc');
+  expect([a.body.existing === true, b.body.existing === true].sort()).toEqual([false, true]);
+  expect(runEvents(s.macro.id)).toHaveLength(1);
+});
+
+test('run+externalRef: a launch failure is a 503, records nothing and writes no audit row', async () => {
+  const s = await setupRun({ result: { ok: false, reason: 'no-window', error: 'Session Manager window is not open' } });
+  const r = await s.run({ externalRef: 'fail-1' });
+  expect(r.status).toBe(503);
+  expect(await lookupExternalRef({ cwd: s.realCwd, externalRef: 'fail-1' })).toBeNull();
+  expect(runEvents(s.macro.id)).toEqual([]);
+});

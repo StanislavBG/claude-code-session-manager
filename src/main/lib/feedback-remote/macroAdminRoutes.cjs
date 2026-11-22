@@ -33,8 +33,8 @@
  * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
  * matching the IPC handlers in index.cjs.
  *
- * POST /admin/macros/run {cwd, id, inputs?, effort?}
- *                                -> { ok, epicId, alreadyRunning }
+ * POST /admin/macros/run {cwd, id, inputs?, effort?, externalRef?}
+ *                                -> { ok, epicId, alreadyRunning, externalRef? }
  * Starts a saved macro from a script (e.g. a systemd timer) through the
  * renderer's press path (deps.startExternalNewSession: same persona, tag, AIM
  * prompt and source.macroId, so autoStartTargets apply). Refused (400, no
@@ -43,6 +43,10 @@
  * = the macro's defaults overlaid by `inputs`. While that macro's Epic is
  * still running in the cwd it returns that Epic (alreadyRunning:true) instead
  * of a second start. A launch failure is a 503 with no audit event.
+ * externalRef (normalizeExternalRef; invalid = 400), e.g. a date, starts the
+ * macro at most once per ref: it rides in the payload, is recorded in
+ * externalRefIndex and audited; a repeat with the same cwd + ref answers
+ * { existing: true } with that Epic (409 if another producer/macro owns the ref).
  *   curl -s -X POST "http://127.0.0.1:$(jq -r .port ~/.claude/session-manager/admin-api.json)/admin/macros/run" -H "Authorization: Bearer $(jq -r .token ~/.claude/session-manager/admin-api.json)" -H 'Content-Type: application/json' -d '{"cwd":"/abs/project","id":"<macro-id>"}'
  */
 'use strict';
@@ -54,6 +58,8 @@ const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { findHumanPromptContaining } = require('./humanPromptLedger.cjs');
 const { readActiveIndex } = require('../epic/epicMint.cjs');
 const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
+const { normalizeExternalRef } = require('../epic/externalRef.cjs');
+const { findEpicByExternalRef, recordExternalRef, withExternalRefLock } = require('../epic/externalRefIndex.cjs');
 
 const EVERY_PROJECT_RE = /(^|[^a-z0-9])(every|all|each)\s+(of\s+)?(my\s+|the\s+|our\s+)?projects?($|[^a-z0-9])/;
 
@@ -344,11 +350,18 @@ function runHandler(deps, libOpts) {
     if (effort !== undefined && !PRD_EFFORT_LEVELS.includes(effort)) {
       return bad(`effort must be one of: ${PRD_EFFORT_LEVELS.join(', ')}`);
     }
+    const ref = normalizeExternalRef(body.externalRef);
+    if (!ref.ok) return bad(ref.error);
     const rendered = macroLibrary.renderMacroPrompt(macro.prompt, macro.inputs, {
       ...macroLibrary.defaultMacroValues(macro.inputs),
       ...(body.inputs || {}),
     });
     if (!rendered.ok) return bad(rendered.error);
+
+    if (ref.value !== undefined) {
+      await runWithExternalRef({ deps, res, cwd, macro, prompt: rendered.prompt, effort, externalRef: ref.value });
+      return;
+    }
 
     const key = `${cwd}\u0000${id}`;
     const pending = inProgressRuns.get(key);
@@ -408,6 +421,104 @@ function runHandler(deps, libOpts) {
     });
     sendJson(res, 200, { ok: true, epicId: result.epicId, alreadyRunning: false });
   };
+}
+
+/** 503 error text for a failed startExternalNewSession result. */
+function launchFailureError(result) {
+  return result?.reason === 'timeout'
+    ? 'timed out waiting for the window; the session may still start, check the Sessions queue before retrying'
+    : result?.error || 'launch failed';
+}
+
+/**
+ * The externalRef branch of /admin/macros/run. The lookup, launch and record
+ * run inside withExternalRefLock, so concurrent calls with the same
+ * (cwd, externalRef) share one launch. The macro-wide findRunningEpic shortcut
+ * is skipped: a new ref is a new run even while another run is busy.
+ */
+async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, externalRef }) {
+  const isTabBusy = deps.isTabBusy || (() => false);
+  const existingAnswer = (epicId) => sendJson(res, 200, {
+    ok: true, epicId, existing: true, alreadyRunning: !!isTabBusy(epicId), externalRef,
+  });
+  await withExternalRefLock({ cwd, externalRef }, async () => {
+    const key = `${cwd}\u0000${macro.id}\u0000${externalRef}`;
+    const pending = inProgressRuns.get(key);
+    if (pending) {
+      const first = await pending;
+      if (first.ok) existingAnswer(first.epicId);
+      else sendJson(res, 503, { ok: false, error: first.error || 'launch failed' });
+      return;
+    }
+    const found = await findEpicByExternalRef({ cwd, externalRef });
+    if (found) {
+      if (found.producer !== 'new-epic-ui' || found.macroId !== macro.id) {
+        sendJson(res, 409, {
+          ok: false,
+          error: `externalRef ${externalRef} already names Epic ${found.epicId}, started by ${found.producer || 'an unknown producer'}${found.macroId ? ` for macro ${found.macroId}` : ''}, not by macro ${macro.id}`,
+          epicId: found.epicId,
+          externalRef,
+        });
+        return;
+      }
+      existingAnswer(found.epicId);
+      return;
+    }
+    const recent = recentRuns.get(key);
+    if (recent && Date.now() - recent.at < RECENT_START_MS) {
+      existingAnswer(recent.epicId);
+      return;
+    } else if (recent) {
+      recentRuns.delete(key);
+    }
+
+    const payload = {
+      cwd,
+      agentName: macro.agentName,
+      tag: macro.tag,
+      title: macro.label,
+      prompt,
+      macroId: macro.id,
+      via: 'script',
+      externalRef,
+      ...(effort !== undefined ? { effort } : {}),
+    };
+    const launch = (async () => {
+      try {
+        return await deps.startExternalNewSession(payload);
+      } catch (e) {
+        return { ok: false, reason: 'launch-failed', error: e?.message ?? 'launch failed' };
+      }
+    })();
+    inProgressRuns.set(key, launch);
+    let result;
+    try {
+      result = await launch;
+      if (result && result.ok) recentRuns.set(key, { epicId: result.epicId, at: Date.now() });
+    } finally {
+      inProgressRuns.delete(key);
+    }
+    if (!result || !result.ok) {
+      sendJson(res, 503, { ok: false, error: launchFailureError(result) });
+      return;
+    }
+    try {
+      await recordExternalRef({ cwd, externalRef, epicId: result.epicId, producer: 'new-epic-ui', macroId: macro.id });
+    } catch (e) {
+      // The session already started; the open-session scan in
+      // findEpicByExternalRef (source.externalRef) still finds it next time.
+      console.warn('[macroAdminRoutes] recordExternalRef failed:', e?.message ?? e);
+    }
+    appendAuditEvent('admin_macro_run', {
+      route: '/admin/macros/run',
+      cwd,
+      macroId: macro.id,
+      epicId: result.epicId,
+      alreadyRunning: false,
+      externalRef,
+    });
+    sendJson(res, 200, { ok: true, epicId: result.epicId, alreadyRunning: false, externalRef });
+  });
 }
 
 /**

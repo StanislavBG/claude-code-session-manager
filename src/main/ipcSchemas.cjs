@@ -585,6 +585,21 @@ const adminListPrdsQuery = z.object({
   fields: z.enum(['compact', 'full']).optional().default('compact'),
 });
 
+// GET /admin/events (lib/telemetry/eventsAdminRoutes.cjs) — cursor read over the
+// audit log. `after` is checked by readEventsAfter itself (the route maps its
+// rejection to the same 400); `kinds` is a comma-separated list, each entry one
+// of auditEvents.cjs's OUTSIDE_EVENT_KINDS; `limit` 1..500 (default applied by
+// readEventsAfter when absent).
+const OUTSIDE_EVENT_KIND_ENUM = z.enum(/** @type {[string, ...string[]]} */ ([...require('./lib/telemetry/auditEvents.cjs').OUTSIDE_EVENT_KINDS]));
+const adminListEventsQuery = z.object({
+  after: z.string().max(200).optional(),
+  kinds: z.string().min(1).max(1000)
+    .transform((v) => v.split(',').map((k) => k.trim()))
+    .pipe(z.array(OUTSIDE_EVENT_KIND_ENUM).min(1))
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
 const adminGetPrdQuery = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
   cwd: z.string().min(1).max(4096).optional(),
@@ -1597,6 +1612,7 @@ module.exports = {
     scheduleArchivePrd,
     scheduleRetagPrd,
     adminListPrdsQuery,
+    adminListEventsQuery,
     adminGetPrdQuery,
     adminUpdatePrd,
     adminCancelJob,

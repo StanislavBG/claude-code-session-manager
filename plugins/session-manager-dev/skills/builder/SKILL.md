@@ -37,13 +37,19 @@ If a meaningful share of commits has no `type:` prefix at all (a bare "wip", "up
 guess: list the unclassifiable commits and ask which bump to apply. A wrong semver bump is hard
 to walk back once published.
 
-## 3. Gate
+## 3. Gate and publish preflight
 
 Run each name in `build-target.json`'s `gates` as `timeout 300 npm run <gate>`, in order,
 against `HEAD`, with no `--skip` flags. With no `gates` entry, run the pre-commit checks the
 project's `CLAUDE.md` or README requires; with none documented, say so in the report. Any
 failure → stop: report the command and its real output, and that no bump, tag or publish
 happened.
+
+**Publish preflight.** After every gate passed, run once
+`node <skill base dir>/scripts/publish-preflight.cjs --cwd <repo root>`; it picks the CI or
+local path itself. Exit 1 / a `NPM_PUBLISH_PREFLIGHT: BLOCKED — ...` line → stop before step 4
+(no `npm version`, commit, tag, push or publish) and report the line verbatim; don't retry
+`npm login`, `npm publish` or the preflight. An OK line, any `WARN:` included, goes in the report.
 
 ## 4. Publish from an isolated worktree
 
@@ -93,9 +99,10 @@ have no `release.yml`) always use steps 5-11:
    A cold `test:unit` in a fresh publish worktree can time out under load; rerun the failed files, then the full suite, before calling the gate red — never publish on the partial rerun.
 7. `npm publish` from inside the worktree, so `prepublishOnly` builds there too.
    A 403 saying two-factor authentication or a bypass-2FA granular token is required is not a
-   login problem (`npm whoami` can succeed). Don't retry `npm login` or `npm publish`: run
-   `npm profile get` and `npm token list`, stop, and report the exact 403 and both results so a
-   human can supply an OTP or a token (the CLI cannot mint a granular token). An E409 "staged"
+   login problem (`npm whoami` can succeed). The step 3 preflight normally catches a token
+   without 'Bypass two-factor authentication' before the bump. Don't retry `npm login` or
+   `npm publish`: run `npm token list --json` (its `bypass_2fa` field; `npm profile get` errors
+   with granular tokens), stop, and report the exact 403 and that result so a human can supply an OTP or a token (the CLI cannot mint a granular token). An E409 "staged"
    response means the publish waits for a human to approve it on npmjs.com — report that.
 8. Back in the main repo: `git push origin main` and `git push origin v<version>`.
 9. `git worktree remove "$HOME/.cache/sm-publish/v<version>" --force`
@@ -130,6 +137,7 @@ undoes it.
 
 One plain-text report, whether the pipeline finished or stopped:
 
+- **Preflight**: the NPM_PUBLISH_PREFLIGHT line, verbatim.
 - **Version** previous → new, and the bump kind.
 - **Commits covered**, grouped by the rule that classified each.
 - **Gates** and their results.

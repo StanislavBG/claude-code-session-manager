@@ -70,9 +70,12 @@ sequence straight through without pausing for confirmation at each step — the 
    requirement, and the CLI cannot create a granular access token (`npm token create` only
    makes classic tokens; granular/bypass-2FA tokens are npmjs.com-web-UI-only, confirmed via
    `npm help token`, 2026-08-22).
-3. **The bypass-2FA token is a bridge, not durable:** npm expects it to lose direct publishing
-   around January 2027 (only a staged publish a human approves with 2FA), leaving Trusted
-   Publishing or staged publishing — https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/
+3. **The bypass-2FA granular token is the current publish path** (owner decision 2026-11-21).
+   npm plans to end its direct publishing around January 2027 —
+   https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/ —
+   after which each release becomes a staged publish the owner approves with 2FA on npmjs.com,
+   unless Trusted Publishing is restored from commit 9f7b2627. Report a staged (E409) result as
+   waiting for owner approval, not as a failure to retry.
 4. **There is no CI publish path** (owner decision 2026-11-21; the Trusted Publishing job was
    removed — restore it from commit 9f7b2627 if wanted). Releases publish locally via skill
    step 4. The token in `~/.npmrc` is a granular npm token with **"Bypass two-factor

@@ -4,7 +4,7 @@ Deliberately **NOT-owned** OPERATIONS STATE namespace: no `OWNERS` entry in `src
 authored by skills and agents with plain file operations. Root `CLAUDE.md` holds the one-line laws; the
 rationale lives here.
 
-Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subsystem detail) · **RUNBOOK**
+Classes: **LAW-RATIONALE** (the why behind a root `CLAUDE.md` law) · **REFERENCE** (subsystem detail) · **RUNBOOK**
 (procedure to follow). `runtime-read` = the app reads the file live, so moving or renaming it breaks a feature.
 
 | doc | covers (one phrase) | class |

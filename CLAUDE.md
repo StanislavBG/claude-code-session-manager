@@ -4,26 +4,13 @@ Electron desktop app — local cockpit for Claude Code CLI. Terminal + config/op
 Per-project state: `<cwd>/session-manager-operations/`.
 
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
-before changing anything in that area.** Reference docs:
+before changing anything in that area.** Every reference doc is in the [architecture index](session-manager-operations/architecture/README.md).
 
 > **SIZE BUDGET — 12,000 chars**, checked with `wc -c CLAUDE.md` before every commit. This file is
 > read on every turn of every session. A new law is ONE line here; its rationale goes in the linked
 > doc. Over budget means **split, don't append**. Correcting a wrong line does not license a longer
 > one — rewrite at the same length, move the "why" to the doc. (Hit 65,768 chars by 2026-08-24;
 > 0 of 359 PRDs pruned it. This paragraph is the only reaper.)
-
-| Doc | Covers |
-| --- | --- |
-| [`domain-model.md`](session-manager-operations/architecture/domain-model.md) | TAB / EPIC / PRD, Agent+Tag, AIM prompt, worktree isolation, single-writer law |
-| [`code-map.md`](session-manager-operations/architecture/code-map.md) | Load-bearing main + renderer files, renderer data flow |
-| [`conventions.md`](session-manager-operations/architecture/conventions.md) | Conventions + the full **Avoid** list (every entry is a real incident) |
-| [`bilko-run-marketing.md`](session-manager-operations/architecture/bilko-run-marketing.md) | Product page, Stripe wiring, npm listing |
-| [`build-target.md`](session-manager-operations/architecture/build-target.md) | Build/publish target |
-| [`ops-maintenance-protocol.md`](session-manager-operations/architecture/ops-maintenance-protocol.md) | Ops-folder drift sweeps |
-| [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions, path-by-path |
-| [`host-boundary.md`](session-manager-operations/architecture/host-boundary.md) | Host-vs-ours boundary, routing rule |
-| [`README.md`](session-manager-operations/architecture/README.md) | Index of this folder |
-| [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) | Dispatch, needs_review ladder, reap gate, diagnosis table |
 
 ## Scoped MDs — auto-load when you edit there; read first
 
@@ -131,6 +118,7 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
 - **`--model` must be pinned explicitly** on every `claude -p` / `--print` call site — unpinned drift costs.
 - **The owner's real name and personal email never enter a tracked file or commit** — [why](session-manager-operations/architecture/identity-boundary.md).
+- **Every doc follows the five doc kinds** — one topic, one topic doc, others link to it — [kinds](plugins/session-manager-dev/skills/maintaining-md-network/placement.md#doc-kinds).
 
 ## Avoid
 

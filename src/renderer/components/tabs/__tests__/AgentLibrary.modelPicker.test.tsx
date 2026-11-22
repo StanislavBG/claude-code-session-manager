@@ -71,8 +71,14 @@ async function mount(model: string | null, catalog: unknown, effort: string | nu
   return container
 }
 
-const btn = (el: HTMLElement, text: string) =>
-  Array.from(el.querySelectorAll('button')).find((b) => b.textContent === text) as HTMLButtonElement | undefined
+const sel = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLSelectElement
+const opts = (s: HTMLSelectElement) => Array.from(s.options)
+const labels = (s: HTMLSelectElement) => opts(s).map((o) => o.textContent)
+const group = (s: HTMLSelectElement, label: string) =>
+  Array.from((s.querySelector(`optgroup[label="${label}"]`) ?? document.createElement('optgroup')).querySelectorAll('option')).map((o) => o.textContent)
+const pick = async (s: HTMLSelectElement, v: string) => {
+  await act(async () => { s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve() })
+}
 const click = async (b: HTMLElement | undefined) => {
   await act(async () => { b!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
 }
@@ -85,68 +91,75 @@ afterEach(() => {
   delete (window as unknown as { api?: unknown }).api
 })
 
-describe('AgentLibrary model picker', () => {
-  it('renders catalog aliases (incl. [1m], best, opusplan, default) instead of the static list', async () => {
+describe('AgentLibrary model select', () => {
+  it('lists catalog aliases (incl. [1m], best, opusplan, default) instead of the static list', async () => {
     const el = await mount(null, CATALOG)
-    for (const a of ['inherit', 'best', 'opus[1m]', 'opusplan', 'default']) expect(btn(el, a)).toBeTruthy()
+    const aliases = group(sel(el, 'model-select'), 'Aliases')
+    for (const a of ['inherit', 'best', 'opus[1m]', 'opusplan', 'default']) expect(aliases).toContain(a)
+    expect(sel(el, 'model-select').value).toBe('inherit')
   })
 
-  it('version row filters by family and hides for inherit', async () => {
+  it('pinned versions list every concrete id plus the suffixed variants of suffixed aliases', async () => {
     const el = await mount('opus', CATALOG)
-    const row = el.querySelector('[data-testid="model-version-row"]')!
-    const labels = Array.from(row.querySelectorAll('button')).map((b) => b.textContent)
-    expect(labels).toEqual(['latest', 'claude-opus-5', 'claude-opus-4-8'])
-    await click(btn(el, 'inherit'))
-    expect(el.querySelector('[data-testid="model-version-row"]')).toBeNull()
+    const pinned = group(sel(el, 'model-select'), 'Pinned versions')
+    expect(pinned).toEqual(expect.arrayContaining(['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-opus-5[1m]', 'claude-sonnet-5[1m]']))
+    expect(pinned).not.toContain('claude-haiku-4-5-20251001[1m]')
   })
 
   it('picking a version pins the exact id', async () => {
     const el = await mount('opus', CATALOG)
-    await click(btn(el, 'claude-opus-4-8'))
+    await pick(sel(el, 'model-select'), 'claude-opus-4-8')
     await saveClick(el)
     expect(savePersona.mock.calls[0][0].model).toBe('claude-opus-4-8')
   })
 
-  it('latest restores the bare alias', async () => {
+  it('a pinned id shows selected and picking the alias restores the bare alias', async () => {
     const el = await mount('claude-opus-4-8', CATALOG)
-    expect(btn(el, 'opus')!.className).toContain('accent')
-    await click(btn(el, 'latest'))
+    expect(sel(el, 'model-select').value).toBe('claude-opus-4-8')
+    await pick(sel(el, 'model-select'), 'opus')
     await saveClick(el)
     expect(savePersona.mock.calls[0][0].model).toBe('opus')
   })
 
   it('an alias containing [1m] is saved verbatim', async () => {
     const el = await mount('opus', CATALOG)
-    await click(btn(el, 'opus[1m]'))
+    await pick(sel(el, 'model-select'), 'opus[1m]')
     await saveClick(el)
     expect(savePersona.mock.calls[0][0].model).toBe('opus[1m]')
   })
 
   it('disables (not hides) options outside availableModels with an explanatory title', async () => {
     const el = await mount('opus', { ...CATALOG, availableModels: ['opus'] })
-    const b = btn(el, 'haiku')!
-    expect(b.disabled).toBe(true)
-    expect(b.title).toMatch(/allowlist/)
-    expect(btn(el, 'opus')!.disabled).toBe(false)
+    const o = (v: string) => opts(sel(el, 'model-select')).find((x) => x.value === v)!
+    expect(o('haiku').disabled).toBe(true)
+    expect(o('haiku').title).toMatch(/allowlist/)
+    expect(o('opus').disabled).toBe(false)
+    expect(o('claude-opus-4-8').disabled).toBe(false)
+    expect(o('claude-sonnet-5').disabled).toBe(true)
   })
 
-  it('null catalog falls back to the static five with a note', async () => {
+  it('null catalog falls back to the static five; the ⋯ menu says the catalog is unavailable', async () => {
     const el = await mount(null, null)
-    for (const a of ['inherit', 'haiku', 'sonnet', 'opus', 'fable']) expect(btn(el, a)).toBeTruthy()
-    expect(btn(el, 'best')).toBeUndefined()
-    expect(el.textContent).toContain('catalog unavailable')
+    const l = labels(sel(el, 'model-select'))
+    for (const a of ['inherit', 'haiku', 'sonnet', 'opus', 'fable']) expect(l).toContain(a)
+    expect(l).not.toContain('best')
+    await click(el.querySelector('[data-testid="agent-detail-more"]') as HTMLElement)
+    expect(el.querySelector('[data-testid="agent-detail-catalog-info"]')!.textContent).toContain('catalog unavailable')
   })
 
   it('an unlisted stored value stays selected and is not rewritten on save', async () => {
     const el = await mount('claude-opus-3-retired', CATALOG)
-    expect(btn(el, 'claude-opus-3-retired (current)')).toBeTruthy()
-    // Alias row is not silently reset, and a save with no edit is not offered / does not rewrite it.
+    expect(labels(sel(el, 'model-select'))).toContain('claude-opus-3-retired (current)')
+    expect(sel(el, 'model-select').value).toBe('claude-opus-3-retired')
     expect(savePersona).not.toHaveBeenCalled()
   })
 
-  it('refresh forces a catalog re-read', async () => {
+  it('the help text rides on the select title; the ⋯ menu shows the CLI version and Re-check forces a catalog re-read', async () => {
     const el = await mount('opus', CATALOG)
-    await click(el.querySelector('[data-testid="model-catalog-refresh"]') as HTMLElement)
+    expect(sel(el, 'model-select').title).toContain("This persona's default model")
+    await click(el.querySelector('[data-testid="agent-detail-more"]') as HTMLElement)
+    expect(el.querySelector('[data-testid="agent-detail-catalog-info"]')!.textContent).toContain('claude 2.0.0')
+    await click(el.querySelector('[data-testid="agent-detail-recheck"]') as HTMLElement)
     expect(catalogFn!.mock.calls.at(-1)![0]).toMatchObject({ force: true })
   })
 })
@@ -156,17 +169,13 @@ const EFFORT_CATALOG = {
   effortLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'auto'],
   settingsEffortLevels: ['low', 'medium', 'high', 'xhigh'],
 }
-const effortLabels = (el: HTMLElement) =>
-  Array.from(el.querySelector('[data-testid="effort-row"]')!.querySelectorAll('button')).map((b) => b.textContent)
+const effortLabels = (el: HTMLElement) => labels(sel(el, 'effort-select'))
 
-describe('AgentLibrary effort picker', () => {
-  it('renders inherit + catalog effortLevels with a session-only marker', async () => {
+describe('AgentLibrary effort select', () => {
+  it('lists inherit + catalog effortLevels with a session-only marker; the hint is the title', async () => {
     const el = await mount('opus', EFFORT_CATALOG)
-    expect(effortLabels(el)).toEqual(['inherit', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'])
-    const marker = el.querySelector('[data-testid="effort-session-only"]')!.textContent!
-    expect(marker).toContain('max (session-only)')
-    expect(marker).toContain('auto (session-only)')
-    expect(marker).not.toContain('high (session-only)')
+    expect(effortLabels(el)).toEqual(['inherit', 'low', 'medium', 'high', 'xhigh', 'max (session-only)', 'auto (session-only)'])
+    expect(sel(el, 'effort-select').title).toContain('max, auto are session-only')
   })
 
   it('null catalog falls back to the static list', async () => {
@@ -177,11 +186,12 @@ describe('AgentLibrary effort picker', () => {
   it('an unlisted stored value stays selected', async () => {
     const el = await mount('opus', EFFORT_CATALOG, 'ludicrous')
     expect(effortLabels(el)).toContain('ludicrous (current)')
+    expect(sel(el, 'effort-select').value).toBe('ludicrous')
   })
 
-  it('picking a level saves it; untouched save of a no-effort persona sends inherit', async () => {
+  it('picking a level saves it', async () => {
     const el = await mount('opus', EFFORT_CATALOG)
-    await click(Array.from(el.querySelector('[data-testid="effort-row"]')!.querySelectorAll('button')).find((b) => b.textContent === 'high') as HTMLElement)
+    await pick(sel(el, 'effort-select'), 'high')
     await saveClick(el)
     expect(savePersona.mock.calls[0][0].effort).toBe('high')
   })
@@ -189,8 +199,7 @@ describe('AgentLibrary effort picker', () => {
   it('notes (without disabling) when the selected model does not support effort', async () => {
     const el = await mount('haiku', EFFORT_CATALOG, 'high')
     expect(el.querySelector('[data-testid="effort-unsupported-note"]')).toBeTruthy()
-    const b = Array.from(el.querySelector('[data-testid="effort-row"]')!.querySelectorAll('button'))[0] as HTMLButtonElement
-    expect(b.disabled).toBe(false)
+    expect(sel(el, 'effort-select').disabled).toBe(false)
   })
 
   it('no note for a supporting model', async () => {

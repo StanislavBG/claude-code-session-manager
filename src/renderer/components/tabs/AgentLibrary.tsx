@@ -17,15 +17,15 @@ import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregat
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas,
- * on the claude-config ConfigLayout kit (render 15): AGENTS FOLDER card,
- * Filter + '+ New', one row per agent (name, model, description); the detail
+ * on the claude-config ConfigLayout kit (render 15): AGENTS FOLDER card (which also
+ * carries the Personas | Tags switch — DESIGN_SPEC.md §5.3), Filter + '+ New', one row per agent (name, model, description); the detail
  * lives in ./agents/AgentDetail.tsx. Component-local fetch, real CRUD: New/Duplicate/Save/
  * Revert/Delete write straight through to disk via `window.api.agents.*`
  * (agentLibrary.cjs), scoped to the global persona directory.
  *
  * Per-project overrides: this is a Home-face, machine-wide page, so it never
- * reads the active tab — no open project is special. The PROJECT OVERRIDE
- * block instead carries an explicit project picker listing every open project
+ * reads the active tab — no open project is special. The PROJECT OVERRIDES
+ * row's '+ Add override' opens a PROJECT OVERRIDE block that carries an explicit project picker listing every open project
  * (one entry per unique tab cwd, nothing preselected); choosing one shows and
  * writes that project's frontmatter-only overlay at
  * `<cwd>/.claude/agents/<name>.md`, keyed by the chosen cwd. Any open
@@ -128,20 +128,31 @@ function AgentLibraryComponent() {
     clearFocus()
   }, [focusTab, focusId, personas, clearFocus])
 
-  const viewTabs = (
-    <ViewTabs
-      options={[{ key: 'personas', label: 'Personas' }, { key: 'tags', label: 'Tags' }] as const}
-      active={view}
-      onChange={setView}
-    />
+  // The Personas | Tags switch lives inside the AGENTS FOLDER card (DESIGN_SPEC.md §5.3), so the
+  // card renders in both views; Tags swaps the list for nothing and the detail for TagLibrary.
+  const folderCard = (
+    <ConfigFileCard
+      eyebrow="AGENTS FOLDER"
+      badge={personas?.length}
+      path="~/.claude/agents/"
+      note="The actor a session opens with — “you are acting as …”"
+    >
+      <div data-testid="agent-view-switch" className="pt-1">
+        <ViewTabs
+          options={[{ key: 'personas', label: 'Personas' }, { key: 'tags', label: 'Tags' }] as const}
+          active={view}
+          onChange={setView}
+        />
+      </div>
+    </ConfigFileCard>
   )
   if (view === 'tags') {
     return (
       <div className="flex flex-col h-full min-h-0">
-        <div className="px-3 py-1.5 border-b border-line">{viewTabs}</div>
-        <div className="flex-1 min-h-0">
-          <TagLibrary onOpenPersona={(name) => { setSelectedName(name); setDraft(null); setCreating(false); setView('personas') }} />
-        </div>
+        <ConfigWorkbench
+          list={folderCard}
+          detail={<TagLibrary onOpenPersona={(name) => { setSelectedName(name); setDraft(null); setCreating(false); setView('personas') }} />}
+        />
       </div>
     )
   }
@@ -284,12 +295,7 @@ function AgentLibraryComponent() {
 
   const list = (
     <>
-      <ConfigFileCard
-        eyebrow="AGENTS FOLDER"
-        badge={personas.length}
-        path="~/.claude/agents/"
-        note="The actor a session opens with — “you are acting as …”"
-      />
+      {folderCard}
       <ConfigListToolbar filter={filter} onFilterChange={setFilter} placeholder="Filter" primaryLabel="+ New" onPrimary={create} />
       <div role="listbox" aria-label="Agents" className="flex flex-col gap-0.5">
         {isNew && obj && (
@@ -370,7 +376,6 @@ function AgentLibraryComponent() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="px-3 py-1.5 border-b border-line">{viewTabs}</div>
       <ConfigWorkbench
         list={list}
         detail={

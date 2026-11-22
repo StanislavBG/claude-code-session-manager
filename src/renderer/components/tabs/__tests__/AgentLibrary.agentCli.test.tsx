@@ -86,21 +86,43 @@ afterEach(() => {
   delete (window as unknown as { api?: unknown }).api
 })
 
+const cli = (el: HTMLElement) => byId(el, 'agent-persona-cli-select') as HTMLSelectElement
+const pick = async (el: HTMLElement, v: string) => {
+  await act(async () => { const s = cli(el); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve() })
+}
+
 describe('AgentLibrary persona cli field', () => {
-  it('a codex persona shows codex checked and the model input', async () => {
+  it('a codex persona shows codex selected and the model input; help rides on the title', async () => {
     const el = await mount(persona({ agentCli: 'codex', agentCliModel: 'gpt-5' }))
-    expect(byId(el, 'agent-persona-cli-option-codex')!.getAttribute('aria-checked')).toBe('true')
+    expect(cli(el).value).toBe('codex')
     const model = byId(el, 'agent-persona-cli-model') as HTMLInputElement
     expect(model).toBeTruthy()
     expect(model.value).toBe('gpt-5')
     expect(model.maxLength).toBe(128)
     expect(model.placeholder).toBe("Blank = the CLI's own default")
-    expect(el.textContent).toContain('Macros, phone launches and scheduled PRDs always run Claude Code.')
+    expect(cli(el).title).toContain('Macros, phone launches and scheduled PRDs always run Claude Code.')
+  })
+
+  it('a not-installed CLI is a disabled option that says so', async () => {
+    const el = await mount(persona())
+    const gemini = Array.from(cli(el).options).find((o) => o.value === 'gemini')!
+    expect(gemini.disabled).toBe(true)
+    expect(gemini.textContent).toContain('not installed')
+    expect(gemini.title).toBe('npm i -g gemini')
+    expect(Array.from(cli(el).options).find((o) => o.value === 'codex')!.disabled).toBe(false)
+  })
+
+  it('Re-check in the ⋯ menu re-runs CLI detection', async () => {
+    const el = await mount(persona())
+    const detect = (window as unknown as { api: { agentCli: { detect: ReturnType<typeof vi.fn> } } }).api.agentCli.detect
+    await click(byId(el, 'agent-detail-more'))
+    await click(byId(el, 'agent-detail-recheck'))
+    expect(detect.mock.calls.at(-1)![0]).toMatchObject({ refresh: true })
   })
 
   it('switching to Claude Code and saving sends agentCli claude and no agentCliModel', async () => {
     const el = await mount(persona({ agentCli: 'codex', agentCliModel: 'gpt-5' }))
-    await click(byId(el, 'agent-persona-cli-option-claude'))
+    await pick(el, 'claude')
     expect(byId(el, 'agent-persona-cli-model')).toBeNull()
     await saveClick(el)
     const sent = savePersona.mock.calls[0][0]
@@ -110,9 +132,9 @@ describe('AgentLibrary persona cli field', () => {
 
   it('picking codex and typing a padded model sends the trimmed model', async () => {
     const el = await mount(persona())
-    expect(byId(el, 'agent-persona-cli-option-claude')!.getAttribute('aria-checked')).toBe('true')
+    expect(cli(el).value).toBe('claude')
     expect(byId(el, 'agent-persona-cli-model')).toBeNull()
-    await click(byId(el, 'agent-persona-cli-option-codex'))
+    await pick(el, 'codex')
     await type(byId(el, 'agent-persona-cli-model') as HTMLInputElement, ' o3 ')
     await saveClick(el)
     const sent = savePersona.mock.calls[0][0]
@@ -122,8 +144,8 @@ describe('AgentLibrary persona cli field', () => {
 
   it('changing the CLI clears the model; a blank model is omitted', async () => {
     const el = await mount(persona({ agentCli: 'codex', agentCliModel: 'gpt-5' }))
-    await click(byId(el, 'agent-persona-cli-option-claude'))
-    await click(byId(el, 'agent-persona-cli-option-codex'))
+    await pick(el, 'claude')
+    await pick(el, 'codex')
     expect((byId(el, 'agent-persona-cli-model') as HTMLInputElement).value).toBe('')
     await saveClick(el)
     const sent = savePersona.mock.calls[0][0]

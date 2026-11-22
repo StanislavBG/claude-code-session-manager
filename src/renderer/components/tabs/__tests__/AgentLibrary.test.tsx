@@ -149,7 +149,7 @@ describe('AgentLibrary', () => {
     const el = await mount()
     const runtime = el.querySelector('[data-testid="agent-runtime-card"]')!
     for (const label of ['model', 'effort', 'runs on', 'tools', 'project overrides']) expect(runtime.textContent).toContain(label)
-    expect(el.textContent).toContain("This persona's default model for its Epics")
+    expect((el.querySelector('[data-testid="model-select"]') as HTMLSelectElement).title).toContain("This persona's default model for its Epics")
   })
 
   it('clicking another persona swaps the detail pane', async () => {
@@ -228,7 +228,7 @@ describe('AgentLibrary', () => {
     expect(api.agents.deletePersona).toHaveBeenCalledWith({ name: 'debugger' })
   })
 
-  it('renders an out-of-list model as a selected, marked chip and keeps it selected across a re-render', async () => {
+  it('renders an out-of-list model as a selected, marked option and keeps it selected across a re-render', async () => {
     installWindowApiMock([PINNED_MODEL_PERSONA, ...PERSONAS])
     const el = await mount()
 
@@ -238,23 +238,22 @@ describe('AgentLibrary', () => {
       await Promise.resolve()
     })
 
-    const findPinnedChip = () =>
-      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'claude-opus-5 (current)')
+    const modelSelect = () => el.querySelector('[data-testid="model-select"]') as HTMLSelectElement
+    const current = () => Array.from(modelSelect().options).find((o) => o.textContent === 'claude-opus-5 (current)')
 
-    expect(findPinnedChip()).toBeTruthy()
+    expect(current()).toBeTruthy()
+    expect(modelSelect().value).toBe('claude-opus-5')
 
-    // Force a re-render (toggling a tool checkbox) and confirm the pinned
-    // model chip is still shown as selected — the first click on it must
-    // never have silently swapped the draft to one of the fixed options.
+    // Force a re-render (toggling a tool) and confirm the pinned model is still
+    // selected — it must never be silently swapped to one of the fixed options.
     const toolButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Read')!
     await act(async () => {
       toolButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })
 
-    const pinnedChipAfterRerender = findPinnedChip()
-    expect(pinnedChipAfterRerender).toBeTruthy()
-    expect(pinnedChipAfterRerender!.className).toContain('bg-accent/15')
+    expect(current()).toBeTruthy()
+    expect(modelSelect().value).toBe('claude-opus-5')
   })
 
   it('editing the description of a persona with a title saves the same title', async () => {
@@ -309,6 +308,63 @@ describe('AgentLibrary', () => {
     expect(tool('Write').className).toContain('border-dashed')
   })
 
+  it('an agent with no tools field shows every tool filled with an "All tools" note; restricting one writes the rest', async () => {
+    const { api } = installWindowApiMock()
+    const el = await mount()
+    await act(async () => { (el.querySelector('[data-agent-row="debugger"] [data-testid="config-list-row"]') as HTMLElement).click(); await Promise.resolve() })
+    const row = el.querySelector('[data-testid="agent-tools-row"]')!
+    for (const b of Array.from(row.querySelectorAll('[data-tool]'))) {
+      expect(b.getAttribute('aria-pressed')).toBe('true')
+      expect(b.className).not.toContain('border-dashed')
+    }
+    expect(el.querySelector('[data-testid="agent-tools-note"]')!.textContent).toContain('All tools')
+    await act(async () => { (row.querySelector('[data-tool="Bash"]') as HTMLElement).click(); await Promise.resolve() })
+    expect((row.querySelector('[data-tool="Bash"]') as HTMLElement).className).toContain('border-dashed')
+    await act(async () => { (el.querySelector('[data-testid="editor-save"]') as HTMLElement).click(); await Promise.resolve() })
+    const sent = api.agents.savePersona.mock.calls[0][0].tools as string[]
+    expect(sent).not.toContain('Bash')
+    expect(sent).toContain('Read')
+  })
+
+  it('MODEL, EFFORT and RUNS ON are three compact selects in one row, help as a title', async () => {
+    const el = await mount()
+    const row = el.querySelector('[data-testid="agent-runtime-row"]')!
+    const selects = Array.from(row.querySelectorAll('select'))
+    expect(selects.map((s) => s.getAttribute('data-testid'))).toEqual(['model-select', 'effort-select', 'agent-persona-cli-select'])
+    for (const s of selects) expect(s.title.length).toBeGreaterThan(0)
+    expect(row.textContent).not.toContain("This persona's default model for its Epics")
+    expect(row.querySelector('button')).toBeNull()
+  })
+
+  it('the ⋯ menu carries re-check and the model catalog info', async () => {
+    const el = await mount()
+    await act(async () => { (el.querySelector('[data-testid="agent-detail-more"]') as HTMLElement).click(); await Promise.resolve() })
+    expect(el.querySelector('[data-testid="agent-detail-recheck"]')).toBeTruthy()
+    expect(el.querySelector('[data-testid="agent-detail-catalog-info"]')!.textContent).toMatch(/catalog|claude/i)
+  })
+
+  it('colour and tags sit in a Details disclosure inside the config card; the editor follows the card directly', async () => {
+    const el = await mount()
+    const card = el.querySelector('[data-testid="agent-runtime-card"]')!
+    const details = card.querySelector('[data-testid="agent-details"]')!
+    expect(details.tagName).toBe('DETAILS')
+    expect(details.querySelector('[data-testid="agent-detail-name"]')).toBeTruthy()
+    expect(Array.from(details.querySelectorAll('button')).some((b) => /^#/.test(b.textContent ?? ''))).toBe(true)
+    expect(card.nextElementSibling!.getAttribute('data-testid')).toBe('agent-detail-editor')
+    expect(el.querySelector('[data-testid="config-detail-header"]')!.textContent).toContain('builder')
+  })
+
+  it('the Personas | Tags switch lives in the AGENTS FOLDER card and swaps in the Tags view', async () => {
+    const el = await mount()
+    const card = el.querySelector('[data-testid="config-file-card"]')!
+    const tags = Array.from(card.querySelectorAll('button')).find((b) => b.textContent === 'Tags')!
+    expect(Array.from(card.querySelectorAll('button')).some((b) => b.textContent === 'Personas')).toBe(true)
+    await act(async () => { tags.click(); await Promise.resolve() })
+    expect(el.querySelector('[data-agent-row]')).toBeNull()
+    expect(el.querySelector('[data-testid="config-file-card"]')).toBeTruthy()
+    expect(el.textContent).toContain('agents carrying this tag')
+  })
+
   it('renders a project override chip for a persona with an overlay', async () => {
     installWindowApiMock([
       {
@@ -323,6 +379,11 @@ describe('AgentLibrary', () => {
     expect(chips[0].textContent).toContain('Self')
     expect(chips[0].textContent).toContain('sonnet · medium')
     expect(el.querySelector('[data-testid="agent-overrides-row"]')!.textContent).toContain('a local copy in ~/Self/.claude/agents/ wins there')
+    expect(el.querySelector('[data-testid="project-override-block"]')).toBeNull()
+    const add = el.querySelector('[data-testid="agent-override-add"]') as HTMLElement
+    expect(add.textContent).toBe('+ Add override')
+    await act(async () => { add.click(); await Promise.resolve() })
+    expect(el.querySelector('[data-testid="override-project-select"]')).toBeTruthy()
   })
 
   it('the body is edited in DocumentEditorPane (Document mode) and saved as the body, Revert discards it', async () => {

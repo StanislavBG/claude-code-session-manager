@@ -48,7 +48,7 @@ let removeOverride: ReturnType<typeof vi.fn>
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 
 /** One tab per cwd; the ACTIVE tab is the last one unless `activeIdx` says otherwise — the page must ignore it. */
-async function mount(details: Detail[], cwds: string[], opts: { activeIdx?: number; personas?: AgentPersona[] } = {}) {
+async function mount(details: Detail[], cwds: string[], opts: { activeIdx?: number; personas?: AgentPersona[]; openPicker?: boolean } = {}) {
   savePersona = vi.fn().mockResolvedValue({ ok: true, path: '' })
   removeOverride = vi.fn().mockResolvedValue({ ok: true })
   ;(window as unknown as { api: unknown }).api = {
@@ -79,6 +79,11 @@ async function mount(details: Detail[], cwds: string[], opts: { activeIdx?: numb
     root!.render(createElement(AgentLibrary))
     await flush()
   })
+  // The picker sits behind the PROJECT OVERRIDES row's '+ Add override' link.
+  if (opts.openPicker !== false) {
+    const add = container.querySelector('[data-testid="agent-override-add"]') as HTMLElement | null
+    if (add) await act(async () => { add.click(); await flush() })
+  }
   return container
 }
 
@@ -109,6 +114,22 @@ afterEach(() => {
 })
 
 describe('AgentLibrary project override', () => {
+  it('PROJECT OVERRIDES is an inline chip row; the picker opens from "+ Add override" and Done folds it away', async () => {
+    const el = await mount([detail('/work/alpha', ['model', 'effort'], { model: 'sonnet', effort: 'medium' })], ['/work/alpha', '/work/beta'], { openPicker: false })
+    const row = q(el, 'agent-overrides-row')!
+    const chip = row.querySelector('[data-testid="agent-override-chip"]')!
+    expect(chip.textContent).toBe('alphasonnet · medium×')
+    expect(row.textContent).toContain('a local copy in /work/alpha/.claude/agents/ wins there')
+    expect(q(el, 'project-override-block')).toBeNull()
+    await click(q(el, 'agent-override-add') as HTMLElement)
+    expect(q(el, 'agent-override-add')).toBeNull()
+    expect(select(el).value).toBe('')
+    await choose(el, '/work/beta')
+    await click(q(el, 'override-close') as HTMLElement)
+    expect(q(el, 'project-override-block')).toBeNull()
+    expect(q(el, 'agent-override-add')).toBeTruthy()
+  })
+
   it('lists every open project sorted by name, selects none whatever the active tab is, and shows no pickers', async () => {
     const el = await mount([], ['/work/beta', '/work/alpha'], { activeIdx: 1 })
     expect(options(el)).toEqual([['', 'Choose a project…'], ['/work/alpha', 'alpha'], ['/work/beta', 'beta']])
@@ -228,7 +249,12 @@ describe('AgentLibrary project override', () => {
   it('the global model row keeps writing the global persona (no projectCwd) while a project is chosen', async () => {
     const el = await mount([], ['/work/alpha'])
     await choose(el, '/work/alpha')
-    await click(within(el, 'model-row', 'opus'))
+    await act(async () => {
+      const s = q(el, 'model-select') as HTMLSelectElement
+      s.value = 'opus'
+      s.dispatchEvent(new Event('change', { bubbles: true }))
+      await flush()
+    })
     const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
     await click(save)
     expect(savePersona.mock.calls[0][0].projectCwd).toBeUndefined()

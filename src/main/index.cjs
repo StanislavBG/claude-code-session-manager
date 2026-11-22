@@ -112,6 +112,11 @@ require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminH
 require('./lib/feedback-remote/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Cursor read over the audit log for outside scripts (read-only).
 require('./lib/telemetry/eventsAdminRoutes.cjs').registerAdminRoute(adminHttp);
+// Outside-facing Epic records for scripts/other projects (read-only).
+require('./lib/epic/epicAdminRoutes.cjs').registerAdminRoute(adminHttp, {
+  isTabBusy: chatRunner.isTabBusy,
+  listJobs: () => scheduler.remote.listJobs(),
+});
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const queueOps = require('./queueOps.cjs');

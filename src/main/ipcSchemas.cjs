@@ -605,6 +605,33 @@ const adminGetPrdQuery = z.object({
   cwd: z.string().min(1).max(4096).optional(),
 });
 
+// GET /admin/epics + /admin/epic (lib/epic/epicAdminRoutes.cjs) — read-only
+// outside-facing Epic records (lib/epic/epicOutsideRead.cjs). Query strings
+// arrive as text, so limit/offset coerce before the int/range checks.
+const EPIC_OUTSIDE_STATE_ENUM = z.enum(/** @type {[string, ...string[]]} */ ([...require('./lib/epic/epicOutsideState.cjs').EPIC_OUTSIDE_STATES]));
+const adminListEpicsQuery = z.object({
+  cwd: z.string().min(1).max(4096),
+  state: EPIC_OUTSIDE_STATE_ENUM.optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
+const adminGetEpicQuery = z.object({
+  cwd: z.string().min(1).max(4096),
+  id: z.string().min(1).max(200).optional(),
+  externalRef: z.string().max(1000).optional().transform((v, ctx) => {
+    if (v === undefined) return undefined;
+    const r = require('./lib/epic/externalRef.cjs').normalizeExternalRef(v);
+    if (!r.ok) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: r.error });
+      return z.NEVER;
+    }
+    return r.value;
+  }),
+}).refine((v) => (v.id === undefined) !== (v.externalRef === undefined), {
+  message: 'exactly one of id or externalRef is required',
+});
+
 // Partial frontmatter patch for update-prd — same recognized-key set as
 // prdFrontmatter.cjs's parsePrdFile/serializePrdFile round-trip pair. Every
 // field optional; the route refuses an empty patch+no-body request via the
@@ -1614,6 +1641,8 @@ module.exports = {
     adminListPrdsQuery,
     adminListEventsQuery,
     adminGetPrdQuery,
+    adminListEpicsQuery,
+    adminGetEpicQuery,
     adminUpdatePrd,
     adminCancelJob,
     setConfigSchema,

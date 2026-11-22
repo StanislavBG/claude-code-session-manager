@@ -96,7 +96,10 @@ async function appendRollupAndNotify(entries) {
 
 /**
  * Cache for parseJSONL results.
- * Entry shape: { mtimeMs: number, size: number, readOffset: number, inode: number, result: AggrResult }
+ * Entry shape: { mtimeMs: number, size: number, readOffset: number, inode: number,
+ *   recentIds: Map<string, usage>, result: AggrResult }
+ * `recentIds` = the last 64 message ids with their counted usage, handed to
+ * the next tail parse so a message straddling two reads is counted once.
  * `size` mirrors stat.size (used for exact-hit comparison).
  * `readOffset` is the byte position of the end of the last complete line
  * (≤ size) — the start position for the next tail-read so we never start
@@ -177,8 +180,14 @@ async function readSlice(filePath, from, to) {
 
 // ── line scanners ─────────────────────────────────────────────────────────────
 
+const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens'];
+/** How many recent message ids the accumulator (and the cache entry) remembers. */
+const RECENT_IDS_MAX = 64;
+
 /**
  * Scan JSONL lines into an aggregate accumulator (mutates acc).
+ * acc.recentIds (Map<message.id, counted usage>, created on demand, last
+ * RECENT_IDS_MAX ids) makes a repeated message.id count once.
  * Returns { firstTs, lastTs } — firstTs is only captured when
  * captureFirst=true (else null); lastTs is the most recent event timestamp
  * seen in this batch of lines (file order, so simply "last one wins").
@@ -209,10 +218,36 @@ function scanAggrLines(lines, acc, captureFirst) {
       const outT = usage.output_tokens ?? usage.outputTokens;
       const cacheR = usage.cache_read_input_tokens ?? usage.cacheReadInputTokens;
       const cacheC = usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens;
-      if (typeof inT === 'number') acc.inputTokens += inT;
-      if (typeof outT === 'number') acc.outputTokens += outT;
-      if (typeof cacheR === 'number') acc.cacheReadTokens += cacheR;
-      if (typeof cacheC === 'number') acc.cacheCreationTokens += cacheC;
+      const vals = {
+        inputTokens: typeof inT === 'number' ? inT : 0,
+        outputTokens: typeof outT === 'number' ? outT : 0,
+        cacheReadTokens: typeof cacheR === 'number' ? cacheR : 0,
+        cacheCreationTokens: typeof cacheC === 'number' ? cacheC : 0,
+      };
+      // A transcript writes one line per content block of a message and
+      // repeats the message's usage on each (same rule as
+      // lib/epic/transcriptUsage.cjs): per message.id, the counted value of
+      // each field is the largest seen, so a repeat adds only the increase.
+      const msgId = obj.message?.id;
+      let add = vals;
+      if (typeof msgId === 'string' && msgId) {
+        const recent = acc.recentIds ?? (acc.recentIds = new Map());
+        const prevVals = recent.get(msgId);
+        if (prevVals) {
+          add = {};
+          const next = {};
+          for (const k of USAGE_FIELDS) {
+            add[k] = Math.max(0, vals[k] - prevVals[k]);
+            next[k] = Math.max(vals[k], prevVals[k]);
+          }
+          recent.delete(msgId);
+          recent.set(msgId, next);
+        } else {
+          recent.set(msgId, { ...vals });
+          while (recent.size > RECENT_IDS_MAX) recent.delete(recent.keys().next().value);
+        }
+      }
+      for (const k of USAGE_FIELDS) acc[k] += add[k];
 
       // Only assistant usage lines carry model+usage together in practice;
       // read defensively rather than assuming every usage line has a model.
@@ -221,10 +256,7 @@ function scanAggrLines(lines, acc, captureFirst) {
         const bucket = acc.byModel[modelId] ?? (acc.byModel[modelId] = {
           inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
         });
-        if (typeof inT === 'number') bucket.inputTokens += inT;
-        if (typeof outT === 'number') bucket.outputTokens += outT;
-        if (typeof cacheR === 'number') bucket.cacheReadTokens += cacheR;
-        if (typeof cacheC === 'number') bucket.cacheCreationTokens += cacheC;
+        for (const k of USAGE_FIELDS) bucket[k] += add[k];
       }
     }
 
@@ -318,6 +350,8 @@ async function parseJSONL(filePath, stat) {
           const readFrom = cached.readOffset ?? cached.size;
           const tail = await readSlice(filePath, readFrom, stat.size);
           const delta = emptyAcc();
+          // Copy, so a failed tail parse leaves the cached memory untouched.
+          delta.recentIds = new Map(cached.recentIds ?? []);
           const { lastTs: deltaLastTs } = scanAggrLines(tail.split('\n'), delta, false);
           const prev = cached.result;
           const merged = {
@@ -355,7 +389,7 @@ async function parseJSONL(filePath, stat) {
           // exact-hit check works correctly on the next call.
           const lastNl = tail.lastIndexOf('\n');
           const readOffset = lastNl >= 0 ? readFrom + lastNl + 1 : readFrom;
-          aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset, inode: stat.ino, result: merged });
+          aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset, inode: stat.ino, recentIds: delta.recentIds, result: merged });
           return { result: merged, cacheHit: false };
         } catch {
           // fall through to full parse
@@ -373,6 +407,9 @@ async function parseJSONL(filePath, stat) {
 
   const acc = emptyAcc();
   const { firstTs, lastTs } = scanAggrLines(text.split('\n'), acc, true);
+  // The id memory lives on the cache entry, not in the returned result.
+  const recentIds = acc.recentIds ?? new Map();
+  delete acc.recentIds;
   acc.firstEventTs = firstTs;
   acc.lastEventTs = lastTs;
 
@@ -386,7 +423,7 @@ async function parseJSONL(filePath, stat) {
 
   const lastNlFull = text.lastIndexOf('\n');
   const readOffsetFull = lastNlFull >= 0 ? lastNlFull + 1 : 0;
-  aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset: readOffsetFull, inode: stat.ino, result: acc });
+  aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset: readOffsetFull, inode: stat.ino, recentIds, result: acc });
   return { result: acc, cacheHit: false };
 }
 

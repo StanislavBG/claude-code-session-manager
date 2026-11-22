@@ -41,7 +41,15 @@ interface Props {
   onChange: (v: string) => void
   /** Markdown blocks to highlight (honey tint + left rule) — matched to top-level nodes by text. */
   markedBlocks?: string[]
+  /** Full-screen host: wider column + roomier page padding (design: DocEditor pgMax / pgPad). */
+  fullScreen?: boolean
 }
+
+// Literal class strings (Tailwind JIT). Design: DocEditor pgPad / pgMax; list
+// bullets and numbers in the accent, semibold (config-data.js mdBlocks).
+const LIST_CLASS = 'marker:text-accent marker:font-semibold'
+const PAGE_PAD = { inline: 'px-9 py-7', full: 'px-16 py-12' }
+const PAGE_MAX = { inline: 'max-w-[720px]', full: 'max-w-[760px]' }
 
 // --- Changed-block marks ---
 
@@ -422,7 +430,7 @@ function bodyMarkdown(ed: Editor, sourceBody: string): string {
   return md.replace(/\n*$/, '') + tail
 }
 
-export function TiptapBody({ value, onChange, markedBlocks }: Props) {
+export function TiptapBody({ value, onChange, markedBlocks, fullScreen }: Props) {
   // Split frontmatter once on mount; capture it for the lifetime of this
   // component instance (keyed by path in EditorView, so remount = new path).
   const splitRef = useRef<SplitDoc>(splitFrontmatter(value))
@@ -434,7 +442,10 @@ export function TiptapBody({ value, onChange, markedBlocks }: Props) {
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        bulletList: { HTMLAttributes: { class: LIST_CLASS } },
+        orderedList: { HTMLAttributes: { class: LIST_CLASS } },
+      }),
       Link.configure({ autolink: true, openOnClick: false }),
       Markdown.configure({ html: false, tightLists: true }),
       ImportLine,
@@ -450,7 +461,7 @@ export function TiptapBody({ value, onChange, markedBlocks }: Props) {
     },
     editorProps: {
       attributes: {
-        class: 'tiptap-content flex-1 outline-none max-w-none p-4 leading-relaxed',
+        class: 'tiptap-content outline-none leading-relaxed',
         'data-testid': 'tiptap-editor',
       },
     },
@@ -485,7 +496,14 @@ export function TiptapBody({ value, onChange, markedBlocks }: Props) {
       <DocToolbar editor={editor} frontmatter={splitRef.current.frontmatter} />
 
       {/* Editor content */}
-      <EditorContent editor={editor} className="flex-1 overflow-y-auto" />
+      <div
+        data-testid="tiptap-page"
+        className={`flex-1 min-h-0 overflow-y-auto ${fullScreen ? PAGE_PAD.full : PAGE_PAD.inline}`}
+      >
+        <div data-testid="tiptap-column" className={`mx-auto w-full ${fullScreen ? PAGE_MAX.full : PAGE_MAX.inline}`}>
+          <EditorContent editor={editor} />
+        </div>
+      </div>
     </div>
   )
 }

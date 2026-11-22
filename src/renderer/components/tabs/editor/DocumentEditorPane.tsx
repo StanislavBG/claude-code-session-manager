@@ -206,7 +206,7 @@ export function DocumentEditorPane({
         <MarkdownPreview ref={docScrollRef} text={value} wideMeasure={prefs.wideMeasure} />
       ) : (
         <div ref={docScrollRef} className="h-full min-h-0">
-          <TiptapBody value={value} onChange={onChange} markedBlocks={markedBlocks} />
+          <TiptapBody value={value} onChange={onChange} markedBlocks={markedBlocks} fullScreen={fullScreen} />
         </div>
       )
     ) : markdown ? (

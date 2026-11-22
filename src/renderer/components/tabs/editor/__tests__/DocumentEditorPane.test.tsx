@@ -18,7 +18,8 @@ vi.mock('../CodeEditorPane', () => ({
     createElement('div', { 'data-testid': 'code-pane', 'data-path': path, 'data-readonly': String(!!readOnly) }, value),
 }))
 vi.mock('../TiptapBody', () => ({
-  TiptapBody: ({ value }: any) => createElement('div', { 'data-testid': 'tiptap-body' }, value),
+  TiptapBody: ({ value, fullScreen }: any) =>
+    createElement('div', { 'data-testid': 'tiptap-body', 'data-fullscreen': String(!!fullScreen) }, value),
 }))
 vi.mock('../MarkdownPreview', async () => {
   const actual = await vi.importActual<any>('../MarkdownPreview')
@@ -147,6 +148,15 @@ describe('DocumentEditorPane — full screen', () => {
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
     expect(pane.className).not.toContain('fixed')
     expect(q(el, 'document-exit-fullscreen')).toBeNull()
+  })
+
+  it('tells the Document view when it is full screen, so its column widens', () => {
+    const el = mount({ path: MD, value: '# hi' })
+    expect(q(el, 'tiptap-body')?.dataset.fullscreen).toBe('false')
+    act(() => q(el, 'document-fullscreen')!.click())
+    expect(q(el, 'tiptap-body')?.dataset.fullscreen).toBe('true')
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(q(el, 'tiptap-body')?.dataset.fullscreen).toBe('false')
   })
 
   it('full screen starts with the outline open; the toggle still closes it; exiting closes it again', () => {

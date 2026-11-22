@@ -49,7 +49,6 @@ Pin `--model` on every `claude -p` spawn.
 
 ## What must NOT be assumed
 
-- Never `path.join` an agent cwd to build an ops path — use `opsPath`.
 - No private process caps, no hand-rolled tmp+rename, no new `JSON.parse(readFileSync)` fallbacks.
 - Never call `activeSessions.cjs` `allProjectCwds`/`activeProjectCwds` on an IPC, boot or timer hot path: they scan `~/.claude/projects` synchronously (7k+ dirs, 0.3-4 s; the 2026-10-25 OOM crashes).
 - `ipcSchemas.cjs` `validated()` passes the zod-parsed payload, which strips unknown keys: an IPC key rename the schema misses silently drops the key (2026-11-07 persona wipe). Rename keys and schema in one PRD; prefer `.strict()`.

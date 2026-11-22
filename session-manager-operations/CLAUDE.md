@@ -5,11 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-14 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
-(`src/main/lib/opsOwnership.cjs`): every namespace has exactly ONE owning
-writer; everyone else reads. Fail-closed — an undeclared writer throws.
-Adding a namespace or writer is a deliberate edit to that file. Build ops
-paths only via its `opsPath()`.
+14 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
 - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` →
   epics · `scheduler` → scheduler · `project-brief` → project-home ·
@@ -34,7 +30,7 @@ Epic lifecycle is specified exactly once, at
 | --- | --- | --- | --- | --- |
 | `architecture` | not owned | reference docs root CLAUDE.md links to | keep | none |
 | `design-mocks` | not owned | design mock artifacts, incl. project-pages component library | keep | [link](design-mocks/README.md) |
-| `feedback` | retired 2026-08-02 | former feedback intake, superseded by New Epic | n/a — retired | [link](feedback/README.md) |
+| `feedback` | retired 2026-08-02 | former feedback intake, superseded by New Epic | n/a — retired | none |
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the free Field Manual | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
@@ -55,8 +51,5 @@ the storage-layout contract; this table only says who owns it.
 
 ## What must NOT be assumed
 
-- Do not write into an owned namespace from outside its declared owner —
-  `assertOpsWrite` throws fail-closed.
-- Do not build an ops-root path by string concatenation — use
-  `opsPath()`/`resolveOpsRoot()`.
+- Owned-namespace writes and ops-path building: see [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 - Do not link out with a `file://` URL — it only resolves on one machine.

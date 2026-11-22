@@ -347,6 +347,8 @@ enforced fail-closed in `src/main/lib/opsOwnership.cjs`: an undeclared writer, o
 throws. The `OWNERS` map in that file and [`../CLAUDE.md`](../CLAUDE.md) are the only enumerations of
 namespaces, owners, and retention; adding a namespace or writer is a deliberate edit to that file, with each
 owned namespace's README documenting its on-disk shape.
+Build every ops path only via its `opsPath()` / `resolveOpsRoot()` — never by string concatenation or a
+`path.join` on an agent cwd; `assertOpsWrite` is the choke point that refuses an undeclared writer.
 
 Owned namespaces are app runtime state where two racing writers would corrupt a JSON source of truth; the
 skill-authored folders have one author per invocation and no such hazard, so no catch-all `general` namespace

@@ -27,6 +27,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same on first boot, or on the next boot after its marker file is deleted) | no |
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
 | move-modules.cjs | manual; `node scripts/move-modules.cjs <mapping.json> [root] [--dry-run]` — idempotent codemod that git-mvs `src/main/lib` modules (+ their tests) into subfolders and rewrites every relative require and `lib/<m>.cjs` path string | no |
+| job-sandbox-probe.cjs | `npm run probe:job-sandbox` (manual, dev-only; never in a gate) — one pinned-haiku `claude -p` per sandbox profile against a fake home with canaries; exit 1 on any escape, 2 = SKIP (deps missing); `--dry-run` prints the settings and spawns nothing | no |
 | mint-epic.cjs | manual; joins an existing Epic and prints its prds dir | yes |
 | ops-sweep.cjs | manual; `node scripts/ops-sweep.cjs <cwd>` | yes |
 | postinstall.cjs | npm `postinstall` | yes |

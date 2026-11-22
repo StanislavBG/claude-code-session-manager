@@ -51,6 +51,7 @@
     "test:unit": "vitest run",
     "test:unit:stability": "bash scripts/test-unit-stability.sh",
     "bench": "node scripts/bench/main-bench.cjs",
+    "probe:job-sandbox": "node scripts/job-sandbox-probe.cjs",
     "bench:renderer": "vitest run --config vitest.bench.config.ts",
     "preview:memory": "node scripts/memory-explorer-shots.mjs",
     "test:e2e": "xvfb-run -a playwright test",

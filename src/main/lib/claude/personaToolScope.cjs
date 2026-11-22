@@ -29,10 +29,13 @@ const HEADLESS_SCOPE_AGENT_NAME = 'sm-headless-scoped';
 
 /**
  * @param {readonly string[]|null|undefined} tools persona `tools:` list
- * @param {{ disallowed?: readonly string[] }} [opts]
+ * @param {{ disallowed?: readonly string[], structuredOutput?: boolean }} [opts]
+ *   structuredOutput: also grant the CLI's StructuredOutput tool (a --json-schema
+ *   run). Probe 2026-11-22 (CLI 2.1.325): a scoped run without it ends
+ *   'success' with structured_output null — the schema is silently skipped.
  * @returns {{ tools: string[] }|null} null = persona declares no restriction
  */
-function buildPersonaToolScope(tools, { disallowed = [] } = {}) {
+function buildPersonaToolScope(tools, { disallowed = [], structuredOutput = false } = {}) {
   if (!Array.isArray(tools) || tools.length === 0) return null;
   const names = tools
     .filter((t) => typeof t === 'string')
@@ -41,7 +44,8 @@ function buildPersonaToolScope(tools, { disallowed = [] } = {}) {
   if (names.length === 0 || names.includes('*')) return null;
   const blocked = new Set(disallowed);
   const out = [];
-  for (const name of [...names, ...HEADLESS_TOOL_FLOOR]) {
+  const extra = structuredOutput === true ? ['StructuredOutput'] : [];
+  for (const name of [...names, ...HEADLESS_TOOL_FLOOR, ...extra]) {
     if (blocked.has(name) || out.includes(name)) continue;
     out.push(name);
   }

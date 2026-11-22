@@ -73,6 +73,26 @@ describe('personaToolScope', () => {
     assert.deepEqual(scope.tools, ['Read', 'Agent', 'Skill', 'ToolSearch', 'TodoWrite']);
   });
 
+  it('appends StructuredOutput when structuredOutput is true', () => {
+    const scope = buildPersonaToolScope(['Read', 'Bash'], { structuredOutput: true });
+    assert.deepEqual(scope.tools, ['Read', 'Bash', 'Agent', 'Skill', 'ToolSearch', 'TodoWrite', 'StructuredOutput']);
+    const twice = buildPersonaToolScope(['StructuredOutput', 'Read'], { structuredOutput: true });
+    assert.equal(twice.tools.filter((t) => t === 'StructuredOutput').length, 1);
+  });
+
+  it('does not add StructuredOutput when absent/false or disallowed', () => {
+    assert.ok(!buildPersonaToolScope(['Read']).tools.includes('StructuredOutput'));
+    assert.ok(!buildPersonaToolScope(['Read'], { structuredOutput: false }).tools.includes('StructuredOutput'));
+    const blocked = buildPersonaToolScope(['Read'], { structuredOutput: true, disallowed: ['StructuredOutput'] });
+    assert.ok(!blocked.tools.includes('StructuredOutput'));
+  });
+
+  it('keeps an unscoped (null) scope null even with structuredOutput', () => {
+    for (const t of [null, undefined, [], ['*']]) {
+      assert.equal(buildPersonaToolScope(t, { structuredOutput: true }), null);
+    }
+  });
+
   it('builds --agents JSON that parses back', () => {
     const scope = buildPersonaToolScope(['Read']);
     const args = personaToolScopeArgs(scope);

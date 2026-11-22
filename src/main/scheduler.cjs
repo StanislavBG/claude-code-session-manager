@@ -165,6 +165,7 @@ const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/ep
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
+const { VALIDATOR_VERDICT_SCHEMA } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
@@ -4920,6 +4921,10 @@ const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
  * `--disallowedTools` takes a variadic list, so another flag must always
  * follow it to end that list — `--output-format` does, right after. Never
  * put `--disallowedTools` last.
+ * `jsonSchema` (object; validator jobs only) adds `--json-schema <json>` right
+ * before `--dangerously-skip-permissions`; the caller must also grant
+ * StructuredOutput in the tool scope — probe 2026-11-22 (CLI 2.1.325): a scoped
+ * run without it silently ignores the schema. null/absent = today's argv.
  * The prompt is NOT in argv: callers send it on the child's stdin
  * (withChildAndLog's `stdinText`). Linux caps a single argv element at 128 KB,
  * and a large prompt failed with spawn E2BIG before the job started (the
@@ -4932,7 +4937,7 @@ function knownMcpServers() {
   return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [] }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [], jsonSchema = null }) {
   return [
     '-p',
     '--model', model,
@@ -4940,6 +4945,7 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers() }),
     ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
+    ...(jsonSchema && typeof jsonSchema === 'object' ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
     '--dangerously-skip-permissions',
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
@@ -5271,7 +5277,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
   const effortResolution = resolveEpicEffort({ cwd, agentType: job.agentType, prdEffort: job.effort });
   const personaEffort = effortResolution.effort;
-  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { disallowed: HEADLESS_DISALLOWED_TOOLS });
+  // Validator jobs (fresh and resume) return a schema-checked verdict:
+  // --json-schema + StructuredOutput in scope (PRD 3613).
+  const isValidator = job.agentType === 'validator';
+  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { disallowed: HEADLESS_DISALLOWED_TOOLS, structuredOutput: isValidator });
   // Epic context packs (PRD 3154): the job's Epic's selected packs load as
   // --plugin-dir per pack, and their laws are appended AFTER the (already
   // capped) persona body — the persona cap never applies to laws. Fresh and
@@ -5507,6 +5516,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       systemPrompt: jobSystemPrompt,
       toolScope: personaToolScope,
       pluginDirArgs: packArgs.pluginDirArgs,
+      jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : null,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 

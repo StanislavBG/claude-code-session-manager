@@ -183,6 +183,7 @@ const webRemote = require('./webRemote.cjs');
 const { registerAgentsHandlers } = require('./agentsIpc.cjs');
 const { registerTelemetryHandlers } = require('./telemetryIpc.cjs');
 const { registerUpdaterIpc } = require('./updaterIpc.cjs');
+const { registerLoginItemIpc } = require('./loginItemIpc.cjs');
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claude/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
@@ -1152,6 +1153,22 @@ try {
   registerUpdaterIpc({ ipcMain, getWindow: () => mainWindow, ptyManager });
 } catch (e) {
   logs.writeLine({ scope: 'main', level: 'error', message: 'updater IPC registration failed', meta: { error: e?.message } });
+}
+try {
+  const { createLoginItem } = require('./lib/process/loginItem.cjs');
+  const loginItem = createLoginItem({
+    app,
+    platform: process.platform,
+    packaged: isPackagedApp(),
+    dev: process.env.SM_DEV === '1' || process.env.SM_E2E === '1',
+    homeDir: os.homedir(),
+    env: process.env,
+    appId: 'run.bilko.session-manager',
+    resolveNpx,
+  });
+  registerLoginItemIpc({ ipcMain, loginItem });
+} catch (e) {
+  logs.writeLine({ scope: 'main', level: 'error', message: 'login item IPC registration failed', meta: { error: e?.message } });
 }
 try {
   require('./lib/opsRetentionSettings.cjs').registerIpc(ipcMain);

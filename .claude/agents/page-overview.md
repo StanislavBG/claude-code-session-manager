@@ -23,7 +23,7 @@ persona: the tool is current, this file is not.
 
 Reads:
 - `~/.claude/session-manager/billing-cache.json` and the `/api/oauth/usage` response behind it, via `billing.fetch` (`src/main/usage.cjs`); OAuth token from `~/.claude/.credentials.json`
-- `~/.claude/projects/*/*.jsonl` session transcripts, via `config.listDir` (Recent sessions)
+- `~/.claude/projects/*/*.jsonl` session transcripts, via `config.listDir` (Recent sessions); re-scanned only through `refreshKnownProjects` in `src/renderer/lib/useKnownProjects.ts`
 - `~/.claude/settings.json`, `<cwd>/.claude/settings.json`, `<cwd>/.claude/settings.local.json`, via `useEffectiveSettings` (effective model and effort)
 - `~/.claude/agents/*.md` persona frontmatter, via `agents.resolveModelInfo`
 - `~/.claude/session-manager/ui-settings-prefs.json` (terminal theme and font)
@@ -44,6 +44,7 @@ Writes:
 - Usage meters (`src/renderer/components/tabs/home/UsageMeters.tsx`) and the footer pills (`src/renderer/components/layout/AlmanacFooter.tsx`) read the same `billing.usage` windows through `src/renderer/lib/usageWindow.ts` (`utilPercent`, `formatReset`, `usageTitle`). Never re-derive them locally.
 - Project lists come only from `useKnownProjects().projects`, via `src/renderer/lib/homeProjectRows.ts` and `src/renderer/lib/knownProjectAggregate.ts`. A project is a cwd; a folder whose cwd never resolved is dropped, never guessed.
 - Enumerating `~/.claude/projects` is an expensive synchronous scan. Never run it uncached on a hot path; the cache in `src/renderer/lib/useKnownProjects.ts` exists for this.
+- The Dashboard stays mounted, so it re-reads its sources only through `src/renderer/lib/useDashboardRefresh.ts` (`useDashboardRefresh`): on a visit (panel focus, or window focus / tab visible while focused; at most once per `DASHBOARD_VISIT_MIN_GAP_MS`, 30 s) and on the Hero's Refresh button (`refresh()`, always). There is no periodic poll of `~/.claude/projects`; a new Dashboard data source joins that hook rather than adding its own reload.
 - Terminal theme and font are one app-wide preference, edited only in `src/renderer/components/tabs/home/TerminalAppearanceCard.tsx` (`src/renderer/lib/terminalSettings.ts`). There is no per-pane copy.
 - "Needs you" rows are real signals only, built by `src/renderer/lib/homeNeedsYou.ts` (`buildNeedsYouRows`). Outside-app items are real signals too: an app posts them through the admin API, and the page only lists and answers them. Nothing on the page is mocked.
 - Dashboard appears on the Home face only and is labelled "Dashboard" to stay distinct from Project Home (header comment in `src/renderer/lib/navGroups.ts`, `NAV_ITEMS`).

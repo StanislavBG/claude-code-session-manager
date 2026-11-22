@@ -31,6 +31,7 @@ const inboxItem = (over: Partial<CustomerFeedbackInboxItem> = {}): CustomerFeedb
   statusNote: null,
   statusAt: null,
   epicId: null,
+  images: [],
   ...over,
 })
 

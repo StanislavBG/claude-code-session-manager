@@ -724,6 +724,8 @@ export interface CustomerFeedbackInboxItem {
   statusNote: string | null;
   statusAt: string | number | null;
   epicId: string | null;
+  /** Screenshot metadata in submission order; `path` = local cache file, null until downloaded. */
+  images: { mime: string; bytes: number; path: string | null }[];
 }
 
 export interface CustomerFeedbackOwnerInfo {
@@ -2544,6 +2546,10 @@ export interface SessionManagerAPI {
     >;
     inboxLinkEpic: (p: { id: string; epicId: string }) => Promise<
       { ok: true } | { ok: false; error: string }
+    >;
+    /** A cached inbox screenshot as a data URL; `index` is 0-based. */
+    inboxImage(p: { id: string; index: number }): Promise<
+      { ok: true; dataUrl: string } | { ok: false; error: string }
     >;
   };
   telemetry: {

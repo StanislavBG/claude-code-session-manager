@@ -144,3 +144,141 @@ test('linkEpic links known id and rejects unknown', async () => {
   expect((await inbox.list({}, deps(null))).items[0].epicId).toBe('e1');
   expect((await inbox.linkEpic('nope', 'e1', deps(null))).ok).toBe(false);
 });
+
+// ── images: metadata + local cache ──────────────────────────────────────────
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('pngdata')]);
+const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('jpgdata')]);
+const GIF = Buffer.from('GIF89a-gifdata');
+const durl = (mime, buf) => `data:${mime};base64,${buf.toString('base64')}`;
+const meta = (mime, buf) => ({ dataUrl: null, mime, bytes: durl(mime, buf).length });
+const full = (mime, buf) => ({ dataUrl: durl(mime, buf), mime, bytes: durl(mime, buf).length });
+
+/** Page GET (images=none) returns `pageItems`; targeted GET returns `imageItems` or `imageResp`. */
+function imgFetch(pageItems, imageItems, imageResp) {
+  return mkFetch((url) => {
+    if (url.includes('images=none')) return { status: 200, json: { items: pageItems, nextSince: 'S', nextModeratedSince: null } };
+    if (imageResp) return imageResp;
+    return { status: 200, json: { items: imageItems, nextSince: null, nextModeratedSince: null } };
+  });
+}
+const imgDeps = (f) => deps(f, { imagesDir: path.join(dir, 'imgs') });
+
+test('maps image metadata in order, caps at 5, absent = []', async () => {
+  const six = Array.from({ length: 6 }, () => meta('image/png', PNG));
+  const f = imgFetch([wire('m1', { images: six }), wire('m2'), wire('m3', { images: 'nope' })], [], { status: 500, json: {} });
+  const r = await inbox.pull(imgDeps(f));
+  expect(r.ok).toBe(true);
+  const items = (await inbox.list({}, imgDeps(f))).items;
+  const m1 = items.find((i) => i.id === 'm1');
+  expect(m1.images).toHaveLength(5);
+  expect(m1.images[0]).toEqual({ mime: 'image/png', bytes: six[0].bytes, path: null });
+  expect(items.find((i) => i.id === 'm2').images).toEqual([]);
+  expect(items.find((i) => i.id === 'm3').images).toEqual([]);
+});
+
+test('caches a 3-image item in order with extensions and 0o600; one targeted GET', async () => {
+  const imgs = [meta('image/png', PNG), meta('image/jpeg', JPG), meta('image/gif', GIF)];
+  const fulls = [full('image/png', PNG), full('image/jpeg', JPG), full('image/gif', GIF)];
+  const f = imgFetch([wire('c1', { images: imgs })], [wire('c0'), wire('c1', { images: fulls })]);
+  const r = await inbox.pull(imgDeps(f));
+  expect(r).toEqual({ ok: true, fetched: 1, pages: 1, imagesCached: 3 });
+  expect(f.calls).toHaveLength(2);
+  const u = new URL(f.calls[1].url);
+  expect(u.searchParams.get('since')).toBe('2026-01-01T00:00:00.000Z');
+  expect(u.searchParams.get('limit')).toBe('20');
+  expect(u.searchParams.has('images')).toBe(false);
+  expect(f.calls[1].init.headers.authorization).toBe(`Bearer ${TOKEN}`);
+  const d = path.join(dir, 'imgs', 'c1');
+  expect(fs.readdirSync(d).sort()).toEqual(['1.png', '2.jpg', '3.gif']);
+  expect(fs.readFileSync(path.join(d, '2.jpg')).equals(JPG)).toBe(true);
+  for (const n of fs.readdirSync(d)) expect(fs.statSync(path.join(d, n)).mode & 0o777).toBe(0o600);
+  const item = (await inbox.list({}, imgDeps(f))).items[0];
+  expect(item.images.map((i) => i.path)).toEqual([path.join(d, '1.png'), path.join(d, '2.jpg'), path.join(d, '3.gif')]);
+  expect(fs.readFileSync(storeFile, 'utf8')).not.toContain('base64');
+
+  // second pull: already cached → no targeted GET, paths kept
+  const f2 = imgFetch([wire('c1', { images: imgs })], []);
+  const r2 = await inbox.pull(imgDeps(f2));
+  expect(r2.imagesCached).toBe(0);
+  expect(f2.calls).toHaveLength(1);
+  expect((await inbox.list({}, imgDeps(f2))).items[0].images[2].path).toBe(path.join(d, '3.gif'));
+
+  const ok = await inbox.readCachedImage('c1', 1, imgDeps(f2));
+  expect(ok).toEqual({ ok: true, dataUrl: durl('image/jpeg', JPG) });
+});
+
+test('mime-mismatch / malformed entries stay null with no file', async () => {
+  const imgs = [meta('image/png', PNG), meta('image/png', PNG), meta('image/png', PNG)];
+  const bad = [
+    { dataUrl: durl('image/png', JPG), mime: 'image/png' }, // sniff mismatch
+    { dataUrl: 'data:image/png;base64,@@@@', mime: 'image/png' }, // non-base64
+    full('image/png', PNG),
+  ];
+  const f = imgFetch([wire('b1', { images: imgs })], [wire('b1', { images: bad })]);
+  const r = await inbox.pull(imgDeps(f));
+  expect(r.ok).toBe(true);
+  expect(r.imagesCached).toBe(1);
+  const d = path.join(dir, 'imgs', 'b1');
+  expect(fs.readdirSync(d)).toEqual(['3.png']);
+  const item = (await inbox.list({}, imgDeps(f))).items[0];
+  expect(item.images.map((i) => i.path)).toEqual([null, null, path.join(d, '3.png')]);
+});
+
+test('failing image GET keeps pull ok, no token leak, retried next pull', async () => {
+  const imgs = [meta('image/png', PNG)];
+  const f = mkFetch((url) => (url.includes('images=none')
+    ? { status: 200, json: { items: [wire('r1', { images: imgs })], nextSince: 'S', nextModeratedSince: null } }
+    : 'throw'));
+  const r = await inbox.pull(imgDeps(f));
+  expect(r).toEqual({ ok: true, fetched: 1, pages: 1, imagesCached: 0 });
+  expect(JSON.parse(fs.readFileSync(storeFile, 'utf8')).nextSince).toBe('S');
+  expect((await inbox.list({}, imgDeps(f))).items[0].images[0].path).toBeNull();
+  expect(fs.readFileSync(storeFile, 'utf8')).not.toContain(TOKEN);
+
+  const f404 = imgFetch([], [], { status: 404, json: {} });
+  expect((await inbox.pull(imgDeps(f404))).imagesCached).toBe(0);
+
+  const f2 = mkFetch((url) => (url.includes('images=none')
+    ? { status: 200, json: { items: [], nextSince: 'S', nextModeratedSince: null } }
+    : { status: 200, json: { items: [wire('r1', { images: [full('image/png', PNG)] })] } }));
+  const r2 = await inbox.pull(imgDeps(f2));
+  expect(r2.imagesCached).toBe(1);
+  expect(fs.existsSync(path.join(dir, 'imgs', 'r1', '1.png'))).toBe(true);
+});
+
+test('unsafe id is never used in a path', async () => {
+  const imgs = [meta('image/png', PNG)];
+  const evil = '../escape';
+  const f = imgFetch([wire('x1', { id: evil, images: imgs })], [wire('x1', { id: evil, images: [full('image/png', PNG)] })]);
+  const r = await inbox.pull(imgDeps(f));
+  expect(r.ok).toBe(true);
+  expect(r.imagesCached).toBe(0);
+  expect(f.calls).toHaveLength(1);
+  expect(fs.existsSync(path.join(dir, 'escape'))).toBe(false);
+  expect(fs.existsSync(path.join(dir, 'imgs'))).toBe(false);
+  expect((await inbox.readCachedImage(evil, 0, imgDeps(f))).ok).toBe(false);
+});
+
+test('prunes cache dirs whose id left the mirror', async () => {
+  const imgsDir = path.join(dir, 'imgs');
+  fs.mkdirSync(path.join(imgsDir, 'gone1'), { recursive: true });
+  fs.writeFileSync(path.join(imgsDir, 'gone1', '1.png'), PNG);
+  const f = imgFetch([wire('k1', { images: [meta('image/png', PNG)] })], [wire('k1', { images: [full('image/png', PNG)] })]);
+  await inbox.pull(imgDeps(f));
+  expect(fs.readdirSync(imgsDir)).toEqual(['k1']);
+});
+
+test('readCachedImage refusals: bad index, unsafe id, missing file, no owner', async () => {
+  const f = imgFetch([wire('z1', { images: [meta('image/png', PNG)] })], [wire('z1', { images: [full('image/png', PNG)] })]);
+  await inbox.pull(imgDeps(f));
+  const d = imgDeps(f);
+  expect((await inbox.readCachedImage('z1', 0, d))).toEqual({ ok: true, dataUrl: durl('image/png', PNG) });
+  for (const idx of [-1, 5, 1.5, '0', 1]) expect((await inbox.readCachedImage('z1', idx, d)).ok).toBe(false);
+  expect((await inbox.readCachedImage('a/b', 0, d)).ok).toBe(false);
+  expect((await inbox.readCachedImage('nope', 0, d)).ok).toBe(false);
+  fs.writeFileSync(path.join(dir, 'imgs', 'z1', '1.png'), 'not an image');
+  expect((await inbox.readCachedImage('z1', 0, d)).ok).toBe(false);
+  fs.rmSync(path.join(dir, 'imgs', 'z1', '1.png'));
+  expect((await inbox.readCachedImage('z1', 0, d)).ok).toBe(false);
+  expect(await inbox.readCachedImage('z1', 0, { ...d, env: {} })).toEqual({ ok: false, error: 'Feedback owner token not configured' });
+});

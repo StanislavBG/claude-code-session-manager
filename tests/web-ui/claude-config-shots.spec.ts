@@ -1,4 +1,4 @@
-import { test, expect, chromium, type Page } from '@playwright/test'
+import { test, expect, chromium, type Locator, type Page } from '@playwright/test'
 import { build } from 'esbuild'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -31,21 +31,43 @@ interface TabSpec {
   header: string
   headerText: string[]
   /** Extra structure checks for the tab. */
-  extra?: (page: Page) => Promise<void>
+  extra?: (page: Page, panel: Locator) => Promise<void>
 }
 
 const rows = (page: Page) => page.getByTestId('config-list-row')
+
+// Wave-3 design details (validate-claude-config-wave3.md findings 1-30): each is asserted so a
+// regression fails this gate instead of only showing up in a PNG nobody diffs.
+
+/** One editor footer (finding 6) and the Outline closed by default (finding 5). */
+async function editorChrome(panel: Locator) {
+  await expect(panel.getByTestId('document-editor-pane')).toHaveCount(1)
+  await expect(panel.getByTestId('editor-status-bar')).toHaveCount(1)
+  await expect(panel.getByTestId('document-outline-toggle')).toHaveAttribute('aria-pressed', 'false')
+  await expect(panel.getByTestId('doc-outline')).toHaveCount(0)
+}
+
+/** Settings rows carry one control each — no inline 'Set to:' input (finding 9). */
+async function settingsRows(panel: Locator, stages: string[]) {
+  await expect(panel.getByTestId('setting-card').first()).toBeVisible()
+  await expect(panel.getByText('Set to:')).toHaveCount(0)
+  // The source ladder names only this face's scopes (finding 10).
+  const ladder = panel.getByTestId('source-ladder').first()
+  await expect(ladder.locator('[data-stage]')).toHaveCount(stages.length)
+  expect(await ladder.locator('[data-stage]').evaluateAll((els) => els.map((e) => e.getAttribute('data-stage')))).toEqual(stages)
+}
 
 const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string, string>; tabs: TabSpec[] }> = {
   home: {
     eyebrow: 'CLAUDE CODE · GLOBAL',
     scope: '~/.claude',
-    counts: { mcp: '3', plugins: '4', agents: '9' },
+    // CLAUDE.md chip = the file + its two imports; Settings = top-level keys set in settings.json (finding 1).
+    counts: { 'claude-md': '3 files', settings: '3', mcp: '3', skills: '6', plugins: '4', agents: '9' },
     tabs: [
       {
         tab: 'claude-md', label: 'CLAUDE.md', card: 'claude-md-file-card', eyebrow: 'FILE + ITS IMPORTS',
         header: 'config-detail-header', headerText: ['~/.claude/CLAUDE.md · YOUR INSTRUCTIONS FOR EVERY PROJECT', 'CLAUDE.md'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           const imports = page.getByTestId('referenced-file-row')
           await expect(imports).toHaveCount(2)
           await expect(imports.nth(0)).toContainText('git.md')
@@ -53,19 +75,29 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
           await expect(imports.nth(1)).toContainText('writing.md')
           await expect(imports.nth(1)).toContainText('18 lines')
           await expect(page.getByTestId('tiptap-editor')).toContainText('House rules')
+          // Each `@` import line is its own block with its own marker (finding 3).
+          const importBlocks = page.getByTestId('tiptap-editor').locator('[data-sm-import]')
+          await expect(importBlocks).toHaveCount(2)
+          await expect(importBlocks.nth(0)).toHaveAttribute('data-sm-import', '~/.claude/rules/git.md')
+          await expect(importBlocks.nth(1)).toHaveAttribute('data-sm-import', '~/.claude/rules/writing.md')
+          for (let i = 0; i < 2; i++) await expect(importBlocks.nth(i).locator('[data-sm-import-marker]')).toHaveText('@')
+          const [a, b] = [await importBlocks.nth(0).boundingBox(), await importBlocks.nth(1).boundingBox()]
+          expect(b!.y).toBeGreaterThanOrEqual(a!.y + a!.height - 1)
+          await editorChrome(panel)
         },
       },
       {
         tab: 'settings', label: 'Settings', card: 'settings-file-card', eyebrow: 'SETTINGS FILE',
         header: 'settings-detail-header', headerText: ['USER SETTINGS · 2 OF 3 SET', 'Essentials'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.getByTestId('settings-group-row').first()).toContainText('Essentials2/3')
+          await settingsRows(panel, ['default', 'user'])
         },
       },
       {
         tab: 'mcp', label: 'MCP', select: 'mcp-row-playwright', card: 'config-file-card', eyebrow: 'SERVER FILE',
         header: 'mcp-detail', headerText: ['User scope', '~/.claude.json › mcpServers › playwright'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.locator('[data-testid^="mcp-row-"]')).toHaveCount(3)
           await expect(page.getByTestId('mcp-detail-name')).toHaveText('playwright')
         },
@@ -73,15 +105,16 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
       {
         tab: 'skills', label: 'Skills', select: 'pdf', card: 'config-file-card', eyebrow: 'SKILLS FOLDER',
         header: 'config-detail-header', headerText: ['SKILL · USER · ~/.claude/skills/pdf/SKILL.md', 'pdf'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.getByTestId('skills-item')).toHaveCount(6)
           await expect(page.getByTestId('skills-folder-on')).toHaveText('6 on')
+          await editorChrome(panel)
         },
       },
       {
         tab: 'plugins', label: 'Plugins', card: 'config-file-card', eyebrow: 'PLUGINS',
         header: 'config-detail-header', headerText: ['PLUGIN · CLAUDE-PLUGINS-OFFICIAL', 'commit-commands'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(rows(page)).toHaveCount(4)
           await expect(rows(page).filter({ hasText: 'pr-review-toolkit' })).toContainText('1 command · 6 agents')
           await expect(page.getByTestId('config-saved-line')).toContainText('Saved — matches settings.json › enabledPlugins')
@@ -90,9 +123,23 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
       {
         tab: 'agents', label: 'Agents', card: 'config-file-card', eyebrow: 'AGENTS FOLDER',
         header: 'config-detail-header', headerText: ['AGENT · USER · ~/.claude/agents/architect.md', 'architect'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(rows(page)).toHaveCount(9)
           await expect(page.getByTestId('agent-detail-description')).toContainText('Designs the shape of a change')
+          // Three compact selects under MODEL / EFFORT / RUNS ON (finding 23).
+          const runtime = panel.getByTestId('agent-runtime-row')
+          await expect(runtime.locator('select')).toHaveCount(3)
+          expect(await runtime.locator('select').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')?.toUpperCase()))).toEqual(['MODEL', 'EFFORT', 'RUNS ON'])
+          // Rendered label text (the labels are CSS-uppercased), each sitting above its select.
+          expect(await runtime.locator('label').evaluateAll((els) => els.map((e) => (e.firstElementChild as HTMLElement).innerText.trim()))).toEqual(['MODEL', 'EFFORT', 'RUNS ON'])
+          // The prompt editor follows the config card, inside the 1040px frame (finding 25).
+          const card = await panel.getByTestId('agent-runtime-card').boundingBox()
+          const editor = await panel.getByTestId('agent-detail-editor').boundingBox()
+          expect(editor!.y).toBeGreaterThanOrEqual(card!.y + card!.height)
+          expect(editor!.y - (card!.y + card!.height)).toBeLessThan(40)
+          expect(editor!.y).toBeLessThan(VIEWPORT.height - 100)
+          expect(await panel.getByTestId('agent-runtime-card').evaluate((el) => el.nextElementSibling?.getAttribute('data-testid'))).toBe('agent-detail-editor')
+          await editorChrome(panel)
         },
       },
     ],
@@ -100,46 +147,67 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
   project: {
     eyebrow: 'CLAUDE CODE · PROJECT',
     scope: '~/Projects/Self',
-    counts: { memory: '9', 'claude-md': 'missing', mcp: '5', skills: '13' },
+    counts: { memory: '9', 'claude-md': 'missing', settings: '3', mcp: '5', skills: '13' },
     tabs: [
       {
         tab: 'memory', label: 'Memory', card: 'config-file-card', eyebrow: 'MEMORY FOLDER',
         header: 'mx-reader-header', headerText: ['MODIFIED JUST NOW', 'portfolio-action-project-field'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.locator('[data-testid^="mx-list-row-"]')).toHaveCount(9)
           await expect(page.getByTestId('mx-list-folder-count')).toHaveText('9 files')
+          // No inner page header, nav rail or path footer (finding 27).
+          for (const id of ['mx-search-trigger', 'mx-learn', 'mx-nav', 'mx-index-footer']) await expect(panel.getByTestId(id)).toHaveCount(0)
+          await expect(panel.getByText('CONFIGURE', { exact: true })).toHaveCount(0)
+          await expect(panel.getByText('Search all memories', { exact: false })).toHaveCount(0)
+          // The full title, not truncated (finding 28).
+          const title = panel.getByTestId('mx-reader-title')
+          await expect(title).toHaveText('portfolio-action-project-field')
+          expect(await title.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
         },
       },
       {
-        tab: 'claude-md', label: 'CLAUDE.md', card: 'claude-md-file-card', eyebrow: 'FILE + ITS IMPORTS',
+        tab: 'claude-md', label: 'CLAUDE.md', card: 'claude-md-file-card', eyebrow: 'INSTRUCTIONS FILE',
         header: 'config-detail-header', headerText: ['~/Projects/Self/CLAUDE.md · PROJECT INSTRUCTIONS', 'CLAUDE.md', 'Not created'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.getByTestId('claude-md-empty')).toContainText('Nothing tells Claude how this repo works yet.')
+          // A missing file keeps the editor chrome; its save button reads 'Create file' (finding 30).
+          await expect(panel.getByTestId('document-empty')).toBeVisible()
+          await expect(panel.getByTestId('editor-save')).toContainText('Create file')
+          await editorChrome(panel)
         },
       },
       {
         tab: 'settings', label: 'Settings', card: 'settings-file-card', eyebrow: 'SETTINGS FILE',
         header: 'settings-detail-header', headerText: ['PROJECT SETTINGS', 'Essentials'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.getByTestId('settings-file-project')).toBeVisible()
           await expect(page.getByTestId('settings-file-local')).toBeVisible()
-          await expect(page.getByTestId('project-claude-config-epic-isolation')).toBeVisible()
+          // Epic isolation is a row in the Settings rail, not a strip above the page (finding 12).
+          await expect(panel.getByTestId('settings-row-epic-isolation')).toBeVisible()
+          await expect(page.getByTestId('project-claude-config-epic-isolation')).toHaveCount(0)
+          await settingsRows(panel, ['default', 'user', 'project', 'local'])
         },
       },
       {
         tab: 'mcp', label: 'MCP', card: 'config-file-card', eyebrow: 'SERVER FILE',
         header: 'mcp-detail', headerText: ['Project scope', '.mcp.json › mcpServers › burrow'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.locator('[data-testid^="mcp-row-"]')).toHaveCount(5)
           await expect(page.getByTestId('mcp-detail-name')).toHaveText('burrow')
+          // One 'Auto-approve all servers' toggle row in the SERVER FILE card (finding 16).
+          const card = panel.getByTestId('config-file-card').first()
+          await expect(card.getByText('Auto-approve all servers', { exact: true })).toBeVisible()
+          await expect(card.locator('input[type="checkbox"]')).toHaveCount(0)
+          await expect(panel.getByTestId('mcp-detail-approved')).toBeVisible()
         },
       },
       {
         tab: 'skills', label: 'Skills', card: 'config-file-card', eyebrow: 'SKILLS FOLDER',
         header: 'config-detail-header',
         headerText: ['SKILL · PROJECT · ~/Projects/Self/.claude/skills/bank-of-america-statements/SKILL.md', 'bank-of-america-statements'],
-        extra: async (page) => {
+        extra: async (page, panel) => {
           await expect(page.getByTestId('skills-item')).toHaveCount(13)
+          await editorChrome(panel)
         },
       },
     ],
@@ -205,7 +273,7 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         const header = panel.getByTestId(t.header).first()
         await expect(header).toBeVisible()
         for (const text of t.headerText) await expect(header).toContainText(text)
-        await t.extra?.(page)
+        await t.extra?.(page, panel)
 
         await page.waitForTimeout(400) // fonts + editor settle
         const file = path.join(OUT, `${face}-${t.tab}.png`)

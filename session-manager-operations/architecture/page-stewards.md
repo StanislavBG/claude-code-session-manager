@@ -105,6 +105,10 @@ How to check: `npm run lint:test-smells` plus the verdicts.
 
 ## How a steward works
 
+**Start of every run** — read this file first: the principles, the Audit / Review / Implement modes, the report
+format and the severity scale. Then run `node scripts/page-surface.cjs <key>` for the live surface. Never trust a
+file list copied into a steward file: the tool is current, the steward file is not.
+
 **Audit** — an audit PRD, or someone asks "audit <page>". Run `node scripts/page-surface.cjs <key>`. Check each
 principle against the page's owned files. Note shared files but do not judge them, because they belong to every
 page that reaches them. Write the audit report, commit only that file, and never edit product code or queue work.

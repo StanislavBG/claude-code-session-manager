@@ -145,6 +145,45 @@ test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-anoth
   }
 });
 
+test('project video tool contract: macro purposes name project-video, project_video_write names episode, recipe exists', () => {
+  const byName = (n) => MCP_TOOL_CATALOG.find((e) => e.name === n);
+  for (const n of ['macro_save', 'macro_list']) {
+    const e = byName(n);
+    expect(e.purpose).toContain("'project-video'");
+    expect(e.purpose).toContain('Project Home ▸ Video');
+    expect(e.purpose).toMatch(/estimateMinutes/);
+    expect(e.purpose).toMatch(/repoPaths/);
+    expect(e.purpose).toMatch(/review/);
+    expect(e.purpose).toMatch(/180 minutes/);
+  }
+  expect(byName('macro_save').purpose).toMatch(/humanRequestQuote/);
+  const video = byName('project_video_write');
+  expect(video.purpose).toContain("'episode'");
+  expect(video.purpose).toContain('<meta name="sm-demo-aspect" content="9:16">');
+  expect(video.purpose).toMatch(/16:9/);
+  for (const n of ['project_video_write', 'project_demo_video_write']) {
+    const text = composeDescription(byName(n));
+    expect(text).toContain('2 MiB per started 30 s of lengthS');
+    expect(text).not.toMatch(/2MB/);
+  }
+  const recipe = MCP_RECIPES.find((r) => r.id === 'add-project-video-tool');
+  expect(recipe).toBeTruthy();
+  expect(recipe.title).toBe('Add a project video tool');
+  const steps = recipe.steps.join(' ');
+  for (const s of [
+    '.claude/agents/',
+    'mcp__session-manager-scheduler__project_video_write',
+    'mcp__session-manager-scheduler__project_video_review_write',
+    "surface 'project-video'",
+    'humanRequestQuote',
+    'Entry id',
+    'Review: approved',
+    'Review: changes requested',
+    'commit',
+    'Project Home ▸ Video',
+  ]) expect(steps).toContain(s);
+});
+
 test.each(MCP_TOOL_CATALOG)('$name exampleArgs satisfies its own inputSchema required fields', (entry) => {
   const tool = TOOLS.find((t) => t.name === entry.name);
   expect(tool).toBeTruthy();

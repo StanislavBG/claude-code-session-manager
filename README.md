@@ -152,6 +152,7 @@ Recipes:
 - `unstick-needs-review-job` — Unstick a job stuck in needs_review
 - `hand-finding-to-another-project` — Hand a finding to another project
 - `reply-to-the-project-that-asked` — Reply to the project that asked
+- `add-project-video-tool` — Add a project video tool
 <!-- /gen:mcp-recipes -->
 
 Tools:
@@ -289,13 +290,13 @@ The app copies these into `~/.claude/agents/` on first launch.
 
 ### Start at login
 
-This is off by default. Turn it on in App Settings, Startup.
+Off by default. Turn it on in App Settings, Startup.
 
-An npx install starts through `npx claude-code-session-manager@latest`. So each login fetches the newest release. If that fails within two minutes, it tries once more with the cached copy. The script is `~/.claude/session-manager/start-at-login.sh`. On Linux, a desktop entry in `~/.config/autostart/` runs it. On macOS, a launch agent in `~/Library/LaunchAgents/` runs it.
+An npx install starts through `npx claude-code-session-manager@latest`, so each login fetches the newest release; if that fails within two minutes, it retries with the cached copy. The script is `~/.claude/session-manager/start-at-login.sh`, run by a desktop entry in `~/.config/autostart/` (Linux) or a launch agent in `~/Library/LaunchAgents/` (macOS).
 
-A packaged build starts the installed app. On macOS and Windows, it is one of the system's login items. A Linux AppImage uses the autostart folder too.
+A packaged build starts the installed app: a login item on macOS and Windows, the autostart folder for a Linux AppImage.
 
-To remove it, turn the switch off. Or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). For a packaged macOS or Windows build, remove it from login items.
+To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). For a packaged macOS or Windows build, remove it from login items.
 
 It is not offered for an npx install on Windows, or in a dev run.
 

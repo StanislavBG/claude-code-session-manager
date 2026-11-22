@@ -391,7 +391,7 @@ const MCP_TOOL_CATALOG = [
       html: '<!DOCTYPE html><html><head><style>body{font:16px sans-serif}</style></head><body><h1>Architecture</h1></body></html>',
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
-      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB read limit).',
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2 MiB read limit; the project_video_write cap is 2 MiB per started 30 s of lengthS).',
   },
   {
     name: 'project_matrix_read',
@@ -429,13 +429,15 @@ const MCP_TOOL_CATALOG = [
     requiredOneOf: [['html', 'htmlPath']],
     group: 'project-home',
     purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "
-      + "via the session-manager app's admin API. Writing an existing videoId replaces that video.",
+      + "via the session-manager app's admin API. Writing an existing videoId replaces that video. `kind` is 'project-demo', 'blog-post', "
+      + "'feature' or 'episode' (an episode of a series, e.g. from a Project Video tool). The video is 16:9 by default; a vertical 9:16 video "
+      + 'declares <meta name="sm-demo-aspect" content="9:16"> in its head.',
     summary: 'Save one self-contained HTML video for Project Home.',
     whenToUse: 'Use when asked to make a project video (demo, marketing). Compose the whole document yourself (inline <style>/<script>, '
       + 'data: URIs for assets, CSS/JS-driven animation) from what is really true about the project, declare `kind` and `lengthS`, '
       + 'then pass the document as `html` or — preferred when it embeds a base64 audio/image data URI — as an absolute `htmlPath`.',
     whenNotToUse: 'Never fabricate content. Do not use for static knowledge pages — use project_page_write. The document must be self-contained '
-      + 'and non-network-capable: the call is rejected for empty input, more than 2MB, remote references, or network-capable APIs.',
+      + 'and non-network-capable: the call is rejected for empty input, more than 2 MiB per started 30 s of lengthS, remote references, or network-capable APIs.',
     exampleArgs: {
       cwd: '/home/bilko/Projects/session-manager',
       videoId: 'demo-30s',
@@ -446,7 +448,7 @@ const MCP_TOOL_CATALOG = [
       meta: {},
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
-      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB).',
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2 MiB per started 30 s of lengthS).',
   },
   {
     name: 'project_demo_video_write',
@@ -463,7 +465,7 @@ const MCP_TOOL_CATALOG = [
       + 'local .html file and pass its absolute path as `htmlPath`.',
     whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
       + 'document must be self-contained and non-network-capable: the call is rejected for empty input, more than '
-      + '2MB, any <script src>, <link href="http…">, @import, or url(http…) (no remote references); any '
+      + '2 MiB per started 30 s of lengthS (the sm-demo-duration seconds), any <script src>, <link href="http…">, @import, or url(http…) (no remote references); any '
       + 'fetch/XMLHttpRequest/WebSocket/EventSource/sendBeacon/dynamic import/importScripts/<iframe>/<object>/'
       + '<embed>/window.open/http(s)-pointing src or href (no network-capable APIs); or a missing/out-of-range '
       + 'sm-demo-duration meta tag.',
@@ -472,7 +474,7 @@ const MCP_TOOL_CATALOG = [
       html: '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="30"></head><body><h1>Example</h1></body></html>',
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
-      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB); prefer `htmlPath` for base64 data URIs. '
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2 MiB per started 30 s of lengthS); prefer `htmlPath` for base64 data URIs. '
       + 'The document is CSP-stamped after it is written, so the viewer sandbox is the real network fence — these checks are defence in depth.',
   },
   {
@@ -579,7 +581,10 @@ const MCP_TOOL_CATALOG = [
     purpose: "List this project's HOT KEYS macros — the saved (agent, tag, prompt) one-click buttons shown "
       + "in the Sessions tab's HOT KEYS strip or as tools in Project Home ▸ Tools, via the session-manager app's admin API. "
       + "Each macro's `surface` tells where it shows: 'sessions' = Sessions HOT KEYS strip, 'project-home' = a tool in "
-      + 'Project Home ▸ Tools, shown in every project (only what it generates is per project).',
+      + 'Project Home ▸ Tools, shown in every project (only what it generates is per project), '
+      + "'project-video' = this project's own Video tool in Project Home ▸ Video only, beside Demo Video (never in Sessions HOT KEYS, "
+      + 'Project Home ▸ Tools, the phone remote or other projects); it carries `job` { estimateMinutes 5-60 (the run budget is 3x, capped at 180 minutes), '
+      + 'repoPaths (optional: a committing run that must land a commit under those paths), review (optional: a review stage a human approves first) }.',
     summary: "List this project's saved one-click macros.",
     whenToUse: 'Use to see what macros already exist for this project (including machine-wide `*` macros and '
       + 'built-ins) before deciding whether to add, update or delete one.',
@@ -593,7 +598,11 @@ const MCP_TOOL_CATALOG = [
     group: 'macros',
     purpose: "Create or update one of this project's HOT KEYS macros — a saved (agentName, tag, prompt) "
       + 'one-click button — via the session-manager app\'s admin API, through the same macroLibrary.cjs store '
-      + 'the Sessions HOT KEYS strip reads from.',
+      + 'the Sessions HOT KEYS strip reads from. `surface` '
+      + "'project-video' = this project's own Video tool in Project Home ▸ Video only, beside Demo Video (never in Sessions HOT KEYS, "
+      + 'Project Home ▸ Tools, the phone remote or other projects); it carries `job` { estimateMinutes 5-60 (the run budget is 3x, capped at 180 minutes), '
+      + 'repoPaths (optional: a committing run that must land a commit under those paths), review (optional: a review stage a human approves first) }. '
+      + 'A project-video save always needs `humanRequestQuote`, the human\'s words naming Project Home.',
     summary: 'Create or change a saved one-click macro (agent, mission, prompt).',
     whenToUse: 'Pass `id` to update an existing macro already visible to this project; omit `id` to create a new '
       + 'one scoped to this project. Use for things like a "Publish git + npm" macro a human will press '
@@ -619,7 +628,8 @@ const MCP_TOOL_CATALOG = [
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or "
       + 'process.cwd()) when omitted. label, agentName, tag and prompt are all required strings. '
-      + "`surface` is optional: 'sessions' = Sessions HOT KEYS strip, 'project-home' = a tool in Project Home ▸ Tools. "
+      + "`surface` is optional: 'sessions' = Sessions HOT KEYS strip, 'project-home' = a tool in Project Home ▸ Tools, "
+      + "'project-video' = this project's own tool in Project Home ▸ Video (saved for this project only; `projects` is ignored). "
       + "A surface 'project-home' macro is always saved for every project (only what it generates is per project); it "
       + 'needs `humanRequestQuote` naming Project Home (or every project) and is refused in a scheduled job or outside '
       + 'a Session Manager chat session. '
@@ -785,6 +795,18 @@ const MCP_RECIPES = [
       'Do the work and verify it (gate green, commit landed, release named if it needs one).',
       'Call feedback_reply with message (what was done, with commit/version) and outcome "done" — or "blocked" / "question" when you cannot finish.',
       'Read the result delivery: "delivered", "event-only" or "fallback". Report only that; never say the other project acted. At most 3 replies per thread.',
+    ],
+  },
+  {
+    id: 'add-project-video-tool',
+    title: 'Add a project video tool',
+    steps: [
+      'Only when the human asked in this chat for a video tool in Project Home. It shows in this project\'s Project Home ▸ Video only, beside Demo Video — never in Sessions HOT KEYS, Tools, the phone remote or other projects.',
+      'Write the persona in this project\'s .claude/agents/<name>.md (project-local resolves before ~/.claude/agents). Its `tools` frontmatter must list every SM MCP tool the run calls — mcp__session-manager-scheduler__project_video_write, plus mcp__session-manager-scheduler__project_video_review_write for a review tool — because a headless job may call only the MCP tools its persona lists.',
+      'Call macro_save with surface \'project-video\', agentName (that persona), tag, prompt, job { estimateMinutes 5-60 (budget 3x, capped at 180 minutes), repoPaths (optional: a committing run), review (optional: a review stage) } and humanRequestQuote — the human\'s words naming Project Home.',
+      'Each press runs as a scheduled job. The run saves its video with project_video_write (kind e.g. \'episode\'; 9:16 via <meta name="sm-demo-aspect" content="9:16">) using the videoId from the PRD\'s \'Entry id\' line — never a new id.',
+      'A review tool\'s first run calls project_video_review_write (script text + images) and ends. The next run carries \'Review: approved…\' (build the final video) or \'Review: changes requested…\' (redo the review material with that note).',
+      'A repoPaths run must land a commit under those paths (the saved video entry itself is never committed); without repoPaths the run is artifact-only. Only the human approves, asks for changes or retries — in Project Home ▸ Video; no tool can.',
     ],
   },
 ];

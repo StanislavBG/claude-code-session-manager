@@ -152,7 +152,7 @@ test('evidence hit via the scheduler run record: reads the model logged in the m
     { slug: 'older', runId: 'run-older', agentType: 'runner', finishedAt: '2026-01-01T00:00:00.000Z' },
     { slug: 'newer', runId: 'run-newer', agentType: 'runner', finishedAt: '2026-02-01T00:00:00.000Z' },
   ]);
-  writeRunLog('run-older', 'older', '[scheduler] agentType=runner persona=/p/runner.md model=claude-old-1\n');
+  writeRunLog('run-older', 'older', '[scheduler] agentType=runner persona=/p/runner.md model=claude-sonnet-old-1\n');
   writeRunLog('run-newer', 'newer', '[scheduler] agentType=runner persona=/p/runner.md model=claude-sonnet-5\n');
 
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'runner' });
@@ -235,7 +235,7 @@ test('reads only the tail of a large history', async () => {
     { slug: 'tail-row', runId: 'run-tail', agentType: 'big', finishedAt: '2026-02-01T00:00:00.000Z' },
   ], 20 * 1024 * 1024);
   expect(fs.statSync(file).size).toBeGreaterThanOrEqual(20 * 1024 * 1024);
-  writeRunLog('run-head', 'head-only', '[scheduler] agentType=big persona=/p/b.md model=claude-head-1\n');
+  writeRunLog('run-head', 'head-only', '[scheduler] agentType=big persona=/p/b.md model=claude-sonnet-head-1\n');
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'big' });
   // Head row is outside the 1 MB tail, so only the tail row is a candidate
   // (and it has no run log) -> no evidence from the head.
@@ -249,11 +249,11 @@ test('returns newest matching row', async () => {
     { slug: 'mid', runId: 'run-mid', agentType: 'big2', finishedAt: '2026-02-01T00:00:00.000Z' },
     { slug: 'new', runId: 'run-new', agentType: 'big2', finishedAt: '2026-03-01T00:00:00.000Z' },
   ], 20 * 1024 * 1024);
-  writeRunLog('run-old', 'old', '[scheduler] agentType=big2 persona=/p/x.md model=claude-old-1\n');
-  writeRunLog('run-mid', 'mid', '[scheduler] agentType=big2 persona=/p/x.md model=claude-mid-1\n');
-  writeRunLog('run-new', 'new', '[scheduler] agentType=big2 persona=/p/x.md model=claude-new-1\n');
+  writeRunLog('run-old', 'old', '[scheduler] agentType=big2 persona=/p/x.md model=claude-sonnet-old-1\n');
+  writeRunLog('run-mid', 'mid', '[scheduler] agentType=big2 persona=/p/x.md model=claude-sonnet-mid-1\n');
+  writeRunLog('run-new', 'new', '[scheduler] agentType=big2 persona=/p/x.md model=claude-sonnet-new-1\n');
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'big2' });
-  expect(info.resolvedModelId).toBe('claude-new-1');
+  expect(info.resolvedModelId).toBe('claude-sonnet-new-1');
 });
 
 test('a malformed history file yields no evidence and does not throw', async () => {
@@ -337,4 +337,79 @@ test('a persona model still wins over the settings model', async () => {
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'writer2' });
   expect(info.modelAlias).toBe('sonnet');
   expect(info.modelSource).toBe('persona');
+});
+
+// ---------- evidence is a concrete id from a run of the persona's own model ----------
+
+test('dev-lead: a run log whose scheduler line holds the alias resolves to the init line\'s concrete id', async () => {
+  writeGlobalPersona('dev-lead', ['model: opus']);
+  writeQueueJobs([{ slug: 'job', runId: 'run-1', agentType: 'dev-lead', finishedAt: '2026-11-22T00:00:00.000Z' }]);
+  writeRunLog('run-1', 'job', [
+    '[scheduler] agentType=dev-lead persona=/home/user/.claude/agents/dev-lead.md model=opus',
+    '{"type":"system","subtype":"init","cwd":"/x","model":"claude-opus-5-5","tools":[]}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5"}}',
+  ].join('\n') + '\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'dev-lead' });
+  expect(info.resolvedModelId).toBe('claude-opus-5-5');
+  expect(info.resolvedFrom).toBe('scheduler-run');
+  expect(info.modelAlias).toBe('opus');
+  expect(info.modelSource).toBe('persona');
+});
+
+test('an alias-only run log gives no evidence and the next newest job is tried', async () => {
+  writeGlobalPersona('validator', ['model: sonnet']);
+  writeQueueJobs([
+    { slug: 'old', runId: 'run-old', agentType: 'validator', finishedAt: '2026-11-01T00:00:00.000Z' },
+    { slug: 'new', runId: 'run-new', agentType: 'validator', finishedAt: '2026-11-20T00:00:00.000Z' },
+  ]);
+  writeRunLog('run-new', 'new', '[scheduler] agentType=validator persona=/p/validator.md model=sonnet\n');
+  writeRunLog('run-old', 'old', '[scheduler] agentType=validator persona=/p/validator.md model=sonnet\n{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'validator' });
+  expect(info.resolvedModelId).toBe('claude-sonnet-5-5');
+});
+
+test('an alias-only run log with no other evidence leaves resolvedModelId null, never the alias', async () => {
+  writeGlobalPersona('validator', ['model: sonnet']);
+  writeQueueJobs([{ slug: 'new', runId: 'run-new', agentType: 'validator', finishedAt: '2026-11-20T00:00:00.000Z' }]);
+  writeRunLog('run-new', 'new', '[scheduler] agentType=validator persona=/p/validator.md model=sonnet\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'validator' });
+  expect(info.resolvedModelId).toBeNull();
+  expect(info.resolvedFrom).toBeNull();
+});
+
+test('architect: a newer session with its own model override is skipped; the older plain session gives the id', async () => {
+  writeGlobalPersona('architect', ['model: opus']);
+  writeActiveIndex({
+    'epic-old': { id: 'epic-old', claudeSessionId: 'sess-old', agentType: 'architect', createdAt: '2026-11-01T00:00:00.000Z' },
+    'epic-new': { id: 'epic-new', claudeSessionId: 'sess-new', agentType: 'architect', model: 'fable[1m]', createdAt: '2026-11-20T00:00:00.000Z' },
+  });
+  writeTranscript('sess-old', [{ type: 'assistant', message: { model: 'claude-opus-5-5' } }]);
+  writeTranscript('sess-new', [{ type: 'assistant', message: { model: 'claude-fable-5-2' } }]);
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'architect' });
+  expect(info.resolvedModelId).toBe('claude-opus-5-5');
+  expect(info.resolvedFrom).toBe('transcript');
+  expect(info.modelAlias).toBe('opus');
+});
+
+test('architect: with only the overridden session, resolvedModelId is null', async () => {
+  writeGlobalPersona('architect', ['model: opus']);
+  writeActiveIndex({
+    'epic-new': { id: 'epic-new', claudeSessionId: 'sess-new', agentType: 'architect', model: 'fable[1m]', createdAt: '2026-11-20T00:00:00.000Z' },
+  });
+  writeTranscript('sess-new', [{ type: 'assistant', message: { model: 'claude-fable-5-2' } }]);
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'architect' });
+  expect(info.resolvedModelId).toBeNull();
+  expect(info.resolvedFrom).toBeNull();
+});
+
+test('an opus alias never resolves to an id of another family', async () => {
+  writeGlobalPersona('opus-only', ['model: opus[1m]']);
+  writeQueueJobs([{ slug: 'j', runId: 'run-j', agentType: 'opus-only', finishedAt: '2026-11-20T00:00:00.000Z' }]);
+  writeRunLog('run-j', 'j', '[scheduler] agentType=opus-only persona=/p/x.md model=claude-sonnet-5-5\n');
+  writeActiveIndex({
+    'epic-1': { id: 'epic-1', claudeSessionId: 'sess-1', agentType: 'opus-only', createdAt: '2026-11-20T00:00:00.000Z' },
+  });
+  writeTranscript('sess-1', [{ type: 'assistant', message: { model: 'claude-fable-5-2' } }]);
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'opus-only' });
+  expect(info.resolvedModelId).toBeNull();
 });

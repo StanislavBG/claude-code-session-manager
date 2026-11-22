@@ -201,39 +201,77 @@ function readTail(filePath, maxBytes, deps) {
   }
 }
 
+// The alias families whose concrete ids carry the family name (claude-opus-5-5 for opus).
+// best / opusplan / default name no single family, so they get no family check.
+const MODEL_FAMILIES = new Set(['opus', 'sonnet', 'haiku', 'fable']);
+
+/** The family an alias names ('opus[1m]' -> 'opus'), or null when it names none. */
+function aliasFamily(modelAlias) {
+  if (!modelAlias) return null;
+  const base = modelAlias.replace(/\[[^\]]*\]$/, '');
+  return MODEL_FAMILIES.has(base) ? base : null;
+}
+
+/**
+ * True when `id` is acceptable evidence for `modelAlias`: a concrete id (never
+ * an alias) and, for a family alias, one whose name contains that family — so
+ * an opus persona can never be reported as running a fable or sonnet id.
+ */
+function fitsAlias(id, modelAlias) {
+  if (!isConcreteModelId(id)) return false;
+  const family = aliasFamily(modelAlias);
+  return !family || id.includes(family);
+}
+
 /**
  * Evidence source 1: the scheduler already logs the persona-resolved model
  * at dispatch (scheduler.cjs's executeJob, ~line 4473: `[scheduler]
  * agentType=... persona=... model=...`). Scans this project's hot queue.json
  * jobs[] AND its archived history.jsonl for the most recent job whose
- * agentType matches, then reads that job's own run log for the line. O(J log
- * J) to sort J candidate jobs, O(min(logSize, cap)) per log read.
+ * agentType matches, then reads that job's own run log for the line. That
+ * line holds what was passed to `--model` — usually the alias itself — so
+ * when it is an alias, the concrete id is the first fitting `"model":"..."`
+ * value in the same head (the CLI's init line). A job with no fitting id gives
+ * no evidence and the next newest job is tried. O(J log J) to sort J candidate
+ * jobs, O(min(logSize, cap)) per log read.
  */
-function findLatestSchedulerModel(cwd, agentType, deps) {
+function findLatestSchedulerModel(cwd, agentType, modelAlias, deps) {
   const jobs = [...readHotJobsForCwd(cwd, deps), ...readHistoryEntriesForCwd(cwd, deps)];
   const matches = jobs.filter((j) => j && j.agentType === agentType && j.runId && j.slug);
   matches.sort((a, b) => jobTimestampMs(b) - jobTimestampMs(a));
 
-  const re = /\[scheduler\] agentType=\S+ persona=.*? model=(\S+)/g;
+  const lineRe = /\[scheduler\] agentType=\S+ persona=.*? model=(\S+)/g;
+  const jsonRe = /"model":"([^"]+)"/g;
   for (const job of matches) {
     const logPath = path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`);
     const head = readHead(logPath, MAX_RUN_LOG_HEAD_BYTES, deps);
     if (!head) continue;
     let match;
-    let last = null;
-    while ((match = re.exec(head))) last = match[1];
-    if (last) return last;
+    let logged = null;
+    lineRe.lastIndex = 0;
+    while ((match = lineRe.exec(head))) logged = match[1];
+    if (!logged) continue;
+    if (isConcreteModelId(logged)) {
+      if (fitsAlias(logged, modelAlias)) return logged;
+      continue;
+    }
+    jsonRe.lastIndex = 0;
+    while ((match = jsonRe.exec(head))) {
+      if (fitsAlias(match[1], modelAlias)) return match[1];
+    }
   }
   return null;
 }
 
 /**
  * Evidence source 2: the most recent Epic (active-index.json entry) created
- * with this agentType, read via its own claude-session transcript's last
- * `"model":"..."` occurrence. O(E log E) to sort E candidate Epics,
- * O(min(transcriptSize, cap)) per transcript read.
+ * with this agentType AND the model being resolved — a session whose own
+ * `model` override names anything else ran a different model and says
+ * nothing about this persona. Read via its own claude-session transcript's
+ * last fitting `"model":"..."` occurrence. O(E log E) to sort E candidate
+ * Epics, O(min(transcriptSize, cap)) per transcript read.
  */
-function findLatestTranscriptModel(cwd, agentType, deps) {
+function findLatestTranscriptModel(cwd, agentType, modelAlias, deps) {
   const readActiveIndex = deps.readActiveIndex || require('../epic/epicMint.cjs').readActiveIndex;
   let sessions;
   try {
@@ -241,7 +279,8 @@ function findLatestTranscriptModel(cwd, agentType, deps) {
   } catch {
     return null;
   }
-  const matches = Object.values(sessions || {}).filter((s) => s && s.agentType === agentType && s.claudeSessionId);
+  const matches = Object.values(sessions || {}).filter((s) => s && s.agentType === agentType && s.claudeSessionId
+    && (!s.model || s.model === modelAlias));
   matches.sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0));
 
   const homeDir = deps.homeDir || os.homedir();
@@ -253,7 +292,8 @@ function findLatestTranscriptModel(cwd, agentType, deps) {
     if (!tail) continue;
     let match;
     let last = null;
-    while ((match = re.exec(tail))) last = match[1];
+    re.lastIndex = 0;
+    while ((match = re.exec(tail))) if (fitsAlias(match[1], modelAlias)) last = match[1];
     if (last) return last;
   }
   return null;
@@ -313,14 +353,14 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     // (which prices any unknown id at a family fallback with estimated:true) —
     // deliberately: that is a pricing heuristic, and borrowing it here would
     // turn "we don't know" into a confident wrong answer.
-    const schedulerHit = findLatestSchedulerModel(normalizedCwd, agentType, deps);
+    const schedulerHit = findLatestSchedulerModel(normalizedCwd, agentType, modelAlias, deps);
     if (schedulerHit) {
       result.resolvedModelId = schedulerHit;
       result.resolvedFrom = 'scheduler-run';
       return result;
     }
 
-    const transcriptHit = findLatestTranscriptModel(normalizedCwd, agentType, deps);
+    const transcriptHit = findLatestTranscriptModel(normalizedCwd, agentType, modelAlias, deps);
     if (transcriptHit) {
       result.resolvedModelId = transcriptHit;
       result.resolvedFrom = 'transcript';

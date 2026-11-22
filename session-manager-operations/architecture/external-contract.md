@@ -426,7 +426,7 @@ of the persona and the project's Claude settings.
 
 | Field | Meaning |
 | --- | --- |
-| `modelId` | The concrete model id. It is the pinned id when the model is already a full id. For an alias it is the id the newest scheduler run or chat of this persona in this project used. `null` when there is no such evidence yet. |
+| `modelId` | A real model id, never an alias: the pinned id when the model is already a full id, otherwise the id a recent run of this persona in this project used when it ran on the persona's own model. `null` when that is unknown. |
 | `modelAlias` | The effective model alias (or full id) the launch uses: the persona's own model, the project override's, or the Claude settings default when the persona inherits. `null` when none is set anywhere. |
 | `modelSource` | Where the model came from: `persona`, `persona-overlay` (the project's override), `settings` (the persona sets none; the Claude settings model is used), `inherit` (no model anywhere) or `fallback` (the persona could not be read). |
 | `effort` | The effort level, or `null` when the persona sets none. |

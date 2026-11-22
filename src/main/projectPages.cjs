@@ -123,7 +123,8 @@ const MD_REVIEW_EPHEMERAL = 'refusing an ephemeral cwd (tmpdir or linked git wor
 
 /**
  * -> MdReviewResult: the newest review record under reviews/docs/ and, per
- * given Epic id, its reviews/validation/<id>/*.md paths — read once per call
+ * given Epic id, its plan-records/<id>/*.md + legacy reviews/validation/<id>/
+ * *.md paths — read once per call
  * (no watcher, no cache). Resolves the project root like mdNetwork(); an
  * ephemeral cwd gets `{ ok: false, error }`.
  */

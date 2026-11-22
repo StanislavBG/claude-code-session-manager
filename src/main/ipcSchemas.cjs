@@ -1040,8 +1040,8 @@ const projectPagesMdNetwork = z.object({
   docFolders: mdNetworkFolderList.optional(),
 }).strict();
 
-// project-pages:md-review — cwd plus optional Review MD network Epic ids whose
-// reviews/validation/<id>/ folders to list. Ids are joined onto the fs, so the
+// project-pages:md-review — cwd plus optional Epic ids whose plan-records/<id>/
+// + legacy reviews/validation/<id>/ folders to list. Ids are joined onto fs; the
 // slug regex (same as lib/mdReviewRecord.cjs EPIC_ID_RE) is load-bearing.
 const projectPagesMdReview = z.object({
   cwd: z.string().min(1).max(4096),

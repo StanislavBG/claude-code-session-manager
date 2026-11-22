@@ -3049,7 +3049,7 @@ export interface SessionManagerAPI {
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
     /** Map the project's markdown link network from its root CLAUDE.md (read-only, bounded, no LLM) for the Tools pane. Scans on every call — no watcher, no cache. `ok:false` (with `error`) for a cwd `get` answers with empty lists (tmpdir / linked worktree), a folder that is not a git repo, or no root CLAUDE.md; rejects on an invalid cwd, like `get`. */
     mdNetwork: (payload: { cwd: string; recordFolders?: string[]; docFolders?: string[] }) => Promise<MdNetworkResult>;
-    /** Read the newest Review MD network record (reviews/docs/) and each given Epic id's validation record paths (reviews/validation/<id>/*.md). Read-only, no watcher, no cache, no LLM. `ok:false` for an ephemeral cwd; rejects on an invalid cwd or a bad Epic id. */
+    /** Read the newest Review MD network record (reviews/docs/) and each given Epic id's validation record paths (session-manager-operations/plan-records/<id>/*.md, then legacy reviews/validation/<id>/*.md history). Read-only, no watcher, no cache, no LLM. `ok:false` for an ephemeral cwd; rejects on an invalid cwd or a bad Epic id. */
     mdReview: (payload: { cwd: string; epicIds?: string[] }) => Promise<MdReviewResult>;
     /** Read the saved Competitor matrix (project-pages/matrix/matrix.json) — read-only; writes go through project_matrix_write. */
     matrix: (payload: { cwd: string }) => Promise<CompetitorMatrixResult>;

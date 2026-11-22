@@ -337,9 +337,9 @@ test('refused send: proposed Epic in A carrying both sets of reference paths', a
 test('fallbacks count toward the per-thread cap', async () => {
   const { a, b } = await setup({ xOverrides: { status: 'completed' } });
   for (let i = 0; i < MAX_REPLIES_PER_THREAD; i++) {
-    expect((await sendFeedbackReply(input(b), deps())).ok).toBe(true);
+    expect((await sendFeedbackReply(input(b, { message: `reply ${i}` }), deps())).ok).toBe(true);
   }
-  expect((await sendFeedbackReply(input(b), deps())).status).toBe(429);
+  expect((await sendFeedbackReply(input(b, { message: 'one more' }), deps())).status).toBe(429);
   // One OPEN fallback Epic per thread: later fallbacks reuse it (replyFallbackReuse.test.cjs).
   expect(fallbackEpics(a)).toHaveLength(1);
 });
@@ -382,9 +382,9 @@ test('cap: the 4th reply is refused with 429', async () => {
   const { b } = await setup();
   const d = deps();
   for (let i = 0; i < MAX_REPLIES_PER_THREAD; i++) {
-    expect((await sendFeedbackReply(input(b), d)).ok).toBe(true);
+    expect((await sendFeedbackReply(input(b, { message: `reply ${i}` }), d)).ok).toBe(true);
   }
-  const r = await sendFeedbackReply(input(b), d);
+  const r = await sendFeedbackReply(input(b, { message: 'one more' }), d);
   expect(r.status).toBe(429);
   expect(MAX_REPLIES_PER_THREAD).toBe(3);
 });
@@ -392,7 +392,7 @@ test('cap: the 4th reply is refused with 429', async () => {
 test('cap: 5 concurrent calls deliver exactly 3', async () => {
   const { a, b } = await setup();
   const d = deps();
-  const results = await Promise.all(Array.from({ length: 5 }, () => sendFeedbackReply(input(b), d)));
+  const results = await Promise.all(Array.from({ length: 5 }, (_, i) => sendFeedbackReply(input(b, { message: `reply ${i}` }), d)));
   expect(results.filter((r) => r.ok)).toHaveLength(3);
   expect(results.filter((r) => r.status === 429)).toHaveLength(2);
   expect(d.calls).toHaveLength(3);
@@ -596,9 +596,9 @@ test('event mode: the per-thread reply limit still applies', async () => {
   setEventMode(a, b, { epicId: null });
   const d = deps('sent', { openFallback: failFallback });
   for (let i = 0; i < MAX_REPLIES_PER_THREAD; i++) {
-    expect((await sendFeedbackReply(input(b), d)).ok).toBe(true);
+    expect((await sendFeedbackReply(input(b, { message: `reply ${i}` }), d)).ok).toBe(true);
   }
-  const r = await sendFeedbackReply(input(b), d);
+  const r = await sendFeedbackReply(input(b, { message: 'one more' }), d);
   expect(r).toMatchObject({ ok: false, status: 429 });
   expect(d.calls).toHaveLength(0);
 });
@@ -612,4 +612,97 @@ test('default (no mode) path is unchanged: prompt sent, audit row has no event-m
   expect(d.calls).toHaveLength(1);
   const f = d.audits[0].fields;
   for (const k of ['mode', 'externalRef', 'message', 'referencePaths']) expect(f).not.toHaveProperty(k);
+});
+
+// ---------------------------------------------------------------------------
+// Identical retries and the reused fallback Epic
+// ---------------------------------------------------------------------------
+
+const sha256 = (s) => require('node:crypto').createHash('sha256').update(s).digest('hex');
+const receipts = (cwd, id) => events(cwd, id).filter((e) => e.notice === 'cross-project-reply-sent');
+
+test('the same reply delivered twice opens one Epic and writes one receipt (cap not consumed)', async () => {
+  const { a, b } = await setup();
+  writeIndex(a, {});
+  const d = deps('sent');
+  const first = await sendFeedbackReply(input(b), d);
+  expect(first).toMatchObject({ ok: true, delivery: 'fallback', reason: 'missing', repliesUsed: 1 });
+  expect(receipts(b, 'psess-y')).toHaveLength(1);
+  expect(receipts(b, 'psess-y')[0].reply.hash).toBe(sha256('done\nFixed in commit abc123.'));
+
+  const again = await sendFeedbackReply(input(b), d);
+  expect(again).toMatchObject({
+    ok: true,
+    alreadyDelivered: true,
+    delivery: 'fallback',
+    reason: 'missing',
+    toEpicId: 'psess-x',
+    fallbackEpicId: first.fallbackEpicId,
+    repliesUsed: 1,
+    repliesLeft: MAX_REPLIES_PER_THREAD - 1,
+  });
+  expect(fallbackEpics(a)).toHaveLength(1);
+  expect(receipts(b, 'psess-y')).toHaveLength(1);
+  expect(d.calls).toHaveLength(0);
+});
+
+test('an identical retry of a delivered reply is not sent again; every receipt carries reply.hash', async () => {
+  const { a, b } = await setup();
+  const d = deps('sent');
+  const first = await sendFeedbackReply(input(b), d);
+  const again = await sendFeedbackReply(input(b), d);
+  expect(again).toMatchObject({ ok: true, alreadyDelivered: true, delivery: 'delivered', toEpicId: 'psess-x', repliesUsed: 1 });
+  expect(first.alreadyDelivered).toBeUndefined();
+  expect(d.calls).toHaveLength(1);
+  expect(events(a, 'psess-x').filter((e) => e.notice === 'cross-project-reply')).toHaveLength(1);
+  // A different reply after it still goes out, and its hash differs.
+  const other = await sendFeedbackReply(input(b, { outcome: 'blocked', message: 'Actually blocked.' }), d);
+  expect(other).toMatchObject({ ok: true, delivery: 'delivered', repliesUsed: 2 });
+  const hs = receipts(b, 'psess-y').map((e) => e.reply.hash);
+  expect(hs).toEqual([sha256('done\nFixed in commit abc123.'), sha256('blocked\nActually blocked.')]);
+});
+
+test('two different replies (blocked, then done) with the asking Epic missing open one Epic and both land in it', async () => {
+  const { a, b } = await setup();
+  writeIndex(a, {});
+  const d = deps('sent');
+  const first = await sendFeedbackReply(input(b, { outcome: 'blocked', message: 'Blocked on your API shape.' }), d);
+  expect(first).toMatchObject({ ok: true, delivery: 'fallback' });
+  expect(first.reused).toBeUndefined();
+  const second = await sendFeedbackReply(input(b, { outcome: 'done', message: 'Unblocked and shipped.' }), d);
+  expect(second).toMatchObject({ ok: true, delivery: 'fallback', fallbackEpicId: first.fallbackEpicId, reused: true });
+
+  const minted = fallbackEpics(a);
+  expect(minted).toHaveLength(1);
+  const f = minted[0];
+  expect(f.status).toBe('proposed');
+  expect(f.openingPrompt).toContain('Blocked on your API shape.');
+  const replyEv = events(a, f.id).filter((e) => e.notice === 'cross-project-reply');
+  expect(replyEv).toHaveLength(1);
+  expect(replyEv[0].text).toContain('Unblocked and shipped.');
+  expect(replyEv[0].reply).toMatchObject({ fromEpicId: 'psess-y', outcome: 'done' });
+  // A proposed Epic has no chat to prompt.
+  expect(d.calls).toHaveLength(0);
+  expect(receipts(b, 'psess-y')).toHaveLength(2);
+  expect(receipts(b, 'psess-y')[1].reply).toMatchObject({ delivery: 'fallback', reused: true, fallbackEpicId: f.id });
+});
+
+test('a reused ACTIVE fallback Epic gets the reply as event + prompt, like a delivered reply', async () => {
+  const { a, b } = await setup();
+  writeIndex(a, {});
+  const d = deps('sent');
+  const first = await sendFeedbackReply(input(b, { outcome: 'blocked', message: 'Blocked.' }), d);
+  const idxFile = opsPath(a, 'prompt-sessions', 'active-index.json');
+  const idx = JSON.parse(fs.readFileSync(idxFile, 'utf8'));
+  Object.assign(idx.sessions[first.fallbackEpicId], { status: 'active', claudeSessionId: 'cs-f' });
+  fs.writeFileSync(idxFile, JSON.stringify(idx));
+
+  const second = await sendFeedbackReply(input(b, { message: 'Done now.' }), d);
+  expect(second).toMatchObject({ ok: true, delivery: 'fallback', fallbackEpicId: first.fallbackEpicId, reused: true });
+  expect(d.calls).toHaveLength(1);
+  const [tabId, prompt, extra] = d.calls[0];
+  expect(tabId).toBe(first.fallbackEpicId);
+  expect(prompt).toContain('Done now.');
+  expect(extra).toEqual({ sessionId: 'cs-f', cwd: expect.any(String) });
+  expect(events(a, first.fallbackEpicId).at(-1)).toMatchObject({ notice: 'cross-project-reply', text: prompt });
 });

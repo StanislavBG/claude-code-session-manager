@@ -7,8 +7,17 @@
  *
  * Per-tab redesign is NOT here — each tab renders today's page as it is.
  */
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ConfigBand, ConfigSearchResults, useConfigSearch, type ConfigBandTab } from '../claudeConfig/ConfigBand'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ConfigBand,
+  ConfigSearchResults,
+  useConfigSearch,
+  claudeMdChip,
+  countClaudeMdFiles,
+  countSettingsKeys,
+  mcpNeedsAttention,
+  type ConfigBandTab,
+} from '../claudeConfig/ConfigBand'
 import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSearch'
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { LearningBody } from '../LearningPanel'
@@ -16,6 +25,9 @@ import { LEARNING_CONTENT } from '../learningContent'
 import { useLayout } from '../../state/layout'
 import { useExtensionCounts } from '../../lib/useExtensionCounts'
 import { useAgentPersonasState } from '../../lib/useAgentPersonas'
+import { useHomeDir } from '../../lib/useHomeDir'
+import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
+import { useMcpChecks, selectMcpCheckResults } from '../../state/mcpChecks'
 import { HOME_CLAUDE_CONFIG_TABS, isHomeConfigTab, type HomeConfigTab } from '../../lib/navGroups'
 import type { NavKey } from '../../lib/navKey'
 import { HomeSessionDrawer } from './home/HomeSessionDrawer'
@@ -46,6 +58,35 @@ const DRAWER_TITLE: Record<DrawerTab, string> = {
 
 const asCount = (n: number | null | undefined): number | undefined => (n == null ? undefined : n)
 
+/** One count; a failed read is `null` (no chip) — the tab body that owns the file reports the error. */
+async function settle<T>(p: () => Promise<T>): Promise<T | null> {
+  try { return await p() } catch { return null }
+}
+
+interface HomeFileCounts { claudeMd: number | null; settings: number | null }
+
+/** Live CLAUDE.md file count and settings.json key count for ~/.claude, re-read when either file changes. */
+function useHomeFileCounts(): HomeFileCounts {
+  const home = useHomeDir()
+  const [counts, setCounts] = useState<HomeFileCounts>({ claudeMd: null, settings: null })
+  const reqId = useRef(0)
+  const md = home ? `${home}/.claude/CLAUDE.md` : null
+  const settings = home ? `${home}/.claude/settings.json` : null
+  const reload = useCallback(() => {
+    if (!md || !settings) return
+    const id = ++reqId.current
+    void Promise.all([settle(() => countClaudeMdFiles(md)), settle(() => countSettingsKeys(settings))]).then(([c, k]) => {
+      if (id === reqId.current) setCounts({ claudeMd: c, settings: k })
+    })
+  }, [md, settings])
+  useEffect(() => {
+    reload()
+    return () => { reqId.current++ }
+  }, [reload])
+  useConfigDirWatch([md, settings], reload)
+  return counts
+}
+
 const loadHomeSearchItems = () => loadConfigSearchItems({ scope: 'home', cwd: null, api: window.api })
 
 function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: HomeConfigTab }) {
@@ -56,6 +97,9 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
 
   const counts = useExtensionCounts()
   const { personas } = useAgentPersonasState()
+  const files = useHomeFileCounts()
+  const mcpResults = useMcpChecks(selectMcpCheckResults)
+  const mcpAttention = useMemo(() => mcpNeedsAttention(mcpResults), [mcpResults])
 
   // Tab hint: `<tab>` or `settings:<view>`. A Settings view is forwarded to the
   // Settings page's own 'settings' hint (consumed when it mounts) in one set().
@@ -81,14 +125,16 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
   const search = useConfigSearch({ load: loadHomeSearchItems, loadKey: 'home', onChoose: chooseResult })
 
   const bandTabs = useMemo<ConfigBandTab<HomeConfigTab>[]>(() => {
-    const countOf: Partial<Record<HomeConfigTab, number | undefined>> = {
-      mcp: asCount(counts.mcp),
-      skills: asCount(counts.skills),
-      plugins: asCount(counts.plugins),
-      agents: asCount(personas?.length),
+    const extra: Record<HomeConfigTab, Partial<ConfigBandTab<HomeConfigTab>>> = {
+      'claude-md': claudeMdChip(files.claudeMd),
+      settings: { count: asCount(files.settings) },
+      mcp: { count: asCount(counts.mcp), attention: mcpAttention },
+      skills: { count: asCount(counts.skills) },
+      plugins: { count: asCount(counts.plugins) },
+      agents: { count: asCount(personas?.length) },
     }
-    return HOME_CLAUDE_CONFIG_TABS.map((t) => ({ ...t, count: countOf[t.key] }))
-  }, [counts.mcp, counts.skills, counts.plugins, personas])
+    return HOME_CLAUDE_CONFIG_TABS.map((t) => ({ ...t, ...extra[t.key] }))
+  }, [files.claudeMd, files.settings, counts.mcp, counts.skills, counts.plugins, personas, mcpAttention])
 
   const learn = LEARNING_CONTENT[LEARN_KEY[tab]]
   const drawerTab: DrawerTab | null = tab === 'skills' || tab === 'mcp' || tab === 'plugins' ? tab : null

@@ -21,6 +21,7 @@ import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
 import { Z } from '../../lib/zLayers'
 import { searchConfig, type ConfigSearchGroup, type ConfigSearchItem } from '../../lib/configSearch'
 import { toast } from '../../state/toast'
+import type { McpCheckResult } from '../../../preload/api'
 
 export interface ConfigBandTab<K extends string = string> {
   key: K
@@ -55,6 +56,37 @@ export interface ConfigBandProps<K extends string = string> {
   searchInputRef?: RefObject<HTMLInputElement>
   /** Called when the LEARN link is pressed. */
   onLearn?: () => void
+}
+
+// ───────────────────────────────────────────── tab counts (shared by Home and Project)
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** A checked MCP server that failed or needs sign-in puts the attention dot on the MCP tab. */
+export function mcpNeedsAttention(results: Record<string, McpCheckResult>): boolean {
+  return Object.values(results).some((r) => r.status === 'failed' || r.status === 'needs-auth')
+}
+
+/** The band chip for a CLAUDE.md file count: `missing` (warn) at 0, else `N file(s)`. */
+export function claudeMdChip(n: number | null): { count?: string; warn?: boolean } {
+  if (n == null) return {}
+  if (n === 0) return { count: 'missing', warn: true }
+  return { count: `${n} ${n === 1 ? 'file' : 'files'}` }
+}
+
+/** The file itself plus every @-import that resolves to a file on disk; 0 when the file is absent. */
+export async function countClaudeMdFiles(path: string): Promise<number> {
+  if (!(await window.api.config.exists(path))) return 0
+  const res = await window.api.config.parseImports(path)
+  if (!res.ok) throw new Error(res.error)
+  return 1 + res.imports.filter((i) => i.exists).length
+}
+
+/** How many top-level keys a settings file sets (0 when it is absent or empty). */
+export async function countSettingsKeys(path: string): Promise<number> {
+  const r = await window.api.config.readJson(path)
+  if (r.error) throw new Error(r.error)
+  return isRecord(r.data) ? Object.keys(r.data).length : 0
 }
 
 function chipClass(active: boolean, warn: boolean): string {
@@ -131,9 +163,10 @@ export function ConfigBand<K extends string = string>({
   return (
     <div
       data-testid="config-band"
-      className="shrink-0 h-[84px] bg-fg text-bg-hi border-b border-fg px-7 flex items-center gap-[26px] whitespace-nowrap"
+      // Design band (ConfigWorkbench.dc.html): 84px tall border-box, 0 28px padding, 236px title column.
+      className="shrink-0 box-border h-[84px] bg-fg text-bg-hi border-b border-fg px-7 py-0 flex items-center gap-[26px] whitespace-nowrap"
     >
-      <div className="flex flex-col gap-0.5 min-w-0">
+      <div data-testid="config-band-title" className="flex flex-col gap-0.5 w-[236px] shrink-0 min-w-0">
         <span className="text-[10.5px] font-semibold tracking-[0.1em] text-bg-hi/60">{eyebrow}</span>
         <span className="flex items-baseline gap-2.5">
           <span className="font-serif text-[25px] font-medium leading-[1.15] text-bg-hi">{title}</span>

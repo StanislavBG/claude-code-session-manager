@@ -29,6 +29,7 @@ vi.mock('../../../lib/configSearch', async (orig) => ({
 import { HomeClaudeConfig } from '../HomeClaudeConfig'
 import { useLayout } from '../../../state/layout'
 import { useConfigSearchFocus } from '../../../state/configSearchFocus'
+import { useMcpChecks } from '../../../state/mcpChecks'
 import type { ConfigSearchItem } from '../../../lib/configSearch'
 
 const SEARCH_ITEMS: ConfigSearchItem[] = [
@@ -37,6 +38,37 @@ const SEARCH_ITEMS: ConfigSearchItem[] = [
   { tab: 'agents', id: 'agents:dev-lead', title: 'dev-lead' },
 ]
 
+const HOME = '/home/tester'
+const HOME_MD = `${HOME}/.claude/CLAUDE.md`
+const HOME_SETTINGS = `${HOME}/.claude/settings.json`
+
+function installApi() {
+  const api = {
+    app: { homeDir: vi.fn().mockResolvedValue(HOME) },
+    config: {
+      exists: vi.fn(async (p: string) => p === HOME_MD),
+      parseImports: vi.fn(async () => ({
+        ok: true,
+        imports: [
+          { path: `${HOME}/.claude/rules/git.md`, exists: true, sizeBytes: 1, tokenEstimate: 0, ok: true },
+          { path: `${HOME}/.claude/rules/writing.md`, exists: true, sizeBytes: 1, tokenEstimate: 0, ok: true },
+          { path: `${HOME}/.claude/rules/gone.md`, exists: false, sizeBytes: 0, tokenEstimate: 0, ok: false },
+        ],
+      })),
+      readJson: vi.fn(async (p: string) => {
+        const data = p === HOME_SETTINGS ? { model: 'opus', permissions: {}, env: {}, hooks: {} } : {}
+        return { raw: JSON.stringify(data), data, exists: true, mtimeMs: 1, parseError: null, error: null }
+      }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
+      onChanged: vi.fn(() => () => {}),
+    },
+  }
+  ;(window as unknown as { api: unknown }).api = api
+  return api
+}
+
+let api: ReturnType<typeof installApi>
 let host: HTMLDivElement
 let root: Root
 
@@ -49,7 +81,8 @@ beforeEach(() => {
   useConfigSearchFocus.getState().clear()
   loadItems.mockReset()
   loadItems.mockResolvedValue(SEARCH_ITEMS)
-  ;(window as unknown as { api: unknown }).api = {}
+  api = installApi()
+  useMcpChecks.setState({ results: {}, checking: {} })
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -94,6 +127,52 @@ describe('HomeClaudeConfig', () => {
     act(() => root.render(createElement(HomeClaudeConfig)))
     const count = (tab: string) => q(`config-band-tab-${tab}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
     expect([count('mcp'), count('skills'), count('plugins'), count('agents')]).toEqual(['3', '7', '2', '4'])
+  })
+
+  const tabCount = (tab: string) => q(`config-band-tab-${tab}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
+  const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) }) }
+
+  it("CLAUDE.md shows 'N files': the file plus its imports that resolve", async () => {
+    act(() => root.render(createElement(HomeClaudeConfig)))
+    await flush()
+    expect(api.config.parseImports).toHaveBeenCalledWith(HOME_MD)
+    expect(tabCount('claude-md')).toBe('3 files')
+  })
+
+  it("CLAUDE.md shows 'missing' when ~/.claude/CLAUDE.md is absent", async () => {
+    api.config.exists.mockResolvedValue(false)
+    act(() => root.render(createElement(HomeClaudeConfig)))
+    await flush()
+    expect(tabCount('claude-md')).toBe('missing')
+  })
+
+  it('Settings counts the top-level keys ~/.claude/settings.json sets', async () => {
+    act(() => root.render(createElement(HomeClaudeConfig)))
+    await flush()
+    expect(api.config.readJson).toHaveBeenCalledWith(HOME_SETTINGS)
+    expect(tabCount('settings')).toBe('4')
+  })
+
+  it.each([
+    ['failed', true],
+    ['needs-auth', true],
+    ['connected', false],
+  ] as const)('MCP attention dot when a checked server is %s: %s', (status, dot) => {
+    useMcpChecks.setState({
+      results: {
+        'user::ok': { ok: true, status: 'connected', tools: [], checkedAt: 1 },
+        'user::x': status === 'connected'
+          ? { ok: true, status, tools: [], checkedAt: 1 }
+          : { ok: false, status, error: 'e', checkedAt: 1 },
+      },
+    })
+    act(() => root.render(createElement(HomeClaudeConfig)))
+    expect(q('config-band-tab-mcp')?.querySelector('[data-testid="config-band-attention"]') != null).toBe(dot)
+  })
+
+  it('no MCP attention dot before any server is checked', () => {
+    act(() => root.render(createElement(HomeClaudeConfig)))
+    expect(q('config-band-attention')).toBeNull()
   })
 
   it('a deep link to a retired key opens Claude config on the matching tab', () => {

@@ -10,6 +10,7 @@ import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
 import { useConfig } from '../../../state/config'
 import { useConfigSearchFocus } from '../../../state/configSearchFocus'
+import { useMcpChecks } from '../../../state/mcpChecks'
 import { HOME, PROJECT_CWD, PROJECT_TAB } from './_navfaceHarness'
 
 vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
@@ -52,6 +53,7 @@ function installApi() {
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
       listDir: vi.fn().mockResolvedValue({ ok: true, error: null, entries: [] }),
       exists: vi.fn().mockResolvedValue(true),
+      parseImports: vi.fn().mockResolvedValue({ ok: true, imports: [] }),
       canWrite: vi.fn().mockResolvedValue(true),
       watch: vi.fn(),
       unwatch: vi.fn(),
@@ -132,6 +134,7 @@ beforeEach(() => {
   useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
   useConfig.setState({ files: {}, watchRefs: {} })
   useConfigSearchFocus.getState().clear()
+  useMcpChecks.setState({ results: {}, checking: {} })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -183,12 +186,88 @@ describe('ProjectClaudeConfig', () => {
     const countOf = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
     expect(countOf('memory')).toBe('3')
     expect(countOf('claude-md')).toBe('1 file')
-    expect(countOf('settings')).toBe('3')
+    // The selected (Project) scope's .claude/settings.json sets two keys.
+    expect(countOf('settings')).toBe('2')
     expect(countOf('mcp')).toBe('2')
     expect(countOf('skills')).toBe('1')
     // The old ViewTabs/SourceChip header row and the source strip under the band are gone.
     expect(q('project-claude-config-toolbar')).toBeNull()
     expect(q('project-claude-config-source')).toBeNull()
+  })
+
+  const countOf = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
+  const dotOn = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-attention"]') != null
+
+  it("CLAUDE.md counts each present file plus its resolved @-imports as 'N files'", async () => {
+    api.config.parseImports.mockImplementation(async (p: string) => ({
+      ok: true,
+      imports: p === MD
+        ? [
+            { path: `${PROJECT_CWD}/docs/a.md`, exists: true, sizeBytes: 1, tokenEstimate: 0, ok: true },
+            { path: `${PROJECT_CWD}/docs/gone.md`, exists: false, sizeBytes: 0, tokenEstimate: 0, ok: false },
+          ]
+        : [],
+    }))
+    await mount()
+    // CLAUDE.md + docs/a.md + CLAUDE.local.md; the unresolved import is not counted.
+    expect(countOf('claude-md')).toBe('3 files')
+    expect(api.config.parseImports).toHaveBeenCalledWith(MD)
+    expect(api.config.parseImports).toHaveBeenCalledWith(LOCAL_MD)
+  })
+
+  it('Settings counts the keys set in the selected settings file and follows the Project / Local choice', async () => {
+    api.config.readJson.mockImplementation(async (p: string) => {
+      const data = p.endsWith('/settings.json') ? { model: 'x' } : p.endsWith('/settings.local.json') ? { model: 'y', env: {}, hooks: {} } : {}
+      return { raw: JSON.stringify(data), data, exists: true, mtimeMs: 1, parseError: null, error: null }
+    })
+    await mount()
+    expect(countOf('settings')).toBe('1')
+    await pick('Settings')
+    await pickLocal()
+    expect(countOf('settings')).toBe('3')
+  })
+
+  it('MCP gets the attention dot when a checked server failed or needs sign-in', async () => {
+    await mount()
+    expect(dotOn('mcp')).toBe(false)
+    await act(async () => {
+      useMcpChecks.setState({ results: { 'project:x:a': { ok: true, status: 'connected', tools: [], checkedAt: 1 } } })
+    })
+    expect(dotOn('mcp')).toBe(false)
+    await act(async () => {
+      useMcpChecks.setState({ results: { 'project:x:a': { ok: false, status: 'needs-auth', error: 'sign in', checkedAt: 1 } } })
+    })
+    expect(dotOn('mcp')).toBe(true)
+    await act(async () => {
+      useMcpChecks.setState({ results: { 'project:x:a': { ok: false, status: 'failed', error: 'boom', checkedAt: 1 } } })
+    })
+    expect(dotOn('mcp')).toBe(true)
+  })
+
+  it.each([
+    ['stale', { stale: true }],
+    ['broken', { deadRefs: ['src/gone.ts'] }],
+  ] as const)('Memory gets the attention dot when a memory is %s', async (_kind, flags) => {
+    api.memory.list.mockResolvedValue({
+      entries: [{ name: 'a.md', path: `${MEM_DIR}/a.md`, bytes: 1, mtimeMs: 1 }], workspace: 'ws', dir: MEM_DIR, autoMemoryEnabled: true, error: null,
+    })
+    api.memory.stale.mockResolvedValue({
+      entries: [{ name: 'a.md', stale: false, reasons: [], deadRefs: [], danglingLinks: [], outLinks: [], ...flags }],
+      workspace: 'ws', error: null,
+    })
+    await mount()
+    expect(dotOn('memory')).toBe(true)
+  })
+
+  it('Memory has no attention dot when every memory is fresh', async () => {
+    api.memory.list.mockResolvedValue({
+      entries: [{ name: 'a.md', path: `${MEM_DIR}/a.md`, bytes: 1, mtimeMs: 1 }], workspace: 'ws', dir: MEM_DIR, autoMemoryEnabled: true, error: null,
+    })
+    api.memory.stale.mockResolvedValue({
+      entries: [{ name: 'a.md', stale: false, reasons: [], deadRefs: [], danglingLinks: [], outLinks: [] }], workspace: 'ws', error: null,
+    })
+    await mount()
+    expect(dotOn('memory')).toBe(false)
   })
 
   it('marks CLAUDE.md missing when neither project file exists', async () => {

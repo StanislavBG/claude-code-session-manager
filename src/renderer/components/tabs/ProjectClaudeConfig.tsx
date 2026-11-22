@@ -20,7 +20,16 @@
  * - Skills    — Skills at project scope (<cwd>/.claude/skills/).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ConfigBand, ConfigSearchResults, useConfigSearch, type ConfigBandTab } from '../claudeConfig/ConfigBand'
+import {
+  ConfigBand,
+  ConfigSearchResults,
+  useConfigSearch,
+  claudeMdChip,
+  countClaudeMdFiles,
+  countSettingsKeys,
+  mcpNeedsAttention,
+  type ConfigBandTab,
+} from '../claudeConfig/ConfigBand'
 import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSearch'
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { LearningBody } from '../LearningPanel'
@@ -44,6 +53,8 @@ import { CLAUDE_MD_SCOPES } from '../../lib/scopes'
 import { basename } from '../../lib/basename'
 import { listSkillEntries } from '../../lib/listSkills'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
+import { useMcpChecks, selectMcpCheckResults } from '../../state/mcpChecks'
+import { buildRows } from './memory/explorer/model'
 import type { AlmanacIconName } from '../layout/AlmanacIcon'
 
 type ConfigTab = 'memory' | 'claude-md' | 'settings' | 'mcp' | 'skills'
@@ -82,7 +93,7 @@ const CLAUDE_MD_NOTES: Record<ProjectScope, { title: string; body: string }> = {
 function countSources(cwd: string, memoryDir: string | null) {
   return {
     claudeMd: [`${cwd}/CLAUDE.md`, `${cwd}/CLAUDE.local.md`],
-    settings: [`${cwd}/.claude/settings.json`, `${cwd}/.claude/settings.local.json`],
+    settings: { project: `${cwd}/.claude/settings.json`, local: `${cwd}/.claude/settings.local.json` },
     mcp: `${cwd}/.mcp.json`,
     skillsDir: `${cwd}/.claude/skills`,
     commandsDir: `${cwd}/.claude/commands`,
@@ -94,15 +105,19 @@ interface ProjectCounts {
   /** The memory folder main resolves for this project (memory.list's `dir`), never a renderer-side guess. */
   memoryDir: string | null
   memory: number | null
-  /** How many of CLAUDE.md / CLAUDE.local.md exist. */
+  /** Any memory the Memory tab would flag stale or broken. */
+  memoryAttention: boolean
+  /** CLAUDE.md / CLAUDE.local.md that exist, plus each one's resolved @-imports. */
   claudeMd: number | null
-  /** Distinct top-level keys across .claude/settings.json and settings.local.json. */
-  settings: number | null
+  /** Top-level keys set in each scope's settings file. */
+  settings: Record<ProjectScope, number | null>
   mcp: number | null
   skills: number | null
 }
 
-const NO_COUNTS: ProjectCounts = { memoryDir: null, memory: null, claudeMd: null, settings: null, mcp: null, skills: null }
+const NO_COUNTS: ProjectCounts = {
+  memoryDir: null, memory: null, memoryAttention: false, claudeMd: null, settings: { project: null, local: null }, mcp: null, skills: null,
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -112,18 +127,13 @@ async function settle<T>(p: () => Promise<T>): Promise<T | null> {
 }
 
 async function readProjectCounts(cwd: string): Promise<ProjectCounts> {
-  const memList = await settle(() => window.api.memory.list({ workspace: encodeWorkspace(cwd), cwd }))
+  const target = { workspace: encodeWorkspace(cwd), cwd }
+  const memList = await settle(() => window.api.memory.list(target))
   const src = countSources(cwd, memList?.dir ?? null)
-  const [claudeMd, settings, mcp, skills] = await Promise.all([
-    settle(async () => (await Promise.all(src.claudeMd.map((f) => window.api.config.exists(f)))).filter(Boolean).length),
-    settle(async () => {
-      const keys = new Set<string>()
-      for (const r of await Promise.all(src.settings.map((f) => window.api.config.readJson(f)))) {
-        if (r.error) throw new Error(r.error)
-        if (isRecord(r.data)) Object.keys(r.data).forEach((k) => keys.add(k))
-      }
-      return keys.size
-    }),
+  const [claudeMd, settingsProject, settingsLocal, mcp, skills, memoryAttention] = await Promise.all([
+    settle(async () => (await Promise.all(src.claudeMd.map(countClaudeMdFiles))).reduce((a, b) => a + b, 0)),
+    settle(() => countSettingsKeys(src.settings.project)),
+    settle(() => countSettingsKeys(src.settings.local)),
     settle(async () => {
       const r = await window.api.config.readJson(src.mcp)
       if (r.error) throw new Error(r.error)
@@ -140,12 +150,19 @@ async function readProjectCounts(cwd: string): Promise<ProjectCounts> {
       const commands = cmds.ok ? cmds.entries.filter((e) => e.name.endsWith('.md')).length : 0
       return list.entries.length + commands
     }),
+    // The same stale/broken rule the Memory tab's Stale and Broken views use.
+    settle(async () => {
+      if (!memList || memList.error) return false
+      const stale = await window.api.memory.stale(target)
+      return buildRows(memList.entries ?? [], stale, null, Date.now()).some((r) => r.stale || r.broken)
+    }),
   ])
   return {
     memoryDir: memList?.dir ?? null,
     memory: memList && !memList.error ? memList.entries.length : null,
+    memoryAttention: memoryAttention ?? false,
     claudeMd,
-    settings,
+    settings: { project: settingsProject, local: settingsLocal },
     mcp,
     skills,
   }
@@ -176,7 +193,7 @@ function useProjectConfigCounts(cwd: string | null): ProjectCounts {
   const counts = found && found.cwd === cwd ? found.counts : NO_COUNTS
   const src = cwd ? countSources(cwd, counts.memoryDir) : null
   useConfigDirWatch(
-    src ? [...src.claudeMd, ...src.settings, src.mcp, src.skillsDir, src.commandsDir, src.memoryDir] : [],
+    src ? [...src.claudeMd, src.settings.project, src.settings.local, src.mcp, src.skillsDir, src.commandsDir, src.memoryDir] : [],
     reload,
     { depth: 1 },
   )
@@ -270,6 +287,8 @@ function ProjectClaudeConfigComponent() {
   const [mcpAdd, setMcpAdd] = useState<McpAddContext | null>(null)
   const [learnOpen, setLearnOpen] = useState(false)
   const counts = useProjectConfigCounts(cwd)
+  const mcpResults = useMcpChecks(selectMcpCheckResults)
+  const mcpAttention = useMemo(() => mcpNeedsAttention(mcpResults), [mcpResults])
 
   const selectTab = useCallback((t: ConfigTab) => {
     setTab(t)
@@ -292,17 +311,15 @@ function ProjectClaudeConfigComponent() {
   const search = useConfigSearch({ load: loadSearchItems, loadKey: cwd ?? '', onChoose: chooseResult })
 
   const bandTabs = useMemo<ConfigBandTab<ConfigTab>[]>(() => {
-    const md = counts.claudeMd
-    const mdTab = md == null ? {} : md === 0 ? { count: 'missing', warn: true } : { count: `${md} ${md === 1 ? 'file' : 'files'}` }
     const countOf: Record<ConfigTab, Partial<ConfigBandTab<ConfigTab>>> = {
-      memory: { count: asCount(counts.memory) },
-      'claude-md': mdTab,
-      settings: { count: asCount(counts.settings) },
-      mcp: { count: asCount(counts.mcp) },
+      memory: { count: asCount(counts.memory), attention: counts.memoryAttention },
+      'claude-md': claudeMdChip(counts.claudeMd),
+      settings: { count: asCount(counts.settings[settingsScope]) },
+      mcp: { count: asCount(counts.mcp), attention: mcpAttention },
       skills: { count: asCount(counts.skills) },
     }
     return TABS.map((t) => ({ ...t, ...countOf[t.key] }))
-  }, [counts.memory, counts.claudeMd, counts.settings, counts.mcp, counts.skills])
+  }, [counts, settingsScope, mcpAttention])
 
   if (!home) return <EmptyState title="loading…" />
   if (!cwd) {

@@ -109,4 +109,54 @@ describe('foldHistoryDaysByCwd', () => {
     expect(days).toEqual([])
     expect(hasExclusions(excluded)).toBe(false)
   })
+
+  describe('byLauncher', () => {
+    const EPIC = '-home-user--local-state-session-manager-session-manager-epic-worktrees-h1-slug'
+    const JOB = '-home-user--local-state-session-manager-session-manager-job-worktrees-h1-3433-slug'
+
+    it('folds an Epic folder and a job folder of one project into one row with two buckets', () => {
+      const days = [day('2026-08-01', {
+        [EPIC]: row(EPIC, { inputTokens: 100, outputTokens: 10, cacheReadTokens: 5, cacheCreationTokens: 1, estimatedCostUsd: 1, sessionCount: 2 }),
+        [JOB]: row(JOB, { inputTokens: 300, outputTokens: 30, cacheReadTokens: 7, cacheCreationTokens: 3, estimatedCostUsd: 2, sessionCount: 3 }),
+      })]
+      const { days: out } = foldHistoryDaysByCwd(days, { [EPIC]: '/p/foo', [JOB]: '/p/foo' })
+      expect(Object.keys(out[0].byProject)).toEqual(['/p/foo'])
+      const r = out[0].byProject['/p/foo']
+      expect(Object.keys(r.byLauncher).sort()).toEqual(['epic', 'job'])
+      expect(r.byLauncher.epic).toEqual({ inputTokens: 100, outputTokens: 10, cacheReadTokens: 5, cacheCreationTokens: 1, costUsd: 1, sessionCount: 2 })
+      expect(r.byLauncher.job).toEqual({ inputTokens: 300, outputTokens: 30, cacheReadTokens: 7, cacheCreationTokens: 3, costUsd: 2, sessionCount: 3 })
+      // Buckets sum to the row's own totals.
+      const buckets = Object.values(r.byLauncher)
+      const sum = (k: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'costUsd' | 'sessionCount') =>
+        buckets.reduce((a, b) => a + (b?.[k] ?? 0), 0)
+      expect(sum('inputTokens')).toBe(r.inputTokens)
+      expect(sum('outputTokens')).toBe(r.outputTokens)
+      expect(sum('cacheReadTokens')).toBe(r.cacheReadTokens)
+      expect(sum('cacheCreationTokens')).toBe(r.cacheCreationTokens)
+      expect(sum('costUsd')).toBe(r.estimatedCostUsd)
+      expect(sum('sessionCount')).toBe(r.sessionCount)
+    })
+
+    it('adds buckets of the same launcher when several folders merge', () => {
+      const EPIC2 = '-home-user--local-state-session-manager-session-manager-epic-worktrees-h2-other'
+      const days = [day('2026-08-01', {
+        [EPIC]: row(EPIC, { inputTokens: 1, estimatedCostUsd: 0.25, sessionCount: 1 }),
+        [EPIC2]: row(EPIC2, { inputTokens: 2, estimatedCostUsd: 0.5, sessionCount: 4 }),
+      })]
+      const { days: out } = foldHistoryDaysByCwd(days, { [EPIC]: '/p/foo', [EPIC2]: '/p/foo' })
+      const r = out[0].byProject['/p/foo']
+      expect(Object.keys(r.byLauncher)).toEqual(['epic'])
+      expect(r.byLauncher.epic?.inputTokens).toBe(3)
+      expect(r.byLauncher.epic?.costUsd).toBe(0.75)
+      expect(r.byLauncher.epic?.sessionCount).toBe(5)
+    })
+
+    it('gives a plain project folder the other bucket', () => {
+      const days = [day('2026-08-01', { '-home-user-Projects-foo': row('-home-user-Projects-foo') })]
+      const { days: out } = foldHistoryDaysByCwd(days, { '-home-user-Projects-foo': '/p/foo' })
+      const r = out[0].byProject['/p/foo']
+      expect(Object.keys(r.byLauncher)).toEqual(['other'])
+      expect(r.byLauncher.other).toEqual({ inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.5, sessionCount: 1 })
+    })
+  })
 })

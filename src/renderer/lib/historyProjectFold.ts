@@ -24,6 +24,29 @@
  * Kept pure (no store/window imports) so it is unit-testable directly.
  */
 import type { HistoryDashboardDay, HistoryDashboardProjectRow } from '../../preload/api'
+import { launcherOfEncodedDir, type HistoryLauncher } from './historyLauncher'
+
+/** One launcher's share of a folded project row. */
+export interface LauncherBucket {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  costUsd: number
+  sessionCount: number
+}
+
+/**
+ * A project row after the fold. `byLauncher` holds one bucket per launcher that
+ * contributed a folder; the buckets sum to the row's own totals.
+ */
+export interface FoldedProjectRow extends HistoryDashboardProjectRow {
+  byLauncher: Partial<Record<HistoryLauncher, LauncherBucket>>
+}
+
+export interface FoldedDay extends HistoryDashboardDay {
+  byProject: Record<string, FoldedProjectRow>
+}
 
 export interface ExcludedProjects {
   /** How many encoded transcript folders had no resolvable working directory. */
@@ -35,7 +58,7 @@ export interface ExcludedProjects {
 }
 
 export interface FoldedHistory {
-  days: HistoryDashboardDay[]
+  days: FoldedDay[]
   excluded: ExcludedProjects
 }
 
@@ -47,7 +70,19 @@ const EMPTY_EXCLUDED: ExcludedProjects = {
   totalTokens: 0,
 }
 
-function mergeRow(into: HistoryDashboardProjectRow, from: HistoryDashboardProjectRow): void {
+function addToLauncher(into: FoldedProjectRow, launcher: HistoryLauncher, from: HistoryDashboardProjectRow): void {
+  const dst = into.byLauncher[launcher] ?? (into.byLauncher[launcher] = {
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, sessionCount: 0,
+  })
+  dst.inputTokens += from.inputTokens
+  dst.outputTokens += from.outputTokens
+  dst.cacheReadTokens += from.cacheReadTokens
+  dst.cacheCreationTokens += from.cacheCreationTokens
+  dst.costUsd += from.estimatedCostUsd
+  dst.sessionCount += from.sessionCount
+}
+
+function mergeRow(into: FoldedProjectRow, from: HistoryDashboardProjectRow, launcher: HistoryLauncher): void {
   into.promptCount += from.promptCount
   into.inputTokens += from.inputTokens
   into.outputTokens += from.outputTokens
@@ -74,12 +109,15 @@ function mergeRow(into: HistoryDashboardProjectRow, from: HistoryDashboardProjec
     dst.costUsd += mb.costUsd
     if (mb.estimated) dst.estimated = true
   }
+  addToLauncher(into, launcher, from)
 }
 
-function cloneRow(row: HistoryDashboardProjectRow, projectDir: string): HistoryDashboardProjectRow {
+function cloneRow(row: HistoryDashboardProjectRow, projectDir: string, launcher: HistoryLauncher): FoldedProjectRow {
   const byModel: HistoryDashboardProjectRow['byModel'] = {}
   for (const [modelId, mb] of Object.entries(row.byModel ?? {})) byModel[modelId] = { ...mb }
-  return { ...row, projectDir, toolBreakdown: { ...(row.toolBreakdown ?? {}) }, byModel }
+  const out: FoldedProjectRow = { ...row, projectDir, toolBreakdown: { ...(row.toolBreakdown ?? {}) }, byModel, byLauncher: {} }
+  addToLauncher(out, launcher, row)
+  return out
 }
 
 /**
@@ -98,7 +136,7 @@ export function foldHistoryDaysByCwd(
   const excludedFolders = new Set<string>()
 
   const foldedDays = days.map((day) => {
-    const byProject: Record<string, HistoryDashboardProjectRow> = {}
+    const byProject: Record<string, FoldedProjectRow> = {}
     for (const [encoded, row] of Object.entries(day.byProject)) {
       const cwd = cwdByEncoded[encoded]
       if (!cwd) {
@@ -109,9 +147,10 @@ export function foldHistoryDaysByCwd(
         excluded.totalTokens += row.inputTokens + row.outputTokens
         continue
       }
+      const launcher = launcherOfEncodedDir(encoded)
       const existing = byProject[cwd]
-      if (existing) mergeRow(existing, row)
-      else byProject[cwd] = cloneRow(row, cwd)
+      if (existing) mergeRow(existing, row, launcher)
+      else byProject[cwd] = cloneRow(row, cwd, launcher)
     }
     return { ...day, byProject }
   })

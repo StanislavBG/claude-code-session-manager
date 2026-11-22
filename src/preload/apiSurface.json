@@ -1076,6 +1076,13 @@
  },
  {
   "ns": "history",
+  "method": "validationQuality",
+  "channel": "history:validation-quality",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "history",
   "method": "onUpdated",
   "channel": "history:updated",
   "kind": "on",

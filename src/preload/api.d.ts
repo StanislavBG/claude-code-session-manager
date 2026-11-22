@@ -2915,6 +2915,8 @@ export interface SessionManagerAPI {
     dashboard: (req: HistoryDashboardRequest) => Promise<HistoryDashboardResult>;
     /** This usage week's validated-PRDs-per-usage efficiency, per project (loopEfficiency.cjs). */
     loopEfficiency: () => Promise<LoopEfficiencyResult>;
+    /** Validator quality per project: first-pass + refuted rates, fix waves, escapes, weekly top miss (validationQuality.cjs). */
+    validationQuality: () => Promise<{ ok: true; projects: ValidationQualityProject[] } | { ok: false; error: string }>;
     /** Fires (throttled to 1/5 s) when main appends days to the rollup. Returns unsubscribe. */
     onUpdated: (handler: () => void) => () => void;
   };
@@ -3510,6 +3512,27 @@ interface LoopEfficiencyRow {
   refuted: number;
   executorUsd: number;
   usdPerVerified: number | null;
+}
+interface ValidationQualityEscape {
+  fixPrd: string;
+  escapedPrd: string;
+  verifiedBy: string | null;
+  missKind: string;
+  reason: string;
+  at: string;
+}
+interface ValidationQualityProject {
+  cwd: string;
+  project: string;
+  firstPass: { pct: number | null; prds: string[] };
+  refuted: { pct: number | null; prds: string[] };
+  fixWaves: { perPlan: number | null; plans: { plan: string; fixWaves: string[] }[] };
+  escapes: ValidationQualityEscape[];
+  week: {
+    fromMs: number;
+    toMs: number;
+    topMiss: null | { missKind: string; count: number; prds: string[]; reasons: string[]; proposal: string };
+  };
 }
 interface LoopEfficiencyResult {
   fromMs: number;

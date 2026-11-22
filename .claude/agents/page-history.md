@@ -39,7 +39,7 @@ The page never writes transcripts.
 - History appears on the Home face only; a per-project copy would be a second door. Source: the comment on `history` in `src/renderer/lib/navGroups.ts`.
 - Analytics prefs persist to disk through `src/renderer/lib/historyAnalyticsPrefs.ts` (`writeHistoryAnalyticsPrefs`, which serializes read-modify-write of the nested `history` object), never browser storage.
 - The dashboard is served from the rollup store, not by re-parsing transcripts per request. Source: `src/main/historyDashboard.cjs` header and `src/main/lib/historyRollup.cjs` (`ROLLUP_VERSION`).
-- Model pricing lives in main only (`MODEL_PRICING` in `src/main/historyAggregator.cjs`, applied in `src/main/historyDashboard.cjs`); the renderer displays the figures it receives and never re-prices.
+- Model pricing lives in main only (`costOfUsage` in `src/main/lib/claude/modelPricing.cjs`, applied in `src/main/historyAggregator.cjs` and `src/main/historyDashboard.cjs`); the renderer displays the figures it receives and never re-prices.
 - Model prices live only in `src/main/lib/claude/modelPricing.cjs` (`MODEL_PRICES`, priced per model id by `priceForModel`, costed by `costOfUsage`); no other file holds a per-token price.
 
 ## Boundaries

@@ -5,39 +5,10 @@ import os from 'node:os'
 import path from 'node:path'
 const require = createRequire(import.meta.url)
 
-const { remote, MODEL_PRICING, scanAggrLines, parseJSONL, resolvePricingKey } =
+const { scanAggrLines, parseJSONL } =
   require('../../src/main/historyAggregator.cjs')
 
-describe('MODEL_PRICING', () => {
-  it('has opus/sonnet/haiku/fable buckets with input/output/cache-read rates', () => {
-    for (const key of ['opus', 'sonnet', 'haiku', 'fable']) {
-      expect(MODEL_PRICING[key]).toBeTruthy()
-      expect(typeof MODEL_PRICING[key].i).toBe('number')
-      expect(typeof MODEL_PRICING[key].o).toBe('number')
-      expect(typeof MODEL_PRICING[key].c).toBe('number')
-    }
-  })
-
-  it('prices cache-read tokens far below input tokens (the cache-savings premise)', () => {
-    for (const key of ['opus', 'sonnet', 'haiku', 'fable']) {
-      expect(MODEL_PRICING[key].c).toBeLessThan(MODEL_PRICING[key].i)
-    }
-  })
-})
-
-describe('resolvePricingKey', () => {
-  it('matches opus/sonnet/haiku/fable by case-insensitive substring', () => {
-    expect(resolvePricingKey('claude-opus-4-8-20260115')).toEqual({ key: 'opus', estimated: false })
-    expect(resolvePricingKey('claude-sonnet-5')).toEqual({ key: 'sonnet', estimated: false })
-    expect(resolvePricingKey('claude-HAIKU-4-5-20251001')).toEqual({ key: 'haiku', estimated: false })
-    expect(resolvePricingKey('claude-fable-5-1')).toEqual({ key: 'fable', estimated: false })
-  })
-
-  it('falls back to sonnet, flagged as estimated, for unrecognized ids', () => {
-    expect(resolvePricingKey('some-future-model-x')).toEqual({ key: 'sonnet', estimated: true })
-    expect(resolvePricingKey(undefined)).toEqual({ key: 'sonnet', estimated: true })
-  })
-})
+// Price-table and resolver tests live with the module: src/main/lib/claude/__tests__/modelPricing.test.cjs.
 
 describe('scanAggrLines byModel bucketing', () => {
   it('accumulates per-model token buckets alongside the flat totals', () => {
@@ -64,10 +35,10 @@ describe('scanAggrLines byModel bucketing', () => {
     expect(acc.inputTokens).toBe(121)
     expect(acc.outputTokens).toBe(61)
     expect(acc.byModel['claude-sonnet-5']).toEqual({
-      inputTokens: 101, outputTokens: 51, cacheReadTokens: 11, cacheCreationTokens: 6,
+      inputTokens: 101, outputTokens: 51, cacheReadTokens: 11, cacheCreationTokens: 6, cacheCreation1hTokens: 0,
     })
     expect(acc.byModel['claude-opus-4-8-20260115']).toEqual({
-      inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheCreationTokens: 0,
+      inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0,
     })
   })
 })
@@ -195,15 +166,18 @@ describe('remote.aggregate', () => {
     expect(row1.byModel['claude-sonnet-5'].outputTokens).toBe(500)
     expect(row1.byModel['claude-sonnet-5'].cacheReadTokens).toBe(200)
     expect(row1.byModel['claude-sonnet-5'].cacheCreationTokens).toBe(100)
-    // (1000 input + 100 cache-creation) * $3/1e6 + 500 output * $15/1e6 + 200 cache-read * $0.3/1e6
-    expect(row1.byModel['claude-sonnet-5'].costUsd).toBeCloseTo(0.01086, 10)
-    // 2000 input * $15/1e6 + 1000 output * $75/1e6
-    expect(row1.byModel['claude-opus-4-8-20260115'].costUsd).toBeCloseTo(0.105, 10)
-    // 500 input * $0.8/1e6 + 250 output * $4/1e6 + 50 cache-read * $0.08/1e6
-    expect(row2.byModel['claude-haiku-4-5-20251001'].costUsd).toBeCloseTo(0.001404, 10)
+    // Priced by lib/claude/modelPricing.cjs. These fixture lines carry no 1-hour split object, so the
+    // parser records cacheCreation1hTokens: 0 and every cache write is a 5-minute write.
+    // sonnet-5 ($2/$10, cache read $0.20): 1000*2 + 500*10 + 200*0.2 + 100*2*1.25, per million
+    expect(row1.byModel['claude-sonnet-5'].costUsd).toBeCloseTo(0.00729, 10)
+    expect(row1.byModel['claude-sonnet-5'].estimated).toBeUndefined()
+    // opus-4-8 ($5/$25): 2000*5 + 1000*25, per million
+    expect(row1.byModel['claude-opus-4-8-20260115'].costUsd).toBeCloseTo(0.035, 10)
+    // haiku-4-5 ($1/$5, cache read $0.10): 500*1 + 250*5 + 50*0.1, per million
+    expect(row2.byModel['claude-haiku-4-5-20251001'].costUsd).toBeCloseTo(0.001755, 10)
 
     // cache-read savings = cacheReadTokens * (inputRate - cacheReadRate), summed across models:
-    // sonnet 200*(3-0.3)/1e6 + opus 0 + haiku 50*(0.8-0.08)/1e6
-    expect(result.cacheSavingsUsd).toBeCloseTo(0.000576, 10)
+    // sonnet 200*(2-0.2)/1e6 + opus 0 + haiku 50*(1-0.1)/1e6
+    expect(result.cacheSavingsUsd).toBeCloseTo(0.000405, 10)
   })
 })

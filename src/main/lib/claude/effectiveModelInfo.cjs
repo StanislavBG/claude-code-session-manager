@@ -309,8 +309,8 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     // Agentless: no per-agent evidence to look up (it would match every agentless job).
     if (!agentType) return result;
 
-    // Evidence is never derived via historyAggregator.cjs's resolvePricingKey
-    // (which buckets any unknown id to 'sonnet' with estimated:true) —
+    // Evidence is never derived via lib/claude/modelPricing.cjs's priceForModel
+    // (which prices any unknown id at a family fallback with estimated:true) —
     // deliberately: that is a pricing heuristic, and borrowing it here would
     // turn "we don't know" into a confident wrong answer.
     const schedulerHit = findLatestSchedulerModel(normalizedCwd, agentType, deps);

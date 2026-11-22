@@ -181,3 +181,30 @@ test('dashboard: legacyDates lists in-range days whose finalized marker predates
   const all = await historyDashboard.computeDashboard({ rangeDays: 0 });
   expect(all.legacyDates).toEqual([old, d2]);
 });
+
+test('cost: claude-opus-5-5 is priced from modelPricing — output, cache reads and split cache writes', async () => {
+  const d1 = daysAgo(1);
+  await historyRollup.appendRollupDays([
+    { date: d1, projectDir: 'p-out', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 1_000_000, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0, v: 4 },
+    { date: d1, projectDir: 'p-read', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000, cacheCreationTokens: 0, cacheCreation1hTokens: 0, v: 4 },
+    { date: d1, projectDir: 'p-write', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 1_000_000, cacheCreation1hTokens: 400_000, v: 4 },
+    { date: d1, projectDir: 'p-nosplit', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 1_000_000, v: 3 },
+    { date: d1, projectDir: 'p-unknown', modelId: 'mystery-model', inputTokens: 1000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0, v: 4 },
+  ]);
+  const result = await historyDashboard.computeDashboard({ rangeDays: 30 });
+  const day = result.days.find((d) => d.date === d1);
+  const m = (p, id = 'claude-opus-5-5') => day.byProject[p].byModel[id];
+
+  expect(m('p-out').costUsd).toBeCloseTo(20, 9);
+  expect(m('p-out').estimated).toBeUndefined();
+  expect(m('p-read').costUsd).toBeCloseTo(0.20, 9);
+  expect(m('p-read').estimated).toBeUndefined();
+  expect(m('p-write').costUsd).toBeCloseTo(6.20, 9);
+  expect(m('p-write').estimated).toBeUndefined();
+  // No recorded 1-hour part: all writes at the 1-hour rate, flagged estimated.
+  expect(m('p-nosplit').costUsd).toBeCloseTo(8, 9);
+  expect(m('p-nosplit').estimated).toBe(true);
+  expect(m('p-unknown', 'mystery-model').estimated).toBe(true);
+  expect(day.byProject['p-write'].estimatedCostUsd).toBeCloseTo(6.20, 9);
+  expect(result.byModelTotals['claude-opus-5-5'].estimated).toBe(true);
+});

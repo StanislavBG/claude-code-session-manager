@@ -5,7 +5,7 @@
  * instantly regardless of transcript corpus size or retention/cleanup.
  *
  * Only imports historyRollup.cjs (the rollup reader) and pure helpers
- * re-exported from historyAggregator.cjs (pricing table + date math) — never
+ * re-exported from historyAggregator.cjs (date math) plus lib/claude/modelPricing.cjs (cost) — never
  * fs/promises, never PROJECTS_DIR. See historyDashboard.test.cjs's zero-scan
  * guarantee test.
  */
@@ -14,12 +14,8 @@
 
 const { ipcMain } = require('electron');
 const historyRollup = require('./lib/historyRollup.cjs');
-const {
-  MODEL_PRICING,
-  resolvePricingKey,
-  localDate,
-  subtractDays,
-} = require('./historyAggregator.cjs');
+const { localDate, subtractDays } = require('./historyAggregator.cjs');
+const { costOfUsage } = require('./lib/claude/modelPricing.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 
 // Read range start for rangeDays=0 ("all time"). Rollup dates are always
@@ -63,6 +59,11 @@ function foldBucketIntoRow(row, bucket) {
     dst.outputTokens += bucket.outputTokens || 0;
     dst.cacheReadTokens += bucket.cacheReadTokens || 0;
     dst.cacheCreationTokens += bucket.cacheCreationTokens || 0;
+    // A line written before rollup v4 has no 1-hour split: leave the field
+    // undefined so costOfUsage marks the cost estimated (unknown, not 0).
+    if (typeof bucket.cacheCreation1hTokens === 'number') {
+      dst.cacheCreation1hTokens = (dst.cacheCreation1hTokens ?? 0) + bucket.cacheCreation1hTokens;
+    }
     row.inputTokens += bucket.inputTokens || 0;
     row.outputTokens += bucket.outputTokens || 0;
     row.cacheReadTokens += bucket.cacheReadTokens || 0;
@@ -75,12 +76,7 @@ function computeRowCost(row) {
   const byModel = {};
   let estimatedCostUsd = 0;
   for (const [modelId, bucket] of Object.entries(row.byModel)) {
-    const { key, estimated } = resolvePricingKey(modelId);
-    const pricing = MODEL_PRICING[key];
-    const costUsd =
-      (bucket.inputTokens + bucket.cacheCreationTokens) * pricing.i / 1e6 +
-      bucket.outputTokens * pricing.o / 1e6 +
-      bucket.cacheReadTokens * pricing.c / 1e6;
+    const { costUsd, estimated } = costOfUsage(modelId, bucket);
     byModel[modelId] = { ...bucket, costUsd, ...(estimated ? { estimated: true } : {}) };
     estimatedCostUsd += costUsd;
   }

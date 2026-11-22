@@ -72,13 +72,11 @@ sequence straight through without pausing for confirmation at each step — the 
 3. **Do not treat a bypass-2FA granular token as a durable automation fix** — npm is removing
    its publish capability (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/);
    it is a bridge at best.
-4. **Unattended path = CI.** `.github/workflows/release.yml`'s `npm-publish` job publishes via
-   npm Trusted Publishing (OIDC) on every `v*` tag push — no stored token, no OTP, because CI
-   presents npm its own short-lived OIDC identity. It needs a one-time trusted-publisher
-   registration on npmjs.com (package Settings → Trusted Publisher → GitHub Actions, workflow
-   `release.yml`); until that exists, or when the job fails, the job reds and the local worktree
-   publish (skill step 4 fallback) is the path — which then needs a human OTP or a bypass-2FA
-   granular token in `~/.npmrc` (bridge only, see above).
+4. **Publish path = local token.** Releases publish locally from an isolated
+   `~/.cache/sm-publish` worktree (skill step 4); there is no CI npm publish job (Trusted
+   Publishing declined by the owner on 2026-11-21). The token in `~/.npmrc` must be a granular
+   npm token with **"Bypass two-factor authentication"** ticked — 90-day maximum, renewed by the
+   owner. Without that bypass, `npm publish` returns E403.
 5. When blocked here: stop, do NOT retry `npm login` or `npm publish` repeatedly, report the
    exact 403 output and the `npm profile get`/`npm token list` findings, and ask the human to
    either supply an OTP-based interactive publish or a bypass-2FA token for this release.

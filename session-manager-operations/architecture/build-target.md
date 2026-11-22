@@ -89,12 +89,14 @@ points there. `repository`/`homepage`/`bugs` only appear on the npm registry pag
 is required to publish packages`) even when `npm whoami` succeeds — a separate gate from login. A
 legacy "classic" publish token cannot satisfy it; only an account with 2FA enabled (interactive OTP
 at publish time) or a **granular access token with "bypass 2FA for write actions"** (npmjs.com web
-UI only — the CLI cannot create one) can. npm is deprecating the bypass-2FA token path itself —
-Phase 2 (~Jan 2027) removes its publish capability entirely. The durable fix is **npm Trusted
-Publishing (OIDC)** — no token/2FA at all, since npm verifies the GitHub Actions run's own
-short-lived identity: `release.yml`'s `npm-publish` job publishes on `v*` tag push (needs a one-time
-trusted-publisher registration on npmjs.com). The fallback local-worktree publish needs either a
-live human OTP or a (temporary, pre-2027) bypass-2FA token per release.
+UI only — the CLI cannot create one) can.
+
+**Decision: Trusted Publishing declined by the owner on 2026-11-21.** `release.yml` has no npm
+publish job; it builds installers only. Releases publish locally from an isolated
+`~/.cache/sm-publish` worktree using a granular npm token with **"Bypass two-factor
+authentication"** ticked (90-day maximum, renewed by the owner). Without that bypass, `npm
+publish` returns E403. npm has announced it is deprecating the bypass-2FA publish capability
+(Phase 2, ~Jan 2027); revisit this decision before then.
 
 ### Publish command sequence
 

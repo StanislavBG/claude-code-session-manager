@@ -1,10 +1,10 @@
 # Domain model (TAB / EPIC) — full reference
 
 Root `CLAUDE.md` holds the one-line laws; this file holds the rationale behind each. **Read this before
-changing anything in the TAB → EPIC → PRD chain.** Any new feature touching sessions, navigation, or
-per-project state must map onto the TAB → operations-root → EPIC → session hierarchy, never a parallel
-scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → operations-root `tasks/`
-(owner-approved 2026-11-22).
+changing anything in the TAB → EPIC → PRD chain.** The law (root CLAUDE.md, Domain model): whatever new
+work deals with sessions, navigation or a project's own state fits the four-level chain of TAB, ops root,
+Epic and session — never a parallel scoping scheme. Only the [Task](#tasks) sits outside an Epic; it lives
+under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
 
 ## Hierarchy
 
@@ -20,7 +20,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   eagerly `/develop` fires inside the Epic's session (the `session-manager-dev:develop` skill's "Tag-aware
   default"): `feature`/`bug` treat PRD decomposition as the expected next step, `discussion` keeps it
   available but never assumed.
-- **"Sessions" is the user-facing name; `Epic`/`PromptSession` is the code name.** Every UI surface says
+- **The UI says "Sessions"; the code says `Epic`/`PromptSession`.** Every UI surface says
   *session* because that is what an Epic is: a tagged claude session opened through AIM. `PromptSession`,
   `EpicTag`, `epicId`, every `epic-*` testid and every on-disk path (`scheduler/epics/<epic-id>/`) keep the
   code name — don't carry the label change into identifiers.
@@ -35,7 +35,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   it adopts an existing CLI session of the same project that no Epic or SessionTab owns instead of minting one,
   so a conversation begun in the plain CLI carries on as an Epic. It is still minted only by a human's New
   Session press and is still 1:1 (`epicMint.cjs`'s restore gate; candidates from `restorableSessions.cjs`).
-- **Active Epics run in their own `git worktree`** (branch `sm-epic/<id>`, `gitWorktree.cjs`'s
+- **Each active Epic gets a private `git worktree`** (branch `sm-epic/<id>`, `gitWorktree.cjs`'s
   `createEpicWorktree`, created at `proposed → active`) so concurrent Epics on one project don't clobber each
   other's uncommitted edits; Terminal PTY and headless Chat both resolve their spawn cwd to it
   (`epicSpawnCwd.cjs`). Isolation folds back at exactly one checkpoint, `markCompleted`'s merge-before-archive
@@ -56,7 +56,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
 
 ## Agent + Tag, and the AIM prompt
 
-- **Epic creation is three independent selections.** `agentType` (Actor — a persona from the Agents page,
+- **Three separate choices make an Epic.** `agentType` (Actor — a persona from the Agents page,
   `~/.claude/agents/*.md`), `tag` (Mission — what the Epic is for) and `agentCli` (which CLI runs it; absent =
   Claude Code, see [Agent CLI](#agent-cli)) are separate axes on `PromptSession`. Actor and Mission may each be
   None (see [Plain sessions](#plain-sessions)). The `tag` taxonomy is a closed union.
@@ -78,15 +78,15 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   so a `feature` Epic can legitimately hold a `bug` PRD. The only asymmetry: an Epic's tag may be `discussion`
   (whether-to-build is unsettled), a PRD's never is (`PRD_WORK_TYPES` = `WORK_TYPES` minus `discussion`).
   `prdCreate.cjs` passes `tag` straight to frontmatter with no lookup against the parent Epic.
-- **The opening prompt is AIM — Actor, Input, Mission, in that order** — composed only by
-  `lib/epicIntake.ts`'s `composeEpicIntake` into `openingPrompt` (never `goalText`). Three slots, parts in
+- **The first prompt follows AIM (Actor, then Input, then Mission)**, and only `composeEpicIntake` in
+  `lib/epicIntake.ts` builds it, writing to `openingPrompt` (never `goalText`). Three slots, parts in
   emission order: **Actor** = persona (identity line + body; the frontmatter description only when there is no
   body); **Input** = grounding line (`lib/groundingBoard.ts`'s `summarizeGroundingBoard` over the real
   System/Project/Local inventory, computed fresh by `computeGroundingBoard` at submit if the board wasn't
   opened), Context Injections, attached references; **Mission** = the tag's job-type framing
   (`initialPromptTemplate`), then the human's goal (one slot, not separate blocks). Every part is independently
   optional and omitted when absent; an Epic with neither an Actor nor a Mission gets no grounding line.
-  Framing only: Input stays real-data-derived and never becomes a second source of truth for what the `claude`
+  Framing only: Input stays real-data-derived and never becomes another authority on what the `claude`
   CLI loads.
   - **Persistence:** sections store as `kind` = slot plus part (`EpicIntakeSection` in
     `src/renderer/lib/epicIntake.ts`). Epics stored with the 7 pre-AIM kinds stay valid and render through
@@ -110,7 +110,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   default (omit the key to keep the global's). A malformed overlay is ignored and reported; provenance is
   per field. Use case: a frontmatter-only `<cwd>/.claude/agents/dev-lead.md` changes one project's executor
   without forking the persona body.
-- **A MACRO is a saved (agent, tag, prompt) hot key, not a fourth concept.** Stored machine-locally by
+- **A MACRO is a stored hot key bundling agent, tag and prompt — not a fourth concept.** Stored machine-locally by
   `macroLibrary.cjs` (`~/.claude/session-manager/macros.json`; `Macro.projects` = absolute cwds or `'*'`) and
   rendered by `SessionActionsBar.tsx`. Pressing one is the same act as New Session — the one IPC handler
   holding `MINT_AUTHORITY_NEW_EPIC_UI`, `composeEpicIntake`, approve out of `proposed`, send — so the
@@ -123,8 +123,8 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   An xhigh/max persona makes every press open MacroCostDialog (useMacroCostPrompt, mounted once in App.tsx);
   'Run at <lower>' (default medium) is per launch: chat Epic `effort` override or build PRD `effort`
   frontmatter (in-process only; resolveEpicEffort's 'prd' rung outranks the persona); no macro or persona is edited.
-  A script (a cron job or systemd timer) may start a macro only when a human ticked 'Can be started by a script'
-  (`scriptStart`) on it; that flag is set only in the macro editor, never by an agent's macro_save.
+  A script (a cron job or systemd timer) may start a macro only after a human has checked its 'Can be started by
+  a script' box (`scriptStart`); that flag is set only in the macro editor, never by an agent's macro_save.
   `POST /admin/macros/run {cwd, id, inputs?, effort?}` (`macroAdminRoutes.cjs`) refuses (400) builtin, job and
   unmarked macros, then hands the press payload to the renderer (`chat:external-new-session`), which runs the
   same New Epic UI path as a press: `MINT_AUTHORITY_NEW_EPIC_UI`, so `MINT_AUTHORITIES` stays two. The Epic
@@ -133,7 +133,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   the cwd (or a start is in flight) the route returns it with `alreadyRunning: true` instead of a second start.
   With no app window open (or the renderer not answering) it is a 503 and nothing starts. There is no macro_run
   MCP tool on purpose: an agent that could start macros would be a third Epic creator; the human's tick is the
-  consent, and an agent needing work runs `/develop` in its own Epic. Example systemd unit line (`$$` is systemd's
+  consent, and an agent that wants work done queues it with `/develop` from the Epic it is in. Example systemd unit line (`$$` is systemd's
   literal `$`; jq builds the JSON body so no nested quotes need escaping; replace MACRO_ID):
   `ExecStart=/usr/bin/sh -c 'f=$$HOME/.claude/session-manager/admin-api.json; CWD=/path/to/project ID=MACRO_ID jq -nc {cwd:env.CWD}+{id:env.ID} | curl -sf --max-time 60 --oauth2-bearer $$(jq -r .token $$f) -H content-type:application/json -d @- http://127.0.0.1:$$(jq -r .port $$f)/admin/macros/run'`
 - **A Project Home tool is app-level, not per project.** A macro with `surface: 'project-home'` (Project Home ▸
@@ -160,7 +160,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   ([limits, stored approval time, Retry](../project-pages/README.md#review-step-videosidreview)). No agent tool
   or route writes `decision.json`, so an agent can never approve its own review and the final build only follows
   a human's say-so.
-- **An Epic's title + objective are fixed for the life of its session, and are its first prompt.** The New Epic
+- **An Epic's title and objective never change while its session lives, and they form its first prompt.** The New Epic
   card composes both through `composeEpicIntake` and sends the objective at creation; nothing rewrites
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of
   work is the intended shape. The queue row's `renameEpic` is a cosmetic carve-out (typo, clarity), never a
@@ -243,16 +243,18 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   [`../prompt-sessions/README.md#lifecycle`](../prompt-sessions/README.md#lifecycle). Every Epic is born
   `proposed`, and nothing is spent until someone presses **Approve & start** (`EpicApprovalBar`), which sends
   `openingPrompt` (falling back to `goalText`) as the first message.
-- **SINGLE-CREATOR LAW: an Epic is created in exactly one place — a human pressing New Epic**, plus one narrow
-  second door for inbound cross-project feedback. Enforced fail-closed in `src/main/lib/epic/epicMint.cjs`:
+- **The law (root CLAUDE.md, SINGLE-CREATOR LAW):** only a person clicking New Epic brings an Epic into
+  being, with one narrow second door for inbound cross-project feedback. `src/main/lib/epic/epicMint.cjs`
+  refuses everything else (fail-closed):
   `ensureEpic()` is join-only except for `promptSessionsCreateEpic.cjs` (`MINT_AUTHORITY_NEW_EPIC_UI`) and
   `crossProjectFeedback.cjs` (`MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK`). `MINT_AUTHORITIES` is the full
   two-entry list; a third is a domain-model change, not a convenience. Anyone else asking for a missing Epic
   gets a throw plus an `epic_mint_refused` audit event.
 - **There is no agent-facing proposal channel.** An agent sure that work is needed runs `/develop` inside the
-  Epic it is already in — PRDs join an existing Epic, they never conjure one. An agent that is unsure says so
+  Epic it is already in. The law (root CLAUDE.md, Domain model) in short: a PRD attaches to an Epic that
+  already exists and can never bring a new one into being. An agent that is unsure says so
   and lets the human open an Epic.
-- **Project-to-project feedback lands as a `proposed` Epic in the RECEIVING project.**
+- **Feedback from another project arrives as a `proposed` Epic on the RECEIVING side.**
   `crossProjectFeedback.cjs` is the only conduit, because the app's main process is the single process
   legitimately holding several projects' operations roots. Surface: the `feedback_open_session` /
   `feedback_list_projects` MCP tools (`scripts/scheduler-mcp-server.cjs` → `POST /admin/feedback/open-session`,
@@ -329,14 +331,15 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   while the app runs is swept before it can become a queue row. Machine-level state is runtime only:
   `~/.claude/session-manager/scheduler-machine.json`, run logs under `~/.claude/session-manager/scheduled-plans/runs/`, and the session
   slot pool (`lib/scheduler/sessionSlots.cjs`) — the one machine-wide pool every scheduler job and chat run acquires from.
-- **PRD authoring is API-only.** `scheduler_create_prd` validates frontmatter, atomically allocates `NN`, and
+- **PRDs are written through the API alone.** `scheduler_create_prd` validates frontmatter, atomically allocates `NN`, and
   enforces the Epic-join rule. A hand-written PRD is never sanctioned (`audit-ops-hygiene.cjs` and `ops-sweep`
   flag one); with the app not running, the agent stops and asks the human to start it.
 
 ## Tasks
 
-- **A Task is one headless `claude -p` run for a project** — with no worktree, no git, no Epic and no PRD. It is
-  the one Epic-less unit in the hierarchy, scoped TAB → operations-root `tasks/` (owner-approved 2026-11-22).
+- **A Task is a single headless `claude -p` call made for one project** — with no worktree, no git, no Epic and
+  no PRD. The law (root CLAUDE.md, Domain model): it is the only unit outside an Epic, filed under the ops
+  root's `tasks/` folder (the owner signed off on 2026-11-22).
 - **A Task never mints an Epic.** The single-creator law is unchanged: nothing about a Task touches
   `epicMint.cjs` or `MINT_AUTHORITIES`.
 - **Only a script starts one**, via `POST /admin/tasks`, and only while a human has **'Scripts may run Tasks'**
@@ -345,7 +348,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   passed unchanged and no persona body is appended. `--no-session-persistence` applies unless the caller asks
   to persist or resume a session; a persisted Task's transcript is skipped by History, so its cost is counted
   once, from the ledger.
-- **Slot policy.** Each Task acquires a slot from `lib/scheduler/sessionSlots.cjs` (the sole machine-wide cap)
+- **Slot policy.** Each Task takes a slot from `lib/scheduler/sessionSlots.cjs` (the only cap across the machine)
   and is served ahead of pending PRD jobs. When the cap is ≥ 2 and some project has Tasks on, one slot is held
   for interactive work. Nothing already running is interrupted to make room; a Task that cannot get a slot in
   time ends `slot_timeout`.
@@ -357,7 +360,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
 
 ## Single-writer law
 
-Every `session-manager-operations/<namespace>/` has exactly one owning writer and everyone else reads,
+Each `session-manager-operations/<namespace>/` is written by one owner alone and read by everyone else,
 enforced fail-closed in `src/main/lib/opsOwnership.cjs`: an undeclared writer, or a namespace with no owner,
 throws. The `OWNERS` map in that file and [`../CLAUDE.md`](../CLAUDE.md) are the only enumerations of
 namespaces, owners, and retention; adding a namespace or writer is a deliberate edit to that file, with each
@@ -372,10 +375,10 @@ by skipping the same-PR registration of a new folder.
 
 ## Open-core and the relay
 
-- **The APP and the Field Manual are both free.** No license check, entitlement gate, trial limit, nag, or
+- **Neither the APP nor the Field Manual costs anything.** There is no license check, entitlement gate, trial limit, nag, or
   "pro" tier, and no feature or chapter moves behind a purchase; the open-core pricing rule lives in the
   manual's own README.
-- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. The relay,
+- **The bilko.run relay is kept running** — its bridge is `src/main/webRemote.cjs`, its UI is App Settings → Phone remote. The relay,
   its routes, and the product-page copy in `~/Projects/Bilko/` are not decommissioned.
 
 ## Plain sessions

@@ -628,6 +628,8 @@ const adminGetEpicQuery = z.object({
     }
     return r.value;
   }),
+  // Opt-in cost receipt: only the query values '1' and 'true' turn it on.
+  receipt: z.string().max(10).optional().transform((v) => v === '1' || v === 'true'),
 }).refine((v) => (v.id === undefined) !== (v.externalRef === undefined), {
   message: 'exactly one of id or externalRef is required',
 });

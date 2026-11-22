@@ -183,7 +183,7 @@ test('epic_list requires only cwd; epic_get requires cwd plus exactly one of id 
   expect(Object.keys(list.inputSchema.properties).sort()).toEqual(['cwd', 'limit', 'offset', 'state']);
   const get = TOOLS.find((t) => t.name === 'epic_get');
   expect(get.inputSchema.required).toEqual(['cwd']);
-  expect(Object.keys(get.inputSchema.properties).sort()).toEqual(['cwd', 'externalRef', 'id']);
+  expect(Object.keys(get.inputSchema.properties).sort()).toEqual(['cwd', 'externalRef', 'id', 'receipt']);
   const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'epic_get');
   expect(entry.requiredOneOf).toEqual([['id', 'externalRef']]);
   for (const name of ['epic_list', 'epic_get']) {

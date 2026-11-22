@@ -197,3 +197,36 @@ test('schemas coerce limit/offset with defaults', () => {
 
 // Session rows' own cwd field is informational only; any absolute path works.
 function cwd0() { return '/placeholder'; }
+
+test('GET /admin/epic carries epic.receipt only when receipt is asked for', async () => {
+  const cwd = await project([session('e-1', cwd0())]);
+  const http = setup(cwd);
+
+  const plain = await call(http, '/admin/epic', { cwd, id: 'e-1' });
+  expect(plain.statusCode).toBe(200);
+  expect(plain.json.epic.epicId).toBe('e-1');
+  expect('receipt' in plain.json.epic).toBe(false);
+
+  const off = await call(http, '/admin/epic', { cwd, id: 'e-1', receipt: '0' });
+  expect(off.statusCode).toBe(200);
+  expect('receipt' in off.json.epic).toBe(false);
+
+  for (const v of ['1', 'true']) {
+    const withReceipt = await call(http, '/admin/epic', { cwd, id: 'e-1', receipt: v });
+    expect(withReceipt.statusCode).toBe(200);
+    expect(withReceipt.json.epic.epicId).toBe('e-1');
+    expect(withReceipt.json.epic.receipt).toBeDefined();
+    expect(Object.keys(withReceipt.json.epic.receipt).sort()).toEqual(['chat', 'jobs']);
+  }
+});
+
+test('adminGetEpicQuery receipt is true only for 1 and true', () => {
+  const parse = (receipt) => schemas.adminGetEpicQuery.parse({ cwd: '/x', id: 'e-1', ...(receipt === undefined ? {} : { receipt }) }).receipt;
+  expect(parse('1')).toBe(true);
+  expect(parse('true')).toBe(true);
+  expect(parse('0')).toBe(false);
+  expect(parse('false')).toBe(false);
+  expect(parse('yes')).toBe(false);
+  expect(parse('')).toBe(false);
+  expect(parse(undefined)).toBe(false);
+});

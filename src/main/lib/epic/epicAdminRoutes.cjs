@@ -5,8 +5,8 @@
  *
  *   GET /admin/epics?cwd=<abs>&state=<state>&limit=<1..200>&offset=<0..>
  *     → 200 { ok: true, epics, total, limit, offset, hasMore }
- *   GET /admin/epic?cwd=<abs>&(id=<epicId> | externalRef=<ref>)
- *     → 200 { ok: true, epic } | 404 { ok: false, error: 'not found' }
+ *   GET /admin/epic?cwd=<abs>&(id=<epicId> | externalRef=<ref>)[&receipt=1|true]
+ *     → 200 { ok: true, epic } (epic.receipt = { jobs, chat } only when receipt was asked for) | 404 { ok: false, error: 'not found' }
  *
  * A query the schema rejects → 400 { ok: false, error: 'invalid query', details }.
  * A cwd that is not absolute or has no session-manager-operations folder →
@@ -84,7 +84,12 @@ function registerAdminRoute(adminHttp, deps = {}) {
   adminHttp.registerRoute('GET', '/admin/epic', async (/** @type {any} */ req, /** @type {any} */ res, /** @type {any} */ query) => {
     const input = parseQuery(schemas.adminGetEpicQuery, query, res);
     if (!input) return;
-    const epic = await getEpicRecord(input.cwd, { ...readOpts, id: input.id, externalRef: input.externalRef });
+    const epic = await getEpicRecord(input.cwd, {
+      ...readOpts,
+      id: input.id,
+      externalRef: input.externalRef,
+      receipt: input.receipt === true,
+    });
     if (!epic) {
       sendJson(res, 404, { ok: false, error: 'not found' });
       return;

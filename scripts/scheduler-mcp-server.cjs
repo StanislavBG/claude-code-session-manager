@@ -28,7 +28,7 @@
  *   customer_feedback_submit({ goal, description, tag, imagePaths? }) -> POST /admin/customer-feedback/submit
  *
  *   epic_list({ cwd, state?, limit?, offset? }) -> GET /admin/epics?cwd=<encoded>&...
- *   epic_get({ cwd, id? | externalRef? }) -> GET /admin/epic?cwd=<encoded>&(id|externalRef)=...
+ *   epic_get({ cwd, id? | externalRef?, receipt? }) -> GET /admin/epic?cwd=<encoded>&(id|externalRef)=...[&receipt=1]
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -419,6 +419,7 @@ const TOOLS = [
         cwd: { type: 'string', description: 'Absolute path of the project the Epic belongs to' },
         id: { type: 'string', description: 'The Epic id. Give exactly one of id / externalRef.' },
         externalRef: { type: 'string', description: 'The external reference the Epic was opened with. Give exactly one of id / externalRef.' },
+        receipt: { type: 'boolean', description: 'Optional: when true, the answer also carries epic.receipt, what the Epic cost in jobs and chat.' },
       },
       required: ['cwd'],
     },
@@ -1002,6 +1003,7 @@ async function handleCallTool(request) {
       if (args?.cwd) qs.set('cwd', args.cwd);
       if (hasId) qs.set('id', args.id);
       else qs.set('externalRef', args.externalRef);
+      if (args?.receipt === true) qs.set('receipt', '1');
       const result = await adminRequest('GET', `/admin/epic?${qs.toString()}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }

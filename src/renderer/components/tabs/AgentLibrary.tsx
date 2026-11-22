@@ -12,6 +12,7 @@ import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
 import { useAgentPersonasState } from '../../lib/useAgentPersonas'
 import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
 import { useSessions } from '../../state/sessions'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregate'
 
 /**
@@ -107,6 +108,25 @@ function AgentLibraryComponent() {
     window.addEventListener('sm:select-persona', h)
     return () => window.removeEventListener('sm:select-persona', h)
   }, [])
+
+  // A "Search all config" pick for this tab (`agents:<name>`): once the personas have
+  // loaded, open the Personas view on that agent, clearing a filter that would hide it and
+  // dropping any unsaved draft / new row. A miss keeps the selection. Either way the
+  // request is consumed.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  useEffect(() => {
+    if (focusTab !== 'agents' || !focusId || personas === null) return
+    const name = focusId.startsWith('agents:') ? focusId.slice('agents:'.length) : null
+    if (name && personas.some((p) => p.name === name)) {
+      setView('personas')
+      setFilter('')
+      setDraft(null); setCreating(false); setConfirmDelete(false); setRowConfirmDelete(null)
+      setSelectedName(name)
+    }
+    clearFocus()
+  }, [focusTab, focusId, personas, clearFocus])
 
   const viewTabs = (
     <ViewTabs

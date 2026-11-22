@@ -21,6 +21,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { shortenHome } from '../ui/SourceChip'
 import { useConfig } from '../../state/config'
 import { toast } from '../../state/toast'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { basename } from '../../lib/basename'
 import { estimateTokens } from '../../lib/estimateTokens'
 import type { ImportRef } from '../../../preload/api'
@@ -63,8 +64,11 @@ export interface ClaudeMdWorkbenchProps {
   testIdPrefix?: string
 }
 
-/** The root file's flattened `@`-import chain, re-parsed when its saved disk text changes. */
-function useImports(activePath: string): ImportRef[] {
+/**
+ * The root file's flattened `@`-import chain, re-parsed when its saved disk text changes.
+ * `ready` turns true once a parse of `activePath` has settled (so an empty list is final).
+ */
+function useImports(activePath: string): { imports: ImportRef[]; ready: boolean } {
   const [found, setFound] = useState<{ path: string; imports: ImportRef[] } | null>(null)
   const generationRef = useRef(0)
   const parsedPathRef = useRef<string | null>(null)
@@ -105,7 +109,10 @@ function useImports(activePath: string): ImportRef[] {
     }
   }, [activePath, diskRaw])
 
-  return useMemo(() => (found && found.path === activePath ? found.imports : []), [found, activePath])
+  return useMemo(
+    () => (found && found.path === activePath ? { imports: found.imports, ready: true } : { imports: [], ready: false }),
+    [found, activePath],
+  )
 }
 
 /** Disk text of files that are listed but not open in the store (other roots, imports) — for line counts. */
@@ -227,7 +234,7 @@ export function ClaudeMdWorkbench({
   const watchFile = useConfig((s) => s.watchFile)
   const unwatchFile = useConfig((s) => s.unwatchFile)
 
-  const imports = useImports(activeRoot)
+  const { imports, ready: importsReady } = useImports(activeRoot)
   // Which document is on screen: null = the active root itself, otherwise one of its imports.
   const [selected, setSelected] = useState<{ root: string; ref: ImportRef } | null>(null)
   const selectedRef = selected && selected.root === activeRoot ? selected.ref : null
@@ -280,6 +287,36 @@ export function ClaudeMdWorkbench({
     setSelected(null)
     if (path !== activeRoot) onSelectRoot?.(path)
   }, [activeRoot, onSelectRoot])
+
+  // A "Search all config" pick for this tab: `claude-md:<root>` opens that root file;
+  // `claude-md:<root>><import>` switches to that root (via onSelectRoot) and, once its
+  // imports are parsed, opens the import. A miss (unknown root or import) keeps the current
+  // document. Either way the request is consumed.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  useEffect(() => {
+    if (focusTab !== 'claude-md' || !focusId) return
+    const rest = focusId.startsWith('claude-md:') ? focusId.slice('claude-md:'.length) : ''
+    const sep = rest.indexOf('>')
+    const root = sep === -1 ? rest : rest.slice(0, sep)
+    const importPath = sep === -1 ? null : rest.slice(sep + 1)
+    if (!roots.some((r) => r.path === root) || (root !== activeRoot && !onSelectRoot)) {
+      clearFocus()
+      return
+    }
+    if (importPath === null) {
+      selectRoot(root)
+      clearFocus()
+      return
+    }
+    // Switch roots first; this effect re-runs once the new root's imports are parsed.
+    if (root !== activeRoot) { onSelectRoot?.(root); return }
+    if (!importsReady) return
+    const ref = imports.find((i) => i.path === importPath)
+    if (ref) selectImport(ref)
+    clearFocus()
+  }, [focusTab, focusId, roots, activeRoot, onSelectRoot, importsReady, imports, selectRoot, selectImport, clearFocus])
 
   const save = useCallback(async () => {
     setSaveError(null)

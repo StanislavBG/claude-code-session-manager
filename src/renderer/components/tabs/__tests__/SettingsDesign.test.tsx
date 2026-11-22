@@ -6,6 +6,7 @@ import { Settings } from '../Settings'
 import { useSessions } from '../../../state/sessions'
 import { settingSources } from '../../ui/EffectiveCards'
 import { mergeScopes, getAtPath } from '../../../lib/mergeScopes'
+import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness } from './_navfaceHarness'
 
 /**
@@ -162,6 +163,50 @@ describe('Settings — ConfigWorkbench design', () => {
     expect(effectiveStage(ladder(el, 'model'))).toEqual(['project'])
     expect(effectiveStage(ladder(el, 'language'))).toEqual(['user'])
     expect(effectiveStage(ladder(el, 'outputStyle'))).not.toContain('project')
+  })
+})
+
+describe('Settings — config-search focus', () => {
+  it('opens the (advanced) group holding the key, scrolls its card into view in the detail, then clears the request', async () => {
+    disk = { [USER]: { model: 'opus', allowedMcpServers: [] } }
+    useConfigSearchFocus.getState().clear()
+    const scrollBy = vi.fn()
+    const origScrollBy = HTMLElement.prototype.scrollBy
+    HTMLElement.prototype.scrollBy = scrollBy as unknown as typeof HTMLElement.prototype.scrollBy
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.key === 'allowedMcpServers' ? 400 : 0
+      return { top, bottom: top + 50, left: 0, right: 0, width: 0, height: 50, x: 0, y: top, toJSON: () => ({}) } as DOMRect
+    })
+    try {
+      const el = await mount('user')
+      expect(q(el, 'settings-detail-header')?.textContent).toContain('Essentials')
+      await act(async () => {
+        useConfigSearchFocus.getState().set('settings', 'settings:allowedMcpServers')
+        await Promise.resolve()
+      })
+      expect(q(el, 'settings-detail-header')?.textContent).toContain('Advanced / Enterprise')
+      expect(el.querySelector('[data-testid="setting-card"][data-key="allowedMcpServers"]')).not.toBeNull()
+      expect(scrollBy).toHaveBeenCalledTimes(1)
+      expect(scrollBy.mock.instances[0]).toBe(q(el, 'config-workbench-detail'))
+      expect(scrollBy.mock.calls[0][0]).toMatchObject({ top: 400 })
+      expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+    } finally {
+      rect.mockRestore()
+      HTMLElement.prototype.scrollBy = origScrollBy
+    }
+  })
+
+  it('keeps the current group for a key that matches nothing, and still clears the request', async () => {
+    disk = { [USER]: { model: 'opus', includeCoAuthoredBy: false } }
+    useConfigSearchFocus.getState().clear()
+    const el = await mount('user')
+    await act(async () => railRow(el, 'git')!.click())
+    await act(async () => {
+      useConfigSearchFocus.getState().set('settings', 'settings:noSuchSettingKey')
+      await Promise.resolve()
+    })
+    expect(q(el, 'settings-detail-header')?.textContent).toContain('Git & Commits')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
   })
 })
 

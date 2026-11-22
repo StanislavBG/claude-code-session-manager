@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { AgentLibrary } from '../AgentLibrary'
 import type { AgentPersona } from '../../../../preload/api'
+import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 
 // The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
 // controlled body text, Document mode by default, and the status bar's Save/Revert.
@@ -114,6 +115,7 @@ async function mount() {
 
 beforeEach(() => {
   installWindowApiMock()
+  useConfigSearchFocus.getState().clear()
 })
 
 afterEach(() => {
@@ -339,5 +341,49 @@ describe('AgentLibrary', () => {
     await act(async () => { (el.querySelector('[data-testid="editor-save"]') as HTMLElement).click(); await Promise.resolve() })
     expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
     expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ name: 'builder', body: 'Edited body.', description: 'Watch git history and drive the next publish.' })
+  })
+})
+
+describe('AgentLibrary config-search focus', () => {
+  const selectedRow = (el: HTMLElement) =>
+    Array.from(el.querySelectorAll('[data-agent-row]')).find(
+      (r) => r.querySelector('[data-testid="config-list-row"]')?.getAttribute('aria-selected') === 'true',
+    )?.getAttribute('data-agent-row')
+  const typeFilter = async (el: HTMLElement, v: string) => {
+    const input = el.querySelector('input[placeholder="Filter"]') as HTMLInputElement
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => {
+      nativeSetter.call(input, v)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await Promise.resolve()
+    })
+  }
+
+  it('selects the persona a search result names, clearing a filter that hides it, then clears the request', async () => {
+    const el = await mount()
+    await typeFilter(el, 'build')
+    expect(selectedRow(el)).toBe('builder')
+    await act(async () => {
+      useConfigSearchFocus.getState().set('agents', 'agents:debugger')
+      await Promise.resolve()
+    })
+    expect(selectedRow(el)).toBe('debugger')
+    expect((el.querySelector('input[placeholder="Filter"]') as HTMLInputElement).value).toBe('')
+    expect(el.textContent).toContain('no open project overlays this agent')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+  })
+
+  it('keeps the current selection for an id that matches nothing, and still clears the request', async () => {
+    const el = await mount()
+    await act(async () => {
+      (el.querySelector('[data-agent-row="debugger"] [data-testid="config-list-row"]') as HTMLElement).click()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      useConfigSearchFocus.getState().set('agents', 'agents:no-such-agent')
+      await Promise.resolve()
+    })
+    expect(selectedRow(el)).toBe('debugger')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
   })
 })

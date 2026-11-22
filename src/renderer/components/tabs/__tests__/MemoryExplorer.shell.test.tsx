@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { MemoryExplorer } from '../memory/explorer/MemoryExplorer'
+import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 
 vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
 vi.mock('../editor/DocumentEditorPane', () => ({
@@ -72,6 +73,7 @@ function setAuto(enabled: boolean) {
 
 beforeEach(() => {
   localStorage.clear()
+  useConfigSearchFocus.getState().clear()
   setAuto(true)
   memory.read.mockImplementation(async (name: string) => ({
     content: name === 'beta.md' ? '---\nname: beta\ndescription: about beta\n---\n\nbeta body\n' : CONTENT,
@@ -227,5 +229,24 @@ describe('MemoryExplorer shell', () => {
     await flush()
     expect(q('mx-palette')).toBeNull()
     expect(q('mx-reader')).not.toBeNull()
+  })
+
+  it('a config-search pick opens that memory file, then clears the request', async () => {
+    await mount()
+    expect(q('mx-reader')!.textContent).toContain('alpha body text')
+    await act(async () => { useConfigSearchFocus.getState().set('memory', 'memory:/mem/beta.md') })
+    await flush()
+    expect(q('mx-reader')!.textContent).toContain('beta body')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+  })
+
+  it('a config-search pick that matches no file keeps the selection, and still clears the request', async () => {
+    await mount()
+    await click(q('mx-list-row-beta.md'))
+    await flush()
+    await act(async () => { useConfigSearchFocus.getState().set('memory', 'memory:/mem/missing.md') })
+    await flush()
+    expect(q('mx-reader')!.textContent).toContain('beta body')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
   })
 })

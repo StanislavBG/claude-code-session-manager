@@ -324,13 +324,18 @@ describe('ProjectClaudeConfig', () => {
       expect(rows[0].textContent).toContain('model')
     })
 
-    it('Enter on a result switches the tab and records the item in configSearchFocus', async () => {
+    it('Enter on a result switches the tab and hands the item to it via configSearchFocus', async () => {
+      const set = vi.spyOn(useConfigSearchFocus.getState(), 'set')
       await mount()
       await focusAndType('model')
       key('Enter')
       await flush()
       expect(q('project-claude-config-panel-settings')).not.toBeNull()
-      expect(useConfigSearchFocus.getState()).toMatchObject({ tab: 'settings', id: 'settings:model' })
+      expect(set).toHaveBeenCalledWith('settings', 'settings:model')
+      // The Settings tab selected the item's group and consumed the request.
+      expect(q('settings-detail-header')?.textContent).toContain('Essentials')
+      expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+      set.mockRestore()
       expect(input().value).toBe('')
     })
 

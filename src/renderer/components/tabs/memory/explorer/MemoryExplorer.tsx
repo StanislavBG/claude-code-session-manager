@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Z } from '../../../../lib/zLayers'
 import { toast } from '../../../../state/toast'
+import { useConfigSearchFocus } from '../../../../state/configSearchFocus'
 import { LEARNING_CONTENT } from '../../../learningContent'
 import type { MemoryAgent } from '../../../../../preload/api'
 import { useMemoryExplorer } from './useMemoryExplorer'
@@ -106,6 +107,13 @@ export function MemoryExplorer({ cwd }: { cwd: string | null }) {
   }, [])
 
   const onAgents = useCallback((a: MemoryAgent[]) => { if (a.length > 0) setKnown(a) }, [])
+
+  // A "Search all config" memory pick names a workspace memory file: show the workspace scope so
+  // the body (which selects the file and clears the request) can find it.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  useEffect(() => {
+    if (focusTab === 'memory' && scopeKey !== 'workspace') onScope({ kind: 'workspace' })
+  }, [focusTab, scopeKey, onScope])
 
   return (
     <ExplorerBody
@@ -280,6 +288,23 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   }
 
   const editDirty = mode === 'edit' && draft !== draftOrig
+
+  // A "Search all config" pick for this tab (`memory:<path>`): once the workspace list has
+  // loaded, open that file in the All view (an unsaved edit asks first). A miss keeps the
+  // selection. Either way the request is consumed; an agent scope waits for the shell's switch.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  useEffect(() => {
+    if (focusTab !== 'memory' || !focusId || agent || ex.loading) return
+    const path = focusId.startsWith('memory:') ? focusId.slice('memory:'.length) : null
+    const row = path ? rows.find((r) => r.path === path) : undefined
+    if (row && (!editDirty || window.confirm('Discard unsaved changes to this memory?'))) {
+      goView('all')
+      select(row.name)
+    }
+    clearFocus()
+  }, [focusTab, focusId, agent, ex.loading, rows, editDirty, goView, select, clearFocus])
 
   const revertEdit = async () => {
     if (!selRow) return

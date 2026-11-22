@@ -9,7 +9,7 @@
  * Detail: one group's setting cards (EffectiveCards) under a header with Show unset / Advanced
  * switches and a '{ } Raw JSON' button that opens the existing raw JSON editor.
  */
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SaveBar } from '../ui/SaveBar'
 import { JsonEditor } from '../ui/JsonEditor'
 import { EmptyState } from '../ui/EmptyState'
@@ -32,6 +32,8 @@ import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { formatMtimeMs } from '../../lib/formatTime'
 import { toast } from '../../state/toast'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
+import { scrollWithin } from '../../lib/scrollWithin'
 
 /**
  * Per-scope statement of WHAT FILE this screen is editing and HOW WIDELY it
@@ -270,6 +272,45 @@ function SettingsComponent({
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 
+  // A "Search all config" pick for this tab (`settings:<key>`): open the group holding the key
+  // (turning on Advanced / Show unset when it would otherwise be hidden, clearing the search
+  // filter), or the Permissions / Hooks pane for a key those editors own, then scroll its card
+  // into view inside the detail column. A miss keeps the current view. Either way the request
+  // is consumed.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  const pageRef = useRef<HTMLDivElement | null>(null)
+  const [scrollToKey, setScrollToKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (focusTab !== 'settings' || !focusId || !home) return
+    const key = focusId.startsWith('settings:') ? focusId.slice('settings:'.length) : null
+    const owner = key ? KEY_OWNERS.find((o) => o.keys.includes(key)) : undefined
+    const holder = key ? cards.groups.find((g) => g.keys.includes(key)) : undefined
+    if (owner?.tab) {
+      setView(owner.tab)
+    } else if (key && holder) {
+      if (holder.advanced && !cards.showAdvanced) cards.setShowAdvanced(true)
+      if (!cards.showUnset) cards.setShowUnset(true)
+      cards.setFilter('')
+      setSelectedGroup(holder.id)
+      setView('general')
+      setScrollToKey(key)
+    }
+    clearFocus()
+  }, [focusTab, focusId, home, cards, clearFocus])
+  // Runs after the group's cards have rendered: scroll only the detail column (never scrollIntoView).
+  useEffect(() => {
+    if (!scrollToKey) return
+    setScrollToKey(null)
+    const root = pageRef.current
+    const container = root?.querySelector<HTMLElement>('[data-testid="config-workbench-detail"]')
+    const target = Array.from(root?.querySelectorAll<HTMLElement>('[data-testid="setting-card"]') ?? []).find(
+      (el) => el.dataset.key === scrollToKey,
+    )
+    if (container && target) scrollWithin(container, target, { block: 'start' })
+  }, [scrollToKey])
+
   if (!home) return <EmptyState title="loading…" />
 
   const file = activePath ? files[activePath] : null
@@ -485,7 +526,7 @@ function SettingsComponent({
   }
 
   return (
-    <div data-testid="settings-page" className="flex h-full min-h-0 bg-bg text-fg">
+    <div ref={pageRef} data-testid="settings-page" className="flex h-full min-h-0 bg-bg text-fg">
       <ConfigWorkbench list={list} detail={detail} />
     </div>
   )

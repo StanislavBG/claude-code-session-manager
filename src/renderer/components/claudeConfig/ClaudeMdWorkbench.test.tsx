@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { useConfig } from '../../state/config'
 import { flushAsync } from '../../testUtils/domFlush'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 
 vi.mock('../tabs/editor/DocumentEditorPane', () => ({
   DocumentEditorPane: ({ path, value, defaultMode }: { path: string; value: string; defaultMode?: string }) =>
@@ -77,6 +78,7 @@ beforeEach(() => {
   }
   installApi()
   useConfig.setState({ files: {}, watchRefs: {} })
+  useConfigSearchFocus.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -146,5 +148,45 @@ describe('ClaudeMdWorkbench', () => {
     await act(async () => { start.click() })
     expect(q('claude-md-empty')).toBeNull()
     expect(pane()?.getAttribute('data-path')).toBe(MD)
+  })
+})
+
+describe('ClaudeMdWorkbench config-search focus', () => {
+  const pick = async (id: string) => {
+    await act(async () => { useConfigSearchFocus.getState().set('claude-md', id) })
+    await flushAsync(8)
+  }
+  const cleared = () => expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+
+  it('selects the import a search result names, then clears the request', async () => {
+    await mount()
+    expect(pane()?.getAttribute('data-path')).toBe(MD)
+    await pick(`claude-md:${MD}>${RULES}`)
+    expect(pane()?.getAttribute('data-path')).toBe(RULES)
+    cleared()
+  })
+
+  it('switches to another root file, and opens its import once that root is active', async () => {
+    const onSelectRoot = await mount(LOCAL)
+    await pick(`claude-md:${LOCAL}`)
+    expect(onSelectRoot).not.toHaveBeenCalled()
+    cleared()
+
+    await pick(`claude-md:${MD}>${RULES}`)
+    expect(onSelectRoot).toHaveBeenCalledWith(MD)
+    expect(useConfigSearchFocus.getState().id).toBe(`claude-md:${MD}>${RULES}`)
+    await mount(MD, onSelectRoot)
+    expect(pane()?.getAttribute('data-path')).toBe(RULES)
+    cleared()
+  })
+
+  it('keeps the current document for an id that matches nothing, and still clears the request', async () => {
+    await mount()
+    await pick(`claude-md:${MD}>${HOME}/missing.md`)
+    expect(pane()?.getAttribute('data-path')).toBe(MD)
+    cleared()
+    await pick(`claude-md:${HOME}/elsewhere/CLAUDE.md`)
+    expect(pane()?.getAttribute('data-path')).toBe(MD)
+    cleared()
   })
 })

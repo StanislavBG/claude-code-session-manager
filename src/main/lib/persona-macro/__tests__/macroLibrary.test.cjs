@@ -785,10 +785,14 @@ test('listMacros returns job on built-in entries, live, even for an edited store
   expect(onDisk.macros.every((m) => !('job' in m) || m.job.estimateMinutes === 1)).toBe(true);
 });
 
-test('saveMacro never writes a job key', async () => {
-  const created = await lib.saveMacro({ ...base(), job: { estimateMinutes: 5, artifactPaths: ['a'] } }, opts);
-  expect('job' in created).toBe(false);
-  await lib.saveMacro({ ...base(), id: created.id, job: { estimateMinutes: 5, artifactPaths: ['a'] } }, opts);
+test('saveMacro refuses a job outside a Project Video tool and never writes one', async () => {
+  await expect(lib.saveMacro({ ...base(), job: { estimateMinutes: 5 } }, opts)).rejects.toThrow('job is allowed only on a Project Video tool');
+  await expect(lib.saveMacro({ ...base({ surface: 'project-home' }), job: { estimateMinutes: 5 } }, opts)).rejects.toThrow('job is allowed only on a Project Video tool');
+  const created = await lib.saveMacro(base(), opts);
+  await expect(lib.saveMacro({ ...base(), id: created.id, job: { estimateMinutes: 5 } }, opts)).rejects.toThrow('job is allowed only on a Project Video tool');
+  // job: null is harmless on any surface
+  const nulled = await lib.saveMacro({ ...base(), id: created.id, job: null }, opts);
+  expect('job' in nulled).toBe(false);
   const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   expect(onDisk.macros.some((m) => 'job' in m)).toBe(false);
 });
@@ -981,4 +985,197 @@ test('a narrowed stored project-home macro cannot be narrowed or removed', async
   const onDisk = JSON.parse(afterSet).macros;
   expect(onDisk).toHaveLength(1);
   expect(onDisk[0]).toMatchObject({ projects: ['*'], updatedAt: PH_EDIT_STAMP });
+});
+
+// --- project-video: a project's own Video tool -------------------------------
+
+const PV_CWD = '/work/vid';
+const pv = (o = {}) => base({ label: 'Shorts', surface: 'project-video', projects: [PV_CWD], job: { estimateMinutes: 20 }, ...o });
+const ONE = 'a Project Video tool belongs to exactly one project';
+
+test('MacroSurfaceSchema accepts project-video; a project-video tool round-trips with its job', async () => {
+  const job = { estimateMinutes: 30, repoPaths: ['videos/out', 'public/shorts/index.html'], review: true };
+  const saved = await lib.saveMacro(pv({ job, projects: [PV_CWD + '/'] }), opts);
+  expect(saved).toMatchObject({ surface: 'project-video', projects: [PV_CWD], job });
+  const listed = (await lib.listMacros(opts)).find((m) => m.id === saved.id);
+  expect(listed.job).toEqual(job);
+  expect(listed.surface).toBe('project-video');
+  expect(lib.MacroSchema.safeParse(saved).success).toBe(true);
+  expect(schemas.macrosSave.safeParse(pv()).success).toBe(true);
+});
+
+test('saveMacro refuses a project-video tool with ["*"], [] or several cwds', async () => {
+  await expect(lib.saveMacro(pv({ projects: ['*'] }), opts)).rejects.toThrow(ONE);
+  await expect(lib.saveMacro(pv({ projects: [] }), opts)).rejects.toThrow(ONE);
+  await expect(lib.saveMacro(pv({ projects: ['/a', '/b'] }), opts)).rejects.toThrow(ONE);
+  await expect(lib.saveMacro(pv({ projects: ['*', '/a'] }), opts)).rejects.toThrow(ONE);
+  const { projects: _p, ...noProjects } = pv();
+  await expect(lib.saveMacro(noProjects, opts)).rejects.toThrow(ONE);
+  const saved = await lib.saveMacro(pv(), opts);
+  await expect(lib.saveMacro({ ...pv(), id: saved.id, projects: ['/a', '/b'] }, opts)).rejects.toThrow(ONE);
+  await expect(lib.saveMacro({ ...pv(), id: saved.id, projects: ['*'] }, opts)).rejects.toThrow(ONE);
+  expect(fs.existsSync(filePath) && JSON.parse(fs.readFileSync(filePath, 'utf8')).macros).toEqual([saved]);
+});
+
+test('MacroSchema refuses a stored project-video entry that is not one project', () => {
+  const stamp = '2026-01-01T00:00:00.000Z';
+  const m = { ...pv(), id: 'pv-000001', createdAt: stamp, updatedAt: stamp };
+  expect(lib.MacroSchema.safeParse(m).success).toBe(true);
+  for (const projects of [['*'], [], ['/a', '/b']]) {
+    const r = lib.MacroSchema.safeParse({ ...m, projects });
+    expect(r.success).toBe(false);
+    expect(r.error.issues.map((i) => i.message)).toContain(ONE);
+  }
+  // a job outside a custom Project Video tool is dropped on read, not kept
+  const sess = lib.MacroSchema.safeParse({ ...m, surface: 'sessions' });
+  expect(sess.success).toBe(true);
+  expect('job' in sess.data).toBe(false);
+  const built = lib.MacroSchema.safeParse({ ...m, builtin: true });
+  expect(built.success).toBe(true);
+  expect('job' in built.data).toBe(false);
+});
+
+test('widenProjectHomeScope and ensureBuiltins never widen a project-video tool', async () => {
+  const stamp = '2026-01-01T00:00:00.000Z';
+  const stored = { ...pv(), id: 'pv-000001', createdAt: stamp, updatedAt: stamp };
+  const w = lib.widenProjectHomeScope([stored]);
+  expect(w.changed).toBe(false);
+  expect(w.macros[0]).toBe(stored);
+  const e = lib.ensureBuiltins([stored], TEST_BUILTINS_V1);
+  expect(e.macros.find((m) => m.id === stored.id)).toEqual(stored);
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [stored] }));
+  const listed = await lib.listMacros({ ...opts, builtins: TEST_BUILTINS_V1 });
+  expect(listed.find((m) => m.id === stored.id)).toEqual(stored);
+  expect(JSON.parse(fs.readFileSync(filePath, 'utf8')).macros.find((m) => m.id === stored.id)).toEqual(stored);
+});
+
+test('setMacroProject cannot add a second project to a project-video tool', async () => {
+  const saved = await lib.saveMacro(pv(), opts);
+  const before = fs.readFileSync(filePath, 'utf8');
+  expect(await lib.setMacroProject({ id: saved.id, cwd: '/other', enabled: true }, opts)).toEqual({ ok: false, error: ONE });
+  expect(await lib.setMacroProject({ id: saved.id, cwd: PV_CWD, enabled: false }, opts)).toEqual({ ok: false, error: ONE });
+  expect(await lib.setMacroProject({ id: saved.id, cwd: PV_CWD, enabled: true }, opts)).toEqual({ ok: true, macro: saved });
+  expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+});
+
+test('job schema: accepts the strict shape and bounds', () => {
+  const J = lib.MacroJobSchema;
+  expect(J.safeParse({ estimateMinutes: 5 }).success).toBe(true);
+  expect(J.safeParse({ estimateMinutes: 60, repoPaths: ['a'], review: false }).success).toBe(true);
+  expect(J.safeParse({ estimateMinutes: 4 }).success).toBe(false);
+  expect(J.safeParse({ estimateMinutes: 61 }).success).toBe(false);
+  expect(J.safeParse({ estimateMinutes: 10.5 }).success).toBe(false);
+  expect(J.safeParse({}).success).toBe(false);
+  expect(J.safeParse({ estimateMinutes: 10, review: 'yes' }).success).toBe(false);
+  expect(J.safeParse({ estimateMinutes: 10, artifactPaths: ['x'] }).success).toBe(false); // strict
+  expect(J.safeParse({ estimateMinutes: 10, repoPaths: [] }).success).toBe(false);
+  expect(J.safeParse({ estimateMinutes: 10, repoPaths: Array.from({ length: 20 }, (_, i) => `p${i}`) }).success).toBe(true);
+  expect(J.safeParse({ estimateMinutes: 10, repoPaths: Array.from({ length: 21 }, (_, i) => `p${i}`) }).success).toBe(false);
+  expect(J.safeParse({ estimateMinutes: 10, repoPaths: ['a'.repeat(200)] }).success).toBe(true);
+  for (const S of [lib.MacroSaveSchema, lib.MacroSchema]) {
+    expect(S.safeParse({ ...pv(), id: 'pv-000001', createdAt: 'x', updatedAt: 'x', job: { estimateMinutes: 3 } }).success).toBe(false);
+  }
+});
+
+test.each([
+  ['empty', ''],
+  ['over 200 chars', 'a'.repeat(201)],
+  ['leading slash', '/videos/out'],
+  ['backslash', 'videos\\out'],
+  ['.. segment', 'videos/../secrets'],
+  ['leading .. segment', '../outside'],
+  ['trailing .. segment', 'videos/..'],
+  ['. segment', 'videos/./out'],
+  ['bare .', '.'],
+  ['bare ..', '..'],
+  ['ops root', 'session-manager-operations/project-pages/x'],
+  ['.git dir', '.git/config'],
+  ['bare .git', '.git'],
+  ['.git prefix', '.gitignore'],
+])('job repoPath refused: %s', async (_name, repoPath) => {
+  expect(lib.MacroJobSchema.safeParse({ estimateMinutes: 10, repoPaths: [repoPath] }).success).toBe(false);
+  expect(lib.MacroSaveSchema.safeParse(pv({ job: { estimateMinutes: 10, repoPaths: ['ok/path', repoPath] } })).success).toBe(false);
+  await expect(lib.saveMacro(pv({ job: { estimateMinutes: 10, repoPaths: [repoPath] } }), opts)).rejects.toThrow();
+});
+
+test('job repoPath accepts ordinary relative paths', () => {
+  for (const p of ['videos', 'public/shorts/index.html', 'a/b.c/d', 'docs/session-manager-operations/x', 'x/.git']) {
+    expect(lib.MacroJobSchema.safeParse({ estimateMinutes: 10, repoPaths: [p] }).success).toBe(true);
+  }
+});
+
+test('job on update: omitted keeps the stored job, null removes it, a new one replaces it', async () => {
+  const saved = await lib.saveMacro(pv({ job: { estimateMinutes: 15, review: true } }), opts);
+  const { job: _j, ...noJob } = pv({ label: 'Renamed' });
+  const kept = await lib.saveMacro({ ...noJob, id: saved.id }, opts);
+  expect(kept.job).toEqual({ estimateMinutes: 15, review: true });
+  const replaced = await lib.saveMacro({ ...noJob, id: saved.id, job: { estimateMinutes: 40 } }, opts);
+  expect(replaced.job).toEqual({ estimateMinutes: 40 });
+  const removed = await lib.saveMacro({ ...noJob, id: saved.id, job: null }, opts);
+  expect('job' in removed).toBe(false);
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')).macros[0];
+  expect('job' in onDisk).toBe(false);
+  // moving back to sessions drops the job
+  const back = await lib.saveMacro({ ...pv(), id: saved.id }, opts);
+  expect(back.job).toEqual({ estimateMinutes: 20 });
+  const sess = await lib.saveMacro({ ...noJob, id: saved.id, surface: 'sessions' }, opts);
+  expect('job' in sess).toBe(false);
+});
+
+test('job is refused on a built-in', async () => {
+  const o = { ...opts, builtins: TEST_BUILTINS_V1 };
+  const b = (await lib.listMacros(o)).find((m) => m.builtin);
+  await expect(lib.saveMacro({ ...b, job: { estimateMinutes: 10 } }, o)).rejects.toThrow('a built-in macro job cannot be set');
+  await expect(lib.saveMacro({ ...b, surface: 'project-video', projects: [PV_CWD], job: { estimateMinutes: 10 } }, o))
+    .rejects.toThrow('built-in macro surface cannot be changed');
+});
+
+test('listMacros keeps a custom stored job; built-ins still get their live BUILTIN_MACROS job', async () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const stamp = '2026-01-01T00:00:00.000Z';
+  const custom = { ...pv({ job: { estimateMinutes: 25, repoPaths: ['out'], review: false } }), id: 'pv-000001', createdAt: stamp, updatedAt: stamp };
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [custom] }));
+  const list = await lib.listMacros({ ...opts, builtins: BUILTIN_MACROS });
+  expect(list.find((m) => m.id === custom.id)).toEqual(custom);
+  expect(list.find((m) => m.id === demo.id).job).toEqual(demo.job);
+});
+
+test('a sessions macro of one project moves in place to project-video', async () => {
+  const inputs = [{ name: 'topic', label: 'Topic' }];
+  const s = await lib.saveMacro(base({ label: 'Short', prompt: 'Make {{topic}}', projects: [PV_CWD], inputs }), opts);
+  await new Promise((r) => setTimeout(r, 5));
+  const { inputs: _i, ...noInputs } = base({ label: 'Short', prompt: 'Make {{topic}}' });
+  const { projects: _p, ...move } = { ...noInputs, id: s.id, surface: 'project-video', job: { estimateMinutes: 10 } };
+  const moved = await lib.saveMacro(move, opts);
+  expect(moved).toMatchObject({ id: s.id, createdAt: s.createdAt, inputs, surface: 'project-video', projects: [PV_CWD], job: { estimateMinutes: 10 } });
+  expect(await lib.listMacros(opts)).toEqual([moved]);
+});
+
+test('a ["*"] macro moves to project-video only when the same save narrows to one cwd', async () => {
+  const all = await lib.saveMacro(base({ projects: ['*'] }), opts);
+  await expect(lib.saveMacro({ ...base({ projects: undefined }), id: all.id, surface: 'project-video' }, opts)).rejects.toThrow(ONE);
+  await expect(lib.saveMacro({ ...base({ projects: ['*'] }), id: all.id, surface: 'project-video' }, opts)).rejects.toThrow(ONE);
+  expect((await lib.listMacros(opts))[0]).toEqual(all);
+  const moved = await lib.saveMacro({ ...base({ projects: [PV_CWD] }), id: all.id, surface: 'project-video' }, opts);
+  expect(moved).toMatchObject({ id: all.id, createdAt: all.createdAt, projects: [PV_CWD], surface: 'project-video' });
+  // a project-home macro (stored ['*']) likewise needs narrowing
+  const ph = await lib.saveMacro(base({ label: 'PH', surface: 'project-home' }), opts);
+  await expect(lib.saveMacro({ ...base({ label: 'PH', projects: undefined }), id: ph.id, surface: 'project-video' }, opts)).rejects.toThrow(ONE);
+  const phMoved = await lib.saveMacro({ ...base({ label: 'PH', projects: [PV_CWD] }), id: ph.id, surface: 'project-video' }, opts);
+  expect(phMoved.projects).toEqual([PV_CWD]);
+});
+
+test('isProjectVideoTool is true only for project-video, projects [cwd] and a job', () => {
+  const m = { ...pv(), id: 'pv-000001' };
+  expect(lib.isProjectVideoTool(m, PV_CWD)).toBe(true);
+  expect(lib.isProjectVideoTool(m, PV_CWD + '/')).toBe(true);
+  expect(lib.isProjectVideoTool(m, '/other')).toBe(false);
+  expect(lib.isProjectVideoTool({ ...m, job: undefined }, PV_CWD)).toBe(false);
+  expect(lib.isProjectVideoTool({ ...m, surface: 'project-home' }, PV_CWD)).toBe(false);
+  expect(lib.isProjectVideoTool({ ...m, surface: 'sessions' }, PV_CWD)).toBe(false);
+  expect(lib.isProjectVideoTool({ ...m, projects: ['*'] }, PV_CWD)).toBe(false);
+  expect(lib.isProjectVideoTool({ ...m, projects: [PV_CWD, '/b'] }, PV_CWD)).toBe(false);
+  expect(lib.isProjectVideoTool(null, PV_CWD)).toBe(false);
+  expect(m.projects).toEqual([PV_CWD]); // pure
 });

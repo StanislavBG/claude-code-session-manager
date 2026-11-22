@@ -35,6 +35,13 @@
  * artifacts are per project); this module enforces that on load (a narrowed
  * stored entry is widened to ['*']) and on save (projects forced to ['*']).
  *
+ * A surface 'project-video' macro is one project's own Video tool (Project
+ * Home ▸ Video): its `projects` is exactly one absolute cwd — never '*', never
+ * widened, never given a second project — and it may carry a `job`
+ * declaration `{ estimateMinutes, repoPaths?, review? }` stored as is. saveMacro
+ * refuses `job` on every other surface and on built-ins; a read drops such a
+ * stale key (a built-in's job is read live from BUILTIN_MACROS by withBuiltinJobs).
+ *
  * Plain Node, no Electron imports.
  */
 
@@ -62,7 +69,32 @@ const AbsolutePathSchema = z.string().max(1024).refine(
 );
 const MacroProjectEntrySchema = z.union([z.literal(ALL_PROJECTS), AbsolutePathSchema]);
 const MacroProjectsSchema = z.array(MacroProjectEntrySchema).max(200);
-const MacroSurfaceSchema = z.enum(['sessions', 'project-home']);
+const MacroSurfaceSchema = z.enum(['sessions', 'project-home', 'project-video']);
+
+const PROJECT_VIDEO_ONE_PROJECT = 'a Project Video tool belongs to exactly one project';
+const JOB_SURFACE_ONLY = 'job is allowed only on a Project Video tool';
+const JOB_NOT_ON_BUILTIN = 'a built-in macro job cannot be set';
+
+/** Repo-relative path a Project Video job may write: '/'-separated, inside the repo, outside ops/git state. */
+const JobRepoPathSchema = z.string().min(1).max(200).superRefine((v, ctx) => {
+  const bad = (message) => ctx.addIssue({ code: 'custom', message });
+  if (v.includes('\\')) bad('repoPath must use "/", not a backslash');
+  if (v.includes('\0')) bad('repoPath must not contain a NUL byte');
+  if (v.startsWith('/')) bad('repoPath must be relative (no leading "/")');
+  if (v.split('/').some((seg) => seg === '..' || seg === '.')) bad('repoPath must not contain a "." or ".." segment');
+  if (v.startsWith('session-manager-operations/')) bad('repoPath must not be under session-manager-operations/');
+  if (v.startsWith('.git')) bad('repoPath must not start with .git');
+});
+const MacroJobSchema = z.object({
+  estimateMinutes: z.number().int().min(5).max(60),
+  repoPaths: z.array(JobRepoPathSchema).min(1).max(20).optional(),
+  review: z.boolean().optional(),
+}).strict();
+
+/** True iff `projects` is exactly one absolute cwd (not '*'). */
+function isSingleProject(projects) {
+  return Array.isArray(projects) && projects.length === 1 && projects[0] !== ALL_PROJECTS;
+}
 
 const MACRO_INPUT_MAX_LEN = 500;
 const MACRO_PLACEHOLDER_RE = /\{\{\s*([a-z][a-z0-9_]{0,31})\s*\}\}/g;
@@ -152,7 +184,19 @@ function renderMacroPrompt(prompt, inputs, values) {
   return { ok: true, prompt: rendered };
 }
 
-const MacroSchema = z.object({
+/**
+ * A job outside a custom Project Video tool is stale (e.g. a stored or live
+ * built-in job of a different shape): drop the key, keep the macro. saveMacro
+ * refuses such a job outright; reads stay tolerant.
+ */
+function stripForeignJob(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !('job' in entry)) return entry;
+  if (entry.surface === 'project-video' && !entry.builtin) return entry;
+  const { job: _stale, ...rest } = entry;
+  return rest;
+}
+
+const MacroObjectSchema = z.object({
   id: MacroIdSchema,
   label: MacroLabelSchema,
   agentName: MacroAgentNameSchema,
@@ -169,7 +213,15 @@ const MacroSchema = z.object({
   autoStartTargets: MacroProjectsSchema.optional(),
   // Human consent that a local script may start this macro (POST /admin/macros/run). Set only by the app's IPC save.
   scriptStart: z.boolean().optional(),
-}).superRefine(refineInputs);
+  // Background job declaration; only on a non-built-in 'project-video' macro.
+  job: MacroJobSchema.optional(),
+}).superRefine((value, ctx) => {
+  refineInputs(value, ctx);
+  if (value.surface === 'project-video' && !isSingleProject(value.projects)) {
+    ctx.addIssue({ code: 'custom', path: ['projects'], message: PROJECT_VIDEO_ONE_PROJECT });
+  }
+});
+const MacroSchema = z.preprocess(stripForeignJob, MacroObjectSchema);
 
 const MacroSaveSchema = z.object({
   id: MacroIdSchema.optional(),
@@ -188,6 +240,8 @@ const MacroSaveSchema = z.object({
   autoStartTargets: MacroProjectsSchema.optional(),
   // Human consent that a local script may start this macro (POST /admin/macros/run). Set only by the app's IPC save.
   scriptStart: z.boolean().optional(),
+  // Omitted keeps the stored job on update; `null` removes it. Only on a 'project-video' macro.
+  job: MacroJobSchema.nullable().optional(),
 }).superRefine(refineInputs);
 
 const MacroDeleteSchema = z.object({ id: MacroIdSchema });
@@ -536,13 +590,41 @@ async function loadStore(filePath, opts) {
 /**
  * Decorate built-in entries with their live `job` declaration from BUILTIN_MACROS.
  * Never persisted: `job` is read at list time so a stored copy cannot freeze it.
+ * A non-built-in macro's stored job (a Project Video tool's) is returned unchanged.
  */
 function withBuiltinJobs(macros) {
   return macros.map((m) => {
-    const { job: _stale, ...rest } = m;
     const b = BUILTIN_MACROS.find((x) => x.id === m.id);
-    return b && b.job ? { ...rest, job: b.job } : rest;
+    if (!b) return m;
+    const { job: _stale, ...rest } = m;
+    return b.job ? { ...rest, job: b.job } : rest;
   });
+}
+
+/** Pure. True only for a 'project-video' macro whose projects is exactly [cwd] and that declares a job. */
+function isProjectVideoTool(macro, cwd) {
+  if (!macro || macro.surface !== 'project-video') return false;
+  if (!macro.job || typeof macro.job !== 'object') return false;
+  const projects = macro.projects;
+  return isSingleProject(projects) && typeof cwd === 'string' && projects[0] === normalizeCwd(cwd);
+}
+
+/** Throws unless the merged save's surface/projects/job combination is allowed. */
+function assertSurfaceRules(saved, parsedJob) {
+  if (saved.surface === 'project-video' && !isSingleProject(saved.projects)) {
+    throw new Error(PROJECT_VIDEO_ONE_PROJECT);
+  }
+  if (parsedJob !== undefined && parsedJob !== null) {
+    if (saved.builtin) throw new Error(JOB_NOT_ON_BUILTIN);
+    if (saved.surface !== 'project-video') throw new Error(JOB_SURFACE_ONLY);
+  }
+}
+
+/** Apply the save's `job` (omitted = keep, null = remove) and drop any job the surface cannot carry. */
+function applyJob(saved, parsedJob) {
+  if (parsedJob === null) delete saved.job;
+  else if (parsedJob !== undefined) saved.job = parsedJob;
+  if (saved.surface !== 'project-video' || saved.builtin) delete saved.job;
 }
 
 /** @returns {Promise<Macro[]>} */
@@ -623,6 +705,8 @@ async function saveMacro(input, opts = {}) {
       }
       if (parsed.scriptStart === true) saved.scriptStart = true;
       else if (parsed.scriptStart === false) delete saved.scriptStart;
+      assertSurfaceRules(saved, parsed.job);
+      applyJob(saved, parsed.job);
       assertPlaceholdersDeclared(saved);
       macros[idx] = saved;
     } else {
@@ -646,6 +730,8 @@ async function saveMacro(input, opts = {}) {
         saved.autoStartTargets = normalizeProjects(parsed.autoStartTargets);
       }
       if (parsed.scriptStart === true) saved.scriptStart = true;
+      assertSurfaceRules(saved, parsed.job);
+      applyJob(saved, parsed.job);
       assertPlaceholdersDeclared(saved);
       macros.push(saved);
     }
@@ -690,6 +776,8 @@ async function setMacroProject(input, opts = {}) {
     if (macro.builtin && !enabled) return { ok: false, error: 'built-in macro visibility cannot be narrowed' };
     const has = macro.projects.includes(target);
     if (enabled === has) return { ok: true, macro };
+    // A Project Video tool never gains a second project nor loses its only one.
+    if (macro.surface === 'project-video') return { ok: false, error: PROJECT_VIDEO_ONE_PROJECT };
     const projects = enabled ? [...macro.projects, target] : macro.projects.filter((p) => p !== target);
     if (projects.length > 200) return { ok: false, error: 'too many projects' };
     const updated = { ...macro, projects, updatedAt: new Date().toISOString() };
@@ -747,6 +835,8 @@ module.exports = {
   renderMacroPrompt,
   macroVisibleIn,
   macroAllowsAutoStart,
+  isProjectVideoTool,
+  MacroJobSchema,
   listMacros,
   saveMacro,
   deleteMacro,

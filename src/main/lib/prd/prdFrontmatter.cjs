@@ -80,8 +80,8 @@ function splitFrontmatter(raw) {
  * { prd, missKind, reason } — see parseFixes.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools'];
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -126,6 +126,52 @@ function parseInlineList(raw) {
     .split(',')
     .map((s) => s.trim().replace(/^(['"])(.*)\1$/, '$2'))
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Quote-aware inline list for `riskTools` — tool-risk rule strings carry
+ * parentheses, spaces, colons and sometimes commas (`Bash(echo a,b)`), so a
+ * plain comma split cannot carry them. An entry that would be ambiguous bare
+ * (comma, bracket, quote, `#`, edge whitespace) is written as a JSON string;
+ * every other entry is written bare, so `riskTools: [a, b]` reads as ['a','b'].
+ * Returns null when `raw` isn't a well-formed bracketed list.
+ */
+function parseQuotedInlineList(raw) {
+  const v = String(raw ?? '').trim();
+  if (!v.startsWith('[') || !v.endsWith(']')) return null;
+  const inner = v.slice(1, -1);
+  const out = [];
+  let i = 0;
+  const skipWs = () => { while (i < inner.length && /\s/.test(inner[i])) i++; };
+  skipWs();
+  if (i === inner.length) return [];
+  for (;;) {
+    skipWs();
+    let item;
+    if (inner[i] === '"') {
+      let j = i + 1;
+      while (j < inner.length && inner[j] !== '"') j += inner[j] === '\\' ? 2 : 1;
+      if (j >= inner.length) return null;
+      try { item = JSON.parse(inner.slice(i, j + 1)); } catch { return null; }
+      i = j + 1;
+      skipWs();
+      if (i < inner.length && inner[i] !== ',') return null;
+    } else {
+      const j = inner.indexOf(',', i);
+      const end = j === -1 ? inner.length : j;
+      item = inner.slice(i, end).trim();
+      i = end;
+    }
+    if (item.length > 0) out.push(item);
+    if (i >= inner.length) break;
+    i++; // past ','
+  }
+  return out;
+}
+
+function formatQuotedInlineList(list) {
+  const enc = (s) => (/[,\[\]"'#]|^\s|\s$/.test(s) ? JSON.stringify(s) : s);
+  return `[${list.map(enc).join(', ')}]`;
 }
 
 /**
@@ -257,6 +303,12 @@ function applyKey(fm, key, after) {
       if (list) fm.artifactPaths = list;
       return;
     }
+    case 'riskTools': {
+      // Quote-aware inline list (rule strings can hold commas) — see parseQuotedInlineList.
+      const list = parseQuotedInlineList(after);
+      if (list) fm.riskTools = list;
+      return;
+    }
   }
 }
 
@@ -292,7 +344,7 @@ function parsePrdFile(text) {
 
     if (RECOGNIZED_KEYS.has(key)) {
       applyKey(fm, key, after);
-      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes') {
+      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes' || key === 'riskTools') {
         if (fm[key]) {
           if (!fm._raw) fm._raw = {};
           fm._raw[key] = { line, parsed: fm[key] };
@@ -354,6 +406,10 @@ function serializePrdFile(fm, body) {
       out.push(`${key}: ${v}`);
       continue;
     }
+    if (key === 'riskTools') {
+      out.push(`${key}: ${formatQuotedInlineList(v)}`);
+      continue;
+    }
     if (Array.isArray(v)) {
       out.push(`${key}: [${v.join(', ')}]`);
       continue;
@@ -377,6 +433,8 @@ module.exports = {
   parsePrdFile,
   serializePrdFile,
   parseInlineList,
+  parseQuotedInlineList,
+  formatQuotedInlineList,
   parseFixes,
   isArtifactOnlyDeclaration,
   RECOGNIZED_KEYS,

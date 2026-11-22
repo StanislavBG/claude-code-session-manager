@@ -32,7 +32,11 @@ const { bareSlug, resolveDepSlug, findNearMatches, epicOf } = require('./depSlug
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
-const { splitFrontmatter, PRD_EFFORT_LEVELS } = require('./prdFrontmatter.cjs');
+const { splitFrontmatter, PRD_EFFORT_LEVELS, formatQuotedInlineList } = require('./prdFrontmatter.cjs');
+const { parseRule: parseToolRiskRule } = require('../claude/toolRiskMarks.cjs');
+
+// Cap on riskTools entries — mirrors ipcSchemas.cjs schedulerCreatePrd.riskTools.
+const RISK_TOOLS_MAX = 20;
 const { sizingWarnings } = require('./prdSizing.cjs');
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
@@ -91,7 +95,7 @@ function isValidMacroId(id) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, riskTools,
     gate, files, budgetExempt, fixes,
   } = input;
 
@@ -150,6 +154,8 @@ function buildPrdBody(input) {
   // prdFrontmatter.cjs's applyKey for the matching "only true opts in" parse.
   if (isValidMacroId(macroId)) fmLines.push(`macroId: ${macroId}`);
   if (PRD_EFFORT_LEVELS.includes(effort)) fmLines.push(`effort: ${effort}`);
+  // Risky tools this PRD is cleared to call — validated + de-duplicated by createPrd().
+  if (Array.isArray(riskTools) && riskTools.length) fmLines.push(`riskTools: ${formatQuotedInlineList(riskTools)}`);
   if (quietMachine === true) fmLines.push('quietMachine: true');
   // Budget exemption is for a sweep validator that cannot be split further;
   // every other caller's budgetExempt is ignored.
@@ -621,6 +627,24 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // effort (in-process callers only: macroJobDispatch.cjs)
   if (input.effort != null && !PRD_EFFORT_LEVELS.includes(input.effort)) {
     return { ok: false, applied: false, status: 400, error: 'effort must be one of low, medium, high, xhigh, max when given' };
+  }
+  // riskTools: tool-risk rule strings (toolRiskMarks.parseRule grammar) this PRD
+  // is cleared to call. Refused before NN allocation; de-duplicated in order.
+  if (input.riskTools != null) {
+    if (!Array.isArray(input.riskTools)) {
+      return { ok: false, applied: false, status: 400, error: 'riskTools must be an array of tool-risk rule strings when given' };
+    }
+    const seen = [];
+    for (const rule of input.riskTools) {
+      if (parseToolRiskRule(rule) === null) {
+        return { ok: false, applied: false, status: 400, error: `riskTools entry ${JSON.stringify(rule)} is not a valid tool-risk rule — use mcp__<server>__<tool>, mcp__<server>__*, Bash(<cmd>) or Bash(<cmd>:*)` };
+      }
+      if (!seen.includes(rule)) seen.push(rule);
+    }
+    if (seen.length > RISK_TOOLS_MAX) {
+      return { ok: false, applied: false, status: 400, error: `riskTools has ${seen.length} entries; the maximum is ${RISK_TOOLS_MAX}` };
+    }
+    input = { ...input, riskTools: seen };
   }
 
   // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied

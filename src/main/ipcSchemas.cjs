@@ -481,6 +481,9 @@ const schedulerCreatePrd = z.object({
   // Artifact-only PRD declaration — cross-field rules enforced in prdCreate.cjs.
   deliverable: z.literal('artifact').optional(),
   artifactPaths: z.array(z.string().min(1).max(1024).regex(NO_NEWLINE_RE, 'must not contain newlines')).max(50).optional(),
+  // Tool-risk rule strings this PRD is cleared to call (toolRiskMarks.parseRule
+  // grammar, re-checked + de-duplicated in prdCreate.cjs; written as `riskTools`).
+  riskTools: z.array(z.string().min(1).max(200)).max(20).optional(),
   // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
   // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
   // sessions key literally equals this value; the renderer only ever sends

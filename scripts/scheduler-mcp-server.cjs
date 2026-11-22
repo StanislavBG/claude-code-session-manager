@@ -332,6 +332,10 @@ const CREATE_PRD_ITEM_SCHEMA = {
     slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
     parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
     dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
+    allowDuplicateOf: {
+      type: 'array', items: { type: 'string' },
+      description: 'Optional: exact NN-prefixed slugs (e.g. "3412-fix-x") of other Epics\' PRDs that share this PRD\'s bare slug. The write is refused as a cross-Epic duplicate unless every one is listed here; list them only for a deliberate duplicate — otherwise add them to dependsOn instead.',
+    },
     disposition: {
       type: 'string',
       enum: ['append', 'new-head'],
@@ -539,6 +543,15 @@ const TOOLS = [
       properties: {
         slug: { type: 'string', description: 'PRD slug of the job to cancel' },
         cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
+        dependents: {
+          type: 'object',
+          description: 'Required when the job has pending dependents (the cancel is refused and lists them otherwise): "cascade" cancels them too, "repoint" makes them depend on `to` instead, "clear" drops the dependency.',
+          properties: {
+            action: { type: 'string', enum: ['cascade', 'repoint', 'clear'] },
+            to: { type: 'string', description: 'PRD slug the dependents should depend on instead — required for action "repoint"' },
+          },
+          required: ['action'],
+        },
       },
       required: ['slug'],
     },
@@ -1102,7 +1115,10 @@ async function handleCallTool(request) {
         return errorResult('missing required argument: slug');
       }
       const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
-      const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug, cwd });
+      // dependents (PRD 3499): forwarded as-is; the admin route validates the
+      // shape and refuses a cancel with pending dependents when it is absent.
+      const dependents = args && args.dependents && typeof args.dependents === 'object' ? args.dependents : undefined;
+      const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug, cwd, dependents });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_retag_prd') {

@@ -111,6 +111,9 @@ const MCP_TOOL_CATALOG = [
       + 'disk by the verifier, and declaring them is the ONLY way an artifact-only PRD can pass the finish '
       + 'protocol without a commit. Each requires the other (the write is refused if only one is given), and '
       + 'no path may contain "..". '
+      + 'A bare slug already used by a PRD in ANOTHER Epic is refused as a cross-Epic duplicate (the error names '
+      + 'the exact NN slugs); add them to dependsOn, or call again with allowDuplicateOf: [those NN slugs] for a '
+      + 'deliberate duplicate. '
       + '`gate` and `files` are REQUIRED on every call — the tool refuses a call missing either. `gate` lists '
       + '1-10 commands that prove this PRD is done (each starting with `timeout <seconds>`, joined with `&&`, '
       + 'no shell metacharacters), or exactly `["none"]` for a PRD with no runnable check; the scheduler '
@@ -154,7 +157,9 @@ const MCP_TOOL_CATALOG = [
       + 'written and every per-entry error is returned as { index, slug, error }. Returns each slug and its NN, plus '
       + 'any advisory warnings. Like scheduler_create_prd it only writes files; the queue rows are derived by the '
       + 'next reconcile pass. All entries must resolve to the same project and Epic; top-level cwd, sourcePromptId '
-      + 'and origin fields are forwarded the same way as scheduler_create_prd.',
+      + 'and origin fields are forwarded the same way as scheduler_create_prd. An entry whose bare slug already '
+      + 'exists in another Epic fails the batch as a cross-Epic duplicate; give that entry dependsOn on the named NN '
+      + 'slugs, or allowDuplicateOf: [those NN slugs] for a deliberate duplicate, and call again.',
     summary: 'Queue a whole plan of PRDs in one all-or-nothing call.',
     whenToUse: 'Use to queue a whole plan at once, validate PRD included: dependsOn may name other entries of the same call by bare slug (earlier or later), so a chain needs no ordering of calls.',
     whenNotToUse: 'Do not use for a single PRD — use scheduler_create_prd. Not callable from inside a headless scheduled job (same refusal as scheduler_create_prd). If the app is not running, stop and ask the human to start it; never hand-write PRD files.',
@@ -236,7 +241,9 @@ const MCP_TOOL_CATALOG = [
       + 'cancelled job lands as "failed" with an error naming the cause. Refuses a slug whose job is already terminal '
       + '(completed/failed/needs_review) — nothing to cancel. A cancelled running job\'s commits are never landed on '
       + 'the base branch; they stay on the job branch, reported in the result as landed:false plus '
-      + 'jobBranch/jobBranchSha.',
+      + 'jobBranch/jobBranchSha. If the job has pending dependents the cancel is refused and lists them; call again '
+      + 'with dependents: { action: "cascade" } (cancel them too), { action: "repoint", to: "<slug>" } (depend on '
+      + 'another PRD instead) or { action: "clear" } (drop the dependency).',
     summary: 'Cancel a job that has not finished.',
     whenToUse: 'Use to stop a running or pending job that should not continue (e.g. it was queued in error, or scope changed underneath it).',
     whenNotToUse: 'Do not use on an already-terminal job (completed/failed/needs_review) — use scheduler_reset_job if it should run again.',

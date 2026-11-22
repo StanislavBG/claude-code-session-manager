@@ -31,6 +31,13 @@ function props(over: Record<string, unknown> = {}) {
     onSort: vi.fn(),
     onNew: vi.fn(),
     empty: null,
+    folder: { count: 51, path: '~/.claude/projects/-p/memory' },
+    scopeOptions: [{ key: 'workspace', label: 'Workspace · Self' }, { key: 'agent:rev', label: 'Subagent · rev' }],
+    scopeKey: 'workspace',
+    onScopeKey: vi.fn(),
+    view: 'all' as const,
+    onView: vi.fn(),
+    counts: { all: 51, stale: 2, broken: 3, recent: 17, unindexed: 0 },
     ...over,
   }
 }
@@ -52,6 +59,39 @@ afterEach(() => {
 })
 
 describe('MemoryListPane', () => {
+  it('MEMORY FOLDER card: file count, mono path, scope picker', () => {
+    const p = props()
+    mount(p)
+    const card = container!.querySelector('[data-testid="config-file-card"]') as HTMLElement
+    expect(card.textContent).toContain('MEMORY FOLDER')
+    expect(q('mx-list-folder-count')!.textContent).toBe('51 files')
+    expect(card.textContent).toContain('~/.claude/projects/-p/memory')
+    const sel = q('mx-list-scope') as HTMLSelectElement
+    expect([...sel.options].map((o) => o.textContent)).toEqual(['Workspace · Self', 'Subagent · rev'])
+    act(() => {
+      sel.value = 'agent:rev'
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(p.onScopeKey).toHaveBeenCalledWith('agent:rev')
+  })
+
+  it('filter chips show counts and switch views', () => {
+    const p = props({ view: 'stale' })
+    mount(p)
+    const labels = [...q('mx-list-chips')!.querySelectorAll('button')].map((b) => b.textContent)
+    expect(labels).toEqual(['All51', 'Stale2', 'Broken3', 'This week17', 'Unindexed✓', 'Ask+'])
+    expect(q('mx-chip-stale')!.getAttribute('aria-pressed')).toBe('true')
+    act(() => { q('mx-chip-broken')!.click() })
+    expect(p.onView).toHaveBeenCalledWith('broken')
+    act(() => { q('mx-chip-ask')!.click() })
+    expect(p.onView).toHaveBeenCalledWith('ask')
+  })
+
+  it('rows show name and size · age only', () => {
+    mount(props())
+    expect(q('mx-list-row-a.md')!.textContent).toBe('a2.0 KB · 3d ago')
+  })
+
   it('renders title, count, meta and just now', () => {
     mount(props({ rows: [row(), row({ name: 'b.md', slug: 'b', ageDays: 0, bytes: 10 })] }))
     expect(q('mx-list')!.textContent).toContain('All memories')
@@ -96,8 +136,9 @@ describe('MemoryListPane', () => {
   it('onSelect and selected class', () => {
     const p = props({ selected: 'a.md', rows: [row(), row({ name: 'b.md', slug: 'b' })] })
     mount(p)
-    expect(q('mx-list-row-a.md')!.className).toContain('bg-muteband')
-    expect(q('mx-list-row-b.md')!.className).not.toContain('bg-muteband')
+    expect(q('mx-list-row-a.md')!.getAttribute('aria-selected')).toBe('true')
+    expect(q('mx-list-row-a.md')!.className).toContain('bg-bg-hi')
+    expect(q('mx-list-row-b.md')!.getAttribute('aria-selected')).toBe('false')
     act(() => { q('mx-list-row-b.md')!.click() })
     expect(p.onSelect).toHaveBeenCalledWith('b.md')
   })

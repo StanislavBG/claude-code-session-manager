@@ -18,13 +18,13 @@ function row(over: Partial<MemoryRow> = {}): MemoryRow {
   }
 }
 
-function mount(r: MemoryRow | null) {
-  const fns = { onOpen: vi.fn(), onRemoveLink: vi.fn(), onAskAbout: vi.fn(), onUpdatePath: vi.fn(), onReviewPath: vi.fn() }
+function mount(r: MemoryRow | null, extra: Record<string, unknown> = {}) {
+  const fns = { onOpen: vi.fn(), onRemoveLink: vi.fn(), onAskAbout: vi.fn(), onUpdatePath: vi.fn(), onReviewPath: vi.fn(), onCheck: vi.fn() }
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   act(() => {
-    root!.render(createElement(LinksRail, { row: r, known: new Set(['b']), ...fns }))
+    root!.render(createElement(LinksRail, { row: r, known: new Set(['b']), ...fns, ...extra }))
   })
   return fns
 }
@@ -81,13 +81,29 @@ describe('LinksRail', () => {
     expect(t).toContain('Nothing links here yet.')
   })
 
-  it('ask box fires onAskAbout', () => {
+  it('ASK CLAUDE card: Check against the repo runs the check; Ask a question opens Ask', () => {
     const f = mount(row())
-    const ask = q('mx-links-ask')!
-    expect(ask.textContent).toContain('Ask about this memory')
-    expect(ask.textContent).toContain('Is this still accurate?')
-    click(ask)
+    const card = q('mx-links-askclaude')!
+    expect(card.textContent).toContain('ASK CLAUDE')
+    expect(card.textContent).toContain('Is this memory still accurate?')
+    const check = q('mx-links-check') as HTMLButtonElement
+    expect(check.textContent).toBe('Check against the repo')
+    click(check)
+    expect(f.onCheck).toHaveBeenCalledTimes(1)
+    click(q('mx-links-ask')!)
     expect(f.onAskAbout).toHaveBeenCalledTimes(1)
+  })
+
+  it('check button waits while a check is busy', () => {
+    mount(row(), { checkBusy: true })
+    expect((q('mx-links-check') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('editing swaps the Ask card for the editing note', () => {
+    mount(row(), { editing: true })
+    expect(q('mx-links-askclaude')).toBeNull()
+    expect(q('mx-links-editing')!.textContent).toContain('EDITING THE FILE ON DISK')
+    expect(q('mx-links-editing')!.textContent).toContain('a.md')
   })
 
   it('renders moved and dead path cards; moved click updates, dead click reviews', () => {

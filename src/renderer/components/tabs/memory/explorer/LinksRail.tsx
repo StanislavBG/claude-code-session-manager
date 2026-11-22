@@ -9,11 +9,17 @@ interface Props {
   onAskAbout: () => void
   onUpdatePath: (ref: { from: string; to: string }) => void
   onReviewPath: () => void
+  /** ASK CLAUDE card's 'Check against the repo' — the existing check (review) action. */
+  onCheck: () => void
+  /** A check is already running or showing its result — the button waits. */
+  checkBusy?: boolean
+  /** The file is open in the editor: the Ask card gives way to an editing note. */
+  editing?: boolean
 }
 
-const LABEL = 'text-[10px] tracking-[.08em] font-semibold text-fg-dim'
+const LABEL = 'text-[11px] tracking-[.1em] font-semibold text-fg-faint'
 const CARD =
-  'flex flex-col gap-px px-2 py-[6px] rounded-[5px] cursor-pointer bg-bg border text-left hover:border-fg-faint'
+  'flex flex-col gap-0.5 px-3.5 py-2.5 rounded-[10px] cursor-pointer bg-bg-hi border text-left hover:border-fg-faint'
 
 function LinkCard({
   testid, slug, sub, dangling, onClick,
@@ -26,7 +32,7 @@ function LinkCard({
       className={`${CARD} ${dangling ? 'border-accent-muted' : 'border-rule-inner'}`}
     >
       <span
-        className={`text-[12px] font-medium overflow-hidden text-ellipsis whitespace-nowrap ${dangling ? 'text-accent' : ''}`}
+        className={`font-mono text-[12.5px] font-medium break-all ${dangling ? 'text-accent' : 'text-fg'}`}
       >
         {slug}
       </span>
@@ -35,11 +41,13 @@ function LinkCard({
   )
 }
 
-export const LinksRail = memo(function LinksRail({ row, onOpen, onRemoveLink, onAskAbout, onUpdatePath, onReviewPath }: Props) {
+export const LinksRail = memo(function LinksRail({
+  row, onOpen, onRemoveLink, onAskAbout, onUpdatePath, onReviewPath, onCheck, checkBusy, editing,
+}: Props) {
   return (
     <aside
       data-testid="mx-links"
-      className="bg-bg-elev border-l border-rule-structural px-[14px] py-4 flex flex-col gap-[18px] overflow-auto"
+      className="px-5 py-6 flex flex-col gap-[18px] overflow-auto"
     >
       {row && (
         <>
@@ -103,17 +111,45 @@ export const LinksRail = memo(function LinksRail({ row, onOpen, onRemoveLink, on
               <span className="text-[12px] text-fg-dim">Nothing links here yet.</span>
             )}
           </div>
-          <button
-            type="button"
-            data-testid="mx-links-ask"
-            onClick={onAskAbout}
-            className="mt-auto flex flex-col gap-[6px] p-[10px] border border-dashed border-rule rounded-[6px] cursor-pointer text-left hover:border-fg"
-          >
-            <span className="text-[12px] text-fg">Ask about this memory</span>
-            <span className="h-7 border border-rule-structural rounded-[5px] bg-bg-hi px-2 flex items-center text-[11.5px] text-fg-dim">
-              Is this still accurate?
-            </span>
-          </button>
+          {editing ? (
+            <div
+              data-testid="mx-links-editing"
+              className="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] border border-dashed border-rule-structural text-[12px] leading-normal text-fg-dim"
+            >
+              <span className={LABEL}>EDITING THE FILE ON DISK</span>
+              <span>
+                Keep the frontmatter lines (name, description, type). Save writes{' '}
+                <span className="font-mono break-all">{row.name}</span>.
+              </span>
+            </div>
+          ) : (
+            <div
+              data-testid="mx-links-askclaude"
+              className="flex flex-col gap-2 px-4 py-3.5 rounded-[14px] border border-honey/50 bg-butter/30"
+            >
+              <span className={`${LABEL} !text-honey-dark`}>ASK CLAUDE</span>
+              <span className="font-serif text-[17px] leading-snug text-fg">Is this memory still accurate?</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  data-testid="mx-links-check"
+                  disabled={checkBusy}
+                  onClick={onCheck}
+                  className="h-8 px-3 rounded-[8px] bg-accent text-bg-hi hover:bg-accent/90 text-[13px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Check against the repo
+                </button>
+                <button
+                  type="button"
+                  data-testid="mx-links-ask"
+                  onClick={onAskAbout}
+                  className="text-[12px] text-honey-dark hover:text-fg"
+                >
+                  Ask a question…
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </aside>

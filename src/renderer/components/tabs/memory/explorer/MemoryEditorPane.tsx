@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import type { KeyboardEvent } from 'react'
 import { slugFromTitle } from './model'
+import { DocumentEditorPane } from '../../editor/DocumentEditorPane'
 
 interface Props {
   mode: 'edit' | 'new' | 'none'
@@ -13,9 +14,15 @@ interface Props {
   onCancel: () => void
   saving: boolean
   dirty: boolean
+  /** Edit mode: absolute path of the memory file (drives the document editor). */
+  path?: string
+  /** Edit mode: status-bar Revert — back to the file as it is on disk. */
+  onRevert?: () => void
 }
 
-function MemoryEditorPaneImpl({ mode, name, title, onTitle, body, onBody, onSave, onCancel, saving, dirty }: Props) {
+function MemoryEditorPaneImpl({
+  mode, name, title, onTitle, body, onBody, onSave, onCancel, saving, dirty, path, onRevert,
+}: Props) {
   if (mode === 'none') {
     return (
       <div data-testid="mx-editor-none" className="flex-1 flex flex-col items-center justify-center text-center gap-1.5 p-10">
@@ -25,7 +32,25 @@ function MemoryEditorPaneImpl({ mode, name, title, onTitle, body, onBody, onSave
     )
   }
 
-  const saveDisabled = saving || (mode === 'edit' && !dirty)
+  if (mode === 'edit') {
+    // The whole file as it is on disk — frontmatter shows as properties in Document mode.
+    return (
+      <div data-testid="mx-editor" className="flex-1 min-h-0 flex flex-col">
+        <DocumentEditorPane
+          key={path ?? name ?? ''}
+          path={path ?? `${name ?? 'memory'}.md`}
+          value={body}
+          onChange={onBody}
+          onSave={() => { if (!saving && dirty) onSave() }}
+          onRevert={onRevert}
+          dirty={dirty}
+          defaultMode="document"
+        />
+      </div>
+    )
+  }
+
+  const saveDisabled = saving
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -41,7 +66,7 @@ function MemoryEditorPaneImpl({ mode, name, title, onTitle, body, onBody, onSave
     <div data-testid="mx-editor" className="flex-1 min-h-0 flex flex-col" onKeyDown={onKeyDown}>
       <div className="flex items-center gap-2 px-[22px] pt-3.5 pb-3 border-b border-rule-structural">
         <h2 className="flex-1 min-w-0 truncate font-mono text-[15px] font-medium text-fg">
-          {mode === 'new' ? 'New memory' : `Editing ${name ?? ''}`}
+          New memory
         </h2>
         <button
           type="button"
@@ -62,7 +87,6 @@ function MemoryEditorPaneImpl({ mode, name, title, onTitle, body, onBody, onSave
         </button>
       </div>
       <div className="flex-1 min-h-0 flex flex-col gap-2.5 px-[22px] py-4">
-        {mode === 'new' && (
           <div className="flex flex-col gap-1">
             <label htmlFor="mx-editor-name" className="text-[11px] tracking-[.06em] font-semibold text-fg-faint">
               NAME
@@ -79,7 +103,6 @@ function MemoryEditorPaneImpl({ mode, name, title, onTitle, body, onBody, onSave
               <div className="font-mono text-[11px] text-fg-faint">→ {slugFromTitle(title)}.md</div>
             )}
           </div>
-        )}
         <textarea
           data-testid="mx-editor-body"
           value={body}
@@ -89,9 +112,8 @@ function MemoryEditorPaneImpl({ mode, name, title, onTitle, body, onBody, onSave
         />
         <div className="flex items-center gap-2 text-[11.5px] text-fg-faint">
           <span>
-            {`Markdown. Frontmatter is ${mode === 'new' ? 'added' : 'kept'} on save. Saving marks the memory verified.`}
+            Markdown. Frontmatter is added on save. Saving marks the memory verified.
           </span>
-          {dirty && mode === 'edit' && <span className="text-accent font-semibold">unsaved</span>}
         </div>
       </div>
     </div>

@@ -21,7 +21,7 @@ const CONTENT = '---\nname: x\n---\n\nBody text.\n\n**Why:** because.\n\n**How t
 function props(over: Record<string, unknown> = {}) {
   return {
     row, content: CONTENT, clusterName: 'Scheduler', clusterDot: 'bg-accent', archived: false,
-    mode: 'read', onMode: vi.fn(), onEdit: vi.fn(), onCopyPath: vi.fn(), onReveal: vi.fn(),
+    onRead: vi.fn(), onEdit: vi.fn(), onCopyPath: vi.fn(), onReveal: vi.fn(),
     onArchive: vi.fn(), onRestore: vi.fn(), onAskDelete: vi.fn(),
     fix: IDLE,
     onFix: vi.fn(), onApplyFix: vi.fn(), onDiscardFix: vi.fn(), onVerify: vi.fn(),
@@ -47,17 +47,31 @@ afterEach(() => {
 })
 
 describe('MemoryReader', () => {
-  it('renders chips conditional on type and session', () => {
+  it('eyebrow: CLUSTER · TYPE · SIZE · MODIFIED · SESSION, mono title', () => {
     mount()
-    const t = q('mx-reader')!.textContent!
-    expect(t).toContain('type · project')
-    expect(t).toContain('session de0e5dbe')
+    expect(q('mx-reader-eyebrow')!.textContent).toBe('SCHEDULER · PROJECT · 2.0 KB · MODIFIED 3D AGO · SESSION DE0E5DBE')
+    expect(q('mx-reader-title')!.textContent).toBe('feedback_x')
+    expect(q('mx-reader-title')!.className).toContain('font-mono')
     act(() => root!.unmount())
     container!.remove()
     mount({ row: { ...row, type: null, originSessionId: null } })
-    const t2 = q('mx-reader')!.textContent!
-    expect(t2).not.toContain('type ·')
-    expect(t2).not.toContain('session ')
+    expect(q('mx-reader-eyebrow')!.textContent).toBe('SCHEDULER · 2.0 KB · MODIFIED 3D AGO')
+  })
+
+  it('Read | Edit switch: Edit calls onEdit; in edit mode shows the editor and Read calls onRead', () => {
+    const p = mount()
+    expect(q('mx-reader-mode-read')!.getAttribute('aria-pressed')).toBe('true')
+    click(q('mx-reader-edit'))
+    expect(p.onEdit).toHaveBeenCalled()
+    act(() => root!.unmount()); container!.remove()
+    const p2 = mount({ editing: true, editor: createElement('div', { 'data-testid': 'fake-editor' }, 'ED') })
+    expect(q('mx-reader-edit')!.getAttribute('aria-pressed')).toBe('true')
+    expect(q('mx-reader')!.textContent).toContain('Editing')
+    expect(q('fake-editor')).not.toBeNull()
+    expect(q('mx-reader')!.textContent).not.toContain('Lead desc')
+    expect(q('mx-reader-fix')).toBeNull()
+    click(q('mx-reader-mode-read'))
+    expect(p2.onRead).toHaveBeenCalled()
   })
 
   it('hides Mark verified for dead-ref stale, shows for age-only', () => {
@@ -129,7 +143,7 @@ describe('MemoryReader', () => {
 
   it('Review with assistant on a non-stale row', () => {
     const p = mount()
-    expect(q('mx-reader-fix')!.textContent).toBe('Review with assistant')
+    expect(q('mx-reader-fix')!.textContent).toBe('+ Review with Claude')
     click(q('mx-reader-fix'))
     expect(p.onFix).toHaveBeenCalled()
   })
@@ -139,12 +153,8 @@ describe('MemoryReader', () => {
     expect(q('mx-reader-apply')).not.toBeNull()
   })
 
-  it('⋯ menu items call handlers; Edit and mode toggle work', () => {
+  it('⋯ menu items call handlers', () => {
     const p = mount()
-    click(q('mx-reader-edit'))
-    expect(p.onEdit).toHaveBeenCalled()
-    click(q('mx-reader-mode-source'))
-    expect(p.onMode).toHaveBeenCalledWith('source')
     const items: [string, string][] = [
       ['Copy path', 'onCopyPath'], ['Reveal in folder', 'onReveal'], ['Archive', 'onArchive'], ['Delete…', 'onAskDelete'],
     ]
@@ -154,11 +164,6 @@ describe('MemoryReader', () => {
       click(btn!)
       expect((p as Record<string, unknown>)[fn]).toHaveBeenCalled()
     }
-  })
-
-  it('Source shows raw text', () => {
-    mount({ mode: 'source' })
-    expect(q('mx-reader')!.querySelector('pre')!.textContent).toBe(CONTENT)
   })
 
   it('archived shows Restore only', () => {

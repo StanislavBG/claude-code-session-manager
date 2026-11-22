@@ -28,6 +28,8 @@ export interface MemoryExplorerActions {
   refresh: () => Promise<void>
   read: (name: string) => Promise<string | null>
   saveBody: (name: string, body: string) => Promise<boolean>
+  /** Write the whole file as given (frontmatter included) — the Edit view's save path. */
+  saveFile: (name: string, content: string) => Promise<boolean>
   create: (title: string, body: string) => Promise<string | null>
   remove: (name: string) => Promise<(() => Promise<void>) | null>
   archive: (name: string) => Promise<boolean>
@@ -225,6 +227,11 @@ export function useMemoryExplorer(scope: ExplorerScope, cwd: string | null): Mem
     return mutate('Memory save', () => window.api.memory.write(name, front + body, target))
   }, [target, read, mutate])
 
+  const saveFile = useCallback(async (name: string, content: string): Promise<boolean> => {
+    if (!target) return false
+    return mutate('Memory save', () => window.api.memory.write(name, content, target))
+  }, [target, mutate])
+
   const create = useCallback(async (title: string, body: string): Promise<string | null> => {
     if (!target) return null
     const name = slugFromTitle(title)
@@ -315,10 +322,10 @@ export function useMemoryExplorer(scope: ExplorerScope, cwd: string | null): Mem
 
   const actions = useMemo<MemoryExplorerActions>(
     () => ({
-      refresh, read, saveBody, create, remove, archive, restore, verify,
+      refresh, read, saveBody, saveFile, create, remove, archive, restore, verify,
       removeLink, regenerateClusters, ask, proposeFix,
     }),
-    [refresh, read, saveBody, create, remove, archive, restore, verify, removeLink, regenerateClusters, ask, proposeFix],
+    [refresh, read, saveBody, saveFile, create, remove, archive, restore, verify, removeLink, regenerateClusters, ask, proposeFix],
   )
 
   return {

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useMemo, useState, type ReactNode } from 'react'
 import { Z } from '../../../../lib/zLayers'
 import { renderChatMarkdown } from '../../../../lib/renderChatMarkdown'
 import type { MemoryRow } from './model'
@@ -11,8 +11,10 @@ interface Props {
   clusterName: string
   clusterDot: string
   archived: boolean
-  mode: 'read' | 'source'
-  onMode: (m: 'read' | 'source') => void
+  /** Edit mode: the header stays, the body is `editor` (the shared document editor). */
+  editing?: boolean
+  editor?: ReactNode
+  onRead: () => void
   onEdit: () => void
   onCopyPath: () => void
   onReveal: () => void
@@ -35,7 +37,7 @@ interface Props {
 }
 
 const BTN = 'text-xs font-medium h-[26px] px-2.5 border border-rule-structural rounded-[5px] bg-bg text-fg hover:border-fg'
-const CHIP = 'px-[7px] py-0.5 rounded bg-bg-elev'
+const SEG = 'h-[30px] px-3 text-[13px] font-medium rounded-[7px]'
 const MENU_ITEM = 'px-2.5 py-[7px] rounded-[5px] text-left text-[12.5px] hover:bg-bg-elev'
 
 // Body typography; scoped to descendants so no global CSS is needed.
@@ -68,6 +70,15 @@ function formatAge(days: number): string {
   return `${days}d ago`
 }
 
+/** CLUSTER · TYPE · SIZE · MODIFIED <age> · SESSION <id> — only the facts the row actually has. */
+export function eyebrowOf(row: MemoryRow, clusterName: string): string {
+  const parts = [clusterName]
+  if (row.type) parts.push(row.type)
+  parts.push(formatSize(row.bytes), `modified ${formatAge(row.ageDays)}`)
+  if (row.originSessionId) parts.push(`session ${row.originSessionId.slice(0, 8)}`)
+  return parts.join(' · ').toUpperCase()
+}
+
 function stripFrontmatter(src: string): string {
   const m = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(src)
   return (m ? src.slice(m[0].length) : src).trim()
@@ -85,94 +96,98 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
   const [menu, setMenu] = useState(false)
 
   const html = useMemo(() => {
-    if (p.content === null || p.mode !== 'read') return ''
+    if (p.content === null || p.editing) return ''
     return renderChatMarkdown(labelHeadings(stripFrontmatter(p.content)))
-  }, [p.content, p.mode])
+  }, [p.content, p.editing])
 
   const pick = (fn: () => void) => () => { setMenu(false); fn() }
 
   return (
     <div data-testid="mx-reader" className="flex flex-col flex-1 min-w-0 min-h-0">
-      <div className="px-[22px] pt-3.5 pb-3 border-b border-rule-structural flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-fg-dim">
-          <span className={`w-[7px] h-[7px] rounded-sm ${p.clusterDot}`} />
-          <span>{p.clusterName}</span>
-          <span className="flex-1" />
-          {!p.archived && (
-            <>
-              <div className="flex border border-rule-structural rounded-[5px] overflow-hidden">
-                <button
-                  type="button"
-                  data-testid="mx-reader-mode-read"
-                  onClick={() => p.onMode('read')}
-                  className={`px-2.5 py-[3px] text-fg ${p.mode === 'read' ? 'bg-muteband' : ''}`}
-                >
-                  Read
-                </button>
-                <button
-                  type="button"
-                  data-testid="mx-reader-mode-source"
-                  onClick={() => p.onMode('source')}
-                  className={`px-2.5 py-[3px] text-fg border-l border-rule-structural ${p.mode === 'source' ? 'bg-muteband' : ''}`}
-                >
-                  Source
-                </button>
-              </div>
-              <button type="button" data-testid="mx-reader-edit" onClick={p.onEdit} className={BTN}>Edit</button>
-              <div className="relative">
-                <button
-                  type="button"
-                  data-testid="mx-reader-more"
-                  onClick={() => setMenu((v) => !v)}
-                  className={`${BTN} !px-2`}
-                >
-                  ⋯
-                </button>
-                {menu && (
-                  <>
-                    <div className={`fixed inset-0 ${Z.dialog}`} onClick={() => setMenu(false)} />
-                    <div
-                      className={`absolute right-0 top-8 w-[200px] ${Z.dialog} bg-bg-hi border border-rule-structural rounded-[7px] shadow-lg p-1 flex flex-col text-fg`}
-                    >
-                      <button type="button" className={MENU_ITEM} onClick={pick(p.onCopyPath)}>Copy path</button>
-                      <button type="button" className={MENU_ITEM} onClick={pick(p.onReveal)}>Reveal in folder</button>
-                      <div className="h-px bg-rule-inner mx-1.5 my-1" />
-                      <button type="button" className={MENU_ITEM} onClick={pick(p.onArchive)}>Archive</button>
-                      <button type="button" className={`${MENU_ITEM} text-accent`} onClick={pick(p.onAskDelete)}>Delete…</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </>
-          )}
+      <div data-testid="mx-reader-header" className="shrink-0 px-9 pt-6 pb-5 border-b border-rule-structural flex items-end gap-3">
+        <div className="flex-1 min-w-0">
+          <div data-testid="mx-reader-eyebrow" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.1em] text-fg-faint">
+            <span className={`w-[7px] h-[7px] rounded-sm shrink-0 ${p.clusterDot}`} />
+            <span className="truncate">{eyebrowOf(row, p.clusterName)}</span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-2.5 min-w-0">
+            <span data-testid="mx-reader-title" className="truncate font-mono text-[27px] font-semibold tracking-[-0.015em] text-fg">
+              {row.slug}
+            </span>
+            {p.editing && (
+              <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-butter/50 text-honey-dark">Editing</span>
+            )}
+          </div>
         </div>
-        <div className="font-mono text-[18px] font-medium text-fg break-all">{row.slug}</div>
-        <div className="flex flex-wrap gap-1.5 text-[11.5px] text-fg-dim">
-          {row.type && <span className={CHIP}>type · {row.type}</span>}
-          <span className={CHIP}>{formatSize(row.bytes)}</span>
-          <span className={CHIP}>modified {formatAge(row.ageDays)}</span>
-          {row.originSessionId && (
-            <span className={`${CHIP} font-mono text-[10.5px]`}>session {row.originSessionId.slice(0, 8)}</span>
-          )}
-        </div>
+        {!p.archived && (
+          <div className="shrink-0 flex items-center gap-2">
+            <div role="group" aria-label="View" className="flex p-[3px] rounded-[10px] bg-bg-elev border border-rule-structural">
+              <button
+                type="button"
+                data-testid="mx-reader-mode-read"
+                aria-pressed={!p.editing}
+                onClick={p.editing ? p.onRead : undefined}
+                className={`${SEG} ${!p.editing ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-dim hover:text-fg'}`}
+              >
+                Read
+              </button>
+              <button
+                type="button"
+                data-testid="mx-reader-edit"
+                aria-pressed={!!p.editing}
+                disabled={p.content === null}
+                onClick={p.editing ? undefined : p.onEdit}
+                className={`${SEG} ${p.editing ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-dim hover:text-fg'} disabled:opacity-50`}
+              >
+                Edit
+              </button>
+            </div>
+            {!p.editing && !row.stale && fix.state === 'idle' && (
+              <button
+                type="button"
+                data-testid="mx-reader-fix"
+                title="Uses Claude"
+                onClick={p.onFix}
+                className="h-[38px] px-4 rounded-[10px] bg-accent text-bg-hi hover:bg-accent/90 text-[13.5px] font-semibold"
+              >
+                + Review with Claude
+              </button>
+            )}
+            <div className="relative">
+              <button
+                type="button"
+                data-testid="mx-reader-more"
+                aria-label="More actions"
+                onClick={() => setMenu((v) => !v)}
+                className="h-[38px] w-[38px] rounded-[10px] border border-rule-structural bg-bg-hi text-fg hover:border-fg"
+              >
+                ⋯
+              </button>
+              {menu && (
+                <>
+                  <div className={`fixed inset-0 ${Z.dialog}`} onClick={() => setMenu(false)} />
+                  <div
+                    className={`absolute right-0 top-11 w-[200px] ${Z.dialog} bg-bg-hi border border-rule-structural rounded-[7px] shadow-lg p-1 flex flex-col text-fg`}
+                  >
+                    <button type="button" className={MENU_ITEM} onClick={pick(p.onCopyPath)}>Copy path</button>
+                    <button type="button" className={MENU_ITEM} onClick={pick(p.onReveal)}>Reveal in folder</button>
+                    <div className="h-px bg-rule-inner mx-1.5 my-1" />
+                    <button type="button" className={MENU_ITEM} onClick={pick(p.onArchive)}>Archive</button>
+                    <button type="button" className={`${MENU_ITEM} text-accent`} onClick={pick(p.onAskDelete)}>Delete…</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {!p.archived && !row.stale && fix.state === 'idle' && (
-        <div className="mx-[22px] mt-3 flex items-center gap-2 text-[11px] text-fg-dim">
-          <button
-            type="button"
-            data-testid="mx-reader-fix"
-            onClick={p.onFix}
-            className="text-xs font-medium h-[26px] px-2.5 rounded-[5px] border border-rule-structural text-fg hover:border-fg"
-          >
-            Review with assistant
-          </button>
-          <span>uses Claude</span>
-        </div>
-      )}
-
+      {p.editing ? (
+        <div data-testid="mx-reader-editor" className="flex-1 min-h-0 flex flex-col px-9 py-6">{p.editor}</div>
+      ) : (
+      <>
       {p.archived && (
-        <div className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-bg-elev flex items-center gap-2.5 text-[12.5px] text-fg-dim">
+        <div className="mx-9 mt-3 px-3 py-2.5 rounded-md bg-bg-elev flex items-center gap-2.5 text-[12.5px] text-fg-dim">
           <span className="flex-1">Archived — read-only. Claude no longer loads this memory.</span>
           <button type="button" data-testid="mx-reader-restore" onClick={p.onRestore} className={BTN}>Restore</button>
         </div>
@@ -181,7 +196,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
       {!p.archived && row.stale && fix.state === 'idle' && (
         <div
           data-testid="mx-reader-stale"
-          className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-butter/40 text-honey-dark flex gap-2.5 items-center text-[12.5px]"
+          className="mx-9 mt-3 px-3 py-2.5 rounded-md bg-butter/40 text-honey-dark flex gap-2.5 items-center text-[12.5px]"
         >
           <div className="flex-1 flex flex-col gap-0.5">
             <b className="font-semibold">
@@ -216,14 +231,14 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
       )}
 
       {!p.archived && fix.state === 'checking' && (
-        <div className="mx-[22px] mt-3 p-3 rounded-md border border-dashed border-honey bg-butter/20 text-[12.5px] text-honey-dark flex items-center gap-2.5">
+        <div className="mx-9 mt-3 p-3 rounded-md border border-dashed border-honey bg-butter/20 text-[12.5px] text-honey-dark flex items-center gap-2.5">
           <span className="font-mono text-accent">●○○</span>
           Assistant is checking {row.deadRefs.length > 0 ? `${row.deadRefs.length} references` : 'this memory'} against the repo…
         </div>
       )}
 
       {!p.archived && fix.state === 'proposed' && (
-        <div className="mx-[22px] mt-3 border border-honey rounded-md overflow-hidden bg-bg-hi">
+        <div className="mx-9 mt-3 border border-honey rounded-md overflow-hidden bg-bg-hi">
           <div className="px-3 py-[9px] bg-butter/40 text-[12.5px] text-honey-dark font-semibold">{actionHeader(fix)}</div>
           <div className="px-3 py-2 text-[12.5px] text-fg flex flex-col gap-0.5">
             <span data-testid="mx-reader-summary">{fix.summary}</span>
@@ -280,24 +295,20 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
       )}
 
       {row.broken && !row.stale && (
-        <div className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-accent-muted/30 text-[12.5px] text-accent-dark">
+        <div className="mx-9 mt-3 px-3 py-2.5 rounded-md bg-accent-muted/30 text-[12.5px] text-accent-dark">
           Broken reference — a link or path in this memory points at nothing. See the red items in Links.
         </div>
       )}
 
       {row.notIndexed && (
-        <div className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-butter/40 text-[12.5px] text-honey-dark">
+        <div className="mx-9 mt-3 px-3 py-2.5 rounded-md bg-butter/40 text-[12.5px] text-honey-dark">
           Claude won't load this — it has no line in MEMORY.md.
         </div>
       )}
 
-      <div className="flex-1 overflow-auto px-[22px] pt-4 pb-[22px]">
+      <div className="flex-1 overflow-auto px-9 pt-6 pb-[22px]">
         {p.content === null ? (
           <div className="text-xs text-fg-faint">Loading…</div>
-        ) : p.mode === 'source' ? (
-          <pre className="m-0 px-4 py-3.5 bg-fg text-bg-elev rounded-md font-mono text-xs leading-[1.7] whitespace-pre-wrap">
-            {p.content}
-          </pre>
         ) : (
           <div className={PROSE}>
             {row.description && (
@@ -311,6 +322,8 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
       <div className="px-[22px] py-2 border-t border-rule-structural font-mono text-[10.5px] text-fg-dim whitespace-nowrap overflow-hidden text-ellipsis">
         {row.path}
       </div>
+      </>
+      )}
     </div>
   )
 })

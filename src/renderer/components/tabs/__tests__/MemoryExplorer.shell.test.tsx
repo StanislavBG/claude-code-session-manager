@@ -6,6 +6,14 @@ import { act } from 'react-dom/test-utils'
 import { MemoryExplorer } from '../memory/explorer/MemoryExplorer'
 
 vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: any) => createElement('div', { 'data-testid': 'doc-editor', 'data-path': p.path }, [
+    createElement('span', { key: 'v', 'data-testid': 'doc-editor-value' }, p.value),
+    createElement('button', { key: 'c', 'data-testid': 'doc-editor-change', onClick: () => p.onChange(p.value + 'more\n') }, 'Type'),
+    createElement('button', { key: 's', 'data-testid': 'doc-editor-save', onClick: () => p.onSave?.() }, 'Save'),
+    createElement('button', { key: 'r', 'data-testid': 'doc-editor-revert', onClick: () => p.onRevert?.() }, 'Revert'),
+  ]),
+}))
 vi.mock('../../../state/toast', () => ({
   toast: { error: vi.fn(), show: vi.fn(), success: vi.fn() },
 }))
@@ -158,6 +166,54 @@ describe('MemoryExplorer shell', () => {
     await flush()
     expect(memory.create).toHaveBeenCalledWith('alpha.md', expect.anything(), expect.anything())
     expect(memory.write).toHaveBeenCalledWith('alpha.md', CONTENT, expect.anything())
+  })
+
+  it('list column shows the MEMORY FOLDER card and filter chips that switch views', async () => {
+    await mount()
+    expect(q('mx-list-folder-count')!.textContent).toBe('2 files')
+    expect(q('mx-list')!.textContent).toContain('/mem')
+    expect((q('mx-list-scope') as HTMLSelectElement).value).toBe('workspace')
+    await click(q('mx-chip-ask'))
+    expect(q('mx-ask')).not.toBeNull()
+  })
+
+  it('Edit switches to the document editor with the file text; Save writes it through memory.write', async () => {
+    await mount()
+    await click(q('mx-list-row-alpha.md'))
+    await flush()
+    await click(q('mx-reader-edit'))
+    expect(q('doc-editor')!.getAttribute('data-path')).toBe('/mem/alpha.md')
+    expect(q('doc-editor-value')!.textContent).toBe(CONTENT)
+    expect(q('mx-links-editing')).not.toBeNull()
+    await click(q('doc-editor-change'))
+    await click(q('doc-editor-save'))
+    await flush()
+    expect(memory.write).toHaveBeenCalledWith('alpha.md', CONTENT + 'more\n', expect.anything())
+    expect(q('doc-editor')).toBeNull()
+    expect(q('mx-undo-bar')!.textContent).toContain('Saved alpha')
+  })
+
+  it('Revert reloads the file from disk into the editor', async () => {
+    await mount()
+    await click(q('mx-list-row-alpha.md'))
+    await flush()
+    await click(q('mx-reader-edit'))
+    await click(q('doc-editor-change'))
+    expect(q('doc-editor-value')!.textContent).toBe(CONTENT + 'more\n')
+    await click(q('doc-editor-revert'))
+    await flush()
+    expect(q('doc-editor-value')!.textContent).toBe(CONTENT)
+    expect(memory.write).not.toHaveBeenCalled()
+  })
+
+  it('Check against the repo runs the existing check (proposeFix)', async () => {
+    memory.proposeFix.mockResolvedValue({ ok: true, content: CONTENT, summary: 'fine', action: 'keep', reason: '', fold: null })
+    await mount()
+    await click(q('mx-list-row-alpha.md'))
+    await flush()
+    await click(q('mx-links-check'))
+    await flush()
+    expect(memory.proposeFix).toHaveBeenCalledWith(expect.objectContaining({ name: 'alpha.md' }))
   })
 
   it('/ opens the palette and Enter on a result selects it', async () => {

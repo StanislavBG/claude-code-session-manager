@@ -15,7 +15,7 @@ import {
   type SortKey,
 } from './model'
 import { ExplorerNav } from './ExplorerNav'
-import { MemoryListPane } from './MemoryListPane'
+import { MemoryListPane, type ScopeOption } from './MemoryListPane'
 import { MemoryReader } from './MemoryReader'
 import { MemoryEditorPane } from './MemoryEditorPane'
 import { LinksRail } from './LinksRail'
@@ -28,7 +28,7 @@ import { UndoBar } from './UndoBar'
 const SCOPE_LS_KEY = 'sm.memoryTab.scope'
 const AGENT_PREFIX = 'agent:'
 
-type Mode = 'read' | 'source' | 'edit' | 'new'
+type Mode = 'read' | 'edit' | 'new'
 type Overlay = 'learn' | 'palette' | 'delete' | null
 interface Fix {
   state: 'idle' | 'checking' | 'proposed'
@@ -244,12 +244,27 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     else toast.error(`${slug} is not in this scope`)
   }
 
+  // Edit opens the whole file as it is on disk; Save writes it back verbatim.
   const startEdit = () => {
     if (content === null) return
-    const body = stripFront(content)
-    setDraft(body)
-    setDraftOrig(body)
+    setDraft(content)
+    setDraftOrig(content)
     setMode('edit')
+  }
+
+  const editDirty = mode === 'edit' && draft !== draftOrig
+
+  const revertEdit = async () => {
+    if (!selRow) return
+    const current = await actions.read(selRow.name)
+    if (current === null) return
+    setDraft(current)
+    setDraftOrig(current)
+  }
+
+  const leaveEdit = () => {
+    if (editDirty && !window.confirm('Discard unsaved changes to this memory?')) return
+    setMode('read')
   }
 
   const save = async () => {
@@ -264,7 +279,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
         select(file)
         say(`Created ${stem(file)}`)
       } else if (mode === 'edit' && selRow) {
-        const ok = await actions.saveBody(selRow.name, draft)
+        const ok = await actions.saveFile(selRow.name, draft)
         if (!ok) return
         setMode('read')
         say(`Saved ${selRow.slug}`)
@@ -414,6 +429,18 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   }, [rows])
   const unclusteredCount = useMemo(() => rows.filter((r) => r.clusterId === null).length, [rows])
   const known = useMemo(() => new Set(rows.map((r) => r.slug)), [rows])
+  const scopeOptions = useMemo<ScopeOption[]>(
+    () => [
+      { key: 'workspace', label: `Workspace · ${basename(cwd)}` },
+      ...ex.agents.map((a) => ({ key: `${AGENT_PREFIX}${a.name}`, label: `Subagent · ${a.name}${a.memoryScope ? '' : ' (off)'}` })),
+    ],
+    [ex.agents, cwd],
+  )
+  const scopeKey = agent ? `${AGENT_PREFIX}${agent.name}` : 'workspace'
+  const onScopeKey = useCallback((key: string) => {
+    const a = key.startsWith(AGENT_PREFIX) ? ex.agents.find((x) => x.name === key.slice(AGENT_PREFIX.length)) : undefined
+    onScope(a ? { kind: 'agent', agent: a } : { kind: 'workspace' })
+  }, [ex.agents, onScope])
 
   const listTitle = view.startsWith('cluster:')
     ? view === 'cluster:unclustered' ? 'Unclustered' : clusters.find((c) => c.id === view.slice(8))?.name ?? 'Cluster'
@@ -555,7 +582,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
             />
           )}
           {isBrowse && (
-            <div className="flex-1 min-w-0 min-h-0 grid grid-cols-[316px_minmax(0,1fr)_236px]">
+            <div className="flex-1 min-w-0 min-h-0 grid grid-cols-[316px_minmax(0,1fr)_268px]">
               <MemoryListPane
                 title={listTitle}
                 rows={listRows}
@@ -568,12 +595,19 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 onSort={setSort}
                 onNew={() => openNew(NEW_TEMPLATE)}
                 empty={empty}
+                folder={{ count: rows.length, path: ex.dir }}
+                scopeOptions={scopeOptions}
+                scopeKey={scopeKey}
+                onScopeKey={onScopeKey}
+                view={view}
+                onView={goView}
+                counts={counts}
               />
               <div className="flex flex-col min-w-0 min-h-0">
-                {mode === 'edit' || mode === 'new' ? (
+                {mode === 'new' ? (
                   <MemoryEditorPane
-                    mode={mode}
-                    name={selRow?.slug ?? null}
+                    mode="new"
+                    name={null}
                     title={title}
                     onTitle={setTitle}
                     body={draft}
@@ -581,7 +615,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                     onSave={() => { void save() }}
                     onCancel={cancelEdit}
                     saving={saving}
-                    dirty={mode === 'new' ? title.trim() !== '' || draft !== NEW_TEMPLATE : draft !== draftOrig}
+                    dirty={title.trim() !== '' || draft !== NEW_TEMPLATE}
                   />
                 ) : selRow ? (
                   <MemoryReader
@@ -590,8 +624,24 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                     clusterName={clusterName(selRow.clusterId)}
                     clusterDot={clusterDot(selRow.clusterId)}
                     archived={isArchivedSel}
-                    mode={mode}
-                    onMode={setMode}
+                    editing={mode === 'edit'}
+                    editor={mode === 'edit' ? (
+                      <MemoryEditorPane
+                        mode="edit"
+                        name={selRow.slug}
+                        path={selRow.path}
+                        title=""
+                        onTitle={setTitle}
+                        body={draft}
+                        onBody={setDraft}
+                        onSave={() => { void save() }}
+                        onCancel={leaveEdit}
+                        onRevert={() => { void revertEdit() }}
+                        saving={saving}
+                        dirty={editDirty}
+                      />
+                    ) : undefined}
+                    onRead={leaveEdit}
                     onEdit={startEdit}
                     onCopyPath={() => { void copyPath() }}
                     onReveal={reveal}
@@ -628,6 +678,9 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 onUpdatePath={(ref) => { void updatePath(ref) }}
                 onReviewPath={() => { void runFix() }}
                 onAskAbout={askAbout}
+                onCheck={() => { void runFix() }}
+                checkBusy={fix.state !== 'idle' || content === null}
+                editing={mode === 'edit'}
               />
             </div>
           )}

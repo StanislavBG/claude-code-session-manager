@@ -26,9 +26,13 @@ const STATUSES = /** @type {const} */ (['open', 'answered', 'withdrawn']);
 
 const AppSchema = z.string().regex(/^[A-Za-z0-9._-]{1,40}$/, 'app must be 1 to 40 letters, digits, . _ or -');
 
-/** Runs a value through normalizeExternalRef; `required` refuses absent values. */
+/**
+ * Runs a value through normalizeExternalRef; `required` refuses absent values.
+ * The input is `.optional()` so zod 4 lets a missing key reach the transform
+ * (a bare z.unknown().transform() rejects it as "expected nonoptional").
+ */
 function refSchema(label, required) {
-  return z.unknown().transform((v, ctx) => {
+  return z.unknown().optional().transform((v, ctx) => {
     if (required && (v === undefined || v === null)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} is required.` });
       return z.NEVER;

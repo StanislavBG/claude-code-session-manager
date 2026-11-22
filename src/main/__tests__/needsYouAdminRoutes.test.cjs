@@ -93,6 +93,13 @@ test('POST /admin/needs-you creates an item: 200, audit row, one onChanged', asy
   expect(rows[0]).toMatchObject({ app: 'portfolio', id: 'q-1', externalRef: 'portfolio:q-1', created: true });
 });
 
+test('POST /admin/needs-you with only app, id, title: 200, created, externalRef null', async () => {
+  const r = await routes.call('POST', '/admin/needs-you', { body: { app: 'portfolio', id: 'q-min', title: 'Ship it?' } });
+  expect(r.status).toBe(200);
+  expect(r.body).toMatchObject({ ok: true, created: true, item: { app: 'portfolio', id: 'q-min', externalRef: null } });
+  expect(r.body.item.externalRef).toBeNull();
+});
+
 test('POST /admin/needs-you updating an open item: created false, audit row, onChanged', async () => {
   await routes.call('POST', '/admin/needs-you', { body: POST });
   const r = await routes.call('POST', '/admin/needs-you', { body: { ...POST, title: 'Ship it now?' } });

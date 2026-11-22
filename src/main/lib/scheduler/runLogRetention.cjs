@@ -539,7 +539,74 @@ function runBootSweep(opts) {
   const runsDir = (opts && opts.runsDir) || schedulerPaths.runsDir();
   const queueStore = require('./queueStore.cjs');
   const state = queueStore.readMergedSync();
-  return applyRetention(runsDir, state.config || {}, { jobs: state.jobs || [] });
+  const result = applyRetention(runsDir, state.config || {}, { jobs: state.jobs || [] });
+  // Same pass, same project list: the cwds readMergedSync just swept (state.sourceCwds,
+  // from queueStore's cached stateCwds) — never a fresh allProjectCwds() scan.
+  result.planRecords = runPlanRecordSweep({ cwds: Array.isArray(state.sourceCwds) ? state.sourceCwds : [] });
+  return result;
+}
+
+/**
+ * epicStatusFor(projectRoot, deps) → epicStatus(id) for prunePlanRecords. Reads the
+ * prompt-sessions store through its existing readers: the active-index.json row
+ * (epicMint.readActiveIndex, read once per call) first, else the per-Epic
+ * prompt-sessions/<id>.json archive/mirror (planRecordRetention.defaultEpicStatus).
+ * Returns null for an unknown Epic (orphan). Never throws.
+ */
+function epicStatusFor(projectRoot, deps) {
+  const d = deps || {};
+  const readActiveIndex = d.readActiveIndex || require('../epic/epicMint.cjs').readActiveIndex;
+  const archiveStatus = (d.defaultEpicStatus || require('./planRecordRetention.cjs').defaultEpicStatus)(projectRoot);
+  let sessions = {};
+  try {
+    const idx = readActiveIndex(projectRoot);
+    if (idx && idx.sessions && typeof idx.sessions === 'object') sessions = idx.sessions;
+  } catch {
+    sessions = {};
+  }
+  return (id) => {
+    try {
+      const row = Object.prototype.hasOwnProperty.call(sessions, id) ? sessions[id] : null;
+      if (row && typeof row === 'object' && typeof row.status === 'string') {
+        return { status: row.status, completedAt: row.completedAt ?? null };
+      }
+      return archiveStatus(id);
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Prune plan-records/<epic-id>/ in every given project root with planRecordsDays from
+ * opsRetentionSettings. Per-project failures are logged and skipped — never throws.
+ * deps: { prune, readSettings, epicStatusFor, now } for tests.
+ */
+function runPlanRecordSweep(opts) {
+  const o = opts || {};
+  const out = { projects: 0, removed: 0, errors: 0 };
+  let days;
+  try {
+    days = (o.readSettings || require('../opsRetentionSettings.cjs').read)().planRecordsDays;
+  } catch {
+    days = undefined; // prunePlanRecords falls back to its own default
+  }
+  const prune = o.prune || require('./planRecordRetention.cjs').prunePlanRecords;
+  const statusFor = o.epicStatusFor || epicStatusFor;
+  const seen = new Set();
+  for (const cwd of o.cwds || []) {
+    if (typeof cwd !== 'string' || !cwd || seen.has(cwd)) continue;
+    seen.add(cwd);
+    try {
+      const r = prune({ projectRoot: cwd, epicStatus: statusFor(cwd), days, now: o.now });
+      out.projects += 1;
+      out.removed += (r && Array.isArray(r.removed)) ? r.removed.length : 0;
+    } catch (e) {
+      out.errors += 1;
+      console.warn(`[runLogRetention] plan-records sweep skipped ${cwd}:`, e && e.message);
+    }
+  }
+  return out;
 }
 
 module.exports = {
@@ -556,4 +623,6 @@ module.exports = {
   isRetentionEnabled,
   applyRetention,
   runBootSweep,
+  runPlanRecordSweep,
+  epicStatusFor,
 };

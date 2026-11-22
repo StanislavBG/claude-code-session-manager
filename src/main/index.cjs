@@ -1306,6 +1306,9 @@ function runRunLogRetentionPass() {
         removedFiles: (result.removedFiles || 0) + tmp.removedFiles + archive.removedFiles,
         freedBytes: (result.freedBytes || 0) + tmp.freedBytes + archive.freedBytes,
         errorCount: (result.errors ? result.errors.length : 0) + tmp.errors.length + archive.errors.length,
+        // plan-records/<epic-id>/ of completed/orphan Epics, pruned inside runBootSweep
+        // for the same project list readMergedSync swept (planRecordsDays knob).
+        planRecords: result.planRecords || null,
       },
     });
   } catch (e) {

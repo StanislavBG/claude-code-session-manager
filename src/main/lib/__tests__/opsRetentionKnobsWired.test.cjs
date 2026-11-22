@@ -72,3 +72,22 @@ test('corrupt settings file falls back to 6 / 100', async () => {
   expect(rotate()).toHaveLength(6);
   expect(await allocAfterSeed()).toBe(31);
 });
+
+test('planRecordsDays reaches the plan-records sweep with an epicStatus function', () => {
+  const { runPlanRecordSweep } = require('../scheduler/runLogRetention.cjs');
+  writeRaw(JSON.stringify({ planRecordsDays: 5 }));
+  const calls = [];
+  runPlanRecordSweep({ cwds: [path.join(home, 'p')], prune: (o) => { calls.push(o); return { removed: [], kept: 0 }; } });
+  expect(calls).toHaveLength(1);
+  expect(calls[0].days).toBe(5);
+  expect(typeof calls[0].epicStatus).toBe('function');
+  expect(calls[0].epicStatus('nope')).toBeNull();
+});
+
+test('planRecordsDays defaults to 14 on a corrupt settings file', () => {
+  const { runPlanRecordSweep } = require('../scheduler/runLogRetention.cjs');
+  writeRaw('{not json');
+  const calls = [];
+  runPlanRecordSweep({ cwds: [path.join(home, 'p')], prune: (o) => { calls.push(o); return { removed: [], kept: 0 }; } });
+  expect(calls[0].days).toBe(14);
+});

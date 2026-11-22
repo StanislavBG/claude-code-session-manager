@@ -160,6 +160,27 @@ describe('notifyOriginatingTab validator verdicts', () => {
     err.mockRestore();
   });
 
+  test('an unsafe epicId writes no verdicts file anywhere and still appends the verdict events', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'validator-unsafe-'));
+    try {
+      const d = deps(VALID, { parsePrdRaw: vi.fn(async () => ({ sourcePromptId: '../scheduler' })) });
+      await notifyOriginatingTab(
+        { slug: '3640-validate-plan', status: 'completed', cwd: root, agentType: 'validator', runId: 'run-9' },
+        d,
+      );
+      expect(d.appendResponseEvent).toHaveBeenCalledTimes(3);
+      expect(d.appendResponseEvent.mock.calls[0][1]).toBe('../scheduler');
+      expect(fs.readdirSync(root, { recursive: true })).toEqual([]);
+      const skipped = err.mock.calls.filter((c) => String(c[0]).includes('verdicts file skipped'));
+      expect(skipped).toHaveLength(1);
+      expect(skipped[0]).toContain('3640-validate-plan');
+    } finally {
+      err.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('invalid structured output gives no verdict events and one error naming slug + checker error', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bad = { schedulerVerdict: 'MAYBE', verdicts: [] };

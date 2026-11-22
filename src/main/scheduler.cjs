@@ -160,7 +160,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prd/prdLocations.cjs');
+const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath, isSafeEpicId } = require('./lib/prd/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epic/epicMint.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
@@ -4012,7 +4012,11 @@ async function notifyOriginatingTab(job, {
         }
       }
     }
-    if (epicId && checkedVerdict && job.cwd) {
+    if (epicId && checkedVerdict && job.cwd && !isSafeEpicId(epicId)) {
+      // PRD 3688: mirror epicOutsideRead.readVerdictFiles — an unsafe id
+      // ('../x', 'a/b') must never be concatenated into a write path.
+      console.error('[scheduler] notifyOriginatingTab verdicts file skipped: unsafe epicId', job?.slug, JSON.stringify(epicId));
+    } else if (epicId && checkedVerdict && job.cwd) {
       // PRD 3614: keep the checked object beside the Markdown plan record.
       try {
         const file = opsPath(job.cwd, 'plan-records', epicId, `${bareSlug(job.slug)}.verdicts.json`);

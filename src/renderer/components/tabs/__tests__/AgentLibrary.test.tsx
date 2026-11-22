@@ -336,6 +336,29 @@ describe('AgentLibrary', () => {
     expect(row.querySelector('button')).toBeNull()
   })
 
+  it('MODEL, EFFORT and RUNS ON are styled like the Settings row selects, each with its own chevron', async () => {
+    const el = await mount()
+    const row = el.querySelector('[data-testid="agent-runtime-row"]')!
+    for (const id of ['model-select', 'effort-select', 'agent-persona-cli-select']) {
+      const s = row.querySelector(`[data-testid="${id}"]`) as HTMLSelectElement
+      const cls = s.className.split(/\s+/)
+      for (const c of ['appearance-none', 'bg-bg-hi', 'border-line', 'rounded']) expect(cls).toContain(c)
+      const chevron = row.querySelector(`[data-testid="${id}-chevron"]`)!
+      expect(chevron.getAttribute('class')).toContain('text-fg-faint')
+      expect(chevron.parentElement).toBe(s.parentElement)
+    }
+  })
+
+  it('the detail grows with its content (scrolled by the workbench) and the editor keeps a minimum height', async () => {
+    const el = await mount()
+    const detail = el.querySelector('[data-testid="agent-detail"]')!
+    expect(detail.parentElement!.getAttribute('data-testid')).toBe('config-workbench-detail')
+    expect(detail.className).not.toContain('min-h-0')
+    expect(detail.className).toContain('shrink-0')
+    expect(el.querySelector('[data-testid="agent-detail-body"]')!.className).not.toContain('min-h-0')
+    expect(el.querySelector('[data-testid="agent-detail-editor"]')!.className).toMatch(/min-h-\[\d+px\]/)
+  })
+
   it('the ⋯ menu carries re-check and the model catalog info', async () => {
     const el = await mount()
     await act(async () => { (el.querySelector('[data-testid="agent-detail-more"]') as HTMLElement).click(); await Promise.resolve() })
@@ -357,9 +380,18 @@ describe('AgentLibrary', () => {
   it('the Personas | Tags switch lives in the AGENTS FOLDER card and swaps in the Tags view', async () => {
     const el = await mount()
     const card = el.querySelector('[data-testid="config-file-card"]')!
-    const tags = Array.from(card.querySelectorAll('button')).find((b) => b.textContent === 'Tags')!
-    expect(Array.from(card.querySelectorAll('button')).some((b) => b.textContent === 'Personas')).toBe(true)
-    await act(async () => { tags.click(); await Promise.resolve() })
+    const pill = card.querySelector('[data-testid="agent-view-switch"]')!
+    expect(pill.getAttribute('role')).toBe('group')
+    expect(pill.className).toContain('rounded')
+    expect(pill.className).toContain('bg-bg-hi')
+    const btn = (label: string) => Array.from(card.querySelectorAll('[data-testid="agent-view-switch"] button')).find((b) => b.textContent === label) as HTMLButtonElement
+    expect(btn('Personas').getAttribute('aria-pressed')).toBe('true')
+    expect(btn('Personas').className).toContain('shadow-sm')
+    expect(btn('Tags').getAttribute('aria-pressed')).toBe('false')
+    await act(async () => { btn('Tags').click(); await Promise.resolve() })
+    expect(btn('Tags').getAttribute('aria-pressed')).toBe('true')
+    expect(btn('Tags').className).toContain('shadow-sm')
+    expect(btn('Personas').getAttribute('aria-pressed')).toBe('false')
     expect(el.querySelector('[data-agent-row]')).toBeNull()
     expect(el.querySelector('[data-testid="config-file-card"]')).toBeTruthy()
     expect(el.textContent).toContain('agents carrying this tag')

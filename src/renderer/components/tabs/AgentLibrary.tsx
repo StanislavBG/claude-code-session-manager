@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
-import { ViewTabs } from '../ui/ViewTabs'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
 import { AgentDetail, BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject } from './agents/AgentDetail'
@@ -59,6 +58,8 @@ function overrideSummary(p: AgentPersona): string {
     .map((d) => `${d.project}: ${overrideParts(d).join(', ') || 'overlay'}`)
     .join('\n')
 }
+
+const VIEWS = [{ key: 'personas', label: 'Personas' }, { key: 'tags', label: 'Tags' }] as const
 
 function AgentLibraryComponent() {
   const [view, setView] = useState<'personas' | 'tags'>('personas')
@@ -137,12 +138,26 @@ function AgentLibraryComponent() {
       path="~/.claude/agents/"
       note="The actor a session opens with — “you are acting as …”"
     >
-      <div data-testid="agent-view-switch" className="pt-1">
-        <ViewTabs
-          options={[{ key: 'personas', label: 'Personas' }, { key: 'tags', label: 'Tags' }] as const}
-          active={view}
-          onChange={setView}
-        />
+      {/* Same segmented pill as DocumentEditorPane's Document | Markdown switch. */}
+      <div
+        role="group"
+        aria-label="Agents view"
+        data-testid="agent-view-switch"
+        className="mt-1 self-start inline-flex items-center p-0.5 rounded bg-bg-hi border border-line"
+      >
+        {VIEWS.map((v) => (
+          <button
+            type="button"
+            key={v.key}
+            onClick={() => setView(v.key)}
+            aria-pressed={view === v.key}
+            className={`px-2.5 py-0.5 text-[11px] rounded transition-colors ${
+              view === v.key ? 'bg-bg text-fg font-medium shadow-sm' : 'text-fg-dim hover:text-fg'
+            }`}
+          >
+            {v.label}
+          </button>
+        ))}
       </div>
     </ConfigFileCard>
   )

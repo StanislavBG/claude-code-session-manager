@@ -251,7 +251,9 @@ export function AgentDetail({
       : "each project's local copy in its .claude/agents/ wins there"
 
   return (
-    <div data-testid="agent-detail" className="flex-1 min-h-0 flex flex-col">
+    // Content-sized (no min-h-0): when the cards + editor outgrow the pane, the detail grows and
+    // ConfigWorkbench's detail column — the one scroller — scrolls it, padding and status bar included.
+    <div data-testid="agent-detail" className="flex-1 shrink-0 flex flex-col">
       <ConfigDetailHeader
         eyebrow={`AGENT · USER · ${compactPath(path, home)}`}
         title={obj.name}
@@ -270,7 +272,7 @@ export function AgentDetail({
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col gap-4 px-9 py-6">
+      <div data-testid="agent-detail-body" className="flex-1 shrink-0 flex flex-col gap-4 px-9 py-6">
         <ConfigCard label="DESCRIPTION" labelNote="CLAUDE READS THIS TO PICK THE AGENT">
           <textarea
             data-testid="agent-detail-description"
@@ -457,7 +459,7 @@ export function AgentDetail({
         <div
           data-testid="agent-detail-editor"
           data-busy={busy ? 'true' : undefined}
-          className="flex-1 min-h-[420px] rounded-[14px] border border-line bg-bg-hi overflow-hidden"
+          className="flex-1 shrink-0 min-h-[480px] grid rounded-[14px] border border-line bg-bg-hi overflow-hidden"
         >
           <DocumentEditorPane
             path={path}
@@ -475,7 +477,9 @@ export function AgentDetail({
   )
 }
 
-const SELECT_CLASS = 'w-full h-8 rounded-md border border-line bg-bg px-2 font-mono text-[12.5px] text-fg disabled:opacity-60'
+/** Settings-row select look (EffectiveCards): native chevron hidden, our own chevron drawn over it. */
+const SELECT_CLASS =
+  'w-full h-9 appearance-none pl-3 pr-8 rounded border border-line bg-bg-hi font-mono text-[13px] text-fg focus:outline-none focus:border-fg-faint disabled:opacity-60'
 
 /** One compact labelled select of the runtime row; the long help text rides on the select's title. */
 function CompactSelect({ label, hint, testId, value, onChange, children }: {
@@ -484,9 +488,22 @@ function CompactSelect({ label, hint, testId, value, onChange, children }: {
   return (
     <label className="min-w-0 flex flex-col gap-1.5">
       <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">{label}</span>
-      <select data-testid={testId} aria-label={label} title={hint} value={value} onChange={(e) => onChange(e.target.value)} className={SELECT_CLASS}>
-        {children}
-      </select>
+      <span className="relative block">
+        <select data-testid={testId} aria-label={label} title={hint} value={value} onChange={(e) => onChange(e.target.value)} className={SELECT_CLASS}>
+          {children}
+        </select>
+        <svg
+          aria-hidden
+          data-testid={`${testId}-chevron`}
+          viewBox="0 0 16 16"
+          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <path d="M4 6l4 4 4-4" />
+        </svg>
+      </span>
     </label>
   )
 }

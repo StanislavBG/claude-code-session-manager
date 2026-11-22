@@ -602,7 +602,10 @@ const MCP_TOOL_CATALOG = [
       + "'project-video' = this project's own Video tool in Project Home ▸ Video only, beside Demo Video (never in Sessions HOT KEYS, "
       + 'Project Home ▸ Tools, the phone remote or other projects); it carries `job` { estimateMinutes 5-60 (the run budget is 3x, capped at 180 minutes), '
       + 'repoPaths (optional: a committing run that must land a commit under those paths), review (optional: a review stage a human approves first) }. '
-      + 'A project-video save always needs `humanRequestQuote`, the human\'s words naming Project Home.',
+      + 'A project-video save always needs `humanRequestQuote`, the human\'s words naming Project Home. '
+      + 'A project-video save is refused unless its agentName is a persona file in this project\'s .claude/agents/ or ~/.claude/agents/ '
+      + 'and, when that persona lists `tools`, the list includes mcp__session-manager-scheduler__project_video_write '
+      + '(plus mcp__session-manager-scheduler__project_video_review_write for a review tool) — the run is a headless job scoped to those tools.',
     summary: 'Create or change a saved one-click macro (agent, mission, prompt).',
     whenToUse: 'Pass `id` to update an existing macro already visible to this project; omit `id` to create a new '
       + 'one scoped to this project. Use for things like a "Publish git + npm" macro a human will press '
@@ -801,8 +804,8 @@ const MCP_RECIPES = [
     id: 'add-project-video-tool',
     title: 'Add a project video tool',
     steps: [
+      'First the persona — a project-video macro_save is refused unless both hold: (1) agentName is a persona file in this project\'s .claude/agents/<name>.md or ~/.claude/agents/<name>.md (project-local resolves first); (2) when that persona lists `tools`, the list includes mcp__session-manager-scheduler__project_video_write, plus mcp__session-manager-scheduler__project_video_review_write for a review tool, because a headless job may call only the MCP tools its persona lists. Write or fix that persona file before macro_save.',
       'Only when the human asked in this chat for a video tool in Project Home. It shows in this project\'s Project Home ▸ Video only, beside Demo Video — never in Sessions HOT KEYS, Tools, the phone remote or other projects.',
-      'Write the persona in this project\'s .claude/agents/<name>.md (project-local resolves before ~/.claude/agents). Its `tools` frontmatter must list every SM MCP tool the run calls — mcp__session-manager-scheduler__project_video_write, plus mcp__session-manager-scheduler__project_video_review_write for a review tool — because a headless job may call only the MCP tools its persona lists.',
       'Call macro_save with surface \'project-video\', agentName (that persona), tag, prompt, job { estimateMinutes 5-60 (budget 3x, capped at 180 minutes), repoPaths (optional: a committing run), review (optional: a review stage) } and humanRequestQuote — the human\'s words naming Project Home.',
       'Each press runs as a scheduled job. The run saves its video with project_video_write (kind e.g. \'episode\'; 9:16 via <meta name="sm-demo-aspect" content="9:16">) using the videoId from the PRD\'s \'Entry id\' line — never a new id.',
       'A review tool\'s first run calls project_video_review_write (text up to 32000 characters — a whole script fits — plus 1-6 images) and ends. The next run carries \'Review: approved…\' (build the final video) or \'Review: changes requested…\' (redo the review material with that note).',

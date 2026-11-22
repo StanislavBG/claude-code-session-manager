@@ -188,6 +188,20 @@ test('project video tool contract: macro purposes name project-video, project_vi
   ]) expect(steps).toContain(s);
 });
 
+test('project video tool persona requirements: macro_save purpose and the recipe\'s first step name them', () => {
+  const save = MCP_TOOL_CATALOG.find((e) => e.name === 'macro_save');
+  for (const s of ['.claude/agents', 'mcp__session-manager-scheduler__project_video_write', 'project_video_review_write', 'refused']) {
+    expect(save.purpose).toContain(s);
+  }
+  const recipe = MCP_RECIPES.find((r) => r.id === 'add-project-video-tool');
+  const first = recipe.steps[0];
+  for (const s of ['.claude/agents', 'mcp__session-manager-scheduler__project_video_write', 'project_video_review_write', 'refused']) {
+    expect(first).toContain(s);
+  }
+  const saveStep = recipe.steps.findIndex((st) => st.includes('Call macro_save'));
+  expect(saveStep).toBeGreaterThan(0);
+});
+
 test.each(MCP_TOOL_CATALOG)('$name exampleArgs satisfies its own inputSchema required fields', (entry) => {
   const tool = TOOLS.find((t) => t.name === entry.name);
   expect(tool).toBeTruthy();

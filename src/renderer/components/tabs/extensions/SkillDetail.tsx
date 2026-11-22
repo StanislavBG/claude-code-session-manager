@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
-import { MarkdownEditor } from '../../ui/MarkdownEditor'
-import { SaveBar } from '../../ui/SaveBar'
-import { renderChatMarkdown } from '../../../lib/renderChatMarkdown'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Toggle } from '../../ui/Toggle'
+import { ConfigCard, ConfigDetailHeader } from '../../claudeConfig/ConfigLayout'
+import { DocumentEditorPane } from '../editor/DocumentEditorPane'
 import { revealInFileExplorer } from '../../../lib/revealInFileExplorer'
+import { Z } from '../../../lib/zLayers'
 import {
   joinSkillDoc,
   readSkillDescription,
@@ -18,13 +19,15 @@ export interface SkillDetailItem {
   name: string
   /** Absolute path to the markdown file. */
   path: string
-  /** Set for an item a plugin adds: shown as a `from <plugin>` badge in place of the scope badge. */
+  /** Set for an item a plugin adds: the eyebrow names the plugin in place of the scope. */
   plugin?: string
+  /** Skills only: `disable-model-invocation: true` in frontmatter. */
+  disabled?: boolean
 }
 
 interface Props {
   item: SkillDetailItem
-  /** Home dir — shortens the FILE path to `~/…`. */
+  /** Home dir — shortens the eyebrow path to `~/…`. */
   home: string
   /** The useConfig draft of `item.path` (whole file: frontmatter + body). */
   draft: string
@@ -36,32 +39,98 @@ interface Props {
   onDraftChange: (raw: string) => void
   onSave: () => void
   onRevert: () => void
-  /** Plugin items (3a FROM PLUGINS): read-only editor, Description as text, no save bar. */
+  /** Plugin items (FROM PLUGINS): read-only editor, Description as text, no toggle or remove. */
   readOnly?: boolean
+  /**
+   * The skill's real enable switch — writes `disable-model-invocation` to its SKILL.md.
+   * Omitted for commands and plugin items, which have no such mechanism.
+   */
+  onToggleEnabled?: (enabled: boolean) => void
+  /** Moves the skill folder to trash. Omitted when the item cannot be removed here. */
+  onRemove?: () => void
 }
-
-type View = 'source' | 'preview'
-
-const BADGE =
-  'h-4 inline-flex items-center px-1.5 bg-bg-elev border border-line rounded-[3px] text-[10px] tracking-[0.04em] text-fg-dim'
-const FIELD_LABEL = 'text-[11px] font-semibold tracking-[0.06em] uppercase text-fg-faint'
-
-/** Light preview pane: serif headings, bg-bg-elev code blocks (3a §3). */
-const PREVIEW_CLASS = [
-  'prose-chat max-w-[720px] px-[26px] py-4 text-[14px] leading-[1.6] text-fg',
-  '[&_h1]:font-serif [&_h2]:font-serif [&_h3]:font-serif [&_h4]:font-serif',
-  '[&_h1]:text-[24px] [&_h2]:text-[20px] [&_h3]:text-[18px] [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold',
-  '[&_h1]:mb-1.5 [&_h2]:mb-1.5 [&_h3]:mb-1.5 [&_p]:mb-3.5 [&_ul]:mb-3.5 [&_ul]:pl-5 [&_ul]:list-disc [&_ol]:pl-5 [&_ol]:list-decimal',
-  '[&_pre]:!bg-bg-elev [&_code]:!bg-bg-elev',
-].join(' ')
 
 function shortPath(path: string, home: string): string {
   return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
 }
 
+/** `⋯` actions: Reveal in File Explorer, and Remove skill when the item can be removed. */
+function MoreMenu({ items }: { items: ReadonlyArray<{ label: string; testId: string; danger?: boolean; onSelect: () => void }> }) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+
+  // Close on Escape or a mousedown outside both the trigger and the menu.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid="skill-detail-more"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="h-9 w-9 inline-flex items-center justify-center rounded-[10px] bg-bg-hi border border-line text-fg-dim hover:text-fg hover:border-rule"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          id={menuId}
+          role="menu"
+          aria-label="More actions"
+          data-testid="skill-detail-more-menu"
+          className={`absolute ${Z.dialog} right-0 top-[42px] min-w-[200px] p-[5px] flex flex-col bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}
+        >
+          {items.map((item) => (
+            <button
+              key={item.testId}
+              type="button"
+              role="menuitem"
+              data-testid={item.testId}
+              onClick={() => {
+                setOpen(false)
+                item.onSelect()
+              }}
+              className={`px-2.5 py-[7px] rounded-[5px] text-left whitespace-nowrap hover:bg-bg-elev ${item.danger ? 'text-red-400' : ''}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
- * Skills detail pane (3a): header, DESCRIPTION / FILE fields, body-only editor or preview, save bar.
- * `readOnly` (plugin items): the same layout with nothing editable and no save bar.
+ * Skills detail (claude-config design, renders 13/09/01): eyebrow `SKILL · <SCOPE> · <path>`,
+ * mono `/name`, Enabled switch + `⋯`; the DESCRIPTION card Claude reads to decide when to use
+ * the skill; the body in the shared DocumentEditorPane (Document mode by default). The
+ * frontmatter never enters the editor — a body edit rejoins it byte-for-byte.
+ * `readOnly` (plugin items): the same layout with nothing editable.
  */
 export function SkillDetail({
   item,
@@ -75,148 +144,122 @@ export function SkillDetail({
   onSave,
   onRevert,
   readOnly = false,
+  onToggleEnabled,
+  onRemove,
 }: Props) {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState<View>('source')
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const parts = useMemo(() => splitSkillDoc(draft), [draft])
   const description = useMemo(() => readSkillDescription(draft) ?? '', [draft])
-  const previewHtml = useMemo(
-    () => (view === 'preview' ? renderChatMarkdown(parts.body) : ''),
-    [view, parts.body],
+
+  const kindLabel = item.kind === 'commands' ? 'COMMAND' : 'SKILL'
+  const where = item.plugin ? `FROM ${item.plugin.toUpperCase()}` : item.scope.toUpperCase()
+  const eyebrow = `${kindLabel} · ${where} · ${shortPath(item.path, home)}`
+
+  const menuItems = [
+    { label: 'Reveal in File Explorer', testId: 'skill-detail-reveal', onSelect: () => revealInFileExplorer(item.path) },
+    ...(onRemove && !readOnly
+      ? [{ label: 'Remove skill…', testId: 'skill-detail-remove', danger: true, onSelect: () => setConfirmRemove(true) }]
+      : []),
+  ]
+
+  const actions = (
+    <>
+      {readOnly && (
+        <span
+          data-testid="skill-detail-readonly"
+          className="text-xs font-semibold px-2 py-0.5 rounded-full bg-bg-elev border border-line text-fg-dim"
+        >
+          Read-only
+        </span>
+      )}
+      {onToggleEnabled && !readOnly && (
+        <span
+          data-testid="skill-detail-enabled"
+          className="flex items-center gap-2 text-[13px] text-fg-dim"
+          title={dirty ? 'This skill has unsaved edits — save or revert before toggling' : undefined}
+        >
+          <Toggle checked={!item.disabled} disabled={dirty} onChange={(v) => onToggleEnabled(v)} />
+          Enabled
+        </span>
+      )}
+      <MoreMenu items={menuItems} />
+    </>
   )
 
-  const segment = (v: View, label: string) => {
-    const on = view === v
-    return (
-      <button
-        type="button"
-        data-testid={`skill-view-${v}`}
-        aria-pressed={on}
-        onClick={() => setView(v)}
-        className={`h-6 inline-flex items-center px-[11px] rounded-[5px] text-xs ${
-          on ? 'bg-bg-hi shadow-sm font-semibold text-fg' : 'text-fg-faint hover:text-fg'
-        }`}
-      >
-        {label}
-      </button>
-    )
-  }
-
   return (
-    <div ref={rootRef} data-testid="skill-detail" className="h-full min-h-0 flex flex-col">
-      <div className="flex-1 min-h-0 flex flex-col px-[22px] pt-4">
-        <div className="flex items-center gap-2.5">
-          <span data-testid="skill-detail-name" className="min-w-0 truncate font-mono text-[18px] font-semibold text-fg">
-            /{item.name}
+    <div data-testid="skill-detail" className="flex-1 min-h-0 flex flex-col">
+      <ConfigDetailHeader eyebrow={eyebrow} title={`/${item.name}`} actions={actions} />
+      {confirmRemove && onRemove && (
+        <div
+          data-testid="skill-detail-remove-confirm"
+          role="alert"
+          className="shrink-0 mx-9 mt-4 px-4 py-2.5 rounded-[10px] border border-red-400/40 bg-red-400/10 flex items-center gap-3 text-[13px] text-fg"
+        >
+          <span className="flex-1 min-w-0">
+            Remove /{item.name}? The folder moves to trash; reinstall from the Library.
           </span>
-          <span data-testid="skill-detail-kind" className={BADGE}>
-            {item.kind === 'commands' ? 'COMMAND' : 'SKILL'}
-          </span>
-          {item.plugin ? (
-            <span data-testid="skill-detail-plugin" className={BADGE}>
-              from {item.plugin}
-            </span>
-          ) : (
-            <span data-testid="skill-detail-scope" className={BADGE}>
-              {item.scope.toUpperCase()}
-            </span>
-          )}
-          {readOnly && (
-            <span data-testid="skill-detail-readonly" className={BADGE}>
-              READ-ONLY
-            </span>
-          )}
-          <div
-            role="group"
-            aria-label="View"
-            className="ml-auto flex gap-0.5 p-0.5 bg-bg-elev border border-line rounded-[7px]"
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmRemove(false)
+              onRemove()
+            }}
+            className="font-semibold text-red-400 hover:text-red-300"
           >
-            {segment('source', 'Source')}
-            {segment('preview', 'Preview')}
-          </div>
+            confirm
+          </button>
+          <button type="button" onClick={() => setConfirmRemove(false)} className="text-fg-faint hover:text-fg">
+            cancel
+          </button>
         </div>
-
-        <div className="grid grid-cols-[84px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2.5 mt-3.5">
+      )}
+      <div className="flex-1 min-h-0 flex flex-col gap-4 px-9 py-6">
+        <ConfigCard label="DESCRIPTION" labelNote="CLAUDE READS THIS TO DECIDE WHEN TO USE IT">
           {readOnly ? (
-            <span className={FIELD_LABEL}>Description</span>
-          ) : (
-            <label htmlFor={`skill-desc-${item.path}`} className={FIELD_LABEL}>
-              Description
-            </label>
-          )}
-          {readOnly ? (
-            <span
-              id={`skill-desc-${item.path}`}
-              data-testid="skill-detail-description-text"
-              className="text-[13px] leading-[1.45] text-fg-dim"
-            >
+            <span data-testid="skill-detail-description-text" className="text-fg-dim">
               {description || <span className="text-fg-faint">No description</span>}
             </span>
           ) : (
-          <input
-            id={`skill-desc-${item.path}`}
-            data-testid="skill-detail-description"
-            type="text"
-            value={description}
-            onChange={(e) => onDraftChange(setSkillDescription(draft, e.target.value))}
-            placeholder="What this does and when Claude should use it"
-            className="px-2.5 py-[7px] bg-bg-hi border border-line rounded-md text-[13px] leading-[1.45] text-fg outline-none focus:border-accent"
-          />
-          )}
-          <span className={FIELD_LABEL}>File</span>
-          <div className="min-w-0 flex items-baseline gap-3 text-xs">
-            <span data-testid="skill-detail-path" title={item.path} className="min-w-0 truncate font-mono text-[11.5px] text-fg-dim">
-              {shortPath(item.path, home)}
-            </span>
-            <button
-              type="button"
-              data-testid="skill-detail-reveal"
-              onClick={() => revealInFileExplorer(item.path)}
-              className="shrink-0 font-medium text-accent hover:underline"
-            >
-              Reveal in File Explorer
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 min-h-0 mt-3.5 border border-line border-b-0 rounded-t-[7px] bg-bg-hi overflow-hidden">
-          {view === 'source' ? (
-            <MarkdownEditor
-              path={item.path}
-              theme="paper"
-              value={parts.body}
-              readOnly={readOnly}
-              onChange={(body) => {
-                if (!readOnly) onDraftChange(joinSkillDoc(parts.frontmatter, body))
+            <textarea
+              data-testid="skill-detail-description"
+              aria-label="Description"
+              rows={2}
+              value={description}
+              // A description is one YAML line: Enter never inserts a break.
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault()
               }}
+              onChange={(e) => onDraftChange(setSkillDescription(draft, e.target.value.replace(/\r?\n/g, ' ')))}
+              placeholder="What this does and when Claude should use it"
+              className="w-full resize-none bg-transparent outline-none text-fg placeholder:text-fg-faint"
             />
-          ) : (
-            <div className="h-full overflow-auto">
-              <div
-                data-testid="skill-preview"
-                className={PREVIEW_CLASS}
-                // renderChatMarkdown sanitizes with DOMPurify — the same path chat turns render through.
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
-              />
-            </div>
           )}
+        </ConfigCard>
+        <div
+          data-testid="skill-detail-editor"
+          data-busy={busy ? 'true' : undefined}
+          data-saved-at={lastSavedAt ?? undefined}
+          className="flex-1 min-h-[420px] rounded-[14px] border border-line bg-bg-hi overflow-hidden"
+        >
+          <DocumentEditorPane
+            path={item.path}
+            value={parts.body}
+            defaultMode="document"
+            readOnly={readOnly}
+            dirty={readOnly ? undefined : dirty}
+            onChange={(body) => {
+              if (!readOnly) onDraftChange(joinSkillDoc(parts.frontmatter, body))
+            }}
+            onSave={readOnly ? undefined : onSave}
+            onRevert={readOnly ? undefined : onRevert}
+          />
         </div>
+        {saveError && (
+          <div data-testid="skill-detail-save-error" role="alert" className="text-[13px] text-red-400">
+            Could not save: {saveError}
+          </div>
+        )}
       </div>
-      {!readOnly && (
-      <div className="shrink-0 border-t border-line bg-bg-elev">
-        <SaveBar
-          dirty={dirty}
-          busy={busy}
-          parseError={saveError}
-          lastSavedAt={lastSavedAt}
-          onSave={onSave}
-          onRevert={onRevert}
-          cleanLabel="Saved — matches the file on disk"
-          shortcutHint
-          scopeRef={rootRef}
-        />
-      </div>
-      )}
     </div>
   )
 }

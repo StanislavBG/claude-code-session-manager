@@ -11,15 +11,29 @@ import { toast } from '../../../state/toast'
 
 /** Scenario tests for the Skills page: the 3a list column and its write paths (create, toggle, remove). */
 
-vi.mock('../../ui/MarkdownEditor', () => ({
-  MarkdownEditor: (p: { value: string; theme?: string; readOnly?: boolean; onChange?: (v: string) => void }) =>
-    createElement('textarea', {
-      'data-testid': 'markdown-editor',
-      'data-theme': p.theme ?? 'dark',
-      readOnly: !!p.readOnly,
-      value: p.value,
-      onChange: (e: { target: { value: string } }) => p.onChange?.(e.target.value),
-    }),
+/** The shared editor, reduced to a textarea plus its Save: Tiptap/Monaco do not run under jsdom. */
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: {
+    path: string
+    value: string
+    defaultMode?: string
+    readOnly?: boolean
+    dirty?: boolean
+    onChange: (v: string) => void
+    onSave?: () => void
+  }) =>
+    createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-dirty': String(!!p.dirty) }, [
+      createElement('textarea', {
+        key: 'ta',
+        'data-testid': 'markdown-editor',
+        readOnly: !!p.readOnly,
+        value: p.value,
+        onChange: (e: { target: { value: string } }) => p.onChange(e.target.value),
+      }),
+      p.onSave
+        ? createElement('button', { key: 'save', type: 'button', 'data-testid': 'document-save', onClick: p.onSave }, 'Save')
+        : null,
+    ]),
 }))
 
 const HOME = '/home/bilko'
@@ -143,9 +157,11 @@ async function mount(props: { onAdd?: () => void; scope?: 'user' | 'project' } =
 
 const q = (el: ParentNode, id: string) => el.querySelector<HTMLElement>(`[data-testid="${id}"]`)
 const classes = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/)
-/** The list's cards, in display order, and the `/name` each one shows. */
+/** The list's rows, in display order, and the `/name` each one shows (the row's first span). */
 const cards = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLElement>('[data-testid="skills-item"]'))
-const nameOf = (card: HTMLElement) => q(card, 'skills-item-name')?.textContent
+const nameOf = (card: HTMLElement) => card.querySelector('[role="option"] span')?.textContent
+const rowOf = (card: HTMLElement | undefined) => card?.querySelector<HTMLElement>('[role="option"]') ?? null
+const isSelected = (card: HTMLElement | undefined) => rowOf(card)?.getAttribute('aria-selected') === 'true'
 const listed = (el: HTMLElement) => cards(el).map(nameOf)
 const cardFor = (el: HTMLElement, name: string) => cards(el).find((c) => nameOf(c) === `/${name}`)
 const toggleFor = (el: HTMLElement, name: string) =>
@@ -158,9 +174,11 @@ const click = async (b: Element) => {
 }
 const buttonByText = (el: HTMLElement, text: string) =>
   Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === text)
+/** The `+ New` primary in the list toolbar. */
+const newButton = (el: HTMLElement) => q(el, 'skills-new')!
 /** React tracks a controlled input's value; go through the native setter so onChange fires. */
 const typeFilter = async (el: HTMLElement, value: string) => {
-  const input = q(el, 'extensions-toolbar-filter') as HTMLInputElement
+  const input = q(el, 'skills-filter') as HTMLInputElement
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
   await act(async () => {
     setter.call(input, value)
@@ -228,20 +246,22 @@ describe('Skills remove', () => {
     const { api } = installApi()
     const winConfirm = vi.spyOn(window, 'confirm')
     const el = await mount()
-    await click(el.querySelector('[aria-label="Remove skill-one"]')!)
+    await click(q(el, 'skill-detail-more')!)
+    await click(q(el, 'skill-detail-remove')!)
     expect(winConfirm).not.toHaveBeenCalled()
     expect(api.files.delete).not.toHaveBeenCalled()
     await click(buttonByText(el, 'confirm')!)
     expect(api.files.delete).toHaveBeenCalledWith(`${SKILLS_DIR}/skill-one`)
     expect(el.textContent).not.toContain('skill-one')
-    expect(el.querySelector(`[aria-label="Remove skill-two"]`)).not.toBeNull()
+    expect(q(el, 'skill-detail')!.textContent).toContain('/skill-two')
     expect(useConfig.getState().files[TWO]).toBeDefined()
   })
 
   it('does nothing on cancel', async () => {
     const { api } = installApi()
     const el = await mount()
-    await click(el.querySelector('[aria-label="Remove skill-one"]')!)
+    await click(q(el, 'skill-detail-more')!)
+    await click(q(el, 'skill-detail-remove')!)
     await click(buttonByText(el, 'cancel')!)
     expect(api.files.delete).not.toHaveBeenCalled()
     expect(el.textContent).toContain('skill-one')
@@ -437,15 +457,21 @@ describe('Skills config watch', () => {
 })
 
 describe('Skills list', () => {
-  it('shows the shared toolbar: filter, counts summary and a + New menu whose Browse catalog… opens the catalog', async () => {
-    installApi({ skills: ['skill-one'], commands: { deploy: 'Ship it', review: 'Review the diff' } })
+  it('shows the SKILLS FOLDER card, Filter and a + New menu whose Browse catalog… opens the catalog', async () => {
+    const { disk } = installApi({ skills: ['skill-one', 'skill-two'], commands: { deploy: 'Ship it', review: 'Review the diff' } })
+    disk[TWO] = md('skill-two', ['disable-model-invocation: true'])
     const onAdd = vi.fn()
     const el = await mount({ onAdd })
-    expect((q(el, 'extensions-toolbar-filter') as HTMLInputElement).placeholder).toBe('Filter skills and commands')
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('1 skill · 2 commands · 0 from plugins')
+    expect(q(el, 'config-workbench')).not.toBeNull()
+    const card = q(el, 'config-file-card')!
+    expect(card.textContent).toContain('SKILLS FOLDER')
+    expect(q(card, 'skills-folder-on')!.textContent).toBe('1 on')
+    expect(card.querySelector('.font-mono')!.textContent).toBe('~/.claude/skills/')
+    expect(q(card, 'skills-folder-note')!.textContent).toBe('2 skills · on in every project')
+    expect((q(el, 'skills-filter') as HTMLInputElement).placeholder).toBe('Filter')
     expect(buttonByText(el, 'Add…')).toBeUndefined()
-    expect(q(el, 'skills-new')!.textContent).toBe('+ New')
-    await click(q(el, 'skills-new')!)
+    expect(newButton(el).textContent).toBe('+ New')
+    await click(newButton(el))
     const browse = q(el, 'skills-new-browse-catalog')!
     expect(browse.textContent).toBe('Browse catalog…')
     await click(browse)
@@ -456,7 +482,7 @@ describe('Skills list', () => {
   it('offers Browse catalog… only when the page has a catalog to open', async () => {
     installApi()
     const el = await mount({ scope: 'user' })
-    await click(q(el, 'skills-new')!)
+    await click(newButton(el))
     expect(q(el, 'skills-new-menu')).not.toBeNull()
     expect(q(el, 'skills-new-browse-catalog')).toBeNull()
   })
@@ -469,8 +495,8 @@ describe('Skills list', () => {
     expect(empty.textContent).toContain('No skills yet')
     expect(empty.textContent).toContain('A skill is a folder with a SKILL.md that Claude loads when a task calls for it.')
     expect(classes(empty)).toEqual(expect.arrayContaining(['border-dashed', 'border-rule']))
-    expect(q(el, 'skills-section-skills-count')!.textContent).toBe('0')
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('0 skills · 0 commands · 0 from plugins')
+    expect(q(el, 'skills-folder-on')!.textContent).toBe('0 on')
+    expect(q(el, 'skills-folder-note')!.textContent).toBe('0 skills · on in every project')
     const link = q(el, 'skills-create-link')!
     expect(link.textContent).toBe('Create a skill →')
     await click(link)
@@ -488,7 +514,6 @@ describe('Skills list', () => {
 
     await typeFilter(el, 'DOCS')
     expect(listed(el)).toEqual(['/skill-two'])
-    expect(q(el, 'skills-section-skills-count')!.textContent).toBe('1')
     expect(q(el, 'skills-section-commands-count')!.textContent).toBe('0')
 
     await typeFilter(el, 'claude.md')
@@ -498,31 +523,39 @@ describe('Skills list', () => {
 
     await typeFilter(el, 'Skill-One')
     expect(listed(el)).toEqual(['/skill-one'])
-    // The summary counts everything, not just what the filter shows.
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('2 skills · 1 command · 0 from plugins')
+    // The folder card counts everything, not just what the filter shows.
+    expect(q(el, 'skills-folder-note')!.textContent).toBe('2 skills · on in every project')
 
     await typeFilter(el, '')
     expect(listed(el)).toHaveLength(3)
   })
 
-  it('shows commands as cards with the mono /name, origin badge and description; selecting one moves the accent border', async () => {
+  it('shows one row per item with the mono /name and its one-line description; a click selects it', async () => {
     installApi({ commands: { 'refresh-claude-md': 'Audit, refresh, and split CLAUDE.md files' } })
     const el = await mount()
-    expect(q(el, 'skills-section-skills-count')!.textContent).toBe('2')
     expect(q(el, 'skills-section-commands-count')!.textContent).toBe('1')
     const cmd = cardFor(el, 'refresh-claude-md')!
-    expect(classes(cmd)).toEqual(expect.arrayContaining(['bg-bg-hi', 'rounded-[7px]', 'border-line']))
-    expect(classes(q(cmd, 'skills-item-name'))).toContain('font-mono')
+    expect(classes(cmd.querySelector('[role="option"] span'))).toContain('font-mono')
     expect(q(cmd, 'skills-item-desc')!.textContent).toBe('Audit, refresh, and split CLAUDE.md files')
-    expect(cmd.querySelector('[title^="Auto-detected"]')).not.toBeNull()
+    // Commands have no enable switch; skills do.
+    expect(cmd.querySelector('[role="switch"]')).toBeNull()
+    expect(toggleFor(el, 'skill-one')).not.toBeNull()
 
     // The first skill starts selected.
-    expect(classes(cardFor(el, 'skill-one'))).toContain('border-accent')
-    expect(classes(cmd)).not.toContain('border-accent')
+    expect(isSelected(cardFor(el, 'skill-one'))).toBe(true)
+    expect(isSelected(cmd)).toBe(false)
     await click(q(cmd, 'skills-item-desc')!)
-    expect(classes(cmd)).toContain('border-accent')
-    expect(classes(cmd)).not.toContain('border-line')
-    expect(classes(cardFor(el, 'skill-one'))).not.toContain('border-accent')
+    expect(isSelected(cmd)).toBe(true)
+    expect(isSelected(cardFor(el, 'skill-one'))).toBe(false)
+    expect(q(el, 'config-detail-header')!.textContent).toContain('COMMAND · USER · ~/.claude/commands/refresh-claude-md.md')
+  })
+
+  it('shows the project skills folder under the cwd, on in this project', async () => {
+    installApi({ skills: [] })
+    useSessions.setState({ tabs: [{ id: 't1', cwd: '/work/proj' } as never], activeTabId: 't1' })
+    const el = await mount({ scope: 'project' })
+    expect(q(el, 'config-file-card')!.querySelector('.font-mono')!.textContent).toBe('/work/proj/.claude/skills/')
+    expect(q(el, 'skills-folder-note')!.textContent).toBe('0 skills · on in this project')
   })
 
   it('shows the frontmatter description under a skill that has one and nothing under one that does not', async () => {
@@ -546,58 +579,89 @@ describe('Skills detail (3a)', () => {
     })
   }
 
-  it('shows the mono name, kind + scope badges, the file row and the clean label', async () => {
+  const editor = (el: HTMLElement) => q(el, 'markdown-editor') as HTMLTextAreaElement
+
+  it('shows the eyebrow path, the /name title, the Enabled switch, the ⋯ menu and the DESCRIPTION card', async () => {
     installApi()
     const el = await mount()
     const detail = q(el, 'skill-detail')!
-    expect(q(detail, 'skill-detail-name')?.textContent).toBe('/skill-one')
-    expect(classes(q(detail, 'skill-detail-name'))).toEqual(expect.arrayContaining(['font-mono', 'text-[18px]', 'font-semibold']))
-    expect(q(detail, 'skill-detail-kind')?.textContent).toBe('SKILL')
-    expect(q(detail, 'skill-detail-scope')?.textContent).toBe('USER')
-    expect(q(detail, 'skill-detail-path')?.textContent).toBe('~/.claude/skills/skill-one/SKILL.md')
-    expect(q(detail, 'savebar-clean')?.textContent).toBe('Saved — matches the file on disk')
-    expect(buttonByText(detail, 'SaveCtrl S')).toBeDefined()
+    const header = q(detail, 'config-detail-header')!
+    expect(header.textContent).toContain('SKILL · USER · ~/.claude/skills/skill-one/SKILL.md')
+    expect(header.textContent).toContain('/skill-one')
+    expect(q(detail, 'skill-detail-enabled')!.textContent).toContain('Enabled')
+    expect(q(detail, 'skill-detail-enabled')!.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true')
+    expect(q(detail, 'skill-detail-more')!.textContent).toBe('⋯')
+    const card = q(detail, 'config-card')!
+    expect(card.textContent).toContain('DESCRIPTION · CLAUDE READS THIS TO DECIDE WHEN TO USE IT')
+    expect((q(card, 'skill-detail-description') as HTMLTextAreaElement).value).toBe('skill-one desc')
+    // The body opens in the shared document editor, Document mode first, clean.
+    const pane = q(detail, 'document-editor-pane')!
+    expect(pane.getAttribute('data-mode')).toBe('document')
+    expect(pane.getAttribute('data-dirty')).toBe('false')
   })
 
-  it('Reveal in File Explorer opens the File Explorer on the file', async () => {
+  it('the detail Enabled switch writes disable-model-invocation, like the row switch', async () => {
+    const { disk } = installApi()
+    const el = await mount()
+    await click(q(el, 'skill-detail-enabled')!.querySelector('[role="switch"]')!)
+    expect(disk[ONE]).toContain('disable-model-invocation: true')
+    expect(toggleFor(el, 'skill-one').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('⋯ › Reveal in File Explorer opens the File Explorer on the file', async () => {
     installApi()
     const el = await mount()
     const openPanel = vi.fn()
     useLayout.setState({ openPanel } as never)
+    await click(q(el, 'skill-detail-more')!)
     await click(q(el, 'skill-detail-reveal')!)
     expect(openPanel).toHaveBeenCalledWith('projects', `reveal:${ONE}`)
   })
 
-  it('edits only the body in a paper editor, and saves the description edit keeping the rest byte-for-byte', async () => {
+  it('edits only the body, and saves the description edit keeping the rest byte-for-byte', async () => {
     const { disk } = installApi()
     const el = await mount()
-    const editor = q(el, 'markdown-editor') as HTMLTextAreaElement
-    expect(editor.getAttribute('data-theme')).toBe('paper')
-    expect(editor.value).toBe('\nbody')
-    const desc = q(el, 'skill-detail-description') as HTMLInputElement
-    expect(desc.value).toBe('skill-one desc')
-    await setValue(desc, 'Does: things')
-    await setValue(q(el, 'markdown-editor') as HTMLTextAreaElement, '\nnew body')
-    expect(q(el, 'savebar-clean')).toBeNull()
-    await click(buttonByText(q(el, 'skill-detail')!, 'SaveCtrl S')!)
+    expect(editor(el).value).toBe('\nbody')
+    await setValue(q(el, 'skill-detail-description') as HTMLTextAreaElement, 'Does: things')
+    await setValue(editor(el), '\nnew body')
+    expect(q(el, 'document-editor-pane')!.getAttribute('data-dirty')).toBe('true')
+    await click(q(el, 'document-save')!)
     expect(disk[ONE]).toBe(['---', 'name: skill-one', 'description: "Does: things"', '---', '', 'new body'].join('\n'))
-    expect(q(el, 'savebar-clean')?.textContent).toBe('Saved — matches the file on disk')
+    expect(q(el, 'document-editor-pane')!.getAttribute('data-dirty')).toBe('false')
   })
 
-  it('Preview renders the body as markdown with serif headings; Source brings the editor back', async () => {
+  it('saving a body edit keeps the frontmatter exactly as it was on disk', async () => {
     const { disk } = installApi()
-    disk[ONE] = ['---', 'name: skill-one', '---', '', '## Step 1', '', '```', 'code', '```'].join('\n')
+    // Odd-but-valid frontmatter: comments, key order, quoting, a block scalar, CRLF-free spacing.
+    const frontmatter = [
+      '---',
+      '# keep me',
+      "description:   'Use when: a task  needs it'   # trailing",
+      'name: skill-one',
+      'allowed-tools:',
+      '  - Bash',
+      'notes: |',
+      '  line one',
+      '    indented',
+      '---',
+      '',
+    ].join('\n')
+    disk[ONE] = `${frontmatter}old body\n`
     const el = await mount()
-    await click(q(el, 'skill-view-preview')!)
-    expect(q(el, 'markdown-editor')).toBeNull()
-    const preview = q(el, 'skill-preview')!
-    expect(preview.querySelector('h2')?.textContent).toBe('Step 1')
-    expect(preview.querySelector('pre')?.textContent).toContain('code')
-    expect(preview.textContent).not.toContain('name: skill-one')
-    expect(q(el, 'skill-view-preview')?.getAttribute('aria-pressed')).toBe('true')
-    await click(q(el, 'skill-view-source')!)
-    expect(q(el, 'markdown-editor')).not.toBeNull()
-    expect(q(el, 'skill-preview')).toBeNull()
+    expect(editor(el).value).toBe('old body\n')
+    await setValue(editor(el), '# Rewritten\n\nnew body\n')
+    await click(q(el, 'document-save')!)
+    expect(disk[ONE]).toBe(`${frontmatter}# Rewritten\n\nnew body\n`)
+    expect(disk[ONE].startsWith(frontmatter)).toBe(true)
+  })
+
+  it('shows a failed save inline', async () => {
+    const { api } = installApi()
+    const el = await mount()
+    await setValue(editor(el), 'changed')
+    api.config.writeText.mockResolvedValueOnce({ ok: false, error: 'EROFS' } as never)
+    await click(q(el, 'document-save')!)
+    expect(q(el, 'skill-detail-save-error')?.textContent).toContain('EROFS')
   })
 })
 
@@ -619,16 +683,15 @@ describe('Skills create (+ New)', () => {
     })
   }
   const pickNew = async (el: HTMLElement, id: 'skills-new-skill' | 'skills-new-command') => {
-    await click(q(el, 'skills-new')!)
+    await click(newButton(el))
     await click(q(el, id)!)
   }
-  const selectedName = (el: HTMLElement) =>
-    cards(el).filter((c) => q(c, 'skills-item-name')?.getAttribute('aria-current') === 'true').map(nameOf)
+  const selectedName = (el: HTMLElement) => cards(el).filter(isSelected).map(nameOf)
 
   it('the + New menu offers New skill, New command and Browse catalog…', async () => {
     installApi()
     const el = await mount({ onAdd: vi.fn() })
-    await click(q(el, 'skills-new')!)
+    await click(newButton(el))
     const labels = Array.from(q(el, 'skills-new-menu')!.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent)
     expect(labels).toEqual(['New skill', 'New command', 'Browse catalog…'])
   })
@@ -638,8 +701,8 @@ describe('Skills create (+ New)', () => {
     const el = await mount()
     await pickNew(el, 'skills-new-skill')
     const input = q(el, 'skills-new-name-skills') as HTMLInputElement
-    // Inline at the top of the Skills section: right after its header, before the first card.
-    expect(q(el, 'skills-section-skills')!.nextElementSibling).toBe(q(el, 'skills-new-row-skills'))
+    // Inline at the top of the skills rows, before the first one.
+    expect(q(el, 'skills-list')!.firstElementChild).toBe(q(el, 'skills-new-row-skills'))
     expect(document.activeElement).toBe(input)
     await typeName(input, 'my-skill')
     await press(input, 'Enter')
@@ -648,7 +711,7 @@ describe('Skills create (+ New)', () => {
     expect(disk[path]).toBe(['---', 'name: my-skill', 'description: ""', '---', '', '# my-skill', ''].join('\n'))
     expect(q(el, 'skills-new-name-skills')).toBeNull()
     expect(selectedName(el)).toEqual(['/my-skill'])
-    expect(q(el, 'skill-detail-name')!.textContent).toContain('my-skill')
+    expect(q(el, 'config-detail-header')!.textContent).toContain('/my-skill')
     expect(document.activeElement).toBe(q(el, 'skill-detail-description'))
   })
 
@@ -742,12 +805,6 @@ describe('Skills FROM PLUGINS (3a)', () => {
     expect(listed(el)).toEqual(['/skill-one', '/skill-two'])
   })
 
-  it('appends the plugin total to the toolbar summary', async () => {
-    installApi({ commands: { deploy: 'Ship it' }, plugins: [STRIPE, DEV] })
-    const el = await mount()
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('2 skills · 1 command · 6 from plugins')
-  })
-
   it('expands a plugin row to its skills and commands and opens one read-only', async () => {
     const { api } = installApi({ plugins: [STRIPE] })
     const el = await mount()
@@ -757,22 +814,25 @@ describe('Skills FROM PLUGINS (3a)', () => {
     const checkout = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="plugin-skills-item"]'))[1]
     await click(checkout)
     const detail = q(el, 'skill-detail')!
-    expect(q(detail, 'skill-detail-name')?.textContent).toBe('/checkout')
-    expect(q(detail, 'skill-detail-kind')?.textContent).toBe('SKILL')
-    expect(q(detail, 'skill-detail-plugin')?.textContent).toBe('from stripe')
+    const header = q(detail, 'config-detail-header')!
+    expect(header.textContent).toContain('SKILL · FROM STRIPE · /plugins/stripe/skills/checkout/SKILL.md')
+    expect(header.textContent).toContain('/checkout')
+    expect(q(detail, 'skill-detail-readonly')?.textContent).toBe('Read-only')
+    expect(q(detail, 'skill-detail-enabled')).toBeNull()
     expect((q(detail, 'markdown-editor') as HTMLTextAreaElement).readOnly).toBe(true)
+    expect(q(detail, 'document-editor-pane')!.getAttribute('data-mode')).toBe('document')
     expect(q(detail, 'skill-detail-description')).toBeNull()
     expect(q(detail, 'skill-detail-description-text')?.textContent).toBe('checkout desc')
-    expect(q(detail, 'skill-detail-path')?.textContent).toBe('/plugins/stripe/skills/checkout/SKILL.md')
+    expect(q(detail, 'document-save')).toBeNull()
+    await click(q(detail, 'skill-detail-more')!)
     expect(q(detail, 'skill-detail-reveal')).not.toBeNull()
-    expect(buttonByText(detail, 'SaveCtrl S')).toBeUndefined()
-    expect(q(detail, 'savebar-clean')).toBeNull()
+    expect(q(detail, 'skill-detail-remove')).toBeNull()
     expect(api.config.writeText).not.toHaveBeenCalled()
 
     // A command opens as COMMAND, still read-only.
     const login = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="plugin-skills-item"]'))[3]
     await click(login)
-    expect(q(el, 'skill-detail-kind')?.textContent).toBe('COMMAND')
+    expect(q(el, 'config-detail-header')!.textContent).toContain('COMMAND · FROM STRIPE')
     expect(q(el, 'skill-detail-description-text')?.textContent).toBe('stripe-login cmd')
   })
 
@@ -818,6 +878,5 @@ describe('Skills FROM PLUGINS (3a)', () => {
     const el = await mount({ scope: 'project' })
     expect(q(el, 'skills-section-plugins')).toBeNull()
     expect(api.plugins.list).not.toHaveBeenCalled()
-    expect(q(el, 'extensions-toolbar-summary')!.textContent).toBe('0 skills · 0 commands')
   })
 })

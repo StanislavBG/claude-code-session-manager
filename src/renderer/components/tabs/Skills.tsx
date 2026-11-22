@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Panel } from '../ui/Panel'
-import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
 import { Toggle } from '../ui/Toggle'
-import { ProvenanceBadge } from '../ui/ProvenanceBadge'
+import { ConfigFileCard, ConfigListRow, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
+import { AlmanacIcon } from '../layout/AlmanacIcon'
+import { Z } from '../../lib/zLayers'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -14,7 +15,6 @@ import type { DirEntry } from '../../../preload/api'
 import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
 import { SkillDetail } from './extensions/SkillDetail'
-import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
 import { PluginSkillsGroup, usePluginSkills, type PluginSkillItem } from './extensions/PluginSkillsGroup'
 
 const WATCH_DEBOUNCE_MS = 250
@@ -83,6 +83,10 @@ const newFileText = (kind: Kind, name: string) =>
     ? ['---', `name: ${name}`, 'description: ""', '---', '', `# ${name}`, ''].join('\n')
     : ['---', 'description: ""', '---', ''].join('\n')
 
+/** `~/…` for a path under home. */
+const shortPath = (path: string, home: string) =>
+  home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 /** List section header (3a): 11px semibold uppercase label + mono count. */
@@ -109,6 +113,104 @@ function SectionNote({ children, testId, title }: { children: ReactNode; testId?
   )
 }
 
+interface NewMenuItem {
+  label: string
+  testId: string
+  onSelect: () => void
+}
+
+/**
+ * List toolbar (Filter + `+ New`) whose primary opens the New menu: New skill,
+ * New command, and Browse catalog… when the page has a catalog to open.
+ */
+function SkillsToolbar({
+  filter,
+  onFilterChange,
+  items,
+}: {
+  filter: string
+  onFilterChange: (value: string) => void
+  items: ReadonlyArray<NewMenuItem>
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+
+  // Close on Escape or a mousedown outside the toolbar (trigger) and the menu.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // The ConfigListToolbar look (Filter + accent primary), with the primary as a real menu
+  // trigger: `skills-new` + aria-haspopup, which the kit's plain button cannot carry.
+  return (
+    <div ref={wrapRef} data-testid="skills-toolbar" className="relative flex items-center gap-2 whitespace-nowrap">
+      <label className="flex-1 min-w-0 flex items-center gap-2 h-[38px] px-3 rounded-[10px] bg-bg-hi border border-line text-[13px] text-fg-faint focus-within:border-fg-faint">
+        <AlmanacIcon name="search" size={15} className="shrink-0" />
+        <input
+          type="search"
+          data-testid="skills-filter"
+          aria-label="Filter"
+          placeholder="Filter"
+          value={filter}
+          spellCheck={false}
+          onChange={(e) => onFilterChange(e.target.value)}
+          className="flex-1 min-w-0 bg-transparent outline-none text-fg placeholder:text-fg-faint"
+        />
+      </label>
+      <button
+        type="button"
+        data-testid="skills-new"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="h-[38px] px-4 rounded-[10px] bg-accent text-bg-hi hover:bg-accent/90 text-[13.5px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        + New
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="New"
+          data-testid="skills-new-menu"
+          className={`absolute ${Z.dialog} right-0 top-[44px] min-w-[190px] p-[5px] flex flex-col bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}
+        >
+          {items.map((item) => (
+            <button
+              key={item.testId}
+              type="button"
+              role="menuitem"
+              data-testid={item.testId}
+              onClick={() => {
+                setOpen(false)
+                item.onSelect()
+              }}
+              className="px-2.5 py-[7px] rounded-[5px] text-left whitespace-nowrap hover:bg-bg-elev"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
@@ -119,8 +221,6 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   const [filter, setFilter] = useState('')
   // Paths that failed to list on the latest load — drives the inline error state.
   const [loadErrors, setLoadErrors] = useState<SkillListError[]>([])
-  // Path of the skill whose inline "remove?" confirmation is open.
-  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   // False until the first listing lands, so the empty states never flash.
   const [listed, setListed] = useState(false)
   // Inline "+ New" name prompt: which section it is open in, its text and error.
@@ -308,7 +408,6 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   // the skill out of the active set entirely.
   async function removeSkill(item: Item) {
     if (!item.dir) return
-    setConfirmRemove(null)
     const r = await window.api.files.delete(item.dir)
     if (!r.ok) {
       toast.error(r.error ?? 'failed to remove skill')
@@ -338,7 +437,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   const selectedLoaded = !!(selectedPath && files[selectedPath])
   useEffect(() => {
     if (!selectedLoaded || !selectedPath || focusDescriptionFor.current !== selectedPath) return
-    const input = listRootRef.current?.querySelector<HTMLInputElement>('[data-testid="skill-detail-description"]')
+    const input = listRootRef.current?.querySelector<HTMLElement>('[data-testid="skill-detail-description"]')
     if (!input) return
     focusDescriptionFor.current = null
     input.focus()
@@ -439,7 +538,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   // "Create a skill →" starts the same flow as the + New menu's New skill item.
   const startNewSkill = () => startCreate('skills')
   // Only a caller with a catalog for this scope can browse it; Project scope has none.
-  const newMenu: ExtensionsToolbarMenuItem[] = [
+  const newMenu: NewMenuItem[] = [
     { label: 'New skill', testId: 'skills-new-skill', onSelect: startNewSkill },
     { label: 'New command', testId: 'skills-new-command', onSelect: () => startCreate('commands') },
     ...(onAdd ? [{ label: 'Browse catalog…', testId: 'skills-new-browse-catalog', onSelect: onAdd }] : []),
@@ -448,7 +547,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   // Inline name prompt at the top of a section while + New is creating there.
   const newRow = (kind: Kind) =>
     creating !== kind ? null : (
-      <div data-testid={`skills-new-row-${kind}`} className="mx-0.5 mb-1 flex flex-col gap-1">
+      <div data-testid={`skills-new-row-${kind}`} className="flex flex-col gap-1">
         <input
           autoFocus
           data-testid={`skills-new-name-${kind}`}
@@ -471,7 +570,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
               void createItem(kind, newName)
             }
           }}
-          className={`h-7 px-2.5 bg-bg-hi border rounded-[7px] font-mono text-[12.5px] text-fg outline-none ${
+          className={`h-[34px] px-3 bg-bg-hi border rounded-[10px] font-mono text-[13px] text-fg outline-none ${
             newNameError ? 'border-red-400' : 'border-accent'
           }`}
         />
@@ -487,87 +586,54 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
     const selected = selectedPath === i.path
     const dirty = !!files[i.path]?.dirty
     return (
-      <div
-        key={i.path}
-        data-testid="skills-item"
-        data-path={i.path}
-        onClick={() => setSelectedPath(i.path)}
-        className={`flex flex-col gap-[3px] px-2.5 py-2 bg-bg-hi border rounded-[7px] cursor-pointer ${
-          selected ? 'border-accent' : 'border-line hover:border-rule'
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="skills-item-name"
-            aria-current={selected ? 'true' : undefined}
-            title={i.disabled ? 'Disabled — Claude will not auto-invoke this skill' : undefined}
-            className={`flex-1 min-w-0 truncate text-left font-mono text-[12.5px] font-semibold text-fg ${
-              i.disabled ? 'line-through opacity-50' : ''
-            }`}
-          >
-            /{i.name}
-          </button>
-          <ProvenanceBadge
-            interactive={false}
-            scope={i.scope}
-            input={{ type: i.kind === 'commands' ? 'command' : 'skill', name: i.name }}
-          />
-          {dirty && <span data-testid="skills-item-dirty" title="Unsaved edits" className="shrink-0 w-1 h-1 rounded-full bg-accent" />}
-          {/* Skills can be turned off via frontmatter, or removed; commands cannot.
-              These controls act on the skill without selecting its card. */}
-          {i.kind === 'skills' && (
-            <span className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              <span title={dirty ? 'This skill has unsaved edits — save or revert before toggling' : undefined}>
-                <Toggle
-                  checked={!i.disabled}
-                  disabled={dirty}
-                  onChange={(v) => void toggleSkillDisabled(i, !v)}
-                />
+      <div key={i.path} data-testid="skills-item" data-path={i.path}>
+        <ConfigListRow
+          title={`/${i.name}`}
+          selected={selected}
+          muted={i.disabled}
+          onSelect={() => setSelectedPath(i.path)}
+          meta={
+            i.description ? (
+              <span data-testid="skills-item-desc" title={i.description}>
+                {i.description}
               </span>
-              {confirmRemove === i.path ? (
-                <span className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => void removeSkill(i)}
-                    title={`Remove ${i.name} — moves the folder to trash; reinstall from the Library`}
-                    className="text-[10px] font-semibold text-red-400 hover:text-red-300"
+            ) : undefined
+          }
+          trailing={
+            dirty || i.kind === 'skills' ? (
+              <span className="flex items-center gap-2">
+                {dirty && (
+                  <span data-testid="skills-item-dirty" title="Unsaved edits" className="w-1.5 h-1.5 rounded-full bg-accent" />
+                )}
+                {/* Skills turn off via `disable-model-invocation` in frontmatter; commands have no switch.
+                    The switch acts on the skill without selecting its row. */}
+                {i.kind === 'skills' && (
+                  <span
+                    onClick={(e) => e.stopPropagation()}
+                    title={
+                      dirty
+                        ? 'This skill has unsaved edits — save or revert before toggling'
+                        : i.disabled
+                          ? 'Disabled — Claude will not auto-invoke this skill'
+                          : undefined
+                    }
                   >
-                    confirm
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRemove(null)}
-                    title="Cancel"
-                    className="text-[10px] text-fg-faint hover:text-fg"
-                  >
-                    cancel
-                  </button>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmRemove(i.path)}
-                  title="Remove skill — moves the folder to trash; reinstall from the Library"
-                  aria-label={`Remove ${i.name}`}
-                  className="text-fg-faint hover:text-red-400 leading-none px-0.5"
-                >
-                  ✕
-                </button>
-              )}
-            </span>
-          )}
-        </div>
-        {i.description && (
-          <div data-testid="skills-item-desc" title={i.description} className="truncate text-[11.5px] text-fg-faint">
-            {i.description}
-          </div>
-        )}
+                    <Toggle
+                      checked={!i.disabled}
+                      disabled={dirty}
+                      onChange={(v) => void toggleSkillDisabled(i, !v)}
+                    />
+                  </span>
+                )}
+              </span>
+            ) : undefined
+          }
+        />
       </div>
     )
   }
 
-  // Each section shows its matching cards, else says why it is empty —
+  // Each section shows its matching rows, else says why it is empty —
   // nothing at all until the first listing lands.
   let skillsBody: ReactNode = null
   if (shownSkills.length > 0) skillsBody = shownSkills.map(renderItem)
@@ -583,7 +649,7 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
     skillsBody = (
       <div
         data-testid="skills-empty"
-        className="mx-0.5 mb-1 px-3 py-[11px] flex flex-col gap-[5px] border border-dashed border-rule rounded-[7px] text-xs leading-[1.45] text-fg-dim"
+        className="px-3 py-[11px] flex flex-col gap-[5px] border border-dashed border-rule rounded-xl text-xs leading-[1.45] text-fg-dim"
       >
         <span className="font-semibold text-fg">No skills yet</span>
         <span>A skill is a folder with a SKILL.md that Claude loads when a task calls for it.</span>
@@ -611,93 +677,96 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
     )
   } else commandsBody = <SectionNote>No slash commands</SectionNote>
 
-  return (
-    <div ref={listRootRef} className="h-full flex flex-col">
-      <ExtensionsToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        placeholder="Filter skills and commands"
-        summary={[
-          plural(skillItems.length, 'skill', 'skills'),
-          plural(commandItems.length, 'command', 'commands'),
-          ...(scope === 'user' ? [`${pluginItems.length} from plugins`] : []),
-        ].join(' · ')}
-        primary={{ label: '+ New', testId: 'skills-new', items: newMenu }}
+  // SKILLS FOLDER card: the scope's skills dir, how many skills are on, and where they apply.
+  const onCount = skillItems.filter((i) => !i.disabled).length
+  const folderPath = `${shortPath(bases?.skills ?? '', home)}/`
+  const folderNote = `${plural(skillItems.length, 'skill', 'skills')} · ${
+    scope === 'user' ? 'on in every project' : 'on in this project'
+  }`
+
+  const list = (
+    <>
+      <ConfigFileCard
+        eyebrow="SKILLS FOLDER"
+        badge={<span data-testid="skills-folder-on">{onCount} on</span>}
+        path={folderPath}
+        note={<span data-testid="skills-folder-note">{folderNote}</span>}
       />
-      <div className="flex-1 min-h-0">
-        <Panel>
-          <ListDetail
-            sidebarWidth="300px"
-            sidebar={
-              <div data-testid="skills-list" className="flex flex-col gap-1 px-2 py-1">
-                <SectionHeader label="Skills" count={shownSkills.length} testId="skills-section-skills" />
-                {newRow('skills')}
-                {skillsBody}
-                <SectionHeader label="Slash commands" count={shownCommands.length} testId="skills-section-commands" />
-                {newRow('commands')}
-                {commandsBody}
-                {scope === 'user' && listed && (
-                  <PluginSkillsGroup
-                    plugins={pluginEntries}
-                    needle={needle}
-                    selectedPath={selectedPath}
-                    onSelect={setSelectedPath}
-                  />
-                )}
-              </div>
-            }
-            detail={
-              selectedItem && file ? (
-                <SkillDetail
-                  item={selectedItem}
-                  home={home}
-                  draft={file.draftRaw}
-                  dirty={file.dirty}
-                  busy={file.busy}
-                  lastSavedAt={file.lastSavedAt}
-                  saveError={saveError}
-                  onDraftChange={(v) => {
-                    setSaveError(null)
-                    setDraft(selectedItem.path, v)
-                  }}
-                  onSave={async () => {
-                    setSaveError(null)
-                    const r = await saveText(selectedItem.path)
-                    if (!r.ok) setSaveError(r.error ?? 'save failed')
-                  }}
-                  onRevert={() => {
-                    setSaveError(null)
-                    revert(selectedItem.path)
-                  }}
-                />
-              ) : selectedPluginItem && file ? (
-                <SkillDetail
-                  readOnly
-                  item={{ ...selectedPluginItem, scope }}
-                  home={home}
-                  draft={file.draftRaw}
-                  dirty={false}
-                  busy={file.busy}
-                  lastSavedAt={file.lastSavedAt}
-                  saveError={null}
-                  onDraftChange={() => {}}
-                  onSave={() => {}}
-                  onRevert={() => {}}
-                />
-              ) : items.length === 0 && loadErrors.length > 0 ? (
-                <div data-testid="skills-list-error">
-                  <EmptyState
-                    title="could not list skills or commands"
-                    hint={loadErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}
-                  />
-                </div>
-              ) : (
-                <EmptyState title={items.length === 0 ? 'no skills or commands' : 'select an item'} />
-              )
-            }
+      <SkillsToolbar filter={filter} onFilterChange={setFilter} items={newMenu} />
+      <div data-testid="skills-list" role="listbox" aria-label="Skills" className="flex flex-col gap-1">
+        {newRow('skills')}
+        {skillsBody}
+        <SectionHeader label="Slash commands" count={shownCommands.length} testId="skills-section-commands" />
+        {newRow('commands')}
+        {commandsBody}
+        {scope === 'user' && listed && (
+          <PluginSkillsGroup
+            plugins={pluginEntries}
+            needle={needle}
+            selectedPath={selectedPath}
+            onSelect={setSelectedPath}
           />
-        </Panel>
+        )}
       </div>
+    </>
+  )
+
+  const detail =
+    selectedItem && file ? (
+      <SkillDetail
+        item={selectedItem}
+        home={home}
+        draft={file.draftRaw}
+        dirty={file.dirty}
+        busy={file.busy}
+        lastSavedAt={file.lastSavedAt}
+        saveError={saveError}
+        onDraftChange={(v) => {
+          setSaveError(null)
+          setDraft(selectedItem.path, v)
+        }}
+        onSave={async () => {
+          setSaveError(null)
+          const r = await saveText(selectedItem.path)
+          if (!r.ok) setSaveError(r.error ?? 'save failed')
+        }}
+        onRevert={() => {
+          setSaveError(null)
+          revert(selectedItem.path)
+        }}
+        onToggleEnabled={
+          selectedItem.kind === 'skills' ? (enabled) => void toggleSkillDisabled(selectedItem, !enabled) : undefined
+        }
+        onRemove={selectedItem.dir ? () => void removeSkill(selectedItem) : undefined}
+      />
+    ) : selectedPluginItem && file ? (
+      <SkillDetail
+        readOnly
+        item={{ ...selectedPluginItem, scope }}
+        home={home}
+        draft={file.draftRaw}
+        dirty={false}
+        busy={file.busy}
+        lastSavedAt={file.lastSavedAt}
+        saveError={null}
+        onDraftChange={() => {}}
+        onSave={() => {}}
+        onRevert={() => {}}
+      />
+    ) : items.length === 0 && loadErrors.length > 0 ? (
+      <div data-testid="skills-list-error">
+        <EmptyState
+          title="could not list skills or commands"
+          hint={loadErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}
+        />
+      </div>
+    ) : (
+      <EmptyState title={items.length === 0 ? 'no skills or commands' : 'select an item'} />
+    )
+
+  return (
+    <div ref={listRootRef} data-testid="skills-page" className="h-full flex flex-col">
+      <ConfigWorkbench list={list} detail={detail} />
     </div>
   )
 }

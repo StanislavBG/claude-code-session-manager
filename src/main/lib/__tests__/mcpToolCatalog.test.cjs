@@ -267,8 +267,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 33 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(33);
+test('catalog has 35 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(35);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });

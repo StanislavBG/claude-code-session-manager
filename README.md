@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->33<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->35<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -191,6 +191,8 @@ Tools:
 | `epic_list` | epics | `cwd` | List the open sessions of one project and what state each is in. |
 | `epic_get` | epics | `cwd`, one of `id` / `externalRef` | Read one session by its id or by the outside reference it was opened with. |
 | `agent_list` | agents | — | List the agents you can launch and the model each one runs on. |
+| `task_list` | tasks | `cwd` | List a project's Tasks with their status, model and cost. |
+| `task_get` | tasks | `cwd`, `id` | Read one Task in full, with its prompt and output. |
 | `session_manager_help` | help | — | Start here: list every tool, or explain one tool or recipe. |
 <!-- /gen:mcp-tools -->
 

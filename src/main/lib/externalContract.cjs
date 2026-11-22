@@ -63,6 +63,8 @@ const CONTRACT = deepFreeze({
     epic_get: { required: ['cwd'], requiredOneOf: [['id', 'externalRef']] },
     feedback_reply: { required: ['message', 'outcome'] },
     agent_list: { required: [] },
+    task_list: { required: ['cwd'] },
+    task_get: { required: ['cwd', 'id'] },
   },
   epicStates: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open'],
   epicRecordFields: [
@@ -115,8 +117,8 @@ function contractFingerprint() {
 
 /** Fingerprint recorded for each contract version. */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields), so its fingerprint was replaced, not bumped.
-  1: '72d82612f96cf080e2fc49247e755afe2c2a700085b3d35ec5ade30afe6b8ed6',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields, then task_list + task_get), so its fingerprint was replaced, not bumped.
+  1: '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

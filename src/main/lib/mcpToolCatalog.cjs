@@ -23,7 +23,7 @@ const { z } = require('zod');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'epics', 'agents']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'epics', 'agents', 'tasks']),
   purpose: z.string().min(1),
   summary: z.string().min(10).max(90).regex(/^[^|`\n]+$/),
   whenToUse: z.string().min(1),
@@ -672,6 +672,36 @@ const MCP_TOOL_CATALOG = [
       + 'session-manager-operations folder is refused.',
     exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
     notes: 'Returns { ok: true, agents }.',
+  },
+  {
+    name: 'task_list',
+    group: 'tasks',
+    purpose: "Read-only list of one project's Task ledger via the session-manager app's admin API (GET /admin/tasks) "
+      + '— the same rows the Scheduler ▸ Tasks page shows, newest first. A Task is one headless `claude -p` run '
+      + 'for the project (run by Session Manager, source "sm", or imported as a direct call, source "direct"). '
+      + 'Each row carries taskId, agent, model, effort, caller, status, timings, usage and cost, never prompt or '
+      + 'output text.',
+    summary: "List a project's Tasks with their status, model and cost.",
+    whenToUse: 'Use to audit which Tasks ran in a project, how they ended and what they cost. Filter by '
+      + '`since`/`until` (ISO), `pipeline`/`runId`/`step` (the caller), `agent`, `status` or `source`; page with '
+      + '`limit` (1-200, default 50) and `offset`.',
+    whenNotToUse: 'Do not use this to run or import a Task — it is read-only. Do not use it to read one Task\'s '
+      + 'prompt or output; use task_get. A `cwd` that is not an absolute project root is refused.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', status: 'error', limit: 20 },
+    notes: 'Returns { ok: true, tasks, total, hasMore }; a partial page adds a `note`.',
+  },
+  {
+    name: 'task_get',
+    group: 'tasks',
+    purpose: "Read-only fetch of one Task from a project's Task ledger via the session-manager app's admin API "
+      + '(GET /admin/task): every task_list field plus prompt, output, stderrTail and envelope (each text capped '
+      + 'at 1 MiB, with promptTruncated / outputTruncated flags).',
+    summary: 'Read one Task in full, with its prompt and output.',
+    whenToUse: 'Use after task_list to see exactly what one Task was asked and what it answered, by its taskId.',
+    whenNotToUse: 'Do not use this to run, retry or import a Task — it is read-only. An unknown id answers '
+      + '404 unknown_task; a `cwd` that is not an absolute project root is refused.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', id: 'task-abc123' },
+    notes: 'Returns { ok: true, task }.',
   },
   {
     name: 'session_manager_help',

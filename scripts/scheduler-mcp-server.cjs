@@ -32,6 +32,9 @@
  *
  *   agent_list({ cwd? }) -> GET /admin/agents[?cwd=<encoded>]
  *
+ *   task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? }) -> GET /admin/tasks?cwd=<encoded>&...
+ *   task_get({ cwd, id }) -> GET /admin/task?cwd=<encoded>&id=<encoded>
+ *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
  * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin API (loopback +
@@ -462,6 +465,39 @@ const TOOLS = [
       properties: {
         cwd: { type: 'string', description: "Optional: absolute project path; when given, each agent also carries the model and effort it resolves to there" },
       },
+    },
+  },
+  {
+    name: 'task_list',
+    description: descriptionFor('task_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Absolute path of the project root whose Task ledger to list' },
+        since: { type: 'string', description: 'Optional: ISO timestamp; only Tasks started at or after it' },
+        until: { type: 'string', description: 'Optional: ISO timestamp; only Tasks started at or before it' },
+        pipeline: { type: 'string', description: "Optional: only Tasks whose caller.pipeline equals this" },
+        runId: { type: 'string', description: "Optional: only Tasks whose caller.runId equals this" },
+        step: { type: 'string', description: "Optional: only Tasks whose caller.step equals this" },
+        agent: { type: 'string', description: 'Optional: only Tasks run as this agent persona' },
+        status: { type: 'string', description: 'Optional: only Tasks with this status (ok, error, timeout, ...)' },
+        source: { type: 'string', enum: ['sm', 'direct'], description: 'Optional: "sm" = run by Session Manager, "direct" = imported call that ran without it' },
+        limit: { type: 'number', description: 'Optional: page size, default 50, max 200' },
+        offset: { type: 'number', description: 'Optional: page offset, default 0' },
+      },
+      required: ['cwd'],
+    },
+  },
+  {
+    name: 'task_get',
+    description: descriptionFor('task_get'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Absolute path of the project root the Task belongs to' },
+        id: { type: 'string', description: 'The taskId, from task_list' },
+      },
+      required: ['cwd', 'id'],
     },
   },
   {
@@ -1066,6 +1102,30 @@ async function handleCallTool(request) {
       if (args?.cwd) qs.set('cwd', args.cwd);
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       const result = await adminRequest('GET', `/admin/agents${suffix}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'task_list') {
+      // URLSearchParams percent-encodes every value.
+      const qs = new URLSearchParams();
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      for (const key of ['since', 'until', 'pipeline', 'runId', 'step', 'agent', 'status', 'source']) {
+        if (typeof args?.[key] === 'string' && args[key] !== '') qs.set(key, args[key]);
+      }
+      if (args?.limit !== undefined) qs.set('limit', String(args.limit));
+      if (args?.offset !== undefined) qs.set('offset', String(args.offset));
+      const result = await adminRequest('GET', `/admin/tasks?${qs.toString()}`);
+      // Same partial-page guard as epic_list.
+      if (result?.ok && result.hasMore) {
+        result.note = `partial list: returned ${result.tasks.length} of ${result.total} Tasks — pass a higher offset to see more`;
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'task_get') {
+      if (typeof args?.id !== 'string' || args.id === '') return errorResult('missing required argument: id');
+      const qs = new URLSearchParams();
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      qs.set('id', args.id);
+      const result = await adminRequest('GET', `/admin/task?${qs.toString()}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'epic_get') {

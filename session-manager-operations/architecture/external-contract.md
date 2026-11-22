@@ -641,11 +641,14 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
 
 ### Reading Tasks and importing direct calls
 
-| Route | Query / body | Answer |
-| --- | --- | --- |
-| `GET /admin/tasks` | `?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=` | `200 { ok: true, tasks, total, hasMore }` |
-| `GET /admin/task` | `?cwd=&id=` | `200 { ok: true, task }` |
-| `POST /admin/tasks/import` | `{ cwd, records: [...] }` (1-100 records, body ≤ 8 MiB) | `200 { ok: true, imported, alreadyImported, rejected: [{ index, error }] }` |
+| Route | MCP tool | Query / body | Answer |
+| --- | --- | --- | --- |
+| `GET /admin/tasks` | `task_list` | `?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=` | `200 { ok: true, tasks, total, hasMore }` |
+| `GET /admin/task` | `task_get` | `?cwd=&id=` | `200 { ok: true, task }` |
+| `POST /admin/tasks/import` | — | `{ cwd, records: [...] }` (1-100 records, body ≤ 8 MiB) | `200 { ok: true, imported, alreadyImported, rejected: [{ index, error }] }` |
+
+- `task_list` (required `cwd`) and `task_get` (required `cwd`, `id`) are read-only MCP wrappers of the two
+  read routes: same arguments, same JSON answer. No MCP tool runs or imports a Task.
 
 - `cwd` must be the absolute project root (`400 invalid_request` otherwise). The two read routes work whatever
   the switch state; the import route answers `403 tasks_disabled` when it is off.

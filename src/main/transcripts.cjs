@@ -473,11 +473,16 @@ const MAX_USAGE_FILE_BYTES = 64 * 1024 * 1024;
 /** Max distinct transcripts whose running totals stay cached. */
 const USAGE_CACHE_MAX = 200;
 
+/** How many recent message ids a cache entry remembers for de-dup across tail reads. */
+const USAGE_RECENT_IDS_MAX = 64;
+
 /**
- * LRU<filePath, { ino, size, mtimeMs, readOffset, usage }>. `readOffset` is the
- * byte just past the last complete (newline-terminated) line already summed, so
- * the next call only parses [readOffset, size). The full parse keeps no
- * de-dup state (every usage event is summed), so none is cached here.
+ * LRU<filePath, { ino, size, mtimeMs, readOffset, usage, recentIds }>. `readOffset`
+ * is the byte just past the last complete (newline-terminated) line already
+ * summed, so the next call only parses [readOffset, size). `recentIds` is an
+ * array of [message.id, { inputTokens, outputTokens }] (oldest first, at most
+ * USAGE_RECENT_IDS_MAX) — the values already counted for that id, so a message
+ * whose lines straddle two reads is still counted once.
  */
 const usageCache = new LRUCache(USAGE_CACHE_MAX);
 
@@ -510,6 +515,8 @@ async function usageForOne(filePath) {
   const start = canTail ? cached.readOffset : 0;
   let inputTokens = canTail ? cached.usage.inputTokens : 0;
   let outputTokens = canTail ? cached.usage.outputTokens : 0;
+  /** @type {Map<string, { inputTokens: number, outputTokens: number }>} */
+  const recent = new Map(canTail && cached.recentIds ? cached.recentIds : []);
   const want = stat.size - start;
   let buf = Buffer.alloc(0);
   if (want > 0) {
@@ -545,8 +552,32 @@ async function usageForOne(filePath) {
     for (const ev of events) {
       if (ev.kind !== 'usage') continue;
       const u = ev.data || {};
-      inputTokens += u.input_tokens ?? u.inputTokens ?? 0;
-      outputTokens += u.output_tokens ?? u.outputTokens ?? 0;
+      const inTok = u.input_tokens ?? u.inputTokens ?? 0;
+      const outTok = u.output_tokens ?? u.outputTokens ?? 0;
+      // One API message's usage is repeated on each of its transcript lines:
+      // count a message.id once, keeping the larger value of each field.
+      const id = obj?.message?.id;
+      if (typeof id !== 'string' || !id) {
+        inputTokens += inTok;
+        outputTokens += outTok;
+        continue;
+      }
+      const prev = recent.get(id);
+      if (prev) {
+        const nextIn = Math.max(prev.inputTokens, inTok);
+        const nextOut = Math.max(prev.outputTokens, outTok);
+        inputTokens += nextIn - prev.inputTokens;
+        outputTokens += nextOut - prev.outputTokens;
+        recent.delete(id);
+        recent.set(id, { inputTokens: nextIn, outputTokens: nextOut });
+      } else {
+        inputTokens += inTok;
+        outputTokens += outTok;
+        recent.set(id, { inputTokens: inTok, outputTokens: outTok });
+        if (recent.size > USAGE_RECENT_IDS_MAX) {
+          recent.delete(recent.keys().next().value);
+        }
+      }
     }
   }
   const usage = { inputTokens, outputTokens };
@@ -556,6 +587,7 @@ async function usageForOne(filePath) {
     mtimeMs: stat.mtimeMs,
     readOffset: start + lastNl + 1,
     usage,
+    recentIds: [...recent],
   });
   return usage;
 }

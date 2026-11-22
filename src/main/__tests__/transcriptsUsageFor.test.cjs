@@ -204,3 +204,42 @@ test('usageCache is bounded and evicts the least-recently-used entry', async () 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── one message.id counted once ────────────────────────────────────────────
+
+function asst(id, input, output) {
+  const message = { role: 'assistant', usage: { input_tokens: input, output_tokens: output } };
+  if (id) message.id = id;
+  return { type: 'assistant', message };
+}
+
+test('three lines of one message.id are counted once (larger value per field)', async () => {
+  const sessionId = 'sess-dedup-one';
+  writeTranscript(cwd, sessionId, [asst('msg_1', 100, 5), asst('msg_1', 100, 40), asst('msg_1', 100, 12)]);
+  const r = await usageFor(cwd, [sessionId]);
+  expect(r[sessionId]).toEqual({ inputTokens: 100, outputTokens: 40 });
+});
+
+test('two distinct message ids are both counted', async () => {
+  const sessionId = 'sess-dedup-two';
+  writeTranscript(cwd, sessionId, [asst('msg_1', 100, 10), asst('msg_1', 100, 10), asst('msg_2', 30, 7), asst('msg_2', 30, 9)]);
+  const r = await usageFor(cwd, [sessionId]);
+  expect(r[sessionId]).toEqual({ inputTokens: 130, outputTokens: 19 });
+});
+
+test('a repeat of a message id arriving in a later tail read is counted once', async () => {
+  const sessionId = 'sess-dedup-tail';
+  const filePath = writeTranscript(cwd, sessionId, [asst('msg_1', 100, 5)]);
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 100, outputTokens: 5 });
+  const future = new Date(Date.now() + 5000);
+  fs.appendFileSync(filePath, JSON.stringify(asst('msg_1', 100, 50)) + '\n' + JSON.stringify(asst('msg_2', 1, 1)) + '\n');
+  fs.utimesSync(filePath, future, future);
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 101, outputTokens: 51 });
+});
+
+test('usage lines without a message id are each added', async () => {
+  const sessionId = 'sess-dedup-noid';
+  writeTranscript(cwd, sessionId, [asst(null, 10, 1), asst(null, 10, 1), asst('msg_1', 5, 5)]);
+  const r = await usageFor(cwd, [sessionId]);
+  expect(r[sessionId]).toEqual({ inputTokens: 25, outputTokens: 7 });
+});

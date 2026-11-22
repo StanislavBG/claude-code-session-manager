@@ -40,11 +40,13 @@ test('catalog description is the exact agreed text', () => {
 
 test('scheduler_create_prd input schema lists fixes with the MISS_KINDS enum', () => {
   const tool = TOOLS.find((t) => t.name === 'scheduler_create_prd');
+  expect(tool).toBeTruthy();
   expectFixesProperty(tool.inputSchema.properties);
 });
 
 test('each scheduler_create_prds entry schema lists fixes with the MISS_KINDS enum', () => {
   const tool = TOOLS.find((t) => t.name === 'scheduler_create_prds');
+  expect(tool).toBeTruthy();
   expectFixesProperty(tool.inputSchema.properties.prds.items.properties);
 });
 

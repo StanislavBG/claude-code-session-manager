@@ -181,6 +181,10 @@ test('project video tool contract: macro purposes name project-video, project_vi
     'Review: changes requested',
     'commit',
     'Project Home ▸ Video',
+    '32000',
+    'Retry',
+    "'Replace entry: <id>'",
+    "'Review: approved by the owner at <time>'",
   ]) expect(steps).toContain(s);
 });
 

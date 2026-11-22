@@ -54,6 +54,18 @@ function shortPath(path: string, home: string): string {
   return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
 }
 
+/**
+ * The file cut for the body editor: the frontmatter block, the line breaks between it and
+ * the text (`lead`), and the text the editor shows. The editor's markdown never starts
+ * with a blank line, so the usual `---` / blank line / body layout would lose that blank
+ * line on the first edit; `lead` keeps it on the frontmatter side and rejoins it verbatim.
+ */
+function splitEditorBody(draft: string): { frontmatter: string | null; lead: string; editorBody: string } {
+  const { frontmatter, body } = splitSkillDoc(draft)
+  const lead = /^(?:\r?\n)*/.exec(body)?.[0] ?? ''
+  return { frontmatter, lead, editorBody: body.slice(lead.length) }
+}
+
 /** `⋯` actions: Reveal in File Explorer, and Remove skill when the item can be removed. */
 function MoreMenu({ items }: { items: ReadonlyArray<{ label: string; testId: string; danger?: boolean; onSelect: () => void }> }) {
   const [open, setOpen] = useState(false)
@@ -128,8 +140,9 @@ function MoreMenu({ items }: { items: ReadonlyArray<{ label: string; testId: str
 /**
  * Skills detail (claude-config design, renders 13/09/01): eyebrow `SKILL · <SCOPE> · <path>`,
  * mono `/name`, Enabled switch + `⋯`; the DESCRIPTION card Claude reads to decide when to use
- * the skill; the body in the shared DocumentEditorPane (Document mode by default). The
- * frontmatter never enters the editor — a body edit rejoins it byte-for-byte.
+ * the skill; the body in the shared DocumentEditorPane (Document mode by default), whose
+ * status bar is the only save-state UI. The frontmatter never enters the editor — a body
+ * edit rejoins it (and the blank lines after it) byte-for-byte, so an opened skill is clean.
  * `readOnly` (plugin items): the same layout with nothing editable.
  */
 export function SkillDetail({
@@ -148,7 +161,7 @@ export function SkillDetail({
   onRemove,
 }: Props) {
   const [confirmRemove, setConfirmRemove] = useState(false)
-  const parts = useMemo(() => splitSkillDoc(draft), [draft])
+  const parts = useMemo(() => splitEditorBody(draft), [draft])
   const description = useMemo(() => readSkillDescription(draft) ?? '', [draft])
 
   const kindLabel = item.kind === 'commands' ? 'COMMAND' : 'SKILL'
@@ -243,12 +256,15 @@ export function SkillDetail({
         >
           <DocumentEditorPane
             path={item.path}
-            value={parts.body}
+            value={parts.editorBody}
             defaultMode="document"
             readOnly={readOnly}
             dirty={readOnly ? undefined : dirty}
             onChange={(body) => {
-              if (!readOnly) onDraftChange(joinSkillDoc(parts.frontmatter, body))
+              if (readOnly) return
+              const next = joinSkillDoc(parts.frontmatter, parts.lead + body)
+              // An editor echo that changes nothing is not an edit.
+              if (next !== draft) onDraftChange(next)
             }}
             onSave={readOnly ? undefined : onSave}
             onRevert={readOnly ? undefined : onRevert}

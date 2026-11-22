@@ -12,9 +12,18 @@ import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 
 /** Scenario tests for the Skills page: the 3a list column and its write paths (create, toggle, remove). */
 
-/** The shared editor, reduced to a textarea plus its Save: Tiptap/Monaco do not run under jsdom. */
-vi.mock('../editor/DocumentEditorPane', () => ({
-  DocumentEditorPane: (p: {
+/** Flipped by the real-editor scenario below: mount the real DocumentEditorPane (Tiptap) instead of the stub. */
+const editorMode = vi.hoisted(() => ({ real: false }))
+
+/** Monaco does not run under jsdom; Document mode (Tiptap) never mounts it. */
+vi.mock('../editor/CodeEditorPane', () => ({
+  CodeEditorPane: (p: { value: string }) => createElement('div', { 'data-testid': 'code-pane' }, p.value),
+}))
+
+/** The shared editor, reduced to a textarea plus its Save — or the real pane when `editorMode.real`. */
+vi.mock('../editor/DocumentEditorPane', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../editor/DocumentEditorPane')>()
+  const Stub = (p: {
     path: string
     value: string
     defaultMode?: string
@@ -34,8 +43,12 @@ vi.mock('../editor/DocumentEditorPane', () => ({
       p.onSave
         ? createElement('button', { key: 'save', type: 'button', 'data-testid': 'document-save', onClick: p.onSave }, 'Save')
         : null,
-    ]),
-}))
+    ])
+  return {
+    DocumentEditorPane: (p: Parameters<typeof actual.DocumentEditorPane>[0]) =>
+      editorMode.real ? createElement(actual.DocumentEditorPane, p) : createElement(Stub, p),
+  }
+})
 
 const HOME = '/home/bilko'
 const SKILLS_DIR = `${HOME}/.claude/skills`
@@ -623,9 +636,10 @@ describe('Skills detail (3a)', () => {
   it('edits only the body, and saves the description edit keeping the rest byte-for-byte', async () => {
     const { disk } = installApi()
     const el = await mount()
-    expect(editor(el).value).toBe('\nbody')
+    // The blank line after the fence stays with the frontmatter, outside the editor.
+    expect(editor(el).value).toBe('body')
     await setValue(q(el, 'skill-detail-description') as HTMLTextAreaElement, 'Does: things')
-    await setValue(editor(el), '\nnew body')
+    await setValue(editor(el), 'new body')
     expect(q(el, 'document-editor-pane')!.getAttribute('data-dirty')).toBe('true')
     await click(q(el, 'document-save')!)
     expect(disk[ONE]).toBe(['---', 'name: skill-one', 'description: "Does: things"', '---', '', 'new body'].join('\n'))
@@ -909,5 +923,105 @@ describe('Skills config-search focus', () => {
     })
     expect(isSelected(cardFor(el, 'skill-two'))).toBe(true)
     expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+  })
+})
+
+/**
+ * The real DocumentEditorPane + Tiptap (wave-3 findings 7, 19, 20): an opened skill is clean
+ * until the user types, its single status bar says so, and the row dot tracks the draft.
+ */
+describe('Skills saved state (real editor)', () => {
+  beforeEach(() => {
+    editorMode.real = true
+    const range = Range.prototype as unknown as Record<string, unknown>
+    if (!range.getClientRects) {
+      range.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] })
+      range.getBoundingClientRect = () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 })
+    }
+    const doc = document as unknown as Record<string, unknown>
+    if (!doc.elementFromPoint) doc.elementFromPoint = () => null
+  })
+  afterEach(() => {
+    editorMode.real = false
+  })
+
+  /** Let Tiptap mount and run its sync effect. */
+  const settle = async () => {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+      await flush()
+    })
+  }
+  const tiptap = (el: HTMLElement) =>
+    (q(el, 'tiptap-editor') as unknown as { editor: { chain: () => { insertContentAt: (at: number, t: string) => { run: () => void } } } }).editor
+  const saveState = (el: HTMLElement) => q(el, 'editor-save-state')?.textContent
+  const saveBtn = (el: HTMLElement) => q(el, 'editor-save') as HTMLButtonElement
+  const revertBtn = (el: HTMLElement) => q(el, 'editor-revert') as HTMLButtonElement
+  const rowDot = (el: HTMLElement, name: string) => cardFor(el, name)!.querySelector('[data-testid="skills-item-dirty"]')
+
+  it('open a skill -> not dirty; type -> dirty + dot; save -> clean', async () => {
+    const { disk, api } = installApi()
+    // Shapes Tiptap re-serializes differently: a blank line after the fence, `*` bullets, no final newline.
+    disk[ONE] = ['---', 'name: skill-one', 'description: skill-one desc', '---', '', '# Title', '', '* one', '* two'].join('\n')
+    const onDisk = disk[ONE]
+    const el = await mount()
+    await settle()
+
+    expect(q(el, 'tiptap-editor')).not.toBeNull()
+    expect(useConfig.getState().files[ONE]?.dirty).toBe(false)
+    expect(saveState(el)).toBe('Saved · matches the file on disk')
+    expect(saveBtn(el).disabled).toBe(true)
+    expect(revertBtn(el).disabled).toBe(true)
+    expect(rowDot(el, 'skill-one')).toBeNull()
+    // One status bar carries the save state — no second SaveBar for the body.
+    expect(el.querySelectorAll('[data-testid="editor-status-bar"]')).toHaveLength(1)
+    expect(Array.from(el.querySelectorAll('button')).filter((b) => b.textContent?.trim().startsWith('Save'))).toHaveLength(1)
+
+    // Selecting another skill and coming back stays clean too.
+    await click(rowOf(cardFor(el, 'skill-two'))!)
+    await settle()
+    expect(useConfig.getState().files[TWO]?.dirty).toBe(false)
+    expect(rowDot(el, 'skill-two')).toBeNull()
+    await click(rowOf(cardFor(el, 'skill-one'))!)
+    await settle()
+    expect(saveState(el)).toBe('Saved · matches the file on disk')
+
+    await act(async () => {
+      tiptap(el).chain().insertContentAt(3, 'X').run()
+      await flush()
+    })
+    expect(useConfig.getState().files[ONE]?.dirty).toBe(true)
+    expect(saveState(el)).toBe('Unsaved changes')
+    expect(saveBtn(el).disabled).toBe(false)
+    expect(rowDot(el, 'skill-one')).not.toBeNull()
+    expect(rowDot(el, 'skill-two')).toBeNull()
+
+    await click(saveBtn(el))
+    await settle()
+    expect(api.config.writeText).toHaveBeenCalledTimes(1)
+    // The frontmatter and the blank line after it survive the save byte-for-byte.
+    expect(disk[ONE].startsWith('---\nname: skill-one\ndescription: skill-one desc\n---\n\n')).toBe(true)
+    expect(disk[ONE]).not.toBe(onDisk)
+    expect(disk[ONE]).toContain('X')
+    expect(useConfig.getState().files[ONE]?.dirty).toBe(false)
+    expect(saveState(el)).toBe('Saved · matches the file on disk')
+    expect(saveBtn(el).disabled).toBe(true)
+    expect(rowDot(el, 'skill-one')).toBeNull()
+  })
+
+  it('Revert returns to the file on disk and stays clean', async () => {
+    installApi()
+    const el = await mount()
+    await settle()
+    await act(async () => {
+      tiptap(el).chain().insertContentAt(1, 'Y').run()
+      await flush()
+    })
+    expect(useConfig.getState().files[ONE]?.dirty).toBe(true)
+    await click(revertBtn(el))
+    await settle()
+    expect(useConfig.getState().files[ONE]?.dirty).toBe(false)
+    expect(saveState(el)).toBe('Saved · matches the file on disk')
+    expect(rowDot(el, 'skill-one')).toBeNull()
   })
 })

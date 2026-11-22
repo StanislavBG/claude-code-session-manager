@@ -464,7 +464,10 @@ export function TiptapBody({ value, onChange, markedBlocks }: Props) {
     const currentBody = bodyMarkdown(editor, newSplit.body)
     if (newSplit.body !== currentBody) {
       splitRef.current = newSplit
-      editor.commands.setContent(newSplit.body)
+      // No update event: this is the caller's own value coming in, not an edit. Tiptap v3
+      // emits by default, which echoed the re-serialized body back through onChange and
+      // marked an untouched file dirty (and re-dirtied it right after Revert).
+      editor.commands.setContent(newSplit.body, { emitUpdate: false })
     }
   }, [value, editor])
 

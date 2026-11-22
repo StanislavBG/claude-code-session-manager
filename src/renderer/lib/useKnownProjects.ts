@@ -7,6 +7,7 @@ import {
   countUnresolvedWorktreeFolders,
   normalizeCwd,
   ownerCandidateCwds,
+  parseManagedWorktreeCwd,
   type ProjectAggregate,
 } from './knownProjectAggregate'
 import type { DirEntry } from '../../preload/api'
@@ -100,6 +101,8 @@ let lastScanFinishedAt = 0
 const resolvedCwdByEncoded = new Map<string, string>()
 /** Folders archived while a scan was in flight — dropped from that scan's publishes. */
 const archivedDuringScan = new Set<string>()
+/** Cwds `enrichProject` succeeded for — a refresh re-enriches them only when a folder of theirs got newer. */
+const enrichedCwds = new Set<string>()
 
 /** Unforced `refreshKnownProjects()` calls within this gap of the last finished scan are no-ops. */
 export const KNOWN_PROJECTS_REFRESH_MIN_GAP_MS = 30_000
@@ -206,6 +209,7 @@ async function runScan(home: string, mode: ScanMode): Promise<void> {
     const rows = next.filter((row) => !archivedDuringScan.has(row.encoded))
     const recentKept = recent.filter((row) => !archivedDuringScan.has(row.projectEncoded))
     rows.sort((a, b) => b.lastSession - a.lastSession)
+    const prevLastSession = new Map(state.rows.map((r) => [r.encoded, r.lastSession]))
     recentKept.sort((a, b) => b.mtimeMs - a.mtimeMs)
     if (mode === 'initial') {
       setState({
@@ -230,7 +234,7 @@ async function runScan(home: string, mode: ScanMode): Promise<void> {
         loading: false,
       })
     }
-    await runEnrichment(rows, token, mode)
+    await runEnrichment(rows, token, mode, prevLastSession)
     if (token === scanToken) lastScanFinishedAt = Date.now()
   } catch (err) {
     console.error('[useKnownProjects] scan failed:', err)
@@ -254,9 +258,17 @@ function withoutArchived<T>(record: Record<string, T>): Record<string, T> {
  *   2. Enrich the UNIQUE cwds only, then fan each result back out to every
  *      folder that resolved to it. This is the expensive stage (4 file reads
  *      per cwd) and running it per folder meant ~2000 enrichments for ~19 real
- *      projects on this machine.
+ *      projects on this machine. Managed worktree cwds are never enriched
+ *      (their details are discarded by aggregateProjectsByCwd), a refresh
+ *      re-enriches only new cwds or ones a folder of which got a newer
+ *      transcript, and the stage publishes once after every read settles.
  */
-async function runEnrichment(rows: ProjectRow[], token: number, mode: ScanMode): Promise<void> {
+async function runEnrichment(
+  rows: ProjectRow[],
+  token: number,
+  mode: ScanMode,
+  prevLastSession: ReadonlyMap<string, number>,
+): Promise<void> {
   const cwdByEncoded: Record<string, string | null> = {}
   await mapWithConcurrency(rows, SCAN_CONCURRENCY, async (row) => {
     if (token !== scanToken) return
@@ -284,21 +296,35 @@ async function runEnrichment(rows: ProjectRow[], token: number, mode: ScanMode):
   setState({ enriched: withoutArchived(enriched), resolving: false })
 
   const uniqueCwds = [...new Set(Object.values(cwdByEncoded).filter((c): c is string => !!c))]
-  await mapWithConcurrency(uniqueCwds, SCAN_CONCURRENCY, async (cwd) => {
-    if (token !== scanToken) return
-    let details: ProjectDetails = {}
-    try {
-      details = await enrichProject(cwd)
-    } catch {
-      return
-    }
-    if (token !== scanToken) return
-    const patch = { ...state.enriched }
-    for (const [encoded, resolved] of Object.entries(cwdByEncoded)) {
-      if (resolved === cwd) patch[encoded] = { cwd, ...details }
-    }
-    setState({ enriched: withoutArchived(patch) })
+  const grownCwds = new Set<string>()
+  for (const row of rows) {
+    const cwd = cwdByEncoded[row.encoded]
+    if (cwd && row.lastSession > (prevLastSession.get(row.encoded) ?? -1)) grownCwds.add(cwd)
+  }
+  const candidates = uniqueCwds.filter((cwd) => {
+    if (parseManagedWorktreeCwd(cwd)) return false
+    if (mode === 'initial') return true
+    return !enrichedCwds.has(cwd) || grownCwds.has(cwd)
   })
+  if (candidates.length === 0) return
+
+  const detailsByCwd = new Map<string, ProjectDetails>()
+  await mapWithConcurrency(candidates, SCAN_CONCURRENCY, async (cwd) => {
+    if (token !== scanToken) return
+    try {
+      detailsByCwd.set(cwd, await enrichProject(cwd))
+      enrichedCwds.add(cwd)
+    } catch {
+      // keep whatever details were carried over
+    }
+  })
+  if (token !== scanToken || detailsByCwd.size === 0) return
+  const patch = { ...state.enriched }
+  for (const [encoded, cwd] of Object.entries(cwdByEncoded)) {
+    const details = cwd ? detailsByCwd.get(cwd) : undefined
+    if (cwd && details) patch[encoded] = { cwd, ...details }
+  }
+  setState({ enriched: withoutArchived(patch) })
 }
 
 /**
@@ -326,6 +352,7 @@ export function __resetKnownProjectsForTests(): void {
   lastScanFinishedAt = 0
   resolvedCwdByEncoded.clear()
   archivedDuringScan.clear()
+  enrichedCwds.clear()
   ownerMap = null
   ownerMapKey = null
 }

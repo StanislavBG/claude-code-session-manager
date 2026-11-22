@@ -102,6 +102,8 @@ function setupFs() {
     a, b, folders,
     rootGate: null as Promise<void> | null,
     rootFail: false,
+    /** package.json path → gate; holds that cwd's enrichment until released. */
+    jsonGate: {} as Record<string, Promise<void>>,
   }
   const listDir = vi.fn(async (path: string) => {
     if (path === ROOT) {
@@ -119,15 +121,20 @@ function setupFs() {
     return { exists: false, text: '', mtimeMs: 0, error: null, truncated: false }
   })
   const archiveProject = vi.fn(async () => ({ ok: true }))
+  const readJson = vi.fn(async (path: string) => {
+    const gate: Promise<void> | undefined = ctl.jsonGate[path]
+    if (gate) await gate
+    return { exists: false, data: null }
+  })
   ;(globalThis as any).window.api = {
     app: { homeDir: vi.fn(async () => '/home/u'), archiveProject },
     config: {
       listDir,
       readText,
-      readJson: vi.fn(async () => ({ exists: false, data: null })),
+      readJson,
     },
   }
-  return { ...ctl, ctl, listDir, readText, archiveProject }
+  return { ...ctl, ctl, cwdOf, listDir, readText, readJson, archiveProject }
 }
 
 async function mountProbe() {
@@ -282,5 +289,104 @@ describe('refreshKnownProjects', () => {
     expect(ref.current!.projects.map((p) => p.cwd)).toEqual(['/p/a'])
     expect(ref.current!.enriched['-p-b']).toBeUndefined()
     unmount()
+  })
+})
+
+/** Every enrichProject read (package.json via readJson; .git/config, .git/HEAD, CLAUDE.md via readText) under `cwd`. */
+const enrichReadsFor = (fs: ReturnType<typeof setupFs>, cwd: string) => [
+  ...fs.readJson.mock.calls.map(([p]) => String(p)),
+  ...fs.readText.mock.calls
+    .filter(([, o]) => (o as any)?.maxBytes !== CWD_RESOLVE_MAX_BYTES)
+    .map(([p]) => String(p)),
+].filter((p) => p.startsWith(`${cwd}/`))
+
+describe('enrichment stage', () => {
+  const WT = '/home/u/.local/state/session-manager/session-manager-job-worktrees/0123456789abcdef/some-slug'
+
+  it('never enriches a managed worktree cwd, initial or refresh, while enriching /p/a', async () => {
+    const fs = setupFs()
+    const w = `${ROOT}/-wt`
+    fs.folders[w] = [file(w, 'w1.jsonl', 300)]
+    fs.cwdOf[w] = WT
+    const { ref, unmount } = await mountProbe()
+    expect(ref.current!.enriched['-wt']).toMatchObject({ cwd: WT })
+    expect(enrichReadsFor(fs, WT)).toEqual([])
+    expect(enrichReadsFor(fs, '/p/a').sort()).toEqual(
+      ['/p/a/.git/HEAD', '/p/a/.git/config', '/p/a/CLAUDE.md', '/p/a/package.json'],
+    )
+    fs.folders[w].push(file(w, 'w2.jsonl', 900))
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    expect(enrichReadsFor(fs, WT)).toEqual([])
+    unmount()
+  })
+
+  it('a forced rescan with unchanged folders makes no enrichment read and keeps details', async () => {
+    const fs = setupFs()
+    const { ref, unmount } = await mountProbe()
+    const jsonBefore = fs.readJson.mock.calls.length
+    const textBefore = fs.readText.mock.calls.length
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    expect(fs.readJson.mock.calls.length).toBe(jsonBefore)
+    expect(fs.readText.mock.calls.length).toBe(textBefore)
+    expect(ref.current!.enriched['-p-a']).toMatchObject({ cwd: '/p/a', name: 'a' })
+    expect(ref.current!.enriched['-p-b']).toMatchObject({ cwd: '/p/b', name: 'b' })
+    unmount()
+  })
+
+  it('re-enriches only a folder whose newest transcript mtime grew', async () => {
+    const fs = setupFs()
+    const { unmount } = await mountProbe()
+    expect(enrichReadsFor(fs, '/p/a')).toHaveLength(4)
+    expect(enrichReadsFor(fs, '/p/b')).toHaveLength(4)
+    fs.folders[fs.a].push(file(fs.a, 's7.jsonl', 700))
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    expect(enrichReadsFor(fs, '/p/a')).toHaveLength(8)
+    expect(enrichReadsFor(fs, '/p/b')).toHaveLength(4)
+    unmount()
+  })
+
+  it('publishes the enrichment stage once', async () => {
+    const fs = setupFs()
+    const c = `${ROOT}/-p-c`
+    fs.folders[c] = [file(c, 's3.jsonl', 300)]
+    fs.cwdOf[c] = '/p/c'
+    // Hold each cwd's enrichment so every one settles in its own act turn — a
+    // per-cwd publish would then show up as its own rendered `enriched` object.
+    const releases: Array<() => void> = []
+    for (const cwd of ['/p/a', '/p/b', '/p/c']) {
+      fs.ctl.jsonGate[`${cwd}/package.json`] = new Promise<void>((r) => { releases.push(r) })
+    }
+    const snapshots: Snapshot[] = []
+    const ref: { current: Hook | null } = { current: null }
+    const Probe = () => {
+      const h = useKnownProjects()
+      ref.current = h
+      snapshots.push({
+        rows: h.rows, recentSessions: h.recentSessions, enriched: h.enriched,
+        projects: h.projects, loading: h.loading, resolving: h.resolving,
+      })
+      return null
+    }
+    const root = createRoot(document.createElement('div'))
+    await act(async () => { root.render(createElement(Probe)) })
+    for (let i = 0; i < 100 && (!ref.current || ref.current.resolving); i++) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 5)) })
+    }
+    expect(ref.current!.resolving).toBe(false)
+    for (const release of releases) {
+      await act(async () => {
+        release()
+        await new Promise((r) => setTimeout(r, 5))
+      })
+    }
+    await act(async () => { await refreshKnownProjects() })
+    const firstResolved = snapshots.findIndex((s) => !s.resolving)
+    const resolveStage = snapshots[firstResolved].enriched
+    const after = new Set(snapshots.slice(firstResolved).map((s) => s.enriched).filter((e) => e !== resolveStage))
+    expect(after.size).toBe(1)
+    const [final] = [...after]
+    expect(final['-p-a']).toMatchObject({ cwd: '/p/a', name: 'a' })
+    expect(final['-p-c']).toMatchObject({ cwd: '/p/c', name: 'c' })
+    act(() => root.unmount())
   })
 })

@@ -87,6 +87,15 @@ test('assertOpsWrite fails closed (not a raw crash) on a relative path that look
   );
 });
 
+test("tasks/ is owned by 'tasks' (taskLedger.cjs) and is a runtime namespace", () => {
+  const { RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+  assert.equal(OWNERS.tasks, 'tasks');
+  assert.ok(RUNTIME_NAMESPACES.includes('tasks'));
+  assert.equal(checkOpsWrite(`${P}/tasks/2026-11-22.jsonl`, 'tasks').ok, true);
+  assert.equal(checkOpsWrite(`${P}/tasks/bodies/t1.json`, 'scheduler').ok, false);
+  assert.equal(checkOpsWrite(`${P}/tasks/.gitignore`, 'runtime-ignore').ok, true);
+});
+
 test('every declared owner is a non-empty string (table sanity)', () => {
   for (const [ns, owner] of Object.entries(OWNERS)) {
     assert.equal(typeof owner, 'string', `${ns} owner must be a string`);

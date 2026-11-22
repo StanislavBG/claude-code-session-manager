@@ -16,6 +16,7 @@ Shared main-process helpers (CommonJS `.cjs`). Layout source of truth: `scripts/
 - `process/` — child processes, kill tree, env cleaning, pid liveness, instance lock.
 - `project-pages/` — Project Home pages library, competitor matrix store/HTML, player bridge.
 - `scheduler/` — dispatch loop, session slots, gates, supervisors, queue helpers.
+- `tasks/` — Task ledger, switch, runner, admin routes and IPC (one headless claude -p run per project); store: [`tasks/README.md`](../../../session-manager-operations/tasks/README.md).
 - `telemetry/` — audit/ops error logs, crash and OTLP telemetry.
 - `util/` — generic pure helpers (atomic fs, kebab, home/cwd encoding, JSON extract, tail).
 - top-level files — cross-cutting modules that fit no domain (`opsOwnership`, `activeSessions`, `projectRootResolve`, `cwdClassify`).

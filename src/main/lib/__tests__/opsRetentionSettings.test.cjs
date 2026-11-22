@@ -36,6 +36,7 @@ test('read returns DEFAULTS when the file is missing', () => {
     runsArchiveDays: 30,
     auditLogMonths: 6,
     reservedMarkersKeep: 100,
+    tasksDays: 30,
   });
   expect(settings.DEFAULTS).not.toHaveProperty('archivedTranscripts');
   expect(settings.storePath()).toBe(path.join(home, '.claude', 'session-manager', 'ops-retention.json'));

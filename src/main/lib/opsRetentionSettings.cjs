@@ -3,7 +3,8 @@
  *
  * Storage: ~/.claude/session-manager/ops-retention.json
  * Shape (DEFAULTS): { runLogs:{maxAgeDays,keepPerSlug}, runsArchiveDays, auditLogMonths,
- *   reservedMarkersKeep }
+ *   reservedMarkersKeep, tasksDays }
+ * tasksDays: Task ledger day files + bodies (lib/tasks/taskLedger.cjs pruneOld).
  * Archived transcripts are kept forever (fixed policy, not a setting).
  *
  * Top-level in lib/ (no domain fits: read by scheduler, telemetry and epic sweeps alike).
@@ -22,6 +23,7 @@ const DEFAULTS = Object.freeze({
   runsArchiveDays: 30,
   auditLogMonths: 6,
   reservedMarkersKeep: 100,
+  tasksDays: 30,
 });
 
 // [min, max] per integer field; out-of-range values clamp, non-integers round.
@@ -31,6 +33,7 @@ const BOUNDS = Object.freeze({
   runsArchiveDays: [1, 3650],
   auditLogMonths: [1, 120],
   reservedMarkersKeep: [1, 100000],
+  tasksDays: [1, 3650],
 });
 
 function storePath() {
@@ -64,7 +67,7 @@ function validatePatch(patch) {
         if (rk !== 'maxAgeDays' && rk !== 'keepPerSlug') throw new Error(`Invalid ops retention config: runLogs.${rk}`);
         out.runLogs[rk] = num(`runLogs.${rk}`, rv);
       }
-    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep') {
+    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays') {
       out[k] = num(k, v);
     } else {
       throw new Error(`Invalid ops retention config: unknown key ${k}`);
@@ -88,7 +91,7 @@ function sanitizeStored(data) {
       };
     }
   }
-  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep']) {
+  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays']) {
     const v = int(key, data[key]);
     if (v !== undefined) out[key] = v;
   }
@@ -113,6 +116,7 @@ function withDefaults(stored) {
     runsArchiveDays: s.runsArchiveDays ?? DEFAULTS.runsArchiveDays,
     auditLogMonths: s.auditLogMonths ?? DEFAULTS.auditLogMonths,
     reservedMarkersKeep: s.reservedMarkersKeep ?? DEFAULTS.reservedMarkersKeep,
+    tasksDays: s.tasksDays ?? DEFAULTS.tasksDays,
   };
 }
 

@@ -53,6 +53,8 @@ session-manager-operations/feedback/
 session-manager-operations/logs/
 session-manager-operations/ui-prefs/
 session-manager-operations/memory-clusters/
+session-manager-operations/tasks/*
+!session-manager-operations/tasks/README.md
 
 # electron-builder staging + installer output (scripts/package/stage.cjs)
 release/

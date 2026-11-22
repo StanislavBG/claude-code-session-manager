@@ -8,6 +8,7 @@
   "agentModelResolve": "claude",
   "agentPersonaSchema": "persona-macro",
   "atomicFs": "util",
+  "taskLedger": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

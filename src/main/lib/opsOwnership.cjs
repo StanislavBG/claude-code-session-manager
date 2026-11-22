@@ -27,6 +27,7 @@
  *   - lib/epic/epicMint.cjs      (raw fs tmp+rename)
  *   - lib/scheduler/queueStore.cjs    (raw fs tmp+rename)
  *   - lib/telemetry/opsErrorLog.cjs   (raw fs append, JSONL error log)
+ *   - lib/tasks/taskLedger.cjs        (raw fs append + atomicFs bodies)
  * Renderer callers declare their writer id through the IPC payload.
  */
 
@@ -70,6 +71,11 @@ const OWNERS = Object.freeze({
   // the renderer through the generic config:write-json IPC with writer:
   // 'ui-prefs'; no dedicated main-process module. See ui-prefs/README.md.
   'ui-prefs': 'ui-prefs',
+  // The Task ledger: one summary JSONL line per Task event (a Task = one
+  // headless claude -p run for this project) in tasks/<YYYY-MM-DD>.jsonl, plus
+  // tasks/bodies/<taskId>.json prompt/output bodies. lib/tasks/taskLedger.cjs is
+  // the ONLY writer; routes, IPC and history read through it. See tasks/README.md.
+  'tasks': 'tasks',
 });
 
 /**
@@ -80,7 +86,7 @@ const OWNERS = Object.freeze({
  * runtime state all the same, so it lives only in this set.
  */
 const RUNTIME_NAMESPACES = Object.freeze([
-  'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters',
+  'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

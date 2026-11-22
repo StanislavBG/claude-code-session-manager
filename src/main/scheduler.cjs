@@ -2868,14 +2868,27 @@ function buildScheduleStatePayload(state) {
     // UI can disable its own control when the env has taken over.
     effectiveConcurrency: (() => {
       const snap = sessionSlots.snapshot();
+      // jobCapacity() excludes the held interactive-Task slot, so a held
+      // slot never reads as free capacity the queue failed to use.
       return {
         cap: snap.total,
-        free: Math.max(0, snap.total - snap.inUse),
+        free: jobFreeSlots(snap),
         source: snap.envOverride ? 'env' : 'pool',
       };
     })(),
   };
   return payload;
+}
+
+/**
+ * Slots a scheduler job could still take: the pool's free slots, bounded by
+ * jobCapacity() (cap minus the held interactive-Task slot) less the
+ * non-interactive holders already counted against it.
+ * @param {{ total: number, inUse: number, holders: Array<{ lane?: string }> }} snap
+ */
+function jobFreeSlots(snap) {
+  const nonInteractive = snap.holders.filter((h) => h.lane !== 'task-interactive').length;
+  return Math.max(0, Math.min(snap.total - snap.inUse, sessionSlots.jobCapacity() - nonInteractive));
 }
 
 // Trailing-edge debounce for the `schedule:state` IPC push: a burst of
@@ -6561,7 +6574,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
   // leaves the job pending; the next tick retries when a slot frees up.
-  const slotToken = sessionSlots.acquire(`scheduler:${job.slug}`, { claimedAt: Date.now() });
+  const slotToken = sessionSlots.acquire(`scheduler:${job.slug}`, { claimedAt: Date.now(), lane: 'job' });
   if (!slotToken) {
     console.log(`[scheduler] no session slot free for ${job.slug} — deferring (${JSON.stringify(sessionSlots.snapshot().holders.map((h) => h.owner))})`);
     return;
@@ -8359,8 +8372,8 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
     // degraded cap minus what's already running.
     runReservationExpiryPass(state.jobs, tickStartedAt);
     const freeSlots = degradedConcurrencyCapValue != null
-      ? Math.max(0, Math.min(sessionSlots.available(), degradedConcurrencyCapValue - runningSet.size))
-      : sessionSlots.available();
+      ? Math.max(0, Math.min(sessionSlots.availableFor('job'), degradedConcurrencyCapValue - runningSet.size))
+      : sessionSlots.availableFor('job');
     const heldSlugs = await computeLaunchHolds(state);
     if (stale()) return STALE_TICK;
     const satisfiedSlugsByCwd = await budget.computeDepHistorySatisfaction(state);
@@ -11108,7 +11121,7 @@ function registerScheduleHandlers() {
     }
     const now = Date.now();
     const slotSnapshot = sessionSlots.snapshot();
-    const freeSlots = Math.max(0, slotSnapshot.total - slotSnapshot.inUse);
+    const freeSlots = jobFreeSlots(slotSnapshot);
     const verdict = starvation.classifyQueueHealth({
       jobs: state.jobs,
       paused: upgradeDrain.effectivePaused(state),

@@ -20,6 +20,19 @@
  * is the one exception — a tiny standalone JSON file, not routed through any
  * other module's config store) — all consumers live in the one Electron main
  * process, which is exactly why it can be the arbiter.
+ *
+ * Lanes (Task primitive): every holder carries a lane — 'general' (default:
+ * chat, project brief, memory assist), 'job' (scheduler PRD jobs),
+ * 'task-batch' and 'task-interactive' (headless Task runs). When the
+ * interactive reserve is on (setInteractiveReserve) and the cap is >= 2, one
+ * slot is HELD for 'task-interactive': non-interactive acquires succeed only
+ * while non-interactive holders < cap - 1. The held slot is arithmetic only —
+ * never a placeholder holder. Tasks may queue with waitForSlot(); a queued
+ * waiter takes precedence over 'job' acquires (they return null while any
+ * waiter queues), and waiters are granted interactive-first then FIFO,
+ * synchronously inside release / setCap / expireDead / setInteractiveReserve
+ * before any listener fires. Precedence only ever affects NEW grants: no
+ * running holder is ever revoked or signalled.
  */
 'use strict';
 
@@ -59,9 +72,7 @@ function setCap(cap) {
   }
   const configPath = sessionSlotsConfigPath();
   atomicFs.writeJsonAtomicSync(configPath, { cap: n });
-  for (const fn of listeners) {
-    try { fn(); } catch { /* a consumer's pump error is its own problem */ }
-  }
+  notify();
   return n;
 }
 
@@ -73,8 +84,108 @@ function totalSlots() {
   return readPersistedCap();
 }
 
-// token → { owner, at, claimedAt (ms), pid (null until stampPid) }
+const LANES = ['general', 'job', 'task-batch', 'task-interactive'];
+const WAIT_LANES = ['task-batch', 'task-interactive'];
+const MAX_WAITERS = 50;
+
+function normalizeLane(lane) {
+  return LANES.includes(lane) ? lane : 'general';
+}
+
+// token → { owner, at, claimedAt (ms), pid (null until stampPid), lane }
 const holders = new Map();
+
+let reserveOn = false;
+// Each: { owner, lane, since (ms), seq, resolve, timer, signal, onAbort }
+const waiters = [];
+let waiterSeq = 0;
+
+function reserveCount(total = totalSlots()) {
+  return reserveOn && total >= 2 ? 1 : 0;
+}
+
+function nonInteractiveHolders() {
+  let n = 0;
+  for (const h of holders.values()) if (h.lane !== 'task-interactive') n += 1;
+  return n;
+}
+
+/** How many more acquires of `lane` the pool admits now (ignores waiter precedence). */
+function capacityFor(lane) {
+  const total = totalSlots();
+  const free = Math.max(0, total - holders.size);
+  if (lane === 'task-interactive') return free;
+  const budget = Math.max(0, total - reserveCount(total) - nonInteractiveHolders());
+  return Math.min(free, budget);
+}
+
+function allowed(lane) {
+  return capacityFor(lane) > 0;
+}
+
+function createHolder(owner, claimedAt, lane) {
+  const token = crypto.randomUUID();
+  holders.set(token, {
+    owner: String(owner || 'unknown'),
+    at: new Date(claimedAt).toISOString(),
+    claimedAt,
+    pid: null,
+    lane,
+  });
+  return token;
+}
+
+function priority(lane) {
+  return lane === 'task-interactive' ? 0 : 1;
+}
+
+function sortWaiters() {
+  waiters.sort((a, b) => (priority(a.lane) - priority(b.lane)) || (a.since - b.since) || (a.seq - b.seq));
+}
+
+function detachWaiter(w) {
+  if (w.timer) clearTimeout(w.timer);
+  if (w.signal && w.onAbort) w.signal.removeEventListener('abort', w.onAbort);
+  w.timer = null;
+  w.onAbort = null;
+}
+
+/** Grant queued waiters (interactive first, then FIFO) while the head is admitted. */
+function grantWaiters() {
+  sortWaiters();
+  while (waiters.length && allowed(waiters[0].lane)) {
+    const w = waiters.shift();
+    detachWaiter(w);
+    w.resolve(createHolder(w.owner, Date.now(), w.lane));
+  }
+}
+
+function notify() {
+  grantWaiters();
+  for (const fn of listeners) {
+    try { fn(); } catch { /* a consumer's pump error is its own problem */ }
+  }
+}
+
+/** Turn the held interactive slot on/off (default off). Grants any waiter it unblocks. */
+function setInteractiveReserve(on) {
+  reserveOn = !!on;
+  notify();
+  return reserveOn;
+}
+
+/** totalSlots() minus the held interactive slot — the most the scheduler may ever run. */
+function jobCapacity() {
+  const total = totalSlots();
+  return Math.max(0, total - reserveCount(total));
+}
+
+/** How many acquires of `lane` would succeed right now (0 for 'job' while waiters queue). */
+function availableFor(lane) {
+  const l = normalizeLane(lane);
+  if (l === 'job' && waiters.length > 0) return 0;
+  return capacityFor(l);
+}
 
 function inUse() {
   return holders.size;
@@ -89,11 +200,53 @@ function available() {
  * `owner` is a diagnostic label ("scheduler:<slug>", "chat:<tabId>") shown in
  * snapshot() so a stuck holder is attributable.
  */
-function acquire(owner, { claimedAt = Date.now() } = {}) {
-  if (holders.size >= totalSlots()) return null;
-  const token = crypto.randomUUID();
-  holders.set(token, { owner: String(owner || 'unknown'), at: new Date(claimedAt).toISOString(), claimedAt, pid: null });
-  return token;
+function acquire(owner, { claimedAt = Date.now(), lane = 'general' } = {}) {
+  const l = normalizeLane(lane);
+  if (l === 'job' && waiters.length > 0) return null;
+  if (!allowed(l)) return null;
+  return createHolder(owner, claimedAt, l);
+}
+
+/**
+ * waitForSlot(owner, { lane, timeoutMs, signal }) → Promise<token|null>.
+ * Only for lanes 'task-batch' / 'task-interactive'. Resolves with a token as
+ * soon as a slot is granted (immediately when one is free and no waiter of the
+ * same-or-higher priority queues), or null on timeout / abort. Rejects with
+ * err.code 'too_many_waiting' past MAX_WAITERS, 'bad_lane' for other lanes.
+ */
+function waitForSlot(owner, { lane = 'task-batch', timeoutMs = 0, signal } = {}) {
+  if (!WAIT_LANES.includes(lane)) {
+    const err = new Error(`sessionSlots.waitForSlot: lane must be one of ${WAIT_LANES.join(', ')}`);
+    /** @type {any} */ (err).code = 'bad_lane';
+    return Promise.reject(err);
+  }
+  if (signal && signal.aborted) return Promise.resolve(null);
+  const blockedByQueue = waiters.some((w) => priority(w.lane) <= priority(lane));
+  if (!blockedByQueue && allowed(lane)) {
+    return Promise.resolve(createHolder(owner, Date.now(), lane));
+  }
+  if (waiters.length >= MAX_WAITERS) {
+    const err = new Error(`sessionSlots.waitForSlot: ${MAX_WAITERS} waiters already queued`);
+    /** @type {any} */ (err).code = 'too_many_waiting';
+    return Promise.reject(err);
+  }
+  return new Promise((resolve) => {
+    const w = { owner: String(owner || 'unknown'), lane, since: Date.now(), seq: waiterSeq++, resolve, timer: null, signal: signal || null, onAbort: null };
+    const giveUp = () => {
+      const i = waiters.indexOf(w);
+      if (i === -1) return;
+      waiters.splice(i, 1);
+      detachWaiter(w);
+      resolve(null);
+    };
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) w.timer = setTimeout(giveUp, timeoutMs);
+    if (signal) {
+      w.onAbort = giveUp;
+      signal.addEventListener('abort', giveUp, { once: true });
+    }
+    waiters.push(w);
+    sortWaiters();
+  });
 }
 
 /** stampPid(token, pid) — record the child pid once known, so expireDead can prove death by pid. */
@@ -122,11 +275,7 @@ function expireDead({ liveSlugs, pidAlive, now = Date.now(), graceMs = DEFAULT_G
     expired.push(h.owner);
     appendAuditEvent('slot_reservation_expired', { owner: h.owner, pid: h.pid, claimedAt: h.at });
   }
-  if (expired.length) {
-    for (const fn of listeners) {
-      try { fn(); } catch { /* a consumer's pump error is its own problem */ }
-    }
-  }
+  if (expired.length) notify();
   return expired;
 }
 
@@ -142,11 +291,7 @@ function subscribe(fn) {
 /** release(token) — idempotent; releasing an unknown/already-released token is a no-op. */
 function release(token) {
   const had = holders.delete(token);
-  if (had) {
-    for (const fn of listeners) {
-      try { fn(); } catch { /* a consumer's pump error is its own problem */ }
-    }
-  }
+  if (had) notify();
   return had;
 }
 
@@ -155,7 +300,9 @@ function snapshot() {
   return {
     total: totalSlots(),
     inUse: holders.size,
-    holders: [...holders.values()],
+    holders: [...holders.values()].map((h) => ({ ...h })),
+    waiters: waiters.map((w) => ({ owner: w.owner, lane: w.lane, since: w.since })),
+    reserve: reserveCount(),
     min: MIN_SLOTS,
     max: MAX_SLOTS,
     default: DEFAULT_SLOTS,
@@ -163,20 +310,28 @@ function snapshot() {
   };
 }
 
-/** Test hook: drop all held slots. */
+/** Test hook: drop all held slots, queued waiters and the reserve. */
 function __resetForTests() {
   holders.clear();
+  for (const w of waiters.splice(0)) detachWaiter(w);
+  reserveOn = false;
 }
 
 module.exports = {
   MIN_SLOTS,
   MAX_SLOTS,
   DEFAULT_SLOTS,
+  LANES,
+  MAX_WAITERS,
   totalSlots,
   setCap,
   inUse,
   available,
   acquire,
+  waitForSlot,
+  availableFor,
+  jobCapacity,
+  setInteractiveReserve,
   stampPid,
   expireDead,
   release,

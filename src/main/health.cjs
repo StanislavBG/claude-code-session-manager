@@ -117,8 +117,10 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
   // The scheduler's private concurrencyCap is retired — the machine-wide
   // sessionSlots pool is the only limit. Read it lazily so this stays a pure
   // function of its args when a caller supplies slotCap explicitly.
+  // jobCapacity() = cap minus the held interactive-Task slot, so a held slot
+  // never reads as a stall.
   const concurrencyCap = queueState.slotCap
-    ?? (() => { try { return require('./lib/scheduler/sessionSlots.cjs').totalSlots(); } catch { return Infinity; } })();
+    ?? (() => { try { return require('./lib/scheduler/sessionSlots.cjs').jobCapacity(); } catch { return Infinity; } })();
 
   if (pending.length === 0) return { stalled: false, reason: 'no-pending-jobs' };
   if (effectivePaused(queueState)) return { stalled: false, reason: queueState.paused ? 'paused' : 'draining' };

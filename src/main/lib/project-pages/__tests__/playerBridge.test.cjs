@@ -57,6 +57,24 @@ describe('playerBridge', () => {
     });
   });
 
+  it('accepts scenes as an array of start times in seconds', () => {
+    demo.scenes = [0, 4.5, 12];
+    const msg = send({ smPlayer: 1, cmd: 'hello' }).mock.calls[0][0];
+    expect(msg.scenes).toEqual([{ t: 0, label: '' }, { t: 4.5, label: '' }, { t: 12, label: '' }]);
+  });
+
+  it('accepts mixed number and object scenes in input order', () => {
+    demo.scenes = [0, { t: 5, label: 'Hook' }];
+    const msg = send({ smPlayer: 1, cmd: 'hello' }).mock.calls[0][0];
+    expect(msg.scenes).toEqual([{ t: 0, label: '' }, { t: 5, label: 'Hook' }]);
+  });
+
+  it('skips NaN, Infinity, negative, string and null scene entries', () => {
+    demo.scenes = [NaN, 'x', null, -1, Infinity];
+    const msg = send({ smPlayer: 1, cmd: 'hello' }).mock.calls[0][0];
+    expect(msg.scenes).toEqual([]);
+  });
+
   it('ignores messages without smPlayer:1', () => {
     expect(send({ cmd: 'play' })).not.toHaveBeenCalled();
     expect(send('play')).not.toHaveBeenCalled();

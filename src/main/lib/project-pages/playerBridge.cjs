@@ -50,6 +50,10 @@ const BRIDGE_JS = `(() => {
     var out = [];
     var src = d && Array.isArray(d.scenes) ? d.scenes : [];
     for (var i = 0; i < src.length; i++) {
+      if (typeof src[i] === 'number') {
+        if (isFinite(src[i]) && src[i] >= 0) out.push({ t: src[i], label: '' });
+        continue;
+      }
       var s = src[i] || {};
       var t = typeof s.t === 'number' ? s.t : s.start;
       var label = s.label != null ? s.label : s.title;

@@ -77,6 +77,19 @@ function withPointer(text) {
 
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
 const MAX_CHARACTER_JS_BYTES = 300 * 1024;
+
+/**
+ * htmlPath cap for project_video_write: 2 MiB per started 30 s of lengthS.
+ * Mirrors maxVideoBytes in src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs
+ * (not required here: this is a standalone process and that module pulls app
+ * config); scheduler-mcp-server-htmlPath.test.cjs asserts the two agree. A
+ * missing, non-numeric or non-positive lengthS keeps the 2 MiB cap — the
+ * route validates lengthS itself.
+ */
+function maxVideoBytesFor(lengthS) {
+  if (typeof lengthS !== 'number' || !Number.isFinite(lengthS) || lengthS <= 0) return MAX_DEMO_VIDEO_BYTES;
+  return Math.ceil(lengthS / 30) * MAX_DEMO_VIDEO_BYTES;
+}
 const MAX_MATRIX_JSON_BYTES = 1048576;
 
 /** Reads a local .js file for project_character_write; errors carry only the reason, never file contents. */
@@ -95,14 +108,21 @@ async function readCharacterJsFile(p) {
   }
 }
 
-/** Reads a local .html/.htm file for project_demo_video_write; errors carry only the reason, never file contents. */
-async function readDemoVideoHtmlFile(p) {
+/**
+ * Reads a local .html/.htm file for an html/htmlPath tool; errors carry only the
+ * reason, never file contents. `maxBytes` defaults to 2 MiB; `lengthS`, when
+ * given, is named in the too-large error (project_video_write's scaled cap).
+ */
+async function readDemoVideoHtmlFile(p, { maxBytes = MAX_DEMO_VIDEO_BYTES, lengthS } = {}) {
   if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: 'htmlPath must be an absolute path' };
   if (!/\.html?$/i.test(p)) return { error: 'htmlPath must end in .html or .htm' };
   try {
     const st = await fsp.stat(p);
     if (!st.isFile()) return { error: 'htmlPath is not a regular file' };
-    if (st.size > MAX_DEMO_VIDEO_BYTES) return { error: `htmlPath file exceeds ${MAX_DEMO_VIDEO_BYTES} bytes` };
+    if (st.size > maxBytes) {
+      const forLength = lengthS === undefined ? '' : ` (the cap for lengthS ${lengthS})`;
+      return { error: `htmlPath file exceeds ${maxBytes} bytes${forLength}` };
+    }
     const html = await fsp.readFile(p, 'utf8');
     if (html.length === 0) return { error: 'htmlPath file is empty' };
     return { html };
@@ -111,12 +131,12 @@ async function readDemoVideoHtmlFile(p) {
   }
 }
 
-/** Resolves exactly one of html / htmlPath into { html } or { error }. */
-async function resolveHtmlArg(args) {
+/** Resolves exactly one of html / htmlPath into { html } or { error }; `readOpts` goes to readDemoVideoHtmlFile. */
+async function resolveHtmlArg(args, readOpts) {
   const hasHtml = !!args && args.html !== undefined && args.html !== null && args.html !== '';
   const hasPath = !!args && args.htmlPath !== undefined && args.htmlPath !== null && args.htmlPath !== '';
   if (hasHtml === hasPath) return { error: 'provide exactly one of html or htmlPath' };
-  if (hasPath) return readDemoVideoHtmlFile(args.htmlPath);
+  if (hasPath) return readDemoVideoHtmlFile(args.htmlPath, readOpts);
   if (typeof args.html !== 'string') return { error: 'missing required argument: html' };
   return { html: args.html };
 }
@@ -829,9 +849,9 @@ const TOOLS = [
         videoId: { type: 'string', description: 'Stable id (kebab-case) of the video; writing the same id replaces that video.' },
         title: { type: 'string', description: 'Human title shown in the video list.' },
         kind: { type: 'string', description: 'What the video is: exactly one of project-demo, blog-post, feature.' },
-        lengthS: { type: 'number', description: 'Length of the video in seconds.' },
-        html: { type: 'string', description: 'The complete self-contained HTML/JS video document (<= 2MB; no remote references or network-capable APIs).' },
-        htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (<= 2MB). Prefer this for base64 data URIs. Give exactly one of html / htmlPath.' },
+        lengthS: { type: 'number', description: 'Length of the video in seconds. Also sets the size cap: 2 MiB per started 30 s (30 s = 2 MiB, 60 s = 4 MiB).' },
+        html: { type: 'string', description: 'The complete self-contained HTML/JS video document (<= 2 MiB per started 30 s of lengthS, e.g. 4 MiB for 60 s; no remote references or network-capable APIs).' },
+        htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (<= 2 MiB per started 30 s of lengthS, e.g. 4 MiB for 60 s). Prefer this for base64 data URIs. Give exactly one of html / htmlPath.' },
         meta: { type: 'object', description: 'Required by the save route, which rejects any other key. Keys: title, kind, target (optional), style, lengthS, character (null when there is no mascot), sources [{claim, source, ref}], report {lufs, truePeakDb, speechS, readingGrade, checks [{id, ok, detail}]}, macroVersion, seedVersion, model, effort.' },
       },
       required: ['videoId', 'title', 'kind', 'lengthS', 'meta'],
@@ -1448,7 +1468,7 @@ async function handleCallTool(request) {
         || typeof args.kind !== 'string' || !args.kind || typeof args.lengthS !== 'number' || !Number.isFinite(args.lengthS)) {
         return errorResult('missing required arguments: videoId, title, kind, lengthS');
       }
-      const loaded = await resolveHtmlArg(args);
+      const loaded = await resolveHtmlArg(args, { maxBytes: maxVideoBytesFor(args.lengthS), lengthS: args.lengthS });
       if (loaded.error) return errorResult(loaded.error);
       const cwd = resolveCwdArg(args);
       const body = { cwd, videoId: args.videoId, title: args.title, kind: args.kind, lengthS: args.lengthS, html: loaded.html };
@@ -1606,5 +1626,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  TOOLS, handleCallTool, HELP_POINTER, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions,
+  TOOLS, handleCallTool, HELP_POINTER, maxVideoBytesFor, resolveHtmlArg, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions,
 };

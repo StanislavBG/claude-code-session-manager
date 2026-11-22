@@ -340,7 +340,8 @@ test('fallbacks count toward the per-thread cap', async () => {
     expect((await sendFeedbackReply(input(b), deps())).ok).toBe(true);
   }
   expect((await sendFeedbackReply(input(b), deps())).status).toBe(429);
-  expect(fallbackEpics(a)).toHaveLength(MAX_REPLIES_PER_THREAD);
+  // One OPEN fallback Epic per thread: later fallbacks reuse it (replyFallbackReuse.test.cjs).
+  expect(fallbackEpics(a)).toHaveLength(1);
 });
 
 // ---------------------------------------------------------------------------

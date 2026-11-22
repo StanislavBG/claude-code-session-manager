@@ -951,6 +951,38 @@ function fallbackReasonText(reason) {
 }
 
 /**
+ * findOpenReplyFallback(toCwd, { toEpicId, fromCwd, fromEpicId }) → { epicId, status } | null
+ *
+ * The OPEN (proposed/active) reply-fallback Epic already minted in toCwd for
+ * this thread — the (asking Epic toEpicId, replier fromCwd/fromEpicId) pair —
+ * or null. Completed or archived (removed from the active index) Epics never
+ * match. Tolerates rows with missing/partial `source`. Never throws.
+ */
+function findOpenReplyFallback(toCwd, { toEpicId, fromCwd, fromEpicId } = {}) {
+  const sameCwd = (x, y) => typeof x === 'string' && typeof y === 'string' && x && y
+    && path.resolve(x) === path.resolve(y);
+  let sessions;
+  try {
+    sessions = readActiveIndex(toCwd).sessions;
+  } catch {
+    return null;
+  }
+  const wantFromEpicId = fromEpicId || null;
+  for (const [id, row] of Object.entries(sessions || {})) {
+    if (!row || typeof row !== 'object') continue;
+    if (row.status !== 'proposed' && row.status !== 'active') continue;
+    const src = row.source && typeof row.source === 'object' ? row.source : null;
+    if (!src || src.producer !== 'cross-project-feedback') continue;
+    const replyOf = src.replyOf && typeof src.replyOf === 'object' ? src.replyOf : null;
+    if (!replyOf || replyOf.epicId !== toEpicId || !sameCwd(replyOf.cwd, toCwd)) continue;
+    if (!sameCwd(src.fromCwd, fromCwd)) continue;
+    if ((src.fromEpicId || null) !== wantFromEpicId) continue;
+    return { epicId: row.id || id, status: row.status };
+  }
+  return null;
+}
+
+/**
  * openReplyFallbackSession(input, deps?) → { ok, epicId, toCwd, ... } | { ok: false, status, error }
  *
  * The fallback leg of feedback_reply (crossProjectReply.cjs): when the asking
@@ -984,6 +1016,28 @@ async function openReplyFallbackSession(input = {}, deps = {}) {
   }
   if (!isSessionManagerProject(toCwd)) return bad(400, `${toCwd} is not a Session Manager project`);
   if (toCwd === fromCwd) return bad(400, 'the reply fallback must land in a DIFFERENT project');
+
+  // Idempotent per thread: at most one OPEN fallback Epic per (asking Epic,
+  // replier Epic). A second reply on the same thread joins the open one
+  // instead of minting a duplicate (2026-11-21: two Epics, plan queued twice).
+  const replyOf = { cwd: toCwd, epicId: toEpicId };
+  const existing = findOpenReplyFallback(toCwd, { toEpicId, fromCwd, fromEpicId });
+  if (existing) {
+    const outcome = singleLine(input.outcome) || 'unknown';
+    const reason = singleLine(input.reason) || 'unknown';
+    try {
+      audit('epic_cross_project_reply_fallback_reused', {
+        cwd: toCwd,
+        epicId: existing.epicId,
+        replyOf,
+        fromCwd,
+        fromEpicId,
+        outcome,
+        reason,
+      });
+    } catch { /* audit is best-effort */ }
+    return { ok: true, epicId: existing.epicId, reused: true, status: existing.status, toCwd, fromCwd, replyOf, reason };
+  }
 
   const original = input.original && typeof input.original === 'object' ? input.original : {};
   const proposal = original.proposal && typeof original.proposal === 'object' ? original.proposal : {};
@@ -1020,7 +1074,6 @@ async function openReplyFallbackSession(input = {}, deps = {}) {
     acceptanceCriteria,
   });
 
-  const replyOf = { cwd: toCwd, epicId: toEpicId };
   let minted;
   try {
     minted = await mint(toCwd, {
@@ -1217,6 +1270,7 @@ module.exports = {
   openFeedbackSession,
   recordExternalRefWithRetry,
   readEpicGoal,
+  findOpenReplyFallback,
   openReplyFallbackSession,
   listFeedbackTargets,
   registerAdminRoute,

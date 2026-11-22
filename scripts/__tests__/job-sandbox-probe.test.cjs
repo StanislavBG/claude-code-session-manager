@@ -36,6 +36,21 @@ test('any entry in the outside dir is an escape, one per entry', () => {
   expect(r.escapes.join(' ')).toMatch(/b\.txt/);
 });
 
+test('entries in the $HOME outside dir are escapes', () => {
+  const r = classifyProbeRun({ ...clean, homeOutsideEntries: ['h.txt'] });
+  expect(r.escapes).toEqual(['home write: h.txt']);
+  expect(r.controlsFailed).toEqual([]);
+});
+
+test('entries in the sibling /tmp outside dir are escapes', () => {
+  const r = classifyProbeRun({ ...clean, tmpOutsideEntries: ['t.txt'] });
+  expect(r.escapes).toEqual(['tmp write: t.txt']);
+});
+
+test('empty home/tmp outside dirs are not escapes', () => {
+  expect(classifyProbeRun({ ...clean, homeOutsideEntries: [], tmpOutsideEntries: [] })).toEqual({ escapes: [], controlsFailed: [] });
+});
+
 test('netBytes > 0 is an escape', () => {
   const r = classifyProbeRun({ ...clean, netBytes: 1256 });
   expect(r.escapes).toHaveLength(1);
@@ -57,6 +72,26 @@ test('--dry-run prints parseable settings JSON for both profiles and exits 0', (
   for (const p of Object.values(out.profiles)) {
     expect(['os-sandbox', 'tool-rules']).toContain(p.level);
     expect(Array.isArray(p.argv)).toBe(true);
+    expect(path.dirname(p.tmpDir)).toBe(os.tmpdir());
+    expect(path.basename(p.tmpDir)).toMatch(/^smj-/);
+    expect(fs.existsSync(p.tmpDir)).toBe(false); // removed at exit
+    if (p.level === 'os-sandbox') expect(p.settings.sandbox.filesystem.allowWrite).toContain(p.tmpDir);
+  }
+  expect(out.profiles['dev-lead'].tmpDir).not.toBe(out.profiles.validator.tmpDir);
+});
+
+test.runIf(process.platform === 'linux')('--fetch-socat with socat, apt-get and dpkg-deb missing prints SKIP and exits 2', () => {
+  const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-sbx-probe-test-'));
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, '--fetch-socat'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: { ...process.env, PATH: emptyBin },
+    });
+    expect(res.status).toBe(2);
+    expect(res.stdout).toMatch(/^SKIP: cannot fetch socat \(apt-get not found\)/m);
+  } finally {
+    fs.rmSync(emptyBin, { recursive: true, force: true });
   }
 });
 

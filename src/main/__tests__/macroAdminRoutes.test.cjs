@@ -355,12 +355,14 @@ function deleteEvents(id) {
     .filter((e) => e.kind === 'admin_macro_delete' && e.macro?.id === id);
 }
 
-async function setupDelete() {
+/** Project-video saves are checked by checkProjectVideoToolRunnable; stubbed ok unless a test passes its own. */
+const runnableOk = async () => ({ ok: true });
+async function setupDelete(extraDeps = {}) {
   const cwd = await mkProjectCwd();
   const filePath = await mkMacrosFile();
   const adminHttp = makeFakeAdminHttp();
   const h = makeHandlers();
-  registerAdminRoute(adminHttp, { onChanged: h.onChanged }, { filePath });
+  registerAdminRoute(adminHttp, { onChanged: h.onChanged, checkProjectVideoToolRunnable: runnableOk, ...extraDeps }, { filePath });
   return { cwd, filePath, adminHttp, ...h };
 }
 
@@ -1177,4 +1179,83 @@ test('project-video move: this project\'s macro moves in place keeping its id; f
     expect(after.find((m) => m.id === mid).surface).toBe('sessions');
   }
   humanLedger._resetForTests();
+});
+
+// --- project-video save: the persona must be able to run the tool ----------
+
+const { checkProjectVideoToolRunnable: realRunnableCheck } = require('../lib/persona-macro/projectVideoToolCheck.cjs');
+
+function writePersona(cwd, name, tools) {
+  const dir = path.join(cwd, '.claude', 'agents');
+  fs.mkdirSync(dir, { recursive: true });
+  const toolsLine = tools ? `tools: ${tools}\n` : '';
+  fs.writeFileSync(path.join(dir, `${name}.md`), `---\nname: ${name}\ndescription: test persona\n${toolsLine}---\nBody.\n`);
+}
+
+async function pvSave(adminHttp, cwd, origin, extra) {
+  return adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, ...MAC, surface: 'project-video', job: VIDEO_JOB, humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin, ...extra },
+  });
+}
+
+test('project-video save is refused (400, helper error, no write/onChanged/audit) for an unresolvable persona and a scoped persona without the MCP tools', async () => {
+  humanLedger._resetForTests();
+  const calls = [];
+  const check = async (input) => { calls.push(input); return realRunnableCheck(input); };
+  const { cwd, adminHttp, getChangedCount } = await setupDelete({ checkProjectVideoToolRunnable: check });
+  const origin = 'sess-pv-runnable-refuse';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  writePersona(cwd, 'pv-scoped', 'Read, Bash');
+
+  const missing = await pvSave(adminHttp, cwd, origin, { label: 'PvNoPersona', agentName: 'pv-no-such-persona-zz' });
+  expect(missing.status).toBe(400);
+  expect(missing.body.error).toContain('A Project Video tool runs as a scheduled job');
+
+  const scoped = await pvSave(adminHttp, cwd, origin, { label: 'PvScoped', agentName: 'pv-scoped' });
+  expect(scoped.status).toBe(400);
+  expect(scoped.body.error).toContain('mcp__session-manager-scheduler__project_video_write');
+  expect(scoped.body.error).toContain('mcp__session-manager-scheduler__project_video_review_write');
+
+  expect(calls[0]).toMatchObject({ cwd: fs.realpathSync(cwd), agentName: 'pv-no-such-persona-zz', job: VIDEO_JOB });
+  expect(getChangedCount()).toBe(0);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  const labels = list.body.macros.map((m) => m.label);
+  expect(labels).not.toContain('PvNoPersona');
+  expect(labels).not.toContain('PvScoped');
+  humanLedger._resetForTests();
+});
+
+test('project-video save succeeds when the persona can run it; an update keeping the stored job is checked too', async () => {
+  humanLedger._resetForTests();
+  const calls = [];
+  const check = async (input) => { calls.push(input); return realRunnableCheck(input); };
+  const { cwd, adminHttp, getChangedCount } = await setupDelete({ checkProjectVideoToolRunnable: check });
+  const origin = 'sess-pv-runnable-ok';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  writePersona(cwd, 'pv-good', 'Read, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_video_review_write');
+  writePersona(cwd, 'pv-scoped', 'Read');
+
+  const ok = await pvSave(adminHttp, cwd, origin, { label: 'PvGood', agentName: 'pv-good' });
+  expect(ok.status).toBe(200);
+  expect(ok.body.macro).toMatchObject({ surface: 'project-video', agentName: 'pv-good', job: VIDEO_JOB });
+  expect(getChangedCount()).toBe(1);
+
+  // Update without job/surface: the stored job is kept, so the new persona is still checked.
+  const id = ok.body.macro.id;
+  const upd = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, id, ...MAC, label: 'PvGood', agentName: 'pv-scoped', humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin },
+  });
+  expect(upd.status).toBe(400);
+  expect(upd.body.error).toContain('project_video_write');
+  expect(calls[calls.length - 1]).toMatchObject({ agentName: 'pv-scoped', job: VIDEO_JOB });
+  expect(getChangedCount()).toBe(1);
+  humanLedger._resetForTests();
+});
+
+test('a non-project-video save never runs the project-video check', async () => {
+  let called = 0;
+  const { cwd, adminHttp } = await setupDelete({ checkProjectVideoToolRunnable: async () => { called += 1; return { ok: false, error: 'no' }; } });
+  const res = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'Plain' } });
+  expect(res.status).toBe(200);
+  expect(called).toBe(0);
 });

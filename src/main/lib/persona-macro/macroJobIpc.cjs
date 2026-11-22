@@ -9,12 +9,16 @@
  *         archivePrd, appendResponseEventWithReason?, dispatchMacroJob?,
  *         macroJobStatuses?, readHistoryTail?, builtins?, listMacros?
  *         (default macroLibrary.listMacros), videoReview? (default
- *         project-pages/videoReview.cjs), listReviews? }
+ *         project-pages/videoReview.cjs), listReviews?,
+ *         checkProjectVideoToolRunnable? (default projectVideoToolCheck.cjs) }
  *
  * runToolJob is the one dispatch path: macros:dispatch-job calls it without a
  * review decision; the review-decision IPC calls it with one. After an ok
  * dispatch of a project Video tool it records the entry's review dispatch
  * (dispatch.json), so every tool entry links to its tool, run and inputs.
+ * Before dispatching a library 'project-video' tool with a job it runs
+ * checkProjectVideoToolRunnable; a refusal returns { ok: false, error } with
+ * no PRD written and the job-not-queued notice. Built-ins are never checked.
  *
  * When a dispatch returns ok:false for an Epic that exists in the cwd's
  * active-index.json (and no build is already running for it — `activeSlug`),
@@ -35,6 +39,10 @@ const JOB_NOT_QUEUED_NOTICE = 'job-not-queued';
 
 function noticeText(label, error) {
   return `${label} background build was not queued: ${error} — press it again in Project Home ▸ Tools to retry.`;
+}
+
+function defaultCheckRunnable() {
+  return require('./projectVideoToolCheck.cjs').checkProjectVideoToolRunnable;
 }
 
 function defaultVideoReview() {
@@ -85,6 +93,11 @@ async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, 
       await appendNotice(deps, macros, cwd, macroId, epicId, notActive);
       return { ok: false, error: notActive };
     }
+    const refusal = await projectVideoRefusal(deps, macros, cwd, macroId);
+    if (refusal) {
+      await appendNotice(deps, macros, cwd, macroId, epicId, refusal);
+      return { ok: false, error: refusal };
+    }
     const args = { cwd, macroId, epicId, extraInstructions, effort };
     if (inputValues !== undefined) args.inputValues = inputValues;
     if (review !== undefined) args.review = review;
@@ -111,6 +124,19 @@ async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, 
     }
   }
   return result;
+}
+
+/**
+ * The runnable-check error for a library 'project-video' tool with a job, or
+ * null (built-ins, other macros and runnable tools).
+ */
+async function projectVideoRefusal(deps, macros, cwd, macroId) {
+  if (findById(deps.builtins || BUILTIN_MACROS, macroId)) return null;
+  const tool = findById(macros, macroId);
+  if (!tool || tool.builtin || tool.surface !== 'project-video' || !tool.job || typeof tool.job !== 'object') return null;
+  const check = deps.checkProjectVideoToolRunnable || defaultCheckRunnable();
+  const verdict = await check({ cwd, agentName: tool.agentName, job: tool.job });
+  return verdict && verdict.ok === false ? verdict.error : null;
 }
 
 /** Best effort: a failed record is logged and never changes the dispatch result. */

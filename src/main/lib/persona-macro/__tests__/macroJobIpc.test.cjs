@@ -16,6 +16,7 @@ function setup(over = {}) {
     archivePrd: vi.fn(async () => ({})),
     listMacros: vi.fn(async () => []),
     videoReview: { recordDispatch: vi.fn(async () => ({ ok: true })) },
+    checkProjectVideoToolRunnable: vi.fn(async () => ({ ok: true })),
     ...over,
   };
   registerMacroJobIpc(ipcMain, deps);
@@ -283,5 +284,41 @@ describe('macros:job-status — library macros', () => {
     const { handlers, deps } = setup({ macroJobStatuses, listReviews, listMacros: vi.fn(async () => macros) });
     await handlers['macros:job-status']({}, { cwd: '/p' });
     expect(macroJobStatuses).toHaveBeenCalledWith({ cwd: '/p' }, { loadJobs: deps.loadJobs, macros, listReviews });
+  });
+});
+
+describe('runToolJob — project-video runnable check', () => {
+  it('refuses a project-video tool the persona cannot run: { ok:false, error }, no PRD, job-not-queued notice', async () => {
+    const check = vi.fn(async () => ({ ok: false, error: 'persona cannot save its video' }));
+    const appendResponseEventWithReason = vi.fn(async () => ({ ok: true }));
+    const { deps } = setup({ checkProjectVideoToolRunnable: check, appendResponseEventWithReason, listMacros: vi.fn(async () => [tool({ job: { estimateMinutes: 10, review: true } })]) });
+    const r = await runToolJob(deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1', inputValues: { topic: 'cats' } });
+    expect(r).toEqual({ ok: false, error: 'persona cannot save its video' });
+    expect(check).toHaveBeenCalledWith({ cwd: '/p', agentName: 'demo-video-builder', job: { estimateMinutes: 10, review: true } });
+    expect(deps.createPrd).not.toHaveBeenCalled();
+    expect(deps.videoReview.recordDispatch).not.toHaveBeenCalled();
+    expect(appendResponseEventWithReason).toHaveBeenCalledTimes(1);
+    const [, epicId, text, opts] = appendResponseEventWithReason.mock.calls[0];
+    expect(epicId).toBe('e1');
+    expect(text).toContain('Short video');
+    expect(text).toContain('persona cannot save its video');
+    expect(opts).toMatchObject({ notice: 'job-not-queued' });
+  });
+
+  it('dispatches a project-video tool the check passes', async () => {
+    const check = vi.fn(async () => ({ ok: true }));
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { deps } = setup({ checkProjectVideoToolRunnable: check, dispatchMacroJob, listMacros: vi.fn(async () => [tool()]) });
+    expect(await runToolJob(deps, { cwd: '/p', macroId: 'tool-v', epicId: 'e1' })).toEqual({ ok: true, slug: 's' });
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it('never checks a built-in macro', async () => {
+    const check = vi.fn(async () => ({ ok: false, error: 'no' }));
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { deps } = setup({ checkProjectVideoToolRunnable: check, dispatchMacroJob });
+    expect(await runToolJob(deps, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1' })).toEqual({ ok: true, slug: 's' });
+    expect(check).not.toHaveBeenCalled();
+    expect(dispatchMacroJob).toHaveBeenCalledTimes(1);
   });
 });

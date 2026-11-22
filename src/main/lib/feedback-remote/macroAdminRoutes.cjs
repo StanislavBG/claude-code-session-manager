@@ -35,6 +35,11 @@
  * caller's `projects`: a create stores [resolvedCwd], an update keeps the
  * stored projects, so the library refuses a '*' or multi-project macro.
  *
+ * Before the write, a save whose resulting macro is surface 'project-video'
+ * with a job (the sent job, or the stored one an update keeps) runs
+ * projectVideoToolCheck's checkProjectVideoToolRunnable (deps-injectable) for
+ * the resolved cwd and persona; a refusal is a 400 with the helper's error.
+ *
  * Every successful save appends one `admin_macro_save` audit event and calls
  * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
  * matching the IPC handlers in index.cjs.
@@ -151,7 +156,7 @@ function listHandler(onChanged, libOpts) {
   };
 }
 
-function saveHandler(onChanged, libOpts) {
+function saveHandler(onChanged, libOpts, deps = {}) {
   return async (req, res) => {
     const body = await readJsonBody(req, res);
     if (!body) return;
@@ -221,6 +226,16 @@ function saveHandler(onChanged, libOpts) {
       };
     } else if ((wantsAll || projectHome) && !projectVideo) {
       input = { ...input, projects: [macroLibrary.ALL_PROJECTS] };
+    }
+    const resultJob = input.job !== undefined ? input.job : existing?.job;
+    if (projectVideo && resultJob && typeof resultJob === 'object') {
+      const check = deps.checkProjectVideoToolRunnable
+        || require('../persona-macro/projectVideoToolCheck.cjs').checkProjectVideoToolRunnable;
+      const verdict = await check({ cwd: resolved.cwd, agentName: input.agentName ?? existing?.agentName, job: resultJob });
+      if (!verdict || verdict.ok === false) {
+        sendJson(res, 400, { ok: false, error: verdict?.error ?? 'project-video tool check failed' });
+        return;
+      }
     }
     let macro;
     try {
@@ -542,13 +557,14 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
 
 /**
  * @param {{ onChanged?: () => void, startExternalNewSession?: (p: object) => Promise<any>,
- *   isTabBusy?: (tabId: string) => boolean, listPersonas?: () => Promise<Array<{name: string}>> }} deps
+ *   isTabBusy?: (tabId: string) => boolean, listPersonas?: () => Promise<Array<{name: string}>>,
+ *   checkProjectVideoToolRunnable?: (i: { cwd: string, agentName: string, job: object }) => Promise<{ ok: boolean, error?: string }> }} deps
  */
 function registerAdminRoute(adminHttp, deps = {}, opts = {}) {
   const { onChanged } = deps;
   const libOpts = opts.filePath ? { filePath: opts.filePath } : undefined;
   adminHttp.registerRoute('GET', '/admin/macros', listHandler(onChanged, libOpts));
-  adminHttp.registerRoute('POST', '/admin/macros/save', saveHandler(onChanged, libOpts));
+  adminHttp.registerRoute('POST', '/admin/macros/save', saveHandler(onChanged, libOpts, deps));
   adminHttp.registerRoute('POST', '/admin/macros/delete', deleteHandler(onChanged, libOpts));
   if (typeof deps.startExternalNewSession === 'function') {
     adminHttp.registerRoute('POST', '/admin/macros/run', runHandler(deps, libOpts));

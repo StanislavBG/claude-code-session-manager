@@ -674,6 +674,18 @@ ipcMain.handle('claudeConfig:patch', validated(schemas.claudeConfigPatch, async 
   return result;
 }));
 ipcMain.handle('macros:save', validated(schemas.macrosSave, async (payload) => {
+  // A Project Video tool with a job must be runnable by its persona (projectVideoToolCheck.cjs);
+  // a refusal throws so the editor shows the reason. Every other save is unchanged.
+  const existing = payload.id ? (await macroLibrary.listMacros()).find((m) => m.id === payload.id) : undefined;
+  const surface = payload.surface ?? existing?.surface;
+  const job = payload.job !== undefined ? payload.job : existing?.job;
+  const projects = payload.projects ?? existing?.projects;
+  if (surface === 'project-video' && job && typeof job === 'object'
+    && Array.isArray(projects) && projects.length === 1 && projects[0] !== macroLibrary.ALL_PROJECTS) {
+    const { checkProjectVideoToolRunnable } = require('./lib/persona-macro/projectVideoToolCheck.cjs');
+    const verdict = await checkProjectVideoToolRunnable({ cwd: projects[0], agentName: payload.agentName, job });
+    if (!verdict.ok) throw new Error(verdict.error);
+  }
   const macro = await macroLibrary.saveMacro(payload);
   broadcastMacrosChanged();
   return macro;

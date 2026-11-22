@@ -8,7 +8,7 @@ vi.mock('../../state/toast', () => ({ toast: { error: (m: string) => toastError(
 import { registerRemoteNewSession } from '../remoteNewSession'
 
 const payload: {
-  cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string
+  cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string; externalRef?: string
   requestId?: string; via?: 'script'; effort?: string
 } = {
   cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', prompt: 'do it',
@@ -55,6 +55,17 @@ describe('registerRemoteNewSession', () => {
     expect(launchSession).toHaveBeenLastCalledWith(expect.objectContaining({ macroId: 'm1' }))
     await fire(payload)
     expect(launchSession.mock.calls[1][0]).not.toHaveProperty('macroId')
+  })
+
+  it('forwards externalRef only when it is a non-empty string', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e', claudeSessionId: 's' })
+    registerRemoteNewSession()
+    await fire({ ...payload, via: 'script', externalRef: 'ext-42' })
+    expect(launchSession).toHaveBeenLastCalledWith(expect.objectContaining({ externalRef: 'ext-42' }))
+    await fire({ ...payload, via: 'script' })
+    expect(launchSession.mock.calls[1][0]).not.toHaveProperty('externalRef')
+    await fire({ ...payload, via: 'script', externalRef: '' })
+    expect(launchSession.mock.calls[2][0]).not.toHaveProperty('externalRef')
   })
 
   it('toasts and logs on failure without throwing', async () => {

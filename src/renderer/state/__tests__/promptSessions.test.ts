@@ -143,6 +143,26 @@ describe('promptSessions.ts', () => {
     expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('developLoop')
   })
 
+  it('createPromptSession builds source from runtime.macroId and runtime.externalRef, each only when set', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const create = (runtime: { macroId?: string; externalRef?: string }) =>
+      usePromptSessions.getState().createPromptSession('/proj', 'Src', undefined, undefined, undefined, undefined, undefined, runtime)
+    const lastSource = () => (api.promptSessions.create.mock.calls.at(-1)?.[0] as { source?: unknown } | undefined)?.source
+
+    await create({ macroId: 'm1' })
+    expect(lastSource()).toEqual({ producer: 'new-epic-ui', macroId: 'm1' })
+
+    await create({ externalRef: 'ext-42' })
+    expect(lastSource()).toEqual({ producer: 'new-epic-ui', externalRef: 'ext-42' })
+
+    await create({ macroId: 'm1', externalRef: 'ext-42' })
+    expect(lastSource()).toEqual({ producer: 'new-epic-ui', macroId: 'm1', externalRef: 'ext-42' })
+
+    await create({})
+    expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('source')
+  })
+
   it('createPromptSession forwards runtime.agentCli and runtime.agentCliModel only when set', async () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')

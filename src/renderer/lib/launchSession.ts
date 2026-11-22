@@ -20,6 +20,8 @@ export interface LaunchSessionInput {
   source: string
   /** The macro whose press launched this session; stamped on the Epic's source. */
   macroId?: string
+  /** An outside app's own id for this Epic; stamped on the Epic's source. */
+  externalRef?: string
   /** 'job' queues the build via macros.dispatchJob instead of sending a chat turn. */
   run?: 'chat' | 'job'
   extraInstructions?: string
@@ -50,7 +52,7 @@ export async function resolvePersonaBody(
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, run, extraInstructions, effort, approve = true, origin } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, effort, approve = true, origin } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
   if (!title) throw new Error('launchSession: title is required')
@@ -66,7 +68,11 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     contextInjections: defaultContextInjectionsForTag(tag),
     ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
   })
-  const runtime = { ...(macroId ? { macroId } : {}), ...(effort ? { effort } : {}) }
+  const runtime = {
+    ...(macroId ? { macroId } : {}),
+    ...(typeof externalRef === 'string' && externalRef ? { externalRef } : {}),
+    ...(effort ? { effort } : {}),
+  }
   const session = await usePromptSessions
     .getState()
     .createPromptSession(cwd, goalText, tag, source, agentName, openingPrompt, sections, ...(Object.keys(runtime).length ? [runtime] as const : []))

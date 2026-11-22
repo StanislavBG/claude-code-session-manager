@@ -335,7 +335,7 @@ interface PromptSessionsState {
     sections?: EpicIntakeSection[],
     /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record.
      *  restoreSessionId adopts that existing CLI session instead of minting one (main marks it restoredSession). */
-    runtime?: { model?: string; effort?: string; macroId?: string; developLoop?: boolean; restoreSessionId?: string; agentCli?: import('../../preload/api').PromptSessionsCreateEpicPayload['agentCli']; agentCliModel?: string; packs?: string[] },
+    runtime?: { model?: string; effort?: string; macroId?: string; externalRef?: string; developLoop?: boolean; restoreSessionId?: string; agentCli?: import('../../preload/api').PromptSessionsCreateEpicPayload['agentCli']; agentCliModel?: string; packs?: string[] },
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -651,7 +651,13 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       ...(runtime?.model ? { model: runtime.model } : {}),
       ...(runtime?.effort ? { effort: runtime.effort } : {}),
       ...(runtime?.developLoop === false ? { developLoop: false } : {}),
-      ...(runtime?.macroId ? { source: { producer: 'new-epic-ui' as const, macroId: runtime.macroId } } : {}),
+      ...(runtime?.macroId || runtime?.externalRef
+        ? { source: {
+            producer: 'new-epic-ui' as const,
+            ...(runtime.macroId ? { macroId: runtime.macroId } : {}),
+            ...(runtime.externalRef ? { externalRef: runtime.externalRef } : {}),
+          } }
+        : {}),
       ...(runtime?.restoreSessionId ? { restoreSessionId: runtime.restoreSessionId } : {}),
       ...(runtime?.agentCli ? { agentCli: runtime.agentCli } : {}),
       ...(runtime?.agentCliModel ? { agentCliModel: runtime.agentCliModel } : {}),

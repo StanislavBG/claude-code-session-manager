@@ -19,7 +19,7 @@ function report(result: ChatExternalNewSessionResult): void {
 }
 
 export function registerRemoteNewSession(): () => void {
-  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, requestId, via, effort }) => {
+  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, externalRef, requestId, via, effort }) => {
     const isScript = via === 'script'
     try {
       let agentDescription: string | undefined
@@ -46,6 +46,7 @@ export function registerRemoteNewSession(): () => void {
         // A script-typed prompt must never enter humanPromptLedger as a verified human quote.
         ...(isScript ? { origin: 'external' as const } : {}),
         ...(macroId ? { macroId } : {}),
+        ...(typeof externalRef === 'string' && externalRef ? { externalRef } : {}),
         ...(isJob ? { run: 'job' as const } : {}),
         ...(extra ? { extraInstructions: extra } : {}),
         ...(typeof effort === 'string' && effort ? { effort } : {}),

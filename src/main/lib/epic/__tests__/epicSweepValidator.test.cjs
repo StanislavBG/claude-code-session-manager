@@ -46,14 +46,19 @@ test('builds the input shape', () => {
     cwd: '/proj',
     slug: 'validate-sweep-20261016031045',
     dependsOn: ['prd-0', 'prd-1'],
-    files: ['session-manager-operations/reviews/validation/epic-1/validate-sweep-20261016031045.md'],
+    files: ['session-manager-operations/plan-records/epic-1/validate-sweep-20261016031045.md'],
+    deliverable: 'artifact',
+    artifactPaths: ['session-manager-operations/plan-records/epic-1/validate-sweep-20261016031045.md'],
   });
   expect(input.slug.length).toBeLessThanOrEqual(60);
   expect(input.title.startsWith('Validate: ')).toBe(true);
   expect(input.acceptanceCriteria).toHaveLength(3);
   expect(input.acceptanceCriteria[0]).toContain('prd-0');
   expect(input.acceptanceCriteria[0]).toContain('epics/epic-1/prds/');
-  expect(input.acceptanceCriteria[2]).toContain('Record written and committed at');
+  expect(input.acceptanceCriteria[2]).toContain('Record written at session-manager-operations/plan-records/epic-1/validate-sweep-20261016031045.md');
+  expect(input.acceptanceCriteria[2]).toContain("job worktree's repository root");
+  expect(input.acceptanceCriteria[2]).toContain('Do not git add or commit it');
+  expect(input.acceptanceCriteria[2]).not.toContain('committed at');
   expect(input.acceptanceCriteria[2]).toContain('git rev-parse --show-toplevel');
   expect(input.implementationNotes).toContain('Work as the validator persona — the procedure is your system prompt.');
   expect(input.implementationNotes).toContain('Base: abc123');

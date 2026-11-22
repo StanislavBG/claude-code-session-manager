@@ -79,12 +79,15 @@ function buildSweepValidatorInput({ epicId, cwd, uncovered, baseSha, now, jobBud
 
   const stamp = new Date(now).toISOString().replace(/\D/g, '').slice(0, 14);
   const slug = `${SWEEP_SLUG_PREFIX}-${stamp}`;
-  const recordPath = `session-manager-operations/reviews/validation/${epicId}/${slug}.md`;
+  // Plan records are a gitignored runtime namespace: the job writes the record
+  // in its worktree and the scheduler copies it to the main checkout, so the
+  // PRD is artifact-only and never commits it.
+  const recordPath = `session-manager-operations/plan-records/${epicId}/${slug}.md`;
 
   const acceptanceCriteria = names.map(
     (name) => `${name} verified against its PRD file (find it by slug under $SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/${epicId}/prds/ or prds-archived/, possibly in a timestamped subfolder)`,
   );
-  acceptanceCriteria.push(`Record written and committed at ${recordPath}, relative to the repository root (git rev-parse --show-toplevel), never relative to a subdirectory you cd'd into`);
+  acceptanceCriteria.push(`Record written at ${recordPath}, relative to the job worktree's repository root (git rev-parse --show-toplevel), never relative to a subdirectory you cd'd into. Do not git add or commit it — the scheduler copies it to the main checkout`);
 
   const base = baseSha
     ? `Base: ${baseSha}`
@@ -103,6 +106,8 @@ function buildSweepValidatorInput({ epicId, cwd, uncovered, baseSha, now, jobBud
     outOfScope: ['Editing product code', 'Queuing fix PRDs'],
     gate: ['none'],
     files: [recordPath],
+    deliverable: 'artifact',
+    artifactPaths: [recordPath],
     estimateMinutes: validatorEstimateMinutes(covered.map((e) => e.gateMs), { factor }),
     agentType: 'validator',
     tag: 'build',

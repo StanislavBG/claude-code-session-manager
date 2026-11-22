@@ -211,11 +211,22 @@ function resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId) {
  * worktree). execGit has no stdin, so candidates go as argv after `--` (still one call). Exit 1 =
  * nothing ignored; any other failure (not a repo, timeout) is swallowed — never blocks the write.
  */
+const PLAN_RECORDS_PREFIX = 'session-manager-operations/plan-records/';
+
+/** True when `files` is a non-empty list whose every entry is under plan-records/. */
+function isPlanRecordOnlyFiles(files) {
+  return Array.isArray(files) && files.length > 0
+    && files.every((f) => typeof f === 'string' && f.startsWith(PLAN_RECORDS_PREFIX) && f.length > PLAN_RECORDS_PREFIX.length);
+}
+
 async function worktreeReachAdvisory(input, cwd) {
   try {
     const text = [input.goal, ...(Array.isArray(input.acceptanceCriteria) ? input.acceptanceCriteria : []),
       input.implementationNotes].filter((s) => typeof s === 'string').join('\n');
-    const candidates = extractRepoPathCandidates(text);
+    // Plan records are gitignored on purpose: the job writes them in its
+    // worktree and the scheduler harvests them to the main checkout, so
+    // naming one is not a worktree-reach mistake.
+    const candidates = extractRepoPathCandidates(text).filter((p) => !p.startsWith(PLAN_RECORDS_PREFIX));
     if (candidates.length === 0) return [];
     const out = await execGit(cwd, ['check-ignore', '--', ...candidates], { timeout: 10000 });
     const ignored = out.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -507,6 +518,15 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // never by sharing a number. An explicit parallelGroup is ignored.
   if (input.parallelGroup != null) {
     console.warn(`[prdCreate] parallelGroup input is deprecated and ignored (got ${input.parallelGroup}) — numbers are unique per project; use dependsOn for ordering`);
+  }
+  // Plan-record auto-declaration: a PRD whose every files entry is a plan
+  // record (gitignored runtime namespace, harvested by the scheduler) can
+  // never commit its output, so it is artifact-only by construction. Derived
+  // here, before the declaration checks below, so the same checks run on it.
+  // An explicit declaration, or a files list mixing in any other path, is
+  // left as the caller gave it.
+  if (input.deliverable == null && input.artifactPaths == null && isPlanRecordOnlyFiles(input.files)) {
+    input = { ...input, deliverable: 'artifact', artifactPaths: [...input.files] };
   }
   // Artifact-only declaration (deliverable + artifactPaths): fail-closed,
   // checked BEFORE the NN allocation so a refusal burns no number.

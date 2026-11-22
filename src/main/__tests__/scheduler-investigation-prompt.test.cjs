@@ -167,18 +167,18 @@ function promptVariants() {
 }
 
 test('fixPlanRecordPath: epic-scoped for a safe epicId, flat for missing/unsafe, never under scheduler/', () => {
-  assert.equal(fixPlanRecordPath('e1', '1695-fix-x'), 'session-manager-operations/reviews/validation/e1/1695-fix-x.md');
+  assert.equal(fixPlanRecordPath('e1', '1695-fix-x'), 'session-manager-operations/plan-records/e1/1695-fix-x.md');
   for (const bad of [undefined, null, '', '../x', 'a/b', 'a\\b']) {
     const p = fixPlanRecordPath(bad, '1695-fix-x');
-    assert.equal(p, 'session-manager-operations/reviews/validation/1695-fix-x.md');
+    assert.equal(p, 'session-manager-operations/plan-records/1695-fix-x.md');
     assert.doesNotMatch(p, /session-manager-operations\/scheduler\//);
   }
 });
 
 test('recordIgnored false names the exact record path and plain git add', () => {
   const prompt = buildInvestigationPrompt(makeArgs({ recordPath: fixPlanRecordPath('e1', '1695-fix-x'), recordIgnored: false }));
-  assert.ok(prompt.includes('session-manager-operations/reviews/validation/e1/1695-fix-x.md'));
-  assert.ok(prompt.includes('git add session-manager-operations/reviews/validation/e1/1695-fix-x.md'));
+  assert.ok(prompt.includes('session-manager-operations/plan-records/e1/1695-fix-x.md'));
+  assert.ok(prompt.includes('git add session-manager-operations/plan-records/e1/1695-fix-x.md'));
   assert.match(prompt, /only allowed record location/);
 });
 
@@ -186,7 +186,7 @@ test('recordIgnored true (and the defaults) name no record path and forbid askin
   const ignored = buildInvestigationPrompt(makeArgs({ recordPath: fixPlanRecordPath('e1', '1695-fix-x'), recordIgnored: true }));
   assert.match(ignored, /ignores/);
   assert.match(ignored, /must not ask for any record file/);
-  assert.doesNotMatch(ignored, /reviews\/validation\/e1\/1695-fix-x\.md/);
+  assert.doesNotMatch(ignored, /plan-records\/e1\/1695-fix-x\.md/);
   const dflt = buildInvestigationPrompt(makeArgs());
   assert.match(dflt, /must not ask for any record file/);
   assert.doesNotMatch(dflt, /reviews\/validation\//);

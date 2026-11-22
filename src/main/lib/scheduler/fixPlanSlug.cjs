@@ -63,13 +63,14 @@ function resolveIsFixPlan(slug, isFixPlan) {
 
 /**
  * The ONE repo-relative path a fix plan may name for a validation record
- * (PRD 2883). Lives under the authored `reviews/` namespace — never under the
- * gitignored `scheduler/` runtime folder, where the fix-plan PRD file itself
+ * (PRD 2883). Lives under the `plan-records/` runtime namespace, which the
+ * scheduler harvests from the job worktree into the main checkout — never
+ * under the `scheduler/` runtime folder, where the fix-plan PRD file itself
  * sits. An unsafe/missing epicId drops the epic segment rather than
  * concatenating it into a path.
  */
 function fixPlanRecordPath(epicId, fixSlug) {
-  const base = 'session-manager-operations/reviews/validation';
+  const base = 'session-manager-operations/plan-records';
   return isSafeEpicId(epicId) ? `${base}/${epicId}/${fixSlug}.md` : `${base}/${fixSlug}.md`;
 }
 

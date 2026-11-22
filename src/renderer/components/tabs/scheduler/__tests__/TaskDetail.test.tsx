@@ -16,7 +16,10 @@ const full: TaskDetailRecord = {
   body: { taskId: 't1', prompt: 'PROMPT TEXT', output: 'OUTPUT TEXT', promptTruncated: false, outputTruncated: false },
 }
 
-const api = { tasks: { list: vi.fn(), get: vi.fn(), getSwitch: vi.fn(), setSwitch: vi.fn() } }
+const api = {
+  tasks: { list: vi.fn(), get: vi.fn(), getSwitch: vi.fn(), setSwitch: vi.fn() },
+  clipboard: { writeText: vi.fn() },
+}
 
 let host: HTMLDivElement
 let root: Root
@@ -81,16 +84,17 @@ describe('TaskDetail', () => {
     expect(q('[data-testid="task-detail-fact-quota"]')!.textContent).toBe('rate limited')
   })
 
-  it('copies via navigator.clipboard and toasts an error when it fails', async () => {
-    const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'))
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+  it('copies via the clipboard IPC and toasts an error when it fails', async () => {
+    const writeText = vi.fn().mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false })
+    api.clipboard = { writeText }
     await render()
     await act(async () => { (q('[data-testid="task-detail-prompt-copy"]') as HTMLButtonElement).click() })
     expect(writeText).toHaveBeenCalledWith('PROMPT TEXT')
     expect(errors()).toHaveLength(0)
+    expect(useToast.getState().history.some((t) => t.kind === 'info' && t.message === 'Prompt copied')).toBe(true)
     await act(async () => { (q('[data-testid="task-detail-output-copy"]') as HTMLButtonElement).click() })
     expect(writeText).toHaveBeenLastCalledWith('OUTPUT TEXT')
-    expect(errors().some((t) => t.message.includes('denied'))).toBe(true)
+    expect(errors().some((t) => t.message === 'Copy output failed')).toBe(true)
   })
 
   it('toasts a load failure', async () => {

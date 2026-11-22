@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { TaskDetail as TaskDetailRecord } from '../../../../preload/api.d'
 import { useToast } from '../../../state/toast'
 import { usd } from '../../../lib/analyticsFormat'
+import { copyText } from '../../../lib/clipboard'
 import { formatTaskDuration, formatTaskStart } from './TasksView'
 
 /**
@@ -111,13 +112,9 @@ export function TaskDetail({ cwd, taskId, onClose }: TaskDetailProps) {
   }, [onClose])
 
   const copy = useCallback(async (label: string, text: string) => {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
-      await navigator.clipboard.writeText(text)
-      show('info', `${label} copied`)
-    } catch (e) {
-      show('error', `Copy ${label.toLowerCase()} failed: ${e instanceof Error ? e.message : String(e)}`)
-    }
+    const ok = await copyText(text)
+    if (ok) show('info', `${label} copied`)
+    else show('error', `Copy ${label.toLowerCase()} failed`)
   }, [show])
 
   const caller = task?.caller

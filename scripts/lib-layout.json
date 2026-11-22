@@ -173,6 +173,7 @@
   "matrixStore": "project-pages",
   "pagesLibrary": "project-pages",
   "playerBridge": "project-pages",
+  "videoReview": "project-pages",
   "withTimeout": "util",
   "workTypeLibrary": "prd",
   "worktreeDeps": "git",

@@ -168,6 +168,7 @@
   "timeoutShimScript": "process",
   "upgradeDrain": "scheduler",
   "usageCircuit": "claude",
+  "validationQuality": "scheduler",
   "validationSentinels": "scheduler",
   "validatorVerdictSchema": "scheduler",
   "watchdogHelpers": "scheduler",

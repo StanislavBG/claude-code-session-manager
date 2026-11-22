@@ -54,3 +54,15 @@ test('listReferencedFiles: zero @import lines returns an empty array', () => {
 
   expect(listReferencedFiles(root)).toEqual([]);
 });
+
+test('listReferencedFiles: a relative @import resolves next to the root file', () => {
+  const dir = mkTmpDir();
+  const a = path.join(dir, 'AGENTS.md');
+  const root = path.join(dir, 'root.md');
+  fs.writeFileSync(a, 'z'.repeat(12));
+  fs.writeFileSync(root, 'See @AGENTS.md for agent rules.\n');
+
+  expect(listReferencedFiles(root)).toEqual([
+    { path: a, exists: true, sizeBytes: 12, tokenEstimate: 3, ok: true },
+  ]);
+});

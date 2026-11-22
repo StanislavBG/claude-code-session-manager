@@ -141,17 +141,15 @@ three failure modes have different fixes:
 | `gate`, `files` | **REQUIRED.** Rules below. The tool refuses a call without them. |
 | `estimateMinutes` | Omit (a persona's `defaultEstimateMinutes` applies). Pass one only for a run needing more than the 45-minute floor. |
 | `sourcePromptId` | Always `<epic-id>`. Never rely on the server's fallback. |
-| `cwd` | The Epic's project root, as an absolute path or `~/…`. The API always uses the Epic's project, whatever you pass. To work in another project, open an Epic there. |
+| `cwd` | The Epic's project root; see PRD_AUTHORING.md §5. |
 | `dependsOn` | Slugs that must finish first. The only ordering tool. |
 | `disposition` | Only when the API asks. `append` waits behind the Epic's unfinished PRDs; `new-head` may run now, so only when no files are shared. |
 | `slug` | Optional kebab-case without an `NN-` prefix. The API picks the number. |
 | `tag`, `agentType` | Omit (`dev-lead` default), except on the validate PRD. |
 | `quietMachine` | Only for timing measurements. |
 
-Never pass `parallelGroup`; it is ignored. The API writes the frontmatter, the `# Files` and
-`# Gate` sections and the standards pointer. Do not write them yourself. Do not put a gate
-fence (three backticks + `gate`), a `# Gate` heading or a `# Files` heading in any text field —
-the API rejects that.
+Never pass `parallelGroup`; it is ignored. The API writes the frontmatter, `# Files` and
+`# Gate` (PRD_AUTHORING.md §6, What the API writes).
 
 ### gate and files rules
 
@@ -165,9 +163,7 @@ can apply, because they depend on the repo at authoring time:
    on the base parks the job as `sentinel_fail` whatever the executor does.
 2. Never put a step only a human or the passage of time can complete (host cron install,
    waiting for a live post, a live payment, an account dashboard action) in a gate or
-   criterion; keep them out of PRDs at authoring time. An executor that meets one ends
-   `SCHEDULER_VERDICT: FAIL` naming what is missing. Why: no executor can pass such a gate,
-   and queued work runs with no questions asked.
+   criterion; keep them out of PRDs at authoring time (PRD_AUTHORING.md §14, No human-only gates).
    Live-run steps that need gitignored state follow PRD_AUTHORING.md §7 (absolute main-checkout
    paths, artifact-only).
 
@@ -221,8 +217,8 @@ here. Never write the record yourself.
 The scheduler heals most parks itself:
 
 1. Verdict-line parks (verdicts no_verdict_sentinel,
-   abandoned_background_task) complete when the gate re-run is green, the landed commit is on
-   HEAD and the tracked tree is clean.
+   abandoned_background_task) complete on their own once the conditions in PRD_AUTHORING.md
+   §13 hold.
 2. Stray-checkout parks (the main checkout was on another branch) are re-landed onto the base
    branch ref without touching the checkout.
 3. needs_review notices are held and grouped per Epic and cause. One notice is sent only when

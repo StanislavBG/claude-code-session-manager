@@ -9,6 +9,7 @@ import type { VideoReview } from '../../../../../../preload/api'
 
 const reviewList = vi.fn()
 const reviewDecide = vi.fn()
+const reviewRetry = vi.fn()
 
 function review(entryId: string, status: VideoReview['status'], over: Partial<VideoReview> = {}): VideoReview {
   return {
@@ -48,7 +49,8 @@ let root: Root | null = null
 beforeEach(() => {
   reviewList.mockReset().mockResolvedValue([WAITING])
   reviewDecide.mockReset().mockResolvedValue({ ok: true, slug: 's2', stage: 'final', decision: {} })
-  ;(window as unknown as { api: unknown }).api = { projectPages: { reviewList, reviewDecide } }
+  reviewRetry.mockReset().mockResolvedValue({ ok: true, slug: 's3', epicId: 'epic-1', stage: 'final' })
+  ;(window as unknown as { api: unknown }).api = { projectPages: { reviewList, reviewDecide, reviewRetry } }
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
 })
 
@@ -211,5 +213,86 @@ describe('VideoReviewPanel', () => {
     await mount({ cwd: null })
     expect(reviewList).not.toHaveBeenCalled()
     expect(tid('video-review-panel')).toBeNull()
+  })
+
+  describe('Final run failed (canRetry)', () => {
+    const FAILED = review('moles-ep', 'approved', {
+      canRetry: true,
+      job: { slug: 'slug-final', state: 'failed', status: 'failed', reason: 'render <crashed> at frame 12' },
+    })
+
+    it('shows a Final run failed card with the reason, the text as plain text and images via smfileUrl', async () => {
+      reviewList.mockResolvedValue([FAILED])
+      await mount()
+      const cards = tids('video-review-retry-card')
+      expect(cards).toHaveLength(1)
+      expect(cards[0].querySelector('h3')?.textContent).toBe('Final run failed')
+      const reason = tid('video-review-retry-reason')!
+      expect(reason.textContent).toBe('render <crashed> at frame 12')
+      expect(reason.querySelector('crashed')).toBeNull()
+      const text = cards[0].querySelector<HTMLElement>('[data-testid="video-review-text"]')!
+      expect(text.textContent).toBe('<b>Script</b>\nScene 1: moles dig.')
+      expect(text.querySelector('b')).toBeNull()
+      expect(
+        Array.from(cards[0].querySelectorAll('[data-testid="video-review-image"]')).map((i) => i.getAttribute('src')),
+      ).toEqual([smfileUrl('/proj/reviews/moles-ep/frame 1.png'), smfileUrl('/proj/reviews/moles-ep/frame-2.png')])
+      expect(tid('video-review-retry')?.textContent).toBe('Retry final run')
+      expect(tid('video-review-card')).toBeNull()
+    })
+
+    it('renders no Retry button for waiting or approved-without-failure reviews', async () => {
+      reviewList.mockResolvedValue([WAITING, review('b', 'approved'), review('c', 'changes-requested')])
+      await mount()
+      expect(tids('video-review-card')).toHaveLength(1)
+      expect(tid('video-review-retry-card')).toBeNull()
+      expect(tid('video-review-retry')).toBeNull()
+    })
+
+    it('one click calls reviewRetry once, stays disabled until it settles, then toasts and reloads', async () => {
+      let resolve: (v: unknown) => void = () => {}
+      reviewRetry.mockReturnValue(new Promise((r) => (resolve = r)))
+      reviewList.mockResolvedValue([FAILED])
+      await mount()
+      await click(tid('video-review-retry'))
+      expect(btn('video-review-retry').disabled).toBe(true)
+      await click(tid('video-review-retry'))
+      expect(reviewRetry).toHaveBeenCalledTimes(1)
+      expect(reviewRetry).toHaveBeenCalledWith({ cwd: '/proj', entryId: 'moles-ep' })
+      reviewList.mockResolvedValue([{ ...FAILED, canRetry: false, job: null }])
+      await act(async () => {
+        resolve({ ok: true, slug: 's3', epicId: 'epic-1', stage: 'final' })
+      })
+      await flush()
+      expect(toasts()).toEqual([expect.objectContaining({ kind: 'info', message: 'Retry queued for moles-ep' })])
+      expect(reviewList).toHaveBeenCalledTimes(2)
+      expect(tid('video-review-retry')).toBeNull()
+    })
+
+    it('an { ok: false } reply shows an error toast and re-enables the button', async () => {
+      reviewRetry.mockResolvedValue({ ok: false, error: 'a retry is already in flight' })
+      reviewList.mockResolvedValue([FAILED])
+      await mount()
+      await click(tid('video-review-retry'))
+      expect(toasts()).toEqual([expect.objectContaining({ kind: 'error', message: 'a retry is already in flight' })])
+      expect(reviewList).toHaveBeenCalledTimes(1)
+      expect(btn('video-review-retry').disabled).toBe(false)
+    })
+
+    it('a thrown retry shows an error toast', async () => {
+      reviewRetry.mockRejectedValue(new Error('desktop only'))
+      reviewList.mockResolvedValue([FAILED])
+      await mount()
+      await click(tid('video-review-retry'))
+      expect(toasts()).toEqual([expect.objectContaining({ kind: 'error', message: 'desktop only' })])
+    })
+
+    it('reloadKey changes refresh Retry cards too', async () => {
+      reviewList.mockResolvedValue([])
+      await mount({ reloadKey: 'a' })
+      expect(tid('video-review-retry-card')).toBeNull()
+      reviewList.mockResolvedValue([FAILED])
+      await rerender({ reloadKey: 'b' })
+      expect(tid('video-review-retry-card')).not.toBeNull()
+    })
   })
 })

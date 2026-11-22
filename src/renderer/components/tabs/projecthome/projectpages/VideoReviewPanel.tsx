@@ -9,6 +9,10 @@
  * job statuses) — no polling of its own — and after every successful decision. Every loaded list
  * is reported through `onReviews` so VideosPane can badge tool entries and regenerate them.
  * A failed load or decision shows an error toast.
+ *
+ * Each review with `canRetry` (approved, final-stage run failed) gets a `Final run failed` card with
+ * job.reason, the approved material, and a Retry final run button calling `projectPages.reviewRetry`
+ * once per click; success toasts and reloads, failure toasts the error.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { smfileUrl } from '../../../../state/editor'
@@ -28,6 +32,78 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/** A review's saved material: text as plain text (never HTML), images via smfileUrl. */
+function ReviewMaterial({ material }: { material: VideoReview['material'] }) {
+  if (!material) return null
+  return (
+    <>
+      {material.text !== '' && (
+        <p data-testid="video-review-text" className="m-0 whitespace-pre-wrap break-words text-[13px] text-fg">
+          {material.text}
+        </p>
+      )}
+      {material.images.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {material.images.map((img) => (
+            <img
+              key={img.path}
+              data-testid="video-review-image"
+              src={smfileUrl(img.path)}
+              alt={img.name}
+              className="max-h-[220px] max-w-full rounded-md border border-rule-structural object-contain"
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+/** An approved entry whose final-stage run failed (canRetry): reason, approved material, Retry. */
+function RetryCard({
+  review,
+  busy,
+  onRetry,
+}: {
+  review: VideoReview
+  busy: boolean
+  onRetry: (entryId: string) => void
+}) {
+  const reason = review.job?.reason ?? null
+  return (
+    <section
+      data-testid="video-review-retry-card"
+      data-entry={review.entryId}
+      aria-label={`Final run failed: ${review.entryId}`}
+      className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-red-400 bg-bg-hi px-4 py-3.5"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="m-0 text-[14px] font-semibold text-fg">Final run failed</h3>
+        <span data-col="entry" className="truncate font-mono text-[10.5px] text-fg-faint">
+          {review.entryId}
+        </span>
+      </div>
+      {reason && (
+        <p data-testid="video-review-retry-reason" className="m-0 whitespace-pre-wrap break-words text-[12.5px] text-red-400">
+          {reason}
+        </p>
+      )}
+      <ReviewMaterial material={review.material} />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-testid="video-review-retry"
+          disabled={busy}
+          onClick={() => onRetry(review.entryId)}
+          className={APPROVE_CLASS}
+        >
+          Retry final run
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function ReviewCard({
   review,
   busy,
@@ -39,7 +115,6 @@ function ReviewCard({
 }) {
   const [noteOpen, setNoteOpen] = useState(false)
   const [note, setNote] = useState('')
-  const material = review.material
   const blank = note.trim() === ''
   return (
     <section
@@ -54,24 +129,7 @@ function ReviewCard({
           {review.entryId}
         </span>
       </div>
-      {material && material.text !== '' && (
-        <p data-testid="video-review-text" className="m-0 whitespace-pre-wrap break-words text-[13px] text-fg">
-          {material.text}
-        </p>
-      )}
-      {material && material.images.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {material.images.map((img) => (
-            <img
-              key={img.path}
-              data-testid="video-review-image"
-              src={smfileUrl(img.path)}
-              alt={img.name}
-              className="max-h-[220px] max-w-full rounded-md border border-rule-structural object-contain"
-            />
-          ))}
-        </div>
-      )}
+      <ReviewMaterial material={review.material} />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -146,6 +204,8 @@ export function VideoReviewPanel({ cwd, reloadKey, onReviews }: VideoReviewPanel
   const showToast = useToast((s) => s.show)
   const [reviews, setReviews] = useState<VideoReview[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
+  // Synchronous in-flight guard so a second click before re-render never calls twice.
+  const busyRef = useRef(false)
   const onReviewsRef = useRef(onReviews)
   onReviewsRef.current = onReviews
   // Drops a slower, older load that lands after a newer one.
@@ -192,12 +252,36 @@ export function VideoReviewPanel({ cwd, reloadKey, onReviews }: VideoReviewPanel
     }
   }
 
+  const retry = async (entryId: string) => {
+    if (!cwd || busyRef.current) return
+    busyRef.current = true
+    setBusyId(entryId)
+    try {
+      const res = await window.api.projectPages.reviewRetry({ cwd, entryId })
+      if (res && res.ok) {
+        showToast('info', `Retry queued for ${entryId}`)
+        await load()
+      } else {
+        showToast('error', res && !res.ok ? res.error : 'Retry failed')
+      }
+    } catch (err) {
+      showToast('error', errorText(err))
+    } finally {
+      busyRef.current = false
+      setBusyId(null)
+    }
+  }
+
   const waiting = reviews.filter((r) => r.status === 'waiting')
-  if (waiting.length === 0) return null
+  const failed = reviews.filter((r) => r.canRetry)
+  if (waiting.length === 0 && failed.length === 0) return null
   return (
     <div data-testid="video-review-panel" className="flex flex-none flex-col gap-2.5">
       {waiting.map((r) => (
         <ReviewCard key={r.entryId} review={r} busy={busyId !== null} onDecide={(id, d, n) => void decide(id, d, n)} />
+      ))}
+      {failed.map((r) => (
+        <RetryCard key={`retry-${r.entryId}`} review={r} busy={busyId !== null} onRetry={(id) => void retry(id)} />
       ))}
     </div>
   )

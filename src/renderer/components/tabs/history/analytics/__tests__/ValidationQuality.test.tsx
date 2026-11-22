@@ -10,9 +10,10 @@ import { useToast } from '../../../../../state/toast'
 let container: HTMLDivElement
 let root: Root
 
-const week = (topMiss: unknown = null) => ({ fromMs: 0, toMs: 1, topMiss })
+const NO_UNCLASSIFIED = { count: 0, prds: [], reasons: [] }
+const week = (topMiss: unknown = null, unclassified: unknown = NO_UNCLASSIFIED) => ({ fromMs: 0, toMs: 1, topMiss, unclassified })
 
-function projects(topMiss: unknown = null) {
+function projects(topMiss: unknown = null, unclassified: unknown = NO_UNCLASSIFIED) {
   return [
     {
       cwd: '/a',
@@ -21,7 +22,7 @@ function projects(topMiss: unknown = null) {
       refuted: { pct: 25, prds: ['p4'] },
       fixWaves: { perPlan: 0.5, plans: [{ plan: 'plan-a', fixWaves: ['plan-a-fix'] }, { plan: 'plan-b', fixWaves: [] }] },
       escapes: [{ fixPrd: 'f9', escapedPrd: 'p2', verifiedBy: 'v1', missKind: 'regression', reason: 'broke save', at: 5 }],
-      week: week(topMiss),
+      week: week(topMiss, unclassified),
     },
     {
       cwd: '/b',
@@ -97,9 +98,40 @@ describe('ValidationQuality', () => {
     expect(q('val-q-week-empty')).toBeNull()
   })
 
-  it('shows the empty week', async () => {
+  it('shows the empty week when there is neither a top miss nor unclassified verdicts', async () => {
     await mount(async () => ({ ok: true, projects: projects() }))
     expect(q('val-q-week-empty')!.textContent).toBe('No validator misses this week.')
+    expect(q('val-q-unclassified')).toBeNull()
+    expect(q('val-q-top-miss')).toBeNull()
+  })
+
+  it('shows unclassified verdicts alone, without the empty line', async () => {
+    const reasons = ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']
+    await mount(async () => ({ ok: true, projects: projects(null, { count: 2, prds: ['old-1', 'old-2'], reasons }) }))
+    const block = q('val-q-unclassified')!
+    expect(block.textContent).toContain('Not classified (recorded before checked verdicts): 2')
+    expect(block.textContent).toContain('old-1, old-2')
+    expect(qa('val-q-unclassified-reason').map((e) => e.textContent)).toEqual(['u1', 'u2', 'u3', 'u4', 'u5'])
+    expect(q('val-q-week-empty')).toBeNull()
+    expect(q('val-q-top-miss')).toBeNull()
+  })
+
+  it('shows unclassified verdicts under the top miss', async () => {
+    await mount(async () => ({
+      ok: true,
+      projects: projects(
+        { missKind: 'gate-red', count: 1, prds: ['p4'], reasons: ['red'], proposal: 'Run the gate.' },
+        { count: 1, prds: ['old-1'], reasons: ['legacy'] },
+      ),
+    }))
+    const top = q('val-q-top-miss')!
+    const unc = q('val-q-unclassified')!
+    expect(top.textContent).toContain('gate-red')
+    expect(unc.textContent).toContain('Not classified (recorded before checked verdicts): 1')
+    expect(unc.textContent).toContain('old-1')
+    expect(qa('val-q-unclassified-reason').map((e) => e.textContent)).toEqual(['legacy'])
+    expect(top.compareDocumentPosition(unc) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(q('val-q-week-empty')).toBeNull()
   })
 
   it('toasts an error on a rejected fetch and on ok:false', async () => {

@@ -3565,6 +3565,8 @@ interface ValidationQualityProject {
     fromMs: number;
     toMs: number;
     topMiss: null | { missKind: string; count: number; prds: string[]; reasons: string[]; proposal: string };
+    /** REFUTED verdicts recorded before checked JSON verdicts — no miss kind, kept out of topMiss. */
+    unclassified: { count: number; prds: string[]; reasons: string[] };
   };
 }
 interface LoopEfficiencyResult {

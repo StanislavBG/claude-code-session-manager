@@ -108,7 +108,7 @@ export function ValidationQuality() {
   } else {
     const openProject = open ? projects.find((p) => p.cwd === open.cwd) : undefined
     const openItems = open && openProject ? metricItems(openProject, open.metric) : null
-    const misses = projects.filter((p) => p.week.topMiss)
+    const weekRows = projects.filter((p) => p.week.topMiss || p.week.unclassified.count > 0)
     body = (
       <>
         <table className="w-full text-[11px] font-mono" data-testid="val-q-table">
@@ -162,27 +162,47 @@ export function ValidationQuality() {
         )}
         <div data-testid="val-q-week" className="mt-3 text-[11px] font-mono text-fg-dim">
           <div className="text-fg-faint">This week</div>
-          {misses.length === 0 ? (
+          {weekRows.length === 0 ? (
             <div data-testid="val-q-week-empty">No validator misses this week.</div>
           ) : (
-            misses.map((p) => {
-              const t = p.week.topMiss!
+            weekRows.map((p) => {
+              const t = p.week.topMiss
+              const u = p.week.unclassified
               return (
-                <div key={p.cwd} data-testid="val-q-top-miss" className="mt-1">
-                  <div>
-                    {p.project}: <span className="text-fg">{t.missKind}</span> — {MISS_KIND_MEANINGS[t.missKind] ?? EM_DASH} ·{' '}
-                    {t.count}×
-                  </div>
-                  <div>PRDs: {t.prds.join(', ')}</div>
-                  {t.reasons.length > 0 && (
-                    <ul className="list-disc pl-4">
-                      {t.reasons.slice(0, 5).map((r) => (
-                        <li key={r} data-testid="val-q-reason">{r}</li>
-                      ))}
-                    </ul>
+                <div key={p.cwd}>
+                  {t && (
+                    <div data-testid="val-q-top-miss" className="mt-1">
+                      <div>
+                        {p.project}: <span className="text-fg">{t.missKind}</span> — {MISS_KIND_MEANINGS[t.missKind] ?? EM_DASH} ·{' '}
+                        {t.count}×
+                      </div>
+                      <div>PRDs: {t.prds.join(', ')}</div>
+                      {t.reasons.length > 0 && (
+                        <ul className="list-disc pl-4">
+                          {t.reasons.slice(0, 5).map((r) => (
+                            <li key={r} data-testid="val-q-reason">{r}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div data-testid="val-q-proposal">Proposed check: {t.proposal}</div>
+                      <div className="text-fg-faint">{APPROVAL_LINE}</div>
+                    </div>
                   )}
-                  <div data-testid="val-q-proposal">Proposed check: {t.proposal}</div>
-                  <div className="text-fg-faint">{APPROVAL_LINE}</div>
+                  {u.count > 0 && (
+                    <div data-testid="val-q-unclassified" className="mt-1">
+                      <div>
+                        {p.project}: Not classified (recorded before checked verdicts): {u.count}
+                      </div>
+                      <div>PRDs: {u.prds.join(', ')}</div>
+                      {u.reasons.length > 0 && (
+                        <ul className="list-disc pl-4">
+                          {u.reasons.slice(0, 5).map((r) => (
+                            <li key={r} data-testid="val-q-unclassified-reason">{r}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })

@@ -86,3 +86,18 @@ for new). Empty CLAUDE.md: serif prompt + `Draft it with /init` + `Just start ty
 
 Tokens: reuse the extensions-3a token table (`../extensions-3a/DESIGN_SPEC.md` §6) — no raw hex in
 className. The band's dark `#2a221a` = `bg-fg` with `text-bg-hi`.
+
+## 5. Deliberate deviations (decided 2026-11-21, do not re-flag)
+
+1. **No "Draft it with /init" button.** SINGLE-CREATOR LAW: only a human pressing New Epic starts a session, and
+   no prefill entry point exists. The empty CLAUDE.md keeps the editor chrome, "Just start typing" and "Create file".
+2. **Skills keeps "Slash commands" and "From plugins" list sections.** They are real files the design's sample
+   lacked; they use the same row style as skills.
+3. **Agents keeps the Personas | Tags switch** (TagLibrary), placed inside the AGENTS FOLDER card.
+4. **Plugins shows "Up to date" / "Update available" only when the app can read the marketplace version**;
+   otherwise the control is omitted.
+5. **Project MCP approval** = one "Auto-approve all servers" toggle in the SERVER FILE card plus a per-server
+   "Approved" toggle in the detail header (the settings keys the old gating checkboxes wrote).
+6. **Epic isolation** (Session Manager's own worktree setting) is an "Epic isolation" entry in the Project
+   Settings rail, not a strip above the page.
+7. Sample-data differences (names, counts, dates, descriptions) are never findings.

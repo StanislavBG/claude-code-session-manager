@@ -13,6 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   checkDevPlugin,
+  DEV_PLUGIN_REINSTALL_FIX,
   checkDelegationReadiness,
   ensureGuardsInstalled,
   logAutoInstallEvent,
@@ -191,14 +192,15 @@ test('dev-plugin: fails independently when enabledPlugins is missing the key', a
   expect(result.checks.filter((c) => c.id !== 'dev-plugin').every((c) => c.ok)).toBe(true);
 }, 15_000);
 
-test('dev-plugin fails when SKILL.md missing', async () => {
+test('dev-plugin fails when the loaded copy SKILL.md is missing', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  const { installPath } = await writeDevPluginInstall(homeDir);
-  await fsp.rm(path.join(installPath, 'skills', 'develop', 'SKILL.md'));
+  const { loadedCopy } = await writeDevPluginInstall(homeDir);
+  const skillFile = path.join(loadedCopy, 'skills', 'develop', 'SKILL.md');
+  await fsp.rm(skillFile);
   const check = checkDevPlugin({ homeDir });
   expect(check.ok).toBe(false);
-  expect(check.detail).toMatch(/SKILL\.md/);
-  expect(check.fix).toMatch(/reinstall/);
+  expect(check.detail).toContain(skillFile);
+  expect(check.fix).toBe(DEV_PLUGIN_REINSTALL_FIX);
   const result = await checkDelegationReadiness({ cwd, homeDir });
   expect(result.checks.find((c) => c.id === 'dev-plugin').ok).toBe(false);
 }, 15_000);
@@ -212,9 +214,46 @@ test('dev-plugin fails when marketplace dir missing', async () => {
   expect(check.detail).toMatch(/marketplace folder/);
 });
 
-test('dev-plugin ok on healthy home', async () => {
+test('dev-plugin ok on healthy home; detail names the loaded copy', async () => {
   const { homeDir } = await makeGreenFixtures();
+  const { loadedCopy } = await writeDevPluginInstall(homeDir);
+  const check = checkDevPlugin({ homeDir });
+  expect(check.ok).toBe(true);
+  expect(check.id).toBe('dev-plugin');
+  expect(check.detail).toContain(loadedCopy);
+  expect(check.fix).toBeNull();
+});
+
+test('dev-plugin ignores the cache snapshot: its SKILL.md deleted, loaded copy present -> ok', async () => {
+  const { homeDir } = await makeGreenFixtures();
+  const { installPath } = await writeDevPluginInstall(homeDir);
+  await fsp.rm(path.join(installPath, 'skills', 'develop', 'SKILL.md'));
   expect(checkDevPlugin({ homeDir }).ok).toBe(true);
+});
+
+test('dev-plugin: malformed marketplace.json gives ok:false, never throws', async () => {
+  const { homeDir } = await makeGreenFixtures();
+  const { marketplace } = await writeDevPluginInstall(homeDir);
+  const manifest = path.join(marketplace, '.claude-plugin', 'marketplace.json');
+  await fsp.writeFile(manifest, '{ nope', 'utf8');
+  let check;
+  expect(() => { check = checkDevPlugin({ homeDir }); }).not.toThrow();
+  expect(check.ok).toBe(false);
+  expect(check.detail).toContain(manifest);
+  expect(check.fix).toBe(DEV_PLUGIN_REINSTALL_FIX);
+});
+
+test('dev-plugin: manifest without a session-manager-dev entry gives ok:false', async () => {
+  const { homeDir } = await makeGreenFixtures();
+  const { marketplace } = await writeDevPluginInstall(homeDir);
+  const manifest = path.join(marketplace, '.claude-plugin', 'marketplace.json');
+  await writeJson(manifest, { name: 'session-manager', plugins: [{ name: 'other', source: './plugins/other' }] });
+  const check = checkDevPlugin({ homeDir });
+  expect(check.ok).toBe(false);
+  expect(check.detail).toContain(manifest);
+  expect(check.fix).toBe(DEV_PLUGIN_REINSTALL_FIX);
+  await writeJson(manifest, { name: 'session-manager', plugins: [{ name: 'session-manager-dev', source: { source: 'github' } }] });
+  expect(checkDevPlugin({ homeDir }).ok).toBe(false);
 });
 
 test('dev-plugin: malformed install JSON gives ok:false, never throws', async () => {

@@ -45,7 +45,15 @@ async function writeDevPluginInstall(homeDir) {
   const marketplace = path.join(homeDir, 'marketplace-src');
   await fsp.mkdir(path.join(installPath, 'skills', 'develop'), { recursive: true });
   await fsp.writeFile(path.join(installPath, 'skills', 'develop', 'SKILL.md'), '# develop', 'utf8');
-  await fsp.mkdir(marketplace, { recursive: true });
+  // Claude Code loads a directory-marketplace plugin IN PLACE from the
+  // manifest's source folder, not from the cache snapshot above.
+  const loadedCopy = path.join(marketplace, 'plugins', 'session-manager-dev');
+  await fsp.mkdir(path.join(loadedCopy, 'skills', 'develop'), { recursive: true });
+  await fsp.writeFile(path.join(loadedCopy, 'skills', 'develop', 'SKILL.md'), '# develop', 'utf8');
+  await writeJson(path.join(marketplace, '.claude-plugin', 'marketplace.json'), {
+    name: 'session-manager',
+    plugins: [{ name: 'session-manager-dev', source: './plugins/session-manager-dev' }],
+  });
   await writeJson(path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json'), {
     version: 2,
     plugins: { 'session-manager-dev@session-manager': [{ scope: 'user', installPath, version: '0.0.1' }] },
@@ -53,7 +61,7 @@ async function writeDevPluginInstall(homeDir) {
   await writeJson(path.join(homeDir, '.claude', 'plugins', 'known_marketplaces.json'), {
     'session-manager': { source: { source: 'directory', path: marketplace }, installLocation: marketplace },
   });
-  return { installPath, marketplace };
+  return { installPath, marketplace, loadedCopy };
 }
 
 /** Seed homeDir with everything the user-scope delegation checks read. */

@@ -325,6 +325,23 @@ function readDevMarketplacePath(homeDir) {
   return typeof p === 'string' && p ? p : null;
 }
 
+const DEV_PLUGIN_NAME = 'session-manager-dev';
+
+/**
+ * Folder Claude Code actually loads the dev plugin from: the 'session-manager-dev'
+ * entry's source in <marketplacePath>/.claude-plugin/marketplace.json, resolved
+ * against marketplacePath. Null when the manifest is missing/malformed or the
+ * entry has no non-empty string source.
+ */
+function readDevPluginSourceDir(marketplacePath) {
+  const manifest = readJsonOrSync(path.join(marketplacePath, '.claude-plugin', 'marketplace.json'), null);
+  const plugins = Array.isArray(manifest?.plugins) ? manifest.plugins : [];
+  const entry = plugins.find((p) => p && p.name === DEV_PLUGIN_NAME);
+  return entry && typeof entry.source === 'string' && entry.source
+    ? path.resolve(marketplacePath, entry.source)
+    : null;
+}
+
 function checkDevPlugin({ homeDir }) {
   const settings = readJsonOrSync(path.join(homeDir, '.claude', 'settings.json'), null);
   const enabled = settings?.enabledPlugins?.[DEV_PLUGIN_ENABLED_KEY] === true;
@@ -348,15 +365,6 @@ function checkDevPlugin({ homeDir }) {
       fix: DEV_PLUGIN_REINSTALL_FIX,
     };
   }
-  const skillFile = path.join(installPath, 'skills', 'develop', 'SKILL.md');
-  if (!fs.existsSync(skillFile)) {
-    return {
-      ...base,
-      ok: false,
-      detail: `${DEV_PLUGIN_ENABLED_KEY} enabled but ${skillFile} is missing`,
-      fix: DEV_PLUGIN_REINSTALL_FIX,
-    };
-  }
 
   const marketplacePath = readDevMarketplacePath(homeDir);
   if (!marketplacePath) {
@@ -376,10 +384,33 @@ function checkDevPlugin({ homeDir }) {
     };
   }
 
+  // The install record's installPath (a ~/.claude/plugins/cache/ snapshot) is
+  // never read by Claude Code for a directory marketplace — it loads the
+  // plugin in place from the manifest's source folder, so check THAT copy.
+  const manifestFile = path.join(marketplacePath, '.claude-plugin', 'marketplace.json');
+  const sourceDir = readDevPluginSourceDir(marketplacePath);
+  if (!sourceDir) {
+    return {
+      ...base,
+      ok: false,
+      detail: `${manifestFile} is missing, malformed, or has no '${DEV_PLUGIN_NAME}' entry with a string source`,
+      fix: DEV_PLUGIN_REINSTALL_FIX,
+    };
+  }
+  const skillFile = path.join(sourceDir, 'skills', 'develop', 'SKILL.md');
+  if (!fs.existsSync(skillFile)) {
+    return {
+      ...base,
+      ok: false,
+      detail: `${DEV_PLUGIN_ENABLED_KEY} enabled but ${skillFile} (the copy sessions load) is missing`,
+      fix: DEV_PLUGIN_REINSTALL_FIX,
+    };
+  }
+
   return {
     ...base,
     ok: true,
-    detail: `${DEV_PLUGIN_ENABLED_KEY} enabled in ~/.claude/settings.json and installed on disk`,
+    detail: `${DEV_PLUGIN_ENABLED_KEY} enabled; sessions load it from ${sourceDir}`,
     fix: null,
   };
 }
@@ -862,6 +893,7 @@ async function ensureGuardsInstalled(cwd, { homeDir = os.homedir() } = {}) {
 
 module.exports = {
   checkDevPlugin,
+  DEV_PLUGIN_REINSTALL_FIX,
   checkDelegationReadiness,
   ensureGuardsInstalled,
   logAutoInstallEvent,

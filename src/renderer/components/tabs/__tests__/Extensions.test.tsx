@@ -160,13 +160,7 @@ describe('Extensions', () => {
     expect(panel.contains(byId('skills-new'))).toBe(true)
   })
 
-  it('openPanel with a tab pre-selects that tab (Command palette / deep-link path)', async () => {
-    await act(async () => { useLayout.getState().openPanel('extensions', 'mcp') }); await flush()
-    expect(selectedTab()).toBe('MCP Servers')
-    await until(agesLoaded)
-    expect(sources()).toEqual(['~/.claude.json › mcpServers · 15d ago'])
-    expect(useLayout.getState().panelTabHint).toBeFalsy()
-  })
+
 
   it('pages have no Library toggle; + New ▸ Browse catalog… opens the catalog drawer, and switching tabs closes it', async () => {
     expect(btn('Library')).toBeUndefined()

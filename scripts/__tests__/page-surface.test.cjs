@@ -24,8 +24,9 @@ describe('real repo', () => {
   const classified = classifyPages(ROOT);
 
   test('listPages resolves faces and entries from the nav registry', () => {
-    expect(byKey.extensions.entry).toBe('src/renderer/components/tabs/Extensions.tsx');
-    expect(byKey.extensions.faces).toEqual(['home']);
+    expect(byKey['claude-config'].entry).toBe('src/renderer/components/tabs/HomeClaudeConfig.tsx');
+    expect(byKey['claude-config'].faces).toEqual(['home']);
+    expect(byKey.extensions).toBeUndefined();
     expect(byKey.overview.entry).toBe('src/renderer/components/tabs/Home.tsx');
     expect(byKey['project-home'].entry).toBe('src/renderer/components/tabs/projecthome/ProjectHome.tsx');
     expect(byKey.skills).toBeUndefined();
@@ -36,11 +37,13 @@ describe('real repo', () => {
 
   test('classifyPages splits owned from shared', () => {
     const c = classified;
-    const skills = c.extensions;
-    expect(skills.owned).toContain('src/renderer/components/tabs/Extensions.tsx');
+    const skills = c['claude-config'];
+    expect(skills.owned).toContain('src/renderer/components/tabs/HomeClaudeConfig.tsx');
     const sharedFiles = skills.shared.map((s) => s.file);
+    // Settings (and its Hooks view) is a tab of both Claude config pages (Home + Project).
     expect(skills.owned).not.toContain('src/renderer/components/tabs/Hooks.tsx');
-    expect(sharedFiles).not.toContain('src/renderer/components/tabs/Hooks.tsx');
+    expect(skills.shared.find((s) => s.file === 'src/renderer/components/tabs/Hooks.tsx')?.pages).toEqual(['claude-config', 'memory']);
+    void sharedFiles;
     expect(skills.owned).toEqual([...skills.owned].sort());
     for (const s of skills.shared) expect(s.pages.length).toBeGreaterThanOrEqual(2);
   });
@@ -58,11 +61,11 @@ describe('real repo', () => {
 
   test('classifyPages attaches api usage per page', () => {
     const c = classified;
-    const skills = [...c.extensions.api, ...c.extensions.sharedApi].find((a) => a.method === 'config.listDir');
+    const skills = [...c['claude-config'].api, ...c['claude-config'].sharedApi].find((a) => a.method === 'config.listDir');
     expect(skills).toBeTruthy();
     expect(skills.main).toContain('src/main/config.cjs');
-    expect(c.extensions.unresolvedApiRefs).toEqual(expect.any(Number));
-    expect(c['agent-library'].api.map((a) => a.method)).toContain('agents.savePersona');
+    expect(c['claude-config'].unresolvedApiRefs).toEqual(expect.any(Number));
+    expect(c['claude-config'].api.map((a) => a.method)).toContain('agents.savePersona');
   });
 });
 
@@ -122,14 +125,14 @@ describe('tests + duplicates', () => {
     expect(d.some((x) => x.method === 'agents.savePersona')).toBe(false);
     const hit = d.find((x) => x.method === 'shell.open');
     expect(hit.channel).toBe('shell:open');
-    expect(hit.pages).toEqual(expect.arrayContaining(['extensions', 'memory', 'projects']));
+    expect(hit.pages).toEqual(expect.arrayContaining(['claude-config', 'memory', 'projects']));
     for (let i = 1; i < d.length; i++) expect(d[i - 1].pages.length).toBeGreaterThanOrEqual(d[i].pages.length);
   });
 });
 
 describe('cli', () => {
   test('<key> --json has owned, api and tests', () => {
-    const r = JSON.parse(cli('extensions', '--json'));
+    const r = JSON.parse(cli('claude-config', '--json'));
     expect(Array.isArray(r.owned)).toBe(true);
     expect(Array.isArray(r.api)).toBe(true);
     expect(Array.isArray(r.tests)).toBe(true);

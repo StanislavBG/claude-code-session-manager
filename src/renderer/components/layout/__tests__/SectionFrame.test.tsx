@@ -62,7 +62,7 @@ describe('SectionFrame', () => {
 })
 
 describe('screenComponents page frames', () => {
-  it('hides the h1 only on Extensions — every other framed Home page still shows its title', () => {
+  it('every framed page shows its title (Extensions, the only hideTitle page, folded into Claude config)', () => {
     const ctx = {}
     const framed: Array<[string, ReactElement<FrameProps>]> = []
     for (const key of SCREEN_KEYS) {
@@ -70,21 +70,13 @@ describe('screenComponents page frames', () => {
       const node = renderScreenComponent(key, ctx)
       if (isValidElement(node) && node.type === SectionFrame) framed.push([key, node as ReactElement<FrameProps>])
     }
-    expect(framed.map(([key]) => key)).toContain('extensions')
     expect(framed.length).toBeGreaterThan(1)
     for (const [key, node] of framed) {
       // The frame alone (its lazy page body swapped out), exactly as screenComponents configures it.
       mount(cloneElement(node, undefined, null))
       const h1 = container.querySelector('h1')
-      if (key === 'extensions') {
-        expect(h1, key).toBeNull()
-        expect(spacer(), key).not.toBeNull()
-        expect(header()?.textContent, key).toContain(INTRO)
-        expect(learn(), key).toBeDefined()
-      } else {
-        expect(h1?.textContent, key).toBe(node.props.title)
-        expect(spacer(), key).toBeNull()
-      }
+      expect(h1?.textContent, key).toBe(node.props.title)
+      expect(spacer(), key).toBeNull()
     }
   })
 })

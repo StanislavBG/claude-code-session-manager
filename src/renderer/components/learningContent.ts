@@ -127,6 +127,24 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'If the prompt looks frozen, scroll up: Claude often produced output but the cursor is below the visible window.',
       ],
     },
+  'claude-config': {
+    headline: 'Your ~/.claude — every file the claude CLI reads on this machine, in one place',
+    intro:
+      'Claude config gathers the user-scope Claude Code files that apply to every project on this machine. Each tab edits the real file on disk; a project\'s own files are edited from that project\'s Claude config instead.',
+    sections: [
+      {
+        title: 'Tabs',
+        items: [
+          { term: 'CLAUDE.md', body: '~/.claude/CLAUDE.md — house rules every session starts with.' },
+          { term: 'Settings', body: '~/.claude/settings.json — permissions, hooks, env and every other key.' },
+          { term: 'MCP', body: 'MCP servers from ~/.claude.json › mcpServers.' },
+          { term: 'Skills', body: 'Skills in ~/.claude/skills and commands in ~/.claude/commands.' },
+          { term: 'Plugins', body: 'Installed plugins; on/off is saved in settings.json › enabledPlugins.' },
+          { term: 'Agents', body: 'Agent personas in ~/.claude/agents.' },
+        ],
+      },
+    ],
+  },
   'system-prompt': {
       headline: 'Edit ~/.claude/CLAUDE.md — the house rules every session on this machine starts with',
       intro:

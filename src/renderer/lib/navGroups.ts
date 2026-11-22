@@ -68,11 +68,12 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Spend, tokens and time across every project', faces: HOME },
 
   // Claude Code — files the claude CLI itself reads
-  { key: 'system-prompt', group: 'Claude Code', label: 'CLAUDE.md', icon: 'system-prompt', hint: 'Your ~/.claude/CLAUDE.md — house rules for every session on this machine', faces: HOME },
+  // Home's Claude config — ONE row over ~/.claude whose page (HomeClaudeConfig)
+  // carries six tabs. The four rows it replaced (system-prompt, settings,
+  // extensions, agent-library) stay valid NavKeys as deep-link ALIASES — see
+  // NAV_KEY_ALIASES below.
+  { key: 'claude-config',  group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'Your ~/.claude — CLAUDE.md, settings, MCP, skills, plugins, agents', faces: HOME },
   { key: 'memory',         group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'This project\'s own files — CLAUDE.md, CLAUDE.local.md, .claude/settings.json, .mcp.json, .claude/skills/ and its memory folder', faces: PROJECT },
-  { key: 'settings',       group: 'Claude Code', label: 'Settings',       icon: 'settings',       hint: 'settings.json — permissions, hooks, env and every other key, per scope', faces: HOME },
-  { key: 'extensions',     group: 'Claude Code', label: 'Extensions',     icon: 'plugins',        hint: 'Skills, MCP servers and plugins', faces: HOME },
-  { key: 'agent-library',  group: 'Claude Code', label: 'Agents',         icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
 
   // Session Manager — this app's own preferences
   { key: 'app-settings', group: 'Session Manager', label: 'App Settings', icon: 'compass', hint: 'Voice, appearance, telemetry, phone remote, updates, storage map', faces: HOME },
@@ -91,13 +92,64 @@ export function getNavItemsForFace(face: NavFace): NavGroupItem[] {
   }))
 }
 
-export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = Object.fromEntries(
-  NAV_ITEMS.map((item) => [item.key, item.group]),
-)
+/**
+ * The six tabs of Home's Claude config page, in band order. `HomeClaudeConfig`
+ * maps each key to the existing page it mounts (CLAUDE.md → SystemPrompt,
+ * Settings → Settings, MCP → McpServers, Skills → Skills, Plugins → Plugins,
+ * Agents → AgentLibrary), all at user scope (~/.claude).
+ */
+export type HomeConfigTab = 'claude-md' | 'settings' | 'mcp' | 'skills' | 'plugins' | 'agents'
+
+export const HOME_CLAUDE_CONFIG_TABS: ReadonlyArray<{ key: HomeConfigTab; label: string; icon: AlmanacIconName }> = [
+  { key: 'claude-md', label: 'CLAUDE.md', icon: 'system-prompt' },
+  { key: 'settings',  label: 'Settings',  icon: 'settings' },
+  { key: 'mcp',       label: 'MCP',       icon: 'mcp' },
+  { key: 'skills',    label: 'Skills',    icon: 'skills' },
+  { key: 'plugins',   label: 'Plugins',   icon: 'plugins' },
+  { key: 'agents',    label: 'Agents',    icon: 'book' },
+]
+
+export function isHomeConfigTab(t: string): t is HomeConfigTab {
+  return HOME_CLAUDE_CONFIG_TABS.some((x) => x.key === t)
+}
+
+/**
+ * Retired Home rows, still valid NavKeys for deep links (CommandPalette,
+ * PluginCard, the footer's settings link, `sm:navigate`, persisted dockview
+ * layouts). Each opens 'claude-config' on its tab. `extensions` keeps its old
+ * sub-tab hints (skills / mcp / plugins) as the target tab.
+ */
+export const NAV_KEY_ALIASES: Partial<Record<NavKey, HomeConfigTab>> = {
+  'system-prompt': 'claude-md',
+  'settings':      'settings',
+  'extensions':    'skills',
+  'agent-library': 'agents',
+}
+
+/**
+ * Rewrites a navigation request onto its canonical panel. A non-alias id
+ * passes through unchanged. An alias becomes `claude-config` with a tab hint
+ * `<tab>` or, for a Settings sub-view (`openPanel('settings', 'hooks')`),
+ * `settings:<view>` — HomeClaudeConfig selects the tab and forwards the view
+ * to the Settings page's own `settings` hint.
+ */
+export function resolveNavAlias(id: string, tab?: string): { id: string; tab?: string } {
+  const target = NAV_KEY_ALIASES[id as NavKey]
+  if (!target) return { id, tab }
+  if (id === 'extensions' && tab && isHomeConfigTab(tab)) return { id: 'claude-config', tab }
+  if (id === 'settings' && tab) return { id: 'claude-config', tab: `settings:${tab}` }
+  return { id: 'claude-config', tab: target }
+}
+
+export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = {
+  ...Object.fromEntries(NAV_ITEMS.map((item) => [item.key, item.group])),
+  ...Object.fromEntries(Object.keys(NAV_KEY_ALIASES).map((k) => [k, 'Claude Code' as const])),
+}
 
 /**
  * True for a NavKey whose NAV_ITEMS entry is `faces: HOME` only (e.g. the
- * six Settings-shaped editors consolidated onto Home — see this file's
+ * Settings-shaped editors consolidated onto Home, and the aliases folded
+ * into Claude config — see this file's
  * top-of-file precedent note). Keys absent from NAV_ITEMS (editor, terminal,
  * etc.) are never home-only by this definition. Used by state/layout.ts's
  * `openPanel`/`focusPanel` to assert `navFace: 'home'` when routing to one
@@ -107,7 +159,8 @@ export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = Object.f
  * sidebar still renders the Project face's item list.
  */
 export function isHomeOnlyNavKey(key: NavKey): boolean {
-  const item = NAV_ITEMS.find((i) => i.key === key)
+  const canonical = NAV_KEY_ALIASES[key] ? 'claude-config' : key
+  const item = NAV_ITEMS.find((i) => i.key === canonical)
   return item != null && item.faces.length === 1 && item.faces[0] === 'home'
 }
 

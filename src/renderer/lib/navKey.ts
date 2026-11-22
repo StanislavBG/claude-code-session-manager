@@ -17,6 +17,9 @@ export type NavKey =
   | 'system-prompt'
   | 'settings'
   | 'memory'
+  // Home's Claude config (~/.claude) — six tabs; system-prompt / settings /
+  // extensions / agent-library are its deep-link aliases (lib/navGroups.ts).
+  | 'claude-config'
   | 'projects'
   | 'history'
   // One combined screen on both faces — global scheduler policy +

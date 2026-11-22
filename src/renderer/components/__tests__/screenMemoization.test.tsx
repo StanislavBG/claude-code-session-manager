@@ -424,19 +424,24 @@ describe('lazy screen boundary (screenComponents.tsx React.lazy + Suspense)', ()
     delete (window as unknown as { api?: unknown }).api
   })
 
-  it('navigating to the lazily-loaded "skills" screen renders its real content', async () => {
+  // 'extensions' is an alias of Claude config that opens it on the Skills tab
+  // (this file's broad window.api mock covers Skills, not the CLAUDE.md tab).
+  it('navigating to the lazily-loaded "extensions" alias renders Claude config on Skills', async () => {
     const ctx: ScreenRenderCtx = {}
     await act(async () => {
       root.render(createElement('div', null, renderScreenComponent('extensions', ctx)))
       await Promise.resolve()
       await Promise.resolve()
     })
-    await flushAsync(12)
+    // The page's chunk graph (six tab pages) takes longer than a fixed flush to import.
+    await vi.waitFor(async () => {
+      await act(async () => { await Promise.resolve() })
+      expect(container.textContent).toContain('CLAUDE CODE · GLOBAL')
+    }, { timeout: 10_000, interval: 20 })
 
-    // The page title from PAGE_META only appears once the lazy Skills
-    // component (wrapped by SectionFrame) has actually resolved and
-    // mounted — the Suspense fallback ("Loading…") carries no such text.
-    expect(container.textContent).toContain('Skills, MCP servers and plugins')
+    // The band's eyebrow only appears once the lazy HomeClaudeConfig page has
+    // actually resolved and mounted — the Suspense fallback ("Loading…") carries no such text.
+    expect(container.textContent).toContain('CLAUDE CODE · GLOBAL')
     expect(container.textContent).not.toContain('Loading…')
   })
 

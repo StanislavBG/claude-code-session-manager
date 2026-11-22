@@ -72,6 +72,6 @@ test('stale PENDING entry whose persona exists is one violation', () => {
   expect(v[0].message).toContain('remove it from PENDING');
 });
 
-test('PENDING holds exactly the 4 project-face keys', () => {
-  expect([...PENDING.keys()].sort()).toEqual(['memory', 'project-home', 'scheduler', 'terminal']);
+test('PENDING holds exactly the 4 project-face keys plus claude-config', () => {
+  expect([...PENDING.keys()].sort()).toEqual(['claude-config', 'memory', 'project-home', 'scheduler', 'terminal']);
 });

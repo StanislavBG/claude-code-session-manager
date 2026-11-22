@@ -20,6 +20,7 @@ export const SCREEN_KEYS: NavKey[] = [
   'history',
   // Claude Code
   'memory',
+  'claude-config',
   'projects',
   'system-prompt',
   'settings',
@@ -32,8 +33,14 @@ export const SCREEN_KEYS: NavKey[] = [
 
 // NavKeys with no AlmanacSidebar row (per navGroups.ts's own comment) have
 // no label in NAV_ITEMS — supply a panel title for those explicitly.
+// The four retired Home rows are aliases of 'claude-config' (see navGroups.ts
+// NAV_KEY_ALIASES); their panels only exist for persisted dockview layouts.
 const TITLE_OVERRIDES: Partial<Record<NavKey, string>> = {
   editor: 'Editor',
+  'system-prompt': 'Claude config',
+  settings: 'Claude config',
+  extensions: 'Claude config',
+  'agent-library': 'Claude config',
 }
 
 const NAV_ITEM_TITLE_BY_KEY: Partial<Record<NavKey, string>> = Object.fromEntries(

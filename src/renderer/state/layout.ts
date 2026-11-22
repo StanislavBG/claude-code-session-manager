@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 import { readAppPrefs } from '../lib/appPrefs'
 import type { NavFace } from '../lib/navFace'
-import { isHomeOnlyNavKey, isProjectOnlyNavKey } from '../lib/navGroups'
+import { isHomeOnlyNavKey, isProjectOnlyNavKey, resolveNavAlias } from '../lib/navGroups'
 import type { NavKey } from '../lib/navKey'
 
 /**
@@ -169,7 +169,10 @@ export const useLayout = create<LayoutState>((set, get) => ({
   setEpicsWorkspaceOpen: (open: boolean) => set({ epicsWorkspaceOpen: open }),
   navFace: 'home',
   setNavFace: (face: NavFace) => set({ navFace: face }),
-  openPanel: (id: string, tab?: string) => {
+  openPanel: (rawId: string, rawTab?: string) => {
+    // Retired Home rows (system-prompt, settings, extensions, agent-library)
+    // open Claude config on the matching tab — lib/navGroups.ts NAV_KEY_ALIASES.
+    const { id, tab } = resolveNavAlias(rawId, rawTab)
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
     set((s) => ({

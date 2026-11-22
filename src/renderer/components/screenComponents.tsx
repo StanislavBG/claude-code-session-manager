@@ -5,7 +5,7 @@ import { ProjectHome } from './tabs/projecthome/ProjectHome'
 import { EditorView } from './tabs/EditorView'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
 import { SectionFrame } from './layout/SectionFrame'
-import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
+import { NAV_GROUP_BY_KEY, NAV_KEY_ALIASES } from '../lib/navGroups'
 
 // Lazy-loaded so these rarely-first-opened screens (and their heavier
 // dependencies — react-force-graph-2d via Plugins -> SkillReferenceGraph,
@@ -17,12 +17,9 @@ import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 // body / recording indicator).
 const History = lazy(() => import('./tabs/History').then((m) => ({ default: m.History })))
 const Scheduler = lazy(() => import('./tabs/Scheduler').then((m) => ({ default: m.Scheduler })))
-const Settings = lazy(() => import('./tabs/Settings').then((m) => ({ default: m.Settings })))
-const SystemPrompt = lazy(() => import('./tabs/SystemPrompt').then((m) => ({ default: m.SystemPrompt })))
 const ProjectClaudeConfig = lazy(() => import('./tabs/ProjectClaudeConfig').then((m) => ({ default: m.ProjectClaudeConfig })))
-const Extensions = lazy(() => import('./tabs/Extensions').then((m) => ({ default: m.Extensions })))
+const HomeClaudeConfig = lazy(() => import('./tabs/HomeClaudeConfig').then((m) => ({ default: m.HomeClaudeConfig })))
 const AppSettings = lazy(() => import('./tabs/AppSettings').then((m) => ({ default: m.AppSettings })))
-const AgentLibrary = lazy(() => import('./tabs/AgentLibrary').then((m) => ({ default: m.AgentLibrary })))
 
 const SCREEN_LOADING_FALLBACK = <div className="p-6 text-xs text-fg-faint">Loading…</div>
 
@@ -57,11 +54,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'memory':        { title: 'Claude config',             intro: 'This project\'s own Claude Code files — its memory folder, CLAUDE.md and CLAUDE.local.md, .claude/settings.json and settings.local.json, .mcp.json and .claude/skills/. Each tab edits the real file the claude CLI reads when a session starts here; ~/.claude is edited from Home.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
-  'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
-  'settings':      { title: 'Settings',                  intro: 'Claude Code\'s settings.json — permissions, hooks, env and every other key, per scope, with schema validation.' },
-  'extensions':    { title: 'Extensions',                intro: 'Skills, MCP servers and plugins — each tab edits the real file Claude Code reads.', hideTitle: true },
   'app-settings':  { title: 'App Settings',              intro: 'Session Manager\'s own preferences — voice, appearance, telemetry, phone remote, updates and the storage map.' },
-  'agent-library': { title: 'Agents',                 intro: 'Agents are the ACTOR of the AIM framework every session opens with — "you are acting as …". Global personas live in ~/.claude/agents, and any open project, picked in a persona’s project override, can get its own model or effort. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
 }
 
 /**
@@ -103,6 +96,15 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
       return <EditorView />
     case 'projects':
       return <ProjectsWorkspace />
+    // Home's Claude config draws its own band. Its retired-row aliases only
+    // reach here from a persisted dockview layout (openPanel rewrites them).
+    case 'claude-config':
+      return <LazyScreen><HomeClaudeConfig /></LazyScreen>
+    // One case per alias (no fall-through) — scripts/page-surface.cjs reads each case's own JSX.
+    case 'system-prompt': return <LazyScreen><HomeClaudeConfig initialTab={NAV_KEY_ALIASES[active]} /></LazyScreen>
+    case 'settings':      return <LazyScreen><HomeClaudeConfig initialTab={NAV_KEY_ALIASES[active]} /></LazyScreen>
+    case 'extensions':    return <LazyScreen><HomeClaudeConfig initialTab={NAV_KEY_ALIASES[active]} /></LazyScreen>
+    case 'agent-library': return <LazyScreen><HomeClaudeConfig initialTab={NAV_KEY_ALIASES[active]} /></LazyScreen>
   }
 
   const meta = PAGE_META[active]
@@ -111,11 +113,7 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
       case 'history':       return <LazyScreen><History /></LazyScreen>
       case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
       case 'memory':        return <LazyScreen><ProjectClaudeConfig /></LazyScreen>
-      case 'system-prompt': return <LazyScreen><SystemPrompt /></LazyScreen>
-      case 'settings':      return <LazyScreen><Settings scope="user" /></LazyScreen>
-      case 'extensions':    return <LazyScreen><Extensions /></LazyScreen>
       case 'app-settings':  return <LazyScreen><AppSettings /></LazyScreen>
-      case 'agent-library': return <LazyScreen><AgentLibrary /></LazyScreen>
       default: return null
     }
   })()

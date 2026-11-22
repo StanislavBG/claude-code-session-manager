@@ -24,8 +24,7 @@ describe('navGroups Home swap', () => {
 
 describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
-    'overview', 'history', 'system-prompt', 'settings', 'extensions',
-    'agent-library', 'app-settings',
+    'overview', 'history', 'claude-config', 'app-settings',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'scheduler']
   const BOTH = ['projects']
@@ -182,7 +181,7 @@ describe('scheduler is project-only (removed from the Home face), retired standa
 })
 
 describe('settings-shaped editors are HOME-only (consolidated from BOTH)', () => {
-  const MOVED_KEYS = ['system-prompt', 'extensions', 'settings', 'app-settings'] as const
+  const MOVED_KEYS = ['claude-config', 'app-settings'] as const
 
   it.each(MOVED_KEYS)('NAV_ITEMS tags %s with faces: [home]', (key) => {
     const item = NAV_ITEMS.find((i) => i.key === key)
@@ -274,10 +273,10 @@ describe('NAV_ITEMS face-coverage invariant', () => {
   })
 })
 
-describe('Home-face registry (14 → 8 consolidation)', () => {
-  it('home face lists exactly the 8 consolidated pages, in order', () => {
+describe('Home-face registry (Claude config merge)', () => {
+  it('home face lists exactly the 5 consolidated pages, in order', () => {
     expect(getNavItemsForFace('home').map((i) => i.key)).toEqual([
-      'overview', 'projects', 'history', 'system-prompt', 'settings', 'extensions', 'agent-library', 'app-settings',
+      'overview', 'projects', 'history', 'claude-config', 'app-settings',
     ])
   })
 
@@ -285,13 +284,4 @@ describe('Home-face registry (14 → 8 consolidation)', () => {
     expect(new Set(NAV_ITEMS.map((i) => i.group))).toEqual(new Set(['Workspace', 'Claude Code', 'Session Manager']))
   })
 
-  it('relabels System Prompt → CLAUDE.md and Agent Library → Agents', () => {
-    expect(NAV_ITEMS.find((i) => i.key === 'system-prompt')?.label).toBe('CLAUDE.md')
-    expect(NAV_ITEMS.find((i) => i.key === 'agent-library')?.label).toBe('Agents')
-  })
-
-  it('Settings hint no longer promises theme, voice or billing window', () => {
-    const hint = NAV_ITEMS.find((i) => i.key === 'settings')?.hint ?? ''
-    expect(hint).not.toMatch(/theme|voice|billing/i)
-  })
 })

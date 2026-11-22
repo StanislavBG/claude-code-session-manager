@@ -16,8 +16,15 @@ const CHARTER = 'session-manager-operations/architecture/page-stewards.md'
 
 // page key -> reason its steward persona may still be absent.
 const PENDING = new Map(
-  ['project-home', 'terminal', 'scheduler', 'memory'].map((k) => [k, 'project-face steward not yet created']),
+  [
+    ...['project-home', 'terminal', 'scheduler', 'memory'].map((k) => [k, 'project-face steward not yet created']),
+    ['claude-config', 'Home Claude config steward not yet created'],
+  ],
 )
+
+// Former Home pages now mounted as tabs of 'claude-config' (lib/navGroups.ts NAV_KEY_ALIASES).
+// Their stewards still own those tab bodies, so they are not orphans; retiring them is its own change.
+const FOLDED = new Set(['system-prompt', 'settings', 'extensions', 'agent-library'])
 
 // Returns { fm: {key: value}, body } or null when the --- fence is not opened and closed.
 function parseFrontmatter(text) {
@@ -76,7 +83,7 @@ function scan(root, { pages = listPages(root), pending = PENDING } = {}) {
   }
   for (const name of entries) {
     const m = /^page-(.+)\.md$/.exec(name)
-    if (m && !keys.has(m[1])) {
+    if (m && !keys.has(m[1]) && !FOLDED.has(m[1])) {
       violations.push({ file: `${AGENTS_DIR}/${name}`, message: `${m[1]}: orphan steward persona — no such page key` })
     }
   }

@@ -69,8 +69,8 @@ describe('layout.ts useLayout store', () => {
 
   it('openPanel focuses an already-registered panel', () => {
     useLayout.setState({ focusedPanelId: null })
-    useLayout.getState().openPanel('extensions')
-    expect(useLayout.getState().focusedPanelId).toBe('extensions')
+    useLayout.getState().openPanel('app-settings')
+    expect(useLayout.getState().focusedPanelId).toBe('app-settings')
   })
 
   it('openPanel is a no-op for an unregistered id', () => {
@@ -251,12 +251,12 @@ describe('layout.ts panel-focus predicate (backs usePanelFocus)', () => {
 
   it('transitions when focusedPanelId changes via openPanel or focusPanel', () => {
     const isFocused = (id: string) => useLayout.getState().focusedPanelId === id
-    useLayout.getState().openPanel('extensions')
+    useLayout.getState().openPanel('app-settings')
     expect(isFocused('terminal')).toBe(false)
-    expect(isFocused('extensions')).toBe(true)
+    expect(isFocused('app-settings')).toBe(true)
 
     useLayout.getState().focusPanel('editor')
-    expect(isFocused('extensions')).toBe(false)
+    expect(isFocused('app-settings')).toBe(false)
     expect(isFocused('editor')).toBe(true)
   })
 })

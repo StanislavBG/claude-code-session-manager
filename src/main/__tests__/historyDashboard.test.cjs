@@ -208,3 +208,39 @@ test('cost: claude-opus-5-5 is priced from modelPricing — output, cache reads 
   expect(day.byProject['p-write'].estimatedCostUsd).toBeCloseTo(6.20, 9);
   expect(result.byModelTotals['claude-opus-5-5'].estimated).toBe(true);
 });
+
+test('cost: the previous period prices a model with an old (no 1-hour field) line and a new line together', async () => {
+  // rangeDays=1 → current = [today], previous = [yesterday]; the previous period folds every
+  // project into one row, so both lines land in the same per-model bucket.
+  const yesterday = daysAgo(1);
+  await historyRollup.appendRollupDays([
+    { date: yesterday, projectDir: 'p-old', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 1_000_000, v: 3 },
+    { date: yesterday, projectDir: 'p-new', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 1_000_000, cacheCreation1hTokens: 400_000, v: 4 },
+  ]);
+  const result = await historyDashboard.computeDashboard({ rangeDays: 1 });
+  // 1M unknown at the 1-hour rate (8.00) + 400K 1-hour (3.20) + 600K 5-minute (3.00).
+  expect(result.prevTotals.estimatedCostUsd).toBeCloseTo(14.20, 9);
+  expect(result.prevTotals.cacheCreationTokens).toBe(2_000_000);
+});
+
+test('cost: a current-period day with an old line is priced at the 1-hour rate and marked estimated', async () => {
+  const d1 = daysAgo(1);
+  await historyRollup.appendRollupDays([
+    { date: d1, projectDir: 'p-old', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 1_000_000, v: 3 },
+    { date: d1, projectDir: 'p-new', modelId: 'claude-opus-5-5', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 1_000_000, cacheCreation1hTokens: 400_000, v: 4 },
+  ]);
+  const result = await historyDashboard.computeDashboard({ rangeDays: 30 });
+  const day = result.days.find((d) => d.date === d1);
+  const oldM = day.byProject['p-old'].byModel['claude-opus-5-5'];
+  expect(oldM.cacheCreationUnknownTokens).toBe(1_000_000);
+  expect(oldM.cacheCreation1hTokens).toBe(0);
+  expect(oldM.costUsd).toBeCloseTo(8, 9);
+  expect(oldM.estimated).toBe(true);
+  const newM = day.byProject['p-new'].byModel['claude-opus-5-5'];
+  expect(newM.cacheCreationUnknownTokens).toBe(0);
+  expect(newM.cacheCreation1hTokens).toBe(400_000);
+  expect(newM.costUsd).toBeCloseTo(6.2, 9);
+  expect(newM.estimated).toBeUndefined();
+  expect(result.byModelTotals['claude-opus-5-5'].costUsd).toBeCloseTo(14.2, 9);
+  expect(result.byModelTotals['claude-opus-5-5'].estimated).toBe(true);
+});

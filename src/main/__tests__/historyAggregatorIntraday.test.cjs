@@ -334,7 +334,7 @@ test('intraday per-model rollup lines carry cacheCreation1hTokens', async () => 
   expect(totalsLine.v).toBe(historyRollup.ROLLUP_VERSION);
 });
 
-test('rollupMapToRows: a per-model line without cacheCreation1hTokens leaves it undefined; one with it carries the value', () => {
+test('rollupMapToRows: an old line (no cacheCreation1hTokens) counts as unknown; a new line adds its 1-hour part', () => {
   const D = '2026-08-01';
   const map = historyRollup.mergeRollupLines([
     JSON.stringify({ date: D, projectDir: 'p', modelId: 'old-model', inputTokens: 1, cacheCreationTokens: 9, v: 3 }),
@@ -342,8 +342,23 @@ test('rollupMapToRows: a per-model line without cacheCreation1hTokens leaves it 
   ]);
   const rows = historyAggregator.rollupMapToRows(map, new Set([D]));
   const row = rows.get(`${D}|p`);
-  expect(row.byModel['old-model'].cacheCreation1hTokens).toBeUndefined();
-  expect('cacheCreation1hTokens' in row.byModel['old-model']).toBe(false);
+  expect(row.byModel['old-model'].cacheCreationUnknownTokens).toBe(9);
+  expect(row.byModel['old-model'].cacheCreation1hTokens).toBe(0);
   expect(row.byModel['new-model'].cacheCreation1hTokens).toBe(7);
+  expect(row.byModel['new-model'].cacheCreationUnknownTokens).toBe(0);
   expect(row.byModel['new-model'].cacheCreationTokens).toBe(9);
+});
+
+test('rollupMapToRows: old and new lines for one model in one bucket sum both parts', () => {
+  const D = '2026-08-02';
+  // mergeRollupLines keys by date|project|model, so build the map by hand to put two lines
+  // for one model in one bucket.
+  const entries = new Map([
+    ['a', { date: D, projectDir: 'p', modelId: 'm', cacheCreationTokens: 1_000_000, v: 3 }],
+    ['b', { date: D, projectDir: 'p', modelId: 'm', cacheCreationTokens: 1_000_000, cacheCreation1hTokens: 400_000, v: 4 }],
+  ]);
+  const dst = historyAggregator.rollupMapToRows(entries, new Set([D])).get(`${D}|p`).byModel.m;
+  expect(dst.cacheCreationTokens).toBe(2_000_000);
+  expect(dst.cacheCreationUnknownTokens).toBe(1_000_000);
+  expect(dst.cacheCreation1hTokens).toBe(400_000);
 });

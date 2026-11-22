@@ -1285,8 +1285,10 @@ export interface DayProjectRow {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
-    /** 1-hour part of cacheCreationTokens; undefined when the split is unknown (rollup line written before v4). */
+    /** Recorded 1-hour part of cacheCreationTokens. */
     cacheCreation1hTokens?: number;
+    /** Part of cacheCreationTokens with no recorded 5-minute / 1-hour split (rollup lines written before v4); priced at the 1-hour rate and marked estimated when above zero. */
+    cacheCreationUnknownTokens?: number;
     costUsd: number;
     /** Set when the model id didn't match opus/sonnet/haiku and was priced at Sonnet rates as a fallback. */
     estimated?: boolean;
@@ -1340,8 +1342,10 @@ export interface HistoryDashboardProjectRow extends HistoryDashboardTotals {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
-    /** 1-hour part of cacheCreationTokens; undefined when the split is unknown (rollup line written before v4). */
+    /** Recorded 1-hour part of cacheCreationTokens. */
     cacheCreation1hTokens?: number;
+    /** Part of cacheCreationTokens with no recorded 5-minute / 1-hour split (rollup lines written before v4); priced at the 1-hour rate and marked estimated when above zero. */
+    cacheCreationUnknownTokens?: number;
     costUsd: number;
     estimated?: boolean;
   }>;
@@ -1364,8 +1368,10 @@ export interface HistoryDashboardResult {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
-    /** 1-hour part of cacheCreationTokens; undefined when the split is unknown (rollup line written before v4). */
+    /** Recorded 1-hour part of cacheCreationTokens. */
     cacheCreation1hTokens?: number;
+    /** Part of cacheCreationTokens with no recorded 5-minute / 1-hour split (rollup lines written before v4); priced at the 1-hour rate and marked estimated when above zero. */
+    cacheCreationUnknownTokens?: number;
     costUsd: number;
     estimated?: boolean;
   }>;

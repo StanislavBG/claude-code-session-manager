@@ -54,15 +54,20 @@ function foldBucketIntoRow(row, bucket) {
   } else {
     const dst = row.byModel[bucket.modelId] ?? (row.byModel[bucket.modelId] = {
       inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0, cacheCreationUnknownTokens: 0,
     });
     dst.inputTokens += bucket.inputTokens || 0;
     dst.outputTokens += bucket.outputTokens || 0;
     dst.cacheReadTokens += bucket.cacheReadTokens || 0;
     dst.cacheCreationTokens += bucket.cacheCreationTokens || 0;
-    // A line written before rollup v4 has no 1-hour split: leave the field
-    // undefined so costOfUsage marks the cost estimated (unknown, not 0).
+    // A line written before rollup v4 has no 1-hour split: its cache writes
+    // count as unknown, which costOfUsage prices at the 1-hour rate and marks
+    // estimated. Both parts are plain sums, so a bucket mixing old and new
+    // lines (e.g. the previous-period row) stays right.
     if (typeof bucket.cacheCreation1hTokens === 'number') {
-      dst.cacheCreation1hTokens = (dst.cacheCreation1hTokens ?? 0) + bucket.cacheCreation1hTokens;
+      dst.cacheCreation1hTokens += bucket.cacheCreation1hTokens;
+    } else {
+      dst.cacheCreationUnknownTokens += bucket.cacheCreationTokens || 0;
     }
     row.inputTokens += bucket.inputTokens || 0;
     row.outputTokens += bucket.outputTokens || 0;

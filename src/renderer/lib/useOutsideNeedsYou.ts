@@ -38,7 +38,7 @@ export function useOutsideNeedsYou(): {
     const off = window.api?.needsYou?.onChanged?.(load)
     return () => {
       cancelled = true
-      off?.()
+      if (typeof off === 'function') off()
     }
   }, [])
   const answer = useCallback(

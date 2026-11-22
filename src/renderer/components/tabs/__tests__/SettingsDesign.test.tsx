@@ -13,7 +13,8 @@ import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness } from './_navfaceHar
  * The Settings tab on the ConfigWorkbench design: SETTINGS FILE card (Project / Local radio
  * rows in a project, the user file on Home), a 'Search N settings' field, the group rail with
  * set/total counts plus Permissions and Hooks rows, and one group's setting cards in the
- * detail, each with a Default — User — Project — Local source ladder.
+ * detail, each with one control by type, a source ladder (Default — User on Home, all four in a
+ * project) and a ⋯ menu holding Reset.
  */
 
 const USER = `${HOME}/.claude/settings.json`
@@ -86,6 +87,21 @@ const effectiveStage = (l: HTMLElement | null) =>
     .filter((s) => s.dataset.effective === 'true')
     .map((s) => s.dataset.stage)
 
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  setter.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+const cards = {
+  setShowAdvanced: (el: HTMLElement) =>
+    Array.from(el.querySelectorAll<HTMLElement>('[role="switch"]'))
+      .find((b) => b.closest('label')?.textContent?.includes('Advanced'))!
+      .click(),
+  search: (el: HTMLElement, text: string) => setInputValue(el.querySelector<HTMLInputElement>('input[type="search"]')!, text),
+}
+
 describe('Settings — ConfigWorkbench design', () => {
   it('Home: user file card, search count, group rail set/total, Permissions + Hooks rows', async () => {
     disk = { [USER]: { model: 'opus', permissions: { allow: ['Bash(ls:*)'] }, hooks: {} } }
@@ -143,9 +159,6 @@ describe('Settings — ConfigWorkbench design', () => {
     expect(onScope).toHaveBeenCalledWith('local')
     expect(radios().map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true'])
     expect(q(el, 'settings-detail-header')?.textContent).toContain('LOCAL SETTINGS')
-    expect(Array.from(el.querySelectorAll('[data-testid="source-chip-path"]')).map((c) => c.textContent)).toEqual([
-      '~/Projects/alpha/.claude/settings.local.json',
-    ])
   })
 
   it('each card shows name, key and a Default — User — Project — Local ladder marking the effective source', async () => {
@@ -163,6 +176,110 @@ describe('Settings — ConfigWorkbench design', () => {
     expect(effectiveStage(ladder(el, 'model'))).toEqual(['project'])
     expect(effectiveStage(ladder(el, 'language'))).toEqual(['user'])
     expect(effectiveStage(ladder(el, 'outputStyle'))).not.toContain('project')
+  })
+})
+
+const card = (el: HTMLElement, key: string) =>
+  el.querySelector<HTMLElement>(`[data-testid="setting-card"][data-key="${key}"]`)!
+const stagesOf = (l: HTMLElement | null) =>
+  Array.from(l?.querySelectorAll<HTMLElement>('[data-stage]') ?? []).map((s) => s.dataset.stage)
+
+describe('Settings — setting row model (wave-3 findings 9, 10, 11, 13)', () => {
+  it('an enum row with no value shows the default in its select; no Set to / save / SET IN / OVERRIDING chips', async () => {
+    disk = { [USER]: { model: 'opus' } }
+    const el = await mount('user')
+    const sel = card(el, 'outputStyle').querySelector<HTMLSelectElement>('select')!
+    expect(sel.selectedOptions[0].textContent).toBe('default')
+    expect(Array.from(sel.options).map((o) => o.textContent)).toEqual(
+      expect.arrayContaining(['default', 'Proactive', 'Explanatory', 'Learning']),
+    )
+    const text = el.textContent ?? ''
+    expect(text).not.toMatch(/Set to:/)
+    expect(text).not.toMatch(/save →/)
+    expect(text).not.toMatch(/set in user/i)
+    expect(text).not.toMatch(/overriding/i)
+  })
+
+  it('a schema enum with a default shows that default when unset', async () => {
+    disk = { [USER]: {} }
+    const el = await mount('user')
+    await act(async () => cards.setShowAdvanced(el))
+    await act(async () => cards.search(el, 'editorMode'))
+    const sel = card(el, 'editorMode').querySelector<HTMLSelectElement>('select')!
+    expect(sel.selectedOptions[0].textContent).toBe('normal')
+  })
+
+  it('a change writes the selected scope (Local) through claudeConfig.patch', async () => {
+    disk = { [PROJECT]: { model: 'sonnet' }, [LOCAL]: {} }
+    const el = await mount('project')
+    await act(async () => q(el, 'settings-file-local')!.click())
+    const api = (window as unknown as { api: { claudeConfig: { patch: ReturnType<typeof vi.fn> } } }).api
+    api.claudeConfig.patch.mockClear()
+
+    const sel = card(el, 'outputStyle').querySelector<HTMLSelectElement>('select')!
+    const idx = Array.from(sel.options).findIndex((o) => o.textContent === 'Explanatory')
+    await act(async () => {
+      sel.value = sel.options[idx].value
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fileId: 'settings', scope: 'local', keyPath: ['outputStyle'], value: 'Explanatory' }),
+    )
+
+    const input = card(el, 'language').querySelector<HTMLInputElement>('input')!
+    await act(async () => {
+      setInputValue(input, 'French')
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    })
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scope: 'local', keyPath: ['language'], value: 'French' }),
+    )
+  })
+
+  it('Home ladder has two scopes and Home ignores the active project tab', async () => {
+    disk = { [USER]: { model: 'opus' }, [PROJECT]: { model: 'sonnet' } }
+    useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+    const home = await mount('user')
+    expect(stagesOf(ladder(home, 'model'))).toEqual(['default', 'user'])
+    expect(effectiveStage(ladder(home, 'model'))).toEqual(['user'])
+    expect(card(home, 'model').querySelector<HTMLInputElement>('input')!.value).toBe('opus')
+  })
+
+  it('a project ladder has four scopes', async () => {
+    disk = { [USER]: { model: 'opus' }, [PROJECT]: { model: 'sonnet' } }
+    const project = await mount('project')
+    expect(stagesOf(ladder(project, 'model'))).toEqual(['default', 'user', 'project', 'local'])
+    expect(effectiveStage(ladder(project, 'model'))).toEqual(['project'])
+  })
+
+  it('reset and the values-across-scopes table are reachable from the row ⋯ menu', async () => {
+    disk = { [USER]: { model: 'opus' }, [PROJECT]: { model: 'sonnet' } }
+    const el = await mount('project')
+    const api = (window as unknown as { api: { claudeConfig: { patch: ReturnType<typeof vi.fn> } } }).api
+    api.claudeConfig.patch.mockClear()
+    const row = card(el, 'model')
+    expect(row.querySelector('[role="menu"]')).toBeNull()
+    await act(async () => row.querySelector<HTMLElement>('[data-testid="setting-row-menu"]')!.click())
+    const reset = row.querySelector<HTMLElement>('[data-testid="setting-row-reset"]')!
+    expect(reset.textContent).toContain('Project')
+    await act(async () => reset.click())
+    expect(api.claudeConfig.patch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scope: 'project', keyPath: ['model'], value: undefined }),
+    )
+
+    await act(async () => row.querySelector<HTMLElement>('[data-testid="setting-row-menu"]')!.click())
+    await act(async () => row.querySelector<HTMLElement>('[data-testid="setting-row-details"]')!.click())
+    expect(row.querySelector('[data-testid="setting-details"]')?.textContent).toContain('Values across all scopes')
+  })
+
+  it('the page body has no path chip row and no schema link; the link lives in the header ⋯', async () => {
+    disk = { [USER]: { model: 'opus' } }
+    const el = await mount('user')
+    expect(el.querySelector('[data-testid="source-chip-path"]')).toBeNull()
+    expect(el.textContent).not.toContain('schema reference')
+    await act(async () => q(el, 'settings-more')!.click())
+    const link = el.querySelector<HTMLAnchorElement>('[role="menu"] a[href="https://code.claude.com/docs/en/settings"]')
+    expect(link?.textContent).toContain('schema reference')
   })
 })
 

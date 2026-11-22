@@ -314,10 +314,10 @@ describe('ProjectClaudeConfig', () => {
     expect(panel('settings')).not.toBeNull()
     expect(q('project-claude-config-source')).toBeNull()
     expect(q('settings-file-project')?.getAttribute('aria-checked')).toBe('true')
-    expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`, `${SHORT}/.claude/settings.json`])
+    expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`])
     await pickLocal()
     expect(q('settings-file-local')?.getAttribute('aria-checked')).toBe('true')
-    expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`, `${SHORT}/.claude/settings.local.json`])
+    expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`])
 
     await pick('MCP')
     expect(panel('mcp')).not.toBeNull()

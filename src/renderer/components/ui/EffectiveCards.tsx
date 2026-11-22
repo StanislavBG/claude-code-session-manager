@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { Scope } from '../../lib/scopes'
 import { SCOPE_LABELS } from '../../lib/scopes'
 import type { EffectiveNode, LeafNode } from '../../lib/mergeScopes'
@@ -6,6 +6,8 @@ import type { SchemaResolver, SchemaInfo } from '../../lib/schemaLookup'
 import { planGroups, planGroupRail, humanizeKey, type GroupRailEntry } from '../../lib/settingsGroups'
 import { resolveSettingDescription } from '../../lib/settingsDescriptionFallbacks'
 import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
+import { Toggle } from './Toggle'
+import { Z } from '../../lib/zLayers'
 
 /** Judgment-call icon per settings group id; 'other' is planGroups' dynamic fallback bucket. */
 const GROUP_ICONS: Record<string, AlmanacIconName> = {
@@ -35,9 +37,11 @@ type OnOverride = (path: string[], value: unknown, intoScope?: Scope) => void
  *
  * Groups keys into themed sections (see settingsGroups.ts). `SettingsGroupRail` is the
  * left-column group list (icon, title, set/total); `SettingsGroupCards` renders the chosen
- * group(s) as setting cards — name, mono key, description, the inline value editor, and a
- * `SourceLadder` (Default — User — Project — Local) marking where the effective value comes
- * from. Shared filter / showAdvanced / showUnset state lives in ONE place — `useEffectiveCards`.
+ * group(s) as setting cards — name, mono key, description, ONE control by type that writes the
+ * selected scope's file, a `SourceLadder` marking where the effective value comes from
+ * (Default — User on Home, Default — User — Project — Local in a project), and a ⋯ menu
+ * holding Reset and the values-across-scopes table. Shared filter / showAdvanced / showUnset
+ * state lives in ONE place — `useEffectiveCards`.
  */
 
 export interface EffectiveCardsModel {
@@ -209,6 +213,13 @@ const LADDER: ReadonlyArray<{ stage: Stage; label: string }> = [
   { stage: 'project', label: 'Project' },
   { stage: 'local', label: 'Local' },
 ]
+/** The stages a face can hold: Home edits only the user file; a project adds Project + Local. */
+export const HOME_STAGES: ReadonlyArray<Stage> = ['default', 'user']
+export const PROJECT_STAGES: ReadonlyArray<Stage> = ['default', 'user', 'project', 'local']
+/** Home (the user file) shows Default — User; a project file shows all four stages. */
+export function ladderStagesFor(targetScope: Scope): ReadonlyArray<Stage> {
+  return targetScope === 'user' ? HOME_STAGES : PROJECT_STAGES
+}
 /** Precedence, lowest first — mergeScopes' order (local beats project beats user). */
 const PRECEDENCE: ReadonlyArray<Scope> = ['user', 'project', 'local']
 
@@ -245,11 +256,20 @@ export function settingSources(
   return { effective: top, has }
 }
 
-export function SourceLadder({ node, defaultVal }: { node: EffectiveNode | undefined; defaultVal: unknown }) {
+export function SourceLadder({
+  node,
+  defaultVal,
+  stages = PROJECT_STAGES,
+}: {
+  node: EffectiveNode | undefined
+  defaultVal: unknown
+  stages?: ReadonlyArray<Stage>
+}) {
   const { effective, has } = settingSources(node, defaultVal)
+  const shown = LADDER.filter((l) => stages.includes(l.stage))
   return (
     <div data-testid="source-ladder" className="flex items-center gap-1.5 whitespace-nowrap" aria-label="Where this value comes from">
-      {LADDER.map(({ stage, label }, i) => {
+      {shown.map(({ stage, label }, i) => {
         const win = stage === effective
         const present = has.has(stage)
         return (
@@ -290,20 +310,24 @@ interface CardProps {
   onOverride: (value: unknown, intoScope?: Scope) => void
 }
 
+/**
+ * One setting row (render 07 / 11): name + mono key + one-line description, ONE control by
+ * type that writes the selected scope's file, the source ladder, and a ⋯ menu holding Reset
+ * and the values-across-scopes table.
+ */
 function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps) {
   const [expanded, setExpanded] = useState(false)
   const title = humanizeKey(keyName)
   const isSet = node !== undefined
   const leafNode = node?.kind === 'leaf' ? node : null
   const defaultVal = info?.default
-  const isDefault = leafNode && defaultVal !== undefined && sameValue(leafNode.value, defaultVal)
-  const status = describeStatus({ isSet, leafNode, defaultVal, isDefault: !!isDefault, node })
+  const isDefault = !!leafNode && defaultVal !== undefined && sameValue(leafNode.value, defaultVal)
 
-  // Reset = "delete from the most-specific scope that has it" (the leaf's winner). Only
-  // shown when the effective value differs from the schema default.
+  // Reset = "delete from the most-specific scope that has it" (the leaf's winner). Offered
+  // only when the effective value differs from the schema default.
   const canReset = !!leafNode && !isDefault
   const description = resolveSettingDescription(keyName, info?.description)
-  // Re-key the editor on the effective value / target file so its local draft follows the data.
+  // Re-key the control on the effective value / target file so its local draft follows the data.
   const editorKey = `${targetScope}:${leafNode ? JSON.stringify(leafNode.value) : '∅'}`
 
   return (
@@ -312,32 +336,13 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
       data-key={keyName}
       className="px-[22px] py-4 rounded-[14px] bg-bg-hi border border-line"
     >
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,250px)_auto] items-center gap-x-7 gap-y-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,250px)_auto_auto] items-center gap-x-7 gap-y-2">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2.5 flex-wrap">
             <h3 className="text-base font-semibold text-fg">{title}</h3>
             <span className="font-mono text-xs text-fg-faint">{keyName}</span>
-            <StatusChip kind={status.kind} label={status.label} />
-            {canReset && leafNode && (
-              <button
-                type="button"
-                onClick={() => onOverride(undefined, leafNode.winner)}
-                className="text-[9px] px-1.5 py-0 rounded border border-line bg-bg-elev text-fg-faint uppercase tracking-wide hover:text-fg hover:bg-bg"
-                title={`reset · delete from ${SCOPE_LABELS[leafNode.winner].label}`}
-              >
-                ↺ reset
-              </button>
-            )}
-            {info?.deprecated && (
-              <span className="text-[9px] px-1 py-0 rounded border border-yellow-900/40 bg-yellow-950/30 text-yellow-500/80 uppercase tracking-wide">
-                deprecated
-              </span>
-            )}
-            {info?.required && !isSet && (
-              <span className="text-[9px] px-1 py-0 rounded border border-red-900/40 bg-red-950/30 text-red-400/80 uppercase tracking-wide">
-                required
-              </span>
-            )}
+            {info?.deprecated && <span className="text-[11px] italic text-fg-faint">deprecated</span>}
+            {info?.required && !isSet && <span className="text-[11px] italic text-fg-faint">required</span>}
           </div>
           {description && (
             <p
@@ -349,24 +354,125 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
               {firstSentence(description.text)}
             </p>
           )}
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="ml-2 text-xs text-fg-faint hover:text-fg underline-offset-2 hover:underline"
-            aria-expanded={expanded}
-          >
-            {expanded ? 'less' : 'details'}
-          </button>
         </div>
-        <div className="min-w-0 text-xs">
-          <Editor key={editorKey} keyName={keyName} node={node} info={info} onChange={(v) => onOverride(v)} targetScope={targetScope} />
+        <div className="min-w-0 text-[13px]">
+          <Editor
+            key={editorKey}
+            keyName={keyName}
+            node={node}
+            info={info}
+            onChange={(v) => onOverride(v)}
+            targetLabel={SCOPE_LABELS[targetScope].label}
+          />
         </div>
-        <SourceLadder node={node} defaultVal={defaultVal} />
+        <SourceLadder node={node} defaultVal={defaultVal} stages={ladderStagesFor(targetScope)} />
+        <RowMenu
+          keyName={keyName}
+          title={title}
+          expanded={expanded}
+          onToggleDetails={() => setExpanded((v) => !v)}
+          reset={
+            canReset && leafNode
+              ? { label: `Reset · remove from ${SCOPE_LABELS[leafNode.winner].label}`, run: () => onOverride(undefined, leafNode.winner) }
+              : null
+          }
+        />
       </div>
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-line/60">
+        <div data-testid="setting-details" className="mt-3 pt-3 border-t border-line/60">
           {leafNode && <DriftTable leaf={leafNode} defaultVal={defaultVal} onReset={(s) => onOverride(undefined, s)} />}
           <CardDetails keyName={keyName} node={node} info={info} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------ Row menu */
+
+/** The per-row ⋯ menu: Reset (when the value differs from the default) and the details/drift table. */
+function RowMenu({
+  keyName,
+  title,
+  expanded,
+  onToggleDetails,
+  reset,
+}: {
+  keyName: string
+  title: string
+  expanded: boolean
+  onToggleDetails: () => void
+  reset: { label: string; run: () => void } | null
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+
+  // Escape or a mousedown outside the trigger + menu closes it (same rule as PluginMenu).
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const item = 'px-2.5 py-[7px] rounded-[5px] text-left whitespace-nowrap hover:bg-bg-elev'
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        data-testid="setting-row-menu"
+        aria-label={`More actions for ${title}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-fg-faint hover:text-fg hover:bg-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={`Actions for ${keyName}`}
+          className={`absolute ${Z.dialog} right-0 top-9 min-w-[220px] p-[5px] flex flex-col gap-1 bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}
+        >
+          {reset && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="setting-row-reset"
+              className={item}
+              onClick={() => {
+                setOpen(false)
+                reset.run()
+              }}
+            >
+              ↺ {reset.label}
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="setting-row-details"
+            className={item}
+            onClick={() => {
+              setOpen(false)
+              onToggleDetails()
+            }}
+          >
+            {expanded ? 'Hide values across scopes' : 'Values across scopes…'}
+          </button>
         </div>
       )}
     </div>
@@ -521,226 +627,175 @@ function CardDetails({
 
 /* ----------------------------------------------------- Inline editors */
 
+/**
+ * String keys whose schema `examples` list the built-in choices: shown as a select (render 11's
+ * Output style) with a 'custom…' entry so any other value stays writable.
+ */
+const SELECT_FROM_EXAMPLES: ReadonlySet<string> = new Set(['outputStyle'])
+/** Select value for "not set in any file" — choosing it removes the key from the selected scope. */
+const UNSET = '\u0000unset'
+const CUSTOM = '\u0000custom'
+
+const CONTROL =
+  'w-full h-9 px-3 rounded-[10px] bg-bg border border-line font-mono text-[13px] text-fg placeholder:text-fg-faint focus:outline-none focus:border-fg-faint'
+
+/**
+ * ONE control per setting, by type, that writes the selected scope's file: a select for enums
+ * (showing the effective value, else the schema default, else 'default' = unset), a Toggle for
+ * booleans, a text / number input for strings / numbers (committed on blur or Enter).
+ */
 function Editor({
+  keyName,
   node,
   info,
   onChange,
-  targetScope,
+  targetLabel,
 }: {
   keyName: string
   node: EffectiveNode | undefined
   info: SchemaInfo | null
   onChange: (v: unknown) => void
-  targetScope: Scope
+  targetLabel: string
 }) {
   const isLeaf = node?.kind === 'leaf'
-  const current = isLeaf ? (node as LeafNode).value : info?.default
+  const setValue = isLeaf ? (node as LeafNode).value : undefined
+  const current = isLeaf ? setValue : info?.default
   const type = normalizeType(info?.type)
+  const aria = `${humanizeKey(keyName)} — writes ${targetLabel}`
 
-  // Boolean → two-state switch
   if (type === 'boolean') {
-    const on = current === true
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-fg-faint">Set to:</span>
-        <div className="inline-flex rounded border border-line overflow-hidden">
-          {[
-            { v: true, label: 'on' },
-            { v: false, label: 'off' },
-          ].map(({ v, label }) => (
-            <button
-              key={label}
-              onClick={() => onChange(v)}
-              className={`px-3 py-0.5 text-xs transition-colors ${
-                on === v
-                  ? 'bg-accent text-bg'
-                  : 'bg-bg-elev text-fg-dim hover:bg-bg-hi hover:text-fg'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span className="text-fg-faint">→ {SCOPE_LABELS[targetScope].label}</span>
-      </div>
+      <span className="flex items-center gap-2" aria-label={aria}>
+        <Toggle checked={current === true} onChange={(v) => onChange(v)} label={current === true ? 'on' : 'off'} />
+      </span>
     )
   }
 
-  // Enum → chip selection
   if (info?.enum) {
-    return (
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-fg-faint">Choose:</span>
-        {info.enum.map((v) => {
-          const selected = sameValue(current, v)
-          return (
-            <button
-              key={String(v)}
-              onClick={() => onChange(v)}
-              className={`px-2 py-0.5 text-xs rounded border ${
-                selected
-                  ? 'bg-accent text-bg border-accent'
-                  : 'bg-bg-elev text-fg-dim border-line hover:text-fg hover:bg-bg-hi'
-              }`}
-            >
-              {String(v)}
-            </button>
-          )
-        })}
-        <span className="text-fg-faint">→ {SCOPE_LABELS[targetScope].label}</span>
-      </div>
-    )
+    return <ChoiceSelect options={info.enum} value={current} onChange={onChange} aria={aria} allowCustom={false} />
   }
 
-  // Number → input
+  if (type === 'string' && SELECT_FROM_EXAMPLES.has(keyName) && info?.examples?.length) {
+    return <ChoiceSelect options={info.examples} value={current} onChange={onChange} aria={aria} allowCustom />
+  }
+
   if (type === 'integer' || type === 'number') {
     return (
-      <NumberEditor
-        value={typeof current === 'number' ? current : undefined}
-        integer={type === 'integer'}
-        onCommit={onChange}
-        target={SCOPE_LABELS[targetScope].label}
+      <TextControl
+        kind="number"
+        initial={typeof current === 'number' ? String(current) : ''}
+        aria={aria}
+        onCommit={(text) => {
+          if (text.trim() === '') return onChange(undefined)
+          const n = type === 'integer' ? parseInt(text, 10) : parseFloat(text)
+          if (!Number.isNaN(n)) onChange(n)
+        }}
       />
     )
   }
 
-  // String → input
   if (type === 'string') {
     return (
-      <StringEditor
-        value={typeof current === 'string' ? current : ''}
-        onCommit={onChange}
-        target={SCOPE_LABELS[targetScope].label}
+      <TextControl
+        kind="text"
+        initial={typeof current === 'string' ? current : ''}
+        aria={aria}
+        onCommit={(text) => onChange(text === '' ? undefined : text)}
       />
     )
   }
 
-  // Array or object — too complex for inline; provide a nudge.
+  // Array or object — too complex for one inline control.
   return (
-    <div className="text-fg-faint">
-      Complex value ({type ?? 'object/array'}) — use the{' '}
-      <span className="text-fg-dim">{'{ } Raw JSON'}</span> to edit.
+    <div className="text-xs text-fg-faint">
+      {node?.kind === 'array' ? `${node.items.length} items · ` : ''}edit in <span className="text-fg-dim">{'{ } Raw JSON'}</span>
     </div>
   )
 }
 
-function NumberEditor({
+/**
+ * Enum / built-in-choice select. Shows the effective value (or the schema default); with
+ * neither it shows 'default' — the unset entry, which removes the key from the selected scope.
+ * `allowCustom` adds 'custom…' that swaps in a text input for any other value.
+ */
+function ChoiceSelect({
+  options,
   value,
-  integer,
-  onCommit,
-  target,
+  onChange,
+  aria,
+  allowCustom,
 }: {
-  value: number | undefined
-  integer: boolean
-  onCommit: (v: number) => void
-  target: string
+  options: unknown[]
+  value: unknown
+  onChange: (v: unknown) => void
+  aria: string
+  allowCustom: boolean
 }) {
-  const [text, setText] = useState(value !== undefined ? String(value) : '')
-  const commit = () => {
-    const n = integer ? parseInt(text, 10) : parseFloat(text)
-    if (!Number.isNaN(n)) onCommit(n)
+  const [custom, setCustom] = useState(false)
+  const hasValue = value !== undefined
+  // The unset entry already reads 'default'; drop a literal 'default' choice so it isn't listed twice.
+  const choices = options.filter((o) => hasValue || o !== 'default')
+  const listed = hasValue && choices.some((o) => sameValue(o, value))
+  const all = hasValue && !listed ? [value, ...choices] : choices
+  if (custom) {
+    return <TextControl kind="text" initial="" aria={aria} autoFocus onCommit={(t) => (t === '' ? setCustom(false) : onChange(t))} />
   }
+  const selectedIdx = hasValue ? all.findIndex((o) => sameValue(o, value)) : -1
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-fg-faint">Set to:</span>
-      <input
-        type="number"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        }}
-        className="w-24 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
-      />
-      <button
-        onClick={commit}
-        className="px-2 py-0.5 text-xs border border-accent/50 rounded text-accent hover:bg-accent hover:text-bg"
-      >
-        save → {target}
-      </button>
-    </div>
-  )
-}
-
-function StringEditor({
-  value,
-  onCommit,
-  target,
-}: {
-  value: string
-  onCommit: (v: string) => void
-  target: string
-}) {
-  const [text, setText] = useState(value)
-  return (
-    <div className="flex items-center gap-2 flex-1 min-w-0">
-      <span className="text-fg-faint shrink-0">Set to:</span>
-      <input
-        type="text"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') onCommit(text)
-        }}
-        className="flex-1 min-w-0 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
-      />
-      <button
-        onClick={() => onCommit(text)}
-        className="shrink-0 px-2 py-0.5 text-xs border border-accent/50 rounded text-accent hover:bg-accent hover:text-bg"
-      >
-        save → {target}
-      </button>
-    </div>
-  )
-}
-
-/* --------------------------------------------------------- Status chip */
-
-type StatusKind = 'set' | 'default' | 'unset' | 'override' | 'accumulated'
-
-function describeStatus({
-  isSet,
-  leafNode,
-  defaultVal,
-  isDefault,
-  node,
-}: {
-  isSet: boolean
-  leafNode: LeafNode | null
-  defaultVal: unknown
-  isDefault: boolean
-  node: EffectiveNode | undefined
-}): { kind: StatusKind; label: string } {
-  if (!isSet) {
-    if (defaultVal !== undefined) return { kind: 'default', label: `using default: ${valueToString(defaultVal)}` }
-    return { kind: 'unset', label: 'not configured' }
-  }
-  if (node?.kind === 'array') return { kind: 'accumulated', label: `${node.items.length} items` }
-  if (node?.kind === 'object') return { kind: 'set', label: 'configured' }
-  if (leafNode) {
-    if (isDefault) return { kind: 'default', label: `= default · ${SCOPE_LABELS[leafNode.winner].label}` }
-    if (leafNode.shadowed.length > 0)
-      return { kind: 'override', label: `overriding ${leafNode.shadowed.length} scope(s)` }
-    return { kind: 'set', label: `set in ${SCOPE_LABELS[leafNode.winner].label}` }
-  }
-  return { kind: 'set', label: 'configured' }
-}
-
-function StatusChip({ kind, label }: { kind: StatusKind; label: string }) {
-  const cls = {
-    set: 'bg-accent/15 text-accent border-accent/30',
-    default: 'bg-bg-hi text-fg-dim border-line',
-    unset: 'bg-bg-elev text-fg-faint border-line',
-    override: 'bg-purple-950/30 text-purple-400/80 border-purple-900/40',
-    accumulated: 'bg-blue-950/30 text-blue-400/80 border-blue-900/40',
-  }[kind]
-  return (
-    <span
-      className={`text-[9px] px-1.5 py-0 rounded border uppercase tracking-wide ${cls}`}
+    <select
+      aria-label={aria}
+      value={selectedIdx >= 0 ? String(selectedIdx) : UNSET}
+      onChange={(e) => {
+        const v = e.target.value
+        if (v === CUSTOM) return setCustom(true)
+        onChange(v === UNSET ? undefined : all[Number(v)])
+      }}
+      className={CONTROL}
     >
-      {label}
-    </span>
+      {!hasValue && <option value={UNSET}>default</option>}
+      {all.map((o, i) => (
+        <option key={i} value={String(i)}>
+          {String(o)}
+        </option>
+      ))}
+      {allowCustom && <option value={CUSTOM}>custom…</option>}
+    </select>
+  )
+}
+
+/** Text / number input: commits on blur or Enter, only when the text changed. */
+function TextControl({
+  kind,
+  initial,
+  aria,
+  onCommit,
+  autoFocus,
+}: {
+  kind: 'text' | 'number'
+  initial: string
+  aria: string
+  onCommit: (text: string) => void
+  autoFocus?: boolean
+}) {
+  const [text, setText] = useState(initial)
+  const commit = () => {
+    if (text !== initial) onCommit(text)
+  }
+  return (
+    <input
+      type={kind}
+      aria-label={aria}
+      value={text}
+      placeholder="not set"
+      autoFocus={autoFocus}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') setText(initial)
+      }}
+      className={CONTROL}
+    />
   )
 }
 

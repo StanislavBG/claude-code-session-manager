@@ -9,11 +9,10 @@
  * Detail: one group's setting cards (EffectiveCards) under a header with Show unset / Advanced
  * switches and a '{ } Raw JSON' button that opens the existing raw JSON editor.
  */
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SaveBar } from '../ui/SaveBar'
 import { JsonEditor } from '../ui/JsonEditor'
 import { EmptyState } from '../ui/EmptyState'
-import { SourceChip } from '../ui/SourceChip'
 import { Toggle } from '../ui/Toggle'
 import { PermissionsRulesEditor } from './Permissions'
 import { HooksEventsEditor } from './Hooks'
@@ -34,6 +33,7 @@ import { formatMtimeMs } from '../../lib/formatTime'
 import { toast } from '../../state/toast'
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { scrollWithin } from '../../lib/scrollWithin'
+import { Z } from '../../lib/zLayers'
 
 /**
  * Per-scope statement of WHAT FILE this screen is editing and HOW WIDELY it
@@ -207,6 +207,65 @@ function DetailHeader({
   )
 }
 
+const SCHEMA_DOCS_URL = 'https://code.claude.com/docs/en/settings'
+
+/** The detail header's ⋯ menu: the settings schema reference (moved out of the page body). */
+function HeaderMoreMenu() {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        data-testid="settings-more"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="h-9 w-9 inline-flex items-center justify-center rounded-[10px] bg-bg-hi border border-line text-fg-dim hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="More actions"
+          className={`absolute ${Z.dialog} right-0 top-[42px] min-w-[200px] p-[5px] flex flex-col bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}
+        >
+          <a
+            role="menuitem"
+            href={SCHEMA_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => setOpen(false)}
+            className="px-2.5 py-[7px] rounded-[5px] whitespace-nowrap hover:bg-bg-elev"
+          >
+            Settings schema reference ↗
+          </a>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Permission rules held anywhere in the merged settings (allow + ask + deny). */
 function permissionRuleCount(effective: EffectiveNode): number {
   let n = 0
@@ -234,7 +293,9 @@ function SettingsComponent({
   })
 
   // Resolve + load + watch every scope path so the effective merge (and the ladder) stays live.
-  const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
+  // Home edits the user file only: its merge (and its Default — User ladder) ignores whatever
+  // project tab happens to be active, so a project value never shows as the Home value.
+  const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, scope === 'user' ? null : cwd)
   const activePath = scopePaths[scope] ?? null
 
   const files = useConfig((s) => s.files)
@@ -379,14 +440,6 @@ function SettingsComponent({
           onSelect={() => setView('hooks')}
         />
       </div>
-      <a
-        href="https://code.claude.com/docs/en/settings"
-        target="_blank"
-        rel="noreferrer"
-        className="px-3 text-xs text-fg-faint hover:text-fg-dim underline-offset-2 hover:underline"
-      >
-        schema reference ↗
-      </a>
     </>
   )
 
@@ -399,10 +452,12 @@ function SettingsComponent({
       {'{ } Raw JSON'}
     </button>
   )
-  const chipLine = (keyPath?: string[]) => (
-    <div className="shrink-0 px-9 pt-3">
-      <SourceChip path={activePath ?? ''} keyPath={keyPath} />
-    </div>
+  const headerActions = (extra?: ReactNode) => (
+    <>
+      {extra}
+      {rawButton}
+      <HeaderMoreMenu />
+    </>
   )
   const errorBanner =
     saveError && view !== 'raw' ? (
@@ -430,11 +485,10 @@ function SettingsComponent({
             <>
               <Toggle checked={cards.showUnset} onChange={cards.setShowUnset} label="Show unset" />
               <Toggle checked={cards.showAdvanced} onChange={setAdvanced} label="Advanced" />
-              {rawButton}
+              {headerActions()}
             </>
           }
         />
-        {chipLine()}
         {errorBanner}
         <SettingsGroupCards
           cards={cards}
@@ -451,9 +505,8 @@ function SettingsComponent({
           eyebrow={`${scopeWord} SETTINGS · PERMISSIONS`}
           title="Permissions"
           summary="What Claude may do without asking."
-          actions={rawButton}
+          actions={headerActions()}
         />
-        {chipLine(['permissions'])}
         {errorBanner}
         <div className="px-6 py-3">
           <PermissionsRulesEditor scope={scope} cwd={cwd} activePath={activePath} />
@@ -472,9 +525,8 @@ function SettingsComponent({
               eyebrow={`${scopeWord} SETTINGS · HOOKS`}
               title="Hooks"
               summary="Commands that run on Claude Code events."
-              actions={rawButton}
+              actions={headerActions()}
             />
-            {chipLine(['hooks'])}
             {errorBanner}
             {banners}
             <div data-testid="settings-hooks-body" className="flex-1 min-h-0 flex mt-3 border-t border-line">
@@ -488,8 +540,7 @@ function SettingsComponent({
   } else if (file) {
     detail = (
       <>
-        <DetailHeader eyebrow={`${scopeWord} SETTINGS · RAW JSON`} title="Raw JSON" summary="The whole file, as the claude CLI reads it." />
-        {chipLine()}
+        <DetailHeader eyebrow={`${scopeWord} SETTINGS · RAW JSON`} title="Raw JSON" summary="The whole file, as the claude CLI reads it." actions={<HeaderMoreMenu />} />
         {/* Monaco scrolls itself: this flex-1, overflow-clip box fills the detail height. */}
         <div data-testid="settings-raw-editor" className="flex-1 min-h-0 overflow-clip mt-3">
           <JsonEditor

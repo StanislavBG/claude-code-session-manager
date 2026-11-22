@@ -40,9 +40,9 @@ const click = async (b: HTMLElement | null | undefined) => {
 const rawButton = (el: HTMLElement) => Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '{ } Raw JSON')
 
 describe('Settings panes', () => {
-  it('General shows the file chip; owned keys live behind the Permissions / Hooks rows, never as cards', async () => {
+  it('General has no path chip row; owned keys live behind the Permissions / Hooks rows, never as cards', async () => {
     const el = await mount()
-    expect(chips(el)).toEqual(['~/.claude/settings.json'])
+    expect(chips(el)).toEqual([])
     expect(q(el, 'settings-row-permissions')?.textContent).toContain('1 rule')
     expect(q(el, 'settings-row-hooks')?.textContent).toContain('2/4')
     for (const k of OWNED_KEYS) {
@@ -51,24 +51,24 @@ describe('Settings panes', () => {
     }
   })
 
-  it('the Permissions row opens the rules editor with the keyed SourceChip', async () => {
+  it('the Permissions row opens the rules editor', async () => {
     const el = await mount()
     await click(q(el, 'settings-row-permissions'))
-    expect(chips(el)).toEqual(['~/.claude/settings.json › permissions'])
+    expect(q(el, 'settings-detail-header')?.textContent).toContain('Permissions')
     expect(el.textContent).toContain('Default Mode')
   })
 
-  it('the Hooks row opens the event editor with the keyed SourceChip', async () => {
+  it('the Hooks row opens the event editor', async () => {
     const el = await mount()
     await click(q(el, 'settings-row-hooks'))
-    expect(chips(el)).toEqual(['~/.claude/settings.json › hooks'])
+    expect(q(el, 'settings-hooks-body')).not.toBeNull()
     expect(el.textContent).toContain('PreToolUse')
   })
 
-  it('{ } Raw JSON opens the raw editor with the file chip and the SaveBar', async () => {
+  it('{ } Raw JSON opens the raw editor with the SaveBar', async () => {
     const el = await mount()
     await click(rawButton(el))
-    expect(chips(el)).toEqual(['~/.claude/settings.json'])
+    expect(chips(el)).toEqual([])
     expect(q(el, 'settings-raw-editor')).not.toBeNull()
     expect(el.textContent?.toLowerCase()).toContain('save')
   })
@@ -76,6 +76,6 @@ describe('Settings panes', () => {
   it("honours a 'settings' panel tab hint (deep link) for a pane", async () => {
     useLayout.setState({ panelTabHint: { id: 'settings', tab: 'hooks' } })
     const el = await mount()
-    expect(chips(el)).toEqual(['~/.claude/settings.json › hooks'])
+    expect(q(el, 'settings-hooks-body')).not.toBeNull()
   })
 })

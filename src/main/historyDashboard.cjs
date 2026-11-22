@@ -8,6 +8,16 @@
  * re-exported from historyAggregator.cjs (date math) plus lib/claude/modelPricing.cjs (cost) — never
  * fs/promises, never PROJECTS_DIR. See historyDashboard.test.cjs's zero-scan
  * guarantee test.
+ *
+ * The one non-rollup input is the Task ledger (lib/tasks/taskLedger.cjs
+ * readTaskUsageDays, for every project in lib/tasks/taskSwitch.cjs
+ * listTaskProjects, switch on or off). It is still no transcript scan and no
+ * PROJECTS_DIR: each project's own session-manager-operations/tasks/ day files.
+ * Its spend lands as rows keyed 'sm-task:<absolute cwd>' so the renderer fold
+ * puts it on that project's row. Nothing counts twice: Tasks run with
+ * --no-session-persistence and write no transcript, and historyAggregator.cjs
+ * skips the transcript of any Task that did persist (sibling PRD
+ * task-history-skip-task-transcripts), so no rollup line carries Task usage.
  */
 
 'use strict';
@@ -21,6 +31,58 @@ const { schemas } = require('./ipcSchemas.cjs');
 // Read range start for rangeDays=0 ("all time"). Rollup dates are always
 // after this, so it's an effective "no lower bound".
 const EARLIEST_DATE = '1970-01-01';
+
+/** Prefix of a Task project's row key in days[].byProject: 'sm-task:' + absolute cwd. */
+const TASK_PROJECT_PREFIX = 'sm-task:';
+
+/**
+ * Default Task readers, required lazily so a dashboard that never reaches
+ * them (and the zero-scan test's module graph) stays as it was.
+ */
+function defaultTaskDeps() {
+  return {
+    listTaskProjects: () => require('./lib/tasks/taskSwitch.cjs').listTaskProjects(),
+    readTaskUsageDays: (cwd, range) => require('./lib/tasks/taskLedger.cjs').readTaskUsageDays(cwd, range),
+  };
+}
+
+/**
+ * Task ledger days → buckets shaped like rollup lines: per day, one totals
+ * bucket (promptCount = sessionCount = task count) and one bucket per model,
+ * so they go through the same fold + cost path as transcript rows.
+ */
+async function readTaskBuckets(from, to, deps) {
+  const listTaskProjects = deps.listTaskProjects ?? defaultTaskDeps().listTaskProjects;
+  const readTaskUsageDays = deps.readTaskUsageDays ?? defaultTaskDeps().readTaskUsageDays;
+  const buckets = [];
+  for (const { cwd } of listTaskProjects() || []) {
+    if (typeof cwd !== 'string' || !cwd) continue;
+    let days;
+    try {
+      days = await readTaskUsageDays(cwd, { sinceDate: from, untilDate: to });
+    } catch (err) {
+      console.warn(`[historyDashboard] Task ledger read failed for ${cwd}:`, err);
+      continue;
+    }
+    const projectDir = TASK_PROJECT_PREFIX + cwd;
+    for (const d of days || []) {
+      buckets.push({
+        date: d.date, projectDir, modelId: historyRollup.TOTALS_MODEL_ID,
+        promptCount: d.tasks || 0, sessionCount: d.tasks || 0,
+      });
+      for (const [modelId, m] of Object.entries(d.byModel || {})) {
+        buckets.push({
+          date: d.date, projectDir, modelId,
+          inputTokens: m.input_tokens || 0,
+          outputTokens: m.output_tokens || 0,
+          cacheReadTokens: m.cache_read_input_tokens || 0,
+          cacheCreationTokens: m.cache_creation_input_tokens || 0,
+        });
+      }
+    }
+  }
+  return buckets;
+}
 
 function emptyProjectRow(date, projectDir) {
   return {
@@ -117,10 +179,11 @@ function addRowToTotals(totals, row) {
 }
 
 /**
- * Answer the History dashboard's full request purely from rollup lines.
- * O(rollup lines in range) — no transcript file is ever opened.
+ * Answer the History dashboard's full request from rollup lines plus the Task
+ * ledger. O(rollup lines + Task ledger lines in range) — no transcript file is
+ * ever opened. `deps` ({ listTaskProjects, readTaskUsageDays }) is for tests.
  */
-async function computeDashboard(req) {
+async function computeDashboard(req, deps = {}) {
   const rangeDays = req?.rangeDays ?? 30;
   const isAll = rangeDays === 0;
   const today = localDate(new Date());
@@ -131,12 +194,13 @@ async function computeDashboard(req) {
   const readFrom = isAll ? EARLIEST_DATE : prevFrom;
 
   const map = await historyRollup.readRollup(readFrom, to);
+  const taskBuckets = await readTaskBuckets(readFrom, to, deps);
 
   const daysMap = new Map(); // date -> Map(projectDir -> row)
   const prevRow = emptyProjectRow('', '');
   const finalizedDates = new Set();
 
-  for (const bucket of map.values()) {
+  for (const bucket of [...map.values(), ...taskBuckets]) {
     if (bucket.projectDir === historyRollup.FINALIZED_PROJECT_ID && bucket.modelId === historyRollup.FINALIZED_MODEL_ID) {
       if (bucket.finalizedAt) finalizedDates.add(bucket.date);
       continue;
@@ -228,4 +292,5 @@ function registerHistoryDashboardHandlers() {
 module.exports = {
   registerHistoryDashboardHandlers,
   computeDashboard,
+  TASK_PROJECT_PREFIX,
 };

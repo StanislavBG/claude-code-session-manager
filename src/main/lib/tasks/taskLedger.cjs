@@ -373,8 +373,10 @@ async function hasImport(cwd, importId) {
 /**
  * readTaskUsageDays(cwd, { sinceDate, untilDate }) → ascending
  * [{ date, tasks, input_tokens, output_tokens, cache_read_input_tokens,
- *    cache_creation_input_tokens, costUsd }] for local dates (YYYY-MM-DD,
- * inclusive) that have at least one Task.
+ *    cache_creation_input_tokens, costUsd, byModel }] for local dates
+ * (YYYY-MM-DD, inclusive) that have at least one Task. `byModel` maps the
+ * Task's `model` (or 'unknown') to { tasks, <USAGE_KEYS> } so a reader can
+ * price usage per model (historyDashboard.cjs does).
  */
 async function readTaskUsageDays(cwd, { sinceDate, untilDate } = {}) {
   const { rows } = await readRows(cwd, { sinceDate, untilDate });
@@ -386,12 +388,19 @@ async function readTaskUsageDays(cwd, { sinceDate, untilDate } = {}) {
     if ((sinceDate && date < sinceDate) || (untilDate && date > untilDate)) continue;
     let d = days.get(date);
     if (!d) {
-      d = { date, tasks: 0, ...Object.fromEntries(USAGE_KEYS.map((k) => [k, 0])), costUsd: 0 };
+      d = { date, tasks: 0, ...Object.fromEntries(USAGE_KEYS.map((k) => [k, 0])), costUsd: 0, byModel: {} };
       days.set(date, d);
     }
     d.tasks += 1;
+    const model = typeof t.model === 'string' && t.model ? t.model : 'unknown';
+    const m = d.byModel[model] ?? (d.byModel[model] = { tasks: 0, ...Object.fromEntries(USAGE_KEYS.map((k) => [k, 0])) });
+    m.tasks += 1;
     const u = t.usage || {};
-    for (const k of USAGE_KEYS) d[k] += Number(u[k]) || 0;
+    for (const k of USAGE_KEYS) {
+      const n = Number(u[k]) || 0;
+      d[k] += n;
+      m[k] += n;
+    }
     d.costUsd += Number(t.costUsd) || 0;
   }
   return [...days.values()].sort((a, b) => (a.date < b.date ? -1 : 1));

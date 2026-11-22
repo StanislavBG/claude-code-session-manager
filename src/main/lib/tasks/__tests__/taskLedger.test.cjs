@@ -232,6 +232,7 @@ test('readTaskUsageDays sums usage per local day', async () => {
   const days = await ledger.readTaskUsageDays(cwd, { sinceDate: d, untilDate: d });
   expect(days).toEqual([{
     date: d, tasks: 2, input_tokens: 20, output_tokens: 40, cache_read_input_tokens: 6, cache_creation_input_tokens: 8, costUsd: 1,
+    byModel: { 'claude-sonnet-4-5': { tasks: 2, input_tokens: 20, output_tokens: 40, cache_read_input_tokens: 6, cache_creation_input_tokens: 8 } },
   }]);
   expect(await ledger.readTaskUsageDays(cwd, { sinceDate: '2026-11-21', untilDate: '2026-11-22' })).toEqual([]);
 });

@@ -77,6 +77,7 @@
   "headTailBuffer": "util",
   "instanceLock": "process",
   "jobDirtFilter": "scheduler",
+  "jobSandboxPolicy": "claude",
   "jobSupervisorRecord": "scheduler",
   "jobWorktree": "git",
   "jobWorktreeBootLive": "git",

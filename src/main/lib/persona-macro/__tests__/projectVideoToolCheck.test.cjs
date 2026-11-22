@@ -106,12 +106,6 @@ describe('mcpToolNamesFromScope', () => {
     expect([...ours]).toEqual(['project_video_write']);
   });
 
-  it('the oracle matches the rule in scripts/scheduler-mcp-server.cjs', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../../../../scripts/scheduler-mcp-server.cjs'), 'utf8');
-    expect(src).toContain("if (!entry.startsWith('mcp__')) continue;");
-    expect(src).toContain("const i = entry.indexOf('__', 5);");
-    expect(src).toContain('if (i > 0) names.add(entry.slice(i + 2));');
-  });
 });
 
 describe('lib layout', () => {

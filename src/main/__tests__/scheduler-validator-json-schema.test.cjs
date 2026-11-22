@@ -94,6 +94,7 @@ function expectSchemaPlacement(argv) {
 test('buildClaudeSpawnArgs: jsonSchema adds --json-schema <json> once, before --dangerously-skip-permissions', () => {
   for (const resume of [true, false]) {
     const args = buildClaudeSpawnArgs({ model: 'opus', sessionId: 's', resume, jsonSchema: VALIDATOR_VERDICT_SCHEMA, toolScope: { tools: ['Read'] } });
+    expect(args).toContain('--json-schema');
     expectSchemaPlacement(args);
   }
 });

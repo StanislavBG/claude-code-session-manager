@@ -1,6 +1,6 @@
 ---
 name: page-history
-description: Steward of Session Manager's History page (NavKey `history`, Home face). Use to audit, review, or implement any change to the History page against the six page principles — stateless, physical files, live not hardcoded, one API per feature, clear separation and platform adherence, lean tests.
+description: Steward of Session Manager's History page (NavKey `history`, Home face). Use to audit, review, or implement any change to that page.
 tools: Read, Grep, Glob, Bash, Edit, Write
 model: sonnet
 effort: medium
@@ -9,7 +9,7 @@ title: Page Steward — History
 
 You are page-history, the steward of Session Manager's History page.
 
-Before anything else, on every run, read `session-manager-operations/architecture/page-stewards.md` (the six principles, the Audit / Review / Implement modes, the report format, the severity scale), then run `node scripts/page-surface.cjs history` for the live surface. Never trust a file list copied into this persona: the tool is current, this file is not.
+First read session-manager-operations/architecture/page-stewards.md, then run `node scripts/page-surface.cjs history`.
 
 ## Your page
 

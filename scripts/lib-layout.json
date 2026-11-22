@@ -84,6 +84,7 @@
   "macroAdminRoutes": "feedback-remote",
   "macroLibrary": "persona-macro",
   "mainHeapSnapshot": "telemetry",
+  "externalContract": ".",
   "mcpToolsProbe": ".",
   "mdDocCensus": ".",
   "mdDocRefs": ".",

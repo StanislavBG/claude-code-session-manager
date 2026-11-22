@@ -37,11 +37,9 @@ const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const config = require('../../config.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
-
-// Reported on unknown-route 404s so a newer scheduler-mcp-server.cjs can tell
-// the agent which app version lacks the route. Read once; omitted if unreadable.
-let APP_VERSION = null;
-try { APP_VERSION = require('../../../../package.json').version || null; } catch { APP_VERSION = null; }
+// App + outside-contract version, reported on the health route, unknown-route
+// 404s and in the token file so outside callers never probe for a route.
+const { contractInfo } = require('../externalContract.cjs');
 
 /**
  * Mode-aware token file path, resolved fresh on every call (never cached at
@@ -109,14 +107,14 @@ function createAdminHttp() {
   async function ensureToken() {
     token = crypto.randomBytes(32).toString('hex');
     const tokenPath = resolveTokenPath();
-    await config.writeJson(tokenPath, { port: null, token });
+    await config.writeJson(tokenPath, { port: null, token, ...contractInfo() });
     try { await fsp.chmod(tokenPath, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
     return token;
   }
 
   async function persistPort(port) {
     const tokenPath = resolveTokenPath();
-    await config.writeJson(tokenPath, { port, token });
+    await config.writeJson(tokenPath, { port, token, ...contractInfo() });
     try { await fsp.chmod(tokenPath, 0o600); } catch { /* */ }
   }
 
@@ -144,7 +142,7 @@ function createAdminHttp() {
     // /admin/scheduler/prds?cwd=&epicId=&status=).
     const urlObj = new URL(req.url, 'http://127.0.0.1');
     if (req.method === 'GET' && urlObj.pathname === HEALTH_PATH) {
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, ...contractInfo() });
       return;
     }
     try {
@@ -153,11 +151,13 @@ function createAdminHttp() {
         // Keep error 'not found' so older MCP servers still see the same key;
         // unknownRoute marks this as transport-level (version skew), not a
         // route handler's own 'not found'.
+        const { appVersion, contractVersion } = contractInfo();
         sendJson(res, 404, {
           ok: false,
           error: 'not found',
           unknownRoute: `${req.method} ${urlObj.pathname}`,
-          ...(APP_VERSION ? { appVersion: APP_VERSION } : {}),
+          ...(appVersion ? { appVersion } : {}),
+          contractVersion,
         });
         return;
       }

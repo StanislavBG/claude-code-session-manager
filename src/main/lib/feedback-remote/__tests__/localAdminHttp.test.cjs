@@ -103,7 +103,7 @@ test('unregistered path/method returns 404', async () => {
     const res = await request(port, { path: '/nope?x=1', token });
     expect(res.status).toBe(404);
     const appVersion = require('../../../../../package.json').version;
-    expect(res.json).toEqual({ ok: false, error: 'not found', unknownRoute: 'GET /nope', appVersion });
+    expect(res.json).toEqual({ ok: false, error: 'not found', unknownRoute: 'GET /nope', appVersion, contractVersion: 1 });
     const post = await request(port, { method: 'POST', path: '/admin/missing', token, body: {} });
     expect(post.status).toBe(404);
     expect(post.json.unknownRoute).toBe('POST /admin/missing');
@@ -122,14 +122,14 @@ test('server binds only to 127.0.0.1', async () => {
   }
 });
 
-test('start() persists token file with port + token, mode 0600', async () => {
+test('start() persists token file with port + token + appVersion + contractVersion, mode 0600', async () => {
   const admin = createAdminHttp();
   const { port, token } = await admin.start();
   try {
     const raw = fs.readFileSync(TEST_TOKEN_PATH, 'utf8');
     const parsed = JSON.parse(raw);
-    expect(parsed.port).toBe(port);
-    expect(parsed.token).toBe(token);
+    const appVersion = require('../../../../../package.json').version;
+    expect(parsed).toEqual({ port, token, appVersion, contractVersion: 1 });
     const mode = fs.statSync(TEST_TOKEN_PATH).mode & 0o777;
     expect(mode).toBe(0o600);
   } finally {
@@ -212,7 +212,10 @@ test('start()s self-check answers on the health path with the fresh bearer token
   try {
     const res = await request(port, { path: '/__admin/health', token });
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ ok: true });
+    const appVersion = require('../../../../../package.json').version;
+    expect(res.json).toEqual({ ok: true, appVersion, contractVersion: 1 });
+    const unauth = await request(port, { path: '/__admin/health' });
+    expect(unauth.status).toBe(401);
   } finally {
     await admin.stop();
   }

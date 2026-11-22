@@ -86,6 +86,8 @@ const {
   MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
 } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
+const { normalizeExternalRef } = require('../epic/externalRef.cjs');
+const { recordExternalRef, findEpicByExternalRef, withExternalRefLock } = require('../epic/externalRefIndex.cjs');
 const { OPS_ROOT_DIR, opsPath } = require('../opsOwnership.cjs');
 const { readJsonOrSync } = require('../util/atomicFs.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
@@ -467,11 +469,15 @@ function validateFeedbackInput(input = {}) {
     );
   }
 
+  const ref = normalizeExternalRef(input.externalRef);
+  if (!ref.ok) return bad(400, ref.error);
+
   return {
     ok: true,
     value: {
       toCwd,
       fromCwd,
+      externalRef: ref.value,
       title,
       body,
       tag,
@@ -624,7 +630,50 @@ async function openFeedbackSession(input, deps = {}) {
   const checked = validateFeedbackInput(input);
   if (!checked.ok) return checked;
   const v = checked.value;
+  const collaborators = { mint, appendReceipt, notify, audit: deps.appendAudit || appendAuditEvent };
 
+  if (!v.externalRef) return mintFeedbackSession(v, input, deps, collaborators);
+
+  // Lookup + mint under one per-(toCwd, ref) lock, so concurrent repeats of
+  // one handoff produce one Epic. A repeat mints nothing, spends no macro
+  // auto-start grant, and writes no receipt or audit row.
+  const externalRef = v.externalRef;
+  return withExternalRefLock({ cwd: v.toCwd, externalRef }, async () => {
+    const found = await findEpicByExternalRef({ cwd: v.toCwd, externalRef });
+    if (found) {
+      if (found.producer !== FEEDBACK_PRODUCER || found.fromCwd !== v.fromCwd) {
+        return {
+          ok: false,
+          status: 409,
+          error: `externalRef ${JSON.stringify(externalRef)} already names Epic ${found.epicId} in ${v.toCwd}, `
+            + 'opened by a different sender. Use a different externalRef.',
+        };
+      }
+      return {
+        ok: true,
+        epicId: found.epicId,
+        status: 'existing',
+        existing: true,
+        externalRef,
+        toCwd: v.toCwd,
+        fromCwd: v.fromCwd,
+        note: `This externalRef was already handed off: Epic ${found.epicId} in the receiving project`
+          + `${found.open ? ' is still open' : ' is no longer open (completed)'}. No new session was opened.`,
+      };
+    }
+    const result = await mintFeedbackSession(v, input, deps, collaborators);
+    if (result.ok) {
+      await recordExternalRef({ cwd: v.toCwd, externalRef, epicId: result.epicId, producer: FEEDBACK_PRODUCER, fromCwd: v.fromCwd });
+    }
+    return result;
+  });
+}
+
+const FEEDBACK_PRODUCER = 'cross-project-feedback';
+
+/** The validated half of openFeedbackSession: auto-start accounting, mint,
+ *  audit, notify, receipt. */
+async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify, audit }) {
   const originClaudeSessionId =
     typeof input.originClaudeSessionId === 'string' && input.originClaudeSessionId
       ? input.originClaudeSessionId
@@ -692,8 +741,9 @@ async function openFeedbackSession(input, deps = {}) {
       openingPrompt,
       sections,
       source: {
-        producer: 'cross-project-feedback',
+        producer: FEEDBACK_PRODUCER,
         fromCwd: v.fromCwd,
+        ...(v.externalRef ? { externalRef: v.externalRef } : {}),
         ...(v.fromEpicId ? { fromEpicId: v.fromEpicId } : {}),
         ...(replyTo ? { replyTo } : {}),
         ...(auto.granted
@@ -733,7 +783,7 @@ async function openFeedbackSession(input, deps = {}) {
     return { ok: false, status: 500, error: `could not open the feedback session: ${e.message}` };
   }
 
-  appendAuditEvent('epic_cross_project_feedback', {
+  audit('epic_cross_project_feedback', {
     cwd: v.toCwd,
     epicId: minted.epicId,
     fromCwd: v.fromCwd,
@@ -777,6 +827,7 @@ async function openFeedbackSession(input, deps = {}) {
     toCwd: v.toCwd,
     fromCwd: v.fromCwd,
     tag: v.tag,
+    ...(v.externalRef ? { externalRef: v.externalRef } : {}),
     status: auto.granted ? 'auto-approved' : 'proposed',
     ...(v.autoStart || macroAuto ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
     receiptOnOriginEpic,

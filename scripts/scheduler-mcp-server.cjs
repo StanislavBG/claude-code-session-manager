@@ -569,6 +569,10 @@ const TOOLS = [
           type: 'string',
           description: "Required with autoStart. Copy VERBATIM from the human's own message in this conversation; the quoted words themselves must name the target project. Do not paraphrase or write it yourself.",
         },
+        externalRef: {
+          type: 'string',
+          description: 'Optional: your own id for this handoff, 1 to 200 characters of letters, digits or . _ : / @ - (trimmed). It is stored on the new session and returned. Repeating a call with the same toCwd, fromCwd and externalRef opens nothing new and returns the session that already exists (status "existing", existing: true); the same externalRef already used by a different sender is refused with 409.',
+        },
       },
       required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'],
     },

@@ -955,3 +955,113 @@ test('EpicSourceSchema.parse keeps replyTo and replyOf', () => {
   expect(parsed.replyTo).toEqual(src.replyTo);
   expect(parsed.replyOf).toEqual(src.replyOf);
 });
+
+// ---------------------------------------------------------------------------
+// externalRef — a caller's own id for the handoff; a repeat returns the same Epic
+// ---------------------------------------------------------------------------
+
+const { recordExternalRef, lookupExternalRef } = require('../lib/epic/externalRefIndex.cjs');
+
+test('validateFeedbackInput normalizes externalRef: invalid → 400, valid trimmed, absent undefined', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  for (const bad of ['', '   ', 'has space', 'x'.repeat(201), 7, {}]) {
+    const r = validateFeedbackInput(payload(to, from, { externalRef: bad }));
+    expect(r.ok, JSON.stringify(bad)).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/externalRef/);
+  }
+  expect(validateFeedbackInput(payload(to, from, { externalRef: '  self:action/42  ' })).value.externalRef).toBe('self:action/42');
+  expect(validateFeedbackInput(payload(to, from)).value.externalRef).toBeUndefined();
+});
+
+test('openFeedbackSession stamps, records and returns externalRef', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const r = await openFeedbackSession(payload(to, from, { externalRef: 'self:action/1' }), { appendResponseEventIfKnown: async () => true });
+  expect(r.ok).toBe(true);
+  expect(r.externalRef).toBe('self:action/1');
+  expect(readActiveIndex(to).sessions[r.epicId].source.externalRef).toBe('self:action/1');
+  expect(await lookupExternalRef({ cwd: to, externalRef: 'self:action/1' })).toMatchObject({
+    epicId: r.epicId, producer: 'cross-project-feedback', fromCwd: from,
+  });
+  const plain = await openFeedbackSession(payload(to, from), { appendResponseEventIfKnown: async () => true });
+  expect(plain.externalRef).toBeUndefined();
+  expect('externalRef' in readActiveIndex(to).sessions[plain.epicId].source).toBe(false);
+});
+
+test('a repeat with the same externalRef returns the existing Epic: no mint, receipt, audit or macro count', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  const receipts = [];
+  const audits = [];
+  const deps = {
+    appendResponseEventIfKnown: async (...a) => { receipts.push(a); return true; },
+    notifyRenderer: () => {},
+    listMacros: async () => [macroFor(to)],
+    appendAudit: (...a) => { audits.push(a); },
+  };
+  const send = (over = {}) => openFeedbackSession(
+    payload(to, from, { tag: 'bug', originClaudeSessionId: s.sessionId, fromEpicId: s.epicId, ...over }), deps);
+  const first = await send({ externalRef: 'self:action/rep' });
+  expect(first.ok).toBe(true);
+  expect(first.status).toBe('auto-approved');
+  expect(receipts.length).toBe(1);
+  expect(audits.length).toBe(1);
+  const before = Object.keys(readActiveIndex(to).sessions).length;
+  for (let i = 0; i < 5; i += 1) {
+    const again = await send({ externalRef: 'self:action/rep' });
+    expect(again).toEqual({
+      ok: true,
+      epicId: first.epicId,
+      status: 'existing',
+      existing: true,
+      externalRef: 'self:action/rep',
+      toCwd: to,
+      fromCwd: from,
+      note: expect.any(String),
+    });
+  }
+  expect(Object.keys(readActiveIndex(to).sessions).length).toBe(before);
+  expect(receipts.length).toBe(1);
+  expect(audits.length).toBe(1);
+  // 1 real grant so far; four more must still be granted (repeats did not count).
+  for (let i = 0; i < 4; i += 1) {
+    expect((await send()).status).toBe('auto-approved');
+  }
+  expect((await send()).autoStart.granted).toBe(false);
+});
+
+test('the same externalRef from another fromCwd or another producer is refused with 409', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const other = await mkProject();
+  const deps = { appendResponseEventIfKnown: async () => true };
+  const first = await openFeedbackSession(payload(to, from, { externalRef: 'self:action/clash' }), deps);
+  expect(first.ok).toBe(true);
+  const before = Object.keys(readActiveIndex(to).sessions).length;
+  const r = await openFeedbackSession(payload(to, other, { externalRef: 'self:action/clash' }), deps);
+  expect(r.ok).toBe(false);
+  expect(r.status).toBe(409);
+  await recordExternalRef({ cwd: to, externalRef: 'self:action/foreign', epicId: first.epicId, producer: 'macro-run', fromCwd: from });
+  const r2 = await openFeedbackSession(payload(to, from, { externalRef: 'self:action/foreign' }), deps);
+  expect(r2.ok).toBe(false);
+  expect(r2.status).toBe(409);
+  expect(Object.keys(readActiveIndex(to).sessions).length).toBe(before);
+});
+
+test('two concurrent calls with the same externalRef produce one Epic', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const deps = { appendResponseEventIfKnown: async () => true };
+  const [a, b] = await Promise.all([
+    openFeedbackSession(payload(to, from, { externalRef: 'self:action/race' }), deps),
+    openFeedbackSession(payload(to, from, { externalRef: 'self:action/race' }), deps),
+  ]);
+  expect(a.ok && b.ok).toBe(true);
+  expect(a.epicId).toBe(b.epicId);
+  expect([a.existing === true, b.existing === true].filter(Boolean).length).toBe(1);
+  const ids = Object.values(readActiveIndex(to).sessions).filter((x) => x.source && x.source.externalRef === 'self:action/race');
+  expect(ids.length).toBe(1);
+});

@@ -109,6 +109,8 @@ function heartbeatPath() { return assertNotLiveRoot(path.join(schedulerHome(), '
 function sessionSlotsConfigPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'session-slots-config.json'), 'sessionSlotsConfigPath'); }
 /** Machine-level (project cwd, externalRef) -> Epic id index (epic/externalRefIndex.cjs). */
 function externalRefIndexPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'external-refs.json'), 'externalRefIndexPath'); }
+/** Machine-level "Needs you" items posted by outside apps (feedback-remote/needsYouStore.cjs). */
+function needsYouPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'needs-you.json'), 'needsYouPath'); }
 /** Last-seen outside-facing state of every open Epic (epic/epicStateWatcher.cjs). */
 function epicStateSnapshotPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'epic-state-snapshot.json'), 'epicStateSnapshotPath'); }
 function watchdogLogsDir() { return assertNotLiveRoot(path.join(schedulerHome(), 'logs'), 'watchdogLogsDir'); }
@@ -203,6 +205,7 @@ module.exports = {
   heartbeatPath,
   sessionSlotsConfigPath,
   externalRefIndexPath,
+  needsYouPath,
   epicStateSnapshotPath,
   adminTokenPath,
   machineStateLogCwd,

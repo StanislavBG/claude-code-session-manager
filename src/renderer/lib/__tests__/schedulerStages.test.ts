@@ -196,7 +196,7 @@ describe('summarizeQueue', () => {
       job('7-g', { status: 'quarantined' }),
     ]
     expect(summarizeQueue(js, NOW)).toEqual({
-      readyNow: 1, totalQueued: 2, heldByDeps: 1, needsYou: 3, needsYouStage: 1,
+      readyNow: 1, totalQueued: 2, heldByDeps: 1, needsYou: 2, needsYouStage: 1,
       failedCount: 1, needsReviewCount: 1, doneToday: 1, inFlight: 1,
     })
   })
@@ -204,6 +204,11 @@ describe('summarizeQueue', () => {
     const js = [job('1-a'), job('2-b', { dependsOn: ['1-a'] }), job('3-c', { status: 'failed', dependsOn: ['2-b'] })]
     expect(summarizeQueue(js, NOW).needsYouStage).toBe(3)
     expect(summarizeQueue([job('1-a')], NOW).needsYouStage).toBeNull()
+  })
+  it('needs_review is excluded from needsYou and needsYouStage but still counted', () => {
+    const js = [job('1-a'), job('2-b', { status: 'needs_review', dependsOn: ['1-a'] }), job('3-c', { status: 'failed', dependsOn: ['2-b'] })]
+    expect(summarizeQueue(js, NOW)).toMatchObject({ needsYou: 1, needsYouStage: 3, needsReviewCount: 1, failedCount: 1 })
+    expect(summarizeQueue([job('1-a', { status: 'needs_review' })], NOW)).toMatchObject({ needsYou: 0, needsYouStage: null, needsReviewCount: 1 })
   })
   it('empty', () => {
     expect(summarizeQueue([], NOW)).toMatchObject({ readyNow: 0, totalQueued: 0, needsYou: 0, needsYouStage: null })

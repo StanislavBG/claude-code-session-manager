@@ -107,7 +107,8 @@ function quarantinedAtMs(job: ScheduleJobLite): number | null {
  * read) — only `status === 'proposed'` entries surface here since archived
  * Epics are 'completed'. `chats` keys on Epic id (== tabId); only chats
  * whose most recent ticket is 'needs-input' surface. `jobs` is the
- * scheduler snapshot; 'failed' / 'needs_review' / 'quarantined' surface.
+ * scheduler snapshot; 'failed' / 'quarantined' surface ('needs_review' never —
+ * the scheduler is fixing it).
  * `now` defaults to Date.now() and only affects a quarantined row's
  * `escalated` flag — pass it explicitly in tests for determinism.
  * `outside` is window.api.needsYou.list()'s items; only `status === 'open'`
@@ -153,7 +154,7 @@ export function buildNeedsYouRows(
   }
 
   for (const job of jobs) {
-    // Quarantined is deliberately NOT folded into the failed/needs_review
+    // Quarantined is deliberately NOT folded into the failed
     // branch below: it must never offer Retry (re-running an unstamped PRD
     // is exactly what quarantine exists to prevent) and has its own action
     // — adopt (or archive) from the Scheduler tab.
@@ -195,11 +196,13 @@ export function buildNeedsYouRows(
       })
       continue
     }
-    if (job.status !== 'failed' && job.status !== 'needs_review') continue
+    // needs_review is deliberately absent: a parked PRD self-heals (scheduler
+    // ladder), so it is the scheduler's work, not a request for the human.
+    if (job.status !== 'failed') continue
     rows.push({
       id: `job:${job.slug}`,
       kind: 'job-failed',
-      label: job.status === 'failed' ? 'Scheduler job failed' : 'Scheduler job needs review',
+      label: 'Scheduler job failed',
       detail: job.title || job.slug,
       meta: job.error ?? 'No error detail recorded.',
       project: job.cwd ? projectNameFromCwd(job.cwd) : null,

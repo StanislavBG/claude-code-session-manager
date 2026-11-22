@@ -24,7 +24,7 @@ import { BandRow, ClickToEditNumber, InfoDot, KpiCell, MiniBar, SegmentPills, St
  *
  * Where the old stats went (nothing shown before is lost):
  *   QueueHealthHeader  verdict headline → title-band ⓘ; slots → SLOTS cell;
- *                      pending/dispatchable → READY NOW cell + ⓘ; needs_review → NEEDS YOU
+ *                      pending/dispatchable → READY NOW cell + ⓘ; needs_review → BEING FIXED
  *                      cell; oldest running / last batch / last dispatch attempt → title-band ⓘ + meta.
  *   WindowStrip        reset countdown + utilization (+ stale-poll note) → WINDOW USED cell;
  *                      pending/running/completed-today legend → title meta + READY NOW / DONE TODAY;
@@ -37,7 +37,8 @@ export type SubView = 'queue' | 'prds' | 'history' | 'tasks' | 'machine'
 export type PlanMode = 'graph' | 'list' | 'critical'
 
 const POLL_MS = 15_000
-const ATTENTION = new Set(['failed', 'needs_review', 'quarantined'])
+/** What NEEDS YOU counts — needs_review is the scheduler's own self-heal (BEING FIXED). */
+const ATTENTION = new Set(['failed', 'quarantined'])
 
 /** Nearest ancestor whose computed overflowY is auto/scroll — the job list's own scroller. */
 function nearestScroller(el: HTMLElement): HTMLElement | null {
@@ -49,7 +50,7 @@ function nearestScroller(el: HTMLElement): HTMLElement | null {
 }
 
 /**
- * Shared with the plan list: first failed/needs_review/quarantined row scrolls
+ * Shared with the plan list: first failed/quarantined row scrolls
  * into view inside the job list's own scroller only (scrollWithin), so the
  * page frames above it never move.
  */
@@ -408,7 +409,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
             testId="kpi-needs-you"
             label="Needs you"
             value={
-              <button type="button" data-testid="kpi-needs-you-jump" onClick={scrollToNeedsYou} className="font-semibold text-accent hover:underline" title="Scroll to the first failed / needs-review / quarantined row">
+              <button type="button" data-testid="kpi-needs-you-jump" onClick={scrollToNeedsYou} className="font-semibold text-accent hover:underline" title="Scroll to the first failed / quarantined row">
                 {summary.needsYou}
               </button>
             }
@@ -419,8 +420,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
             }
             third={[
               summary.failedCount > 0 && `${summary.failedCount} failed`,
-              summary.needsReviewCount > 0 && `${summary.needsReviewCount} needs review`,
-              (summary.needsYou - summary.failedCount - summary.needsReviewCount) > 0 && `${summary.needsYou - summary.failedCount - summary.needsReviewCount} quarantined`,
+              (summary.needsYou - summary.failedCount) > 0 && `${summary.needsYou - summary.failedCount} quarantined`,
             ].filter(Boolean).join(' · ')}
           />
         ) : (
@@ -428,7 +428,15 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
             testId="kpi-needs-you"
             label="Needs you"
             value={<span className="inline-flex items-center gap-1.5 text-[15px]"><span className="w-2.5 h-2.5 rounded-full bg-sage" aria-hidden="true" />all clear</span>}
-            third="0 failed · 0 needs review"
+            third="0 failed · 0 quarantined"
+          />
+        )}
+        {summary.needsReviewCount > 0 && (
+          <KpiCell
+            testId="kpi-being-fixed"
+            label="Being fixed"
+            value={summary.needsReviewCount}
+            sub="the scheduler is handling them"
           />
         )}
         <KpiCell

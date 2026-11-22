@@ -540,10 +540,13 @@ export function summarizeQueue(jobs: ScheduleJob[], now: number = Date.now()): Q
     else if (j.status === 'completed' && j.finishedAt && new Date(Date.parse(j.finishedAt)).toDateString() === today) doneToday++
   }
   let needsYouStage: number | null = null
-  if (failedCount + needsReviewCount + quarantined > 0) {
+  // needs_review is the scheduler's own self-heal, not the human's — it is
+  // reported separately as needsReviewCount and never feeds needsYou.
+  const needsYou = failedCount + quarantined
+  if (needsYou > 0) {
     for (const p of buildPlans(cj, { sessions: {}, now })) {
       for (const s of p.stages) {
-        if (s.rows.some((r) => isAttention(r.status))) {
+        if (s.rows.some((r) => r.status === 'failed' || r.status === 'quarantined')) {
           if (needsYouStage === null || s.n < needsYouStage) needsYouStage = s.n
           break
         }
@@ -554,7 +557,7 @@ export function summarizeQueue(jobs: ScheduleJob[], now: number = Date.now()): Q
     readyNow,
     totalQueued,
     heldByDeps: totalQueued - readyNow,
-    needsYou: failedCount + needsReviewCount + quarantined,
+    needsYou,
     needsYouStage,
     failedCount,
     needsReviewCount,

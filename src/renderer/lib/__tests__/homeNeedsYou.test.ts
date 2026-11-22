@@ -65,6 +65,11 @@ describe('buildNeedsYouRows', () => {
     ])
   })
 
+  it('adds no row for a needs_review job — the scheduler is fixing it, not asking the human', () => {
+    const jobs = [{ slug: '829-bar', title: 'Bar PRD', cwd: '/home/bilko/Projects/session-manager', status: 'needs_review', error: 'gate red' }]
+    expect(buildNeedsYouRows({}, {}, jobs)).toEqual([])
+  })
+
   it('ignores jobs in other statuses', () => {
     const jobs = [{ slug: 'a', title: 't', cwd: null, status: 'pending', error: null }]
     expect(buildNeedsYouRows({}, {}, jobs)).toEqual([])

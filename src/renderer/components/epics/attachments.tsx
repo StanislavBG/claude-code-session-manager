@@ -21,6 +21,21 @@ export interface AttachmentItem {
   file: File
 }
 
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+
+/** IHDR width/height of a PNG (big-endian uint32 at offsets 16 and 20), or
+ *  null when `bytes` is shorter than 24 bytes or lacks the PNG signature. */
+export function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 24) return null
+  for (let i = 0; i < PNG_SIGNATURE.length; i++) if (bytes[i] !== PNG_SIGNATURE[i]) return null
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return { width: dv.getUint32(16), height: dv.getUint32(20) }
+}
+
+/** A pasted PNG this small is the clipboard's placeholder for a screenshot
+ *  that never landed (a 70-byte 1×1 image), not a real screenshot. */
+const DEGENERATE_PNG_MAX_PX = 2
+
 export interface AttachmentsState {
   items: AttachmentItem[]
   add: (files: FileList | File[]) => void
@@ -35,15 +50,21 @@ export function useAttachments(): AttachmentsState {
   // Mirror of `items` so remove/clear/unmount can revoke synchronously, outside
   // a state updater (updaters may run twice under StrictMode).
   const itemsRef = useRef<AttachmentItem[]>([])
+  // Guards the fire-and-forget pasted-PNG probe from setting state after unmount.
+  const mountedRef = useRef(true)
   const commit = (next: AttachmentItem[]) => {
     itemsRef.current = next
     setItems(next)
   }
   // Each blob URL pins its whole File until revoked — release whatever is still held on unmount.
   useEffect(
-    () => () => {
-      for (const i of itemsRef.current) if (i.url) URL.revokeObjectURL(i.url)
-      itemsRef.current = []
+    () => {
+      mountedRef.current = true
+      return () => {
+        mountedRef.current = false
+        for (const i of itemsRef.current) if (i.url) URL.revokeObjectURL(i.url)
+        itemsRef.current = []
+      }
     },
     [],
   )
@@ -63,6 +84,26 @@ export function useAttachments(): AttachmentsState {
       }
     })
     commit([...itemsRef.current, ...next])
+    for (const item of next) {
+      if (item.hasRealPath || item.file.type !== 'image/png') continue
+      void probeDegeneratePng(item)
+    }
+  }
+  // Fire-and-forget: a pasted PNG of at most 2×2 px is a screenshot that never
+  // reached the clipboard — drop it and tell the user instead of sending a blank.
+  const probeDegeneratePng = async (item: AttachmentItem) => {
+    let size: { width: number; height: number } | null
+    try {
+      size = pngSize(new Uint8Array(await item.file.slice(0, 24).arrayBuffer()))
+    } catch {
+      return
+    }
+    if (!size || size.width > DEGENERATE_PNG_MAX_PX || size.height > DEGENERATE_PNG_MAX_PX) return
+    if (!mountedRef.current || !itemsRef.current.some((i) => i.id === item.id)) return
+    remove(item.id)
+    toast.warn(
+      `The pasted image is only ${size.width}×${size.height} px — your screenshot did not reach the clipboard, so it was not attached. Copy it again and paste.`,
+    )
   }
   const remove = (id: string) => {
     const gone = itemsRef.current.find((i) => i.id === id)

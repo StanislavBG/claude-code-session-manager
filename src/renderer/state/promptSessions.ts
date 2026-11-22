@@ -39,6 +39,8 @@ export interface EpicSource {
   sourceTabId?: string
   /** 'new-epic-ui' only — the id of the macro whose press launched this Epic. */
   macroId?: string
+  /** An outside app's own id for this Epic (validated by main's epic/externalRef.cjs). */
+  externalRef?: string
   /** 'cross-project-feedback' only — the sending project's cwd. */
   fromCwd?: string
   /** 'cross-project-feedback' only — the sending Epic's id, if it had one. */

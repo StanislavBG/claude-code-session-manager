@@ -45,6 +45,10 @@ const EpicSourceSchema = z.object({
   fromEpicId: z.string().optional(),
   // The macro that launched this Epic (new-epic-ui Epics only).
   macroId: z.string().optional(),
+  // An outside app's own id for this Epic. Any string here: the strict rule
+  // lives in epic/externalRef.cjs at entry points, since a stricter stored
+  // shape would make dropInvalidSessions drop a whole row.
+  externalRef: z.string().optional(),
   // Zod strips undeclared keys on the merge path; a stricter shape could make dropInvalidSessions (ipcSchemas.cjs) drop a whole row holding an older or malformed value.
   proposal: z.unknown().optional(),
   autoApprove: z.unknown().optional(),

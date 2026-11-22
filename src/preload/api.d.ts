@@ -2880,6 +2880,8 @@ export interface SessionManagerAPI {
         title: string;
         prompt: string;
         macroId?: string;
+        /** An outside app's own id for the Epic to create. */
+        externalRef?: string;
         /** Set when main awaits the result; echo it back via `reportExternalNewSessionResult`. */
         requestId?: string;
         via?: 'script';
@@ -2994,6 +2996,8 @@ export interface PromptSessionsCreateEpicPayload {
     sourceTabId?: string;
     /** The macro that launched this Epic. */
     macroId?: string;
+    /** An outside app's own id for this Epic. */
+    externalRef?: string;
   };
   /** Full first-prompt body + its labeled sections (epicIntake.ts's
    *  composeEpicIntake) — carried alongside goalText so the Epic's first

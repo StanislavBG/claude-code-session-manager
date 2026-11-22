@@ -14,7 +14,8 @@
  * (`BuildLaunch`: title, sent lines, entry replaced) — component state only, so
  * an app reload forgets it and the panes fall back to the macro label — and the
  * `“<title>” is ready` toast when a macro's job goes from queued / running to
- * done (Project Home v2 DESIGN_SPEC §4).
+ * done (Project Home v2 DESIGN_SPEC §4) — or `<label>: waiting for your OK in Project Home ▸ Video`
+ * when a Video tool's review-stage job ends `awaiting_review`.
  *
  * The Tools key button's findings count is the last link-map scan the Tools
  * pane reported for this cwd (`onFindingsCount`) — unknown, so hidden, until
@@ -70,7 +71,14 @@ function ProjectHomeComponent() {
   // launch is dropped so a later job this window did not start never shows its title or lines.
   const onJobSettled = useCallback(
     (status: MacroJobStatus) => {
-      if (status.state === 'done') {
+      if (status.state === 'done' && status.status === 'awaiting_review') {
+        // A Video tool's review stage finished: its entry now waits on the human, not ready yet.
+        const label =
+          library.find((m) => m.id === status.macroId)?.label ??
+          cwdLaunches?.[status.macroId]?.title ??
+          status.macroId
+        toast.success(`${label}: waiting for your OK in Project Home ▸ Video`)
+      } else if (status.state === 'done') {
         const title =
           cwdLaunches?.[status.macroId]?.title ??
           library.find((m) => m.id === status.macroId)?.label ??

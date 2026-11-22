@@ -8,18 +8,22 @@ import { BUILDING_ROW_ID, type BuildLaunch } from '../BuildingPanel'
 import { VIDEO_STYLES } from '../composerTemplates'
 import { useToast } from '../../../../../state/toast'
 import type { ProjectVideoEntry } from '../../../../../lib/projectPages/useProjectPagesOutput'
-import type { Macro, MacroJobStatus, ProjectVideoMeta } from '../../../../../../preload/api'
+import type { Macro, MacroJobStatus, ProjectVideoMeta, VideoReview } from '../../../../../../preload/api'
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
 
 const rename = vi.fn()
 const del = vi.fn()
+const reviewList = vi.fn()
+const reviewDecide = vi.fn()
 
 beforeEach(() => {
   rename.mockReset().mockResolvedValue({ ok: true, title: 'x' })
   del.mockReset().mockResolvedValue({ ok: true })
-  ;(window as unknown as { api: unknown }).api = { projectPages: { rename, delete: del } }
+  reviewList.mockReset().mockResolvedValue([])
+  reviewDecide.mockReset().mockResolvedValue({ ok: true, slug: 's', stage: 'final', decision: {} })
+  ;(window as unknown as { api: unknown }).api = { projectPages: { rename, delete: del, reviewList, reviewDecide } }
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
 })
 
@@ -876,5 +880,141 @@ describe('VideosPane project Video tools', () => {
     click(tid('project-home-generate'))
     click(tid('composer-generate'))
     expect(onLaunch).toHaveBeenCalledWith(DEMO, DEMO_LINES)
+  })
+})
+
+describe('VideosPane tool entries: review panel, badges and Regenerate', () => {
+  const TOOL: Macro = {
+    ...DEMO,
+    id: 'burrow-episode',
+    label: 'Episode',
+    agentName: 'burrow-video',
+    surface: 'project-video',
+    projects: ['/proj'],
+    prompt: 'Make episode {{topic}}.',
+    inputs: [{ name: 'topic', label: 'Topic', required: true }],
+    job: { estimateMinutes: 10, review: true },
+  }
+  const MOLES = video('moles-ep', 'Moles episode', HOUR, { kind: 'episode', aspect: '9:16' })
+  function review(entryId: string, status: VideoReview['status'], slug = `slug-${entryId}`): VideoReview {
+    return {
+      entryId,
+      status,
+      dispatch: {
+        entryId,
+        macroId: 'burrow-episode',
+        epicId: 'epic-9',
+        slug,
+        stage: status === 'approved' ? 'final' : 'review',
+        inputValues: { topic: 'Moles' },
+        extraInstructions: '',
+        dispatchedAt: isoAgo(HOUR),
+      },
+      material: status === 'building' ? null : { entryId, text: 'Script', images: [], savedAt: isoAgo(HOUR) },
+      decision: null,
+    }
+  }
+  const toolStatus = (over: Partial<MacroJobStatus>) => status({ macroId: 'burrow-episode', ...over })
+  const badgeOf = (scope: ParentNode | null) => scope?.querySelector('[data-testid="video-tool-badge"]')?.textContent ?? null
+  const rowOf = (id: string) => rows().find((r) => r.getAttribute('data-id') === id) ?? null
+
+  async function mountLoaded(over: Partial<VideosPaneProps>) {
+    const c = mount(over)
+    await act(async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+    return c
+  }
+
+  it('shows the review panel above the library list for a waiting entry', async () => {
+    reviewList.mockResolvedValue([review('new-ep', 'waiting')])
+    await mountLoaded({ entries: [TOUR], tools: [TOOL] })
+    const panel = tid('video-review-panel')!
+    expect(panel.textContent).toContain('Waiting for your OK')
+    expect(follows(panel, tid('project-home-library')!)).toBe(true)
+    expect(reviewList).toHaveBeenCalledWith({ cwd: '/proj' })
+  })
+
+  it('badges each tool entry: Building, Waiting for review, Failed: <reason>, Done', async () => {
+    reviewList.mockResolvedValue([
+      review('moles-ep', 'approved'),
+      review('build-ep', 'building'),
+      review('wait-ep', 'waiting'),
+      review('fail-ep', 'building', 'slug-fail'),
+    ])
+    await mountLoaded({
+      entries: [MOLES, TOUR],
+      tools: [TOOL],
+      toolJobStatus: {
+        'burrow-episode': toolStatus({ slug: 'slug-fail', entryId: 'fail-ep', state: 'failed', status: 'failed', reason: 'render timed out' }),
+      },
+    })
+    expect(badgeOf(rowOf('moles-ep'))).toBe('Done')
+    // A Demo Video entry has no review record, so no badge.
+    expect(badgeOf(rowOf('product-tour'))).toBeNull()
+    expect(badgeOf(tid('video-tool-entry-build-ep'))).toBe('Building')
+    expect(badgeOf(tid('video-tool-entry-wait-ep'))).toBe('Waiting for review')
+    expect(badgeOf(tid('video-tool-entry-fail-ep'))).toBe('Failed: render timed out')
+  })
+
+  it("a saved tool entry reads Building while the tool's job for it is pending / running", async () => {
+    reviewList.mockResolvedValue([review('moles-ep', 'approved', 'slug-final')])
+    for (const state of ['queued', 'running'] as const) {
+      await mountLoaded({
+        entries: [MOLES],
+        tools: [TOOL],
+        toolJobStatus: { 'burrow-episode': toolStatus({ slug: 'slug-final', entryId: 'moles-ep', state }) },
+      })
+      expect(badgeOf(rowOf('moles-ep'))).toBe('Building')
+      act(() => root!.unmount())
+      container!.remove()
+    }
+    root = null
+    container = null
+  })
+
+  it("reloads the review list when a tool's job status changes", async () => {
+    await mountLoaded({ entries: [TOUR], tools: [TOOL], toolJobStatus: { 'burrow-episode': toolStatus({ state: 'running' }) } })
+    expect(reviewList).toHaveBeenCalledTimes(1)
+    rerender({ entries: [TOUR], tools: [TOOL], toolJobStatus: { 'burrow-episode': toolStatus({ state: 'running' }) } })
+    await flush()
+    expect(reviewList).toHaveBeenCalledTimes(1)
+    rerender({
+      entries: [TOUR],
+      tools: [TOOL],
+      toolJobStatus: { 'burrow-episode': toolStatus({ state: 'done', status: 'awaiting_review' }) },
+    })
+    await flush()
+    expect(reviewList).toHaveBeenCalledTimes(2)
+  })
+
+  it('Regenerate on a tool entry re-runs that tool with its recorded inputs and Replace entry, never Demo Video', async () => {
+    reviewList.mockResolvedValue([review('moles-ep', 'approved')])
+    const onLaunch = vi.fn()
+    const onLaunched = vi.fn()
+    await mountLoaded({ entries: [MOLES, TOUR], tools: [TOOL], onLaunch, onLaunched })
+    click(rowOf('moles-ep'))
+    click(tid('project-home-regenerate'))
+    expect(tid('composer-generate')).toBeNull()
+    expect(onLaunch).toHaveBeenCalledTimes(1)
+    expect(onLaunch).toHaveBeenCalledWith(TOOL, 'Replace entry: moles-ep', { topic: 'Moles' })
+    expect(onLaunched).toHaveBeenCalledWith('burrow-episode', expect.objectContaining({ replaceEntryId: 'moles-ep' }))
+  })
+
+  it("a tool entry's Regenerate is disabled while that tool builds; a Demo Video entry keeps the composer Regenerate", async () => {
+    reviewList.mockResolvedValue([review('moles-ep', 'approved')])
+    const onLaunch = vi.fn()
+    await mountLoaded({
+      entries: [MOLES, TOUR],
+      tools: [TOOL],
+      onLaunch,
+      toolJobStatus: { 'burrow-episode': toolStatus({ state: 'running' }) },
+    })
+    click(rowOf('moles-ep'))
+    expect((tid('project-home-regenerate') as HTMLButtonElement).disabled).toBe(true)
+    click(rowOf('product-tour'))
+    click(tid('project-home-regenerate'))
+    click(tid('composer-generate'))
+    expect(onLaunch).toHaveBeenCalledWith(DEMO, `${TOUR_LINES}\nReplace entry: product-tour`)
   })
 })

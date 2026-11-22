@@ -32,16 +32,25 @@
  * (`toolJobStatus`) queued / running disables it as `Building…`; a failed run shows its reason line
  * beside it until this window launches it again (`toolLaunches`).
  *
+ * Review step (VideoReviewPanel, above the library): every tool entry waiting on the human gets a
+ * `Waiting for your OK` card; the panel reloads its list when any tool's job status changes and
+ * reports it back here. Each tool entry — a review record whose dispatch names a macro — carries a
+ * badge (`video-tool-badge`): `Building` (review building, or the tool's job queued / running),
+ * `Waiting for review`, `Failed: <reason>` (the tool's failed job for that entry) or `Done`. Tool
+ * entries not yet in the library list under it with the same badge. Regenerate… on a tool entry
+ * re-runs that tool (never Demo Video) with its recorded input values and `Replace entry: <id>`.
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { VideoPlayer } from './VideoPlayer'
 import { createdLabel, fitInstructions } from './PagesPane'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
 import { LibraryEmptyState } from './LibraryEmptyState'
+import { VideoReviewPanel } from './VideoReviewPanel'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import {
   VIDEO_STYLES,
@@ -64,7 +73,7 @@ import {
   type BuildLaunch,
 } from './BuildingPanel'
 import type { ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
-import type { Macro, MacroJobStatus, ProjectVideoMeta } from '../../../../../preload/api'
+import type { Macro, MacroJobStatus, ProjectVideoMeta, VideoReview } from '../../../../../preload/api'
 
 const GENERATE_CLASS =
   'flex h-[38px] flex-none items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-semibold text-bg-hi cursor-pointer enabled:hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
@@ -225,7 +234,7 @@ function videoTarget(m: ProjectVideoMeta): string | null {
   return t || null
 }
 
-function videoRow(e: ProjectVideoEntry): LibraryRow {
+function videoRow(e: ProjectVideoEntry, badge: ToolBadge | null = null): LibraryRow {
   const m = e.meta
   const target = m ? videoTarget(m) : null
   return {
@@ -268,6 +277,7 @@ function videoRow(e: ProjectVideoEntry): LibraryRow {
               <span data-col="grade">{fmt(m.report.readingGrade)}</span>
             </span>
           )}
+          {badge && <ToolBadgeChip badge={badge} />}
         </span>
       </span>
     ),
@@ -342,6 +352,46 @@ function QualityCard({ report }: { report: ProjectVideoMeta['report'] }) {
     </section>
   )
 }
+
+type ToolBadge = { kind: 'building' | 'waiting' | 'failed' | 'done'; text: string }
+
+/** The tool's job when it belongs to this review's entry (by entryId, else the dispatched slug). */
+function jobForReview(review: VideoReview, status: MacroJobStatus | undefined): MacroJobStatus | undefined {
+  if (!status) return undefined
+  if (status.entryId) return status.entryId === review.entryId ? status : undefined
+  return review.dispatch && status.slug === review.dispatch.slug ? status : undefined
+}
+
+/** A tool entry's badge; null when the review record names no tool. */
+export function toolEntryBadge(
+  review: VideoReview,
+  toolJobStatus: Record<string, MacroJobStatus | undefined> | undefined,
+): ToolBadge | null {
+  const macroId = review.dispatch?.macroId
+  if (!macroId) return null
+  const job = jobForReview(review, toolJobStatus?.[macroId])
+  if (job?.state === 'failed') return { kind: 'failed', text: `Failed: ${job.reason ?? job.status}` }
+  if (review.status === 'building' || isBuilding(job)) return { kind: 'building', text: 'Building' }
+  if (review.status === 'waiting') return { kind: 'waiting', text: 'Waiting for review' }
+  return { kind: 'done', text: 'Done' }
+}
+
+const BADGE_CLASS: Record<ToolBadge['kind'], string> = {
+  building: 'self-start rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-accent-dark',
+  waiting: 'self-start rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-accent',
+  failed: 'self-start break-words rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-red-400',
+  done: 'self-start rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-sage-dark',
+}
+
+function ToolBadgeChip({ badge }: { badge: ToolBadge }) {
+  return (
+    <span data-testid="video-tool-badge" data-kind={badge.kind} className={BADGE_CLASS[badge.kind]}>
+      {badge.text}
+    </span>
+  )
+}
+
+const NO_REVIEWS: VideoReview[] = []
 
 export interface VideosPaneProps {
   cwd?: string | null
@@ -435,6 +485,21 @@ export function VideosPane({
   // Open composer: `{}` = Generate video, `{ tplId }` = an empty-state card, `{ regen }` = Regenerate…
   // (mounted per open — it reads its props once).
   const [composer, setComposer] = useState<{ regen?: ComposerRegen; tplId?: string } | null>(null)
+  // VideoReviewPanel's last loaded list (every status).
+  const [reviews, setReviews] = useState<VideoReview[]>(NO_REVIEWS)
+  // Any tool job change reloads the review list.
+  const reviewReloadKey = useMemo(
+    () =>
+      Object.keys(toolJobStatus ?? {})
+        .sort()
+        .map((id) => {
+          const s = toolJobStatus?.[id]
+          return `${id}:${s?.slug ?? ''}:${s?.state ?? ''}:${s?.status ?? ''}:${s?.entryId ?? ''}`
+        })
+        .join('|'),
+    [toolJobStatus],
+  )
+  const reviewById = useMemo(() => new Map(reviews.map((r) => [r.entryId, r])), [reviews])
   const select = onSelect ?? setOwnId
   const pickedId = onSelect ? (selectedId ?? null) : ownId
   const build = isBuilding(jobStatus) ? jobStatus : undefined
@@ -472,7 +537,30 @@ export function VideosPane({
     onLaunch(macro, extra)
   }
 
+  /** The project tool an entry's review record names (undefined for Demo Video entries). */
+  const toolFor = (entry: ProjectVideoEntry): { review: VideoReview; tool: Macro | undefined } | null => {
+    const review = reviewById.get(entry.id)
+    const macroId = review?.dispatch?.macroId
+    if (!review || !macroId) return null
+    return { review, tool: tools?.find((t) => t.id === macroId) }
+  }
+
   const regenerate = (entry: ProjectVideoEntry) => {
+    const named = toolFor(entry)
+    if (named) {
+      // A tool entry re-runs its own tool with the recorded inputs, never Demo Video.
+      if (!named.tool) return
+      const inputValues = named.review.dispatch?.inputValues ?? {}
+      const extra = `Replace entry: ${entry.id}`
+      onLaunched?.(named.tool.id, {
+        title: entry.meta?.title || entry.id,
+        lines: [extra],
+        replaceEntryId: entry.id,
+        at: Date.now(),
+      })
+      onLaunch(named.tool, extra, inputValues)
+      return
+    }
     const { tplId, cfg } = entry.meta
       ? videoCfgFromEntry(entry.meta)
       : { tplId: FALLBACK_TEMPLATE, cfg: videoDefaults(FALLBACK_TEMPLATE) }
@@ -532,15 +620,43 @@ export function VideosPane({
     </div>
   )
 
-  const rows: LibraryRow[] = entries.map((e) =>
-    build && e.id === replacingId
-      ? {
-          id: e.id,
-          title: e.meta?.title,
-          content: <VideoBuildingRow title={buildTitle} lengthS={buildLength ?? e.meta?.lengthS ?? null} status={build} />,
-        }
-      : videoRow(e),
+  const rows: LibraryRow[] = entries.map((e) => {
+    if (build && e.id === replacingId) {
+      return {
+        id: e.id,
+        title: e.meta?.title,
+        content: <VideoBuildingRow title={buildTitle} lengthS={buildLength ?? e.meta?.lengthS ?? null} status={build} />,
+      }
+    }
+    const review = reviewById.get(e.id)
+    return videoRow(e, review ? toolEntryBadge(review, toolJobStatus) : null)
+  })
+  // Tool entries with a review record but no saved library entry yet (still building, waiting or failed).
+  const pendingToolEntries = reviews.filter((r) => r.dispatch?.macroId && !entries.some((e) => e.id === r.entryId))
+  const pendingNode = pendingToolEntries.length > 0 && (
+    <ul data-testid="video-tool-entries" aria-label="Tool entries" className="m-0 flex flex-none list-none flex-col gap-1.5 p-0">
+      {pendingToolEntries.map((r) => {
+        const badge = toolEntryBadge(r, toolJobStatus)
+        const tool = tools?.find((t) => t.id === r.dispatch?.macroId)
+        return (
+          <li
+            key={r.entryId}
+            data-testid={`video-tool-entry-${r.entryId}`}
+            className="flex flex-col gap-1 rounded-[9px] border border-rule-structural px-3 py-2"
+          >
+            <span className="truncate text-[12.5px] font-semibold text-fg">{r.entryId}</span>
+            <span className="truncate font-mono text-[10.5px] text-fg-faint">{tool?.label ?? r.dispatch?.macroId}</span>
+            {badge && <ToolBadgeChip badge={badge} />}
+          </li>
+        )
+      })}
+    </ul>
   )
+  const reviewPanel = <VideoReviewPanel cwd={cwd} reloadKey={reviewReloadKey} onReviews={setReviews} />
+  const selectedTool = selected ? toolFor(selected) : null
+  const regenDisabled = selectedTool
+    ? !selectedTool.tool || launching !== null || isBuilding(toolJobStatus?.[selectedTool.tool.id])
+    : busy
   if (build && !replacingId) {
     rows.unshift({ id: BUILDING_ROW_ID, content: <VideoBuildingRow title={buildTitle} lengthS={buildLength} status={build} /> })
   }
@@ -551,6 +667,7 @@ export function VideosPane({
   // Both branches share one composer slot, so the first video landing while the composer is open keeps its form.
   return (
     <>
+      {reviewPanel}
       {shownId !== null ? (
         <div
           data-testid="project-home-library"
@@ -560,6 +677,7 @@ export function VideosPane({
           <div className="flex min-h-0 flex-col gap-3">
             {generateButton}
             {toolsNode}
+            {pendingNode}
             <div
               data-testid="project-home-videos-header"
               className="flex flex-none items-baseline justify-between px-0.5 pt-0.5 font-mono text-[10.5px] text-fg-faint"
@@ -612,7 +730,8 @@ export function VideosPane({
                   <button
                     type="button"
                     data-testid="project-home-regenerate"
-                    disabled={busy}
+                    disabled={regenDisabled}
+                    title={selectedTool && !selectedTool.tool ? 'This video tool is no longer available' : undefined}
                     onClick={() => regenerate(selected)}
                     className={REGENERATE_CLASS}
                   >
@@ -660,6 +779,7 @@ export function VideosPane({
       ) : (
         <>
         {toolsNode}
+        {pendingNode}
         <LibraryEmptyState
           kind="video"
           onQuick={(tplId) => launch(videoPromptLines(videoDefaults(tplId)))}

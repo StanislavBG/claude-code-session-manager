@@ -1285,6 +1285,8 @@ export interface DayProjectRow {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
+    /** 1-hour part of cacheCreationTokens; undefined when the split is unknown (rollup line written before v4). */
+    cacheCreation1hTokens?: number;
     costUsd: number;
     /** Set when the model id didn't match opus/sonnet/haiku and was priced at Sonnet rates as a fallback. */
     estimated?: boolean;
@@ -1338,6 +1340,8 @@ export interface HistoryDashboardProjectRow extends HistoryDashboardTotals {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
+    /** 1-hour part of cacheCreationTokens; undefined when the split is unknown (rollup line written before v4). */
+    cacheCreation1hTokens?: number;
     costUsd: number;
     estimated?: boolean;
   }>;
@@ -1360,6 +1364,8 @@ export interface HistoryDashboardResult {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
+    /** 1-hour part of cacheCreationTokens; undefined when the split is unknown (rollup line written before v4). */
+    cacheCreation1hTokens?: number;
     costUsd: number;
     estimated?: boolean;
   }>;

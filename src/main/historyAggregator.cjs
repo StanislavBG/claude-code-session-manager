@@ -180,7 +180,10 @@ async function readSlice(filePath, from, to) {
 
 // ── line scanners ─────────────────────────────────────────────────────────────
 
-const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens'];
+// cacheCreation1hTokens is the 1-hour part of cacheCreationTokens
+// (usage.cache_creation.ephemeral_1h_input_tokens); it is priced differently
+// from the 5-minute part, so it is kept alongside the sum.
+const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'cacheCreation1hTokens'];
 /** How many recent message ids the accumulator (and the cache entry) remembers. */
 const RECENT_IDS_MAX = 64;
 
@@ -218,11 +221,13 @@ function scanAggrLines(lines, acc, captureFirst) {
       const outT = usage.output_tokens ?? usage.outputTokens;
       const cacheR = usage.cache_read_input_tokens ?? usage.cacheReadInputTokens;
       const cacheC = usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens;
+      const cacheC1h = usage.cache_creation?.ephemeral_1h_input_tokens;
       const vals = {
         inputTokens: typeof inT === 'number' ? inT : 0,
         outputTokens: typeof outT === 'number' ? outT : 0,
         cacheReadTokens: typeof cacheR === 'number' ? cacheR : 0,
         cacheCreationTokens: typeof cacheC === 'number' ? cacheC : 0,
+        cacheCreation1hTokens: typeof cacheC1h === 'number' ? cacheC1h : 0,
       };
       // A transcript writes one line per content block of a message and
       // repeats the message's usage on each (same rule as
@@ -237,8 +242,9 @@ function scanAggrLines(lines, acc, captureFirst) {
           add = {};
           const next = {};
           for (const k of USAGE_FIELDS) {
-            add[k] = Math.max(0, vals[k] - prevVals[k]);
-            next[k] = Math.max(vals[k], prevVals[k]);
+            const prevK = prevVals[k] || 0;
+            add[k] = Math.max(0, vals[k] - prevK);
+            next[k] = Math.max(vals[k], prevK);
           }
           recent.delete(msgId);
           recent.set(msgId, next);
@@ -247,16 +253,16 @@ function scanAggrLines(lines, acc, captureFirst) {
           while (recent.size > RECENT_IDS_MAX) recent.delete(recent.keys().next().value);
         }
       }
-      for (const k of USAGE_FIELDS) acc[k] += add[k];
+      for (const k of USAGE_FIELDS) acc[k] = (acc[k] || 0) + add[k];
 
       // Only assistant usage lines carry model+usage together in practice;
       // read defensively rather than assuming every usage line has a model.
       const modelId = obj.message?.model;
       if (typeof modelId === 'string' && modelId) {
         const bucket = acc.byModel[modelId] ?? (acc.byModel[modelId] = {
-          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0,
         });
-        for (const k of USAGE_FIELDS) bucket[k] += add[k];
+        for (const k of USAGE_FIELDS) bucket[k] = (bucket[k] || 0) + add[k];
       }
     }
 
@@ -313,6 +319,7 @@ async function parseJSONL(filePath, stat) {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
     toolCallCount: 0,
     toolBreakdown: {},
     byModel: {},
@@ -360,6 +367,7 @@ async function parseJSONL(filePath, stat) {
             outputTokens: prev.outputTokens + delta.outputTokens,
             cacheReadTokens: prev.cacheReadTokens + delta.cacheReadTokens,
             cacheCreationTokens: prev.cacheCreationTokens + delta.cacheCreationTokens,
+            cacheCreation1hTokens: (prev.cacheCreation1hTokens || 0) + delta.cacheCreation1hTokens,
             toolCallCount: prev.toolCallCount + delta.toolCallCount,
             toolBreakdown: { ...prev.toolBreakdown },
             byModel: {},
@@ -377,12 +385,13 @@ async function parseJSONL(filePath, stat) {
           }
           for (const [modelId, deltaBucket] of Object.entries(delta.byModel)) {
             const b = merged.byModel[modelId] ?? (merged.byModel[modelId] = {
-              inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+              inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0,
             });
             b.inputTokens += deltaBucket.inputTokens;
             b.outputTokens += deltaBucket.outputTokens;
             b.cacheReadTokens += deltaBucket.cacheReadTokens;
             b.cacheCreationTokens += deltaBucket.cacheCreationTokens;
+            b.cacheCreation1hTokens = (b.cacheCreation1hTokens || 0) + (deltaBucket.cacheCreation1hTokens || 0);
           }
           // readOffset advances to the last complete newline so the next tail
           // always starts at a line boundary. size stays at stat.size so the
@@ -442,6 +451,7 @@ function emptyBucket(sessionDate, encodedCwd) {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
     toolCallCount: 0,
     toolBreakdown: {},
     byModel: {},
@@ -458,18 +468,20 @@ function foldParsedIntoBucket(b, parsed) {
   b.outputTokens += parsed.outputTokens;
   b.cacheReadTokens += parsed.cacheReadTokens;
   b.cacheCreationTokens += parsed.cacheCreationTokens;
+  b.cacheCreation1hTokens = (b.cacheCreation1hTokens || 0) + (parsed.cacheCreation1hTokens || 0);
   b.toolCallCount += parsed.toolCallCount;
   for (const [tool, cnt] of Object.entries(parsed.toolBreakdown)) {
     b.toolBreakdown[tool] = (b.toolBreakdown[tool] ?? 0) + cnt;
   }
   for (const [modelId, srcBucket] of Object.entries(parsed.byModel ?? {})) {
     const dst = b.byModel[modelId] ?? (b.byModel[modelId] = {
-      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0,
     });
     dst.inputTokens += srcBucket.inputTokens;
     dst.outputTokens += srcBucket.outputTokens;
     dst.cacheReadTokens += srcBucket.cacheReadTokens;
     dst.cacheCreationTokens += srcBucket.cacheCreationTokens;
+    dst.cacheCreation1hTokens = (dst.cacheCreation1hTokens || 0) + (srcBucket.cacheCreation1hTokens || 0);
   }
   b.sessionCount++;
   b.errorCount += parsed.errorCount;
@@ -504,6 +516,7 @@ function bucketToRollupLines(b) {
       outputTokens: mb.outputTokens,
       cacheReadTokens: mb.cacheReadTokens,
       cacheCreationTokens: mb.cacheCreationTokens,
+      cacheCreation1hTokens: mb.cacheCreation1hTokens || 0,
       toolCallCount: 0,
       toolBreakdown: {},
       errorCount: 0,
@@ -558,6 +571,12 @@ function rollupMapToRows(map, finalizedDates) {
       dst.outputTokens += bucket.outputTokens || 0;
       dst.cacheReadTokens += bucket.cacheReadTokens || 0;
       dst.cacheCreationTokens += bucket.cacheCreationTokens || 0;
+      // A line written before v4 has no 1-hour split: leave the field
+      // undefined so a reader can tell the split is unknown (not 0).
+      if (typeof bucket.cacheCreation1hTokens === 'number') {
+        dst.cacheCreation1hTokens = (dst.cacheCreation1hTokens ?? 0) + bucket.cacheCreation1hTokens;
+        row.cacheCreation1hTokens += bucket.cacheCreation1hTokens;
+      }
       row.inputTokens += bucket.inputTokens || 0;
       row.outputTokens += bucket.outputTokens || 0;
       row.cacheReadTokens += bucket.cacheReadTokens || 0;
@@ -1073,6 +1092,8 @@ module.exports = {
   CACHE_MAX,
   LRUCache,
   computeActiveMinutes,
+  bucketToRollupLines,
+  rollupMapToRows,
   mapWithConcurrency,
   resetIntradayRegistryForTests,
   INTRADAY_STAT_CONCURRENCY,

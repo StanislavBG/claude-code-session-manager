@@ -96,8 +96,22 @@ test('rollupKey is stable and distinguishes date/project/model', () => {
   expect(historyRollup.rollupKey('2026-07-01', 'proj-a', 'sonnet')).toBe(a);
 });
 
-test('ROLLUP_VERSION is 3 (each model call counted once)', () => {
-  expect(historyRollup.ROLLUP_VERSION).toBe(3);
+test('ROLLUP_VERSION is 4 (records 1-hour cache writes)', () => {
+  expect(historyRollup.ROLLUP_VERSION).toBe(4);
+});
+
+test('a v3 day is no longer finalized but is not legacy; a v2 day is legacy', () => {
+  const M = historyRollup.FINALIZED_MODEL_ID;
+  const P = historyRollup.FINALIZED_PROJECT_ID;
+  const map = historyRollup.mergeRollupLines([
+    JSON.stringify({ date: '2026-08-02', projectDir: P, modelId: M, finalizedAt: 1, v: 2 }),
+    JSON.stringify({ date: '2026-08-03', projectDir: P, modelId: M, finalizedAt: 1, v: 3 }),
+    JSON.stringify({ date: '2026-08-04', projectDir: P, modelId: M, finalizedAt: 1, v: 4 }),
+  ]);
+  expect(historyRollup.isDateFinalized(map, '2026-08-03')).toBe(false);
+  expect(historyRollup.isDateFinalized(map, '2026-08-02')).toBe(false);
+  expect(historyRollup.isDateFinalized(map, '2026-08-04')).toBe(true);
+  expect(historyRollup.legacyFinalizedDates(map)).toEqual(['2026-08-02']);
 });
 
 test('legacyFinalizedDates: v2 marker is legacy, v3 marker is not, a day with no marker is not', () => {

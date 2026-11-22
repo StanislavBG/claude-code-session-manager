@@ -40,6 +40,12 @@ function line(id, tokens, model = MODEL) {
       cache_creation_input_tokens: tokens.cacheC ?? 0,
     },
   };
+  if (tokens.c1h !== undefined) {
+    message.usage.cache_creation = {
+      ephemeral_5m_input_tokens: (tokens.cacheC ?? 0) - tokens.c1h,
+      ephemeral_1h_input_tokens: tokens.c1h,
+    };
+  }
   if (id) message.id = id;
   return JSON.stringify({ timestamp: '2026-11-21T10:00:00.000Z', message });
 }
@@ -47,7 +53,7 @@ function line(id, tokens, model = MODEL) {
 function emptyAcc() {
   return {
     promptCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
-    cacheCreationTokens: 0, toolCallCount: 0, toolBreakdown: {}, byModel: {}, errorCount: 0,
+    cacheCreationTokens: 0, cacheCreation1hTokens: 0, toolCallCount: 0, toolBreakdown: {}, byModel: {}, errorCount: 0,
   };
 }
 
@@ -57,6 +63,7 @@ function totals(r) {
     outputTokens: r.outputTokens,
     cacheReadTokens: r.cacheReadTokens,
     cacheCreationTokens: r.cacheCreationTokens,
+    cacheCreation1hTokens: r.cacheCreation1hTokens,
   };
 }
 
@@ -67,7 +74,7 @@ test('three lines of one message.id count once with the largest values', () => {
     line('msg_a', { in: 10, out: 7, cacheR: 100, cacheC: 50 }),
     line('msg_a', { in: 10, out: 30, cacheR: 100, cacheC: 50 }),
   ], acc, false);
-  expect(totals(acc)).toEqual({ inputTokens: 10, outputTokens: 30, cacheReadTokens: 100, cacheCreationTokens: 50 });
+  expect(totals(acc)).toEqual({ inputTokens: 10, outputTokens: 30, cacheReadTokens: 100, cacheCreationTokens: 50, cacheCreation1hTokens: 0 });
   expect(acc.byModel[MODEL]).toEqual(totals(acc));
 });
 
@@ -129,7 +136,7 @@ test('a repeated id that arrives in a later tail parse does not add', async () =
   st = fs.statSync(file);
   const second = await historyAggregator.parseJSONL(file, st);
   expect(second.cacheHit).toBe(false);
-  expect(totals(second.result)).toEqual({ inputTokens: 14, outputTokens: 14, cacheReadTokens: 100, cacheCreationTokens: 0 });
+  expect(totals(second.result)).toEqual({ inputTokens: 14, outputTokens: 14, cacheReadTokens: 100, cacheCreationTokens: 0, cacheCreation1hTokens: 0 });
   expect(second.result.byModel[MODEL]).toEqual(totals(second.result));
 
   // Third read: msg_a again, with a smaller value — must not add anything.
@@ -145,4 +152,36 @@ test('a repeated id that arrives in a later tail parse does not add', async () =
   const full = await fresh.parseJSONL(file, st);
   expect(totals(full.result)).toEqual(totals(third.result));
   expect(full.result.byModel).toEqual(third.result.byModel);
+});
+
+test('1-hour cache writes count once per message id and sum per model', () => {
+  const acc = emptyAcc();
+  const OTHER = 'claude-sonnet-4-5';
+  historyAggregator.scanAggrLines([
+    line('msg_a', { in: 1, cacheC: 50, c1h: 40 }),
+    line('msg_a', { in: 1, cacheC: 50, c1h: 40 }),
+    line('msg_b', { in: 1, cacheC: 30, c1h: 10 }),
+    line('msg_c', { in: 1, cacheC: 20, c1h: 20 }, OTHER),
+    line('msg_d', { in: 1, cacheC: 5 }), // no cache_creation split → 0
+  ], acc, false);
+  expect(acc.cacheCreation1hTokens).toBe(70);
+  expect(acc.cacheCreationTokens).toBe(105);
+  expect(acc.byModel[MODEL].cacheCreation1hTokens).toBe(50);
+  expect(acc.byModel[MODEL].cacheCreationTokens).toBe(85);
+  expect(acc.byModel[OTHER].cacheCreation1hTokens).toBe(20);
+});
+
+test('1-hour cache writes survive a tail parse without double counting', async () => {
+  const file = path.join(tmpDir, 'grow1h.jsonl');
+  fs.writeFileSync(file, line('msg_a', { cacheC: 50, c1h: 40 }) + '\n', 'utf8');
+  let st = fs.statSync(file);
+  await historyAggregator.parseJSONL(file, st);
+  fs.appendFileSync(file, [
+    line('msg_a', { cacheC: 50, c1h: 40 }),
+    line('msg_b', { cacheC: 10, c1h: 6 }),
+  ].join('\n') + '\n', 'utf8');
+  st = fs.statSync(file);
+  const second = await historyAggregator.parseJSONL(file, st);
+  expect(second.result.cacheCreation1hTokens).toBe(46);
+  expect(second.result.byModel[MODEL].cacheCreation1hTokens).toBe(46);
 });

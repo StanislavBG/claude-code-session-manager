@@ -53,6 +53,12 @@ function assistantLine(ts, model, tokens = {}) {
         output_tokens: tokens.out ?? 5,
         cache_read_input_tokens: tokens.cacheR ?? 0,
         cache_creation_input_tokens: tokens.cacheC ?? 0,
+        ...(tokens.c1h !== undefined ? {
+          cache_creation: {
+            ephemeral_5m_input_tokens: (tokens.cacheC ?? 0) - tokens.c1h,
+            ephemeral_1h_input_tokens: tokens.c1h,
+          },
+        } : {}),
       },
     },
   };
@@ -310,4 +316,34 @@ test('mapWithConcurrency preserves input order and respects the concurrency boun
   expect(results).toEqual(items.map((i) => i * 2));
   expect(maxInFlight).toBeLessThanOrEqual(5);
   expect(maxInFlight).toBeGreaterThan(1);
+});
+
+test('intraday per-model rollup lines carry cacheCreation1hTokens', async () => {
+  writeTranscript('/repo/onehour', 'sess-1h', [
+    userLine(todayAt(9).toISOString()),
+    assistantLine(todayAt(9).toISOString(), 'claude-opus-5', { cacheC: 50, c1h: 40 }),
+    assistantLine(todayAt(9).toISOString(), 'claude-opus-5', { cacheC: 10, c1h: 2 }),
+  ], todayAt(9));
+  await historyAggregator.refreshIntradayToday();
+  const t = today();
+  const map = await historyRollup.readRollup(t, t);
+  const modelLine = [...map.values()].find((b) => b.modelId === 'claude-opus-5');
+  expect(modelLine.cacheCreationTokens).toBe(60);
+  expect(modelLine.cacheCreation1hTokens).toBe(42);
+  const totalsLine = [...map.values()].find((b) => b.modelId === historyRollup.TOTALS_MODEL_ID);
+  expect(totalsLine.v).toBe(historyRollup.ROLLUP_VERSION);
+});
+
+test('rollupMapToRows: a per-model line without cacheCreation1hTokens leaves it undefined; one with it carries the value', () => {
+  const D = '2026-08-01';
+  const map = historyRollup.mergeRollupLines([
+    JSON.stringify({ date: D, projectDir: 'p', modelId: 'old-model', inputTokens: 1, cacheCreationTokens: 9, v: 3 }),
+    JSON.stringify({ date: D, projectDir: 'p', modelId: 'new-model', inputTokens: 1, cacheCreationTokens: 9, cacheCreation1hTokens: 7, v: 4 }),
+  ]);
+  const rows = historyAggregator.rollupMapToRows(map, new Set([D]));
+  const row = rows.get(`${D}|p`);
+  expect(row.byModel['old-model'].cacheCreation1hTokens).toBeUndefined();
+  expect('cacheCreation1hTokens' in row.byModel['old-model']).toBe(false);
+  expect(row.byModel['new-model'].cacheCreation1hTokens).toBe(7);
+  expect(row.byModel['new-model'].cacheCreationTokens).toBe(9);
 });

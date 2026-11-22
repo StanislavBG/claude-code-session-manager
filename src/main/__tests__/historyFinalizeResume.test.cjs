@@ -119,12 +119,12 @@ test('budget is independent of real elapsed time', async () => {
   expect(readCursor().lastDir).toBe('-b');
 });
 
-test('a finalize pass over a day with transcripts writes a current-version (v3) marker', async () => {
+test('a finalize pass over a day with transcripts writes a current-version (v4) marker', async () => {
   const r = await historyAggregator.finalizeClosedDays({ budgetMs: Infinity, cursorPath });
   expect(r.partial).toBe(false);
   expect(r.finalizedDates.length).toBe(1);
   const map = await historyRollup.readRollup('2000-01-01', '2999-01-01');
   const marker = map.get(historyRollup.rollupKey(r.finalizedDates[0], historyRollup.FINALIZED_PROJECT_ID, historyRollup.FINALIZED_MODEL_ID));
-  expect(marker.v).toBe(3);
+  expect(marker.v).toBe(4);
   expect(historyRollup.legacyFinalizedDates(map)).toEqual([]);
 });

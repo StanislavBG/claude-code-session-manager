@@ -15,9 +15,11 @@
  *     toolCallCount, toolBreakdown, errorCount, sessionCount are populated;
  *     token fields are 0. One per (date, projectDir).
  *   - per-model line (modelId === a real model id): inputTokens,
- *     outputTokens, cacheReadTokens, cacheCreationTokens are populated; the
- *     rest are 0/empty. Cost is NOT stored — it's computed at read time from
- *     MODEL_PRICING so a pricing fix retroactively corrects displayed cost.
+ *     outputTokens, cacheReadTokens, cacheCreationTokens and (since v4)
+ *     cacheCreation1hTokens — the 1-hour part of cacheCreationTokens — are
+ *     populated; the rest are 0/empty. Cost is NOT stored — it's computed at
+ *     read time from lib/claude/modelPricing.cjs so a pricing fix
+ *     retroactively corrects displayed cost.
  *   - finalized marker (projectDir === '', modelId === FINALIZED_MODEL_ID):
  *     one per date, carries only `finalizedAt`. A date only counts as closed
  *     (safe to trust the rollup with no live re-scan) once this exists.
@@ -37,11 +39,16 @@ const FINALIZED_PROJECT_ID = '';
 // Bumped when a bucket/finalized-marker line's shape changes in a way that
 // requires re-deriving it from transcripts (v1 → v2 added `activeMinutes`;
 // v2 → v3 counts each model call once — earlier versions over-counted calls,
-// so a day still finalized at v<3 reads high).
+// so a day still finalized at v<3 reads high; v3 → v4 records 1-hour cache
+// writes as cacheCreation1hTokens on per-model lines).
 // isDateFinalized() gates on this so old-shape finalized days get re-scanned
 // by the existing finalizeClosedDays() budget/resume loop instead of a new
 // migration path.
-const ROLLUP_VERSION = 3;
+const ROLLUP_VERSION = 4;
+// The version that fixed the call over-count. A day finalized below it reads
+// high and is reported as legacy; a day finalized at/above it but below
+// ROLLUP_VERSION has correct counts and only lacks a newer field.
+const OVERCOUNT_FIX_VERSION = 3;
 
 function rollupKey(date, projectDir, modelId) {
   return `${date}|${projectDir}|${modelId}`;
@@ -100,17 +107,17 @@ function isDateFinalized(mergedMap, date) {
 }
 
 /**
- * Sorted dates whose finalized marker was written below ROLLUP_VERSION (no
- * `v` counts as v1). These are days the finalize pass could not recount —
+ * Sorted dates whose finalized marker was written below OVERCOUNT_FIX_VERSION
+ * (no `v` counts as v1). These are days the finalize pass could not recount —
  * typically because their transcripts are gone — so their stored numbers come
- * from an older counting scheme. A date with no marker is not legacy.
+ * from the over-counting scheme. A date with no marker is not legacy.
  */
 function legacyFinalizedDates(mergedMap) {
   const dates = [];
   for (const bucket of mergedMap.values()) {
     if (bucket.projectDir !== FINALIZED_PROJECT_ID || bucket.modelId !== FINALIZED_MODEL_ID) continue;
     if (!bucket.finalizedAt) continue;
-    if ((bucket.v ?? 1) < ROLLUP_VERSION) dates.push(bucket.date);
+    if ((bucket.v ?? 1) < OVERCOUNT_FIX_VERSION) dates.push(bucket.date);
   }
   return dates.sort();
 }
@@ -156,6 +163,7 @@ module.exports = {
   FINALIZED_MODEL_ID,
   FINALIZED_PROJECT_ID,
   ROLLUP_VERSION,
+  OVERCOUNT_FIX_VERSION,
   rollupKey,
   mergeRollupLines,
   readRollup,

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { TaskSummary, TaskListQuery } from '../../../../preload/api.d'
 import { useToast } from '../../../state/toast'
 import { usd } from '../../../lib/analyticsFormat'
+import { TaskDetail } from './TaskDetail'
 
 /**
  * Tasks sub-view of the Scheduler page — this project's Task ledger
  * (window.api.tasks, main/lib/tasks/taskIpc.cjs), grouped by caller pipeline
- * then run, newest first. Data is local component state (no zustand store);
- * this view is the single scroller under the Scheduler bands.
+ * then run, newest first. Data is local component state (no zustand store).
+ * The list is the one scroller under the Scheduler bands; clicking a row opens
+ * a sibling TaskDetail panel (its own column scroller, never nested).
  */
 
 const POLL_MS = 15_000
@@ -110,14 +112,12 @@ function StatusChip({ t }: { t: TaskSummary }) {
 /** Per-project state resets by remount: Scheduler.tsx keys this view on scopeCwd. */
 export interface TasksViewProps {
   scopeCwd: string | null
-  /** Drill-down hook — wired by the task-detail PRD; a no-op until then. */
-  onOpen?: (taskId: string) => void
 }
 
-const noop = () => {}
-
-export function TasksView({ scopeCwd, onOpen = noop }: TasksViewProps) {
+export function TasksView({ scopeCwd }: TasksViewProps) {
   const show = useToast((s) => s.show)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const closeDetail = useCallback(() => setSelectedId(null), [])
   const [rows, setRows] = useState<TaskSummary[]>([])
   const [loaded, setLoaded] = useState(false)
   const [filters, setFilters] = useState<Filters>({})
@@ -215,7 +215,8 @@ export function TasksView({ scopeCwd, onOpen = noop }: TasksViewProps) {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-9 py-4" data-testid="tasks-view">
+    <div className="h-full flex min-h-0" data-testid="tasks-view">
+    <div className="flex-1 min-w-0 h-full overflow-y-auto px-9 py-4" data-testid="tasks-list">
       <div className="flex items-center gap-3 flex-wrap mb-3">
         {FILTER_KEYS.map((k) => (
           <label key={k} className="flex items-center gap-1 text-[12px] text-fg-dim">
@@ -270,8 +271,9 @@ export function TasksView({ scopeCwd, onOpen = noop }: TasksViewProps) {
                   key={t.taskId}
                   type="button"
                   data-testid={`tasks-row-${t.taskId}`}
-                  onClick={() => onOpen(t.taskId)}
-                  className="w-full text-left px-2 py-1 flex items-center gap-3 text-[12px] hover:bg-bg-elev border-b border-line last:border-b-0"
+                  onClick={() => setSelectedId(t.taskId)}
+                  aria-pressed={selectedId === t.taskId}
+                  className={`w-full text-left px-2 py-1 flex items-center gap-3 text-[12px] hover:bg-bg-elev border-b border-line last:border-b-0 ${selectedId === t.taskId ? 'bg-bg-elev' : ''}`}
                 >
                   <span className="w-[170px] shrink-0 font-mono text-fg-dim">{formatTaskStart(t.startedAt)}</span>
                   <span className="w-[90px] shrink-0 truncate text-fg-faint" title={t.caller?.step}>{t.caller?.step ?? '—'}</span>
@@ -295,6 +297,12 @@ export function TasksView({ scopeCwd, onOpen = noop }: TasksViewProps) {
           ))}
         </section>
       ))}
+    </div>
+      {selectedId && (
+        <div className="w-[46%] max-w-[720px] shrink-0 h-full min-h-0">
+          <TaskDetail key={selectedId} cwd={scopeCwd} taskId={selectedId} onClose={closeDetail} />
+        </div>
+      )}
     </div>
   )
 }

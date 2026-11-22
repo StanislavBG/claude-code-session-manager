@@ -25,9 +25,9 @@ const api = {
 let host: HTMLDivElement
 let root: Root
 
-async function render(scopeCwd: string | null, onOpen?: (id: string) => void) {
+async function render(scopeCwd: string | null) {
   await act(async () => {
-    root.render(createElement(TasksView, { scopeCwd, onOpen }))
+    root.render(createElement(TasksView, { scopeCwd }))
   })
   await act(async () => { await Promise.resolve() })
 }
@@ -71,8 +71,7 @@ describe('TasksView', () => {
   })
 
   it('shows the direct badge only on imported rows, with cost, zone and status chip', async () => {
-    const onOpen = vi.fn()
-    await render('/p', onOpen)
+    await render('/p')
     const badges = qa('[data-testid="tasks-badge-direct"]')
     expect(badges).toHaveLength(1)
     expect(q('[data-testid="tasks-row-t2"]')!.contains(badges[0])).toBe(true)
@@ -86,8 +85,21 @@ describe('TasksView', () => {
       .formatToParts(new Date('2026-11-21T10:00:00.000Z')).find((p) => p.type === 'timeZoneName')!.value
     expect(t2).toContain(zone)
     expect(q('[data-testid="tasks-row-t3"]')!.textContent).toContain('quota')
-    act(() => { (q('[data-testid="tasks-row-t1"]') as HTMLButtonElement).click() })
-    expect(onOpen).toHaveBeenCalledWith('t1')
+  })
+
+  it('opens the TaskDetail panel beside the list on row click and closes it', async () => {
+    api.tasks.get.mockReset().mockResolvedValue({ ok: true, task: { ...rows[0], body: { taskId: 't1', prompt: 'hi', output: 'yo' } } })
+    await render('/p')
+    expect(q('[data-testid="task-detail"]')).toBeNull()
+    await act(async () => { (q('[data-testid="tasks-row-t1"]') as HTMLButtonElement).click() })
+    await act(async () => { await Promise.resolve() })
+    expect(api.tasks.get).toHaveBeenCalledWith({ cwd: '/p', id: 't1' })
+    const detail = q('[data-testid="task-detail"]')!
+    expect(detail).not.toBeNull()
+    expect(q('[data-testid="tasks-list"]')!.contains(detail)).toBe(false)
+    expect(q('[data-testid="task-detail-prompt"]')!.textContent).toContain('hi')
+    act(() => { (q('[data-testid="task-detail-close"]') as HTMLButtonElement).click() })
+    expect(q('[data-testid="task-detail"]')).toBeNull()
   })
 
   it('builds filter options from the rows and refetches on filter change', async () => {

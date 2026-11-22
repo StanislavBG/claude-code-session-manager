@@ -9,7 +9,7 @@
  */
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, describe, beforeEach, afterEach, vi } from 'vitest';
 const path = require('node:path');
 const { MCP_TOOL_CATALOG, MCP_RECIPES, CatalogEntrySchema, composeDescription } = require('../mcpToolCatalog.cjs');
 // scheduler-mcp-server.cjs guards its stdio-server main() behind
@@ -81,7 +81,7 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
 test('project-home group lists the page/video tools and the two aliases', () => {
   expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
     'project_home_write', 'project_page_write', 'project_matrix_read', 'project_matrix_write',
-    'project_video_write', 'project_demo_video_write', 'project_character_write',
+    'project_video_write', 'project_demo_video_write', 'project_character_write', 'project_video_review_write',
   ]);
 });
 
@@ -267,8 +267,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 35 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(35);
+test('catalog has 36 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(36);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -339,4 +339,78 @@ test.each(ONE_OF_TOOLS)('$name handler refuses a call missing a whole requiredOn
 test.each(MCP_TOOL_CATALOG)('$name composeDescription ignores requiredOneOf', (entry) => {
   expect(composeDescription({ ...entry, requiredOneOf: [['zz_a', 'zz_b']] })).toBe(composeDescription(entry));
   expect(composeDescription(entry)).not.toContain('zz_a');
+});
+
+// ── project_video_review_write (review material only, never a decision) ──
+const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX } = require('../project-pages/videoReview.cjs');
+
+test('project_video_review_write: catalog entry saves material and cannot decide', () => {
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'project_video_review_write');
+  expect(entry.group).toBe('project-home');
+  expect(REVIEW_TEXT_MAX).toBe(32000);
+  for (const s of ['review material', 'text up to 32000 characters', 'whole episode script', '1-6 images',
+    'review-stage Project Video tool run', 'cannot approve, ask for changes or retry', 'only a human click in Project Home ▸ Video']) {
+    expect(entry.purpose).toContain(s);
+  }
+});
+
+test('project_video_review_write: inputSchema states the text max and the image count', () => {
+  const tool = TOOLS.find((t) => t.name === 'project_video_review_write');
+  expect(tool.inputSchema.required).toEqual(['videoId', 'text', 'imagePaths']);
+  expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['cwd', 'imagePaths', 'text', 'videoId']);
+  expect(tool.inputSchema.properties.text.maxLength).toBe(REVIEW_TEXT_MAX);
+  expect(tool.inputSchema.properties.text.description).toContain(String(REVIEW_TEXT_MAX));
+  expect(tool.inputSchema.properties.imagePaths.maxItems).toBe(REVIEW_IMAGES_MAX);
+});
+
+test('no catalog tool name contains approve, decide or retry', () => {
+  expect(MCP_TOOL_CATALOG.map((e) => e.name).filter((n) => /approve|decide|retry/i.test(n))).toEqual([]);
+  expect(TOOLS.map((t) => t.name).filter((n) => /approve|decide|retry/i.test(n))).toEqual([]);
+});
+
+describe('project_video_review_write handler', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
+  const call = (args) => handleCallTool({ params: { name: 'project_video_review_write', arguments: args } });
+  let dir;
+  let savedScope;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-review-mcp-'));
+    savedScope = process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+    delete process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (savedScope !== undefined) process.env.SM_SCHEDULER_JOB_MCP_TOOLS = savedScope;
+    vi.unstubAllGlobals();
+  });
+
+  test('refuses bad text and bad image paths as tool errors before any admin call', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const png = path.join(dir, 'a.png');
+    fs.writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const big = path.join(dir, 'big.png');
+    fs.writeFileSync(big, Buffer.alloc(2 * 1024 * 1024 + 1));
+    const txt = path.join(dir, 'a.txt');
+    fs.writeFileSync(txt, 'x');
+    const cases = [
+      [{ videoId: 'ep-1', text: '', imagePaths: [png] }, 'text must be 1-32000'],
+      [{ videoId: 'ep-1', text: 'a'.repeat(REVIEW_TEXT_MAX + 1), imagePaths: [png] }, 'text must be 1-32000'],
+      [{ videoId: 'ep-1', text: 'x', imagePaths: [] }, 'imagePaths must be an array of 1-6'],
+      [{ videoId: 'ep-1', text: 'x', imagePaths: Array(7).fill(png) }, 'imagePaths must be an array of 1-6'],
+      [{ videoId: 'ep-1', text: 'x', imagePaths: ['rel.png'] }, 'must be an absolute path'],
+      [{ videoId: 'ep-1', text: 'x', imagePaths: [txt] }, 'must end in .png'],
+      [{ videoId: 'ep-1', text: 'x', imagePaths: [big] }, 'exceeds'],
+      [{ videoId: 'ep-1', text: 'x', imagePaths: [path.join(dir, 'missing.png')] }, 'cannot read'],
+      [{ text: 'x', imagePaths: [png] }, 'videoId'],
+    ];
+    for (const [args, msg] of cases) {
+      const r = await call(args);
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toContain(msg);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

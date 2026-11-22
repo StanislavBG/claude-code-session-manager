@@ -6,6 +6,9 @@
  *   POST /admin/project-home/demo-video/write   alias: {cwd, html} -> a new videos/vid-<id>/ project-demo entry
  *   POST /admin/project-home/matrix/read        {cwd} -> project-pages/matrix/matrix.json (+ its JSON Schema)
  *   POST /admin/project-home/matrix/write       {cwd, matrix, model?} -> matrixStore.writeMatrix
+ *   POST /admin/project-home/videos/review/write {cwd, videoId, text, images:[{base64}]} -> videoReview.writeMaterial
+ *     (review material only; there is deliberately no route that decides, approves or retries —
+ *     only the human buttons in the app record a decision)
  * all owned by writer 'project-home' (see opsOwnership.cjs). Registered
  * against the same injected localAdminHttp.cjs transport as
  * prdAdminRoutes.cjs.
@@ -36,9 +39,14 @@ const { checkHtmlLimits } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 const { readMatrix, matrixJsonSchema, MAX_MATRIX_BYTES } = require('../project-pages/competitiveMatrix.cjs');
 const { writeMatrix } = require('../project-pages/matrixStore.cjs');
+const videoReview = require('../project-pages/videoReview.cjs');
 
 const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
+/** Review write body cap: 6 base64 images of 2 MiB (16 MiB) + a 32000-char text and JSON overhead. */
+const REVIEW_WRITE_BODY_MAX = 18 * 1024 * 1024;
+const REVIEW_DECISION_KEYS = Object.freeze(['decision', 'status', 'approved', 'approvedAt']);
+const REVIEW_DECISION_REFUSAL = 'review decisions are made only by a human in the app';
 
 // Each detector is a linear regex scan; the input is capped first.
 const REMOTE_REFERENCE_CHECKS = [
@@ -359,6 +367,9 @@ function registerAdminRoute(adminHttp) {
     },
   }));
 
+  // POST /admin/project-home/videos/review/write {cwd, videoId, text, images:[{base64}]} -> review/material.json
+  adminHttp.registerRoute('POST', '/admin/project-home/videos/review/write', reviewWriteHandler);
+
   // POST /admin/project-home/character/write {cwd, json, js, replace?} -> videos/_character/
   adminHttp.registerRoute('POST', '/admin/project-home/character/write', characterWriteHandler);
 
@@ -412,6 +423,70 @@ function makeMatrixHandler(run) {
       sendJson(res, 500, { ok: false, error: e?.message ?? 'matrix route failed' });
     }
   };
+}
+
+/**
+ * Saves review material for one review-stage video entry. Never records a
+ * decision: a body carrying any decision-shaped key is refused outright.
+ */
+async function reviewWriteHandler(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req, REVIEW_WRITE_BODY_MAX);
+  } catch (e) {
+    sendJson(res, 413, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'} (limit is ${REVIEW_WRITE_BODY_MAX} bytes)` });
+    return;
+  }
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+    return;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    sendJson(res, 400, { ok: false, error: 'invalid payload' });
+    return;
+  }
+  if (REVIEW_DECISION_KEYS.some((k) => Object.prototype.hasOwnProperty.call(body, k))) {
+    sendJson(res, 400, { ok: false, error: REVIEW_DECISION_REFUSAL });
+    return;
+  }
+  const { videoId, text, images } = body;
+  if (typeof videoId !== 'string' || !ENTRY_ID_RE.test(videoId)) {
+    sendJson(res, 400, { ok: false, error: 'invalid videoId' });
+    return;
+  }
+  if (!Array.isArray(images)) {
+    sendJson(res, 400, { ok: false, error: 'images must be an array of { base64 }' });
+    return;
+  }
+  const decoded = [];
+  for (let i = 0; i < images.length; i++) {
+    const b64 = images[i] && images[i].base64;
+    if (typeof b64 !== 'string' || !b64) {
+      sendJson(res, 400, { ok: false, error: `image ${i + 1}: base64 must be a non-empty string` });
+      return;
+    }
+    decoded.push({ bytes: Buffer.from(b64, 'base64') });
+  }
+  const resolved = resolveCwd(body.cwd);
+  if (!resolved.ok) {
+    sendJson(res, resolved.status, { ok: false, error: resolved.error });
+    return;
+  }
+  config.addAllowedRoot(resolved.cwd);
+  try {
+    const r = await videoReview.writeMaterial(resolved.cwd, videoId, { text, images: decoded });
+    if (!r.ok) {
+      sendJson(res, 400, { ok: false, error: r.error });
+      return;
+    }
+    const review = await videoReview.readReview(resolved.cwd, videoId);
+    sendJson(res, 200, { ok: true, entryId: videoId, status: review ? review.status : 'waiting' });
+  } catch (e) {
+    sendJson(res, 500, { ok: false, error: e?.message ?? 'review write failed' });
+  }
 }
 
 async function characterWriteHandler(req, res) {
@@ -476,5 +551,6 @@ module.exports = {
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,
+  REVIEW_WRITE_BODY_MAX,
   resolveCwd,
 };

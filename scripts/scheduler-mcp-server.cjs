@@ -19,6 +19,7 @@
  *   project_matrix_write({ cwd?, matrix? | matrixPath?, model? }) -> POST /admin/project-home/matrix/write
  *   project_character_write({ cwd?, json, js? | jsPath?, replace? }) -> POST /admin/project-home/character/write
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
+ *   project_video_review_write({ cwd?, videoId, text, imagePaths }) -> POST /admin/project-home/videos/review/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
  *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, job?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
@@ -55,6 +56,7 @@ const { createStdioServer } = require('../src/main/lib/mcpStdioServer.cjs');
 const { PRD_WORK_TYPES } = require('../src/main/lib/prd/workTypeLibrary.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
+const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX, REVIEW_IMAGE_BYTES_MAX } = require('../src/main/lib/project-pages/videoReview.cjs');
 
 const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
 
@@ -129,6 +131,33 @@ async function readDemoVideoHtmlFile(p, { maxBytes = MAX_DEMO_VIDEO_BYTES, lengt
   } catch (err) {
     return { error: `cannot read htmlPath: ${err && err.code ? err.code : 'read failed'}` };
   }
+}
+
+/**
+ * Reads project_video_review_write's imagePaths into [{ base64 }] or { error }.
+ * Errors carry only the reason and the 1-based index, never file contents.
+ */
+async function readReviewImages(imagePaths) {
+  if (!Array.isArray(imagePaths) || imagePaths.length < 1 || imagePaths.length > REVIEW_IMAGES_MAX) {
+    return { error: `imagePaths must be an array of 1-${REVIEW_IMAGES_MAX} absolute paths` };
+  }
+  const images = [];
+  for (let i = 0; i < imagePaths.length; i++) {
+    const p = imagePaths[i];
+    const n = i + 1;
+    if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: `imagePaths[${n}] must be an absolute path` };
+    if (!/\.(png|jpe?g|webp)$/i.test(p)) return { error: `imagePaths[${n}] must end in .png, .jpg, .jpeg or .webp` };
+    try {
+      const st = await fsp.stat(p);
+      if (!st.isFile()) return { error: `imagePaths[${n}] is not a regular file` };
+      if (st.size > REVIEW_IMAGE_BYTES_MAX) return { error: `imagePaths[${n}] exceeds ${REVIEW_IMAGE_BYTES_MAX} bytes (2 MiB)` };
+      if (st.size === 0) return { error: `imagePaths[${n}] is empty` };
+      images.push({ base64: (await fsp.readFile(p)).toString('base64') });
+    } catch (err) {
+      return { error: `cannot read imagePaths[${n}]: ${err && err.code ? err.code : 'read failed'}` };
+    }
+  }
+  return { images };
 }
 
 /** Resolves exactly one of html / htmlPath into { html } or { error }; `readOpts` goes to readDemoVideoHtmlFile. */
@@ -858,6 +887,26 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_video_review_write',
+    description: descriptionFor('project_video_review_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        videoId: { type: 'string', description: 'Id of the review-stage video entry this run was dispatched for.' },
+        text: { type: 'string', minLength: 1, maxLength: REVIEW_TEXT_MAX, description: `The review text the human reads (1-${REVIEW_TEXT_MAX} characters), such as a whole episode script.` },
+        imagePaths: {
+          type: 'array',
+          minItems: 1,
+          maxItems: REVIEW_IMAGES_MAX,
+          items: { type: 'string' },
+          description: `1-${REVIEW_IMAGES_MAX} absolute paths to local .png/.jpg/.jpeg/.webp files, each at most 2 MiB, such as a storyboard contact sheet. Read and sent by this server.`,
+        },
+      },
+      required: ['videoId', 'text', 'imagePaths'],
+    },
+  },
+  {
     name: 'macro_list',
     description: descriptionFor('macro_list'),
     inputSchema: {
@@ -1484,6 +1533,20 @@ async function handleCallTool(request) {
       const body = { cwd, videoId: args.videoId, title: args.title, kind: args.kind, lengthS: args.lengthS, html: loaded.html };
       if (args.meta && typeof args.meta === 'object') body.meta = args.meta;
       const result = await adminRequest('POST', '/admin/project-home/videos/write', body);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_video_review_write') {
+      if (!args || typeof args.videoId !== 'string' || !args.videoId) return errorResult('missing required argument: videoId');
+      if (typeof args.text !== 'string' || args.text.length < 1 || args.text.length > REVIEW_TEXT_MAX) {
+        return errorResult(`text must be 1-${REVIEW_TEXT_MAX} characters`);
+      }
+      const loaded = await readReviewImages(args.imagePaths);
+      if (loaded.error) return errorResult(loaded.error);
+      const cwd = resolveCwdArg(args);
+      const result = await adminRequest('POST', '/admin/project-home/videos/review/write', {
+        cwd, videoId: args.videoId, text: args.text, images: loaded.images,
+      });
+      if (result?.ok === false) return errorResult(result.error ?? 'project_video_review_write failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_list') {

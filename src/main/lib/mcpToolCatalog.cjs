@@ -496,6 +496,28 @@ const MCP_TOOL_CATALOG = [
       + 'Give exactly one of `js` / `jsPath` (absolute .js file, <= 300KB).',
   },
   {
+    name: 'project_video_review_write',
+    group: 'project-home',
+    purpose: 'Save review material (text up to 32000 characters, such as a whole episode script, and 1-6 images, such as a storyboard contact sheet) '
+      + "for a review-stage Project Video tool run, via the session-manager app's admin API. Saving again replaces the previous material. "
+      + 'It cannot approve, ask for changes or retry: only a human click in Project Home ▸ Video can.',
+    summary: 'Save a script and images for a human to review a video.',
+    whenToUse: 'Use at the end of a review-stage Project Video tool run, once the material the human must check is ready: pass the `videoId` '
+      + 'the run was dispatched for, the review `text`, and `imagePaths` (absolute .png/.jpg/.jpeg/.webp files, each at most 2 MiB). '
+      + 'Then stop and say the material waits for the human in Project Home ▸ Video.',
+    whenNotToUse: 'Never use it to record a decision — a call carrying decision, status, approved or approvedAt is refused, and no tool can '
+      + 'approve, ask for changes or retry. Do not use for the finished video — use project_video_write. The call is refused when the entry '
+      + 'has no recorded dispatch, for text outside 1-32000 characters, and for images that are not PNG, JPEG or WebP.',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      videoId: 'ep-1',
+      text: 'Episode 1 script: ...',
+      imagePaths: ['/tmp/ep-1/storyboard.png'],
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'The images are read from disk and base64-encoded by the MCP server before the save.',
+  },
+  {
     name: 'customer_feedback_list',
     group: 'customer-feedback',
     purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "

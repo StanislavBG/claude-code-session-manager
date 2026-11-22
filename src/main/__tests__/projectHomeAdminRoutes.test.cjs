@@ -79,7 +79,7 @@ const GOOD_HTML = '<!DOCTYPE html><html><head><style>body{background:url(data:im
 const GOOD_DEMO_VIDEO_HTML = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
   + '<body><canvas id="c"></canvas><script>window.smDemo = { scenes: [] }; const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
 
-test('registers the library routes, the aliases, the character route and the matrix routes', () => {
+test('registers the library routes, the aliases, the character route, the matrix routes and the review write route', () => {
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
   expect([...adminHttp.routes.keys()].sort()).toEqual([
@@ -89,6 +89,7 @@ test('registers the library routes, the aliases, the character route and the mat
     'POST /admin/project-home/matrix/write',
     'POST /admin/project-home/pages/write',
     'POST /admin/project-home/videos/write',
+    'POST /admin/project-home/videos/review/write',
     'POST /admin/project-home/write',
   ].sort());
 });
@@ -607,4 +608,82 @@ test('character/write: rejects network js, oversized js and bad json', async () 
   expect(big.status).toBe(400);
   const bad = await adminHttp.call('POST', url, { body: { cwd, ...GOOD_CHARACTER, json: { name: 'x' } } });
   expect(bad.status).toBe(400);
+});
+
+// ── POST /admin/project-home/videos/review/write ─────────────────────────────
+const videoReview = require('../lib/project-pages/videoReview.cjs');
+const { REVIEW_WRITE_BODY_MAX } = require('../lib/feedback-remote/projectHomeAdminRoutes.cjs');
+
+const REVIEW_URL = '/admin/project-home/videos/review/write';
+const PNG_B64 = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]).toString('base64');
+
+async function reviewSetup({ dispatch = true } = {}) {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const videoId = 'ep-1';
+  if (dispatch) {
+    const r = await videoReview.recordDispatch(cwd, videoId, { macroId: 'burrow-episode', stage: 'storyboard' });
+    expect(r.ok).toBe(true);
+  }
+  return { cwd, adminHttp, videoId };
+}
+
+test('videos/review/write: saves material after a recorded dispatch', async () => {
+  const { cwd, adminHttp, videoId } = await reviewSetup();
+  const { status, body } = await adminHttp.call('POST', REVIEW_URL, {
+    body: { cwd, videoId, text: 'Episode script', images: [{ base64: PNG_B64 }, { base64: PNG_B64 }] },
+  });
+  expect(status).toBe(200);
+  expect(body).toEqual({ ok: true, entryId: videoId, status: 'waiting' });
+  const review = await videoReview.readReview(cwd, videoId);
+  expect(review.material.text).toBe('Episode script');
+  expect(review.material.images.map((i) => i.name)).toEqual(['image-1.png', 'image-2.png']);
+  expect(review.decision).toBeNull();
+});
+
+test('videos/review/write: a 32000-char text is saved, a 32001-char text is refused', async () => {
+  const { cwd, adminHttp, videoId } = await reviewSetup();
+  expect(videoReview.REVIEW_TEXT_MAX).toBe(32000);
+  const ok = await adminHttp.call('POST', REVIEW_URL, { body: { cwd, videoId, text: 'a'.repeat(32000), images: [{ base64: PNG_B64 }] } });
+  expect(ok.status).toBe(200);
+  expect(ok.body.ok).toBe(true);
+  const tooLong = await adminHttp.call('POST', REVIEW_URL, { body: { cwd, videoId, text: 'a'.repeat(32001), images: [{ base64: PNG_B64 }] } });
+  expect(tooLong.status).toBe(400);
+  expect(tooLong.body.ok).toBe(false);
+  expect((await videoReview.readReview(cwd, videoId)).material.text).toBe('a'.repeat(32000));
+});
+
+test.each(['decision', 'status', 'approved', 'approvedAt'])('videos/review/write: a body with %s is refused', async (key) => {
+  const { cwd, adminHttp, videoId } = await reviewSetup();
+  const { status, body } = await adminHttp.call('POST', REVIEW_URL, {
+    body: { cwd, videoId, text: 'x', images: [{ base64: PNG_B64 }], [key]: key === 'approved' ? true : 'approve' },
+  });
+  expect(status).toBe(400);
+  expect(body).toEqual({ ok: false, error: 'review decisions are made only by a human in the app' });
+  expect((await videoReview.readReview(cwd, videoId)).material).toBeNull();
+});
+
+test('videos/review/write: refused without a recorded dispatch', async () => {
+  const { cwd, adminHttp, videoId } = await reviewSetup({ dispatch: false });
+  const { status, body } = await adminHttp.call('POST', REVIEW_URL, { body: { cwd, videoId, text: 'x', images: [{ base64: PNG_B64 }] } });
+  expect(status).toBe(400);
+  expect(body.ok).toBe(false);
+  expect(body.error).toContain('no dispatch');
+});
+
+test('videos/review/write: rejects bad images, a missing cwd and an oversized body', async () => {
+  const { cwd, adminHttp, videoId } = await reviewSetup();
+  const notImage = await adminHttp.call('POST', REVIEW_URL, { body: { cwd, videoId, text: 'x', images: [{ base64: Buffer.from('hello').toString('base64') }] } });
+  expect(notImage.status).toBe(400);
+  const noImages = await adminHttp.call('POST', REVIEW_URL, { body: { cwd, videoId, text: 'x', images: [] } });
+  expect(noImages.status).toBe(400);
+  const badShape = await adminHttp.call('POST', REVIEW_URL, { body: { cwd, videoId, text: 'x', images: ['abc'] } });
+  expect(badShape.status).toBe(400);
+  const noCwd = await adminHttp.call('POST', REVIEW_URL, { body: { videoId, text: 'x', images: [{ base64: PNG_B64 }] } });
+  expect(noCwd.status).toBe(400);
+  expect(REVIEW_WRITE_BODY_MAX).toBe(18 * 1024 * 1024);
+  const big = await adminHttp.call('POST', REVIEW_URL, { rawBody: `{"cwd":"${cwd}","pad":"${'a'.repeat(REVIEW_WRITE_BODY_MAX)}"}` });
+  expect(big.status).toBe(413);
+  expect(big.body.ok).toBe(false);
 });

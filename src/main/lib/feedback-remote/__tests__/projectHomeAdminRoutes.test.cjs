@@ -187,3 +187,12 @@ test('videos/write refuses a video that draws its own button, with the htmlLimit
   const ok = await setup().call('POST', '/admin/project-home/videos/write', { body: { ...body, html: clean } });
   expect(ok.status).toBe(200);
 });
+
+test('no Project Home or macro admin route can decide, approve or retry a review', () => {
+  const http = setup();
+  require('../macroAdminRoutes.cjs').registerAdminRoute(http, { startExternalNewSession: () => {} });
+  const keys = [...http.routes.keys()];
+  expect(keys).toContain('POST /admin/project-home/videos/review/write');
+  expect(keys).toContain('POST /admin/macros/run');
+  expect(keys.filter((k) => /decide|approve|retry/i.test(k))).toEqual([]);
+});

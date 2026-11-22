@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->35<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->36<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -182,6 +182,7 @@ Tools:
 | `project_video_write` | project-home | `videoId`, `title`, `kind`, `lengthS`, `meta`, one of `html` / `htmlPath` | Save one self-contained HTML video for Project Home. |
 | `project_demo_video_write` | project-home | one of `html` / `htmlPath` | Save a 30-second or 1-minute demo video (same as project_video_write). |
 | `project_character_write` | project-home | `json`, one of `js` / `jsPath` | Save the reusable character used in this project's videos. |
+| `project_video_review_write` | project-home | `videoId`, `text`, `imagePaths` | Save a script and images for a human to review a video. |
 | `customer_feedback_list` | customer-feedback | — | List feedback that users sent to the owner's inbox. |
 | `customer_feedback_set_status` | customer-feedback | `id`, `status` | Set the status of one feedback item, with an optional note. |
 | `customer_feedback_submit` | customer-feedback | `goal`, `description`, `tag` | Send feedback about Session Manager to its maintainers. |
@@ -206,11 +207,11 @@ Rules the server enforces:
 
 ### Headless jobs
 
-Each PRD runs as one `claude -p` job with a pinned `--model`. It runs as the persona named in the PRD. The default is `dev-lead`. The job works in its own worktree. It runs the PRD's gate, then commits. Its last line is a verdict such as `SCHEDULER_VERDICT: PASS`.
+Each PRD job runs as the PRD's persona, `dev-lead` by default, in its own worktree. It runs the PRD's gate, then commits. Its last line is a verdict such as `SCHEDULER_VERDICT: PASS`.
 
 ### Scripts
 
-A script can start a macro with `POST /admin/macros/run`. This only works for a macro that a person marked "Can be started by a script".
+A script can start a macro with `POST /admin/macros/run`. It works only for a macro a person marked "Can be started by a script".
 
 ## Skills
 
@@ -283,7 +284,7 @@ The app copies these into `~/.claude/agents/` on first launch.
 | Guard hook shims | `~/.claude/session-manager/hooks/`. A project uses them once you accept its setup banner. | Do not accept the banner. |
 | App state | `~/.claude/session-manager/` | None |
 | Project folder | `<repo>/session-manager-operations/` | None |
-| Session worktrees | `~/.local/state/session-manager/`, or `$XDG_STATE_HOME/session-manager/` when `XDG_STATE_HOME` is set | None |
+| Session worktrees | `$XDG_STATE_HOME/session-manager/`, by default `~/.local/state/session-manager/` | None |
 | Telemetry | Sent to bilko.run | `SM_TELEMETRY=0` |
 
 ### Start at login
@@ -294,7 +295,7 @@ An npx install starts through `npx claude-code-session-manager@latest`. So each 
 
 A packaged build starts the installed app. On macOS and Windows, it is one of the system's login items. A Linux AppImage uses the autostart folder too.
 
-To remove it, turn the switch off, or delete these files: `claude-code-session-manager.desktop` on Linux, `run.bilko.session-manager.login.plist` on macOS, and the script. For a packaged macOS or Windows build, remove it from the system's login items.
+To remove it, turn the switch off. Or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). For a packaged macOS or Windows build, remove it from login items.
 
 It is not offered for an npx install on Windows, or in a dev run.
 

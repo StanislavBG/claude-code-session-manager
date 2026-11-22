@@ -498,12 +498,13 @@ function bucketToRollupLines(b) {
   return lines;
 }
 
-function finalizedMarkerLine(date) {
+function finalizedMarkerLine(date, cycleStartedAt) {
   return {
     date,
     projectDir: historyRollup.FINALIZED_PROJECT_ID,
     modelId: historyRollup.FINALIZED_MODEL_ID,
     finalizedAt: Date.now(),
+    cycleStartedAt,
     v: historyRollup.ROLLUP_VERSION,
   };
 }
@@ -607,6 +608,22 @@ async function finalizeClosedDays({ budgetMs, dryRun = false, cursorPath } = {})
     }
   }
 
+  // Skip threshold: local midnight of the day the last completed pass (at
+  // this ROLLUP_VERSION) started. That pass skipped only that day's content,
+  // so a folder with no transcript modified since that midnight holds nothing
+  // it did not already count. No such marker => no threshold => full pass.
+  let skipBeforeMs = null;
+  try {
+    const lastCycle = await historyRollup.readNewestFinalizedCycleStart();
+    if (lastCycle !== null) {
+      const midnight = new Date(lastCycle);
+      midnight.setHours(0, 0, 0, 0);
+      skipBeforeMs = midnight.getTime();
+    }
+  } catch {
+    skipBeforeMs = null;
+  }
+
   let projectDirs;
   try {
     projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
@@ -635,13 +652,20 @@ async function finalizeClosedDays({ budgetMs, dryRun = false, cursorPath } = {})
     let files;
     try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { walkedLast = encodedCwd; continue; }
 
+    // Stat the whole folder first: a day's lines are whole-folder totals, so
+    // the folder is either skipped entirely or read entirely.
+    const stated = [];
     for (const fileEntry of files) {
       if (!fileEntry.name.endsWith('.jsonl')) continue;
       const filePath = path.join(projectDir, fileEntry.name);
+      try { stated.push({ filePath, stat: await fsp.stat(filePath) }); } catch { continue; }
+    }
+    if (skipBeforeMs !== null && !stated.some((f) => f.stat.mtimeMs >= skipBeforeMs)) {
+      walkedLast = encodedCwd;
+      continue;
+    }
 
-      let stat;
-      try { stat = await fsp.stat(filePath); } catch { continue; }
-
+    for (const { filePath, stat } of stated) {
       const { result: parsed } = await parseJSONL(filePath, stat);
       if (parsed.skipped) continue;
 
@@ -663,7 +687,7 @@ async function finalizeClosedDays({ budgetMs, dryRun = false, cursorPath } = {})
   // Only stamp dates as finalized (safe to trust with no live re-scan) once a
   // full cycle has covered every project directory — possibly across calls.
   if (!partial) {
-    for (const date of dates) entries.push(finalizedMarkerLine(date));
+    for (const date of dates) entries.push(finalizedMarkerLine(date, cycleStartedAt));
   }
 
   if (!dryRun) {
@@ -742,6 +766,22 @@ function resetIntradayRegistryForTests() {
  */
 async function computeIntradayBuckets() {
   const today = localDate(new Date());
+
+  // Skip threshold: local midnight of the day the last completed pass (at
+  // this ROLLUP_VERSION) started. That pass skipped only that day's content,
+  // so a folder with no transcript modified since that midnight holds nothing
+  // it did not already count. No such marker => no threshold => full pass.
+  let skipBeforeMs = null;
+  try {
+    const lastCycle = await historyRollup.readNewestFinalizedCycleStart();
+    if (lastCycle !== null) {
+      const midnight = new Date(lastCycle);
+      midnight.setHours(0, 0, 0, 0);
+      skipBeforeMs = midnight.getTime();
+    }
+  } catch {
+    skipBeforeMs = null;
+  }
 
   let projectDirs;
   try {
@@ -888,6 +928,22 @@ async function aggregate(req) {
   let skippedLargeFiles = 0;
   let skippedBudgetFiles = 0;
   let parseBudgetSpentMs = 0;
+
+  // Skip threshold: local midnight of the day the last completed pass (at
+  // this ROLLUP_VERSION) started. That pass skipped only that day's content,
+  // so a folder with no transcript modified since that midnight holds nothing
+  // it did not already count. No such marker => no threshold => full pass.
+  let skipBeforeMs = null;
+  try {
+    const lastCycle = await historyRollup.readNewestFinalizedCycleStart();
+    if (lastCycle !== null) {
+      const midnight = new Date(lastCycle);
+      midnight.setHours(0, 0, 0, 0);
+      skipBeforeMs = midnight.getTime();
+    }
+  } catch {
+    skipBeforeMs = null;
+  }
 
   let projectDirs;
   try {

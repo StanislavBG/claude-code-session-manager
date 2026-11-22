@@ -123,6 +123,30 @@ function legacyFinalizedDates(mergedMap) {
 }
 
 /**
+ * Newest `cycleStartedAt` among finalized markers written at ROLLUP_VERSION
+ * (older-version markers and markers without the field are ignored), or null.
+ * finalizeClosedDays() derives its "skip unchanged folders" threshold from it,
+ * so null — first run, missing rollup, version change — means a full pass.
+ */
+function newestFinalizedCycleStart(mergedMap) {
+  let newest = null;
+  for (const bucket of mergedMap.values()) {
+    if (bucket.projectDir !== FINALIZED_PROJECT_ID || bucket.modelId !== FINALIZED_MODEL_ID) continue;
+    if (!bucket.finalizedAt || (bucket.v ?? 1) !== ROLLUP_VERSION) continue;
+    if (typeof bucket.cycleStartedAt !== 'number' || !Number.isFinite(bucket.cycleStartedAt)) continue;
+    if (newest === null || bucket.cycleStartedAt > newest) newest = bucket.cycleStartedAt;
+  }
+  return newest;
+}
+
+/** newestFinalizedCycleStart() over the whole rollup file on disk. */
+async function readNewestFinalizedCycleStart() {
+  const { exists, text } = await config.readText(historyRollupPath());
+  if (!exists || !text) return null;
+  return newestFinalizedCycleStart(mergeRollupLines(text.split('\n')));
+}
+
+/**
  * Append bucket entries (append-only) to the rollup file, then compact
  * (dedupe + rewrite) if the file has grown past COMPACT_THRESHOLD_BYTES.
  * Uses config.cjs's validatePath/validateWrite for boundary safety and
@@ -169,6 +193,8 @@ module.exports = {
   readRollup,
   isDateFinalized,
   legacyFinalizedDates,
+  newestFinalizedCycleStart,
+  readNewestFinalizedCycleStart,
   appendRollupDays,
   compact,
 };

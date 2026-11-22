@@ -127,6 +127,25 @@ test('legacyFinalizedDates: v2 marker is legacy, v3 marker is not, a day with no
   expect(historyRollup.legacyFinalizedDates(new Map())).toEqual([]);
 });
 
+test('newestFinalizedCycleStart: newest cycleStartedAt among current-version markers only', () => {
+  const V = historyRollup.ROLLUP_VERSION;
+  const m = (date, extra) => JSON.stringify({ date, projectDir: '', modelId: '__finalized__', finalizedAt: 1, ...extra });
+  const map = historyRollup.mergeRollupLines([
+    m('2026-07-01', { v: V, cycleStartedAt: 100 }),
+    m('2026-07-02', { v: V, cycleStartedAt: 300 }),
+    m('2026-07-03', { v: V - 1, cycleStartedAt: 900 }),
+    m('2026-07-04', { v: V }),
+    JSON.stringify({ date: '2026-07-05', projectDir: 'p', modelId: '', cycleStartedAt: 999, v: V }),
+  ]);
+  expect(historyRollup.newestFinalizedCycleStart(map)).toBe(300);
+  expect(historyRollup.newestFinalizedCycleStart(historyRollup.mergeRollupLines([m('2026-07-03', { v: V - 1, cycleStartedAt: 900 })]))).toBe(null);
+  expect(historyRollup.newestFinalizedCycleStart(new Map())).toBe(null);
+});
+
+test('readNewestFinalizedCycleStart: null when the rollup file is missing', async () => {
+  expect(await historyRollup.readNewestFinalizedCycleStart()).toBe(null);
+});
+
 test('mergeRollupLines: last-write-wins per key', () => {
   const lines = [
     JSON.stringify({ date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 10 }),

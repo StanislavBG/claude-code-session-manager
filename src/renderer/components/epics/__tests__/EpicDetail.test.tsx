@@ -1371,6 +1371,36 @@ describe('EpicDetail (PRD 827)', () => {
   })
 
   it.each([
+    { name: 'verified', verdict: 'verified' as const, withJob: true, word: 'verified', tone: 'bg-sage' },
+    { name: 'refuted', verdict: 'refuted' as const, withJob: true, word: 'refuted', tone: 'bg-accent' },
+    { name: 'no verdict (unvalidated)', verdict: undefined, withJob: true, word: 'claimed', tone: undefined },
+    { name: 'verified, queue row gone', verdict: 'verified' as const, withJob: false, word: 'verified', tone: 'bg-sage' },
+    { name: 'refuted, queue row gone', verdict: 'refuted' as const, withJob: false, word: 'refuted', tone: 'bg-accent' },
+    { name: 'no verdict, queue row gone', verdict: undefined, withJob: false, word: 'ready to run', tone: 'bg-bg' },
+  ])('PRD 3457: a dispatched-PRD row takes its status from a bare-slug verdict event — $name', async ({ verdict, withJob, word, tone }) => {
+    installWindowApiMock()
+
+    const slug = '3309-external-ref-schema'
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const append = (e: any) => {
+      const prev = usePromptSessions.getState().events[session.id].slice(-1)[0]
+      usePromptSessions.getState().appendPromptSessionEvent(session.id, { causedByEventId: prev.id, ...e })
+    }
+    append({ kind: 'prd_created', prdSlug: slug })
+    append({ kind: 'response', text: `PRD ${slug} finished: completed. Check Scheduler for details.`, prdSlug: slug, outcome: 'completed', validation: 'unvalidated', agentType: 'dev-lead' })
+    if (verdict) append({ kind: 'response', text: `Validation ${verdict.toUpperCase()}: external-ref-schema`, prdSlug: 'external-ref-schema', outcome: 'completed', validation: verdict })
+    useScheduleState.setState({ snapshot: { jobs: withJob ? [{ slug, status: 'completed' } as any] : [] } as any, loaded: true })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
+    expect(chip.getAttribute('title')).toContain(word)
+    expect(chip.getAttribute('aria-label')).toContain(word)
+    if (tone) expect(chip.className).toContain(tone)
+    if (!verdict && withJob) expect(chip.className).not.toContain('bg-sage')
+  })
+
+  it.each([
     { validation: 'unvalidated', slug: '972-claimed' },
     { validation: 'verified', slug: '974-verified' },
     { validation: 'refuted', slug: '976-refuted' },

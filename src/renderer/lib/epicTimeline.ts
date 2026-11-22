@@ -4,6 +4,7 @@ import { visibleFeedTurns } from '../components/ChatTranscriptTurn'
 import { splitStopSignal } from './stopSignal'
 import { filterTurnsByVerbosity, type ChatVerbosity } from './chatVerbosity'
 import { questionCardStates, type QuestionCardState } from './questionCardState'
+import { bareSlug } from './depSlugResolve'
 
 export type ValidationVerdict = 'unvalidated' | 'validating' | 'verified' | 'refuted'
 export type TimelineEvent = PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' }
@@ -26,6 +27,7 @@ export interface EpicTimeline {
   visibleTurns: ChatTurn[]
   hiddenCount: number
   revealLevel: ReturnType<typeof filterTurnsByVerbosity>['revealLevel']
+  /** Keyed by bareSlug(prdSlug) — look it up the same way. */
   latestValidationBySlug: Map<string, ValidationVerdict>
   timeline: TimelineItem[]
   /** Index in `visibleTurns` of the last assistant turn, or -1. */
@@ -87,11 +89,13 @@ export function buildEpicTimeline(
     return false
   }
 
-  // Later events overwrite earlier ones for the same slug.
+  // Keyed by bareSlug: a PRD's finish event carries the numbered slug
+  // (3309-x) but the validator's verdict carries the bare one (x). Later
+  // events overwrite earlier ones for the same PRD.
   const latestValidationBySlug = new Map<string, ValidationVerdict>()
   const eventItems: TimelineItem[] = []
   for (const e of sessionEvents) {
-    if (e.kind === 'response' && e.prdSlug && e.validation) latestValidationBySlug.set(e.prdSlug, e.validation)
+    if (e.kind === 'response' && e.prdSlug && e.validation) latestValidationBySlug.set(bareSlug(e.prdSlug), e.validation)
     if (e.kind === 'prd_created' || e.kind === 'closed' || (e.kind === 'response' && !isDuplicateResponseEvent(e))) {
       eventItems.push({ kind: 'event', at: Date.parse(e.at), event: e as TimelineEvent })
     }

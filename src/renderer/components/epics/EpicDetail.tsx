@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useChat, attachTranscriptFeed, detachTranscriptFeed, type ChatTurn } from '../../state/chat'
 import { buildEpicTimeline } from '../../lib/epicTimeline'
+import { bareSlug } from '../../lib/depSlugResolve'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicUsage } from '../../state/epicUsage'
@@ -1288,8 +1289,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 const e = item.event
                 if (e.kind === 'prd_created') {
                   const prdJob = scheduleJobs.find((j) => j.slug === e.prdSlug) ?? null
-                  const validation = e.prdSlug ? latestValidationBySlug.get(e.prdSlug) : undefined
-                  const prdStatus = prdStatusFor(prdJob, validation)
+                  const validation = e.prdSlug ? latestValidationBySlug.get(bareSlug(e.prdSlug)) : undefined
+                  // A finished PRD's queue row is gone, so a final verdict is the only source left.
+                  const prdStatus = !prdJob && (validation === 'verified' || validation === 'refuted') ? validation : prdStatusFor(prdJob, validation)
                   const tone = STATUS_TONE[prdStatus]
                   const prdStatusLabel = `PRD "${e.prdSlug}" — ${tone.label} — open in Scheduler`
                   return (

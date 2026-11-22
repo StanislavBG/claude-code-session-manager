@@ -7,6 +7,7 @@ import { filterTurnsByVerbosity, type ChatVerbosity } from '../chatVerbosity'
 import { splitStopSignal } from '../stopSignal'
 import { buildEpicTimeline } from '../epicTimeline'
 import { questionCardStates } from '../questionCardState'
+import { bareSlug } from '../depSlugResolve'
 
 /** Verbatim copy of the pre-change inline derivation from EpicDetail.tsx. */
 function legacy(turns: ChatTurn[], sessionEvents: PromptSessionEvent[], verbosity: ChatVerbosity) {
@@ -33,7 +34,7 @@ function legacy(turns: ChatTurn[], sessionEvents: PromptSessionEvent[], verbosit
   }
   const latest = new Map<string, string>()
   for (const e of sessionEvents) {
-    if (e.kind === 'response' && e.prdSlug && e.validation) latest.set(e.prdSlug, e.validation)
+    if (e.kind === 'response' && e.prdSlug && e.validation) latest.set(bareSlug(e.prdSlug), e.validation)
   }
   const timeline = [
     ...visibleTurns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
@@ -106,6 +107,34 @@ describe('buildEpicTimeline', () => {
       expect(got.timeline).toEqual(want.items)
     })
   }
+
+  describe('latestValidationBySlug keyed by bare slug', () => {
+    const at = (i: number) => new Date(T0 + i * 1000).toISOString()
+    const base = (i: number, extra: Partial<PromptSessionEvent>): PromptSessionEvent => ({
+      id: `v${i}`, promptSessionId: 'p', kind: 'response', causedByEventId: null, at: at(i), ...extra,
+    })
+    const realEvents = (verdict?: 'verified' | 'refuted'): PromptSessionEvent[] => [
+      base(0, { kind: 'prd_created', prdSlug: '3309-external-ref-schema' }),
+      base(1, { text: 'PRD 3309-external-ref-schema finished: completed. Check Scheduler for details.', prdSlug: '3309-external-ref-schema', outcome: 'completed', validation: 'unvalidated' }),
+      ...(verdict ? [base(2, { text: `Validation ${verdict.toUpperCase()}: external-ref-schema`, prdSlug: 'external-ref-schema', outcome: 'completed', validation: verdict })] : []),
+    ]
+
+    it('a bare-slug verified verdict overwrites the numbered finish event', () => {
+      const m = buildEpicTimeline([], realEvents('verified'), 'standard').latestValidationBySlug
+      expect([...m]).toEqual([['external-ref-schema', 'verified']])
+      expect(m.get(bareSlug('3309-external-ref-schema'))).toBe('verified')
+    })
+
+    it('a bare-slug refuted verdict overwrites the numbered finish event', () => {
+      const m = buildEpicTimeline([], realEvents('refuted'), 'standard').latestValidationBySlug
+      expect(m.get(bareSlug('3309-external-ref-schema'))).toBe('refuted')
+    })
+
+    it('with no verdict event the finish event stays unvalidated', () => {
+      const m = buildEpicTimeline([], realEvents(), 'standard').latestValidationBySlug
+      expect(m.get(bareSlug('3309-external-ref-schema'))).toBe('unvalidated')
+    })
+  })
 
   it('handles empty input', () => {
     const got = buildEpicTimeline([], [], 'standard')

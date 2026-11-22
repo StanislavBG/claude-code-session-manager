@@ -756,3 +756,23 @@ describe('VideosPane rename and delete', () => {
     expect(tid('entry-delete')).toBeNull()
   })
 })
+
+describe('VideosPane episodes and 9:16', () => {
+  const EP = video('ep-1', 'Episode one', HOUR, { kind: 'episode', aspect: '9:16' })
+  const WIDE = video('wide', 'Wide', 2 * HOUR)
+
+  it("labels kind 'episode' as 'Episode' on its row and in the title-bar sub", () => {
+    mount({ entries: [EP, WIDE] })
+    expect(col(rows()[0], 'kind')).toBe('Episode')
+    expect(tid('project-home-video-sub')?.textContent).toBe('Episode · 30s · auto · 1h ago')
+    expect(col(rows()[1], 'kind')).toBe('project-demo')
+  })
+
+  it("passes a 9:16 entry's aspect to the player; a 16:9-less entry keeps the 16:9 box", () => {
+    mount({ entries: [EP, WIDE] })
+    const box = () => tid('video-player-frame', tid('project-home-content')!)!.parentElement!
+    expect(box().getAttribute('data-aspect')).toBe('9:16')
+    click(rows()[1])
+    expect(box().getAttribute('data-aspect')).toBe('16:9')
+  })
+})

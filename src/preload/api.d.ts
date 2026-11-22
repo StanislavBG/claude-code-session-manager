@@ -1831,7 +1831,9 @@ export interface ProjectPageMeta {
 export interface ProjectVideoMeta {
   id: string;
   title: string;
-  kind: 'project-demo' | 'blog-post' | 'feature';
+  kind: 'project-demo' | 'blog-post' | 'feature' | 'episode';
+  /** Frame shape from the document's sm-demo-aspect tag; absent on older entries (treat as '16:9'). */
+  aspect?: '16:9' | '9:16';
   /** The `Video target:` text the video was built for (a post path or URL, or a feature name); absent for a Project demo. */
   target?: string;
   style: string;

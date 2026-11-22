@@ -83,3 +83,50 @@ describe('VideoPlayer', () => {
     expect(post.mock.calls.at(-1)![0]).toEqual({ smPlayer: 1, cmd: 'seek', t: 12 })
   })
 })
+
+describe('VideoPlayer aspect', () => {
+  function mountAspect(aspect?: '16:9' | '9:16') {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => root!.render(<VideoPlayer path="/p/v.html" mtimeMs={1} aspect={aspect} />))
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement
+    return { el: container, box: iframe.parentElement as HTMLElement, iframe }
+  }
+
+  it("renders a '9:16' video in an upright, height-bounded, centered box", () => {
+    const { el, box } = mountAspect('9:16')
+    expect(box.getAttribute('data-aspect')).toBe('9:16')
+    for (const c of ['aspect-[9/16]', 'h-[70vh]', 'max-h-[720px]', 'mx-auto']) expect(box.className).toContain(c)
+    expect(box.className).not.toContain('aspect-video')
+    for (const id of ['video-play', 'video-restart', 'video-seek', 'video-mute']) {
+      expect(el.querySelector(`[data-testid="${id}"]`)).not.toBeNull()
+    }
+  })
+
+  it('keeps the 16:9 aspect-video box by default and for 16:9', () => {
+    for (const aspect of [undefined, '16:9'] as const) {
+      const { box } = mountAspect(aspect)
+      expect(box.getAttribute('data-aspect')).toBe('16:9')
+      expect(box.className).toContain('aspect-video')
+      expect(box.className).not.toContain('aspect-[9/16]')
+      act(() => root?.unmount())
+      container?.remove()
+    }
+    root = null
+    container = null
+  })
+
+  it('draws the same scene markers in the 9:16 box', () => {
+    const { el, iframe } = mountAspect('9:16')
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: iframe.contentWindow,
+          data: { smPlayer: 1, type: 'state', duration: 30, t: 5, playing: false, muted: true, scenes: [{ t: 0, label: 'a' }, { t: 15, label: 'b' }] },
+        }),
+      )
+    })
+    expect(el.querySelectorAll('[data-testid="video-scene-marker"]').length).toBe(2)
+  })
+})

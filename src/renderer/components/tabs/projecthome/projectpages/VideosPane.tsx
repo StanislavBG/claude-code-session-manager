@@ -141,13 +141,18 @@ function videoBuildSub(lines: readonly string[] | undefined): string {
     .join(' · ')
 }
 
+/** A video kind as the library shows it: 'episode' reads 'Episode'; the others keep their slug. */
+function kindLabel(kind: ProjectVideoMeta['kind']): string {
+  return kind === 'episode' ? 'Episode' : kind
+}
+
 /**
  * Title-bar sub: `<kind> · <target> · <len>s · <style> · <ago>` (the target only when recorded and
  * non-blank); just `<ago>` for an entry with unreadable meta.
  */
 function videoSub(entry: ProjectVideoEntry): string {
   const m = entry.meta
-  const parts = m ? [m.kind, videoTarget(m), `${m.lengthS}s`, m.style.trim().toLowerCase()] : []
+  const parts = m ? [kindLabel(m.kind), videoTarget(m), `${m.lengthS}s`, m.style.trim().toLowerCase()] : []
   return [...parts, createdLabel(entry)].filter(Boolean).join(' · ')
 }
 
@@ -239,7 +244,7 @@ function videoRow(e: ProjectVideoEntry): LibraryRow {
           <span data-col="meta" className="font-mono text-[10.5px] text-fg-faint">
             {m && (
               <>
-                <span data-col="kind">{m.kind}</span>
+                <span data-col="kind">{kindLabel(m.kind)}</span>
                 {' · '}
                 <span data-col="length">{`${m.lengthS}s`}</span>
                 {' · '}
@@ -539,7 +544,7 @@ export function VideosPane({
             ) : selected?.meta ? (
               <>
                 <div className="flex-none overflow-hidden rounded-xl border border-rule-structural bg-bg-hi">
-                  <VideoPlayer path={selected.path} mtimeMs={selected.mtimeMs} />
+                  <VideoPlayer path={selected.path} mtimeMs={selected.mtimeMs} aspect={selected.meta.aspect} />
                 </div>
                 <div
                   data-testid="video-cards"

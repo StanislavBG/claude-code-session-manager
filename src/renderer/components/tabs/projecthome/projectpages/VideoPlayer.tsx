@@ -11,6 +11,8 @@ import { smfileUrl } from '../../../../state/editor'
 interface Props {
   path: string
   mtimeMs: number
+  /** The video's frame shape (meta.aspect); anything but '9:16' plays in the 16:9 box. */
+  aspect?: '16:9' | '9:16'
 }
 
 interface Scene {
@@ -41,7 +43,7 @@ function parseState(data: unknown): PlayerState | null {
   return { duration: num(d.duration), t: num(d.t), playing: d.playing === true, muted: d.muted !== false, scenes }
 }
 
-export function VideoPlayer({ path, mtimeMs }: Props) {
+export function VideoPlayer({ path, mtimeMs, aspect }: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [state, setState] = useState<PlayerState>(INITIAL)
 
@@ -67,10 +69,15 @@ export function VideoPlayer({ path, mtimeMs }: Props) {
 
   const max = state.duration > 0 ? state.duration : 1
   const btn = 'px-2 py-1 rounded bg-bg-hi text-fg text-xs hover:bg-accent/20'
+  const upright = aspect === '9:16'
+  // Literal class strings only (Tailwind JIT): an upright 9:16 frame is height-bounded and centered.
+  const frameBox = upright
+    ? 'aspect-[9/16] h-[70vh] max-h-[720px] max-w-full mx-auto bg-black'
+    : 'aspect-video w-full bg-black'
 
   return (
     <div className="w-full">
-      <div className="aspect-video w-full bg-black">
+      <div className={frameBox} data-aspect={upright ? '9:16' : '16:9'}>
         <iframe
           ref={frameRef}
           key={`${path}#${mtimeMs}`}

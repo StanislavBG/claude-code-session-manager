@@ -46,7 +46,8 @@ An unknown route answers `404` with `error: "not found"`, `unknownRoute` (for ex
 
 - A change that **breaks** an outside caller increments `contractVersion`. That covers an admin route, an
   MCP tool, an audit event kind listed here, or the `admin-api.json` shape.
-- An **additive** change (a new route, a new optional field) does not.
+- An **additive** change (a new route, a new optional field) does not. It is recorded as a new
+  fingerprint appended under the same version in `CONTRACT_FINGERPRINTS`.
 
 Advice for a consumer: store the `contractVersion` you were written against. At start, read it from the
 health route or the file. If it is different, **stop loudly** (log an error, exit non-zero). Do not guess.
@@ -241,11 +242,14 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 | Route | MCP tool | Query / args | Answer |
 | --- | --- | --- | --- |
 | `GET /admin/epics` | `epic_list` | `cwd` (absolute), `state?` (one of the eight states), `limit?` (1–200, default 50), `offset?` (default 0) | `{ ok, epics, total, limit, offset, hasMore }` |
-| `GET /admin/epic` | `epic_get` | `cwd`, exactly one of `id` or `externalRef`, `receipt?` (`1` or `true`; the tool takes a boolean) | `{ ok, epic }` or `404 { ok: false, error: "not found" }` |
+| `GET /admin/epic` | `epic_get` | `cwd` (optional when `id` is given), exactly one of `id` or `externalRef`, `receipt?` (`1` or `true`; the tool takes a boolean) | `{ ok, epic }` or `404 { ok: false, error: "not found" }` |
 
 - `epic_list` / `GET /admin/epics` lists only **open** Epics (`proposed` or `active`), newest first. When
   `hasMore` is true the tool adds a `note`; ask again with a higher `offset`.
 - `epic_get` / `GET /admin/epic` also finds a **completed** Epic, from its archive.
+- `GET /admin/epic?id=<epicId>` without `cwd` looks the Epic up across the registered projects: none is
+  `404 { ok: false, error: "not found" }`; more than one is `409 { ok: false, error: "ambiguous epic id", cwds }`.
+  `externalRef` always needs `cwd`.
 - A bad query is `400 { ok: false, error: "invalid query", details }`. A `cwd` that is not absolute or has
   no `session-manager-operations/` folder is `400` with the reason. A project Session Manager has never
   opened reads as empty (list) or `404` (get).

@@ -38,7 +38,7 @@ function deepFreeze(v) {
  * The outside contract — what an outside app may depend on. Every list here
  * is checked against the code by src/main/__tests__/externalContract.shape.test.cjs;
  * changing one changes contractFingerprint(), which must then be recorded
- * under a new CONTRACT_VERSION in CONTRACT_FINGERPRINTS.
+ * in CONTRACT_FINGERPRINTS (see the rule there).
  */
 const CONTRACT = deepFreeze({
   routes: [
@@ -115,10 +115,16 @@ function contractFingerprint() {
   return require('node:crypto').createHash('sha256').update(stableStringify(CONTRACT)).digest('hex');
 }
 
-/** Fingerprint recorded for each contract version. */
+/**
+ * Accepted fingerprints for each contract version, oldest first; the last
+ * entry of CONTRACT_FINGERPRINTS[CONTRACT_VERSION] is the current manifest.
+ * - An additive change (a new route, a new optional field) appends its
+ *   fingerprint to the current version's array; contractVersion stays.
+ * - A breaking change increments CONTRACT_VERSION and starts a new array.
+ */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields, then task_list + task_get), so its fingerprint was replaced, not bumped.
-  1: '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields, then task_list + task_get), so its first fingerprint was replaced, not appended.
+  1: Object.freeze(['5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101']),
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

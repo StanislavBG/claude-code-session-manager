@@ -2,7 +2,8 @@
  * externalContract.shape.test.cjs — pins the outside contract.
  *
  * 1. The manifest (CONTRACT) hashes to the fingerprint recorded for the
- *    current CONTRACT_VERSION — a shape change without a version bump fails.
+ *    current CONTRACT_VERSION (last entry of its array) — a shape change that
+ *    records no new fingerprint fails.
  * 2. The manifest matches the code: routes are registered by their modules,
  *    tools carry exactly the listed required arguments, states/event kinds
  *    equal the code's lists, record/receipt/agent/admin-api.json keys match.
@@ -29,14 +30,18 @@ afterAll(() => { fs.rmSync(TEST_TOKEN_PATH, { force: true }); });
 
 // ── 1. version ↔ fingerprint ────────────────────────────────────────────────
 
-test('the manifest fingerprint matches the one recorded for CONTRACT_VERSION', () => {
+test('the manifest fingerprint is the last one recorded for CONTRACT_VERSION', () => {
   const actual = contractFingerprint();
-  const recorded = CONTRACT_FINGERPRINTS[CONTRACT_VERSION];
+  const accepted = CONTRACT_FINGERPRINTS[CONTRACT_VERSION];
+  expect(Array.isArray(accepted)).toBe(true);
+  const recorded = accepted[accepted.length - 1];
   if (actual !== recorded) {
     throw new Error(
-      `The outside contract manifest changed (fingerprint ${actual}) but CONTRACT_VERSION ${CONTRACT_VERSION} `
-      + `records ${recorded ?? '(nothing)'}. If the change breaks an outside caller, increase CONTRACT_VERSION `
-      + `in src/main/lib/externalContract.cjs and record the new fingerprint under CONTRACT_FINGERPRINTS[<new version>].`,
+      `The outside contract manifest changed (fingerprint ${actual}) but the last fingerprint recorded for `
+      + `CONTRACT_VERSION ${CONTRACT_VERSION} is ${recorded ?? '(nothing)'}. In src/main/lib/externalContract.cjs: `
+      + `if the change is additive (a new route, a new optional field), append the new fingerprint to `
+      + `CONTRACT_FINGERPRINTS[${CONTRACT_VERSION}]; if it breaks an outside caller, increase CONTRACT_VERSION and `
+      + `record the new fingerprint as CONTRACT_FINGERPRINTS[<new version>] = ['<fingerprint>'].`,
     );
   }
   expect(actual).toMatch(/^[0-9a-f]{64}$/);

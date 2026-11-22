@@ -281,7 +281,7 @@ export function MdNetworkExplorer({ network, initialPath = null, onClose, render
                 onClick={() => setMode('map')}
                 className={`h-7 cursor-pointer px-3 text-[12px] ${mode === 'map' ? 'bg-bg-elev font-semibold text-fg' : 'bg-bg-hi text-fg-dim'}`}
               >
-                Map
+                Graph
               </button>
               <button
                 type="button"
@@ -290,7 +290,7 @@ export function MdNetworkExplorer({ network, initialPath = null, onClose, render
                 onClick={() => setMode('docs')}
                 className={`h-7 cursor-pointer px-3 text-[12px] ${mode === 'docs' ? 'bg-bg-elev font-semibold text-fg' : 'bg-bg-hi text-fg-dim'}`}
               >
-                Docs
+                List
               </button>
             </div>
           )}

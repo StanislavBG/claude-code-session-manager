@@ -36,23 +36,22 @@ const ORPHAN: MdNetworkFinding = {
 }
 
 /**
- * Walk order, as mdNetworkScan emits it: the root links README + nine docs/arch docs (depth 1);
- * README links a1 and a missing doc; a1 links a2 and docs/arch/deep.md (depth 2); deep links
- * x (depth 3); x links y (depth 4) and back to the root.
+ * Walk order, as mdNetworkScan emits it: the root links README (depth 1); README links nine
+ * docs/arch docs (depth 2) and a missing doc; a1 links a2 and docs/arch/deep.md (depth 3); deep
+ * links x (depth 4); x links y (depth 5) and back to the root.
  */
 const NET = network(
   [
-    doc('CLAUDE.md', 0, 10, 1),
-    doc('README.md', 1, 2, 1),
-    ...ARCH.map((p) => doc(p, 1, p.endsWith('a1.md') ? 2 : 0, p.endsWith('a2.md') ? 2 : 1)),
-    doc('docs/arch/deep.md', 2, 1, 1),
-    doc('docs/arch/deeper/x.md', 3, 2, 1),
-    doc('docs/y.md', 4, 0, 1),
+    doc('CLAUDE.md', 0, 1, 1),
+    doc('README.md', 1, 10, 1),
+    ...ARCH.map((p) => doc(p, 2, p.endsWith('a1.md') ? 2 : 0, p.endsWith('a2.md') ? 2 : 1)),
+    doc('docs/arch/deep.md', 3, 1, 1),
+    doc('docs/arch/deeper/x.md', 4, 2, 1),
+    doc('docs/y.md', 5, 0, 1),
   ],
   [
     { from: 'CLAUDE.md', to: 'README.md' },
-    ...ARCH.map((p) => ({ from: 'CLAUDE.md', to: p })),
-    { from: 'README.md', to: 'docs/arch/a1.md' },
+    ...ARCH.map((p) => ({ from: 'README.md', to: p })),
     { from: 'README.md', to: 'docs/missing.md', broken: true },
     { from: 'docs/arch/a1.md', to: 'docs/arch/a2.md' },
     { from: 'docs/arch/a1.md', to: 'docs/arch/deep.md' },
@@ -63,7 +62,7 @@ const NET = network(
   [BROKEN, ORPHAN],
 )
 
-const GROUP = 'folder:1:docs/arch'
+const GROUP = 'folder:2:docs/arch'
 const MISSING = 'missing:docs/missing.md'
 const ORPHAN_ID = 'orphan:notes/'
 
@@ -78,28 +77,32 @@ describe('layoutMdNetwork', () => {
     const layout = layoutMdNetwork(NET)
     const col = (c: number) => layout.nodes.filter((n) => n.column === c).map((n) => [n.id, n.x, n.y])
     expect(col(0)).toEqual([['CLAUDE.md', 44, 196]])
-    expect(col(1)).toEqual([['README.md', 232, 106], [GROUP, 232, 286]])
-    expect(col(2)).toEqual([[MISSING, 470, 106], ['docs/arch/deep.md', 470, 286]])
-    expect(col(3)).toEqual([['docs/arch/deeper/x.md', 650, 76], ['docs/y.md', 650, 196], [ORPHAN_ID, 650, 316]])
+    expect(col(1)).toEqual([['README.md', 232, 196]])
+    expect(col(2)).toEqual([[GROUP, 470, 106], [MISSING, 470, 286]])
+    expect(col(3)).toEqual([
+      ['docs/arch/deep.md', 650, 61],
+      ['docs/arch/deeper/x.md', 650, 151],
+      ['docs/y.md', 650, 241],
+      [ORPHAN_ID, 650, 331],
+    ])
     for (const n of layout.nodes) {
       expect(n.y).toBeGreaterThanOrEqual(16)
       expect(n.y).toBeLessThanOrEqual(376)
     }
   })
 
-  it('collapses more than 8 docs of one folder in a column into one "<folder>/ · <n>" node, re-routing its edges', () => {
+  it('collapses more than 8 docs of one folder in a column past depth 1 into one "<folder>/ · <n>" node, re-routing its edges', () => {
     const layout = layoutMdNetwork(NET)
     const group = byId(layout, GROUP)
     expect(group).toMatchObject({ kind: 'folder', label: 'arch/ · 9', path: 'docs/arch/ (9 docs)', count: 9 })
-    // Out of the group: a1 → deep. Into it: the root's nine links + README → a1. a1 → a2 stays inside.
-    expect([group.linksOut, group.linkedFrom]).toEqual([1, 10])
+    // Out of the group: a1 → deep. Into it: README's nine links. a1 → a2 stays inside.
+    expect([group.linksOut, group.linkedFrom]).toEqual([1, 9])
     expect(layout.nodes.some((n) => ARCH.includes(n.id))).toBe(false)
-    // docs/arch/deep.md shares the folder but sits alone in column 2, so it stays a doc.
+    // docs/arch/deep.md shares the folder but sits alone in column 3, so it stays a doc.
     expect(byId(layout, 'docs/arch/deep.md')).toMatchObject({ kind: 'doc', label: 'arch/deep.md' })
     const pairs = layout.edges.map((e) => `${e.from} > ${e.to}${e.broken ? ' (broken)' : ''}`)
     expect(pairs).toEqual([
       'CLAUDE.md > README.md',
-      `CLAUDE.md > ${GROUP}`,
       `README.md > ${GROUP}`,
       `README.md > ${MISSING} (broken)`,
       `${GROUP} > docs/arch/deep.md`,
@@ -112,11 +115,26 @@ describe('layoutMdNetwork', () => {
   it('keeps a folder with exactly 8 docs in a column as separate docs', () => {
     const eight = ARCH.slice(0, 8)
     const layout = layoutMdNetwork(
-      network([doc('CLAUDE.md', 0, 8, 0), ...eight.map((p) => doc(p, 1))], eight.map((p) => ({ from: 'CLAUDE.md', to: p }))),
+      network([doc('CLAUDE.md', 0, 8, 0), ...eight.map((p) => doc(p, 2))], eight.map((p) => ({ from: 'CLAUDE.md', to: p }))),
     )
     expect(layout.nodes.filter((n) => n.kind === 'folder')).toEqual([])
-    expect(layout.nodes.filter((n) => n.column === 1).map((n) => n.id)).toEqual(eight)
+    expect(layout.nodes.filter((n) => n.column === 2).map((n) => n.id)).toEqual(eight)
     expect(layout.edges).toHaveLength(8)
+  })
+
+  it('never collapses depth-1 docs, however many share a folder; deeper columns still collapse', () => {
+    const topics = Array.from({ length: 12 }, (_, i) => `architecture/t${i + 1}.md`)
+    const deep = Array.from({ length: 9 }, (_, i) => `architecture/sub/d${i + 1}.md`)
+    const layout = layoutMdNetwork(
+      network(
+        [doc('CLAUDE.md', 0, 12, 0), ...topics.map((p) => doc(p, 1)), ...deep.map((p) => doc(p, 2))],
+        [...topics.map((p) => ({ from: 'CLAUDE.md', to: p })), ...deep.map((p) => ({ from: topics[0], to: p }))],
+      ),
+    )
+    expect(layout.nodes.filter((n) => n.column === 1).map((n) => [n.id, n.kind])).toEqual(topics.map((p) => [p, 'doc']))
+    expect(layout.nodes.filter((n) => n.column === 2).map((n) => [n.id, n.kind])).toEqual([
+      ['folder:2:architecture/sub', 'folder'],
+    ])
   })
 
   it('labels a doc "<folder>/<file>", clipping the folder from the left, then the file, to its column', () => {
@@ -136,11 +154,11 @@ describe('layoutMdNetwork', () => {
   it('draws bezier edges between columns and an arc for a same-column link', () => {
     const layout = layoutMdNetwork(NET)
     const edge = (from: string, to: string) => layout.edges.find((e) => e.from === from && e.to === to)!.d
-    expect(edge('CLAUDE.md', 'README.md')).toBe('M44 196 C138 196 138 106 232 106')
+    expect(edge('README.md', GROUP)).toBe('M232 196 C351 196 351 106 470 106')
     const arc = edge('docs/arch/deeper/x.md', 'docs/y.md')
-    expect(arc.startsWith('M650 76 C')).toBe(true)
-    expect(arc.endsWith(' 650 196')).toBe(true)
-    expect(arc).not.toBe('M650 76 C650 76 650 196 650 196')
+    expect(arc.startsWith('M650 151 C')).toBe(true)
+    expect(arc.endsWith(' 650 241')).toBe(true)
+    expect(arc).not.toBe('M650 151 C650 151 650 241 650 241')
   })
 
   it('adds a missing node for a broken target, flags the linking doc, and an orphan node per orphan group', () => {
@@ -159,7 +177,7 @@ describe('layoutMdNetwork', () => {
   it('draws the docs of an expanded folder as individual nodes, keeping the other ids', () => {
     const layout = layoutMdNetwork(NET, { expanded: new Set([GROUP]) })
     expect(layout.nodes.some((n) => n.id === GROUP)).toBe(false)
-    expect(layout.nodes.filter((n) => n.column === 1).map((n) => n.id)).toEqual(['README.md', ...ARCH])
+    expect(layout.nodes.filter((n) => n.column === 2).map((n) => n.id)).toEqual([...ARCH, MISSING])
     expect(byId(layout, 'docs/arch/a1.md')).toMatchObject({ kind: 'doc', label: 'arch/a1.md', linksOut: 2 })
     const pairs = layout.edges.map((e) => `${e.from} > ${e.to}`)
     expect(pairs).toContain('docs/arch/a1.md > docs/arch/a2.md')
@@ -171,9 +189,9 @@ describe('layoutMdNetwork', () => {
 
   it('grows the height to fit the fullest column at minRowGap and spreads rows within 16..height-16', () => {
     const layout = layoutMdNetwork(NET, { expanded: new Set([GROUP]), minRowGap: 40 })
-    // Column 1 holds README + nine arch docs: 32 + 10 * 40.
+    // Column 2 holds nine arch docs + the missing target: 32 + 10 * 40.
     expect([layout.width, layout.height]).toEqual([760, 432])
-    const col1 = layout.nodes.filter((n) => n.column === 1).map((n) => n.y)
+    const col1 = layout.nodes.filter((n) => n.column === 2).map((n) => n.y)
     expect(col1[0]).toBe(36)
     expect(col1[9]).toBe(396)
     for (const n of layout.nodes) {
@@ -225,7 +243,7 @@ describe('MdNetworkCards LINK MAP', () => {
     mount()
     const svg = q('md-link-map-svg')!
     expect(svg.getAttribute('viewBox')).toBe('0 0 760 392')
-    expect(all('md-link-map-legend').map((l) => l.textContent)).toEqual(['Entry map', 'Owner doc', 'Doc', 'Finding', 'Missing'])
+    expect(all('md-link-map-legend').map((l) => l.textContent)).toEqual(['Map', 'Folder note', 'Topic doc', 'Finding', 'Missing'])
     expect(all('md-link-map-node').map((g) => g.getAttribute('data-node-id'))).toEqual(layoutMdNetwork(NET).nodes.map((n) => n.id))
     expect(node(GROUP).textContent).toContain('arch/ · 9')
     expect(q('md-link-map-caption')!.textContent).toBe(HINT)
@@ -268,7 +286,7 @@ describe('MdNetworkCards LINK MAP', () => {
       `README.md > ${GROUP}`,
       `README.md > ${MISSING}`,
     ])
-    expect(q('md-link-map-caption')!.textContent).toBe('README.md · links out 2 · linked from 1')
+    expect(q('md-link-map-caption')!.textContent).toBe('README.md · links out 10 · linked from 1')
     unhover(node('README.md'))
     expect(Object.values(stateOf()).every((s) => s === 'idle')).toBe(true)
     expect(q('md-link-map-caption')!.textContent).toBe(HINT)
@@ -277,7 +295,7 @@ describe('MdNetworkCards LINK MAP', () => {
   it('captions a collapsed folder with its folder path and the links crossing it', () => {
     mount()
     hover(node(GROUP))
-    expect(q('md-link-map-caption')!.textContent).toBe('docs/arch/ (9 docs) · links out 1 · linked from 10')
+    expect(q('md-link-map-caption')!.textContent).toBe('docs/arch/ (9 docs) · links out 1 · linked from 9')
   })
 })
 

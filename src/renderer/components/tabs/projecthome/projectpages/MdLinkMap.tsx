@@ -6,9 +6,10 @@
  * (x = 44 / 232 / 470 / 650 of the 760×392 viewBox, depth 3+ in the last), each column's rows
  * spread evenly within y 16..376. Rows keep the scan's walk order, so a doc sits near the doc
  * that first linked it. `opts.minRowGap` grows the height to fit the fullest column at that gap
- * (never below 392); rows then spread within 16..height-16. More than 8 docs of one folder in a column collapse into one
- * `<folder>/ · <n>` node (its edges re-routed, links inside it dropped) unless `opts.expanded` holds
- * that folder node's id. A broken link's target
+ * (never below 392); rows then spread within 16..height-16. Depth-1 docs (the topic docs the root
+ * links directly) always draw one by one; deeper, more than 8 docs of one folder in a column collapse
+ * into one `<folder>/ · <n>` node (its edges re-routed, links inside it dropped) unless
+ * `opts.expanded` holds that folder node's id. A broken link's target
  * gets a dashed accent Missing node one column right of the linking doc, which is drawn as a
  * Finding; each orphan group is an unlinked dashed node at the foot of the last column.
  *
@@ -25,7 +26,7 @@ const LAST_COLUMN = COLUMN_X.length - 1
 const ROW_TOP = 16
 const MAP_WIDTH = 760
 const MAP_HEIGHT = 392
-/** A column holding more than this many docs of one folder draws them as one folder node. */
+/** A column past depth 1 holding more than this many docs of one folder draws them as one folder node. */
 const COLLAPSE_OVER = 8
 /** Label room per column, in characters of the 10.5px mono label. */
 const LABEL_MAX = [14, 34, 26, 15] as const
@@ -149,7 +150,9 @@ export function layoutMdNetwork(net: MdNetwork, opts: LayoutOptions = {}): MdLin
     const dir = dirOf(n.path)
     const order = firstIn.get(n.id) ?? -1
     const id = `folder:${column}:${dir}`
-    if ((perFolder.get(`${column}\0${dir}`) ?? 0) > COLLAPSE_OVER && !expanded?.has(id)) {
+    // Depth-1 docs are the map's topic docs: never fold them away.
+    const collapses = column > 1 && (perFolder.get(`${column}\0${dir}`) ?? 0) > COLLAPSE_OVER
+    if (collapses && !expanded?.has(id)) {
       nodeOf.set(n.id, id)
       const group = drafts.get(id)
       const count = (group?.count ?? 0) + 1
@@ -297,9 +300,9 @@ const NODE_LOOK: Record<MdMapNodeKind, NodeLook> = {
 }
 
 const LEGEND: readonly { label: string; swatch: string }[] = [
-  { label: 'Entry map', swatch: 'h-2.5 w-2.5 bg-fg' },
-  { label: 'Owner doc', swatch: 'h-[9px] w-[9px] bg-fg-dim' },
-  { label: 'Doc', swatch: 'h-[9px] w-[9px] border-[1.3px] border-fg-faint bg-bg-hi' },
+  { label: 'Map', swatch: 'h-2.5 w-2.5 bg-fg' },
+  { label: 'Folder note', swatch: 'h-[9px] w-[9px] bg-fg-dim' },
+  { label: 'Topic doc', swatch: 'h-[9px] w-[9px] border-[1.3px] border-fg-faint bg-bg-hi' },
   { label: 'Finding', swatch: 'h-[9px] w-[9px] border-2 border-accent' },
   { label: 'Missing', swatch: 'h-[9px] w-[9px] border-[1.5px] border-dashed border-accent' },
 ]

@@ -25,17 +25,17 @@ const BROKEN: MdNetworkFinding = {
   detail: 'The link target doesn’t exist.',
 }
 const NET = network(
-  [doc('CLAUDE.md', 0, 10, 1), doc('README.md', 1, 2, 1), ...ARCH.map((p) => doc(p, 1)), doc('docs/guide.md', 2, 1, 1)],
+  [doc('CLAUDE.md', 0, 1, 1), doc('README.md', 1, 2, 1), doc('docs/guide.md', 2, 10, 1), ...ARCH.map((p) => doc(p, 3))],
   [
     { from: 'CLAUDE.md', to: 'README.md' },
-    ...ARCH.map((p) => ({ from: 'CLAUDE.md', to: p })),
     { from: 'README.md', to: 'docs/guide.md' },
     { from: 'README.md', to: 'docs/missing.md', broken: true },
+    ...ARCH.map((p) => ({ from: 'docs/guide.md', to: p })),
     { from: 'docs/guide.md', to: 'CLAUDE.md' },
   ],
   [BROKEN],
 )
-const GROUP = 'folder:1:docs/arch'
+const GROUP = 'folder:3:docs/arch'
 
 let container: HTMLDivElement
 let root: Root
@@ -151,7 +151,7 @@ describe('MdNetworkExplorer', () => {
     expect(node('README.md')?.getAttribute('data-state')).toBe('idle')
   })
 
-  it('shows the Map | Docs toggle only with renderDocs, and Docs swaps the canvas', () => {
+  it('shows the Graph | List toggle only with renderDocs, and Docs swaps the canvas', () => {
     render()
     expect(q('md-explorer-view-docs')).toBeNull()
     act(() => root.unmount())
@@ -166,6 +166,8 @@ describe('MdNetworkExplorer', () => {
     })
     expect(q('explorer-footer')).not.toBeNull()
     expect(q('md-explorer-canvas')).not.toBeNull()
+    expect(q('md-explorer-view-map')?.textContent).toBe('Graph')
+    expect(q('md-explorer-view-docs')?.textContent).toBe('List')
     click(q('md-explorer-view-docs'))
     expect(q('md-explorer-canvas')).toBeNull()
     click(q('docs-table'))

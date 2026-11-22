@@ -68,6 +68,11 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'project-pages:matrix': { field: 'cwd', mode: 'root' },
   // Epic Changes view (main/lib/epic/epicChanges.cjs): diffs a repo, so cwd must sit inside a registered root.
   'epicChanges:get': { field: 'cwd', mode: 'root' },
+  // Scheduler Tasks section reads (main/lib/tasks/taskIpc.cjs): cwd inside a registered root.
+  // tasks:set-switch is not here — its apiSurface row is 'deny', so it never reaches the relay.
+  'tasks:list': { field: 'cwd', mode: 'root' },
+  'tasks:get': { field: 'cwd', mode: 'root' },
+  'tasks:get-switch': { field: 'cwd', mode: 'root' },
 })
 
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker', '.password-store', '.azure', '.terraform.d'])

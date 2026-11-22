@@ -324,6 +324,36 @@ describe('remoteArgFence', () => {
     })
   })
 
+  // Scheduler Tasks section (main/lib/tasks/taskIpc.cjs): the REAL apiSurface rows + fence entries.
+  describe('tasks:* reads are fenced; tasks:set-switch is never remote', () => {
+    const realSurface = require('../../../../preload/apiSurface.cjs')
+    const reads = ['tasks:list', 'tasks:get', 'tasks:get-switch']
+    const mkD = (ch) => {
+      const fn = vi.fn(async (_e, payload) => ({ ok: true, payload }))
+      const d = createRemoteIpcDispatcher({ surface: realSurface, handlers: new Map([[ch, fn]]), getConfig: () => fullCfg, fenceCtx: mk() })
+      return { fn, d }
+    }
+    it('fences the cwd of each read channel to a registered project root', () => {
+      for (const ch of reads) expect(PATH_FENCED_CHANNELS[ch]).toEqual({ field: 'cwd', mode: 'root' })
+    })
+    it('forwards a registered cwd and refuses any other', async () => {
+      for (const ch of reads) {
+        const { fn, d } = mkD(ch)
+        expect(await d.invoke(authed, ch, [{ cwd: '/home/u/proj' }])).toEqual({ ok: true, result: { ok: true, payload: { cwd: '/home/u/proj' } } })
+        for (const args of [[{ cwd: '/home/u' }], [{ cwd: '/tmp/x' }], [{}], []]) {
+          expect(await d.invoke(authed, ch, args)).toEqual(fenced)
+        }
+        expect(fn).toHaveBeenCalledTimes(1)
+      }
+    })
+    it('never runs tasks:set-switch for a remote caller', async () => {
+      const { fn, d } = mkD('tasks:set-switch')
+      const res = await d.invoke(authed, 'tasks:set-switch', [{ cwd: '/home/u/proj', enabled: true }])
+      expect(res.ok).toBe(false)
+      expect(fn).not.toHaveBeenCalled()
+    })
+  })
+
   describe('home / ancestor roots are ignored', () => {
     const withRoots = (roots) => ({ ...mk(), projectRoots: () => roots })
     it('home registered as a root does not expose ~/notes.txt', () => {

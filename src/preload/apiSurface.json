@@ -1090,6 +1090,34 @@
   "remote": "read"
  },
  {
+  "ns": "tasks",
+  "method": "list",
+  "channel": "tasks:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "tasks",
+  "method": "get",
+  "channel": "tasks:get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "tasks",
+  "method": "getSwitch",
+  "channel": "tasks:get-switch",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "tasks",
+  "method": "setSwitch",
+  "channel": "tasks:set-switch",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
   "ns": "files",
   "method": "list",
   "channel": "files:list",

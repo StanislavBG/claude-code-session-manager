@@ -306,6 +306,14 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('history:updated', listener);
     },
   },
+  // Scheduler Tasks section (main/lib/tasks/taskIpc.cjs). setSwitch is the
+  // human-only Tasks switch — desktop-only, the phone relay can never reach it.
+  tasks: {
+    list: (q) => ipcRenderer.invoke('tasks:list', q),
+    get: (q) => ipcRenderer.invoke('tasks:get', q),
+    getSwitch: (q) => ipcRenderer.invoke('tasks:get-switch', q),
+    setSwitch: (q) => ipcRenderer.invoke('tasks:set-switch', q),
+  },
   files: {
     list: (path, showHidden) => ipcRenderer.invoke('files:list', { path, showHidden }),
     read: (path) => ipcRenderer.invoke('files:read', { path }),

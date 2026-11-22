@@ -1383,6 +1383,127 @@ export interface HistoryDashboardResult {
   legacyDates: string[];
 }
 
+// ────────────────────────────────────────────── Tasks (main/lib/tasks/taskIpc.cjs)
+// Request types mirror the zod schemas of the same name in main/ipcSchemas.cjs.
+
+/** Mirrors ipcSchemas TaskListQuery. since/until are ISO timestamps (inclusive). */
+export interface TaskListQuery {
+  cwd: string;
+  since?: string;
+  until?: string;
+  pipeline?: string;
+  runId?: string;
+  step?: string;
+  agent?: string;
+  status?: string;
+  source?: string;
+  /** 1..200, default 50. */
+  limit?: number;
+  offset?: number;
+}
+
+/** Mirrors ipcSchemas TaskGetQuery. */
+export interface TaskGetQuery {
+  cwd: string;
+  id: string;
+}
+
+/** Mirrors ipcSchemas TaskSwitchQuery. */
+export interface TaskSwitchQuery {
+  cwd: string;
+}
+
+/** Mirrors ipcSchemas TaskSwitchSet. */
+export interface TaskSwitchSet {
+  cwd: string;
+  enabled: boolean;
+}
+
+export interface TaskUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * One folded ledger summary row (start ⊕ end, or an imported line) as
+ * taskLedger.listTasks returns it. Hashes + byte counts only — never text.
+ */
+export interface TaskSummary {
+  v?: number;
+  taskId: string;
+  /** 'sm' (ran through Session Manager) or 'direct' (imported). */
+  source?: 'sm' | 'direct' | string;
+  /** Ledger status; 'running' / 'interrupted' are derived when no end line exists. */
+  status: 'running' | 'interrupted' | 'ok' | 'error' | 'timeout' | 'caller_gone' | 'rate_limited' | 'spawn_failed' | string;
+  cwd?: string;
+  runtimeCwd?: string;
+  agent?: string;
+  model?: string;
+  effort?: string;
+  missionId?: string | null;
+  priority?: string;
+  caller?: { pipeline?: string; runId?: string; step?: string; attempt?: number; [key: string]: unknown };
+  importId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  timeoutSec?: number;
+  slotWaitSec?: number;
+  slotWaitMs?: number;
+  durationMs?: number;
+  exitCode?: number | null;
+  usage?: TaskUsage | null;
+  modelUsage?: Record<string, unknown> | null;
+  costUsd?: number | null;
+  cliCostUsd?: number | null;
+  numTurns?: number | null;
+  quota?: { rateLimited: boolean; resetsAt: string | null };
+  error?: string | null;
+  promptSha256?: string;
+  promptBytes?: number;
+  outputSha256?: string;
+  outputBytes?: number;
+}
+
+/** The Task's body file (tasks/bodies/<taskId>.json); prompt/output capped at 1 MiB each. */
+export interface TaskBody {
+  v?: number;
+  taskId: string;
+  startedAt?: string;
+  prompt?: string;
+  promptTruncated?: boolean;
+  output?: string;
+  outputTruncated?: boolean;
+  stderrTail?: string;
+  envelope?: unknown;
+}
+
+/**
+ * taskLedger.getTask: the summary row plus its body (null when the body
+ * file is missing). sha256s/byte counts sit on the summary fields.
+ */
+export interface TaskDetail extends TaskSummary {
+  body: TaskBody | null;
+}
+
+export type TaskListResult =
+  | { ok: true; tasks: TaskSummary[]; total: number; hasMore: boolean; skippedLines: number }
+  | { ok: false; error: string };
+
+export type TaskGetResult =
+  | { ok: true; task: TaskDetail | null }
+  | { ok: false; error: string };
+
+export type TaskGetSwitchResult =
+  | { ok: true; enabled: boolean }
+  | { ok: false; error: string };
+
+export type TaskSetSwitchResult =
+  | { ok: true; enabled: boolean; changedAt: string }
+  | { ok: false; error: string };
+
 
 export interface FileEntry {
   name: string;
@@ -2651,6 +2772,13 @@ export interface SessionManagerAPI {
     loopEfficiency: () => Promise<LoopEfficiencyResult>;
     /** Fires (throttled to 1/5 s) when main appends days to the rollup. Returns unsubscribe. */
     onUpdated: (handler: () => void) => () => void;
+  };
+  /** Scheduler Tasks section (taskIpc.cjs). setSwitch is desktop-only (remote 'deny'). */
+  tasks: {
+    list: (q: TaskListQuery) => Promise<TaskListResult>;
+    get: (q: TaskGetQuery) => Promise<TaskGetResult>;
+    getSwitch: (q: TaskSwitchQuery) => Promise<TaskGetSwitchResult>;
+    setSwitch: (q: TaskSwitchSet) => Promise<TaskSetSwitchResult>;
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;

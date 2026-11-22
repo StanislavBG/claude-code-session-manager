@@ -9,8 +9,8 @@
  *
  * - Memory    — today's MemoryExplorer (Memory.tsx). Its chip names the folder main resolves
  *               for this project (memory.list's `dir`), never a renderer-side guess.
- * - CLAUDE.md — <cwd>/CLAUDE.md (Project) or <cwd>/CLAUDE.local.md (Local), loaded and saved
- *               through useConfig loadText/saveText. Save never forces, so the store's mtime
+ * - CLAUDE.md — ClaudeMdWorkbench over <cwd>/CLAUDE.md (Project) and <cwd>/CLAUDE.local.md
+ *               (Local) as radio rows, loaded and saved through useConfig loadText/saveText. Save never forces, so the store's mtime
  *               conflict check still refuses to overwrite a copy that changed on disk.
  * - Settings  — Settings.tsx at project or local scope, below the Epic worktree isolation
  *               toggle, which sits under a chip naming its own file: it is Session Manager's
@@ -25,9 +25,8 @@ import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
 import { ViewTabs } from '../ui/ViewTabs'
 import { SourceChip, shortenHome } from '../ui/SourceChip'
-import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
-import { DocumentEditorPane } from './editor/DocumentEditorPane'
+import { ClaudeMdWorkbench, type ClaudeMdRoot } from '../claudeConfig/ClaudeMdWorkbench'
 import { HomeSessionDrawer } from './home/HomeSessionDrawer'
 import { Memory } from './Memory'
 import { Settings } from './Settings'
@@ -37,11 +36,11 @@ import { Skills } from './Skills'
 import { McpLibrary } from './Library'
 import { useConfig } from '../../state/config'
 import { usePanelTabHint } from '../../state/layout'
-import { toast } from '../../state/toast'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import { CLAUDE_MD_SCOPES } from '../../lib/scopes'
+import { basename } from '../../lib/basename'
 import { listSkillEntries } from '../../lib/listSkills'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { AlmanacIconName } from '../layout/AlmanacIcon'
@@ -82,10 +81,6 @@ const CLAUDE_MD_NOTES: Record<ProjectScope, { title: string; body: string }> = {
       'This is the real <project>/CLAUDE.local.md on disk: your own notes for this project on this machine, kept out of git. The claude CLI loads it alongside CLAUDE.md.',
   },
 }
-
-const CONFLICT_HINT = 'changed on disk since it was loaded. Revert reloads it'
-
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /** The files and folders each tab's count reads — also the paths whose changes re-count. */
 function countSources(cwd: string, memoryDir: string | null) {
@@ -194,75 +189,59 @@ function useProjectConfigCounts(cwd: string | null): ProjectCounts {
 
 const asCount = (n: number | null): number | undefined => (n == null ? undefined : n)
 
-/** One CLAUDE.md-family file, edited through the config store (dirty draft, watch, mtime-checked save). */
-function ClaudeMdTab({ path, scope }: { path: string; scope: ProjectScope }) {
-  const file = useConfig((s) => s.files[path])
-  const loadText = useConfig((s) => s.loadText)
-  const setDraft = useConfig((s) => s.setDraft)
-  const saveText = useConfig((s) => s.saveText)
-  const watchFile = useConfig((s) => s.watchFile)
-  const unwatchFile = useConfig((s) => s.unwatchFile)
-  const [saveError, setSaveError] = useState<string | null>(null)
+/**
+ * The project's CLAUDE.md / CLAUDE.local.md in the shared ClaudeMdWorkbench (design render 06):
+ * the two files are radio rows that own the Project / Local choice, each file's @imports follow,
+ * and the selected one is edited through the config store (dirty draft, watch, mtime-checked save).
+ */
+function ClaudeMdTab({ home, cwd, scope, onScopeChange }: {
+  home: string
+  cwd: string
+  scope: ProjectScope
+  onScopeChange: (scope: ProjectScope) => void
+}) {
+  const paths = useMemo(
+    () => ({ project: CLAUDE_MD_SCOPES.resolve('project', home, cwd), local: CLAUDE_MD_SCOPES.resolve('local', home, cwd) }),
+    [home, cwd],
+  )
+  const roots = useMemo(() => {
+    const out: ClaudeMdRoot[] = []
+    if (paths.project) out.push({ path: paths.project, label: 'Project · in git', eyebrow: 'PROJECT INSTRUCTIONS' })
+    if (paths.local) out.push({ path: paths.local, label: 'Local · this machine', eyebrow: 'LOCAL INSTRUCTIONS' })
+    return out
+  }, [paths])
+  const onSelectRoot = useCallback(
+    (p: string) => onScopeChange(p === paths.local ? 'local' : 'project'),
+    [paths.local, onScopeChange],
+  )
+  const empty = useMemo(() => ({
+    title: scope === 'local' ? 'No private notes for this project yet.' : 'Nothing tells Claude how this repo works yet.',
+    body: scope === 'local'
+      ? `Claude loads this file into every session started in ${basename(cwd)} on this machine. It stays out of git.`
+      : `It loads this file into every session started in ${basename(cwd)} — and so does anyone who clones the repo.`,
+  }), [scope, cwd])
 
-  useEffect(() => {
-    // Re-read on every open so edits made elsewhere show up; keepDirty keeps an unsaved draft.
-    loadText(path, true).catch((e: unknown) => toast.error(`Couldn't read ${path}: ${errText(e)}`))
-    watchFile(path)
-    return () => { unwatchFile(path) }
-  }, [path, loadText, watchFile, unwatchFile])
-
-  const save = useCallback(async () => {
-    setSaveError(null)
-    // No `force`: saveText refuses with 'conflict' (and toasts) when the disk copy is newer than the draft's base.
-    const res = await saveText(path)
-    if (!res.ok) setSaveError(res.error === 'conflict' ? CONFLICT_HINT : res.error ?? 'save failed')
-  }, [path, saveText])
-
-  // Revert re-reads the file rather than restoring the cached copy, so after a conflict the
-  // draft is rebased on what is on disk now and the next save is checked against it.
-  const reload = useCallback(() => {
-    setSaveError(null)
-    loadText(path).catch((e: unknown) => toast.error(`Couldn't read ${path}: ${errText(e)}`))
-  }, [path, loadText])
-
-  if (!file) return <EmptyState title="loading…" />
+  const active = paths[scope]
+  if (!active) return <EmptyState title="loading…" />
   const note = CLAUDE_MD_NOTES[scope]
 
   return (
     <div data-testid="project-claude-md" className="flex flex-col h-full min-h-0">
-      <div className="shrink-0 border-b border-line bg-bg-elev px-3 py-2 text-[11.5px] leading-snug">
-        <span className="font-semibold text-fg">{note.title}</span>
-        <span className="mx-1.5 text-fg-faint">·</span>
-        <span className="text-fg-dim">{note.body}</span>
-      </div>
-      {file.loadError && (
-        <div role="alert" className="shrink-0 border-b border-line px-3 py-1.5 text-[11px] text-red-400">
-          {file.loadError}
-        </div>
-      )}
-      <div className="flex-1 min-h-0">
-        <DocumentEditorPane
-          path={path}
-          value={file.draftRaw}
-          defaultMode="split"
-          onChange={(v) => {
-            setSaveError(null)
-            setDraft(path, v)
-          }}
-          onSave={() => { void save() }}
-        />
-      </div>
-      <div className="shrink-0 border-t border-line">
-        <SaveBar
-          dirty={file.dirty}
-          busy={file.busy}
-          parseError={saveError}
-          lastSavedAt={file.lastSavedAt}
-          leading={file.exists ? null : <span>file will be created on save</span>}
-          onSave={() => { void save() }}
-          onRevert={reload}
-        />
-      </div>
+      <ClaudeMdWorkbench
+        home={home}
+        scope="project"
+        roots={roots}
+        activeRoot={active}
+        onSelectRoot={onSelectRoot}
+        empty={empty}
+        note={
+          <div className="shrink-0 text-[11.5px] leading-snug">
+            <span className="font-semibold text-fg">{note.title}</span>
+            <span className="mx-1.5 text-fg-faint">·</span>
+            <span className="text-fg-dim">{note.body}</span>
+          </div>
+        }
+      />
     </div>
   )
 }
@@ -371,7 +350,7 @@ function ProjectClaudeConfigComponent() {
       </SourceStrip>
       <div className="flex-1 min-h-0" data-testid={`project-claude-config-panel-${tab}`}>
         {tab === 'memory' && <Memory />}
-        {tab === 'claude-md' && mdPath && <ClaudeMdTab key={mdPath} path={mdPath} scope={mdScope} />}
+        {tab === 'claude-md' && <ClaudeMdTab home={home} cwd={cwd} scope={mdScope} onScopeChange={setMdScope} />}
         {tab === 'settings' && <SettingsTab cwd={cwd} scope={settingsScope} />}
         {tab === 'mcp' && <McpServers scope="project" onAdd={openMcpAdd} />}
         {tab === 'skills' && <Skills scope="project" />}

@@ -75,10 +75,13 @@ function splitFrontmatter(raw) {
  * emitted only in its inline `[a, b]` list form (the sole form prdCreate.cjs
  * ever writes; block-style YAML lists are out of scope). An empty array is
  * never emitted, which is how `scheduler_update_prd` clears a dependency.
+ *
+ * `fixes` (the earlier PRDs this one repairs) is a one-line JSON array of
+ * { prd, missKind, reason } — see parseFixes.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort'];
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -141,6 +144,27 @@ function isArtifactOnlyDeclaration(decl) {
     && decl.artifactPaths.length > 0;
 }
 
+/**
+ * Parse the `fixes` value — a one-line JSON array of { prd, missKind, reason }
+ * (the sole form prdCreate.cjs's buildPrdBody writes). Returns null for anything
+ * else (not JSON, not an array, or an entry missing a string field), so a
+ * hand-mangled value is left unset rather than half-parsed.
+ */
+function parseFixes(raw) {
+  const v = String(raw ?? '').trim();
+  if (!v.startsWith('[')) return null;
+  let arr;
+  try { arr = JSON.parse(v); } catch { return null; }
+  if (!Array.isArray(arr)) return null;
+  const out = [];
+  for (const e of arr) {
+    if (e == null || typeof e !== 'object' || Array.isArray(e)) return null;
+    if (typeof e.prd !== 'string' || typeof e.missKind !== 'string' || typeof e.reason !== 'string') return null;
+    out.push({ prd: e.prd, missKind: e.missKind, reason: e.reason });
+  }
+  return out;
+}
+
 function arraysEqual(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -190,6 +214,11 @@ function applyKey(fm, key, after) {
       // header) — a malformed/hand-edited non-list value is left unset.
       const list = parseInlineList(after);
       if (list) fm.dependsOn = list;
+      return;
+    }
+    case 'fixes': {
+      const list = parseFixes(after);
+      if (list && list.length) fm.fixes = list;
       return;
     }
     case 'quietMachine':
@@ -263,7 +292,7 @@ function parsePrdFile(text) {
 
     if (RECOGNIZED_KEYS.has(key)) {
       applyKey(fm, key, after);
-      if (key === 'dependsOn' || key === 'artifactPaths') {
+      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes') {
         if (fm[key]) {
           if (!fm._raw) fm._raw = {};
           fm._raw[key] = { line, parsed: fm[key] };
@@ -312,6 +341,11 @@ function serializePrdFile(fm, body) {
     // dependency — never emitted, same as an absent key.
     if (Array.isArray(v) && v.length === 0) continue;
     const cached = fm._raw?.[key];
+    if (key === 'fixes') {
+      const line = `fixes: ${JSON.stringify(v.map((f) => ({ prd: f.prd, missKind: f.missKind, reason: f.reason })))}`;
+      out.push(cached && cached.line.trim() === line ? cached.line : line);
+      continue;
+    }
     if (cached && (Array.isArray(v) ? arraysEqual(cached.parsed, v) : cached.parsed === v)) {
       out.push(cached.line);
       continue;
@@ -343,6 +377,7 @@ module.exports = {
   parsePrdFile,
   serializePrdFile,
   parseInlineList,
+  parseFixes,
   isArtifactOnlyDeclaration,
   RECOGNIZED_KEYS,
   PRD_EFFORT_LEVELS,

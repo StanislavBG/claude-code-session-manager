@@ -41,6 +41,7 @@ const { isSweepValidatorSlug } = require('../epic/epicSweepValidator.cjs');
 const { validateGate, validateFiles, renderFilesSection, renderGateSection, parseFilesSection } = require('./prdGateFiles.cjs');
 const { filesOverlap } = require('../scheduler/schedulerBatch.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
+const { MISS_KINDS } = require('../scheduler/validatorVerdictSchema.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -91,7 +92,7 @@ function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
     implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort,
-    gate, files, budgetExempt,
+    gate, files, budgetExempt, fixes,
   } = input;
 
   // No `parallelGroup` frontmatter key (PRD_AUTHORING.md §5) — the NN-
@@ -127,6 +128,10 @@ function buildPrdBody(input) {
   fmLines.push(`agentType: ${agentType || DEFAULT_PRD_AGENT_TYPE}`);
   // Explicit ordering (PRD 832): replaces the retired shared-NN convention.
   if (dependsOn && dependsOn.length) fmLines.push(`dependsOn: [${dependsOn.join(', ')}]`);
+  // Earlier PRDs this one repairs (validator-miss / escape link) — one-line JSON
+  // array, already validated and resolved to NN slugs by createPrd(); see
+  // prdFrontmatter.cjs's applyKey for the matching parse.
+  if (Array.isArray(fixes) && fixes.length) fmLines.push(`fixes: ${serializeFixes(fixes)}`);
   // Wave-authoring decision (scheduler wave-disposition PRD) — only ever set
   // when createPrd() actually had a disposition to record (see the call
   // site above); a first-ever PRD in an Epic, or one with its own explicit
@@ -289,6 +294,64 @@ function resolveDependsOnToFullSlugs(dependsOn, rows, { epicId = null, siblingSl
     out.push(chosen);
   }
   return { dependsOn: Array.from(new Set(out)), siblingDeps, warnings };
+}
+
+const FIXES_MAX = 20;
+const FIX_REASON_MAX = 200;
+
+/** Serialize resolved fixes as the one-line JSON array prdFrontmatter.cjs parses. */
+function serializeFixes(fixes) {
+  return JSON.stringify(fixes.map((f) => ({ prd: f.prd, missKind: f.missKind, reason: f.reason })));
+}
+
+/**
+ * Shape check for the optional `fixes` input: 1-FIXES_MAX entries of
+ * { prd, missKind (one of MISS_KINDS), reason (one line, 1-200 chars) }, none
+ * naming the PRD being created. Returns one error string per bad entry, each
+ * naming its index.
+ */
+function validateFixesShape(fixes, selfSlug) {
+  if (!Array.isArray(fixes)) return ['fixes must be an array of { prd, missKind, reason }'];
+  if (fixes.length < 1 || fixes.length > FIXES_MAX) return [`fixes must have 1-${FIXES_MAX} entries (got ${fixes.length})`];
+  const errors = [];
+  fixes.forEach((f, i) => {
+    const at = `fixes[${i}]`;
+    if (f == null || typeof f !== 'object' || Array.isArray(f)) { errors.push(`${at}: must be an object { prd, missKind, reason }`); return; }
+    if (typeof f.prd !== 'string' || !/^\S+$/.test(f.prd)) {
+      errors.push(`${at}.prd: must be the NN-slug or bare slug of an existing PRD`);
+    } else if (f.prd === selfSlug) {
+      errors.push(`${at}.prd: "${f.prd}" names this PRD itself`);
+    }
+    if (!MISS_KINDS.includes(f.missKind)) errors.push(`${at}.missKind: must be one of ${MISS_KINDS.join(', ')}`);
+    if (typeof f.reason !== 'string' || f.reason.trim() === '') errors.push(`${at}.reason: must be a non-empty string`);
+    else if (/[\r\n]/.test(f.reason)) errors.push(`${at}.reason: must be one line`);
+    else if (f.reason.length > FIX_REASON_MAX) errors.push(`${at}.reason: must be at most ${FIX_REASON_MAX} chars (got ${f.reason.length})`);
+  });
+  return errors;
+}
+
+/**
+ * Resolve each fixes[].prd to the full NN slug of an existing PRD in this project,
+ * with the same rule dependsOn uses (resolveDepSlug + resolveDependsOnToFullSlugs:
+ * exact slug, else bare name preferring the same Epic, highest NN).
+ */
+function resolveFixes(fixes, rows, { epicId = null } = {}) {
+  const slugs = rows.map((r) => r.slug);
+  const errors = [];
+  const warnings = [];
+  const out = [];
+  fixes.forEach((f, i) => {
+    if (resolveDepSlug(f.prd, slugs).length === 0) {
+      const near = findNearMatches(f.prd, slugs);
+      errors.push(`fixes[${i}].prd: "${f.prd}" does not resolve to any existing PRD in this project.` +
+        (near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : ''));
+      return;
+    }
+    const r = resolveDependsOnToFullSlugs([f.prd], rows, { epicId });
+    warnings.push(...r.warnings.map((w) => w.replace(/^dependsOn /, `fixes[${i}].prd `)));
+    out.push({ prd: r.dependsOn[0], missKind: f.missKind, reason: f.reason });
+  });
+  return { fixes: out, errors, warnings };
 }
 
 /**
@@ -686,7 +749,8 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // A read failure is skipped-with-a-warning, never a write outage.
   const needCrossEpicGuard = opts.internalMint !== true;
   let listing = null;
-  if (needCrossEpicGuard || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
+  const hasFixes = input.fixes !== undefined && input.fixes !== null;
+  if (needCrossEpicGuard || hasFixes || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
     try {
       listing = opts.listingCache
         ? await (opts.listingCache.promise ??= remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER }))
@@ -713,6 +777,23 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // Cross-Epic files-overlap advisory: a warning, never a refusal.
   if (listing && filesList && filesList.length) {
     extraWarnings.push(...await crossEpicFilesOverlapWarnings(filesList, input.sourcePromptId ?? null, listing.prds ?? [], remote, input.cwd));
+  }
+
+  // fixes: shape-checked and resolved to full NN slugs before NN allocation, so a
+  // refusal burns no number. Fail-closed when the listing could not be read — an
+  // unresolved fixes link would miscount escapes.
+  if (hasFixes) {
+    const shapeErrors = validateFixesShape(input.fixes, slug);
+    if (shapeErrors.length) {
+      return { ok: false, applied: false, status: 400, error: shapeErrors.join('; ') };
+    }
+    if (!listing) {
+      return { ok: false, applied: false, status: 503, error: 'fixes could not be checked: the PRD listing for this project could not be read — retry' };
+    }
+    const r = resolveFixes(input.fixes, listing.prds ?? [], { epicId: input.sourcePromptId ?? null });
+    if (r.errors.length) return { ok: false, applied: false, status: 400, error: r.errors.join('; ') };
+    extraWarnings.push(...r.warnings);
+    input = { ...input, fixes: r.fixes };
   }
 
   // Dry run burns no number: a placeholder keeps the filename-shaped guards below meaningful.
@@ -1199,6 +1280,8 @@ module.exports = {
   createPrd,
   createPrdBatch,
   findCrossEpicDuplicates,
+  validateFixesShape,
+  FIXES_MAX,
   PRD_BATCH_MAX,
   registerAdminRoute,
 };

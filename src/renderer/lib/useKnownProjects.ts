@@ -97,8 +97,15 @@ let scannedForHome: string | null = null
 let scanToken = 0
 let inFlight: Promise<void> | null = null
 let lastScanFinishedAt = 0
-/** encoded folder → resolved cwd; only non-null resolutions, so unresolved folders retry. */
+/** encoded folder → resolved cwd; only non-null resolutions (failures live in unresolvedSignature). */
 const resolvedCwdByEncoded = new Map<string, string>()
+/**
+ * encoded folder → `${sessionCount}:${lastSession}` of the scan whose cwd
+ * resolution failed (null or threw). A later scan skips resolveProjectCwd
+ * while the folder's signature is unchanged and retries once it differs.
+ */
+const unresolvedSignature = new Map<string, string>()
+const signatureOf = (row: ProjectRow) => `${row.sessionCount}:${row.lastSession}`
 /** Folders archived while a scan was in flight — dropped from that scan's publishes. */
 const archivedDuringScan = new Set<string>()
 /** Cwds `enrichProject` succeeded for — a refresh re-enriches them only when a folder of theirs got newer. */
@@ -276,13 +283,21 @@ async function runEnrichment(
     if (row.sessionCount === 0) { cwdByEncoded[row.encoded] = null; return }
     const cached = resolvedCwdByEncoded.get(row.encoded)
     if (cached) { cwdByEncoded[row.encoded] = cached; return }
+    const signature = signatureOf(row)
+    if (unresolvedSignature.get(row.encoded) === signature) { cwdByEncoded[row.encoded] = null; return }
     try {
       const cwd = await resolveProjectCwd(row.path)
       const normalized = cwd ? normalizeCwd(cwd) : null
       cwdByEncoded[row.encoded] = normalized
-      if (normalized) resolvedCwdByEncoded.set(row.encoded, normalized)
+      if (normalized) {
+        resolvedCwdByEncoded.set(row.encoded, normalized)
+        unresolvedSignature.delete(row.encoded)
+      } else {
+        unresolvedSignature.set(row.encoded, signature)
+      }
     } catch {
       cwdByEncoded[row.encoded] = null
+      unresolvedSignature.set(row.encoded, signature)
     }
   })
   if (token !== scanToken) return
@@ -351,6 +366,7 @@ export function __resetKnownProjectsForTests(): void {
   inFlight = null
   lastScanFinishedAt = 0
   resolvedCwdByEncoded.clear()
+  unresolvedSignature.clear()
   archivedDuringScan.clear()
   enrichedCwds.clear()
   ownerMap = null

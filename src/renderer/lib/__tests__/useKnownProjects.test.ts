@@ -207,17 +207,72 @@ describe('refreshKnownProjects', () => {
     unmount()
   })
 
-  it('does not re-read transcripts of a folder whose cwd already resolved; retries unresolved ones', async () => {
+  it('does not re-read transcripts of a folder whose cwd already resolved, nor of an unchanged unresolved one', async () => {
     const fs = setupFs()
     const c = `${ROOT}/-p-c`
     fs.folders[c] = [file(c, 's5.jsonl', 50)] // no cwd mapping → never resolves
-    const { unmount } = await mountProbe()
+    const { ref, unmount } = await mountProbe()
     expect(cwdReadsFor(fs.readText, fs.a)).toHaveLength(1)
     expect(cwdReadsFor(fs.readText, c)).toHaveLength(1)
     await act(async () => { await refreshKnownProjects({ force: true }) })
     expect(cwdReadsFor(fs.readText, fs.a)).toHaveLength(1)
     expect(cwdReadsFor(fs.readText, fs.b)).toHaveLength(1)
+    expect(cwdReadsFor(fs.readText, c)).toHaveLength(1)
+    expect(ref.current!.enriched['-p-c']).toEqual({ cwd: null })
+    unmount()
+  })
+
+  it('an unchanged unresolved folder causes no cwd-resolve readText on a forced rescan', async () => {
+    const fs = setupFs()
+    const c = `${ROOT}/-p-c`
+    fs.folders[c] = [file(c, 's5.jsonl', 50), file(c, 's6.jsonl', 60)]
+    const { unmount } = await mountProbe()
+    const before = fs.readText.mock.calls.filter(([, o]) => (o as any)?.maxBytes === CWD_RESOLVE_MAX_BYTES).length
+    expect(cwdReadsFor(fs.readText, c).length).toBeGreaterThan(0)
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    const after = fs.readText.mock.calls.filter(([, o]) => (o as any)?.maxBytes === CWD_RESOLVE_MAX_BYTES).length
+    expect(after).toBe(before)
+    unmount()
+  })
+
+  it('remembers a folder whose resolution threw and skips it while unchanged', async () => {
+    const fs = setupFs()
+    const c = `${ROOT}/-p-c`
+    fs.folders[c] = [file(c, 's5.jsonl', 50)]
+    const base = fs.listDir.getMockImplementation()!
+    let cListings = 0
+    fs.listDir.mockImplementation(async (path: string) => {
+      // Odd calls are the scan's own listing; even ones are resolveProjectCwd's.
+      if (path === c && ++cListings % 2 === 0) throw new Error('listDir failed')
+      return base(path)
+    })
+    const { ref, unmount } = await mountProbe()
+    expect(ref.current!.enriched['-p-c']).toEqual({ cwd: null })
+    expect(cListings).toBe(2)
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    // Only the scan's own listing of c; resolveProjectCwd was not re-run.
+    expect(cListings).toBe(3)
+    expect(ref.current!.enriched['-p-c']).toEqual({ cwd: null })
+    unmount()
+  })
+
+  it('retries an unresolved folder whose newest transcript mtime grew, and caches the success', async () => {
+    const fs = setupFs()
+    const c = `${ROOT}/-p-c`
+    fs.folders[c] = [file(c, 's5.jsonl', 50)]
+    const { ref, unmount } = await mountProbe()
+    expect(cwdReadsFor(fs.readText, c)).toHaveLength(1)
+    expect(ref.current!.enriched['-p-c']).toEqual({ cwd: null })
+    fs.folders[c] = [file(c, 's5.jsonl', 70)] // appended → newer mtime, same count
+    fs.cwdOf[c] = '/p/c'
+    await act(async () => { await refreshKnownProjects({ force: true }) })
     expect(cwdReadsFor(fs.readText, c)).toHaveLength(2)
+    expect(ref.current!.enriched['-p-c']).toMatchObject({ cwd: '/p/c' })
+    const reads = cwdReadsFor(fs.readText, c).length
+    await act(async () => { await refreshKnownProjects({ force: true }) })
+    expect(cwdReadsFor(fs.readText, c)).toHaveLength(reads)
+    expect(ref.current!.enriched['-p-c']).toMatchObject({ cwd: '/p/c' })
     unmount()
   })
 

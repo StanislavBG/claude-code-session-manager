@@ -2803,7 +2803,9 @@ function formatLoadGateDetail(load) {
 function loadGateAuditFields(load) {
   return {
     loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
-    cpuBusy: load.cpuBusy, cpuIowait: load.cpuIowait, cpuWindowMs: load.cpuWindowMs, heldMs: load.heldMs,
+    // cpuBusy is the decision value: net of the app's own process tree (PRD 3495).
+    cpuBusy: load.cpuBusy, cpuBusyRaw: load.cpuBusyRaw, cpuBusyNet: load.cpuBusyNet, cpuOwnBusy: load.cpuOwnBusy,
+    cpuIowait: load.cpuIowait, cpuWindowMs: load.cpuWindowMs, heldMs: load.heldMs,
   };
 }
 
@@ -8512,7 +8514,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
       const mins = Math.round(load.heldMs / 60_000);
       console.warn(`[scheduler] load gate: held ${gatedBatch.length} job(s) for ${mins}m with slots and memory free — letting ${launchBatch[0].slug} through; top CPU: ${top.length ? top.join(' | ') : 'n/a'}`);
     } else if (load.standDown) {
-      console.log(`[scheduler] load gate: stood down — loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} but CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`);
+      console.log(`[scheduler] load gate: stood down — loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} but CPU ${Math.round(load.cpuBusy * 100)}% busy net of this app (${Math.round((load.cpuBusyRaw ?? load.cpuBusy) * 100)}% raw) over ${Math.round(load.cpuWindowMs / 1000)}s`);
       if (load.shouldAuditStandDown) {
         appendAuditEvent('load_gate_stood_down', loadGateAuditFields(load));
       }

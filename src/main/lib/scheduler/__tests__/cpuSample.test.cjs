@@ -66,10 +66,13 @@ describe('readCpuTimes', () => {
   });
 });
 
+// No own-process reading injected → net equals raw, own share unknown (PRD 3495).
+const noOwn = (b) => ({ busyFraction: b, ownFraction: null, netBusyFraction: b });
+
 function harness() {
   let t = 1_000_000;
   let cur = { busy: 0, total: 0 };
-  const s = createCpuSampler({ now: () => t, read: () => cur });
+  const s = createCpuSampler({ now: () => t, read: () => cur, readOwn: () => null });
   return {
     s,
     at(ms, reading) { t = 1_000_000 + ms; cur = reading; },
@@ -87,7 +90,7 @@ describe('createCpuSampler', () => {
     h.s.observe(); // too close to previous: skipped
     h.at(61_000, { busy: 50, total: 200 });
     // only the t=0 entry stored: delta busy 50 / total 200
-    assert.deepEqual(h.s.sample(), { busyFraction: 0.25, iowaitFraction: 0, windowMs: 61_000 });
+    assert.deepEqual(h.s.sample(), { ...noOwn(0.25), iowaitFraction: 0, windowMs: 61_000 });
   });
 
   it('picks the stored reading closest to windowMs among 30/60/90 s', () => {
@@ -96,7 +99,7 @@ describe('createCpuSampler', () => {
     h.at(30_000, { busy: 10, total: 100 }); h.s.observe(); // age 60
     h.at(60_000, { busy: 20, total: 200 }); h.s.observe(); // age 30
     h.at(90_000, { busy: 70, total: 300 });
-    assert.deepEqual(h.s.sample(), { busyFraction: 0.3, iowaitFraction: 0, windowMs: 60_000 });
+    assert.deepEqual(h.s.sample(), { ...noOwn(0.3), iowaitFraction: 0, windowMs: 60_000 });
   });
 
   it('skips entries younger than minWindowMs', () => {
@@ -113,7 +116,7 @@ describe('createCpuSampler', () => {
     h.at(190_000, { busy: 2, total: 20 }); h.s.observe(); // evicts t=0
     h.at(200_000, { busy: 3, total: 30 });
     // t=0 would be 200s old: gone; t=100s is 100s old
-    assert.deepEqual(h.s.sample(), { busyFraction: 2 / 20, iowaitFraction: 0, windowMs: 100_000 });
+    assert.deepEqual(h.s.sample(), { ...noOwn(2 / 20), iowaitFraction: 0, windowMs: 100_000 });
     h.at(400_000, { busy: 9, total: 90 });
     assert.equal(h.s.sample(), null);
   });
@@ -122,18 +125,18 @@ describe('createCpuSampler', () => {
     const h = harness();
     h.at(0, { busy: 0, total: 0 }); h.s.observe();
     h.at(MIN_WINDOW_MS, { busy: 1, total: 4 });
-    assert.deepEqual(h.s.sample(), { busyFraction: 0.25, iowaitFraction: 0, windowMs: MIN_WINDOW_MS });
+    assert.deepEqual(h.s.sample(), { ...noOwn(0.25), iowaitFraction: 0, windowMs: MIN_WINDOW_MS });
     h.at(MAX_WINDOW_MS, { busy: 1, total: 4 });
-    assert.deepEqual(h.s.sample(), { busyFraction: 0.25, iowaitFraction: 0, windowMs: MAX_WINDOW_MS });
+    assert.deepEqual(h.s.sample(), { ...noOwn(0.25), iowaitFraction: 0, windowMs: MAX_WINDOW_MS });
   });
 
   it('reports iowaitFraction over the total delta, clamped, backwards gives 0', () => {
     const h = harness();
     h.at(0, { busy: 0, iowait: 50, total: 0 }); h.s.observe();
     h.at(60_000, { busy: 10, iowait: 80, total: 100 });
-    assert.deepEqual(h.s.sample(), { busyFraction: 0.1, iowaitFraction: 0.3, windowMs: 60_000 });
+    assert.deepEqual(h.s.sample(), { ...noOwn(0.1), iowaitFraction: 0.3, windowMs: 60_000 });
     h.at(60_000, { busy: 10, iowait: 20, total: 100 });
-    assert.deepEqual(h.s.sample(), { busyFraction: 0.1, iowaitFraction: 0, windowMs: 60_000 });
+    assert.deepEqual(h.s.sample(), { ...noOwn(0.1), iowaitFraction: 0, windowMs: 60_000 });
     h.at(60_000, { busy: 10, iowait: 500, total: 100 });
     assert.equal(h.s.sample().iowaitFraction, 1);
   });

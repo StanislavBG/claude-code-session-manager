@@ -158,6 +158,20 @@ CPU busy fraction of a ~1-minute sample (`cpuSample.cjs`; `MOSTLY_IDLE_BUSY = 0.
 
 **Reconcile coverage rule.** `reconcile()` skips PRDs of any project whose queue file the read did not cover, for that pass only: it writes a `reconcile_uncovered_project` audit row (`cwd`, `skippedPrds`) and the next read, which covers the project, mints them. A project missing from a read is never treated as having an empty queue.
 
+**The busy fraction is net of this app's own processes** (PRD 3495). On 2026-11-22 the gate held
+launches at ratios 2.21, 1.86, 1.23 and 1.01 (threshold 0.85, 14 cores) while the app's own renderer
+averaged ~81% CPU and main ~45%: about 1.26 cores, or 9 points of a 14-core box that the gate counted
+against itself. `cpuSample.cjs` `readOwnProcessTicks` now reads `/proc/<pid>/stat` for Electron main
+plus each descendant with the same executable and an Electron `--type=` flag (zygote, renderer, GPU,
+utility). Spawned `claude -p` jobs have no such flag, so they still count. All three bands judge
+`cpuBusy` = **net**. Audit rows carry `cpuBusyRaw`, `cpuBusyNet` and `cpuOwnBusy`. `loadavg` is still
+the first predicate and is still reported, but it never holds alone when net busy is under the idle
+bar. Off Linux there is no own reading, so net = raw. Measured 2026-11-22 10:16 AM PST with a bounded
+60 s `/proc` script against the live app (8 own pids, 4 jobs running, loadavg1 2.61→2.05, so ratio
+≈0.17: the gate was not firing): **raw 6.3% → net 4.4%**. Own share was 1.9%, i.e. 0.27 cores (main 0.25,
+renderer 0.02, GPU/utility/zygote ~0). The renderer was idle in that window. At the incident's 1.26
+cores the net figure drops by ~9 points.
+
 **No sample yields at the limit**: it cannot prove saturation, so loadavg alone holds until 45 minutes, then one job goes through. A broken reader must never disable the gate.
 
 `iowait` does NOT count as busy: it is an idle CPU with I/O outstanding, swap-in waits land there on

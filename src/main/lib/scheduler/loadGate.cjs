@@ -47,6 +47,16 @@ const MOSTLY_IDLE_BUSY = 0.5;
 // Both bars use Math.min(threshold, bar) so a strict threshold stays strict.
 const SATURATED_BUSY = 0.85;
 
+// The busy fraction every band above judges is NET of this app's own process
+// tree (PRD 3495; cpuSample.cjs readOwnProcessTicks) — the app must not gate on
+// its own renderer/main load. Raw and own shares are still reported. A sampler
+// without a net figure (non-Linux, legacy injection) falls back to raw.
+function busyOf(sample) {
+  if (!sample) return null;
+  return Number.isFinite(sample.netBusyFraction) ? sample.netBusyFraction : sample.busyFraction;
+}
+const round3 = (n) => (Number.isFinite(n) ? Number(n.toFixed(3)) : null);
+
 // One audit row per this interval while continuously gated — the poll loop
 // ticks every 60 s and a saturated box stays saturated for a while; auditing
 // every tick would bury the signal in its own noise.
@@ -111,7 +121,8 @@ function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.pl
 /**
  * createLoadGate(opts) → { evaluate, observe, snapshot, endHold }
  *
- * Decision: loadavg over threshold AND the CPU sample not mostly idle (busy
+ * Decision: loadavg over threshold AND the CPU sample (net of the app's own
+ * processes, see busyOf) not mostly idle (busy
  * fraction >= min(threshold, MOSTLY_IDLE_BUSY)) holds; over threshold with a
  * mostly idle sample stands down (standDown:true); no sample keeps the loadavg
  * verdict. observe() feeds the sampler and must run every tick.
@@ -172,6 +183,9 @@ function createLoadGate({
         threshold: typeof threshold === 'function' ? threshold() : threshold,
         loadavg1: null,
         cpuBusy: null,
+        cpuBusyRaw: null,
+        cpuBusyNet: null,
+        cpuOwnBusy: null,
         cpuIowait: null,
         cpuWindowMs: null,
         standDown: false,
@@ -188,8 +202,9 @@ function createLoadGate({
     const th = typeof threshold === 'function' ? threshold() : threshold;
     const ratio = c > 0 && Number.isFinite(l1) ? l1 / c : 0;
     const sample = cpu.sample();
+    const busy = busyOf(sample);
     const overLoad = isLoadGated(l1, c, th);
-    const standDown = overLoad && sample !== null && sample.busyFraction < Math.min(th, MOSTLY_IDLE_BUSY);
+    const standDown = overLoad && busy !== null && busy < Math.min(th, MOSTLY_IDLE_BUSY);
     const wouldGate = overLoad && !standDown;
 
     const holding = wouldGate && !bypass;
@@ -198,7 +213,7 @@ function createLoadGate({
       lastHeldAt = t;
     }
     // A yield stays armed until the caller proves a launch with endHold().
-    const saturated = sample !== null && sample.busyFraction >= Math.min(th, SATURATED_BUSY);
+    const saturated = busy !== null && busy >= Math.min(th, SATURATED_BUSY);
     const atLimit = holding && heldMs >= yieldAfterMs;
     const yielded = atLimit && !saturated;
     const gated = holding && !yielded;
@@ -225,7 +240,10 @@ function createLoadGate({
       ratio: Number(ratio.toFixed(3)),
       threshold: th,
       loadavg1: Number.isFinite(l1) ? Number(l1.toFixed(2)) : null,
-      cpuBusy: sample ? Number(sample.busyFraction.toFixed(3)) : null,
+      cpuBusy: round3(busy), // the decision value (net of own processes)
+      cpuBusyRaw: sample ? round3(sample.busyFraction) : null,
+      cpuBusyNet: round3(busy),
+      cpuOwnBusy: sample && Number.isFinite(sample.ownFraction) ? round3(sample.ownFraction) : null,
       cpuIowait: sample ? Number(sample.iowaitFraction.toFixed(3)) : null,
       cpuWindowMs: sample ? sample.windowMs : null,
       standDown,
@@ -257,8 +275,8 @@ function createLoadGate({
     const [l1] = loadavg();
     const th = typeof threshold === 'function' ? threshold() : threshold;
     if (!isLoadGated(l1, cores(), th)) return false;
-    const sample = cpu.sample();
-    return sample !== null && sample.busyFraction >= Math.min(th, SATURATED_BUSY);
+    const busy = busyOf(cpu.sample());
+    return busy !== null && busy >= Math.min(th, SATURATED_BUSY);
   }
 
   return { evaluate, observe, snapshot, endHold, isSaturated };

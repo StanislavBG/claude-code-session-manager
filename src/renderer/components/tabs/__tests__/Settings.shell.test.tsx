@@ -2,15 +2,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import { act } from 'react-dom/test-utils'
 import { Settings } from '../Settings'
-import { HOME, useNavfaceHarness, clickViewTab } from './_navfaceHarness'
+import { HOME, useNavfaceHarness } from './_navfaceHarness'
 
 /**
- * Settings > Permissions / Hooks / Raw render through PageShell: scope note +
- * SourceChip are the fixed header, the Hooks event list is the subnav rail,
- * and the editor is the only scroller (Raw: Monaco fills a non-scrolling
- * content box, SaveBar is the footer). The double-scroll regression was an
- * outer overflow-auto body wrapping an inner scroller; this pins that only
- * page-shell-subnav / page-shell-content may carry a scroll class.
+ * Settings renders in the ConfigWorkbench frame: the left list and the detail are the only
+ * scrollers, except Hooks (event list + event editor scroll side by side inside a
+ * fixed-height body) and Raw (Monaco fills a non-scrolling box, SaveBar below it). The
+ * double-scroll regression was an outer scroller wrapping an inner one; this pins every
+ * scroll class to a known region.
  */
 
 function installApi() {
@@ -37,87 +36,54 @@ function installApi() {
 
 const { mount } = useNavfaceHarness(Settings, installApi)
 
-const go = async (el: HTMLElement, label: string) => {
+const SCROLL_CLASS = /(^|\s)overflow(-y)?-(auto|scroll)(\s|$)/
+const q = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[data-testid="${id}"]`)
+
+/** Scroll-class elements under `detail` (the detail region itself excluded). */
+function innerScrollers(detail: HTMLElement): HTMLElement[] {
+  return Array.from(detail.querySelectorAll<HTMLElement>('*')).filter((n) => SCROLL_CLASS.test(n.getAttribute('class') ?? ''))
+}
+
+async function open(el: HTMLElement, testId: string) {
   await act(async () => {
-    clickViewTab(el, label)
+    q(el, testId)!.click()
     await Promise.resolve()
   })
 }
 
-const SCROLL_CLASS = /(^|\s)overflow(-y)?-(auto|scroll)(\s|$)/
-
-function region(el: HTMLElement, id: string): HTMLElement | null {
-  return el.querySelector<HTMLElement>(`[data-testid="${id}"]`)
-}
-
-/** Every scroll-class element inside the shell is one of the two shell scrollers. */
-function scrollersIn(shell: HTMLElement): string[] {
-  const all = [shell, ...Array.from(shell.querySelectorAll<HTMLElement>('*'))]
-  return all
-    .filter((n) => SCROLL_CLASS.test(n.getAttribute('class') ?? ''))
-    .map((n) => n.getAttribute('data-testid') ?? `<${n.tagName.toLowerCase()} class="${n.getAttribute('class')}">`)
-}
-
-function expectShellHeader(el: HTMLElement, chip: string) {
-  const header = region(el, 'page-shell-header')!
-  expect(header).not.toBeNull()
-  expect(header.querySelector('[data-testid="settings-scope-note"]')).not.toBeNull()
-  expect(header.querySelector('[data-testid="source-chip-path"]')?.textContent).toBe(chip)
-  // Nothing in the header scrolls (and nothing outside it duplicates the note).
-  expect(el.querySelectorAll('[data-testid="settings-scope-note"]').length).toBe(1)
-}
-
-describe('Settings non-General views render through PageShell', () => {
-  it('Permissions: scope note + chip in header, editor is the only scroller', async () => {
+describe('Settings scrolling inside the ConfigWorkbench', () => {
+  it('General and Permissions: the detail region is the only detail scroller', async () => {
     const el = await mount()
-    await go(el, 'Permissions')
-    const shell = region(el, 'page-shell')!
-    expect(shell).not.toBeNull()
-    expectShellHeader(el, '~/.claude/settings.json › permissions')
-    expect(region(el, 'page-shell-content')?.textContent).toContain('Default Mode')
-    expect(region(el, 'page-shell-subnav')).toBeNull()
-    expect(scrollersIn(shell)).toEqual(['page-shell-content'])
+    const detail = q(el, 'config-workbench-detail')!
+    expect(SCROLL_CLASS.test(detail.className)).toBe(true)
+    expect(innerScrollers(detail)).toEqual([])
+    await open(el, 'settings-row-permissions')
+    expect(detail.textContent).toContain('Default Mode')
+    expect(innerScrollers(detail)).toEqual([])
   })
 
-  it('Hooks: event list is the subnav rail, event editor is the content', async () => {
+  it('Hooks: the event list and event editor are the two scrollers, inside a fixed-height body', async () => {
     const el = await mount()
-    await go(el, 'Hooks')
-    const shell = region(el, 'page-shell')!
-    expect(shell).not.toBeNull()
-    expectShellHeader(el, '~/.claude/settings.json › hooks')
-    const subnav = region(el, 'page-shell-subnav')!
-    expect(subnav).not.toBeNull()
-    expect(subnav.textContent).toContain('PreToolUse')
-    expect(subnav.textContent).toContain('PostToolUse')
-    const content = region(el, 'page-shell-content')!
-    expect(content.textContent).toContain('+ add group')
-    expect(content.textContent).not.toContain('PostToolUse')
-    expect(scrollersIn(shell).sort()).toEqual(['page-shell-content', 'page-shell-subnav'])
+    await open(el, 'settings-row-hooks')
+    const body = q(el, 'settings-hooks-body')!
+    expect(body.className).toMatch(/(^|\s)min-h-0(\s|$)/)
+    const scrollers = innerScrollers(q(el, 'config-workbench-detail')!)
+    expect(scrollers).toHaveLength(2)
+    expect(scrollers.every((s) => s.parentElement === body)).toBe(true)
+    expect(scrollers[0].textContent).toContain('PostToolUse')
+    expect(scrollers[1].textContent).toContain('+ add group')
+  })
 
-    // Selecting an event in the rail drives the content editor.
-    const btn = Array.from(subnav.querySelectorAll('button')).find((b) =>
-      b.textContent?.startsWith('PostToolUse'),
-    ) as HTMLButtonElement
+  it('Raw: Monaco fills a non-scrolling box with the SaveBar below it', async () => {
+    const el = await mount()
     await act(async () => {
-      btn.click()
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '{ } Raw JSON')!.click()
       await Promise.resolve()
     })
-    expect(content.querySelector('h3')?.textContent).toBe('PostToolUse')
-  })
-
-  it('Raw: Monaco fills a non-scrolling content box, SaveBar is the footer', async () => {
-    const el = await mount()
-    await go(el, 'Raw')
-    const shell = region(el, 'page-shell')!
-    expect(shell).not.toBeNull()
-    expectShellHeader(el, '~/.claude/settings.json')
-    const footer = region(el, 'page-shell-footer')!
-    expect(footer).not.toBeNull()
-    expect(footer.textContent?.toLowerCase()).toContain('save')
-    const editorBox = region(el, 'settings-raw-editor')!
-    expect(editorBox.parentElement?.getAttribute('data-testid')).toBe('page-shell-content')
-    expect(editorBox.className).toMatch(/(^|\s)h-full(\s|$)/)
-    expect(editorBox.className).toMatch(/(^|\s)overflow-clip(\s|$)/)
-    expect(scrollersIn(shell)).toEqual(['page-shell-content'])
+    const box = q(el, 'settings-raw-editor')!
+    expect(box.className).toMatch(/(^|\s)overflow-clip(\s|$)/)
+    expect(box.className).toMatch(/(^|\s)flex-1(\s|$)/)
+    expect(box.nextElementSibling?.textContent?.toLowerCase()).toContain('save')
+    expect(innerScrollers(q(el, 'config-workbench-detail')!)).toEqual([])
   })
 })

@@ -9,10 +9,13 @@ type Override = (path: string[], value: unknown) => void
 const captured: { onOverride: Override | null } = { onOverride: null }
 
 vi.mock('../../ui/EffectiveCards', () => ({
-  useEffectiveCards: () => ({}),
-  EffectiveCardsToolbar: () => null,
-  EffectiveCardsRail: () => null,
-  EffectiveCardsSections: (props: { onOverride: Override }) => {
+  useEffectiveCards: () => ({
+    filter: '', setFilter: () => {}, showAdvanced: false, setShowAdvanced: () => {},
+    showUnset: true, setShowUnset: () => {}, rootNode: null, schema: null,
+    groups: [], railGroups: [], visibleGroups: [], totalKeys: 0,
+  }),
+  SettingsGroupRail: () => null,
+  SettingsGroupCards: (props: { onOverride: Override }) => {
     captured.onOverride = props.onOverride
     return null
   },

@@ -294,10 +294,10 @@ describe('memoized screens still react to their own store', () => {
     const { Settings } = await import('../tabs/Settings')
     const el = await mount(createElement(Settings))
 
-    // Switch to the Raw view so the assertion below can see literal JSON
+    // Open the raw JSON editor ('{ } Raw JSON') so the assertion below can see literal JSON
     // text rather than the Guided/Tree schema-driven rendering.
     await act(async () => {
-      const rawBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Raw')
+      const rawBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === '{ } Raw JSON')
       rawBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })

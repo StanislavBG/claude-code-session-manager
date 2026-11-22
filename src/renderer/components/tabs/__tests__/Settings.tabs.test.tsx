@@ -3,7 +3,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { act } from 'react-dom/test-utils'
 import { Settings } from '../Settings'
 import { OWNED_KEYS, planGroups } from '../../../lib/settingsGroups'
-import { HOME, useNavfaceHarness, viewTabLabels, clickViewTab } from './_navfaceHarness'
+import { useLayout } from '../../../state/layout'
+import { HOME, useNavfaceHarness } from './_navfaceHarness'
 
 function installApi() {
   const data = { model: 'opus', permissions: { allow: ['Bash(ls:*)'] }, hooks: {}, disableAllHooks: false }
@@ -29,66 +30,52 @@ function installApi() {
 
 const { mount } = useNavfaceHarness(Settings, installApi)
 const chips = (el: HTMLElement) => Array.from(el.querySelectorAll('[data-testid="source-chip-path"]')).map((c) => c.textContent ?? '')
-const go = async (el: HTMLElement, label: string) => {
+const q = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[data-testid="${id}"]`)
+const click = async (b: HTMLElement | null | undefined) => {
   await act(async () => {
-    clickViewTab(el, label)
+    b!.click()
     await Promise.resolve()
   })
 }
+const rawButton = (el: HTMLElement) => Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '{ } Raw JSON')
 
-describe('Settings tabs', () => {
-  it('offers General / Permissions / Hooks / Raw and no Tree', async () => {
+describe('Settings panes', () => {
+  it('General shows the file chip; owned keys live behind the Permissions / Hooks rows, never as cards', async () => {
     const el = await mount()
-    const labels = viewTabLabels(el)
-    expect(labels.slice(0, 4)).toEqual(['General', 'Permissions', 'Hooks', 'Raw'])
-    expect(labels).not.toContain('Tree')
-    expect(labels).not.toContain('Guided')
-  })
-
-  it('General summarises owned keys per owner and hides their cards', async () => {
-    const el = await mount()
-    const s = el.querySelector('[data-testid="owned-summary-permissions"]')
-    expect(s?.textContent).toContain('1 of 1 keys set')
-    expect(el.querySelector('[data-testid="owned-summary-hooks"]')).not.toBeNull()
-    expect(chips(el)).toEqual([`~/.claude/settings.json`])
+    expect(chips(el)).toEqual(['~/.claude/settings.json'])
+    expect(q(el, 'settings-row-permissions')?.textContent).toContain('1 rule')
+    expect(q(el, 'settings-row-hooks')?.textContent).toContain('2/4')
     for (const k of OWNED_KEYS) {
       expect(planGroups(new Set([k])).flatMap((g) => g.keys)).not.toContain(k)
+      expect(el.querySelector(`[data-testid="setting-card"][data-key="${k}"]`)).toBeNull()
     }
   })
 
-  it('General keeps owned summaries in the scrolling content, not the fixed header', async () => {
+  it('the Permissions row opens the rules editor with the keyed SourceChip', async () => {
     const el = await mount()
-    const summaries = el.querySelector('[data-testid="settings-owned-summaries"]')
-    expect(summaries).not.toBeNull()
-    expect(summaries?.closest('[data-testid="page-shell-content"]')).not.toBeNull()
-    expect(summaries?.closest('[data-testid="page-shell-header"]')).toBeNull()
-    const header = el.querySelector('[data-testid="page-shell-header"]')
-    expect(header?.querySelector('[data-testid="settings-scope-note"]')).not.toBeNull()
-    expect(header?.querySelector('[data-testid="source-chip-path"]')).toBeNull()
-  })
-
-  it('a summary line switches to its tab, which shows the keyed SourceChip', async () => {
-    const el = await mount()
-    const btn = Array.from(el.querySelectorAll('[data-testid="owned-summary-permissions"] button'))[0] as HTMLButtonElement
-    await act(async () => {
-      btn.click()
-      await Promise.resolve()
-    })
+    await click(q(el, 'settings-row-permissions'))
     expect(chips(el)).toEqual(['~/.claude/settings.json › permissions'])
     expect(el.textContent).toContain('Default Mode')
   })
 
-  it('Hooks tab shows the hooks SourceChip and event editor', async () => {
+  it('the Hooks row opens the event editor with the keyed SourceChip', async () => {
     const el = await mount()
-    await go(el, 'Hooks')
+    await click(q(el, 'settings-row-hooks'))
     expect(chips(el)).toEqual(['~/.claude/settings.json › hooks'])
     expect(el.textContent).toContain('PreToolUse')
   })
 
-  it('Raw tab shows the file chip and the SaveBar', async () => {
+  it('{ } Raw JSON opens the raw editor with the file chip and the SaveBar', async () => {
     const el = await mount()
-    await go(el, 'Raw')
+    await click(rawButton(el))
     expect(chips(el)).toEqual(['~/.claude/settings.json'])
+    expect(q(el, 'settings-raw-editor')).not.toBeNull()
     expect(el.textContent?.toLowerCase()).toContain('save')
+  })
+
+  it("honours a 'settings' panel tab hint (deep link) for a pane", async () => {
+    useLayout.setState({ panelTabHint: { id: 'settings', tab: 'hooks' } })
+    const el = await mount()
+    expect(chips(el)).toEqual(['~/.claude/settings.json › hooks'])
   })
 })

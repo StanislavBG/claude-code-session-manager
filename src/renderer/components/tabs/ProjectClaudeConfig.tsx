@@ -246,8 +246,8 @@ function ClaudeMdTab({ home, cwd, scope, onScopeChange }: {
   )
 }
 
-/** Settings at the chosen scope, below the Epic isolation toggle shown with its own file. */
-function SettingsTab({ cwd, scope }: { cwd: string; scope: ProjectScope }) {
+/** Settings at the chosen scope (its file card's radio rows own the Project / Local choice), below the Epic isolation toggle shown with its own file. */
+function SettingsTab({ cwd, scope, onScopeChange }: { cwd: string; scope: ProjectScope; onScopeChange: (scope: ProjectScope) => void }) {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div data-testid="project-claude-config-epic-isolation" className="shrink-0">
@@ -259,7 +259,7 @@ function SettingsTab({ cwd, scope }: { cwd: string; scope: ProjectScope }) {
         <SettingsEpicIsolation cwd={cwd} />
       </div>
       <div className="flex-1 min-h-0">
-        <Settings scope={scope} />
+        <Settings scope={scope} onScopeChange={onScopeChange} />
       </div>
     </div>
   )
@@ -351,7 +351,7 @@ function ProjectClaudeConfigComponent() {
       <div className="flex-1 min-h-0" data-testid={`project-claude-config-panel-${tab}`}>
         {tab === 'memory' && <Memory />}
         {tab === 'claude-md' && <ClaudeMdTab home={home} cwd={cwd} scope={mdScope} onScopeChange={setMdScope} />}
-        {tab === 'settings' && <SettingsTab cwd={cwd} scope={settingsScope} />}
+        {tab === 'settings' && <SettingsTab cwd={cwd} scope={settingsScope} onScopeChange={setSettingsScope} />}
         {tab === 'mcp' && <McpServers scope="project" onAdd={openMcpAdd} />}
         {tab === 'skills' && <Skills scope="project" />}
       </div>

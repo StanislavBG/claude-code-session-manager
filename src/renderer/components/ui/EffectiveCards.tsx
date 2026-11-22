@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { Scope } from '../../lib/scopes'
 import { SCOPE_LABELS } from '../../lib/scopes'
 import type { EffectiveNode, LeafNode } from '../../lib/mergeScopes'
@@ -6,7 +6,6 @@ import type { SchemaResolver, SchemaInfo } from '../../lib/schemaLookup'
 import { planGroups, planGroupRail, humanizeKey, type GroupRailEntry } from '../../lib/settingsGroups'
 import { resolveSettingDescription } from '../../lib/settingsDescriptionFallbacks'
 import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
-import { usePageShell } from '../layout/PageShell'
 
 /** Judgment-call icon per settings group id; 'other' is planGroups' dynamic fallback bucket. */
 const GROUP_ICONS: Record<string, AlmanacIconName> = {
@@ -27,34 +26,18 @@ const GROUP_ICONS: Record<string, AlmanacIconName> = {
   other: 'dot',
 }
 
+const EYEBROW = 'text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint'
+
 type OnOverride = (path: string[], value: unknown, intoScope?: Scope) => void
 
-/** The four columns surfaced by the drift indicator. `default` is sourced
- *  from the JSON Schema, the other three from the merged LeafNode. */
-const DRIFT_SCOPES: ReadonlyArray<Scope | 'default'> = ['user', 'project', 'local', 'default']
-
-const SCOPE_LABELS_SHORT: Record<Scope | 'default', string> = {
-  user: 'user',
-  project: 'project',
-  local: 'local',
-  default: 'default',
-}
-
 /**
- * Grandma-friendly view of merged settings.
+ * Grandma-friendly view of merged settings, on the Claude config workbench design.
  *
- * Groups keys into themed sections (see settingsGroups.ts), renders each
- * setting as an expandable card with one-line prose + inline editors for
- * common types. Clicking "Explain" opens the full description, shadowed
- * values, and enum choices. Everything else (arrays, nested objects) gets
- * a "Edit in Raw view" fallback.
- *
- * Rendered as three pieces into a <PageShell> owned by the caller (Settings):
- * `EffectiveCardsToolbar` → header, `EffectiveCardsRail` → subnav,
- * `EffectiveCardsSections` → content. Their shared filter / showAdvanced /
- * showUnset state lives in ONE place — `useEffectiveCards` — and is passed to
- * each piece. The rail jumps via `usePageShell().scrollToAnchor`, which moves
- * only the shell's content scroller, never the page frame.
+ * Groups keys into themed sections (see settingsGroups.ts). `SettingsGroupRail` is the
+ * left-column group list (icon, title, set/total); `SettingsGroupCards` renders the chosen
+ * group(s) as setting cards — name, mono key, description, the inline value editor, and a
+ * `SourceLadder` (Default — User — Project — Local) marking where the effective value comes
+ * from. Shared filter / showAdvanced / showUnset state lives in ONE place — `useEffectiveCards`.
  */
 
 export interface EffectiveCardsModel {
@@ -69,6 +52,8 @@ export interface EffectiveCardsModel {
   groups: ReturnType<typeof planGroups>
   railGroups: GroupRailEntry[]
   visibleGroups: ReturnType<typeof planGroups>
+  /** Every editable key across all groups (the 'Search N settings' count). */
+  totalKeys: number
 }
 
 export function useEffectiveCards({ node, schema }: { node: EffectiveNode; schema: SchemaResolver }): EffectiveCardsModel {
@@ -90,6 +75,8 @@ export function useEffectiveCards({ node, schema }: { node: EffectiveNode; schem
     [allKeysSig, presentSig],
   )
 
+  const totalKeys = useMemo(() => groups.reduce((n, g) => n + g.keys.length, 0), [groups])
+
   const visibleGroups = useMemo(() => {
     return groups
       .filter((g) => showAdvanced || !g.advanced)
@@ -109,186 +96,187 @@ export function useEffectiveCards({ node, schema }: { node: EffectiveNode; schem
 
   return {
     filter, setFilter, showAdvanced, setShowAdvanced, showUnset, setShowUnset,
-    rootNode, schema, groups, railGroups, visibleGroups,
+    rootNode, schema, groups, railGroups, visibleGroups, totalKeys,
   }
 }
 
-/* --------------------------------------------------------------- Toolbar */
+/* ------------------------------------------------------------- GroupRail */
 
-export function EffectiveCardsToolbar({ cards, targetScope }: { cards: EffectiveCardsModel; targetScope: Scope }) {
+/** Left-column group list: icon, title, set/total. `selectedId` null = nothing highlighted. */
+export function SettingsGroupRail({
+  cards,
+  selectedId,
+  onSelect,
+}: {
+  cards: EffectiveCardsModel
+  selectedId: string | null
+  onSelect: (id: string) => void
+}) {
   return (
-    <div className="border-b border-line bg-bg-elev px-3 py-1.5 flex items-center gap-3 text-xs">
-      <span className="text-fg-faint">
-        writing overrides to{' '}
-        <span className="text-fg-dim font-medium">{SCOPE_LABELS[targetScope].label}</span>
-      </span>
-      <label className="flex items-center gap-1 text-fg-faint cursor-pointer">
-        <input
-          type="checkbox"
-          checked={cards.showUnset}
-          onChange={(e) => cards.setShowUnset(e.target.checked)}
-          className="accent-accent"
-        />
-        show not-yet-configured
-      </label>
-      <label className="flex items-center gap-1 text-fg-faint cursor-pointer">
-        <input
-          type="checkbox"
-          checked={cards.showAdvanced}
-          onChange={(e) => cards.setShowAdvanced(e.target.checked)}
-          className="accent-accent"
-        />
-        show advanced
-      </label>
-      <div className="flex-1" />
-      <input
-        value={cards.filter}
-        onChange={(e) => cards.setFilter(e.target.value)}
-        placeholder="search settings…"
-        className="bg-bg border border-line rounded px-2 py-1 text-xs text-fg w-64"
-      />
+    <div className="flex flex-col gap-px" role="listbox" aria-label="Settings groups">
+      {cards.railGroups.map((g) => {
+        const selected = g.id === selectedId
+        return (
+          <button
+            key={g.id}
+            type="button"
+            role="option"
+            aria-selected={selected}
+            data-testid="settings-group-row"
+            data-group-id={g.id}
+            onClick={() => onSelect(g.id)}
+            className={`w-full flex items-center gap-2.5 h-[34px] px-3 rounded-[9px] border text-left text-[13.5px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+              selected ? 'bg-bg-hi border-line font-semibold text-fg' : 'border-transparent text-fg-dim hover:bg-bg-hi/60'
+            }`}
+          >
+            <AlmanacIcon
+              name={GROUP_ICONS[g.id] ?? 'dot'}
+              size={16}
+              className={`shrink-0 ${selected ? 'text-accent' : 'text-fg-faint'}`}
+            />
+            <span className="flex-1 min-w-0 truncate">{g.title}</span>
+            <span className={`shrink-0 font-mono text-xs ${g.setCount ? 'text-fg-dim' : 'text-fg-faint'}`}>
+              {g.setCount}/{g.total}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-/* -------------------------------------------------------------- Sections */
+/* ------------------------------------------------------------ GroupCards */
 
-export function EffectiveCardsSections({
+/**
+ * The detail body: one section per group in `groupIds` (in visibleGroups order), each a
+ * caption line ('ESSENTIALS · THE KNOBS YOU REACH FOR FIRST') over its setting cards.
+ */
+export function SettingsGroupCards({
   cards,
+  groupIds,
   targetScope,
   onOverride,
 }: {
   cards: EffectiveCardsModel
+  groupIds: ReadonlyArray<string>
   targetScope: Scope
   onOverride: OnOverride
 }) {
   const { visibleGroups, rootNode, schema, filter } = cards
+  const shown = visibleGroups.filter((g) => groupIds.includes(g.id))
   return (
-    <div className="py-3">
-      {visibleGroups.map((g) => (
-        <Section key={g.id} id={g.id} title={g.title} summary={g.summary} advanced={g.advanced}>
-          {g.keys.map((k) => {
-            const child = rootNode?.children[k]
-            const info = schema.at([k])
-            return (
+    <div className="px-9 py-6 flex flex-col gap-[26px]">
+      {shown.map((g) => (
+        <section key={g.id} id={`settings-group-${g.id}`} data-testid="settings-group-section">
+          <div className="flex items-baseline gap-3 mb-3">
+            <span className={EYEBROW}>
+              {g.title} · {g.summary.replace(/\.$/, '')}
+            </span>
+            {g.advanced && (
+              <span className="text-[9px] px-1.5 rounded border border-line text-fg-faint uppercase tracking-wide">advanced</span>
+            )}
+            <span aria-hidden className="flex-1 h-px bg-line" />
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {g.keys.map((k) => (
               <SettingCard
                 key={k}
                 keyName={k}
-                node={child}
-                info={info}
+                node={rootNode?.children[k]}
+                info={schema.at([k])}
                 targetScope={targetScope}
                 onOverride={(v, intoScope) => onOverride([k], v, intoScope)}
               />
-            )
-          })}
-        </Section>
+            ))}
+          </div>
+        </section>
       ))}
-      {visibleGroups.length === 0 && (
+      {shown.length === 0 && (
         <div className="px-6 py-12 text-center text-fg-faint text-sm">
-          no settings match "{filter}"
+          {filter.trim() ? `no settings match "${filter}"` : 'nothing to show — turn on Show unset to see every setting in this group'}
         </div>
       )}
     </div>
   )
 }
 
-/* ------------------------------------------------------------- GroupRail */
+/* ---------------------------------------------------------- SourceLadder */
 
-/** Must render inside a <PageShell> (uses its scrollToAnchor). */
-export function EffectiveCardsRail({ cards }: { cards: EffectiveCardsModel }) {
-  const shell = usePageShell()
-  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null)
-  const { groups, showAdvanced, setShowAdvanced } = cards
+type Stage = Scope | 'default'
+const LADDER: ReadonlyArray<{ stage: Stage; label: string }> = [
+  { stage: 'default', label: 'Default' },
+  { stage: 'user', label: 'User' },
+  { stage: 'project', label: 'Project' },
+  { stage: 'local', label: 'Local' },
+]
+/** Precedence, lowest first — mergeScopes' order (local beats project beats user). */
+const PRECEDENCE: ReadonlyArray<Scope> = ['user', 'project', 'local']
 
-  const jumpToGroup = (id: string) => {
-    const target = groups.find((g) => g.id === id)
-    if (target?.advanced && !showAdvanced) setShowAdvanced(true)
-    // Defer to an effect so a just-revealed advanced section is in the DOM.
-    setPendingScrollId(id)
+/** Scopes that hold a value somewhere under `node` (leaf winner + shadowed, array items, object descendants). */
+function scopesIn(node: EffectiveNode, into: Set<Scope>): void {
+  if (node.kind === 'leaf') {
+    into.add(node.winner)
+    for (const s of node.shadowed) into.add(s.scope)
+  } else if (node.kind === 'array') {
+    for (const it of node.items) into.add(it.fromScope)
+  } else {
+    for (const child of Object.values(node.children)) scopesIn(child, into)
   }
-
-  useEffect(() => {
-    if (!pendingScrollId) return
-    setPendingScrollId(null)
-    shell.scrollToAnchor(`settings-group-${pendingScrollId}`, { behavior: 'smooth' })
-  }, [pendingScrollId, shell])
-
-  return <GroupRail groups={cards.railGroups} onJump={jumpToGroup} />
 }
 
-function GroupRail({
-  groups,
-  onJump,
-}: {
-  groups: GroupRailEntry[]
-  onJump: (id: string) => void
-}) {
+/**
+ * Where a setting's value comes from, read off the merged node mergeScopes already built
+ * (no second reader): `has` = every stage holding a value, `effective` = the one that wins.
+ * A leaf's winner is exact; for arrays / objects the most specific contributing scope wins.
+ * Unset with a schema default → Default.
+ */
+export function settingSources(
+  node: EffectiveNode | undefined,
+  defaultVal: unknown,
+): { effective: Stage | null; has: Set<Stage> } {
+  const has = new Set<Stage>()
+  if (defaultVal !== undefined) has.add('default')
+  if (!node) return { effective: defaultVal !== undefined ? 'default' : null, has }
+  const scopes = new Set<Scope>()
+  scopesIn(node, scopes)
+  scopes.forEach((s) => has.add(s))
+  if (node.kind === 'leaf') return { effective: node.winner, has }
+  const top = [...PRECEDENCE].reverse().find((s) => scopes.has(s)) ?? null
+  return { effective: top, has }
+}
+
+export function SourceLadder({ node, defaultVal }: { node: EffectiveNode | undefined; defaultVal: unknown }) {
+  const { effective, has } = settingSources(node, defaultVal)
   return (
-    <div className="min-h-full border-r border-line bg-bg-elev/30 py-3">
-      {groups.map((g) => (
-        <button
-          key={g.id}
-          type="button"
-          data-group-id={g.id}
-          onClick={() => onJump(g.id)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-hi transition-colors"
-          title={`jump to ${g.title}`}
-        >
-          <AlmanacIcon
-            name={GROUP_ICONS[g.id] ?? 'dot'}
-            size={15}
-            className="text-fg-faint shrink-0"
-          />
-          <span className="flex-1 min-w-0 truncate text-xs text-fg-dim">{g.title}</span>
-          <span className="text-[10px] text-fg-faint font-mono shrink-0">
-            {g.setCount}/{g.total}
+    <div data-testid="source-ladder" className="flex items-center gap-1.5 whitespace-nowrap" aria-label="Where this value comes from">
+      {LADDER.map(({ stage, label }, i) => {
+        const win = stage === effective
+        const present = has.has(stage)
+        return (
+          <span key={stage} className="flex items-center gap-1.5">
+            {i > 0 && <span aria-hidden className="w-3 h-px bg-line" />}
+            <span
+              data-stage={stage}
+              data-effective={win ? 'true' : 'false'}
+              title={win ? `effective value comes from ${label}` : present ? `${label} also sets this` : `not set in ${label}`}
+              className={`flex items-center gap-1.5 text-xs ${
+                win ? 'font-bold text-fg' : present ? 'font-medium text-fg-dim' : 'font-medium text-fg-faint/70'
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`w-2.5 h-2.5 rounded-full box-border border-[1.5px] ${
+                  win
+                    ? stage === 'default' ? 'bg-fg-faint border-fg-faint' : 'bg-accent border-accent'
+                    : present ? 'border-fg-faint' : 'border-line'
+                }`}
+              />
+              {label}
+            </span>
           </span>
-        </button>
-      ))}
+        )
+      })}
     </div>
-  )
-}
-
-/* ---------------------------------------------------------------- Section */
-
-function Section({
-  id,
-  title,
-  summary,
-  advanced,
-  children,
-}: {
-  id: string
-  title: string
-  summary: string
-  advanced?: boolean
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(true)
-  return (
-    <section
-      id={`settings-group-${id}`}
-      className="mx-4 mb-4 rounded-lg border border-line shadow-sm bg-bg-elev/50 overflow-hidden"
-    >
-      <header
-        className="px-4 py-3 bg-bg-elev cursor-pointer hover:bg-bg-hi flex items-center gap-3 border-b border-line"
-        onClick={() => setOpen(!open)}
-      >
-        <span className="text-fg-faint w-3">{open ? '▾' : '▸'}</span>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h2 className="text-fg text-base font-semibold">{title}</h2>
-            {advanced && (
-              <span className="text-[9px] px-1.5 py-0 rounded border border-yellow-900/40 bg-yellow-950/30 text-yellow-500/80 uppercase tracking-wide">
-                advanced
-              </span>
-            )}
-          </div>
-          <p className="text-fg-dim text-sm mt-0.5">{summary}</p>
-        </div>
-      </header>
-      {open && <div className="divide-y divide-line/60">{children}</div>}
-    </section>
   )
 }
 
@@ -304,73 +292,37 @@ interface CardProps {
 
 function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps) {
   const [expanded, setExpanded] = useState(false)
-  const [driftOpen, setDriftOpen] = useState(false)
   const title = humanizeKey(keyName)
   const isSet = node !== undefined
-  const isLeaf = node?.kind === 'leaf'
-  const leafNode = isLeaf ? (node as LeafNode) : null
-  const isObjectOrArray = node?.kind === 'object' || node?.kind === 'array'
+  const leafNode = node?.kind === 'leaf' ? node : null
   const defaultVal = info?.default
-  const isDefault =
-    leafNode && defaultVal !== undefined && sameValue(leafNode.value, defaultVal)
+  const isDefault = leafNode && defaultVal !== undefined && sameValue(leafNode.value, defaultVal)
+  const status = describeStatus({ isSet, leafNode, defaultVal, isDefault: !!isDefault, node })
 
-  const status = describeStatus({
-    isSet,
-    leafNode,
-    defaultVal,
-    isDefault: !!isDefault,
-    node,
-  })
-
-  // Drift across scopes is precomputed by mergeScopes — winner + shadowed[] —
-  // so we just surface what's already there rather than re-merging here.
-  const driftScopes = collectDriftScopes(leafNode, defaultVal)
-  const hasDrift = driftScopes.length >= 2
-
-  // Reset = "delete from the most-specific scope that has it". For a leaf
-  // that's the winner. Only show when effective != default (otherwise the
-  // value already matches the schema default).
+  // Reset = "delete from the most-specific scope that has it" (the leaf's winner). Only
+  // shown when the effective value differs from the schema default.
   const canReset = !!leafNode && !isDefault
-
   const description = resolveSettingDescription(keyName, info?.description)
+  // Re-key the editor on the effective value / target file so its local draft follows the data.
+  const editorKey = `${targetScope}:${leafNode ? JSON.stringify(leafNode.value) : '∅'}`
 
   return (
-    <div className="px-4 py-3 hover:bg-bg-elev/20">
-      <div className="flex items-start gap-3">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-fg-faint hover:text-fg w-3 mt-0.5"
-          title={expanded ? 'collapse' : 'expand'}
-        >
-          {expanded ? '▾' : '▸'}
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <h3 className="text-fg text-sm">{title}</h3>
+    <div
+      data-testid="setting-card"
+      data-key={keyName}
+      className="px-[22px] py-4 rounded-[14px] bg-bg-hi border border-line"
+    >
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,250px)_auto] items-center gap-x-7 gap-y-2">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2.5 flex-wrap">
+            <h3 className="text-base font-semibold text-fg">{title}</h3>
+            <span className="font-mono text-xs text-fg-faint">{keyName}</span>
             <StatusChip kind={status.kind} label={status.label} />
-            {hasDrift && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (!expanded) setExpanded(true)
-                  setDriftOpen((v) => !v)
-                }}
-                className="text-[9px] px-1.5 py-0 rounded border border-blue-900/40 bg-blue-950/30 text-blue-300/90 uppercase tracking-wide hover:bg-blue-900/40"
-                title="this key is defined in multiple scopes — click to expand"
-              >
-                drift · {driftScopes.map((s) => SCOPE_LABELS_SHORT[s]).join(' · ')}
-              </button>
-            )}
             {canReset && leafNode && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  // Write undefined into the winning scope's draft. setAtPath
-                  // sets base[head] = undefined, which JSON.stringify drops,
-                  // achieving an in-scope delete on save.
-                  onOverride(undefined, leafNode.winner)
-                }}
-                className="text-[9px] px-1.5 py-0 rounded border border-line bg-bg-elev text-fg-faint uppercase tracking-wide hover:text-fg hover:bg-bg-hi"
+                type="button"
+                onClick={() => onOverride(undefined, leafNode.winner)}
+                className="text-[9px] px-1.5 py-0 rounded border border-line bg-bg-elev text-fg-faint uppercase tracking-wide hover:text-fg hover:bg-bg"
                 title={`reset · delete from ${SCOPE_LABELS[leafNode.winner].label}`}
               >
                 ↺ reset
@@ -389,63 +341,36 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
           </div>
           {description && (
             <p
-              className={`text-fg-dim text-xs mt-0.5 leading-relaxed ${
+              className={`text-[13.5px] text-fg-dim mt-0.5 leading-relaxed ${
                 description.authored ? 'inline-block border-b border-dotted border-fg-faint/70 cursor-help' : ''
               }`}
-              title={
-                description.authored
-                  ? 'In-app-authored description — not from the official Claude Code schema'
-                  : undefined
-              }
+              title={description.authored ? 'In-app-authored description — not from the official Claude Code schema' : undefined}
             >
               {firstSentence(description.text)}
             </p>
           )}
-          {expanded && driftOpen && leafNode && (
-            <DriftTable
-              leaf={leafNode}
-              defaultVal={defaultVal}
-              onReset={(s) => onOverride(undefined, s)}
-            />
-          )}
-          {expanded && (
-            <CardDetails
-              keyName={keyName}
-              node={node}
-              info={info}
-              targetScope={targetScope}
-              onOverride={(v) => onOverride(v)}
-            />
-          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="ml-2 text-xs text-fg-faint hover:text-fg underline-offset-2 hover:underline"
+            aria-expanded={expanded}
+          >
+            {expanded ? 'less' : 'details'}
+          </button>
         </div>
-        <div className="shrink-0">
-          {!expanded && (
-            <QuickControl
-              node={node}
-              info={info}
-              onSet={(v) => {
-                onOverride(v)
-              }}
-              disabled={isObjectOrArray && isSet}
-            />
-          )}
+        <div className="min-w-0 text-xs">
+          <Editor key={editorKey} keyName={keyName} node={node} info={info} onChange={(v) => onOverride(v)} targetScope={targetScope} />
         </div>
+        <SourceLadder node={node} defaultVal={defaultVal} />
       </div>
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-line/60">
+          {leafNode && <DriftTable leaf={leafNode} defaultVal={defaultVal} onReset={(s) => onOverride(undefined, s)} />}
+          <CardDetails keyName={keyName} node={node} info={info} />
+        </div>
+      )}
     </div>
   )
-}
-
-function collectDriftScopes(
-  leaf: LeafNode | null,
-  defaultVal: unknown,
-): Array<Scope | 'default'> {
-  if (!leaf) return []
-  const seen = new Set<Scope | 'default'>()
-  seen.add(leaf.winner)
-  for (const s of leaf.shadowed) seen.add(s.scope)
-  if (defaultVal !== undefined) seen.add('default')
-  // Preserve canonical order (user → project → local → default).
-  return DRIFT_SCOPES.filter((s) => seen.has(s))
 }
 
 /* --------------------------------------------------------- DriftTable */
@@ -514,20 +439,16 @@ function CardDetails({
   keyName,
   node,
   info,
-  targetScope,
-  onOverride,
 }: {
   keyName: string
   node: EffectiveNode | undefined
   info: SchemaInfo | null
-  targetScope: Scope
-  onOverride: (value: unknown) => void
 }) {
   const isLeaf = node?.kind === 'leaf'
   const leaf = isLeaf ? (node as LeafNode) : null
   const description = resolveSettingDescription(keyName, info?.description)
   return (
-    <div className="mt-3 space-y-2 text-xs">
+    <div className="mt-2 space-y-2 text-xs">
       {description && (
         <p
           className={`text-fg-dim leading-relaxed whitespace-pre-wrap ${
@@ -594,15 +515,6 @@ function CardDetails({
           </>
         )}
       </dl>
-      <div className="pt-2 flex items-center gap-2 flex-wrap border-t border-line/60">
-        <Editor
-          keyName={keyName}
-          node={node}
-          info={info}
-          onChange={onOverride}
-          targetScope={targetScope}
-        />
-      </div>
     </div>
   )
 }
@@ -707,7 +619,7 @@ function Editor({
   return (
     <div className="text-fg-faint">
       Complex value ({type ?? 'object/array'}) — use the{' '}
-      <span className="text-fg-dim">Raw</span> tab to edit.
+      <span className="text-fg-dim">{'{ } Raw JSON'}</span> to edit.
     </div>
   )
 }
@@ -781,41 +693,6 @@ function StringEditor({
       </button>
     </div>
   )
-}
-
-/* -------------------------------------------------- Quick control (collapsed) */
-
-function QuickControl({
-  node,
-  info,
-  onSet,
-  disabled,
-}: {
-  node: EffectiveNode | undefined
-  info: SchemaInfo | null
-  onSet: (v: unknown) => void
-  disabled?: boolean
-}) {
-  const isLeaf = node?.kind === 'leaf'
-  const type = normalizeType(info?.type)
-  if (disabled) return null
-  if (type === 'boolean') {
-    const on = isLeaf && (node as LeafNode).value === true
-    return (
-      <button
-        onClick={() => onSet(!on)}
-        className={`px-2.5 py-0.5 text-xs rounded border transition-colors ${
-          on
-            ? 'bg-accent/15 text-accent border-accent/40 hover:bg-accent hover:text-bg'
-            : 'bg-bg-elev text-fg-dim border-line hover:text-fg hover:bg-bg-hi'
-        }`}
-        title="toggle"
-      >
-        {on ? 'on' : 'off'}
-      </button>
-    )
-  }
-  return null
 }
 
 /* --------------------------------------------------------- Status chip */

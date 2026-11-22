@@ -26,7 +26,6 @@
  * Never throws on malformed input: invalid entries are skipped.
  */
 
-const path = require('node:path');
 // importsOf is the shared link convention's; re-exported so consumers keep requiring it from here.
 const { importsOf } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
@@ -48,7 +47,7 @@ const NEVER_RECORD_NAMES = new Set(['README.md', 'CLAUDE.md', 'AGENTS.md', 'inde
  * @typedef {'map' | 'scoped' | 'agent' | 'record' | 'doc'} MdDocRole
  * @typedef {{ path: string, ms: number }} MdChangedSince
  * @typedef {{ path: string, role: MdDocRole, depth: number | null, lines: number | null, bytes: number | null, lastCommitMs: number | null, commits: number, linkedFrom: number, codeRefs: number, codeRefFiles: string[], deadRefs: string[], ambiguousRefs: string[], changedSince: MdChangedSince[], collection: string | null }} MdDoc
- * @typedef {{ folder: string, docs: number, linked: number, lastCommitMs: number | null, source: 'heuristic' | 'override' }} MdRecordCollection
+ * @typedef {{ folder: string, docs: number, linked: number, lastCommitMs: number | null, source: 'heuristic' }} MdRecordCollection
  * @typedef {{ tracked: number, network: number, records: number, unlinked: number, byRole: Record<MdDocRole, number> }} MdCensusCounts
  * @typedef {{ docs: MdDoc[], collections: MdRecordCollection[], counts: MdCensusCounts, gitWindow: { commits: number, oldestMs: number | null }, warnings: string[] }} MdCensus
  * @typedef {{ path: string, text?: string | null, lines?: number | null, bytes?: number | null }} MdCensusDocInput
@@ -61,8 +60,6 @@ const NEVER_RECORD_NAMES = new Set(['README.md', 'CLAUDE.md', 'AGENTS.md', 'inde
  * @property {GitLogEntry[]} [log] newest first
  * @property {Map<string, MdDocRefs>} [refs]
  * @property {Map<string, string[]>} [codeMentions] doc path -> code files naming it
- * @property {string[]} [recordFolders] folders forced to be record collections
- * @property {string[]} [docFolders] folders (and subfolders) never record collections
  */
 
 /** @param {unknown} v @returns {v is number} */
@@ -78,14 +75,6 @@ function numOrNull(v) {
 /** @param {string} p @returns {string} the last path segment */
 function baseName(p) {
   return p.slice(p.lastIndexOf('/') + 1);
-}
-
-/** Folder form with a trailing slash, or '' for the repo root / invalid. @param {unknown} f @returns {string} */
-function toFolder(f) {
-  if (typeof f !== 'string') return '';
-  const norm = path.posix.normalize(f.trim()).replace(/^\.\/+/, '').replace(/\/+$/, '');
-  if (!norm || norm === '.' || norm.startsWith('../') || norm === '..' || norm.startsWith('/')) return '';
-  return `${norm}/`;
 }
 
 /** Every ancestor folder of `p`, shallowest first, each with a trailing slash. @param {string} p @returns {string[]} */
@@ -150,8 +139,6 @@ function censusMdDocs(input) {
     log = [],
     refs,
     codeMentions,
-    recordFolders = [],
-    docFolders = [],
   } = input || /** @type {CensusInput} */ ({ docs: [], reachable: new Map() });
   /** @type {string[]} */
   const warnings = [];
@@ -222,9 +209,6 @@ function censusMdDocs(input) {
   const isReachable = (p) => reach.has(p) || mapSet.has(p);
 
   // Record collections.
-  const blocked = (Array.isArray(docFolders) ? docFolders : []).map(toFolder).filter(Boolean);
-  /** @param {string} folder */
-  const isBlocked = (folder) => blocked.some((b) => folder.startsWith(b));
   /** @type {Map<string, { docs: number, linked: number, withCommits: number, writeOnce: number, last: number | null }>} */
   const stats = new Map();
   for (const d of list) {
@@ -248,18 +232,9 @@ function censusMdDocs(input) {
   const collections = [];
   /** @param {string} folder */
   const insideChosen = (folder) => collections.some((c) => folder.startsWith(c.folder));
-  const overrides = [...new Set((Array.isArray(recordFolders) ? recordFolders : []).map(toFolder).filter(Boolean))].sort(
-    (a, b) => a.length - b.length,
-  );
-  for (const folder of overrides) {
-    if (insideChosen(folder)) continue;
-    const s = stats.get(folder);
-    if (!s) warnings.push(`Record folder override matches no doc: ${folder}`);
-    collections.push({ folder, docs: s ? s.docs : 0, linked: s ? s.linked : 0, lastCommitMs: s ? s.last : null, source: 'override' });
-  }
   const candidates = [...stats.keys()].sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : a > b ? 1 : 0));
   for (const folder of candidates) {
-    if (isBlocked(folder) || insideChosen(folder) || overrides.some((o) => o.startsWith(folder))) continue;
+    if (insideChosen(folder)) continue;
     const s = /** @type {NonNullable<ReturnType<typeof stats.get>>} */ (stats.get(folder));
     if (s.docs < COLLECTION_MIN_DOCS || s.linked > s.docs * COLLECTION_MAX_LINKED_SHARE) continue;
     if (s.withCommits > 0 && s.writeOnce < s.withCommits * WRITE_ONCE_MIN_SHARE) continue;

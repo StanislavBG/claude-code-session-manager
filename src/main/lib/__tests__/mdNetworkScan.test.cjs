@@ -476,7 +476,7 @@ describe('scanMdNetwork with injected git and fs', () => {
     expect(bProbed.size).toBe(100);
   });
 
-  it('keeps record collections out of orphan findings, from the heuristic or an override folder', async () => {
+  it('keeps record collections out of orphan findings, found by the heuristic alone', async () => {
     const records = Array.from({ length: 25 }, (_, i) => `records/r-${String(i).padStart(2, '0')}.md`);
     const tracked = ['CLAUDE.md', 'notes/lost.md', ...records];
     const texts = Object.fromEntries(tracked.map((p) => [p, p === 'CLAUDE.md' ? '# Map' : '']));
@@ -486,9 +486,11 @@ describe('scanMdNetwork with injected git and fs', () => {
     expect(r.findings.map((f) => f.where)).toEqual(['notes/']);
     expect(r.nodes.map((n) => n.id)).toEqual(['CLAUDE.md']);
 
-    const forced = await scanMdNetwork('/repo', fakeRepo({ tracked, texts }).deps, { recordFolders: ['notes'], docFolders: ['records/'] });
-    expect(forced.census.collections.map((c) => [c.folder, c.source])).toEqual([['notes/', 'override']]);
-    expect(forced.findings.map((f) => [f.where, f.count])).toEqual([['records/', 25]]);
+    // Folder overrides are gone: a stray third argument changes nothing.
+    const scan = /** @type {any} */ (scanMdNetwork);
+    const stray = await scan('/repo', fakeRepo({ tracked, texts }).deps, { recordFolders: ['notes'], docFolders: ['records/'] });
+    expect(stray.census.collections.map((c) => [c.folder, c.source])).toEqual([['records/', 'heuristic']]);
+    expect(stray.findings.map((f) => f.where)).toEqual(['notes/']);
 
     // A linked record is a leaf: its own links pull nothing into the network.
     const linked = { ...texts, 'CLAUDE.md': '[one record](records/r-00.md)', 'records/r-00.md': '[lost](../notes/lost.md)' };
@@ -496,6 +498,19 @@ describe('scanMdNetwork with injected git and fs', () => {
     expect(leaf.census.collections.map((c) => c.folder)).toEqual(['records/']);
     expect(leaf.nodes.map((n) => n.id)).toEqual(['CLAUDE.md', 'records/r-00.md']);
     expect(leaf.findings.map((f) => f.where)).toEqual(['notes/']);
+  });
+
+  it('marks session-manager-operations/reviews/ as a record collection by the heuristic', async () => {
+    const reviews = Array.from({ length: 25 }, (_, i) => `session-manager-operations/reviews/v-${String(i).padStart(2, '0')}.md`);
+    // a linked ops root (README + architecture doc) keeps session-manager-operations/ itself from qualifying
+    const ops = ['session-manager-operations/README.md', 'session-manager-operations/architecture.md'];
+    const tracked = ['CLAUDE.md', ...ops, ...reviews];
+    const map = ops.map((p) => `[ops](${p})`).join(' ');
+    const texts = Object.fromEntries(tracked.map((p) => [p, p === 'CLAUDE.md' ? map : '']));
+    const r = await scanMdNetwork('/repo', fakeRepo({ tracked, texts }).deps);
+    expect(r.census.collections.map((c) => [c.folder, c.source])).toEqual([['session-manager-operations/reviews/', 'heuristic']]);
+    expect(r.census.counts.records).toBe(25);
+    expect(r.findings).toEqual([]);
   });
 
   it('reads mdNetwork.loadedByTools / history from a tracked .session-manager.json, warning on a malformed one', async () => {

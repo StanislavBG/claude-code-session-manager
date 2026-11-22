@@ -1,6 +1,6 @@
 /**
  * mdDocCensus.test.cjs — the per-doc census behind Review MD network: roles
- * (with @-imports), record collections (heuristic + overrides), recency from a
+ * (with @-imports), record collections (heuristic only), recency from a
  * real git log, counts, refs caps and malformed input.
  *
  * Run: timeout 300 npx vitest run src/main/lib/__tests__/mdDocCensus.test.cjs
@@ -111,12 +111,12 @@ describe('censusMdDocs record collections', () => {
     expect(censusMdDocs({ docs, reachable: new Map(), log }).collections).toEqual([]);
   });
 
-  it('honours recordFolders and docFolders overrides', () => {
+  it('ignores retired recordFolders / docFolders inputs', () => {
     const docs = [...many('ops/reviews/', 25), ...many('small/', 3)];
-    const c = censusMdDocs({ docs, reachable: new Map(), recordFolders: ['small'], docFolders: ['ops/'] });
-    expect(c.collections).toEqual([{ folder: 'small/', docs: 3, linked: 0, lastCommitMs: null, source: 'override' }]);
-    expect(roleOf(c, 'small/r00.md')).toBe('record');
-    expect(roleOf(c, 'ops/reviews/r00.md')).toBe('doc');
+    const c = censusMdDocs(/** @type {any} */ ({ docs, reachable: new Map(), recordFolders: ['small'], docFolders: ['ops/'] }));
+    expect(c.collections).toEqual([{ folder: 'ops/', docs: 25, linked: 0, lastCommitMs: null, source: 'heuristic' }]);
+    expect(roleOf(c, 'small/r00.md')).toBe('doc');
+    expect(roleOf(c, 'ops/reviews/r00.md')).toBe('record');
   });
 
   it('picks the shallowest qualifying folder, never the repo root', () => {

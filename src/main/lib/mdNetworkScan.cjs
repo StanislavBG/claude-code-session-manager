@@ -18,7 +18,7 @@
  *   prefixes and `records` docs are never walked: a link into one is an edge
  *   and the doc a leaf node, but its own links pull nothing in; they are never
  *   orphans either.
- * - scanMdNetwork(cwd, deps, opts) — thin I/O wrapper: one `git ls-files -z`, at
+ * - scanMdNetwork(cwd, deps) — thin I/O wrapper: one `git ls-files -z`, at
  *   most MAX_DOCS docs read (the root, then breadth-first along its links, then
  *   the rest shallowest-first, so the cap drops unreachable docs before reachable
  *   ones), at most MAX_DOC_BYTES each, READ_BATCH reads in parallel, async fs only.
@@ -39,7 +39,7 @@
  *   `duplicates` is mdDuplicates.findDuplicates over every read doc except
  *   history prefixes and record-collection docs; a failure degrades to [] plus
  *   a census warning.
- *   Docs in record collections (opts.recordFolders / heuristic) leave orphans.
+ *   Docs in record collections (the census heuristic) leave orphans.
  *
  * Followed — every reference an agent follows, matching the maintaining-md-network
  * skill's link convention: inline `[text](target)` links (images too) and
@@ -114,7 +114,6 @@ const MD_RE = /\.md$/i;
  * @typedef {{ a: string, b: string, sharedRuns: number, samples: string[], copy?: true }} MdDuplicatePair
  * @typedef {MdLinkNetwork & { census: MdCensus, duplicates: MdDuplicatePair[] }} MdNetwork
  * @typedef {MdNetwork | { ok: false, error: string }} MdNetworkResult
- * @typedef {{ recordFolders?: string[], docFolders?: string[] }} ScanOpts
  */
 
 /**
@@ -412,10 +411,9 @@ function gitFailure(err) {
  * I/O: scans the git project at `cwd` and builds its network. Never throws.
  * @param {string} cwd the project root (`git ls-files` paths are relative to it)
  * @param {ScanDeps} [deps] injectable I/O; defaults are git + async fs
- * @param {ScanOpts} [opts] record-collection overrides for the census
  * @returns {Promise<MdNetworkResult>}
  */
-async function scanMdNetwork(cwd, deps = {}, opts = {}) {
+async function scanMdNetwork(cwd, deps = {}) {
   try {
     if (typeof cwd !== 'string' || cwd === '') return { ok: false, error: 'cwd must be a non-empty path' };
     /** @type {NonNullable<ScanDeps['execGit']>} */
@@ -689,8 +687,6 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
       log,
       refs,
       codeMentions,
-      recordFolders: opts.recordFolders,
-      docFolders: opts.docFolders,
     });
     census.warnings.unshift(...warnings);
 

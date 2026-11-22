@@ -35,6 +35,12 @@ function messageOf(err: unknown): string {
   return String(err)
 }
 
+/** Background per-cwd hydrate failures go to the log channel (not a toast), like the promptSessions store's own. */
+function logHydrateFailure(cwd: string, err: unknown): void {
+  const msg = messageOf(err)
+  window.api?.logs?.write?.('dashboard', 'warn', `hydrate failed for ${cwd}: ${msg}`, undefined, { cwd })
+}
+
 export function useDashboardRefresh(opts: DashboardRefreshOptions): DashboardRefreshResult {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
@@ -120,8 +126,8 @@ export function useDashboardRefresh(opts: DashboardRefreshOptions): DashboardRef
     for (const cwd of optsRef.current.cwds) {
       if (hydratedRef.current.has(cwd)) continue
       hydratedRef.current.add(cwd)
-      void Promise.resolve().then(() => store.hydrate(cwd)).catch(() => {})
-      void Promise.resolve().then(() => store.hydrateArchived(cwd)).catch(() => {})
+      void Promise.resolve().then(() => store.hydrate(cwd)).catch((err) => logHydrateFailure(cwd, err))
+      void Promise.resolve().then(() => store.hydrateArchived(cwd)).catch((err) => logHydrateFailure(cwd, err))
     }
   }, [cwdsKey])
 

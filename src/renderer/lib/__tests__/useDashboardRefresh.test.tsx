@@ -212,6 +212,53 @@ describe('new cwd hydration', () => {
     await render({ focused: false, cwds: ['/b', '/a'] })
     expect(mocks.hydrate).toHaveBeenCalledTimes(2)
   })
+
+  it('logs (not toasts, not swallows) a throwing hydrate for one cwd', async () => {
+    const write = vi.fn()
+    const w = window as unknown as { api?: unknown }
+    const prevApi = w.api
+    w.api = { logs: { write } }
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      mocks.hydrate.mockImplementation((cwd: string) => {
+        if (cwd === '/bad') throw new Error('disk gone')
+        return Promise.resolve()
+      })
+      await render({ focused: false, cwds: ['/ok', '/bad'] })
+      expect(write).toHaveBeenCalledTimes(1)
+      const [scope, level, message, meta, ctx] = write.mock.calls[0]
+      expect(scope).toBe('dashboard')
+      expect(level).toBe('warn')
+      expect(message).toContain('/bad')
+      expect(message).toContain('disk gone')
+      expect(meta).toBeUndefined()
+      expect(ctx).toEqual({ cwd: '/bad' })
+      expect(mocks.toastError).not.toHaveBeenCalled()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+      w.api = prevApi
+    }
+  })
+
+  it('a failing hydrate with no window.api.logs does not throw', async () => {
+    const w = window as unknown as { api?: unknown }
+    const prevApi = w.api
+    w.api = undefined
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      mocks.hydrateArchived.mockRejectedValue(new Error('nope'))
+      await render({ focused: false, cwds: ['/x'] })
+      await new Promise((r) => setTimeout(r, 0))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+      w.api = prevApi
+    }
+  })
 })
 
 describe('state + toasts', () => {

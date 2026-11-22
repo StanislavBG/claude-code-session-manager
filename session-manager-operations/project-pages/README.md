@@ -214,8 +214,24 @@ records live in the entry's `review/` folder, written as writer `project-home` t
 | `material.json` + `image-1.<ext>` .. `image-N.<ext>` | `project_video_review_write` → `POST /admin/project-home/videos/review/write` → `writeMaterial` | the review-stage run: text (<=32000 chars) + 1-6 PNG/JPEG/WebP images (<=2 MiB each, checked by magic bytes); refused without a `dispatch.json`; replaces the earlier material and images |
 | `decision.json` | **only** the human decision (`project-videos:review-decide` → `writeDecision`) | `approve` (with `at`) or `changes` (with `note`); refused without material or when already decided |
 
+Material limits (`writeMaterial`): `text` is 1-32000 characters (`REVIEW_TEXT_MAX`) and `images`
+is 1-6 items (`REVIEW_IMAGES_MAX`); anything else is refused. An approval's `decision.json` keeps
+`at` — the exact time text of the approval line (`formatLocalAt`, e.g. `2026-11-22 13:05 PST`, a
+1-40 char single line) that the final run's goal carries as `Review: approved by the owner at <at>`.
+
 No agent tool or route writes `decision.json`. `reviewStatus` derives `building` / `waiting` /
-`approved` / `changes-requested` from the newest record; `project-videos:review-list` lists them.
+`approved` / `changes-requested` from the newest record; a `'final'` dispatch record never changes
+the review status (it never outranks a decision), so an approved entry stays `approved` while its
+final run builds or fails. `project-videos:review-list` lists them, each with its `job` and
+`canRetry`.
+
+**Retry** (`project-videos:review-retry` → `videoReviewIpc.retry`). Offered (`canRetry`, `retryable`)
+only on an approved entry whose recorded `'final'` run's job failed, and only to a human click on that
+entry in Project Home ▸ Video — renderer IPC only: no admin route, MCP tool or phone path reaches it.
+It re-dispatches the final stage once (one in-flight decide/retry per entry) with the recorded inputs
+and the original `Review: approved by the owner at <at>` (the `at` in `decision.json`) and
+`Replace entry: <id>` lines; it writes no decision, never re-runs the review stage, and archives
+the failed job's old slug (best effort).
 Why only a human approves: [domain-model.md](../architecture/domain-model.md).
 
 ### Write tools and routes

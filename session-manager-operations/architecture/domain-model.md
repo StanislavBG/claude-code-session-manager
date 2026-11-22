@@ -155,10 +155,11 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   surface and on built-ins. Why: a project's video recipes (Burrow's episode tools, 9:16) are that project's
   content, not Session Manager's, so they must not leak into every install the way a Project Home tool does —
   and they leave Hot keys because a press is a background build, not a New Session. With `review: true` the first
-  run only saves review material (`project_video_review_write`) to `videos/<id>/review/`; **only a human click**
-  (`project-videos:review-decide` → `videoReview.writeDecision`) approves it or asks for changes. No agent tool
+  run only saves review material (`project_video_review_write`) to `videos/<id>/review/`, and **only a human
+  click** in Project Home ▸ Video approves it, asks for changes on it, or retries its failed final run
+  ([limits, stored approval time, Retry](../project-pages/README.md#review-step-videosidreview)). No agent tool
   or route writes `decision.json`, so an agent can never approve its own review and the final build only follows
-  a human's say-so. Files: [project-pages/README.md](../project-pages/README.md#review-step-videosidreview).
+  a human's say-so.
 - **An Epic's title + objective are fixed for the life of its session, and are its first prompt.** The New Epic
   card composes both through `composeEpicIntake` and sends the objective at creation; nothing rewrites
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of

@@ -230,4 +230,4 @@ function computeEpicOutsideState(args) {
   return result('open');
 }
 
-module.exports = { computeEpicOutsideState, knownPrdSlugs, EPIC_OUTSIDE_STATES };
+module.exports = { computeEpicOutsideState, knownPrdSlugs, refutedReason, EPIC_OUTSIDE_STATES };

@@ -10,7 +10,9 @@
  *                the fix row's creation was VERIFIED (the validator missed it)
  *   - week:      the 7 days ending at nowMs — miss kinds counted over REFUTED
  *                verdicts and escapes, the top one, and one proposed standard
- *                check for a human to approve.
+ *                check for a human to approve. A REFUTED verdict with no
+ *                missKinds array (written before checked JSON verdicts) is
+ *                unclassified: listed in week.unclassified, never ranked.
  *
  * No cost or usage numbers — those stay in loopEfficiency.cjs.
  * Pure: no I/O, no Date.now(), no mutation of inputs.
@@ -22,6 +24,7 @@ const path = require('path');
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
 const { isSweepValidatorSlug } = require('../epic/epicSweepValidator.cjs');
 const { MISS_KINDS } = require('./validatorVerdictSchema.cjs');
+const { refutedReason } = require('../epic/epicOutsideState.cjs');
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -87,7 +90,7 @@ function isValidatorRow(r) {
  * @param {{ epics?: Array<{ cwd: string, epicId?: string, events?: any[] }>, rows?: any[], nowMs: number }} input
  */
 function computeValidationQuality({ epics, rows, nowMs }) {
-  /** @type {Map<string, { cwd: string, verdicts: Map<string, Array<{ at: number, verdict: 'verified'|'refuted', reason: string|null, missKinds: string[], validator: string|null }>>, rows: any[] }>} */
+  /** @type {Map<string, { cwd: string, verdicts: Map<string, Array<{ at: number, verdict: 'verified'|'refuted', reason: string|null, missKinds: string[], legacy: boolean, validator: string|null }>>, rows: any[] }>} */
   const byCwd = new Map();
   const bucket = (/** @type {string} */ cwd) => {
     let b = byCwd.get(cwd);
@@ -113,8 +116,9 @@ function computeValidationQuality({ epics, rows, nowMs }) {
       list.push({
         at,
         verdict,
-        reason: typeof ev.reason === 'string' && ev.reason ? ev.reason : null,
+        reason: (typeof ev.reason === 'string' && ev.reason) || refutedReason(ev.text) || null,
         missKinds: Array.isArray(ev.missKinds) ? ev.missKinds : [],
+        legacy: !Array.isArray(ev.missKinds),
         validator: typeof ev.validator === 'string' && ev.validator ? ev.validator : null,
       });
     }
@@ -228,9 +232,18 @@ function computeValidationQuality({ epics, rows, nowMs }) {
       d.prds.push(prd);
       if (reason && !d.reasons.includes(reason)) d.reasons.push(reason);
     };
+    let unclassifiedCount = 0;
+    const unclassifiedPrds = [];
+    const unclassifiedReasons = [];
     for (const [slug, list] of b.verdicts) {
       for (const x of list) {
         if (x.verdict !== 'refuted' || !inWeek(x.at)) continue;
+        if (x.legacy) {
+          unclassifiedCount += 1;
+          unclassifiedPrds.push(slug);
+          if (x.reason && !unclassifiedReasons.includes(x.reason)) unclassifiedReasons.push(x.reason);
+          continue;
+        }
         const kinds = x.missKinds.length ? [...new Set(x.missKinds.map(normMissKind))] : ['other'];
         for (const k of kinds) note(k, slug, x.reason);
       }
@@ -252,7 +265,13 @@ function computeValidationQuality({ epics, rows, nowMs }) {
       refuted: { pct: pct(refutedPrds.length, judged), prds: sortedUnique(refutedPrds) },
       fixWaves,
       escapes,
-      week: { fromMs, toMs: nowMs, missKinds, topMiss },
+      week: {
+        fromMs,
+        toMs: nowMs,
+        missKinds,
+        topMiss,
+        unclassified: { count: unclassifiedCount, prds: sortedUnique(unclassifiedPrds), reasons: unclassifiedReasons.slice(0, 5) },
+      },
     });
   }
 

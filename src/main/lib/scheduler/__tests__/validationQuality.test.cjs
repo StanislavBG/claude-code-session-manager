@@ -174,3 +174,66 @@ test('projects are bucketed per cwd', () => {
   });
   expect(r.projects.map((p) => [p.project, p.firstPass.pct, p.refuted.pct])).toEqual([['a', 0, 100], ['b', 100, 0]]);
 });
+
+// Real-shaped legacy verdict events (pre checked-JSON): no missKinds, no reason.
+const legacy = (prdSlug, at, reason) => ({
+  kind: 'response', prdSlug, validation: 'refuted', text: `Validation REFUTED: ${prdSlug} — ${reason}`, at,
+});
+
+test('a legacy event takes its reason from the text; ev.reason wins when set; no reason gives null', () => {
+  const now = T0 + DAY;
+  const p = one({
+    epics: [{ cwd: CWD, epicId: 'e1', events: [
+      legacy('1-x', T0, 'gate fails'),
+      { kind: 'response', prdSlug: '2-y', validation: 'refuted', text: 'Validation REFUTED: 2-y — from text', reason: 'from field', at: T0 },
+      { kind: 'response', prdSlug: '3-z', validation: 'refuted', text: 'Validation REFUTED: 3-z', at: T0 },
+    ] }],
+    rows: [],
+    nowMs: now,
+  });
+  expect(p.week.unclassified).toEqual({ count: 3, prds: ['x', 'y', 'z'], reasons: ['gate fails', 'from field'] });
+});
+
+test('only legacy REFUTED events in the window: topMiss is null, all listed as unclassified', () => {
+  const now = T0 + DAY;
+  const p = one({
+    epics: [{ cwd: CWD, epicId: 'e1', events: [
+      legacy('1-a', T0, 'r1'), legacy('2-b', T0 + 1, 'r2'), legacy('2-b', T0 + 2, 'r2'),
+      legacy('3-c', T0 + 3, 'r3'), legacy('4-d', T0 + 4, 'r4'), legacy('5-e', T0 + 5, 'r5'), legacy('6-f', T0 + 6, 'r6'),
+    ] }],
+    rows: [],
+    nowMs: now,
+  });
+  expect(p.week.topMiss).toBeNull();
+  expect(Object.values(p.week.missKinds).every((n) => n === 0)).toBe(true);
+  expect(p.week.unclassified).toEqual({
+    count: 7, prds: ['a', 'b', 'c', 'd', 'e', 'f'], reasons: ['r1', 'r2', 'r3', 'r4', 'r5'],
+  });
+});
+
+test('one classified gate-red miss plus five legacy ones: topMiss is gate-red with count 1', () => {
+  const now = T0 + DAY;
+  const p = one({
+    epics: [{ cwd: CWD, epicId: 'e1', events: [
+      v('0-g', 'refuted', T0, { missKinds: ['gate-red'], reason: 'red' }),
+      legacy('1-a', T0, 'r1'), legacy('2-b', T0, 'r2'), legacy('3-c', T0, 'r3'), legacy('4-d', T0, 'r4'), legacy('5-e', T0, 'r5'),
+    ] }],
+    rows: [],
+    nowMs: now,
+  });
+  expect(p.week.topMiss).toEqual({ missKind: 'gate-red', count: 1, prds: ['g'], reasons: ['red'], proposal: PROPOSED_CHECKS['gate-red'] });
+  expect(p.week.missKinds.other).toBe(0);
+  expect(p.week.unclassified.count).toBe(5);
+});
+
+test('missKinds: [] (checked JSON, no kind given) still counts as other; empty week has zero unclassified', () => {
+  const now = T0 + DAY;
+  const p = one({
+    epics: [{ cwd: CWD, epicId: 'e1', events: [v('1-a', 'refuted', T0, { missKinds: [], reason: 'why' })] }],
+    rows: [],
+    nowMs: now,
+  });
+  expect(p.week.missKinds.other).toBe(1);
+  expect(p.week.topMiss).toMatchObject({ missKind: 'other', count: 1, reasons: ['why'] });
+  expect(p.week.unclassified).toEqual({ count: 0, prds: [], reasons: [] });
+});

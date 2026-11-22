@@ -145,6 +145,11 @@ function parseLog(logPath) {
         seq: seq++,
         subtype: obj.subtype ?? '',
         resultText: typeof obj.result === 'string' ? obj.result : '',
+        // `claude -p --json-schema` (validator jobs) puts the checked JSON
+        // here and replaces `result` with its string form.
+        ...(obj.structured_output && typeof obj.structured_output === 'object' && !Array.isArray(obj.structured_output)
+          ? { structuredOutput: obj.structured_output }
+          : {}),
       };
       resultEvent = ev;
       events.push(ev);
@@ -279,6 +284,9 @@ function scanSentinel(resultEvent, events) {
   const RE = /^SCHEDULER_VERDICT:\s*(PASS|FAIL|BLOCKED_BY_FOREIGN_WIP|NEEDS_HUMAN)\b/m;
   const norm = (v) => { const l = v.toLowerCase(); return l === 'needs_human' ? 'fail' : l; };
 
+  const structured = structuredSchedulerVerdict(resultEvent);
+  if (structured) return structured;
+
   if (resultEvent) {
     const m = resultEvent.resultText.match(RE);
     if (m) return norm(m[1]);
@@ -293,6 +301,18 @@ function scanSentinel(resultEvent, events) {
     if (m) return norm(m[1]);
   }
 
+  return null;
+}
+
+/**
+ * 'pass' | 'fail' from a result event's structured_output.schedulerVerdict
+ * (validator runs under `--json-schema`), else null.
+ */
+function structuredSchedulerVerdict(resultEvent) {
+  const so = resultEvent && resultEvent.structuredOutput;
+  if (!so || typeof so !== 'object') return null;
+  if (so.schedulerVerdict === 'PASS') return 'pass';
+  if (so.schedulerVerdict === 'FAIL') return 'fail';
   return null;
 }
 
@@ -327,6 +347,10 @@ function scanHaltLine(text) {
 function scanSentinelReason(resultEvent, events) {
   const RE = /^SCHEDULER_VERDICT:\s*(?:FAIL|NEEDS_HUMAN)\b[ \t]*([^\n]*)/m;
   const clip = (m) => m[1].trim().slice(0, 300);
+  if (structuredSchedulerVerdict(resultEvent) === 'fail') {
+    const fr = resultEvent.structuredOutput.failReason;
+    return typeof fr === 'string' ? fr.trim().slice(0, 300) : '';
+  }
   if (resultEvent && resultEvent.resultText) {
     const m = resultEvent.resultText.match(RE);
     if (m) return clip(m);

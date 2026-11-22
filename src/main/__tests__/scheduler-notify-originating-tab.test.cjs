@@ -284,27 +284,33 @@ describe("tab", () => {
     const scheduleSettle = vi.fn();
     const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-validator-1' }));
     const loadSessions = vi.fn(async () => ({ tabs: [] }));
-    const readResultFromLog = vi.fn(() => [
-      'VALIDATION: 111-alpha VERIFIED',
-      'VALIDATION: 222-beta REFUTED — missing coverage',
-    ].join('\n'));
+    const readResultFromLog = vi.fn(() => '{"schedulerVerdict":"PASS"}');
+    // PRD 3614: verdicts come from the result event's structured_output.
+    const readStructuredFromLog = vi.fn(() => ({
+      schedulerVerdict: 'PASS',
+      verdicts: [
+        { prd: '111-alpha', verdict: 'VERIFIED', reason: '', criteria: [], findings: [] },
+        { prd: '222-beta', verdict: 'REFUTED', reason: 'missing coverage', criteria: [{ id: '1', met: false, evidence: 'no test', missKind: 'missing-test' }], findings: [] },
+      ],
+    }));
+    const writeVerdictsFile = vi.fn(async () => {});
 
     await notifyOriginatingTab(
       { slug: '1407-validator-run', status: 'completed', cwd: '/some/cwd', agentType: 'validator' },
       {
         parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent,
-        appendTranscriptTurn, readResultFromLog, scheduleSettle,
+        appendTranscriptTurn, readResultFromLog, readStructuredFromLog, writeVerdictsFile, scheduleSettle,
       },
     );
 
     expect(appendResponseEvent).toHaveBeenCalledTimes(3);
     expect(appendResponseEvent).toHaveBeenNthCalledWith(
       1, '/some/cwd', 'psess-validator-1', expect.stringContaining('111-alpha'),
-      { prdSlug: '111-alpha', outcome: 'completed', validation: 'verified' },
+      { prdSlug: '111-alpha', outcome: 'completed', validation: 'verified', reason: '', missKinds: [], validator: '1407-validator-run' },
     );
     expect(appendResponseEvent).toHaveBeenNthCalledWith(
       2, '/some/cwd', 'psess-validator-1', expect.stringContaining('222-beta'),
-      { prdSlug: '222-beta', outcome: 'completed', validation: 'refuted' },
+      { prdSlug: '222-beta', outcome: 'completed', validation: 'refuted', reason: 'missing coverage', missKinds: ['missing-test'], validator: '1407-validator-run' },
     );
     expect(appendResponseEvent).toHaveBeenNthCalledWith(
       3, '/some/cwd', 'psess-validator-1', expect.stringContaining('1407-validator-run'),

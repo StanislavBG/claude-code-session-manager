@@ -119,7 +119,6 @@ const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
-const { parseValidationSentinels } = require('./lib/scheduler/validationSentinels.cjs');
 const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
@@ -165,7 +164,7 @@ const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/ep
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
-const { VALIDATOR_VERDICT_SCHEMA } = require('./lib/scheduler/validatorVerdictSchema.cjs');
+const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
@@ -206,7 +205,8 @@ const adoptedRunSupervisor = require('./lib/scheduler/adoptedRunSupervisor.cjs')
 const { splitFrontmatter, parsePrdFile, serializePrdFile, isArtifactOnlyDeclaration } = require('./lib/prd/prdFrontmatter.cjs');
 const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
 const { resolvePersonaDefaultEstimate, DEFAULT_PRD_AGENT_TYPE } = require('./lib/prd/prdAgentType.cjs');
-const { resolveDepSlug, findNearMatches } = require('./lib/prd/depSlugResolve.cjs');
+const { resolveDepSlug, findNearMatches, bareSlug } = require('./lib/prd/depSlugResolve.cjs');
+const { writeJsonAtomic } = require('./lib/util/atomicFs.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
 const cancelDependents = require('./scheduler/cancelDependents.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -418,7 +418,12 @@ function harvestJobPlanRecords(job, worktreeDir, projectRoot) {
   }
 }
 
-function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false, isArtifactOnly = false }) {
+// Validator jobs only (`--json-schema`): the CLI replaces the result text
+// with the JSON, so the scheduler reads the verdict from structured output.
+const FINISH_VALIDATOR_VERDICT_LINE = `
+   - Your structured output's schedulerVerdict (and failReason) is what the scheduler reads as this verdict.`;
+
+function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false, isArtifactOnly = false, isValidator = false }) {
   return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
    foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
    project's own typecheck, lint and test commands instead. The project's
@@ -446,7 +451,7 @@ ${verdictStepNum}. VERDICT LINE — end your final report with exactly one of th
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}${isArtifactOnly ? FINISH_ARTIFACT_ONLY_VERDICT_LINE : ''}
+   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}${isArtifactOnly ? FINISH_ARTIFACT_ONLY_VERDICT_LINE : ''}${isValidator ? FINISH_VALIDATOR_VERDICT_LINE : ''}
    - Print FAIL when the gate is red or the commit could not land. Also print
      FAIL when a step needs something this run cannot reach (live runtime
      state, credentials, an account or dashboard action, a host install): do
@@ -496,13 +501,13 @@ in your final report.`;
  * tree, never FAIL for the missing commit. Self job 826 printed exactly that
  * false FAIL. Omitted/false leaves the text unchanged.
  */
-function buildFinishProtocol({ reviewInRun = true, isFixPlan = false, isArtifactOnly = false } = {}) {
+function buildFinishProtocol({ reviewInRun = true, isFixPlan = false, isArtifactOnly = false, isValidator = false } = {}) {
   if (reviewInRun) {
     return buildFinishHead(3) + FINISH_REVIEW_STEPS_IN_RUN
-      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan, isArtifactOnly });
+      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan, isArtifactOnly, isValidator });
   }
   return buildFinishHead(2) + FINISH_REVIEW_STEP_DEFERRED
-    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan, isArtifactOnly });
+    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan, isArtifactOnly, isValidator });
 }
 
 const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
@@ -3514,6 +3519,35 @@ function extractResultTextFromLog(logPath) {
 }
 
 /**
+ * Same tail scan as extractResultTextFromLog, but returns the last result
+ * event's `structured_output` object (set by `claude -p --json-schema`), or
+ * null for a missing file, a torn line, or no such field. Never throws.
+ */
+function extractStructuredOutputFromLog(logPath) {
+  if (!logPath) return null;
+  try {
+    const tail = readTail(logPath, RESULT_TEXT_TAIL_BYTES);
+    if (!tail) return null;
+    const lines = tail.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line || !line.includes('"type":"result"')) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (!parsed || parsed.type !== 'result') continue;
+        const so = parsed.structured_output;
+        return so && typeof so === 'object' && !Array.isArray(so) ? so : null;
+      } catch {
+        // torn/partial line — keep scanning backward
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * resolveNotifyPrd(job, parsePrdRaw) → Promise<parsed PRD | null>
  *
  * Locate and parse a finishing job's PRD for the notification path, trying
@@ -3826,6 +3860,8 @@ async function notifyOriginatingTab(job, {
   appendResponseEvent = appendResponseEventIfKnown,
   appendTranscriptTurn = promptSessionTranscript.appendTurn,
   readResultFromLog = extractResultTextFromLog,
+  readStructuredFromLog = extractStructuredOutputFromLog,
+  writeVerdictsFile = writeJsonAtomic,
   scheduleSettle = defaultScheduleSettle,
 } = {}) {
   try {
@@ -3884,9 +3920,9 @@ async function notifyOriginatingTab(job, {
     const needsResultText = (epicIdForTranscript && job.cwd)
       || (job.agentType === 'validator' && job.status === 'completed');
     let resultText = null;
+    const logPath = job.runId ? path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`) : null;
     if (needsResultText) {
       try {
-        const logPath = job.runId ? path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`) : null;
         resultText = readResultFromLog(logPath);
       } catch (e) {
         console.error('[scheduler] notifyOriginatingTab readResultFromLog error', job?.slug, e);
@@ -3904,13 +3940,31 @@ async function notifyOriginatingTab(job, {
       }
     }
 
-    // PRD 1407: a plan-level validator job ends its run with one
-    // `VALIDATION: <slug> VERIFIED`/`REFUTED` line per PRD it checked.
-    // Parsed only for a completed validator job; every ordinary work-item
-    // job gets an empty array here and behaves exactly as before.
-    const verdicts = (job.agentType === 'validator' && job.status === 'completed')
-      ? parseValidationSentinels(resultText)
-      : [];
+    // PRD 1407: a plan-level validator job reports one verdict per PRD it
+    // checked. Since `--json-schema` (PRD 3614) the verdicts come from the
+    // result event's structured_output, checked by parseValidatorVerdict —
+    // the CLI replaces the result text with the JSON string, so VALIDATION:
+    // lines are no longer there. Missing/invalid output → no verdict events.
+    // Every ordinary work-item job gets an empty array and behaves as before.
+    /** @type {{ slug: string, verdict: string, reason: string, missKinds: string[] }[]} */
+    let verdicts = [];
+    /** @type {any} */
+    let checkedVerdict = null;
+    if (job.agentType === 'validator' && job.status === 'completed') {
+      let structured = null;
+      try {
+        structured = readStructuredFromLog(logPath);
+      } catch (e) {
+        console.error('[scheduler] notifyOriginatingTab readStructuredFromLog error', job?.slug, e);
+      }
+      const checked = parseValidatorVerdict(structured);
+      if (checked.ok) {
+        checkedVerdict = checked.value;
+        verdicts = verdictRowsFromStructured(checked.value);
+      } else {
+        console.error(`[scheduler] notifyOriginatingTab: validator ${job.slug} structured output rejected — ${checked.error}`);
+      }
+    }
 
     if (!epicId && verdicts.length > 0) {
       // No Epic to attach these to (unresolved sourcePromptId/epicId, same
@@ -3935,12 +3989,37 @@ async function notifyOriginatingTab(job, {
             job.cwd || null,
             epicId,
             `Validation ${v.verdict.toUpperCase()}: ${v.slug}${v.reason ? ` — ${v.reason}` : ''}`,
-            { prdSlug: v.slug, outcome: 'completed', validation: v.verdict },
+            {
+              prdSlug: v.slug,
+              outcome: 'completed',
+              validation: v.verdict,
+              reason: typeof v.reason === 'string' ? v.reason : '',
+              missKinds: Array.isArray(v.missKinds) ? v.missKinds : [],
+              validator: job.slug,
+            },
           );
         } catch (e) {
           console.error('[scheduler] notifyOriginatingTab verdict appendResponseEvent error', job?.slug, v.slug, e);
         }
       }
+    }
+    if (epicId && checkedVerdict && job.cwd) {
+      // PRD 3614: keep the checked object beside the Markdown plan record.
+      try {
+        const file = opsPath(job.cwd, 'plan-records', epicId, `${bareSlug(job.slug)}.verdicts.json`);
+        assertOpsWrite(file, 'scheduler');
+        await writeVerdictsFile(file, {
+          validator: job.slug,
+          runId: job.runId || null,
+          at: new Date().toISOString(),
+          schedulerVerdict: checkedVerdict.schedulerVerdict,
+          verdicts: checkedVerdict.verdicts,
+        });
+      } catch (e) {
+        console.error('[scheduler] notifyOriginatingTab verdicts file write error', job?.slug, e);
+      }
+    }
+    if (epicId) {
       // PRD 986: the check-in event is born validation:'unvalidated' — never
       // 'verified' — regardless of the job's self-reported outcome. The
       // check-in is a request to validate, not an assertion of done.
@@ -5245,7 +5324,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       isArtifactOnly = false;
     }
   }
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly }) });
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly, isValidator: job.agentType === 'validator' }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did
@@ -12959,6 +13038,7 @@ module.exports = {
   isNotifiableTerminalStatus,
   armSettleAfterValidatorBudgetKill,
   extractResultTextFromLog,
+  extractStructuredOutputFromLog,
   resolveVerifyPrdPath,
   resolveFixPlanPath,
   resolveNotifyPrd,

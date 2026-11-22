@@ -80,7 +80,7 @@ test('usageFor sums a usage-only line from the agent-CLI transcript', async () =
     { type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 120, output_tokens: 34 } }, sessionId: SID },
   ]);
   const out = await tr.usageFor(CWD, [SID]);
-  expect(out[SID]).toEqual({ inputTokens: 120, outputTokens: 34 });
+  expect(out[SID]).toEqual({ inputTokens: 120, outputTokens: 34, calls: 1, lastContext: 120 });
 });
 
 test('an invalid (non-UUID) session id never throws and keeps the Claude path', () => {

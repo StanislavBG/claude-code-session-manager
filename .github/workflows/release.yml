@@ -1,6 +1,7 @@
 name: Release
 # Builds electron-builder installers on native runners and publishes them to the
 # GitHub Release for the pushed v* tag. Windows ships both x64 and arm64 installers.
+# The npm package is published locally by the /builder skill, not by this workflow (Trusted Publishing was removed 2026-11-21; restore from commit 9f7b2627).
 on:
   push:
     tags: ['v*']

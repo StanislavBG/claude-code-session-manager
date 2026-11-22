@@ -4,8 +4,9 @@
  * `duplicates`, most shared first), then broken or local-only links, then orphan groups (the
  * scan's `findings`, in its order). Each row says where the text should live.
  *
- * A duplicate's keeper is the topic doc (census role `doc`) over a map, scoped or agent doc;
- * ties go to the doc more docs link to, then to the pair's first doc. Purely presentational:
+ * A duplicate's keeper is a map (census role `map`) always — it keeps its one-line rule and the
+ * other doc links to it; else the topic doc (role `doc`) over a scoped or agent doc; ties go to
+ * the doc more docs link to, then to the pair's first doc. Purely presentational:
  * hovering a row reports its index so the link map can light its nodes.
  */
 import { toast } from '../../../../state/toast'
@@ -40,9 +41,9 @@ export function chooseKeeper(pair: MdDuplicatePair, docs: readonly MdDoc[]): { k
   const of = (path: string) => docs.find((d) => d.path === path)
   const a = of(pair.a)
   const b = of(pair.b)
-  const topic = (d: MdDoc | undefined) => (d?.role === 'doc' ? 1 : 0)
+  const rank = (d: MdDoc | undefined) => (d?.role === 'map' ? 2 : d?.role === 'doc' ? 1 : 0)
   const linked = (d: MdDoc | undefined) => d?.linkedFrom ?? 0
-  const bWins = topic(b) > topic(a) || (topic(b) === topic(a) && linked(b) > linked(a))
+  const bWins = rank(b) > rank(a) || (rank(b) === rank(a) && linked(b) > linked(a))
   return bWins ? { keeper: pair.b, other: pair.a } : { keeper: pair.a, other: pair.b }
 }
 
@@ -66,7 +67,10 @@ export function buildFixList(net: MdNetwork): MdFixRow[] {
   const docs = net.census?.docs ?? []
   const dupes = (net.duplicates ?? []).map((pair): MdFixRow => {
     const { keeper, other } = chooseKeeper(pair, docs)
-    const action = `Keep it in ${keeper}; link to it from ${other}`
+    const keeperIsMap = docs.find((d) => d.path === keeper)?.role === 'map'
+    const action = keeperIsMap
+      ? `Keep the rule in ${keeper}; replace the copy in ${other} with a link to it`
+      : `Keep it in ${keeper}; link to it from ${other}`
     return {
       kind: 'duplicate',
       key: `duplicate ${pair.a}\0${pair.b}`,
@@ -87,6 +91,13 @@ export function buildFixList(net: MdNetwork): MdFixRow[] {
 /** How many rows the fix list shows for a scan. */
 export function fixListCount(net: MdNetwork): number {
   return (net.duplicates?.length ?? 0) + net.findings.length
+}
+
+/** The Open button's label: a duplicate row names the doc it opens (the one to edit). */
+function openLabel(r: MdFixRow): string {
+  if (r.kind !== 'duplicate') return 'Open'
+  const name = r.open.replace(/\/+$/, '').split('/').pop() || r.open
+  return `Open ${name}`
 }
 
 function absolutePath(cwd: string, rel: string): string {
@@ -164,10 +175,10 @@ export function MdFixList({
               }}
               className="text-[12px] font-semibold text-accent-dark cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Open
+              {openLabel(r)}
             </button>
           </div>
-          <span data-testid="md-fix-where" className="break-all font-mono text-[11.5px] text-fg">
+          <span data-testid="md-fix-where" className="break-words font-mono text-[11.5px] text-fg">
             {r.where}
           </span>
           <span data-testid="md-fix-detail" className="text-[12.5px] leading-[1.45] text-fg-dim">

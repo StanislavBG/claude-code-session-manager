@@ -51,15 +51,21 @@ function net(findings: MdNetworkFinding[], duplicates: MdDuplicatePair[]): MdNet
 }
 
 describe('chooseKeeper', () => {
-  it('keeps the topic doc over a map, scoped or agent doc, whichever side it is on', () => {
-    expect(chooseKeeper({ a: 'CLAUDE.md', b: 'docs/topic.md', sharedRuns: 3, samples: [] }, DOCS)).toEqual({ keeper: 'docs/topic.md', other: 'CLAUDE.md' })
+  it('always keeps a map, whichever side it is on, even over a topic doc with more links', () => {
+    expect(chooseKeeper({ a: 'CLAUDE.md', b: 'docs/topic.md', sharedRuns: 3, samples: [] }, DOCS)).toEqual({ keeper: 'CLAUDE.md', other: 'docs/topic.md' })
+    expect(chooseKeeper({ a: 'docs/other.md', b: 'CLAUDE.md', sharedRuns: 3, samples: [] }, DOCS)).toEqual({ keeper: 'CLAUDE.md', other: 'docs/other.md' })
+    expect(chooseKeeper({ a: 'src/CLAUDE.md', b: 'README.md', sharedRuns: 3, samples: [] }, DOCS).keeper).toBe('README.md')
+  })
+
+  it('keeps the topic doc over a scoped or agent doc, whichever side it is on', () => {
     expect(chooseKeeper({ a: 'docs/topic.md', b: 'src/CLAUDE.md', sharedRuns: 3, samples: [] }, DOCS)).toEqual({ keeper: 'docs/topic.md', other: 'src/CLAUDE.md' })
     expect(chooseKeeper({ a: '.claude/agents/x.md', b: 'docs/topic.md', sharedRuns: 3, samples: [] }, DOCS).keeper).toBe('docs/topic.md')
   })
 
   it('breaks a tie by the higher linkedFrom, then the first doc', () => {
     expect(chooseKeeper({ a: 'docs/topic.md', b: 'docs/other.md', sharedRuns: 3, samples: [] }, DOCS)).toEqual({ keeper: 'docs/other.md', other: 'docs/topic.md' })
-    expect(chooseKeeper({ a: 'CLAUDE.md', b: 'src/CLAUDE.md', sharedRuns: 3, samples: [] }, DOCS).keeper).toBe('src/CLAUDE.md')
+    expect(chooseKeeper({ a: 'CLAUDE.md', b: 'README.md', sharedRuns: 3, samples: [] }, DOCS).keeper).toBe('README.md')
+    expect(chooseKeeper({ a: '.claude/agents/x.md', b: 'src/CLAUDE.md', sharedRuns: 3, samples: [] }, DOCS).keeper).toBe('src/CLAUDE.md')
     expect(chooseKeeper({ a: 'x.md', b: 'y.md', sharedRuns: 3, samples: [] }, DOCS)).toEqual({ keeper: 'x.md', other: 'y.md' })
   })
 })
@@ -78,8 +84,8 @@ describe('buildFixList', () => {
   it('says where duplicated text should live; a copy pair says keep one', () => {
     const [dup, copy] = buildFixList(net([], [DUP, COPY]))
     expect(dup.where).toBe('Same text in CLAUDE.md and docs/topic.md (5 shared runs)')
-    expect(dup.detail).toBe('Keep it in docs/topic.md; link to it from CLAUDE.md')
-    expect(dup.open).toBe('CLAUDE.md')
+    expect(dup.detail).toBe('Keep the rule in CLAUDE.md; replace the copy in docs/topic.md with a link to it')
+    expect(dup.open).toBe('docs/topic.md')
     expect(copy.where).toBe('Same text in docs/topic.md and docs/other.md (1 shared run)')
     expect(copy.detail).toBe('Full copy: keep one. Keep it in docs/other.md; link to it from docs/topic.md')
   })
@@ -130,10 +136,16 @@ describe('MdNetworkCards with the fix list', () => {
     expect(rows.map((r) => r.getAttribute('data-type'))).toEqual(['duplicate', 'broken-link', 'orphan'])
     expect(all('md-fix-count')[0].textContent).toBe('3')
     expect(all('md-fix-detail').map((d) => d.textContent)).toEqual([
-      'Keep it in docs/topic.md; link to it from CLAUDE.md',
+      'Keep the rule in CLAUDE.md; replace the copy in docs/topic.md with a link to it',
       'Works only on this machine: notes/private.md is not tracked in git.',
       ORPHAN.detail,
     ])
+    const where = all('md-fix-where')
+    expect(where.every((w) => !w.className.includes('break-all'))).toBe(true)
+    expect(where.every((w) => w.className.includes('break-words'))).toBe(true)
+    expect(all('md-fix-open').map((b) => b.textContent)).toEqual(['Open topic.md', 'Open', 'Open'])
+    act(() => all('md-fix-open')[0].click())
+    expect((window.api as unknown as { shell: { open: ReturnType<typeof vi.fn> } }).shell.open).toHaveBeenCalledWith({ as: 'revealPath', path: '/p/alpha/docs/topic.md' })
     hover(rows[0])
     expect(hot()).toEqual(['CLAUDE.md', 'docs/topic.md'])
     expect(all('md-link-map-caption')[0].textContent).toBe('duplicate · Same text in CLAUDE.md and docs/topic.md (2 shared runs)')

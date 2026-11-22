@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { MdNetworkExplorer, type MdNetworkExplorerProps } from '../MdNetworkExplorer'
+import { fixListCount } from '../MdFixList'
 import type { MdNetwork, MdNetworkEdge, MdNetworkFinding, MdNetworkNode } from '../../../../../../preload/api'
 
 function doc(path: string, depth: number, linksOut = 0, linkedFrom = 1): MdNetworkNode {
@@ -86,6 +87,15 @@ describe('MdNetworkExplorer', () => {
     expect(counts).toContain('12 docs in the network')
     expect(counts).toContain('13 links')
     expect(counts).toContain('1 finding')
+  })
+
+  it('header count is the fix list count: findings plus duplicates, in the pane title’s words', () => {
+    const base = network([doc('CLAUDE.md', 0)], [], [{ type: 'orphan', where: 'notes/', count: 1, paths: ['notes/a.md'], detail: 'x' }])
+    const net = { ...base, duplicates: [{ a: 'CLAUDE.md', b: 'docs/a.md', sharedRuns: 1, samples: [] }] }
+    render({ network: net })
+    const counts = q('md-explorer-counts')?.textContent ?? ''
+    expect(fixListCount(net)).toBe(2)
+    expect(counts).toContain(`· ${fixListCount(net)} findings`)
   })
 
   it('closes on Esc and on the Close button', () => {

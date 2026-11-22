@@ -430,7 +430,7 @@ export function MdMapGraph({ layout, focus, hoveredId, selectedId = null, onHove
               x={above ? n.x : round1(n.x + r + 6)}
               y={above ? round1(n.y - r - 6) : round1(n.y + 3.5)}
               textAnchor={above ? 'middle' : 'start'}
-              strokeWidth={4}
+              strokeWidth={6}
               className={`stroke-bg-hi font-mono text-[10.5px] [paint-order:stroke] [stroke-linejoin:round] ${
                 n.flagged ? 'fill-accent' : look.label
               } ${hot ? 'font-bold' : look.weight}`}
@@ -442,7 +442,7 @@ export function MdMapGraph({ layout, focus, hoveredId, selectedId = null, onHove
                 x={n.x}
                 y={round1(n.y + r + 15)}
                 textAnchor="middle"
-                strokeWidth={4}
+                strokeWidth={6}
                 className="fill-fg-faint stroke-bg-hi font-mono text-[9.5px] [paint-order:stroke]"
               >
                 entry map

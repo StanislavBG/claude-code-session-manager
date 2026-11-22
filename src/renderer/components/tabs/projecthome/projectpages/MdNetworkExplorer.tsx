@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { Modal } from '../../../ui/Modal'
+import { fixListCount } from './MdFixList'
 import { MdMapGraph, layoutMdNetwork, type MdMapEdge, type MdMapNode } from './MdLinkMap'
 import type { MdNetwork } from '../../../../../preload/api'
 
@@ -259,7 +260,7 @@ export function MdNetworkExplorer({ network, initialPath = null, onClose, render
       <div data-testid="md-explorer" className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-3 border-b border-rule-inner px-6 pb-3">
           <span data-testid="md-explorer-counts" className="font-mono text-[11.5px] text-fg-faint">
-            {plural(network.docs, 'doc')} in the network · {plural(network.links, 'link')} · {plural(network.findings.length, 'finding')}
+            {plural(network.docs, 'doc')} in the network · {plural(network.links, 'link')} · {plural(fixListCount(network), 'finding')}
           </span>
           <span className="flex-1" />
           <input

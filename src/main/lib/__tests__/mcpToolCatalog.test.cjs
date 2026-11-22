@@ -483,3 +483,12 @@ test('scheduler_create_prd(s) advertise riskTools (array of strings, max 20) and
   const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_create_prd');
   expect(composeDescription(entry)).toMatch(/riskTools/);
 });
+
+test('scheduler_update_prd frontmatter patch accepts riskTools (array of strings, max 20; empty clears)', () => {
+  const update = TOOLS.find((t) => t.name === 'scheduler_update_prd');
+  const rt = update.inputSchema.properties.frontmatter.properties.riskTools;
+  expect(rt).toMatchObject({ type: 'array', items: { type: 'string' }, maxItems: 20 });
+  expect(rt.description).toMatch(/replaces/i);
+  expect(rt.description).toMatch(/empty array clears/i);
+  expect(rt.description).toMatch(/scheduler_create_prd/);
+});

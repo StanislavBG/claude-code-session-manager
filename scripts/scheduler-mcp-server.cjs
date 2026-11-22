@@ -603,6 +603,7 @@ const TOOLS = [
             quietMachine: { type: 'boolean', description: 'Optional: the exclusive machine-wide quiet lease flag (see scheduler_create_prd) — patchable after creation too' },
             dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: replaces the dependsOn list; an explicit empty array CLEARS it — see scheduler_create_prd' },
             disposition: { type: 'string', enum: ['append', 'new-head'], description: 'Optional: patches the recorded wave-authoring decision — see scheduler_create_prd' },
+            riskTools: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Optional: replaces the PRD\'s riskTools — the tool-risk rules it is cleared to call although marked in tool-risk.json. Same rule syntax as scheduler_create_prd\'s riskTools (mcp__server__tool, mcp__server__*, Bash(prefix:*)). At most 20; an explicit empty array clears it.' },
           },
         },
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter). Cannot be combined with gate/files/acceptanceCriteria.' },

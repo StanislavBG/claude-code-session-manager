@@ -616,6 +616,12 @@ const adminListEpicsQuery = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
+// GET /admin/agents (lib/persona-macro/agentAdminRoutes.cjs) — read-only
+// persona roster; an optional cwd adds each persona's effective model/effort.
+const adminListAgentsQuery = z.object({
+  cwd: z.string().min(1).max(4096).optional(),
+});
+
 const adminGetEpicQuery = z.object({
   cwd: z.string().min(1).max(4096),
   id: z.string().min(1).max(200).optional(),
@@ -1645,6 +1651,7 @@ module.exports = {
     adminGetPrdQuery,
     adminListEpicsQuery,
     adminGetEpicQuery,
+    adminListAgentsQuery,
     adminUpdatePrd,
     adminCancelJob,
     setConfigSchema,

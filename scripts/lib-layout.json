@@ -3,6 +3,7 @@
   "activeIndexMerge": "epic",
   "activeIndexRebuild": "epic",
   "adoptedRunSupervisor": "scheduler",
+  "agentAdminRoutes": "persona-macro",
   "agentEffortResolve": "claude",
   "agentModelResolve": "claude",
   "agentPersonaSchema": "persona-macro",

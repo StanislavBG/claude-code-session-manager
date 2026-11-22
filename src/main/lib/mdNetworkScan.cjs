@@ -43,15 +43,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execGit } = require('./git/gitExec.cjs');
-const { censusMdDocs, parseGitLog, importsOf } = require('./mdDocCensus.cjs');
-const { backtickPaths, assessRefs, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
+const { censusMdDocs, parseGitLog } = require('./mdDocCensus.cjs');
+const { assessRefs, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
+// The link convention (links, imports, backticked paths) is written once, in the skill's mdLinks.cjs.
+const { linksOf, importsOf, backtickPaths, toRepoPath } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
 const ROOT_DOC = 'CLAUDE.md';
 const MAX_DOCS = 2000;
 const MAX_DOC_BYTES = 256 * 1024;
 const READ_BATCH = 32;
-/** Longest link destination or title scanned, so a pathological line stays linear. */
-const MAX_LINK_CHARS = 1024;
 /** `git ls-files -z` stdout cap; node's 1 MB default overflows near 15k tracked files. */
 const LS_FILES_MAX_BUFFER = 64 * 1024 * 1024;
 const LOG_ARGS = ['log', '--max-count=2000', '--no-renames', '--format=%x01%ct', '--name-only', '-z'];
@@ -65,14 +65,10 @@ const DETAIL_MISSING = 'The link target doesn’t exist.';
 const DETAIL_ESCAPES = 'The link target is outside the project.';
 
 const MD_RE = /\.md$/i;
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
-const INLINE_CODE_RE = /(`+).{0,1024}?\1/g;
-const AUTOLINK_RE = /<([^<>\s]{1,1024})>/g;
 
 /**
- * @typedef {{ path: string, text: string }} MdFile a doc: repo-relative POSIX path + text
- * @typedef {{ line: number, target: string, to: string, escapes: boolean }} MdLink
+ * @typedef {import('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs').MdFile} MdFile
+ * @typedef {import('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs').MdLink} MdLink
  * @typedef {MdLink & { kind: 'link' | 'path' | 'import' }} MdRef a followed reference; only `link` ones can be broken
  *   `target` as written (fragment/query stripped); `to` resolved repo-relative
  * @typedef {'hub' | 'owner' | 'doc'} MdNetworkNodeType
@@ -88,7 +84,6 @@ const AUTOLINK_RE = /<([^<>\s]{1,1024})>/g;
  * @typedef {MdLinkNetwork & { census: MdCensus }} MdNetwork
  * @typedef {MdNetwork | { ok: false, error: string }} MdNetworkResult
  * @typedef {{ recordFolders?: string[], docFolders?: string[] }} ScanOpts
- * @typedef {{ fence: string, inComment: boolean }} LineState an open code fence / HTML comment
  */
 
 /**
@@ -115,11 +110,6 @@ function byCodeUnit(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Repo-relative POSIX form: no `./` or trailing `/`; `.` is the root folder. @param {string} p */
-function toRepoPath(p) {
-  return path.posix.normalize(p).replace(/\/+$/, '') || '.';
-}
-
 /** @param {string} p @returns {string} the top-level folder, or `.` for a root-level path */
 function topFolder(p) {
   const slash = p.indexOf('/');
@@ -138,168 +128,6 @@ function foldersOf(paths) {
     }
   }
   return folders;
-}
-
-/** @param {string} s @param {number} i @returns {number} the first index at or after `i` that is not a space/tab */
-function skipBlanks(s, i) {
-  while (s[i] === ' ' || s[i] === '\t') i += 1;
-  return i;
-}
-
-/** @param {string} s @param {string} ch @param {number} from @returns {number} `ch`'s index within MAX_LINK_CHARS, or -1 */
-function indexWithin(s, ch, from) {
-  const i = s.slice(from, from + MAX_LINK_CHARS).indexOf(ch);
-  return i === -1 ? -1 : from + i;
-}
-
-/**
- * Parses an inline link's destination (+ optional title) starting just after `](`.
- * @param {string} s
- * @param {number} start
- * @returns {{ target: string, end: number } | null} the raw target and the index after `)`
- */
-function parseDestination(s, start) {
-  let j = skipBlanks(s, start);
-  let target;
-  if (s[j] === '<') {
-    const close = indexWithin(s, '>', j + 1);
-    if (close === -1) return null;
-    target = s.slice(j + 1, close);
-    j = close + 1;
-  } else {
-    const from = j;
-    const limit = Math.min(s.length, from + MAX_LINK_CHARS);
-    let depth = 0;
-    for (; j < limit; j += 1) {
-      const c = s[j];
-      if (c === ' ' || c === '\t') break;
-      if (c === '(') depth += 1;
-      else if (c === ')') {
-        if (depth === 0) break;
-        depth -= 1;
-      }
-    }
-    if (j === limit && j < s.length) return null;
-    target = s.slice(from, j);
-  }
-  j = skipBlanks(s, j);
-  const quote = s[j];
-  if (quote === '"' || quote === "'" || quote === '(') {
-    const close = indexWithin(s, quote === '(' ? ')' : quote, j + 1);
-    if (close === -1) return null;
-    j = skipBlanks(s, close + 1);
-  }
-  return s[j] === ')' ? { target, end: j + 1 } : null;
-}
-
-/** Raw targets of one line's inline links, then of its `<x.md>` autolinks. @param {string} s @returns {string[]} */
-function lineTargets(s) {
-  /** @type {string[]} */
-  const targets = [];
-  let outside = ''; // the line minus its inline links, so `[x](<a.md>)` is not also an autolink
-  let last = 0;
-  for (let i = s.indexOf(']('); i !== -1; ) {
-    const dest = parseDestination(s, i + 2);
-    if (dest) {
-      targets.push(dest.target);
-      outside += `${s.slice(last, i)} `;
-      last = dest.end;
-      i = s.indexOf('](', dest.end);
-    } else {
-      i = s.indexOf('](', i + 2);
-    }
-  }
-  outside += s.slice(last);
-  for (const m of outside.matchAll(AUTOLINK_RE)) {
-    if (MD_RE.test(m[1].replace(/[?#].*$/, ''))) targets.push(m[1]);
-  }
-  return targets;
-}
-
-/** Drops HTML comments (which may span lines) from one line. @param {string} line @param {LineState} state */
-function stripComments(line, state) {
-  let out = '';
-  let i = 0;
-  while (i < line.length) {
-    if (state.inComment) {
-      const close = line.indexOf('-->', i);
-      if (close === -1) return out;
-      state.inComment = false;
-      i = close + 3;
-    } else {
-      const open = line.indexOf('<!--', i);
-      if (open === -1) return out + line.slice(i);
-      out += `${line.slice(i, open)} `;
-      state.inComment = true;
-      i = open + 4;
-    }
-  }
-  return out;
-}
-
-/** The part of one line that can hold links. @param {string} line @param {LineState} state @returns {string} */
-function visibleText(line, state) {
-  const fence = state.inComment ? null : FENCE_RE.exec(line);
-  if (state.fence) {
-    if (fence && fence[1][0] === state.fence[0] && fence[1].length >= state.fence.length && fence[2].trim() === '') {
-      state.fence = '';
-    }
-    return '';
-  }
-  if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) {
-    state.fence = fence[1];
-    return '';
-  }
-  return stripComments(line.replace(INLINE_CODE_RE, ' '), state);
-}
-
-/**
- * The followed link for one raw target written in doc `from`, or null when ignored.
- * @param {string} from @param {string} raw @param {number} line 1-based
- * @returns {MdLink | null}
- */
-function followLink(from, raw, line) {
-  const written = raw.trim();
-  if (written === '' || written[0] === '#' || written[0] === '/' || SCHEME_RE.test(written)) return null;
-  const target = written.replace(/[?#].*$/, '');
-  if (target === '') return null;
-  let decoded = target;
-  try {
-    decoded = decodeURIComponent(target);
-  } catch {
-    // a stray `%` is part of the file name
-  }
-  const to = toRepoPath(path.posix.join(path.posix.dirname(from), decoded));
-  return { line, target, to, escapes: to === '..' || to.startsWith('../') };
-}
-
-/**
- * Memo for linksOf: scanMdNetwork walks the docs before buildMdNetwork does, so
- * each doc is parsed once. File objects are treated as immutable.
- * @type {WeakMap<MdFile, MdLink[]>}
- */
-const linkMemo = new WeakMap();
-
-/** A doc's followed links, in document order. @param {MdFile} file @returns {MdLink[]} */
-function linksOf(file) {
-  const memo = linkMemo.get(file);
-  if (memo) return memo;
-  const from = toRepoPath(file.path);
-  /** @type {MdLink[]} */
-  const links = [];
-  /** @type {LineState} */
-  const state = { fence: '', inComment: false };
-  const lines = file.text.split(/\r?\n/);
-  for (let n = 0; n < lines.length; n += 1) {
-    const visible = visibleText(lines[n], state);
-    if (visible === '') continue;
-    for (const raw of lineTargets(visible)) {
-      const link = followLink(from, raw, n + 1);
-      if (link) links.push(link);
-    }
-  }
-  linkMemo.set(file, links);
-  return links;
 }
 
 /**

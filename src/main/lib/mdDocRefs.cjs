@@ -10,23 +10,17 @@
  *     `git grep -F -o --null` run and the parse of its output into
  *     doc -> code files that name it.
  * No fs, no git: all IO is injected (`exists`, `lastCommitOf`) or done by the
- * caller (scanMdNetwork). Fence/comment handling mirrors mdNetworkScan.cjs.
+ * caller (scanMdNetwork). backtickPaths (fence/comment handling included) is
+ * the shared link convention's, from the skill's mdLinks.cjs; re-exported here.
  */
 
 const path = require('node:path');
+const { backtickPaths } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
-const MAX_TOKENS = 200;
 const MAX_CHANGED = 20;
 const MAX_PATTERNS = 4000;
 
-const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
-const INLINE_CODE_RE = /(`+)(.{0,1024}?)\1/g;
-const BAD_START_RE = /^(?:[/~$<]|http)/i;
-const BAD_CHAR_RE = /[*{}<>:]/;
-const EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
-
 /**
- * @typedef {{ fence: string, inComment: boolean }} LineState
  * @typedef {{ path: string, ms: number }} ChangedRef
  * @typedef {{
  *   docPath: string,
@@ -37,80 +31,6 @@ const EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
  *   lastCommitOf: (repoPath: string) => number | null | undefined,
  * }} AssessInput
  */
-
-/** Drops HTML comments (which may span lines) from one line. @param {string} line @param {LineState} state */
-function stripComments(line, state) {
-  let out = '';
-  let i = 0;
-  while (i < line.length) {
-    if (state.inComment) {
-      const close = line.indexOf('-->', i);
-      if (close === -1) return out;
-      state.inComment = false;
-      i = close + 3;
-    } else {
-      const open = line.indexOf('<!--', i);
-      if (open === -1) return out + line.slice(i);
-      out += `${line.slice(i, open)} `;
-      state.inComment = true;
-      i = open + 4;
-    }
-  }
-  return out;
-}
-
-/** One line outside fences, comments removed (inline code kept). @param {string} line @param {LineState} state */
-function visibleLine(line, state) {
-  const fence = state.inComment ? null : FENCE_RE.exec(line);
-  if (state.fence) {
-    if (fence && fence[1][0] === state.fence[0] && fence[1].length >= state.fence.length && fence[2].trim() === '') {
-      state.fence = '';
-    }
-    return '';
-  }
-  if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) {
-    state.fence = fence[1];
-    return '';
-  }
-  return stripComments(line, state);
-}
-
-/** The repo-path form of one inline-code token, or null. @param {string} raw @returns {string | null} */
-function pathToken(raw) {
-  const t = raw.trim();
-  if (t === '' || !t.includes('/') || /\s/.test(t) || BAD_START_RE.test(t)) return null;
-  const bare = t.replace(/:\d+$/, '').replace(/#.*$/, '');
-  if (bare === '' || BAD_CHAR_RE.test(bare)) return null;
-  if (!bare.endsWith('/') && !EXT_RE.test(bare)) return null;
-  return bare;
-}
-
-/**
- * Distinct path-shaped inline-code tokens outside fenced code and HTML comments,
- * in document order, at most MAX_TOKENS. O(text length).
- * @param {string} text
- * @returns {string[]}
- */
-function backtickPaths(text) {
-  if (typeof text !== 'string' || text === '') return [];
-  /** @type {LineState} */
-  const state = { fence: '', inComment: false };
-  const seen = new Set();
-  /** @type {string[]} */
-  const out = [];
-  for (const line of text.split(/\r?\n/)) {
-    const visible = visibleLine(line, state);
-    if (visible === '' || !visible.includes('`')) continue;
-    for (const m of visible.matchAll(INLINE_CODE_RE)) {
-      const tok = pathToken(m[2]);
-      if (tok === null || seen.has(tok)) continue;
-      seen.add(tok);
-      out.push(tok);
-      if (out.length >= MAX_TOKENS) return out;
-    }
-  }
-  return out;
-}
 
 /** Normalised repo path, or null when it escapes the repo. @param {string} p @returns {string | null} */
 function repoPath(p) {

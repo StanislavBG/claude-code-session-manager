@@ -25,6 +25,8 @@
  */
 
 const path = require('node:path');
+// importsOf is the shared link convention's; re-exported so consumers keep requiring it from here.
+const { importsOf } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
 const ROOT_DOC = 'CLAUDE.md';
 const MAX_IMPORT_DEPTH = 5;
@@ -36,11 +38,6 @@ const MAX_CODE_REF_FILES = 10;
 const MAX_DEAD_REFS = 10;
 const MAX_CHANGED_SINCE = 20;
 
-const MD_RE = /\.md$/i;
-const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
-const INLINE_CODE_RE = /(`+).{0,1024}?\1/g;
-const IMPORT_RE = /(^|\s)@(\S+)/g;
-const TRAILING_PUNCT_RE = /[),.;:!?'"\]]+$/;
 const AGENT_RE = /(^|\/)\.claude\/|(^|\/)skills\/[^/]+\/|(^|\/)plugins\/[^/]+\/(agents|commands)\//;
 const SCOPED_NAMES = new Set(['CLAUDE.md', 'AGENTS.md', 'CLAUDE.local.md']);
 const NEVER_RECORD_NAMES = new Set(['README.md', 'CLAUDE.md', 'AGENTS.md', 'index.md']);
@@ -94,42 +91,6 @@ function foldersOf(p) {
   /** @type {string[]} */
   const out = [];
   for (let i = p.indexOf('/'); i > 0; i = p.indexOf('/', i + 1)) out.push(p.slice(0, i + 1));
-  return out;
-}
-
-/**
- * The `@path.md` imports in `text`, outside fenced and inline code, resolved
- * against `fromPath`'s folder. Skips `@~/...`, absolute and escaping targets.
- * @param {string} text @param {string} fromPath @returns {string[]}
- */
-function importsOf(text, fromPath) {
-  if (typeof text !== 'string' || typeof fromPath !== 'string') return [];
-  const dir = path.posix.dirname(fromPath);
-  /** @type {string[]} */
-  const out = [];
-  const seen = new Set();
-  let fence = '';
-  for (const line of text.split(/\r?\n/)) {
-    const f = FENCE_RE.exec(line);
-    if (fence) {
-      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === '') fence = '';
-      continue;
-    }
-    if (f && !(f[1][0] === '`' && f[2].includes('`'))) {
-      fence = f[1];
-      continue;
-    }
-    const visible = line.replace(INLINE_CODE_RE, ' ');
-    for (const m of visible.matchAll(IMPORT_RE)) {
-      const target = m[2].replace(TRAILING_PUNCT_RE, '');
-      if (!MD_RE.test(target) || target.startsWith('~') || target.startsWith('/')) continue;
-      const resolved = path.posix.normalize(path.posix.join(dir, target));
-      if (resolved === '..' || resolved.startsWith('../') || resolved.startsWith('/')) continue;
-      if (seen.has(resolved)) continue;
-      seen.add(resolved);
-      out.push(resolved);
-    }
-  }
   return out;
 }
 

@@ -7,6 +7,17 @@ import { AgentLibrary } from '../AgentLibrary'
 import { __resetModelCatalogForTests } from '../../../lib/useModelCatalog'
 import type { AgentPersona } from '../../../../preload/api'
 
+// The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
+// controlled body text, Document mode by default, and the status bar's Save/Revert.
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
+    createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
+      createElement('textarea', { key: 'ta', 'data-testid': 'document-editor-body', value: p.value, onChange: (e: { target: { value: string } }) => p.onChange(e.target.value) }),
+      createElement('button', { key: 'r', 'data-testid': 'editor-revert', disabled: !p.dirty, onClick: () => p.onRevert?.() }, 'Revert'),
+      createElement('button', { key: 's', 'data-testid': 'editor-save', disabled: !p.dirty, onClick: () => p.onSave?.() }, 'Save'),
+    ]),
+}))
+
 const CATALOG = {
   aliases: ['sonnet', 'opus', 'haiku', 'fable', 'best', 'sonnet[1m]', 'opus[1m]', 'opusplan', 'default'],
   models: ['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
@@ -65,7 +76,7 @@ const btn = (el: HTMLElement, text: string) =>
 const click = async (b: HTMLElement | undefined) => {
   await act(async () => { b!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
 }
-const saveClick = async (el: HTMLElement) => click(Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? '')))
+const saveClick = async (el: HTMLElement) => click(el.querySelector('[data-testid="editor-save"]') as HTMLElement)
 
 beforeEach(() => __resetModelCatalogForTests())
 afterEach(() => {

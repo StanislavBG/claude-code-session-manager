@@ -6,6 +6,17 @@ import { act } from 'react-dom/test-utils'
 import { AgentLibrary } from '../AgentLibrary'
 import type { AgentCliDetectRow, AgentPersona } from '../../../../preload/api'
 
+// The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
+// controlled body text, Document mode by default, and the status bar's Save/Revert.
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
+    createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
+      createElement('textarea', { key: 'ta', 'data-testid': 'document-editor-body', value: p.value, onChange: (e: { target: { value: string } }) => p.onChange(e.target.value) }),
+      createElement('button', { key: 'r', 'data-testid': 'editor-revert', disabled: !p.dirty, onClick: () => p.onRevert?.() }, 'Revert'),
+      createElement('button', { key: 's', 'data-testid': 'editor-save', disabled: !p.dirty, onClick: () => p.onSave?.() }, 'Save'),
+    ]),
+}))
+
 const ROW = (id: AgentCliDetectRow['id'], installed: boolean): AgentCliDetectRow => ({
   id, label: id, installed, path: installed ? `/usr/bin/${id}` : null, version: installed ? '1.0.0' : null,
   install: installed ? null : `npm i -g ${id}`, docs: `https://example.com/${id}`, login: null,
@@ -58,7 +69,7 @@ const click = async (b: HTMLElement | null | undefined) => {
   await act(async () => { b!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
 }
 const saveClick = async (el: HTMLElement) => {
-  await click(Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? '')))
+  await click(el.querySelector('[data-testid="editor-save"]') as HTMLElement)
   await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve() })
 }
 const type = async (input: HTMLInputElement, value: string) => {

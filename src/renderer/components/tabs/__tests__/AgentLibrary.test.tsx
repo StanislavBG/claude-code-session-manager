@@ -6,6 +6,17 @@ import { act } from 'react-dom/test-utils'
 import { AgentLibrary } from '../AgentLibrary'
 import type { AgentPersona } from '../../../../preload/api'
 
+// The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
+// controlled body text, Document mode by default, and the status bar's Save/Revert.
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
+    createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
+      createElement('textarea', { key: 'ta', 'data-testid': 'document-editor-body', value: p.value, onChange: (e: { target: { value: string } }) => p.onChange(e.target.value) }),
+      createElement('button', { key: 'r', 'data-testid': 'editor-revert', disabled: !p.dirty, onClick: () => p.onRevert?.() }, 'Revert'),
+      createElement('button', { key: 's', 'data-testid': 'editor-save', disabled: !p.dirty, onClick: () => p.onSave?.() }, 'Save'),
+    ]),
+}))
+
 /**
  * AgentLibrary is a component-local fetch (no store) list+detail page, per
  * Skills.tsx's canonical shape — mirrors Skills.navface.test.tsx's
@@ -118,7 +129,11 @@ describe('AgentLibrary', () => {
     const el = await mount()
     expect(el.textContent).toContain('builder')
     expect(el.textContent).toContain('debugger')
-    expect(el.textContent).toContain('2 personas')
+    const card = el.querySelector('[data-testid="config-file-card"]')!
+    expect(card.textContent).toContain('AGENTS FOLDER')
+    expect(card.textContent).toContain('~/.claude/agents/')
+    expect(card.textContent).toContain('2')
+    expect(card.textContent).toContain('The actor a session opens with')
   })
 
   it('selects the first persona by default and shows its detail, incl. the overriding project (AC 6: builder overridden by session-manager)', async () => {
@@ -130,13 +145,14 @@ describe('AgentLibrary', () => {
 
   it('surfaces the model field as this persona\'s per-Epic default model (agent-model-nav-consolidation)', async () => {
     const el = await mount()
-    expect(el.textContent).toContain('default model')
+    const runtime = el.querySelector('[data-testid="agent-runtime-card"]')!
+    for (const label of ['model', 'effort', 'runs on', 'tools', 'project overrides']) expect(runtime.textContent).toContain(label)
     expect(el.textContent).toContain("This persona's default model for its Epics")
   })
 
   it('clicking another persona swaps the detail pane', async () => {
     const el = await mount()
-    const debuggerRow = el.querySelector('[data-agent-row="debugger"]')
+    const debuggerRow = el.querySelector('[data-agent-row="debugger"] [data-testid="config-list-row"]')
     await act(async () => {
       debuggerRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
@@ -153,7 +169,7 @@ describe('AgentLibrary', () => {
     expect(el.textContent).not.toContain('every project')
     const tag = Array.from(el.querySelectorAll('button')).find((b) => /^#/.test(b.textContent ?? ''))!
     await act(async () => { tag.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
-    const save = Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? ''))!
+    const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
     await act(async () => { save.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
     expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
     expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ projects: ['*'], action: 'Sweep it.', actionLabel: 'Sweep' })
@@ -161,7 +177,7 @@ describe('AgentLibrary', () => {
 
   it('filters the list by name', async () => {
     const el = await mount()
-    const input = el.querySelector('input[placeholder="filter…"]') as HTMLInputElement
+    const input = el.querySelector('input[placeholder="Filter"]') as HTMLInputElement
     // React tracks the input's previous value internally; setting .value via
     // plain JS before dispatching 'input' doesn't register as a change
     // unless we go through the native setter React itself overrides.
@@ -214,7 +230,7 @@ describe('AgentLibrary', () => {
     installWindowApiMock([PINNED_MODEL_PERSONA, ...PERSONAS])
     const el = await mount()
 
-    const row = el.querySelector('[data-agent-row="pinned-model-agent"]')!
+    const row = el.querySelector('[data-agent-row="pinned-model-agent"] [data-testid="config-list-row"]')!
     await act(async () => {
       row.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
@@ -243,17 +259,85 @@ describe('AgentLibrary', () => {
     const titled: AgentPersona = { ...PERSONAS[0], title: 'Engineering — Software Engineer' }
     const { api } = installWindowApiMock([titled, PERSONAS[1]])
     const el = await mount()
-    const field = el.querySelector('textarea, input[value="Watch git history and drive the next publish."]') as HTMLTextAreaElement | HTMLInputElement
-    const proto = field instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
-    const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
+    const field = el.querySelector('[data-testid="agent-detail-description"]') as HTMLTextAreaElement
+    expect(field.value).toBe('Watch git history and drive the next publish.')
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => {
       nativeSetter.call(field, 'Edited description.')
       field.dispatchEvent(new Event('input', { bubbles: true }))
       await Promise.resolve()
     })
-    const save = Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? ''))!
+    const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
     await act(async () => { save.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
     expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
     expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ description: 'Edited description.', title: 'Engineering — Software Engineer' })
+  })
+
+  it('rows show the mono name, the model on the right and a one-line description', async () => {
+    installWindowApiMock([{ ...PERSONAS[0], model: 'opus' }, PERSONAS[1]])
+    const el = await mount()
+    const row = el.querySelector('[data-agent-row="builder"]')!
+    expect(row.querySelector('[data-testid="agent-row-model"]')!.textContent).toBe('opus')
+    expect(el.querySelector('[data-agent-row="debugger"] [data-testid="agent-row-model"]')!.textContent).toBe('inherit')
+    expect(row.textContent).toContain('Watch git history and drive the next publish.')
+  })
+
+  it('detail header reads AGENT · USER · <path>, with Duplicate and ⋯ (Delete agent… confirms then deletes)', async () => {
+    const { api } = installWindowApiMock()
+    const el = await mount()
+    const header = el.querySelector('[data-testid="config-detail-header"]')!
+    expect(header.textContent).toContain('AGENT · USER · ~/.claude/agents/builder.md')
+    expect(header.textContent).toContain('builder')
+    expect(Array.from(header.querySelectorAll('button')).some((b) => b.textContent === 'Duplicate')).toBe(true)
+    expect(el.textContent).toContain('CLAUDE READS THIS TO PICK THE AGENT')
+    await act(async () => { (el.querySelector('[data-testid="agent-detail-more"]') as HTMLElement).click(); await Promise.resolve() })
+    await act(async () => { (el.querySelector('[data-testid="agent-detail-delete"]') as HTMLElement).click(); await Promise.resolve() })
+    const confirm = el.querySelector('[data-testid="agent-detail-delete-confirm"]')!
+    const del = Array.from(confirm.querySelectorAll('button')).find((b) => b.textContent === 'Delete')!
+    await act(async () => { del.click(); await Promise.resolve() })
+    expect(api.agents.deletePersona).toHaveBeenCalledWith({ name: 'builder' })
+  })
+
+  it('tools render allowed filled and the rest dashed', async () => {
+    const el = await mount()
+    const tool = (t: string) => el.querySelector(`[data-testid="agent-tools-row"] [data-tool="${t}"]`) as HTMLElement
+    expect(tool('Read').getAttribute('aria-pressed')).toBe('true')
+    expect(tool('Read').className).not.toContain('border-dashed')
+    expect(tool('Write').getAttribute('aria-pressed')).toBe('false')
+    expect(tool('Write').className).toContain('border-dashed')
+  })
+
+  it('renders a project override chip for a persona with an overlay', async () => {
+    installWindowApiMock([
+      {
+        ...PERSONAS[1],
+        overridingProjects: ['Self'],
+        overrideDetails: [{ project: 'Self', cwd: '/home/bilko/Self', fields: ['model', 'effort'], values: { model: 'sonnet', effort: 'medium' }, bodyOverridden: false, issue: null }],
+      },
+    ])
+    const el = await mount()
+    const chips = el.querySelectorAll('[data-testid="agent-override-chip"]')
+    expect(chips).toHaveLength(1)
+    expect(chips[0].textContent).toContain('Self')
+    expect(chips[0].textContent).toContain('sonnet · medium')
+    expect(el.querySelector('[data-testid="agent-overrides-row"]')!.textContent).toContain('a local copy in ~/Self/.claude/agents/ wins there')
+  })
+
+  it('the body is edited in DocumentEditorPane (Document mode) and saved as the body, Revert discards it', async () => {
+    const { api } = installWindowApiMock()
+    const el = await mount()
+    const pane = el.querySelector('[data-testid="document-editor-pane"]')!
+    expect(pane.getAttribute('data-mode')).toBe('document')
+    const body = el.querySelector('[data-testid="document-editor-body"]') as HTMLTextAreaElement
+    expect(body.value).toBe('You are the Builder agent.')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
+    await act(async () => { setter.call(body, 'Edited body.'); body.dispatchEvent(new Event('input', { bubbles: true })); await Promise.resolve() })
+    await act(async () => { (el.querySelector('[data-testid="editor-revert"]') as HTMLElement).click(); await Promise.resolve() })
+    expect((el.querySelector('[data-testid="document-editor-body"]') as HTMLTextAreaElement).value).toBe('You are the Builder agent.')
+    const body2 = el.querySelector('[data-testid="document-editor-body"]') as HTMLTextAreaElement
+    await act(async () => { setter.call(body2, 'Edited body.'); body2.dispatchEvent(new Event('input', { bubbles: true })); await Promise.resolve() })
+    await act(async () => { (el.querySelector('[data-testid="editor-save"]') as HTMLElement).click(); await Promise.resolve() })
+    expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
+    expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ name: 'builder', body: 'Edited body.', description: 'Watch git history and drive the next publish.' })
   })
 })

@@ -9,6 +9,17 @@ import { toast } from '../../../state/toast'
 import { __resetModelCatalogForTests } from '../../../lib/useModelCatalog'
 import type { AgentPersona } from '../../../../preload/api'
 
+// The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
+// controlled body text, Document mode by default, and the status bar's Save/Revert.
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
+    createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
+      createElement('textarea', { key: 'ta', 'data-testid': 'document-editor-body', value: p.value, onChange: (e: { target: { value: string } }) => p.onChange(e.target.value) }),
+      createElement('button', { key: 'r', 'data-testid': 'editor-revert', disabled: !p.dirty, onClick: () => p.onRevert?.() }, 'Revert'),
+      createElement('button', { key: 's', 'data-testid': 'editor-save', disabled: !p.dirty, onClick: () => p.onSave?.() }, 'Save'),
+    ]),
+}))
+
 /**
  * The PROJECT OVERRIDE block picks its project from an explicit dropdown of every open project
  * (one option per unique tab cwd, nothing preselected) — never from the active tab. Every mount
@@ -218,7 +229,7 @@ describe('AgentLibrary project override', () => {
     const el = await mount([], ['/work/alpha'])
     await choose(el, '/work/alpha')
     await click(within(el, 'model-row', 'opus'))
-    const save = Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? ''))!
+    const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
     await click(save)
     expect(savePersona.mock.calls[0][0].projectCwd).toBeUndefined()
     expect(savePersona.mock.calls[0][0]).not.toHaveProperty('projectName')
@@ -227,7 +238,7 @@ describe('AgentLibrary project override', () => {
   it('the chosen project survives switching personas and falls back to "Choose a project…" when its tab closes', async () => {
     const el = await mount([], ['/work/alpha', '/work/beta'], { personas: [persona([]), persona([], 'architect')] })
     await choose(el, '/work/beta')
-    await click(el.querySelector('[data-agent-row="architect"]') as HTMLElement)
+    await click(el.querySelector('[data-agent-row="architect"] [data-testid="config-list-row"]') as HTMLElement)
     expect(select(el).value).toBe('/work/beta')
     expect(q(el, 'project-override')!.textContent).toContain('/work/beta/.claude/agents/architect.md')
     await act(async () => {

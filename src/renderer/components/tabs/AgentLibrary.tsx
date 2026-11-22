@@ -1,35 +1,24 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Panel } from '../ui/Panel'
-import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
 import { ViewTabs } from '../ui/ViewTabs'
-import { SourceChip } from '../ui/SourceChip'
+import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
-import { useHomeDir } from '../../lib/useHomeDir'
-import { Button } from '../ui/Button'
-import { Choice } from '../ui/Choice'
+import { AgentDetail, BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject } from './agents/AgentDetail'
 import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
 import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
-import { TAG_LIBRARY } from '../../lib/tagLibrary'
-import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
-import { useModelCatalog } from '../../lib/useModelCatalog'
 import { useAgentPersonasState } from '../../lib/useAgentPersonas'
 import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
-import { modelFamily } from '../../lib/prettyModel'
-import { modelSupportsEffort } from '../../lib/effortSupport'
 import { useSessions } from '../../state/sessions'
-import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
 import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregate'
-import { compactPath } from '../../lib/compactPath'
-import { AgentCliPicker, type AgentCliChoice } from '../epics/AgentCliPicker'
 
 /**
- * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
- * Follows Skills.tsx's canonical list+detail shape (component-local fetch on
- * mount, filterable sidebar, detail pane) plus real CRUD: New/Duplicate/Save/
+ * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas,
+ * on the claude-config ConfigLayout kit (render 15): AGENTS FOLDER card,
+ * Filter + '+ New', one row per agent (name, model, description); the detail
+ * lives in ./agents/AgentDetail.tsx. Component-local fetch, real CRUD: New/Duplicate/Save/
  * Revert/Delete write straight through to disk via `window.api.agents.*`
  * (agentLibrary.cjs), scoped to the global persona directory.
  *
@@ -52,54 +41,6 @@ import { AgentCliPicker, type AgentCliChoice } from '../epics/AgentCliPicker'
  * from the persona) is no longer editable here; saves pass it through untouched.
  */
 
-const TOOLS =['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
-const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink']
-const COLOR_SWATCH: Record<string, string> = {
-  red: '#c0392b', orange: '#b85c34', yellow: '#c9a227', green: '#6f7d52',
-  cyan: '#3f8f8a', blue: '#4a6fa5', purple: '#7a6a8a', pink: '#b45a80',
-}
-
-interface Draft {
-  name: string
-  description: string
-  tools: string[]
-  model: string
-  effort: string
-  color: string
-  // string[], not AgentPersonaTag[] — mirrors AgentPersona.tags (read path stays permissive;
-  // a loaded persona may carry a stale/foreign tag). Filtered down to the known tags at
-  // save time so the write-side schema (agentPersonaSchema.cjs's closed WorkType union) never
-  // rejects a save just because the persona already had an unrecognized tag on disk.
-  tags: string[]
-  body: string
-  /** Default coding-agent CLI New Session starts this persona on ('claude' = Claude Code, the default). */
-  agentCli: AgentCliChoice
-  /** Model for a non-Claude agentCli; '' = the CLI's own default. */
-  agentCliModel: string
-}
-
-function toDraft(p: AgentPersona): Draft {
-  return {
-    name: p.name,
-    description: p.description ?? '',
-    tools: p.tools,
-    model: p.model ?? 'inherit',
-    effort: p.effort ?? 'inherit',
-    color: p.color ?? '',
-    tags: p.tags,
-    body: p.body,
-    agentCli: p.agentCli ?? 'claude',
-    agentCliModel: p.agentCliModel ?? '',
-  }
-}
-
-const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '', agentCli: 'claude', agentCliModel: '' }
-
-type OverrideDetail = NonNullable<AgentPersona['overrideDetails']>[number]
-
-/** An open project the PROJECT OVERRIDE picker can target: a unique normalized tab cwd and its folder name. */
-interface OpenProject { cwd: string; name: string }
-
 /** One entry per unique `normalizeCwd(tab.cwd)` (so `/a/b/` and `/a/b` are one), sorted by name then cwd. */
 function openProjectsOf(tabs: readonly { cwd: string }[]): OpenProject[] {
   const byCwd = new Map<string, OpenProject>()
@@ -108,11 +49,6 @@ function openProjectsOf(tabs: readonly { cwd: string }[]): OpenProject[] {
     if (cwd && !byCwd.has(cwd)) byCwd.set(cwd, { cwd, name: projectNameFromCwd(cwd) })
   }
   return [...byCwd.values()].sort((a, b) => a.name.localeCompare(b.name) || a.cwd.localeCompare(b.cwd))
-}
-
-/** What one project's overlay of a persona overrides: its frontmatter keys (minus `name`), plus "full body". */
-function overrideParts(d: OverrideDetail): string[] {
-  return [...d.fields.filter((f) => f !== 'name'), ...(d.bodyOverridden ? ['full body'] : [])]
 }
 
 /** Tooltip for the list's override badge: per project, which keys a frontmatter-only overlay sets, or "full body".
@@ -326,108 +262,100 @@ function AgentLibraryComponent() {
     }
   }
 
-  return (
-    <Panel
-      toolbar={
-        <>
-          {viewTabs}
-          <span className="text-fg-faint">
-            {personas.length} persona{personas.length === 1 ? '' : 's'}
-          </span>
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="filter…"
-            className="bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg w-40"
-          />
-          <div className="flex-1" />
-          <Button variant="primary" onClick={create}>+ New agent</Button>
-        </>
-      }
-    >
-      <ListDetail
-        sidebar={
-          <div className="py-1">
-            {isNew && (
-              <div className="w-full text-left px-3 py-1 text-xs flex flex-col gap-0.5 bg-bg-hi text-fg border-l-2 border-accent">
-                <span className="flex items-center gap-2 justify-between w-full">
-                  <span className="truncate font-mono">{obj?.name}</span>
-                  <span className="shrink-0 text-[10px] font-semibold text-accent">new</span>
-                </span>
-              </div>
-            )}
-            {filtered.length === 0 && !isNew ? (
-              <div className="px-3 py-1 text-xs text-fg-faint italic">no agent personas found</div>
-            ) : (
-              filtered.map((p) => {
-                const isSelected = !isNew && p.name === selectedName
-                const isDirty = isSelected && dirty
-                const confirming = rowConfirmDelete === p.name
-                return (
-                  <div
-                    key={p.name}
-                    data-agent-row={p.name}
-                    className={`group w-full text-left px-3 py-1 text-xs flex flex-col gap-0.5 border-l-2 cursor-pointer ${
-                      isSelected
-                        ? 'bg-bg-hi text-fg border-accent'
-                        : 'text-fg-dim hover:text-fg hover:bg-bg-hi border-transparent'
-                    }`}
-                    onClick={() => pick(p.name)}
-                  >
-                    <span className="flex items-center gap-2 justify-between w-full">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span
-                          className="w-2 h-2 rounded-sm shrink-0"
-                          style={{ background: p.color ? COLOR_SWATCH[p.color] ?? p.color : 'var(--fg-faint, #999)', opacity: p.color ? 1 : 0.35 }}
-                        />
-                        <span className="truncate font-mono">{p.name}</span>
-                      </span>
-                      <span className="shrink-0 flex items-center gap-1.5">
-                        {isDirty && <span className="text-[10px] font-semibold text-accent">unsaved</span>}
-                        {!isDirty && p.overridingProjects.length > 0 && (
-                          <span title={overrideSummary(p)}>
-                            <Badge tone="dim">{p.overridingProjects.length} override{p.overridingProjects.length > 1 ? 's' : ''}</Badge>
-                          </span>
-                        )}
-                        {confirming ? (
-                          <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => removeRow(p.name)}
-                              disabled={busy}
-                              title={`Delete ${p.name}`}
-                              className="text-[10px] font-semibold text-red-400 hover:text-red-300"
-                            >
-                              confirm
-                            </button>
-                            <button
-                              onClick={() => setRowConfirmDelete(null)}
-                              title="Cancel"
-                              className="text-[10px] text-fg-faint hover:text-fg"
-                            >
-                              cancel
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setRowConfirmDelete(p.name) }}
-                            title={`Delete ${p.name}`}
-                            className="opacity-0 group-hover:opacity-100 text-fg-faint hover:text-red-400 transition-opacity"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </span>
-                    </span>
-                    {p.description && <span className="truncate text-fg-faint">{p.description}</span>}
-                  </div>
-                )
-              })
-            )}
+  const list = (
+    <>
+      <ConfigFileCard
+        eyebrow="AGENTS FOLDER"
+        badge={personas.length}
+        path="~/.claude/agents/"
+        note="The actor a session opens with — “you are acting as …”"
+      />
+      <ConfigListToolbar filter={filter} onFilterChange={setFilter} placeholder="Filter" primaryLabel="+ New" onPrimary={create} />
+      <div role="listbox" aria-label="Agents" className="flex flex-col gap-0.5">
+        {isNew && obj && (
+          <div data-agent-row-new="">
+            <ConfigListRow
+              title={obj.name}
+              trailing={<span className="text-[10px] font-semibold text-accent">new</span>}
+              meta={obj.description || undefined}
+              selected
+              onSelect={() => {}}
+            />
           </div>
-        }
+        )}
+        {filtered.length === 0 && !isNew ? (
+          <div className="px-3 py-1 text-xs text-fg-faint italic">no agent personas found</div>
+        ) : (
+          filtered.map((p) => {
+            const isSelected = !isNew && p.name === saved?.name
+            const isDirty = isSelected && dirty
+            const confirming = rowConfirmDelete === p.name
+            return (
+              <div key={p.name} data-agent-row={p.name} className="group">
+                <ConfigListRow
+                  title={p.name}
+                  selected={isSelected}
+                  onSelect={() => pick(p.name)}
+                  meta={p.description || undefined}
+                  trailing={
+                    <span className="flex items-center gap-1.5">
+                      {isDirty && <span className="text-[10px] font-semibold text-accent">unsaved</span>}
+                      {!isDirty && p.overridingProjects.length > 0 && (
+                        <span title={overrideSummary(p)}>
+                          <Badge tone="dim">{p.overridingProjects.length} override{p.overridingProjects.length > 1 ? 's' : ''}</Badge>
+                        </span>
+                      )}
+                      <span data-testid="agent-row-model" className="font-mono">{p.model ?? 'inherit'}</span>
+                      {confirming ? (
+                        <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => removeRow(p.name)}
+                            disabled={busy}
+                            title={`Delete ${p.name}`}
+                            className="text-[10px] font-semibold text-red-400 hover:text-red-300"
+                          >
+                            confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRowConfirmDelete(null)}
+                            title="Cancel"
+                            className="text-[10px] text-fg-faint hover:text-fg"
+                          >
+                            cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setRowConfirmDelete(p.name) }}
+                          title={`Delete ${p.name}`}
+                          aria-label={`Delete ${p.name}`}
+                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-fg-faint hover:text-red-400 transition-opacity"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  }
+                />
+              </div>
+            )
+          })
+        )}
+      </div>
+    </>
+  )
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 py-1.5 border-b border-line">{viewTabs}</div>
+      <ConfigWorkbench
+        list={list}
         detail={
           obj ? (
-            <AgentPersonaEditor
+            <AgentDetail
               obj={obj}
               set={set}
               saved={saved}
@@ -451,445 +379,9 @@ function AgentLibraryComponent() {
           )
         }
       />
-    </Panel>
+    </div>
   )
 }
 
 // Memoized: no props; own data comes from store/IPC hooks inside the component.
 export const AgentLibrary = memo(AgentLibraryComponent)
-
-function AgentPersonaEditor({
-  obj, set, saved, dirty, isNew, busy, confirmDelete, setConfirmDelete,
-  onDuplicate, onRevert, onSave, onDelete, onDropOverride, projects, selected, onSelect, onSaveOverride,
-}: {
-  obj: Draft
-  set: (patch: Partial<Draft>) => void
-  saved: AgentPersona | null
-  dirty: boolean
-  isNew: boolean
-  busy: boolean
-  confirmDelete: boolean
-  setConfirmDelete: (v: boolean) => void
-  onDuplicate: () => void
-  onRevert: () => void
-  onSave: () => void
-  onDelete: () => void
-  onDropOverride: (cwd: string, label: string) => void
-  /** PROJECT OVERRIDE picker: every open project, the chosen one (null = none), and the chooser. */
-  projects: OpenProject[]
-  selected: OpenProject | null
-  onSelect: (cwd: string | null) => void
-  onSaveOverride: (patch: { model: string; effort: string }) => void
-}) {
-  const home = useHomeDir()
-  const path = !isNew && saved ? saved.path : `${home ?? '~'}/.claude/agents/${obj.name}.md`
-  const canRevertOrSave = dirty || isNew
-  return (
-    <div className="max-w-3xl">
-      <div className="px-4 py-3 border-b border-line flex items-center gap-2 flex-wrap">
-        <span className="text-sm font-semibold text-fg font-mono">{obj.name}</span>
-        {isNew ? <Badge tone="accent">unsaved draft</Badge> : dirty ? <Badge tone="warn">edited</Badge> : <Badge tone="good">saved</Badge>}
-        <span className="ml-auto min-w-0"><SourceChip path={path} /></span>
-      </div>
-
-      <div className="p-4 space-y-4">
-        <Field label="name" hint="Filename on disk — lowercase, hyphenated.">
-          <input
-            value={obj.name}
-            onChange={(e) => set({ name: e.target.value.toLowerCase() })}
-            className="w-full bg-bg border border-line rounded px-2 py-1 text-xs text-fg font-mono"
-          />
-        </Field>
-
-        <Field label="description" hint="Shown in the list and in agent pickers.">
-          <input
-            value={obj.description}
-            onChange={(e) => set({ description: e.target.value })}
-            className="w-full bg-bg border border-line rounded px-2 py-1 text-xs text-fg"
-          />
-        </Field>
-
-        <ModelPicker value={obj.model} onChange={(v) => set({ model: v })} />
-
-        <EffortPicker value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
-
-        <Field
-          label="cli"
-          hint="Which coding-agent CLI New Session starts this persona on — override per session in New Session → advanced. On a non-Claude CLI the session has no develop loop, no Restore, and this persona's model/effort are not used. Macros, phone launches and scheduled PRDs always run Claude Code."
-        >
-          <div className="space-y-2">
-            <AgentCliPicker
-              testIdPrefix="agent-persona-cli"
-              value={obj.agentCli}
-              onChange={(id) => set({ agentCli: id, agentCliModel: '' })}
-            />
-            {obj.agentCli !== 'claude' && (
-              <input
-                data-testid="agent-persona-cli-model"
-                aria-label="CLI model"
-                value={obj.agentCliModel}
-                maxLength={128}
-                placeholder="Blank = the CLI's own default"
-                onChange={(e) => set({ agentCliModel: e.target.value })}
-                className="w-full bg-bg border border-line rounded px-2 py-1 text-xs text-fg font-mono"
-              />
-            )}
-          </div>
-        </Field>
-
-        {!isNew && saved && (
-          <ProjectOverrideBlock saved={saved} projects={projects} selected={selected} onSelect={onSelect} busy={busy} onSave={onSaveOverride} />
-        )}
-
-        <Field label="tools" hint={`${obj.tools.length} of ${TOOLS.length} granted. Anything not ticked is refused at call time.`}>
-          <div className="flex flex-wrap gap-1.5">
-            {TOOLS.map((t) => {
-              const on = obj.tools.includes(t)
-              return (
-                <button
-                  key={t}
-                  onClick={() => set({ tools: on ? obj.tools.filter((x) => x !== t) : [...obj.tools, t] })}
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
-                    on ? 'bg-sage/15 text-sage-dark border-sage/30' : 'bg-bg-hi text-fg-faint border-line'
-                  }`}
-                >
-                  {t}
-                </button>
-              )
-            })}
-          </div>
-        </Field>
-
-        <Field label="color">
-          <div className="flex gap-1.5">
-            {COLORS.map((c) => (
-              <button
-                key={c || 'none'}
-                title={c || 'none'}
-                onClick={() => set({ color: c })}
-                className="w-5 h-5 rounded"
-                style={{
-                  background: c ? COLOR_SWATCH[c] : 'transparent',
-                  border: obj.color === c ? '2px solid var(--accent, #b85c34)' : '1px solid var(--line, #555)',
-                }}
-              />
-            ))}
-          </div>
-        </Field>
-
-        <Field label="tags" hint="Session mission tags this persona is associated with — shown as the default agent on the Tags tab.">
-          <div className="flex flex-wrap gap-1.5">
-            {TAG_LIBRARY.map((t) => {
-              const on = obj.tags.includes(t.tag)
-              const tone = ticketTagTone(t.tag)
-              return (
-                <button
-                  key={t.tag}
-                  onClick={() => set({ tags: on ? obj.tags.filter((x) => x !== t.tag) : [...obj.tags, t.tag] })}
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
-                    on ? `${tone.bg} ${tone.text} ${tone.border ? 'border-current/30' : 'border-transparent'}` : 'bg-bg-hi text-fg-faint border-line'
-                  }`}
-                >
-                  #{t.tag}
-                </button>
-              )
-            })}
-          </div>
-        </Field>
-
-        <Field label="definition" hint="The system prompt this persona runs under.">
-          <textarea
-            rows={9}
-            value={obj.body}
-            onChange={(e) => set({ body: e.target.value })}
-            className="w-full bg-bg border border-line rounded px-2 py-1.5 text-xs text-fg font-mono leading-relaxed resize-y"
-          />
-        </Field>
-
-        <Field label="project overrides" hint="Open projects that shadow this definition with a local copy.">
-          {saved && (saved.overrideDetails ?? []).length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {(saved.overrideDetails ?? []).map((d) => (
-                <span key={d.cwd} className="inline-flex items-center gap-1.5 bg-bg-elev border border-line rounded px-2 py-0.5 text-[11px] font-mono text-fg-dim">
-                  {d.project}
-                  <button onClick={() => onDropOverride(d.cwd, d.project)} title="Drop the local copy" className="text-fg-faint hover:text-fg">×</button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-fg-faint italic">
-              {isNew ? 'save first to see project overrides.' : 'no open project overlays this agent — the global definition applies everywhere.'}
-            </div>
-          )}
-        </Field>
-      </div>
-
-      <div className="px-4 py-2.5 border-t border-line flex items-center gap-2 flex-wrap">
-        {confirmDelete ? (
-          <>
-            <span className="text-xs text-fg-dim">Delete <strong className="font-mono">{obj.name}</strong> and its file?</span>
-            <Button variant="danger" onClick={onDelete} disabled={busy}>Delete</Button>
-            <Button onClick={() => setConfirmDelete(false)}>Keep</Button>
-          </>
-        ) : (
-          <>
-            <Button onClick={onDuplicate} disabled={busy}>Duplicate</Button>
-            {!isNew && <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={busy}>Delete</Button>}
-            <div className="flex-1" />
-            {canRevertOrSave && <span className="text-[11px] text-fg-faint">unsaved changes</span>}
-            <Button onClick={onRevert} disabled={!canRevertOrSave || busy}>Revert</Button>
-            <Button variant="primary" onClick={onSave} disabled={!canRevertOrSave || busy}>
-              {busy ? 'Saving…' : isNew ? 'Create' : 'Save'}
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint mb-1.5 font-mono">{label}</div>
-      {children}
-      {hint && <div className="text-[11px] text-fg-faint mt-1 leading-snug">{hint}</div>}
-    </div>
-  )
-}
-
-const LATEST = 'latest'
-const BLOCKED_REASON = 'Blocked by the availableModels allowlist in your Claude settings'
-
-/**
- * Two-level, catalog-driven model picker: an alias row (every alias the installed
- * CLI offers, `inherit` prepended) and, for family aliases, a version row pinning a
- * concrete id. The stored value is written verbatim — a bare alias, or a concrete
- * id (with the alias's `[1m]` suffix when one is chosen). `catalog === null`
- * degrades to the static five chips.
- */
-function ModelPicker({ value, onChange, label = 'default model', hint, testIdPrefix = '', inheritLabel }: {
-  value: string; onChange: (v: string) => void; label?: string; hint?: string; testIdPrefix?: string; inheritLabel?: string
-}) {
-  const { catalog, loading, degraded, refresh } = useModelCatalog(null)
-  const aliases = catalog ? ['inherit', ...catalog.aliases] : [...MODELS]
-  const allow = catalog?.availableModels ?? null
-  const blockedAlias = (a: string) => !!allow && a !== 'inherit' && !allow.includes(a)
-  const blockedId = (id: string, fam: string | null) => !!allow && !allow.includes(id) && !(fam && allow.includes(fam))
-
-  const stored = value || 'inherit'
-  const suffix = /\[[^\]]*\]$/.exec(stored)?.[0] ?? ''
-  const isAlias = aliases.includes(stored)
-  // A pinned concrete id maps back to its family alias (+ suffix) so the alias row shows it selected.
-  const pinnedAlias = !isAlias && catalog && modelFamily(stored) && aliases.includes(modelFamily(stored)! + suffix)
-    ? modelFamily(stored)! + suffix
-    : null
-  const aliasValue = isAlias ? stored : pinnedAlias ?? stored
-  const family = modelFamily(aliasValue)
-  const aliasSuffix = /\[[^\]]*\]$/.exec(aliasValue)?.[0] ?? ''
-  const showVersion = !!catalog && stored !== 'inherit' && !!family && aliases.includes(aliasValue)
-  const versions = showVersion ? catalog!.models.filter((id) => modelFamily(id) === family).map((id) => id + aliasSuffix) : []
-  const versionValue = isAlias ? LATEST : stored
-
-  const blocked: Record<string, string> = {}
-  if (catalog) for (const a of aliases) if (blockedAlias(a)) blocked[a] = BLOCKED_REASON
-  const blockedVersions: Record<string, string> = {}
-  for (const v of versions) if (blockedId(v, family)) blockedVersions[v] = BLOCKED_REASON
-
-  return (
-    <Field
-      label={label}
-      hint={hint ?? "This persona's default model for its Epics — sets the --model an Epic launches with (Terminal + Chat both honor it). 'inherit' falls back to each view's own default, not this Settings page. Cheap models for read-only personas; opus for judgement calls."}
-    >
-      <div data-testid={`${testIdPrefix}model-row`}>
-        <Choice options={aliases} value={aliasValue} onChange={onChange} mono blocked={blocked} labels={inheritLabel ? { inherit: inheritLabel } : undefined} />
-      </div>
-      {showVersion && (
-        <div className="mt-2" data-testid={`${testIdPrefix}model-version-row`}>
-          <div className="text-[10.5px] text-fg-faint mb-1 font-mono">version</div>
-          <Choice
-            options={[LATEST, ...versions]}
-            value={versionValue}
-            onChange={(v) => onChange(v === LATEST ? aliasValue : v)}
-            mono
-            blocked={blockedVersions}
-          />
-        </div>
-      )}
-      <div className="text-[11px] text-fg-faint mt-1 leading-snug flex items-center gap-2">
-        <span>
-          {catalog
-            ? `Models are live-read from the installed claude CLI${degraded ? ' (cached — CLI probe unavailable)' : ''}. "latest" keeps the floating alias.`
-            : loading ? 'Loading model catalog…' : 'catalog unavailable — showing the standard list.'}
-        </span>
-        <button
-          data-testid={`${testIdPrefix}model-catalog-refresh`}
-          onClick={() => { void refresh() }}
-          disabled={loading}
-          className="underline text-fg-dim disabled:opacity-40"
-        >
-          refresh
-        </button>
-      </div>
-    </Field>
-  )
-}
-
-/**
- * Catalog-driven effort picker. Options are `inherit` + the levels `/effort` accepts in a live
- * session (`catalog.effortLevels`); levels absent from `settingsEffortLevels` cannot be written to a
- * settings.json file and get a session-only marker. `catalog === null` degrades to the static list.
- * A model known not to support effort gets a non-blocking note — the control stays enabled.
- */
-function EffortPicker({ value, model, onChange, label = 'effort', testIdPrefix = '', inheritLabel }: {
-  value: string; model: string; onChange: (v: string) => void; label?: string; testIdPrefix?: string; inheritLabel?: string
-}) {
-  const { catalog } = useModelCatalog(null)
-  const levels = catalog && catalog.effortLevels.length ? ['inherit', ...catalog.effortLevels] : [...EFFORTS]
-  const settingsLevels = catalog?.settingsEffortLevels ?? []
-  const sessionOnly = catalog ? levels.filter((l) => l !== 'inherit' && !settingsLevels.includes(l)) : []
-  const stored = value || 'inherit'
-  const unsupported = stored !== 'inherit' && modelSupportsEffort(model) === false
-  return (
-    <Field
-      label={label}
-      hint={
-        catalog
-          ? `Effort levels are live-read from the installed claude CLI (what /effort accepts). ${
-              sessionOnly.length ? `${sessionOnly.join(', ')} ${sessionOnly.length > 1 ? 'are' : 'is'} session-only — settings.json accepts ${settingsLevels.join(', ')}. ` : ''
-            }'inherit' writes no effort: line.`
-          : "catalog unavailable — showing the standard list. 'inherit' writes no effort: line."
-      }
-    >
-      <div data-testid={`${testIdPrefix}effort-row`}>
-        <Choice options={levels} value={stored} onChange={onChange} mono labels={inheritLabel ? { inherit: inheritLabel } : undefined} />
-      </div>
-      {sessionOnly.length > 0 && (
-        <div className="text-[11px] text-fg-faint mt-1 font-mono" data-testid={`${testIdPrefix}effort-session-only`}>
-          {sessionOnly.map((l) => `${l} (session-only)`).join(' · ')}
-        </div>
-      )}
-      {unsupported && (
-        <div className="text-[11px] text-amber-400 mt-1 leading-snug" data-testid={`${testIdPrefix}effort-unsupported-note`}>
-          The selected model does not support effort — the CLI will ignore this setting.
-        </div>
-      )}
-    </Field>
-  )
-}
-
-/**
- * PROJECT OVERRIDE — an explicit project picker over every open project (one option per unique tab cwd,
- * nothing preselected: the page never reads the active tab, so no open project is special), then the CHOSEN
- * project's runtime model/effort for this persona, written as a frontmatter-only overlay at
- * `<cwd>/.claude/agents/<name>.md` (no body; lib/persona-macro/personaMerge.cjs inherits the rest from the
- * global persona). An option whose project already overrides this persona names what it overrides; two open
- * projects sharing a folder name are labelled by their home-shortened paths instead. Deliberately a separate
- * block from the global rows above it: those edit `~/.claude/agents/<name>.md` for the whole machine, these
- * edit only the chosen project's file. Each picker writes on change (no draft/Save step) so the two scopes
- * never share a Save button. The choice is AgentLibrary's page state (it survives switching personas) and
- * falls back to "Choose a project…" once that project's tab closes.
- */
-function ProjectOverrideBlock({ saved, projects, selected, onSelect, busy, onSave }: {
-  saved: AgentPersona
-  projects: OpenProject[]
-  selected: OpenProject | null
-  onSelect: (cwd: string | null) => void
-  busy: boolean
-  onSave: (patch: { model: string; effort: string }) => void
-}) {
-  const home = useHomeDir()
-  const nameCount = new Map<string, number>()
-  for (const p of projects) nameCount.set(p.name, (nameCount.get(p.name) ?? 0) + 1)
-  const optionLabel = (p: OpenProject) => {
-    const label = (nameCount.get(p.name) ?? 0) > 1 ? compactPath(p.cwd, home) : p.name
-    const d = saved.overrideDetails?.find((x) => x.cwd === p.cwd)
-    if (!d) return label
-    const parts = overrideParts(d)
-    return `${label} — ${parts.length ? `overrides ${parts.join(', ')}` : 'overlay'}`
-  }
-  // By cwd, not folder name: two open projects sharing a name must not read each other's overlay.
-  const detail = selected ? saved.overrideDetails?.find((d) => d.cwd === selected.cwd) : undefined
-  const fullBody = !!detail?.bodyOverridden
-  const model = detail?.values?.model ?? 'inherit'
-  const effort = detail?.values?.effort ?? 'inherit'
-  const globalModel = saved.model ?? 'inherit'
-  const globalEffort = saved.effort ?? 'inherit'
-
-  return (
-    <div
-      data-testid="project-override-block"
-      className={selected ? 'border border-accent/40 rounded p-3 space-y-3 bg-accent/5' : 'border border-dashed border-line rounded p-3 space-y-3'}
-    >
-      <label className="flex flex-col gap-1">
-        <span className={`text-[10.5px] font-semibold uppercase tracking-wide font-mono ${selected ? 'text-accent' : 'text-fg-faint'}`}>
-          project override
-        </span>
-        <select
-          data-testid="override-project-select"
-          value={selected?.cwd ?? ''}
-          onChange={(e) => onSelect(e.target.value || null)}
-          disabled={busy || projects.length === 0}
-          className="rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] text-fg disabled:opacity-60"
-        >
-          <option value="">Choose a project…</option>
-          {projects.map((p) => (
-            <option key={p.cwd} value={p.cwd}>{optionLabel(p)}</option>
-          ))}
-        </select>
-      </label>
-      {projects.length === 0 ? (
-        <div data-testid="project-override-none" className="text-[11px] text-fg-faint leading-snug">
-          No open project tabs — open a project tab to override this persona&apos;s model or effort for it.
-        </div>
-      ) : !selected ? (
-        <div data-testid="project-override-unselected" className="text-[11px] text-fg-faint leading-snug">
-          Pick an open project to see or set this persona&apos;s model and effort for that project only. A project that
-          already overrides this persona says what it overrides.
-        </div>
-      ) : (
-        <div data-testid="project-override" className="space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge tone="accent">{selected.name} only</Badge>
-            <span className="ml-auto min-w-0"><SourceChip path={`${selected.cwd}/.claude/agents/${saved.name}.md`} /></span>
-          </div>
-          <div className="text-[11px] text-fg-faint leading-snug">
-            Changes what the SCHEDULER (and new Epics) spawn for <strong>{selected.name}</strong> only — a frontmatter-only overlay with just the keys you set;
-            the persona&apos;s body stays the global one. The global model/effort rows edit the machine-wide persona and are never touched here.
-          </div>
-          {fullBody && (
-            <div data-testid="project-override-fullbody" className="text-[11px] text-amber-400 leading-snug">
-              {selected.name} already has a FULL-BODY override of this persona (its own definition text). It is shown as-is and not converted to a
-              frontmatter-only overlay — edit that file directly, or drop it with × under &quot;project overrides&quot; below.
-            </div>
-          )}
-          <fieldset disabled={busy || fullBody} className="space-y-3 border-0 p-0 m-0 min-w-0">
-            <ModelPicker
-              value={model}
-              onChange={(v) => { if (!fullBody) onSave({ model: v, effort }) }}
-              label="project model"
-              hint="'use global' writes no model: line in the overlay."
-              testIdPrefix="override-"
-              inheritLabel="use global"
-            />
-            <EffortPicker
-              value={effort}
-              model={model !== 'inherit' ? model : globalModel}
-              onChange={(v) => { if (!fullBody) onSave({ model, effort: v }) }}
-              label="project effort"
-              testIdPrefix="override-"
-              inheritLabel="use global"
-            />
-          </fieldset>
-          <div data-testid="override-provenance" className="text-[11px] font-mono text-fg-dim space-y-0.5">
-            {[['model', globalModel, model], ['effort', globalEffort, effort]].map(([k, g, o]) => (
-              <div key={k} data-testid={`override-provenance-${k}`}>
-                {k}: {o !== 'inherit' ? <>{g} <span className="text-fg-faint">(global)</span> → <span className="text-accent">{o}</span> <span className="text-fg-faint">(this project)</span></> : <>{g} <span className="text-fg-faint">(global — not overridden)</span></>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}

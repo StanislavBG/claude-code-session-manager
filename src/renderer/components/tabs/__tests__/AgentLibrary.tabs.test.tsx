@@ -6,6 +6,17 @@ import { act } from 'react-dom/test-utils'
 import { AgentLibrary } from '../AgentLibrary'
 import type { AgentPersona } from '../../../../preload/api'
 
+// The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
+// controlled body text, Document mode by default, and the status bar's Save/Revert.
+vi.mock('../editor/DocumentEditorPane', () => ({
+  DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
+    createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
+      createElement('textarea', { key: 'ta', 'data-testid': 'document-editor-body', value: p.value, onChange: (e: { target: { value: string } }) => p.onChange(e.target.value) }),
+      createElement('button', { key: 'r', 'data-testid': 'editor-revert', disabled: !p.dirty, onClick: () => p.onRevert?.() }, 'Revert'),
+      createElement('button', { key: 's', 'data-testid': 'editor-save', disabled: !p.dirty, onClick: () => p.onSave?.() }, 'Save'),
+    ]),
+}))
+
 /** AgentLibrary's Personas | Tags tabs. */
 
 const PERSONAS: AgentPersona[] = [
@@ -98,10 +109,10 @@ function clickText(el: HTMLElement, text: string) {
 }
 
 describe('AgentLibrary tabs', () => {
-  it('defaults to Personas with a SourceChip of the real persona path', async () => {
+  it('defaults to Personas with the real persona path in the detail eyebrow', async () => {
     const el = await mount()
     expect(el.querySelector('[data-agent-row="builder"]')).not.toBeNull()
-    expect(el.querySelector('[data-testid="source-chip-path"]')!.textContent).toContain('~/.claude/agents/builder.md')
+    expect(el.querySelector('[data-testid="config-detail-header"]')!.textContent).toContain('~/.claude/agents/builder.md')
   })
 
   it('Tags tab shows the read-only tag body without the stale Action-button hint', async () => {
@@ -118,7 +129,7 @@ describe('AgentLibrary tabs', () => {
     await clickText(el, 'Tags')
     await clickText(el, 'builder')
     expect(el.querySelector('[data-agent-row="builder"]')).not.toBeNull()
-    expect(el.textContent).toContain('+ New agent')
-    expect(el.querySelector('[data-testid="source-chip-path"]')!.textContent).toContain('builder.md')
+    expect(el.textContent).toContain('+ New')
+    expect(el.querySelector('[data-testid="config-detail-header"]')!.textContent).toContain('builder.md')
   })
 })

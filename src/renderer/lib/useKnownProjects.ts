@@ -94,6 +94,17 @@ let state: KnownProjectsState = { rows: [], recentSessions: [], enriched: {}, lo
 const subscribers = new Set<() => void>()
 let scannedForHome: string | null = null
 let scanToken = 0
+let inFlight: Promise<void> | null = null
+let lastScanFinishedAt = 0
+/** encoded folder → resolved cwd; only non-null resolutions, so unresolved folders retry. */
+const resolvedCwdByEncoded = new Map<string, string>()
+/** Folders archived while a scan was in flight — dropped from that scan's publishes. */
+const archivedDuringScan = new Set<string>()
+
+/** Unforced `refreshKnownProjects()` calls within this gap of the last finished scan are no-ops. */
+export const KNOWN_PROJECTS_REFRESH_MIN_GAP_MS = 30_000
+
+type ScanMode = 'initial' | 'refresh'
 
 function notify() {
   subscribers.forEach((fn) => fn())
@@ -159,9 +170,10 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results
 }
 
-async function runScan(home: string): Promise<void> {
+async function runScan(home: string, mode: ScanMode): Promise<void> {
   const token = ++scanToken
-  setState({ loading: true, resolving: true })
+  archivedDuringScan.clear()
+  if (mode === 'initial') setState({ loading: true, resolving: true })
   try {
     const r = await window.api.config.listDir(`${home}/.claude/projects`, { dirsOnly: true })
     if (token !== scanToken) return
@@ -191,20 +203,45 @@ async function runScan(home: string): Promise<void> {
       }
     })
     if (token !== scanToken) return
-    next.sort((a, b) => b.lastSession - a.lastSession)
-    recent.sort((a, b) => b.mtimeMs - a.mtimeMs)
-    setState({
-      rows: next,
-      recentSessions: recent.slice(0, RECENT_SESSIONS_KEEP),
-      enriched: {},
-      loading: false,
-      resolving: true,
-    })
-    void runEnrichment(next, token)
+    const rows = next.filter((row) => !archivedDuringScan.has(row.encoded))
+    const recentKept = recent.filter((row) => !archivedDuringScan.has(row.projectEncoded))
+    rows.sort((a, b) => b.lastSession - a.lastSession)
+    recentKept.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    if (mode === 'initial') {
+      setState({
+        rows,
+        recentSessions: recentKept.slice(0, RECENT_SESSIONS_KEEP),
+        enriched: {},
+        loading: false,
+        resolving: true,
+      })
+    } else {
+      // Stale-while-revalidate: carry each still-listed folder's previous
+      // enrichment over so resolved projects never blink out mid-rescan.
+      const carried: Record<string, EnrichmentState> = {}
+      for (const row of rows) {
+        const prev = state.enriched[row.encoded]
+        if (prev) carried[row.encoded] = prev
+      }
+      setState({
+        rows,
+        recentSessions: recentKept.slice(0, RECENT_SESSIONS_KEEP),
+        enriched: carried,
+        loading: false,
+      })
+    }
+    await runEnrichment(rows, token, mode)
+    if (token === scanToken) lastScanFinishedAt = Date.now()
   } catch (err) {
     console.error('[useKnownProjects] scan failed:', err)
+    if (mode === 'refresh') throw err
     if (token === scanToken) setState({ loading: false, resolving: false })
   }
+}
+
+function withoutArchived<T>(record: Record<string, T>): Record<string, T> {
+  if (archivedDuringScan.size === 0) return record
+  return Object.fromEntries(Object.entries(record).filter(([k]) => !archivedDuringScan.has(k)))
 }
 
 /**
@@ -219,15 +256,19 @@ async function runScan(home: string): Promise<void> {
  *      per cwd) and running it per folder meant ~2000 enrichments for ~19 real
  *      projects on this machine.
  */
-async function runEnrichment(rows: ProjectRow[], token: number): Promise<void> {
+async function runEnrichment(rows: ProjectRow[], token: number, mode: ScanMode): Promise<void> {
   const cwdByEncoded: Record<string, string | null> = {}
   await mapWithConcurrency(rows, SCAN_CONCURRENCY, async (row) => {
     if (token !== scanToken) return
     // No transcript file ⇒ no cwd to recover; don't pay for a listDir round-trip.
     if (row.sessionCount === 0) { cwdByEncoded[row.encoded] = null; return }
+    const cached = resolvedCwdByEncoded.get(row.encoded)
+    if (cached) { cwdByEncoded[row.encoded] = cached; return }
     try {
       const cwd = await resolveProjectCwd(row.path)
-      cwdByEncoded[row.encoded] = cwd ? normalizeCwd(cwd) : null
+      const normalized = cwd ? normalizeCwd(cwd) : null
+      cwdByEncoded[row.encoded] = normalized
+      if (normalized) resolvedCwdByEncoded.set(row.encoded, normalized)
     } catch {
       cwdByEncoded[row.encoded] = null
     }
@@ -235,8 +276,12 @@ async function runEnrichment(rows: ProjectRow[], token: number): Promise<void> {
   if (token !== scanToken) return
 
   const enriched: Record<string, EnrichmentState> = {}
-  for (const row of rows) enriched[row.encoded] = { cwd: cwdByEncoded[row.encoded] ?? null }
-  setState({ enriched, resolving: false })
+  for (const row of rows) {
+    const cwd = cwdByEncoded[row.encoded] ?? null
+    const prev = mode === 'refresh' ? state.enriched[row.encoded] : undefined
+    enriched[row.encoded] = { ...(prev && prev.cwd === cwd ? prev : {}), cwd }
+  }
+  setState({ enriched: withoutArchived(enriched), resolving: false })
 
   const uniqueCwds = [...new Set(Object.values(cwdByEncoded).filter((c): c is string => !!c))]
   await mapWithConcurrency(uniqueCwds, SCAN_CONCURRENCY, async (cwd) => {
@@ -252,8 +297,37 @@ async function runEnrichment(rows: ProjectRow[], token: number): Promise<void> {
     for (const [encoded, resolved] of Object.entries(cwdByEncoded)) {
       if (resolved === cwd) patch[encoded] = { cwd, ...details }
     }
-    setState({ enriched: patch })
+    setState({ enriched: withoutArchived(patch) })
   })
+}
+
+/**
+ * Re-runs the ~/.claude/projects scan as a stale-while-revalidate rescan: the
+ * previous data stays published until the new data replaces it. Deduped
+ * against any scan in flight; unforced calls within
+ * KNOWN_PROJECTS_REFRESH_MIN_GAP_MS of the last finished scan are no-ops.
+ * No-op before the hook has started a first scan. Rejects when the rescan
+ * fails, leaving the previous state untouched.
+ */
+export function refreshKnownProjects(opts: { force?: boolean } = {}): Promise<void> {
+  if (!scannedForHome) return Promise.resolve()
+  if (inFlight) return inFlight
+  if (!opts.force && Date.now() - lastScanFinishedAt < KNOWN_PROJECTS_REFRESH_MIN_GAP_MS) return Promise.resolve()
+  inFlight = runScan(scannedForHome, 'refresh').finally(() => { inFlight = null })
+  return inFlight
+}
+
+/** Test-only reset — module state is shared across tests. */
+export function __resetKnownProjectsForTests(): void {
+  state = { rows: [], recentSessions: [], enriched: {}, loading: true, resolving: true }
+  scannedForHome = null
+  scanToken += 1
+  inFlight = null
+  lastScanFinishedAt = 0
+  resolvedCwdByEncoded.clear()
+  archivedDuringScan.clear()
+  ownerMap = null
+  ownerMapKey = null
 }
 
 export function useKnownProjects() {
@@ -271,7 +345,7 @@ export function useKnownProjects() {
     if (!home) return
     if (scannedForHome === home) return
     scannedForHome = home
-    void runScan(home)
+    inFlight = runScan(home, 'initial').finally(() => { inFlight = null })
   }, [home])
 
   const { rows, recentSessions, enriched, loading, resolving } = state
@@ -325,6 +399,7 @@ export function useKnownProjects() {
     try {
       const result = await window.api.app.archiveProject(encoded)
       if (result.ok) {
+        if (inFlight) archivedDuringScan.add(encoded)
         setState({
           rows: state.rows.filter((r) => r.encoded !== encoded),
           enriched: Object.fromEntries(Object.entries(state.enriched).filter(([k]) => k !== encoded)),

@@ -106,6 +106,7 @@ function installWindowApiMock() {
     history: {
       dashboard: vi.fn().mockResolvedValue(buildRaw()),
       loopEfficiency: vi.fn().mockResolvedValue({ fromMs: 0, toMs: 0, rows: [], totals: { runs: 0, wastedRuns: 0, verified: 0, refuted: 0, executorUsd: 0, wastedRunRate: 0 }, weeklyUtilizationPct: null, verifiedPerUsagePct: null }),
+      validationQuality: vi.fn().mockResolvedValue({ ok: true, projects: [] }),
       onUpdated: vi.fn((cb: () => void) => {
         updatedHandlers.add(cb)
         return () => { updatedHandlers.delete(cb) }
@@ -544,7 +545,7 @@ describe('HistoryDashboard live refresh — onUpdated / focus / visibility', () 
     const addDoc = vi.spyOn(document, 'addEventListener')
     const rmDoc = vi.spyOn(document, 'removeEventListener')
     await mount(<HistoryDashboard />)
-    expect(updatedHandlers.size).toBe(2) // dashboard + LoopEfficiency panel
+    expect(updatedHandlers.size).toBe(3) // dashboard + LoopEfficiency + ValidationQuality panels
     const focusFn = addWin.mock.calls.find((c) => c[0] === 'focus')![1]
     const visFn = addDoc.mock.calls.find((c) => c[0] === 'visibilitychange')![1]
     await act(async () => { root!.unmount() })

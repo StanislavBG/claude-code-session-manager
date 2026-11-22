@@ -38,7 +38,8 @@ const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
 const { isSweepValidatorSlug } = require('../epic/epicSweepValidator.cjs');
-const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
+const { validateGate, validateFiles, renderFilesSection, renderGateSection, parseFilesSection } = require('./prdGateFiles.cjs');
+const { filesOverlap } = require('../scheduler/schedulerBatch.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
@@ -301,6 +302,41 @@ function crossEpicDuplicateError(slug, dups) {
   return `A PRD with slug "${slug}" already exists in another Epic: ${list}. ` +
     `Add ${slugs.length === 1 ? 'it' : 'them'} to dependsOn instead of queueing the same work twice, ` +
     `or pass allowDuplicateOf: [${slugs.join(', ')}] to create a deliberate duplicate.`;
+}
+
+/**
+ * Cross-Epic files-overlap advisory (2026-11-22 Self stall: 1047 and 1056 also
+ * declared the same files). Dispatch already serializes overlapping files, so
+ * this only WARNS — never refuses. Candidates: listing rows of another Epic
+ * whose status is pending/running/investigating. A row's `files` is used when
+ * present, else its `# Files` section is read via remote.readPrd + the shared
+ * parseFilesSection. Overlap uses the scheduler's own filesOverlap rule.
+ */
+const OVERLAP_ACTIVE_STATUSES = new Set(['pending', 'running', 'investigating']);
+async function crossEpicFilesOverlapWarnings(newFiles, epicId, rows, remote, cwd) {
+  if (!Array.isArray(newFiles) || !newFiles.length || !Array.isArray(rows)) return [];
+  const warnings = [];
+  for (const r of rows) {
+    if (!r || typeof r.slug !== 'string' || !OVERLAP_ACTIVE_STATUSES.has(r.status)) continue;
+    if (r.epicId == null || r.epicId === '' || r.epicId === (epicId ?? null)) continue;
+    let otherFiles = Array.isArray(r.files) ? r.files : null;
+    if (!otherFiles) {
+      try {
+        const read = typeof remote?.readPrd === 'function' ? await remote.readPrd(r.slug, cwd) : null;
+        otherFiles = read?.ok ? parseFilesSection(read.text) : [];
+      } catch { otherFiles = []; }
+    }
+    if (!filesOverlap(newFiles, otherFiles)) continue;
+    const pairs = [];
+    for (const a of newFiles) {
+      for (const b of otherFiles) {
+        if (filesOverlap([a], [b])) pairs.push(a === b ? a : `${a} ~ ${b}`);
+      }
+    }
+    warnings.push(`Files overlap with ${r.slug} (Epic ${r.epicId}, status ${r.status}): ${pairs.join(', ')}. ` +
+      'Dispatch will serialize the two; add it to dependsOn if this PRD needs its changes first.');
+  }
+  return warnings;
 }
 
 /**
@@ -630,7 +666,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // A read failure is skipped-with-a-warning, never a write outage.
   const needCrossEpicGuard = opts.internalMint !== true;
   let listing = null;
-  if (needCrossEpicGuard || (input.dependsOn && input.dependsOn.length)) {
+  if (needCrossEpicGuard || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
     try {
       listing = opts.listingCache
         ? await (opts.listingCache.promise ??= remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER }))
@@ -652,6 +688,11 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
       }
       duplicateAllowed = dups.map((r) => ({ slug: r.slug, epicId: r.epicId, status: r.status ?? null }));
     }
+  }
+
+  // Cross-Epic files-overlap advisory: a warning, never a refusal.
+  if (listing && filesList && filesList.length) {
+    extraWarnings.push(...await crossEpicFilesOverlapWarnings(filesList, input.sourcePromptId ?? null, listing.prds ?? [], remote, input.cwd));
   }
 
   // Dry run burns no number: a placeholder keeps the filename-shaped guards below meaningful.
@@ -1128,6 +1169,7 @@ function registerAdminRoute(adminHttp, remote) {
 }
 
 module.exports = {
+  crossEpicFilesOverlapWarnings,
   PRD_CREATE_SLUG_RE,
   STANDARDS_PATH,
   readStandards,

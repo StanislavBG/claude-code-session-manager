@@ -705,6 +705,6 @@ function findStarvedProjects(jobs, now, thresholdMs, lastDispatchAtByCwd = {}) {
 }
 
 module.exports = {
-  pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, findBlockingDep, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD,
+  pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, findBlockingDep, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, filesOverlap, pathsOverlap,
   DEP_HISTORY_FAIL_OPEN,
 };

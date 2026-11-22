@@ -146,6 +146,17 @@ function installBroadWindowApiMock() {
       configPath: vi.fn().mockResolvedValue('/home/bilko/.claude/session-manager/otel.json'),
     },
     files: { delete: vi.fn().mockResolvedValue({ ok: true }) },
+    // AppSettings mounts on its Voice tab → VoiceModal's HotkeyHint / HotkeyModeToggle
+    // and MicDevicePicker read these on mount.
+    voice: {
+      getHotkeyConfig: vi.fn().mockResolvedValue({ accelerator: 'CommandOrControl+Shift+Space', mode: 'hold', global: true, schemaVersion: 1 }),
+      setHotkeyConfig: vi.fn().mockResolvedValue({ ok: true }),
+      onHotkeyConfigChanged: vi.fn(() => () => {}),
+      getDevicePref: vi.fn().mockResolvedValue({ selectedDeviceId: null, selectedLabel: null }),
+      setDevicePref: vi.fn().mockResolvedValue({ ok: true }),
+      getTtsEnabled: vi.fn().mockResolvedValue(false),
+      setTtsEnabled: vi.fn().mockResolvedValue({ ok: true }),
+    },
     memory: {
       list: vi.fn().mockResolvedValue({ entries: [], error: null }),
       stale: vi.fn().mockResolvedValue({ entries: [] }),
@@ -230,6 +241,10 @@ describe('screen components stay memoized across an unrelated re-render', () => 
   })
 
   it('with 5 panels mounted, a layout-store-style focus change (unrelated parent re-render, same ctx) re-renders zero screen components', async () => {
+    // AppSettings opens on its Voice tab (VoiceModal reads window.api.voice on mount).
+    // A missing stub there throws into an ErrorBoundary whose remount timing made this
+    // suite's render counts flaky — so the mount must log no crash at all.
+    const errSpy = vi.spyOn(console, 'error')
     await act(async () => {
       root.render(createElement(FivePanelHarness, { tick: 0 }))
       await Promise.resolve()
@@ -256,6 +271,9 @@ describe('screen components stay memoized across an unrelated re-render', () => 
 
     const after = renderCounts.counts
     expect(after).toEqual(before)
+    const crashes = errSpy.mock.calls.flat().map(String).filter((m) => /Cannot read properties of undefined/.test(m))
+    errSpy.mockRestore()
+    expect(crashes).toEqual([])
   })
 })
 

@@ -207,8 +207,9 @@ End every plan with exactly one validate PRD:
 A per-run record from any other PRD (ship, deploy, audit) also goes under
 `session-manager-operations/plan-records/<epic-id>/`; never name a git-ignored ops path in `files` to get it force-added.
 
-The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTED — <reason>`
-per PRD. Queue the validate PRD in the same `scheduler_create_prds` call as the plan (its `dependsOn` may name that call's entries); with single creates it goes last: in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist. The
+The validator returns a checked JSON verdict (`VERIFIED` or `REFUTED` with a reason, per PRD). The
+scheduler saves it as `session-manager-operations/plan-records/<epic-id>/<validate-slug>.verdicts.json`, and
+`GET /admin/epic` serves it as `verdicts`. Queue the validate PRD in the same `scheduler_create_prds` call as the plan (its `dependsOn` may name that call's entries); with single creates it goes last: in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist. The
 scheduler sends no per-PRD validation prompt. When the Epic has no pending or running PRD for
 `SM_EPIC_SETTLE_SECONDS` (default 120), it queues one `validate-sweep-*` validator for completed
 PRDs no validator checked (a large sweep becomes several sweeps in turn), then sends one PLAN SETTLED digest. Several validators in one Epic
@@ -254,7 +255,9 @@ Rules:
       safest reasonable choice, and report it. Why: queued work runs with no questions asked.
    2. **A PLAN SETTLED digest.** Read the validator records it names. A `REFUTED` PRD, or a
       Critical or Important finding, means a fix wave: one `behavior` or `wire` PRD per finding
-      plus a new validate PRD. Never fix inline. The new validate PRD has one criterion per fix
+      plus a new validate PRD. Never fix inline. Every fix PRD sets `fixes: [{ prd, missKind, reason }]`,
+      one entry per PRD it repairs, including a PRD a validator `VERIFIED` whose bug was found later
+      (an escape). Why: escapes are counted from `fixes`. The new validate PRD has one criterion per fix
       PRD and one per PRD the earlier validator marked `REFUTED`, each cited by slug. Why: a
       refuted PRD keeps its Epic blocked until a validator verifies that same PRD. A PRD marked
       `REFUTED` again after its fix wave, on the same criterion, gets no third fix wave: list it

@@ -275,7 +275,27 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 | `source` | object | `{ producer, fromCwd, fromEpicId, macroId }`, each a string or null. |
 | `createdAt` | string or null | ISO time. |
 | `completedAt` | string or null | ISO time. |
+| `verdicts` | object[] | Checked validator verdicts, newest per PRD slug, sorted by `prd`. Item shape below. `[]` when none. |
 | `receipt` | object | Only when you asked for it. See below. |
+
+### `verdicts` items
+
+Read from the scheduler's `plan-records/<epicId>/*.verdicts.json` files (`src/main/lib/epic/epicOutsideRead.cjs`,
+`readVerdictFiles`). A file that fails the verdict check is skipped.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `prd` | string | The judged PRD's slug (no number prefix). |
+| `verdict` | string | `VERIFIED` or `REFUTED`. |
+| `reason` | string | One line; never empty when `REFUTED`. |
+| `criteria` | object[] | `{ id, met, evidence, missKind? }`. `id` is the criterion's 1-based index as a string. |
+| `findings` | object[] | `{ severity, text, file?, missKind? }`. `severity` is `Critical`, `Important` or `Minor`. |
+| `validator` | string or null | Slug of the validate PRD that gave the verdict. |
+| `at` | string or null | ISO time the verdict was saved. |
+
+`missKind` is one of `not-landed`, `gate-red`, `behavior-wrong`, `not-checked-live`, `missing-test`,
+`regression`, `spec-gap`, `security`, `docs-drift`, `other` (`src/main/lib/scheduler/validatorVerdictSchema.cjs`,
+`MISS_KIND_MEANINGS`).
 
 ### The eight states
 
@@ -333,6 +353,28 @@ read. `receipt` is `{ jobs, chat }`; each part is `null` when it can't be read.
 | `largestContext` | The largest single-call context. |
 | `models` | Calls per model name. |
 | `bySource` | `[{ source, approxTokens }]`, a rough split of what filled the context. |
+
+### `GET /admin/validation-quality`
+
+How often the validator's verdicts held up, for one project. Code: `src/main/validationQualityHandlers.cjs`
+(route), `src/main/lib/scheduler/validationQuality.cjs` (`computeValidationQuality`). Read-only. No MCP tool.
+
+Query: `cwd` (absolute project path, required).
+
+Answer: `200 { ok: true, project }`. `project`:
+
+| Field | Meaning |
+| --- | --- |
+| `cwd`, `project` | The project path and its folder name. |
+| `firstPass` | `{ pct, prds }`: judged work PRDs whose first verdict was `VERIFIED`. `pct` is `null` when none was judged. |
+| `refuted` | `{ pct, prds }`: judged work PRDs with any `REFUTED` verdict. |
+| `fixWaves` | `{ perPlan, plans: [{ plan, fixWaves }] }`: fix-wave plans per original plan. A fix wave is a plan holding a PRD with `fixes`. |
+| `escapes` | `[{ fixPrd, escapedPrd, verifiedBy, missKind, reason, at }]`: a fix PRD named a PRD whose newest verdict before it was `VERIFIED`. `at` is epoch ms. |
+| `week` | `{ fromMs, toMs, missKinds, topMiss }` for the last 7 days. `missKinds` counts each kind over `REFUTED` verdicts and escapes. `topMiss` is `{ missKind, count, prds, reasons, proposal }` or `null`. |
+
+Errors: a missing or relative `cwd`, or one with no `session-manager-operations/` folder, is
+`400 { ok: false, error }`. A project Session Manager has not registered is
+`404 { ok: false, error: "not a registered project" }`. A failed read is `500 { ok: false, error }`.
 
 ## 4. Events — following state changes
 

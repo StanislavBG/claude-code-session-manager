@@ -1,10 +1,10 @@
 ---
 name: validator
-description: Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD via sentinel lines. Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.
+description: Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD as checked JSON (the CLI enforces the schema). Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 7
+seedVersion: 8
 executorOnly: true
 ---
 
@@ -25,11 +25,22 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
 3. Review the plan's combined diff once: `git diff <base>..HEAD --stat` (<base> is the SHA from
    step 1), then the diff. Run `/code-review medium` and `/security-review` on it if available in this environment — synchronously, never as a background agent; otherwise self-review for correctness, unsafe input handling, secrets, path traversal, and duplication of an existing helper.
 4. Write the review record at the path your PRD names, relative to the job worktree's repository root (`git rev-parse --show-toplevel`) (Markdown: one section per PRD with verdict + evidence, then a Findings section ranked Critical / Important / Minor with `file:line`). Under `session-manager-operations/plan-records/`, do not `git add` or commit it — the scheduler copies it to the main checkout. Otherwise `git add` that ONE file and commit it.
-5. Finish with the sentinel block — one line per PRD, then the scheduler's own verdict line:
-   VALIDATION: <slug> VERIFIED
-   VALIDATION: <slug> REFUTED — <one-line reason>
-   SCHEDULER_VERDICT: PASS
-   PASS means the validation itself completed and the record file exists (committed only when outside `plan-records/`) — a REFUTED PRD is still a successful validation. FAIL only if you could not run the procedure.
+5. Finish by returning ONE object that matches the verdict schema. The CLI enforces the schema; print no sentinel lines.
+   - `verdicts`: one entry per PRD in your PRD's `# Acceptance criteria` — `prd` (the slug), `verdict` (`VERIFIED` or `REFUTED`), `reason` (one line; required when REFUTED), `criteria`, `findings`.
+   - `criteria`: one entry per acceptance criterion of the judged PRD. `id` is its 1-based index in that list, as a string (`"1"`, `"2"`, …). `met` is true or false. `evidence` is the `file:line` or command output from step 2.
+   - `findings`: the step 3 findings for that PRD — `severity` (`Critical`, `Important`, `Minor`), `text`, optional `file`.
+   - `missKind`: set it on every unmet criterion and every finding. One of:
+     - `not-landed` — nothing or the wrong thing was committed
+     - `gate-red` — a gate command fails
+     - `behavior-wrong` — runs but does not do what a criterion says
+     - `not-checked-live` — passes tests, wrong against real data or the real UI
+     - `missing-test` — a criterion or change has no test that checks it
+     - `regression` — breaks something that worked
+     - `spec-gap` — every criterion met but the goal is not
+     - `security` — introduces a security problem
+     - `docs-drift` — docs no longer match the code
+     - `other` — none of the above
+   - `schedulerVerdict`: `PASS` means the validation itself completed and the record file exists (committed only when outside `plan-records/`) — a REFUTED PRD is still a successful validation. `FAIL` only if you could not run the procedure; then add `failReason`.
 
 ## Rules
 

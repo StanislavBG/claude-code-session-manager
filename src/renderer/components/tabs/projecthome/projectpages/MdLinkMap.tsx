@@ -18,7 +18,7 @@
  * plain SVG attributes.
  */
 import { useMemo, useState, type KeyboardEvent } from 'react'
-import type { MdNetwork } from '../../../../../preload/api'
+import type { MdDocRole, MdNetwork } from '../../../../../preload/api'
 import { MdFixList, buildFixList } from './MdFixList'
 
 const COLUMN_X = [44, 232, 470, 650] as const
@@ -32,7 +32,20 @@ const COLLAPSE_OVER = 8
 const LABEL_MAX = [14, 34, 26, 15] as const
 const HINT = 'Hover a doc to see where it lives and what links to it.'
 
-export type MdMapNodeKind = 'hub' | 'owner' | 'doc' | 'folder' | 'missing' | 'orphan'
+/**
+ * A doc node's kind is its census role (the doc kinds the List view and preview use):
+ * hub = Map, owner = Folder note, agent = Agent file, doc = Topic doc, record = History.
+ */
+export type MdMapNodeKind = 'hub' | 'owner' | 'agent' | 'doc' | 'record' | 'folder' | 'missing' | 'orphan'
+
+/** Census role → map node kind; `hub`/`owner` keep the data-kind values the map always drew. */
+const KIND_OF_ROLE: Record<MdDocRole, MdMapNodeKind> = {
+  map: 'hub',
+  scoped: 'owner',
+  agent: 'agent',
+  doc: 'doc',
+  record: 'record',
+}
 
 /** One drawn node: a doc, a collapsed folder, a missing link target, or an orphan group. */
 export interface MdMapNode {
@@ -142,6 +155,10 @@ export function layoutMdNetwork(net: MdNetwork, opts: LayoutOptions = {}): MdLin
     perFolder.set(key, (perFolder.get(key) ?? 0) + 1)
   }
 
+  // Draw each doc by its census role; a doc the census lacks keeps the scan's nodeType.
+  const roleOf = new Map<string, MdDocRole>()
+  for (const d of net.census?.docs ?? []) roleOf.set(d.path, d.role)
+
   const drafts = new Map<string, DraftNode>()
   /** Doc path → the map node drawing it. */
   const nodeOf = new Map<string, string>()
@@ -170,10 +187,11 @@ export function layoutMdNetwork(net: MdNetwork, opts: LayoutOptions = {}): MdLin
         order: Math.min(group?.order ?? order, order),
       })
     } else {
+      const role = roleOf.get(n.path)
       nodeOf.set(n.id, n.id)
       drafts.set(n.id, {
         id: n.id,
-        kind: n.type,
+        kind: role === undefined ? n.type : KIND_OF_ROLE[role],
         column,
         label: docLabel(n.path, LABEL_MAX[column]),
         path: n.path,
@@ -293,18 +311,23 @@ interface NodeLook {
 const NODE_LOOK: Record<MdMapNodeKind, NodeLook> = {
   hub: { r: 9, dot: 'fill-fg stroke-fg', strokeWidth: 0, label: 'fill-fg', weight: 'font-bold' },
   owner: { r: 5.5, dot: 'fill-fg-dim stroke-fg-dim', strokeWidth: 0, label: 'fill-fg-dim', weight: 'font-medium' },
+  agent: { r: 5, dot: 'fill-bg-hi stroke-fg-dim', strokeWidth: 2, label: 'fill-fg-dim', weight: 'font-medium' },
   doc: { r: 4, dot: 'fill-bg-hi stroke-fg-faint', strokeWidth: 1.3, label: 'fill-fg-faint', weight: 'font-normal' },
+  record: { r: 3.5, dot: 'fill-rule-inner stroke-rule-inner', strokeWidth: 0, label: 'fill-fg-faint', weight: 'font-normal' },
   folder: { r: 6.5, dot: 'fill-rule-inner stroke-fg-faint', strokeWidth: 1.3, label: 'fill-fg-faint', weight: 'font-normal' },
   missing: { r: 5, dot: 'fill-none stroke-accent', strokeWidth: 1.5, dash: '2.5 2', label: 'fill-accent', weight: 'font-medium' },
   orphan: { r: 5.5, dot: 'fill-bg-hi stroke-fg-faint', strokeWidth: 1.3, dash: '2.5 2', label: 'fill-fg-faint', weight: 'font-normal' },
 }
 
-const LEGEND: readonly { label: string; swatch: string }[] = [
-  { label: 'Map', swatch: 'h-2.5 w-2.5 bg-fg' },
-  { label: 'Folder note', swatch: 'h-[9px] w-[9px] bg-fg-dim' },
-  { label: 'Topic doc', swatch: 'h-[9px] w-[9px] border-[1.3px] border-fg-faint bg-bg-hi' },
-  { label: 'Finding', swatch: 'h-[9px] w-[9px] border-2 border-accent' },
-  { label: 'Missing', swatch: 'h-[9px] w-[9px] border-[1.5px] border-dashed border-accent' },
+/** In this order; the card shows an entry only when some node on the map is of it. */
+const LEGEND: readonly { label: string; swatch: string; shown: (n: MdMapNode) => boolean }[] = [
+  { label: 'Map', swatch: 'h-2.5 w-2.5 bg-fg', shown: (n) => n.kind === 'hub' },
+  { label: 'Folder note', swatch: 'h-[9px] w-[9px] bg-fg-dim', shown: (n) => n.kind === 'owner' },
+  { label: 'Agent file', swatch: 'h-[9px] w-[9px] border-2 border-fg-dim bg-bg-hi', shown: (n) => n.kind === 'agent' },
+  { label: 'Topic doc', swatch: 'h-[9px] w-[9px] border-[1.3px] border-fg-faint bg-bg-hi', shown: (n) => n.kind === 'doc' },
+  { label: 'History', swatch: 'h-[7px] w-[7px] bg-rule-inner', shown: (n) => n.kind === 'record' },
+  { label: 'Finding', swatch: 'h-[9px] w-[9px] border-2 border-accent', shown: (n) => n.flagged },
+  { label: 'Missing', swatch: 'h-[9px] w-[9px] border-[1.5px] border-dashed border-accent', shown: (n) => n.kind === 'missing' },
 ]
 
 /** What a hovered finding lights on the map. */
@@ -488,7 +511,7 @@ export function MdLinkMap({
       <div className="flex flex-wrap items-center gap-3.5 border-b border-rule-inner px-4 py-3">
         <span className="font-mono text-[10.5px] tracking-[.1em] text-fg-faint">LINK MAP</span>
         <span className="flex-1" />
-        {LEGEND.map((l) => (
+        {LEGEND.filter((l) => layout.nodes.some(l.shown)).map((l) => (
           <span key={l.label} data-testid="md-link-map-legend" className="flex items-center gap-1.5 text-[11.5px] text-fg-faint">
             <span className={`flex-none rounded-full ${l.swatch}`} />
             {l.label}

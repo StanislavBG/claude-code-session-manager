@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { MdMapGraph, MdNetworkCards, layoutMdNetwork, type MdLinkMapLayout, type MdMapNode } from '../MdLinkMap'
 import { useToast } from '../../../../../state/toast'
-import type { MdNetwork, MdNetworkEdge, MdNetworkFinding, MdNetworkNode } from '../../../../../../preload/api'
+import type { MdDoc, MdDocRole, MdNetwork, MdNetworkEdge, MdNetworkFinding, MdNetworkNode } from '../../../../../../preload/api'
 
 const CWD = '/p/alpha'
 
@@ -15,6 +15,14 @@ function doc(path: string, depth: number, linksOut = 0, linkedFrom = 1): MdNetwo
 
 function network(nodes: MdNetworkNode[], edges: MdNetworkEdge[], findings: MdNetworkFinding[] = []): MdNetwork {
   return { ok: true, root: 'CLAUDE.md', nodes, edges, findings, docs: nodes.length, links: edges.length, scopes: [], census: { docs: [], collections: [], counts: { tracked: 0, network: 0, records: 0, unlinked: 0, byRole: { map: 0, scoped: 0, agent: 0, record: 0, doc: 0 } }, gitWindow: { commits: 0, oldestMs: null }, warnings: [] } }
+}
+
+function censusDoc(path: string, role: MdDocRole): MdDoc {
+  return { path, role, depth: null, lines: null, bytes: null, lastCommitMs: null, commits: 0, linkedFrom: 0, codeRefs: 0, codeRefFiles: [], deadRefs: [], ambiguousRefs: [], changedSince: [], collection: null }
+}
+
+function withCensus(net: MdNetwork, roles: Record<string, MdDocRole>): MdNetwork {
+  return { ...net, census: { ...net.census, docs: Object.entries(roles).map(([p, r]) => censusDoc(p, r)) } }
 }
 
 const ARCH = Array.from({ length: 9 }, (_, i) => `docs/arch/a${i + 1}.md`)
@@ -169,6 +177,55 @@ describe('layoutMdNetwork', () => {
     expect(layout.findingNodes).toEqual([['README.md', MISSING], [ORPHAN_ID]])
   })
 
+  it('draws each doc by its census role: map, scoped, agent, doc, record', () => {
+    const paths = ['CLAUDE.md', 'src/CLAUDE.md', 'AGENTS.md', 'README.md', 'docs/history/2026-01.md']
+    const net = withCensus(
+      network(
+        [doc(paths[0], 0, 4, 0), ...paths.slice(1).map((p) => doc(p, 1))],
+        paths.slice(1).map((p) => ({ from: 'CLAUDE.md', to: p })),
+      ),
+      { 'CLAUDE.md': 'map', 'src/CLAUDE.md': 'scoped', 'AGENTS.md': 'agent', 'README.md': 'doc', 'docs/history/2026-01.md': 'record' },
+    )
+    const layout = layoutMdNetwork(net)
+    expect(layout.nodes.map((n) => [n.id, n.kind])).toEqual([
+      ['CLAUDE.md', 'hub'],
+      ['src/CLAUDE.md', 'owner'],
+      ['AGENTS.md', 'agent'],
+      ['README.md', 'doc'],
+      ['docs/history/2026-01.md', 'record'],
+    ])
+  })
+
+  it('a depth-1 README.md with census role doc is a Topic doc, not a Folder note; src/CLAUDE.md (scoped) is a Folder note', () => {
+    expect(doc('README.md', 1).type).toBe('owner')
+    const net = withCensus(
+      network(
+        [doc('CLAUDE.md', 0, 2, 0), doc('README.md', 1), doc('src/CLAUDE.md', 2)],
+        [{ from: 'CLAUDE.md', to: 'README.md' }, { from: 'README.md', to: 'src/CLAUDE.md' }],
+      ),
+      { 'CLAUDE.md': 'map', 'README.md': 'doc', 'src/CLAUDE.md': 'scoped' },
+    )
+    const layout = layoutMdNetwork(net)
+    expect(byId(layout, 'README.md').kind).toBe('doc')
+    expect(byId(layout, 'src/CLAUDE.md').kind).toBe('owner')
+  })
+
+  it('falls back to the scan nodeType for a doc missing from the census', () => {
+    const net = withCensus(
+      network(
+        [doc('CLAUDE.md', 0, 2, 0), doc('README.md', 1), doc('docs/a.md', 2)],
+        [{ from: 'CLAUDE.md', to: 'README.md' }, { from: 'README.md', to: 'docs/a.md' }],
+      ),
+      { 'docs/a.md': 'record' },
+    )
+    const layout = layoutMdNetwork(net)
+    expect(layout.nodes.map((n) => [n.id, n.kind])).toEqual([
+      ['CLAUDE.md', 'hub'],
+      ['README.md', 'owner'],
+      ['docs/a.md', 'record'],
+    ])
+  })
+
   it('reports the default 760x392 canvas with no options', () => {
     const layout = layoutMdNetwork(NET)
     expect([layout.width, layout.height]).toEqual([760, 392])
@@ -248,6 +305,24 @@ describe('MdNetworkCards LINK MAP', () => {
     expect(node(GROUP).textContent).toContain('arch/ · 9')
     expect(q('md-link-map-caption')!.textContent).toBe(HINT)
     expect(Object.values(stateOf()).every((s) => s === 'idle')).toBe(true)
+  })
+
+  it('the legend names every kind in order but shows only those on the map', () => {
+    const paths = ['CLAUDE.md', 'src/CLAUDE.md', 'AGENTS.md', 'README.md', 'docs/history/2026-01.md']
+    const full = withCensus(
+      network(
+        [doc(paths[0], 0, 5, 0), ...paths.slice(1).map((p) => doc(p, 1))],
+        [...paths.slice(1).map((p) => ({ from: 'CLAUDE.md', to: p })), { from: 'README.md', to: 'docs/missing.md', broken: true }],
+        [BROKEN],
+      ),
+      { 'CLAUDE.md': 'map', 'src/CLAUDE.md': 'scoped', 'AGENTS.md': 'agent', 'README.md': 'doc', 'docs/history/2026-01.md': 'record' },
+    )
+    mount(full)
+    expect(all('md-link-map-legend').map((l) => l.textContent)).toEqual([
+      'Map', 'Folder note', 'Agent file', 'Topic doc', 'History', 'Finding', 'Missing',
+    ])
+    act(() => root!.render(<MdNetworkCards cwd={CWD} network={withCensus(network([doc('CLAUDE.md', 0, 1, 0), doc('README.md', 1)], [{ from: 'CLAUDE.md', to: 'README.md' }]), { 'CLAUDE.md': 'map', 'README.md': 'doc' })} />))
+    expect(all('md-link-map-legend').map((l) => l.textContent)).toEqual(['Map', 'Topic doc'])
   })
 
   it('draws broken links as dashed accent edges and missing targets as dashed accent nodes', () => {

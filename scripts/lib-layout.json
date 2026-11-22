@@ -9,6 +9,7 @@
   "agentPersonaSchema": "persona-macro",
   "atomicFs": "util",
   "taskLedger": "tasks",
+  "taskSwitch": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

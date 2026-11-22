@@ -107,6 +107,8 @@ function machineStatePath() { return assertNotLiveRoot(path.join(schedulerHome()
 function schedulerStatePath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-state.json'), 'schedulerStatePath'); }
 function heartbeatPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-heartbeat.log'), 'heartbeatPath'); }
 function sessionSlotsConfigPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'session-slots-config.json'), 'sessionSlotsConfigPath'); }
+/** Machine-level per-project 'Scripts may run Tasks' switches, keyed by abs cwd (tasks/taskSwitch.cjs). */
+function taskSwitchesPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'task-switches.json'), 'taskSwitchesPath'); }
 /** Machine-level (project cwd, externalRef) -> Epic id index (epic/externalRefIndex.cjs). */
 function externalRefIndexPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'external-refs.json'), 'externalRefIndexPath'); }
 /** Machine-level "Needs you" items posted by outside apps (feedback-remote/needsYouStore.cjs). */
@@ -204,6 +206,7 @@ module.exports = {
   schedulerStatePath,
   heartbeatPath,
   sessionSlotsConfigPath,
+  taskSwitchesPath,
   externalRefIndexPath,
   needsYouPath,
   epicStateSnapshotPath,

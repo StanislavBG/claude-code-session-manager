@@ -10,6 +10,7 @@ import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
 import { useMcpChecks, mcpCheckKey } from '../../../state/mcpChecks'
 import { useToast } from '../../../state/toast'
+import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 import type { McpCheckRequest, McpCheckResult } from '../../../../preload/api'
 import { HOME, PROJECT_CWD, PROJECT_TAB } from './_navfaceHarness'
 
@@ -237,6 +238,7 @@ beforeEach(() => {
   useConfig.setState({ files: {}, watchRefs: {} })
   useMcpChecks.setState(PRISTINE_CHECKS, true)
   useToast.setState({ toasts: [] })
+  useConfigSearchFocus.getState().clear()
 })
 
 afterEach(() => {
@@ -885,5 +887,34 @@ describe('McpServers FROM PLUGINS', () => {
     expect(detailName()).toBe('linear')
     expect(q('mcp-detail-transport')!.textContent).toBe('plugin')
     expect(q('mcp-command')!.textContent).toBe('https://mcp.linear.app/mcp')
+  })
+})
+
+describe('McpServers config-search focus', () => {
+  it('selects the server a search result names, clearing a filter that hides it, then clears the request', async () => {
+    installApi({ ...SERVERS, eps: { command: 'e' }, zeta: { command: 'z' } })
+    await mount()
+    await typeInto(q('mcp-filter') as HTMLInputElement, 'ta')
+    expect(rowNames()).toEqual(['beta', 'delta', 'zeta'])
+    await act(async () => {
+      useConfigSearchFocus.getState().set('mcp', 'mcp:gamma')
+    })
+    await flush()
+    expect(rowNames()).toEqual(['alpha', 'beta', 'delta', 'eps', 'gamma', 'zeta'])
+    expect(selectedRows()).toEqual(['gamma'])
+    expect(detailName()).toBe('gamma')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+  })
+
+  it('keeps the current selection for an id that matches nothing, and still clears the request', async () => {
+    installApi()
+    await mount()
+    await click(q('mcp-row-delta'))
+    await act(async () => {
+      useConfigSearchFocus.getState().set('mcp', 'mcp:nope')
+    })
+    await flush()
+    expect(selectedRows()).toEqual(['delta'])
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
   })
 })

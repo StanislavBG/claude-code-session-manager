@@ -231,6 +231,33 @@ describe('Plugins list + detail: enable switch, file card, filter, + Add, inline
     act(() => root.unmount())
   })
 
+  it('a config-search focus for a plugin key selects it, clearing a filter that hides it, then clears the request', async () => {
+    installApi({ plugins: [{ name: 'alpha' }, { name: 'demo' }] })
+    const root = await mount()
+    const { useConfigSearchFocus } = await import('../../../state/configSearchFocus')
+    typeFilter('alpha')
+    expect(rowNames()).toEqual(['alpha'])
+    act(() => useConfigSearchFocus.getState().set('plugins', `plugins:${KEY}`))
+    await flushAsync(10)
+    expect(rowNames()).toEqual(['alpha', 'demo'])
+    expect(rowFor('demo').getAttribute('aria-selected')).toBe('true')
+    expect(q('[data-testid="config-detail-header"]')?.textContent).toContain('demo')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+    act(() => root.unmount())
+  })
+
+  it('a config-search focus that matches no plugin keeps the selection and still clears the request', async () => {
+    installApi({ plugins: [{ name: 'alpha' }, { name: 'demo' }] })
+    const root = await mount()
+    const { useConfigSearchFocus } = await import('../../../state/configSearchFocus')
+    act(() => rowFor('demo').click())
+    act(() => useConfigSearchFocus.getState().set('plugins', 'plugins:nope@market'))
+    await flushAsync(10)
+    expect(rowFor('demo').getAttribute('aria-selected')).toBe('true')
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+    act(() => root.unmount())
+  })
+
   it('uninstall confirms inline in the ⋯ menu (no window.confirm), calls uninstall and re-lists', async () => {
     const api = installApi()
     const confirm = vi.fn().mockReturnValue(true)

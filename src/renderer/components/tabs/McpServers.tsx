@@ -21,6 +21,7 @@ import { Z } from '../../lib/zLayers'
 import type { Scope } from '../../lib/scopes'
 import { mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { distinctPlaceholders } from '../../lib/mcpPlaceholders'
 import { listPluginMcpServers } from '../../lib/pluginContents'
 import type { InstalledPlugin, McpCheckRequest, McpCheckResult } from '../../../preload/api'
@@ -346,6 +347,26 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     watchFile(path)
     return () => unwatchFile(path)
   }, [path])
+
+  // A "Search all config" pick for this tab: once the server file has loaded, select the
+  // server (`mcp:<name>`), clearing a filter that would hide it; a miss keeps the selection.
+  // Either way the request is consumed.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  const focusFile = path ? files[path] : undefined
+  useEffect(() => {
+    if (focusTab !== 'mcp' || !focusId || !focusFile || focusFile.busy) return
+    const name = focusId.startsWith('mcp:') ? focusId.slice('mcp:'.length) : null
+    const { servers: focusServers } = parse(focusFile.draftRaw)
+    if (name !== null && focusServers && typeof focusServers === 'object' && Object.hasOwn(focusServers, name)) {
+      setFilter('')
+      setJsonFor(null)
+      setSelectedName(name)
+      setSelectedPluginId(null)
+    }
+    clearFocus()
+  }, [focusTab, focusId, focusFile, clearFocus])
 
   const [saveError, setSaveError] = useState<string | null>(null)
 

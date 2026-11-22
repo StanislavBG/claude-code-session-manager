@@ -14,6 +14,7 @@ import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { SkillDetail } from './extensions/SkillDetail'
 import { PluginSkillsGroup, usePluginSkills, type PluginSkillItem } from './extensions/PluginSkillsGroup'
 
@@ -321,6 +322,22 @@ function SkillsComponent({ onAdd, scope = 'user' }: { onAdd?: () => void; scope?
   }, [bases, scope])
 
   useEffect(() => { void loadItems() }, [loadItems])
+
+  // A "Search all config" pick for this tab: once the list has landed, select the item
+  // (`skills:<path>`), clearing a filter that would hide it; a miss keeps the selection.
+  // Either way the request is consumed.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  useEffect(() => {
+    if (focusTab !== 'skills' || !focusId || !listed) return
+    const path = focusId.startsWith('skills:') ? focusId.slice('skills:'.length) : null
+    if (path && items.some((i) => i.path === path)) {
+      setFilter('')
+      setSelectedPath(path)
+    }
+    clearFocus()
+  }, [focusTab, focusId, listed, items, clearFocus])
 
   // Invalidate any still-in-flight loadItems on actual unmount — the seq bump
   // above only covers a NEW call superseding an old one; nothing else calls

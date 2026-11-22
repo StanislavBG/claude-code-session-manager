@@ -8,6 +8,7 @@ import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
 import { useConfig } from '../../../state/config'
 import { toast } from '../../../state/toast'
+import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 
 /** Scenario tests for the Skills page: the 3a list column and its write paths (create, toggle, remove). */
 
@@ -190,6 +191,7 @@ beforeEach(() => {
   useLayout.setState({ navFace: 'home' })
   useSessions.setState({ tabs: [], activeTabId: null })
   useConfig.setState({ files: {}, watchRefs: {} })
+  useConfigSearchFocus.getState().clear()
 })
 
 afterEach(() => {
@@ -878,5 +880,34 @@ describe('Skills FROM PLUGINS (3a)', () => {
     const el = await mount({ scope: 'project' })
     expect(q(el, 'skills-section-plugins')).toBeNull()
     expect(api.plugins.list).not.toHaveBeenCalled()
+  })
+})
+
+describe('Skills config-search focus', () => {
+  it('selects the skill a search result names, clearing a filter that hides it, then clears the request', async () => {
+    installApi()
+    const el = await mount()
+    await typeFilter(el, 'skill-one')
+    expect(listed(el)).toEqual(['/skill-one'])
+    await act(async () => {
+      useConfigSearchFocus.getState().set('skills', `skills:${TWO}`)
+      await flush()
+    })
+    expect(listed(el)).toEqual(['/skill-one', '/skill-two'])
+    expect(isSelected(cardFor(el, 'skill-two'))).toBe(true)
+    expect(isSelected(cardFor(el, 'skill-one'))).toBe(false)
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
+  })
+
+  it('keeps the current selection for an id that matches nothing, and still clears the request', async () => {
+    installApi()
+    const el = await mount()
+    await click(rowOf(cardFor(el, 'skill-two'))!)
+    await act(async () => {
+      useConfigSearchFocus.getState().set('skills', `skills:${SKILLS_DIR}/missing/SKILL.md`)
+      await flush()
+    })
+    expect(isSelected(cardFor(el, 'skill-two'))).toBe(true)
+    expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
   })
 })

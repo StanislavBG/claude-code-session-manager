@@ -14,6 +14,7 @@ import { PluginDetail, type PluginJumpTab } from './plugins/PluginDetail'
 import { PluginSwitch } from './plugins/PluginSwitch'
 import { useLayout } from '../../state/layout'
 import { toast, useToast } from '../../state/toast'
+import { useConfigSearchFocus } from '../../state/configSearchFocus'
 
 interface InstalledPluginEntry {
   scope: string
@@ -186,6 +187,23 @@ function PluginsComponent({ onAdd, onJump }: PluginsProps) {
   }, [home])
 
   useEffect(() => { void loadRows() }, [loadRows])
+
+  // A "Search all config" pick for this tab: once the list has loaded, select the plugin
+  // (`plugins:<name@marketplace>`), clearing a filter that would hide it; a miss keeps the
+  // selection. Either way the request is consumed.
+  const focusTab = useConfigSearchFocus((st) => st.tab)
+  const focusId = useConfigSearchFocus((st) => st.id)
+  const clearFocus = useConfigSearchFocus((st) => st.clear)
+  useEffect(() => {
+    if (focusTab !== 'plugins' || !focusId || loading) return
+    const key = focusId.startsWith('plugins:') ? focusId.slice('plugins:'.length) : null
+    const row = key ? rows.find((r) => r.key === key) : undefined
+    if (row) {
+      setFilter('')
+      setSelected(row.path)
+    }
+    clearFocus()
+  }, [focusTab, focusId, loading, rows, clearFocus])
 
   // Invalidate any still-in-flight loadRows on actual unmount — the seq bump
   // above only covers a NEW call superseding an old one; nothing else calls

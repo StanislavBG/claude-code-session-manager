@@ -10,7 +10,10 @@
  *
  * Scheduler + chat liveness come in as injected functions (listJobs,
  * isTabBusy) with safe defaults (no jobs, never busy) so this module needs no
- * running scheduler. An unregistered project reads as nothing.
+ * running scheduler. Open-Epic reads (active index) skip the registration
+ * check: it enumerates ~/.claude/projects (11k+ dirs, ~21 s cold). Only the
+ * archive path checks it, because readArchived requires a registered project,
+ * so a completed Epic in an unregistered project reads as nothing.
  */
 
 const path = require('node:path');
@@ -137,9 +140,10 @@ async function openRecord(cwd, epicId, session, index, jobs, awaiting, isTabBusy
   return buildRecord(cwd, epicId, session, eventsOf(index, epicId), jobs, needsInput, chatBusy);
 }
 
-/** The archived (completed) session + its events, or null. */
+/** The archived (completed) session + its events, or null (also for an unregistered project). */
 function archivedEntry(cwd, epicId, projectRoots) {
   try {
+    if (!isRegistered(cwd, projectRoots)) return null;
     const res = readArchived(cwd, epicId, { projectRoots });
     const data = res && res.exists ? res.data : null;
     if (!isObj(data) || !str(data.archivedAt) || !isObj(data.session)) return null;
@@ -217,7 +221,7 @@ async function getEpicRecord(cwd, opts = {}) {
       runsRoot,
       resolveTranscriptPath = resolveEpicTranscriptPath,
     } = isObj(opts) ? opts : {};
-    if (!isRegistered(cwd, projectRoots)) return null;
+    if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) return null;
 
     let epicId = str(id);
     if (!epicId && str(externalRef)) {
@@ -273,9 +277,8 @@ async function listOpenEpicRecords(cwd, opts = {}) {
       state,
       isTabBusy = () => false,
       listJobs = () => [],
-      projectRoots = defaultProjectRoots,
     } = o;
-    if (!isRegistered(cwd, projectRoots)) return empty;
+    if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) return empty;
 
     const index = readActiveIndex(cwd);
     const open = [];

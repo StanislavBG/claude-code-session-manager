@@ -147,13 +147,43 @@ test('a sparse mirror file without archivedAt is ignored', async () => {
   expect(await getEpicRecord(cwd, opts(cwd, {}))).toBeNull();
 });
 
-test('an unregistered project yields null and an empty list', async () => {
+test('an unregistered project: an archive lookup yields null; open reads skip the registration scan', async () => {
   const cwd = await mkTmp('sm-outside-read-cwd-');
   setup(cwd, [session('e-1', cwd)]);
+  writeFile(cwd, 'e-done.json', {
+    session: session('e-done', cwd, { status: 'completed' }),
+    events: [],
+    archivedAt: '2026-11-05T00:00:01.000Z',
+  });
   const other = { projectRoots: () => ['/not/this/project'] };
-  expect(await getEpicRecord(cwd, { ...other, id: 'e-1' })).toBeNull();
+  expect(await getEpicRecord(cwd, { ...other, id: 'e-done' })).toBeNull();
+  expect(await getEpicRecord(cwd, { ...other, id: 'e-missing' })).toBeNull();
+  expect((await getEpicRecord(cwd, { ...other, id: 'e-1' })).epicId).toBe('e-1');
   const page = await listOpenEpicRecords(cwd, other);
-  expect(page).toEqual({ epics: [], total: 0, limit: 50, offset: 0, hasMore: false });
+  expect(page.epics.map((r) => r.epicId)).toEqual(['e-1']);
+});
+
+test('projectRoots is never called for open Epics; it is for a completed one', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-open', cwd, { source: { producer: 'p', externalRef: 'ref-open' } })]);
+  writeFile(cwd, 'e-done.json', {
+    session: session('e-done', cwd, { status: 'completed' }),
+    events: [],
+    archivedAt: '2026-11-05T00:00:01.000Z',
+  });
+  await recordExternalRef({ cwd, externalRef: 'ref-open', epicId: 'e-open', producer: 'p' });
+  let calls = 0;
+  const projectRoots = () => { calls++; return [cwd]; };
+
+  expect((await getEpicRecord(cwd, { projectRoots, id: 'e-open' })).epicId).toBe('e-open');
+  expect(calls).toBe(0);
+  expect((await getEpicRecord(cwd, { projectRoots, externalRef: 'ref-open' })).epicId).toBe('e-open');
+  expect(calls).toBe(0);
+  expect((await listOpenEpicRecords(cwd, { projectRoots })).total).toBe(1);
+  expect(calls).toBe(0);
+
+  expect((await getEpicRecord(cwd, { projectRoots, id: 'e-done' })).state).toBe('closed');
+  expect(calls).toBeGreaterThanOrEqual(1);
 });
 
 test('lookup by externalRef finds open and completed Epics', async () => {

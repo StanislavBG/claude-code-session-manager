@@ -3,7 +3,8 @@
 Root `CLAUDE.md` holds the one-line laws; this file holds the rationale behind each. **Read this before
 changing anything in the TAB → EPIC → PRD chain.** Any new feature touching sessions, navigation, or
 per-project state must map onto the TAB → operations-root → EPIC → session hierarchy, never a parallel
-scoping scheme.
+scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → operations-root `tasks/`
+(owner-approved 2026-11-22).
 
 ## Hierarchy
 
@@ -316,6 +317,27 @@ scoping scheme.
 - **PRD authoring is API-only.** `scheduler_create_prd` validates frontmatter, atomically allocates `NN`, and
   enforces the Epic-join rule. A hand-written PRD is never sanctioned (`audit-ops-hygiene.cjs` and `ops-sweep`
   flag one); with the app not running, the agent stops and asks the human to start it.
+
+## Tasks
+
+- **A Task is one headless `claude -p` run for a project** — with no worktree, no git, no Epic and no PRD. It is
+  the one Epic-less unit in the hierarchy, scoped TAB → operations-root `tasks/` (owner-approved 2026-11-22).
+- **A Task never mints an Epic.** The single-creator law is unchanged: nothing about a Task touches
+  `epicMint.cjs` or `MINT_AUTHORITIES`.
+- **Only a script starts one**, via `POST /admin/tasks`, and only while a human has **'Scripts may run Tasks'**
+  on for that project (Scheduler → Tasks pill; `lib/tasks/taskSwitch.cjs`). Switch off = the route refuses.
+- **The call is the caller's, not ours.** `--model` and `--effort` come from the named persona; the prompt is
+  passed unchanged and no persona body is appended. `--no-session-persistence` applies unless the caller asks
+  to persist or resume a session; a persisted Task's transcript is skipped by History, so its cost is counted
+  once, from the ledger.
+- **Slot policy.** Each Task acquires a slot from `lib/scheduler/sessionSlots.cjs` (the sole machine-wide cap)
+  and is served ahead of pending PRD jobs. When the cap is ≥ 2 and some project has Tasks on, one slot is held
+  for interactive work. Nothing already running is interrupted to make room; a Task that cannot get a slot in
+  time ends `slot_timeout`.
+- **Storage: the `tasks/` runtime namespace** (writer `tasks` in `opsOwnership.cjs`; sole writer
+  `lib/tasks/taskLedger.cjs`). Day-file JSONL summaries plus `bodies/<taskId>.json`; retention is `tasksDays`
+  from `opsRetentionSettings.cjs`. A run made without Session Manager ("ran without SM") can be imported as an
+  `imported` ledger line. Layout: [`../tasks/README.md`](../tasks/README.md).
 
 ## Single-writer law
 

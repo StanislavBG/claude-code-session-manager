@@ -1337,6 +1337,40 @@ describe('EpicDetail (PRD 827)', () => {
     expect(chip.className).toContain('bg-bg')
   })
 
+  it.each([
+    { name: 'completed validate PRD', slug: '3441-validate-continue-in-fresh-session', outcome: 'completed', verdict: undefined, withJob: false, word: 'completed', tone: 'bg-sage' },
+    { name: 'completed PRD, verified verdict', slug: '3309-external-ref-schema', outcome: 'completed', verdict: 'verified' as const, withJob: false, word: 'verified', tone: 'bg-sage' },
+    { name: 'completed PRD, refuted verdict', slug: '3309-external-ref-schema', outcome: 'completed', verdict: 'refuted' as const, withJob: false, word: 'refuted', tone: 'bg-accent' },
+    { name: 'completed PRD, no verdict yet', slug: '3309-external-ref-schema', outcome: 'completed', verdict: undefined, withJob: false, word: 'claimed', tone: undefined },
+    { name: 'failed PRD', slug: '3309-external-ref-schema', outcome: 'failed', verdict: undefined, withJob: false, word: 'failed', tone: 'bg-accent' },
+    { name: 'needs_review PRD', slug: '3309-external-ref-schema', outcome: 'needs_review', verdict: undefined, withJob: false, word: 'needs review', tone: 'bg-butter' },
+    { name: 'failed validate PRD', slug: '3441-validate-continue-in-fresh-session', outcome: 'failed', verdict: undefined, withJob: false, word: 'failed', tone: 'bg-accent' },
+    { name: 'queue row present wins over a different outcome', slug: '3309-external-ref-schema', outcome: 'failed', verdict: undefined, withJob: true, word: 'running', tone: undefined },
+    { name: 'validate PRD with queue row present is unchanged', slug: '3441-validate-continue-in-fresh-session', outcome: 'completed', verdict: undefined, withJob: true, word: 'running', tone: undefined },
+  ])('PRD 3466: a dispatched-PRD row falls back to its finish outcome when the queue row is gone — $name', async ({ slug, outcome, verdict, withJob, word, tone }) => {
+    installWindowApiMock()
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const append = (e: any) => {
+      const prev = usePromptSessions.getState().events[session.id].slice(-1)[0]
+      usePromptSessions.getState().appendPromptSessionEvent(session.id, { causedByEventId: prev.id, ...e })
+    }
+    const bare = slug.replace(/^\d+-/, '')
+    append({ kind: 'prd_created', prdSlug: slug })
+    append({ kind: 'response', text: `PRD ${slug} finished: ${outcome}. Check Scheduler for details.`, prdSlug: slug, outcome, validation: 'unvalidated', agentType: bare.startsWith('validate-') ? 'validator' : 'dev-lead' })
+    if (verdict) append({ kind: 'response', text: `Validation ${verdict.toUpperCase()}: ${bare}`, prdSlug: bare, outcome: 'completed', validation: verdict })
+    useScheduleState.setState({ snapshot: { jobs: withJob ? [{ slug, status: 'running' } as any] : [] } as any, loaded: true })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
+    expect(chip.getAttribute('title')).toContain(word)
+    expect(chip.getAttribute('aria-label')).toContain(word)
+    expect(chip.getAttribute('title')).not.toContain('ready to run')
+    if (tone) expect(chip.className).toContain(tone)
+    if (word === 'claimed') expect(chip.className).not.toContain('bg-sage')
+  })
+
   it('CORE (PRD 987): the dispatched-PRD chip renders the CLAIMED tone — never green — when the job self-reports completed but the Epic has not yet verified it', async () => {
     installWindowApiMock()
 
@@ -1376,7 +1410,7 @@ describe('EpicDetail (PRD 827)', () => {
     { name: 'no verdict (unvalidated)', verdict: undefined, withJob: true, word: 'claimed', tone: undefined },
     { name: 'verified, queue row gone', verdict: 'verified' as const, withJob: false, word: 'verified', tone: 'bg-sage' },
     { name: 'refuted, queue row gone', verdict: 'refuted' as const, withJob: false, word: 'refuted', tone: 'bg-accent' },
-    { name: 'no verdict, queue row gone', verdict: undefined, withJob: false, word: 'ready to run', tone: 'bg-bg' },
+    { name: 'no verdict, queue row gone', verdict: undefined, withJob: false, word: 'claimed', tone: undefined },
   ])('PRD 3457: a dispatched-PRD row takes its status from a bare-slug verdict event — $name', async ({ verdict, withJob, word, tone }) => {
     installWindowApiMock()
 

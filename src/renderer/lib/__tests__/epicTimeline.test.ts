@@ -136,6 +136,32 @@ describe('buildEpicTimeline', () => {
     })
   })
 
+  describe('latestOutcomeBySlug keyed by bare slug', () => {
+    const at = (i: number) => new Date(T0 + i * 1000).toISOString()
+    const base = (i: number, extra: Partial<PromptSessionEvent>): PromptSessionEvent => ({
+      id: `o${i}`, promptSessionId: 'p', kind: 'response', causedByEventId: null, at: at(i), ...extra,
+    })
+
+    it('maps a numbered finish event to its outcome under the bare slug', () => {
+      const m = buildEpicTimeline([], [
+        base(0, { kind: 'prd_created', prdSlug: '3441-validate-continue-in-fresh-session' }),
+        base(1, { prdSlug: '3441-validate-continue-in-fresh-session', outcome: 'completed', validation: 'unvalidated' }),
+      ], 'standard').latestOutcomeBySlug
+      expect([...m]).toEqual([['validate-continue-in-fresh-session', 'completed']])
+    })
+
+    it('a later event for the same PRD wins; events without slug or outcome are ignored', () => {
+      const m = buildEpicTimeline([], [
+        base(0, { prdSlug: '3309-external-ref-schema', outcome: 'failed' }),
+        base(1, { prdSlug: '3310-external-ref-schema', outcome: 'needs_review' }),
+        base(2, { prdSlug: 'external-ref-schema' }),
+        base(3, { outcome: 'completed' }),
+        base(4, { kind: 'prd_created', prdSlug: 'external-ref-schema', outcome: 'completed' }),
+      ], 'standard').latestOutcomeBySlug
+      expect([...m]).toEqual([['external-ref-schema', 'needs_review']])
+    })
+  })
+
   it('handles empty input', () => {
     const got = buildEpicTimeline([], [], 'standard')
     expect(got.timeline).toEqual([])

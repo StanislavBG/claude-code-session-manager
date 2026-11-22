@@ -7,6 +7,7 @@ import { questionCardStates, type QuestionCardState } from './questionCardState'
 import { bareSlug } from './depSlugResolve'
 
 export type ValidationVerdict = 'unvalidated' | 'validating' | 'verified' | 'refuted'
+export type PrdOutcome = NonNullable<PromptSessionEvent['outcome']>
 export type TimelineEvent = PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' }
 
 export type TimelineItem =
@@ -29,6 +30,10 @@ export interface EpicTimeline {
   revealLevel: ReturnType<typeof filterTurnsByVerbosity>['revealLevel']
   /** Keyed by bareSlug(prdSlug) — look it up the same way. */
   latestValidationBySlug: Map<string, ValidationVerdict>
+  /** Keyed by bareSlug(prdSlug): the outcome of the newest response event
+   *  carrying both a prdSlug and an outcome — what a PRD finished as, still
+   *  known after its queue row is gone. */
+  latestOutcomeBySlug: Map<string, PrdOutcome>
   timeline: TimelineItem[]
   /** Index in `visibleTurns` of the last assistant turn, or -1. */
   lastAssistantIndex: number
@@ -93,14 +98,16 @@ export function buildEpicTimeline(
   // (3309-x) but the validator's verdict carries the bare one (x). Later
   // events overwrite earlier ones for the same PRD.
   const latestValidationBySlug = new Map<string, ValidationVerdict>()
+  const latestOutcomeBySlug = new Map<string, PrdOutcome>()
   const eventItems: TimelineItem[] = []
   for (const e of sessionEvents) {
     if (e.kind === 'response' && e.prdSlug && e.validation) latestValidationBySlug.set(bareSlug(e.prdSlug), e.validation)
+    if (e.kind === 'response' && e.prdSlug && e.outcome) latestOutcomeBySlug.set(bareSlug(e.prdSlug), e.outcome)
     if (e.kind === 'prd_created' || e.kind === 'closed' || (e.kind === 'response' && !isDuplicateResponseEvent(e))) {
       eventItems.push({ kind: 'event', at: Date.parse(e.at), event: e as TimelineEvent })
     }
   }
 
   const timeline = [...turnItems, ...eventItems].sort((a, b) => a.at - b.at)
-  return { visibleTurns, hiddenCount, revealLevel, latestValidationBySlug, timeline, lastAssistantIndex }
+  return { visibleTurns, hiddenCount, revealLevel, latestValidationBySlug, latestOutcomeBySlug, timeline, lastAssistantIndex }
 }

@@ -790,7 +790,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // Verbosity dial (lib/chatVerbosity.ts) is a pure DISPLAY filter applied
   // after dedup; the whole derivation lives in buildEpicTimeline, memoized on
   // turns/events/verbosity only so live-stream deltas never recompute it.
-  const { visibleTurns, hiddenCount, revealLevel, latestValidationBySlug, timeline, lastAssistantIndex } = useMemo(
+  const { visibleTurns, hiddenCount, revealLevel, latestValidationBySlug, latestOutcomeBySlug, timeline, lastAssistantIndex } = useMemo(
     () => buildEpicTimeline(turns, sessionEvents, verbosity),
     [turns, sessionEvents, verbosity],
   )
@@ -1289,9 +1289,19 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 const e = item.event
                 if (e.kind === 'prd_created') {
                   const prdJob = scheduleJobs.find((j) => j.slug === e.prdSlug) ?? null
-                  const validation = e.prdSlug ? latestValidationBySlug.get(bareSlug(e.prdSlug)) : undefined
-                  // A finished PRD's queue row is gone, so a final verdict is the only source left.
-                  const prdStatus = !prdJob && (validation === 'verified' || validation === 'refuted') ? validation : prdStatusFor(prdJob, validation)
+                  const bare = e.prdSlug ? bareSlug(e.prdSlug) : undefined
+                  const validation = bare ? latestValidationBySlug.get(bare) : undefined
+                  const outcome = bare ? latestOutcomeBySlug.get(bare) : undefined
+                  // A finished PRD's queue row is gone; its finish event's outcome is what
+                  // remains. A validate PRD never gets a verdict of its own, so its outcome
+                  // stands as-is; any other PRD folds in its verdict.
+                  const prdStatus: PrdDisplayStatus = prdJob
+                    ? prdStatusFor(prdJob, validation)
+                    : outcome
+                      ? (bare!.startsWith('validate-') ? outcome : resolveValidatedStatus(outcome, validation))
+                      : validation === 'verified' || validation === 'refuted'
+                        ? validation
+                        : prdStatusFor(null, validation)
                   const tone = STATUS_TONE[prdStatus]
                   const prdStatusLabel = `PRD "${e.prdSlug}" — ${tone.label} — open in Scheduler`
                   return (

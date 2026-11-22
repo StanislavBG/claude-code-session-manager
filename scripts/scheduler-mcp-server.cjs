@@ -414,6 +414,10 @@ const CREATE_PRD_ITEM_SCHEMA = {
       type: 'array', items: { type: 'string' },
       description: 'Required with deliverable: "artifact" (and refused without it): every git-excluded file this PRD writes during the run, e.g. a built file in a gitignored folder. Relative paths, never containing "..", no commas or brackets. Each must be non-empty and freshly written.',
     },
+    riskTools: {
+      type: 'array', items: { type: 'string' }, maxItems: 20,
+      description: 'Optional: the tool-risk rules this PRD is cleared to call although they are marked irreversible, money or public in ~/.claude/tool-risk.json or <project>/.claude/tool-risk.json. Same syntax as the marks (mcp__server__tool, mcp__server__*, Bash(prefix:*)). At most 20.',
+    },
     quietMachine: {
       type: 'boolean',
       description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',

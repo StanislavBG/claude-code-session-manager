@@ -112,6 +112,8 @@ const MCP_TOOL_CATALOG = [
       + 'disk by the verifier, and declaring them is the ONLY way an artifact-only PRD can pass the finish '
       + 'protocol without a commit. Each requires the other (the write is refused if only one is given), and '
       + 'no path may contain "..". '
+      + '`riskTools` (optional, up to 20) names the tool-risk rules this PRD is cleared to call although they are '
+      + 'marked irreversible, money or public in a tool-risk.json, in the same syntax as the marks. '
       + 'A bare slug already used by a PRD in ANOTHER Epic is refused as a cross-Epic duplicate (the error names '
       + 'the exact NN slugs); add them to dependsOn, or call again with allowDuplicateOf: [those NN slugs] for a '
       + 'deliberate duplicate. '

@@ -471,3 +471,15 @@ describe('project_video_review_write handler', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+test('scheduler_create_prd(s) advertise riskTools (array of strings, max 20) and the catalog names it', () => {
+  const create = TOOLS.find((t) => t.name === 'scheduler_create_prd');
+  const rt = create.inputSchema.properties.riskTools;
+  expect(rt).toMatchObject({ type: 'array', items: { type: 'string' }, maxItems: 20 });
+  expect(rt.description).toMatch(/tool-risk\.json/);
+  expect(rt.description).toMatch(/Bash\(prefix:\*\)/);
+  const batch = TOOLS.find((t) => t.name === 'scheduler_create_prds');
+  expect(batch.inputSchema.properties.prds.items.properties.riskTools).toEqual(rt);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_create_prd');
+  expect(composeDescription(entry)).toMatch(/riskTools/);
+});

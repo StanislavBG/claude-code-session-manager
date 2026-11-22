@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="fonts.css">
+<style>
+body{margin:0;background:#e6dcc6;font-family:Geist,system-ui,sans-serif;color:#2a221a}
+a{color:#b85c34}a:hover{color:#814024}
+.dv-turn{padding:44px 48px 40px;border-bottom:1px solid rgba(42,34,26,.12);scroll-margin-top:16px;width:max-content}
+.dv-thd{display:flex;align-items:baseline;gap:12px;margin:0 0 22px}
+.dv-tid{font:600 11px 'IBM Plex Mono',ui-monospace,monospace;padding:3px 8px;background:#2a221a;color:#fbf6ec;border-radius:4px;text-decoration:none}
+.dv-tname{font:600 15px/1.2 Geist,system-ui,sans-serif;color:#2a221a}
+.dv-opts{display:flex;flex-wrap:nowrap;gap:48px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:12px;scroll-margin-top:16px}
+.dv-oid{font:600 11.5px 'IBM Plex Mono',ui-monospace,monospace;padding:3px 8px;background:rgba(42,34,26,.1);color:#2a221a;border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:10px;font:400 15px/1.35 Geist,system-ui,sans-serif;color:#5b4a36;height:24px}
+.dv-card{max-width:100%;background:#f6efe1;border:1px solid rgba(42,34,26,.12);border-radius:10px;box-shadow:0 2px 6px rgba(42,34,26,.08);overflow:hidden}
+.dv-opt:target .dv-oid{background:#b85c34;color:#fbf6ec}
+.dv-next{margin:28px 0 0;font:14px/1.5 Geist,system-ui,sans-serif;color:#5b4a36}
+</style>
+</helmet>
+<section class="dv-turn" id="t4">
+  <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Final — Workbench for projects and Home, with memory suggest + edit</span></div>
+  <a href="Claude%20Config%20Final.dc.html" style="display:inline-flex;align-items:center;gap:10px;padding:16px 22px;border-radius:12px;background:#2a221a;color:#fbf6ec;font-size:17px;font-weight:600;text-decoration:none">Open Claude Config Final →</a>
+</section>
+<section class="dv-turn" id="t3">
+  <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Memory → "Check against the repo": what actually runs, and the click path (in <a class="dv-oid" href="#2a">2a</a>)</span></div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 40px minmax(0,1.15fr) minmax(0,1.15fr);gap:16px;align-items:stretch;margin:0 0 40px;width:3600px">
+    <div style="padding:22px 24px;border-radius:14px;background:#f6efe1;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px"><span style="font-family:Newsreader,Georgia,serif;font-size:30px;line-height:1;color:#b85c34">①</span><span style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">YOU CLICK</span><span style="font-size:19px;font-weight:600">Check against the repo</span><span style="font-size:15px;line-height:1.55;color:#5b4a36">It runs only when you click. Nothing runs when the page opens.</span><span style="margin-top:auto;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#4e5739">free</span></div>
+    <div style="padding:22px 24px;border-radius:14px;background:#f6efe1;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px"><span style="font-family:Newsreader,Georgia,serif;font-size:30px;line-height:1;color:#b85c34">②</span><span style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">LOCAL CHECKS · NO AI</span><span style="font-size:19px;font-weight:600">Gather the evidence</span><span style="font-size:15px;line-height:1.55;color:#5b4a36">Every path and [[link]] in the memory is resolved against the repo's git-tracked files and git renames. The app also lists the project's markdown docs and where the memory's terms already appear.</span><span style="margin-top:auto;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#4e5739">free · about a second</span></div>
+    <div style="padding:22px 24px;border-radius:14px;background:#2a221a;color:#efe6d3;display:flex;flex-direction:column;gap:8px"><span style="font-family:Newsreader,Georgia,serif;font-size:30px;line-height:1;color:#e4b85a">③</span><span style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#e4b85a">ONE CLAUDE -P CALL</span><span style="font-size:19px;font-weight:600;color:#fbf6ec">sonnet · up to 2 min</span><span style="font-size:15px;line-height:1.55;color:#cfc0a2">Claude gets the memory and that evidence, and must answer with exactly one verdict as JSON. It has no tools, so it can't open files, run commands or edit anything. The app rejects malformed answers.</span><span style="margin-top:auto;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#e8a988">paid · takes 1 session slot</span></div>
+    <div style="padding:22px 24px;border-radius:14px;background:#f6efe1;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px"><span style="font-family:Newsreader,Georgia,serif;font-size:30px;line-height:1;color:#b85c34">④</span><span style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">YOU DECIDE</span><span style="font-size:19px;font-weight:600">Apply or discard</span><span style="font-size:15px;line-height:1.55;color:#5b4a36">Nothing is written until you click. Update and archive can be undone. Keep marks the memory verified. Fold gives you a prompt to start a new Epic.</span><span style="margin-top:auto;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#4e5739">free</span></div>
+    <div></div>
+    <div style="padding:22px 26px;border-radius:14px;background:#fbf6ec;border:2px solid #2a221a;display:flex;flex-direction:column;gap:10px"><span style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#b85c34">MACRO? SESSION? NEITHER.</span><span style="font-family:Newsreader,Georgia,serif;font-size:24px;line-height:1.25">One question, one answer — like the Ask box, not like an Epic.</span><span style="font-size:15px;line-height:1.55;color:#5b4a36">A macro or Epic is a real Claude session with tools that edits files over many turns. This check opens nothing in Sessions, leaves nothing running, and writes nothing until you apply. Only a fold leads to a real session: the Epic you start from its prompt.</span><span style="margin-top:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8a7a60">src/main/memoryAssist.cjs · proposeFix → runGated</span></div>
+    <div style="padding:22px 26px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:10px"><span style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#b85c34">TODAY, TWO BUTTONS BLUR THIS</span><span style="font-family:Newsreader,Georgia,serif;font-size:24px;line-height:1.25">"Is this still accurate?" opens Ask, which can't see the repo.</span><span style="font-size:15px;line-height:1.55;color:#5b4a36">Ask answers only from the memory files themselves. "Review with assistant" is the button that actually checks the repo. The redesign gives the check one name and one place, and keeps Ask as a separate link.</span><span style="margin-top:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8a7a60">LinksRail.tsx · MemoryReader.tsx</span></div>
+  </div>
+
+  <div class="dv-opts">
+    <div class="dv-opt" id="3a">
+      <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><b style="font-weight:600;color:#2a221a">Step 1 · Read, then click</b> — one entry point, with the cost stated up front</div>
+      <div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="memory" band="flush" step="read" hint-size="1910px,1118px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="3b">
+      <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a><b style="font-weight:600;color:#2a221a">Step 2 · About 20 s</b> — local checks done, Claude deciding; a 5th session dot lights in the footer</div>
+      <div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="memory" band="flush" step="running" hint-size="1910px,1118px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="3c">
+      <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a><b style="font-weight:600;color:#2a221a">Step 3 · One verdict</b> — the reason and the exact diff, above the memory</div>
+      <div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="memory" band="flush" step="verdict" hint-size="1910px,1118px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="3d">
+      <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a><b style="font-weight:600;color:#2a221a">Step 4 · Applied</b> — memory rewritten in place, with Undo</div>
+      <div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="memory" band="flush" step="done" hint-size="1910px,1118px"></dc-import></div>
+    </div>
+  </div>
+
+  <div style="margin-top:44px;display:grid;grid-template-columns:repeat(4,440px) 40px repeat(3,300px);gap:18px;align-items:stretch">
+    <div style="grid-column:1 / span 4;font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">THE FOUR VERDICTS STEP 3 CAN SHOW — FIX_POLICY: "KEEP THE MEMORY FOLDER SMALL"</div>
+    <div></div>
+    <div style="grid-column:6 / span 3;font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">WHEN IT CAN'T RUN · NOTHING IS CHANGED</div>
+    <div style="border-radius:14px;border:1px solid rgba(111,125,82,.5);background:#fbf6ec;overflow:hidden;display:flex;flex-direction:column"><div style="padding:11px 16px;background:rgba(111,125,82,.16);font-size:11px;font-weight:700;letter-spacing:.1em;color:#4e5739">KEEP</div><div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1"><span style="font-size:16px;font-weight:600">Looks accurate — keep</span><span style="font-size:14px;line-height:1.5;color:#5b4a36">The flagged references were false alarms, and the memory still earns its place.</span></div><div style="padding:12px 16px;border-top:1px solid #e8e0cd;display:flex;align-items:center;gap:10px"><span style="height:34px;display:inline-flex;align-items:center;padding:0 14px;border-radius:9px;background:#2a221a;color:#fbf6ec;font-size:13px;font-weight:600">Mark verified</span><span style="font-size:12.5px;color:#8a7a60">Touches the file, clears age staleness</span></div></div>
+    <div style="border-radius:14px;border:1px solid #d3a23c;background:#fbf6ec;overflow:hidden;display:flex;flex-direction:column"><div style="padding:11px 16px;background:rgba(228,184,90,.3);font-size:11px;font-weight:700;letter-spacing:.1em;color:#7b560e">UPDATE</div><div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1"><span style="font-size:16px;font-weight:600">Suggested update</span><span style="font-size:14px;line-height:1.5;color:#5b4a36">Worth keeping, but some details are wrong. Same frontmatter, shorter where possible, no new claims.</span><div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:12px;border-radius:6px;overflow:hidden"><div style="padding:4px 8px;background:rgba(232,169,136,.3);color:#814024">− (&quot;Burrow session (bug)&quot;).</div><div style="padding:4px 8px;background:rgba(111,125,82,.2);color:#4e5739">+ `ref`.</div></div></div><div style="padding:12px 16px;border-top:1px solid #e8e0cd;display:flex;align-items:center;gap:10px"><span style="height:34px;display:inline-flex;align-items:center;padding:0 14px;border-radius:9px;background:#2a221a;color:#fbf6ec;font-size:13px;font-weight:600">Apply update</span><span style="font-size:12.5px;color:#8a7a60">Writes the file · undoable</span></div></div>
+    <div style="border-radius:14px;border:1px solid rgba(184,92,52,.45);background:#fbf6ec;overflow:hidden;display:flex;flex-direction:column"><div style="padding:11px 16px;background:rgba(184,92,52,.14);font-size:11px;font-weight:700;letter-spacing:.1em;color:#814024">ARCHIVE</div><div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1"><span style="font-size:16px;font-weight:600">Suggested: archive this memory</span><span style="font-size:14px;line-height:1.5;color:#5b4a36">Already covered by a doc, derivable from the code or git history, a finished one-off, or wrong.</span></div><div style="padding:12px 16px;border-top:1px solid #e8e0cd;display:flex;align-items:center;gap:10px"><span style="height:34px;display:inline-flex;align-items:center;padding:0 14px;border-radius:9px;background:#b85c34;color:#fbf6ec;font-size:13px;font-weight:600">Archive</span><span style="font-size:12.5px;color:#8a7a60">Moves to .archive · undoable</span></div></div>
+    <div style="border-radius:14px;border:1px solid #2a221a;background:#fbf6ec;overflow:hidden;display:flex;flex-direction:column"><div style="padding:11px 16px;background:#2a221a;font-size:11px;font-weight:700;letter-spacing:.1em;color:#e4b85a">FOLD</div><div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1"><span style="font-size:16px;font-weight:600">Suggested: move into <span style="font-family:'IBM Plex Mono',monospace;font-size:14px">docs/portfolio.md</span></span><span style="font-size:14px;line-height:1.5;color:#5b4a36">A lasting rule about one part of the project. At most 3 lines go into the best-fitting doc, after an exact anchor line.</span><div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:12px;border-radius:6px;overflow:hidden"><div style="padding:4px 8px;color:#8a7a60">after: ## Ledger rules</div><div style="padding:4px 8px;background:rgba(111,125,82,.2);color:#4e5739">+ Never set action.project for internal tools.</div></div></div><div style="padding:12px 16px;border-top:1px solid #e8e0cd;display:flex;align-items:center;gap:10px"><span style="height:34px;display:inline-flex;align-items:center;padding:0 14px;border-radius:9px;background:#2a221a;color:#fbf6ec;font-size:13px;font-weight:600">Copy for an Epic</span><span style="font-size:12.5px;color:#8a7a60">Memory stays until the doc change lands</span></div></div>
+    <div></div>
+    <div style="padding:16px;border-radius:14px;border:1px dashed #d4ccb8;display:flex;flex-direction:column;gap:8px"><span style="font-size:15px;font-weight:600">All session slots are busy</span><span style="font-size:13.5px;line-height:1.5;color:#5b4a36">Every slot is taken by a running session or job. Try again shortly.</span><span style="margin-top:auto;align-self:flex-start;height:32px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 12px;border-radius:8px;border:1px solid #d4ccb8;font-size:13px;font-weight:500">Retry</span></div>
+    <div style="padding:16px;border-radius:14px;border:1px dashed #d4ccb8;display:flex;flex-direction:column;gap:8px"><span style="font-size:15px;font-weight:600">No answer within 2 minutes</span><span style="font-size:13.5px;line-height:1.5;color:#5b4a36">The call hit its time limit. The slot is freed either way.</span><span style="margin-top:auto;align-self:flex-start;height:32px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 12px;border-radius:8px;border:1px solid #d4ccb8;font-size:13px;font-weight:500">Retry</span></div>
+    <div style="padding:16px;border-radius:14px;border:1px dashed #d4ccb8;display:flex;flex-direction:column;gap:8px"><span style="font-size:15px;font-weight:600">Answer didn't pass the checks</span><span style="font-size:13.5px;line-height:1.5;color:#5b4a36">Unreadable JSON, a changed frontmatter or an unknown fold target. It was rejected.</span><span style="margin-top:auto;align-self:flex-start;height:32px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 12px;border-radius:8px;border:1px solid #d4ccb8;font-size:13px;font-weight:500">Retry</span></div>
+  </div>
+
+  <p class="dv-next">Try next: "let fold start the Epic directly instead of copying a prompt" · "show a stale memory entering this flow from its banner" · "check both stale memories in one pass"</p>
+</section>
+<section class="dv-turn" id="t2">
+  <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Workbench (<a class="dv-oid" href="#1c">1c</a>) inside the real app shell — band flush vs. inset</span></div>
+  <div style="max-width:1100px;margin:0 0 32px;padding:20px 26px;border-radius:14px;background:#f6efe1;border:1px solid #e0d3b8;font-size:15px;line-height:1.55">
+    The shell (top project tabs, Almanac sidebar, footer) is rebuilt from <span style="font-family:'IBM Plex Mono',monospace;font-size:13.5px">TabBar.tsx</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:13.5px">AlmanacSidebar.tsx</span> and <span style="font-family:'IBM Plex Mono',monospace;font-size:13.5px">AlmanacFooter.tsx</span>. The open question is where the dark band meets that chrome. The active "Self" tab is drawn to merge into the page below it. In <a class="dv-oid" href="#2a">2a</a> it lands directly on the dark band. In <a class="dv-oid" href="#2b">2b</a> a 12px strip of paper keeps that join, and the band reads as a card sitting on the page.
+  </div>
+  <div class="dv-opts">
+    <div class="dv-opt" id="2a">
+      <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b style="font-weight:600;color:#2a221a">Flush band</b> — edge to edge, the strongest contrast with the shell</div>
+      <div style="display:flex;flex-direction:column;gap:44px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Memory</span><div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="memory" band="flush" hint-size="1910px,1118px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Settings</span><div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="settings" band="flush" hint-size="1910px,1118px"></dc-import></div></div>
+      </div>
+    </div>
+    <div class="dv-opt" id="2b">
+      <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><b style="font-weight:600;color:#2a221a">Inset band</b> — a rounded card, so the active tab still lands on paper</div>
+      <div style="display:flex;flex-direction:column;gap:44px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Memory</span><div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="memory" band="inset" hint-size="1910px,1118px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Settings</span><div class="dv-card" style="width:1910px;height:1118px"><dc-import name="AppShell" tab="settings" band="inset" hint-size="1910px,1118px"></dc-import></div></div>
+      </div>
+    </div>
+  </div>
+  <p class="dv-next">Try next: "go with <a class="dv-oid" href="#2b">2b</a> and show all five tabs in the shell" · "show a stale memory and a failed MCP check in <a class="dv-oid" href="#2a">2a</a>" · "package <a class="dv-oid" href="#1c">1c</a> for Claude Code handoff"</p>
+</section>
+<section class="dv-turn" id="t1">
+  <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Claude config — three directions across all five tabs, next to today</span></div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,560px));gap:28px;margin:0 0 40px;font-size:15px;line-height:1.55;color:#2a221a">
+    <div style="padding:24px 28px;border-radius:14px;background:#f6efe1;border:1px solid #e0d3b8">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#b85c34;margin-bottom:10px">WHY IT FEELS SCRUNCHY — FOUND IN THE CODE</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div>Settings stacks <b style="font-weight:600">7 strips</b> before the first setting: tabs, Epic note, Epic toggle, sub-tabs, scope note, filter bar, file chip, then summaries.</div>
+        <div>Memory puts a second page header ("CONFIGURE Memory") under the page header, then lists 9 subagent scopes that are all "off".</div>
+        <div>The 5 tabs are 22px tall at 12px. Almost every label is 10–12px, so nothing stands out.</div>
+        <div>Two bugs the redesigns fix: folder chips say "created on first save" for folders that exist (SourceChip reads a folder as a file), and the skill toggle's knob sits outside its track.</div>
+      </div>
+    </div>
+    <div style="padding:24px 28px;border-radius:14px;background:#f6efe1;border:1px solid #e0d3b8">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#b85c34;margin-bottom:10px">SHARED BY ALL THREE</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div><b style="font-weight:600">The tab switcher is the overview.</b> Each file shows its live status: count, health, age. A missing CLAUDE.md is visible from every tab.</div>
+        <div><b style="font-weight:600">One file bar per tab</b> holds the real path, the scope and what it means, and the one primary action. It replaces the note strips.</div>
+        <div>One header per page. Type grows from 11 to 15 to 22–46px, controls are 36–40px tall, and color appears only where something needs you.</div>
+        <div style="color:#5b4a36">Built with the app's own Almanac tokens (Geist, Newsreader, IBM Plex Mono, terracotta on paper), the same warm-paper look as the attached system.</div>
+      </div>
+    </div>
+    <div style="padding:24px 28px;border-radius:14px;background:#2a221a;color:#efe6d3">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#e4b85a;margin-bottom:10px">THE THREE DIRECTIONS</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div><a class="dv-oid" href="#1a" style="background:rgba(246,239,225,.14);color:#fbf6ec">1a</a> <b style="font-weight:600;color:#fbf6ec">Folder tabs.</b> The safest option: today's layouts, cleaned up. Tabs become file cards attached to one panel.</div>
+        <div><a class="dv-oid" href="#1b" style="background:rgba(246,239,225,.14);color:#fbf6ec">1b</a> <b style="font-weight:600;color:#fbf6ec">Ledger.</b> Editorial: a masthead of big numbers, then tables and grids instead of side rails. Settings show which scope each value comes from.</div>
+        <div><a class="dv-oid" href="#1c" style="background:rgba(246,239,225,.14);color:#fbf6ec">1c</a> <b style="font-weight:600;color:#fbf6ec">Workbench.</b> The boldest: a dark command band, and every tab uses the same rail + detail layout with the file shown top-left. Code views are dark.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dv-opts">
+    <div class="dv-opt" id="today">
+      <div class="dv-olabel"><span class="dv-oid" style="background:#d4ccb8">today</span>Recreated from source — for comparison</div>
+      <div style="display:flex;flex-direction:column;gap:44px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Memory</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigToday" tab="memory" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">CLAUDE.md</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigToday" tab="claude-md" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Settings</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigToday" tab="settings" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">MCP</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigToday" tab="mcp" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Skills</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigToday" tab="skills" hint-size="1592px,1040px"></dc-import></div></div>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="1a">
+      <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><b style="font-weight:600;color:#2a221a">Folder tabs</b> — same layouts, clear hierarchy, status on every tab</div>
+      <div style="display:flex;flex-direction:column;gap:44px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Memory</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigFolderTabs" tab="memory" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">CLAUDE.md</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigFolderTabs" tab="claude-md" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Settings</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigFolderTabs" tab="settings" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">MCP</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigFolderTabs" tab="mcp" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Skills</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigFolderTabs" tab="skills" hint-size="1592px,1040px"></dc-import></div></div>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="1b">
+      <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><b style="font-weight:600;color:#2a221a">Ledger</b> — big-number masthead, tables and grids instead of side rails</div>
+      <div style="display:flex;flex-direction:column;gap:44px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Memory</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigLedger" tab="memory" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">CLAUDE.md</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigLedger" tab="claude-md" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Settings</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigLedger" tab="settings" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">MCP</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigLedger" tab="mcp" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Skills</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigLedger" tab="skills" hint-size="1592px,1040px"></dc-import></div></div>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="1c">
+      <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><b style="font-weight:600;color:#2a221a">Workbench</b> — dark command band, one rail + detail layout for every tab</div>
+      <div style="display:flex;flex-direction:column;gap:44px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Memory</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigWorkbench" tab="memory" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">CLAUDE.md</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigWorkbench" tab="claude-md" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Settings</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigWorkbench" tab="settings" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">MCP</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigWorkbench" tab="mcp" hint-size="1592px,1040px"></dc-import></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#8a7a60">Skills</span><div class="dv-card" style="width:1592px;height:1040px"><dc-import name="ConfigWorkbench" tab="skills" hint-size="1592px,1040px"></dc-import></div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="dv-next">Try next: "the masthead from <a class="dv-oid" href="#1b">1b</a> on top of the rail from <a class="dv-oid" href="#1c">1c</a>" · "<a class="dv-oid" href="#1a">1a</a>, but denser lists" · "show a stale memory and a failed MCP check in <a class="dv-oid" href="#1c">1c</a>"</p>
+</section>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="fonts.css">
+<script src="config-data.js"></script>
+<style>body{margin:0;background:#f6efe1}a{color:#b85c34;text-decoration:none}a:hover{color:#814024}</style>
+</helmet>
+<div data-screen-label="1c Workbench" style="position:relative;width:1592px;height:1040px;box-sizing:border-box;background:#f6efe1;color:#2a221a;font-family:Geist,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;line-height:1.5;-webkit-font-smoothing:antialiased">
+  <div style="flex-shrink:0;height:84px;box-sizing:border-box;margin:{{ bandM }};border-radius:{{ bandR }};background:{{ bandBg }};border-bottom:1px solid {{ bandBd }};padding:0 28px;display:flex;align-items:center;gap:26px;white-space:nowrap">
+    <div style="display:flex;flex-direction:column;gap:2px;width:236px">
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ bandSub }}">{{ bandEyebrow }}</span>
+      <span style="display:flex;align-items:baseline;gap:10px"><span style="font-family:Newsreader,Georgia,serif;font-size:25px;font-weight:500;color:{{ bandFg }};line-height:1.15">Claude config</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ bandSub2 }}">{{ bandPath }}</span></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <sc-for list="{{ pills }}" as="p" hint-placeholder-count="5"><div onClick="{{ p.go }}" style="height:48px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 14px 0 13px;border-radius:12px;background:{{ p.bg }};border:1px solid {{ p.bd }};box-shadow:{{ p.sh }};cursor:pointer">
+        <img src="{{ p.ic }}" alt="" style="width:18px;height:18px">
+        <span style="font-size:14.5px;font-weight:600;color:{{ p.fg }}">{{ p.label }}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;padding:2px 7px;border-radius:6px;background:{{ p.bb }};color:{{ p.bf }}">{{ p.badge }}</span>
+        <span style="width:7px;height:7px;border-radius:50%;background:{{ p.dot }};margin-left:-4px"></span>
+      </div></sc-for>
+    </div>
+    <span style="flex:1"></span>
+    <div style="display:flex;align-items:center;gap:10px;width:250px;height:40px;box-sizing:border-box;padding:0 12px;border-radius:10px;background:{{ bandSearchBg }};border:1px solid {{ bandSearchBd }};font-size:13px;color:{{ bandSub }}"><img src="{{ icSearchInk }}" alt="" style="width:15px;height:15px"><span style="flex:1">Search all config</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid {{ bandKbdBd }}">/</span></div>
+    <span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:{{ learnFg }}">LEARN</span>
+  </div>
+
+  <div style="flex:1;min-height:0;display:flex">
+    <sc-if value="{{ isMemory }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+      <div style="padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">MEMORY FOLDER</span><span style="font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:9999px;background:rgba(111,125,82,.15);color:#4e5739">51 files</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.45;word-break:break-all">~/.claude/projects/-home-bilko-Self/memory/</span>
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;background:#f6efe1;font-size:13px;white-space:nowrap"><span style="color:#8a7a60">Scope</span><span style="font-weight:600;flex:1">Workspace · Self</span><span style="font-size:11px;color:#8a7a60">▾</span></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:12.5px;white-space:nowrap">
+        <span style="height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:9999px;background:{{ chipBg }};color:{{ chipFg }};font-weight:600">All <span style="font-family:'IBM Plex Mono',monospace;font-weight:400">51</span></span>
+        <span style="height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:9999px;background:rgba(211,162,60,.2);color:#7b560e;font-weight:600">Stale <span style="font-family:'IBM Plex Mono',monospace;font-weight:400">2</span></span>
+        <span style="height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:9999px;background:rgba(184,92,52,.15);color:#814024;font-weight:600">Broken <span style="font-family:'IBM Plex Mono',monospace;font-weight:400">3</span></span>
+        <span style="height:30px;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:9999px;border:1px solid #d4ccb8;color:#5b4a36">This week <span style="font-family:'IBM Plex Mono',monospace">17</span></span>
+        <span style="height:30px;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:9999px;border:1px solid #d4ccb8;color:#5b4a36">Unindexed <span style="color:#4e5739">✓</span></span>
+        <span style="height:30px;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:9999px;border:1px solid #d4ccb8;color:#5b4a36">Ask <img src="{{ icSpark }}" alt="" style="width:12px;height:12px"></span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="padding:10px 12px;border-radius:10px;background:#fbf6ec;border:1px solid #e0d3b8;box-shadow:0 1px 2px rgba(42,34,26,.06)"><div style="font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">portfolio-action-project-field</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7a60;margin-top:2px">4.8 KB · just now</div></div>
+        <sc-for list="{{ memRest }}" as="m" hint-placeholder-count="8"><div style="padding:10px 12px;border-radius:10px;border:1px solid transparent"><div style="font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.slug }}</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7a60;margin-top:2px">{{ m.size }} · {{ m.age }}</div></div></sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:16px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60;white-space:nowrap">UNCLUSTERED · FEEDBACK · 4.8 KB · MODIFIED JUST NOW · SESSION F5ED2DFB</div>
+          <div style="display:flex;align-items:center;gap:14px;margin-top:6px"><div style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;letter-spacing:-.015em;white-space:nowrap">portfolio-action-project-field</div><sc-if value="{{ flowChip }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;font-weight:600;padding:4px 11px;border-radius:9999px;background:{{ chipBg }};color:{{ chipFg }};white-space:nowrap">{{ chipText }}</span></sc-if></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;white-space:nowrap">
+          <div style="display:flex;padding:3px;gap:2px;border-radius:10px;background:#efe6d3;font-size:13px"><span style="padding:5px 13px;border-radius:7px;background:{{ readBg }};color:{{ readFg }};font-weight:{{ readW }}">Read</span><span style="padding:5px 13px;border-radius:7px;background:{{ editBg }};color:{{ editFg }};font-weight:{{ editW }}">Edit</span></div>
+          <sc-if value="{{ noFlow }}" hint-placeholder-val="{{ true }}"><span style="height:36px;display:inline-flex;align-items:center;gap:7px;padding:0 15px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600"><img src="{{ icSparkPaper }}" alt="" style="width:14px;height:14px">Review with Claude</span></sc-if>
+          <span style="height:36px;width:36px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #d4ccb8;font-size:15px">⋯</span>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:30px 36px;display:grid;grid-template-columns:minmax(0,1fr) 264px;column-gap:44px;position:relative">
+          <sc-if value="{{ stDone }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:50%;bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;padding:11px 14px 11px 18px;border-radius:12px;background:#2a221a;color:#efe6d3;font-size:13.5px;box-shadow:0 14px 34px -12px rgba(42,34,26,.55);white-space:nowrap;z-index:2"><span>Applied fix to <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#fbf6ec">portfolio-action-project-field</span></span><span style="color:#e4b85a;font-weight:700">Undo</span><span style="color:#8a7a60">×</span></div></sc-if>
+        <div style="max-width:700px">
+          <sc-if value="{{ stVerdict }}" hint-placeholder-val="{{ false }}"><div style="margin:0 0 28px;border-radius:14px;border:1px solid #d3a23c;background:#fbf6ec;overflow:hidden;box-shadow:0 22px 40px -28px rgba(42,34,26,.5)">
+            <div style="padding:12px 18px;background:rgba(228,184,90,.3);display:flex;align-items:center;gap:10px"><img src="{{ icSparkHoney }}" alt="" style="width:15px;height:15px"><span style="font-size:11px;font-weight:700;letter-spacing:.1em;color:#7b560e;flex:1">CLAUDE SUGGESTS · UPDATE</span><span style="font-size:12px;color:#7b560e">one of keep · update · archive · fold</span></div>
+            <div style="padding:14px 18px 12px;display:flex;flex-direction:column;gap:5px"><span style="font-size:16px;font-weight:600">Drop the finished in-flight note — the rule itself still holds.</span><span style="font-size:13.5px;line-height:1.55;color:#5b4a36"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">ledger_append.py</span> already refuses owner-deleted ids, so the queued Self fix has landed. Every other path in the memory resolves in this repo.</span></div>
+            <sc-for list="{{ diff }}" as="d" hint-placeholder-count="5"><div style="display:grid;grid-template-columns:22px minmax(0,1fr);padding:6px 18px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.5;border-top:1px solid #e8e0cd;background:{{ d.bg }};color:{{ d.fg }}"><span>{{ d.s }}</span><span>{{ d.t }}</span></div></sc-for>
+            <div style="padding:12px 18px;border-top:1px solid #e0d3b8;display:flex;align-items:center;gap:10px"><span style="height:36px;display:inline-flex;align-items:center;padding:0 16px;border-radius:9px;background:{{ primBg }};color:#fbf6ec;font-size:13.5px;font-weight:600">Apply update</span><span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:9px;border:1px solid #2a221a;font-size:13.5px;font-weight:600">Edit first</span><span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:9px;border:1px solid #d4ccb8;font-size:13.5px;font-weight:500">Discard</span><span style="flex:1"></span><span style="font-size:12.5px;color:#8a7a60">Writes the file · undoable</span></div>
+          </div></sc-if>
+          <sc-if value="{{ stDone }}" hint-placeholder-val="{{ false }}"><div style="margin:0 0 24px;padding:12px 16px;border-radius:12px;background:rgba(111,125,82,.14);display:flex;align-items:center;gap:10px;font-size:13.5px;color:#4e5739"><img src="{{ icCheckSage }}" alt="" style="width:16px;height:16px"><span style="flex:1"><b style="font-weight:600">Updated.</b> One clause and one finished note removed — the rule is unchanged.</span><span style="font-weight:600;text-decoration:underline">Show what changed</span></div></sc-if>
+          <sc-if value="{{ isEditing }}" hint-placeholder-val="{{ false }}"><dc-import name="DocEditor" paper="{{ edPaper }}" doc="{{ memDoc }}" file="portfolio-action-project-field.md" path="~/.claude/projects/-home-bilko-Self/memory/portfolio-action-project-field.md" state="dirty" mode="{{ docMode }}" compact="true" on-full="{{ fullMem }}" style="position:relative;display:block;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+          <sc-if value="{{ notEditing }}" hint-placeholder-val="{{ true }}"><p style="font-family:Newsreader,Georgia,serif;font-size:22px;line-height:1.45;margin:0 0 18px">Portfolio ledger - never set action.project to burrow, Bilko or Self (the owner deleted those project entries 2026-11-12); name the repo in ref. Also: a Burrow action auto-marked done is not proof the pipeline runs</p>
+          <sc-for list="{{ prose }}" as="para" hint-placeholder-count="4"><div style="font-size:{{ para.fs }};line-height:{{ para.lh }};color:{{ para.c }};font-weight:{{ para.fw }};letter-spacing:{{ para.ls }};margin-top:{{ para.mt }}"><sc-for list="{{ para.parts }}" as="pt"><span style="font-family:{{ pt.ff }};font-size:{{ pt.fs }};background:{{ pt.bg }};padding:{{ pt.pad }};border-radius:4px;color:{{ pt.c }};font-weight:{{ pt.fw }}">{{ pt.t }}</span></sc-for></div></sc-for></sc-if>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">LINKS TO · 2</span>
+          <div style="padding:11px 14px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500">burrow-publisher-diagnosis</div><div style="font-size:12px;color:#8a7a60">wikilink</div></div>
+          <div style="padding:11px 14px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500">portfolio-decisions-are-steps</div><div style="font-size:12px;color:#8a7a60">wikilink</div></div>
+          <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60;margin-top:10px">LINKED FROM · 1</span>
+          <div style="padding:11px 14px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500">bilko-run-clicks-are-not-people</div><div style="font-size:12px;color:#8a7a60">wikilink</div></div>
+          <sc-if value="{{ noFlow }}" hint-placeholder-val="{{ true }}"><div style="margin-top:16px;padding:16px 18px;border-radius:14px;background:{{ askBg }};border:1px solid {{ askBd }};display:flex;flex-direction:column;gap:10px">
+            <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ askLabel }}">ASK CLAUDE</span>
+            <span style="font-family:Newsreader,Georgia,serif;font-size:18px;line-height:1.3;color:{{ askText }}">Is this memory still accurate?</span>
+            <span style="align-self:flex-start;height:32px;display:inline-flex;align-items:center;padding:0 13px;border-radius:8px;background:{{ askBtnBg }};color:{{ askBtnFg }};font-size:13px;font-weight:700">Check against the repo</span>
+          </div></sc-if>
+          <sc-if value="{{ stRead }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;padding:18px;border-radius:14px;background:{{ askBg }};border:1px solid {{ askBd }};display:flex;flex-direction:column;gap:10px;box-shadow:{{ askRing }}">
+            <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ askLabel }}">CHECK WITH CLAUDE</span>
+            <span style="font-family:Newsreader,Georgia,serif;font-size:19px;line-height:1.3;color:{{ askText }}">Is this memory still accurate?</span>
+            <span style="font-size:12.5px;line-height:1.5;color:{{ askSub }}">Claude checks every path and [[link]] in it against this repo and its docs, then suggests one fix. Nothing changes until you apply it.</span>
+            <span style="align-self:flex-start;height:34px;display:inline-flex;align-items:center;padding:0 14px;border-radius:8px;background:{{ askBtnBg }};color:{{ askBtnFg }};font-size:13px;font-weight:700">Check against the repo</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7a60">1 claude -p run · sonnet · ≤ 2 min</span>
+          </div><div style="margin-top:12px;font-size:12.5px;color:#5b4a36;padding:0 4px">Want an answer, not a fix? <span style="color:#b85c34;font-weight:600">Ask your memories →</span></div></sc-if>
+          <sc-if value="{{ stRun }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;border-radius:14px;background:{{ runBg }};border:1px solid {{ runBd }};overflow:hidden">
+            <div style="padding:14px 16px 12px;display:flex;align-items:center;gap:9px;border-bottom:1px solid {{ runRule }}"><span style="width:8px;height:8px;border-radius:50%;background:#e4b85a;box-shadow:0 0 0 4px rgba(228,184,90,.2)"></span><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ runLabel }};flex:1">CHECKING</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{ runSub }}">0:12</span></div>
+            <div style="padding:12px 16px 14px;display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:10px;font-weight:600;letter-spacing:.1em;color:#8a7a60">1 · LOCAL CHECKS · NO AI · DONE</span>
+              <sc-for list="{{ evidence }}" as="e" hint-placeholder-count="5"><div style="display:flex;gap:8px;align-items:baseline;font-size:12px"><span style="color:{{ runCheck }}">✓</span><span style="font-family:'IBM Plex Mono',monospace;color:{{ runText }}">{{ e.t }}</span><span style="color:#8a7a60">{{ e.note }}</span></div></sc-for>
+              <span style="font-size:10px;font-weight:600;letter-spacing:.1em;color:#8a7a60;margin-top:6px">2 · CLAUDE · SONNET · RUNNING</span>
+              <div style="height:4px;border-radius:9999px;background:{{ runTrack }};overflow:hidden"><div style="width:38%;height:100%;border-radius:9999px;background:#e4b85a"></div></div>
+              <span style="font-size:12px;line-height:1.45;color:{{ runSub }}">Weighing keep · update · archive · fold from the evidence above. No tools — it can't open files.</span>
+            </div>
+            <div style="padding:10px 16px;border-top:1px solid {{ runRule }};font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7a60">session slot 5 of 10 · cap 2:00</div>
+          </div></sc-if>
+          <sc-if value="{{ stVerdict }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:7px"><div style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60;flex:1">CHECKED IN 0:21</span><span style="font-size:12px;color:#b85c34;font-weight:600;white-space:nowrap">Evidence ▾</span></div><span style="font-size:12.5px;line-height:1.5;color:#5b4a36">5 references resolve · 2 terms also in a project doc · session slot released</span></div></sc-if>
+          <sc-if value="{{ stDone }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:9px"><div style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">CHECKED JUST NOW</span></div><span style="font-size:12.5px;line-height:1.5;color:#5b4a36">Verdict: <b style="font-weight:600;color:#2a221a">update</b>, applied by you.</span><span style="align-self:flex-start;height:30px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 12px;border-radius:8px;border:1px solid #d4ccb8;font-size:12.5px;font-weight:500">Check again</span></div></sc-if>
+          <sc-if value="{{ stEditFix }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;padding:16px 18px;border-radius:14px;background:#fbf6ec;border:1px solid #d3a23c;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:8px"><img src="{{ icSparkHoney }}" alt="" style="width:14px;height:14px"><span style="font-size:10.5px;font-weight:700;letter-spacing:.1em;color:#7b560e">STARTED FROM CLAUDE’S UPDATE</span></div><span style="font-size:13px;line-height:1.5;color:#5b4a36">The suggested change is already in the editor, and the line it touched is marked in the margin. Change anything before you save.</span><span style="font-size:12.5px;color:#8a7a60">Revert goes back to the file on disk.</span></div></sc-if>
+          <sc-if value="{{ stEditPlain }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;padding:14px 16px;border-radius:14px;border:1px dashed #d4ccb8;display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">EDITING THE FILE ON DISK</span><span style="font-size:12.5px;line-height:1.5;color:#5b4a36">Keep the frontmatter lines (name, description, type). Save writes <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">portfolio-action-project-field.md</span>.</span></div></sc-if>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isClaude }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:22px;overflow:hidden">
+      <div style="padding:14px 14px 12px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:6px">
+        <span style="padding:0 2px 4px;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">INSTRUCTIONS FILE</span>
+        <div style="display:flex;gap:11px;padding:10px;border-radius:10px;background:#f6efe1;border:1px solid #e8e0cd"><span style="width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:5px solid #2a221a;flex-shrink:0;margin-top:2px"></span><div style="flex:1"><div style="display:flex;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;flex:1">CLAUDE.md</span><span style="font-size:11px;font-weight:600;color:#814024">missing</span></div><div style="font-size:12px;color:#8a7a60">Project · shared via git</div></div></div>
+        <div style="display:flex;gap:11px;padding:10px"><span style="width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b8a98a;flex-shrink:0;margin-top:2px"></span><div style="flex:1"><div style="display:flex;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;flex:1;color:#5b4a36">CLAUDE.local.md</span><span style="font-size:11px;color:#8a7a60">missing</span></div><div style="font-size:12px;color:#8a7a60">Local · this machine only</div></div></div>
+      </div>
+      
+      <div style="display:flex;flex-direction:column;gap:0;padding:0 4px">
+        <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60;margin-bottom:12px">A SESSION HERE LOADS</span>
+        <div style="display:flex;gap:12px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:10px;height:10px;border-radius:50%;background:#6f7d52;margin-top:4px"></span><span style="width:1px;flex:1;background:#d4ccb8;margin:3px 0"></span></div><div style="padding-bottom:14px"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">~/.claude/CLAUDE.md</div><div style="font-size:12px;color:#8a7a60">global · edited in Home</div></div></div>
+        <div style="display:flex;gap:12px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:2px solid #b85c34;margin-top:4px"></span><span style="width:1px;flex:1;background:#d4ccb8;margin:3px 0"></span></div><div style="padding-bottom:14px"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600">CLAUDE.md</div><div style="font-size:12px;color:#814024;white-space:nowrap">this file · not created</div></div></div>
+        <div style="display:flex;gap:12px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b8a98a;margin-top:4px"></span></div><div><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#5b4a36">CLAUDE.local.md</div><div style="font-size:12px;color:#8a7a60">not created</div></div></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:16px;white-space:nowrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">~/SELF/CLAUDE.MD · PROJECT INSTRUCTIONS</div>
+          <div style="display:flex;align-items:center;gap:14px;margin-top:6px"><span style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;letter-spacing:-.015em">CLAUDE.md</span><span style="font-size:12.5px;font-weight:600;padding:3px 10px;border-radius:9999px;background:rgba(184,92,52,.14);color:#814024">Not created</span></div>
+        </div>
+        
+        
+      </div>
+      <div style="flex:1;min-height:0;padding:24px 36px 28px;display:flex"><div style="position:relative;flex:1;min-width:0;min-width:0;min-height:0"><dc-import name="DocEditor" paper="{{ edPaper }}" doc="claude-project" file="CLAUDE.md" path="~/Self/CLAUDE.md" state="new" mode="{{ docMode }}" on-full="{{ fullClaudeP }}" style="position:absolute;top:0;left:0;width:100%;height:100%" hint-size="100%,100%"></dc-import></div></div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="padding:14px 14px 12px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;padding:0 2px 4px"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">SETTINGS FILE</span><span style="font-size:11.5px;color:#8a7a60">{{ setAge }}</span></div>
+        <div style="display:flex;gap:11px;padding:10px;border-radius:10px;background:#f6efe1;border:1px solid #e8e0cd"><span style="width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:5px solid #2a221a;flex-shrink:0;margin-top:2px"></span><div><div style="font-size:13.5px;font-weight:600">{{ setScope1 }}</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">{{ setPath1 }}</div></div></div>
+        <sc-if value="{{ isProject }}" hint-placeholder-val="{{ true }}"><div style="display:flex;gap:11px;padding:10px"><span style="width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b8a98a;flex-shrink:0;margin-top:2px"></span><div><div style="font-size:13.5px;font-weight:500;color:#5b4a36">Local</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">settings.local.json · this machine</div></div></div></sc-if><sc-if value="{{ isGlobal }}" hint-placeholder-val="{{ false }}"><div style="padding:6px 10px 2px;font-size:12px;line-height:1.45;color:#8a7a60">Each project can override any of these in its own Claude config.</div></sc-if>
+      </div>
+      <div style="display:flex;align-items:center;gap:9px;height:38px;box-sizing:border-box;padding:0 12px;border-radius:10px;background:#fbf6ec;border:1px solid #e0d3b8;font-size:13px;color:#8a7a60"><img src="{{ icSearch }}" alt="" style="width:15px;height:15px">Search 133 settings</div>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <div style="display:flex;align-items:center;gap:10px;height:34px;box-sizing:border-box;padding:0 11px;border-radius:9px;background:#fbf6ec;border:1px solid #e0d3b8;font-size:13.5px;font-weight:600"><img src="{{ icStar }}" alt="" style="width:16px;height:16px"><span style="flex:1">Essentials</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">2/3</span></div>
+        <sc-for list="{{ groupRest }}" as="g" hint-placeholder-count="12"><div style="display:flex;align-items:center;gap:10px;height:33px;padding:0 12px;font-size:13.5px;color:#5b4a36"><img src="{{ g.ic }}" alt="" style="width:16px;height:16px;flex-shrink:0"><span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ g.title }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ g.cc }}">{{ g.count }}</span></div></sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:1px;border-top:1px solid #d4ccb8;padding-top:10px">
+        <div style="display:flex;align-items:center;gap:10px;height:33px;padding:0 12px;font-size:13.5px;color:#5b4a36"><img src="{{ icPerm }}" alt="" style="width:16px;height:16px"><span style="flex:1">Permissions</span><span style="font-size:12px;color:#8a7a60;white-space:nowrap">none set</span></div>
+        <div style="display:flex;align-items:center;gap:10px;height:33px;padding:0 12px;font-size:13.5px;color:#5b4a36"><img src="{{ icHooks }}" alt="" style="width:16px;height:16px"><span style="flex:1">Hooks</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">1/4</span></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:16px;white-space:nowrap">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">{{ setEyebrow }}</div><div style="display:flex;align-items:baseline;gap:14px;margin-top:4px"><span style="font-family:Newsreader,Georgia,serif;font-size:34px;font-weight:500;line-height:1.1">Essentials</span><span style="font-size:14.5px;color:#5b4a36">The knobs you reach first.</span></div></div>
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36"><span style="width:30px;height:18px;border-radius:9999px;background:{{ togOn }};position:relative"><span style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fbf6ec"></span></span>Show unset</span>
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36;margin-left:6px"><span style="width:30px;height:18px;border-radius:9999px;background:#d4ccb8;position:relative"><span style="position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fbf6ec"></span></span>Advanced</span>
+        <span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13px;font-weight:500;font-family:'IBM Plex Mono',monospace;margin-left:8px">{ } Raw JSON</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:24px 36px">
+        <sc-for list="{{ sections }}" as="s" hint-placeholder-count="2"><div style="margin-bottom:26px">
+          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">{{ s.cap }}</span><span style="flex:1;height:1px;background:#e0d3b8"></span></div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ s.rows }}" as="r"><div style="display:grid;grid-template-columns:minmax(0,1fr) 250px 330px;align-items:center;column-gap:28px;padding:16px 22px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8">
+              <div style="min-width:0"><div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:16px;font-weight:600">{{ r.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8a7a60">{{ r.key }}</span></div><div style="font-size:13.5px;color:#5b4a36;margin-top:3px">{{ r.desc }}</div></div>
+              <div style="height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 13px;border-radius:10px;border:1px solid #e0d3b8;background:#f6efe1;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:{{ r.valFg }}"><span style="flex:1">{{ r.value }}</span><span style="font-family:Geist,sans-serif;font-size:11px;color:#8a7a60">{{ r.caret }}</span></div>
+              <div style="display:flex;align-items:center;gap:6px"><sc-for list="{{ r.track }}" as="d"><span style="width:{{ d.sep }};height:1px;background:#d4ccb8"></span><span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:{{ d.fw }};color:{{ d.fg }}"><span style="width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:1.5px solid {{ d.bd }};background:{{ d.bg }}"></span>{{ d.t }}</span></sc-for></div>
+            </div></sc-for>
+          </div>
+        </div></sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isMcp }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">SERVER FILE</span><span style="font-size:11.5px;color:#8a7a60">edited 5d ago</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">~/Self/.mcp.json › mcpServers</span>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;background:#f6efe1;font-size:13px;white-space:nowrap"><span style="width:30px;height:18px;border-radius:9999px;background:#d4ccb8;position:relative;flex-shrink:0"><span style="position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fbf6ec"></span></span><span style="color:#5b4a36">Auto-approve all servers</span></div>
+      </div>
+      <div style="display:flex;gap:8px;white-space:nowrap"><span style="flex:1;height:38px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Check all 5</span><span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600">+ Add</span></div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px">
+        <div style="padding:12px 14px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8;box-shadow:0 1px 2px rgba(42,34,26,.06)"><div style="display:flex;align-items:center;gap:10px"><span style="width:9px;height:9px;box-sizing:border-box;border-radius:50%;border:1.5px solid #8a7a60"></span><span style="font-size:14.5px;font-weight:600;flex:1">burrow</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">http</span></div><div style="padding-left:19px;font-size:12px;color:#8a7a60;margin-top:2px"><span style="color:#7b560e">Community</span> · approved · not checked</div></div>
+        <sc-for list="{{ serverRest }}" as="s" hint-placeholder-count="4"><div style="padding:12px 14px;border-radius:12px;border:1px solid transparent"><div style="display:flex;align-items:center;gap:10px"><span style="width:9px;height:9px;box-sizing:border-box;border-radius:50%;border:1.5px solid #8a7a60"></span><span style="font-size:14.5px;font-weight:500;flex:1">{{ s.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">{{ s.type }}</span></div><div style="padding-left:19px;font-size:12px;color:#8a7a60;margin-top:2px"><span style="color:{{ s.oc }}">{{ s.origin }}</span> · approved · not checked</div></div></sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:12px;white-space:nowrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">COMMUNITY · HTTP · PROJECT SCOPE · .MCP.JSON › MCPSERVERS › BURROW</div>
+          <div style="display:flex;align-items:center;gap:14px;margin-top:4px"><span style="font-size:34px;font-weight:600;letter-spacing:-.02em;line-height:1.15">burrow</span><span style="display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:9999px;font-size:12.5px;font-weight:600;background:#efe6d3;color:#5b4a36"><span style="width:7px;height:7px;box-sizing:border-box;border-radius:50%;border:1.5px solid #8a7a60"></span>Not checked</span></div>
+        </div>
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36;margin-right:8px"><span style="width:34px;height:20px;border-radius:9999px;background:#b85c34;position:relative"><span style="position:absolute;right:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fbf6ec"></span></span>Approved</span>
+        <span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Check again</span>
+        <span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Edit JSON</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:28px 36px;display:flex;flex-direction:column;gap:20px;max-width:1060px">
+        <div style="padding:18px 22px;border-radius:14px;background:{{ valBg }};border:1px solid {{ valBd }};display:flex;align-items:center;gap:16px">
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ valLabel }}">URL</span><span style="font-family:'IBM Plex Mono',monospace;font-size:17px;color:{{ valText }}">http://127.0.0.1:8767/mcp</span></div>
+          <span style="display:flex;align-items:center;gap:7px;font-size:13px;color:{{ valSub }}"><img src="{{ icCopyInk }}" alt="" style="width:15px;height:15px">Copy</span>
+        </div>
+        <div style="padding:18px 22px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:12px">
+          <span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">HEADERS · 1</span>
+          <div style="display:flex;align-items:center;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:14px"><span style="font-weight:600">x-bot-id</span><span style="color:#b8a98a">:</span><span style="color:#8a7a60;letter-spacing:.12em">••••••••</span><span style="margin-left:auto;font-family:Geist,sans-serif;font-size:13px;color:#5b4a36">Show</span></div>
+          <span style="font-size:13px;font-weight:600;color:#b85c34">+ Add header</span>
+        </div>
+        <div style="padding:22px;border-radius:14px;border:1.5px dashed #d4ccb8;display:flex;align-items:center;gap:18px">
+          <img src="{{ icTool }}" alt="" style="width:26px;height:26px">
+          <div style="flex:1"><div style="font-size:15px;font-weight:600">Tools appear after a check</div><div style="font-size:13.5px;color:#5b4a36">A check connects to burrow once and lists every tool it offers, named <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">mcp__burrow__…</span></div></div>
+          <span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:{{ primBg }};color:#fbf6ec;font-size:13.5px;font-weight:600;white-space:nowrap">Check burrow</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span>Saved — matches .mcp.json</div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isSkills }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">SKILLS FOLDER</span><span style="font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:9999px;background:rgba(111,125,82,.15);color:#4e5739">{{ skOn }}</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">{{ skPath }}</span>
+        <span style="font-size:12px;color:#8a7a60">{{ skSummary }}</span>
+      </div>
+      <div style="display:flex;gap:8px;white-space:nowrap"><div style="flex:1;display:flex;align-items:center;gap:9px;height:38px;box-sizing:border-box;padding:0 12px;border-radius:10px;background:#fbf6ec;border:1px solid #e0d3b8;font-size:13px;color:#8a7a60"><img src="{{ icSearch }}" alt="" style="width:15px;height:15px">Filter</div><span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600">+ New</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
+        <div style="padding:10px 12px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8;box-shadow:0 1px 2px rgba(42,34,26,.06)"><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ sk0Name }}</span><span style="width:28px;height:16px;border-radius:9999px;background:#b85c34;position:relative;flex-shrink:0"><span style="position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fbf6ec"></span></span></div><div style="font-size:12px;color:#8a7a60;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px">{{ sk0Short }}</div></div>
+        <sc-for list="{{ skillRest }}" as="k" hint-placeholder-count="12"><div style="padding:10px 12px;border-radius:12px;border:1px solid transparent"><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">/{{ k.name }}</span><span style="width:28px;height:16px;border-radius:9999px;background:#b85c34;position:relative;flex-shrink:0"><span style="position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fbf6ec"></span></span></div><div style="font-size:12px;color:#8a7a60;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px">{{ k.desc }}</div></div></sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:12px;white-space:nowrap">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">{{ skEyebrow }}</div><div style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;letter-spacing:-.015em;margin-top:6px">{{ sk0Name }}</div></div>
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36;margin-right:8px"><span style="width:34px;height:20px;border-radius:9999px;background:#b85c34;position:relative"><span style="position:absolute;right:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fbf6ec"></span></span>Enabled</span>
+        
+        <span style="height:36px;width:36px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #d4ccb8;font-size:15px">⋯</span>
+      </div>
+      <div style="flex:1;min-height:0;padding:22px 36px 28px;display:flex;flex-direction:column;gap:14px">
+        <div style="padding:14px 18px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8"><div style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">DESCRIPTION · CLAUDE READS THIS TO DECIDE WHEN TO USE IT</div><div style="font-size:15px;line-height:1.5;margin-top:4px">{{ skDesc }}</div></div>
+        <div style="position:relative;flex:1;min-height:0;min-width:0;min-height:0"><dc-import name="DocEditor" paper="{{ edPaper }}" doc="{{ skDoc }}" file="SKILL.md" path="{{ skFilePath }}" state="saved" mode="{{ docMode }}" on-full="{{ fullSkill }}" style="position:absolute;top:0;left:0;width:100%;height:100%" hint-size="100%,100%"></dc-import></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isGClaude }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden;gap:22px">
+      <div style="padding:14px 14px 12px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;padding:0 2px 4px"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">FILE + ITS IMPORTS</span><span style="font-size:11.5px;color:#8a7a60">~310 tokens</span></div>
+        <div style="display:flex;gap:11px;padding:10px;border-radius:10px;background:#f6efe1;border:1px solid #e8e0cd"><span style="width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:5px solid #2a221a;flex-shrink:0;margin-top:2px"></span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;flex:1">CLAUDE.md</span><span style="font-size:11px;color:#8a7a60">16 lines</span></div><div style="font-size:12px;color:#8a7a60">User · every project on this machine</div></div></div>
+        <sc-for list="{{ gImports }}" as="f" hint-placeholder-count="2"><div style="display:flex;gap:11px;padding:10px"><span style="width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b8a98a;flex-shrink:0;margin-top:2px"></span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;flex:1;color:#5b4a36">{{ f.name }}</span><span style="font-size:11px;color:#8a7a60">{{ f.note }}</span></div><div style="font-size:12px;color:#8a7a60">Imported · editable here</div></div></div></sc-for>
+      </div>
+      
+      <div style="display:flex;flex-direction:column;padding:0 4px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60;margin-bottom:12px">EVERY SESSION LOADS</span><div style="display:flex;gap:12px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:2px solid #b85c34;margin-top:4px"></span><span style="width:1px;flex:1;background:#d4ccb8;margin:3px 0"></span></div><div style="padding-bottom:14px"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600">~/.claude/CLAUDE.md</div><div style="font-size:12px;color:#5b4a36;white-space:nowrap">this file · every project</div></div></div><div style="display:flex;gap:12px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b8a98a;margin-top:4px"></span><span style="width:1px;flex:1;background:#d4ccb8;margin:3px 0"></span></div><div style="padding-bottom:14px"><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:400">&lt;project&gt;/CLAUDE.md</div><div style="font-size:12px;color:#8a7a60;white-space:nowrap">per project · in its Claude config</div></div></div><div style="display:flex;gap:12px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:1.5px solid #b8a98a;margin-top:4px"></span></div><div style=""><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:400">&lt;project&gt;/CLAUDE.local.md</div><div style="font-size:12px;color:#8a7a60;white-space:nowrap">per project · that machine only</div></div></div></div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:12px;white-space:nowrap;gap:16px">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">~/.CLAUDE/CLAUDE.MD · YOUR INSTRUCTIONS FOR EVERY PROJECT</div><div style="display:flex;align-items:center;gap:14px;margin-top:6px"><span style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;letter-spacing:-.015em">CLAUDE.md</span><span style="font-size:12.5px;font-weight:600;padding:3px 10px;border-radius:9999px;background:rgba(111,125,82,.16);color:#4e5739">Loaded in every session</span></div></div>
+        
+        
+      </div>
+      <div style="flex:1;min-height:0;padding:24px 36px 28px;display:flex"><div style="position:relative;flex:1;min-width:0;min-width:0;min-height:0"><dc-import name="DocEditor" paper="{{ edPaper }}" doc="claude-global" file="CLAUDE.md" path="~/.claude/CLAUDE.md" state="saved" mode="{{ docMode }}" on-full="{{ fullClaudeG }}" style="position:absolute;top:0;left:0;width:100%;height:100%" hint-size="100%,100%"></dc-import></div></div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isGMcp }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px;gap:9px">
+        <div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">SERVER FILE</span><span style="font-size:11.5px;color:#8a7a60">edited 2d ago</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">~/.claude.json › mcpServers</span>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;background:#f6efe1;font-size:13px;white-space:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:#6f7d52;flex-shrink:0"></span><span style="color:#5b4a36">On in every project · no approval step</span></div>
+      </div>
+      <div style="display:flex;gap:8px;white-space:nowrap"><span style="flex:1;height:38px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Check all 3</span><span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600">+ Add</span></div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px">
+        <div style="padding:12px 14px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8;box-shadow:0 1px 2px rgba(42,34,26,.06)"><div style="display:flex;align-items:center;gap:10px"><span style="width:9px;height:9px;border-radius:50%;background:#6f7d52"></span><span style="font-size:14.5px;font-weight:600;flex:1">playwright</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">stdio</span></div><div style="padding-left:19px;font-size:12px;color:#8a7a60;margin-top:2px"><span style="color:#7b560e">Community</span> · <span style="color:#4e5739">connected · 20 tools</span></div></div>
+        <sc-for list="{{ gServerRest }}" as="s" hint-placeholder-count="2"><div style="padding:12px 14px;border-radius:12px;border:1px solid transparent"><div style="display:flex;align-items:center;gap:10px"><span style="width:9px;height:9px;box-sizing:border-box;border-radius:50%;border:1.5px solid {{ s.dotBd }};background:{{ s.dotBg }}"></span><span style="font-size:14.5px;font-weight:500;flex:1">{{ s.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">{{ s.type }}</span></div><div style="padding-left:19px;font-size:12px;color:#8a7a60;margin-top:2px"><span style="color:#7b560e">{{ s.origin }}</span> · <span style="color:{{ s.sc }}">{{ s.sub }}</span></div></div></sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:12px;white-space:nowrap">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">COMMUNITY · STDIO · USER SCOPE · ~/.CLAUDE.JSON › MCPSERVERS › PLAYWRIGHT</div><div style="display:flex;align-items:center;gap:14px;margin-top:4px"><span style="font-size:34px;font-weight:600;letter-spacing:-.02em;line-height:1.15">playwright</span><span style="display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:9999px;font-size:12.5px;font-weight:600;background:rgba(111,125,82,.16);color:#4e5739"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span>Connected</span></div></div>
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36;margin-right:8px"><span style="width:8px;height:8px;border-radius:50%;background:#6f7d52"></span>On in every project</span>
+        <span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Check again</span><span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Edit JSON</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:28px 36px;display:flex;flex-direction:column;gap:20px;max-width:1060px">
+        <div style="padding:18px 22px;border-radius:14px;background:{{ valBg }};border:1px solid {{ valBd }};display:flex;align-items:center;gap:16px"><div style="flex:1;display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ valLabel }}">COMMAND</span><span style="font-family:'IBM Plex Mono',monospace;font-size:17px;color:{{ valText }}">npx @playwright/mcp@latest</span></div><span style="display:flex;align-items:center;gap:7px;font-size:13px;color:{{ valSub }}"><img src="{{ icCopyInk }}" alt="" style="width:15px;height:15px">Copy</span></div>
+        <div style="padding:18px 22px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:10px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">ENVIRONMENT · 0</span><span style="font-size:14px;color:#5b4a36">No variables set.</span><span style="font-size:13px;font-weight:600;color:#b85c34">+ Add variable</span></div>
+        <div style="padding:18px 22px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:12px"><div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">TOOLS · 20</span><span style="font-size:12.5px;color:#8a7a60">checked 2 min ago</span></div><div style="display:flex;flex-wrap:wrap;gap:8px"><sc-for list="{{ gTools }}" as="t" hint-placeholder-count="8"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:5px 10px;border-radius:8px;background:#f6efe1;border:1px solid #e8e0cd">{{ t }}</span></sc-for><span style="font-size:12.5px;padding:5px 10px;color:#b85c34;font-weight:600">+12 more</span></div><span style="font-size:12.5px;color:#8a7a60">Claude calls them as <span style="font-family:'IBM Plex Mono',monospace">mcp__playwright__…</span></span></div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span>Saved — matches ~/.claude.json</div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isPlugins }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">PLUGINS</span><span style="font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:9999px;background:rgba(111,125,82,.15);color:#4e5739">3 on</span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;word-break:break-all">~/.claude/plugins/installed_plugins.json</span><span style="font-size:12px;line-height:1.45;color:#8a7a60">On/off is saved in settings.json › enabledPlugins</span></div>
+      <div style="display:flex;gap:8px;white-space:nowrap"><div style="flex:1;display:flex;align-items:center;gap:9px;height:38px;box-sizing:border-box;padding:0 12px;border-radius:10px;background:#fbf6ec;border:1px solid #e0d3b8;font-size:13px;color:#8a7a60"><img src="{{ icSearch }}" alt="" style="width:15px;height:15px">Filter</div><span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600">+ Add</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
+        <div style="padding:10px 12px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8;box-shadow:0 1px 2px rgba(42,34,26,.06)"><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600">commit-commands</span><span style="width:28px;height:16px;border-radius:9999px;background:#b85c34;position:relative;flex-shrink:0"><span style="position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fbf6ec"></span></span></div><div style="font-size:12px;color:#8a7a60;margin-top:2px">claude-plugins-official · 3 commands</div></div>
+        <sc-for list="{{ gPluginRest }}" as="p" hint-placeholder-count="3"><div style="padding:10px 12px;border-radius:12px;border:1px solid transparent;opacity:{{ p.op }}"><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500">{{ p.name }}</span><span style="width:28px;height:16px;border-radius:9999px;background:{{ p.tBg }};position:relative;flex-shrink:0"><span style="position:absolute;left:{{ p.kL }};right:{{ p.kR }};top:2px;width:12px;height:12px;border-radius:50%;background:#fbf6ec"></span></span></div><div style="font-size:12px;color:#8a7a60;margin-top:2px">{{ p.sub }}</div></div></sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:12px;white-space:nowrap">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">PLUGIN · CLAUDE-PLUGINS-OFFICIAL · V1.0.0 · USER SCOPE</div><div style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;letter-spacing:-.015em;margin-top:6px">commit-commands</div></div>
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36;margin-right:8px"><span style="width:34px;height:20px;border-radius:9999px;background:#b85c34;position:relative"><span style="position:absolute;right:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fbf6ec"></span></span>Enabled</span>
+        <span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500;color:#8a7a60">Up to date</span>
+        <span style="height:36px;width:36px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #d4ccb8;font-size:15px">⋯</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:22px 36px 28px;display:flex;flex-direction:column;gap:14px;max-width:1060px">
+        <div style="padding:14px 18px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8"><div style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">DESCRIPTION · FROM THE PLUGIN’S MANIFEST</div><div style="font-size:15px;line-height:1.5;margin-top:4px">Git commit workflows: write the commit, push and open a pull request, and clean up merged branches.</div></div>
+        <div style="border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;overflow:hidden"><div style="padding:14px 18px 10px;display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">WHAT IT ADDS · 3 COMMANDS</span><span style="font-size:12.5px;color:#b85c34;font-weight:600">Open in Skills →</span></div><sc-for list="{{ gCmds }}" as="c" hint-placeholder-count="3"><div style="display:grid;grid-template-columns:200px minmax(0,1fr);column-gap:16px;align-items:baseline;padding:12px 18px;border-top:1px solid #efe6d3"><span style="font-family:'IBM Plex Mono',monospace;font-size:13.5px;font-weight:600">{{ c.cmd }}</span><span style="font-size:13.5px;color:#5b4a36">{{ c.desc }}</span></div></sc-for></div>
+        <div style="padding:18px 22px;border-radius:14px;background:{{ valBg }};border:1px solid {{ valBd }};display:flex;align-items:center;gap:16px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:{{ valLabel }}">INSTALLED AT</span><span style="font-family:'IBM Plex Mono',monospace;font-size:14.5px;color:{{ valText }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">~/.claude/plugins/cache/claude-plugins-official/commit-commands/1.0.0</span></div><span style="font-size:13px;color:{{ valSub }}">Reveal</span></div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4a36"><span style="width:7px;height:7px;border-radius:50%;background:#6f7d52"></span>Saved — matches settings.json › enabledPlugins</div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isAgents }}" hint-placeholder-val="{{ false }}">
+    <div style="width:316px;flex-shrink:0;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="padding:14px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">AGENTS FOLDER</span><span style="font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:9999px;background:rgba(111,125,82,.15);color:#4e5739">9</span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">~/.claude/agents/</span><span style="font-size:12px;line-height:1.45;color:#8a7a60">The actor a session opens with — “you are acting as …”</span></div>
+      <div style="display:flex;gap:8px;white-space:nowrap"><div style="flex:1;display:flex;align-items:center;gap:9px;height:38px;box-sizing:border-box;padding:0 12px;border-radius:10px;background:#fbf6ec;border:1px solid #e0d3b8;font-size:13px;color:#8a7a60"><img src="{{ icSearch }}" alt="" style="width:15px;height:15px">Filter</div><span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600">+ New</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
+        <div style="padding:10px 12px;border-radius:12px;background:#fbf6ec;border:1px solid #e0d3b8;box-shadow:0 1px 2px rgba(42,34,26,.06)"><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600">architect</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">opus</span></div><div style="font-size:12px;color:#8a7a60;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Designs the shape of a change before anyone builds it.</div></div>
+        <sc-for list="{{ gAgentRest }}" as="a" hint-placeholder-count="8"><div style="padding:10px 12px;border-radius:12px;border:1px solid transparent"><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7a60">{{ a.model }}</span></div><div style="font-size:12px;color:#8a7a60;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.desc }}</div></div></sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="flex-shrink:0;padding:24px 36px 20px;border-bottom:1px solid #e0d3b8;display:flex;align-items:flex-end;gap:12px;white-space:nowrap">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;color:#8a7a60">AGENT · USER · ~/.CLAUDE/AGENTS/ARCHITECT.MD</div><div style="font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;letter-spacing:-.015em;margin-top:6px">architect</div></div>
+        <span style="height:36px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid #d4ccb8;background:#fbf6ec;font-size:13.5px;font-weight:500">Duplicate</span>
+        <span style="height:36px;width:36px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #d4ccb8;font-size:15px">⋯</span>
+      </div>
+      <div style="flex:1;min-height:0;padding:22px 36px 28px;display:flex;flex-direction:column;gap:14px">
+        <div style="padding:14px 18px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8"><div style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">DESCRIPTION · CLAUDE READS THIS TO PICK THE AGENT</div><div style="font-size:15px;line-height:1.5;margin-top:4px">Designs the shape of a change before anyone builds it.</div></div>
+        <div style="padding:16px 18px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:14px">
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));column-gap:16px"><div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">MODEL</span><div style="height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 13px;border-radius:10px;border:1px solid #e0d3b8;background:#f6efe1;font-family:'IBM Plex Mono',monospace;font-size:13.5px"><span style="flex:1">opus</span><span style="font-family:Geist,sans-serif;font-size:11px;color:#8a7a60">▾</span></div></div><div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">EFFORT</span><div style="height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 13px;border-radius:10px;border:1px solid #e0d3b8;background:#f6efe1;font-family:'IBM Plex Mono',monospace;font-size:13.5px"><span style="flex:1">high</span><span style="font-family:Geist,sans-serif;font-size:11px;color:#8a7a60">▾</span></div></div><div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">RUNS ON</span><div style="height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 13px;border-radius:10px;border:1px solid #e0d3b8;background:#f6efe1;font-family:'IBM Plex Mono',monospace;font-size:13.5px"><span style="flex:1">claude</span><span style="font-family:Geist,sans-serif;font-size:11px;color:#8a7a60">▾</span></div></div></div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60;margin-right:6px">TOOLS</span><sc-for list="{{ gToolsOn }}" as="t" hint-placeholder-count="5"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:5px 10px;border-radius:8px;background:{{ chipBg }};color:{{ chipFg }}">{{ t }}</span></sc-for><sc-for list="{{ gToolsOff }}" as="t" hint-placeholder-count="3"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:4px 9px;border-radius:8px;border:1px dashed #d4ccb8;color:#8a7a60">{{ t }}</span></sc-for></div>
+          <div style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid #efe6d3;font-size:13px;color:#5b4a36;white-space:nowrap"><span style="font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">PROJECT OVERRIDES</span><span style="display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:9999px;background:#efe6d3;font-size:12.5px;color:#2a221a"><span style="font-weight:600">Self</span><span style="font-family:'IBM Plex Mono',monospace">sonnet · medium</span><span style="color:#8a7a60">×</span></span><span style="color:#8a7a60">a local copy in ~/Self/.claude/agents/ wins there</span></div>
+        </div>
+        <div style="position:relative;flex:1;min-height:0;min-width:0;min-height:0"><dc-import name="DocEditor" paper="{{ edPaper }}" doc="agent" file="architect.md" path="~/.claude/agents/architect.md" state="saved" mode="{{ docMode }}" on-full="{{ fullAgent }}" style="position:absolute;top:0;left:0;width:100%;height:100%" hint-size="100%,100%"></dc-import></div>
+      </div>
+    </div>
+    </sc-if>
+  </div>
+  <sc-if value="{{ isFull }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;inset:0;z-index:30;display:flex;background:{{ overlayBg }}"><div style="position:relative;flex:1;min-width:0;min-height:0"><dc-import name="DocEditor" paper="{{ edPaper }}" doc="{{ fullDoc }}" file="{{ fullFile }}" path="{{ fullPath }}" state="{{ fullState }}" mode="{{ docMode }}" full="{{ true }}" on-exit="{{ exitFull }}" style="position:absolute;top:0;left:0;width:100%;height:100%" hint-size="100%,100%"></dc-import></div></div></sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1592,&quot;height&quot;:1040},&quot;scope&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;project&quot;,&quot;global&quot;],&quot;default&quot;:&quot;project&quot;,&quot;tsType&quot;:&quot;'project'|'global'&quot;},&quot;tab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;memory&quot;,&quot;claude-md&quot;,&quot;settings&quot;,&quot;mcp&quot;,&quot;skills&quot;,&quot;plugins&quot;,&quot;agents&quot;],&quot;default&quot;:&quot;memory&quot;,&quot;tsType&quot;:&quot;'memory'|'claude-md'|'settings'|'mcp'|'skills'|'plugins'|'agents'&quot;},&quot;band&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;flush&quot;,&quot;inset&quot;],&quot;default&quot;:&quot;flush&quot;,&quot;tsType&quot;:&quot;'flush'|'inset'&quot;},&quot;step&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;read&quot;,&quot;running&quot;,&quot;verdict&quot;,&quot;done&quot;,&quot;edit&quot;,&quot;edit-fix&quot;],&quot;default&quot;:&quot;none&quot;,&quot;tsType&quot;:&quot;'none'|'read'|'running'|'verdict'|'done'|'edit'|'edit-fix'&quot;,&quot;section&quot;:&quot;Memory check flow&quot;},&quot;full&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;claude-project&quot;,&quot;claude-global&quot;,&quot;skill-project&quot;,&quot;skill-global&quot;,&quot;agent&quot;,&quot;memory&quot;,&quot;memory-fix&quot;],&quot;default&quot;:&quot;none&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Document editor&quot;},&quot;palette&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;calm&quot;,&quot;ink-editor&quot;,&quot;paper&quot;,&quot;zebra&quot;],&quot;default&quot;:&quot;calm&quot;,&quot;tsType&quot;:&quot;'calm'|'ink-editor'|'paper'|'zebra'&quot;,&quot;section&quot;:&quot;Color&quot;},&quot;docmode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;doc&quot;,&quot;md&quot;],&quot;default&quot;:&quot;doc&quot;,&quot;tsType&quot;:&quot;'doc'|'md'&quot;,&quot;section&quot;:&quot;Document editor&quot;}}">
+class Component extends DCLogic {
+  state = { tab: null, D: null, full: undefined };
+  componentDidMount() {
+    const poll = () => { if (window.CC_DATA) this.setState({ D: window.CC_DATA }); else this._t = setTimeout(poll, 40); };
+    poll();
+  }
+  componentWillUnmount() { clearTimeout(this._t); }
+  renderVals() {
+    const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+    const global = this.props.scope === 'global';
+    const valid = global ? ['claude-md', 'settings', 'mcp', 'skills', 'plugins', 'agents'] : ['memory', 'claude-md', 'settings', 'mcp', 'skills'];
+    let tab = this.state.tab || this.props.tab || valid[0];
+    if (valid.indexOf(tab) < 0) tab = valid[0];
+    const go = (k) => () => this.setState({ tab: k });
+    const D = this.state.D || window.CC_DATA;
+    const meta = global ? [
+      { k: 'claude-md', label: 'CLAUDE.md', icon: 'file', badge: '3 files', dot: 'transparent' },
+      { k: 'settings', label: 'Settings', icon: 'settings', badge: '13', dot: 'transparent' },
+      { k: 'mcp', label: 'MCP', icon: 'mcp', badge: '3', dot: '#e4b85a' },
+      { k: 'skills', label: 'Skills', icon: 'skills', badge: '6', dot: 'transparent' },
+      { k: 'plugins', label: 'Plugins', icon: 'plugins', badge: '4', dot: 'transparent' },
+      { k: 'agents', label: 'Agents', icon: 'book', badge: '9', dot: 'transparent' }
+    ] : [
+      { k: 'memory', label: 'Memory', icon: 'memory', badge: '51', dot: '#e4b85a' },
+      { k: 'claude-md', label: 'CLAUDE.md', icon: 'file', badge: 'missing', dot: 'transparent', warn: true },
+      { k: 'settings', label: 'Settings', icon: 'settings', badge: '13', dot: 'transparent' },
+      { k: 'mcp', label: 'MCP', icon: 'mcp', badge: '5', dot: '#e4b85a' },
+      { k: 'skills', label: 'Skills', icon: 'skills', badge: '13', dot: 'transparent' }
+    ];
+    const step = !global && this.props.step && this.props.step !== 'none' ? this.props.step : null;
+    const editing = step === 'edit' || step === 'edit-fix';
+    const pal = ['zebra', 'ink-editor', 'calm', 'paper'].indexOf(this.props.palette) >= 0 ? this.props.palette : 'calm';
+    const bandDark = pal !== 'paper', edDark = pal === 'zebra' || pal === 'ink-editor', accDark = pal === 'zebra';
+    const memDoc = step === 'edit-fix' ? 'memory-fix' : 'memory';
+    const propFull = this.props.full && this.props.full !== 'none' ? this.props.full : null;
+    const fullKey = this.state.full === undefined ? propFull : this.state.full;
+    const MEMP = '~/.claude/projects/-home-bilko-Self/memory/portfolio-action-project-field.md';
+    const FULL = {
+      'claude-project': ['CLAUDE.md', '~/Self/CLAUDE.md', 'new'],
+      'claude-global': ['CLAUDE.md', '~/.claude/CLAUDE.md', 'saved'],
+      'skill-project': ['SKILL.md', '~/Self/.claude/skills/bank-of-america-statements/SKILL.md', 'saved'],
+      'skill-global': ['SKILL.md', '~/.claude/skills/pdf/SKILL.md', 'saved'],
+      'agent': ['architect.md', '~/.claude/agents/architect.md', 'saved'],
+      'memory': ['portfolio-action-project-field.md', MEMP, 'dirty'],
+      'memory-fix': ['portfolio-action-project-field.md', MEMP, 'dirty']
+    };
+    const fm = fullKey && FULL[fullKey] ? FULL[fullKey] : null;
+    const openFull = (k) => () => this.setState({ full: k });
+    const v = {
+      bandM: this.props.band === 'inset' ? '12px 12px 0px' : '0px',
+      bandR: this.props.band === 'inset' ? '14px' : '0px',
+      bandEyebrow: global ? 'CLAUDE CODE · GLOBAL' : 'CLAUDE CODE · PROJECT',
+      bandPath: global ? '~/.claude' : '~/Self',
+      isProject: !global, isGlobal: global,
+      docMode: this.props.docmode === 'md' ? 'md' : 'doc',
+      edPaper: !edDark, overlayBg: edDark ? '#2a221a' : '#f6efe1',
+      bandBg: bandDark ? '#2a221a' : '#efe6d3', bandBd: bandDark ? '#2a221a' : '#e0d3b8', bandFg: bandDark ? '#fbf6ec' : '#2a221a',
+      bandSub: bandDark ? '#b8a98a' : '#8a7a60', bandSub2: bandDark ? '#cfc0a2' : '#5b4a36',
+      bandSearchBg: bandDark ? 'rgba(246,239,225,.08)' : '#fbf6ec', bandSearchBd: bandDark ? 'rgba(246,239,225,.14)' : '#e0d3b8', bandKbdBd: bandDark ? 'rgba(246,239,225,.2)' : '#d4ccb8',
+      learnFg: bandDark ? '#e4b85a' : '#b85c34',
+      chipBg: accDark ? '#2a221a' : 'rgba(184,92,52,.13)', chipFg: accDark ? '#fbf6ec' : '#814024',
+      primBg: accDark ? '#2a221a' : '#b85c34', togOn: accDark ? '#2a221a' : '#b85c34',
+      askBg: accDark ? '#2a221a' : 'rgba(228,184,90,.16)', askBd: accDark ? '#2a221a' : 'rgba(211,162,60,.5)', askLabel: accDark ? '#e4b85a' : '#7b560e',
+      askText: accDark ? '#fbf6ec' : '#2a221a', askSub: accDark ? '#cfc0a2' : '#5b4a36', askBtnBg: accDark ? '#e4b85a' : '#b85c34', askBtnFg: accDark ? '#2a221a' : '#fbf6ec',
+      askRing: accDark ? '0 0 0 3px rgba(228,184,90,.5)' : '0 0 0 3px rgba(228,184,90,.3)',
+      runBg: accDark ? '#2a221a' : '#fbf6ec', runBd: accDark ? '#2a221a' : '#e0d3b8', runRule: accDark ? 'rgba(246,239,225,.1)' : '#efe6d3', runLabel: accDark ? '#e4b85a' : '#7b560e',
+      runSub: accDark ? '#cfc0a2' : '#5b4a36', runText: accDark ? '#fbf6ec' : '#2a221a', runTrack: accDark ? 'rgba(246,239,225,.12)' : '#efe6d3', runCheck: accDark ? '#9aa874' : '#6f7d52',
+      valBg: accDark ? '#2a221a' : '#f6efe1', valBd: accDark ? '#2a221a' : '#e0d3b8', valLabel: accDark ? '#e4b85a' : '#8a7a60', valText: accDark ? '#fbf6ec' : '#2a221a', valSub: accDark ? '#cfc0a2' : '#5b4a36',
+      isFull: !!fm, fullDoc: fullKey || 'claude-global', fullFile: fm ? fm[0] : '', fullPath: fm ? fm[1] : '', fullState: fm ? fm[2] : 'saved',
+      exitFull: () => this.setState({ full: null }),
+      memDoc: memDoc, skDoc: global ? 'skill-global' : 'skill-project',
+      skFilePath: global ? '~/.claude/skills/pdf/SKILL.md' : '~/Self/.claude/skills/bank-of-america-statements/SKILL.md',
+      fullClaudeP: openFull('claude-project'), fullClaudeG: openFull('claude-global'), fullSkill: openFull(global ? 'skill-global' : 'skill-project'), fullAgent: openFull('agent'), fullMem: openFull(memDoc),
+      readBg: editing ? 'transparent' : (accDark ? '#2a221a' : '#fbf6ec'), readFg: editing ? '#5b4a36' : (accDark ? '#fbf6ec' : '#2a221a'), readW: editing ? 500 : 600,
+      editBg: editing ? (accDark ? '#2a221a' : '#fbf6ec') : 'transparent', editFg: editing ? (accDark ? '#fbf6ec' : '#2a221a') : '#5b4a36', editW: editing ? 600 : 500,
+      isMemory: !global && tab === 'memory', isClaude: !global && tab === 'claude-md', isSettings: tab === 'settings',
+      isMcp: !global && tab === 'mcp', isSkills: tab === 'skills',
+      isGClaude: global && tab === 'claude-md', isGMcp: global && tab === 'mcp', isPlugins: tab === 'plugins', isAgents: tab === 'agents',
+      setAge: global ? 'edited 3d ago' : 'edited 56d ago',
+      setScope1: global ? 'User' : 'Project',
+      setPath1: global ? '~/.claude/settings.json · every project' : '.claude/settings.json · in git',
+      setEyebrow: global ? 'USER SETTINGS · 2 OF 3 SET' : 'PROJECT SETTINGS · 2 OF 3 SET',
+      skPath: global ? '~/.claude/skills/' : '~/Self/.claude/skills/',
+      skSummary: global ? '6 skills · on in every project' : '13 skills · 0 slash commands · all local',
+      skOn: global ? '6 on' : '13 on',
+      sk0Name: global ? '/pdf' : '/bank-of-america-statements',
+      sk0Short: global ? 'Read, fill, split and merge PDF files' : 'Parse local Bank of America PDF eStatements (checking + mortgage)',
+      skEyebrow: global ? 'SKILL · USER · ~/.CLAUDE/SKILLS/PDF/SKILL.MD' : 'SKILL · PROJECT · ~/SELF/.CLAUDE/SKILLS/BANK-OF-AMERICA-STATEMENTS/SKILL.MD',
+      skDesc: global ? 'Read, fill, split and merge PDF files. Use when a task involves a .pdf.' : 'Parse local Bank of America PDF eStatements (checking + mortgage) for the WA household into append-only structured data and refresh the served Bank-of-America page.',
+      gToolsOn: ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch'], gToolsOff: ['Edit', 'Write', 'Bash'],
+      pills: meta.map((m) => {
+        const on = m.k === tab;
+        return {
+          label: m.label, badge: m.badge, dot: m.dot, go: go(m.k),
+          ic: D ? D.icon(m.icon, on ? (bandDark ? '#2a221a' : '#b85c34') : (bandDark ? '#cfc0a2' : '#8a7a60'), 1.7) : BLANK,
+          bg: on ? (bandDark ? '#f6efe1' : '#fbf6ec') : 'transparent', fg: on ? '#2a221a' : (bandDark ? '#efe6d3' : '#5b4a36'),
+          bd: on && !bandDark ? '#e0d3b8' : 'transparent', sh: on && !bandDark ? '0 1px 2px rgba(42,34,26,.1)' : 'none',
+          bb: m.warn ? (on || !bandDark ? 'rgba(184,92,52,.16)' : 'rgba(232,169,136,.16)') : (on ? (bandDark ? '#2a221a' : 'rgba(184,92,52,.14)') : (bandDark ? 'rgba(246,239,225,.1)' : 'rgba(42,34,26,.07)')),
+          bf: m.warn ? (on || !bandDark ? '#814024' : '#e8a988') : (on ? (bandDark ? '#fbf6ec' : '#814024') : (bandDark ? '#e0d3b8' : '#5b4a36'))
+        };
+      })
+    };
+    Object.assign(v, { icSearch: BLANK, icSearchInk: BLANK, icSpark: BLANK, icSparkPaper: BLANK, icStar: BLANK, icPerm: BLANK, icHooks: BLANK, icTool: BLANK, icCopyInk: BLANK, icSparkHoney: BLANK, icCheckSage: BLANK, groups: [], groupRest: [] });
+    Object.assign(v, {
+      noFlow: !step, stRead: step === 'read', stRun: step === 'running', stVerdict: step === 'verdict', stDone: step === 'done',
+      isEditing: editing, notEditing: !editing, stEditFix: step === 'edit-fix', stEditPlain: step === 'edit',
+      editNote: step === 'edit-fix' ? 'Claude’s update is in · not saved yet' : 'Unsaved changes',
+      flowChip: editing || step === 'running' || step === 'verdict' || step === 'done',
+      chipText: step === 'running' ? 'Checking with Claude…' : step === 'verdict' ? 'Suggestion ready' : step === 'done' ? 'Updated · checked just now' : step === 'edit-fix' ? 'Editing Claude’s update' : 'Editing',
+      chipBg: step === 'done' ? 'rgba(111,125,82,.16)' : 'rgba(228,184,90,.28)',
+      chipFg: step === 'done' ? '#4e5739' : '#7b560e'
+    });
+    if (!D) return v;
+    const G = D.G;
+    const I = (n, c) => D.icon(n, c || '#8a7a60');
+    Object.assign(v, {
+      icSearch: I('search'), icSearchInk: I('search', bandDark ? '#b8a98a' : '#8a7a60'), icSpark: I('sparkle', '#5b4a36'), icSparkPaper: I('sparkle', '#fbf6ec'),
+      icStar: I('star', '#b85c34'), icPerm: I('permissions'), icHooks: I('hooks'), icTool: D.icon('tool', '#8a7a60', 1.4), icCopyInk: I('copy', accDark ? '#cfc0a2' : '#5b4a36'),
+      icSparkHoney: D.icon('sparkle', '#7b560e', 1.8), icCheckSage: D.icon('check', '#4e5739', 2)
+    });
+    v.evidence = D.evidence || [];
+    v.diff = (D.fixDiff || []).map((d) => ({ s: d.s, t: d.t, bg: d.s === '−' ? 'rgba(232,169,136,.3)' : d.s === '+' ? 'rgba(111,125,82,.2)' : 'transparent', fg: d.s === '−' ? '#814024' : d.s === '+' ? '#4e5739' : '#8a7a60' }));
+    v.memRest = D.memories.slice(1);
+    const PROSE_THEME = {
+      p: { fs: '15px', lh: '1.7', c: '#2a221a' },
+      h: { fs: '11.5px', c: '#b85c34', ls: '.1em', fw: 600, mt: '24px' },
+      code: { ff: "'IBM Plex Mono',monospace", fs: '13px', bg: '#efe6d3', pad: '1px 5px', c: '#2a221a' },
+      gap: '14px', boldW: 600
+    };
+    v.prose = D.prose(PROSE_THEME, step === 'done' ? D.memBodyFixed : null);
+    v.memLines = editing ? D.memSource({ dash: '#8a7a60', key: '#e4b85a', text: '#efe6d3', code: '#e8a988', bold: '#fbf6ec', mark: '#e4b85a', caretBg: 'rgba(246,239,225,.07)' }, step) : [];
+    v.groupRest = D.groups.slice(1).map((g) => ({ title: g.title, count: g.set + '/' + g.total, cc: g.set ? '#5b4a36' : '#b8a98a', ic: I(g.icon) }));
+    const stages = global ? ['Default', 'User'] : ['Default', 'User', 'Project', 'Local'];
+    const track = (r) => stages.map((s, i) => {
+      const win = r.src === s;
+      const has = win || (s === 'Default' && r.src !== 'Not set');
+      return {
+        t: s, sep: i === 0 ? '0px' : '12px', fw: win ? 700 : 500,
+        fg: win ? '#2a221a' : (has ? '#5b4a36' : '#b8a98a'),
+        bg: win ? (s === 'Default' ? '#8a7a60' : '#b85c34') : 'transparent',
+        bd: win ? (s === 'Default' ? '#8a7a60' : '#b85c34') : (has ? '#8a7a60' : '#d4ccb8')
+      };
+    });
+    v.sections = D.sections.map((s) => ({
+      cap: s.title.toUpperCase() + ' · ' + s.summary.replace(/\.$/, '').toUpperCase(),
+      rows: s.rows.map((r) => ({
+        name: r.name, key: r.key, desc: r.desc, value: r.value,
+        caret: r.kind === 'text' ? '' : '▾', valFg: r.set ? '#2a221a' : '#8a7a60', track: track(r)
+      }))
+    }));
+    v.serverRest = D.servers.slice(1).map((s) => ({ name: s.name, type: s.type, origin: s.origin, oc: s.origin === 'Community' ? '#7b560e' : '#5b4a36' }));
+    const CODE_TH = { head: '#e4b85a', headW: 600, code: '#e8a988', text: '#efe6d3', fence: '#8a7a60' };
+    v.skillRest = (global ? G.skills : D.skills).slice(1);
+    v.lines = D.code(CODE_TH, global ? G.skillSrc : null);
+    v.gImports = G.imports;
+    v.gClaudeLines = D.code(CODE_TH, G.claudeMd);
+    v.gServerRest = G.servers.slice(1).map((s) => {
+      const auth = s.status === 'auth';
+      return { name: s.name, type: s.type, origin: s.origin, sub: auth ? 'needs sign-in' : 'not checked', sc: auth ? '#7b560e' : '#8a7a60', dotBg: auth ? '#d3a23c' : 'transparent', dotBd: auth ? '#d3a23c' : '#8a7a60' };
+    });
+    v.gTools = G.tools;
+    v.gPluginRest = G.plugins.slice(1).map((p) => ({ name: p.name, sub: p.mkt + ' · ' + p.adds, tBg: p.on ? '#b85c34' : '#d4ccb8', kL: p.on ? 'auto' : '2px', kR: p.on ? '2px' : 'auto', op: p.on ? 1 : 0.6 }));
+    v.gCmds = G.pluginCmds;
+    v.gAgentRest = G.agents.slice(1);
+    v.gAgentLines = D.code(CODE_TH, G.agentPrompt);
+    return v;
+  }
+}
+</script>
+</body>
+</html>

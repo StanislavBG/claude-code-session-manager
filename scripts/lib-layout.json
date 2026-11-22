@@ -86,6 +86,7 @@
   "launchFailure": "scheduler",
   "loadGate": "scheduler",
   "localAdminHttp": "feedback-remote",
+  "loginItemPlan": "process",
   "loginShellPath": "process",
   "loopDelay": "util",
   "lruCache": "util",

@@ -515,6 +515,23 @@ tmpDir, deps: resolveJobSandboxDeps() })` and passes its `argv` to `buildClaudeS
 `sandboxArgs`, which replaces the old single `--dangerously-skip-permissions` flag. The
 investigation spawn (`spawnInvestigation`) calls it too, with `agentType: 'investigation'` (always `tool-rules`).
 
+### Coverage — every headless `claude` spawn
+
+- **PRD jobs** (`executeJob`, `scheduler.cjs`): `os-sandbox` for `validator` and `dev-lead` when
+  the OS sandbox dependencies are present, else `tool-rules`; every other persona `tool-rules`.
+- **Investigation probe** (`spawnInvestigation`, `scheduler.cjs`): `tool-rules` (`agentType: 'investigation'`).
+- **Tasks** (`buildTaskArgs`, `lib/tasks/taskRun.cjs`): `tool-rules` when the Task skips
+  permissions (`dangerouslySkipPermissions: true`, `agentType: 'task'`); without that flag no
+  policy is added and the CLI's own permission prompts apply.
+- **`runClaudeP`** (`lib/claude/runClaudeP.cjs`), **`docEdit.cjs`** and **`supervisor.cjs`**
+  (`runProbe`): `tool-rules` (`agentType: 'aux'`, dependencies passed as unavailable, rooted at
+  `process.cwd()`).
+- **Interactive Epic chats**: not covered — out of scope for this policy.
+
+`tool-rules` blocks the `Read`, `Write` and `Edit` tools and a plain Bash `cat` of a secret, but
+not an interpreter such as `python3 -c 'open(...)'` (or `sh -c 'cat $1'`). Only `os-sandbox`
+contains Bash.
+
 ### Two levels
 
 | Level | Who gets it | What it passes |

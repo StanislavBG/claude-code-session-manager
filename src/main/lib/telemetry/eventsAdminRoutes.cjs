@@ -15,9 +15,7 @@
 
 const { schemas } = require('../../ipcSchemas.cjs');
 const { sendJson } = require('../feedback-remote/localAdminHttp.cjs');
-const { readEventsAfter } = require('./auditEvents.cjs');
-
-const INVALID_CURSOR_PREFIX = 'invalid audit cursor';
+const { readEventsAfter, INVALID_AUDIT_CURSOR } = require('./auditEvents.cjs');
 
 /** @param {{ registerRoute: Function }} adminHttp */
 function registerAdminRoute(adminHttp) {
@@ -33,9 +31,8 @@ function registerAdminRoute(adminHttp) {
     try {
       result = readEventsAfter({ after: input.after, kinds: input.kinds, limit: input.limit });
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (message.startsWith(INVALID_CURSOR_PREFIX)) {
-        sendJson(res, 400, { ok: false, error: 'invalid query', details: message });
+      if (e instanceof Error && /** @type {Error & { code?: unknown }} */ (e).code === INVALID_AUDIT_CURSOR) {
+        sendJson(res, 400, { ok: false, error: 'invalid query', details: e.message });
         return;
       }
       throw e;

@@ -35,12 +35,18 @@ const INITIAL_WINDOW = 1024 * 1024;
 const START = 'start';
 const CURSOR_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)~(\d+)$/;
 const CURSOR_FORM = "expected '<ISO timestamp>~<count>' (e.g. 2026-11-01T00:00:00.000Z~1) or 'start'";
+/** `code` of the Error parseCursor throws for a malformed cursor. */
+const INVALID_AUDIT_CURSOR = 'INVALID_AUDIT_CURSOR';
 
 /** @param {unknown} after */
 function parseCursor(after) {
   if (after === START) return { start: true, at: '', n: 0 };
   const m = typeof after === 'string' ? CURSOR_RE.exec(after) : null;
-  if (!m) throw new Error(`invalid audit cursor ${JSON.stringify(after)}: ${CURSOR_FORM}`);
+  if (!m) {
+    const err = /** @type {Error & { code: string }} */ (new Error(`invalid audit cursor ${JSON.stringify(after)}: ${CURSOR_FORM}`));
+    err.code = INVALID_AUDIT_CURSOR;
+    throw err;
+  }
   return { start: false, at: m[1], n: Number(m[2]) };
 }
 
@@ -154,4 +160,4 @@ function readEventsAfter({ after, kinds, limit, target, initialWindow } = {}) {
   return { events, next, more, gap };
 }
 
-module.exports = { OUTSIDE_EVENT_KINDS, readEventsAfter, CURSOR_FORM };
+module.exports = { OUTSIDE_EVENT_KINDS, readEventsAfter, CURSOR_FORM, INVALID_AUDIT_CURSOR };

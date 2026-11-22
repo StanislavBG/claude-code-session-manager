@@ -142,6 +142,14 @@ test.each([
   });
 });
 
+test('GET /admin/events answers a malformed cursor with 400 carrying the reader\'s message', async () => {
+  await withAdmin(async (port, token) => {
+    const res = await request(port, { path: '/admin/events?after=yesterday', token });
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ ok: false, error: 'invalid query', details: expect.stringMatching(/^invalid audit cursor "yesterday": expected/) });
+  });
+});
+
 test('GET /admin/events writes no file and no audit row', async () => {
   const before = fs.readFileSync(auditLogPath(), 'utf8');
   const filesBefore = fs.readdirSync(tmpHome).sort();

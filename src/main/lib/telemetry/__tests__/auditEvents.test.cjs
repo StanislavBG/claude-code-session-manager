@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
-const { readEventsAfter, OUTSIDE_EVENT_KINDS } = require('../auditEvents.cjs');
+const { readEventsAfter, OUTSIDE_EVENT_KINDS, INVALID_AUDIT_CURSOR } = require('../auditEvents.cjs');
 
 let root;
 beforeAll(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'auditevents-')); });
@@ -117,6 +117,16 @@ test('malformed cursor throws naming the expected form', () => {
   }
 });
 
+test('malformed cursor error carries code INVALID_AUDIT_CURSOR, message unchanged', () => {
+  expect(INVALID_AUDIT_CURSOR).toBe('INVALID_AUDIT_CURSOR');
+  const target = logDir([row(1, 'epic_state_changed')]);
+  let err;
+  try { readEventsAfter({ after: 'garbage', target }); } catch (e) { err = e; }
+  expect(err).toBeInstanceOf(Error);
+  expect(err.code).toBe(INVALID_AUDIT_CURSOR);
+  expect(err.message).toMatch(/^invalid audit cursor "garbage": expected '<ISO timestamp>~<count>'/);
+});
+
 test('a malformed line is skipped', () => {
   const target = logDir([row(1, 'epic_state_changed', { n: 1 }), '{not json', '"just a string"', row(2, 'epic_state_changed', { n: 2 })]);
   const r = readEventsAfter({ after: 'start', target });
@@ -161,4 +171,20 @@ test('gap is true when the cursor predates the archive too', () => {
   expect(r.next).toBe(`${T(10)}~1`);
   const noArchive = logDir([row(10, 'epic_state_changed', { n: 'live1' })]);
   expect(readEventsAfter({ after: `${T(1)}~1`, target: noArchive }).gap).toBe(true);
+});
+
+test('two rows sharing one at across the rotation boundary are each returned exactly once', () => {
+  const target = logDir(
+    [row(5, 'epic_state_changed', { n: 'live-first' }), row(6, 'epic_state_changed', { n: 'live2' })],
+    [row(1, 'epic_state_changed', { n: 'a1' }), row(5, 'epic_state_changed', { n: 'archive-last' })],
+  );
+  const first = readEventsAfter({ after: `${T(1)}~1`, limit: 1, target });
+  expect(first.events.map((e) => e.n)).toEqual(['archive-last']);
+  expect(first.more).toBe(true);
+  expect(first.gap).toBe(false);
+  const second = readEventsAfter({ after: first.next, limit: 1, target });
+  expect(second.events.map((e) => e.n)).toEqual(['live-first']);
+  expect(second.gap).toBe(false);
+  const third = readEventsAfter({ after: second.next, target });
+  expect(third.events.map((e) => e.n)).toEqual(['live2']);
 });

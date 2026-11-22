@@ -4,7 +4,11 @@
  * drift-check.cjs — dependency-free drift check for a repo's markdown network.
  *
  *   node drift-check.cjs [--root <dir>] [--map <path>] [--file <path>]...
- *                        [--exclude <prefix>]... [--checks links,paths,limits,contents[,orphans][,duplicates]] [--strict-paths]
+ *                        [--exclude <prefix>]... [--checks links,paths,limits,contents,pairs[,orphans][,duplicates]] [--strict-paths]
+ *
+ * `pairs` (default) checks the AGENTS.md pair layout: a CLAUDE.md beside an AGENTS.md must open
+ * with `@AGENTS.md`, a nested AGENTS.md needs a CLAUDE.md stub beside it when the repo root has a
+ * CLAUDE.md, and no line may be kept in both files of a pair.
  *
  * `orphans` is opt-in (not in the default set): docs no chain of references from the root
  * CLAUDE.md reaches, by the maintaining-md-network SKILL.md link convention. `duplicates` is opt-in
@@ -21,10 +25,10 @@ const { spawnSync } = require('child_process');
 // The link convention (links, imports, backticked paths; code and comments skipped) is written
 // once, in the sibling mdLinks.cjs — same folder, so this script stays dependency-free.
 const { linksOf, rawLinksOf, visibleLine, importsOf, backtickPaths, toRepoPath } = require('./mdLinks.cjs');
-const { findDuplicates } = require('./mdDuplicates.cjs');
+const { findDuplicates, normalize } = require('./mdDuplicates.cjs');
 
-const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'orphans', 'duplicates'];
-const DEFAULT_CHECKS = ['links', 'paths', 'limits', 'contents'];
+const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'pairs', 'orphans', 'duplicates'];
+const DEFAULT_CHECKS = ['links', 'paths', 'limits', 'contents', 'pairs'];
 const LIMIT_ALWAYS_LOADED = 200;
 const LIMIT_MAP = 70;
 const CONTENTS_MIN_LINES = 100;
@@ -238,6 +242,65 @@ function hasPathsFrontmatter(text) {
   return !!m && /^paths\s*:/m.test(m[1]);
 }
 
+/** True when the doc's first non-blank line is the `@AGENTS.md` import (a CLAUDE.md stub). */
+function importsAgentsFirst(text) {
+  const first = text.split(/\r?\n/).find((l) => l.trim() !== '');
+  return first !== undefined && /^@(\.\/)?AGENTS\.md$/.test(first.trim());
+}
+
+/**
+ * Comparable lines of a doc: { line, text, key } for every non-blank, non-heading line outside
+ * code fences, keyed by mdDuplicates.normalize (the duplicate check's normalization).
+ */
+function comparableLines(text) {
+  const out = [];
+  let fence = null;
+  text.split(/\r?\n/).forEach((raw, idx) => {
+    const m = /^\s*(`{3,}|~{3,})/.exec(raw);
+    if (fence) {
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      return;
+    }
+    if (m) { fence = m[1]; return; }
+    if (raw.trim() === '' || /^\s{0,3}#{1,6}(\s|$)/.test(raw)) return;
+    const key = normalize(raw).join(' ');
+    if (key) out.push({ line: idx + 1, text: raw, key });
+  });
+  return out;
+}
+
+/** The AGENTS.md pair layout findings for the checked docs. */
+function pairFindings(root, docs) {
+  const out = [];
+  const exists = (rel) => fs.existsSync(path.join(root, rel));
+  const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
+  const rootHasClaude = exists(ROOT_DOC);
+  for (const rel of docs) {
+    const base = path.posix.basename(rel);
+    const dir = path.posix.dirname(rel);
+    const sibling = (name) => (dir === '.' ? name : `${dir}/${name}`);
+    if (base === 'CLAUDE.md') {
+      const agentsFile = sibling('AGENTS.md');
+      if (!exists(agentsFile)) continue;
+      const claudeText = read(rel);
+      const agentsText = read(agentsFile);
+      if (claudeText === null || agentsText === null) continue;
+      if (!importsAgentsFirst(claudeText)) out.push({ kind: 'claude-md-stub-missing-import', file: rel });
+      const agentsByKey = new Map();
+      for (const l of comparableLines(agentsText)) if (!agentsByKey.has(l.key)) agentsByKey.set(l.key, l.line);
+      const seen = new Set();
+      for (const l of comparableLines(claudeText)) {
+        if (seen.has(l.key) || !agentsByKey.has(l.key)) continue;
+        seen.add(l.key);
+        out.push({ kind: 'fact-in-both', file: rel, claudeFile: rel, agentsFile, line: l.line, agentsLine: agentsByKey.get(l.key), text: l.text });
+      }
+    } else if (base === 'AGENTS.md' && rootHasClaude && !exists(sibling('CLAUDE.md'))) {
+      out.push({ kind: 'agents-md-not-loaded', file: rel });
+    }
+  }
+  return out;
+}
+
 function runDriftCheck(options) {
   const opts = Object.assign({ root: null, map: null, files: [], excludes: [], checks: DEFAULT_CHECKS, strictPaths: false }, options);
   const root = path.resolve(opts.root || process.cwd());
@@ -268,6 +331,11 @@ function runDriftCheck(options) {
     if (!fs.existsSync(path.join(root, map))) throw new UsageError(`map not found: ${opts.map}`);
   } else {
     const rootFiles = ['CLAUDE.md', 'AGENTS.md'].map((n) => path.join(root, n)).filter((p) => fs.existsSync(p));
+    // A root CLAUDE.md that is a stub (`@AGENTS.md` first) hands the map role to the root AGENTS.md.
+    const rootAgents = path.join(root, 'AGENTS.md');
+    let stubbed = false;
+    try { stubbed = fs.existsSync(rootAgents) && importsAgentsFirst(fs.readFileSync(path.join(root, ROOT_DOC), 'utf8')); } catch { /* no root CLAUDE.md */ }
+    if (stubbed) rootFiles.sort((a, b) => (a === rootAgents ? -1 : b === rootAgents ? 1 : 0));
     const candidates = [...rootFiles];
     for (const p of rootFiles) {
       const info = docInfo(p, root);
@@ -278,6 +346,7 @@ function runDriftCheck(options) {
       try { t = fs.readFileSync(p, 'utf8'); } catch { continue; }
       if (/<!--\s*md-network-map/.test(t)) { map = toPosix(path.relative(root, p)); break; }
     }
+    if (map === null && stubbed) map = 'AGENTS.md';
   }
   const notes = [];
   if (map === null) notes.push('no md-network-map comment found; the 70-line map limit was not applied');
@@ -385,6 +454,8 @@ function runDriftCheck(options) {
       findings.push({ kind: 'broken-link', file: m.file, line: m.line, target: m.target });
     }
   }
+
+  if (checks.has('pairs')) findings.push(...pairFindings(root, docs));
 
   if (checks.has('orphans')) {
     if (!fs.existsSync(path.join(root, ROOT_DOC))) {

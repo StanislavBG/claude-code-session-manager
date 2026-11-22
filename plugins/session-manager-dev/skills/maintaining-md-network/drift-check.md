@@ -22,10 +22,10 @@ node <skill base dir>/scripts/drift-check.cjs --root <repo>
 | Flag | Meaning |
 | --- | --- |
 | `--root <dir>` | Repo to check. Defaults to the current directory. Must be a directory. |
-| `--map <path>` | The entry map. Default: the first file that holds the maintainer comment, searched in this order: the root CLAUDE.md, the root AGENTS.md, then the `.md` files those two import directly with at-sign imports (see below). |
+| `--map <path>` | The entry map. Default: the first file that holds the maintainer comment, searched in this order: the root CLAUDE.md, the root AGENTS.md, then the `.md` files those two import directly with at-sign imports (see below). When the root CLAUDE.md is a stub (its first non-blank line is `@AGENTS.md`), the root AGENTS.md is searched first, and it is the map if no file holds the comment. |
 | `--file <path>` | Check only this file. Repeat for each file. Default: every tracked `.md` file (all `.md` files outside `.git` and `node_modules` when the repo is not git). |
 | `--exclude <prefix>` | Skip files whose repo-relative path starts with the prefix. Repeat as needed. |
-| `--checks <list>` | Comma list from `links`, `paths`, `limits`, `contents`, `orphans`, `duplicates`. Default: the first four. `orphans` is opt-in: it reports docs the root CLAUDE.md never reaches, by the [link convention](SKILL.md#what-counts-as-a-link) in SKILL.md. `duplicates` is opt-in: it reports pairs of checked docs that share the same text. |
+| `--checks <list>` | Comma list from `links`, `paths`, `limits`, `contents`, `pairs`, `orphans`, `duplicates`. Default: the first five. `pairs` checks the AGENTS.md pair layout (a CLAUDE.md stub that imports the AGENTS.md beside it). `orphans` is opt-in: it reports docs the root CLAUDE.md never reaches, by the [link convention](SKILL.md#what-counts-as-a-link) in SKILL.md. `duplicates` is opt-in: it reports pairs of checked docs that share the same text. |
 | `--strict-paths` | Report `unanchored-path` findings, and treat a link starting with `/` that matches no file as broken. Off by default. |
 
 A flag that needs a value fails if the value is missing or starts with `--`.
@@ -52,6 +52,9 @@ One JSON object on stdout, with its keys in this order:
 | `unanchored-path` | file, line, target, matches | Only with `--strict-paths`. The span does not resolve from the root or the doc, but tracked files match it as a path suffix or folder. The doc names the path without its full prefix. |
 | `over-line-limit` | file, lines, expandedLines, limit | A CLAUDE.md, AGENTS.md or unscoped `.claude/rules` file has more than 200 lines, or the map has more than 70. `expandedLines` counts the file plus every `.md` it pulls in with an at-sign import (up to 4 hops, each file once); the limit applies to `expandedLines`. |
 | `no-contents-list` | file, lines | A doc over 100 lines has no Contents heading and no list of anchor links near the top. |
+| `claude-md-stub-missing-import` | file | Check `pairs`. A CLAUDE.md has an AGENTS.md in the same folder, but its first non-blank line is not `@AGENTS.md`. Claude Code then never loads that AGENTS.md. |
+| `agents-md-not-loaded` | file | Check `pairs`. An AGENTS.md has no CLAUDE.md in its folder while the repo root has a CLAUDE.md. Claude Code never auto-loads it; add a CLAUDE.md stub whose first line is `@AGENTS.md`. |
+| `fact-in-both` | file, claudeFile, agentsFile, line, agentsLine, text | Check `pairs`. A non-blank, non-heading line outside code fences is in both files of a CLAUDE.md / AGENTS.md pair after the duplicate check's normalization (`mdDuplicates.cjs` `normalize`). `file` = `claudeFile`; `line` is its line in CLAUDE.md, `agentsLine` its line in AGENTS.md. Keep it in AGENTS.md only. |
 | `orphan` | file | Only with `--checks orphans` (opt-in). No chain of references from the root CLAUDE.md reaches this checked doc, by SKILL.md's [link convention](SKILL.md#what-counts-as-a-link): markdown links and `<x.md>` autolinks, backticked `.md` paths (repo-root form first, then doc-relative) and at-sign imports, outside fences and HTML comments. All tracked docs carry reachability; `--exclude` and `--file` only limit what is reported. No root CLAUDE.md adds a note instead. Keep history collections out with `--exclude`. |
 | `duplicate` | file, other, sharedRuns, detail (also `type: 'duplicate'`) | Only with `--checks duplicates` (opt-in). Two checked docs share at least 10 distinct runs of 8 consecutive words (`scripts/mdDuplicates.cjs` `findDuplicates`, the same function the app's scan runs); `file` is the first doc in path order, `other` the second. Code fences and link targets are ignored; text found in more than 6 docs is boilerplate and skipped. Keep history collections out with `--exclude`. |
 
@@ -63,7 +66,7 @@ Rules the script applies:
 - Site route: a link starting with a single slash that does not exist under the repo root is treated as a website route and skipped. `--strict-paths` turns that skip off.
 - Ignore marker: a line that contains the marker `<!-- drift-check-ignore -->` is skipped by the link and path checks.
 - Ellipsis rule: a span with a `...` segment, such as src/.../x.ts, is a placeholder and is skipped.
-- Map detection: without `--map`, the script looks for the maintainer comment in the root CLAUDE.md and AGENTS.md, then in the `.md` files inside the repo that they import directly with at-sign imports. Only those direct imports (one hop) are searched, not the files they import in turn. The first file with the comment is the map.
+- Map detection: without `--map`, the script looks for the maintainer comment in the root CLAUDE.md and AGENTS.md, then in the `.md` files inside the repo that they import directly with at-sign imports. Only those direct imports (one hop) are searched, not the files they import in turn. The first file with the comment is the map. When the root CLAUDE.md's first non-blank line is `@AGENTS.md` and the root AGENTS.md exists, AGENTS.md is searched first, and with no comment anywhere it is the map.
 
 ## Path conventions
 
@@ -188,7 +191,7 @@ The map carries one HTML comment, so the script and the next reviewer can find i
 
 Put the comment in the map file itself. The map may be an imported file: when the root CLAUDE.md pulls in docs/map.md with an at-sign import, the comment goes in docs/map.md.
 
-Without `--map`, the script searches the root CLAUDE.md, then the root AGENTS.md, then the `.md` files those two import directly with at-sign imports. The first file that has the comment is the map, and it gets the 70-line limit.
+Without `--map`, the script searches the root CLAUDE.md, then the root AGENTS.md, then the `.md` files those two import directly with at-sign imports. The first file that has the comment is the map, and it gets the 70-line limit. A root CLAUDE.md stub (first non-blank line `@AGENTS.md`) puts the root AGENTS.md first, and makes it the map when no file has the comment.
 
 Do not put the comment in a CLAUDE.md that only imports the map. That makes CLAUDE.md the map, so CLAUDE.md plus everything it imports is held to the 70-line limit, and the real map gets no limit of its own. On the Bilko repo, moving the comment from docs/map.md to CLAUDE.md gave a false over-line-limit finding: CLAUDE.md had 45 lines, 93 with its imports, against a limit of 70.
 

@@ -403,3 +403,69 @@ test('duplicates: a paragraph written in two docs is one finding and exits 1; of
   expect(json.counts).toEqual({ duplicate: 1 });
   expect(run(dir, '--checks', 'duplicates', '--exclude', 'docs/b.md').code).toBe(0);
 });
+
+test('pairs: a CLAUDE.md beside an AGENTS.md without the @AGENTS.md import is reported', () => {
+  const dir = repo({
+    'CLAUDE.md': '@AGENTS.md\n',
+    'AGENTS.md': '# Map\n',
+    'pkg/CLAUDE.md': '\n# Pkg\nsee AGENTS.md\n',
+    'pkg/AGENTS.md': '# Pkg agents\n',
+    'lib/CLAUDE.md': '\n  @AGENTS.md\n',
+    'lib/AGENTS.md': '# Lib agents\n',
+  });
+  const { code, json } = run(dir);
+  expect(code).toBe(1);
+  expect(json.findings.filter((f) => f.kind === 'claude-md-stub-missing-import')).toEqual([
+    { kind: 'claude-md-stub-missing-import', file: 'pkg/CLAUDE.md' },
+  ]);
+  expect(json.counts['claude-md-stub-missing-import']).toBe(1);
+});
+
+test('pairs: an AGENTS.md with no CLAUDE.md stub beside it, in a repo with a root CLAUDE.md, is reported', () => {
+  const dir = repo({
+    'CLAUDE.md': '@AGENTS.md\n',
+    'AGENTS.md': '# Map\n',
+    'pkg/AGENTS.md': '# Pkg agents\n',
+  });
+  const { code, json } = run(dir);
+  expect(code).toBe(1);
+  expect(json.findings).toEqual([{ kind: 'agents-md-not-loaded', file: 'pkg/AGENTS.md' }]);
+  // No root CLAUDE.md: Claude Code is not the reader that matters; nothing reported.
+  const bare = repo({ 'AGENTS.md': '# Map\n', 'pkg/AGENTS.md': '# Pkg agents\n' });
+  expect(run(bare).json.findings).toEqual([]);
+});
+
+test('pairs: a line kept in both files of a pair is fact-in-both; headings and blanks are not', () => {
+  const dir = repo({
+    'CLAUDE.md': '@AGENTS.md\n\n# Rules\nRun   `npm test` before **every** commit.\n',
+    'AGENTS.md': '# Rules\n\n- run npm test before every commit\nOther fact.\n',
+  });
+  const { code, json } = run(dir);
+  expect(code).toBe(1);
+  expect(json.findings).toEqual([
+    {
+      kind: 'fact-in-both',
+      file: 'CLAUDE.md',
+      claudeFile: 'CLAUDE.md',
+      agentsFile: 'AGENTS.md',
+      line: 4,
+      agentsLine: 3,
+      text: 'Run   `npm test` before **every** commit.',
+    },
+  ]);
+});
+
+test('map: a root CLAUDE.md stub makes the root AGENTS.md the map; the map comment still wins', () => {
+  const dir = repo({ 'CLAUDE.md': '\n@AGENTS.md\n', 'AGENTS.md': lines(80) });
+  const { json } = run(dir, '--checks', 'limits');
+  expect(json.map).toBe('AGENTS.md');
+  expect(json.notes).toEqual([]);
+  expect(json.findings).toContainEqual({ kind: 'over-line-limit', file: 'AGENTS.md', lines: 80, expandedLines: 80, limit: 70 });
+
+  const withComment = repo({
+    'CLAUDE.md': '@AGENTS.md\n',
+    'AGENTS.md': '# Hi\n@docs/map.md\n',
+    'docs/map.md': '<!-- md-network-map -->\n# Map\n',
+  });
+  expect(run(withComment, '--checks', 'limits').json.map).toBe('docs/map.md');
+});

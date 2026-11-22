@@ -73,8 +73,8 @@ Every published version must have:
 - `bugs.url` — `https://github.com/StanislavBG/claude-code-session-manager/issues`
 
 No `publishConfig.provenance` field — it has never existed in this project's `package.json`
-(current `publishConfig` is just `{ "access": "public" }`), and provenance itself is future work,
-gated on a `release.yml` GitHub Actions workflow that doesn't exist yet (see the 2FA note below).
+(current `publishConfig` is just `{ "access": "public" }`). `release.yml` builds installers only;
+there is no npm provenance because publishing is local (see the 2FA note below).
 
 ### GitHub repo requirement
 
@@ -85,18 +85,16 @@ points there. `repository`/`homepage`/`bugs` only appear on the npm registry pag
 
 ### npm write-path 2FA gate / Trusted Publishing
 
-`npm publish` can 403 (`Two-factor authentication or granular access token with bypass 2fa enabled
-is required to publish packages`) even when `npm whoami` succeeds — a separate gate from login. A
-legacy "classic" publish token cannot satisfy it; only an account with 2FA enabled (interactive OTP
-at publish time) or a **granular access token with "bypass 2FA for write actions"** (npmjs.com web
-UI only — the CLI cannot create one) can.
-
-**Decision: Trusted Publishing declined by the owner on 2026-11-21.** `release.yml` has no npm
-publish job; it builds installers only. Releases publish locally from an isolated
-`~/.cache/sm-publish` worktree using a granular npm token with **"Bypass two-factor
-authentication"** ticked (90-day maximum, renewed by the owner). Without that bypass, `npm
-publish` returns E403. npm has announced it is deprecating the bypass-2FA publish capability
-(Phase 2, ~Jan 2027); revisit this decision before then.
+No CI publish path (owner decision 2026-11-21; Trusted Publishing job removed, restore from commit
+9f7b2627). Releases publish locally via the builder skill's isolated worktree with a granular token
+that has **"Bypass two-factor authentication"** ticked, renewed before its 90-day expiry. With
+`bypass_2fa: false`, `npm publish` fails E403 though `npm whoami` succeeds. Probe with
+`npm token list --json` (`bypass_2fa`, `expiry`, `revoked`); `npm profile get` errors with granular
+tokens. The builder skill's step 3 publish preflight names a missing or wrong token before any bump.
+npm expects such tokens to lose direct publishing ~January 2027 ([changelog](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)).
+A Trusted Publisher, if ever registered, needs `npm publish` ticked under Allowed actions (configs
+created after 2026-09-03 allow only `npm stage publish` by default) and must complete its first
+publish within 2 days or it expires.
 
 ### Publish command sequence
 

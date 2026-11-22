@@ -63,20 +63,21 @@ sequence straight through without pausing for confirmation at each step — the 
 2fa enabled is required to publish packages` even when `npm whoami` succeeds — this is a
 **separate write-path gate**, not a stale-login problem. Don't loop on `npm login`/re-auth.
 
-1. Check `npm profile get` (2FA status) and `npm token list` (token type) first.
+1. Probe with `npm token list --json` — field `bypass_2fa` (also `expiry`, `revoked`,
+   `permissions`, `scopes`). `npm profile get` errors with granular tokens; don't rely on it.
 2. If 2FA is disabled and the token is a legacy "classic" publish token (created via
    `npm token create`), publish is structurally blocked — classic tokens can't satisfy this
    requirement, and the CLI cannot create a granular access token (`npm token create` only
    makes classic tokens; granular/bypass-2FA tokens are npmjs.com-web-UI-only, confirmed via
    `npm help token`, 2026-08-22).
-3. **Do not treat a bypass-2FA granular token as a durable automation fix** — npm is removing
-   its publish capability (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/);
-   it is a bridge at best.
-4. **Publish path = local token.** Releases publish locally from an isolated
-   `~/.cache/sm-publish` worktree (skill step 4); there is no CI npm publish job (Trusted
-   Publishing declined by the owner on 2026-11-21). The token in `~/.npmrc` must be a granular
-   npm token with **"Bypass two-factor authentication"** ticked — 90-day maximum, renewed by the
-   owner. Without that bypass, `npm publish` returns E403.
-5. When blocked here: stop, do NOT retry `npm login` or `npm publish` repeatedly, report the
-   exact 403 output and the `npm profile get`/`npm token list` findings, and ask the human to
-   either supply an OTP-based interactive publish or a bypass-2FA token for this release.
+3. **The bypass-2FA token is a bridge, not durable:** npm expects it to lose direct publishing
+   around January 2027 (only a staged publish a human approves with 2FA), leaving Trusted
+   Publishing or staged publishing — https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/
+4. **There is no CI publish path** (owner decision 2026-11-21; the Trusted Publishing job was
+   removed — restore it from commit 9f7b2627 if wanted). Releases publish locally via skill
+   step 4. The token in `~/.npmrc` is a granular npm token with **"Bypass two-factor
+   authentication"** ticked, renewed before its 90-day expiry; with `bypass_2fa: false`,
+   `npm publish` returns E403 even though `npm whoami` succeeds.
+5. The builder skill's step 3 publish preflight prints a `BLOCKED` line naming a missing or
+   wrong token before any bump. When blocked: stop, don't retry `npm login`/`npm publish`,
+   report that line, and ask the owner to renew or fix the token.

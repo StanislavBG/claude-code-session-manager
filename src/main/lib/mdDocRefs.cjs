@@ -72,7 +72,9 @@ function suffixIndex(paths) {
  * Dead refs (tokens that resolve nowhere: not present, not gitignored, naming
  * no tracked path by suffix), ambiguous refs (a suffix naming 2+ tracked
  * paths), and existing file refs committed after the doc (newest first, at
- * most MAX_CHANGED). A unique suffix match counts as that file.
+ * most MAX_CHANGED). A unique suffix match counts as that file. A bare
+ * token (no '/', no extension) resolves only as an exact top-level path and is
+ * otherwise ignored.
  * @param {AssessInput} input
  * @returns {{ deadRefs: string[], ambiguousRefs: string[], changedSince: ChangedRef[] }}
  */
@@ -99,6 +101,14 @@ function assessRefs({ docPath, linkTargets, tokens, docMs, exists, lastCommitOf,
   }
   for (const tok of Array.isArray(tokens) ? tokens : []) {
     if (typeof tok !== 'string' || tok === '') continue;
+    if (!tok.includes('/') && path.posix.extname(tok) === '') {
+      // A bare name (`tasks`, `scripts`) is a name unless it is exactly a
+      // top-level tracked file or folder: no suffix match, no doc-folder join,
+      // never ambiguous, never dead.
+      const top = repoPath(tok);
+      if (top !== null && exists(top)) addFile(top);
+      continue;
+    }
     const isFolder = tok.endsWith('/');
     const root = repoPath(tok);
     const local = dir === '.' ? null : repoPath(path.posix.join(dir, tok));

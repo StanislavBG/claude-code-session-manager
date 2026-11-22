@@ -152,6 +152,46 @@ describe('assessRefs shorthand and ignored paths', () => {
   });
 });
 
+describe('assessRefs bare names (no slash, no extension)', () => {
+  const tracked = ['src/renderer/lib/epicIntake.ts', 'scripts/build.cjs', 'Makefile', 'README.md'];
+  const folders = ['src', 'src/renderer', 'src/renderer/lib', 'src/main', 'src/main/lib', 'src/main/lib/tasks', 'ops', 'ops/tasks', 'scripts'];
+  const all = new Set([...tracked, ...folders]);
+  const suffixMatches = suffixIndex([...tracked, ...folders]);
+  const run = (tokens, docPath = 'CLAUDE.md') =>
+    assessRefs({ docPath, linkTargets: [], tokens, docMs: 0, exists: (p) => all.has(p), lastCommitOf: () => 10, suffixMatches });
+
+  it('a bare name matching two nested folders is neither ambiguous nor dead', () => {
+    const r = run(['tasks']);
+    expect(r.ambiguousRefs).toEqual([]);
+    expect(r.deadRefs).toEqual([]);
+    expect(r.changedSince).toEqual([]);
+  });
+
+  it('a bare name matching one nested path never resolves by suffix', () => {
+    const r = run(['renderer', 'nothing']);
+    expect(r).toMatchObject({ deadRefs: [], ambiguousRefs: [], changedSince: [] });
+  });
+
+  it('a bare name equal to a top-level tracked folder or file resolves', () => {
+    const r = run(['scripts', 'Makefile']);
+    expect(r.deadRefs).toEqual([]);
+    expect(r.ambiguousRefs).toEqual([]);
+    expect(r.changedSince.map((c) => c.path)).toEqual(['Makefile', 'scripts']);
+  });
+
+  it('a bare name never resolves against the doc folder', () => {
+    const r = run(['tasks'], 'ops/README.md');
+    expect(r).toMatchObject({ deadRefs: [], ambiguousRefs: [], changedSince: [] });
+  });
+
+  it('tokens with a slash or an extension keep the suffix rules', () => {
+    const r = run(['lib/epicIntake.ts', 'tasks/', 'gone.md']);
+    expect(r.changedSince.map((c) => c.path)).toEqual(['src/renderer/lib/epicIntake.ts']);
+    expect(r.ambiguousRefs).toEqual(['tasks']);
+    expect(r.deadRefs).toEqual(['gone.md']);
+  });
+});
+
 describe('mentionPatterns', () => {
   it('adds full paths plus unshared parent/basename suffixes', () => {
     const { patterns, owner } = mentionPatterns([

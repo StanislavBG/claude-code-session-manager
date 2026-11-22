@@ -1,10 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Panel } from '../ui/Panel'
-import { ListDetail } from '../ui/ListDetail'
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
-import { ExtensionsToolbar, type ExtensionsToolbarMenuItem } from './extensions/ExtensionsToolbar'
+import { ConfigFileCard, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { McpServerDetail, MCP_CHECK_LABEL, MCP_DOT_CLASS, type McpCheckState } from './extensions/McpServerDetail'
 import {
   classifyProvenance,
@@ -18,6 +16,8 @@ import { useProvenance } from '../../state/provenance'
 import { mcpCheckKey, selectMcpChecking, selectMcpCheckResults, useMcpChecks } from '../../state/mcpChecks'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { formatAgo } from '../../lib/formatTime'
+import { Z } from '../../lib/zLayers'
 import type { Scope } from '../../lib/scopes'
 import { mcpPatchTarget } from './Library'
 import { toast, useToast } from '../../state/toast'
@@ -34,11 +34,15 @@ import type { InstalledPlugin, McpCheckRequest, McpCheckResult } from '../../../
  * streamable-http; v2.1.121 added `alwaysLoad`; reserved name `workspace`
  * cannot be used (v2.1.128).
  *
- * The list is the Extensions 3a design (design-mocks/extensions-3a/DESIGN_SPEC.md §2, §4):
- * the shared ExtensionsToolbar, one status dot per server from the mcpChecks store (checks
- * run only on Check all / Check again — never on mount), and a server always selected. The
- * selected server opens in the 3a detail (extensions/McpServerDetail.tsx); its Edit JSON shows
- * today's full per-server form (McpServerEditor below) in the detail's body.
+ * Layout is the Claude config design (design-mocks/claude-config renders 12-home-mcp,
+ * 08-project-mcp) on the shared ConfigLayout kit: a SERVER FILE card (`edited <age>`, the file ›
+ * mcpServers, and the scope note — or, in a project, the approval gating of
+ * <cwd>/.claude/settings.json), `Check all N` + `+ Add`, then one row per server with its status dot,
+ * name, transport and `<origin> · <status>`. The Extensions 3a decisions stay
+ * (design-mocks/extensions-3a/DESIGN_SPEC.md §4, §7): one status dot per server from the mcpChecks
+ * store (checks run only on Check all / Check again — never on mount), no per-server enabled
+ * switch, and a server always selected. The selected server opens in extensions/McpServerDetail.tsx;
+ * its Edit JSON shows today's full per-server form (McpServerEditor below) in the detail's body.
  *
  * User scope adds FROM PLUGINS (spec §4): the servers each enabled plugin adds (its .mcp.json, read
  * by pluginContents.ts's listPluginMcpServers), read-only — transport `plugin`, line 2
@@ -227,6 +231,92 @@ function McpCheckDot({ result, checking, testId }: { result: McpCheckResult | un
   )
 }
 
+/** Show the list's filter field only once the list is long enough to need one. */
+const FILTER_MIN_ROWS = 6
+
+/** `/home/me/x` → `~/x`, as the SERVER FILE card names a project's file. */
+function tildify(path: string, home: string): string {
+  if (path === home) return '~'
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
+}
+
+const ROW_CLASS = (selected: boolean) =>
+  `w-full text-left grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 px-3 py-2.5 rounded-xl border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+    selected ? 'bg-bg-hi border-line shadow-sm' : 'border-transparent hover:bg-bg-hi/60'
+  }`
+
+const GROUP_HEADER_CLASS = 'flex items-center gap-2 mx-1 mt-2 text-[11px] font-semibold tracking-[0.1em] uppercase text-fg-faint'
+
+/** `+ Add` and its menu: New server, and Browse catalog… when the page has a catalog drawer. */
+function AddMenu({ items }: { items: ReadonlyArray<{ label: string; testId: string; onSelect: () => void }> }) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+
+  // Close on Escape or a mousedown outside both the trigger and the menu.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid="mcp-add-server"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="h-[38px] px-4 rounded-[10px] bg-accent text-bg-hi hover:bg-accent/90 text-[13.5px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        + Add
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          id={menuId}
+          role="menu"
+          aria-label="Add a server"
+          data-testid="mcp-add-server-menu"
+          className={`absolute ${Z.dialog} right-0 top-[44px] min-w-[190px] p-[5px] flex flex-col bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}
+        >
+          {items.map((item) => (
+            <button
+              key={item.testId}
+              type="button"
+              role="menuitem"
+              data-testid={item.testId}
+              onClick={() => {
+                setOpen(false)
+                item.onSelect()
+              }}
+              className="px-2.5 py-[7px] rounded-[5px] text-left whitespace-nowrap hover:bg-bg-elev"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddContext) => void; scope?: Scope } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
@@ -236,7 +326,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   // The FROM PLUGINS row picked (its PluginMcpServer id), or null when a config server is.
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
-  // The server whose Edit JSON form is open in the detail, or null for the 3a detail.
+  // The server whose Edit JSON form is open in the detail, or null for the detail cards.
   const [jsonFor, setJsonFor] = useState<string | null>(null)
   // The pane the SaveBar's Ctrl/Cmd+S saves from.
   const paneRef = useRef<HTMLDivElement>(null)
@@ -293,18 +383,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
   }, [home, loadProvenance])
 
   if (!home) return <EmptyState title="loading…" />
-  if (scope === 'project' && !cwd) {
-    return (
-      <Panel
-        toolbar={
-          <>
-          </>
-        }
-      >
-        <EmptyState title="no active project" />
-      </Panel>
-    )
-  }
+  if (scope === 'project' && !cwd) return <EmptyState title="no active project" />
   if (!path) return <EmptyState title="loading…" />
 
   const file = files[path]
@@ -337,16 +416,16 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     ...listed.map(requestFor).filter((r): r is McpCheckRequest => r !== null),
     ...listedPlugins.map(pluginCheckRequest),
   ]
-  // "<n> servers" is the scope file's own count (matches the folder tab); plugin servers are named apart.
-  const summary = [
-    `${names.length} server${names.length === 1 ? '' : 's'}`,
-    ...(pluginServers.length > 0 ? [`${pluginServers.length} from plugins`] : []),
-  ]
-  const checkedCount =
-    names.filter((n) => resultFor(n) !== undefined).length + pluginServers.filter((p) => checkResults[pluginKeyOf(p)] !== undefined).length
   const checkingListed = listed.some(isChecking) || listedPlugins.some((p) => checking[pluginKeyOf(p)] === true)
-  // The scope's file as the page names it — list header, detail key path and SaveBar alike.
+  // The scope's file as the page names it — detail key path and SaveBar alike.
   const fileName = scope === 'user' ? '~/.claude.json' : '.mcp.json'
+  // The SERVER FILE card's path: the project's file under its (home-relative) folder.
+  const cardPath = `${scope === 'user' ? '~/.claude.json' : `${tildify(cwd ?? '', home)}/.mcp.json`} › mcpServers`
+  const now = Date.now()
+  const edited = file && file.mtimeMs > 0 ? `edited ${formatAgo(Math.min(file.mtimeMs, now), now)}` : 'not created yet'
+  const originOf = (n: string, srv: McpServer): Provenance =>
+    provenanceOverrides[provenanceKey('mcp', scope, n)] ?? classifyProvenance(mcpProvInput(n, srv)).provenance
+  const showFilter = needle !== '' || names.length + pluginServers.length >= FILTER_MIN_ROWS
 
   const updateServers = (next: Record<string, McpServer>) => {
     setSaveError(null)
@@ -358,7 +437,7 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     updateServers({ ...servers, [name]: { type: 'stdio', command: '', args: [] } })
     setSelectedName(name)
     setSelectedPluginId(null)
-    // A blank server has nothing to show in the 3a body yet: open it in the form.
+    // A blank server has nothing to show in the detail cards yet: open it in the form.
     setJsonFor(name)
   }
   const selectServer = (name: string) => {
@@ -394,230 +473,242 @@ function McpServersComponent({ onAdd, scope = 'user' }: { onAdd?: (ctx: McpAddCo
     updateServers({ ...servers, [name]: srv })
   }
 
-  const addItems: ExtensionsToolbarMenuItem[] = [{ label: 'New server', testId: 'mcp-new-server', onSelect: addServer }]
+  const addItems = [{ label: 'New server', testId: 'mcp-new-server', onSelect: addServer }]
   if (onAdd) addItems.push({ label: 'Browse catalog…', testId: 'mcp-browse-catalog', onSelect: () => onAdd({ scope, cwd }) })
 
-  return (
-    <div ref={paneRef} className="h-full flex flex-col">
-      <ExtensionsToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        placeholder="Filter servers"
-        summary={[...summary, `${checkedCount} checked`].join(' · ')}
-        primary={{ label: '+ Add server', testId: 'mcp-add-server', items: addItems }}
+  // A plugin server is read-only: nothing of it is saved here, so it gets no SaveBar.
+  const saveBar = file ? (
+    <SaveBar
+      dirty={file.dirty}
+      busy={file.busy}
+      parseError={saveError || err || file.parseError}
+      lastSavedAt={file.lastSavedAt}
+      onSave={async () => {
+        setSaveError(null)
+        // Refuse to persist a new/changed server that still has a literal `<token>`.
+        // Unchanged servers are exempt so a pre-existing broken entry can't block fixing/removing others.
+        const disk = (file.diskData as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
+        for (const [n, srv] of Object.entries(servers)) {
+          if (JSON.stringify(srv) === JSON.stringify(disk[n])) continue
+          const ph = distinctPlaceholders(srv)
+          if (ph.length > 0) {
+            useToast.getState().show('error', `Not saved: "${n}" still contains placeholder ${ph.map((p) => p.token).join(', ')} — replace it with a real value`)
+            return
+          }
+        }
+        try {
+          for (const p of diffServerPatches(disk as Record<string, McpServer>, servers)) {
+            await window.api.claudeConfig.patch({
+              ...mcpPatchTarget(scope, cwd),
+              keyPath: ['mcpServers', p.name],
+              value: p.value,
+            })
+          }
+          await loadJson(path)
+        } catch (e) {
+          setSaveError((e as Error).message || 'save failed')
+        }
+      }}
+      onRevert={() => {
+        setSaveError(null)
+        revert(path)
+      }}
+      cleanLabel={`Saved — matches ${fileName}`}
+      shortcutHint
+      scopeRef={paneRef}
+    />
+  ) : null
+
+  const list = (
+    <>
+      <ConfigFileCard
+        eyebrow="SERVER FILE"
+        badge={<span data-testid="mcp-file-edited">{edited}</span>}
+        path={cardPath}
+        note={
+          scope === 'user' ? (
+            <span data-testid="mcp-scope-note" className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-bg-elev text-[12.5px] text-fg-dim">
+              <span aria-hidden="true" className="w-[7px] h-[7px] shrink-0 rounded-full bg-sage" />
+              On in every project · no approval step
+            </span>
+          ) : (
+            <span data-testid="mcp-scope-note">Only in this project · each server needs approval</span>
+          )
+        }
       >
+        {scope === 'project' && cwd ? <McpProjectGating cwd={cwd} names={names} /> : null}
+      </ConfigFileCard>
+      <div className="flex items-center gap-2">
         <button
           type="button"
           data-testid="mcp-check-all"
           onClick={() => void checkAll(listedRequests)}
           disabled={listedRequests.length === 0 || checkingListed}
-          className="shrink-0 h-7 inline-flex items-center px-[11px] bg-bg-hi border border-line rounded-md text-[12.5px] text-fg hover:border-rule disabled:opacity-50 disabled:hover:border-line"
+          className="flex-1 min-w-0 h-[38px] px-3 rounded-[10px] bg-bg-hi border border-line text-[13.5px] font-medium text-fg hover:border-rule disabled:opacity-50 disabled:hover:border-line"
         >
-          {checkingListed ? 'Checking…' : 'Check all'}
+          {checkingListed ? 'Checking…' : `Check all ${listedRequests.length}`}
         </button>
-      </ExtensionsToolbar>
-      <div className="flex-1 min-h-0">
-        <Panel
-          footer={
-            // A plugin server is read-only: nothing of it is saved here.
-            file && !selectedPlugin ? (
-              <SaveBar
-                dirty={file.dirty}
-                busy={file.busy}
-                parseError={saveError || err || file.parseError}
-                lastSavedAt={file.lastSavedAt}
-                onSave={async () => {
-                  setSaveError(null)
-                  // Refuse to persist a new/changed server that still has a literal `<token>`.
-                  // Unchanged servers are exempt so a pre-existing broken entry can't block fixing/removing others.
-                  const disk = (file.diskData as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
-                  for (const [n, srv] of Object.entries(servers)) {
-                    if (JSON.stringify(srv) === JSON.stringify(disk[n])) continue
-                    const ph = distinctPlaceholders(srv)
-                    if (ph.length > 0) {
-                      useToast.getState().show('error', `Not saved: "${n}" still contains placeholder ${ph.map((p) => p.token).join(', ')} — replace it with a real value`)
-                      return
-                    }
-                  }
-                  try {
-                    for (const p of diffServerPatches(disk as Record<string, McpServer>, servers)) {
-                      await window.api.claudeConfig.patch({
-                        ...mcpPatchTarget(scope, cwd),
-                        keyPath: ['mcpServers', p.name],
-                        value: p.value,
-                      })
-                    }
-                    await loadJson(path)
-                  } catch (e) {
-                    setSaveError((e as Error).message || 'save failed')
-                  }
-                }}
-                onRevert={() => {
-                  setSaveError(null)
-                  revert(path)
-                }}
-                cleanLabel={`Saved — matches ${fileName}`}
-                shortcutHint
-                scopeRef={paneRef}
-              />
-            ) : null
-          }
-        >
-          {scope === 'project' && cwd && <McpProjectGating cwd={cwd} names={names} />}
-          <ListDetail
-            sidebarWidth="300px"
-            sidebar={
-              <div className="flex flex-col gap-0.5 px-2 py-1">
-                {/* Renders IN ~/.CLAUDE.JSON / IN .MCP.JSON — `uppercase` keeps the real file name in the DOM. */}
-                <div
-                  data-testid="mcp-list-header"
-                  className="flex items-center gap-2 mx-1.5 mt-3 mb-1 text-[11px] font-semibold tracking-[.06em] uppercase text-fg-faint"
-                >
-                  {`In ${fileName}`}
-                  <span className="font-mono font-medium tracking-normal text-fg-faint/60">{listed.length}</span>
-                </div>
-                {names.length === 0 ? (
-                  <div className="mx-1.5 py-1 text-xs text-fg-faint">{pluginServers.length > 0 ? `No servers in ${fileName} yet.` : 'No servers yet.'}</div>
-                ) : listed.length === 0 ? (
-                  <div className="mx-1.5 py-1 text-xs text-fg-faint">No servers match “{filter.trim()}”.</div>
-                ) : (
-                  listed.map((n) => {
-                    const srv = servers[n]
-                    const isSelected = n === selected
-                    const result = resultFor(n)
-                    const inFlight = isChecking(n)
-                    const origin: Provenance =
-                      provenanceOverrides[provenanceKey('mcp', scope, n)] ?? classifyProvenance(mcpProvInput(n, srv)).provenance
-                    const placeholders = distinctPlaceholders(srv).map((p) => p.token).join(', ')
-                    return (
-                      <button
-                        key={n}
-                        type="button"
-                        data-testid={`mcp-row-${n}`}
-                        aria-current={isSelected ? 'true' : undefined}
-                        title={srv.description?.trim() || undefined}
-                        onClick={() => selectServer(n)}
-                        className={`w-full text-left grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1.5 rounded-[7px] border ${
-                          isSelected ? 'bg-bg-hi border-line' : 'border-transparent hover:bg-bg-hi/60'
-                        }`}
-                      >
-                        <McpCheckDot result={result} checking={inFlight} testId={`mcp-dot-${n}`} />
-                        <span className={`truncate text-[13px] text-fg${isSelected ? ' font-semibold' : ''}`}>{n}</span>
-                        <span className="font-mono text-[10.5px] text-fg-faint/80">{srv.type ?? 'stdio'}</span>
-                        <span data-testid={`mcp-status-${n}`} className="col-start-2 col-span-2 truncate text-[11px] text-fg-faint">
-                          <span className={ORIGIN_CLASS[origin]}>{PROVENANCE_LABEL[origin]}</span>
-                          {' · '}
-                          {inFlight ? 'checking…' : checkStatusText(result)}
-                        </span>
-                        {placeholders ? (
-                          <span
-                            className="col-start-2 col-span-2 truncate text-[11px] text-honey-dark"
-                            title={`${scope} scope · ${path} — replace ${placeholders} with a real value; Save refuses it until then`}
-                          >
-                            ⚠ unconfigured placeholder: {placeholders}
-                          </span>
-                        ) : null}
-                      </button>
-                    )
-                  })
-                )}
-                {pluginServers.length > 0 ? (
-                  <>
-                    <div
-                      data-testid="mcp-plugins-header"
-                      className="flex items-center gap-2 mx-1.5 mt-3 mb-1 text-[11px] font-semibold tracking-[.06em] uppercase text-fg-faint"
-                    >
-                      From plugins
-                      <span data-testid="mcp-plugins-count" className="font-mono font-medium tracking-normal text-fg-faint/60">
-                        {listedPlugins.length}
-                      </span>
-                      <span
-                        data-testid="mcp-plugins-readonly"
-                        className="ml-auto px-[5px] border border-line rounded-[3px] text-[9.5px] font-medium tracking-normal text-fg-faint/80"
-                      >
-                        READ-ONLY
-                      </span>
-                    </div>
-                    {listedPlugins.length === 0 ? (
-                      <div className="mx-1.5 py-1 text-xs text-fg-faint">No plugin servers match “{filter.trim()}”.</div>
-                    ) : (
-                      listedPlugins.map((p) => {
-                        const isSelected = selectedPlugin?.id === p.id
-                        const key = pluginKeyOf(p)
-                        const result = checkResults[key]
-                        const inFlight = checking[key] === true
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            data-testid={`mcp-plugin-row-${p.id}`}
-                            aria-current={isSelected ? 'true' : undefined}
-                            onClick={() => selectPluginServer(p.id)}
-                            className={`w-full text-left grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1.5 rounded-[7px] border ${
-                              isSelected ? 'bg-bg-hi border-line' : 'border-transparent hover:bg-bg-hi/60'
-                            }`}
-                          >
-                            <McpCheckDot result={result} checking={inFlight} testId={`mcp-plugin-dot-${p.id}`} />
-                            <span className={`truncate text-[13px] text-fg${isSelected ? ' font-semibold' : ''}`}>{p.name}</span>
-                            <span className="font-mono text-[10.5px] text-fg-faint/80">plugin</span>
-                            <span data-testid={`mcp-plugin-status-${p.id}`} className="col-start-2 col-span-2 truncate text-[11px] text-fg-faint">
-                              via the {p.plugin} plugin · {inFlight ? 'checking…' : checkStatusText(result)}
-                            </span>
-                          </button>
-                        )
-                      })
-                    )}
-                  </>
-                ) : null}
-              </div>
-            }
-            detail={
-              selectedPlugin ? (
-                <McpServerDetail
-                  key={`plugin:${selectedPlugin.id}`}
-                  name={selectedPlugin.name}
-                  server={selectedPlugin.server}
-                  scope="user"
-                  plugin={selectedPlugin.plugin}
-                  checkRequest={pluginCheckRequest(selectedPlugin)}
-                  provenance={mcpProvInput(selectedPlugin.name, selectedPlugin.server)}
-                />
-              ) : selected !== null ? (
-                // Keyed by name: another server — or a rename — starts with every value masked again.
-                <McpServerDetail
-                  key={selected}
-                  name={selected}
-                  server={servers[selected]}
-                  scope={scope}
-                  fileLabel={fileName}
-                  checkRequest={requestFor(selected)}
-                  provenance={mcpProvInput(selected, servers[selected])}
-                  onChange={(s) => updateServer(selected, s)}
-                  editing={jsonFor === selected}
-                  onEditingChange={(on) => setJsonFor(on ? selected : null)}
-                  editor={
-                    jsonFor === selected ? (
-                      <McpServerEditor
-                        name={selected}
-                        server={servers[selected]}
-                        scope={scope}
-                        onRename={(n) => renameServer(selected, n)}
-                        onChange={(s) => updateServer(selected, s)}
-                        onRemove={() => removeServer(selected)}
-                      />
-                    ) : null
-                  }
-                />
-              ) : (
-                <EmptyState
-                  title="No MCP servers yet"
-                  hint={onAdd ? '+ Add server starts a new one or browses the catalog.' : '+ Add server starts a new one.'}
-                />
-              )
-            }
-          />
-        </Panel>
+        <AddMenu items={addItems} />
       </div>
+      {showFilter ? (
+        <input
+          type="search"
+          data-testid="mcp-filter"
+          aria-label="Filter servers"
+          placeholder="Filter servers"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          spellCheck={false}
+          className="h-[34px] px-3 rounded-[10px] bg-bg-hi border border-line text-[13px] text-fg placeholder:text-fg-faint outline-none focus:border-fg-faint"
+        />
+      ) : null}
+      <div role="listbox" aria-label="MCP servers" className="flex flex-col gap-1">
+        {names.length === 0 ? (
+          <div className="mx-1 py-1 text-xs text-fg-faint">{pluginServers.length > 0 ? `No servers in ${fileName} yet.` : 'No servers yet.'}</div>
+        ) : listed.length === 0 ? (
+          <div className="mx-1 py-1 text-xs text-fg-faint">No servers match “{filter.trim()}”.</div>
+        ) : (
+          listed.map((n) => {
+            const srv = servers[n]
+            const isSelected = n === selected
+            const result = resultFor(n)
+            const inFlight = isChecking(n)
+            const origin = originOf(n, srv)
+            const placeholders = distinctPlaceholders(srv).map((p) => p.token).join(', ')
+            return (
+              <button
+                key={n}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                data-testid={`mcp-row-${n}`}
+                aria-current={isSelected ? 'true' : undefined}
+                title={srv.description?.trim() || undefined}
+                onClick={() => selectServer(n)}
+                className={ROW_CLASS(isSelected)}
+              >
+                <McpCheckDot result={result} checking={inFlight} testId={`mcp-dot-${n}`} />
+                <span className={`truncate text-[14px] text-fg ${isSelected ? 'font-semibold' : 'font-medium'}`}>{n}</span>
+                <span className="font-mono text-[11.5px] text-fg-faint">{srv.type ?? 'stdio'}</span>
+                <span data-testid={`mcp-status-${n}`} className="col-start-2 col-span-2 truncate text-xs text-fg-faint">
+                  <span className={ORIGIN_CLASS[origin]}>{PROVENANCE_LABEL[origin]}</span>
+                  {' · '}
+                  {inFlight ? 'checking…' : checkStatusText(result)}
+                </span>
+                {placeholders ? (
+                  <span
+                    className="col-start-2 col-span-2 truncate text-[11px] text-honey-dark"
+                    title={`${scope} scope · ${path} — replace ${placeholders} with a real value; Save refuses it until then`}
+                  >
+                    ⚠ unconfigured placeholder: {placeholders}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })
+        )}
+        {pluginServers.length > 0 ? (
+          <>
+            <div data-testid="mcp-plugins-header" className={GROUP_HEADER_CLASS}>
+              From plugins
+              <span data-testid="mcp-plugins-count" className="font-mono font-medium tracking-normal text-fg-faint/60">
+                {listedPlugins.length}
+              </span>
+              <span
+                data-testid="mcp-plugins-readonly"
+                className="ml-auto px-[5px] border border-line rounded-[3px] text-[9.5px] font-medium tracking-normal text-fg-faint/80"
+              >
+                READ-ONLY
+              </span>
+            </div>
+            {listedPlugins.length === 0 ? (
+              <div className="mx-1 py-1 text-xs text-fg-faint">No plugin servers match “{filter.trim()}”.</div>
+            ) : (
+              listedPlugins.map((p) => {
+                const isSelected = selectedPlugin?.id === p.id
+                const key = pluginKeyOf(p)
+                const result = checkResults[key]
+                const inFlight = checking[key] === true
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    data-testid={`mcp-plugin-row-${p.id}`}
+                    aria-current={isSelected ? 'true' : undefined}
+                    onClick={() => selectPluginServer(p.id)}
+                    className={ROW_CLASS(isSelected)}
+                  >
+                    <McpCheckDot result={result} checking={inFlight} testId={`mcp-plugin-dot-${p.id}`} />
+                    <span className={`truncate text-[14px] text-fg ${isSelected ? 'font-semibold' : 'font-medium'}`}>{p.name}</span>
+                    <span className="font-mono text-[11.5px] text-fg-faint">plugin</span>
+                    <span data-testid={`mcp-plugin-status-${p.id}`} className="col-start-2 col-span-2 truncate text-xs text-fg-faint">
+                      via the {p.plugin} plugin · {inFlight ? 'checking…' : checkStatusText(result)}
+                    </span>
+                  </button>
+                )
+              })
+            )}
+          </>
+        ) : null}
+      </div>
+    </>
+  )
+
+  const detail = selectedPlugin ? (
+    <McpServerDetail
+      key={`plugin:${selectedPlugin.id}`}
+      name={selectedPlugin.name}
+      server={selectedPlugin.server}
+      scope="user"
+      plugin={selectedPlugin.plugin}
+      checkRequest={pluginCheckRequest(selectedPlugin)}
+      origin={classifyProvenance(mcpProvInput(selectedPlugin.name, selectedPlugin.server)).provenance}
+    />
+  ) : selected !== null ? (
+    // Keyed by name: another server — or a rename — starts with every value masked again.
+    <McpServerDetail
+      key={selected}
+      name={selected}
+      server={servers[selected]}
+      scope={scope}
+      fileLabel={fileName}
+      checkRequest={requestFor(selected)}
+      origin={originOf(selected, servers[selected])}
+      onChange={(s) => updateServer(selected, s)}
+      editing={jsonFor === selected}
+      onEditingChange={(on) => setJsonFor(on ? selected : null)}
+      editor={
+        jsonFor === selected ? (
+          <McpServerEditor
+            name={selected}
+            server={servers[selected]}
+            scope={scope}
+            onRename={(n) => renameServer(selected, n)}
+            onChange={(s) => updateServer(selected, s)}
+            onRemove={() => removeServer(selected)}
+          />
+        ) : null
+      }
+      footer={saveBar}
+    />
+  ) : (
+    // No server left: the SaveBar still saves the removal of the last one.
+    <div className="flex-1 flex flex-col">
+      <div className="flex-1">
+        <EmptyState
+          title="No MCP servers yet"
+          hint={onAdd ? '+ Add starts a new one or browses the catalog.' : '+ Add starts a new one.'}
+        />
+      </div>
+      {saveBar}
+    </div>
+  )
+
+  return (
+    <div ref={paneRef} className="h-full min-h-0 flex flex-col">
+      <ConfigWorkbench list={list} detail={detail} />
     </div>
   )
 }
@@ -917,9 +1008,10 @@ function KVEditor({
 }
 
 /**
- * Project gating for .mcp.json servers: `disabledMcpjsonServers` (per server)
- * and `enableAllProjectMcpServers`, both in <cwd>/.claude/settings.json,
- * written through claudeConfig.patch (key-scoped, never a whole-file write).
+ * Project gating for .mcp.json servers, inside the SERVER FILE card: `enableAllProjectMcpServers`
+ * (Auto-approve all servers) and `disabledMcpjsonServers` (the per-server Approved boxes), both in
+ * <cwd>/.claude/settings.json, written through claudeConfig.patch (key-scoped, never a whole-file
+ * write). This is project approval, not an enabled switch — Claude Code has none per server.
  */
 function McpProjectGating({ cwd, names }: { cwd: string; names: string[] }) {
   const target = { fileId: 'settings' as const, scope: 'project' as const, cwd }
@@ -961,9 +1053,8 @@ function McpProjectGating({ cwd, names }: { cwd: string; names: string[] }) {
   }
 
   return (
-    <div className="px-3 py-1 text-xs text-fg-faint border-b border-line flex flex-wrap items-center gap-x-4 gap-y-1" data-testid="mcp-gating">
-      <span>Gating · {cwd}/.claude/settings.json</span>
-      <label className="flex items-center gap-1">
+    <div data-testid="mcp-gating" className="flex flex-col gap-1.5 px-2.5 py-2 rounded-lg bg-bg-elev text-[12.5px] text-fg-dim">
+      <label className="flex items-center gap-2" title="enableAllProjectMcpServers">
         <input
           type="checkbox"
           data-testid="mcp-enable-all"
@@ -971,20 +1062,28 @@ function McpProjectGating({ cwd, names }: { cwd: string; names: string[] }) {
           disabled={busy}
           onChange={(e) => { setEnableAll(e.target.checked); patch('enableAllProjectMcpServers', e.target.checked ? true : undefined) }}
         />
-        enableAllProjectMcpServers
+        Auto-approve all servers
       </label>
-      {names.map((n) => (
-        <label key={n} className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            data-testid={`mcp-gate-${n}`}
-            checked={!disabled.includes(n)}
-            disabled={busy}
-            onChange={(e) => toggleServer(n, e.target.checked)}
-          />
-          {n}
-        </label>
-      ))}
+      {names.length > 0 ? (
+        <div className="flex flex-col gap-1 pt-1 border-t border-line">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Approved</span>
+          {names.map((n) => (
+            <label key={n} className="flex items-center gap-2 font-mono text-xs" title="disabledMcpjsonServers">
+              <input
+                type="checkbox"
+                data-testid={`mcp-gate-${n}`}
+                checked={!disabled.includes(n)}
+                disabled={busy}
+                onChange={(e) => toggleServer(n, e.target.checked)}
+              />
+              <span className="truncate">{n}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+      <span className="truncate text-[11px] text-fg-faint" title={`${cwd}/.claude/settings.json`}>
+        in .claude/settings.json
+      </span>
     </div>
   )
 }

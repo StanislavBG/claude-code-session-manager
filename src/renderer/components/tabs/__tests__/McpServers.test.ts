@@ -77,7 +77,7 @@ describe('McpLibrary install payload', () => {
   })
 })
 
-/* ── The 3a list: toolbar, status dots, selection, Check all, + Add server ── */
+/* ── The list column: SERVER FILE card, Check all N + + Add, status rows, selection ── */
 
 const CLAUDE_JSON = `${HOME}/.claude.json`
 const MCP_JSON = `${PROJECT_CWD}/.mcp.json`
@@ -203,6 +203,7 @@ const detailName = () => q('mcp-detail-name')?.textContent ?? null
 const saveButton = () =>
   Array.from(container!.querySelectorAll('button')).find((b) => /^Save(Ctrl S|⌘S)?$/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement | undefined
 const toastMessages = () => useToast.getState().toasts.map((t) => t.message)
+const checkAllText = () => q('mcp-check-all')!.textContent
 const buttonByText = (label: string) =>
   Array.from(container!.querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined
 
@@ -246,23 +247,33 @@ afterEach(() => {
   delete (window as unknown as { api?: unknown }).api
 })
 
-describe('McpServers 3a list', () => {
-  it('renders the shared toolbar — Filter servers, "<n> servers · <m> checked", Check all, + Add server — and none of the old buttons', async () => {
+describe('McpServers list column', () => {
+  it('lays the page out on ConfigLayout: a SERVER FILE card (edited <age>, ~/.claude.json › mcpServers, scope note), Check all N and + Add', async () => {
     useMcpChecks.setState({ results: { [mcpCheckKey(userReq('beta'))]: failed } })
     installApi()
     await mount({ onAdd: vi.fn() })
 
-    expect(q('extensions-toolbar')).not.toBeNull()
-    expect((q('extensions-toolbar-filter') as HTMLInputElement).placeholder).toBe('Filter servers')
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 1 checked')
-    expect(q('mcp-check-all')!.textContent).toBe('Check all')
-    expect(q('mcp-add-server')!.textContent).toBe('+ Add server')
+    expect(q('config-workbench-list')).not.toBeNull()
+    expect(q('config-workbench-detail')).not.toBeNull()
+    const card = q('config-file-card')!
+    expect(card.textContent).toContain('SERVER FILE')
+    expect(q('mcp-file-edited')!.textContent).toMatch(/^edited \d+d ago$/)
+    expect(card.querySelector('.font-mono')!.textContent).toBe('~/.claude.json › mcpServers')
+    expect(q('mcp-scope-note')!.textContent).toBe('On in every project · no approval step')
+    // User scope has no approval step, so no gating.
+    expect(q('mcp-gating')).toBeNull()
+
+    expect(checkAllText()).toBe('Check all 4')
+    expect(q('mcp-add-server')!.textContent).toBe('+ Add')
+    // Four servers need no filter field; the old toolbar band is gone.
+    expect(q('mcp-filter')).toBeNull()
+    expect(q('extensions-toolbar')).toBeNull()
     for (const gone of ['Add…', '+ new server', '⟳ test connections', 'test connection']) {
       expect(buttonByText(gone)).toBeUndefined()
     }
   })
 
-  it('heads the list with the real file and a count, and draws one status dot + "<origin> · <status>" line per server', async () => {
+  it('draws one row per server: status dot, name, transport and "<origin> · <status>"', async () => {
     useMcpChecks.setState({
       results: {
         [mcpCheckKey(userReq('alpha'))]: connected(2),
@@ -272,11 +283,6 @@ describe('McpServers 3a list', () => {
     })
     installApi()
     await mount()
-
-    const header = q('mcp-list-header')!
-    expect(header.firstChild?.textContent).toBe('In ~/.claude.json')
-    expect(header.className.split(/\s+/)).toContain('uppercase')
-    expect(header.querySelector('.font-mono')?.textContent).toBe('4')
 
     expect(rowNames()).toEqual(['alpha', 'beta', 'delta', 'gamma'])
     const dot = (n: string) => q(`mcp-dot-${n}`)!
@@ -342,7 +348,8 @@ describe('McpServers 3a list', () => {
     installApi({})
     await mount()
     expect(rowNames()).toEqual([])
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('0 servers · 0 checked')
+    expect(checkAllText()).toBe('Check all 0')
+    expect((q('mcp-check-all') as HTMLButtonElement).disabled).toBe(true)
     expect(container!.textContent).toContain('No MCP servers yet')
     expect(q('mcp-detail')).toBeNull()
     expect(nameInput()).toBeNull()
@@ -359,10 +366,10 @@ describe('McpServers 3a list', () => {
     expect(checkAll).toHaveBeenCalledWith(['alpha', 'beta', 'delta', 'gamma'].map(userReq))
   })
 
-  it('Check all runs the real per-server check and the dots + summary follow the stored results', async () => {
+  it('Check all runs the real per-server check and the dots + row lines follow the stored results', async () => {
     const api = installApi()
     await mount()
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 0 checked')
+    expect(api.mcp.checkServer).not.toHaveBeenCalled()
 
     await click(q('mcp-check-all'))
     await flush()
@@ -370,7 +377,6 @@ describe('McpServers 3a list', () => {
     for (const n of ['alpha', 'beta', 'delta', 'gamma']) expect(api.mcp.checkServer).toHaveBeenCalledWith(userReq(n))
     expect(api.mcp.status).not.toHaveBeenCalled()
 
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 4 checked')
     expect(q('mcp-dot-alpha')!.dataset.status).toBe('connected')
     expect(q('mcp-status-alpha')!.textContent).toBe('Anthropic · connected · 1 tool')
     expect(q('mcp-dot-beta')!.dataset.status).toBe('failed')
@@ -378,19 +384,19 @@ describe('McpServers 3a list', () => {
     expect(q('mcp-status-gamma')!.textContent).toBe('Local · connected · 3 tools')
   })
 
-  it('the filter narrows the rows (and Check all to them) but not the server total', async () => {
+  it('a long list gets a filter field that narrows the rows and Check all to them', async () => {
     const checkAll = vi.fn(async () => {})
     useMcpChecks.setState({ checkAll })
-    installApi()
+    installApi({ ...SERVERS, eps: { command: 'e' }, zeta: { command: 'z' } })
     await mount()
+    expect(checkAllText()).toBe('Check all 6')
 
-    await typeInto(q('extensions-toolbar-filter') as HTMLInputElement, 'ta')
-    expect(rowNames()).toEqual(['beta', 'delta'])
-    expect(q('mcp-list-header')!.querySelector('.font-mono')?.textContent).toBe('2')
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 0 checked')
+    await typeInto(q('mcp-filter') as HTMLInputElement, 'ta')
+    expect(rowNames()).toEqual(['beta', 'delta', 'zeta'])
+    expect(checkAllText()).toBe('Check all 3')
 
     await click(q('mcp-check-all'))
-    expect(checkAll).toHaveBeenCalledWith([userReq('beta'), userReq('delta')])
+    expect(checkAll).toHaveBeenCalledWith([userReq('beta'), userReq('delta'), userReq('zeta')])
   })
 
   it('+ Add server ▸ New server adds a selected server-N draft; Browse catalog… calls onAdd', async () => {
@@ -409,7 +415,7 @@ describe('McpServers 3a list', () => {
     expect(detailName()).toBe('server-5')
     expect(nameInput()?.value).toBe('server-5')
     expect(q('mcp-edit-done')).not.toBeNull()
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('5 servers · 0 checked')
+    expect(checkAllText()).toBe('Check all 5')
     const file = useConfig.getState().files[CLAUDE_JSON]
     expect(file.dirty).toBe(true)
     expect(JSON.parse(file.draftRaw).mcpServers['server-5']).toEqual({ type: 'stdio', command: '', args: [] })
@@ -419,15 +425,19 @@ describe('McpServers 3a list', () => {
     expect(onAdd).toHaveBeenCalledWith({ scope: 'user', cwd: null })
   })
 
-  it('project scope names .mcp.json, keeps the gating row, and checks project servers by cwd', async () => {
+  it('project scope names <cwd>/.mcp.json, keeps the approval gating in the SERVER FILE card, and checks project servers by cwd', async () => {
     const checkAll = vi.fn(async () => {})
     useMcpChecks.setState({ checkAll })
     useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
     installApi({ srv: { command: 'x' } })
     await mount({ scope: 'project' })
 
-    expect(q('mcp-list-header')!.firstChild?.textContent).toBe('In .mcp.json')
-    expect(q('mcp-gating')).not.toBeNull()
+    const card = q('config-file-card')!
+    expect(card.querySelector('.font-mono')!.textContent).toBe('~/Projects/alpha/.mcp.json › mcpServers')
+    expect(card.querySelector('[data-testid="mcp-gating"]')).not.toBeNull()
+    expect(card.querySelector('[data-testid="mcp-enable-all"]')).not.toBeNull()
+    expect(card.querySelector('[data-testid="mcp-gate-srv"]')).not.toBeNull()
+    expect(card.textContent).toContain('Auto-approve all servers')
     expect(selectedRows()).toEqual(['srv'])
     expect(q('mcp-detail-scope')!.textContent).toBe('Project scope')
     expect(q('mcp-detail-keypath')!.textContent).toBe('.mcp.json › mcpServers › srv')
@@ -438,19 +448,19 @@ describe('McpServers 3a list', () => {
   })
 })
 
-/* ── The 3a detail: header, COMMAND / ENVIRONMENT / TOOLS, Edit JSON, the SaveBar ── */
+/* ── The detail: eyebrow header, COMMAND / ENVIRONMENT / TOOLS cards, Edit JSON, the saved line ── */
 
-describe('McpServers 3a detail', () => {
+describe('McpServers detail', () => {
   const ago = (ms: number) => Date.now() - ms
 
-  it('heads the detail with the 22px name, a Connected pill, "checked <ago>", provenance + transport badges, scope and key path', async () => {
+  it('heads the detail with an ORIGIN · TRANSPORT · SCOPE · path › name eyebrow, the mono name, a Connected pill and Check again / Edit JSON', async () => {
     useMcpChecks.setState({ results: { [mcpCheckKey(userReq('alpha'))]: { ...connected(2), checkedAt: ago(5 * 60_000) } } })
     installApi()
     await mount()
 
     const name = q('mcp-detail-name')!
     expect(name.textContent).toBe('alpha')
-    expect(name.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-[22px]', 'font-semibold']))
+    expect(name.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-[27px]', 'font-semibold', 'font-mono']))
 
     const pill = q('mcp-detail-status')!
     expect(pill.textContent).toBe('Connected')
@@ -459,15 +469,16 @@ describe('McpServers 3a detail', () => {
     expect(pill.querySelector('.bg-sage')).not.toBeNull()
     expect(q('mcp-detail-checked')!.textContent).toBe('checked 5m ago')
 
-    // The origin as ProvenanceBadge resolves it (accent tone = Anthropic); display-only here.
-    const origin = q('mcp-detail-meta')!.querySelector<HTMLElement>('.text-accent-dark')!
-    expect(origin.textContent).toBe('Anthropic')
-    expect(origin.title).toMatch(/^Auto-detected Anthropic/)
+    // The eyebrow: origin as the row resolves it, transport, scope, key path — uppercased by CSS.
+    expect(q('mcp-detail-meta')!.textContent).toBe('Anthropic · stdio · User scope · ~/.claude.json › mcpServers › alpha')
+    expect(q('mcp-detail-meta')!.className.split(/\s+/)).toContain('uppercase')
+    expect(q('mcp-detail-origin')!.textContent).toBe('Anthropic')
     expect(q('mcp-detail-transport')!.textContent).toBe('stdio')
-    expect(q('mcp-detail-transport')!.querySelector('.uppercase')).not.toBeNull()
     expect(q('mcp-detail-scope')!.textContent).toBe('User scope')
     expect(q('mcp-detail-keypath')!.textContent).toBe('~/.claude.json › mcpServers › alpha')
-    expect(q('mcp-detail-keypath')!.className).toContain('font-mono')
+    expect(q('mcp-detail-scope-note')!.textContent).toBe('On in every project')
+    expect(q('mcp-check-again')!.textContent).toBe('Check again')
+    expect(q('mcp-edit-json')!.textContent).toBe('Edit JSON')
 
     // DESIGN_SPEC §7.1: Claude Code has no per-server enabled field, so there is no Enabled switch.
     expect(container!.querySelector('[role="switch"]')).toBeNull()
@@ -528,10 +539,10 @@ describe('McpServers 3a detail', () => {
     expect(button().disabled).toBe(false)
     expect(q('mcp-detail-status')!.textContent).toBe('Connected')
     expect(q('mcp-detail-checked')!.textContent).toBe('checked just now')
-    expect(q('mcp-tools-count')!.textContent).toBe('1')
+    expect(q('mcp-tools')!.textContent).toContain('Tools · 1')
   })
 
-  it('TOOLS lists the last check as mono name | description | mono mcp__<server>__<tool>; unchecked and failed servers say why there are none', async () => {
+  it('TOOLS · N shows the last check as mono chips with "checked <ago>"; an unchecked server offers Check <name>, a failed one says why', async () => {
     const tools = [
       { name: 'fetch', description: 'Fetches a URL from the internet.' },
       { name: 'read_page', description: '' },
@@ -545,32 +556,34 @@ describe('McpServers 3a detail', () => {
     installApi()
     await mount()
 
-    expect(q('mcp-tools-count')!.textContent).toBe('2')
-    expect(q('mcp-tools')!.textContent).toContain('from the last check')
-    const rows = Array.from(container!.querySelectorAll<HTMLElement>('[data-testid^="mcp-tool-row-"]'))
-    expect(rows.map((r) => Array.from(r.children).map((c) => c.textContent))).toEqual([
-      ['fetch', 'Fetches a URL from the internet.', 'mcp__alpha__fetch'],
-      ['read_page', '', 'mcp__alpha__read_page'],
-    ])
-    expect(rows[0].children[0].className).toContain('font-mono')
-    expect(rows[0].children[2].className).toContain('font-mono')
+    expect(q('mcp-tools')!.textContent).toContain('Tools · 2')
+    expect(q('mcp-detail-checked')!.textContent).toBe('checked just now')
+    const chips = Array.from(container!.querySelectorAll<HTMLElement>('[data-testid^="mcp-tool-row-"]'))
+    expect(chips.map((c) => c.textContent)).toEqual(['fetch', 'read_page'])
+    expect(chips[0].className).toContain('font-mono')
+    expect(chips[0].title).toBe('mcp__alpha__fetch — Fetches a URL from the internet.')
+    expect(chips[1].title).toBe('mcp__alpha__read_page')
+    expect(q('mcp-tools-more')).toBeNull()
+    expect(q('mcp-tools')!.textContent).toContain('Claude calls them as mcp__alpha__…')
 
     await click(q('mcp-row-gamma'))
-    expect(q('mcp-tools-empty')!.textContent).toBe('Check this server to list its tools.')
-    expect(q('mcp-tools-count')).toBeNull()
+    expect(q('mcp-tools-empty')!.textContent).toContain('Tools appear after a check')
+    expect(q('mcp-tools')!.className.split(/\s+/)).toContain('border-dashed')
+    expect(q('mcp-detail-checked')).toBeNull()
     expect(container!.querySelectorAll('[data-testid^="mcp-tool-row-"]')).toHaveLength(0)
+    expect(q('mcp-tools-check')!.textContent).toBe('Check gamma')
 
     await click(q('mcp-row-beta'))
     expect(q('mcp-tools-empty')!.textContent).toBe('The last check failed: spawn ENOENT')
   })
 
-  it('COMMAND shows "$ <command> <args…>" (an http server: its URL) in a mono box, and Copy writes it to the clipboard with a toast', async () => {
+  it('the COMMAND card shows "<command> <args…>" (an http server: a URL card) in mono, and Copy writes it to the clipboard with a toast', async () => {
     const api = installApi({ ...SERVERS, spaced: { command: 'node', args: ['server.js', '--root', '/tmp/my dir'] } })
     await mount()
 
     const box = q('mcp-command-box')!
-    expect(box.className.split(/\s+/)).toEqual(expect.arrayContaining(['font-mono', 'bg-bg-hi']))
-    expect(box.textContent!.startsWith('$')).toBe(true)
+    expect(box.className.split(/\s+/)).toContain('font-mono')
+    expect(box.closest('[data-testid="config-card"]')!.textContent).toContain('Command')
     expect(q('mcp-command')!.textContent).toBe('npx -y @anthropic-ai/alpha-mcp')
 
     await click(q('mcp-command-copy'))
@@ -583,18 +596,19 @@ describe('McpServers 3a detail', () => {
 
     await click(q('mcp-row-beta'))
     expect(q('mcp-command')!.textContent).toBe('https://beta.example.com/mcp')
-    expect(q('mcp-command-box')!.textContent).not.toContain('$')
+    expect(q('mcp-command-box')!.closest('[data-testid="config-card"]')!.textContent).toMatch(/^URL/)
     await click(q('mcp-command-copy'))
     expect(api.clipboard.writeText).toHaveBeenLastCalledWith('https://beta.example.com/mcp')
   })
 
-  it('ENVIRONMENT masks every value until its row is revealed; no variables = the dashed "No variables set" box', async () => {
+  it('ENVIRONMENT · N masks every value until its row is revealed; no variables = "No variables set." + Add variable', async () => {
     installApi({
       envy: { command: 'node', args: ['envy.js'], env: { API_TOKEN: 'sekrit-123', REGION: 'us-west-2' } },
       plain: { command: 'node', args: ['plain.js'] },
     })
     await mount()
 
+    expect(q('mcp-env')!.textContent).toContain('Environment · 2')
     const envRows = () => Array.from(q('mcp-env')!.querySelectorAll<HTMLElement>('[data-testid^="mcp-env-row-"]'))
     expect(envRows().map((r) => r.dataset.testid)).toEqual(['mcp-env-row-API_TOKEN', 'mcp-env-row-REGION'])
     expect(envRows()[0].textContent).toContain('API_TOKEN')
@@ -611,10 +625,9 @@ describe('McpServers 3a detail', () => {
     expect(container!.innerHTML).not.toContain('sekrit-123')
 
     await click(q('mcp-row-plain'))
-    const empty = q('mcp-env-empty')!
-    expect(empty.textContent).toContain('No variables set')
-    expect(empty.className.split(/\s+/)).toContain('border-dashed')
-    expect(empty.querySelector('[data-testid="mcp-env-add"]')!.textContent).toBe('+ Add variable')
+    expect(q('mcp-env')!.textContent).toContain('Environment · 0')
+    expect(q('mcp-env-empty')!.textContent).toBe('No variables set.')
+    expect(q('mcp-env-add')!.textContent).toBe('+ Add variable')
   })
 
   it('+ Add variable puts KEY=value in the draft (SaveBar dirty) and Save patches the server\'s env — the value is never toasted', async () => {
@@ -653,6 +666,7 @@ describe('McpServers 3a detail', () => {
     await mount()
 
     expect(q('mcp-env')).toBeNull()
+    expect(q('mcp-headers')!.textContent).toContain('Headers · 1')
     expect(q('mcp-headers-row-Authorization')).not.toBeNull()
     expect(container!.innerHTML).not.toContain('tok-123456')
 
@@ -713,10 +727,11 @@ describe('McpServers 3a detail', () => {
     expect(q('mcp-edit-json')).not.toBeNull()
   })
 
-  it('the SaveBar names the scope\'s file when clean, shows the save shortcut, and Ctrl+S saves while focus is in the pane', async () => {
+  it('the SaveBar closes the detail with "Saved — matches <file>", shows the save shortcut, and Ctrl+S saves while focus is in the pane', async () => {
     const api = installApi()
     await mount()
     expect(q('savebar-clean')!.textContent).toBe('Saved — matches ~/.claude.json')
+    expect(q('mcp-detail')!.contains(q('savebar-clean'))).toBe(true)
     expect(saveButton()!.querySelector('kbd')?.textContent).toBe('Ctrl S')
     expect(saveButton()!.getAttribute('aria-keyshortcuts')).toBe('Control+S')
 
@@ -772,8 +787,8 @@ describe('McpServers FROM PLUGINS', () => {
     expect(q(`mcp-plugin-status-${LINEAR_ID}`)!.textContent).toBe('via the linear plugin · not checked')
     expect(q(`mcp-plugin-dot-${STRIPE_ID}`)!.dataset.status).toBe('connected')
 
-    // The summary names plugin servers apart from the file's; checked counts both.
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 2 from plugins · 1 checked')
+    // Check all counts the plugin servers too.
+    expect(checkAllText()).toBe('Check all 6')
     // The config server stays selected by default.
     expect(selectedRows()).toEqual(['alpha'])
   })
@@ -826,7 +841,7 @@ describe('McpServers FROM PLUGINS', () => {
     expect(saveButton()).toBeDefined()
   })
 
-  it('Check all includes the listed plugin servers and the "<m> checked" summary counts them', async () => {
+  it('Check all includes the listed plugin servers', async () => {
     const api = installApi(SERVERS, PLUGINS)
     await mount()
 
@@ -835,18 +850,17 @@ describe('McpServers FROM PLUGINS', () => {
     expect(api.mcp.checkServer).toHaveBeenCalledTimes(6)
     expect(api.mcp.checkServer).toHaveBeenCalledWith(stripeReq)
     expect(api.mcp.checkServer).toHaveBeenCalledWith(linearReq)
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 2 from plugins · 6 checked')
+    expect(q(`mcp-plugin-status-${LINEAR_ID}`)!.textContent).toBe('via the linear plugin · failed')
   })
 
-  it('counts only the file\'s servers as servers and names plugin servers apart: "4 servers · 1 from plugins · <m> checked"', async () => {
+  it('"Check all N" counts the file\'s servers plus the plugin servers it will check', async () => {
     const api = installApi(SERVERS, [PLUGINS[0]])
     await mount()
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 1 from plugins · 0 checked')
+    expect(checkAllText()).toBe('Check all 5')
 
     await click(q('mcp-check-all'))
     await flush()
     expect(api.mcp.checkServer).toHaveBeenCalledTimes(5)
-    expect(q('extensions-toolbar-summary')!.textContent).toBe('4 servers · 1 from plugins · 5 checked')
   })
 
   it('the filter narrows plugin rows and Check all to them too', async () => {
@@ -855,7 +869,7 @@ describe('McpServers FROM PLUGINS', () => {
     installApi(SERVERS, PLUGINS)
     await mount()
 
-    await typeInto(q('extensions-toolbar-filter') as HTMLInputElement, 'str')
+    await typeInto(q('mcp-filter') as HTMLInputElement, 'str')
     expect(rowNames()).toEqual([])
     expect(pluginRowIds()).toEqual([STRIPE_ID])
     // With no config row listed, the plugin row is the selected one.

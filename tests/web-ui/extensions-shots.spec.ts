@@ -73,7 +73,7 @@ test('Extensions 3a screenshots: skills, mcp, plugins — light + inverted dark'
       await expect(page.getByTestId('savebar-clean')).toContainText('Saved — matches')
       await page.getByTestId('mcp-check-again').click()
       await expect(page.getByTestId('mcp-detail-status')).toContainText(/connected/i)
-      await expect(page.getByTestId('mcp-tools-count')).toHaveText('1')
+      await expect(page.getByTestId('mcp-tools')).toContainText('Tools · 1')
       await expect(page.getByTestId('mcp-tool-row-fetch')).toBeVisible()
       await page.waitForTimeout(300)
       await page.screenshot({ path: path.join(OUT, `mcp-${scheme}.png`) })

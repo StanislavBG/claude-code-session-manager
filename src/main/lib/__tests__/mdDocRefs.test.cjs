@@ -126,9 +126,9 @@ describe('assessRefs shorthand and ignored paths', () => {
   });
 
   it('a suffix shared by two or more tracked paths lands in ambiguousRefs, not deadRefs', () => {
-    const r = run(['x/CLAUDE.md', 'lib/']);
+    const r = run(['x/CLAUDE.md', 'CLAUDE.md', 'lib/']);
     expect(r.deadRefs).toEqual(['x/CLAUDE.md']); // a/CLAUDE.md, b/CLAUDE.md do not end with /x/CLAUDE.md
-    expect(r.ambiguousRefs).toEqual(['lib']); // src/renderer/lib and src/main/lib
+    expect(r.ambiguousRefs).toEqual(['CLAUDE.md']); // a/CLAUDE.md and b/CLAUDE.md; `lib/` is a bare name
     const r2 = assessRefs({ docPath: 'README.md', linkTargets: [], tokens: ['q/CLAUDE.md'], docMs: 0, exists: () => false, lastCommitOf: () => null, suffixMatches: () => ['a/q/CLAUDE.md', 'b/q/CLAUDE.md'] });
     expect(r2).toMatchObject({ deadRefs: [], ambiguousRefs: ['q/CLAUDE.md'] });
   });
@@ -184,11 +184,23 @@ describe('assessRefs bare names (no slash, no extension)', () => {
     expect(r).toMatchObject({ deadRefs: [], ambiguousRefs: [], changedSince: [] });
   });
 
-  it('tokens with a slash or an extension keep the suffix rules', () => {
+  it('tokens with an inner slash or an extension keep the suffix rules', () => {
     const r = run(['lib/epicIntake.ts', 'tasks/', 'gone.md']);
     expect(r.changedSince.map((c) => c.path)).toEqual(['src/renderer/lib/epicIntake.ts']);
-    expect(r.ambiguousRefs).toEqual(['tasks']);
+    expect(r.ambiguousRefs).toEqual([]);
     expect(r.deadRefs).toEqual(['gone.md']);
+  });
+
+  it('a bare name with one trailing slash is the bare name: `tasks/` is neither ambiguous nor dead', () => {
+    const r = run(['tasks/', 'nothing/'], 'ops/README.md');
+    expect(r).toMatchObject({ deadRefs: [], ambiguousRefs: [], changedSince: [] });
+  });
+
+  it('a bare name with one trailing slash resolves as a top-level folder', () => {
+    const r = run(['scripts/']);
+    expect(r.deadRefs).toEqual([]);
+    expect(r.ambiguousRefs).toEqual([]);
+    expect(r.changedSince.map((c) => c.path)).toEqual(['scripts']);
   });
 });
 

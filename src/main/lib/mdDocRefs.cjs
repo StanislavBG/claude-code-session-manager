@@ -73,8 +73,8 @@ function suffixIndex(paths) {
  * no tracked path by suffix), ambiguous refs (a suffix naming 2+ tracked
  * paths), and existing file refs committed after the doc (newest first, at
  * most MAX_CHANGED). A unique suffix match counts as that file. A bare
- * token (no '/', no extension) resolves only as an exact top-level path and is
- * otherwise ignored.
+ * token (no '/', no extension; one trailing '/' allowed) resolves only as an
+ * exact top-level path and is otherwise ignored.
  * @param {AssessInput} input
  * @returns {{ deadRefs: string[], ambiguousRefs: string[], changedSince: ChangedRef[] }}
  */
@@ -101,11 +101,13 @@ function assessRefs({ docPath, linkTargets, tokens, docMs, exists, lastCommitOf,
   }
   for (const tok of Array.isArray(tokens) ? tokens : []) {
     if (typeof tok !== 'string' || tok === '') continue;
-    if (!tok.includes('/') && path.posix.extname(tok) === '') {
+    // A token whose only '/' is one trailing slash (`tasks/`) is the bare name.
+    const bare = /^[^/]+\/$/.test(tok) ? tok.slice(0, -1) : tok;
+    if (!bare.includes('/') && path.posix.extname(bare) === '') {
       // A bare name (`tasks`, `scripts`) is a name unless it is exactly a
       // top-level tracked file or folder: no suffix match, no doc-folder join,
       // never ambiguous, never dead.
-      const top = repoPath(tok);
+      const top = repoPath(bare);
       if (top !== null && exists(top)) addFile(top);
       continue;
     }

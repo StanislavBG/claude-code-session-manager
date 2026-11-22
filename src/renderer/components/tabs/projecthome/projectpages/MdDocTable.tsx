@@ -16,10 +16,10 @@ export const MD_DOC_TABLE_CAP = 500
 const FILTERS: readonly { key: MdDocFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'map', label: 'Map' },
-  { key: 'scoped', label: 'Scoped' },
-  { key: 'agent', label: 'Agent' },
-  { key: 'doc', label: 'Doc' },
-  { key: 'record', label: 'Record' },
+  { key: 'scoped', label: 'Folder notes' },
+  { key: 'agent', label: 'Agent files' },
+  { key: 'doc', label: 'Topic docs' },
+  { key: 'record', label: 'History' },
   { key: 'unlinked', label: 'Unlinked' },
 ]
 

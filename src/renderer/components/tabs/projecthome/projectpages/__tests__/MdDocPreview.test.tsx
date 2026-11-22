@@ -131,7 +131,7 @@ describe('MdDocPreview', () => {
   it('renders the header from mdCurate', async () => {
     await render()
     expect(q('md-doc-preview-path')!.textContent).toBe('docs/guide.md')
-    expect(q('md-doc-preview-role')!.textContent).toBe('doc')
+    expect(q('md-doc-preview-role')!.textContent).toBe('topic doc')
     expect(q('md-doc-preview-usage')!.textContent).toBe('Reachable from CLAUDE.md in 1 link(s) · named by 2 code files')
     const stats = q('md-doc-preview-stats')!.textContent!
     expect(stats).toContain('3d ago')

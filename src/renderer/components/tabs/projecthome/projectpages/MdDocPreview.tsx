@@ -19,10 +19,10 @@ export const MAX_PREVIEW_CHARS = 200_000
 
 const ROLE_LABEL: Record<MdDocRole, string> = {
   map: 'map',
-  scoped: 'scoped',
-  agent: 'agent',
-  record: 'record',
-  doc: 'doc',
+  scoped: 'folder note',
+  agent: 'agent file',
+  record: 'history',
+  doc: 'topic doc',
 }
 
 export interface MdDocPreviewProps {

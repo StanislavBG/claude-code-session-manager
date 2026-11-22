@@ -112,6 +112,8 @@ describe('MdDocTable', () => {
     render()
     const filters = Array.from(host.querySelectorAll<HTMLElement>('[data-testid="md-doc-table-filter"]')).map((c) => c.dataset.filter)
     expect(filters).toEqual(['all', 'map', 'scoped', 'agent', 'doc', 'record', 'unlinked'])
+    const labels = Array.from(host.querySelectorAll<HTMLElement>('[data-testid="md-doc-table-filter"]')).map((c) => c.textContent!.replace(/\s*\d+\s*$/, '').trim())
+    expect(labels).toEqual(['All', 'Map', 'Folder notes', 'Agent files', 'Topic docs', 'History', 'Unlinked'])
     expect(chip('all').textContent).toContain('6')
     expect(chip('doc').textContent).toContain('2')
     expect(chip('unlinked').textContent).toContain('1')

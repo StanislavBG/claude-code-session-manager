@@ -48,7 +48,7 @@ test('sums input/output tokens across usage events in a session transcript', asy
   ]);
 
   const result = await usageFor(cwd, [sessionId]);
-  expect(result[sessionId]).toEqual({ inputTokens: 150, outputTokens: 30 });
+  expect(result[sessionId]).toMatchObject({ inputTokens: 150, outputTokens: 30 });
 });
 
 test('maps a session with no transcript file to null', async () => {
@@ -61,7 +61,7 @@ test('batches multiple sessions in one call', async () => {
   writeTranscript(cwd, 'sess-b', [{ usage: { input_tokens: 7, output_tokens: 2 } }]);
 
   const result = await usageFor(cwd, ['sess-a', 'sess-b', 'sess-missing']);
-  expect(result).toEqual({
+  expect(result).toMatchObject({
     'sess-a': { inputTokens: 5, outputTokens: 1 },
     'sess-b': { inputTokens: 7, outputTokens: 2 },
     'sess-missing': null,
@@ -74,15 +74,15 @@ test('a repeat call against an unchanged file returns the same cached totals', a
 
   const first = await usageFor(cwd, [sessionId]);
   const second = await usageFor(cwd, [sessionId]);
-  expect(second[sessionId]).toEqual(first[sessionId]);
-  expect(second[sessionId]).toEqual({ inputTokens: 10, outputTokens: 5 });
+  expect(second[sessionId]).toMatchObject(first[sessionId]);
+  expect(second[sessionId]).toMatchObject({ inputTokens: 10, outputTokens: 5 });
 });
 
 test('a growing transcript is re-summed after the file mtime/size change', async () => {
   const sessionId = 'sess-grow';
   writeTranscript(cwd, sessionId, [{ usage: { input_tokens: 10, output_tokens: 5 } }]);
   const before = await usageFor(cwd, [sessionId]);
-  expect(before[sessionId]).toEqual({ inputTokens: 10, outputTokens: 5 });
+  expect(before[sessionId]).toMatchObject({ inputTokens: 10, outputTokens: 5 });
 
   // Force a distinct mtime — some filesystems have coarse mtime resolution.
   const filePath = transcriptPath(cwd, sessionId);
@@ -91,7 +91,7 @@ test('a growing transcript is re-summed after the file mtime/size change', async
   fs.utimesSync(filePath, future, future);
 
   const after = await usageFor(cwd, [sessionId]);
-  expect(after[sessionId]).toEqual({ inputTokens: 13, outputTokens: 6 });
+  expect(after[sessionId]).toMatchObject({ inputTokens: 13, outputTokens: 6 });
 });
 
 // ── incremental tail parse + bounded cache ─────────────────────────────────
@@ -120,7 +120,7 @@ test('incremental result equals a from-scratch parse across 5 appends (partial l
   ]);
   const check = async () => {
     const r = await usageFor(cwd, [sessionId]);
-    expect(r[sessionId]).toEqual(fromScratch(filePath));
+    expect(r[sessionId]).toMatchObject(fromScratch(filePath));
   };
   await check();
   const l2 = JSON.stringify({ id: 'm2', usage: { input_tokens: 20, output_tokens: 2 } });
@@ -139,7 +139,7 @@ test('incremental result equals a from-scratch parse across 5 appends (partial l
   // 5: multibyte content then usage
   fs.appendFileSync(filePath, JSON.stringify({ t: 'héllo 日本', usage: { input_tokens: 4, output_tokens: 4 } }) + '\n');
   await check();
-  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 44, outputTokens: 8 });
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toMatchObject({ inputTokens: 44, outputTokens: 8 });
 });
 
 test('the call after a one-line append reads < 4 KB from disk', async () => {
@@ -161,7 +161,7 @@ test('the call after a one-line append reads < 4 KB from disk', async () => {
   });
   try {
     const r = await usageFor(cwd, [sessionId]);
-    expect(r[sessionId]).toEqual({ inputTokens: 2005, outputTokens: 2005 });
+    expect(r[sessionId]).toMatchObject({ inputTokens: 2005, outputTokens: 2005 });
   } finally {
     spy.mockRestore();
   }
@@ -177,7 +177,7 @@ test('truncation / replacement triggers a full re-parse', async () => {
   ]);
   await usageFor(cwd, [sessionId]);
   fs.writeFileSync(filePath, JSON.stringify({ usage: { input_tokens: 1, output_tokens: 2 } }) + '\n');
-  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 1, outputTokens: 2 });
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toMatchObject({ inputTokens: 1, outputTokens: 2 });
 });
 
 test('usageCache is bounded and evicts the least-recently-used entry', async () => {
@@ -217,29 +217,107 @@ test('three lines of one message.id are counted once (larger value per field)', 
   const sessionId = 'sess-dedup-one';
   writeTranscript(cwd, sessionId, [asst('msg_1', 100, 5), asst('msg_1', 100, 40), asst('msg_1', 100, 12)]);
   const r = await usageFor(cwd, [sessionId]);
-  expect(r[sessionId]).toEqual({ inputTokens: 100, outputTokens: 40 });
+  expect(r[sessionId]).toMatchObject({ inputTokens: 100, outputTokens: 40 });
 });
 
 test('two distinct message ids are both counted', async () => {
   const sessionId = 'sess-dedup-two';
   writeTranscript(cwd, sessionId, [asst('msg_1', 100, 10), asst('msg_1', 100, 10), asst('msg_2', 30, 7), asst('msg_2', 30, 9)]);
   const r = await usageFor(cwd, [sessionId]);
-  expect(r[sessionId]).toEqual({ inputTokens: 130, outputTokens: 19 });
+  expect(r[sessionId]).toMatchObject({ inputTokens: 130, outputTokens: 19 });
 });
 
 test('a repeat of a message id arriving in a later tail read is counted once', async () => {
   const sessionId = 'sess-dedup-tail';
   const filePath = writeTranscript(cwd, sessionId, [asst('msg_1', 100, 5)]);
-  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 100, outputTokens: 5 });
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toMatchObject({ inputTokens: 100, outputTokens: 5 });
   const future = new Date(Date.now() + 5000);
   fs.appendFileSync(filePath, JSON.stringify(asst('msg_1', 100, 50)) + '\n' + JSON.stringify(asst('msg_2', 1, 1)) + '\n');
   fs.utimesSync(filePath, future, future);
-  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 101, outputTokens: 51 });
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toMatchObject({ inputTokens: 101, outputTokens: 51 });
 });
 
 test('usage lines without a message id are each added', async () => {
   const sessionId = 'sess-dedup-noid';
   writeTranscript(cwd, sessionId, [asst(null, 10, 1), asst(null, 10, 1), asst('msg_1', 5, 5)]);
   const r = await usageFor(cwd, [sessionId]);
-  expect(r[sessionId]).toEqual({ inputTokens: 25, outputTokens: 7 });
+  expect(r[sessionId]).toMatchObject({ inputTokens: 25, outputTokens: 7 });
+});
+
+// ── lastContext + calls ────────────────────────────────────────────────────
+
+function ctxLine(id, input, cacheRead, cacheCreate, output) {
+  const message = {
+    role: 'assistant',
+    usage: {
+      input_tokens: input,
+      cache_read_input_tokens: cacheRead,
+      cache_creation_input_tokens: cacheCreate,
+      output_tokens: output,
+    },
+  };
+  if (id) message.id = id;
+  return { type: 'assistant', message };
+}
+
+test('one call: lastContext sums input + cache read + cache creation, calls = 1', async () => {
+  const sessionId = 'sess-ctx-one';
+  writeTranscript(cwd, sessionId, [ctxLine('msg_1', 3, 50_000, 2_000, 10)]);
+  const r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r).toEqual({ inputTokens: 3, outputTokens: 10, lastContext: 52_003, calls: 1 });
+});
+
+test('several calls: lastContext is the newest call, calls counts each message id once', async () => {
+  const sessionId = 'sess-ctx-many';
+  writeTranscript(cwd, sessionId, [
+    ctxLine('msg_1', 1, 100, 10, 5),
+    ctxLine('msg_1', 1, 100, 10, 9),
+    ctxLine('msg_2', 2, 200, 20, 5),
+    ctxLine(null, 4, 300, 30, 1),
+    ctxLine('msg_3', 7, 700, 70, 2),
+    { type: 'user', message: { content: 'no usage' } },
+  ]);
+  const r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r.calls).toBe(4);
+  expect(r.lastContext).toBe(777);
+});
+
+test('a message split over two tail reads counts as one call; lastContext follows the newest call', async () => {
+  const sessionId = 'sess-ctx-split';
+  const filePath = writeTranscript(cwd, sessionId, [ctxLine('msg_1', 1, 100, 0, 5), ctxLine('msg_2', 2, 1_000, 0, 5)]);
+  let r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r.calls).toBe(2);
+  expect(r.lastContext).toBe(1_002);
+
+  // Second line of msg_2 lands in the next read, with a larger cache creation.
+  fs.appendFileSync(filePath, JSON.stringify(ctxLine('msg_2', 2, 1_000, 50, 40)) + '\n');
+  fs.utimesSync(filePath, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r.calls).toBe(2);
+  expect(r.lastContext).toBe(1_052);
+
+  // A late repeat of an older id neither adds a call nor moves lastContext.
+  fs.appendFileSync(filePath, JSON.stringify(ctxLine('msg_1', 1, 100, 0, 5)) + '\n');
+  fs.utimesSync(filePath, new Date(Date.now() + 10000), new Date(Date.now() + 10000));
+  r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r.calls).toBe(2);
+  expect(r.lastContext).toBe(1_052);
+
+  // A new call becomes the newest.
+  const l3 = JSON.stringify(ctxLine('msg_3', 3, 2_000, 0, 1));
+  fs.appendFileSync(filePath, l3.slice(0, 20));
+  fs.utimesSync(filePath, new Date(Date.now() + 15000), new Date(Date.now() + 15000));
+  r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r.calls).toBe(2);
+  fs.appendFileSync(filePath, l3.slice(20) + '\n');
+  fs.utimesSync(filePath, new Date(Date.now() + 20000), new Date(Date.now() + 20000));
+  r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r).toEqual({ inputTokens: 6, outputTokens: 46, lastContext: 2_003, calls: 3 });
+});
+
+test('a transcript with no usage has lastContext null and calls 0', async () => {
+  const sessionId = 'sess-ctx-none';
+  writeTranscript(cwd, sessionId, [{ type: 'user', message: { content: 'hi' } }]);
+  const r = (await usageFor(cwd, [sessionId]))[sessionId];
+  expect(r).toEqual({ inputTokens: 0, outputTokens: 0, lastContext: null, calls: 0 });
 });

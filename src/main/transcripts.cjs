@@ -477,12 +477,17 @@ const USAGE_CACHE_MAX = 200;
 const USAGE_RECENT_IDS_MAX = 64;
 
 /**
- * LRU<filePath, { ino, size, mtimeMs, readOffset, usage, recentIds }>. `readOffset`
+ * LRU<filePath, { ino, size, mtimeMs, readOffset, usage, recentIds, newestId }>. `readOffset`
  * is the byte just past the last complete (newline-terminated) line already
  * summed, so the next call only parses [readOffset, size). `recentIds` is an
  * array of [message.id, { inputTokens, outputTokens }] (oldest first, at most
  * USAGE_RECENT_IDS_MAX) — the values already counted for that id, so a message
- * whose lines straddle two reads is still counted once.
+ * whose lines straddle two reads is still counted once. `newestId` is the
+ * message.id of the newest counted call (null if it had none), so a later line
+ * of that call can raise `usage.lastContext` while a late repeat of an older
+ * id cannot. `usage` = { inputTokens, outputTokens, lastContext, calls }:
+ * lastContext is input + cache-read + cache-creation tokens of the newest
+ * counted call (null before any), calls the number of counted calls.
  */
 const usageCache = new LRUCache(USAGE_CACHE_MAX);
 
@@ -515,7 +520,11 @@ async function usageForOne(filePath) {
   const start = canTail ? cached.readOffset : 0;
   let inputTokens = canTail ? cached.usage.inputTokens : 0;
   let outputTokens = canTail ? cached.usage.outputTokens : 0;
-  /** @type {Map<string, { inputTokens: number, outputTokens: number }>} */
+  let calls = canTail ? cached.usage.calls : 0;
+  let lastContext = canTail ? cached.usage.lastContext : null;
+  // message.id of the newest counted call (null when that call had no id).
+  let newestId = canTail ? cached.newestId : null;
+  /** @type {Map<string, { inputTokens: number, outputTokens: number, context: number }>} */
   const recent = new Map(canTail && cached.recentIds ? cached.recentIds : []);
   const want = stat.size - start;
   let buf = Buffer.alloc(0);
@@ -554,33 +563,46 @@ async function usageForOne(filePath) {
       const u = ev.data || {};
       const inTok = u.input_tokens ?? u.inputTokens ?? 0;
       const outTok = u.output_tokens ?? u.outputTokens ?? 0;
+      const ctx =
+        inTok +
+        (u.cache_read_input_tokens ?? u.cacheReadInputTokens ?? 0) +
+        (u.cache_creation_input_tokens ?? u.cacheCreationInputTokens ?? 0);
       // One API message's usage is repeated on each of its transcript lines:
       // count a message.id once, keeping the larger value of each field.
       const id = obj?.message?.id;
       if (typeof id !== 'string' || !id) {
         inputTokens += inTok;
         outputTokens += outTok;
+        calls += 1;
+        lastContext = ctx;
+        newestId = null;
         continue;
       }
       const prev = recent.get(id);
       if (prev) {
         const nextIn = Math.max(prev.inputTokens, inTok);
         const nextOut = Math.max(prev.outputTokens, outTok);
+        const nextCtx = Math.max(prev.context ?? 0, ctx);
         inputTokens += nextIn - prev.inputTokens;
         outputTokens += nextOut - prev.outputTokens;
+        // A later line of an older call never moves lastContext off the newest call.
+        if (id === newestId) lastContext = nextCtx;
         recent.delete(id);
-        recent.set(id, { inputTokens: nextIn, outputTokens: nextOut });
+        recent.set(id, { inputTokens: nextIn, outputTokens: nextOut, context: nextCtx });
       } else {
         inputTokens += inTok;
         outputTokens += outTok;
-        recent.set(id, { inputTokens: inTok, outputTokens: outTok });
+        calls += 1;
+        lastContext = ctx;
+        newestId = id;
+        recent.set(id, { inputTokens: inTok, outputTokens: outTok, context: ctx });
         if (recent.size > USAGE_RECENT_IDS_MAX) {
           recent.delete(recent.keys().next().value);
         }
       }
     }
   }
-  const usage = { inputTokens, outputTokens };
+  const usage = { inputTokens, outputTokens, lastContext, calls };
   usageCache.set(filePath, {
     ino: stat.ino,
     size: stat.size,
@@ -588,6 +610,7 @@ async function usageForOne(filePath) {
     readOffset: start + lastNl + 1,
     usage,
     recentIds: [...recent],
+    newestId,
   });
   return usage;
 }

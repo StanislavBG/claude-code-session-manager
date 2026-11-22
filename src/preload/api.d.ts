@@ -2336,8 +2336,10 @@ export interface SessionManagerAPI {
     exists: (cwd: string, sessionUuid: string) => Promise<boolean>;
     /** Batched token-usage totals, one map entry per requested sessionId. A
      *  session with no transcript file yet (or one over the main-process size
-     *  cap) maps to null. */
-    usageFor: (cwd: string, sessionIds: string[]) => Promise<Record<string, { inputTokens: number; outputTokens: number } | null>>;
+     *  cap) maps to null. `lastContext` = input + cache-read + cache-creation
+     *  tokens of the newest model call (null when there is none); `calls` =
+     *  number of model calls, each message.id counted once. */
+    usageFor: (cwd: string, sessionIds: string[]) => Promise<Record<string, { inputTokens: number; outputTokens: number; lastContext: number | null; calls: number } | null>>;
     /** Fires once per main-process flush with the ORDERED batch of events that
      *  flush produced (never one call per event) — see transcripts.cjs's
      *  doFlush / MAX_EVENTS_PER_BATCH. */

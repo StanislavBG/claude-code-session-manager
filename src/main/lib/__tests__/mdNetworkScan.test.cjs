@@ -328,7 +328,7 @@ describe('scanMdNetwork with injected git and fs', () => {
   });
 
   /** A fake repo: `git` answers by subcommand, files come from `texts`. */
-  const fakeRepo = ({ tracked, texts, log = '', grep = '', onDisk = () => false, probes = [] }) => {
+  const fakeRepo = ({ tracked, texts, log = '', grep = '', onDisk = () => false, probes = [], ignore = () => false }) => {
     const gitCalls = [];
     return {
       gitCalls,
@@ -343,6 +343,14 @@ describe('scanMdNetwork with injected git and fs', () => {
           if (args[0] === 'grep') {
             if (grep instanceof Error) throw grep;
             return grep;
+          }
+          if (args.includes('check-ignore')) {
+            const asked = args.slice(args.indexOf('--') + 1);
+            const link = asked.find((p) => p.startsWith('linked/'));
+            if (link) throw Object.assign(new Error('Command failed'), { code: 128, stderrText: `fatal: pathspec '${link}' is beyond a symbolic link\n` });
+            const hits = asked.filter(ignore);
+            if (hits.length === 0) throw Object.assign(new Error('Command failed: git check-ignore'), { code: 1 });
+            return `${hits.join('\n')}\n`;
           }
           throw new Error(`unexpected git ${args[0]}`);
         },
@@ -374,9 +382,9 @@ describe('scanMdNetwork with injected git and fs', () => {
     });
     const r = await scanMdNetwork('/repo', deps);
     expect(r.ok).toBe(true);
-    expect(gitCalls.map((c) => c.args[0])).toEqual(['ls-files', 'log', 'grep']);
-    expect(gitCalls[1]).toEqual({ args: LOG_ARGS, opts: { maxBuffer: 64 * 1024 * 1024 } });
-    expect(gitCalls[2].opts).toEqual({ maxBuffer: 16 * 1024 * 1024 });
+    expect(gitCalls.map((c) => c.args.find((a) => a !== '-c' && !a.includes('=')))).toEqual(['ls-files', 'check-ignore', 'log', 'grep']);
+    expect(gitCalls[2]).toEqual({ args: LOG_ARGS, opts: { maxBuffer: 64 * 1024 * 1024 } });
+    expect(gitCalls[3].opts).toEqual({ maxBuffer: 16 * 1024 * 1024 });
     expect(r.census.warnings).toEqual([]);
     expect(r.census.gitWindow).toEqual({ commits: 3, oldestMs: 100000 });
     const byPath = new Map(r.census.docs.map((d) => [d.path, d]));
@@ -395,6 +403,23 @@ describe('scanMdNetwork with injected git and fs', () => {
     });
     expect(byPath.get('docs/orphan.md')).toMatchObject({ depth: null, lines: 0, bytes: 0, lastCommitMs: null });
     expect(r.findings.map((f) => f.where)).toEqual(['docs/']);
+  });
+
+  it('resolves shorthand refs by suffix, lists ambiguous ones, and never calls a gitignored ref dead', async () => {
+    const { deps, gitCalls } = fakeRepo({
+      tracked: ['CLAUDE.md', 'src/renderer/lib/epicIntake.ts', 'a/x/CLAUDE.md', 'b/x/CLAUDE.md'],
+      texts: { 'CLAUDE.md': 'See `lib/epicIntake.ts`, `x/CLAUDE.md`, `linked/pkg/a.json`, `dist/index.html`, `logs/` and `src/gone.cjs`.', 'a/x/CLAUDE.md': '', 'b/x/CLAUDE.md': '' },
+      ignore: (p) => p === 'dist/index.html' || p === 'logs/',
+    });
+    const r = await scanMdNetwork('/repo', deps);
+    expect(r.census.warnings).toEqual([]);
+    // a path beyond a symlink fails the call; it is dropped and the rest retried
+    const asked = gitCalls.filter((c) => c.args.includes('check-ignore')).map((c) => c.args.slice(c.args.indexOf('--') + 1));
+    expect(asked).toEqual([
+      ['lib/epicIntake.ts', 'x/CLAUDE.md', 'linked/pkg/a.json', 'dist/index.html', 'logs/', 'src/gone.cjs'],
+      ['lib/epicIntake.ts', 'x/CLAUDE.md', 'dist/index.html', 'logs/', 'src/gone.cjs'],
+    ]);
+    expect(r.census.docs.find((d) => d.path === 'CLAUDE.md')).toMatchObject({ deadRefs: ['linked/pkg/a.json', 'src/gone.cjs'], ambiguousRefs: ['x/CLAUDE.md'] });
   });
 
   it('degrades a failing git log or git grep to null recency / zero code refs plus a warning', async () => {

@@ -32,7 +32,10 @@
  *   for recency, one `git grep -F -o` over non-.md files (16 MB buffer) for code
  *   mentions, and at most MAX_REF_PROBES on-disk probes (READ_BATCH at a time)
  *   for backticked paths git does not vouch for — unprobed ones count as
- *   existing. A failing git call degrades to a census warning, never an error.
+ *   existing. A probed-absent path that is gitignored (same check-ignore pass
+ *   as link targets) is never dead; one naming exactly one tracked file or
+ *   folder by suffix (`lib/x.ts`) resolves to it, two or more make it an
+ *   ambiguousRef. A failing git call degrades to a census warning, never an error.
  *   Docs in record collections (opts.recordFolders / heuristic) leave orphans.
  *
  * Followed — every reference an agent follows, matching the maintaining-md-network
@@ -53,7 +56,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execGit } = require('./git/gitExec.cjs');
 const { censusMdDocs, parseGitLog, recordCollectionDocs } = require('./mdDocCensus.cjs');
-const { assessRefs, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
+const { assessRefs, suffixIndex, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
 // The link convention (links, imports, backticked paths) is written once, in the skill's mdLinks.cjs.
 const { linksOf, importsOf, backtickPaths, toRepoPath } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
@@ -526,23 +529,68 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
         if (hits[k]) onDisk.add(rel);
       });
     }
+    /** @param {string} p */
+    const vouched = (p) => !gone.has(p) && (trackedSet.has(p) || trackedFolders.has(p));
+
+    // Backticked paths git does not vouch for: probed on disk, capped; the rest count as existing.
+    /** @type {Map<string, boolean>} */
+    const probed = new Map();
+    /** @type {string[]} */
+    const toProbe = [];
+    const queuedProbes = new Set();
+    /** @type {Set<string>} probed forms of `folder/` tokens */
+    const folderRefs = new Set();
+    /** @type {Map<MdFile, string[]>} */
+    const tokensOf = new Map();
+    for (const file of files) {
+      const tokens = backtickPaths(file.text);
+      tokensOf.set(file, tokens);
+      const dir = path.posix.dirname(file.path);
+      for (const tok of tokens) {
+        const rootForm = toRepoPath(tok);
+        const forms = dir === '.' ? [rootForm] : [rootForm, toRepoPath(path.posix.join(dir, tok))];
+        for (const rel of forms) {
+          if (rel === '.' || rel === '..' || rel.startsWith('../')) continue;
+          if (vouched(rel)) break; // assessRefs takes the first existing form
+          if (onDisk.has(rel) || queuedProbes.has(rel) || toProbe.length >= MAX_REF_PROBES) continue;
+          queuedProbes.add(rel);
+          toProbe.push(rel);
+          if (tok.endsWith('/')) folderRefs.add(rel);
+        }
+      }
+    }
+    for (let i = 0; i < toProbe.length; i += READ_BATCH) {
+      const batch = toProbe.slice(i, i + READ_BATCH);
+      const hits = await Promise.all(batch.map(probe));
+      batch.forEach((rel, k) => probed.set(rel, hits[k]));
+    }
     const notOnDisk = candidates.filter((rel) => !onDisk.has(rel));
-    for (let i = 0; i < notOnDisk.length; i += CHECK_IGNORE_BATCH) {
-      const batch = notOnDisk.slice(i, i + CHECK_IGNORE_BATCH);
-      try {
-        // -z needs --stdin, so paths go as args and come back one per line, unquoted.
-        const out = String(await runGit(cwd, ['-c', 'core.quotePath=false', 'check-ignore', '--no-index', '--', ...batch]));
-        for (const rel of out.split('\n')) if (rel !== '') ignored.add(toRepoPath(rel));
-      } catch (err) {
-        if (errorField(err, 'code') !== 1) {
-          warnings.push(`gitignore check unavailable: ${gitFailure(err)}`);
+    // One check-ignore pass for absent link targets and absent backticked refs;
+    // a folder ref is asked with its trailing '/' so dir-only patterns match.
+    const toCheck = [...new Set([...notOnDisk, ...toProbe.filter((rel) => probed.get(rel) === false).map((rel) => (folderRefs.has(rel) ? `${rel}/` : rel))])];
+    checkIgnore: for (let i = 0; i < toCheck.length; i += CHECK_IGNORE_BATCH) {
+      let batch = toCheck.slice(i, i + CHECK_IGNORE_BATCH);
+      while (batch.length > 0) {
+        try {
+          // -z needs --stdin, so paths go as args and come back one per line, unquoted.
+          const out = String(await runGit(cwd, ['-c', 'core.quotePath=false', 'check-ignore', '--no-index', '--', ...batch]));
+          for (const rel of out.split('\n')) if (rel !== '') ignored.add(toRepoPath(rel));
           break;
+        } catch (err) {
+          if (errorField(err, 'code') === 1) break;
+          // A path under a symlink (a linked node_modules) fails the whole call: drop it, retry the rest.
+          const beyond = /pathspec '(.+)' is beyond a symbolic link/.exec(gitFailure(err));
+          const drop = beyond ? batch.indexOf(beyond[1]) : -1;
+          if (drop >= 0) {
+            batch = batch.filter((_, k) => k !== drop);
+            continue;
+          }
+          warnings.push(`gitignore check unavailable: ${gitFailure(err)}`);
+          break checkIgnore;
         }
       }
     }
 
-    /** @param {string} p */
-    const vouched = (p) => !gone.has(p) && (trackedSet.has(p) || trackedFolders.has(p));
     /** @param {string} p */
     const present = (p) => vouched(p);
     /** @param {string} p */
@@ -576,35 +624,6 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
     /** @type {Map<string, MdFile>} */
     const readByPath = new Map(files.map((f) => [f.path, f]));
 
-    // Backticked paths git does not vouch for: probed on disk, capped; the rest count as existing.
-    /** @type {Map<string, boolean>} */
-    const probed = new Map();
-    /** @type {string[]} */
-    const toProbe = [];
-    const queuedProbes = new Set();
-    /** @type {Map<MdFile, string[]>} */
-    const tokensOf = new Map();
-    for (const file of files) {
-      const tokens = backtickPaths(file.text);
-      tokensOf.set(file, tokens);
-      const dir = path.posix.dirname(file.path);
-      for (const tok of tokens) {
-        const rootForm = toRepoPath(tok);
-        const forms = dir === '.' ? [rootForm] : [rootForm, toRepoPath(path.posix.join(dir, tok))];
-        for (const rel of forms) {
-          if (rel === '.' || rel === '..' || rel.startsWith('../')) continue;
-          if (vouched(rel)) break; // assessRefs takes the first existing form
-          if (onDisk.has(rel) || queuedProbes.has(rel) || toProbe.length >= MAX_REF_PROBES) continue;
-          queuedProbes.add(rel);
-          toProbe.push(rel);
-        }
-      }
-    }
-    for (let i = 0; i < toProbe.length; i += READ_BATCH) {
-      const batch = toProbe.slice(i, i + READ_BATCH);
-      const hits = await Promise.all(batch.map(probe));
-      batch.forEach((rel, k) => probed.set(rel, hits[k]));
-    }
     /** @param {string} p */
     const refExists = (p) => {
       if (present(p) || onDisk.has(p)) return true;
@@ -613,6 +632,8 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
       return hit === undefined ? true : hit;
     };
 
+    // Shorthand refs (`lib/x.ts`) resolve by suffix against everything git tracks here.
+    const suffixMatches = suffixIndex([...tracked.filter((p) => !gone.has(p)), ...trackedFolders]);
     /** @type {Map<string, import('./mdDocCensus.cjs').MdDocRefs>} */
     const refs = new Map();
     for (const file of files) {
@@ -628,6 +649,8 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
           docMs: lastCommitOf(file.path),
           exists: refExists,
           lastCommitOf,
+          ignored: (p) => ignored.has(p),
+          suffixMatches,
         }),
       );
     }

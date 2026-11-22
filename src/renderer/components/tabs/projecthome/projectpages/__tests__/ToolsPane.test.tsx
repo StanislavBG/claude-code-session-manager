@@ -60,7 +60,7 @@ const SESSIONS_ONLY = macro({ id: 'sessions-only', label: 'Elsewhere', surface: 
 function mdDoc(path: string, role: MdDocRole, depth: number | null): MdDoc {
   return {
     path, role, depth, lines: 10, bytes: 200, lastCommitMs: null, commits: 1, linkedFrom: depth === null ? 0 : 1,
-    codeRefs: 0, codeRefFiles: [], deadRefs: [], changedSince: [], collection: null,
+    codeRefs: 0, codeRefFiles: [], deadRefs: [], ambiguousRefs: [], changedSince: [], collection: null,
   }
 }
 

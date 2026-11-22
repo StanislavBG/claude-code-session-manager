@@ -135,12 +135,13 @@ describe('censusMdDocs refs', () => {
       docs: [{ path: 'a.md' }],
       reachable: new Map(),
       codeMentions: new Map([['a.md', codes]]),
-      refs: new Map([['a.md', { deadRefs: dead, changedSince: changed }]]),
+      refs: new Map([['a.md', { deadRefs: dead, ambiguousRefs: dead, changedSince: changed }]]),
     });
     const d = c.docs[0];
     expect(d.codeRefs).toBe(15);
     expect(d.codeRefFiles).toEqual(codes.slice(0, 10));
     expect(d.deadRefs).toEqual(dead.slice(0, 10));
+    expect(d.ambiguousRefs).toEqual(dead.slice(0, 10));
     expect(d.changedSince).toEqual(changed.slice(0, 20));
   });
 

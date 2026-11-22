@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { backtickPaths, assessRefs, mentionPatterns, parseMentions } = require('../mdDocRefs.cjs');
+const { backtickPaths, assessRefs, suffixIndex, mentionPatterns, parseMentions } = require('../mdDocRefs.cjs');
 
 describe('backtickPaths', () => {
   it('keeps distinct path-shaped inline code tokens in document order', () => {
@@ -105,6 +105,50 @@ describe('assessRefs', () => {
     });
     expect(r.changedSince).toHaveLength(20);
     expect(r.changedSince[0]).toEqual({ path: 'f/29.ts', ms: 30 });
+  });
+});
+
+describe('assessRefs shorthand and ignored paths', () => {
+  const tracked = ['src/renderer/lib/epicIntake.ts', 'src/main/lib/util/atomicFs.cjs', 'a/CLAUDE.md', 'b/CLAUDE.md', 'web/remote-app/README.md'];
+  const folders = ['src', 'src/renderer', 'src/renderer/lib', 'src/main', 'src/main/lib', 'src/main/lib/util', 'a', 'b', 'web', 'web/remote-app'];
+  const all = new Set([...tracked, ...folders]);
+  const suffixMatches = suffixIndex([...tracked, ...folders]);
+  const run = (tokens, ignored = () => false) =>
+    assessRefs({ docPath: 'CLAUDE.md', linkTargets: [], tokens, docMs: 0, exists: (p) => all.has(p), lastCommitOf: () => 10, ignored, suffixMatches });
+
+  it('a token naming exactly one tracked file or folder by suffix is not dead and counts as that file', () => {
+    const r = run(['lib/epicIntake.ts', 'util/atomicFs.cjs', 'renderer/lib/', 'remote-app/README.md']);
+    expect(r.deadRefs).toEqual([]);
+    expect(r.ambiguousRefs).toEqual([]);
+    expect(r.changedSince.map((c) => c.path)).toEqual([
+      'src/main/lib/util/atomicFs.cjs', 'src/renderer/lib/epicIntake.ts', 'web/remote-app/README.md',
+    ]);
+  });
+
+  it('a suffix shared by two or more tracked paths lands in ambiguousRefs, not deadRefs', () => {
+    const r = run(['x/CLAUDE.md', 'lib/']);
+    expect(r.deadRefs).toEqual(['x/CLAUDE.md']); // a/CLAUDE.md, b/CLAUDE.md do not end with /x/CLAUDE.md
+    expect(r.ambiguousRefs).toEqual(['lib']); // src/renderer/lib and src/main/lib
+    const r2 = assessRefs({ docPath: 'README.md', linkTargets: [], tokens: ['q/CLAUDE.md'], docMs: 0, exists: () => false, lastCommitOf: () => null, suffixMatches: () => ['a/q/CLAUDE.md', 'b/q/CLAUDE.md'] });
+    expect(r2).toMatchObject({ deadRefs: [], ambiguousRefs: ['q/CLAUDE.md'] });
+  });
+
+  it('a gitignored path is never dead', () => {
+    const r = run(['dist/index.html', 'logs/', 'gone/x.ts'], (p) => p === 'dist/index.html' || p === 'logs');
+    expect(r.deadRefs).toEqual(['gone/x.ts']);
+    expect(r.ambiguousRefs).toEqual([]);
+  });
+
+  it('a truly missing path is still dead', () => {
+    const r = run(['nowhere/epicIntakeX.ts', 'pic/Intake.ts']);
+    expect(r.deadRefs).toEqual(['nowhere/epicIntakeX.ts', 'pic/Intake.ts']);
+  });
+
+  it('suffixIndex matches whole segments only, equal paths included', () => {
+    const m = suffixIndex(['src/a/b.ts', 'xa/b.ts', 'a/b.ts', 'src/a']);
+    expect(m('a/b.ts')).toEqual(['src/a/b.ts', 'a/b.ts']);
+    expect(m('a/')).toEqual(['src/a']);
+    expect(m('../a/b.ts')).toEqual([]);
   });
 });
 

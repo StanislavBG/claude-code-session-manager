@@ -11,7 +11,7 @@ const NOW = Date.UTC(2026, 10, 13)
 function doc(p: Partial<MdDoc> & { path: string }): MdDoc {
   return {
     role: 'doc', depth: 1, lines: 10, bytes: 100, lastCommitMs: NOW - DAY, commits: 1, linkedFrom: 1,
-    codeRefs: 0, codeRefFiles: [], deadRefs: [], changedSince: [], collection: null, ...p,
+    codeRefs: 0, codeRefFiles: [], deadRefs: [], ambiguousRefs: [], changedSince: [], collection: null, ...p,
   }
 }
 

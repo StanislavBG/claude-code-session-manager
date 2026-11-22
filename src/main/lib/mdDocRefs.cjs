@@ -4,12 +4,15 @@
 /**
  * mdDocRefs — pure helpers for a markdown doc's currency and usage:
  *   - backtickPaths: the repo-path-shaped inline-code tokens a doc names;
- *   - assessRefs: which named paths no longer exist, and which existing files
- *     were committed after the doc last changed;
+ *   - assessRefs: which named paths no longer exist (dead), which name 2+
+ *     tracked paths by suffix (ambiguous), and which existing files were
+ *     committed after the doc last changed;
+ *   - suffixIndex: a resolver from a shorthand token (`lib/x.ts`) to the
+ *     tracked paths it names (`src/renderer/lib/x.ts`), built once per scan;
  *   - mentionPatterns / parseMentions: the fixed-string patterns for a
  *     `git grep -F -o --null` run and the parse of its output into
  *     doc -> code files that name it.
- * No fs, no git: all IO is injected (`exists`, `lastCommitOf`) or done by the
+ * No fs, no git: all IO is injected (`exists`, `lastCommitOf`, `ignored`) or done by the
  * caller (scanMdNetwork). backtickPaths (fence/comment handling included) is
  * the shared link convention's, from the skill's mdLinks.cjs; re-exported here.
  */
@@ -29,6 +32,8 @@ const MAX_PATTERNS = 4000;
  *   docMs: number | null,
  *   exists: (repoPath: string) => boolean,
  *   lastCommitOf: (repoPath: string) => number | null | undefined,
+ *   ignored?: (repoPath: string) => boolean,
+ *   suffixMatches?: (token: string) => string[],
  * }} AssessInput
  */
 
@@ -40,16 +45,45 @@ function repoPath(p) {
 }
 
 /**
- * Dead refs (tokens that resolve nowhere) and existing file refs committed
- * after the doc (newest first, at most MAX_CHANGED).
- * @param {AssessInput} input
- * @returns {{ deadRefs: string[], changedSince: ChangedRef[] }}
+ * Resolver from a token to every tracked path equal to it or ending with
+ * '/<token>' (whole segments only), in listing order. One Map by basename.
+ * @param {string[]} paths tracked files and folders, repo-relative POSIX
+ * @returns {(token: string) => string[]}
  */
-function assessRefs({ docPath, linkTargets, tokens, docMs, exists, lastCommitOf }) {
+function suffixIndex(paths) {
+  /** @type {Map<string, string[]>} */
+  const byBase = new Map();
+  for (const p of Array.isArray(paths) ? paths : []) {
+    if (typeof p !== 'string' || p === '') continue;
+    const base = path.posix.basename(p);
+    const list = byBase.get(base);
+    if (list) list.push(p);
+    else byBase.set(base, [p]);
+  }
+  return (token) => {
+    const t = typeof token === 'string' ? repoPath(token) : null;
+    if (t === null) return [];
+    const list = byBase.get(path.posix.basename(t)) ?? [];
+    return [...new Set(list.filter((p) => p === t || p.endsWith(`/${t}`)))];
+  };
+}
+
+/**
+ * Dead refs (tokens that resolve nowhere: not present, not gitignored, naming
+ * no tracked path by suffix), ambiguous refs (a suffix naming 2+ tracked
+ * paths), and existing file refs committed after the doc (newest first, at
+ * most MAX_CHANGED). A unique suffix match counts as that file.
+ * @param {AssessInput} input
+ * @returns {{ deadRefs: string[], ambiguousRefs: string[], changedSince: ChangedRef[] }}
+ */
+function assessRefs({ docPath, linkTargets, tokens, docMs, exists, lastCommitOf, ignored, suffixMatches }) {
   const dir = path.posix.dirname(docPath);
   /** @type {string[]} */
   const deadRefs = [];
   const deadSeen = new Set();
+  /** @type {string[]} */
+  const ambiguousRefs = [];
+  const ambiguousSeen = new Set();
   /** @type {string[]} */
   const fileRefs = [];
   const fileSeen = new Set();
@@ -70,7 +104,19 @@ function assessRefs({ docPath, linkTargets, tokens, docMs, exists, lastCommitOf 
     const local = dir === '.' ? null : repoPath(path.posix.join(dir, tok));
     const candidates = [root, local].filter((c) => c !== null);
     if (candidates.length === 0) continue;
-    const hit = candidates.find((c) => exists(c));
+    let hit = candidates.find((c) => exists(c));
+    if (hit === undefined && typeof ignored === 'function' && candidates.some((c) => ignored(c))) continue;
+    if (hit === undefined && root !== null && typeof suffixMatches === 'function') {
+      const matches = suffixMatches(root);
+      if (matches.length === 1) hit = matches[0];
+      else if (matches.length >= 2) {
+        if (!ambiguousSeen.has(root)) {
+          ambiguousSeen.add(root);
+          ambiguousRefs.push(root);
+        }
+        continue;
+      }
+    }
     if (hit === undefined) {
       const dead = /** @type {string} */ (root ?? candidates[0]);
       if (!deadSeen.has(dead)) {
@@ -89,7 +135,7 @@ function assessRefs({ docPath, linkTargets, tokens, docMs, exists, lastCommitOf 
     if (docMs === null || docMs === undefined || ms > docMs) changed.push({ path: p, ms });
   }
   changed.sort((a, b) => b.ms - a.ms || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { deadRefs, changedSince: changed.slice(0, MAX_CHANGED) };
+  return { deadRefs, ambiguousRefs, changedSince: changed.slice(0, MAX_CHANGED) };
 }
 
 /**
@@ -166,4 +212,4 @@ function parseMentions(stdout, owner) {
   return out;
 }
 
-module.exports = { backtickPaths, assessRefs, mentionPatterns, parseMentions };
+module.exports = { backtickPaths, assessRefs, suffixIndex, mentionPatterns, parseMentions };

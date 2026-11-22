@@ -47,13 +47,13 @@ const NEVER_RECORD_NAMES = new Set(['README.md', 'CLAUDE.md', 'AGENTS.md', 'inde
 /**
  * @typedef {'map' | 'scoped' | 'agent' | 'record' | 'doc'} MdDocRole
  * @typedef {{ path: string, ms: number }} MdChangedSince
- * @typedef {{ path: string, role: MdDocRole, depth: number | null, lines: number | null, bytes: number | null, lastCommitMs: number | null, commits: number, linkedFrom: number, codeRefs: number, codeRefFiles: string[], deadRefs: string[], changedSince: MdChangedSince[], collection: string | null }} MdDoc
+ * @typedef {{ path: string, role: MdDocRole, depth: number | null, lines: number | null, bytes: number | null, lastCommitMs: number | null, commits: number, linkedFrom: number, codeRefs: number, codeRefFiles: string[], deadRefs: string[], ambiguousRefs: string[], changedSince: MdChangedSince[], collection: string | null }} MdDoc
  * @typedef {{ folder: string, docs: number, linked: number, lastCommitMs: number | null, source: 'heuristic' | 'override' }} MdRecordCollection
  * @typedef {{ tracked: number, network: number, records: number, unlinked: number, byRole: Record<MdDocRole, number> }} MdCensusCounts
  * @typedef {{ docs: MdDoc[], collections: MdRecordCollection[], counts: MdCensusCounts, gitWindow: { commits: number, oldestMs: number | null }, warnings: string[] }} MdCensus
  * @typedef {{ path: string, text?: string | null, lines?: number | null, bytes?: number | null }} MdCensusDocInput
  * @typedef {{ ms: number, files: string[] }} GitLogEntry
- * @typedef {{ deadRefs: string[], changedSince: MdChangedSince[] }} MdDocRefs
+ * @typedef {{ deadRefs: string[], ambiguousRefs: string[], changedSince: MdChangedSince[] }} MdDocRefs
  * @typedef {object} CensusInput
  * @property {string} [root] the root doc (default CLAUDE.md)
  * @property {MdCensusDocInput[]} docs every tracked .md, repo-relative POSIX
@@ -310,6 +310,7 @@ function censusMdDocs(input) {
       codeRefs: mentions.length,
       codeRefFiles: mentions.slice(0, MAX_CODE_REF_FILES),
       deadRefs: ref ? stringList(ref.deadRefs, MAX_DEAD_REFS) : [],
+      ambiguousRefs: ref ? stringList(ref.ambiguousRefs, MAX_DEAD_REFS) : [],
       changedSince: ref ? changedSinceList(ref.changedSince) : [],
       collection: role === 'record' ? folder : null,
     });

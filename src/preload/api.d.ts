@@ -2005,7 +2005,7 @@ export type MdReviewResult = MdReviewOk | { ok: false; error: string };
 /** How agents meet a doc: 'map' = the root + its @-imports; 'scoped' = another CLAUDE.md / AGENTS.md / CLAUDE.local.md; 'agent' = .claude/, skills/, plugin agents/commands; 'record' = in a record collection and unreachable; 'doc' = anything else. */
 export type MdDocRole = 'map' | 'scoped' | 'agent' | 'record' | 'doc';
 
-export interface MdDoc { path: string; role: MdDocRole; depth: number | null; lines: number | null; bytes: number | null; lastCommitMs: number | null; commits: number; linkedFrom: number; codeRefs: number; codeRefFiles: string[]; deadRefs: string[]; changedSince: { path: string; ms: number }[]; collection: string | null; }
+export interface MdDoc { path: string; role: MdDocRole; depth: number | null; lines: number | null; bytes: number | null; lastCommitMs: number | null; commits: number; linkedFrom: number; codeRefs: number; codeRefFiles: string[]; deadRefs: string[]; ambiguousRefs: string[]; changedSince: { path: string; ms: number }[]; collection: string | null; }
 
 /** A folder of machine-written, write-once, unlinked docs (e.g. validation records). */
 export interface MdRecordCollection { folder: string; docs: number; linked: number; lastCommitMs: number | null; source: 'heuristic' | 'override'; }

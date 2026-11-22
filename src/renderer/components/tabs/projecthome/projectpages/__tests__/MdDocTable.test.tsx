@@ -11,7 +11,7 @@ const NOW = 1_800_000_000_000
 function doc(path: string, over: Partial<MdDoc> = {}): MdDoc {
   return {
     path, role: 'doc', depth: 1, lines: 10, bytes: 100, lastCommitMs: NOW - DAY, commits: 1,
-    linkedFrom: 1, codeRefs: 0, codeRefFiles: [], deadRefs: [], changedSince: [], collection: null, ...over,
+    linkedFrom: 1, codeRefs: 0, codeRefFiles: [], deadRefs: [], ambiguousRefs: [], changedSince: [], collection: null, ...over,
   }
 }
 

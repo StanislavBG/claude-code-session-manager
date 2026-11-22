@@ -14,7 +14,7 @@ const DAY = 86_400_000
 function mdDoc(path: string, over: Partial<MdDoc> = {}): MdDoc {
   return {
     path, role: 'doc', depth: 1, lines: 40, bytes: 2048, lastCommitMs: NOW - 3 * DAY, commits: 5,
-    linkedFrom: 1, codeRefs: 0, codeRefFiles: [], deadRefs: [], changedSince: [], collection: null, ...over,
+    linkedFrom: 1, codeRefs: 0, codeRefFiles: [], deadRefs: [], ambiguousRefs: [], changedSince: [], collection: null, ...over,
   }
 }
 

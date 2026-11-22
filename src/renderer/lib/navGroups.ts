@@ -73,7 +73,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   // extensions, agent-library) stay valid NavKeys as deep-link ALIASES — see
   // NAV_KEY_ALIASES below.
   { key: 'claude-config',  group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'Your ~/.claude — CLAUDE.md, settings, MCP, skills, plugins, agents', faces: HOME },
-  { key: 'memory',         group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'This project\'s own files — CLAUDE.md, CLAUDE.local.md, .claude/settings.json, .mcp.json, .claude/skills/ and its memory folder', faces: PROJECT },
+  { key: 'memory',         group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'This project\'s own files — CLAUDE.md, CLAUDE.local.md, settings, MCP, skills', faces: PROJECT },
 
   // Session Manager — this app's own preferences
   { key: 'app-settings', group: 'Session Manager', label: 'App Settings', icon: 'compass', hint: 'Voice, appearance, telemetry, phone remote, updates, storage map', faces: HOME },

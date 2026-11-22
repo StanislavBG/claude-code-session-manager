@@ -96,11 +96,13 @@ async function mount(node: ReactNode = createElement(ProjectClaudeConfig)) {
 }
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const chips = () => Array.from(container.querySelectorAll('[data-testid="source-chip-path"]')).map((c) => c.textContent)
-/** Clicks a button in the page's own toolbar (the five tabs and the Project / Local switch). */
+const tabLabel = (b: Element) => b.querySelector('span.font-semibold')?.textContent?.trim()
+/** Clicks a ConfigBand tab, or a button in the tab's source strip (the Project / Local switch). */
 async function pick(label: string) {
-  const bar = q('project-claude-config-toolbar')
-  const b = Array.from(bar?.querySelectorAll('button') ?? []).find((x) => x.textContent?.trim() === label)
-  if (!b) throw new Error(`no toolbar button "${label}"`)
+  const band = Array.from(q('config-band')?.querySelectorAll('[role="tab"]') ?? []) as HTMLElement[]
+  const strip = Array.from(q('project-claude-config-source')?.querySelectorAll('button') ?? [])
+  const b = band.find((x) => tabLabel(x) === label) ?? strip.find((x) => x.textContent?.trim() === label)
+  if (!b) throw new Error(`no band tab or strip button "${label}"`)
   await act(async () => { b.click() })
   await flush()
 }
@@ -135,14 +137,54 @@ describe('ProjectClaudeConfig', () => {
   it('is the memory NavKey screen: labeled Claude config, with a hint naming the project files', async () => {
     const item = getNavItemsForFace('project').find((i) => i.key === 'memory')
     expect(item?.label).toBe('Claude config')
-    for (const f of ['CLAUDE.md', '.claude/settings.json', '.mcp.json', '.claude/skills', 'memory']) {
-      expect(item?.hint).toContain(f)
-    }
+    expect(item?.hint).toBe("This project's own files — CLAUDE.md, CLAUDE.local.md, settings, MCP, skills")
     await mount(renderScreenComponent('memory', {}))
     // The screen is lazy-loaded; give the chunk a few turns to resolve.
     for (let i = 0; i < 20 && !q('project-claude-config'); i++) await flush(1)
     expect(q('project-claude-config')).not.toBeNull()
     expect(container.querySelector('h1, h2')?.textContent).toBe('Claude config')
+  })
+
+  it('renders ConfigBand over the project path with exactly Memory, CLAUDE.md, Settings, MCP, Skills and live counts', async () => {
+    api.memory.list.mockResolvedValue({
+      entries: [{ name: 'a' }, { name: 'b' }, { name: 'c' }], workspace: 'ws', dir: MEM_DIR, autoMemoryEnabled: true, error: null,
+    })
+    api.config.exists.mockImplementation(async (p: string) => p === MD)
+    api.config.readJson.mockImplementation(async (p: string) => {
+      const data = p.endsWith('/.mcp.json') ? { mcpServers: { one: {}, two: {} } }
+        : p.endsWith('/settings.json') ? { model: 'x', permissions: {} }
+        : p.endsWith('/settings.local.json') ? { model: 'y', env: {} } : {}
+      return { raw: JSON.stringify(data), data, exists: true, mtimeMs: 1, parseError: null, error: null }
+    })
+    api.config.listDir.mockImplementation(async (p: string) => ({
+      ok: true, error: null,
+      entries: p.endsWith('/.claude/commands') ? [{ name: 'go.md', isDir: false }, { name: 'x.txt', isDir: false }] : [],
+    }))
+    await mount()
+    const band = q('config-band')!
+    expect(band.textContent).toContain('CLAUDE CODE · PROJECT')
+    expect(band.textContent).toContain('Claude config')
+    expect(band.textContent).toContain(SHORT)
+    const tabs = Array.from(band.querySelectorAll('[role="tab"]'))
+    expect(tabs.map(tabLabel)).toEqual(['Memory', 'CLAUDE.md', 'Settings', 'MCP', 'Skills'])
+    // Plugins and Agents are machine-wide: Home only.
+    expect(q('config-band-tab-plugins')).toBeNull()
+    expect(q('config-band-tab-agents')).toBeNull()
+    expect(tabs.some((t) => /Plugins|Agents/.test(t.textContent ?? ''))).toBe(false)
+    const countOf = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
+    expect(countOf('memory')).toBe('3')
+    expect(countOf('claude-md')).toBe('1 file')
+    expect(countOf('settings')).toBe('3')
+    expect(countOf('mcp')).toBe('2')
+    expect(countOf('skills')).toBe('1')
+    // The old ViewTabs/SourceChip header row is gone.
+    expect(q('project-claude-config-toolbar')).toBeNull()
+  })
+
+  it('marks CLAUDE.md missing when neither project file exists', async () => {
+    api.config.exists.mockResolvedValue(false)
+    await mount()
+    expect(q('config-band-tab-claude-md')?.querySelector('[data-testid="config-band-count"]')?.textContent).toBe('missing')
   })
 
   it("shows the active project's real file on every tab's SourceChip", async () => {
@@ -224,6 +266,6 @@ describe('ProjectClaudeConfig', () => {
     useSessions.setState({ tabs: [], activeTabId: null })
     await mount()
     expect(container.textContent).toContain('no active project')
-    expect(q('project-claude-config-toolbar')).toBeNull()
+    expect(q('config-band')).toBeNull()
   })
 })

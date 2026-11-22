@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { listOpenEpicRecords, getEpicRecord } = require('../epicOutsideRead.cjs');
+const { listOpenEpicRecords, getEpicRecord, findEpicProject } = require('../epicOutsideRead.cjs');
 const { recordExternalRef } = require('../externalRefIndex.cjs');
 
 const tmpDirs = [];
@@ -390,4 +390,59 @@ test('receipt: a completed Epic from the archive sums the runs of its archived c
   expect(rec.receipt.jobs.runs).toBe(2);
   expect(rec.receipt.jobs.costUsd).toBeCloseTo(2.75, 10);
   expect(rec.receipt.jobs.byPrd.map((p) => p.slug).sort()).toEqual(['0003-c', '0004-d']);
+});
+
+// ── findEpicProject: which registered project holds an Epic id ───────────────
+
+test('findEpicProject: one registered project holds the open Epic → { cwd }', async () => {
+  const a = await mkTmp('sm-outside-find-a-');
+  const b = await mkTmp('sm-outside-find-b-');
+  setup(a, [session('e-1', a)]);
+  setup(b, [session('e-2', b)]);
+  expect(findEpicProject('e-1', { projectRoots: () => [a, b] })).toEqual({ cwd: a });
+  expect(findEpicProject('e-2', { projectRoots: () => [a, b, b] })).toEqual({ cwd: b });
+});
+
+test('findEpicProject: no registered project holds it → null (also for an unregistered holder)', async () => {
+  const a = await mkTmp('sm-outside-find-a-');
+  const unregistered = await mkTmp('sm-outside-find-u-');
+  setup(a, [session('e-1', a)]);
+  setup(unregistered, [session('e-hidden', unregistered)]);
+  expect(findEpicProject('e-missing', { projectRoots: () => [a] })).toBeNull();
+  expect(findEpicProject('e-hidden', { projectRoots: () => [a] })).toBeNull();
+  // A completed-status row lingering in the index without an archive is not a match.
+  setup(a, [session('e-old', a, { status: 'completed' })]);
+  expect(findEpicProject('e-old', { projectRoots: () => [a] })).toBeNull();
+});
+
+test('findEpicProject: several projects hold the id → { ambiguous }', async () => {
+  const a = await mkTmp('sm-outside-find-a-');
+  const b = await mkTmp('sm-outside-find-b-');
+  setup(a, [session('e-dup', a)]);
+  setup(b, []);
+  writeFile(b, 'e-dup.json', { session: session('e-dup', b, { status: 'completed' }), events: [], archivedAt: '2026-11-05T00:00:01.000Z' });
+  const res = findEpicProject('e-dup', { projectRoots: () => [b, a] });
+  expect(res).toEqual({ ambiguous: [a, b].sort() });
+});
+
+test('findEpicProject: an archived (completed) Epic is found by its archive file', async () => {
+  const a = await mkTmp('sm-outside-find-a-');
+  const b = await mkTmp('sm-outside-find-b-');
+  setup(a, []);
+  setup(b, []);
+  writeFile(b, 'e-done.json', { session: session('e-done', b, { status: 'completed' }), events: [], archivedAt: '2026-11-05T00:00:01.000Z' });
+  writeFile(a, 'e-mirror.json', { id: 'e-mirror', cwd: a, status: 'active', archivedAt: null });
+  expect(findEpicProject('e-done', { projectRoots: () => [a, b] })).toEqual({ cwd: b });
+  expect(findEpicProject('e-mirror', { projectRoots: () => [a, b] })).toBeNull();
+});
+
+test('findEpicProject: an unsafe id is refused before projectRoots is consulted; it never throws', async () => {
+  let calls = 0;
+  const projectRoots = () => { calls++; return []; };
+  for (const bad of ['', '../escape', 'a/b', 'a\\b', '..', null, undefined, 42]) {
+    expect(findEpicProject(bad, { projectRoots })).toBeNull();
+  }
+  expect(calls).toBe(0);
+  expect(findEpicProject('e-1', { projectRoots: () => { throw new Error('boom'); } })).toBeNull();
+  expect(findEpicProject('e-1', { projectRoots: () => [null, 'relative/path', 7] })).toBeNull();
 });

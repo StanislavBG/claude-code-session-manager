@@ -7,6 +7,9 @@
  *     → 200 { ok: true, epics, total, limit, offset, hasMore }
  *   GET /admin/epic?cwd=<abs>&(id=<epicId> | externalRef=<ref>)[&receipt=1|true]
  *     → 200 { ok: true, epic } (epic.receipt = { jobs, chat } only when receipt was asked for) | 404 { ok: false, error: 'not found' }
+ *   GET /admin/epic?id=<epicId>[&receipt=1|true]   (no cwd)
+ *     → the Epic is found among the registered projects (findEpicProject):
+ *       one → as above; none → 404; several → 409 { ok: false, error: 'ambiguous epic id', cwds }
  *
  * A query the schema rejects → 400 { ok: false, error: 'invalid query', details }.
  * A cwd that is not absolute or has no session-manager-operations folder →
@@ -22,7 +25,7 @@ const path = require('node:path');
 const { schemas } = require('../../ipcSchemas.cjs');
 const { sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { opsPath } = require('../opsOwnership.cjs');
-const { listOpenEpicRecords, getEpicRecord } = require('./epicOutsideRead.cjs');
+const { listOpenEpicRecords, getEpicRecord, findEpicProject } = require('./epicOutsideRead.cjs');
 
 /** @param {unknown} cwd @returns {string | null} the reason this cwd is not a project, or null. */
 function projectProblem(cwd) {
@@ -52,8 +55,11 @@ function registerAdminRoute(adminHttp, deps = {}) {
   if (typeof deps.listJobs === 'function') readOpts.listJobs = deps.listJobs;
   if (typeof deps.projectRoots === 'function') readOpts.projectRoots = deps.projectRoots;
 
-  /** @param {any} schema @param {any} query @param {any} res */
-  function parseQuery(schema, query, res) {
+  /**
+   * @param {any} schema @param {any} query @param {any} res
+   * @param {(input: any) => boolean} [cwdOptional] true when this input may omit cwd
+   */
+  function parseQuery(schema, query, res, cwdOptional) {
     let input;
     try {
       input = schema.parse(Object.fromEntries(query ?? []));
@@ -61,6 +67,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       sendJson(res, 400, { ok: false, error: 'invalid query', details: e?.issues ?? e?.message });
       return null;
     }
+    if (input.cwd === undefined && cwdOptional && cwdOptional(input)) return input;
     const problem = projectProblem(input.cwd);
     if (problem) {
       sendJson(res, 400, { ok: false, error: problem });
@@ -82,9 +89,22 @@ function registerAdminRoute(adminHttp, deps = {}) {
   });
 
   adminHttp.registerRoute('GET', '/admin/epic', async (/** @type {any} */ req, /** @type {any} */ res, /** @type {any} */ query) => {
-    const input = parseQuery(schemas.adminGetEpicQuery, query, res);
+    const input = parseQuery(schemas.adminGetEpicQuery, query, res, (v) => v.id !== undefined);
     if (!input) return;
-    const epic = await getEpicRecord(input.cwd, {
+    let cwd = input.cwd;
+    if (cwd === undefined) {
+      const found = findEpicProject(input.id, readOpts.projectRoots ? { projectRoots: /** @type {() => string[]} */ (readOpts.projectRoots) } : {});
+      if (found && 'ambiguous' in found) {
+        sendJson(res, 409, { ok: false, error: 'ambiguous epic id', cwds: found.ambiguous });
+        return;
+      }
+      if (!found) {
+        sendJson(res, 404, { ok: false, error: 'not found' });
+        return;
+      }
+      cwd = found.cwd;
+    }
+    const epic = await getEpicRecord(cwd, {
       ...readOpts,
       id: input.id,
       externalRef: input.externalRef,

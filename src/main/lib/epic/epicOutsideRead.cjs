@@ -25,6 +25,7 @@ const { readArchived, defaultProjectRoots, makeRegisteredRootsCache } = require(
 const { gatherEpicJobReceipt } = require('./epicJobReceipt.cjs');
 const { summarizeTranscriptFile } = require('./transcriptUsage.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
+const { isSafeEpicId } = require('../prd/prdLocations.cjs');
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -53,6 +54,59 @@ function isRegistered(cwd, projectRoots) {
     return false;
   } catch {
     return false;
+  }
+}
+
+const DEFAULT_ROOTS_TTL_MS = 10000;
+let defaultRootsList = null;
+let defaultRootsListAt = 0;
+
+/** The registered roots, each folded to its project root and de-duplicated. */
+function registeredRoots(projectRoots) {
+  let raw;
+  if (projectRoots === defaultProjectRoots) {
+    if (!defaultRootsList || Date.now() - defaultRootsListAt >= DEFAULT_ROOTS_TTL_MS) {
+      defaultRootsList = defaultProjectRoots() || [];
+      defaultRootsListAt = Date.now();
+    }
+    raw = defaultRootsList;
+  } else {
+    raw = projectRoots() || [];
+  }
+  const { projectRootOf } = require('../activeSessions.cjs');
+  const out = new Set();
+  for (const r of raw) {
+    if (typeof r !== 'string' || !r || !path.isAbsolute(r)) continue;
+    out.add(norm(projectRootOf(r) || r));
+  }
+  return [...out];
+}
+
+/**
+ * Which registered project holds this Epic — open in its active index, or
+ * completed in its per-Epic archive. { cwd } on one match, { ambiguous: cwds }
+ * on several, null on none or an unsafe id. Reads only each root's
+ * prompt-sessions/ folder; never throws.
+ *
+ * @param {string} epicId
+ * @param {{ projectRoots?: () => string[] }} [opts]
+ * @returns {{ cwd: string } | { ambiguous: string[] } | null}
+ */
+function findEpicProject(epicId, opts = {}) {
+  try {
+    if (!isSafeEpicId(epicId)) return null;
+    const { projectRoots = defaultProjectRoots } = isObj(opts) ? opts : {};
+    const hits = [];
+    for (const root of registeredRoots(projectRoots)) {
+      try {
+        if (openSession(readActiveIndex(root), epicId) || archivedEntry(root, epicId, projectRoots)) hits.push(root);
+      } catch { /* this root holds nothing readable */ }
+    }
+    if (hits.length === 0) return null;
+    if (hits.length === 1) return { cwd: hits[0] };
+    return { ambiguous: hits.sort() };
+  } catch {
+    return null;
   }
 }
 
@@ -303,4 +357,4 @@ async function listOpenEpicRecords(cwd, opts = {}) {
   }
 }
 
-module.exports = { listOpenEpicRecords, getEpicRecord };
+module.exports = { listOpenEpicRecords, getEpicRecord, findEpicProject };

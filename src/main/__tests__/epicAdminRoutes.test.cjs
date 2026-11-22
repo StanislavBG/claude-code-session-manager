@@ -158,7 +158,7 @@ test('invalid queries answer 400 invalid query with details', async () => {
     ['/admin/epics', { cwd, limit: '0' }],
     ['/admin/epics', { cwd, limit: '201' }],
     ['/admin/epics', { cwd, offset: '-1' }],
-    ['/admin/epic', { id: 'e-1' }],
+    ['/admin/epic', { externalRef: 'ref-1' }], // id alone may omit cwd (epicAdminRoutes-id-only.test.cjs); externalRef may not
     ['/admin/epic', { cwd }],
     ['/admin/epic', { cwd, id: 'e-1', externalRef: 'ref-1' }],
     ['/admin/epic', { cwd, externalRef: 'bad ref!' }],

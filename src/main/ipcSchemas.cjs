@@ -635,8 +635,10 @@ const adminListAgentsQuery = z.object({
   cwd: z.string().min(1).max(4096).optional(),
 });
 
+// cwd is optional only for a lookup by id: Session Manager then finds the
+// Epic among its registered projects (epicOutsideRead.findEpicProject).
 const adminGetEpicQuery = z.object({
-  cwd: z.string().min(1).max(4096),
+  cwd: z.string().min(1).max(4096).optional(),
   id: z.string().min(1).max(200).optional(),
   externalRef: z.string().max(1000).optional().transform((v, ctx) => {
     if (v === undefined) return undefined;
@@ -651,6 +653,8 @@ const adminGetEpicQuery = z.object({
   receipt: z.string().max(10).optional().transform((v) => v === '1' || v === 'true'),
 }).refine((v) => (v.id === undefined) !== (v.externalRef === undefined), {
   message: 'exactly one of id or externalRef is required',
+}).refine((v) => v.externalRef === undefined || v.cwd !== undefined, {
+  message: 'externalRef requires cwd',
 });
 
 // Partial frontmatter patch for update-prd — same recognized-key set as

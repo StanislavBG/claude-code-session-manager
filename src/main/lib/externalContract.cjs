@@ -49,6 +49,9 @@ const CONTRACT = deepFreeze({
     { method: 'GET', path: '/admin/epic' },
     { method: 'GET', path: '/admin/events' },
     { method: 'GET', path: '/admin/agents' },
+    { method: 'POST', path: '/admin/needs-you' },
+    { method: 'POST', path: '/admin/needs-you/withdraw' },
+    { method: 'GET', path: '/admin/needs-you' },
   ],
   tools: {
     feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
@@ -74,7 +77,14 @@ const CONTRACT = deepFreeze({
     'name', 'title', 'description', 'model', 'effort', 'tags', 'tools', 'executorOnly', 'agentCli', 'agentCliModel',
     'seedVersion', 'path', 'resolved',
   ],
-  eventKinds: ['epic_state_changed', 'job_transition', 'epic_cross_project_reply'],
+  // Keys of one stored Needs you item (feedback-remote/needsYouStore.cjs) as the store and GET /admin/needs-you return it.
+  needsYouItemFields: [
+    'app', 'id', 'title', 'why', 'link', 'options', 'externalRef', 'status', 'answer', 'createdAt', 'updatedAt',
+    'answeredAt',
+  ],
+  // Keys of a needs_you_answered row (feedback-remote/needsYouIpc.cjs) as readEventsAfter returns it; externalRef only when the item has one.
+  needsYouAnsweredFields: ['at', 'kind', 'app', 'id', 'answer', 'externalRef'],
+  eventKinds: ['epic_state_changed', 'job_transition', 'epic_cross_project_reply', 'needs_you_answered'],
   adminApiFields: ['port', 'token', 'appVersion', 'contractVersion'],
 });
 
@@ -94,8 +104,8 @@ function contractFingerprint() {
 
 /** Fingerprint recorded for each contract version. */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields), so its fingerprint was replaced, not bumped.
-  1: 'b14b7bf3d410c276165d9c6ab5c35b9b1e0de7368d719143f6bbf64004ec2a24',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered), so its fingerprint was replaced, not bumped.
+  1: '6e8615100a963fd9691ab651948d21e04c8d54a5b07446e959371d17b834cddd',
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

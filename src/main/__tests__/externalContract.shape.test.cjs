@@ -76,6 +76,7 @@ test('every listed admin route is registered by its module', async () => {
   require('../lib/feedback-remote/macroAdminRoutes.cjs').registerAdminRoute(fake, { startExternalNewSession: async () => ({}) });
   require('../lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(fake);
   require('../lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(fake, { listPersonas: async () => [] });
+  require('../lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(fake);
 
   // The health route lives inside localAdminHttp.cjs itself — check it on a real server.
   const admin = createAdminHttp();
@@ -97,6 +98,14 @@ test('every listed admin route is registered by its module', async () => {
     expect(fake.routes).toContain(`${r.method} ${r.path}`);
   }
   expect([...Object.keys(tokenFile)].sort()).toEqual([...CONTRACT.adminApiFields].sort());
+});
+
+test('the Needs you routes are listed and registered by needsYouAdminRoutes.cjs', () => {
+  const fake = fakeAdminHttp();
+  require('../lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(fake);
+  const listed = CONTRACT.routes.filter((r) => r.path.startsWith('/admin/needs-you')).map((r) => `${r.method} ${r.path}`);
+  expect(listed.sort()).toEqual(['GET /admin/needs-you', 'POST /admin/needs-you', 'POST /admin/needs-you/withdraw']);
+  for (const r of listed) expect(fake.routes).toContain(r);
 });
 
 test('every listed MCP tool exists with exactly the listed required arguments', () => {
@@ -289,4 +298,32 @@ test('the keys of an agent from GET /admin/agents with a cwd equal agentFields',
   expect(agents).toHaveLength(1);
   expect(Object.keys(agents[0]).sort()).toEqual([...CONTRACT.agentFields].sort());
   expect(Object.keys(agents[0].resolved).sort()).toEqual(['effort', 'effortSource', 'modelId', 'modelSource']);
+});
+
+// ── Needs you item keys + needs_you_answered keys from the real store and IPC ──
+
+test('a stored Needs you item has exactly needsYouItemFields', async () => {
+  const store = require('../lib/feedback-remote/needsYouStore.cjs');
+  const { item } = await store.postNeedsYou({ app: 'portfolio', id: 'q-1', title: 'Pick one', options: ['a', 'b'] });
+  expect(Object.keys(item).sort()).toEqual([...CONTRACT.needsYouItemFields].sort());
+  const [listed] = await store.listNeedsYou({ app: 'portfolio' });
+  expect(Object.keys(listed).sort()).toEqual([...CONTRACT.needsYouItemFields].sort());
+});
+
+test('a needs_you_answered event read back carries only needsYouAnsweredFields', async () => {
+  const store = require('../lib/feedback-remote/needsYouStore.cjs');
+  const { registerNeedsYouIpc } = require('../lib/feedback-remote/needsYouIpc.cjs');
+  const { readEventsAfter } = require('../lib/telemetry/auditEvents.cjs');
+  const handlers = new Map();
+  registerNeedsYouIpc({ ipcMain: { handle: (ch, fn) => { handlers.set(ch, fn); } } });
+  await store.postNeedsYou({ app: 'portfolio', id: 'q-2', title: 'Ship?', options: ['yes', 'no'], externalRef: 'portfolio:action-2' });
+  const r = await handlers.get('needsYou:answer')({}, { app: 'portfolio', id: 'q-2', answer: 'yes' });
+  expect(r.ok).toBe(true);
+
+  const { events } = readEventsAfter({ after: 'start', kinds: ['needs_you_answered'] });
+  expect(events).toHaveLength(1);
+  const allowed = new Set(CONTRACT.needsYouAnsweredFields);
+  for (const k of Object.keys(events[0])) expect(allowed.has(k), `unlisted key ${k}`).toBe(true);
+  expect(events[0]).toMatchObject({ kind: 'needs_you_answered', app: 'portfolio', id: 'q-2', answer: 'yes', externalRef: 'portfolio:action-2' });
+  expect(Object.keys(events[0]).sort()).toEqual([...CONTRACT.needsYouAnsweredFields].sort());
 });

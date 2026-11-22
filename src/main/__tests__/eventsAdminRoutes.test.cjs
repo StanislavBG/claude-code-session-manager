@@ -26,6 +26,7 @@ const ROWS = [
   { at: '2026-11-01T00:00:02.000Z', kind: 'prd_created', slug: 's2' },
   { at: '2026-11-01T00:00:03.000Z', kind: 'epic_state_changed', epicId: 'e2' },
   { at: '2026-11-01T00:00:04.000Z', kind: 'epic_cross_project_reply', epicId: 'e1', mode: 'event', outcome: 'done', message: 'Fixed.', caller: 'y' },
+  { at: '2026-11-01T00:00:05.000Z', kind: 'needs_you_answered', app: 'portfolio', id: 'q-1', answer: 'yes', externalRef: 'portfolio:action-1', caller: 'z' },
 ];
 
 beforeAll(() => {
@@ -89,7 +90,7 @@ test('GET /admin/events with no cursor returns no events and the newest cursor',
   await withAdmin(async (port, token) => {
     const res = await request(port, { path: '/admin/events', token });
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ ok: true, events: [], next: '2026-11-01T00:00:04.000Z~1', more: false, gap: false });
+    expect(res.json).toEqual({ ok: true, events: [], next: '2026-11-01T00:00:05.000Z~1', more: false, gap: false });
   });
 });
 
@@ -102,7 +103,7 @@ test('GET /admin/events?after=start returns default-kind events with caller stri
       { at: '2026-11-01T00:00:00.000Z', kind: 'epic_state_changed', epicId: 'e1' },
       { at: '2026-11-01T00:00:03.000Z', kind: 'epic_state_changed', epicId: 'e2' },
     ]);
-    expect(res.json.next).toBe('2026-11-01T00:00:04.000Z~1');
+    expect(res.json.next).toBe('2026-11-01T00:00:05.000Z~1');
     expect(res.json.more).toBe(false);
     expect(res.json.gap).toBe(false);
   });
@@ -115,7 +116,19 @@ test('GET /admin/events?kinds=epic_cross_project_reply returns reply rows with c
     expect(res.json.events).toEqual([
       { at: '2026-11-01T00:00:04.000Z', kind: 'epic_cross_project_reply', epicId: 'e1', mode: 'event', outcome: 'done', message: 'Fixed.' },
     ]);
-    expect(res.json.next).toBe('2026-11-01T00:00:04.000Z~1');
+    expect(res.json.next).toBe('2026-11-01T00:00:05.000Z~1');
+    expect(res.json.more).toBe(false);
+  });
+});
+
+test('GET /admin/events?kinds=needs_you_answered returns answered rows with caller stripped', async () => {
+  await withAdmin(async (port, token) => {
+    const res = await request(port, { path: '/admin/events?after=start&kinds=needs_you_answered', token });
+    expect(res.status).toBe(200);
+    expect(res.json.events).toEqual([
+      { at: '2026-11-01T00:00:05.000Z', kind: 'needs_you_answered', app: 'portfolio', id: 'q-1', answer: 'yes', externalRef: 'portfolio:action-1' },
+    ]);
+    expect(res.json.next).toBe('2026-11-01T00:00:05.000Z~1');
     expect(res.json.more).toBe(false);
   });
 });

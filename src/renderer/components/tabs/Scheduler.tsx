@@ -7,6 +7,7 @@ import { SchedulePanel } from '../SchedulePanel'
 import { SchedulerPrdsView } from './plans/SchedulerPrdsView'
 import { SchedulerHistoryView } from './plans/SchedulerHistoryView'
 import { SessionManagerConfig } from './SessionManagerConfig'
+import { TasksView } from './scheduler/TasksView'
 import type { NavKey } from '../../lib/navKey'
 
 /**
@@ -32,6 +33,8 @@ import type { NavKey } from '../../lib/navKey'
  *   • PRDs    — AUTHOR: edit the .md source (structured frontmatter form +
  *     body editor, lint, archive/retag) — the old "Plans"
  *   • History — last 50 completed/failed jobs with project + date-range filters
+ *   • Tasks   — this project's single Claude calls (Task ledger), grouped by
+ *     caller pipeline → run, plus the 'Scripts may run Tasks' switch.
  *   • Machine — global session pool, fire-policy scaffolding, on-disk paths;
  *     applies to every project, not just the active tab (SessionManagerConfig).
  * scopeCwd derives directly from the active tab's cwd every render (no
@@ -59,7 +62,7 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
   const [planToolsEl, setPlanToolsEl] = useState<HTMLElement | null>(null)
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
-    return (stored === 'prds' || stored === 'history' || stored === 'machine') ? stored : 'queue'
+    return (stored === 'prds' || stored === 'history' || stored === 'machine' || stored === 'tasks') ? stored : 'queue'
   })
   // scopeCwd is derived directly from activeCwd every render, not stored
   // state — the currently-active project's tab, or null (every project) if
@@ -109,6 +112,8 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
         {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} navigate={navigate} filterText={filterText} planMode={planMode} onOpenPrds={openPrds} planToolsEl={planToolsEl} />}
         {subView === 'prds' && <SchedulerPrdsView scopeCwd={scopeCwd} />}
         {subView === 'history' && <SchedulerHistoryView scopeCwd={scopeCwd} />}
+        {/* Keyed on cwd so filters/rows/switch reset when the project changes. */}
+        {subView === 'tasks' && <TasksView key={scopeCwd ?? ''} scopeCwd={scopeCwd} />}
         {subView === 'machine' && (
           <div className="h-full overflow-y-auto px-9 py-6">
             <SessionManagerConfig />

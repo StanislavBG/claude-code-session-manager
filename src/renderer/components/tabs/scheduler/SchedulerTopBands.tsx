@@ -33,7 +33,7 @@ import { BandRow, ClickToEditNumber, InfoDot, KpiCell, MiniBar, SegmentPills, St
  *   PolicyBar          buttons; fire-policy select + concurrency cap + utilization threshold → CONCURRENCY cell.
  */
 
-export type SubView = 'queue' | 'prds' | 'history' | 'machine'
+export type SubView = 'queue' | 'prds' | 'history' | 'tasks' | 'machine'
 export type PlanMode = 'graph' | 'list' | 'critical'
 
 const POLL_MS = 15_000
@@ -529,6 +529,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
           <span className="w-px h-[16px] bg-rule-structural" aria-hidden="true" />
           {([['prds', 'PRDs', 'Authored PRD source files on disk — edit, lint, archive, or queue them.'],
             ['history', 'History', 'The last 50 completed and failed jobs.'],
+            ['tasks', 'Tasks', 'This project’s single Claude calls, grouped by caller pipeline and run.'],
             ['machine', 'Machine', 'Machine-wide config that applies to every project — not this project’s live queue.']] as const).map(([v, label, title]) => (
             <button
               key={v}

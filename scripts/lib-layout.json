@@ -112,6 +112,7 @@
   "personaMerge": "persona-macro",
   "personaToolScope": "claude",
   "toolRiskMarks": "claude",
+  "toolRiskIpc": "claude",
   "pidAlive": "process",
   "planRecordHarvest": "scheduler",
   "planRecordRetention": "scheduler",

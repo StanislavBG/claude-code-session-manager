@@ -758,6 +758,20 @@
   "remote": "deny"
  },
  {
+  "ns": "toolRisk",
+  "method": "read",
+  "channel": "toolRisk:read",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "toolRisk",
+  "method": "write",
+  "channel": "toolRisk:write",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
   "ns": "voice",
   "method": "onHotkey",
   "channel": "voice:hotkey",

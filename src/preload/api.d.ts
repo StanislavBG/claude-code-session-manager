@@ -466,6 +466,34 @@ export interface ClaudeConfigPatchInput extends ClaudeConfigReadInput {
   value?: unknown;
 }
 
+/** toolRisk:read — scope 'user' = ~/.claude/tool-risk.json, 'project' = <cwd>/.claude/tool-risk.json. */
+export interface ToolRiskReadInput {
+  scope: 'user' | 'project';
+  /** Required (absolute) for scope 'project'. */
+  cwd?: string | null;
+}
+export type ToolRiskMark = 'read' | 'write' | 'irreversible' | 'money' | 'public';
+export interface ToolRiskReadResult {
+  ok: boolean;
+  path: string | null;
+  exists: boolean;
+  /** rule (mcp__srv__tool, mcp__srv__*, Bash(prefix:*), Bash(exact)) -> mark. */
+  marks: Record<string, ToolRiskMark>;
+  interactive: boolean;
+  error?: string;
+}
+export interface ToolRiskWriteInput extends ToolRiskReadInput {
+  marks: Record<string, ToolRiskMark>;
+  /** Project only (refused for 'user'). true installs guard-tool-risk into
+   *  <cwd>/.claude/settings.json PreToolUse; false removes it; omitted keeps the file's value. */
+  interactive?: boolean;
+}
+export interface ToolRiskWriteResult {
+  ok: boolean;
+  path: string | null;
+  error?: string;
+}
+
 export interface MacroSaveInput {
   id?: string;
   label: string;
@@ -2767,6 +2795,11 @@ export interface SessionManagerAPI {
     read: (payload: ClaudeConfigReadInput) => Promise<{ path: string; data: Record<string, unknown> }>;
     /** Sets one key path; omit `value` to delete it. Broadcasts `config:changed`. */
     patch: (payload: ClaudeConfigPatchInput) => Promise<{ ok: true; path: string; data: Record<string, unknown> }>;
+  };
+  /** Tool-risk marks (System/Project) — validated by main's toolRiskMarks.cjs. */
+  toolRisk: {
+    read: (payload: ToolRiskReadInput) => Promise<ToolRiskReadResult>;
+    write: (payload: ToolRiskWriteInput) => Promise<ToolRiskWriteResult>;
   };
   config: {
     readJson: (path: string) => Promise<ReadJsonResult>;

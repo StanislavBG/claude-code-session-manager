@@ -914,4 +914,5 @@ module.exports = {
   SELF_SCHEDULE_GUARD_MATCHER,
   GUARD_DEFS,
   checkGuard,
+  installGuard,
 };

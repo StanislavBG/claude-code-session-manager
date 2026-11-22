@@ -676,6 +676,14 @@ ipcMain.handle('claudeConfig:patch', validated(schemas.claudeConfigPatch, async 
   sendIfAlive(mainWindow, 'config:changed', { path: result.path, mtimeMs, kind: 'change' });
   return result;
 }));
+// toolRisk (lib/claude/toolRiskIpc.cjs): System/Project tool-risk marks + the Project
+// interactive opt-in that installs/removes guard-tool-risk in <cwd>/.claude/settings.json.
+require('./lib/claude/toolRiskIpc.cjs').registerToolRiskIpc(ipcMain, {
+  schemas,
+  validated,
+  validatePath: configMgr.validatePath,
+  onChanged: ({ path: changedPath }) => sendIfAlive(mainWindow, 'config:changed', { path: changedPath, mtimeMs: Date.now(), kind: 'change' }),
+});
 ipcMain.handle('macros:save', validated(schemas.macrosSave, async (payload) => {
   // A Project Video tool with a job must be runnable by its persona (projectVideoToolCheck.cjs);
   // a refusal throws so the editor shows the reason. Every other save is unchanged.

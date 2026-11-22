@@ -819,6 +819,19 @@ const claudeConfigPatch = z.object({
   keyPath: z.array(z.string().min(1).max(256)).min(1).max(8),
   value: z.unknown().optional(),
 }).strict();
+// toolRisk:read / toolRisk:write — mirrors ToolRiskReadInput / ToolRiskWriteInput
+// (src/preload/api.d.ts). Rule/mark validity is toolRiskMarks.cjs's job (so its
+// error text reaches the UI); here only the shape is pinned.
+const toolRiskBase = {
+  scope: z.enum(['user', 'project']),
+  cwd: z.string().min(1).max(4096).nullish(),
+};
+const toolRiskRead = z.object(toolRiskBase).strict();
+const toolRiskWrite = z.object({
+  ...toolRiskBase,
+  marks: z.record(z.string().max(1024), z.unknown()),
+  interactive: z.boolean().optional(),
+}).strict();
 // mcp:check-server — names WHICH configured server to check, never its config:
 // main reads that from disk (lib/mcpToolsProbe.cjs checkConfiguredMcpServer), so
 // the renderer can't make main spawn a command of its choosing. A project server
@@ -1832,6 +1845,8 @@ module.exports = {
     agentsDeletePersona,
     claudeConfigRead,
     claudeConfigPatch,
+    toolRiskRead,
+    toolRiskWrite,
     mcpCheckServer,
     macrosSave,
     macrosDelete,

@@ -34,6 +34,12 @@ afterEach(() => {
 })
 
 describe('LauncherMix', () => {
+  it('labels itself with the composition section kicker', () => {
+    const el = mount({ epic: bucket(1) })
+    expect(el.textContent).toContain('05 · composition')
+    expect(el.textContent).not.toContain('07 · composition')
+  })
+
   it('renders three lines in fixed order with cost and share', () => {
     const el = mount({ other: bucket(1), epic: bucket(2), job: bucket(1) })
     const ls = lines(el)

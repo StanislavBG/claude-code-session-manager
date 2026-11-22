@@ -22,7 +22,7 @@ export function LauncherMix({ byLauncherTotals }: Props) {
 
   return (
     <div className={`${CARD} p-4`}>
-      <SectionHead kicker="07 · composition" title="Launcher mix" right={<span className="text-xs font-mono text-fg-faint">{usd(total)} total</span>} />
+      <SectionHead kicker="05 · composition" title="Launcher mix" right={<span className="text-xs font-mono text-fg-faint">{usd(total)} total</span>} />
       {total <= 0 ? (
         <div className="text-xs text-fg-faint">no usage in range</div>
       ) : (

@@ -209,3 +209,51 @@ test('an epic_state_changed event from the watcher carries only listed keys and 
   // The rows exercised every listed key at least once.
   expect([...seen].sort()).toEqual([...CONTRACT.epicStateChangedFields].sort());
 });
+
+// ── epic_cross_project_reply keys from a real event-mode reply read back by readEventsAfter ──
+
+test('an event-mode epic_cross_project_reply row carries only listed keys and exercises every one', async () => {
+  const config = require('../config.cjs');
+  const { opsPath } = require('../lib/opsOwnership.cjs');
+  const { sendFeedbackReply } = require('../lib/feedback-remote/crossProjectReply.cjs');
+  const { readEventsAfter } = require('../lib/telemetry/auditEvents.cjs');
+  const mkProject = async (prefix) => {
+    const cwd = await mkTmp(`sm-contract-reply-${prefix}-`);
+    config.addAllowedRoot(cwd);
+    fs.mkdirSync(path.join(cwd, 'session-manager-operations'), { recursive: true });
+    return fs.realpathSync(cwd);
+  };
+  const writeIndex = (cwd, sessions) => {
+    const file = opsPath(cwd, 'prompt-sessions', 'active-index.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const events = Object.fromEntries(Object.keys(sessions).map((id) => [id, [
+      { id: `pevt-${id}`, promptSessionId: id, kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+    ]]));
+    fs.writeFileSync(file, JSON.stringify({ sessions, events }));
+  };
+  const a = await mkProject('a');
+  const b = await mkProject('b');
+  writeIndex(a, { 'psess-x': { id: 'psess-x', cwd: a, status: 'active', claudeSessionId: 'cs-x', goalText: 'Ask B' } });
+  writeIndex(b, {
+    'psess-y': {
+      id: 'psess-y', cwd: b, status: 'active', claudeSessionId: 'cs-y', goalText: 'Answer A',
+      source: {
+        producer: 'cross-project-feedback', fromCwd: a, fromEpicId: 'psess-x', externalRef: 'portfolio:action-1',
+        replyTo: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x', mode: 'event' }, proposal: {},
+      },
+    },
+  });
+
+  const r = await sendFeedbackReply(
+    { fromCwd: b, originClaudeSessionId: 'cs-y', message: 'Fixed.', outcome: 'done', referencePaths: ['src/x.cjs'] },
+    { sendPrompt: async () => { throw new Error('event mode must not prompt'); }, openFallback: null },
+  );
+  expect(r).toMatchObject({ ok: true, delivery: 'event-only' });
+
+  const { events } = readEventsAfter({ after: 'start', kinds: ['epic_cross_project_reply'] });
+  expect(events).toHaveLength(1);
+  const allowed = new Set(CONTRACT.replyEventFields);
+  for (const k of Object.keys(events[0])) expect(allowed.has(k), `unlisted key ${k}`).toBe(true);
+  expect(events[0]).toMatchObject({ kind: 'epic_cross_project_reply', mode: 'event', externalRef: 'portfolio:action-1' });
+  expect(Object.keys(events[0]).sort()).toEqual([...CONTRACT.replyEventFields].sort());
+});

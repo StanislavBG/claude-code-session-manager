@@ -29,7 +29,7 @@ const zlib = require('node:zlib');
 
 const { auditLogPath, readTail } = require('./auditLog.cjs');
 
-const OUTSIDE_EVENT_KINDS = Object.freeze(['epic_state_changed', 'job_transition']);
+const OUTSIDE_EVENT_KINDS = Object.freeze(['epic_state_changed', 'job_transition', 'epic_cross_project_reply']);
 const DEFAULT_KINDS = Object.freeze(['epic_state_changed']);
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;

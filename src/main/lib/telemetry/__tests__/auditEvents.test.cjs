@@ -32,7 +32,7 @@ function logDir(rows, archiveRows) {
 }
 
 test('OUTSIDE_EVENT_KINDS', () => {
-  expect([...OUTSIDE_EVENT_KINDS].sort()).toEqual(['epic_state_changed', 'job_transition']);
+  expect([...OUTSIDE_EVENT_KINDS].sort()).toEqual(['epic_cross_project_reply', 'epic_state_changed', 'job_transition']);
 });
 
 test('paging with limit, caller stripped, more + next', () => {

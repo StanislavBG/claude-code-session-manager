@@ -53,6 +53,7 @@ const CONTRACT = deepFreeze({
     feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
     epic_list: { required: ['cwd'] },
     epic_get: { required: ['cwd'], requiredOneOf: [['id', 'externalRef']] },
+    feedback_reply: { required: ['message', 'outcome'] },
   },
   epicStates: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open'],
   epicRecordFields: [
@@ -61,7 +62,12 @@ const CONTRACT = deepFreeze({
   ],
   receiptFields: ['jobs', 'chat'],
   epicStateChangedFields: ['at', 'kind', 'cwd', 'epicId', 'from', 'to', 'blockedKind', 'externalRef'],
-  eventKinds: ['epic_state_changed', 'job_transition'],
+  // Keys of an event-mode epic_cross_project_reply row (crossProjectReply.cjs replyAsEvent) as readEventsAfter returns it.
+  replyEventFields: [
+    'at', 'kind', 'cwd', 'epicId', 'fromCwd', 'fromEpicId', 'outcome', 'delivery', 'mode', 'externalRef',
+    'message', 'referencePaths',
+  ],
+  eventKinds: ['epic_state_changed', 'job_transition', 'epic_cross_project_reply'],
   adminApiFields: ['port', 'token', 'appVersion', 'contractVersion'],
 });
 
@@ -81,8 +87,8 @@ function contractFingerprint() {
 
 /** Fingerprint recorded for each contract version. */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf), so its fingerprint was replaced, not bumped.
-  1: '26a7c2ba4082e0726671f891a78a533fbb7e3429735c3ae4f8e2bea52d59e6ff',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields), so its fingerprint was replaced, not bumped.
+  1: '8056c0386a184916e0b6f5d727353cfec95217a4e802f368c6f1ef852a104cf3',
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

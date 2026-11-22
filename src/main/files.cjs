@@ -20,7 +20,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { z } = require('zod');
-const { assertInsideHomeOrRoots } = require('./lib/insideHome.cjs');
+const { assertInsideHomeOrRoots, assertNotSensitiveWrite } = require('./lib/insideHome.cjs');
 const { getAllowedRoots } = require('./config.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
 const atomicFs = require('./lib/util/atomicFs.cjs');
@@ -34,25 +34,6 @@ const { schemas } = require('./ipcSchemas.cjs');
  */
 function validateHomePath(abs) {
   return assertInsideHomeOrRoots(expandHome(abs), getAllowedRoots()).realPath;
-}
-
-/** Reject .credentials.json writes regardless of where they sit. */
-function rejectCredentials(real) {
-  if (path.basename(real) === '.credentials.json') {
-    throw new Error('Write to .credentials.json denied');
-  }
-  // Defense-in-depth: files:* is renderer-only (not web-remote reachable), but a
-  // renderer compromise could otherwise write code-execution-persistence or
-  // credential material a cockpit file browser has no business modifying. Block
-  // WRITES to these (reads are unaffected — they don't call this). Shell rc files
-  // are deliberately NOT blocked; developers legitimately edit those.
-  const rel = path.relative(os.homedir(), real);
-  if (rel === '.ssh' || rel.startsWith('.ssh' + path.sep)) {
-    throw new Error('Write inside ~/.ssh denied');
-  }
-  if (rel.startsWith(path.join('.config', 'autostart') + path.sep)) {
-    throw new Error('Write to ~/.config/autostart denied');
-  }
 }
 
 // Invalid characters for file/folder names (cross-platform).
@@ -160,7 +141,7 @@ async function writeFile(filePath, content) {
   let resolved;
   try {
     resolved = validateHomePath(filePath);
-    rejectCredentials(resolved);
+    assertNotSensitiveWrite(resolved);
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -185,7 +166,7 @@ async function createEntry(parentPath, name, kind) {
   // produce something outside parent (defense in depth).
   try { validateHomePath(target); }
   catch (e) { return { ok: false, error: e.message }; }
-  try { rejectCredentials(target); }
+  try { assertNotSensitiveWrite(target); }
   catch (e) { return { ok: false, error: e.message }; }
 
   try {
@@ -222,7 +203,7 @@ async function renameEntry(oldPath, newName) {
   const newPath = path.join(path.dirname(resolvedOld), newName);
   try { validateHomePath(newPath); }
   catch (e) { return { ok: false, error: e.message }; }
-  try { rejectCredentials(newPath); }
+  try { assertNotSensitiveWrite(newPath); }
   catch (e) { return { ok: false, error: e.message }; }
 
   try {
@@ -256,7 +237,7 @@ async function duplicateEntry(filePath) {
   let resolved;
   try { resolved = validateHomePath(filePath); }
   catch (e) { return { ok: false, error: e.message }; }
-  try { rejectCredentials(resolved); }
+  try { assertNotSensitiveWrite(resolved); }
   catch (e) { return { ok: false, error: e.message }; }
 
   let st;
@@ -273,7 +254,7 @@ async function duplicateEntry(filePath) {
 
   const target = path.join(dir, nameResult.name);
   try { validateHomePath(target); } catch (e) { return { ok: false, error: e.message }; }
-  try { rejectCredentials(target); } catch (e) { return { ok: false, error: e.message }; }
+  try { assertNotSensitiveWrite(target); } catch (e) { return { ok: false, error: e.message }; }
 
   try {
     await fsp.copyFile(resolved, target, fs.constants.COPYFILE_EXCL);
@@ -302,7 +283,7 @@ async function deleteEntry(filePath) {
   if (isCriticalPath(resolved)) {
     return { ok: false, error: 'Cannot delete system-critical paths' };
   }
-  try { rejectCredentials(resolved); }
+  try { assertNotSensitiveWrite(resolved); }
   catch (e) { return { ok: false, error: e.message }; }
 
   try {
@@ -423,7 +404,6 @@ module.exports = {
   openExternal,
   showInFinder,
   // exported for tests
-  rejectCredentials,
   validateHomePath,
   isCriticalPath,
   listDir,

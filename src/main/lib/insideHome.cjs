@@ -5,7 +5,8 @@
  * the target and the home directory are resolved via realpath, and the
  * boundary is either exact equality or a path-separator boundary.
  *
- * Two exports, two policies:
+ * Containment exports, two policies (plus assertNotSensitiveWrite, the
+ * write-side denylist):
  *   assertInsideHome(p) → { realPath }                — throws on failure
  *   checkInsideHome(p)  → { ok, realPath } | { ok, error }  — never throws
  *
@@ -170,7 +171,32 @@ function assertInsideHomeOrRoots(p, roots = [], deps = {}) {
   return { realPath: r.realPath };
 }
 
+/**
+ * Write-side denylist — the ONE copy of the rule (files:* mutations and
+ * config:write-text both call it). Pure path logic; no fs touched. Pass an
+ * already-resolved real path. Throws on a denied path, returns undefined
+ * otherwise.
+ *
+ * Defense-in-depth: a renderer compromise could otherwise write credential or
+ * code-execution-persistence material. Shell rc files are deliberately NOT
+ * blocked; developers legitimately edit those.
+ */
+function assertNotSensitiveWrite(realAbs, home = os.homedir()) {
+  if (path.basename(realAbs) === '.credentials.json') {
+    throw new Error('Write to .credentials.json denied');
+  }
+  const rel = path.relative(home, realAbs);
+  if (rel === '.ssh' || rel.startsWith('.ssh' + path.sep)) {
+    throw new Error('Write inside ~/.ssh denied');
+  }
+  if (rel.startsWith(path.join('.config', 'autostart') + path.sep)) {
+    throw new Error('Write to ~/.config/autostart denied');
+  }
+  return undefined;
+}
+
 module.exports = {
+  assertNotSensitiveWrite,
   assertInsideHome,
   checkInsideHome,
   assertInsideHomeOrRoots,

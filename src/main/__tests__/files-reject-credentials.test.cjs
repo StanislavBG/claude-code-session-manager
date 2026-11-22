@@ -1,6 +1,6 @@
 'use strict';
 
-// rejectCredentials — write-side denylist for files:* mutations (write/create/
+// assertNotSensitiveWrite (lib/insideHome.cjs) — write-side denylist for files:* mutations (write/create/
 // rename/delete all call it). Pure path logic; no fs touched.
 
 import { test } from 'vitest';
@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 
-const { rejectCredentials } = require('../files.cjs');
+const { assertNotSensitiveWrite: rejectCredentials } = require('../lib/insideHome.cjs');
 
 const home = os.homedir();
 const under = (...p) => path.join(home, ...p);

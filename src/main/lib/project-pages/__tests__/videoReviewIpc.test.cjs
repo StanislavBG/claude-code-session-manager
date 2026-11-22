@@ -56,6 +56,7 @@ async function setup({ epicStatus = 'active', createPrd, ...over } = {}) {
     archivePrd: vi.fn(async () => ({})),
     listMacros: vi.fn(async () => [tool(cwd)]),
     appendResponseEventWithReason: vi.fn(async () => ({ ok: true })),
+    checkProjectVideoToolRunnable: vi.fn(async () => ({ ok: true })),
     ...over,
   };
   registerVideoReviewIpc(ipcMain, deps);
@@ -173,7 +174,7 @@ test('two concurrent decides dispatch once', async () => {
   const first = decide({ decision: 'approve' });
   const second = await decide({ decision: 'approve' });
   expect(second.ok).toBe(false);
-  expect(second.error).toMatch(/already being sent/);
+  expect(second.error).toBe('a decision or retry for this entry is already in progress');
   release();
   expect((await first).ok).toBe(true);
   expect(createPrd).toHaveBeenCalledTimes(1);
@@ -275,10 +276,31 @@ test('two concurrent retries dispatch once', async () => {
   const first = retry();
   const second = await retry();
   expect(second.ok).toBe(false);
-  expect(second.error).toMatch(/already being sent/);
+  expect(second.error).toBe('a decision or retry for this entry is already in progress');
   release();
   expect((await first).ok).toBe(true);
   expect(deps.createPrd).toHaveBeenCalledTimes(1);
+});
+
+test('a tool whose persona cannot run it: approve and retry return the refusal, dispatch nothing, keep the entry state', async () => {
+  const refusal = { ok: false, error: 'persona demo-video-builder is not installed for this project' };
+  const { cwd, deps, decide } = await setup({ checkProjectVideoToolRunnable: vi.fn(async () => refusal) });
+  expect(await decide({ decision: 'approve' })).toEqual({ ok: false, error: refusal.error });
+  expect(deps.checkProjectVideoToolRunnable).toHaveBeenCalled();
+  expect(deps.createPrd).not.toHaveBeenCalled();
+  expect(fs.existsSync(decisionPath(cwd))).toBe(false);
+  expect((await videoReview.readReview(cwd, ENTRY)).status).toBe('waiting');
+
+  const ctx = await approvedWithJob('failed');
+  const before = fs.readFileSync(decisionPath(ctx.cwd), 'utf8');
+  ctx.deps.checkProjectVideoToolRunnable.mockImplementation(async () => refusal);
+  expect(await ctx.retry()).toEqual({ ok: false, error: refusal.error });
+  expect(ctx.deps.createPrd).not.toHaveBeenCalled();
+  expect(ctx.deps.archivePrd).not.toHaveBeenCalled();
+  expect(fs.readFileSync(decisionPath(ctx.cwd), 'utf8')).toBe(before);
+  const [e] = await ctx.handlers['project-videos:review-list']({}, { cwd: ctx.cwd });
+  expect(e.status).toBe('approved');
+  expect(e.canRetry).toBe(true);
 });
 
 test('retry schema is strict; entryId matches ENTRY_ID_RE', () => {

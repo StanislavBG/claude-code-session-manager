@@ -29,10 +29,10 @@
  */
 
 const NOT_RETRYABLE_ERROR = 'only an approved entry whose final run failed can be retried';
-const IN_FLIGHT_ERROR = 'a decision for this entry is already being sent';
+const IN_FLIGHT_ERROR = 'a decision or retry for this entry is already in progress';
 const INACTIVE_ERROR = 'the session that built this entry is no longer active — press the tool again';
 
-/** In-flight decides, keyed `${cwd}\0${entryId}`. */
+/** In-flight decides and retries (they share one slot per entry), keyed `${cwd}\0${entryId}`. */
 const inFlight = new Set();
 
 function defaultVideoReview() {

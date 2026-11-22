@@ -28,6 +28,13 @@
  *     (cwd) resolves back to cwd unchanged, which is not a redirect and must
  *     not be refused.)
  *
+ * Plus one for a MISSING cwd: a path that does not exist and lies lexically
+ * inside os.tmpdir() (resolved or realpath'd) is ephemeral. Verified live
+ * 2026-11-22: a reconcile pass recreated queue.json inside
+ * /tmp/sm-sbx-probe-LrKw/work, deleted half an hour earlier and remembered
+ * only as a ~/.claude/projects transcript dir — classifyCwd cannot inspect a
+ * path that is gone, so it looked like an ordinary project.
+ *
  * Deliberately NOT a blanket "anywhere under os.tmpdir()" prefix match: this
  * codebase's own scheduler test suite routinely mkdtemp()s a fake project cwd
  * under os.tmpdir() (documented convention — see e.g.
@@ -35,6 +42,8 @@
  * unrelated use that a blanket match would wrongly refuse.
  */
 
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { classifyCwd } = require('./cwdClassify.cjs');
 
@@ -48,9 +57,24 @@ const { classifyCwd } = require('./cwdClassify.cjs');
  * opsOwnership.assertOpsWrite refuses separately (writes only — dispatch and
  * reads stay open).
  */
+function isInside(child, parent) {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function tmpRoots() {
+  const roots = [path.resolve(os.tmpdir())];
+  try { roots.push(fs.realpathSync(os.tmpdir())); } catch { /* tmpdir unresolvable — lexical root only */ }
+  return roots;
+}
+
 function isEphemeralCwd(cwd) {
   if (!cwd || typeof cwd !== 'string' || !path.isAbsolute(cwd)) return false;
-  const { kind } = classifyCwd(path.resolve(cwd));
+  const abs = path.resolve(cwd);
+  let exists = true;
+  try { exists = fs.existsSync(abs); } catch { exists = true; }
+  if (!exists && tmpRoots().some((root) => isInside(abs, root))) return true;
+  const { kind } = classifyCwd(abs);
   return kind === 'ephemeral' || kind === 'worktree';
 }
 

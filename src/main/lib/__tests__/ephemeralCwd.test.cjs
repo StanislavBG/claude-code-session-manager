@@ -89,3 +89,30 @@ test('isEphemeralCwd is false for non-absolute or missing input, never throws', 
   expect(isEphemeralCwd(null)).toBe(false);
   expect(isEphemeralCwd(undefined)).toBe(false);
 });
+
+// Live 2026-11-22: a reconcile pass recreated queue.json inside
+// /tmp/sm-sbx-probe-LrKw/work, deleted half an hour earlier — a missing path
+// under os.tmpdir() classified as an ordinary project.
+test('isEphemeralCwd refuses a MISSING path under os.tmpdir()', () => {
+  const cwd = path.join(os.tmpdir(), 'sm-sbx-probe-ZZZZ-does-not-exist', 'work');
+  expect(fs.existsSync(cwd)).toBe(false);
+  expect(isEphemeralCwd(cwd)).toBe(true);
+});
+
+test('isEphemeralCwd keeps today\'s result for a missing path under a fake home outside os.tmpdir()', async () => {
+  const home = await mkNonTmpDir('sm-ephemeral-fakehome-');
+  tmpDirs.push(home);
+  // A plain main-tree checkout, so the parent walk can't land on the job
+  // worktree this suite may itself run inside.
+  fs.mkdirSync(path.join(home, '.git'), { recursive: true });
+  const cwd = path.join(home, '.sm-sbx-chk-gone', 'work');
+  expect(fs.existsSync(cwd)).toBe(false);
+  expect(isEphemeralCwd(cwd)).toBe(false);
+});
+
+test('isEphemeralCwd still refuses existing temp paths (os.tmpdir() and a managed worktree root)', () => {
+  expect(fs.existsSync(os.tmpdir())).toBe(true);
+  expect(isEphemeralCwd(os.tmpdir())).toBe(true);
+  expect(isEphemeralCwd(fs.realpathSync(os.tmpdir()))).toBe(true);
+  expect(isEphemeralCwd(path.join(KIND_CONFIG.job.root, 'some-job-id'))).toBe(true);
+});

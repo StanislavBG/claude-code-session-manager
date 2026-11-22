@@ -570,6 +570,13 @@ async function writeSplit(state, defaultCwd) {
     byCwd.get(cwd).push(job);
   }
   for (const [cwd, jobs] of byCwd) {
+    // Never materialize a missing project root: a deleted cwd remembered only
+    // as a transcript dir got {"jobs": []} recreated every reconcile pass
+    // (2026-11-22, /tmp/sm-sbx-probe-*/work + ~/.sm-sbx-chk-*/work).
+    if (typeof cwd === 'string' && path.isAbsolute(cwd) && !fs.existsSync(cwd)) {
+      console.warn('[queueStore] skip queue write for missing cwd', cwd);
+      continue;
+    }
     const file = queuePathOrSkip(cwd, 'writeSplit');
     if (!file) continue;
     try {

@@ -19,6 +19,8 @@ const fs = require('fs')
 const { spawnSync, execFileSync } = require('child_process')
 const path = require('path')
 const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../src/main/health.cjs')
+// The link convention (what counts as a link, outside code fences, inline code and comments) is written once here.
+const { linksOf, rawLinksOf, followLink, visibleText } = require('../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs')
 
 const ROOT = path.resolve(process.argv[2] || process.env.SM_DOC_ROOT || path.join(__dirname, '..'))
 const OPS = 'session-manager-operations'
@@ -114,25 +116,26 @@ try {
   for (const f of fs.readdirSync(archDir)) if (f.endsWith('.md')) linted.add(`${OPS}/architecture/${f}`)
 } catch { /* no architecture dir: already reported as missing junction */ }
 
-function stripCode(text) {
-  return text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+/** A doc's text with code fences, inline code and HTML comments blanked (mdLinks.visibleText). */
+function visibleDoc(text) {
+  const state = { fence: '', inComment: false }
+  return text.split(/\r?\n/).map((line) => visibleText(line, state)).join('\n')
 }
 
 for (const f of [...linted].sort()) {
   const abs = path.join(ROOT, f)
-  const text = stripCode(fs.readFileSync(abs, 'utf8'))
-  for (const m of text.matchAll(/\]\(\s*<?([^)\s>]+)/g)) {
-    const target = m[1]
+  const source = fs.readFileSync(abs, 'utf8')
+  for (const { line, raw } of rawLinksOf(source)) {
+    const target = raw.trim()
     if (/^file:\/\//i.test(target)) { fail(`${f}: file:// link: ${target}`); continue }
-    if (/^(https?:|mailto:|#)/i.test(target)) continue
-    const p = target.split('#')[0]
-    if (!p) continue
-    const resolved = path.resolve(path.dirname(abs), p)
+    const link = followLink(f, target, line)
+    if (!link) continue // URL, #anchor or /rooted target
+    const resolved = path.resolve(ROOT, link.to)
     if (fs.existsSync(resolved)) continue
     if (isGitIgnored(resolved)) { console.log(`doc-hierarchy: note: ${f}: link target is gitignored and absent (excluded): ${target}`); continue }
     fail(`${f}: broken relative link: ${target}`)
   }
-  for (const m of text.matchAll(/file:\/\/[^\s)>\]]*/gi)) {
+  for (const m of visibleDoc(source).matchAll(/file:\/\/[^\s)>\]]*/gi)) {
     if (!failures.includes(`${f}: file:// link: ${m[0]}`)) fail(`${f}: file:// link: ${m[0]}`)
   }
 }
@@ -147,7 +150,7 @@ if (exists('CLAUDE.md')) {
       if (!lines[i].startsWith('|')) continue
       const firstCell = lines[i].split('|')[1] || ''
       // Link targets win; backticked text is a path only where the cell has no links.
-      const links = [...firstCell.matchAll(/\]\(([^)\s#]+)/g)].map((m) => m[1])
+      const links = linksOf({ path: 'CLAUDE.md', text: firstCell }).map((l) => l.to)
       const paths = links.length ? links : [...firstCell.matchAll(/`([^`]+\.md)`/g)].map((m) => m[1])
       for (const p of paths) {
         if (/^(https?:|mailto:|file:)/i.test(p)) continue
@@ -184,12 +187,9 @@ if (exists('CLAUDE.md')) {
   while (queue.length) {
     const f = queue.shift()
     const abs = path.join(ROOT, f)
-    const text = stripCode(fs.readFileSync(abs, 'utf8'))
-    for (const m of text.matchAll(/\]\(\s*<?([^)\s>]+)/g)) {
-      if (/^[a-z][a-z0-9+.-]*:/i.test(m[1])) continue
-      const p = m[1].split('#')[0].split('?')[0]
-      if (!p.toLowerCase().endsWith('.md')) continue
-      const target = path.resolve(path.dirname(abs), p)
+    for (const link of linksOf({ path: f, text: fs.readFileSync(abs, 'utf8') })) {
+      if (link.escapes || !link.to.toLowerCase().endsWith('.md')) continue
+      const target = path.resolve(ROOT, link.to)
       if (!target.startsWith(ROOT + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) continue
       const r = rel(target)
       if (!reached.has(r)) { reached.add(r); queue.push(r) }

@@ -16,6 +16,9 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+// The link convention (links, imports, backticked paths; code and comments skipped) is written
+// once, in the sibling mdLinks.cjs — same folder, so this script stays dependency-free.
+const { linksOf, rawLinksOf, visibleLine, importsOf, backtickPaths, toRepoPath } = require('./mdLinks.cjs');
 
 const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'orphans'];
 const DEFAULT_CHECKS = ['links', 'paths', 'limits', 'contents'];
@@ -99,14 +102,10 @@ function listDocs(root) {
   return { git: false, files: out };
 }
 
-/** Blank out inline code spans (keeps length) so links inside them are ignored. */
-function blankCode(line) {
-  return line.replace(/`[^`]*`/g, (m) => ' '.repeat(m.length));
-}
-
 const IGNORE_MARKER = '<!-- drift-check-ignore -->';
 const DOMAIN_RE = /^([a-z0-9-]+\.)+[a-z]{2,}$/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+const SPAN_RE = /`([^`]+)`/g;
 
 function isRepoPathCandidate(span) {
   if (!span.includes('/')) return false;
@@ -120,115 +119,46 @@ function isRepoPathCandidate(span) {
   return true;
 }
 
-/** Parse a doc once: returns { lines, links, spans }. */
+/**
+ * Parse a doc once for the links / paths / contents checks: its lines, every link destination
+ * as written (mdLinks.rawLinksOf), the inline code spans on lines outside fences and comments
+ * (mdLinks.visibleLine), and the lines carrying the ignore marker.
+ */
 function parseDoc(text) {
-  const rawLines = text.split('\n');
-  const links = [];
+  const lines = text.split('\n');
   const spans = [];
-  const importTokens = [];
-  const autolinks = [];
-  const refTokens = [];
   const ignoredLines = new Set();
-  let fence = null;
-  let inComment = false;
-  rawLines.forEach((raw, idx) => {
+  const state = { fence: '', inComment: false };
+  lines.forEach((raw, idx) => {
     const lineNo = idx + 1;
-    const fm = /^\s*(```+|~~~+)/.exec(raw);
-    if (!inComment && fm) {
-      const marker = fm[1][0];
-      if (fence === null) fence = marker;
-      else if (fence === marker) fence = null;
-      return;
-    }
-    if (fence !== null) return;
     if (raw.includes(IGNORE_MARKER)) ignoredLines.add(lineNo);
-    // strip HTML comments (possibly spanning lines)
-    let line = '';
-    let rest = raw;
-    while (rest.length) {
-      if (inComment) {
-        const end = rest.indexOf('-->');
-        if (end === -1) { rest = ''; break; }
-        rest = rest.slice(end + 3);
-        inComment = false;
-      } else {
-        const start = rest.indexOf('<!--');
-        if (start === -1) { line += rest; rest = ''; break; }
-        line += rest.slice(0, start);
-        rest = rest.slice(start + 4);
-        inComment = true;
-      }
-    }
-    const noCode = blankCode(line);
-    const linkRe = /!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
-    let m;
-    while ((m = linkRe.exec(noCode))) {
-      let t = m[1];
-      if (t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1);
-      links.push({ line: lineNo, target: t });
-    }
-    for (const am of noCode.replace(linkRe, ' ').matchAll(AUTOLINK_RE)) {
-      if (/\.md$/i.test(am[1].replace(/[?#].*$/, ''))) autolinks.push({ line: lineNo, target: am[1] });
-    }
-    for (const cm of line.matchAll(MULTI_CODE_RE)) {
-      const tok = pathToken(cm[2]);
-      if (tok !== null && !refTokens.includes(tok)) refTokens.push(tok);
-    }
-    const impRe = /(?:^|\s)@(\S+)/g;
-    while ((m = impRe.exec(noCode))) importTokens.push(m[1]);
-    const spanRe = /`([^`]+)`/g;
-    while ((m = spanRe.exec(line))) spans.push({ line: lineNo, span: m[1].trim() });
+    for (const m of visibleLine(raw, state).matchAll(SPAN_RE)) spans.push({ line: lineNo, span: m[1].trim() });
   });
-  return { lines: rawLines, links, spans, importTokens, autolinks, refTokens, ignoredLines };
+  const links = rawLinksOf(text).map((l) => ({ line: l.line, target: l.raw }));
+  return { lines, links, spans, ignoredLines };
 }
 
 const MAX_IMPORT_HOPS = 4;
 
-const AUTOLINK_RE = /<([^<>\s]{1,1024})>/g;
-const MULTI_CODE_RE = /(`+)(.{0,1024}?)\1/g;
-
-/** A backticked repo-path token (SKILL.md link convention), or null. */
-function pathToken(raw) {
-  const t = raw.trim();
-  if (t === '' || !t.includes('/') || /\s/.test(t) || /^(?:[/~$<]|http)/i.test(t)) return null;
-  const bare = t.replace(/:\d+$/, '').replace(/#.*$/, '');
-  if (bare === '' || /[*{}<>:]/.test(bare)) return null;
-  if (!bare.endsWith('/') && !/\.[A-Za-z0-9]{1,8}$/.test(bare)) return null;
-  return bare;
-}
-
-/** Repo-relative POSIX form: no `./` or trailing `/`; `.` is the root. */
-const toRepoPath = (p) => path.posix.normalize(p).replace(/\/+$/, '') || '.';
 const escapesRoot = (p) => p === '..' || p.startsWith('../') || p.startsWith('/');
 
 /**
- * Docs a parsed doc references, by SKILL.md's link convention (the same rule as the
- * app's src/main/lib/mdNetworkScan.cjs): markdown links and `<x.md>` autolinks resolved
- * against the doc's folder; `@path.md` imports resolved against the doc's folder;
- * backticked `.md` paths, repo-root form first, then doc-relative. Only targets that are
- * docs (per `isDoc`) count.
+ * Docs a doc references, by SKILL.md's link convention (mdLinks.cjs, shared with the app's
+ * src/main/lib/mdNetworkScan.cjs): markdown links and `<x.md>` autolinks and `@path.md`
+ * imports resolved against the doc's folder; backticked `.md` paths, repo-root form first,
+ * then doc-relative. Only targets that are docs (per `isDoc`) count.
  */
-function docRefs(from, parsed, isDoc) {
+function docRefs(from, text, isDoc) {
   const dir = path.posix.dirname(from);
   const out = [];
   const add = (to) => { if (to !== from && !out.includes(to)) out.push(to); };
-  for (const l of [...parsed.links, ...parsed.autolinks]) {
-    const written = l.target.trim();
-    if (written === '' || written[0] === '#' || written[0] === '/' || SCHEME_RE.test(written)) continue;
-    const target = written.replace(/[?#].*$/, '');
-    if (target === '') continue;
-    let decoded = target;
-    try { decoded = decodeURIComponent(target); } catch { /* a stray % is part of the name */ }
-    const to = toRepoPath(path.posix.join(dir, decoded));
-    if (!escapesRoot(to) && isDoc(to)) add(to);
+  for (const l of linksOf({ path: from, text })) {
+    if (!l.escapes && isDoc(l.to)) add(l.to);
   }
-  for (let tok of parsed.importTokens) {
-    tok = tok.replace(/[),.;:!?'"\]]+$/, '');
-    if (!/\.md$/i.test(tok) || tok.startsWith('~') || tok.startsWith('/')) continue;
-    const to = toRepoPath(path.posix.join(dir, tok));
-    if (!escapesRoot(to) && isDoc(to)) add(to);
+  for (const to of importsOf(text, from)) {
+    if (isDoc(to)) add(to);
   }
-  for (const tok of parsed.refTokens) {
+  for (const tok of backtickPaths(text)) {
     if (!tok.endsWith('.md')) continue;
     const forms = dir === '.' ? [toRepoPath(tok)] : [toRepoPath(tok), toRepoPath(path.posix.join(dir, tok))];
     const to = forms.find((f) => !escapesRoot(f) && isDoc(f));
@@ -248,7 +178,7 @@ function reachableDocs(root, allDocs) {
     const from = queue.shift();
     let text;
     try { text = fs.readFileSync(path.join(root, from), 'utf8'); } catch { continue; }
-    for (const to of docRefs(from, parseDoc(text), isDoc)) {
+    for (const to of docRefs(from, text, isDoc)) {
       if (!seen.has(to)) { seen.add(to); queue.push(to); }
     }
   }
@@ -257,19 +187,10 @@ function reachableDocs(root, allDocs) {
 
 const ROOT_DOC = 'CLAUDE.md';
 
-/** Claude Code `@path` imports of a doc: absolute .md paths inside root. */
+/** Claude Code `@path` imports of a doc (mdLinks.importsOf): absolute .md paths inside root. */
 function parseImports(text, fileAbs, root) {
-  const out = [];
-  for (let tok of parseDoc(text).importTokens) {
-    tok = tok.replace(/[.,;:!?)\]}'"]+$/, '');
-    if (!tok || tok.startsWith('~')) continue;
-    if (!/\.md$/i.test(tok)) continue;
-    const abs = path.resolve(path.dirname(fileAbs), tok);
-    const rel = path.relative(root, abs);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
-    if (!out.includes(abs)) out.push(abs);
-  }
-  return out;
+  const from = toPosix(path.relative(root, fileAbs));
+  return importsOf(text, from).map((rel) => path.join(root, rel));
 }
 
 const docInfoCache = new Map(); // abs -> { lines, imports } | null (per process; reset each run)

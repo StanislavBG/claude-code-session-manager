@@ -12,8 +12,11 @@
  * it too, so it MUST stay dependency-free: node built-ins only.
  *
  * - linksOf(file) — a doc's followed links, in document order (memoized per file object).
+ * - rawLinksOf(text) — every link destination as written, before followLink's filters
+ *   (for checkers that judge `/rooted` or `#fragment` targets themselves).
  * - followLink(from, raw, line) — one raw link target -> followed link, or null when ignored.
  * - visibleText(line, state) — the part of one line that can hold links.
+ * - visibleLine(line, state) — one line outside fences, HTML comments removed, inline code kept.
  * - importsOf(text, fromPath) — the `@path.md` imports a doc makes, resolved against its folder.
  * - backtickPaths(text) — the path-shaped inline-code tokens a doc names.
  * - toRepoPath(p) — repo-relative POSIX form.
@@ -213,6 +216,26 @@ function followLink(from, raw, line) {
  */
 const linkMemo = new WeakMap();
 
+/**
+ * Every inline / image / `<x.md>` autolink destination outside code and HTML
+ * comments, as written (fragment, query, scheme and leading `/` kept), in document order.
+ * @param {string} text @returns {{ line: number, raw: string }[]} line is 1-based
+ */
+function rawLinksOf(text) {
+  /** @type {{ line: number, raw: string }[]} */
+  const out = [];
+  if (typeof text !== 'string') return out;
+  /** @type {LineState} */
+  const state = { fence: '', inComment: false };
+  const lines = text.split(/\r?\n/);
+  for (let n = 0; n < lines.length; n += 1) {
+    const visible = visibleText(lines[n], state);
+    if (visible === '') continue;
+    for (const raw of lineTargets(visible)) out.push({ line: n + 1, raw });
+  }
+  return out;
+}
+
 /** A doc's followed links, in document order. @param {MdFile} file @returns {MdLink[]} */
 function linksOf(file) {
   const memo = linkMemo.get(file);
@@ -220,16 +243,9 @@ function linksOf(file) {
   const from = toRepoPath(file.path);
   /** @type {MdLink[]} */
   const links = [];
-  /** @type {LineState} */
-  const state = { fence: '', inComment: false };
-  const lines = file.text.split(/\r?\n/);
-  for (let n = 0; n < lines.length; n += 1) {
-    const visible = visibleText(lines[n], state);
-    if (visible === '') continue;
-    for (const raw of lineTargets(visible)) {
-      const link = followLink(from, raw, n + 1);
-      if (link) links.push(link);
-    }
+  for (const { line, raw } of rawLinksOf(file.text)) {
+    const link = followLink(from, raw, line);
+    if (link) links.push(link);
   }
   linkMemo.set(file, links);
   return links;
@@ -309,4 +325,4 @@ function backtickPaths(text) {
   return out;
 }
 
-module.exports = { linksOf, followLink, visibleText, importsOf, backtickPaths, toRepoPath };
+module.exports = { linksOf, rawLinksOf, followLink, visibleText, visibleLine, importsOf, backtickPaths, toRepoPath };

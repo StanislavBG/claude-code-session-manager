@@ -14,7 +14,7 @@ const mdLinks = require(path.resolve(
   __dirname,
   '../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs',
 ));
-const { linksOf, followLink, visibleText, importsOf, backtickPaths, toRepoPath } = mdLinks;
+const { linksOf, rawLinksOf, followLink, visibleText, visibleLine, importsOf, backtickPaths, toRepoPath } = mdLinks;
 const census = require('../../src/main/lib/mdDocCensus.cjs');
 const docRefs = require('../../src/main/lib/mdDocRefs.cjs');
 
@@ -22,9 +22,9 @@ const docRefs = require('../../src/main/lib/mdDocRefs.cjs');
 const targets = (text, p = 'docs/a.md') => linksOf({ path: p, text }).map((l) => l.to);
 
 describe('exports', () => {
-  test('exports exactly the six convention functions', () => {
+  test('exports exactly the eight convention functions', () => {
     expect(Object.keys(mdLinks).sort()).toEqual(
-      ['backtickPaths', 'followLink', 'importsOf', 'linksOf', 'toRepoPath', 'visibleText'],
+      ['backtickPaths', 'followLink', 'importsOf', 'linksOf', 'rawLinksOf', 'toRepoPath', 'visibleLine', 'visibleText'],
     );
   });
 
@@ -82,6 +82,30 @@ describe('linksOf', () => {
     const first = linksOf(file);
     expect(first[0].escapes).toBe(true);
     expect(linksOf(file)).toBe(first);
+  });
+});
+
+describe('rawLinksOf / visibleLine', () => {
+  test('rawLinksOf keeps destinations as written, outside code and comments', () => {
+    const text = '[a](/site/route/) [b](b.md#top) <c.md?x>\n`[z](z.md)` <!-- [h](h.md) -->\n```\n[f](f.md)\n```\n[u](https://x.y)';
+    expect(rawLinksOf(text)).toEqual([
+      { line: 1, raw: '/site/route/' },
+      { line: 1, raw: 'b.md#top' },
+      { line: 1, raw: 'c.md?x' },
+      { line: 6, raw: 'https://x.y' },
+    ]);
+  });
+
+  test('linksOf is rawLinksOf passed through followLink', () => {
+    const text = '[a](/abs.md) [b](b.md#top) [c](#only)';
+    const viaRaw = rawLinksOf(text).map((r) => followLink('docs/a.md', r.raw, r.line)).filter(Boolean);
+    expect(linksOf({ path: 'docs/a.md', text })).toEqual(viaRaw);
+  });
+
+  test('visibleLine keeps inline code, drops comments and fenced lines', () => {
+    const state = { fence: '', inComment: false };
+    const out = ['`a/b.md` <!-- x', 'y --> `c/d.md`', '```', '`e/f.md`', '```'].map((l) => visibleLine(l, state));
+    expect(out.map((l) => l.trim())).toEqual(['`a/b.md`', '`c/d.md`', '', '', '']);
   });
 });
 

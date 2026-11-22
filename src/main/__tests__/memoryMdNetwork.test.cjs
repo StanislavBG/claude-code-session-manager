@@ -26,6 +26,17 @@ test('extracts md links, strips anchors, drops untracked links', () => {
   assert.equal(r.docs[0].title, 'Doc A');
 });
 
+test('links inside code fences, inline code and comments do not count', () => {
+  const files = {
+    'CLAUDE.md': '# Root\n```\n[f](docs/fenced.md)\n```\n`[i](docs/inline.md)`\n<!-- [c](docs/comment.md) -->\n[a](docs/a.md)',
+    'docs/a.md': '# A', 'docs/fenced.md': '# F', 'docs/inline.md': '# I', 'docs/comment.md': '# C',
+  };
+  const r = collectMdNetwork({
+    cwd: CWD, memoryBody: '', trackedFiles: Object.keys(files), readFile: fsOf(files),
+  });
+  assert.deepEqual(r.docs.map((d) => d.path), ['docs/a.md']);
+});
+
 test('includes tracked scoped CLAUDE.md, excludes root, title falls back to path', () => {
   const files = { 'CLAUDE.md': '# Root', 'src/CLAUDE.md': 'no heading' };
   const r = collectMdNetwork({

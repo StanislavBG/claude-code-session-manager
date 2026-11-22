@@ -9,6 +9,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { linksOf } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
 const ROOT_MAX_BYTES = 16 * 1024;
 const MAX_DOCS = 60;
@@ -18,7 +19,6 @@ const HITS_PER_DOC = 3;
 const HITS_TOTAL = 8;
 const MAX_LINE_CHARS = 200;
 
-const MD_LINK_RE = /\]\(([^)\s]+\.md)(#[^)]*)?\)/g;
 const TERM_RE = /`([^`\n]{4,80})`/g;
 const ROOT_DOC = 'CLAUDE.md';
 
@@ -35,18 +35,11 @@ function safeRead(readFile, abs) {
   }
 }
 
+/** Docs the root CLAUDE.md links to, by the shared link convention (mdLinks.cjs). */
 function extractLinkedDocs(rootText) {
-  const out = [];
-  let m;
-  MD_LINK_RE.lastIndex = 0;
-  while ((m = MD_LINK_RE.exec(rootText)) !== null) {
-    const target = m[1];
-    if (/^(?:https?|file):\/\//i.test(target)) continue;
-    const norm = path.posix.normalize(target);
-    if (norm.startsWith('..') || norm.startsWith('/')) continue;
-    out.push(norm);
-  }
-  return out;
+  return linksOf({ path: ROOT_DOC, text: rootText })
+    .filter((l) => !l.escapes && /\.md$/i.test(l.to))
+    .map((l) => l.to);
 }
 
 function extractTerms(body) {

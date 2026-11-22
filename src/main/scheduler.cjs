@@ -163,6 +163,7 @@ const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+const needsYouStore = require('./lib/feedback-remote/needsYouStore.cjs');
 const { withTimeout } = require('./lib/util/withTimeout.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
@@ -1107,6 +1108,7 @@ function heartbeatTick(deps = {}) {
           loadGated: lastTick?.reason === 'load-deferred',
         });
         Object.assign(heldByDependencyByCwd, budget.findDependencyStalledProjects(s.jobs, classified));
+        applyDepHoldNotices(classified).catch((e) => console.error('[scheduler] dep-hold Needs-you error', e));
       } else {
         refreshSatisfiedSlugsCache(s);
       }
@@ -2603,6 +2605,77 @@ let stallToasted = new Map();
 // (and by refreshSatisfiedSlugsCache when the heartbeat runs before any tick)
 // so the heartbeat's dependency-held stall check never does its own fs read.
 let lastSatisfiedSlugsByCwd = null;
+// Dependency-hold Needs-you notices (one per (cwd, blocking slug) episode).
+// Ids of the notices this process has open; null until seeded from the store
+// on first use, so a restart withdraws a notice whose hold cleared while down
+// instead of orphaning it. budget.selectDepHoldNotices decides; this applies.
+const DEP_HOLD_NEEDS_YOU_APP = 'session-manager';
+let depHoldOpen = null; // Map<id, { cwd, blockerSlug, blockerStatus, heldSlugs } | null>
+let depHoldApplyInFlight = false;
+/**
+ * applyDepHoldNotices(classified, deps?) — side-effect half of the dep-hold
+ * notice: post/withdraw through needsYouStore (the same store the
+ * /admin/needs-you routes use), audit stall_dep_hold_posted /
+ * stall_dep_hold_withdrawn, and broadcast needsYou:changed. Never mints an
+ * Epic or PRD. `deps` ({ store, audit, onChanged, thresholdMs }) is a test seam.
+ */
+async function applyDepHoldNotices(classified, deps = {}) {
+  const store = deps.store ?? needsYouStore;
+  const audit = deps.audit ?? appendAuditEvent;
+  const onChanged = deps.onChanged ?? (() => { if (mainWindow) sendIfAlive(mainWindow, 'needsYou:changed', {}); });
+  if (depHoldApplyInFlight) return;
+  depHoldApplyInFlight = true;
+  try {
+    if (depHoldOpen === null) {
+      const items = await store.listNeedsYou({ app: DEP_HOLD_NEEDS_YOU_APP, status: 'open' });
+      depHoldOpen = new Map(items
+        .filter((it) => typeof it.id === 'string' && it.id.startsWith(budget.DEP_HOLD_NOTICE_ID_PREFIX))
+        .map((it) => [it.id, null]));
+    }
+    const { post, withdraw } = budget.selectDepHoldNotices(classified, depHoldOpen.keys(), {
+      thresholdMs: deps.thresholdMs ?? budget.DEP_HOLD_NOTICE_MS,
+    });
+    let changed = false;
+    for (const p of post) {
+      const { title, why } = budget.formatDepHoldNotice(p);
+      let result;
+      try {
+        result = await store.postNeedsYou({ app: DEP_HOLD_NEEDS_YOU_APP, id: p.id, title, why });
+      } catch (e) {
+        console.error(`[scheduler] dep-hold Needs-you post failed for ${p.blockerSlug} in ${p.cwd}`, e?.message ?? e);
+        continue; // not marked open — retried next heartbeat
+      }
+      depHoldOpen.set(p.id, p);
+      audit('stall_dep_hold_posted', {
+        id: p.id, cwd: p.cwd, blockerSlug: p.blockerSlug, blockerStatus: p.blockerStatus,
+        heldSlugs: p.heldSlugs, created: result.created, changed: result.changed,
+      });
+      if (result.changed) changed = true;
+    }
+    for (const id of withdraw) {
+      const meta = depHoldOpen.get(id) ?? null;
+      let item;
+      try {
+        item = await store.withdrawNeedsYou({ app: DEP_HOLD_NEEDS_YOU_APP, id });
+      } catch (e) {
+        console.error(`[scheduler] dep-hold Needs-you withdraw failed for ${id}`, e?.message ?? e);
+        continue;
+      }
+      depHoldOpen.delete(id);
+      audit('stall_dep_hold_withdrawn', {
+        id, cwd: meta?.cwd ?? null, blockerSlug: meta?.blockerSlug ?? null, wasOpen: item != null,
+      });
+      if (item) changed = true;
+    }
+    if (changed) onChanged();
+  } finally {
+    depHoldApplyInFlight = false;
+  }
+}
+function _resetDepHoldNoticesForTests() {
+  depHoldOpen = null;
+  depHoldApplyInFlight = false;
+}
 let satisfiedRefreshInFlight = false;
 function refreshSatisfiedSlugsCache(state) {
   if (satisfiedRefreshInFlight) return;
@@ -12493,6 +12566,8 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 }
 
 module.exports = {
+  applyDepHoldNotices,
+  _resetDepHoldNoticesForTests,
   readValidatorGateMs,
   resolveValidatorEstimate,
   planJobScope,

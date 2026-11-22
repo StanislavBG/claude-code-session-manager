@@ -6,6 +6,7 @@
  */
 'use strict';
 
+const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { claudePidAlive } = require('../lib/scheduler/reaperHelpers.cjs');
@@ -238,6 +239,82 @@ function findDependencyStalledProjects(jobs, classified) {
     out[cwd] = held;
   }
   return out;
+}
+
+/** A dependency hold this old on a failed/cancelled row earns a Needs-you item. */
+const DEP_HOLD_NOTICE_MS = 30 * 60_000;
+/** Root statuses a Needs-you dep-hold notice is posted for (a human can fix these in one click). */
+const DEP_HOLD_NOTICE_STATUSES = new Set(['failed', 'cancelled']);
+const DEP_HOLD_NOTICE_ID_PREFIX = 'stall-dep-hold:';
+
+/**
+ * depHoldNoticeId(cwd, blockerSlug) → string
+ * Stable Needs-you id for one (project, blocking row) pair. The cwd is hashed
+ * (a path can hold characters the Needs-you id pattern refuses); the slug is
+ * kept readable, with any refused character replaced by '-'.
+ */
+function depHoldNoticeId(cwd, blockerSlug) {
+  const h = crypto.createHash('sha1').update(String(cwd)).digest('hex').slice(0, 12);
+  const slug = String(blockerSlug).replace(/[^A-Za-z0-9._:/@-]/g, '-').slice(0, 160);
+  return `${DEP_HOLD_NOTICE_ID_PREFIX}${h}:${slug}`;
+}
+
+/**
+ * selectDepHoldNotices(classified, prevOpen, { thresholdMs }) → { post, withdraw }
+ *
+ * Pure. Given classifyPendingHolds output and the ids of dep-hold notices
+ * already open (a Set or array), decide which (cwd, blocking slug) pairs need
+ * a Needs-you post and which open notices must be withdrawn:
+ *   - post: a pair NOT already open where at least one pending row has been
+ *     held over `thresholdMs` by a chain whose root is a failed or cancelled
+ *     row → { id, cwd, blockerSlug, blockerStatus, heldSlugs } (heldSlugs =
+ *     every row that pair currently holds, sorted). Once open it is never
+ *     re-posted in the same episode.
+ *   - withdraw: an open id for which no pending row is held by that blocker
+ *     any more (any age — a younger re-hold keeps the episode open).
+ */
+function selectDepHoldNotices(classified, prevOpen, opts = {}) {
+  const { thresholdMs = DEP_HOLD_NOTICE_MS } = opts;
+  const open = new Set(prevOpen ?? []);
+  const held = new Map();
+  for (const c of classified ?? []) {
+    if (c?.cause !== 'dependency' || !c.rootSlug || !DEP_HOLD_NOTICE_STATUSES.has(c.rootStatus)) continue;
+    const id = depHoldNoticeId(c.cwd, c.rootSlug);
+    if (!held.has(id)) {
+      held.set(id, { id, cwd: c.cwd, blockerSlug: c.rootSlug, blockerStatus: c.rootStatus, heldSlugs: [], due: false });
+    }
+    const entry = held.get(id);
+    entry.heldSlugs.push(c.slug);
+    if (Number.isFinite(c.ageMs) && c.ageMs >= thresholdMs) entry.due = true;
+  }
+  const post = [];
+  for (const entry of held.values()) {
+    if (!entry.due || open.has(entry.id)) continue;
+    const { due, ...rest } = entry;
+    post.push({ ...rest, heldSlugs: [...rest.heldSlugs].sort() });
+  }
+  const withdraw = [...open].filter((id) => !held.has(id));
+  return { post, withdraw };
+}
+
+/**
+ * formatDepHoldNotice({ cwd, blockerSlug, blockerStatus, heldSlugs }) → { title, why }
+ * Pure. The Needs-you text: which rows are held, by which row in which
+ * state, and the one-click fix (reset it, or archive/dismiss it).
+ */
+function formatDepHoldNotice({ cwd, blockerSlug, blockerStatus, heldSlugs }) {
+  const project = path.basename(String(cwd)) || String(cwd);
+  const n = heldSlugs.length;
+  const title = `Scheduler: ${n} PRD${n === 1 ? '' : 's'} in ${project} held by ${blockerStatus} ${blockerSlug}`
+    .replace(/[\r\n]+/g, ' ').slice(0, 200);
+  const shown = heldSlugs.slice(0, 20).join(', ') + (n > 20 ? `, and ${n - 20} more` : '');
+  const why = [
+    `${n} pending PRD${n === 1 ? '' : 's'} in ${cwd} cannot run: ${shown} ${n === 1 ? 'waits' : 'wait'} `
+      + `(directly or down the dependsOn chain) on ${blockerSlug}, which is ${blockerStatus}.`,
+    `Fix: in the Scheduler tab, Reset ${blockerSlug} to run it again, or archive/dismiss it `
+      + 'so its dependents stop waiting on it. This item closes by itself once nothing is held by it.',
+  ].join(' ').slice(0, 1000);
+  return { title, why };
 }
 
 /**
@@ -874,6 +951,11 @@ module.exports = {
   isNonProblemRow,
   classifyPendingHolds,
   findDependencyStalledProjects,
+  DEP_HOLD_NOTICE_MS,
+  DEP_HOLD_NOTICE_ID_PREFIX,
+  depHoldNoticeId,
+  selectDepHoldNotices,
+  formatDepHoldNotice,
   findStaleQuarantinedJobs,
   findOverrunningJobs,
   computeJobBudgetMs,

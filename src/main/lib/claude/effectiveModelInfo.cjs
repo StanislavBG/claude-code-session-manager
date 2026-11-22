@@ -212,12 +212,32 @@ function aliasFamily(modelAlias) {
   return MODEL_FAMILIES.has(base) ? base : null;
 }
 
+// What a concrete model id looks like: 'claude-' then lower-case letters,
+// digits, dots or hyphens, with an optional bracket suffix ('[1m]'). Anything
+// else — '<synthetic>', a string torn out of quoted source text — is refused.
+const MODEL_ID_SHAPE = /^claude-[a-z0-9.-]+(\[[a-z0-9]+\])?$/;
+
+/** Each line of `text` parsed as JSON; lines that do not parse (a cut last line) are skipped. */
+function parseJsonLines(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('{')) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      // incomplete or non-JSON line — no evidence
+    }
+  }
+  return out;
+}
+
 /**
  * True when `id` is acceptable evidence for `modelAlias`: a concrete id (never
  * an alias) and, for a family alias, one whose name contains that family — so
  * an opus persona can never be reported as running a fable or sonnet id.
  */
 function fitsAlias(id, modelAlias) {
+  if (typeof id !== 'string' || !MODEL_ID_SHAPE.test(id)) return false;
   if (!isConcreteModelId(id)) return false;
   const family = aliasFamily(modelAlias);
   return !family || id.includes(family);
@@ -228,11 +248,13 @@ function fitsAlias(id, modelAlias) {
  * at dispatch (scheduler.cjs's executeJob, ~line 4473: `[scheduler]
  * agentType=... persona=... model=...`). Scans this project's hot queue.json
  * jobs[] AND its archived history.jsonl for the most recent job whose
- * agentType matches, then reads that job's own run log for the line. That
- * line holds what was passed to `--model` — usually the alias itself — so
- * when it is an alias, the concrete id is the first fitting `"model":"..."`
- * value in the same head (the CLI's init line). A job with no fitting id gives
- * no evidence and the next newest job is tried. O(J log J) to sort J candidate
+ * agentType matches, then reads that job's own run log for the line — only
+ * from a line that starts with it and stands before the first JSON line, so
+ * the same text quoted inside a later line never counts. That line holds what
+ * was passed to `--model` — usually the alias itself — so when it is an alias,
+ * the concrete id is the `model` field of the first parsed system/init line.
+ * A job with no fitting, id-shaped value gives no evidence and the next newest
+ * job is tried. O(J log J) to sort J candidate
  * jobs, O(min(logSize, cap)) per log read.
  */
 function findLatestSchedulerModel(cwd, agentType, modelAlias, deps) {
@@ -240,25 +262,30 @@ function findLatestSchedulerModel(cwd, agentType, modelAlias, deps) {
   const matches = jobs.filter((j) => j && j.agentType === agentType && j.runId && j.slug);
   matches.sort((a, b) => jobTimestampMs(b) - jobTimestampMs(a));
 
-  const lineRe = /\[scheduler\] agentType=\S+ persona=.*? model=(\S+)/g;
-  const jsonRe = /"model":"([^"]+)"/g;
+  const headerRe = /^\[scheduler\] agentType=\S+ persona=.*? model=(\S+)/;
   for (const job of matches) {
     const logPath = path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`);
     const head = readHead(logPath, MAX_RUN_LOG_HEAD_BYTES, deps);
     if (!head) continue;
-    let match;
+    const lines = head.split('\n');
+    // The scheduler's own header stands before the CLI's first JSON line;
+    // the same text inside a later (JSON) line is quoted content, not a header.
     let logged = null;
-    lineRe.lastIndex = 0;
-    while ((match = lineRe.exec(head))) logged = match[1];
+    let firstJson = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('{')) { firstJson = i; break; }
+      const m = headerRe.exec(lines[i]);
+      if (m && logged === null) logged = m[1];
+    }
     if (!logged) continue;
     if (isConcreteModelId(logged)) {
       if (fitsAlias(logged, modelAlias)) return logged;
       continue;
     }
-    jsonRe.lastIndex = 0;
-    while ((match = jsonRe.exec(head))) {
-      if (fitsAlias(match[1], modelAlias)) return match[1];
-    }
+    // Alias: the concrete id is the model field of the first system/init line.
+    const init = parseJsonLines(lines.slice(firstJson).join('\n'))
+      .find((o) => o && o.type === 'system' && o.subtype === 'init');
+    if (init && fitsAlias(init.model, modelAlias)) return init.model;
   }
   return null;
 }
@@ -267,8 +294,9 @@ function findLatestSchedulerModel(cwd, agentType, modelAlias, deps) {
  * Evidence source 2: the most recent Epic (active-index.json entry) created
  * with this agentType AND the model being resolved — a session whose own
  * `model` override names anything else ran a different model and says
- * nothing about this persona. Read via its own claude-session transcript's
- * last fitting `"model":"..."` occurrence. O(E log E) to sort E candidate
+ * nothing about this persona. Read via its own claude-session transcript:
+ * message.model of the last parsed `type:'assistant'` line that fits (so
+ * '<synthetic>' and quoted text never count). O(E log E) to sort E candidate
  * Epics, O(min(transcriptSize, cap)) per transcript read.
  */
 function findLatestTranscriptModel(cwd, agentType, modelAlias, deps) {
@@ -284,17 +312,19 @@ function findLatestTranscriptModel(cwd, agentType, modelAlias, deps) {
   matches.sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0));
 
   const homeDir = deps.homeDir || os.homedir();
-  const re = /"model":"([^"]+)"/g;
   for (const session of matches) {
     const filePath = resolveEpicTranscriptPath({ cwd, claudeSessionId: session.claudeSessionId, deps: { homeDir } }).path;
     if (!filePath) continue;
     const tail = readTail(filePath, MAX_TRANSCRIPT_TAIL_BYTES, deps);
     if (!tail) continue;
-    let match;
-    let last = null;
-    re.lastIndex = 0;
-    while ((match = re.exec(tail))) if (fitsAlias(match[1], modelAlias)) last = match[1];
-    if (last) return last;
+    // message.model of the last fitting assistant line; quoted text never counts.
+    const entries = parseJsonLines(tail);
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (!e || e.type !== 'assistant') continue;
+      const id = e.message && e.message.model;
+      if (fitsAlias(id, modelAlias)) return id;
+    }
   }
   return null;
 }

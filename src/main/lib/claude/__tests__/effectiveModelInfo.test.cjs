@@ -193,8 +193,8 @@ test('transcript evidence prefers the most recently created matching Epic', asyn
     'epic-old': { id: 'epic-old', claudeSessionId: 'sess-old', agentType: 'multi-epic', createdAt: '2026-01-01T00:00:00.000Z' },
     'epic-new': { id: 'epic-new', claudeSessionId: 'sess-new', agentType: 'multi-epic', createdAt: '2026-05-01T00:00:00.000Z' },
   });
-  writeTranscript('sess-old', [{ model: 'claude-haiku-old' }]);
-  writeTranscript('sess-new', [{ model: 'claude-haiku-new' }]);
+  writeTranscript('sess-old', [{ type: 'assistant', message: { model: 'claude-haiku-old' } }]);
+  writeTranscript('sess-new', [{ type: 'assistant', message: { model: 'claude-haiku-new' } }]);
 
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'multi-epic' });
   expect(info.resolvedModelId).toBe('claude-haiku-new');
@@ -411,5 +411,87 @@ test('an opus alias never resolves to an id of another family', async () => {
   });
   writeTranscript('sess-1', [{ type: 'assistant', message: { model: 'claude-fable-5-2' } }]);
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'opus-only' });
+  expect(info.resolvedModelId).toBeNull();
+});
+
+// ---------- evidence comes from the log's and transcript's own parsed lines ----------
+
+test('dev-lead: quoted header and model text in later JSON lines never beats the real header + init line', async () => {
+  writeGlobalPersona('dev-lead', ['model: opus']);
+  writeQueueJobs([{ slug: 'job', runId: 'run-1', agentType: 'dev-lead', finishedAt: '2026-11-22T00:00:00.000Z' }]);
+  const quoted = "writeRunLog('r', 's', '[scheduler] agentType=dev-lead persona=/p/x.md model=claude-opus-5\\\\n\"]);' + '\"model\":\"claude-opus-5\\\\n\\\"];\"'";
+  writeRunLog('run-1', 'job', [
+    '[scheduler] starting 3481-agent-resolved-model-id-is-concrete at 2026-11-22T17:32:06.799Z',
+    '[scheduler] cwd=/home/user/Projects/session-manager (running isolated in worktree ...)',
+    '',
+    '[scheduler] agentType=dev-lead persona=/home/user/.claude/agents/dev-lead.md model=opus effort=medium tools=10 scoped',
+    '{"type":"system","subtype":"init","cwd":"/x","session_id":"s","tools":[],"model":"claude-opus-5-5"}',
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', input: { content: quoted } }] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: quoted }] } }),
+    '{"type":"user","message":{"content":"truncated at 64 KB [scheduler] agentType=dev-lead persona=/p model=claude-opus-9',
+  ].join('\n'));
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'dev-lead' });
+  expect(info.resolvedModelId).toBe('claude-opus-5-5');
+  expect(info.resolvedFrom).toBe('scheduler-run');
+});
+
+test('a log head with only quoted header/model text and no init line gives no evidence', async () => {
+  writeGlobalPersona('dev-lead', ['model: opus']);
+  writeQueueJobs([{ slug: 'job', runId: 'run-1', agentType: 'dev-lead', finishedAt: '2026-11-22T00:00:00.000Z' }]);
+  writeRunLog('run-1', 'job', [
+    '[scheduler] agentType=dev-lead persona=/p/dev-lead.md model=opus',
+    JSON.stringify({ type: 'user', message: { content: '[scheduler] agentType=dev-lead persona=/p model=claude-opus-5-5 "model":"claude-opus-5-5"' } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5' } }),
+  ].join('\n') + '\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'dev-lead' });
+  expect(info.resolvedModelId).toBeNull();
+  expect(info.resolvedFrom).toBeNull();
+});
+
+test('a header line quoted only inside JSON lines (no real header before the first JSON line) gives no evidence', async () => {
+  writeGlobalPersona('dev-lead', ['model: opus']);
+  writeQueueJobs([{ slug: 'job', runId: 'run-1', agentType: 'dev-lead', finishedAt: '2026-11-22T00:00:00.000Z' }]);
+  writeRunLog('run-1', 'job', [
+    '{"type":"system","subtype":"init","model":"claude-opus-5-5"}',
+    '[scheduler] agentType=dev-lead persona=/p/dev-lead.md model=claude-opus-5-5',
+  ].join('\n') + '\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'dev-lead' });
+  expect(info.resolvedModelId).toBeNull();
+});
+
+test('a malformed concrete id in the header is refused', async () => {
+  writeGlobalPersona('dev-lead', ['model: opus']);
+  writeQueueJobs([{ slug: 'job', runId: 'run-1', agentType: 'dev-lead', finishedAt: '2026-11-22T00:00:00.000Z' }]);
+  writeRunLog('run-1', 'job', '[scheduler] agentType=dev-lead persona=/p/dev-lead.md model=claude-opus-5\\n"];\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'dev-lead' });
+  expect(info.resolvedModelId).toBeNull();
+});
+
+test('transcript: the last assistant line wins over later quoted model text; <synthetic> is never returned', async () => {
+  writeGlobalPersona('architect', ['model: opus']);
+  writeActiveIndex({
+    'epic-1': { id: 'epic-1', claudeSessionId: 'sess-1', agentType: 'architect', createdAt: '2026-11-20T00:00:00.000Z' },
+  });
+  writeTranscript('sess-1', [
+    { type: 'assistant', message: { id: 'msg_1', model: 'claude-opus-5-5', content: [] } },
+    { type: 'assistant', message: { id: 'msg_2', model: '<synthetic>', content: [] } },
+    { type: 'user', message: { content: 'quoted: "model":"claude-opus-9-bogus" and "model":"claude-opus-5\\n\\"];"' } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', model: 'claude-opus-9-bogus' }] }] }, model: 'claude-opus-9-bogus' },
+  ]);
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'architect' });
+  expect(info.resolvedModelId).toBe('claude-opus-5-5');
+  expect(info.resolvedFrom).toBe('transcript');
+});
+
+test('transcript: only <synthetic> and quoted text gives no evidence', async () => {
+  writeGlobalPersona('architect', ['model: opus']);
+  writeActiveIndex({
+    'epic-1': { id: 'epic-1', claudeSessionId: 'sess-1', agentType: 'architect', createdAt: '2026-11-20T00:00:00.000Z' },
+  });
+  writeTranscript('sess-1', [
+    { type: 'assistant', message: { model: '<synthetic>' } },
+    { type: 'user', message: { content: '"model":"claude-opus-5-5"' } },
+  ]);
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'architect' });
   expect(info.resolvedModelId).toBeNull();
 });

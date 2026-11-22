@@ -15,7 +15,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const { projectJobCap, quietMachineWaitMs } = require('./schedulerConfig.cjs');
-const { bareSlug, isSatisfiedDepRow } = require('../prd/depSlugResolve.cjs');
+const { isSatisfiedDepRow, makeDepResolver } = require('../prd/depSlugResolve.cjs');
 
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
@@ -75,34 +75,14 @@ function dedupeCycles(cycles) {
   return out;
 }
 
-function makeDepResolver(projectJobs, satisfiedSlugs = new Set()) {
-  const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
-  const rowsByBareSlug = new Map();
-  for (const j of projectJobs) {
-    const bare = bareSlug(j.slug);
-    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
-    rowsByBareSlug.get(bare).push(j);
-  }
-  const rowsForDep = (slug) => {
-    const exact = rowBySlug.get(slug);
-    if (exact) return [exact];
-    return rowsByBareSlug.get(bareSlug(slug)) ?? [];
-  };
-  // Bare-name fallback applies here too: a satisfiedSlugs entry is almost
-  // always the FULL NN-prefixed slug (a history.jsonl row or an archived
-  // `<slug>.md` filename), but a human-authored dependsOn: writes the bare
-  // name — same asymmetry findBlockingDep already resolves for live rows.
-  let satisfiedBareSlugs = null;
-  const isKnownSatisfied = (slug) => {
-    if (satisfiedSlugs === DEP_HISTORY_FAIL_OPEN) return true;
-    if (satisfiedSlugs.has(slug)) return true;
-    if (satisfiedBareSlugs === null) {
-      satisfiedBareSlugs = new Set();
-      for (const s of satisfiedSlugs) satisfiedBareSlugs.add(bareSlug(s));
-    }
-    return satisfiedBareSlugs.has(bareSlug(slug));
-  };
-  return { rowsForDep, isKnownSatisfied };
+/**
+ * The shared run-time dep resolver (depSlugResolve.cjs makeDepResolver),
+ * translating this module's DEP_HISTORY_FAIL_OPEN sentinel into its
+ * `failOpen` flag. Every gate below goes through this — no local slug rule.
+ */
+function depResolver(projectJobs, satisfiedSlugs = new Set()) {
+  if (satisfiedSlugs === DEP_HISTORY_FAIL_OPEN) return makeDepResolver(projectJobs, new Set(), { failOpen: true });
+  return makeDepResolver(projectJobs, satisfiedSlugs);
 }
 
 /**
@@ -114,19 +94,19 @@ function makeDepResolver(projectJobs, satisfiedSlugs = new Set()) {
  * (or a restored record) can. Sorted, de-duplicated. O(jobs + deps).
  */
 function findUnresolvableDepRoots(projectJobs, satisfiedSlugs = new Set()) {
-  const { rowsForDep, isKnownSatisfied } = makeDepResolver(projectJobs, satisfiedSlugs);
+  const { resolve } = depResolver(projectJobs, satisfiedSlugs);
   const roots = new Set();
   for (const j of projectJobs) {
     if (j.status !== 'pending') continue;
     for (const dep of j.dependsOn ?? []) {
-      if (rowsForDep(dep).length === 0 && !isKnownSatisfied(dep)) roots.add(dep);
+      if (resolve(dep, j).kind === 'unresolved') roots.add(dep);
     }
   }
   return [...roots].sort();
 }
 
-function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
-  const { rowsForDep, isKnownSatisfied } = makeDepResolver(projectJobs, satisfiedSlugs);
+function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set(), resolver = null) {
+  const { resolve } = resolver ?? depResolver(projectJobs, satisfiedSlugs);
   // A dep row is blocking unless isSatisfiedDepRow — 'completed', or a
   // `needsReviewAutoResolvedSkip` skip. That skip is deliberately NOT the
   // "PRD source vanished, a human must author a fresh PRD" skip the
@@ -135,9 +115,9 @@ function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
   // would defeat the auto-resolve pass. runVerify.checkDeps MUST use the same
   // predicate, or every run of the dependent is downgraded and re-dispatched.
   return (job.dependsOn ?? []).find((slug) => {
-    const rows = rowsForDep(slug);
-    if (rows.length > 0) return rows.some((dep) => !isSatisfiedDepRow(dep));
-    return !isKnownSatisfied(slug);
+    const { kind, rows } = resolve(slug, job);
+    if (kind === 'row') return rows.some((dep) => !isSatisfiedDepRow(dep));
+    return kind === 'unresolved';
   });
 }
 
@@ -230,15 +210,12 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
   // `873-leftnav-two-face-framework`, all of them eligible immediately even
   // though the framework PRD they build on had not landed). findBlockingDep
   // resolves a dep by exact slug first, then falls back to matching rows
-  // whose slug is that dep with a leading `NN-` stripped.
-  const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
-  const rowsForDep = (slug) => {
-    const exact = rowBySlug.get(slug);
-    if (exact) return [exact];
-    const bare = String(slug ?? '').replace(/^\d+-/, '');
-    return projectJobs.filter((j) => String(j.slug ?? '').replace(/^\d+-/, '') === bare);
-  };
-  const blockingDep = (j) => findBlockingDep(j, projectJobs, satisfiedSlugs);
+  // whose slug is that dep with a leading `NN-` stripped. One resolver
+  // (depSlugResolve.cjs makeDepResolver) serves gating, hold records and the
+  // root walk, so they can never name different rows for the same dep.
+  const resolver = depResolver(projectJobs, satisfiedSlugs);
+  const rowsForDep = (slug, dependent) => resolver.rowsForDep(slug, dependent);
+  const blockingDep = (j) => findBlockingDep(j, projectJobs, satisfiedSlugs, resolver);
   const depStatusOf = (rows) => (rows.length === 0 ? 'unresolved' : (rows.find((d) => d.status !== 'completed')?.status ?? 'unknown'));
 
   // Root-blocker walk (PRD 1123): follows dependsOn upward from a held job
@@ -255,7 +232,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     for (let hops = 0; hops <= projectJobs.length; hops += 1) {
       const dep = blockingDep(current);
       if (!dep) return { rootSlug: current.slug, rootStatus: current.status, cycle: false };
-      const rows = rowsForDep(dep);
+      const rows = rowsForDep(dep, current);
       if (rows.length === 0) return { rootSlug: dep, rootStatus: 'unresolved', cycle: false };
       const nextRow = rows.find((r) => r.status !== 'completed') ?? rows[0];
       if (visited.has(nextRow.slug)) return { cycle: true, members: [...visited, nextRow.slug] };
@@ -313,7 +290,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
   for (const j of allPending) {
     const dep = blockingDep(j);
     if (!dep) { pending.push(j); continue; }
-    const depRows = rowsForDep(dep);
+    const depRows = rowsForDep(dep, j);
     const root = findRootBlocker(j);
     if (root.cycle) {
       cycles.push(root.members);

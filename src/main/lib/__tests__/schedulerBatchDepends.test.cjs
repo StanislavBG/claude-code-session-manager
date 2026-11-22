@@ -310,3 +310,60 @@ test('an idle queue reports no holds (empty must not read as blocked)', () => {
   assert.deepEqual(batch, []);
   assert.deepEqual(holds, []);
 });
+
+// ---------------------------------------------------------------------------
+// Exact-satisfied-first resolution (Self, 2026-11-22). A cancelled
+// 1056-sm-contract-client in another Epic froze 16 PRDs that depended on the
+// completed, archived 1047-sm-contract-client: the bare-name row fallback ran
+// before the satisfied-record check ever did.
+// ---------------------------------------------------------------------------
+
+test('1047/1056: a cancelled same-bare-name row in another Epic does not block deps of a completed, archived PRD', () => {
+  const prevCap = process.env.SM_PROJECT_JOB_CAP;
+  process.env.SM_PROJECT_JOB_CAP = '10';
+  try {
+    const jobs = [
+      job('1056-sm-contract-client', 'failed', { epicId: 'B', error: 'cancelled via admin API' }),
+      job('1048-uses-exact', 'pending', { epicId: 'A', dependsOn: ['1047-sm-contract-client'] }),
+      job('1050-uses-bare', 'pending', { epicId: 'A', dependsOn: ['sm-contract-client'] }),
+    ];
+    const satisfied = new Set(['1047-sm-contract-client']);
+    const { batch } = pickForProject(jobs, new Set(), 5, new Map(), satisfied);
+    assert.deepEqual(batch.map((j) => j.slug).sort(), ['1048-uses-exact', '1050-uses-bare']);
+    assert.equal(findBlockingDep(jobs[1], jobs, satisfied), undefined);
+    assert.equal(findBlockingDep(jobs[2], jobs, satisfied), undefined);
+  } finally {
+    if (prevCap === undefined) delete process.env.SM_PROJECT_JOB_CAP;
+    else process.env.SM_PROJECT_JOB_CAP = prevCap;
+  }
+});
+
+test('a cancelled bare-name row (cancelledAt) never blocks when a satisfied record shares its bare name', () => {
+  const jobs = [
+    job('1056-x', 'failed', { epicId: 'A', cancelledAt: '2026-11-22T00:00:00Z' }),
+    job('1060-next', 'pending', { epicId: 'A', dependsOn: ['x'] }),
+  ];
+  assert.equal(findBlockingDep(jobs[1], jobs, new Set(['1047-x'])), undefined);
+  // Without a satisfied record the cancelled row still holds.
+  assert.equal(findBlockingDep(jobs[1], jobs, new Set()), 'x');
+});
+
+test('a bare dep prefers same-Epic rows over another Epic\'s row with the same bare name', () => {
+  const jobs = [
+    job('1056-x', 'failed', { epicId: 'B' }),
+    job('1057-x', 'completed', { epicId: 'A' }),
+    job('1060-next', 'pending', { sourcePromptId: 'A', dependsOn: ['x'] }),
+  ];
+  assert.equal(findBlockingDep(jobs[2], jobs, new Set()), undefined);
+});
+
+test('an NN-prefixed dep with no exact row or record does not bind to another Epic\'s same-bare-name row', () => {
+  const jobs = [
+    job('1056-x', 'completed', { epicId: 'B' }),
+    job('1060-next', 'pending', { epicId: 'A', dependsOn: ['1047-x'] }),
+  ];
+  assert.equal(findBlockingDep(jobs[1], jobs, new Set()), '1047-x');
+  const sameEpic = [job('1056-x', 'running', { epicId: 'A' }), jobs[1]];
+  assert.equal(findBlockingDep(jobs[1], sameEpic, new Set()), '1047-x');
+  assert.equal(pickForProject(sameEpic, new Set(['1056-x']), 5).holds[0].depStatus, 'running');
+});

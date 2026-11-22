@@ -9,9 +9,11 @@
  * could still fail to block at run time (or vice versa) — so the matching
  * rule lives here once, not copied into each caller.
  *
- * Resolution rule: exact slug match first; else bare-name match after
- * stripping one leading `NN-` prefix — a human-authored `dependsOn:` can't
- * know the `NN-` prefix the allocator will hand a sibling PRD.
+ * Resolution rule (write-time resolveDepSlug): exact slug match first; else
+ * bare-name match after stripping one leading `NN-` prefix — a human-authored
+ * `dependsOn:` can't know the `NN-` prefix the allocator will hand a sibling
+ * PRD. Run-time gating uses makeDepResolver below, which adds the satisfied
+ * record and Epic ordering on top of the same bare-name rule.
  */
 
 /** Strip one leading `NN-` prefix, if present. */
@@ -84,4 +86,102 @@ function findNearMatches(depSlug, candidateSlugs, limit = 3) {
     .map((entry) => entry.slug);
 }
 
-module.exports = { bareSlug, resolveDepSlug, findNearMatches, isSatisfiedDepRow };
+/**
+ * Was this row cancelled by a human (admin API cancel), rather than failing on
+ * its own? scheduler.cjs's cancel handler stamps `cancelledAt` and an error
+ * starting 'cancelled via admin API'; either marker counts.
+ */
+function isCancelledRow(row) {
+  if (!row) return false;
+  if (typeof row.cancelledAt === 'string' ? row.cancelledAt.length > 0 : row.cancelledAt != null) return true;
+  return typeof row.error === 'string' && row.error.startsWith('cancelled via admin API');
+}
+
+/** The Epic a queue row belongs to: `epicId`, else its `sourcePromptId`. */
+function epicOf(job) {
+  return job?.epicId ?? job?.sourcePromptId ?? null;
+}
+
+/** True when `slug` carries a leading `NN-` allocator prefix. */
+function isPrefixedSlug(slug) {
+  return /^\d+-/.test(String(slug ?? ''));
+}
+
+/**
+ * makeDepResolver(projectJobs, satisfiedSlugs, { failOpen, epicId }) — the ONE
+ * run-time `dependsOn` resolution rule, shared by every schedulerBatch.cjs
+ * gate (findBlockingDep, findUnresolvableDepRoots, pickForProject's hold
+ * records and root-blocker walk) so gating, holds and the root walk can never
+ * disagree about what a dep names.
+ *
+ * resolve(dep, dependentJob) → { kind: 'row'|'satisfied'|'unresolved', rows }, in order:
+ *   1. an exact live row                              → 'row'
+ *   2. the exact slug in satisfiedSlugs               → 'satisfied'
+ *   3. NN-prefixed dep: a live row with the same bare name IN THE DEPENDENT'S
+ *      EPIC                                           → 'row'; else 'unresolved'
+ *      (a dep written with a full slug names one PRD — another Epic's
+ *      re-allocated sibling is not it)
+ *   4. bare dep: live rows with that bare name, preferring rows in the
+ *      dependent's Epic                               → 'row'
+ *   5. bare dep: a satisfied record with that bare name → 'satisfied'
+ *   6.                                                 → 'unresolved'
+ * In steps 3-4 a cancelled row (isCancelledRow) is dropped when a satisfied
+ * record shares its bare name — a human-cancelled duplicate must never freeze
+ * the dependents of the PRD that genuinely finished (Self, 2026-11-22: the
+ * cancelled 1056-sm-contract-client froze 16 dependents of the completed
+ * 1047-sm-contract-client).
+ *
+ * `failOpen` (the caller's history/archive lookup failed this tick): any dep
+ * that resolves to no live row is 'satisfied' instead of 'unresolved'.
+ * `epicId` is the fallback Epic when resolve() is called without a dependent.
+ */
+function makeDepResolver(projectJobs, satisfiedSlugs = new Set(), opts = {}) {
+  const failOpen = opts.failOpen === true;
+  const satisfied = satisfiedSlugs instanceof Set ? satisfiedSlugs : new Set(satisfiedSlugs ?? []);
+  const rowBySlug = new Map();
+  const rowsByBareSlug = new Map();
+  for (const j of projectJobs) {
+    if (!rowBySlug.has(j.slug)) rowBySlug.set(j.slug, j);
+    const bare = bareSlug(j.slug);
+    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
+    rowsByBareSlug.get(bare).push(j);
+  }
+  let satisfiedBareSlugs = null;
+  const hasSatisfiedBare = (bare) => {
+    if (satisfiedBareSlugs === null) {
+      satisfiedBareSlugs = new Set();
+      for (const s of satisfied) satisfiedBareSlugs.add(bareSlug(s));
+    }
+    return satisfiedBareSlugs.has(bare);
+  };
+  const unresolved = () => (failOpen ? { kind: 'satisfied', rows: [] } : { kind: 'unresolved', rows: [] });
+
+  const resolve = (dep, dependentJob) => {
+    const exact = rowBySlug.get(dep);
+    if (exact) return { kind: 'row', rows: [exact] };
+    if (satisfied.has(dep)) return { kind: 'satisfied', rows: [] };
+    const bare = bareSlug(dep);
+    const depEpic = dependentJob ? epicOf(dependentJob) : (opts.epicId ?? null);
+    const sameEpic = (r) => depEpic != null && epicOf(r) === depEpic;
+    const bareRows = rowsByBareSlug.get(bare) ?? [];
+    const bareSatisfied = hasSatisfiedBare(bare);
+    const live = (rows) => (bareSatisfied ? rows.filter((r) => !isCancelledRow(r)) : rows);
+
+    if (isPrefixedSlug(dep)) {
+      const rows = live(bareRows.filter(sameEpic));
+      return rows.length > 0 ? { kind: 'row', rows } : unresolved();
+    }
+    const preferred = bareRows.filter(sameEpic);
+    const rows = live(preferred.length > 0 ? preferred : bareRows);
+    if (rows.length > 0) return { kind: 'row', rows };
+    if (bareSatisfied) return { kind: 'satisfied', rows: [] };
+    return unresolved();
+  };
+  const rowsForDep = (dep, dependentJob) => resolve(dep, dependentJob).rows;
+  const isKnownSatisfied = (dep, dependentJob) => resolve(dep, dependentJob).kind === 'satisfied';
+  return { resolve, rowsForDep, isKnownSatisfied };
+}
+
+module.exports = {
+  bareSlug, resolveDepSlug, findNearMatches, isSatisfiedDepRow, isCancelledRow, epicOf, makeDepResolver,
+};

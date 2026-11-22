@@ -1075,3 +1075,106 @@ test('run+externalRef: a record that fails twice still answers 200 with external
   expect(s.launches).toHaveLength(1);
   expect(warns.some((w) => /recordExternalRef/.test(w) && /disk full/.test(w))).toBe(true);
 });
+
+// --- surface 'project-video' (one project's own Video tool) -----------------
+
+const VIDEO_JOB = { estimateMinutes: 20, repoPaths: ['web/videos'], review: true };
+
+test('project-video create with a verified quote stores projects [cwd] and job; a caller projects value is ignored', async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const origin = 'sess-pv-ok';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const res = await adminHttp.call('POST', '/admin/macros/save', {
+    body: {
+      cwd, ...MAC, label: 'Short video', surface: 'project-video', job: VIDEO_JOB, projects: ['*'],
+      humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin,
+    },
+  });
+  expect(res.status).toBe(200);
+  expect(res.body.macro).toMatchObject({ surface: 'project-video', projects: [fs.realpathSync(cwd)], job: VIDEO_JOB });
+  const ev = saveEvents(res.body.macro.id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({ surface: 'project-video', projects: [fs.realpathSync(cwd)], humanRequestQuote: PH_QUOTE });
+  expect(getChangedCount()).toBe(1);
+  humanLedger._resetForTests();
+});
+
+test('project-video save without a verified Project Home quote is a 400; no write, onChanged or audit', async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const origin = 'sess-pv-refuse';
+  humanLedger.recordHumanPrompt(origin, 'keep this for this project only');
+  for (const extra of [
+    {},
+    { humanRequestQuote: PH_QUOTE },
+    { humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin },
+    { humanRequestQuote: 'keep this for this project only', originClaudeSessionId: origin },
+  ]) {
+    const res = await adminHttp.call('POST', '/admin/macros/save', {
+      body: { cwd, ...MAC, label: 'PvRefused', surface: 'project-video', job: VIDEO_JOB, ...extra },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toContain('Project Home');
+  }
+  expect(getChangedCount()).toBe(0);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  expect(list.body.macros.map((m) => m.label)).not.toContain('PvRefused');
+  humanLedger._resetForTests();
+});
+
+test("project-video tool is listed (with surface and job) only in its own project", async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp } = await setupDelete();
+  const other = await mkProjectCwd();
+  const origin = 'sess-pv-list';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const res = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, ...MAC, label: 'Mine', surface: 'project-video', job: VIDEO_JOB, humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin },
+  });
+  expect(res.status).toBe(200);
+  const own = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  expect(own.body.macros.find((m) => m.id === res.body.macro.id)).toMatchObject({ surface: 'project-video', job: VIDEO_JOB });
+  const foreign = await adminHttp.call('GET', '/admin/macros', { query: { cwd: other } });
+  expect(foreign.body.macros.map((m) => m.id)).not.toContain(res.body.macro.id);
+  humanLedger._resetForTests();
+});
+
+test('project-video move: this project\'s macro moves in place keeping its id; foreign, multi-project, * and built-in are refused', async () => {
+  humanLedger._resetForTests();
+  const { cwd, filePath, adminHttp } = await setupDelete();
+  const other = await mkProjectCwd();
+  const origin = 'sess-pv-move';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const verified = { humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin };
+
+  const plain = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'ToMove' } });
+  const id = plain.body.macro.id;
+  const moved = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, id, ...MAC, label: 'ToMove', surface: 'project-video', job: VIDEO_JOB, ...verified },
+  });
+  expect(moved.status).toBe(200);
+  expect(moved.body.macro).toMatchObject({ id, surface: 'project-video', projects: [fs.realpathSync(cwd)], job: VIDEO_JOB });
+  const relabel = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, id, ...MAC, label: 'Moved', ...verified } });
+  expect(relabel.status).toBe(200);
+  expect(relabel.body.macro).toMatchObject({ id, label: 'Moved', surface: 'project-video', job: VIDEO_JOB });
+  const all = (await macroLib.listMacros({ filePath })).filter((m) => m.label === 'Moved' || m.label === 'ToMove');
+  expect(all).toHaveLength(1);
+
+  const foreign = await macroLib.saveMacro({ ...MAC, label: 'Foreign', projects: [fs.realpathSync(other)] }, { filePath });
+  const multi = await macroLib.saveMacro({ ...MAC, label: 'Multi', projects: [fs.realpathSync(cwd), fs.realpathSync(other)] }, { filePath });
+  const star = await macroLib.saveMacro({ ...MAC, label: 'Star', projects: ['*'] }, { filePath });
+  for (const [mid, msg] of [[foreign.id, 'not visible'], [multi.id, null], [star.id, null], ['builtin-x', 'built-in']]) {
+    const res = await adminHttp.call('POST', '/admin/macros/save', {
+      body: { cwd, id: mid, ...MAC, surface: 'project-video', job: VIDEO_JOB, ...verified },
+    });
+    expect(res.status).toBe(400);
+    if (msg) expect(res.body.error).toContain(msg);
+  }
+  const after = await macroLib.listMacros({ filePath });
+  for (const mid of [foreign.id, multi.id, star.id]) {
+    expect(after.find((m) => m.id === mid).surface).toBe('sessions');
+  }
+  humanLedger._resetForTests();
+});

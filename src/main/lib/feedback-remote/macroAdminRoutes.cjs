@@ -3,7 +3,7 @@
  * the scheduler MCP) can list, create/update and delete a HOT KEYS macro
  * for its own project, through the existing macroLibrary.cjs store:
  *   GET  /admin/macros?cwd=…                          -> { ok, macros }
- *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt, inputs?}
+ *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt, inputs?, surface?, job?}
  *   POST /admin/macros/delete {cwd, id, originClaudeSessionId?}
  *                                                     -> { ok, deleted, macro }
  * delete removes the macro from THIS project through
@@ -28,6 +28,12 @@
  * VERIFIED human request: body.humanRequestQuote must appear in a prompt the
  * human typed into body.originClaudeSessionId (humanPromptLedger) AND name
  * every/all projects (or, for a 'project-home' macro, Project Home). Otherwise 400, no write, no onChanged, no audit.
+ *
+ * A save whose resulting surface is 'project-video' (one project's own Video
+ * tool, Project Home ▸ Video) may carry `job` (forwarded to saveMacro), always
+ * needs the same verified quote as a 'project-home' save, and ignores a
+ * caller's `projects`: a create stores [resolvedCwd], an update keeps the
+ * stored projects, so the library refuses a '*' or multi-project macro.
  *
  * Every successful save appends one `admin_macro_save` audit event and calls
  * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
@@ -79,20 +85,23 @@ function quoteNamesProjectHome(quote) {
   return PROJECT_HOME_RE.test(q);
 }
 
+const PROJECT_VIDEO_HINT =
+  "a Project Video tool (Project Home ▸ Video, this project only) needs humanRequestQuote (the human's words naming Project Home); the human can add one from Project Home ▸ Video";
 const HUMAN_HINT = "the human can set 'Show in every project' in the macro editor";
 const PROJECT_HOME_HINT =
   "a Project Home tool is shown in every project's Project Home, so it needs humanRequestQuote (the human's words asking for a Project Home tool); the human can add one from Project Home ▸ Tools ▸ Add a tool";
 
-/** Fail-closed check that a human asked for an all-projects macro (or a Project Home tool). */
-function verifyAllProjectsRequest(body, { projectHome = false } = {}) {
-  const hint = projectHome ? PROJECT_HOME_HINT : HUMAN_HINT;
+/** Fail-closed check that a human asked for an all-projects macro (or a Project Home / Project Video tool). */
+function verifyAllProjectsRequest(body, { projectHome = false, projectVideo = false } = {}) {
+  const hint = projectVideo ? PROJECT_VIDEO_HINT : projectHome ? PROJECT_HOME_HINT : HUMAN_HINT;
+  const what = projectVideo ? 'a Project Video tool' : 'a macro shown in every project';
   const quote = body.humanRequestQuote;
   if (typeof quote !== 'string' || !quote.trim()) {
-    return { ok: false, reason: `a macro shown in every project needs humanRequestQuote (a verbatim human request); ${hint}` };
+    return { ok: false, reason: `${what} needs humanRequestQuote (a verbatim human request); ${hint}` };
   }
   const origin = body.originClaudeSessionId;
   if (typeof origin !== 'string' || origin.length < 1 || origin.length > 128) {
-    return { ok: false, reason: `a macro shown in every project needs originClaudeSessionId (1-128 chars); ${hint}` };
+    return { ok: false, reason: `${what} needs originClaudeSessionId (1-128 chars); ${hint}` };
   }
   if (!findHumanPromptContaining(origin, quote)) {
     return { ok: false, reason: `humanRequestQuote was not found in a prompt the human typed in this session; ${hint}` };
@@ -155,12 +164,6 @@ function saveHandler(onChanged, libOpts) {
       sendJson(res, 400, { ok: false, error: 'built-in macros cannot be edited through this route' });
       return;
     }
-    const p = body.projects;
-    if (p !== undefined && !(Array.isArray(p) && p.length === 1 && p[0] === macroLibrary.ALL_PROJECTS)) {
-      sendJson(res, 400, { ok: false, error: 'projects: only ["*"] is accepted; omit it to use the current project' });
-      return;
-    }
-    const wantsAll = p !== undefined;
     let input;
     try {
       input = macroLibrary.MacroSaveSchema.parse({
@@ -171,6 +174,7 @@ function saveHandler(onChanged, libOpts) {
         prompt: body.prompt,
         inputs: body.inputs,
         surface: body.surface,
+        job: body.job,
       });
     } catch (e) {
       sendJson(res, 400, { ok: false, error: e?.issues?.[0]?.message ?? e?.message ?? 'invalid payload' });
@@ -191,10 +195,18 @@ function saveHandler(onChanged, libOpts) {
     }
     const resultSurface = input.surface ?? existing?.surface ?? 'sessions';
     const projectHome = resultSurface === 'project-home';
+    // A Project Video tool belongs to the resolved project only: a caller's `projects` is ignored.
+    const projectVideo = resultSurface === 'project-video';
+    const p = projectVideo ? undefined : body.projects;
+    if (p !== undefined && !(Array.isArray(p) && p.length === 1 && p[0] === macroLibrary.ALL_PROJECTS)) {
+      sendJson(res, 400, { ok: false, error: 'projects: only ["*"] is accepted; omit it to use the current project' });
+      return;
+    }
+    const wantsAll = p !== undefined;
     const allProjects = Boolean(existing?.projects.includes(macroLibrary.ALL_PROJECTS)) || wantsAll || projectHome;
     let quote = null;
-    if (allProjects) {
-      const v = verifyAllProjectsRequest(body, { projectHome });
+    if (allProjects || projectVideo) {
+      const v = verifyAllProjectsRequest(body, { projectHome: projectHome || projectVideo, projectVideo });
       if (!v.ok) {
         sendJson(res, 400, { ok: false, error: v.reason });
         return;
@@ -204,10 +216,10 @@ function saveHandler(onChanged, libOpts) {
     if (!input.id) {
       input = {
         ...input,
-        projects: wantsAll || projectHome ? [macroLibrary.ALL_PROJECTS] : [resolved.cwd],
+        projects: (wantsAll || projectHome) && !projectVideo ? [macroLibrary.ALL_PROJECTS] : [resolved.cwd],
         surface: input.surface ?? 'sessions',
       };
-    } else if (wantsAll || projectHome) {
+    } else if ((wantsAll || projectHome) && !projectVideo) {
       input = { ...input, projects: [macroLibrary.ALL_PROJECTS] };
     }
     let macro;

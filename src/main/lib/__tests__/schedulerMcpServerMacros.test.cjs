@@ -357,7 +357,7 @@ test('macro_save forwards surface, projects, humanRequestQuote and originClaudeS
   setDeleteEnv({ chat: 'chat-123' });
   const { handleCallTool, TOOLS, requests } = await deleteHarness({ ok: true, macro: { id: 'm1' } });
   const tool = TOOLS.find((t) => t.name === 'macro_save');
-  expect(tool.inputSchema.properties.surface.enum).toEqual(['sessions', 'project-home']);
+  expect(tool.inputSchema.properties.surface.enum).toEqual(['sessions', 'project-home', 'project-video']);
   expect(tool.inputSchema.properties.projects.type).toBe('array');
   expect(tool.inputSchema.properties.humanRequestQuote.type).toBe('string');
   const result = await callTool(handleCallTool, 'macro_save', {
@@ -428,4 +428,62 @@ test('macro_save turns an admin { ok: false, error } into an error result', asyn
   const result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, projects: ['*'], humanRequestQuote: 'x' });
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toContain('quote not found in chat');
+});
+
+const PV_JOB = { estimateMinutes: 20, repoPaths: ['web/videos'], review: true };
+
+test('macro_save schema declares surface project-video and a job object', async () => {
+  const { TOOLS } = await deleteHarness({ ok: true });
+  const props = TOOLS.find((t) => t.name === 'macro_save').inputSchema.properties;
+  expect(props.surface.enum).toContain('project-video');
+  expect(props.surface.description).toContain("THIS project's Project Home ▸ Video only");
+  expect(props.surface.description).toContain('Demo Video');
+  expect(props.surface.description).toContain('humanRequestQuote naming Project Home');
+  expect(props.job.type).toBe('object');
+  expect(Object.keys(props.job.properties)).toEqual(['estimateMinutes', 'repoPaths', 'review']);
+});
+
+test('macro_save with surface project-video in a chat session forwards surface, job, quote and origin', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, requests } = await deleteHarness({ ok: true, macro: { id: 'm1' } });
+  const result = await callTool(handleCallTool, 'macro_save', {
+    ...SAVE_ARGS, surface: 'project-video', job: PV_JOB, humanRequestQuote: 'add a Project Home video tool',
+  });
+  expect(result.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body).toMatchObject({
+    surface: 'project-video',
+    job: PV_JOB,
+    humanRequestQuote: 'add a Project Home video tool',
+    originClaudeSessionId: 'chat-123',
+  });
+});
+
+test('macro_save forwards job: null and drops a non-object job', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, requests } = await deleteHarness({ ok: true, macro: { id: 'm1' } });
+  await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, id: 'm1', surface: 'project-video', job: null, humanRequestQuote: 'q' });
+  await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, id: 'm1', surface: 'project-video', job: 'x', humanRequestQuote: 'q' });
+  expect(requests).toHaveLength(2);
+  expect(requests[0].body.job).toBeNull();
+  expect(Object.prototype.hasOwnProperty.call(requests[1].body, 'job')).toBe(false);
+});
+
+test('macro_save with surface project-video refuses in a job or outside a session, without HTTP', async () => {
+  const { handleCallTool, requests } = await deleteHarness({ ok: true });
+  setDeleteEnv({ chat: 'chat-123', slug: 'some-job' });
+  let result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, surface: 'project-video', job: PV_JOB });
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('Project Home ▸ Video');
+  setDeleteEnv({});
+  result = await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, surface: 'project-video', job: PV_JOB });
+  expect(result.isError).toBe(true);
+  expect(requests).toHaveLength(0);
+});
+
+test('macro_list returns a project-video tool with its surface and job', async () => {
+  const macro = { id: 'pv-1', label: 'V', surface: 'project-video', projects: ['/p'], job: PV_JOB };
+  const { handleCallTool } = await deleteHarness({ ok: true, macros: [macro] });
+  const result = await callTool(handleCallTool, 'macro_list', {});
+  expect(JSON.parse(result.content[0].text).macros[0]).toMatchObject({ surface: 'project-video', job: PV_JOB });
 });

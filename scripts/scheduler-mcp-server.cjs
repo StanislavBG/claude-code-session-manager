@@ -21,7 +21,7 @@
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
- *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
+ *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, job?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
  *   macro_delete({ id }) -> POST /admin/macros/delete
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
@@ -879,9 +879,19 @@ const TOOLS = [
         agentName: { type: 'string', description: 'Persona to run the macro as (e.g. "builder").' },
         tag: { type: 'string', description: 'Mission tag for the macro.' },
         prompt: { type: 'string', description: 'The opening prompt the macro sends. Write input placeholders as {{name}}; each is filled from the matching entry in `inputs` when the macro is pressed.' },
-        surface: { type: 'string', enum: ['sessions', 'project-home'], description: "Where the macro shows: 'sessions' = Sessions HOT KEYS strip; 'project-home' = a tool in Project Home ▸ Tools, shown in every project (only what it generates is per project). A 'project-home' save needs humanRequestQuote and a Session Manager chat session." },
+        surface: { type: 'string', enum: ['sessions', 'project-home', 'project-video'], description: "Where the macro shows: 'sessions' = Sessions HOT KEYS strip; 'project-home' = a tool in Project Home ▸ Tools, shown in every project (only what it generates is per project); 'project-video' = a tool in THIS project's Project Home ▸ Video only, beside Demo Video, that may carry job. A 'project-home' or 'project-video' save needs humanRequestQuote naming Project Home and a Session Manager chat session." },
+        job: {
+          type: 'object',
+          description: "Only with surface 'project-video': the tool runs as a background job. Omit on update to keep the stored job; pass null to remove it.",
+          properties: {
+            estimateMinutes: { type: 'integer', minimum: 5, maximum: 60, description: 'Expected run time in minutes (5-60).' },
+            repoPaths: { type: 'array', items: { type: 'string' }, description: 'Optional: repo-relative paths the job may write (1-20, "/"-separated, not under session-manager-operations/ or .git).' },
+            review: { type: 'boolean', description: 'Optional: true = the result waits for a human review step.' },
+          },
+          required: ['estimateMinutes'],
+        },
         projects: { type: 'array', items: { type: 'string' }, description: 'Optional: only ["*"] is accepted, to show the macro in every project. Needs humanRequestQuote and a Session Manager chat session.' },
-        humanRequestQuote: { type: 'string', description: "With projects [\"*\"] or surface 'project-home': the exact words the human typed in this chat asking for every project or for a Project Home tool." },
+        humanRequestQuote: { type: 'string', description: "With projects [\"*\"] or surface 'project-home' / 'project-video': the exact words the human typed in this chat asking for every project or naming Project Home." },
         inputs: {
           type: 'array',
           description: 'Optional input fields the human fills in before the macro runs. Prompt placeholders are written as {{name}}. Omit on update to keep the existing inputs; pass [] to clear them.',
@@ -1496,6 +1506,12 @@ async function handleCallTool(request) {
           + 'Say in your final result that the human can add it from Project Home ▸ Tools ▸ Add a tool.',
         );
         if (refusal) return refusal;
+      } else if (args.surface === 'project-video') {
+        const refusal = humanSessionRefusal(
+          "refused: a Project Video tool (this project's Project Home ▸ Video) is saved only in a Session Manager chat session where the human asked for it. "
+          + 'Say in your final result that the human can add it from Project Home ▸ Video.',
+        );
+        if (refusal) return refusal;
       } else if (args.projects !== undefined) {
         const refusal = humanSessionRefusal(
           'refused: a macro shown in every project is saved only in a Session Manager chat session where the human asked for it. '
@@ -1509,6 +1525,7 @@ async function handleCallTool(request) {
       if (Array.isArray(args.inputs)) payload.inputs = args.inputs;
       if (typeof args.surface === 'string') payload.surface = args.surface;
       if (Array.isArray(args.projects)) payload.projects = args.projects;
+      if (args.job === null || (args.job && typeof args.job === 'object' && !Array.isArray(args.job))) payload.job = args.job;
       if (typeof args.humanRequestQuote === 'string') payload.humanRequestQuote = args.humanRequestQuote;
       payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
       const result = await adminRequest('POST', '/admin/macros/save', payload);

@@ -645,7 +645,7 @@ function broadcastMacrosChanged() {
 ipcMain.handle('macros:list', () => macroLibrary.listMacros());
 // Background macro jobs: dispatch a built-in macro as a scheduler PRD inside an existing Epic.
 // createPrd is wired exactly as chat:create-prd (below) so its own reconcile request queues the row.
-require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, {
+const macroJobIpcDeps = {
   schemas,
   validatePath: require('./config.cjs').validatePath,
   readActiveIndex: require('./lib/epic/epicMint.cjs').readActiveIndex,
@@ -654,7 +654,11 @@ require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, {
   archivePrd: (slug, cwd) => queueOps.archiveMany([slug], cwd),
   // Durable 'job-not-queued' notice on the Epic when a dispatch fails (PRD 2950).
   appendResponseEventWithReason: promptSessionEvents.appendResponseEventWithReason,
-});
+};
+require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, macroJobIpcDeps);
+// Project Video review step: list + human decide (approve / ask for changes). Same deps
+// as macroJobIpc — a decision dispatches through runToolJob. Renderer IPC only.
+require('./lib/project-pages/videoReviewIpc.cjs').registerVideoReviewIpc(ipcMain, macroJobIpcDeps);
 // claudeConfig (lib/claudeConfig.cjs): key-scoped read/patch of Claude's JSON config files.
 // A successful patch broadcasts `config:changed` so renderer state refreshes.
 ipcMain.handle('claudeConfig:read', validated(schemas.claudeConfigRead, async (p) => {

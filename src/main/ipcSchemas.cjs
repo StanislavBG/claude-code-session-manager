@@ -1068,6 +1068,14 @@ const projectDemoVideoAdminWriteBody = z.object({
 // never match.
 const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const entryId = z.string().regex(ENTRY_ID_RE);
+// Project Video review step (project-pages/videoReviewIpc.cjs): renderer IPC only.
+const projectVideosReviewList = z.object({ cwd: z.string().min(1).max(4096) }).strict();
+const projectVideosReviewDecide = z.object({
+  cwd: z.string().min(1).max(4096),
+  entryId,
+  decision: z.enum(['approve', 'changes']),
+  note: z.string().max(2000).optional(),
+}).strict();
 const projectVideoReportFields = {
   lufs: z.number().nullable(),
   truePeakDb: z.number().nullable(),
@@ -1814,6 +1822,8 @@ module.exports = {
     macrosRemoveFromProject,
     macrosDispatchJob,
     macrosJobStatus,
+    projectVideosReviewList,
+    projectVideosReviewDecide,
     needsYouList,
     needsYouAnswer,
     agentsGetPersonaBody,

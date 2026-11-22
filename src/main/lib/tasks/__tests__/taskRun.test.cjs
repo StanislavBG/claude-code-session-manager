@@ -48,13 +48,34 @@ describe('buildTaskArgs', () => {
       '--max-turns', '12',
       '--system-prompt', 'SYS',
       '--dangerously-skip-permissions',
+      '--settings', expect.any(String),
       '--mcp-config', path.join(PROJ, 'cfg/mcp.json'), '/abs/other.json',
       '--tools', 'Read,Write',
       '--output-format', 'json',
     ]);
     expect(args).not.toContain('--append-system-prompt');
+    const settings = JSON.parse(args[args.indexOf('--settings') + 1]);
+    expect(Array.isArray(settings.permissions.deny)).toBe(true);
+    expect(settings.sandbox).toBeUndefined();
     const env = buildTaskEnv({ disableAutoMemory: true }, { A: '1' });
     expect(env).toEqual({ A: '1', SM_KG_INTERNAL: '1', SM_PROC_ROLE: 'aux', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });
+  });
+
+  test('dangerouslySkipPermissions: tool-rules level denies home secrets', () => {
+    const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime: { dangerouslySkipPermissions: true } });
+    const i = args.indexOf('--dangerously-skip-permissions');
+    expect(args[i + 1]).toBe('--settings');
+    const deny = JSON.parse(args[i + 2]).permissions.deny;
+    const home = os.homedir().replace(/^\/+/, '');
+    expect(deny).toContain(`Read(//${home}/.npmrc)`);
+    expect(deny).toContain(`Edit(//${home}/.ssh/**)`);
+  });
+
+  test('no dangerouslySkipPermissions: no bypass flag, no --settings', () => {
+    for (const runtime of [{}, { dangerouslySkipPermissions: 'yes' }, { dangerouslySkipPermissions: false }]) {
+      const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime });
+      expect(args).toEqual(['-p', '--model', 'm', '--effort', 'e', '--no-session-persistence', '--output-format', 'json']);
+    }
   });
 
   test('env: no auto-memory flag unless === true; no caller env leaks in', () => {

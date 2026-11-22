@@ -29,6 +29,7 @@ const { withProcRole } = require('../process/cleanEnv.cjs');
 const { killTree, detachedSpawnOpts } = require('../process/killTree.cjs');
 const memoryScope = require('../process/memoryScope.cjs');
 const { writeToolRiskGuardSettingsFile } = require('../epic/guardSpawnSettings.cjs');
+const { buildJobSandboxSettings } = require('../claude/jobSandboxPolicy.cjs');
 
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 16 * 1024;
@@ -61,7 +62,16 @@ function buildTaskArgs({ model, effort, runtime, projectCwd } = /** @type {any} 
   if (rt.strictMcpConfig === true) args.push('--strict-mcp-config');
   if (rt.maxTurns !== undefined && rt.maxTurns !== null) args.push('--max-turns', String(rt.maxTurns));
   if (typeof rt.systemPrompt === 'string') args.push('--system-prompt', rt.systemPrompt);
-  if (rt.dangerouslySkipPermissions === true) args.push('--dangerously-skip-permissions', ...headlessPermissionArgs());
+  if (rt.dangerouslySkipPermissions === true) {
+    // Tool-rules level of the job sandbox policy: bypass kept, home secrets denied.
+    // '--settings' takes one value, so it sits here, not in the variadic block below.
+    const root = path.resolve(base);
+    const policy = buildJobSandboxSettings({
+      agentType: 'task', worktreeDir: root, projectRoot: root,
+      homeDir: os.homedir(), tmpDir: os.tmpdir(), deps: { available: false, missing: [] },
+    });
+    args.push(...policy.argv, ...headlessPermissionArgs());
+  }
 
   // Variadic flags last-but-one: a following flag (--output-format) always ends their list.
   const mcp = rt.mcpConfig === undefined || rt.mcpConfig === null

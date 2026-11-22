@@ -505,3 +505,115 @@ blindly `git add -A`-ing both together. (Incident, 2026-08-02: a perf-fix sessio
 4-file diff coexisted with an unrelated concurrent rewrite of `chat.ts` and a mid-session
 `package.json` version bump neither of which it made, per that session's now-retired
 resume note.)
+
+## 11. Job sandbox
+
+Every headless PRD job is confined by
+[`jobSandboxPolicy.cjs`](../../src/main/lib/claude/jobSandboxPolicy.cjs). `executeJob` in
+`scheduler.cjs` calls `buildJobSandboxSettings({ agentType, worktreeDir, projectRoot, homeDir,
+tmpDir, deps: resolveJobSandboxDeps() })` and passes its `argv` to `buildClaudeSpawnArgs` as
+`sandboxArgs`, which replaces the old single `--dangerously-skip-permissions` flag. The
+investigation spawn (`spawnInvestigation`) calls it too, with `agentType: 'investigation'` (always `tool-rules`).
+
+### Two levels
+
+| Level | Who gets it | What it passes |
+| --- | --- | --- |
+| `os-sandbox` | `validator` and `dev-lead` (the keys of `SANDBOX_PROFILES`), **only** when the OS sandbox dependencies are present | No `--dangerously-skip-permissions`. `--permission-mode <profile mode>` plus `--settings` that turn on the CLI sandbox (`enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed`), allow `Read(//**)`, `Glob`, `Grep`, `Bash`, `Skill`, `Agent`, `ToolSearch`, `TodoWrite`, and deny the secret paths plus `WebFetch` and `WebSearch`. |
+| `tool-rules` | Every other persona, and `validator`/`dev-lead` when the dependencies are missing or disabled | Keeps `--dangerously-skip-permissions`, plus `--settings` with `permissions.deny` `Read`/`Edit` rules over the secret paths. This is a guard against plain tool use, not containment. |
+
+Dependencies (`sandboxDependencies`): Linux needs `bwrap` and `socat` on `PATH`; macOS needs
+`sandbox-exec`; any other platform is unsupported. On Linux `resolveJobSandboxDeps` also runs a
+`bwrap` self-test (`--unshare-net --unshare-pid -- true`); a failure degrades to `tool-rules`
+with reason `bwrap self-test failed`. The result is computed once per process and never throws.
+
+### Secret paths
+
+Relative to the home directory (`SANDBOX_SECRET_PATHS`). At both levels each gets
+`Read`/`Edit` deny rules on the path and `/**` under it; at `os-sandbox` each is also in
+`sandbox.filesystem.denyRead` and in `sandbox.credentials.files` with mode `deny`.
+
+`.npmrc`, `.netrc`, `.ssh`, `.gnupg`, `Self/secrets`, `.claude/.credentials.json`, `.config/gh`,
+`.google_workspace_mcp`, `.config/google-workspace-mcp`, `.aws`, `.docker/config.json`.
+
+Rule paths use a leading `//` for an absolute path (a single `/` would be relative to the
+settings file).
+
+### Profiles — write roots and network
+
+Both `os-sandbox` profiles share the same write roots (`sandbox.filesystem.allowWrite`):
+
+- the job worktree (`worktreeDir`);
+- `<projectRoot>/.git` — a job worktree commits into the main checkout's `.git` (objects, refs,
+  `worktrees/<name>`); the CLI keeps `.git/hooks` and `.git/config` read-only itself;
+- the OS temp dir (`tmpDir`);
+- `~/.npm` and `~/.cache`;
+- `<projectRoot>/node_modules/.vite` and `<projectRoot>/node_modules/.vitest`.
+
+| Profile | `--permission-mode` | Bash network allowlist (`strictAllowlist: true`) |
+| --- | --- | --- |
+| `validator` | `default` | none (empty list) |
+| `dev-lead` | `acceptEdits` | `registry.npmjs.org` |
+
+A `tool-rules` job has no write or network restriction beyond the secret deny rules.
+
+### Personas today and next stage
+
+One row per file in `src/seed/agents/`. Next-stage allowance is read from the persona's `tools:`
+line (`WebFetch`/`WebSearch` = web; a release persona = npm registry; else none);
+`validator` and `dev-lead` keep their current profile.
+
+| Persona | Level today | Next-stage network |
+| --- | --- | --- |
+| `architect` | `tool-rules` | none |
+| `blender-artist` | `tool-rules` | none |
+| `competitive-analyst` | `tool-rules` | web |
+| `competitive-researcher` | `tool-rules` | web |
+| `demo-video-builder` | `tool-rules` | none |
+| `dev-lead` | `os-sandbox` when available | npm registry (already live) |
+| `project-home-builder` | `tool-rules` | none |
+| `validator` | `os-sandbox` when available | none (already live) |
+
+### Switch and run meta
+
+- `SM_JOB_SANDBOX=0` in the app's environment makes `resolveJobSandboxDeps` report
+  `missing: ['disabled by SM_JOB_SANDBOX=0']`, so every job runs at `tool-rules` (the secret
+  deny rules stay).
+- Every job's run meta JSON carries a `sandbox` key — `{ level, profile, network, reason }`
+  (`network` is `null` at `tool-rules`; `reason` says why a job fell back, e.g.
+  `no sandbox profile for persona architect` or `OS sandbox unavailable, missing: socat`). The
+  scheduler log has the same line: `[scheduler] sandbox: level=… profile=… network=… reason=…`.
+
+### Probe
+
+`npm run probe:job-sandbox` (`scripts/job-sandbox-probe.cjs`) is a manual developer probe, not
+part of any gate. For each profile it runs one short `claude -p --model haiku` with the real
+policy argv against a throwaway fake home holding canary secrets, asks it to read the secrets,
+write outside its worktree and fetch an off-allowlist domain, and reports every escape. Exit 0 =
+contained, 1 = an escape or a failed positive control (the inside write), 2 = SKIP (dependencies
+missing). `node scripts/job-sandbox-probe.cjs --dry-run` prints `{ deps, profiles }` and spawns
+nothing.
+
+### Evidence (CLI 2.1.325, 2026-11-22, canary files)
+
+- `permissions.deny` rules passed with `--settings` held under `--dangerously-skip-permissions`
+  for the Read and Write tools and for plain Bash `cat` or redirect, with a reported error.
+- `python3 -c "open(...)"` and `sh -c 'cat $1'` bypassed those same rules.
+- `--permission-mode acceptEdits` plus `--permission-prompts none` confined the Read and Write
+  tools to the cwd and `--add-dir`, but not Bash.
+- `sandbox.enabled` with `failIfUnavailable` refused to start without `socat`.
+
+### Residual risks
+
+- **The CLI sandbox wraps Bash only.** Hooks and MCP servers run outside it; in-process tools
+  are governed by the permission rules, not the OS sandbox.
+- **Tool rules are bypassed by interpreters without the OS layer.** At `tool-rules` a job can
+  read a secret with `python3`, `node` or `sh -c`.
+- **The `.git` common dir is writable** so a job can commit; a job can therefore rewrite refs and
+  objects of the main checkout.
+- **WebFetch is not gated by the sandbox network allowlist** — the allowlist covers Bash only.
+  `os-sandbox` denies `WebFetch`/`WebSearch` outright; at `tool-rules` they are unrestricted.
+- **No nested user namespaces inside sandboxed Bash** — Chromium/Electron's own sandbox (and so
+  Playwright e2e) cannot start there.
+- **`socat` is required on Linux.** Without it `validator` and `dev-lead` fall back to
+  `tool-rules`.

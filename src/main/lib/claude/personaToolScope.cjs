@@ -12,9 +12,11 @@
  * working.
  *
  * Scoping is focus, not containment: the scope decides which tools a job is
- * offered. Every headless job runs as the owner's OS user with
- * --dangerously-skip-permissions, so a job with Bash can still start an MCP
- * server or call the admin API itself.
+ * offered. Every headless job runs as the owner's OS user. Sandboxed personas
+ * (validator, dev-lead when the OS sandbox is available) no longer run with
+ * --dangerously-skip-permissions; every other job still does, under secret-path
+ * deny rules — see jobSandboxPolicy.cjs. Either way a job with Bash can still
+ * start an MCP server or call the admin API itself.
  *
  * Pure: no fs, and no require of scheduler.cjs (cycle) — the caller passes its
  * HEADLESS_DISALLOWED_TOOLS list in.

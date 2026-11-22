@@ -100,6 +100,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
 - A `needs_review` park self-heals first; its Epic gets one grouped notice when the ladder fails or the hold ends — never mints work.
+- **Headless jobs run sandboxed** (`jobSandboxPolicy.cjs`): secrets unreadable; validator/dev-lead drop --dangerously-skip-permissions — [policy](session-manager-operations/architecture/scheduler-operations.md#11-job-sandbox).
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
 - Stuck queue / parked `needs_review`? See
   [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) (ladder + diagnosis).

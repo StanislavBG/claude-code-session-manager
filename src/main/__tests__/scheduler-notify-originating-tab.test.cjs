@@ -579,6 +579,39 @@ describe("transcript", () => {
       expect(appendResponseEvent.mock.calls[0][2]).toContain('(failed)');
     });
 
+    test('failed approved final run of a video review → points at the entry Retry button', async () => {
+      const cwd = mkProject();
+      const reviewDir = nodePath.join(cwd, 'session-manager-operations', 'project-pages', 'videos', 'vid-final1', 'review');
+      fs.mkdirSync(reviewDir, { recursive: true });
+      fs.writeFileSync(nodePath.join(reviewDir, 'dispatch.json'), JSON.stringify({
+        entryId: 'vid-final1', macroId: 'builtin-demo-video', slug: '9020-final', stage: 'final', dispatchedAt: new Date().toISOString(),
+      }));
+      const prd = { macroId: 'builtin-demo-video', artifactPaths: ['session-manager-operations/project-pages/videos/vid-final1/index.html'] };
+      let { appendResponseEvent } = await run({ slug: '9020-final', status: 'failed', cwd, error: 'gate red' }, prd);
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('FAILED — Demo Video: the approved final run for entry vid-final1 failed (gate red). Press Retry on it in Project Home ▸ Video; your approval is kept.');
+      expect(appendResponseEvent.mock.calls[0][3]).toMatchObject({ notice: 'build-failed', outcome: 'failed' });
+      // A different slug, or a non-final stage, keeps today's message.
+      ({ appendResponseEvent } = await run({ slug: '9020-other', status: 'failed', cwd, error: 'gate red' }, prd));
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('FAILED — Demo Video: the background build failed (gate red). Press it again in Project Home to retry.');
+      fs.writeFileSync(nodePath.join(reviewDir, 'dispatch.json'), JSON.stringify({
+        entryId: 'vid-final1', macroId: 'builtin-demo-video', slug: '9020-final', stage: 'review', dispatchedAt: new Date().toISOString(),
+      }));
+      ({ appendResponseEvent } = await run({ slug: '9020-final', status: 'failed', cwd, error: 'gate red' }, prd));
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('FAILED — Demo Video: the background build failed (gate red). Press it again in Project Home to retry.');
+    });
+
+    test('listReviews throwing falls back to the generic FAILED text', async () => {
+      const cwd = mkProject();
+      // videos/ as a FILE → readdir throws ENOTDIR (not ENOENT) inside listReviews.
+      fs.mkdirSync(nodePath.join(cwd, 'session-manager-operations', 'project-pages'), { recursive: true });
+      fs.writeFileSync(nodePath.join(cwd, 'session-manager-operations', 'project-pages', 'videos'), 'x');
+      const { appendResponseEvent } = await run(
+        { slug: '9021-throw', status: 'failed', cwd, error: 'boom' },
+        { macroId: 'builtin-demo-video' },
+      );
+      expect(appendResponseEvent.mock.calls[0][2]).toBe('FAILED — Demo Video: the background build failed (boom). Press it again in Project Home to retry.');
+    });
+
     test('path-traversal entry id is rejected → label-only DONE, no buildOutput', async () => {
       const cwd = mkProject();
       // A readable meta.json one level up that a traversal would reach.

@@ -3732,15 +3732,33 @@ function readMacroBuildOutput(cwd, prd) {
 }
 
 /**
- * macroBuildNotice(job, prd) → { message, notice, buildOutput? } | null
+ * macroBuildNotice(job, prd) → Promise<{ message, notice, buildOutput? } | null>
  * null for any PRD without a `macroId`, or a status other than completed/failed.
+ * A failed job that is the approved 'final' run of a video review points at
+ * that entry's Retry button (pressing the tool again would restart the
+ * review). Async because videoReview.listReviews is; never rejects.
  */
-function macroBuildNotice(job, prd) {
+async function macroBuildNotice(job, prd) {
   if (!prd || typeof prd.macroId !== 'string' || !prd.macroId) return null;
   if (job.status !== 'completed' && job.status !== 'failed') return null;
   const label = macroLabelFor(prd);
   if (job.status === 'failed') {
     const reason = job.error || job.verifierVerdict || job.status;
+    try {
+      if (job.cwd && job.slug) {
+        const videoReview = require('./lib/project-pages/videoReview.cjs');
+        const reviews = await videoReview.listReviews(job.cwd);
+        const hit = reviews.find((r) => r && r.dispatch && r.dispatch.stage === 'final' && r.dispatch.slug === job.slug);
+        if (hit) {
+          return {
+            message: `FAILED — ${label}: the approved final run for entry ${hit.entryId} failed (${reason}). Press Retry on it in Project Home ▸ Video; your approval is kept.`,
+            notice: 'build-failed',
+          };
+        }
+      }
+    } catch {
+      // fall through to the generic failed message
+    }
     return {
       message: `FAILED — ${label}: the background build failed (${reason}). Press it again in Project Home to retry.`,
       notice: 'build-failed',
@@ -3827,7 +3845,7 @@ async function notifyOriginatingTab(job, {
       message = `PRD ${job.slug} was skipped: its PRD source could not be found on disk. Blocked dependents: ${shown}${more}.`
         + ' If the PRD file exists, run scheduler_reset_job with force:true; if it was intentionally removed, archive it with scheduler_archive_prd.';
     }
-    const macroNotice = macroBuildNotice(job, prd);
+    const macroNotice = await macroBuildNotice(job, prd);
     if (macroNotice) message = macroNotice.message;
 
     // The EPIC this check-in belongs to. Deliberately does NOT consider

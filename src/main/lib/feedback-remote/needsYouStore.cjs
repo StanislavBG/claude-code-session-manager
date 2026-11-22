@@ -166,11 +166,19 @@ async function listNeedsYou(filter = {}) {
   return items.filter((it) => (app === undefined || it.app === app) && (status === undefined || it.status === status));
 }
 
+/** The caller fields a post may set on an open item. */
+function callerKey(item) {
+  return JSON.stringify([item.title, item.why, item.link, item.options, item.externalRef]);
+}
+
 /**
- * Create an open item, or update title/why/link/options of an existing open
- * item with the same app + id. A closed item is returned unchanged.
+ * Create an open item, or replace title/why/link/options/externalRef of an
+ * existing open item with the same app + id (a left-out field is cleared).
+ * A closed item is returned unchanged. `changed` is decided inside the write
+ * queue: true on create or when a stored field differs; an identical re-post
+ * writes nothing and keeps updatedAt.
  * @param {unknown} input
- * @returns {Promise<{ item: NeedsYouItem, created: boolean }>}
+ * @returns {Promise<{ item: NeedsYouItem, created: boolean, changed: boolean }>}
  */
 async function postNeedsYou(input) {
   const data = NeedsYouPostSchema.parse(input);
@@ -180,14 +188,17 @@ async function postNeedsYou(input) {
     const now = new Date().toISOString();
     const existing = items.find((it) => it.app === data.app && it.id === data.id);
     if (existing) {
-      if (existing.status !== 'open') return { item: existing, created: false };
+      if (existing.status !== 'open') return { item: existing, created: false, changed: false };
+      const before = callerKey(existing);
       existing.title = data.title;
       existing.why = data.why ?? '';
       existing.link = data.link ?? null;
       existing.options = data.options ?? null;
+      existing.externalRef = data.externalRef ?? null;
+      if (callerKey(existing) === before) return { item: existing, created: false, changed: false };
       existing.updatedAt = now;
       await writeStore(filePath, items);
-      return { item: existing, created: false };
+      return { item: existing, created: false, changed: true };
     }
     const open = items.filter((it) => it.status === 'open');
     if (open.filter((it) => it.app === data.app).length >= MAX_OPEN_PER_APP) {
@@ -213,7 +224,7 @@ async function postNeedsYou(input) {
     };
     items.push(item);
     await writeStore(filePath, items);
-    return { item, created: true };
+    return { item, created: true, changed: true };
   });
 }
 

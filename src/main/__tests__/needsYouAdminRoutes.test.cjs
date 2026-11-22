@@ -117,6 +117,38 @@ test('POST /admin/needs-you that changes nothing writes no row and no onChanged'
   expect(auditRows('needs_you_posted')).toHaveLength(1);
 });
 
+test('POST /admin/needs-you answer carries changed; identical re-post: changed false, no row', async () => {
+  const first = await routes.call('POST', '/admin/needs-you', { body: POST });
+  expect(first.body).toMatchObject({ ok: true, created: true, changed: true });
+  const same = await routes.call('POST', '/admin/needs-you', { body: POST });
+  expect(same.body).toMatchObject({ ok: true, created: false, changed: false });
+  expect(auditRows('needs_you_posted')).toHaveLength(1);
+  expect(changed).toBe(1);
+});
+
+test('POST /admin/needs-you with another externalRef stores it and logs it', async () => {
+  await routes.call('POST', '/admin/needs-you', { body: POST });
+  const r = await routes.call('POST', '/admin/needs-you', { body: { ...POST, externalRef: 'portfolio:q-1b' } });
+  expect(r.body).toMatchObject({ ok: true, created: false, changed: true, item: { externalRef: 'portfolio:q-1b' } });
+  const rows = auditRows('needs_you_posted');
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toMatchObject({ externalRef: 'portfolio:q-1b', created: false });
+  const list = await routes.call('GET', '/admin/needs-you', { query: { app: 'portfolio' } });
+  expect(list.body.items[0].externalRef).toBe('portfolio:q-1b');
+});
+
+test('two POSTs issued together: at most one audit row per real change', async () => {
+  await routes.call('POST', '/admin/needs-you', { body: POST });
+  const next = { ...POST, title: 'Ship it today?' };
+  const [a, b] = await Promise.all([
+    routes.call('POST', '/admin/needs-you', { body: next }),
+    routes.call('POST', '/admin/needs-you', { body: next }),
+  ]);
+  expect([a.body.changed, b.body.changed].filter(Boolean)).toHaveLength(1);
+  expect(auditRows('needs_you_posted')).toHaveLength(2);
+  expect(changed).toBe(2);
+});
+
 test('POST /admin/needs-you invalid input: 400 with the first problem in words', async () => {
   const r = await routes.call('POST', '/admin/needs-you', { body: { ...POST, app: 'bad app!' } });
   expect(r.status).toBe(400);

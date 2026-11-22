@@ -90,11 +90,41 @@ test('post on an existing open item updates title, why, link, options', async ()
   expect(await store.listNeedsYou({})).toHaveLength(1);
 });
 
+test('post reports changed: true on create and on a real change, false on an identical re-post', async () => {
+  const first = await store.postNeedsYou(base({ options: ['A', 'B'], externalRef: 'ext:1' }));
+  expect(first).toMatchObject({ created: true, changed: true });
+  const same = await store.postNeedsYou(base({ options: ['A', 'B'], externalRef: 'ext:1' }));
+  expect(same).toMatchObject({ created: false, changed: false });
+  expect(same.item.updatedAt).toBe(first.item.updatedAt);
+  const diff = await store.postNeedsYou(base({ options: ['A', 'C'], externalRef: 'ext:1' }));
+  expect(diff).toMatchObject({ created: false, changed: true });
+});
+
+test('a re-post replaces externalRef; absent clears it', async () => {
+  await store.postNeedsYou(base({ externalRef: 'ext:1' }));
+  const r = await store.postNeedsYou(base({ externalRef: 'ext:2' }));
+  expect(r).toMatchObject({ changed: true, item: { externalRef: 'ext:2' } });
+  expect(readFile().items[0].externalRef).toBe('ext:2');
+  const cleared = await store.postNeedsYou(base());
+  expect(cleared).toMatchObject({ changed: true, item: { externalRef: null } });
+  expect(readFile().items[0].externalRef).toBeNull();
+});
+
+test('two identical posts issued together: exactly one reports changed', async () => {
+  await store.postNeedsYou(base());
+  const results = await Promise.all([
+    store.postNeedsYou(base({ title: 'Together' })),
+    store.postNeedsYou(base({ title: 'Together' })),
+  ]);
+  expect(results.filter((r) => r.changed)).toHaveLength(1);
+});
+
 test('post on an answered or withdrawn item changes nothing', async () => {
   await store.postNeedsYou(base({ options: ['A', 'B'] }));
   await store.answerNeedsYou({ app: 'portfolio', id: 'q-1', answer: 'A' });
   const r = await store.postNeedsYou(base({ title: 'Changed', options: ['X', 'Y'] }));
   expect(r.created).toBe(false);
+  expect(r.changed).toBe(false);
   expect(r.item).toMatchObject({ title: 'Pick a plan', status: 'answered', answer: 'A' });
 
   await store.postNeedsYou(base({ id: 'q-2' }));

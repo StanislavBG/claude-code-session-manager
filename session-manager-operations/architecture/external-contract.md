@@ -457,7 +457,7 @@ list, next to Session Manager's own items. The owner answers there, or in the ap
 
 | Route | Body / query | Answer |
 | --- | --- | --- |
-| `POST /admin/needs-you` | `{ app, id, title, why?, link?, options?, externalRef? }` | `200 { ok, item, created }`, `400`, or `429` at a limit |
+| `POST /admin/needs-you` | `{ app, id, title, why?, link?, options?, externalRef? }` | `200 { ok, item, created, changed }`, `400`, or `429` at a limit |
 | `POST /admin/needs-you/withdraw` | `{ app, id }` | `200 { ok, item }` or `404 { ok: false, error: "not found" }` |
 | `GET /admin/needs-you` | `app?`, `status?` (`open`, `answered` or `withdrawn`) | `200 { ok, items }` |
 
@@ -475,7 +475,7 @@ The key is `app` + `id`. The answer to every route carries the stored item with 
 | `why` | string | Optional context, at most 1000 characters. Stored as `""` when left out. |
 | `link` | string or null | Optional, at most 2000 characters. Must start with `http://` or `https://`. |
 | `options` | string[] or null | Optional. 2 to 5 distinct answers, each 1 to 80 characters. |
-| `externalRef` | string or null | Optional; same rules as in section 2. Set only when the item is created. |
+| `externalRef` | string or null | Optional; same rules as in section 2. A re-post to an open item replaces it. |
 | `status` | string | `open`, `answered` or `withdrawn`. |
 | `answer` | string or null | The option the owner picked. |
 | `createdAt`, `updatedAt` | string | ISO times. |
@@ -490,11 +490,12 @@ The key is `app` + `id`. The answer to every route carries the stored item with 
   button. Session Manager cannot answer it; it stays `open` until you withdraw it.
 - **At most 10 open items per app**, and at most 50 open items in total. A new item over either limit is
   `429` with the reason. Answered and withdrawn items do not count.
-- Posting the same `app` + `id` again while the item is `open` replaces `title`, `why`, `link` and
-  `options` (a left-out field is cleared). It answers `created: false`. An identical re-post changes
-  nothing.
+- Posting the same `app` + `id` again while the item is `open` replaces every caller field: `title`,
+  `why`, `link`, `options` and `externalRef` (a left-out field is cleared). It answers `created: false`.
+- `changed` is `true` when the post created the item or any stored field differs after it. An identical
+  re-post answers `changed: false`, keeps `updatedAt`, and writes no `needs_you_posted` audit row.
 - Posting an `app` + `id` that is already answered or withdrawn changes nothing. It answers `200` with the
-  old item and `created: false`. Use a new `id` to ask again.
+  old item, `created: false` and `changed: false`. Use a new `id` to ask again.
 - Answered and withdrawn items are dropped 14 days after they closed.
 
 ### What the owner sees
@@ -546,6 +547,7 @@ Answer:
 {
   "ok": true,
   "created": true,
+  "changed": true,
   "item": {
     "app": "planner",
     "id": "task-4821-date",

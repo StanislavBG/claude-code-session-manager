@@ -5,14 +5,15 @@
  * this machine can put a "Needs you" item in front of the owner, take it back,
  * and list its items, through needsYouStore.cjs:
  *   POST /admin/needs-you          {app, id, title, why?, link?, options?, externalRef?}
- *                                  -> 200 { ok, item, created } | 400 | 429 (item limit)
+ *                                  -> 200 { ok, item, created, changed } | 400 | 429 (item limit)
  *   POST /admin/needs-you/withdraw {app, id} -> 200 { ok, item } | 404 { ok:false, error:'not found' }
  *   GET  /admin/needs-you?app=&status=       -> 200 { ok, items }
  *
- * A post that created or changed an item appends one `needs_you_posted` audit
- * row and calls deps.onChanged once; a post that changed nothing (an identical
- * re-post, or an item already answered/withdrawn) writes no row and does not
- * call it. A withdrawal appends `needs_you_withdrawn` and calls onChanged once.
+ * A post the store reports as `changed` (decided inside its write queue)
+ * appends one `needs_you_posted` audit row and calls deps.onChanged once; a
+ * post that changed nothing (an identical re-post, or an item already
+ * answered/withdrawn) writes no row and does not call it. A withdrawal
+ * appends `needs_you_withdrawn` and calls onChanged once.
  * Answering is the human's, in the app — no route here.
  */
 
@@ -49,23 +50,10 @@ function firstIssue(e, fallback) {
   return e?.issues?.[0]?.message ?? e?.message ?? fallback;
 }
 
-/** The fields a post may change on an existing open item. */
-function contentKey(item) {
-  return JSON.stringify([item.title, item.why, item.link, item.options, item.status]);
-}
-
 function postHandler(onChanged) {
   return async (req, res) => {
     const body = await readJsonBody(req, res);
     if (!body) return;
-    let input;
-    try {
-      input = needsYouStore.NeedsYouPostSchema.parse(body);
-    } catch (e) {
-      sendJson(res, 400, { ok: false, error: firstIssue(e, 'invalid payload') });
-      return;
-    }
-    const before = (await needsYouStore.listNeedsYou({ app: input.app })).find((it) => it.id === input.id);
     let result;
     try {
       result = await needsYouStore.postNeedsYou(body);
@@ -81,8 +69,7 @@ function postHandler(onChanged) {
       sendJson(res, 500, { ok: false, error: e?.message ?? 'post failed' });
       return;
     }
-    const { item, created } = result;
-    const changed = created || !before || contentKey(before) !== contentKey(item);
+    const { item, created, changed } = result;
     if (changed) {
       appendAuditEvent('needs_you_posted', {
         route: '/admin/needs-you',
@@ -93,7 +80,7 @@ function postHandler(onChanged) {
       });
       if (onChanged) onChanged();
     }
-    sendJson(res, 200, { ok: true, item, created });
+    sendJson(res, 200, { ok: true, item, created, changed });
   };
 }
 

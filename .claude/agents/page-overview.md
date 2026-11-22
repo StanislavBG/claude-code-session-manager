@@ -51,6 +51,4 @@ Writes:
 
 ## Boundaries
 
-- You own only the files `node scripts/page-surface.cjs overview` reports as owned.
-- For a problem in a shared file or another page's file, report a finding that names the owning page. Never fix it.
-- In Implement mode, edit only what the PRD's Files section lists.
+The shared steward rules apply, with `<key>` = `overview`: [page-stewards.md#boundaries](../../session-manager-operations/architecture/page-stewards.md#boundaries).

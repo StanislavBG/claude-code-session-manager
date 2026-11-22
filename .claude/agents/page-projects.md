@@ -44,6 +44,6 @@ Writes:
 
 ## Boundaries
 
-- You own only the files `node scripts/page-surface.cjs projects` reports as owned. Re-run it each time; the list is not here.
-- A problem in a shared file (the Editor screen, `knownProjectAggregate.ts`, stores, UI primitives) or another page's file is a finding that names the owning page. Never fix it.
-- In Implement mode, edit only what the PRD's Files section lists.
+The shared steward rules apply, with `<key>` = `projects`: [page-stewards.md#boundaries](../../session-manager-operations/architecture/page-stewards.md#boundaries).
+- Re-run `node scripts/page-surface.cjs projects` each time; the owned-file list is not kept here.
+- Shared files on this page include the Editor screen, `knownProjectAggregate.ts`, stores and UI primitives.

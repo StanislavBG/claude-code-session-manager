@@ -44,6 +44,4 @@ The page never writes transcripts.
 
 ## Boundaries
 
-- You own only the files `node scripts/page-surface.cjs history` reports as owned.
-- A problem in a shared file or another page's file is a finding that names the owning page (the surface tool lists which pages reach each shared file). You never fix it.
-- In Implement mode you edit only what the PRD's Files section lists.
+The shared steward rules apply, with `<key>` = `history`: [page-stewards.md#boundaries](../../session-manager-operations/architecture/page-stewards.md#boundaries).

@@ -129,6 +129,7 @@ const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSin
 const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
+const { harvestPlanRecords } = require('./lib/scheduler/planRecordHarvest.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/feedback-remote/localAdminHttp.cjs');
@@ -400,6 +401,22 @@ const FINISH_ARTIFACT_ONLY_VERDICT_LINE = `
 const FINISH_ARTIFACT_ONLY_COMMIT_LINE = `
    This job is artifact-only: its output is git-excluded, so there is nothing to stage. Skip the commit and go to the next step.`;
 
+/**
+ * harvestJobPlanRecords(job, worktreeDir, projectRoot) — copy this run's
+ * plan records from its worktree into the main checkout. Logs, never throws.
+ */
+function harvestJobPlanRecords(job, worktreeDir, projectRoot) {
+  try {
+    const epicId = job.epicId || job.sourcePromptId;
+    if (!epicId || !worktreeDir || !projectRoot || path.resolve(worktreeDir) === path.resolve(projectRoot)) return;
+    const { copied, skipped } = harvestPlanRecords({ worktreeDir, projectRoot, epicId });
+    if (copied.length) console.log(`[scheduler] ${job.slug}: harvested ${copied.length} plan record(s) into ${projectRoot}`);
+    for (const sk of skipped) console.warn(`[scheduler] ${job.slug}: plan record not harvested: ${sk.path} — ${sk.reason}`);
+  } catch (e) {
+    console.error(`[scheduler] ${job.slug}: plan record harvest failed`, e);
+  }
+}
+
 function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false, isArtifactOnly = false }) {
   return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
    foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
@@ -414,9 +431,11 @@ ${commitStepNum}. COMMIT — stage only the exact paths you created or changed f
    jobs' verdicts. Always commit your own work: this rule changes what you
    stage, never whether you commit.
    Never run \`git add -f\` or \`git add --force\` on a path git ignores, unless the
-   PRD's # Files section names that exact path. If git add refuses a path as
+   PRD's # Files section names that exact path AND that path is not under
+   session-manager-operations/. If git add refuses a path as
    ignored, leave it out of the commit and name it in your final report.
    Why: an ignored path is usually live runtime state, not work product.
+   A record under session-manager-operations/plan-records/<epic-id>/ is written in this worktree and never staged; the scheduler copies it to the main checkout.
    Never commit any file under these folders (except each folder's top-level README.md, the layout contract), even when the PRD names it:
      ${FINISH_RUNTIME_FOLDERS}
    Why: those folders hold the app's live state. A commit of them breaks the
@@ -7030,6 +7049,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }, reviewInRun, worktree.ok ? worktree.setup : { ran: false, ok: false, reason: 'in-place', waitedMs: 0, ms: 0, commands: [] });
     } finally {
       if (worktree.ok) {
+        // Plan records are written in the worktree and never committed; copy
+        // them to the main checkout before verify and before the checkout is
+        // removed. Never throws (planRecordHarvest.cjs).
+        harvestJobPlanRecords(job, worktree.dir, job.cwd || defaultCwd);
         ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, worktreeHead, uncommittedSnapshot } =
           await finalizeJobWorktree({ job, runId, runDir, worktree, guardCwd, carriedPaths }));
       } else {

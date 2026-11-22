@@ -537,17 +537,26 @@ function isGitRepo(cwd) {
  * `cwd`, is a non-empty regular file, and has an mtime inside the run window
  * (startedAt - 60s .. (finishedAt ?? now) + 120s). Never throws: any doubt
  * (no paths, `..`, escape, missing, non-file, empty, stale, fs error) → false.
- * `cwd` may be a list of roots; a path is accepted if it verifies under any.
+ * `cwd` may be a list of roots; a path is accepted if it verifies under any —
+ * except a `session-manager-operations/plan-records/` path, which verifies only
+ * under the first root (the main checkout).
  * Complexity O(paths).
  */
 function artifactsVerifiedOnDisk({ cwd, paths, startedAt, finishedAt, fsImpl = fs } = {}) {
   return artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl }).ok;
 }
 
+const PLAN_RECORDS_PREFIX = 'session-manager-operations/plan-records/';
+
 function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
   const fail = { ok: false, verified: [] };
   try {
-    const roots = (Array.isArray(cwd) ? cwd : [cwd]).filter((r) => typeof r === 'string' && r);
+    const rawRoots = Array.isArray(cwd) ? cwd : [cwd];
+    const roots = rawRoots.filter((r) => typeof r === 'string' && r);
+    // A plan record lands in the main checkout only via the scheduler's
+    // harvest (planRecordHarvest.cjs), so it verifies against the FIRST root
+    // (queueEntry.cwd) alone — a copy left only in the worktree never counts.
+    const mainRoot = typeof rawRoots[0] === 'string' && rawRoots[0] ? [rawRoots[0]] : [];
     if (!roots.length || !Array.isArray(paths) || paths.length === 0) return fail;
     const start = Date.parse(startedAt ?? '');
     if (Number.isNaN(start)) return fail;
@@ -560,7 +569,8 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
       if (typeof p !== 'string' || !p || p.includes('\0')) return fail;
       if (p.split(/[\\/]/).includes('..')) return fail;
       let hit = null;
-      for (const root of roots) {
+      const isPlanRecord = path.posix.normalize(p.replace(/\\/g, '/')).startsWith(PLAN_RECORDS_PREFIX);
+      for (const root of (isPlanRecord ? mainRoot : roots)) {
         const base = path.resolve(root);
         const abs = path.resolve(base, p);
         const rel = path.relative(base, abs);

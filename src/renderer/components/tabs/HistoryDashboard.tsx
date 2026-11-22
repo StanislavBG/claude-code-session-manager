@@ -334,6 +334,14 @@ export function HistoryDashboard() {
             {describeExclusions(excluded)}
           </div>
         )}
+        {raw.legacyDates && raw.legacyDates.length > 0 && (
+          <div
+            data-testid="history-legacy-note"
+            className="rounded-[10px] border border-line bg-bg-hi px-3 py-2 text-[11.5px] font-mono text-fg-faint"
+          >
+            {describeLegacyDates(raw.legacyDates)}
+          </div>
+        )}
         {/* Project face is force-scoped to the active project (see `keep`
             above) — nothing to facet with only one project ever shown, and
             no escape hatch to peek at others. Home face keeps the full
@@ -368,6 +376,14 @@ export function HistoryDashboard() {
       </div>
     </div>
   )
+}
+
+// Days finalized before once-per-call counting read high and can't be
+// recounted (their transcripts are gone) — stated, never shown as exact.
+function describeLegacyDates(dates: string[]): string {
+  const last = dates.reduce((a, b) => (b > a ? b : a))
+  const n = dates.length
+  return `${n} ${n === 1 ? 'day' : 'days'} in this range (last: ${last}) were counted with the older method and read about two to three times too high; they cannot be recounted because their transcripts are gone.`
 }
 
 function HistorySkeleton() {

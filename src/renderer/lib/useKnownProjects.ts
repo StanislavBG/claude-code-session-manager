@@ -46,12 +46,12 @@ export function candidatePath(encoded: string): string {
 // pay ~2000 whole-file reads across the IPC boundary.
 export const CWD_RESOLVE_MAX_BYTES = 64 * 1024
 
-export async function resolveProjectCwd(projectFolder: string): Promise<string | null> {
-  const files = await window.api.config.listDir(projectFolder, { filesOnly: true })
-  const jsonl = (files.entries as DirEntry[])
-    .filter((f) => f.name.endsWith('.jsonl'))
-    .sort((a, b) => a.size - b.size)
-  for (const f of jsonl) {
+type JsonlRef = { path: string; size: number }
+
+/** Smallest transcript first; return the first non-empty `cwd` string found in a line. */
+async function resolveCwdFromJsonl(jsonl: readonly JsonlRef[]): Promise<string | null> {
+  const ordered = [...jsonl].sort((a, b) => a.size - b.size)
+  for (const f of ordered) {
     const r = await window.api.config.readText(f.path, { maxBytes: CWD_RESOLVE_MAX_BYTES })
     if (!r.exists || !r.text) continue
     for (const line of r.text.split('\n')) {
@@ -65,6 +65,11 @@ export async function resolveProjectCwd(projectFolder: string): Promise<string |
     }
   }
   return null
+}
+
+export async function resolveProjectCwd(projectFolder: string): Promise<string | null> {
+  const files = await window.api.config.listDir(projectFolder, { filesOnly: true })
+  return resolveCwdFromJsonl((files.entries as DirEntry[]).filter((f) => f.name.endsWith('.jsonl')))
 }
 
 // Module-level cache, shared by every mount site (Home renders this hook
@@ -221,6 +226,9 @@ async function runScan(home: string, mode: ScanMode, listing: ListingMode): Prom
     const listed = new Set(entries.map((e) => e.name))
     for (const key of [...folderCache.keys()]) if (!listed.has(key)) folderCache.delete(key)
     const recent: RecentRow[] = []
+    // Scan-local: the .jsonl entries of every folder listed in THIS scan, so
+    // cwd resolution never lists the same folder a second time.
+    const jsonlByEncoded = new Map<string, JsonlRef[]>()
     const next = await mapWithConcurrency(entries, SCAN_CONCURRENCY, async (e): Promise<ProjectRow> => {
       const cached = folderCache.get(e.name)
       if (listing === 'incremental' && canReuseListing(e, cached, startedAt)) {
@@ -229,6 +237,7 @@ async function runScan(home: string, mode: ScanMode, listing: ListingMode): Prom
       }
       const files = await window.api.config.listDir(e.path, { filesOnly: true })
       const jsonl = (files.entries as DirEntry[]).filter((f) => f.name.endsWith('.jsonl'))
+      jsonlByEncoded.set(e.name, jsonl.map((f) => ({ path: f.path, size: f.size })))
       const folderRecent: RecentRow[] = jsonl.map((f) => ({
         sessionId: f.name.replace(/\.jsonl$/, ''),
         projectEncoded: e.name,
@@ -280,7 +289,7 @@ async function runScan(home: string, mode: ScanMode, listing: ListingMode): Prom
         loading: false,
       })
     }
-    await runEnrichment(rows, token, mode, prevLastSession)
+    await runEnrichment(rows, token, mode, prevLastSession, jsonlByEncoded)
     if (token === scanToken) {
       lastScanFinishedAt = Date.now()
       lastListingStartedAt = startedAt
@@ -317,6 +326,7 @@ async function runEnrichment(
   token: number,
   mode: ScanMode,
   prevLastSession: ReadonlyMap<string, number>,
+  jsonlByEncoded: ReadonlyMap<string, readonly JsonlRef[]>,
 ): Promise<void> {
   const cwdByEncoded: Record<string, string | null> = {}
   await mapWithConcurrency(rows, SCAN_CONCURRENCY, async (row) => {
@@ -328,7 +338,8 @@ async function runEnrichment(
     const signature = signatureOf(row)
     if (unresolvedSignature.get(row.encoded) === signature) { cwdByEncoded[row.encoded] = null; return }
     try {
-      const cwd = await resolveProjectCwd(row.path)
+      const listedJsonl = jsonlByEncoded.get(row.encoded)
+      const cwd = listedJsonl ? await resolveCwdFromJsonl(listedJsonl) : await resolveProjectCwd(row.path)
       const normalized = cwd ? normalizeCwd(cwd) : null
       cwdByEncoded[row.encoded] = normalized
       if (normalized) {

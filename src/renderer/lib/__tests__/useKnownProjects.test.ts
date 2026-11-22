@@ -168,6 +168,19 @@ const cwdReadsFor = (readText: ReturnType<typeof setupFs>['readText'], dir: stri
   readText.mock.calls.filter(([p, o]) => (o as any)?.maxBytes === CWD_RESOLVE_MAX_BYTES && String(p).startsWith(`${dir}/`))
 
 describe('refreshKnownProjects', () => {
+  it('initial scan lists the root plus each folder exactly once and still resolves every cwd', async () => {
+    const fs = setupFs()
+    const c = `${ROOT}/-p-c`
+    fs.folders[c] = [file(c, 's3.jsonl', 300)]
+    fs.cwdOf[c] = '/p/c'
+    const { ref, unmount } = await mountProbe()
+    expect(ref.current!.resolving).toBe(false)
+    expect(ref.current!.projects.map((p) => p.cwd).sort()).toEqual(['/p/a', '/p/b', '/p/c'])
+    expect(fs.listDir).toHaveBeenCalledTimes(3 + 1)
+    expect(fs.listDir.mock.calls.map((call) => call[0]).sort()).toEqual([ROOT, fs.a, fs.b, c].sort())
+    unmount()
+  })
+
   it('resolves without scanning before the hook has started a first scan', async () => {
     const fs = setupFs()
     await refreshKnownProjects({ force: true })
@@ -245,19 +258,22 @@ describe('refreshKnownProjects', () => {
     const fs = setupFs()
     const c = `${ROOT}/-p-c`
     fs.folders[c] = [file(c, 's5.jsonl', 50)]
-    const base = fs.listDir.getMockImplementation()!
-    let cListings = 0
-    fs.listDir.mockImplementation(async (path: string) => {
-      // Odd calls are the scan's own listing; even ones are resolveProjectCwd's.
-      if (path === c && ++cListings % 2 === 0) throw new Error('listDir failed')
-      return base(path)
+    const base = fs.readText.getMockImplementation()!
+    let cReads = 0
+    fs.readText.mockImplementation(async (path: string, opts?: { maxBytes?: number }) => {
+      // The cwd read of c's transcript fails; every other read is untouched.
+      if (path.startsWith(`${c}/`) && opts?.maxBytes === CWD_RESOLVE_MAX_BYTES) {
+        cReads++
+        throw new Error('readText failed')
+      }
+      return base(path, opts)
     })
     const { ref, unmount } = await mountProbe()
     expect(ref.current!.enriched['-p-c']).toEqual({ cwd: null })
-    expect(cListings).toBe(2)
+    expect(cReads).toBe(1)
     await act(async () => { await refreshKnownProjects({ force: true }) })
-    // Only the scan's own listing of c; resolveProjectCwd was not re-run.
-    expect(cListings).toBe(3)
+    // The unchanged folder's failed resolution was not re-run.
+    expect(cReads).toBe(1)
     expect(ref.current!.enriched['-p-c']).toEqual({ cwd: null })
     unmount()
   })

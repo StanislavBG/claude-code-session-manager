@@ -447,7 +447,168 @@ the resolver never throws, so expect an object; still handle `null`.
 `persona-overlay`, the project changed this persona; read `<cwd>/.claude/agents/<name>.md` as well if
 you need the project's own text.
 
-## 6. Not part of the contract
+## 6. Needs you
+
+An outside app can put one question in front of the owner. It shows in the Dashboard's **Needs you**
+list, next to Session Manager's own items. The owner answers there, or in the app behind the link. Code:
+`src/main/lib/feedback-remote/needsYouAdminRoutes.cjs` (routes),
+`src/main/lib/feedback-remote/needsYouStore.cjs` (the store and its limits),
+`src/main/lib/feedback-remote/needsYouIpc.cjs` (the owner's answer).
+
+| Route | Body / query | Answer |
+| --- | --- | --- |
+| `POST /admin/needs-you` | `{ app, id, title, why?, link?, options?, externalRef? }` | `200 { ok, item, created }`, `400`, or `429` at a limit |
+| `POST /admin/needs-you/withdraw` | `{ app, id }` | `200 { ok, item }` or `404 { ok: false, error: "not found" }` |
+| `GET /admin/needs-you` | `app?`, `status?` (`open`, `answered` or `withdrawn`) | `200 { ok, items }` |
+
+There is no route to answer. Only the owner answers, in the app window.
+
+### The item
+
+The key is `app` + `id`. The answer to every route carries the stored item with these fields.
+
+| Field | Type | Limit / meaning |
+| --- | --- | --- |
+| `app` | string | Your app's name. 1 to 40 letters, digits, `.` `_` or `-`. Shown to the owner. |
+| `id` | string | Your id for the item. Same rules as `externalRef` (section 2). Required. |
+| `title` | string | The question. 1 to 200 characters, one line. |
+| `why` | string | Optional context, at most 1000 characters. Stored as `""` when left out. |
+| `link` | string or null | Optional, at most 2000 characters. Must start with `http://` or `https://`. |
+| `options` | string[] or null | Optional. 2 to 5 distinct answers, each 1 to 80 characters. |
+| `externalRef` | string or null | Optional; same rules as in section 2. Set only when the item is created. |
+| `status` | string | `open`, `answered` or `withdrawn`. |
+| `answer` | string or null | The option the owner picked. |
+| `createdAt`, `updatedAt` | string | ISO times. |
+| `answeredAt` | string or null | ISO time of the answer. |
+
+### Rules
+
+- **One decision per item.** Post a second item for a second question.
+- **A question the owner answers in Session Manager** has `options`: 2 to 5 of them. The owner sees one
+  button per option.
+- **A notice the owner settles in your app** has no `options`, only a `link`. The owner sees an **Open**
+  button. Session Manager cannot answer it; it stays `open` until you withdraw it.
+- **At most 10 open items per app**, and at most 50 open items in total. A new item over either limit is
+  `429` with the reason. Answered and withdrawn items do not count.
+- Posting the same `app` + `id` again while the item is `open` replaces `title`, `why`, `link` and
+  `options` (a left-out field is cleared). It answers `created: false`. An identical re-post changes
+  nothing.
+- Posting an `app` + `id` that is already answered or withdrawn changes nothing. It answers `200` with the
+  old item and `created: false`. Use a new `id` to ask again.
+- Answered and withdrawn items are dropped 14 days after they closed.
+
+### What the owner sees
+
+The row shows `title`, then `why`, and your `app` name when opened. All item text is shown as **plain
+text**; no HTML or Markdown is rendered. The **Open** button appears when the item has a `link`. The link
+opens in the system browser only when it is `http` or `https`; the app refuses any other scheme.
+
+### How the answer comes back
+
+When the owner picks an option, the item turns `answered` and one `needs_you_answered` audit row is
+written:
+
+| Field | Meaning |
+| --- | --- |
+| `at` | ISO time the row was written. |
+| `kind` | `"needs_you_answered"`. |
+| `app` | The item's `app`. |
+| `id` | The item's `id`. |
+| `answer` | The option the owner picked. |
+| `externalRef` | Present only when the item has one. |
+
+Read the rows with `GET /admin/events?kinds=needs_you_answered` (cursor rules as in section 4). Or read
+the item's `status` and `answer` with `GET /admin/needs-you?app=<app>`. On a `gap`, re-read with
+`GET /admin/needs-you`.
+
+When a question no longer matters (it was settled in your app, or the work went away), **withdraw it**
+with `POST /admin/needs-you/withdraw`. It leaves the owner's list at once. A withdrawal of an item that is
+not `open` is `404`.
+
+Post:
+
+```json
+POST /admin/needs-you
+{
+  "app": "planner",
+  "id": "task-4821-date",
+  "title": "Publish the November post on Tuesday or Thursday?",
+  "why": "Both days are free on the calendar.",
+  "link": "http://localhost:4100/tasks/4821",
+  "options": ["Tuesday", "Thursday"],
+  "externalRef": "planner:task/4821"
+}
+```
+
+Answer:
+
+```json
+{
+  "ok": true,
+  "created": true,
+  "item": {
+    "app": "planner",
+    "id": "task-4821-date",
+    "title": "Publish the November post on Tuesday or Thursday?",
+    "why": "Both days are free on the calendar.",
+    "link": "http://localhost:4100/tasks/4821",
+    "options": ["Tuesday", "Thursday"],
+    "externalRef": "planner:task/4821",
+    "status": "open",
+    "answer": null,
+    "createdAt": "2026-11-21T17:00:00.000Z",
+    "updatedAt": "2026-11-21T17:00:00.000Z",
+    "answeredAt": null
+  }
+}
+```
+
+Withdraw:
+
+```json
+POST /admin/needs-you/withdraw
+{ "app": "planner", "id": "task-4821-date" }
+```
+
+Answer: `{ "ok": true, "item": { …, "status": "withdrawn", … } }`.
+
+List:
+
+```text
+GET /admin/needs-you?app=planner&status=answered
+```
+
+Answer:
+
+```json
+{
+  "ok": true,
+  "items": [
+    {
+      "app": "planner",
+      "id": "task-4821-date",
+      "title": "Publish the November post on Tuesday or Thursday?",
+      "why": "Both days are free on the calendar.",
+      "link": "http://localhost:4100/tasks/4821",
+      "options": ["Tuesday", "Thursday"],
+      "externalRef": "planner:task/4821",
+      "status": "answered",
+      "answer": "Thursday",
+      "createdAt": "2026-11-21T17:00:00.000Z",
+      "updatedAt": "2026-11-21T18:05:12.004Z",
+      "answeredAt": "2026-11-21T18:05:12.004Z"
+    }
+  ]
+}
+```
+
+The matching event:
+
+```json
+{ "at": "2026-11-21T18:05:12.010Z", "kind": "needs_you_answered", "app": "planner", "id": "task-4821-date", "answer": "Thursday", "externalRef": "planner:task/4821" }
+```
+
+## 7. Not part of the contract
 
 Do not build on these. They change without a version bump.
 
@@ -456,6 +617,7 @@ Do not build on these. They change without a version bump.
 - The headings and wording inside validation records and PRD bodies. Read `verified` / `refuted` from
   the Epic record instead.
 - Renderer state: anything the app window shows or keeps in memory.
-- Audit row kinds other than `epic_state_changed` and `job_transition`, and the `caller` field (the
+- Audit row kinds other than `epic_state_changed`, `job_transition`, `epic_cross_project_reply` and
+  `needs_you_answered` (so not `needs_you_posted` or `needs_you_withdrawn`), and the `caller` field (the
   events route strips it).
 - Admin routes and MCP tools not named on this page.

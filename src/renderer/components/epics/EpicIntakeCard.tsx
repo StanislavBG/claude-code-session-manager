@@ -40,6 +40,7 @@ const DEFAULT_EXPANDED: Record<AimSlot, boolean> = {
 const PART_LABEL: Record<Exclude<AimPart, 'injection'>, string> = {
   persona: 'Persona',
   grounding: 'Grounding',
+  handoff: 'Handoff',
   reference: 'Reference',
   'job-type': 'Job type',
   goal: 'Goal',

@@ -3038,7 +3038,7 @@ export interface PromptSessionsCreateEpicPayload {
     text: string;
     source?: string;
     /** Which part of its AIM slot this entry is; absent on Epics minted before AIM sections. */
-    part?: 'persona' | 'grounding' | 'injection' | 'reference' | 'job-type' | 'goal';
+    part?: 'persona' | 'grounding' | 'injection' | 'handoff' | 'reference' | 'job-type' | 'goal';
   }>;
   /** Adopt an existing CLI session of this project instead of minting one. */
   restoreSessionId?: string;

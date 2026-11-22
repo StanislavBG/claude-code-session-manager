@@ -111,6 +111,7 @@
   "personaImportHealth": "persona-macro",
   "personaMerge": "persona-macro",
   "personaToolScope": "claude",
+  "toolRiskMarks": "claude",
   "pidAlive": "process",
   "planRecordHarvest": "scheduler",
   "planRecordRetention": "scheduler",

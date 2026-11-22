@@ -16,9 +16,9 @@
  *
  * Review MD network's data is one `window.api.projectPages.mdNetwork` scan,
  * fetched once per cwd when its view first shows and again on `Refresh` —
- * never polled. The scan fills the info strip, the LINK MAP / FINDINGS cards
- * (MdLinkMap), the Scope options after the input's default, the row and title
- * findings count, and `onFindingsCount` (ProjectHome's Tools key button).
+ * never polled. The scan fills the info strip, the LINK MAP (MdLinkMap) and FIX LIST
+ * (MdFixList) cards, the Scope options after the input's default, the row and title
+ * findings count (fix-list rows), and `onFindingsCount` (ProjectHome's Tools key button).
  *
  * The `LAST REVIEW` section (MdLastReview) is one `window.api.projectPages.mdReview` read, on the
  * same schedule as the scan (first show per cwd, and `Refresh`; never polled) plus whenever the
@@ -33,6 +33,7 @@ import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { useAgentPersonas } from '../../../../lib/useAgentPersonas'
 import { toast } from '../../../../state/toast'
 import { MdNetworkCards } from './MdLinkMap'
+import { fixListCount } from './MdFixList'
 import { MdNetworkExplorer } from './MdNetworkExplorer'
 import { MdDocPreview } from './MdDocPreview'
 import { MdDocTable } from './MdDocTable'
@@ -103,7 +104,7 @@ function useMdNetworkScan(
         (res) => {
           if (id !== latest.current) return
           setScan(res.ok ? { cwd: forCwd, status: 'ready', result: res } : { cwd: forCwd, status: 'error', error: res.error })
-          onFindingsCount?.(forCwd, res.ok ? res.findings.length : null)
+          onFindingsCount?.(forCwd, res.ok ? fixListCount(res) : null)
         },
         (err: unknown) => {
           if (id !== latest.current) return
@@ -294,16 +295,17 @@ function ReviewInfo({ cwd, scan, onRefresh }: { cwd?: string | null; scan: MdNet
     tone = 'bg-accent'
     text = `Could not map docs: ${scan.error}`
   } else if (scan?.status === 'ready') {
-    const { docs, links, findings } = scan.result
+    const { docs, links } = scan.result
+    const fixes = fixListCount(scan.result)
     // The census says what the tracked docs are; an older scan without one keeps the bare count.
     const counts = scan.result.census?.counts
     if (counts) {
       const parts = [plural(counts.tracked, 'tracked doc'), `${counts.network} in the network`]
       if (counts.records > 0) parts.push(plural(counts.records, 'record'))
-      parts.push(`${counts.unlinked} unlinked`, plural(links, 'link'), plural(findings.length, 'finding'))
+      parts.push(`${counts.unlinked} unlinked`, plural(links, 'link'), plural(fixes, 'finding'))
       text = `${parts.join(' · ')}. ${REVIEW_NOTE}`
     } else {
-      text = `${plural(docs, 'doc')} · ${plural(links, 'link')} · ${plural(findings.length, 'finding')}. ${REVIEW_NOTE}`
+      text = `${plural(docs, 'doc')} · ${plural(links, 'link')} · ${plural(fixes, 'finding')}. ${REVIEW_NOTE}`
     }
   }
   return (
@@ -430,7 +432,7 @@ function ReviewTool({
     <>
       <TitleBar
         title={macro.label}
-        sub={`built-in macro · ${macro.agentName}${network ? ` · ${plural(network.findings.length, 'finding')}` : ''}`}
+        sub={`built-in macro · ${macro.agentName}${network ? ` · ${plural(fixListCount(network), 'finding')}` : ''}`}
       >
         <div className="flex min-w-0 max-w-full flex-col gap-[5px]">
           <span className="text-[11.5px] font-semibold text-fg-dim">{scopeLabel}</span>
@@ -652,7 +654,7 @@ export function ToolsPane({
   const network = scan && scan.status !== 'error' ? scan.result : null
   const rowMeta = (m: Macro) => {
     if (m.id !== REVIEW_MD_NETWORK_ID) return m.agentName
-    const base = network ? plural(network.findings.length, 'finding') : m.agentName
+    const base = network ? plural(fixListCount(network), 'finding') : m.agentName
     const last = runs[0]
     return last ? `${base} · last run ${runDate(last.epic.createdAt)} · ${last.status}` : base
   }

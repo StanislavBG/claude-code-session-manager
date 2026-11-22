@@ -429,13 +429,13 @@ describe('ToolsPane Review MD network link map', () => {
     expect(mdNetwork.mock.calls).toEqual([[scanOf(CWD)]])
     expect(infoText()).toBe('Scanning docs…')
     expect(q('md-link-map-svg')).toBeNull()
-    expect(q('md-findings')).toBeNull()
+    expect(q('md-fix-list')).toBeNull()
     render({ macros: [REVIEW, { ...SWEEP }] })
     expect(mdNetwork).toHaveBeenCalledTimes(1)
     await act(async () => { scan.resolve(NET) })
     expect(infoText()).toBe(INFO)
     expect(q('md-link-map-svg')).not.toBeNull()
-    expect(q('md-findings')!.querySelectorAll('[data-testid="md-finding"]')).toHaveLength(3)
+    expect(q('md-fix-list')!.querySelectorAll('[data-testid="md-fix-row"]')).toHaveLength(3)
   })
 
   it('shows "<n> findings" on the Review row and reports the count through onFindingsCount', async () => {
@@ -447,6 +447,18 @@ describe('ToolsPane Review MD network link map', () => {
     expect(meta(REVIEW.id)).toBe('3 findings')
     expect(meta('sweep')).toBe('dev-lead')
     expect(onFindingsCount.mock.calls).toEqual([[CWD, 3]])
+  })
+
+  it('counts fix-list rows, duplicates included, on the row meta, title, info strip and onFindingsCount', async () => {
+    mdNetwork.mockResolvedValue({ ...NET, duplicates: [{ a: 'src/CLAUDE.md', b: 'plugins/CLAUDE.md', sharedRuns: 4, samples: [] }] })
+    const onFindingsCount = vi.fn()
+    render({ macros: [REVIEW, SWEEP], onFindingsCount })
+    await settle()
+    expect(meta(REVIEW.id)).toBe('4 findings')
+    expect(q('project-home-tool-sub')!.textContent).toBe('built-in macro · architect · 4 findings')
+    expect(infoText()).toBe(INFO.replace('3 findings', '4 findings'))
+    expect(q('md-fix-list')!.querySelectorAll('[data-testid="md-fix-row"]')).toHaveLength(4)
+    expect(onFindingsCount.mock.calls).toEqual([[CWD, 4]])
   })
 
   it('does not scan while another tool is shown; scans once Review MD network is picked, not again on switching back', async () => {

@@ -1,5 +1,5 @@
 /**
- * Review MD network's LINK MAP and FINDINGS cards (Project Home v2 DESIGN_SPEC §6), drawn from
+ * Review MD network's LINK MAP card (and, beside it, MdFixList's FIX LIST) (Project Home v2 DESIGN_SPEC §6), drawn from
  * the one `window.api.projectPages.mdNetwork` scan ToolsPane fetches. Purely presentational.
  *
  * `layoutMdNetwork` is the pure layout: four columns by link depth from the root CLAUDE.md
@@ -13,12 +13,12 @@
  * Finding; each orphan group is an unlinked dashed node at the foot of the last column.
  *
  * Hovering a node dims all but it and its neighbours and captions it; hovering a finding lights
- * its nodes. Colours are token classes written as whole literals (Tailwind JIT); geometry is
+ * its nodes (a fix row does the same). Colours are token classes written as whole literals (Tailwind JIT); geometry is
  * plain SVG attributes.
  */
 import { useMemo, useState, type KeyboardEvent } from 'react'
-import { toast } from '../../../../state/toast'
-import type { MdNetwork, MdNetworkFinding } from '../../../../../preload/api'
+import type { MdNetwork } from '../../../../../preload/api'
+import { MdFixList, buildFixList } from './MdFixList'
 
 const COLUMN_X = [44, 232, 470, 650] as const
 const LAST_COLUMN = COLUMN_X.length - 1
@@ -521,99 +521,7 @@ export function MdLinkMap({
   )
 }
 
-/** The repo-relative path a finding's Open reveals: the linking doc, or the orphan group's folder. */
-function findingTarget(f: MdNetworkFinding): string {
-  return f.type === 'broken-link' ? f.file : f.where
-}
-
-function absolutePath(cwd: string, rel: string): string {
-  const base = cwd.replace(/[\\/]+$/, '')
-  const tail = rel === '.' || rel === './' ? '' : rel.replace(/^\.\//, '').replace(/\/+$/, '')
-  return tail === '' ? base : `${base}/${tail}`
-}
-
-function openFinding(cwd: string, f: MdNetworkFinding): void {
-  const rel = findingTarget(f)
-  const fail = (why: string) => toast.error(`Could not open ${rel}: ${why}`)
-  window.api.shell.open({ as: 'revealPath', path: absolutePath(cwd, rel) }).then(
-    (res) => {
-      if (!res.ok) fail(res.error ?? 'unknown error')
-    },
-    (err: unknown) => fail(err instanceof Error ? err.message : String(err)),
-  )
-}
-
-/** The FINDINGS card: one row per finding; hovering a row reports its index. */
-export function MdFindings({
-  cwd,
-  findings,
-  hovered,
-  onHover,
-}: {
-  cwd?: string | null
-  findings: readonly MdNetworkFinding[]
-  hovered: number | null
-  onHover: (index: number | null) => void
-}) {
-  return (
-    <section
-      data-testid="md-findings"
-      aria-label="Findings"
-      className="min-w-0 flex-[1_1_300px] overflow-hidden rounded-xl border border-rule-structural bg-bg-hi"
-    >
-      <div className="flex justify-between px-4 py-3 font-mono text-[10.5px] text-fg-faint">
-        <span className="tracking-[.1em]">FINDINGS</span>
-        <span data-testid="md-findings-count">{findings.length}</span>
-      </div>
-      {findings.length === 0 && (
-        <p data-testid="md-findings-empty" className="m-0 border-t border-bg-elev px-4 py-3 text-[12.5px] text-fg-faint">
-          No broken links or orphan docs.
-        </p>
-      )}
-      {findings.map((f, i) => (
-        <div
-          key={`${f.type} ${f.where}`}
-          data-testid="md-finding"
-          data-type={f.type}
-          onMouseEnter={() => onHover(i)}
-          onMouseLeave={() => onHover(null)}
-          className={`flex flex-col gap-1.5 border-t border-bg-elev px-4 py-3 ${hovered === i ? 'bg-bg-elev' : ''}`}
-        >
-          <div className="flex items-center gap-2">
-            <span
-              data-testid="md-finding-type"
-              className={`rounded px-[7px] py-[3px] font-mono text-[10px] font-bold tracking-[.04em] ${
-                f.type === 'broken-link' ? 'bg-accent text-bg-hi' : 'bg-rule-inner text-fg-dim'
-              }`}
-            >
-              {f.type}
-            </span>
-            <span className="flex-1" />
-            <button
-              type="button"
-              data-testid="md-finding-open"
-              disabled={!cwd}
-              onClick={() => {
-                if (cwd) openFinding(cwd, f)
-              }}
-              className="text-[12px] font-semibold text-accent-dark cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Open
-            </button>
-          </div>
-          <span data-testid="md-finding-where" className="break-all font-mono text-[11.5px] text-fg">
-            {f.where}
-          </span>
-          <span data-testid="md-finding-detail" className="text-[12.5px] leading-[1.45] text-fg-dim">
-            {f.detail}
-          </span>
-        </div>
-      ))}
-    </section>
-  )
-}
-
-/** Both cards side by side over one scan; a hovered finding lights its nodes on the map. */
+/** The link map and the fix list side by side over one scan; a hovered fix row lights its nodes on the map. */
 export function MdNetworkCards({
   cwd,
   network,
@@ -624,16 +532,21 @@ export function MdNetworkCards({
   onExplore?: (id: string | null) => void
 }) {
   const layout = useMemo(() => layoutMdNetwork(network), [network])
-  const [hoverFinding, setHoverFinding] = useState<number | null>(null)
-  const finding = hoverFinding === null ? undefined : network.findings[hoverFinding]
-  const focusFinding: MapFocus | null =
-    finding && hoverFinding !== null
-      ? { ids: layout.findingNodes[hoverFinding] ?? [], caption: `${finding.type} · ${finding.where}` }
-      : null
+  const rows = useMemo(() => buildFixList(network), [network])
+  const [hoverRow, setHoverRow] = useState<number | null>(null)
+  const row = hoverRow === null ? undefined : rows[hoverRow]
+  let focusFinding: MapFocus | null = null
+  if (row) {
+    const ids =
+      row.findingIndex !== null
+        ? (layout.findingNodes[row.findingIndex] ?? [])
+        : row.docs.filter((id) => layout.nodes.some((n) => n.id === id))
+    focusFinding = { ids, caption: `${row.kind} · ${row.where}` }
+  }
   return (
     <div className="flex flex-none flex-wrap items-start gap-4">
       <MdLinkMap layout={layout} focusFinding={focusFinding} onExplore={onExplore} />
-      <MdFindings cwd={cwd} findings={network.findings} hovered={hoverFinding} onHover={setHoverFinding} />
+      <MdFixList cwd={cwd} rows={rows} hovered={hoverRow} onHover={setHoverRow} />
     </div>
   )
 }

@@ -281,23 +281,23 @@ describe('MdNetworkCards LINK MAP', () => {
   })
 })
 
-describe('MdNetworkCards FINDINGS', () => {
-  const findings = () => all('md-finding')
+describe('MdNetworkCards FIX LIST', () => {
+  const findings = () => all('md-fix-row')
 
   it('lists each finding with its type tag (broken-link accent, orphan muted), mono where and detail', () => {
     mount()
-    expect(q('md-findings-count')!.textContent).toBe('2')
+    expect(q('md-fix-count')!.textContent).toBe('2')
     expect(findings()).toHaveLength(2)
     const [broken, orphan] = findings()
-    const tag = (f: HTMLElement) => f.querySelector('[data-testid="md-finding-type"]') as HTMLElement
+    const tag = (f: HTMLElement) => f.querySelector('[data-testid="md-fix-type"]') as HTMLElement
     expect(tag(broken).textContent).toBe('broken-link')
     expect(tag(broken).className).toContain('bg-accent')
     expect(tag(orphan).textContent).toBe('orphan')
     expect(tag(orphan).className).toContain('bg-rule-inner')
-    const where = broken.querySelector('[data-testid="md-finding-where"]') as HTMLElement
+    const where = broken.querySelector('[data-testid="md-fix-where"]') as HTMLElement
     expect(where.textContent).toBe('README.md:3 → docs/missing.md')
     expect(where.className).toContain('font-mono')
-    expect(orphan.querySelector('[data-testid="md-finding-detail"]')!.textContent).toBe(ORPHAN.detail)
+    expect(orphan.querySelector('[data-testid="md-fix-detail"]')!.textContent).toBe(ORPHAN.detail)
   })
 
   it('hovering a finding highlights its nodes on the map and dims the rest', () => {
@@ -318,7 +318,7 @@ describe('MdNetworkCards FINDINGS', () => {
   it('Open reveals the absolute path: the linking doc of a broken link, the folder of an orphan group', async () => {
     const rootOrphan: MdNetworkFinding = { ...ORPHAN, where: './', count: 1, paths: ['TODO.md'] }
     mount(network(NET.nodes, NET.edges, [BROKEN, ORPHAN, rootOrphan]))
-    const openBtns = all('md-finding-open') as HTMLButtonElement[]
+    const openBtns = all('md-fix-open') as HTMLButtonElement[]
     await act(async () => { openBtns[0].click() })
     await act(async () => { openBtns[1].click() })
     await act(async () => { openBtns[2].click() })
@@ -333,16 +333,16 @@ describe('MdNetworkCards FINDINGS', () => {
   it('a failed Open surfaces as one error toast', async () => {
     open.mockResolvedValue({ ok: false, error: 'outside home' })
     mount()
-    await act(async () => { (all('md-finding-open')[0] as HTMLButtonElement).click() })
+    await act(async () => { (all('md-fix-open')[0] as HTMLButtonElement).click() })
     expect(useToast.getState().toasts.map((t) => [t.kind, t.message])).toEqual([['error', 'Could not open README.md: outside home']])
   })
 
   it('with no findings shows an empty note and Open is disabled without a cwd', () => {
     mount(network(NET.nodes, NET.edges, []), null)
-    expect(q('md-findings-count')!.textContent).toBe('0')
-    expect(q('md-findings-empty')).not.toBeNull()
+    expect(q('md-fix-count')!.textContent).toBe('0')
+    expect(q('md-fix-empty')).not.toBeNull()
     act(() => root!.render(<MdNetworkCards cwd={null} network={NET} />))
-    expect((all('md-finding-open') as HTMLButtonElement[]).every((b) => b.disabled)).toBe(true)
+    expect((all('md-fix-open') as HTMLButtonElement[]).every((b) => b.disabled)).toBe(true)
   })
 })
 

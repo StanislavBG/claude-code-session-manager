@@ -1214,6 +1214,8 @@ async function handleCallTool(request) {
       if (result?.ok !== false) {
         if (result?.delivery === 'delivered') {
           note = ' — delivered into the asking session; it has not acted on it yet.';
+        } else if (result?.delivery === 'event-only' && result?.reason === 'asker-requested-event') {
+          note = ' — the answer was recorded as an event for the asking app, as it requested; no chat was prompted.';
         } else if (result?.delivery === 'event-only') {
           note = " — delivered as an event only on the asking Epic; its session was not prompted"
             + `${result.reason ? ` (${result.reason})` : ''}.`;

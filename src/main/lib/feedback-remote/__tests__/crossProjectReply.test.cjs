@@ -520,3 +520,95 @@ test('incomplete replyTo object (even with fromEpicId) → 400 as before', async
   expect(r.status).toBe(400);
   expect(r.error).toMatch(/not answering a cross-project request with a reply thread/);
 });
+
+// ---------------------------------------------------------------------------
+// replyTo.mode 'event' — the asker wants the reply as data, never a chat prompt
+// ---------------------------------------------------------------------------
+
+/** Re-stamp Y's source with an event-mode replyTo (epicId may be null). */
+function setEventMode(a, b, { epicId = 'psess-x', claudeSessionId = 'cs-x', externalRef } = {}) {
+  const idx = readActiveIndex(b);
+  const y = idx.sessions['psess-y'];
+  y.source = {
+    producer: 'cross-project-feedback',
+    fromCwd: a,
+    ...(epicId ? { fromEpicId: epicId } : {}),
+    ...(externalRef ? { externalRef } : {}),
+    replyTo: { cwd: a, epicId, claudeSessionId: epicId ? claudeSessionId : null, mode: 'event' },
+    proposal: {},
+  };
+  writeIndex(b, { 'psess-y': y });
+}
+
+const failFallback = async () => { throw new Error('fallback must not open in event mode'); };
+
+test('event mode, asker active: event on X, no prompt, no fallback, event-only receipt + rich audit', async () => {
+  const { a, b } = await setup();
+  setEventMode(a, b, { externalRef: 'portfolio:action-42' });
+  const d = deps('sent', { openFallback: failFallback });
+  const long = 'y'.repeat(2500);
+  const refs = Array.from({ length: 10 }, (_, i) => `r${i}.md`);
+  const r = await sendFeedbackReply(input(b, { message: long, referencePaths: refs }), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'event-only', reason: 'asker-requested-event', toEpicId: 'psess-x', receiptOnReplyingEpic: true });
+  expect(d.calls).toHaveLength(0);
+  expect(events(a, 'psess-x').at(-1).notice).toBe('cross-project-reply');
+  expect(events(b, 'psess-y').at(-1).notice).toBe('cross-project-reply-sent');
+  expect(d.audits).toHaveLength(1);
+  const f = d.audits[0].fields;
+  expect(d.audits[0].kind).toBe('epic_cross_project_reply');
+  expect(f).toMatchObject({ mode: 'event', externalRef: 'portfolio:action-42', delivery: 'event-only', outcome: 'done', fromEpicId: 'psess-y', epicId: 'psess-x' });
+  expect(f.message).toHaveLength(2000);
+  expect(f.referencePaths).toEqual(refs);
+});
+
+test('event mode, asker gone (missing / completed): no event, no prompt, no fallback, still ok', async () => {
+  for (const variant of ['missing', 'completed']) {
+    const { a, b } = await setup(variant === 'completed' ? { xOverrides: { status: 'completed' } } : {});
+    setEventMode(a, b);
+    if (variant === 'missing') writeIndex(a, {});
+    const before = events(a, 'psess-x').length;
+    const d = deps('sent', { openFallback: failFallback });
+    const r = await sendFeedbackReply(input(b), d);
+    expect(r).toMatchObject({ ok: true, delivery: 'event-only', reason: 'asker-requested-event' });
+    expect(d.calls).toHaveLength(0);
+    expect(events(a, 'psess-x')).toHaveLength(before);
+    expect(Object.values(readActiveIndex(a).sessions).filter((s) => s.source && s.source.replyOf)).toHaveLength(0);
+    expect(events(b, 'psess-y').at(-1).notice).toBe('cross-project-reply-sent');
+    expect(d.audits[0].fields).toMatchObject({ mode: 'event' });
+    expect(d.audits[0].fields).not.toHaveProperty('externalRef');
+  }
+});
+
+test('event mode, asker without an Epic (cwd-only replyTo): ok event-only, nothing appended in A', async () => {
+  const { a, b } = await setup();
+  setEventMode(a, b, { epicId: null, externalRef: 'ext-1' });
+  const d = deps('sent', { openFallback: failFallback });
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'event-only', reason: 'asker-requested-event', toEpicId: null });
+  expect(d.calls).toHaveLength(0);
+  expect(events(a, 'psess-x')).toHaveLength(1);
+  expect(d.audits[0].fields).toMatchObject({ mode: 'event', externalRef: 'ext-1', epicId: null, message: 'Fixed in commit abc123.', referencePaths: ['src/relay.cjs'] });
+});
+
+test('event mode: the per-thread reply limit still applies', async () => {
+  const { a, b } = await setup();
+  setEventMode(a, b, { epicId: null });
+  const d = deps('sent', { openFallback: failFallback });
+  for (let i = 0; i < MAX_REPLIES_PER_THREAD; i++) {
+    expect((await sendFeedbackReply(input(b), d)).ok).toBe(true);
+  }
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r).toMatchObject({ ok: false, status: 429 });
+  expect(d.calls).toHaveLength(0);
+});
+
+test('default (no mode) path is unchanged: prompt sent, audit row has no event-mode fields', async () => {
+  const { b } = await setup();
+  const d = deps('sent');
+  const r = await sendFeedbackReply(input(b), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'delivered' });
+  expect(r).not.toHaveProperty('reason');
+  expect(d.calls).toHaveLength(1);
+  const f = d.audits[0].fields;
+  for (const k of ['mode', 'externalRef', 'message', 'referencePaths']) expect(f).not.toHaveProperty(k);
+});

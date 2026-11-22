@@ -132,6 +132,15 @@ test.each([
   expect(r.content[0].text).not.toMatch(/fixed it|has acted|is working on it/i);
 });
 
+test('event-only delivery the asker requested says it was recorded as an event for the asking app, no chat prompted', async () => {
+  const { handleCallTool } = await setup({ ok: true, delivery: 'event-only', reason: 'asker-requested-event' }, { SM_CHAT_SESSION_ID: 's' });
+  const r = await call(handleCallTool, BASE);
+  const text = r.content[0].text;
+  expect(text).toContain('recorded as an event for the asking app');
+  expect(text).toContain('no chat was prompted');
+  expect(text).not.toContain('delivered as an event only on the asking Epic');
+});
+
 test('catalog documents feedback_reply and drops the "no reply channel" wording', () => {
   const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../lib/mcpToolCatalog.cjs');
   const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'feedback_reply');

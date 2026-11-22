@@ -54,6 +54,11 @@ const REPLY_OUTCOMES = Object.freeze(['done', 'blocked', 'question']);
 const RECEIPT_NOTICE = 'cross-project-reply-sent';
 const REPLY_NOTICE = 'cross-project-reply';
 const FALLBACK_NOTICE = 'cross-project-reply-fallback';
+/** Event mode (source.replyTo.mode 'event'): the asker keeps its own records,
+ *  so the reply is data in the audit row — never a chat prompt or a fallback. */
+const EVENT_MODE_REASON = 'asker-requested-event';
+const AUDIT_MESSAGE_CHARS = 2000;
+const AUDIT_MAX_REFERENCES = 10;
 
 /** Per-Y promise chain: cap check → deliver → receipt run one at a time. */
 const threadLocks = new Map();
@@ -219,6 +224,7 @@ async function sendFeedbackReply(input, deps = {}) {
   if (!resolved.ok) return bad(400, resolved.error);
   const rt = resolved.thread;
   const legacy = resolved.legacy;
+  const eventMode = resolved.mode === 'event';
   const threadField = legacy ? { thread: 'legacy' } : {};
   if (input.toEpicId !== undefined && input.toEpicId !== null && input.toEpicId !== rt.epicId) {
     return bad(403, `this session may only reply to Epic ${rt.epicId}, the one that asked`);
@@ -241,6 +247,13 @@ async function sendFeedbackReply(input, deps = {}) {
     const sent = countReceipts(replierCwd, yId);
     if (sent >= MAX_REPLIES_PER_THREAD) {
       return bad(429, `reply limit of ${MAX_REPLIES_PER_THREAD} reached for this thread`);
+    }
+
+    if (eventMode) {
+      return replyAsEvent({
+        appendEvent, audit, sent, rt, targetCwd, replierCwd, yId, y,
+        message, outcome, referencePaths,
+      });
     }
 
     // The fallback (default: crossProjectFeedback.openReplyFallbackSession,
@@ -368,12 +381,68 @@ async function sendFeedbackReply(input, deps = {}) {
   });
 }
 
+/**
+ * replyAsEvent(ctx) → Promise<result>. Event-mode delivery, run inside the
+ * per-Epic lock after the cap check: append the reply event on X only when
+ * replyTo.epicId names an active Epic in replyTo.cwd, write the receipt on Y,
+ * and put what an outside app needs to match and read the reply into the
+ * audit row. Never prompts a chat, never opens a fallback session.
+ */
+async function replyAsEvent({
+  appendEvent, audit, sent, rt, targetCwd, replierCwd, yId, y, message, outcome, referencePaths,
+}) {
+  const replyMeta = { fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths };
+  let eventOnAskingEpic = false;
+  const x = nonEmpty(rt.epicId) ? readActiveIndex(targetCwd).sessions[rt.epicId] : null;
+  if (x && x.status === 'active') {
+    const prompt = composeReplyPrompt({
+      fromCwd: replierCwd, fromEpicId: yId, fromGoalText: y.goalText, outcome, message, referencePaths,
+    });
+    try {
+      const appended = await appendEvent(targetCwd, x.id, prompt, { notice: REPLY_NOTICE, reply: replyMeta });
+      eventOnAskingEpic = !!(appended && appended.ok);
+    } catch { eventOnAskingEpic = false; }
+  }
+
+  const project = path.basename(targetCwd);
+  const receipt = await appendEvent(replierCwd, yId,
+    `Reply recorded as an event for ${rt.epicId ? `${rt.epicId} in ` : ''}${project} (${outcome}, event-only).`,
+    { notice: RECEIPT_NOTICE, allowInactive: true, reply: replyMeta });
+
+  const externalRef = y.source && y.source.externalRef;
+  audit('epic_cross_project_reply', {
+    cwd: targetCwd,
+    epicId: rt.epicId || null,
+    fromCwd: replierCwd,
+    fromEpicId: yId,
+    outcome,
+    delivery: 'event-only',
+    mode: 'event',
+    ...(externalRef ? { externalRef } : {}),
+    message: message.slice(0, AUDIT_MESSAGE_CHARS),
+    referencePaths: referencePaths.slice(0, AUDIT_MAX_REFERENCES),
+  });
+
+  return {
+    ok: true,
+    delivery: 'event-only',
+    reason: EVENT_MODE_REASON,
+    toCwd: targetCwd,
+    toEpicId: rt.epicId || null,
+    eventOnAskingEpic,
+    ...receiptFields(receipt),
+    repliesUsed: sent + 1,
+    repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
+  };
+}
+
 const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 
 /**
  * resolveThread(src) — pure. The thread a replying Epic's `source` names:
  *   { ok: true, thread: { cwd, epicId, claudeSessionId }, legacy } or { ok: false, error }.
- * A complete replyTo → legacy false. A pre-reply-thread request Epic (no
+ * A complete replyTo → legacy false; a replyTo with mode 'event' needs only a cwd
+ * (→ mode: 'event'). A pre-reply-thread request Epic (no
  * replyTo key, no replyOf, fromCwd + fromEpicId set) → legacy true, no
  * session pin. Every refusal says why and points at feedback_open_session.
  */
@@ -381,6 +450,19 @@ function resolveThread(src) {
   const s = src && typeof src === 'object' ? src : {};
   const isRequest = s.producer === 'cross-project-feedback';
   const rt = s.replyTo;
+  // Event mode needs only the asker's cwd; epicId/claudeSessionId may be null.
+  if (isRequest && rt && typeof rt === 'object' && rt.mode === 'event' && nonEmpty(rt.cwd)) {
+    return {
+      ok: true,
+      thread: {
+        cwd: rt.cwd,
+        epicId: nonEmpty(rt.epicId) ? rt.epicId : null,
+        claudeSessionId: nonEmpty(rt.claudeSessionId) ? rt.claudeSessionId : null,
+      },
+      legacy: false,
+      mode: 'event',
+    };
+  }
   if (isRequest && rt && typeof rt === 'object'
     && nonEmpty(rt.cwd) && nonEmpty(rt.epicId) && nonEmpty(rt.claudeSessionId)) {
     return { ok: true, thread: { cwd: rt.cwd, epicId: rt.epicId, claudeSessionId: rt.claudeSessionId }, legacy: false };

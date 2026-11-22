@@ -7,6 +7,9 @@
  * key tab and the key buttons' numbers. Don't reintroduce a second hosted
  * iframe or hand-written blocks here.
  *
+ * The whole macro library also goes down as `library`: the Videos tab lists this project's
+ * `project-video` tools from it, pressed through the same `launch`.
+ *
  * Also owns this window's last Pages / Videos launch per project and macro
  * (`BuildLaunch`: title, sent lines, entry replaced) — component state only, so
  * an app reload forgets it and the panes fall back to the macro label — and the
@@ -69,7 +72,9 @@ function ProjectHomeComponent() {
     (status: MacroJobStatus) => {
       if (status.state === 'done') {
         const title =
-          cwdLaunches?.[status.macroId]?.title ?? macros.find((m) => m.id === status.macroId)?.label ?? status.macroId
+          cwdLaunches?.[status.macroId]?.title ??
+          library.find((m) => m.id === status.macroId)?.label ??
+          status.macroId
         toast.success(`“${title}” is ready`)
       }
       if (!cwd || !cwdLaunches?.[status.macroId]) return
@@ -79,7 +84,7 @@ function ProjectHomeComponent() {
         return { ...all, [cwd]: kept }
       })
     },
-    [cwd, cwdLaunches, macros],
+    [cwd, cwdLaunches, library],
   )
   useJobSettled(cwd, jobStatus, onJobSettled)
   // cwd → the Tools pane's last link-map findings count (null = that scan failed).
@@ -116,6 +121,7 @@ function ProjectHomeComponent() {
         onLaunched={recordLaunch}
         onGoTools={() => setTab('tools')}
         onFindingsCount={recordFindings}
+        library={library}
       />
     </div>
   )

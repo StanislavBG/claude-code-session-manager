@@ -25,6 +25,13 @@
  * (`videoPromptLines` of `videoDefaults`) straight through `launch`; Customize opens the composer on
  * the template. A failed job's reason shows above the cards; the TIP link calls `onGoTools`.
  *
+ * Video tools (`tools`): this project's `project-video` macros, one button each (`video-tool-<id>`, the
+ * macro label) under Generate video — and above the empty state's cards. A tool with inputs opens the
+ * HOT KEYS strip's MacroInputsForm (defaults, options, required checks); Start / a no-input press
+ * calls `onLaunch(tool, undefined, values)`, the same `useMacroLaunch` path Demo Video takes. Its job
+ * (`toolJobStatus`) queued / running disables it as `Building…`; a failed run shows its reason line
+ * beside it until this window launches it again (`toolLaunches`).
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
@@ -35,6 +42,7 @@ import { createdLabel, fitInstructions } from './PagesPane'
 import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
 import { LibraryEmptyState } from './LibraryEmptyState'
+import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import {
   VIDEO_STYLES,
   VIDEO_TEMPLATES,
@@ -342,7 +350,7 @@ export interface VideosPaneProps {
   /** `builtin-demo-video`; without it Generate video and Regenerate… stay disabled. */
   macro: Macro | undefined
   launching: string | null
-  onLaunch: (macro: Macro, extraInstructions?: string) => void
+  onLaunch: (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
   /** The video macro's job. Queued / running disables both buttons and shows the building row; failed shows its reason. */
   jobStatus?: MacroJobStatus
   onOpenSession?: (epicId: string) => void
@@ -355,6 +363,53 @@ export interface VideosPaneProps {
   onLaunched?: (macroId: string, launch: BuildLaunch) => void
   /** Switches Project Home to Tools — the empty state's `Review MD network` link. */
   onGoTools?: () => void
+  /** This project's `project-video` macros with a job (ProjectPagesSection), one button each. */
+  tools?: Macro[]
+  /** Each tool's job status by macro id. */
+  toolJobStatus?: Record<string, MacroJobStatus | undefined>
+  /** This window's last launch of each tool by macro id. */
+  toolLaunches?: Record<string, BuildLaunch | undefined>
+}
+
+const TOOL_CLASS =
+  'inline-flex h-8 min-w-0 items-center justify-center rounded-lg border border-rule-structural bg-bg-hi px-3 text-[12.5px] font-semibold text-fg cursor-pointer enabled:hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed'
+
+/** One project Video tool button, with its failed run's reason line beside it. */
+function VideoToolButton({
+  tool,
+  launching,
+  status,
+  launch,
+  onPress,
+  onOpenSession,
+}: {
+  tool: Macro
+  launching: string | null
+  status: MacroJobStatus | undefined
+  launch: BuildLaunch | undefined
+  onPress: (tool: Macro) => void
+  onOpenSession?: (epicId: string) => void
+}) {
+  const building = isBuilding(status)
+  const failed = failureShown(status, launch) ? status : undefined
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        data-testid={`video-tool-${tool.id}`}
+        disabled={building || launching !== null}
+        onClick={() => onPress(tool)}
+        className={TOOL_CLASS}
+      >
+        {building ? 'Building…' : launching === tool.id ? 'Starting…' : tool.label}
+      </button>
+      {failed && (
+        <span data-testid={`video-tool-status-${tool.id}`} className="min-w-0">
+          <JobStatusLine status={failed} onOpenSession={onOpenSession} />
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function VideosPane({
@@ -370,8 +425,13 @@ export function VideosPane({
   lastLaunch,
   onLaunched,
   onGoTools,
+  tools,
+  toolJobStatus,
+  toolLaunches,
 }: VideosPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
+  // The tool whose inputs form is open.
+  const [pendingTool, setPendingTool] = useState<Macro | null>(null)
   // Open composer: `{}` = Generate video, `{ tplId }` = an empty-state card, `{ regen }` = Regenerate…
   // (mounted per open — it reads its props once).
   const [composer, setComposer] = useState<{ regen?: ComposerRegen; tplId?: string } | null>(null)
@@ -443,6 +503,35 @@ export function VideosPane({
     </button>
   )
 
+  const launchTool = (tool: Macro, values?: Record<string, string>) => {
+    setPendingTool(null)
+    onLaunched?.(tool.id, { title: tool.label, lines: [], at: Date.now() })
+    onLaunch(tool, undefined, values)
+  }
+  const toolsNode = tools && tools.length > 0 && (
+    <div data-testid="video-tools" className="flex flex-none flex-col gap-1.5">
+      {tools.map((t) => (
+        <VideoToolButton
+          key={t.id}
+          tool={t}
+          launching={launching}
+          status={toolJobStatus?.[t.id]}
+          launch={toolLaunches?.[t.id]}
+          onOpenSession={onOpenSession}
+          onPress={(m) => (m.inputs && m.inputs.length > 0 ? setPendingTool(m) : launchTool(m))}
+        />
+      ))}
+      {pendingTool && (
+        <MacroInputsForm
+          key={pendingTool.id}
+          macro={pendingTool}
+          onCancel={() => setPendingTool(null)}
+          onSubmit={(values) => launchTool(pendingTool, values)}
+        />
+      )}
+    </div>
+  )
+
   const rows: LibraryRow[] = entries.map((e) =>
     build && e.id === replacingId
       ? {
@@ -470,6 +559,7 @@ export function VideosPane({
         >
           <div className="flex min-h-0 flex-col gap-3">
             {generateButton}
+            {toolsNode}
             <div
               data-testid="project-home-videos-header"
               className="flex flex-none items-baseline justify-between px-0.5 pt-0.5 font-mono text-[10.5px] text-fg-faint"
@@ -568,6 +658,8 @@ export function VideosPane({
           </div>
         </div>
       ) : (
+        <>
+        {toolsNode}
         <LibraryEmptyState
           kind="video"
           onQuick={(tplId) => launch(videoPromptLines(videoDefaults(tplId)))}
@@ -578,6 +670,7 @@ export function VideosPane({
           starting={macro !== undefined && launching === macro.id}
           notice={failed && <JobStatusLine status={failed} onOpenSession={onOpenSession} />}
         />
+        </>
       )}
       {composerNode}
     </>

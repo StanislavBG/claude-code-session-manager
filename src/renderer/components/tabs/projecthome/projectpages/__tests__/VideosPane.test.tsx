@@ -776,3 +776,105 @@ describe('VideosPane episodes and 9:16', () => {
     expect(box().getAttribute('data-aspect')).toBe('16:9')
   })
 })
+
+describe('VideosPane project Video tools', () => {
+  const TOOL: Macro = {
+    ...DEMO,
+    id: 'burrow-episode',
+    label: 'Episode',
+    agentName: 'burrow-video',
+    surface: 'project-video',
+    projects: ['/proj'],
+    prompt: 'Make episode {{topic}} in {{format}}.',
+    inputs: [
+      { name: 'topic', label: 'Topic', required: true },
+      { name: 'format', label: 'Format', default: '9:16', options: ['9:16', '16:9'] },
+    ],
+    job: { estimateMinutes: 10 },
+  }
+  const PLAIN: Macro = { ...TOOL, id: 'burrow-blog', label: 'Blog video', prompt: 'Go.', inputs: undefined }
+  const toolBtn = (id: string) => tid(`video-tool-${id}`) as HTMLButtonElement | null
+
+  it('renders one button per tool, labelled with the macro label, beside Generate video', () => {
+    mount({ tools: [TOOL, PLAIN] })
+    expect(toolBtn('burrow-episode')?.textContent).toBe('Episode')
+    expect(toolBtn('burrow-blog')?.textContent).toBe('Blog video')
+    expect(follows(tid('project-home-generate')!, toolBtn('burrow-episode')!)).toBe(true)
+  })
+
+  it('shows the tools on the empty state too', () => {
+    mount({ entries: [], tools: [TOOL] })
+    expect(toolBtn('burrow-episode')).not.toBeNull()
+  })
+
+  it('a tool with inputs opens the inputs form with defaults and options; required blocks; Start calls onLaunch with the values', async () => {
+    const onLaunch = vi.fn()
+    const onLaunched = vi.fn()
+    mount({ tools: [TOOL], onLaunch, onLaunched })
+    click(toolBtn('burrow-episode'))
+    expect(tid('macro-inputs-form')).not.toBeNull()
+    expect((tid('macro-input-format') as HTMLSelectElement).value).toBe('9:16')
+    expect(Array.from((tid('macro-input-format') as HTMLSelectElement).options).map((o) => o.value)).toEqual(['', '9:16', '16:9'])
+    await act(async () => {
+      tid('macro-inputs-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    })
+    expect(tid('macro-inputs-error')?.textContent).toBe('"Topic" is required')
+    expect(onLaunch).not.toHaveBeenCalled()
+    type(tid('macro-input-topic'), 'Moles')
+    await act(async () => {
+      tid('macro-inputs-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith(TOOL, undefined, { topic: 'Moles', format: '9:16' })
+    expect(onLaunched).toHaveBeenCalledWith('burrow-episode', expect.objectContaining({ title: 'Episode' }))
+    expect(tid('macro-inputs-form')).toBeNull()
+  })
+
+  it('Cancel closes the inputs form without launching', () => {
+    const onLaunch = vi.fn()
+    mount({ tools: [TOOL], onLaunch })
+    click(toolBtn('burrow-episode'))
+    click(tid('macro-inputs-cancel'))
+    expect(tid('macro-inputs-form')).toBeNull()
+    expect(onLaunch).not.toHaveBeenCalled()
+  })
+
+  it('a tool without inputs launches on press', () => {
+    const onLaunch = vi.fn()
+    mount({ tools: [PLAIN], onLaunch })
+    click(toolBtn('burrow-blog'))
+    expect(onLaunch).toHaveBeenCalledWith(PLAIN, undefined, undefined)
+  })
+
+  it("while a tool's job is queued (pending/held) or running its button is disabled and reads Building…", () => {
+    for (const state of ['queued', 'running'] as const) {
+      mount({ tools: [TOOL, PLAIN], toolJobStatus: { 'burrow-episode': status({ macroId: 'burrow-episode', state }) } })
+      expect(toolBtn('burrow-episode')!.disabled).toBe(true)
+      expect(toolBtn('burrow-episode')!.textContent).toBe('Building…')
+      expect(toolBtn('burrow-blog')!.disabled).toBe(false)
+      // Demo Video's own build state is untouched by a tool's build.
+      expect((tid('project-home-generate') as HTMLButtonElement).disabled).toBe(false)
+      act(() => root!.unmount())
+      container!.remove()
+    }
+    root = null
+    container = null
+  })
+
+  it("a failed (incl. needs_review) tool job shows its reason line next to its button", () => {
+    mount({
+      tools: [TOOL],
+      toolJobStatus: { 'burrow-episode': status({ macroId: 'burrow-episode', state: 'failed', status: 'needs_review', reason: 'render timed out' }) },
+    })
+    const line = tid('video-tool-status-burrow-episode')!
+    expect(line.textContent).toContain('Failed: render timed out')
+    expect(toolBtn('burrow-episode')!.disabled).toBe(false)
+  })
+
+  it('Demo Video Generate video and Regenerate still launch the demo macro', async () => {
+    const onLaunch = vi.fn()
+    mount({ tools: [TOOL], onLaunch })
+    click(tid('project-home-generate'))
+    click(tid('composer-generate'))
+    expect(onLaunch).toHaveBeenCalledWith(DEMO, DEMO_LINES)
+  })
+})

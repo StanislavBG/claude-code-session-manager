@@ -746,3 +746,72 @@ describe('ProjectPagesSection', () => {
     })
   })
 })
+
+describe('ProjectPagesSection project Video tools', () => {
+  const tool = (over: Partial<Macro>): Macro =>
+    macro({ surface: 'project-video', projects: ['/proj'], job: { estimateMinutes: 5 }, agentName: 'burrow-video', ...over })
+  const HERE = tool({ id: 'here-tool', label: 'Episode', inputs: [{ name: 'topic', label: 'Topic', default: 'Moles' }], prompt: 'Ep {{topic}}' })
+  const ELSEWHERE = tool({ id: 'other-tool', label: 'Other', projects: ['/other'] })
+  const NO_JOB = tool({ id: 'no-job', label: 'No job', job: undefined })
+  const STAR = tool({ id: 'star-tool', label: 'Star', projects: ['*'] })
+  const SESSIONS = macro({ id: 'hotkey', label: 'Hotkey', surface: 'sessions', projects: ['/proj'] })
+  const HOME_CUSTOM = macro({ id: 'home-custom', label: 'Home custom', projects: ['/proj'] })
+  const LIBRARY = [...MACROS, HERE, ELSEWHERE, NO_JOB, STAR, SESSIONS, HOME_CUSTOM]
+  const toolIds = () =>
+    Array.from(document.querySelectorAll('[data-testid^="video-tool-"]'))
+      .map((n) => n.getAttribute('data-testid'))
+      .filter((t) => !t!.startsWith('video-tool-status-'))
+
+  it("shows only this cwd's project-video tools with a job; no other project's, sessions or project-home macro", async () => {
+    mount(<ProjectPagesSection {...props({ cwd: '/proj/', library: LIBRARY, videos: [NEW_V], tab: 'videos' })} />)
+    await flush()
+    expect(toolIds()).toEqual(['video-tool-here-tool'])
+    await show({ cwd: '/other', library: LIBRARY, videos: [NEW_V], tab: 'videos' })
+    expect(toolIds()).toEqual(['video-tool-other-tool'])
+  })
+
+  it('pressing a tool opens its inputs form and Start launches it with the values', async () => {
+    const onLaunch = vi.fn()
+    mount(<ProjectPagesSection {...props({ cwd: '/proj', library: LIBRARY, videos: [NEW_V], tab: 'videos', onLaunch })} />)
+    await flush()
+    act(() => byTestId('video-tool-here-tool')!.click())
+    await act(async () => {
+      byTestId('macro-inputs-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith(HERE, undefined, { topic: 'Moles' })
+  })
+
+  it("passes each tool's job status: building disables it, failed shows its reason", async () => {
+    const st = (macroId: string, over: Partial<MacroJobStatus>): MacroJobStatus => ({
+      macroId, epicId: null, slug: 's', state: 'queued', status: 'pending', reason: null, startedAt: null, finishedAt: null, ...over,
+    })
+    const second = tool({ id: 'second-tool', label: 'Second' })
+    mount(
+      <ProjectPagesSection
+        {...props({
+          cwd: '/proj',
+          library: [...LIBRARY, second],
+          videos: [NEW_V],
+          tab: 'videos',
+          jobStatus: { 'here-tool': st('here-tool', { state: 'running', status: 'running' }), 'second-tool': st('second-tool', { state: 'failed', status: 'failed', reason: 'boom' }) },
+        })}
+      />,
+    )
+    await flush()
+    const btn = byTestId('video-tool-here-tool') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.textContent).toBe('Building…')
+    expect(byTestId('video-tool-status-second-tool')?.textContent).toContain('Failed: boom')
+    // Demo Video's Generate video is unaffected by a tool's build.
+    expect(generateBtn()!.disabled).toBe(false)
+  })
+
+  it('Demo Video Generate video still launches builtin-demo-video with tools present', async () => {
+    const onLaunch = vi.fn()
+    mount(<ProjectPagesSection {...props({ cwd: '/proj', library: LIBRARY, videos: [NEW_V], tab: 'videos', onLaunch })} />)
+    await flush()
+    act(() => generateBtn()!.click())
+    act(() => byTestId('composer-generate')!.click())
+    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, DEMO_LINES)
+  })
+})

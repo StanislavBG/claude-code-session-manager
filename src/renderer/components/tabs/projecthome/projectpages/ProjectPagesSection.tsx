@@ -17,8 +17,14 @@
  * this window's last Pages / Videos launch, which the panes' building state
  * shows (title, sent lines). Purely presentational — no store access here; the
  * page and video selections live here so they survive key-button switches.
+ *
+ * `library` is ProjectHome's whole macro library: the Videos tab's tools are its `surface:
+ * 'project-video'` macros with a job whose `projects` names this cwd (never `'*'`, never another
+ * project's), each with its job status and last launch by macro id — memoized here, never built
+ * inside a store selector.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { normalizeCwd } from '../../../../lib/knownProjectAggregate'
 import { PagesPane } from './PagesPane'
 import { VideosPane } from './VideosPane'
 import { ToolsPane, type FindingsCountFn, type LaunchFn } from './ToolsPane'
@@ -26,6 +32,17 @@ import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
 import type { BuildLaunch } from './BuildingPanel'
 import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus } from '../../../../../preload/api'
+
+const NO_MACROS: Macro[] = []
+
+/** `cwd`'s project Video tools: surface 'project-video', a job, and `projects` naming this cwd. */
+export function videoToolsFor(library: readonly Macro[], cwd: string | null | undefined): Macro[] {
+  if (!cwd) return NO_MACROS
+  const here = normalizeCwd(cwd)
+  return library
+    .filter((m) => m.surface === 'project-video' && !!m.job && m.projects.some((p) => p !== '*' && normalizeCwd(p) === here))
+    .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()))
+}
 
 export function ProjectPagesSection({
   tab,
@@ -44,6 +61,7 @@ export function ProjectPagesSection({
   onLaunched,
   onGoTools,
   onFindingsCount,
+  library,
 }: {
   tab: ProjectHomeTab
   cwd?: string | null
@@ -64,9 +82,22 @@ export function ProjectPagesSection({
   onGoTools?: () => void
   /** ToolsPane's link-map findings count per scanned cwd (null when the scan failed) — ProjectHome's Tools key button. */
   onFindingsCount?: FindingsCountFn
+  /** Every macro in the library (ProjectHome's `useMacros`) — the source of the Videos tab's tools. */
+  library?: Macro[]
 }) {
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
+  const videoTools = useMemo(() => videoToolsFor(library ?? NO_MACROS, cwd), [library, cwd])
+  const toolJobStatus = useMemo(() => {
+    const out: Record<string, MacroJobStatus | undefined> = {}
+    for (const t of videoTools) out[t.id] = jobStatus?.[t.id]
+    return out
+  }, [videoTools, jobStatus])
+  const toolLaunches = useMemo(() => {
+    const out: Record<string, BuildLaunch | undefined> = {}
+    for (const t of videoTools) out[t.id] = launches?.[t.id]
+    return out
+  }, [videoTools, launches])
 
   if (tab === 'tools') {
     return (
@@ -135,6 +166,9 @@ export function ProjectPagesSection({
           lastLaunch={launches?.['builtin-demo-video']}
           onLaunched={onLaunched}
           onGoTools={onGoTools}
+          tools={videoTools}
+          toolJobStatus={toolJobStatus}
+          toolLaunches={toolLaunches}
         />
       )}
     </div>

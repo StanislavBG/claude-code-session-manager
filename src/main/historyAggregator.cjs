@@ -767,22 +767,6 @@ function resetIntradayRegistryForTests() {
 async function computeIntradayBuckets() {
   const today = localDate(new Date());
 
-  // Skip threshold: local midnight of the day the last completed pass (at
-  // this ROLLUP_VERSION) started. That pass skipped only that day's content,
-  // so a folder with no transcript modified since that midnight holds nothing
-  // it did not already count. No such marker => no threshold => full pass.
-  let skipBeforeMs = null;
-  try {
-    const lastCycle = await historyRollup.readNewestFinalizedCycleStart();
-    if (lastCycle !== null) {
-      const midnight = new Date(lastCycle);
-      midnight.setHours(0, 0, 0, 0);
-      skipBeforeMs = midnight.getTime();
-    }
-  } catch {
-    skipBeforeMs = null;
-  }
-
   let projectDirs;
   try {
     projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
@@ -928,22 +912,6 @@ async function aggregate(req) {
   let skippedLargeFiles = 0;
   let skippedBudgetFiles = 0;
   let parseBudgetSpentMs = 0;
-
-  // Skip threshold: local midnight of the day the last completed pass (at
-  // this ROLLUP_VERSION) started. That pass skipped only that day's content,
-  // so a folder with no transcript modified since that midnight holds nothing
-  // it did not already count. No such marker => no threshold => full pass.
-  let skipBeforeMs = null;
-  try {
-    const lastCycle = await historyRollup.readNewestFinalizedCycleStart();
-    if (lastCycle !== null) {
-      const midnight = new Date(lastCycle);
-      midnight.setHours(0, 0, 0, 0);
-      skipBeforeMs = midnight.getTime();
-    }
-  } catch {
-    skipBeforeMs = null;
-  }
 
   let projectDirs;
   try {

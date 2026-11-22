@@ -362,3 +362,26 @@ test('rollupMapToRows: old and new lines for one model in one bucket sum both pa
   expect(dst.cacheCreationUnknownTokens).toBe(1_000_000);
   expect(dst.cacheCreation1hTokens).toBe(400_000);
 });
+
+test('computeIntradayBuckets and aggregate never read the finalize skip threshold', async () => {
+  // Only finalizeClosedDays uses the skip threshold. The other two walks must
+  // not read (and merge) the whole rollup file just to compute it.
+  writeTranscript('/repo/threshold', 'sess-th', [
+    userLine(todayAt(9).toISOString()),
+    assistantLine(todayAt(9).toISOString(), 'claude-opus-5'),
+  ], todayAt(9));
+  const original = historyRollup.readNewestFinalizedCycleStart;
+  let calls = 0;
+  historyRollup.readNewestFinalizedCycleStart = async (...args) => {
+    calls++;
+    return original(...args);
+  };
+  try {
+    await historyAggregator.computeIntradayBuckets();
+    const t = today();
+    await historyAggregator.remote.aggregate({ fromDate: t, toDate: t });
+  } finally {
+    historyRollup.readNewestFinalizedCycleStart = original;
+  }
+  expect(calls).toBe(0);
+});

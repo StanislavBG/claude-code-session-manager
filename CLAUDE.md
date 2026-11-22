@@ -116,6 +116,7 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **Telemetry is anonymous, on by default, opt-out** (`SM_TELEMETRY=0`) — see [telemetry.md](session-manager-operations/architecture/telemetry.md).
 - **No per-OS UI chrome** — native frame everywhere; no layering branches on `process.platform`.
 - **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
+- **Needs you = an open question** (a chat ended needs-input). A parked PRD shows as being fixed, never needs review — `src/renderer/lib/needsHuman.ts`.
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
 - **`--model` must be pinned explicitly** on every `claude -p` / `--print` call site — unpinned drift costs.
 - **The owner's real name and personal email never enter a tracked file or commit** — [why](session-manager-operations/architecture/identity-boundary.md).

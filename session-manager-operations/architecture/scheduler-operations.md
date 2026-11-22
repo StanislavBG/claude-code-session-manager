@@ -202,6 +202,8 @@ if 1-3 don't apply; rung 5 (`reverifyNeedsReview`) is the periodic catch-all for
 same-tick path missed (app restarted mid-episode, etc.) — it re-runs the SAME selectors, not a
 different algorithm.
 
+A needs_review park is the scheduler's self-heal state; the UI never presents it to the human as a question ([`needsHuman.ts`](../../src/renderer/lib/needsHuman.ts)).
+
 | # | Rung | Entry condition | Exit |
 | --- | --- | --- | --- |
 | 1 | **mechanical-recovery** | `selectMechanicalRecoveryTarget`: `verifierVerdict === 'worktree_integration_failed'` (the one verdict PRD 1125 already taught `integrateBranch` to auto-resolve on retry) and not yet attempted. Kill switch `SM_MECHANICAL_RECOVERY_DISABLE=1`. | `performMechanicalRecovery` re-attempts `integrateJobBranch` — pure git, no model call. Success → `completed` (source `scheduler:mechanicalRecovery`). Failure → stays `needs_review`, `mechanicalRecoveryAttempted=true` stamped either way (one bounded attempt, falls through to the next rung). |

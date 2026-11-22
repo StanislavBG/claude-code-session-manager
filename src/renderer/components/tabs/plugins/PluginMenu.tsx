@@ -2,7 +2,7 @@
  * PluginMenu — the ⋯ menu on a plugin's detail header (Claude config ▸ Plugins, render 14):
  * Reveal in File Explorer, Copy path, divider, then Uninstall.
  *
- * Uninstall confirms inline inside the menu (extensions-3a DESIGN_SPEC §7.7) — never a native
+ * Uninstall confirms inline inside the menu (design-mocks/claude-config, render 14) — never a native
  * `window.confirm`.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react'

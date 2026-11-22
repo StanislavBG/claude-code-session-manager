@@ -1,4 +1,4 @@
-import { toast } from '../state/toast'
+import { toast as appToast } from '../state/toast'
 
 /** One plugin advertised by a marketplace Claude Code already knows about. */
 export interface MarketplacePlugin {
@@ -6,6 +6,8 @@ export interface MarketplacePlugin {
   name: string
   description: string
   source: string
+  /** The entry's `version`, when the marketplace.json records one (most official entries do not). */
+  version?: string
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -25,10 +27,12 @@ function sourceOf(raw: unknown): string {
 /**
  * Plugins from every marketplace in ~/.claude/plugins/known_marketplaces.json,
  * read from each marketplace's .claude-plugin/marketplace.json on disk. A
- * missing/invalid file is skipped and toasted; this never throws.
+ * missing/invalid file is skipped and toasted (unless `quiet`, for surfaces that
+ * only peek at one entry); this never throws.
  */
-export async function listMarketplacePlugins(home: string): Promise<MarketplacePlugin[]> {
+export async function listMarketplacePlugins(home: string, opts: { quiet?: boolean } = {}): Promise<MarketplacePlugin[]> {
   const root = `${home}/.claude/plugins`
+  const toast = opts.quiet ? { error: () => {}, warn: () => {} } : appToast
   const out: MarketplacePlugin[] = []
   let known: Record<string, unknown>
   try {
@@ -68,6 +72,7 @@ export async function listMarketplacePlugins(home: string): Promise<MarketplaceP
           name: p.name,
           description: typeof p.description === 'string' ? p.description : '',
           source: sourceOf(p.source),
+          ...(typeof p.version === 'string' && p.version ? { version: p.version } : {}),
         })
       }
     } catch (err) {

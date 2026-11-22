@@ -6,8 +6,16 @@
  *
  * Contents are read from the plugin's own install dir (lib/pluginContents) and re-read when any of its
  * component files change (debounced, never two reloads at once). A skill row opens the read-only
- * SkillHomePage in place of the detail. There is no update check anywhere in the app, so the design's
- * `Up to date` control is omitted rather than faked.
+ * SkillHomePage in place of the detail.
+ *
+ * WHAT IT ADDS keeps the plugin's own order within each kind: manifest-declared component paths first, in
+ * the order the manifest lists them, then the default folder in the order its listing returns — nothing
+ * here re-sorts rows.
+ *
+ * The header's `Up to date` / `Update available` control compares the installed manifest version with the
+ * `version` the plugin's marketplace.json entry records, read by the same reader the catalog uses
+ * (lib/pluginMarketplaces, local files only — no network). With no readable version on either side the
+ * control is omitted rather than faked (DESIGN_SPEC §5.4).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../../ui/EmptyState'
@@ -25,6 +33,7 @@ import {
   type PluginRow,
 } from '../../../lib/pluginContents'
 import { toast } from '../../../state/toast'
+import { listMarketplacePlugins } from '../../../lib/pluginMarketplaces'
 import { ConfigCard, ConfigDetailHeader, ConfigSavedLine } from '../../claudeConfig/ConfigLayout'
 import { SkillHomePage } from './PluginSkillBrowser'
 import { PluginMenu } from './PluginMenu'
@@ -49,6 +58,36 @@ export function pluginEyebrow(row: PluginRow): string {
   parts.push(`${(row.scope ?? 'user').toUpperCase()} SCOPE`)
   return parts.join(' · ')
 }
+
+/** Numeric dotted-version compare (`1.10.0` > `1.9.2`); null when either side is not plain `x.y.z`-style. */
+export function compareVersions(a: string, b: string): number | null {
+  const parse = (v: string) => {
+    const core = v.trim().replace(/^v/i, '').split(/[-+]/)[0]
+    const parts = core.split('.')
+    return parts.every((x) => /^\d+$/.test(x)) ? parts.map(Number) : null
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  if (!pa || !pb) return null
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return Math.sign(d)
+  }
+  return 0
+}
+
+export type UpdateState = 'up-to-date' | 'update-available'
+
+/** `update-available` only when the marketplace records a newer version than the installed one; null when unknown. */
+export function pluginUpdateState(installed: string | null | undefined, latest: string | null | undefined): UpdateState | null {
+  if (!installed || !latest) return null
+  const cmp = compareVersions(latest, installed)
+  if (cmp === null) return latest.trim() === installed.trim() ? 'up-to-date' : 'update-available'
+  return cmp > 0 ? 'update-available' : 'up-to-date'
+}
+
+/** The plugin's name as its marketplace lists it: the `name@marketplace` key's name, else the row name. */
+const marketplaceName = (row: PluginRow) => (row.key && row.key.includes('@') ? row.key.slice(0, row.key.lastIndexOf('@')) : row.name)
 
 export interface AddedItem {
   kind: 'command' | 'skill' | 'agent' | 'hook' | 'mcp'
@@ -120,6 +159,23 @@ export function PluginDetail({ row, home, busy, onToggle, onUninstall, onJump }:
   const [loading, setLoading] = useState(true)
   const [watchPaths, setWatchPaths] = useState<string[]>([])
   const loadSeq = useRef(0)
+  const [latestVersion, setLatestVersion] = useState<string | null>(null)
+
+  const pluginMarketplace = row.marketplace
+  const pluginName = marketplaceName(row)
+  useEffect(() => {
+    setLatestVersion(null)
+    if (!home || !pluginMarketplace) return
+    let live = true
+    void listMarketplacePlugins(home, { quiet: true }).then((all) => {
+      if (!live) return
+      const hit = all.find((p) => p.marketplace === pluginMarketplace && p.name === pluginName)
+      setLatestVersion(hit?.version ?? null)
+    })
+    return () => {
+      live = false
+    }
+  }, [home, pluginMarketplace, pluginName])
 
   const loadDetail = useCallback(async () => {
     const seq = ++loadSeq.current
@@ -218,6 +274,8 @@ export function PluginDetail({ row, home, busy, onToggle, onUninstall, onJump }:
   }
 
   const enabled = row.enabled === true
+  const installedVersion = row.manifest?.version ?? null
+  const updateState = pluginUpdateState(installedVersion, latestVersion)
   const description = row.manifest?.description
   const count = (k: AddedItem['kind']) => items.filter((i) => i.kind === k).length
   const kinds: Array<[AddedItem['kind'], string, string]> = [
@@ -250,6 +308,18 @@ export function PluginDetail({ row, home, busy, onToggle, onUninstall, onJump }:
               />
               Enabled
             </label>
+            {updateState && (
+              <span
+                data-testid="plugin-update-state"
+                data-state={updateState}
+                title={`Installed v${installedVersion} · ${row.marketplace} lists v${latestVersion}`}
+                className={`h-7 inline-flex items-center px-3 bg-bg border rounded-md text-[13px] font-semibold ${
+                  updateState === 'update-available' ? 'border-accent text-accent' : 'border-line text-fg-dim'
+                }`}
+              >
+                {updateState === 'update-available' ? 'Update available' : 'Up to date'}
+              </span>
+            )}
             <PluginMenu row={row} busy={busy} onUninstall={onUninstall} />
           </>
         }

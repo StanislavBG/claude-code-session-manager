@@ -247,3 +247,50 @@ test("the single-writer law refuses any writer but 'tasks' in tasks/", () => {
 test('a taskId that could escape bodies/ is rejected', async () => {
   await expect(ledger.appendTaskStart(cwd, startRow('../evil'))).rejects.toThrow(/taskId/);
 });
+
+test('sessionId + persisted default to null/false on start, end and imported lines and fold onto rows', async () => {
+  const s = startRow('d1');
+  await ledger.appendTaskStart(cwd, s);
+  await ledger.appendTaskEnd(cwd, endRow('d1', s.startedAt));
+  await ledger.appendImported(cwd, { ...startRow('d2'), ...endRow('d2', s.startedAt), importId: 'imp-d2' });
+  const day = opsPath(cwd, 'tasks', `${localDate(s.startedAt)}.jsonl`);
+  const lines = fs.readFileSync(day, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  expect(lines.map((l) => l.kind)).toEqual(['start', 'end', 'imported']);
+  for (const l of lines) expect(l).toMatchObject({ sessionId: null, persisted: false });
+  const { tasks } = await ledger.listTasks(cwd);
+  for (const t of tasks) expect(t).toMatchObject({ sessionId: null, persisted: false });
+});
+
+test('a persisted start keeps sessionId + persisted through its end; listTasks and getTask carry both', async () => {
+  const s = startRow('p1', { sessionId: 'sess-p1', persisted: true });
+  await ledger.appendTaskStart(cwd, s);
+  await ledger.appendTaskEnd(cwd, endRow('p1', s.startedAt));
+  const day = opsPath(cwd, 'tasks', `${localDate(s.startedAt)}.jsonl`);
+  const lines = fs.readFileSync(day, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  expect(lines[0]).toMatchObject({ kind: 'start', sessionId: 'sess-p1', persisted: true });
+  const { tasks } = await ledger.listTasks(cwd);
+  expect(tasks[0]).toMatchObject({ taskId: 'p1', sessionId: 'sess-p1', persisted: true, status: 'ok' });
+  expect(await ledger.getTask(cwd, 'p1')).toMatchObject({ sessionId: 'sess-p1', persisted: true });
+});
+
+test('listPersistedSessionIds: persisted start before any end, not non-persisted, imported persisted counts', async () => {
+  expect(await ledger.listPersistedSessionIds(cwd)).toEqual(new Set());
+  await ledger.appendTaskStart(cwd, startRow('a', { sessionId: 'sess-a', persisted: true }));
+  expect(await ledger.listPersistedSessionIds(cwd)).toEqual(new Set(['sess-a']));
+  await ledger.appendTaskStart(cwd, startRow('b', { sessionId: 'sess-b', persisted: false }));
+  await ledger.appendTaskStart(cwd, startRow('b2', { sessionId: 'sess-b2' }));
+  await ledger.appendImported(cwd, {
+    ...startRow('c'), ...endRow('c', new Date().toISOString()), importId: 'imp-c', sessionId: 'sess-c', persisted: true,
+  });
+  const day = opsPath(cwd, 'tasks', `${localDate(new Date().toISOString())}.jsonl`);
+  fs.appendFileSync(day, '{not json\n{"kind":"start","taskId":"x","sessionId":"sess-bad"}\n[1]\n');
+  expect(await ledger.listPersistedSessionIds(cwd)).toEqual(new Set(['sess-a', 'sess-c']));
+});
+
+test('listPersistedSessionIds: pruned day files drop their ids', async () => {
+  await ledger.appendTaskStart(cwd, startRow('old', { startedAt: '2026-01-01T12:00:00.000Z', sessionId: 'sess-old', persisted: true }));
+  await ledger.appendTaskStart(cwd, startRow('new', { startedAt: '2026-11-20T12:00:00.000Z', sessionId: 'sess-new', persisted: true }));
+  expect(await ledger.listPersistedSessionIds(cwd)).toEqual(new Set(['sess-old', 'sess-new']));
+  await ledger.pruneOld(cwd, { now: new Date('2026-11-22T12:00:00.000Z').getTime() });
+  expect(await ledger.listPersistedSessionIds(cwd)).toEqual(new Set(['sess-new']));
+});

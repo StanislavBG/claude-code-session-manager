@@ -10,7 +10,10 @@
  * Layout (all paths via opsPath(cwd, 'tasks', ...)):
  *   tasks/<YYYY-MM-DD>.jsonl   summary lines, local date of the Task's startedAt.
  *                              kind 'start' | 'end' | 'imported'. Hashes + byte
- *                              counts only — never prompt/output text.
+ *                              counts only — never prompt/output text. Every
+ *                              line carries sessionId (claude session id or
+ *                              null) and persisted (true when the run kept its
+ *                              transcript; listPersistedSessionIds reads it).
  *   tasks/bodies/<taskId>.json prompt/output text (each capped at 1 MiB, with
  *                              promptTruncated/outputTruncated), stderrTail,
  *                              envelope. Written via atomicFs.writeJsonAtomic.
@@ -96,6 +99,14 @@ function stripText(row) {
   return out;
 }
 
+/** sessionId (non-empty string, else null) + persisted (true only when === true). */
+function sessionFields(row) {
+  return {
+    sessionId: typeof row.sessionId === 'string' && row.sessionId ? row.sessionId : null,
+    persisted: row.persisted === true,
+  };
+}
+
 function appendLine(file, obj) {
   assertOpsWrite(file, WRITER);
   const line = `${JSON.stringify(obj)}\n`;
@@ -158,6 +169,7 @@ async function appendTaskStart(cwd, row) {
   });
   const line = {
     ...stripText(row),
+    ...sessionFields(row),
     v: 1,
     kind: 'start',
     source: 'sm',
@@ -191,6 +203,7 @@ async function appendTaskEnd(cwd, row) {
   });
   const line = {
     ...stripText(row),
+    ...sessionFields(row),
     v: 1,
     kind: 'end',
     startedAt,
@@ -226,6 +239,7 @@ async function appendImported(cwd, row) {
   });
   const line = {
     ...stripText(row),
+    ...sessionFields(row),
     v: 1,
     kind: 'imported',
     source: 'direct',
@@ -301,8 +315,15 @@ function fold(rows, now) {
     const { kind, ...fields } = row;
     const cur = byId.get(row.taskId);
     if (kind === 'end') {
-      // An end never erases start fields it doesn't carry.
-      byId.set(row.taskId, { ...(cur || {}), ...fields, startedAt: (cur && cur.startedAt) || fields.startedAt });
+      // An end never erases start fields it doesn't carry — nor the start's
+      // sessionId/persisted with its own null/false defaults.
+      byId.set(row.taskId, {
+        ...(cur || {}),
+        ...fields,
+        startedAt: (cur && cur.startedAt) || fields.startedAt,
+        sessionId: fields.sessionId || (cur && cur.sessionId) || null,
+        persisted: fields.persisted === true || (cur && cur.persisted === true) || false,
+      });
     } else if (kind === 'start') {
       byId.set(row.taskId, cur ? { ...fields, ...cur } : { ...fields });
     } else {
@@ -310,7 +331,9 @@ function fold(rows, now) {
     }
   }
   const tasks = [];
-  for (const t of byId.values()) tasks.push({ ...t, status: foldedStatus(t, now) });
+  for (const t of byId.values()) {
+    tasks.push({ ...t, ...sessionFields(t), status: foldedStatus(t, now) });
+  }
   tasks.sort((a, b) => (toMs(b.startedAt) ?? 0) - (toMs(a.startedAt) ?? 0));
   return tasks;
 }
@@ -406,6 +429,22 @@ async function readTaskUsageDays(cwd, { sinceDate, untilDate } = {}) {
   return [...days.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+/**
+ * listPersistedSessionIds(cwd) → Set of sessionId from every retained 'start'
+ * or 'imported' line with persisted === true. A start line is written before
+ * the claude process spawns, so its id is here before its transcript exists.
+ * Malformed lines are skipped; a missing tasks/ folder yields an empty Set.
+ */
+async function listPersistedSessionIds(cwd) {
+  const { rows } = await readRows(cwd);
+  const ids = new Set();
+  for (const r of rows) {
+    if ((r.kind === 'start' || r.kind === 'imported') && r.persisted === true
+      && typeof r.sessionId === 'string' && r.sessionId) ids.add(r.sessionId);
+  }
+  return ids;
+}
+
 // ─── Retention ────────────────────────────────────────────────────────────
 
 /**
@@ -456,6 +495,7 @@ module.exports = {
   listTasks,
   getTask,
   readTaskUsageDays,
+  listPersistedSessionIds,
   pruneOld,
   BODY_CAP_BYTES,
   _resetForTests,

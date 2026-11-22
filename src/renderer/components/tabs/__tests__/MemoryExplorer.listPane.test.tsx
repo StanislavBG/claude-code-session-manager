@@ -38,6 +38,8 @@ function props(over: Record<string, unknown> = {}) {
     view: 'all' as const,
     onView: vi.fn(),
     counts: { all: 51, stale: 2, broken: 3, recent: 17, unindexed: 0 },
+    clusterCount: 4,
+    archivedCount: 0,
     ...over,
   }
 }
@@ -79,12 +81,27 @@ describe('MemoryListPane', () => {
     const p = props({ view: 'stale' })
     mount(p)
     const labels = [...q('mx-list-chips')!.querySelectorAll('button')].map((b) => b.textContent)
-    expect(labels).toEqual(['All51', 'Stale2', 'Broken3', 'This week17', 'Unindexed✓', 'Ask+'])
+    expect(labels).toEqual(['All51', 'Stale2', 'Broken3', 'This week17', 'Unindexed✓', 'Clusters4', 'Ask+'])
     expect(q('mx-chip-stale')!.getAttribute('aria-pressed')).toBe('true')
     act(() => { q('mx-chip-broken')!.click() })
     expect(p.onView).toHaveBeenCalledWith('broken')
     act(() => { q('mx-chip-ask')!.click() })
     expect(p.onView).toHaveBeenCalledWith('ask')
+    act(() => { q('mx-chip-clusters')!.click() })
+    expect(p.onView).toHaveBeenCalledWith('clusters')
+  })
+
+  it('Clusters chip is active on a cluster drill-in; Archived chip only when something is archived', () => {
+    const p = props({ view: 'cluster:c1', archivedCount: 2 })
+    mount(p)
+    expect(q('mx-chip-clusters')!.getAttribute('aria-pressed')).toBe('true')
+    expect(q('mx-chip-archived')!.textContent).toBe('Archived2')
+    act(() => { q('mx-chip-archived')!.click() })
+    expect(p.onView).toHaveBeenCalledWith('archived')
+    act(() => { root!.unmount() })
+    container!.remove()
+    mount(props())
+    expect(q('mx-chip-archived')).toBeNull()
   })
 
   it('rows show name and size · age only', () => {

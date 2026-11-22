@@ -26,6 +26,10 @@ interface Props {
   view: ExplorerView
   onView: (v: ExplorerView) => void
   counts: { all: number; stale: number; broken: number; recent: number; unindexed: number }
+  /** Clusters chip count — opens the ClustersView. */
+  clusterCount: number
+  /** Archived chip shows only when something is archived. */
+  archivedCount: number
 }
 
 const NEXT_SORT: Record<SortKey, SortKey> = { recent: 'name', name: 'size', size: 'recent' }
@@ -34,19 +38,23 @@ const SORT_LABEL: Record<SortKey, string> = { recent: 'Recent', name: 'Name', si
 const BADGE = 'text-[9.5px] font-semibold tracking-[.06em] px-[5px] py-px rounded-[3px]'
 const CHIP = 'h-7 px-2.5 rounded-full border text-[12.5px] font-medium flex items-center gap-1.5 whitespace-nowrap'
 
-type ChipKey = 'all' | 'stale' | 'broken' | 'recent' | 'unindexed' | 'ask'
+type ChipKey = 'all' | 'stale' | 'broken' | 'recent' | 'unindexed' | 'archived' | 'clusters' | 'ask'
 const CHIPS: { key: ChipKey; label: string; tone: string }[] = [
   { key: 'all', label: 'All', tone: 'bg-butter/40 text-honey-dark' },
   { key: 'stale', label: 'Stale', tone: 'bg-butter/40 text-honey-dark' },
   { key: 'broken', label: 'Broken', tone: 'bg-accent-muted/30 text-accent-dark' },
   { key: 'recent', label: 'This week', tone: '' },
   { key: 'unindexed', label: 'Unindexed', tone: '' },
+  { key: 'archived', label: 'Archived', tone: '' },
+  { key: 'clusters', label: 'Clusters', tone: '' },
   { key: 'ask', label: 'Ask', tone: '' },
 ]
 
-function chipCount(key: ChipKey, counts: Props['counts']): string {
+function chipCount(key: ChipKey, p: Props): string {
   if (key === 'ask') return '+'
-  const n = counts[key]
+  if (key === 'clusters') return String(p.clusterCount)
+  if (key === 'archived') return String(p.archivedCount)
+  const n = p.counts[key]
   return key === 'unindexed' && n === 0 ? '✓' : String(n)
 }
 
@@ -80,8 +88,8 @@ export const MemoryListPane = memo(function MemoryListPane(p: Props) {
         </ConfigFileCard>
 
         <div data-testid="mx-list-chips" className="flex flex-wrap gap-1.5">
-          {CHIPS.map((c) => {
-            const active = p.view === c.key
+          {CHIPS.filter((c) => c.key !== 'archived' || p.archivedCount > 0).map((c) => {
+            const active = p.view === c.key || (c.key === 'clusters' && p.view.startsWith('cluster:'))
             return (
               <button
                 key={c.key}
@@ -94,7 +102,7 @@ export const MemoryListPane = memo(function MemoryListPane(p: Props) {
                 }`}
               >
                 <span>{c.label}</span>
-                <span className="font-mono text-[11px]">{chipCount(c.key, p.counts)}</span>
+                <span className="font-mono text-[11px]">{chipCount(c.key, p)}</span>
               </button>
             )
           })}

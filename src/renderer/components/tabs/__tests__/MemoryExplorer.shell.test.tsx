@@ -109,18 +109,23 @@ afterEach(() => {
 })
 
 describe('MemoryExplorer shell', () => {
-  it('renders the header and toggles the LEARN popover', async () => {
+  it('renders no inner header, search field, LEARN or nav rail — only the list column and the reader', async () => {
     await mount()
     const text = container!.textContent ?? ''
-    expect(text).toContain('CONFIGURE')
-    expect(text).toContain('Memory')
-    expect(text).toContain("Claude Code's own memory files · stored on this machine")
-    expect(text).toContain('Search all memories, or ask a question…')
-    expect(q('mx-learn-popover')).toBeNull()
-    await click(q('mx-learn'))
-    expect(q('mx-learn-popover')!.textContent).toContain('How memory works')
-    await click(q('mx-learn-close'))
-    expect(q('mx-learn-popover')).toBeNull()
+    expect(text).not.toContain('CONFIGURE')
+    expect(text).not.toContain("Claude Code's own memory files")
+    expect(text).not.toContain('Search all memories, or ask a question…')
+    expect(q('mx-search-trigger')).toBeNull()
+    expect(q('mx-learn')).toBeNull()
+    expect(container!.querySelector('[data-testid^="mx-nav-"]')).toBeNull()
+    expect(q('mx-list')).not.toBeNull()
+    expect(q('mx-reader')).not.toBeNull()
+  })
+
+  it('/ no longer opens a Memory-only palette (the band owns search)', async () => {
+    await mount()
+    act(() => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true })) })
+    expect(q('mx-palette')).toBeNull()
   })
 
   it('shows the auto-memory banner only when auto memory is off', async () => {
@@ -133,15 +138,17 @@ describe('MemoryExplorer shell', () => {
     expect(q('mx-auto-off')!.textContent).toContain('Auto memory is off')
   })
 
-  it('switches to Ask and Clusters from the nav', async () => {
+  it('switches to Ask and Clusters from the chips, keeping the list column', async () => {
     await mount()
-    await click(q('mx-nav-ask'))
+    await click(q('mx-chip-ask'))
     expect(q('mx-ask')).not.toBeNull()
-    expect(q('mx-list')).toBeNull()
-    await click(q('mx-nav-clusters'))
-    expect(q('mx-clusters')).not.toBeNull()
-    await click(q('mx-nav-all'))
     expect(q('mx-list')).not.toBeNull()
+    await click(q('mx-chip-clusters'))
+    expect(q('mx-clusters')).not.toBeNull()
+    expect(q('mx-chip-clusters')!.getAttribute('aria-pressed')).toBe('true')
+    await click(q('mx-chip-all'))
+    expect(q('mx-clusters')).toBeNull()
+    expect(q('mx-reader')).not.toBeNull()
   })
 
   it('selecting a row loads the reader', async () => {
@@ -216,19 +223,6 @@ describe('MemoryExplorer shell', () => {
     await click(q('mx-links-check'))
     await flush()
     expect(memory.proposeFix).toHaveBeenCalledWith(expect.objectContaining({ name: 'alpha.md' }))
-  })
-
-  it('/ opens the palette and Enter on a result selects it', async () => {
-    await mount()
-    act(() => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true })) })
-    expect(q('mx-palette')).not.toBeNull()
-    const input = q('mx-palette-input') as HTMLInputElement
-    await act(async () => {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    })
-    await flush()
-    expect(q('mx-palette')).toBeNull()
-    expect(q('mx-reader')).not.toBeNull()
   })
 
   it('a config-search pick opens that memory file, then clears the request', async () => {

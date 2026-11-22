@@ -92,7 +92,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
             <span className="truncate">{eyebrowOf(row, p.clusterName)}</span>
           </div>
           <div className="mt-1.5 flex items-center gap-2.5 min-w-0">
-            <span data-testid="mx-reader-title" className="truncate font-mono text-[27px] font-semibold tracking-[-0.015em] text-fg">
+            <span data-testid="mx-reader-title" className="min-w-0 [overflow-wrap:anywhere] font-mono text-[27px] font-semibold tracking-[-0.015em] text-fg">
               {row.slug}
             </span>
             {p.editing ? (
@@ -251,10 +251,6 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
             <div className="contents" dangerouslySetInnerHTML={{ __html: html }} />
           </div>
         )}
-      </div>
-
-      <div className="px-[22px] py-2 border-t border-rule-structural font-mono text-[10.5px] text-fg-dim whitespace-nowrap overflow-hidden text-ellipsis">
-        {row.path}
       </div>
       </>
       )}

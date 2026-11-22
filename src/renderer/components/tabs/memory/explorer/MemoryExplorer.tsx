@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Z } from '../../../../lib/zLayers'
 import { toast } from '../../../../state/toast'
 import { useConfigSearchFocus } from '../../../../state/configSearchFocus'
-import { LEARNING_CONTENT } from '../../../learningContent'
 import type { MemoryAgent } from '../../../../../preload/api'
 import { useMemoryExplorer } from './useMemoryExplorer'
 import {
@@ -15,14 +13,12 @@ import {
   type MemoryRow,
   type SortKey,
 } from './model'
-import { ExplorerNav } from './ExplorerNav'
 import { MemoryListPane, type ScopeOption } from './MemoryListPane'
 import { MemoryReader } from './MemoryReader'
 import { MemoryEditorPane } from './MemoryEditorPane'
 import { LinksRail } from './LinksRail'
 import { AskView } from './AskView'
 import { ClustersView } from './ClustersView'
-import { SearchPalette } from './SearchPalette'
 import { DeleteMemoryDialog } from './DeleteMemoryDialog'
 import { UndoBar } from './UndoBar'
 import { ACTION_UI, type Suggestion } from './MemorySuggestionCard'
@@ -31,7 +27,7 @@ const SCOPE_LS_KEY = 'sm.memoryTab.scope'
 const AGENT_PREFIX = 'agent:'
 
 type Mode = 'read' | 'edit' | 'new'
-type Overlay = 'learn' | 'palette' | 'delete' | null
+type Overlay = 'delete' | null
 interface Fix extends Suggestion {
   state: 'idle' | 'checking' | 'proposed'
   /** Wall time of the check, measured here in the renderer. */
@@ -85,7 +81,6 @@ function readStoredScopeKey(): string {
 export function MemoryExplorer({ cwd }: { cwd: string | null }) {
   const [storedKey, setStoredKey] = useState(readStoredScopeKey)
   const [known, setKnown] = useState<MemoryAgent[]>([])
-  const [wsCount, setWsCount] = useState(0)
 
   const scopeKey = useMemo(() => {
     if (!storedKey.startsWith(AGENT_PREFIX)) return 'workspace'
@@ -122,8 +117,6 @@ export function MemoryExplorer({ cwd }: { cwd: string | null }) {
       cwd={cwd}
       onScope={onScope}
       onAgents={onAgents}
-      wsCount={wsCount}
-      onWsCount={setWsCount}
     />
   )
 }
@@ -133,11 +126,9 @@ interface BodyProps {
   cwd: string | null
   onScope: (s: ExplorerScope) => void
   onAgents: (a: MemoryAgent[]) => void
-  wsCount: number
-  onWsCount: (n: number) => void
 }
 
-function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: BodyProps) {
+function ExplorerBody({ scope, cwd, onScope, onAgents }: BodyProps) {
   const ex = useMemoryExplorer(scope, cwd)
   const { actions, rows, clusters } = ex
   const agent = scope.kind === 'agent' ? scope.agent : null
@@ -163,9 +154,6 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const [loaded, setLoaded] = useState<{ name: string; text: string | null } | null>(null)
 
   useEffect(() => { onAgents(ex.agents) }, [ex.agents, onAgents])
-  useEffect(() => {
-    if (!agent && !ex.loading) onWsCount(rows.length)
-  }, [agent, ex.loading, rows.length, onWsCount])
 
   const archivedRows = useMemo<MemoryRow[]>(
     () => ex.archived.map((name) => ({
@@ -233,21 +221,6 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   }, [readName, readStamp, actions.read]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const content = isArchivedSel ? '' : loaded && loaded.name === readName ? loaded.text : null
-
-  // `/` opens the palette unless the user is typing.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
-      const t = e.target as HTMLElement | null
-      const tag = t?.tagName?.toLowerCase() ?? ''
-      if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return
-      if (t?.closest?.('.monaco-editor')) return
-      e.preventDefault()
-      setOverlay('palette')
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [])
 
   const say = (message: string, undoFn?: () => void) => setUndo({ message, undo: undoFn })
   const openNew = (body = '') => {
@@ -494,11 +467,6 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   )
 
   const counts = useMemo(() => navCounts(rows), [rows])
-  const clusterCounts = useMemo(() => {
-    const out: Record<string, number> = {}
-    for (const r of rows) if (r.clusterId) out[r.clusterId] = (out[r.clusterId] ?? 0) + 1
-    return out
-  }, [rows])
   const unclusteredCount = useMemo(() => rows.filter((r) => r.clusterId === null).length, [rows])
   const known = useMemo(() => new Set(rows.map((r) => r.slug)), [rows])
   const scopeOptions = useMemo<ScopeOption[]>(
@@ -516,7 +484,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
 
   const listTitle = view.startsWith('cluster:')
     ? view === 'cluster:unclustered' ? 'Unclustered' : clusters.find((c) => c.id === view.slice(8))?.name ?? 'Cluster'
-    : ({ all: 'All memories', stale: 'Stale', broken: 'Broken references', recent: 'Changed this week', unindexed: 'Not in index', archived: 'Archived' } as Record<string, string>)[view] ?? 'All memories'
+    : ({ all: 'All memories', ask: 'Ask', clusters: 'Clusters', stale: 'Stale', broken: 'Broken references', recent: 'Changed this week', unindexed: 'Not in index', archived: 'Archived' } as Record<string, string>)[view] ?? 'All memories'
 
   let empty: { title: string; body: string; action: string; onAction: () => void } | null = null
   if (listRows.length === 0) {
@@ -552,82 +520,42 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   }
 
   const autoOff = !ex.autoMemoryEnabled
-  const learn = LEARNING_CONTENT.memory
 
   return (
     <div data-testid="mx-shell" className="relative h-full flex flex-col bg-bg text-fg leading-[normal]">
-      <div className="relative shrink-0 flex items-center gap-3 px-6 py-4 border-b border-rule-structural">
-        <div className="flex items-baseline gap-3 pt-1">
-          <span className="text-[11px] tracking-[.08em] font-medium text-fg-dim">CONFIGURE</span>
-          <span className="font-serif text-[28px] leading-none">Memory</span>
-          <span className="text-xs text-fg-dim">Claude Code's own memory files · stored on this machine</span>
-        </div>
-        <div className="flex-1" />
-        <button
-          type="button"
-          data-testid="mx-search-trigger"
-          onClick={() => setOverlay('palette')}
-          className="flex items-center gap-2 h-[30px] px-2.5 border border-rule-structural rounded-md bg-bg-elev w-[300px] text-xs text-fg-dim hover:border-fg-faint"
-        >
-          <span>Search all memories, or ask a question…</span>
-          <span className="flex-1" />
-          <span className="font-mono text-[10px] px-[5px] py-px border border-rule-structural rounded-[3px] text-fg-dim">/</span>
-        </button>
-        <button
-          type="button"
-          data-testid="mx-learn"
-          onClick={() => setOverlay((o) => (o === 'learn' ? null : 'learn'))}
-          className={`text-[11px] tracking-[.08em] font-semibold px-1 py-1.5 hover:text-fg ${overlay === 'learn' ? 'text-fg' : 'text-accent'}`}
-        >
-          LEARN
-        </button>
-        {overlay === 'learn' && (
-          <div
-            data-testid="mx-learn-popover"
-            className={`absolute right-5 top-[58px] w-[360px] ${Z.dialog} bg-bg-hi border border-rule-structural rounded-lg shadow-2xl p-4 flex flex-col gap-2.5 text-[13px] leading-[1.55] text-fg`}
-          >
-            <span className="font-serif text-[17px]">How memory works</span>
-            <span>{learn.intro}</span>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                data-testid="mx-learn-close"
-                onClick={() => setOverlay(null)}
-                className="text-xs font-medium h-7 px-3 rounded-[5px] bg-fg text-bg"
-              >
-                Got it
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
       {autoOff && (
         <div data-testid="mx-auto-off" className="shrink-0 w-full px-6 py-2 bg-butter/40 text-honey-dark text-[12.5px]">
           Auto memory is off — Claude Code is not reading or writing any of these files.
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0">
-        <ExplorerNav
-          scope={scope}
-          agents={ex.agents}
-          agentCounts={ex.agentCounts}
-          workspaceName={basename(cwd)}
-          workspacePath={cwd ?? ''}
-          workspaceCount={agent ? wsCount : rows.length}
-          onScope={onScope}
+      <div
+        className={`flex-1 min-h-0 grid ${isBrowse ? 'grid-cols-[316px_minmax(0,1fr)_268px]' : 'grid-cols-[316px_minmax(0,1fr)]'}`}
+      >
+        <MemoryListPane
+          title={listTitle}
+          rows={isBrowse ? listRows : []}
+          clusterDot={clusterDot}
+          selected={selected}
+          onSelect={select}
+          query={query}
+          onQuery={setQuery}
+          sort={sort}
+          onSort={setSort}
+          onNew={() => openNew(NEW_TEMPLATE)}
+          empty={isBrowse ? empty : null}
+          folder={{ count: rows.length, path: ex.dir }}
+          scopeOptions={scopeOptions}
+          scopeKey={scopeKey}
+          onScopeKey={onScopeKey}
           view={view}
           onView={goView}
           counts={counts}
-          clusters={clusters}
-          clusterCounts={clusterCounts}
-          unclusteredCount={unclusteredCount}
+          clusterCount={clusters.length}
           archivedCount={ex.archived.length}
-          index={ex.index}
         />
-        <main className="flex-1 min-w-0 min-h-0 flex">
-          {view === 'ask' && (
+        {view === 'ask' && (
+          <div className="min-w-0 min-h-0 flex">
             <div className="flex-1 min-w-0">
               <AskView
                 rows={rows}
@@ -639,8 +567,10 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 onDraft={(text) => openNew(text)}
               />
             </div>
-          )}
-          {view === 'clusters' && (
+          </div>
+        )}
+        {view === 'clusters' && (
+          <div className="min-w-0 min-h-0 flex">
             <ClustersView
               clusters={clusters}
               rows={rows}
@@ -652,29 +582,10 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
               onOpenCluster={(id) => goView(`cluster:${id}`)}
               onOpen={openByName}
             />
-          )}
-          {isBrowse && (
-            <div className="flex-1 min-w-0 min-h-0 grid grid-cols-[316px_minmax(0,1fr)_268px]">
-              <MemoryListPane
-                title={listTitle}
-                rows={listRows}
-                clusterDot={clusterDot}
-                selected={selected}
-                onSelect={select}
-                query={query}
-                onQuery={setQuery}
-                sort={sort}
-                onSort={setSort}
-                onNew={() => openNew(NEW_TEMPLATE)}
-                empty={empty}
-                folder={{ count: rows.length, path: ex.dir }}
-                scopeOptions={scopeOptions}
-                scopeKey={scopeKey}
-                onScopeKey={onScopeKey}
-                view={view}
-                onView={goView}
-                counts={counts}
-              />
+          </div>
+        )}
+        {isBrowse && (
+          <>
               <div className="flex flex-col min-w-0 min-h-0">
                 {mode === 'new' ? (
                   <MemoryEditorPane
@@ -759,19 +670,10 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 editingSuggestion={mode === 'edit' && suggestEdit}
                 check={mode === 'edit' ? null : check}
               />
-            </div>
-          )}
-        </main>
+          </>
+        )}
       </div>
 
-      <SearchPalette
-        open={overlay === 'palette'}
-        rows={rows}
-        clusterDot={clusterDot}
-        onPick={openByName}
-        onAsk={() => { setAskCtx(null); goView('ask') }}
-        onClose={() => setOverlay(null)}
-      />
       <DeleteMemoryDialog
         open={overlay === 'delete' && selRow !== null}
         name={selRow?.slug ?? ''}

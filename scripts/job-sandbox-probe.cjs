@@ -242,6 +242,19 @@ function sizeOr0(p) {
   }
 }
 
+/**
+ * Every ~/.claude/projects folder left behind for one of `cwds`, in input order.
+ * Pure apart from the injected `exists`.
+ * @param {string[]} cwds
+ * @param {{ homeDir?: string, exists?: (p: string) => boolean }} [opts]
+ * @returns {string[]}
+ */
+function leakedProjectFolders(cwds, { homeDir = os.homedir(), exists = fs.existsSync } = {}) {
+  return cwds
+    .map((cwd) => path.join(homeDir, '.claude', 'projects', projectFolderName(cwd)))
+    .filter((folder) => exists(folder));
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const wantSocat = process.argv.includes('--fetch-socat');
@@ -335,15 +348,9 @@ async function main() {
     for (const r of rows) console.log([r.profile, r.level, fmt(r.escapes), fmt(r.controlsFailed), r.note].join('\t'));
     const bad = rows.some((r) => r.escapes.length || r.controlsFailed.length);
     console.log(bad ? 'FAIL: sandbox escape or failed control' : 'PASS: no escapes, controls ok');
-    let leaked = false;
-    for (const cwd of cwds) {
-      const folder = path.join(os.homedir(), '.claude', 'projects', projectFolderName(cwd));
-      if (fs.existsSync(folder)) {
-        leaked = true;
-        console.log(`LEAK: project folder ${folder}`);
-      }
-    }
-    return bad || leaked ? 1 : 0;
+    const leaked = leakedProjectFolders(cwds);
+    for (const folder of leaked) console.log(`LEAK: project folder ${folder}`);
+    return bad || leaked.length ? 1 : 0;
   } finally {
     for (const d of temps.reverse()) fs.rmSync(d, { recursive: true, force: true });
   }
@@ -359,4 +366,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { classifyProbeRun, probeChildEnv, projectFolderName };
+module.exports = { classifyProbeRun, probeChildEnv, projectFolderName, leakedProjectFolders };

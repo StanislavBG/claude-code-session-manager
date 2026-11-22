@@ -13,7 +13,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../job-sandbox-probe.cjs');
-const { classifyProbeRun, probeChildEnv, projectFolderName } = require(SCRIPT);
+const { classifyProbeRun, probeChildEnv, projectFolderName, leakedProjectFolders } = require(SCRIPT);
 
 const CANARY = 'SM-SANDBOX-CANARY-0123456789abcdef';
 const clean = { canary: CANARY, output: 'Read refused. Write refused.', outsideEntries: [], netBytes: 0, insideExists: true, profile: 'dev-lead' };
@@ -87,6 +87,29 @@ test('projectFolderName replaces every non-alphanumeric character with -', () =>
   expect(projectFolderName('/tmp/sm-sbx-probe-ab12/dev-lead/work')).toBe('-tmp-sm-sbx-probe-ab12-dev-lead-work');
   expect(projectFolderName('/home/u/.local/state/a_b.c/v1.2')).toBe('-home-u--local-state-a-b-c-v1-2');
   expect(projectFolderName('AZaz09')).toBe('AZaz09');
+});
+
+test('leakedProjectFolders returns exactly the existing folder, under the given homeDir', () => {
+  const homeDir = '/fake/home';
+  const leaked = path.join(homeDir, '.claude', 'projects', projectFolderName('/tmp/b/work'));
+  const seen = [];
+  const exists = (p) => {
+    seen.push(p);
+    return p === leaked;
+  };
+  expect(leakedProjectFolders(['/tmp/a/work', '/tmp/b/work'], { homeDir, exists })).toEqual([leaked]);
+  expect(seen).toEqual([path.join(homeDir, '.claude', 'projects', '-tmp-a-work'), leaked]);
+});
+
+test('leakedProjectFolders returns [] when no folder exists', () => {
+  expect(leakedProjectFolders(['/tmp/a/work', '/tmp/b/work'], { homeDir: '/fake/home', exists: () => false })).toEqual([]);
+});
+
+test('leakedProjectFolders names a dotted/slashed cwd by projectFolderName', () => {
+  const cwd = '/home/u/.local/state/a_b.c/v1.2';
+  const out = leakedProjectFolders([cwd], { homeDir: '/h', exists: () => true });
+  expect(out).toEqual([path.join('/h', '.claude', 'projects', projectFolderName(cwd))]);
+  expect(path.basename(out[0])).toBe('-home-u--local-state-a-b-c-v1-2');
 });
 
 test('--dry-run prints parseable settings JSON for both profiles and exits 0', () => {

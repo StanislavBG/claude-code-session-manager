@@ -169,6 +169,7 @@
   "upgradeDrain": "scheduler",
   "usageCircuit": "claude",
   "validationSentinels": "scheduler",
+  "validatorVerdictSchema": "scheduler",
   "watchdogHelpers": "scheduler",
   "winSpawn": "process",
   "competitiveMatrix": "project-pages",

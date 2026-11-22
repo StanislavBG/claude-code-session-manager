@@ -9,6 +9,9 @@ import { useEpicTerminal } from '../../../state/epicTerminal'
 import { toast } from '../../../state/toast'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
 import { flushAsync } from '../../../testUtils/domFlush'
+import { continueEpicFresh } from '../../../lib/continueEpicFresh'
+
+vi.mock('../../../lib/continueEpicFresh', () => ({ continueEpicFresh: vi.fn() }))
 
 /**
  * Row overflow menu (PRDs 830/wire-row-menu) — the 8-action `useRowMenuItems`
@@ -121,7 +124,7 @@ describe('EpicQueue row menu', () => {
     expect(el.querySelector('[data-testid="epic-queue-row-menu"]')).toBeNull()
   })
 
-  it('lists all 6 actions for an active Epic, hiding Reopen', () => {
+  it('lists all 7 actions for an active Epic, hiding Reopen', () => {
     const epic = makeEpic({ status: 'active' })
     const el = mount(createElement(EpicQueue, baseProps(epic)))
     const menu = openMenu(el)
@@ -133,6 +136,7 @@ describe('EpicQueue row menu', () => {
       'Resume in terminal',
       'Mark completed',
       'Duplicate as new session',
+      'Continue in a fresh session',
       'Delete session',
     ])
   })
@@ -148,6 +152,7 @@ describe('EpicQueue row menu', () => {
       'Rename title',
       'Reopen',
       'Duplicate as new session',
+      'Continue in a fresh session',
       'Delete session',
     ])
   })
@@ -296,6 +301,33 @@ describe('EpicQueue row menu', () => {
 
     expect(duplicateEpic).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
     expect(onSelect).toHaveBeenCalledWith('epic-dup')
+  })
+
+  it('Continue in a fresh session calls continueEpicFresh and selects the new epic', async () => {
+    vi.mocked(continueEpicFresh).mockResolvedValue('epic-fresh')
+    const epic = makeEpic()
+    const onSelect = vi.fn()
+    const el = mount(createElement(EpicQueue, baseProps(epic, { onSelect })))
+    const menu = openMenu(el)
+    clickMenuItem(menu, 'Continue in a fresh session')
+    await flushAsync(2)
+
+    expect(continueEpicFresh).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
+    expect(onSelect).toHaveBeenCalledWith('epic-fresh')
+  })
+
+  it('Continue in a fresh session surfaces a failure via toast.error and selects nothing', async () => {
+    vi.mocked(continueEpicFresh).mockRejectedValue(new Error('no agent saved'))
+    const toastError = vi.spyOn(toast, 'error')
+    const epic = makeEpic()
+    const onSelect = vi.fn()
+    const el = mount(createElement(EpicQueue, baseProps(epic, { onSelect })))
+    const menu = openMenu(el)
+    clickMenuItem(menu, 'Continue in a fresh session')
+    await flushAsync(2)
+
+    expect(toastError).toHaveBeenCalledWith('no agent saved')
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   describe('Delete session', () => {

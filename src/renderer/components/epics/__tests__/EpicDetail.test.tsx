@@ -6,6 +6,8 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vite
 import { flushAsync } from '../../../testUtils/domFlush'
 import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
+vi.mock('../../../lib/continueEpicFresh', () => ({ continueEpicFresh: vi.fn() }))
+
 /**
  * EpicDetail (PRD 827-epic-detail-view) — the right-pane Epic detail shell +
  * Discussion view, superseding PromptSessionConversation.tsx as the Epic
@@ -568,6 +570,103 @@ describe('EpicDetail (PRD 827)', () => {
       resolve(completed)
     })
     expect((el.querySelector('[data-testid="epic-resume"]') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  describe('Continue in a fresh session (header button)', () => {
+    async function activeSession() {
+      const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
+      return usePromptSessions.getState().approveProposed(proposed.id)!
+    }
+
+    it('is shown for active and completed Epics, not for a proposed one', async () => {
+      installWindowApiMock()
+      const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Idea', 'feature')
+      let el = mount(createElement(EpicDetail, { promptSession: proposed }))
+      expect(el.querySelector('[data-testid="epic-continue-fresh"]')).toBeNull()
+      act(() => root?.unmount())
+      container?.remove()
+
+      const active = usePromptSessions.getState().approveProposed(proposed.id)!
+      el = mount(createElement(EpicDetail, { promptSession: active }))
+      const btn = el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement
+      expect(btn).not.toBeNull()
+      expect(btn.textContent).toBe('Continue in a fresh session')
+      act(() => root?.unmount())
+      container?.remove()
+
+      el = mount(createElement(EpicDetail, { promptSession: { ...active, status: 'completed', completedAt: new Date().toISOString() } }))
+      expect(el.querySelector('[data-testid="epic-continue-fresh"]')).not.toBeNull()
+    })
+
+    it('calls continueEpicFresh, is disabled while it runs, then selects the new Epic', async () => {
+      installWindowApiMock()
+      const { continueEpicFresh } = await import('../../../lib/continueEpicFresh')
+      let resolve!: (id: string) => void
+      vi.mocked(continueEpicFresh).mockImplementation(() => new Promise((r) => { resolve = r }))
+      const selected: string[] = []
+      const onSelectEvt = (e: Event) => selected.push((e as CustomEvent<string>).detail)
+      window.addEventListener('sm:select-prompt-session', onSelectEvt)
+      try {
+        const session = await activeSession()
+        const el = mount(createElement(EpicDetail, { promptSession: session }))
+        const btn = el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement
+        expect(btn.disabled).toBe(false)
+        await act(async () => {
+          btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        })
+        expect(continueEpicFresh).toHaveBeenCalledWith(session.id, 'Epic header')
+        expect((el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement).disabled).toBe(true)
+        expect(selected).toEqual([])
+        await act(async () => {
+          resolve('epic-fresh-1')
+        })
+        expect(selected).toEqual(['epic-fresh-1'])
+        expect((el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement).disabled).toBe(false)
+      } finally {
+        window.removeEventListener('sm:select-prompt-session', onSelectEvt)
+      }
+    })
+
+    it('shows an error toast when continueEpicFresh fails', async () => {
+      installWindowApiMock()
+      const { continueEpicFresh } = await import('../../../lib/continueEpicFresh')
+      const { toast } = await import('../../../state/toast')
+      vi.mocked(continueEpicFresh).mockRejectedValue(new Error('no agent saved'))
+      const toastError = vi.spyOn(toast, 'error')
+      const session = await activeSession()
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      await act(async () => {
+        (el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flushAsync(2)
+      expect(toastError).toHaveBeenCalledWith('no agent saved')
+      expect((el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('uses the attention tone only when the context is large', async () => {
+      installWindowApiMock()
+      const { AMBER_TEXT, AMBER_TINT } = await import('../../ChatTranscriptTurn')
+      const session = await activeSession()
+      const chat = { turns: [{ id: 't1', role: 'user', text: 'hi', at: Date.now() }], running: false, stream: '', queuedPosition: 0 } as any
+      useChat.setState({ chats: { [session.id]: chat } })
+
+      useEpicUsage.setState({ usage: { [session.id]: { inputTokens: 10, outputTokens: 5, lastContext: 120_000, calls: 2 } } })
+      let el = mount(createElement(EpicDetail, { promptSession: session }))
+      await flushAsync(2)
+      let btn = el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement
+      expect(btn.className).not.toContain(AMBER_TEXT)
+      expect(btn.className).not.toContain(AMBER_TINT)
+      act(() => root?.unmount())
+      container?.remove()
+
+      useEpicUsage.setState({ usage: { [session.id]: { inputTokens: 10, outputTokens: 5, lastContext: 412_000, calls: 9 } } })
+      el = mount(createElement(EpicDetail, { promptSession: session }))
+      await flushAsync(2)
+      expect((el.querySelector('[data-testid="epic-detail-context"]') as HTMLElement).className).toContain(AMBER_TEXT)
+      btn = el.querySelector('[data-testid="epic-continue-fresh"]') as HTMLButtonElement
+      expect(btn.className).toContain(AMBER_TEXT)
+      expect(btn.className).toContain(AMBER_TINT)
+    })
   })
 
   it('interleaves chat turns and prd_created events by timestamp in the Discussion view', async () => {

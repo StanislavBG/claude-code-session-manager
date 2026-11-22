@@ -16,6 +16,7 @@ import { copyText } from '../../lib/clipboard'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { toast } from '../../state/toast'
+import { continueEpicFresh } from '../../lib/continueEpicFresh'
 import {
   epicDisplayStatus,
   epicPrds,
@@ -277,7 +278,7 @@ interface QueueRowProps {
  *  (mirrors EpicDetail's own button), jump straight into the Epic's Terminal
  *  view, rename the title (opens the in-place RowEditor — title only; the
  *  goal is the already-sent first prompt and is never editable), duplicate as
- *  a new Epic, reopen a completed Epic, and delete (in-menu confirm step). */
+ *  a new Epic, continue in a fresh session (continueEpicFresh), reopen a completed Epic, and delete (in-menu confirm step). */
 function useRowMenuItems(
   epic: PromptSession,
   status: EpicDisplayStatus,
@@ -335,6 +336,16 @@ function useRowMenuItems(
         .getState()
         .duplicateEpic(epic.id, 'EpicQueue row menu')
         .then((dup) => onSelect(dup.id))
+        .catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
+    },
+  })
+  items.push({
+    label: 'Continue in a fresh session',
+    onSelect: () => {
+      continueEpicFresh(epic.id, 'EpicQueue row menu')
+        .then((newId) => onSelect(newId))
         .catch((err: unknown) => {
           toast.error(err instanceof Error ? err.message : String(err))
         })

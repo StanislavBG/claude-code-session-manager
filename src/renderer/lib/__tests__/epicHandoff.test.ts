@@ -24,7 +24,7 @@ describe('summarizePrdOutcomes', () => {
       makeEvent({ prdSlug: '100-a', text: 'no validation here' }),
       makeEvent({ prdSlug: '100-a', validation: 'refuted' }),
     ])
-    expect(out).toEqual({ verified: [], refuted: ['100-a'], unvalidated: [] })
+    expect(out).toEqual({ verified: [], refuted: ['a'], unvalidated: [] })
   })
 
   it('counts an unvalidated completed PRD, but not an unvalidated failed one', () => {
@@ -33,7 +33,45 @@ describe('summarizePrdOutcomes', () => {
       makeEvent({ prdSlug: '201-c', validation: 'unvalidated', outcome: 'failed' }),
       makeEvent({ prdSlug: '202-d', validation: 'verified' }),
     ])
-    expect(out).toEqual({ verified: ['202-d'], refuted: [], unvalidated: ['200-b'] })
+    expect(out).toEqual({ verified: ['d'], refuted: [], unvalidated: ['b'] })
+  })
+
+  // Shapes copied from real active-index.json events (PRD 3455).
+  const finish = (slug: string, agentType = 'dev-lead') =>
+    makeEvent({
+      text: `PRD ${slug} finished: completed. Check Scheduler for details.`,
+      prdSlug: slug,
+      outcome: 'completed',
+      validation: 'unvalidated',
+      ...({ agentType } as object),
+    })
+  const verdict = (bare: string, v: 'verified' | 'refuted') =>
+    makeEvent({ text: `Validation ${v.toUpperCase()}: ${bare}`, prdSlug: bare, outcome: 'completed', validation: v })
+
+  it('merges a numbered finish event and its bare verdict event into one verified PRD', () => {
+    const out = summarizePrdOutcomes([finish('3309-external-ref-schema'), verdict('external-ref-schema', 'verified')])
+    expect(out).toEqual({ verified: ['external-ref-schema'], refuted: [], unvalidated: [] })
+  })
+
+  it('lists a finished PRD with no verdict once, as unvalidated, by bare slug', () => {
+    const out = summarizePrdOutcomes([finish('3309-external-ref-schema')])
+    expect(out).toEqual({ verified: [], refuted: [], unvalidated: ['external-ref-schema'] })
+  })
+
+  it('a refuted verdict after a numbered finish event is one refuted PRD', () => {
+    const out = summarizePrdOutcomes([finish('3310-foo-bar'), verdict('foo-bar', 'refuted')])
+    expect(out).toEqual({ verified: [], refuted: ['foo-bar'], unvalidated: [] })
+  })
+
+  it('ignores validate PRDs: by validate- bare slug and by validator agentType', () => {
+    const out = summarizePrdOutcomes([
+      finish('3309-external-ref-schema'),
+      verdict('external-ref-schema', 'verified'),
+      finish('3441-validate-continue-in-fresh-session', 'validator'),
+      finish('3442-validate-other'),
+      finish('3443-odd-name', 'validator'),
+    ])
+    expect(out).toEqual({ verified: ['external-ref-schema'], refuted: [], unvalidated: [] })
   })
 
   it('returns empty lists for no events and for malformed input', () => {

@@ -1,4 +1,5 @@
 import type { PromptSessionEvent } from '../state/promptSessions'
+import { bareSlug } from './depSlugResolve'
 
 /**
  * Pure builders for the short handoff text that carries a long session's
@@ -37,6 +38,12 @@ const CLOSING =
  * latestValidationBySlug. 'unvalidated' counts only when that event's outcome
  * is 'completed'; 'validating' (or an unvalidated non-completed job) counts as
  * none of the three. Slugs keep first-seen order. O(n).
+ *
+ * Every event is keyed by bareSlug(prdSlug): a PRD's own finish event carries
+ * its numbered slug (`3309-x`) while the validator's verdict event carries the
+ * bare one (`x`), so both must land on the same key. Returned lists hold bare
+ * slugs. Events of a validate PRD — bare slug starting with `validate-` (the
+ * schedulerStages rule) or agentType 'validator' — are left out entirely.
  */
 export function summarizePrdOutcomes(events: readonly PromptSessionEvent[] | null | undefined): PrdOutcomes {
   const latest = new Map<string, { validation: string; outcome: unknown }>()
@@ -45,7 +52,11 @@ export function summarizePrdOutcomes(events: readonly PromptSessionEvent[] | nul
       if (!e || typeof e !== 'object') continue
       const { prdSlug, validation, outcome } = e as Partial<PromptSessionEvent>
       if (typeof prdSlug !== 'string' || prdSlug === '' || typeof validation !== 'string') continue
-      latest.set(prdSlug, { validation, outcome })
+      // agentType is written on real finish events but not declared on PromptSessionEvent.
+      if ((e as { agentType?: unknown }).agentType === 'validator') continue
+      const slug = bareSlug(prdSlug)
+      if (slug === '' || slug.startsWith('validate-')) continue
+      latest.set(slug, { validation, outcome })
     }
   }
   const out: PrdOutcomes = { verified: [], refuted: [], unvalidated: [] }

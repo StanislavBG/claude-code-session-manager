@@ -91,4 +91,45 @@ describe('useOutsideNeedsYou', () => {
     expect(answer).toHaveBeenCalledWith({ app: 'portfolio', id: '1', answer: 'a' })
     expect(got).toBe(result)
   })
+
+  it('reload lists again, updates items, and keeps its identity across renders', async () => {
+    list.mockResolvedValueOnce({ ok: true, items: [mk('1')] })
+    list.mockResolvedValueOnce({ ok: true, items: [mk('1'), mk('3')] })
+    mount()
+    await flush()
+    const firstReload = latest!.reload
+    act(() => latest!.reload())
+    await flush()
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(latest!.items.map((i) => i.id)).toEqual(['1', '3'])
+    act(() => root!.render(<Probe />))
+    expect(latest!.reload).toBe(firstReload)
+  })
+
+  it('a failing reload toasts once across repeated failures', async () => {
+    const { useToast } = await import('../../state/toast')
+    useToast.getState().clearHistory()
+    list.mockResolvedValueOnce({ ok: true, items: [] })
+    list.mockRejectedValue(new Error('down'))
+    mount()
+    await flush()
+    act(() => latest!.reload())
+    await flush()
+    act(() => latest!.reload())
+    await flush()
+    expect(list).toHaveBeenCalledTimes(3)
+    const errs = useToast.getState().history.filter((h) => h.message.includes('outside items'))
+    expect(errs).toHaveLength(1)
+  })
+
+  it('reload after unmount is a no-op', async () => {
+    list.mockResolvedValue({ ok: true, items: [] })
+    mount()
+    await flush()
+    const reload = latest!.reload
+    act(() => root!.unmount())
+    root = null
+    reload()
+    expect(list).toHaveBeenCalledTimes(1)
+  })
 })

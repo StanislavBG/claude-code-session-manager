@@ -114,3 +114,103 @@ describe('scheduleState.ts — timeout grace window', () => {
     expect(useToast.getState().history).toHaveLength(0)
   })
 })
+
+describe('scheduleState.ts — refreshScheduleState', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('re-pulls state(), sets { snapshot, loaded: true }, and never toasts', async () => {
+    const first = fakeSnapshot()
+    const second = { paused: { reason: 'auth' } } as unknown as ScheduleStateSnapshot
+    const { state } = installWindowApiMock(() => Promise.resolve(first))
+    const { startSchedulePolling, stopSchedulePolling, refreshScheduleState, useScheduleState } =
+      await import('../scheduleState')
+    const { useToast } = await import('../toast')
+
+    await startSchedulePolling()
+    state.mockImplementation(() => Promise.resolve(second))
+    await refreshScheduleState()
+
+    expect(state).toHaveBeenCalledTimes(2)
+    expect(useScheduleState.getState()).toEqual({ snapshot: second, loaded: true })
+    // A paused snapshot pulled by refresh must not toast — only onState does.
+    expect(useToast.getState().history).toHaveLength(0)
+    stopSchedulePolling()
+  })
+
+  it('leaves prevPauseReason alone, so the next live auth-pause still toasts', async () => {
+    const paused = { paused: { reason: 'auth' } } as unknown as ScheduleStateSnapshot
+    const { state, emitState } = installWindowApiMock(() => Promise.resolve(fakeSnapshot()))
+    const { startSchedulePolling, stopSchedulePolling, refreshScheduleState } = await import('../scheduleState')
+    const { useToast } = await import('../toast')
+
+    await startSchedulePolling()
+    state.mockImplementation(() => Promise.resolve(paused))
+    await refreshScheduleState()
+    emitState(paused)
+
+    const history = useToast.getState().history
+    expect(history).toHaveLength(1)
+    expect(history[0].message).toContain('Scheduler paused')
+    stopSchedulePolling()
+  })
+
+  it('cancels a pending grace handle on success, so no toast fires later', async () => {
+    const { state } = installWindowApiMock(() => pendingForever())
+    const { startSchedulePolling, stopSchedulePolling, refreshScheduleState, useScheduleState } =
+      await import('../scheduleState')
+    const { useToast } = await import('../toast')
+
+    const startPromise = startSchedulePolling()
+    await vi.advanceTimersByTimeAsync(5_000) // TIMEOUT -> grace window armed
+    await startPromise
+
+    const snap = fakeSnapshot()
+    state.mockImplementation(() => Promise.resolve(snap))
+    await refreshScheduleState()
+    expect(useScheduleState.getState().snapshot).toBe(snap)
+
+    state.mockImplementation(() => pendingForever())
+    await vi.advanceTimersByTimeAsync(40_000) // would have retried + toasted if not cancelled
+    expect(useToast.getState().history).toHaveLength(0)
+    stopSchedulePolling()
+  })
+
+  it('works before startSchedulePolling and does not mark polling started', async () => {
+    const snap = fakeSnapshot()
+    installWindowApiMock(() => Promise.resolve(snap))
+    const { startSchedulePolling, stopSchedulePolling, refreshScheduleState, useScheduleState } =
+      await import('../scheduleState')
+
+    await refreshScheduleState()
+    expect(useScheduleState.getState()).toEqual({ snapshot: snap, loaded: true })
+    await startSchedulePolling()
+    expect((window as unknown as { api: { schedule: { onState: { mock: { calls: unknown[] } } } } })
+      .api.schedule.onState.mock.calls).toHaveLength(1)
+    stopSchedulePolling()
+  })
+
+  it('rejects with the state() error and keeps the previous snapshot, without toasting', async () => {
+    const first = fakeSnapshot()
+    const { state } = installWindowApiMock(() => Promise.resolve(first))
+    const { startSchedulePolling, stopSchedulePolling, refreshScheduleState, useScheduleState } =
+      await import('../scheduleState')
+    const { useToast } = await import('../toast')
+
+    await startSchedulePolling()
+    const err = new Error('boom')
+    state.mockImplementation(() => Promise.reject(err))
+    await expect(refreshScheduleState()).rejects.toBe(err)
+
+    expect(useScheduleState.getState().snapshot).toBe(first)
+    expect(useToast.getState().history).toHaveLength(0)
+    stopSchedulePolling()
+  })
+})

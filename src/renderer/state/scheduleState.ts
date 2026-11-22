@@ -103,6 +103,22 @@ export async function startSchedulePolling(): Promise<void> {
   })
 }
 
+/**
+ * On-demand re-pull of the scheduler snapshot (the Dashboard's Refresh).
+ * Rejects with the state() error and leaves the previous snapshot in place.
+ * Deliberately leaves `prevPauseReason` and `started` alone: the live onState
+ * listener stays the one place that toasts a pause change, and refreshing
+ * never toasts.
+ */
+export async function refreshScheduleState(): Promise<void> {
+  const snap = await fetchState()
+  if (pendingGraceHandle) {
+    pendingGraceHandle.cancel()
+    pendingGraceHandle = null
+  }
+  useScheduleState.setState({ snapshot: snap, loaded: true })
+}
+
 export function stopSchedulePolling(): void {
   if (offSubscription) {
     offSubscription()

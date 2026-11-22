@@ -296,7 +296,7 @@ describe('ProjectClaudeConfig', () => {
 
     // Memory: today's MemoryExplorer, over this project's memory folder.
     expect(panel('memory')).not.toBeNull()
-    expect(q('mx-nav-all')).not.toBeNull()
+    expect(q('mx-list-folder-count')).not.toBeNull()
     expect(api.memory.list).toHaveBeenCalledWith(expect.objectContaining({ cwd: PROJECT_CWD }))
     expect(q('project-claude-config-source')).toBeNull()
 

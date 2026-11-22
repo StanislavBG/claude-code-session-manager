@@ -320,3 +320,44 @@ test('receipt: listOpenEpicRecords never computes one', async () => {
   expect(page.epics[0]).not.toHaveProperty('receipt');
   expect(resolverCalls).toBe(0);
 });
+
+// ── receipt: finished PRDs (no live rows) come from check-in events ─────────
+
+const checkin = (prdSlug, at) => ({ kind: 'response', prdSlug, validation: 'unvalidated', outcome: 'completed', at });
+
+test('receipt: an open Epic with no live rows sums the runs of its checked-in PRDs', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const runsRoot = await mkTmp('sm-outside-read-runs-');
+  setup(cwd, [session('e-1', cwd)], {
+    'e-1': [checkin('0001-a', '2026-11-02T01:00:00.000Z'), checkin('0002-b', '2026-11-03T01:00:00.000Z')],
+  });
+  writeMeta(runsRoot, '2026-11-02T00-00-00-000Z', '0001-a', { cwd, totalCostUsd: 1.25, exitCode: 0, finishedAt: 1 });
+  writeMeta(runsRoot, '2026-11-03T00-00-00-000Z', '0002-b', { cwd, totalCostUsd: 0.5, exitCode: 0, finishedAt: 2 });
+  writeMeta(runsRoot, '2026-11-03T00-00-00-000Z', '0099-other', { cwd, totalCostUsd: 99 });
+  const missing = { path: null, candidates: [], existsAnywhere: false, existingPaths: [] };
+
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-1', receipt: true, listJobs: () => [], runsRoot, resolveTranscriptPath: () => missing }));
+  expect(rec.receipt.jobs.runs).toBe(2);
+  expect(rec.receipt.jobs.costUsd).toBeCloseTo(1.75, 10);
+  expect(rec.receipt.jobs.byPrd.map((p) => p.slug).sort()).toEqual(['0001-a', '0002-b']);
+});
+
+test('receipt: a completed Epic from the archive sums the runs of its archived check-ins', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const runsRoot = await mkTmp('sm-outside-read-runs-');
+  setup(cwd, []);
+  writeFile(cwd, 'e-done.json', {
+    session: session('e-done', cwd, { status: 'completed' }),
+    events: [checkin('0003-c', '2026-11-02T01:00:00.000Z'), checkin('0004-d', '2026-11-03T01:00:00.000Z')],
+    archivedAt: '2026-11-05T00:00:01.000Z',
+  });
+  writeMeta(runsRoot, '2026-11-02T00-00-00-000Z', '0003-c', { cwd, totalCostUsd: 0.75, exitCode: 0, finishedAt: 1 });
+  writeMeta(runsRoot, '2026-11-03T00-00-00-000Z', '0004-d', { cwd, totalCostUsd: 2, exitCode: 0, finishedAt: 2 });
+  const missing = { path: null, candidates: [], existsAnywhere: false, existingPaths: [] };
+
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-done', receipt: true, runsRoot, resolveTranscriptPath: () => missing }));
+  expect(rec.state).toBe('closed');
+  expect(rec.receipt.jobs.runs).toBe(2);
+  expect(rec.receipt.jobs.costUsd).toBeCloseTo(2.75, 10);
+  expect(rec.receipt.jobs.byPrd.map((p) => p.slug).sort()).toEqual(['0003-c', '0004-d']);
+});

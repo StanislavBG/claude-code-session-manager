@@ -15,7 +15,7 @@
 
 const path = require('node:path');
 const { readActiveIndex } = require('./epicMint.cjs');
-const { computeEpicOutsideState } = require('./epicOutsideState.cjs');
+const { computeEpicOutsideState, knownPrdSlugs } = require('./epicOutsideState.cjs');
 const { findEpicByExternalRef } = require('./externalRefIndex.cjs');
 const { awaitingInputSessions } = require('../../exchanges.cjs');
 const { readArchived, defaultProjectRoots, makeRegisteredRootsCache } = require('../../promptSessionsIpc.cjs');
@@ -152,13 +152,14 @@ function archivedEntry(cwd, epicId, projectRoots) {
   }
 }
 
-/** Job-run cost for the Epic's PRD slugs since the session was created; null on failure. */
-async function jobsReceipt(cwd, epicId, session, jobs, runsRoot) {
+/**
+ * Job-run cost for every PRD the Epic is known to have (live rows + check-ins
+ * on its chain, so finished PRDs whose rows are gone still count) since the
+ * session was created; null on failure.
+ */
+async function jobsReceipt(cwd, epicId, session, events, jobs, runsRoot) {
   try {
-    const slugs = jobs
-      .filter((r) => isObj(r) && (r.epicId === epicId || r.sourcePromptId === epicId))
-      .map((r) => str(r.slug))
-      .filter(Boolean);
+    const slugs = knownPrdSlugs({ session: { ...session, id: epicId }, events, jobs });
     const created = Date.parse(session.createdAt);
     return await gatherEpicJobReceipt({
       cwd,
@@ -185,9 +186,9 @@ async function chatReceipt(cwd, session, resolveTranscriptPath) {
   }
 }
 
-async function buildReceipt(cwd, epicId, session, jobs, runsRoot, resolveTranscriptPath) {
+async function buildReceipt(cwd, epicId, session, events, jobs, runsRoot, resolveTranscriptPath) {
   const [jobsPart, chatPart] = await Promise.all([
-    jobsReceipt(cwd, epicId, session, jobs, runsRoot),
+    jobsReceipt(cwd, epicId, session, events, jobs, runsRoot),
     chatReceipt(cwd, session, resolveTranscriptPath),
   ]);
   return { jobs: jobsPart, chat: chatPart };
@@ -198,7 +199,7 @@ async function buildReceipt(cwd, epicId, session, jobs, runsRoot, resolveTranscr
  * from its archive file (only when archivedAt is set). Null on no match.
  *
  * `receipt: true` adds `receipt: { jobs, chat }` — jobs = gatherEpicJobReceipt
- * over the Epic's job slugs since createdAt, chat = summarizeTranscriptFile of
+ * over the Epic's known PRD slugs (knownPrdSlugs) since createdAt, chat = summarizeTranscriptFile of
  * the resolved transcript (null when none). Each part is null on failure.
  * Without it no run folder or transcript is read. `runsRoot` and
  * `resolveTranscriptPath` are injectable for tests.
@@ -229,19 +230,22 @@ async function getEpicRecord(cwd, opts = {}) {
     const open = openSession(index, epicId);
     const jobs = await loadJobs(listJobs);
     let session;
+    let events;
     let record;
     if (open) {
       session = open;
+      events = eventsOf(index, epicId);
       const awaiting = await loadAwaiting(cwd);
       record = await openRecord(cwd, epicId, open, index, jobs, awaiting, isTabBusy);
     } else {
       const archived = archivedEntry(cwd, epicId, projectRoots);
       if (!archived) return null;
       session = archived.session;
+      events = archived.events;
       record = buildRecord(cwd, epicId, session, archived.events, jobs, false, false);
     }
     if (receipt !== true) return record;
-    return { ...record, receipt: await buildReceipt(cwd, epicId, session, jobs, runsRoot, resolveTranscriptPath) };
+    return { ...record, receipt: await buildReceipt(cwd, epicId, session, events, jobs, runsRoot, resolveTranscriptPath) };
   } catch {
     return null;
   }

@@ -532,8 +532,8 @@ function applyRetention(runsDir, settings, opts) {
  * happens unless the read config opts out with
  * schedulerRunLogRetention.enabled === false (see isRetentionEnabled).
  *
- * Intended to be called once per app boot (see index.cjs's deferred 30s
- * startup timer, alongside finalizeClosedDays) — never on its own timer.
+ * Called by index.cjs's runRunLogRetentionPass: once on the deferred boot
+ * pass, then every 24h from that pass's setInterval timer.
  */
 function runBootSweep(opts) {
   const runsDir = (opts && opts.runsDir) || schedulerPaths.runsDir();
@@ -546,23 +546,55 @@ function runBootSweep(opts) {
   return result;
 }
 
+const INDEX_UNREADABLE = Symbol('active-index-unreadable');
+
+/**
+ * readIndexSessions(projectRoot) → the active-index.json `sessions` map, {} when the
+ * file is absent, or INDEX_UNREADABLE when it exists but cannot be read/parsed into an
+ * object carrying an object `sessions` field. Deliberately NOT epicMint.readActiveIndex:
+ * that reader folds every error into an empty index, which would make every live Epic
+ * look like an orphan to the plan-records sweep.
+ */
+function readIndexSessions(projectRoot) {
+  const { opsPath } = require('../opsOwnership.cjs');
+  const { readJsonOrSync } = require('../util/atomicFs.cjs');
+  const file = opsPath(projectRoot, 'prompt-sessions', 'active-index.json');
+  if (!fs.existsSync(file)) return {};
+  const parsed = readJsonOrSync(file, INDEX_UNREADABLE);
+  if (parsed === INDEX_UNREADABLE || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return INDEX_UNREADABLE;
+  }
+  const sessions = parsed.sessions;
+  if (!sessions || typeof sessions !== 'object' || Array.isArray(sessions)) return INDEX_UNREADABLE;
+  return sessions;
+}
+
 /**
  * epicStatusFor(projectRoot, deps) → epicStatus(id) for prunePlanRecords. Reads the
- * prompt-sessions store through its existing readers: the active-index.json row
- * (epicMint.readActiveIndex, read once per call) first, else the per-Epic
+ * active-index.json row (read once per call) first, else the per-Epic
  * prompt-sessions/<id>.json archive/mirror (planRecordRetention.defaultEpicStatus).
- * Returns null for an unknown Epic (orphan). Never throws.
+ * Returns null for an unknown Epic (orphan).
+ *
+ * FAILS CLOSED: when active-index.json exists but is unreadable/corrupt, the returned
+ * function throws for every id, so prunePlanRecords keeps every folder in that project.
+ * A missing index means no rows: ids fall through to the archive, unknown ids are orphans.
+ * deps: { readActiveIndex, defaultEpicStatus } for tests (readActiveIndex replaces the
+ * canonical read; its result is trusted as-is).
  */
 function epicStatusFor(projectRoot, deps) {
   const d = deps || {};
-  const readActiveIndex = d.readActiveIndex || require('../epic/epicMint.cjs').readActiveIndex;
   const archiveStatus = (d.defaultEpicStatus || require('./planRecordRetention.cjs').defaultEpicStatus)(projectRoot);
-  let sessions = {};
-  try {
-    const idx = readActiveIndex(projectRoot);
-    if (idx && idx.sessions && typeof idx.sessions === 'object') sessions = idx.sessions;
-  } catch {
-    sessions = {};
+  let sessions;
+  if (d.readActiveIndex) {
+    const idx = d.readActiveIndex(projectRoot);
+    sessions = idx && idx.sessions && typeof idx.sessions === 'object' ? idx.sessions : {};
+  } else {
+    let read;
+    try { read = readIndexSessions(projectRoot); } catch { read = INDEX_UNREADABLE; }
+    if (read === INDEX_UNREADABLE) {
+      return () => { throw new Error('active-index unreadable'); };
+    }
+    sessions = read;
   }
   return (id) => {
     try {

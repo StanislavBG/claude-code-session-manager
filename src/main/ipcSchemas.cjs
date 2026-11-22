@@ -707,9 +707,15 @@ const adminUpdatePrd = z.object({
   'body cannot be combined with gate, files or acceptanceCriteria',
 );
 
+// `dependents` (PRD 3499): what happens to pending PRDs that depend on the
+// cancelled job — required by remote.cancelJob whenever any exist.
 const adminCancelJob = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
   cwd: z.string().min(1).max(4096).optional(),
+  dependents: z.object({
+    action: z.enum(['cascade', 'repoint', 'clear']),
+    to: z.string().min(1).max(200).optional(),
+  }).strict().refine((d) => d.action !== 'repoint' || d.to !== undefined, 'dependents.to is required for action "repoint"').optional(),
 });
 
 // ──────────────────────────────────────────── Projects

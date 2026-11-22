@@ -206,6 +206,7 @@ const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
 const { resolvePersonaDefaultEstimate, DEFAULT_PRD_AGENT_TYPE } = require('./lib/prd/prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/prd/depSlugResolve.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
+const cancelDependents = require('./scheduler/cancelDependents.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
 // Captured once at module load so every run's meta sidecar can record how
@@ -12540,6 +12541,49 @@ const remote = {
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review' || job.status === 'skipped') {
       return { ok: false, error: `job already terminal (status: "${job.status}") — nothing to cancel` };
     }
+    // Dependents choice (PRD 3499): cancelling a row that pending PRDs depend
+    // on would strand them behind a dead row (Self stall, 2026-11-22). Refuse
+    // unless the caller says what happens to them; apply that choice BEFORE
+    // the target is cancelled, aborting on any failure.
+    const depCwd = job.cwd ?? null;
+    const pendingDependents = cancelDependents.findPendingDependents(state.jobs, slug, depCwd);
+    let depPlan = null;
+    if (pendingDependents.length > 0) {
+      const names = pendingDependents.map((d) => d.slug);
+      if (!opts.dependents) {
+        return {
+          ok: false,
+          error: `job "${slug}" has ${names.length} pending dependent(s): ${names.join(', ')}. `
+            + 'Pass dependents: { action: "cascade" } to cancel them too, '
+            + '{ action: "repoint", to: "<slug>" } to make them depend on another PRD instead, '
+            + 'or { action: "clear" } to drop the dependency.',
+          dependents: names,
+          choices: [...cancelDependents.DEPENDENTS_ACTIONS],
+        };
+      }
+      depPlan = cancelDependents.planDependentsUpdate(state.jobs, slug, opts.dependents, depCwd);
+      if (!depPlan.ok) return { ok: false, error: depPlan.error, dependents: names };
+      const applied = [];
+      for (const edit of depPlan.edits) {
+        if (edit.action !== 'setDependsOn') continue;
+        const res = await this.updatePrd({ slug: edit.slug, cwd: depCwd ?? undefined, frontmatter: { dependsOn: edit.dependsOn } });
+        if (!res?.ok) {
+          // Best-effort rollback of edits already written, so an aborted
+          // cancel leaves the dependents as they were.
+          for (const done of applied.reverse()) {
+            await this.updatePrd({ slug: done.slug, cwd: depCwd ?? undefined, frontmatter: { dependsOn: done.previous } }).catch(() => null);
+          }
+          return {
+            ok: false,
+            error: `could not update dependent ${edit.slug}: ${res?.error ?? 'unknown error'} — "${slug}" was not cancelled`,
+            dependents: names,
+          };
+        }
+        applied.push(edit);
+      }
+    }
+    const cascadeEdits = depPlan?.action === 'cascade' ? depPlan.edits : [];
+    const dependsOnEdits = depPlan && depPlan.action !== 'cascade' ? depPlan.edits : [];
     const wasRunning = job.status === 'running';
     const pid = job.runtime?.pid;
     // Evidence-before-failure guard, scoped to an actually-running job being
@@ -12563,6 +12607,24 @@ const remote = {
       : 'cancelled via admin API';
     const cancelledAt = new Date().toISOString();
     await mutate((s) => {
+      // Dependents first (same mutate, so the target never lands cancelled
+      // while its dependents still point at it).
+      for (const edit of cascadeEdits) {
+        const d = s.jobs.find((x) => x.slug === edit.slug && x.cwd === job.cwd);
+        if (!d || d.status !== 'pending') continue;
+        if (!transitionJob(d, 'failed', { reason: edit.reason, source: 'remote:cancelJob' })) continue;
+        d.error = edit.reason;
+        d.cancelledAt = cancelledAt;
+        d.finishedAt = new Date().toISOString();
+        d.exitCode = d.exitCode ?? null;
+        delete d.runtime;
+      }
+      // Mirror the rewritten dependsOn onto the rows now; reconcile() would
+      // refresh it from the PRD file on its next pass anyway.
+      for (const edit of dependsOnEdits) {
+        const d = s.jobs.find((x) => x.slug === edit.slug && x.cwd === job.cwd);
+        if (d) d.dependsOn = edit.dependsOn;
+      }
       const idx = s.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return;
       const j = s.jobs[idx];
@@ -12579,6 +12641,12 @@ const remote = {
     if (wasRunning && pid) killOrphanClaudePid(pid);
     await broadcast({ flush: true });
     const result = { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null, cancelledAt };
+    if (depPlan) {
+      appendAuditEvent('job_cancel_dependents', {
+        slug, cwd: job.cwd ?? null, action: depPlan.action, to: depPlan.to ?? null, dependents: depPlan.dependents,
+      });
+      result.dependents = { action: depPlan.action, to: depPlan.to ?? null, slugs: depPlan.dependents };
+    }
     if (wasRunning) {
       // Whatever the executor committed before SIGTERM stays on its job
       // branch (never integrated); tell the caller where. Known residual: a

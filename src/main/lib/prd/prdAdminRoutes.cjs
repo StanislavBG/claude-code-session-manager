@@ -185,9 +185,12 @@ function registerAdminRoute(adminHttp, remote) {
       sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
       return;
     }
-    const result = await remote.cancelJob(input.slug, { cwd: input.cwd });
+    const result = await remote.cancelJob(input.slug, { cwd: input.cwd, dependents: input.dependents });
     if (!result.ok) {
-      const status = result.error === 'invalid slug' ? 400
+      // A dependents refusal/abort (result.dependents set) is always a 409 —
+      // the job exists; the caller must pass or fix a dependents choice.
+      const status = Array.isArray(result.dependents) ? 409
+        : result.error === 'invalid slug' ? 400
         : /unknown slug|not found/i.test(result.error ?? '') ? 404
           : 409;
       sendJson(res, status, result);

@@ -97,12 +97,19 @@ async function mount(node: ReactNode = createElement(ProjectClaudeConfig)) {
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const chips = () => Array.from(container.querySelectorAll('[data-testid="source-chip-path"]')).map((c) => c.textContent)
 const tabLabel = (b: Element) => b.querySelector('span.font-semibold')?.textContent?.trim()
-/** Clicks a ConfigBand tab, or a button in the tab's source strip (the Project / Local switch). */
+/** Clicks a ConfigBand tab. */
 async function pick(label: string) {
   const band = Array.from(q('config-band')?.querySelectorAll('[role="tab"]') ?? []) as HTMLElement[]
-  const strip = Array.from(q('project-claude-config-source')?.querySelectorAll('button') ?? [])
-  const b = band.find((x) => tabLabel(x) === label) ?? strip.find((x) => x.textContent?.trim() === label)
-  if (!b) throw new Error(`no band tab or strip button "${label}"`)
+  const b = band.find((x) => tabLabel(x) === label)
+  if (!b) throw new Error(`no band tab "${label}"`)
+  await act(async () => { b.click() })
+  await flush()
+}
+/** Clicks the Local radio row in the active tab's left-column file card (CLAUDE.md or Settings). */
+async function pickLocal() {
+  const rows = Array.from(container.querySelectorAll('[role="radiogroup"] [role="radio"]')) as HTMLElement[]
+  const b = q('settings-file-local') ?? rows.find((x) => x.textContent?.includes('CLAUDE.local.md'))
+  if (!b) throw new Error('no Local radio row')
   await act(async () => { b.click() })
   await flush()
 }
@@ -177,8 +184,9 @@ describe('ProjectClaudeConfig', () => {
     expect(countOf('settings')).toBe('3')
     expect(countOf('mcp')).toBe('2')
     expect(countOf('skills')).toBe('1')
-    // The old ViewTabs/SourceChip header row is gone.
+    // The old ViewTabs/SourceChip header row and the source strip under the band are gone.
     expect(q('project-claude-config-toolbar')).toBeNull()
+    expect(q('project-claude-config-source')).toBeNull()
   })
 
   it('marks CLAUDE.md missing when neither project file exists', async () => {
@@ -187,28 +195,44 @@ describe('ProjectClaudeConfig', () => {
     expect(q('config-band-tab-claude-md')?.querySelector('[data-testid="config-band-count"]')?.textContent).toBe('missing')
   })
 
-  it("shows the active project's real file on every tab's SourceChip", async () => {
+  it('mounts all five tabs with no source strip under the band; radio rows own the Project / Local choice', async () => {
     await mount()
+    const panel = (key: string) => q(`project-claude-config-panel-${key}`)
+    const checked = () =>
+      Array.from(container.querySelectorAll('[role="radio"][aria-checked="true"]')).map((x) => x.textContent ?? '')
+
     // Memory: today's MemoryExplorer, over this project's memory folder.
+    expect(panel('memory')).not.toBeNull()
     expect(q('mx-nav-all')).not.toBeNull()
     expect(api.memory.list).toHaveBeenCalledWith(expect.objectContaining({ cwd: PROJECT_CWD }))
-    expect(chips()).toEqual(['~' + MEM_DIR.slice(HOME.length)])
+    expect(q('project-claude-config-source')).toBeNull()
 
     await pick('CLAUDE.md')
-    expect(chips()).toEqual([`${SHORT}/CLAUDE.md`])
-    await pick('Local')
-    expect(chips()).toEqual([`${SHORT}/CLAUDE.local.md`])
+    expect(panel('claude-md')).not.toBeNull()
+    expect(q('project-claude-config-source')).toBeNull()
+    expect(q('claude-md-file-card')).not.toBeNull()
+    expect(checked()).toEqual([expect.stringContaining('CLAUDE.md')])
+    expect(q('doc-editor')?.dataset.path).toBe(MD)
+    await pickLocal()
+    expect(checked()).toEqual([expect.stringContaining('CLAUDE.local.md')])
+    expect(q('doc-editor')?.dataset.path).toBe(LOCAL_MD)
 
     await pick('Settings')
+    expect(panel('settings')).not.toBeNull()
+    expect(q('project-claude-config-source')).toBeNull()
+    expect(q('settings-file-project')?.getAttribute('aria-checked')).toBe('true')
     expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`, `${SHORT}/.claude/settings.json`])
-    await pick('Local')
+    await pickLocal()
+    expect(q('settings-file-local')?.getAttribute('aria-checked')).toBe('true')
     expect(chips()).toEqual([`${SHORT}/${EPIC_CFG}`, `${SHORT}/.claude/settings.local.json`])
 
     await pick('MCP')
-    expect(chips()).toEqual([`${SHORT}/.mcp.json › mcpServers`])
+    expect(panel('mcp')).not.toBeNull()
+    expect(q('project-claude-config-source')).toBeNull()
 
     await pick('Skills')
-    expect(chips()).toEqual([`${SHORT}/.claude/skills`])
+    expect(panel('skills')).not.toBeNull()
+    expect(q('project-claude-config-source')).toBeNull()
   })
 
   it('CLAUDE.md tab edits <cwd>/CLAUDE.md and CLAUDE.local.md through the config store', async () => {
@@ -223,7 +247,7 @@ describe('ProjectClaudeConfig', () => {
     expect(disk[MD].text).toBe('# alpha rules\nedited\n')
     expect(useConfig.getState().files[MD]?.dirty).toBe(false)
 
-    await pick('Local')
+    await pickLocal()
     expect(q('doc-editor')?.dataset.path).toBe(LOCAL_MD)
     expect(q('doc-editor-text')?.textContent).toBe('# my local notes\n')
     await act(async () => { q('doc-editor-type')!.click() })
@@ -258,7 +282,7 @@ describe('ProjectClaudeConfig', () => {
     expect(box.checked).toBe(true)
     expect(api.promptSessions.getWorktreeDisabled).toHaveBeenCalledWith({ cwd: PROJECT_CWD })
     // Same section, still once, on the Local scope.
-    await pick('Local')
+    await pickLocal()
     expect(container.querySelectorAll('[data-testid="settings-epic-isolation"]')).toHaveLength(1)
   })
 

@@ -4,11 +4,11 @@
  * the claude CLI reads from THIS project's directory is edited here. The page frame is the
  * shared dark ConfigBand (design-mocks/claude-config/DESIGN_SPEC.md §1.3, §2) with five
  * tabs and live counts; Plugins and Agents are machine-wide and live on Home only. Each tab
- * reuses the component Home uses, with the project scope passed in, under a thin source
- * strip (the Project/Local switch where the tab has one, plus a SourceChip naming the real file):
+ * reuses the component Home uses, with the project scope passed in; each tab's own left-column
+ * file card names its real file and, where the tab has one, owns the Project/Local choice:
  *
- * - Memory    — today's MemoryExplorer (Memory.tsx). Its chip names the folder main resolves
- *               for this project (memory.list's `dir`), never a renderer-side guess.
+ * - Memory    — today's MemoryExplorer (Memory.tsx) over the folder main resolves for this
+ *               project (memory.list's `dir`), never a renderer-side guess.
  * - CLAUDE.md — ClaudeMdWorkbench over <cwd>/CLAUDE.md (Project) and <cwd>/CLAUDE.local.md
  *               (Local) as radio rows, loaded and saved through useConfig loadText/saveText. Save never forces, so the store's mtime
  *               conflict check still refuses to overwrite a copy that changed on disk.
@@ -19,11 +19,10 @@
  *               at that same scope.
  * - Skills    — Skills at project scope (<cwd>/.claude/skills/).
  */
-import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfigBand, type ConfigBandTab } from '../claudeConfig/ConfigBand'
 import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
-import { ViewTabs } from '../ui/ViewTabs'
 import { SourceChip, shortenHome } from '../ui/SourceChip'
 import { EmptyState } from '../ui/EmptyState'
 import { ClaudeMdWorkbench, type ClaudeMdRoot } from '../claudeConfig/ClaudeMdWorkbench'
@@ -57,11 +56,6 @@ const PROJECT_CLAUDE_CONFIG_TABS: ReadonlyArray<{ key: ConfigTab; label: string;
   { key: 'skills', label: 'Skills', icon: 'skills' },
 ]
 const TABS = PROJECT_CLAUDE_CONFIG_TABS
-
-const SCOPES: ReadonlyArray<{ key: ProjectScope; label: string }> = [
-  { key: 'project', label: 'Project' },
-  { key: 'local', label: 'Local' },
-]
 
 const isConfigTab = (t: string): t is ConfigTab => TABS.some((o) => o.key === t)
 
@@ -265,18 +259,6 @@ function SettingsTab({ cwd, scope, onScopeChange }: { cwd: string; scope: Projec
   )
 }
 
-/** A thin strip at the top of a tab body: the Project/Local switch where the tab has one, then the real file. */
-function SourceStrip({ children }: { children: ReactNode }) {
-  return (
-    <div
-      data-testid="project-claude-config-source"
-      className="shrink-0 flex items-center gap-3 min-w-0 px-7 py-1.5 border-b border-line"
-    >
-      {children}
-    </div>
-  )
-}
-
 function ProjectClaudeConfigComponent() {
   const home = useHomeDir()
   const cwd = useActiveTab()?.cwd ?? null
@@ -286,7 +268,6 @@ function ProjectClaudeConfigComponent() {
   const [mcpAdd, setMcpAdd] = useState<McpAddContext | null>(null)
   const [learnOpen, setLearnOpen] = useState(false)
   const counts = useProjectConfigCounts(cwd)
-  const memoryDir = counts.memoryDir
 
   const selectTab = useCallback((t: ConfigTab) => {
     setTab(t)
@@ -320,7 +301,6 @@ function ProjectClaudeConfigComponent() {
     )
   }
 
-  const mdPath = CLAUDE_MD_SCOPES.resolve(mdScope, home, cwd)
   const learn = LEARNING_CONTENT.memory
 
   return (
@@ -339,15 +319,6 @@ function ProjectClaudeConfigComponent() {
           <LearningBody content={learn} />
         </div>
       )}
-      <SourceStrip>
-        {tab === 'claude-md' && <ViewTabs options={SCOPES} active={mdScope} onChange={setMdScope} />}
-        {tab === 'settings' && <ViewTabs options={SCOPES} active={settingsScope} onChange={setSettingsScope} />}
-        {tab === 'memory' && memoryDir && <SourceChip path={memoryDir} note="Open this project's memory folder" />}
-        {tab === 'claude-md' && mdPath && <SourceChip path={mdPath} />}
-        {/* Settings: its own body chips every view's file; the Epic isolation chip sits with its toggle. */}
-        {tab === 'mcp' && <SourceChip path={`${cwd}/.mcp.json`} keyPath={['mcpServers']} />}
-        {tab === 'skills' && <SourceChip path={`${cwd}/.claude/skills`} note={`Open ${cwd}/.claude/skills/`} />}
-      </SourceStrip>
       <div className="flex-1 min-h-0" data-testid={`project-claude-config-panel-${tab}`}>
         {tab === 'memory' && <Memory />}
         {tab === 'claude-md' && <ClaudeMdTab home={home} cwd={cwd} scope={mdScope} onScopeChange={setMdScope} />}

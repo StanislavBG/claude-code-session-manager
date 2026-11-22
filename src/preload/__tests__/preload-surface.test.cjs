@@ -67,7 +67,7 @@ test('schedule.resetJob sends cwd only when given', async () => {
   assert.deepStrictEqual(calls[1].payload, { slug: 'my-slug', cwd: '/tmp/proj' });
 });
 
-test('customerFeedback exposes nine methods wired to customerFeedback:* channels', async () => {
+test('customerFeedback exposes ten methods wired to customerFeedback:* channels', async () => {
   const expected = {
     submit: 'customerFeedback:submit',
     list: 'customerFeedback:list',
@@ -78,6 +78,7 @@ test('customerFeedback exposes nine methods wired to customerFeedback:* channels
     inboxList: 'customerFeedback:inbox-list',
     inboxSetStatus: 'customerFeedback:inbox-set-status',
     inboxLinkEpic: 'customerFeedback:inbox-link-epic',
+    inboxImage: 'customerFeedback:inbox-image',
   };
   assert.deepStrictEqual(Object.keys(exposedApi.customerFeedback).sort(), Object.keys(expected).sort());
   for (const [method, channel] of Object.entries(expected)) {

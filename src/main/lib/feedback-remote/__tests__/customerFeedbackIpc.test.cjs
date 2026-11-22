@@ -5,6 +5,7 @@ const CHANNELS = [
   'customerFeedback:submit', 'customerFeedback:list', 'customerFeedback:refresh-status',
   'customerFeedback:mark-seen', 'customerFeedback:owner-info', 'customerFeedback:inbox-pull',
   'customerFeedback:inbox-list', 'customerFeedback:inbox-set-status', 'customerFeedback:inbox-link-epic',
+  'customerFeedback:inbox-image',
 ];
 
 function setup() {
@@ -17,6 +18,7 @@ function setup() {
   const inbox = {
     getOwnerInfo: vi.fn(() => ({ ownerMode: true, projectCwd: '/x' })),
     pull: vi.fn(), list: vi.fn(), setStatus: vi.fn(), linkEpic: vi.fn(),
+    readCachedImage: vi.fn(async () => ({ ok: true, dataUrl: 'data:image/png;base64,AA' })),
   };
   const timers = [];
   const setTimeoutImpl = (fn, ms) => { const t = { fn, ms, unref: vi.fn() }; timers.push(t); return t; };
@@ -25,9 +27,26 @@ function setup() {
 }
 
 describe('customerFeedbackIpc', () => {
-  it('registers all nine channels', () => {
+  it('registers all ten channels', () => {
     const { handlers } = setup();
     expect([...handlers.keys()].sort()).toEqual([...CHANNELS].sort());
+  });
+
+  it('inbox-image forwards a valid { id, index } to inbox.readCachedImage and returns its result', async () => {
+    const { handlers, inbox } = setup();
+    const r = await handlers.get('customerFeedback:inbox-image')({}, { id: 'fb_1', index: 2 });
+    expect(inbox.readCachedImage).toHaveBeenCalledWith('fb_1', 2);
+    expect(r).toEqual({ ok: true, dataUrl: 'data:image/png;base64,AA' });
+  });
+
+  it('inbox-image refuses an out-of-range index, a missing id, and extra keys without reading', () => {
+    const { handlers, inbox } = setup();
+    const h = handlers.get('customerFeedback:inbox-image');
+    expect(() => h({}, { id: 'fb_1', index: 5 })).toThrow();
+    expect(() => h({}, { index: 0 })).toThrow();
+    expect(() => h({}, { id: '', index: 0 })).toThrow();
+    expect(() => h({}, { id: 'fb_1', index: 0, path: '/etc/passwd' })).toThrow();
+    expect(inbox.readCachedImage).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed submit before reaching submit', async () => {

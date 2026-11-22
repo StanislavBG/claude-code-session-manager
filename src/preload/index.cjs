@@ -276,6 +276,7 @@ contextBridge.exposeInMainWorld('api', {
     inboxList: (p) => ipcRenderer.invoke('customerFeedback:inbox-list', p),
     inboxSetStatus: (p) => ipcRenderer.invoke('customerFeedback:inbox-set-status', p),
     inboxLinkEpic: (p) => ipcRenderer.invoke('customerFeedback:inbox-link-epic', p),
+    inboxImage: (p) => ipcRenderer.invoke('customerFeedback:inbox-image', p),
   },
   // Diagnostic only — no handler is registered unless the main process was
   // launched with SM_HEAP_SNAPSHOT=1, so this rejects by default.

@@ -1463,6 +1463,7 @@ const customerFeedbackInboxSetStatus = z.object({
   note: z.string().max(500).optional(),
 });
 const customerFeedbackInboxLinkEpic = z.object({ id: z.string().max(200), epicId: z.string().max(200) });
+const customerFeedbackInboxImage = z.object({ id: z.string().min(1).max(200), index: z.number().int().min(0).max(4) }).strict();
 
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
@@ -1710,6 +1711,7 @@ module.exports = {
     customerFeedbackInboxList,
     customerFeedbackInboxSetStatus,
     customerFeedbackInboxLinkEpic,
+    customerFeedbackInboxImage,
   },
   validated,
 };

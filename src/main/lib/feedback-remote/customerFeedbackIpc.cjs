@@ -56,6 +56,8 @@ function registerCustomerFeedbackHandlers(deps = {}) {
   ipcMain.handle('customerFeedback:inbox-list', v(s.customerFeedbackInboxList, ({ includeHidden }) => inbox.list({ includeHidden })));
   ipcMain.handle('customerFeedback:inbox-set-status', v(s.customerFeedbackInboxSetStatus, ({ id, status, note }) => inbox.setStatus(id, status, note)));
   ipcMain.handle('customerFeedback:inbox-link-epic', v(s.customerFeedbackInboxLinkEpic, ({ id, epicId }) => inbox.linkEpic(id, epicId)));
+  // Returns the cached image's data URL to the renderer only — never log it.
+  ipcMain.handle('customerFeedback:inbox-image', v(s.customerFeedbackInboxImage, ({ id, index }) => inbox.readCachedImage(id, index)));
 
   // One-shot deferred refresh so users see resolutions without opening anything.
   try {

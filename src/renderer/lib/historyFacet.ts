@@ -2,6 +2,8 @@
 // totals/model-mix/active-days from the per-project day buckets already
 // loaded from `history:dashboard` — never a new IPC round-trip.
 import type { HistoryDashboardDay, HistoryDashboardProjectRow, HistoryDashboardTotals } from '../../preload/api'
+import type { HistoryLauncher } from './historyLauncher'
+import type { FoldedProjectRow, LauncherBucket } from './historyProjectFold'
 
 export interface ModelBucket {
   inputTokens: number
@@ -37,6 +39,11 @@ export interface FacetResult {
   prevTotals: HistoryDashboardTotals
   prevAvailable: boolean
   byModelTotals: Record<string, ModelBucket>
+  /**
+   * Sum of the kept rows' `byLauncher` buckets (set by `foldHistoryDaysByCwd`).
+   * A raw, unfolded row has no `byLauncher` and adds nothing.
+   */
+  byLauncherTotals: Partial<Record<HistoryLauncher, LauncherBucket>>
   activeDays: number
 }
 
@@ -79,6 +86,7 @@ export function facetSlice(data: FacetInput, keep: Set<string> | null): FacetRes
   const days: FacetedDay[] = []
   const totals = emptyTotals()
   const byModelTotals: Record<string, ModelBucket> = {}
+  const byLauncherTotals: Partial<Record<HistoryLauncher, LauncherBucket>> = {}
   let activeDays = 0
 
   for (const day of data.days) {
@@ -100,6 +108,18 @@ export function facetSlice(data: FacetInput, keep: Set<string> | null): FacetRes
         dst.costUsd += mb.costUsd
         if (mb.estimated) dst.estimated = true
       }
+      const byLauncher = (row as Partial<FoldedProjectRow>).byLauncher ?? {}
+      for (const [launcher, lb] of Object.entries(byLauncher) as [HistoryLauncher, LauncherBucket][]) {
+        const dst = byLauncherTotals[launcher] ?? (byLauncherTotals[launcher] = {
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, sessionCount: 0,
+        })
+        dst.inputTokens += lb.inputTokens
+        dst.outputTokens += lb.outputTokens
+        dst.cacheReadTokens += lb.cacheReadTokens
+        dst.cacheCreationTokens += lb.cacheCreationTokens
+        dst.costUsd += lb.costUsd
+        dst.sessionCount += lb.sessionCount
+      }
     }
     if (dayHasData) activeDays += 1
     days.push({ date: day.date, totals: dayTotals })
@@ -111,6 +131,7 @@ export function facetSlice(data: FacetInput, keep: Set<string> | null): FacetRes
     prevTotals: keepAll ? data.prevTotals : emptyTotals(),
     prevAvailable: keepAll,
     byModelTotals,
+    byLauncherTotals,
     activeDays,
   }
 }

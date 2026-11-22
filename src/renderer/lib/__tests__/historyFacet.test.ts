@@ -98,3 +98,48 @@ describe('facetSlice', () => {
     expect(result.days).toHaveLength(2)
   })
 })
+
+describe('facetSlice byLauncherTotals', () => {
+  const lb = (costUsd: number, sessionCount: number, inputTokens = 0) => ({
+    inputTokens, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd, sessionCount,
+  })
+  const launcherFixture: FacetInput = {
+    days: [
+      {
+        date: '2026-07-01',
+        byProject: {
+          'proj-a': row({ projectDir: 'proj-a', byLauncher: { epic: lb(1, 1, 60), job: lb(0.5, 1, 40) } }),
+          'proj-b': row({ projectDir: 'proj-b', byLauncher: { other: lb(2, 2, 300) } }),
+          // A raw (unfolded) row carries no byLauncher and adds nothing.
+          'proj-c': row({ projectDir: 'proj-c' }),
+        },
+      },
+      {
+        date: '2026-07-02',
+        byProject: {
+          'proj-a': row({ projectDir: 'proj-a', byLauncher: { epic: lb(0.25, 1, 10) } }),
+        },
+      },
+    ],
+    totals: totals(),
+    prevTotals: totals(),
+  }
+
+  it('sums every launcher bucket over all projects and days', () => {
+    const r = facetSlice(launcherFixture, null)
+    expect(r.byLauncherTotals.epic).toEqual(lb(1.25, 2, 70))
+    expect(r.byLauncherTotals.job).toEqual(lb(0.5, 1, 40))
+    expect(r.byLauncherTotals.other).toEqual(lb(2, 2, 300))
+  })
+
+  it('sums only the kept projects under a project filter', () => {
+    const r = facetSlice(launcherFixture, new Set(['proj-a', 'proj-c']))
+    expect(r.byLauncherTotals.epic).toEqual(lb(1.25, 2, 70))
+    expect(r.byLauncherTotals.job).toEqual(lb(0.5, 1, 40))
+    expect(r.byLauncherTotals.other).toBeUndefined()
+  })
+
+  it('is empty when no row carries byLauncher', () => {
+    expect(facetSlice(fixture, null).byLauncherTotals).toEqual({})
+  })
+})

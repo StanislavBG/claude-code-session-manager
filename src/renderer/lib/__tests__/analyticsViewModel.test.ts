@@ -35,6 +35,7 @@ describe('buildHeadline', () => {
     prevTotals: totals({ estimatedCostUsd: 20 }),
     prevAvailable: true,
     byModelTotals: {},
+    byLauncherTotals: {},
     activeDays: 2,
   }
 

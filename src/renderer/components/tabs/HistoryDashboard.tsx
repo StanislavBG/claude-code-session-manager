@@ -21,6 +21,7 @@ import { StackedTrend } from './history/analytics/StackedTrend'
 import { Ranking } from './history/analytics/Ranking'
 import { ProjectDrill } from './history/analytics/ProjectDrill'
 import { ModelMix } from './history/analytics/panels/ModelMix'
+import { LauncherMix } from './history/analytics/panels/LauncherMix'
 import { Concentration } from './history/analytics/panels/Concentration'
 import { CachePanel } from './history/analytics/panels/CachePanel'
 import { LoopEfficiency } from './history/analytics/panels/LoopEfficiency'
@@ -368,6 +369,7 @@ export function HistoryDashboard() {
         )}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <ModelMix byModelTotals={facet.byModelTotals} />
+          <LauncherMix byLauncherTotals={facet.byLauncherTotals} />
           <Concentration rows={projectRows} />
           <CachePanel totals={facet.totals} />
           <Rhythm days={facet.days} measure={measure} />

@@ -33,6 +33,7 @@ The page never writes transcripts.
 
 - History is the machine-wide analytics and cost surface only: spend, tokens, time and charts. It does no session search, preview or resume. Source: the `history` entry of `NAV_ITEMS` in `src/renderer/lib/navGroups.ts`.
 - `history:dashboard` buckets by encoded cwd. `foldHistoryDaysByCwd` in `src/renderer/lib/historyProjectFold.ts` re-keys every day to the resolved cwd before any slice, row or budget is computed, and merges `toolBreakdown` and `byModel`.
+- The launcher of a transcript folder (Epic session, scheduler job, other) is derived from its folder name by `launcherOfEncodedDir` in `src/renderer/lib/historyLauncher.ts`; nothing is stored for it. The fold buckets it into each row's `byLauncher`, `facetSlice` sums it into `byLauncherTotals`, and the Launcher mix panel shows it.
 - Folders that do not resolve are summed into `excluded` (`ExcludedProjects` in `src/renderer/lib/historyProjectFold.ts`) and stated on screen (testid `history-excluded-note`). Excluded spend is never dropped silently.
 - Usage is counted once per model call. Days named in `legacyDates` (`HistoryDashboardResult` in `src/preload/api.d.ts`) were counted under the older rollup version, read high, and cannot be recounted; they are shown with a note (testid `history-legacy-note`), never silently.
 - History appears on the Home face only; a per-project copy would be a second door. Source: the comment on `history` in `src/renderer/lib/navGroups.ts`.

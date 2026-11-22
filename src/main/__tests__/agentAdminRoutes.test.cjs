@@ -148,12 +148,44 @@ test('with cwd: each agent carries resolved; a throwing resolution gives resolve
   expect(res.statusCode).toBe(200);
   const { agents } = res.json;
   expect(agents.map((a) => a.name)).toEqual(['alpha', 'beta', 'broken']);
-  expect(agents[0].resolved).toEqual({ modelId: 'claude-alpha', modelSource: 'persona', effort: 'medium', effortSource: 'persona' });
-  expect(agents[1].resolved).toEqual({ modelId: 'claude-beta', modelSource: 'persona', effort: 'medium', effortSource: 'persona' });
+  expect(agents[0].resolved).toEqual({ modelId: 'claude-alpha', modelAlias: 'opus', modelSource: 'persona', effort: 'medium', effortSource: 'persona' });
+  expect(agents[1].resolved).toEqual({ modelId: 'claude-beta', modelAlias: 'opus', modelSource: 'persona', effort: 'medium', effortSource: 'persona' });
   expect(agents[2].resolved).toBeNull();
   expect(seen.map((s) => s[0]).every((c) => c === cwd)).toBe(true);
   expect(seen.map((s) => s[1]).sort()).toEqual(['alpha', 'beta', 'broken']);
   expect(res.body).not.toContain('SECRET BODY');
+});
+
+test('with cwd: a persona with its own model, one that inherits, and a failed resolution', async () => {
+  const cwd = await project();
+  const http = setup({
+    listPersonas: async () => [persona('own', { model: 'sonnet' }), persona('inherits', { model: 'inherit' }), persona('failed')],
+    resolveEffectiveModelInfo: async ({ agentType }) => {
+      if (agentType === 'failed') throw new Error('boom');
+      if (agentType === 'own') {
+        return { modelAlias: 'sonnet', modelSource: 'persona', resolvedModelId: 'claude-sonnet-x', personaEffort: 'high', personaEffortSource: 'persona' };
+      }
+      // Inherits: the Settings default alias, no concrete id evidence yet.
+      return { modelAlias: 'opus', modelSource: 'settings', resolvedModelId: null, personaEffort: null, personaEffortSource: 'inherit' };
+    },
+  });
+  const res = await call(http, { cwd });
+  expect(res.statusCode).toBe(200);
+  const byName = Object.fromEntries(res.json.agents.map((a) => [a.name, a]));
+  expect(byName.own.resolved).toEqual({ modelId: 'claude-sonnet-x', modelAlias: 'sonnet', modelSource: 'persona', effort: 'high', effortSource: 'persona' });
+  expect(byName.inherits.model).toBe('inherit');
+  expect(byName.inherits.resolved).toEqual({ modelId: null, modelAlias: 'opus', modelSource: 'settings', effort: null, effortSource: 'inherit' });
+  expect(byName.failed.resolved).toBeNull();
+});
+
+test('with cwd: a resolver answer without modelAlias gives modelAlias: null', async () => {
+  const cwd = await project();
+  const http = setup({
+    listPersonas: async () => [persona('bare', { model: null })],
+    resolveEffectiveModelInfo: async () => ({ modelSource: 'inherit', resolvedModelId: null }),
+  });
+  const res = await call(http, { cwd });
+  expect(res.json.agents[0].resolved).toEqual({ modelId: null, modelAlias: null, modelSource: 'inherit', effort: null, effortSource: null });
 });
 
 test('a relative cwd answers 400 naming the reason', async () => {

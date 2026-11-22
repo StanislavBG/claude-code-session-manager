@@ -9,9 +9,11 @@
  *       name, title, description, model, effort, tags, tools, executorOnly,
  *       agentCli, agentCliModel, seedVersion, path — never the persona body or
  *       the per-project override details.
- *       With cwd, each agent also has resolved: { modelId, modelSource, effort,
- *       effortSource } (effectiveModelInfo.cjs), or resolved: null when that
- *       persona's resolution throws.
+ *       With cwd, each agent also has resolved: { modelId, modelAlias,
+ *       modelSource, effort, effortSource } (effectiveModelInfo.cjs), or
+ *       resolved: null when that persona's resolution throws. modelAlias is
+ *       the effective alias: the persona's own, or the Settings default when
+ *       the persona inherits.
  *
  * A query the schema rejects → 400 { ok: false, error: 'invalid query', details }.
  * A cwd that is not absolute or has no session-manager-operations folder →
@@ -101,6 +103,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
           const info = await resolveInfo({ cwd, agentType: agent.name });
           agent.resolved = {
             modelId: info?.resolvedModelId ?? null,
+            modelAlias: info?.modelAlias ?? null,
             modelSource: info?.modelSource ?? null,
             effort: info?.personaEffort ?? null,
             effortSource: info?.personaEffortSource ?? null,

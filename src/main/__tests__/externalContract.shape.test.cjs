@@ -282,7 +282,7 @@ test('the keys of an agent from GET /admin/agents with a cwd equal agentFields',
   registerAdminRoute({ registerRoute: (m, p, h) => { handlers.set(`${m} ${p}`, h); } }, {
     listPersonas: async () => [row],
     resolveEffectiveModelInfo: async () => ({
-      resolvedModelId: 'claude-opus-x', modelSource: 'persona', personaEffort: 'high', personaEffortSource: 'persona',
+      resolvedModelId: 'claude-opus-x', modelAlias: 'opus', modelSource: 'persona', personaEffort: 'high', personaEffortSource: 'persona',
     }),
   });
   const cwd = await mkTmp('sm-contract-agents-cwd-');
@@ -297,7 +297,7 @@ test('the keys of an agent from GET /admin/agents with a cwd equal agentFields',
   const { agents } = JSON.parse(res.body);
   expect(agents).toHaveLength(1);
   expect(Object.keys(agents[0]).sort()).toEqual([...CONTRACT.agentFields].sort());
-  expect(Object.keys(agents[0].resolved).sort()).toEqual(['effort', 'effortSource', 'modelId', 'modelSource']);
+  expect(Object.keys(agents[0].resolved).sort()).toEqual(['effort', 'effortSource', 'modelAlias', 'modelId', 'modelSource']);
 });
 
 // ── Needs you item keys + needs_you_answered keys from the real store and IPC ──

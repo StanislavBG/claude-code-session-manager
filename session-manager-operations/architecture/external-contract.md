@@ -416,7 +416,7 @@ text) is never in the answer.
 | `agentCli` | string or null | Another agent CLI the persona runs on. `null` means Claude Code. |
 | `agentCliModel` | string or null | The model for that other CLI. `null` when `agentCli` is `null`. |
 | `seedVersion` | number or null | The version stamp of a persona Session Manager seeds. `null` when the file has none. |
-| `path` | string | Absolute path of the persona file in the global folder. |
+| `path` | string or null | Absolute path of the persona file in the global folder. |
 | `resolved` | object or null | Present only when you passed `cwd`. See below. |
 
 ### `resolved`
@@ -427,6 +427,7 @@ of the persona and the project's Claude settings.
 | Field | Meaning |
 | --- | --- |
 | `modelId` | The concrete model id. It is the pinned id when the model is already a full id. For an alias it is the id the newest scheduler run or chat of this persona in this project used. `null` when there is no such evidence yet. |
+| `modelAlias` | The effective model alias (or full id) the launch uses: the persona's own model, the project override's, or the Claude settings default when the persona inherits. `null` when none is set anywhere. |
 | `modelSource` | Where the model came from: `persona`, `persona-overlay` (the project's override), `settings` (the persona sets none; the Claude settings model is used), `inherit` (no model anywhere) or `fallback` (the persona could not be read). |
 | `effort` | The effort level, or `null` when the persona sets none. |
 | `effortSource` | `persona`, `persona-overlay`, `inherit` (the persona sets no level) or `null` (the persona could not be read). |
@@ -437,10 +438,13 @@ the resolver never throws, so expect an object; still handle `null`.
 ### Launching from an outside app
 
 1. Call `GET /admin/agents?cwd=<project>` and pick an agent by `name`.
-2. Read the file at `path` for the prompt text. Strip the frontmatter (the block between the first two
+2. Read the file at `path` for the prompt text (skip this when `path` is `null`). Strip the frontmatter (the block between the first two
    `---` lines); the rest is the body.
-3. Pin the model with `--model <resolved.modelId>`. When `modelId` is `null`, pin `model` (the alias)
-   instead; never launch without `--model`.
+3. Pin the model, in this order. Never start a session without a model.
+   1. When `resolved.modelId` is set, pin `--model <resolved.modelId>`.
+   2. Otherwise, when `resolved.modelAlias` is set, pin `--model <resolved.modelAlias>`.
+   3. When both are `null` (or `resolved` itself is `null`), do not start the session; report that the
+      agent has no model to pin.
 4. Pass `resolved.effort` as the effort when it is not `null`.
 
 `path` is the global file. A project override of the body is not in it. When `resolved.modelSource` is

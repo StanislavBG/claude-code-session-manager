@@ -674,12 +674,7 @@
   "method": "writeText",
   "channel": "config:write-text",
   "kind": "invoke",
-  "remote": "deny",
-  "pack": [
-   "path",
-   "text",
-   "writer"
-  ]
+  "remote": "deny"
  },
  {
   "ns": "config",
@@ -707,10 +702,7 @@
   "method": "canWrite",
   "channel": "config:can-write",
   "kind": "invoke",
-  "remote": "deny",
-  "pack": [
-   "path"
-  ]
+  "remote": "deny"
  },
  {
   "ns": "config",

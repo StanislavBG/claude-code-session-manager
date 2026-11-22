@@ -19,7 +19,8 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { assertOpsWrite, opsPath, OWNERS } = require('./lib/opsOwnership.cjs');
+const { assertOpsWrite, opsPath, OWNERS, OPS_ROOT_DIR } = require('./lib/opsOwnership.cjs');
+const { walkImports } = require('./lib/persona-macro/personaImportHealth.cjs');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -193,6 +194,82 @@ function validateWrite(realAbs) {
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);
 }
 
+// ── Renderer instruction-file writes ────────────────────────────────────────
+// The renderer's config:write-text (and only it) may also save instruction
+// files: any CLAUDE.md / CLAUDE.local.md inside the read boundary, and any file
+// main itself proves sits in the @-import closure of a CLAUDE.md /
+// CLAUDE.local.md the caller names as `importedBy`. Main's own writers
+// (writeTextAtomic, writeJson, writeJsonSync, writeBinaryAtomic) never take
+// this path — they keep validateWrite's strict boundary.
+const INSTRUCTION_FILE_NAMES = new Set(['CLAUDE.md', 'CLAUDE.local.md']);
+
+function isInstructionFileName(p) {
+  return INSTRUCTION_FILE_NAMES.has(pathFor().basename(p));
+}
+
+/** True when any path segment is the ops root dir (single-writer law territory). */
+function isInsideOpsRoot(realAbs) {
+  return realAbs.split(/[\\/]/).includes(OPS_ROOT_DIR);
+}
+
+/**
+ * Instruction-file rule for renderer writes. `realAbs` must already have
+ * passed validatePath (it is the realpath).
+ * @param {string} realAbs
+ * @param {{ importedBy?: string }} [opts]
+ * @returns {{ ok: true } | { ok: false, reason: 'sensitive' | 'ops-root' | 'not-imported' }}
+ */
+function checkInstructionWrite(realAbs, { importedBy } = {}) {
+  let realHome;
+  try { realHome = canon(os.homedir()); } catch { realHome = os.homedir(); }
+  try {
+    insideHome.assertNotSensitiveWrite(realAbs, realHome);
+  } catch {
+    return { ok: false, reason: 'sensitive' };
+  }
+  if (isInsideOpsRoot(realAbs)) return { ok: false, reason: 'ops-root' };
+  if (isInstructionFileName(realAbs)) return { ok: true };
+  if (typeof importedBy === 'string' && importedBy) {
+    let realImporter = null;
+    try { realImporter = validatePath(expandHome(importedBy)); } catch { realImporter = null; }
+    if (realImporter && isInstructionFileName(realImporter)) {
+      for (const entry of walkImports(realImporter)) {
+        if (!entry.exists) continue;
+        let realImport;
+        try { realImport = canon(entry.importPath); } catch { continue; }
+        if (realImport === realAbs) return { ok: true };
+      }
+    }
+  }
+  return { ok: false, reason: 'not-imported' };
+}
+
+/**
+ * The one decision both config:write-text and config:can-write use for a
+ * realpath that already passed validatePath: the strict validateWrite
+ * boundary, else the instruction-file rule.
+ */
+function decideRendererWrite(real, importedBy) {
+  try {
+    validateWrite(real);
+    return { ok: true };
+  } catch {
+    return checkInstructionWrite(real, { importedBy });
+  }
+}
+
+/** config:write-text's writer — validateWrite OR checkInstructionWrite, then the ops law + atomic write. */
+async function writeRendererText(abs, text, { writer, importedBy } = {}) {
+  const real = validatePath(expandHome(abs));
+  if (!decideRendererWrite(real, importedBy).ok) {
+    throw new Error(`Write outside allowed write boundaries: ${real}`);
+  }
+  assertOpsWrite(real, writer);
+  await atomicFs.writeTextAtomic(real, text, {});
+  const stat = await fsp.stat(real);
+  return { ok: true, mtimeMs: stat.mtimeMs };
+}
+
 async function readJson(abs) {
   try {
     abs = validatePath(expandHome(abs));
@@ -358,14 +435,38 @@ async function listDir(abs, { filesOnly = false, dirsOnly = false, includeHidden
   }
 }
 
-/** True only when writeTextAtomic would pass its path checks (validatePath + validateWrite). */
-function canWrite(abs) {
+/**
+ * Whether config:write-text would accept `abs` — same decision as
+ * writeRendererText, plus a W_OK probe on the file (or its nearest existing
+ * parent folder when it does not exist yet).
+ * @returns {Promise<{ ok: boolean, reason?: 'outside-boundary' | 'sensitive' | 'ops-root' | 'not-imported' | 'permission' }>}
+ */
+async function canWrite(abs, { importedBy } = {}) {
+  let real;
   try {
-    validateWrite(validatePath(expandHome(abs)));
-    return true;
+    real = validatePath(expandHome(abs));
   } catch {
-    return false;
+    return { ok: false, reason: 'outside-boundary' };
   }
+  const decision = decideRendererWrite(real, importedBy);
+  if (!decision.ok) return decision;
+  let probe = real;
+  for (;;) {
+    try {
+      await fsp.access(probe, fs.constants.F_OK);
+      break;
+    } catch {
+      const parent = path.dirname(probe);
+      if (parent === probe) break;
+      probe = parent;
+    }
+  }
+  try {
+    await fsp.access(probe, fs.constants.W_OK);
+  } catch {
+    return { ok: false, reason: 'permission' };
+  }
+  return { ok: true };
 }
 
 async function exists(abs) {
@@ -530,9 +631,9 @@ function registerConfigHandlers() {
     registerPromptSessionsRoot(p);
     return writeJson(p, data, { writer });
   }));
-  ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text, writer }) => writeTextAtomic(p, text, { writer })));
+  ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text, writer, importedBy }) => writeRendererText(p, text, { writer, importedBy })));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
-  ipcMain.handle('config:can-write', v(s.configPath, ({ path: p }) => canWrite(p)));
+  ipcMain.handle('config:can-write', v(s.configCanWrite, ({ path: p, importedBy }) => canWrite(p, { importedBy })));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
   ipcMain.handle('config:parse-imports', v(s.configParseImports, async ({ path: p }) => {
     try {
@@ -563,6 +664,9 @@ module.exports = {
   migrateLegacyHomeFile,
   writeTextAtomic,
   writeBinaryAtomic,
+  writeRendererText,
+  checkInstructionWrite,
+  canWrite,
   listDir,
   exists,
   addAllowedRoot,

@@ -136,6 +136,8 @@ test('appPreview rows carry the expected channels and remote policies', () => {
 // the exact preload output for the sentinel call must still match, so a change here fails loudly.
 const KNOWN_UNDESCRIBED = {
   'config.readText': [{ path: '$0', maxBytes: undefined }], // deny; (path, opts) -> { path, maxBytes: opts?.maxBytes }
+  'config.writeText': [{ path: '$0', text: '$1', writer: '$2', importedBy: undefined }], // deny; opts?.importedBy
+  'config.canWrite': [{ path: '$0', importedBy: undefined }], // deny; (path, opts) -> { path, importedBy: opts?.importedBy }
   'voice.setRecording': [true], // deny; !!coercion
   'voice.setTtsEnabled': [true], // !!coercion; remote forwards the raw boolean
   'updater.install': [{ force: false }], // deny; force === true
@@ -182,4 +184,21 @@ test('every invoke/send row: pack (or its absence) matches what the real preload
     }
   }
   assert.deepStrictEqual(failures, [], failures.join('\n'));
+});
+
+// config.writeText / config.canWrite forward the optional importedBy (main
+// proves the @-import closure; the renderer only names the importing CLAUDE.md).
+test('config.writeText and config.canWrite forward importedBy', async () => {
+  recorded = [];
+  const res = await exposedApi.config.writeText('/h/core.md', 'x', 'w', { importedBy: '/h/.claude/CLAUDE.md' });
+  assert.deepStrictEqual(res, { ok: true });
+  await exposedApi.config.writeText('/h/CLAUDE.md', 'y');
+  await exposedApi.config.canWrite('/h/core.md', { importedBy: '/h/.claude/CLAUDE.md' });
+  await exposedApi.config.canWrite('/h/CLAUDE.md');
+  assert.deepStrictEqual(recorded.map((r) => [r.channel, r.rest[0]]), [
+    ['config:write-text', { path: '/h/core.md', text: 'x', writer: 'w', importedBy: '/h/.claude/CLAUDE.md' }],
+    ['config:write-text', { path: '/h/CLAUDE.md', text: 'y', writer: undefined, importedBy: undefined }],
+    ['config:can-write', { path: '/h/core.md', importedBy: '/h/.claude/CLAUDE.md' }],
+    ['config:can-write', { path: '/h/CLAUDE.md', importedBy: undefined }],
+  ]);
 });

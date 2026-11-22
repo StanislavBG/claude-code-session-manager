@@ -73,6 +73,38 @@ describe('configWriteText schema', () => {
   it('rejects missing path field', () => {
     expect(schemas.configWriteText.safeParse({ text: 'hi' }).success).toBe(false)
   })
+
+  it('accepts and keeps an optional importedBy', () => {
+    const r = (schemas.configWriteText as unknown as { safeParse: (v: unknown) => { success: boolean; data?: { importedBy?: string } } })
+      .safeParse({ path: '/home/user/core.md', text: 'x', importedBy: '/home/user/.claude/CLAUDE.md' })
+    expect(r.success).toBe(true)
+    expect(r.data?.importedBy).toBe('/home/user/.claude/CLAUDE.md')
+  })
+
+  it('rejects an empty or over-long importedBy', () => {
+    expect(schemas.configWriteText.safeParse({ path: '/a', text: 'x', importedBy: '' }).success).toBe(false)
+    expect(schemas.configWriteText.safeParse({ path: '/a', text: 'x', importedBy: '/' + 'a'.repeat(4096) }).success).toBe(false)
+  })
+})
+
+// ──────────────────────────────────────────── config:can-write
+describe('configCanWrite schema', () => {
+  it('accepts path only', () => {
+    expect(schemas.configCanWrite.safeParse({ path: '/home/user/CLAUDE.md' }).success).toBe(true)
+  })
+
+  it('accepts path + importedBy', () => {
+    expect(schemas.configCanWrite.safeParse({ path: '/home/user/core.md', importedBy: '/home/user/.claude/CLAUDE.md' }).success).toBe(true)
+  })
+
+  it('rejects empty path or empty importedBy', () => {
+    expect(schemas.configCanWrite.safeParse({ path: '' }).success).toBe(false)
+    expect(schemas.configCanWrite.safeParse({ path: '/a', importedBy: '' }).success).toBe(false)
+  })
+
+  it('rejects a non-string importedBy', () => {
+    expect(schemas.configCanWrite.safeParse({ path: '/a', importedBy: 42 }).success).toBe(false)
+  })
 })
 
 // ──────────────────────────────────────────── config:list-dir

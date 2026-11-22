@@ -127,10 +127,19 @@ const configWriteJson = z.object({
   writer: z.string().min(1).max(64).optional(),
 });
 
+// `importedBy`: a CLAUDE.md / CLAUDE.local.md whose @-import closure main
+// checks to allow writing an imported instruction file (config.cjs
+// checkInstructionWrite). Main proves the import; the renderer only names it.
 const configWriteText = z.object({
   path: z.string().min(1).max(4096),
   text: z.string(),
   writer: z.string().min(1).max(64).optional(),
+  importedBy: z.string().min(1).max(4096).optional(),
+});
+
+const configCanWrite = z.object({
+  path: z.string().min(1).max(4096),
+  importedBy: z.string().min(1).max(4096).optional(),
 });
 
 const configListDir = z.object({
@@ -1672,6 +1681,7 @@ module.exports = {
     configReadText,
     configWriteJson,
     configWriteText,
+    configCanWrite,
     configListDir,
     configWatch,
     configWatchOpts,

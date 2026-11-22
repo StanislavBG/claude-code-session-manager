@@ -168,4 +168,58 @@ describe('buildNeedsYouRows', () => {
     }]
     expect(buildNeedsYouRows({}, {}, jobs)).toEqual([])
   })
+
+  describe('outside items', () => {
+    const item = (over: Partial<Record<string, unknown>> = {}) => ({
+      app: 'portfolio',
+      id: 'i1',
+      title: 'Approve the weekly plan',
+      why: 'Three changes are waiting',
+      link: 'https://example.test/plan',
+      options: ['Yes', 'No'],
+      externalRef: null,
+      status: 'open' as const,
+      answer: null,
+      createdAt: '2026-11-20T10:00:00.000Z',
+      updatedAt: '2026-11-20T10:00:00.000Z',
+      ...over,
+    })
+
+    it('surfaces an open outside item as an outside-item row', () => {
+      const rows = buildNeedsYouRows({}, {}, [], 0, [item()])
+      expect(rows).toEqual([
+        {
+          id: 'outside:portfolio:i1',
+          kind: 'outside-item',
+          label: 'Approve the weekly plan',
+          detail: 'Three changes are waiting',
+          meta: 'portfolio',
+          project: '',
+          epicId: null,
+          jobSlug: null,
+          app: 'portfolio',
+          itemId: 'i1',
+          link: 'https://example.test/plan',
+          options: ['Yes', 'No'],
+        },
+      ])
+    })
+
+    it('appends outside rows after existing rows, oldest first, open only', () => {
+      const sessions = { e: { id: 'e', cwd: '/x', goalText: 'g' } }
+      const items = [
+        item({ id: 'new', createdAt: '2026-11-21T00:00:00.000Z' }),
+        item({ id: 'gone', status: 'answered', createdAt: '2026-11-01T00:00:00.000Z' }),
+        item({ id: 'old', app: 'kiln', createdAt: '2026-11-19T00:00:00.000Z', link: null, options: null }),
+      ]
+      const rows = buildNeedsYouRows(sessions, {}, [], 0, items as Parameters<typeof buildNeedsYouRows>[4])
+      expect(rows.map((r) => r.id)).toEqual(['proposed:e', 'outside:kiln:old', 'outside:portfolio:new'])
+      expect(rows[1]).toMatchObject({ link: null, options: null, meta: 'kiln' })
+      expect(rows[0]).not.toHaveProperty('app')
+    })
+
+    it('defaults to no outside rows', () => {
+      expect(buildNeedsYouRows({}, {}, [])).toEqual([])
+    })
+  })
 })

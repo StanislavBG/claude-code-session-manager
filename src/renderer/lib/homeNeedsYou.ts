@@ -7,6 +7,8 @@
 //   - a scheduler job in `failed` / `needs_review` (the queue's own verdict)
 //   - a scheduler job `quarantined` (no createdVia provenance — the
 //     PRD-authoring lockdown gate; see scheduler.cjs's reconcile())
+//   - an open item an outside app posted (window.api.needsYou — main's
+//     feedback-remote/needsYouStore.cjs)
 // Kept dependency-free (plain shapes, no store imports) so it is
 // unit-testable without mocking zustand — same shape as homeSessionRows.ts.
 import { projectNameFromCwd } from './homeProjectRows'
@@ -47,7 +49,25 @@ export interface ScheduleJobLite {
   overrun?: { ratio: number; ranMs: number; estimateMinutes: number; at: string }
 }
 
-export type NeedsYouKind = 'proposed-epic' | 'needs-input' | 'job-failed' | 'job-quarantined' | 'job-overrunning'
+/** Structural subset of preload's NeedsYouItem — kept local so this module stays dependency-free. */
+export interface OutsideItemLite {
+  app: string
+  id: string
+  title: string
+  why: string
+  link: string | null
+  options: string[] | null
+  status: string
+  createdAt: string
+}
+
+export type NeedsYouKind =
+  | 'proposed-epic'
+  | 'needs-input'
+  | 'job-failed'
+  | 'job-quarantined'
+  | 'job-overrunning'
+  | 'outside-item'
 
 export interface NeedsYouRow {
   id: string
@@ -63,6 +83,14 @@ export interface NeedsYouRow {
   /** 'job-quarantined' only — true once the row has sat un-adopted past
    *  QUARANTINE_ESCALATE_MS. Drives the row's tone/label on Home. */
   escalated?: boolean
+  /** 'outside-item' only — the posting app's name. */
+  app?: string
+  /** 'outside-item' only — the item's id within its app (answer key with `app`). */
+  itemId?: string
+  /** 'outside-item' only — the app's link for the item, if any. */
+  link?: string | null
+  /** 'outside-item' only — the answer choices; null = informational, no buttons. */
+  options?: string[] | null
 }
 
 /** Finds the recorded quarantine timestamp, if any — see ScheduleJobLite.statusHistory. */
@@ -82,12 +110,15 @@ function quarantinedAtMs(job: ScheduleJobLite): number | null {
  * scheduler snapshot; 'failed' / 'needs_review' / 'quarantined' surface.
  * `now` defaults to Date.now() and only affects a quarantined row's
  * `escalated` flag — pass it explicitly in tests for determinism.
+ * `outside` is window.api.needsYou.list()'s items; only `status === 'open'`
+ * entries surface, appended after every other row, oldest `createdAt` first.
  */
 export function buildNeedsYouRows(
   sessions: Record<string, ProposedEpicLite>,
   chats: Record<string, { ticketHistory?: TicketLite[] }>,
   jobs: ScheduleJobLite[],
   now: number = Date.now(),
+  outside: readonly OutsideItemLite[] = [],
 ): NeedsYouRow[] {
   const rows: NeedsYouRow[] = []
 
@@ -174,6 +205,26 @@ export function buildNeedsYouRows(
       project: job.cwd ? projectNameFromCwd(job.cwd) : null,
       epicId: null,
       jobSlug: job.slug,
+    })
+  }
+
+  const open = outside
+    .filter((it) => it.status === 'open')
+    .sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0))
+  for (const it of open) {
+    rows.push({
+      id: `outside:${it.app}:${it.id}`,
+      kind: 'outside-item',
+      label: it.title,
+      detail: it.why,
+      meta: it.app,
+      project: '',
+      epicId: null,
+      jobSlug: null,
+      app: it.app,
+      itemId: it.id,
+      link: it.link,
+      options: it.options,
     })
   }
 

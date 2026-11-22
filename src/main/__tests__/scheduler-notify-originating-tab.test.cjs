@@ -597,6 +597,95 @@ describe("transcript", () => {
       expect(r2.appendResponseEvent.mock.calls[0][2]).toBe('DONE — Demo Video finished.');
     });
 
+    describe('Project Video tool review stage (build-review)', () => {
+      const REVIEW_MSG = 'WAITING — Burrow Video: the review material is saved. Approve it or ask for changes in Project Home ▸ Video.';
+      function writeReview(cwd, id) {
+        const d = nodePath.join(cwd, 'session-manager-operations', 'project-pages', 'videos', id, 'review');
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(nodePath.join(d, 'material.json'), JSON.stringify({ title: 'Review title' }));
+        // A meta.json beside it must never be reported as the build output.
+        fs.writeFileSync(nodePath.join(cwd, 'session-manager-operations', 'project-pages', 'videos', id, 'meta.json'),
+          JSON.stringify({ title: 'Not built yet', lengthS: 30, style: 'x' }));
+      }
+
+      test('artifact-only review stage (artifactPaths/files) → WAITING text + build-review notice, no buildOutput', async () => {
+        const cwd = mkProject();
+        writeReview(cwd, 'vid-rev1');
+        const rel = 'session-manager-operations/project-pages/videos/vid-rev1/review/material.json';
+        const { appendResponseEvent } = await run(
+          { slug: '9010-rev', status: 'completed', cwd },
+          { macroId: 'tool-burrow-video', title: 'Burrow Video: review material', deliverable: 'artifact', artifactPaths: [rel], files: [rel] },
+        );
+        const [, , text, meta] = appendResponseEvent.mock.calls[0];
+        expect(text).toBe(REVIEW_MSG);
+        expect(meta).toMatchObject({ notice: 'build-review', outcome: 'completed' });
+        expect(meta).not.toHaveProperty('buildOutput');
+      });
+
+      test('repo-committing review stage (path only in files)', async () => {
+        const cwd = mkProject();
+        const { appendResponseEvent } = await run(
+          { slug: '9011-rev', status: 'completed', cwd },
+          { macroId: 'tool-burrow-video', title: 'Burrow Video: review material', files: ['src/x.ts', 'session-manager-operations/project-pages/videos/vid-r2/review/material.json'] },
+        );
+        expect(appendResponseEvent.mock.calls[0][2]).toBe(REVIEW_MSG);
+        expect(appendResponseEvent.mock.calls[0][3]).toMatchObject({ notice: 'build-review' });
+      });
+
+      test('repo-committing review stage (path only in the gate block)', async () => {
+        const cwd = mkProject();
+        const abs = nodePath.join(cwd, 'session-manager-operations/project-pages/videos/vid-r3/review/material.json');
+        const gateCmd = `timeout 60 node -e 'const s=require("fs").statSync(${JSON.stringify(abs)});process.exit(s.size>0?0:1)'`;
+        const body = '# Goal\n\nx\n\n# Gate\n\n```gate\n' + gateCmd + '\n```\n';
+        let { appendResponseEvent } = await run(
+          { slug: '9012-rev', status: 'completed', cwd },
+          { macroId: 'tool-burrow-video', title: 'Burrow Video: review material', files: ['src/x.ts'], body },
+        );
+        expect(appendResponseEvent.mock.calls[0][2]).toBe(REVIEW_MSG);
+        ({ appendResponseEvent } = await run(
+          { slug: '9012-rev2', status: 'completed', cwd },
+          { macroId: 'tool-burrow-video', title: 'Burrow Video: review material', gate: [gateCmd] },
+        ));
+        expect(appendResponseEvent.mock.calls[0][3]).toMatchObject({ notice: 'build-review' });
+      });
+
+      test('final stage of the same tool → unchanged DONE text + buildOutput', async () => {
+        const cwd = mkProject();
+        writeEntry(cwd, 'videos', 'vid-fin', { title: 'Final cut', kind: 'demo', style: 'vertical', lengthS: 60 });
+        writeReview(cwd, 'vid-fin2');
+        const rel = 'session-manager-operations/project-pages/videos/vid-fin/index.html';
+        const { appendResponseEvent } = await run(
+          { slug: '9013-fin', status: 'completed', cwd },
+          { macroId: 'tool-burrow-video', title: 'Burrow Video: background build', deliverable: 'artifact', artifactPaths: [rel], files: [rel] },
+        );
+        const [, , text, meta] = appendResponseEvent.mock.calls[0];
+        expect(text).toBe('DONE — Burrow Video: “Final cut” is saved (60 s · vertical). Watch it in Project Home ▸ Videos.');
+        expect(meta).toMatchObject({ notice: 'build-done', buildOutput: { kind: 'video', id: 'vid-fin', title: 'Final cut' } });
+      });
+
+      test('Demo Video build is unchanged', async () => {
+        const cwd = mkProject();
+        writeEntry(cwd, 'videos', 'vid-demo', { title: 'Demo', kind: 'demo', style: 'animated-whiteboard', lengthS: 30 });
+        const { appendResponseEvent } = await run(
+          { slug: '9014-demo', status: 'completed', cwd },
+          { macroId: 'builtin-demo-video', deliverable: 'artifact', artifactPaths: ['session-manager-operations/project-pages/videos/vid-demo/index.html'] },
+        );
+        expect(appendResponseEvent.mock.calls[0][2]).toBe('DONE — Demo Video: “Demo” is saved (30 s · animated-whiteboard). Watch it in Project Home ▸ Videos.');
+        expect(appendResponseEvent.mock.calls[0][3]).toMatchObject({ notice: 'build-done' });
+      });
+
+      test('failed review stage keeps the FAILED text', async () => {
+        const cwd = mkProject();
+        const rel = 'session-manager-operations/project-pages/videos/vid-f/review/material.json';
+        const { appendResponseEvent } = await run(
+          { slug: '9015-fail', status: 'failed', cwd, error: 'gate red' },
+          { macroId: 'tool-burrow-video', title: 'Burrow Video: review material', artifactPaths: [rel], files: [rel] },
+        );
+        expect(appendResponseEvent.mock.calls[0][2]).toBe('FAILED — Burrow Video: the background build failed (gate red). Press it again in Project Home to retry.');
+        expect(appendResponseEvent.mock.calls[0][3]).toMatchObject({ notice: 'build-failed' });
+      });
+    });
+
     test('non-macro PRD keeps the exact old message and no notice; transcript turn unchanged', async () => {
       const cwd = mkProject();
       const { appendResponseEvent, appendTranscriptTurn } = await run(

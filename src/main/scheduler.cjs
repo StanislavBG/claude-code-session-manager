@@ -3661,10 +3661,28 @@ function armSettleAfterValidatorBudgetKill(job, { scheduleSettle = defaultSchedu
 const MACRO_ARTIFACT_RE = /^session-manager-operations\/project-pages\/(videos|knowledge)\/([a-z0-9-]+)\/index\.html$/;
 const MACRO_META_MAX_BYTES = 256 * 1024;
 
+// A Project Video tool's review stage (macroJobDispatch.cjs REVIEW_MATERIAL_REL)
+// saves review material, not the video: any path ending in this names one.
+const MACRO_REVIEW_MATERIAL_RE = /\/review\/material\.json(?=$|["'`\s)])/;
+
+function isMacroReviewStage(prd) {
+  const strings = [];
+  for (const k of ['artifactPaths', 'files', 'gate']) {
+    const v = prd[k];
+    if (typeof v === 'string') strings.push(v);
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string') strings.push(x);
+  }
+  if (typeof prd.body === 'string') {
+    const m = /```gate\r?\n([\s\S]*?)```/.exec(prd.body);
+    if (m) strings.push(...m[1].split(/\r?\n/));
+  }
+  return strings.some((s) => MACRO_REVIEW_MATERIAL_RE.test(s.trim()));
+}
+
 function macroLabelFor(prd) {
   const builtin = BUILTIN_MACROS.find((m) => m && m.id === prd.macroId);
   if (builtin && typeof builtin.label === 'string' && builtin.label) return builtin.label;
-  const title = typeof prd.title === 'string' ? prd.title.replace(/:\s*background build\s*$/i, '').trim() : '';
+  const title = typeof prd.title === 'string' ? prd.title.replace(/:\s*(?:background build|review material)\s*$/i, '').trim() : '';
   return title || prd.macroId;
 }
 
@@ -3678,6 +3696,7 @@ function readMacroBuildOutput(cwd, prd) {
     if (!cwd) return null;
     const first = Array.isArray(prd.artifactPaths) ? prd.artifactPaths[0] : null;
     if (typeof first !== 'string') return null;
+    if (MACRO_REVIEW_MATERIAL_RE.test(first.trim())) return null;
     const m = MACRO_ARTIFACT_RE.exec(first.trim());
     if (!m) return null;
     const dir = m[1];
@@ -3706,6 +3725,12 @@ function macroBuildNotice(job, prd) {
     return {
       message: `FAILED — ${label}: the background build failed (${reason}). Press it again in Project Home to retry.`,
       notice: 'build-failed',
+    };
+  }
+  if (isMacroReviewStage(prd)) {
+    return {
+      message: `WAITING — ${label}: the review material is saved. Approve it or ask for changes in Project Home ▸ Video.`,
+      notice: 'build-review',
     };
   }
   const out = readMacroBuildOutput(job.cwd, prd);

@@ -1165,8 +1165,11 @@ try {
     env: process.env,
     appId: 'run.bilko.session-manager',
     resolveNpx,
+    warn: (message, meta) => logs.writeLine({ scope: 'main', level: 'warn', message, meta }),
   });
   registerLoginItemIpc({ ipcMain, loginItem });
+  // Bring an enabled login item up to this build's script + entry; not awaited, never throws.
+  void loginItem.refreshIfStale();
 } catch (e) {
   logs.writeLine({ scope: 'main', level: 'error', message: 'login item IPC registration failed', meta: { error: e?.message } });
 }

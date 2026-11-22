@@ -136,3 +136,91 @@ describe('createLoginItem — foreign file at the entry path', () => {
     expect(fs.existsSync(scriptPath())).toBe(false);
   });
 });
+
+describe('createLoginItem — foreign file at the script path', () => {
+  const foreignScript = '#!/bin/sh\necho someone else\n';
+  function plantScript() {
+    fs.mkdirSync(path.dirname(scriptPath()), { recursive: true });
+    fs.writeFileSync(scriptPath(), foreignScript);
+  }
+
+  it('switch-on leaves it alone and names it', async () => {
+    plantScript();
+    const li = make();
+    await expect(li.setEnabled(true)).rejects.toThrow(scriptPath());
+    expect(fs.readFileSync(scriptPath(), 'utf8')).toBe(foreignScript);
+    expect(fs.existsSync(desktopPath())).toBe(false);
+  });
+
+  it('switch-off leaves it and the entry alone and names it', async () => {
+    const li = make();
+    await li.setEnabled(true);
+    const entry = fs.readFileSync(desktopPath(), 'utf8');
+    fs.writeFileSync(scriptPath(), foreignScript);
+    await expect(li.setEnabled(false)).rejects.toThrow(scriptPath());
+    expect(fs.readFileSync(scriptPath(), 'utf8')).toBe(foreignScript);
+    expect(fs.readFileSync(desktopPath(), 'utf8')).toBe(entry);
+  });
+
+  it('status reads as off with a reason naming the script', async () => {
+    const li = make();
+    await li.setEnabled(true);
+    fs.writeFileSync(scriptPath(), foreignScript);
+    const s = li.status();
+    expect(s.enabled).toBe(false);
+    expect(s.reason).toContain(scriptPath());
+  });
+});
+
+describe('createLoginItem — refreshIfStale', () => {
+  it('rewrites a stale script and a stale entry', async () => {
+    const li = make();
+    await li.setEnabled(true);
+    const entry = fs.readFileSync(desktopPath(), 'utf8');
+    const script = fs.readFileSync(scriptPath(), 'utf8');
+    fs.writeFileSync(scriptPath(), `${script}# old release\n`);
+    expect(await li.refreshIfStale()).toBe(true);
+    expect(fs.readFileSync(scriptPath(), 'utf8')).toBe(script);
+
+    fs.writeFileSync(desktopPath(), entry.replace('Name=Session Manager', 'Name=Session Manager (old)'));
+    expect(await li.refreshIfStale()).toBe(true);
+    expect(fs.readFileSync(desktopPath(), 'utf8')).toBe(entry);
+    expect(fs.readFileSync(scriptPath(), 'utf8')).toBe(script);
+  });
+
+  it('a script written for an older npx path is refreshed', async () => {
+    await make({ resolveNpx: () => '/old/bin/npx' }).setEnabled(true);
+    const li = make();
+    expect(await li.refreshIfStale()).toBe(true);
+    expect(fs.readFileSync(scriptPath(), 'utf8')).toContain(NPX);
+  });
+
+  it('leaves an up-to-date pair untouched', async () => {
+    const li = make();
+    await li.setEnabled(true);
+    const past = new Date(2020, 0, 1);
+    fs.utimesSync(scriptPath(), past, past);
+    fs.utimesSync(desktopPath(), past, past);
+    expect(await li.refreshIfStale()).toBe(false);
+    expect(fs.statSync(scriptPath()).mtimeMs).toBe(past.getTime());
+    expect(fs.statSync(desktopPath()).mtimeMs).toBe(past.getTime());
+  });
+
+  it('does nothing when the login item is off', async () => {
+    const li = make();
+    expect(await li.refreshIfStale()).toBe(false);
+    expect(fs.readdirSync(home)).toEqual([]);
+  });
+
+  it('does nothing for a foreign script, and never throws', async () => {
+    const li = make();
+    await li.setEnabled(true);
+    fs.writeFileSync(scriptPath(), '#!/bin/sh\necho mine\n');
+    expect(await li.refreshIfStale()).toBe(false);
+    expect(fs.readFileSync(scriptPath(), 'utf8')).toBe('#!/bin/sh\necho mine\n');
+    const warnings = [];
+    const broken = make({ resolveNpx: () => { throw new Error('boom'); }, warn: (m) => warnings.push(m) });
+    expect(await broken.refreshIfStale()).toBe(false);
+    expect(warnings.length).toBe(1);
+  });
+});

@@ -175,3 +175,12 @@ describe('planLoginItem — start-at-login script', () => {
     }
   });
 });
+
+describe('SCRIPT_MARKER', () => {
+  it('is the first comment line of the start script', () => {
+    const { planLoginItem: plan, SCRIPT_MARKER } = require('../loginItemPlan.cjs');
+    expect(SCRIPT_MARKER).toBe('# Written by Session Manager to start it at login.');
+    const p = plan({ platform: 'linux', packaged: false, dev: false, homeDir: '/h', npxPath: '/usr/bin/npx' });
+    expect(p.scriptText.split('\n')[1]).toBe(SCRIPT_MARKER);
+  });
+});

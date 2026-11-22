@@ -7,6 +7,9 @@
 
 const PKG = 'claude-code-session-manager';
 const DEFAULT_APP_ID = 'run.bilko.session-manager';
+// The start script's marker: its first comment line. loginItem.cjs only rewrites or removes a
+// script that carries it.
+const SCRIPT_MARKER = '# Written by Session Manager to start it at login.';
 
 function joinHome(homeDir, rel) {
   return `${String(homeDir).replace(/\/+$/, '')}/${rel}`;
@@ -72,7 +75,7 @@ function launchAgentPlist(label, scriptPath) {
 function startScript({ logPath, npxPath }) {
   return [
     '#!/bin/sh',
-    '# Written by Session Manager to start it at login.',
+    SCRIPT_MARKER,
     "# To remove it, turn off App Settings > Startup > 'Start at login'.",
     `LOG=${shQuote(logPath)}`,
     'log() {',
@@ -187,4 +190,4 @@ function planLoginItem(opts) {
   };
 }
 
-module.exports = { planLoginItem, shQuote, execQuote, xmlEscape };
+module.exports = { planLoginItem, shQuote, execQuote, xmlEscape, SCRIPT_MARKER };

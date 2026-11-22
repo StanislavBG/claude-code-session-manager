@@ -8,7 +8,7 @@
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
-const { planLoginItem } = require('./loginItemPlan.cjs');
+const { planLoginItem, SCRIPT_MARKER } = require('./loginItemPlan.cjs');
 const { writeTextAtomic } = require('../util/atomicFs.cjs');
 
 const DESKTOP_MARKER = 'X-Session-Manager-Login-Item=1';
@@ -32,6 +32,11 @@ function carriesMarker(plan, text) {
   return text.split(/\r?\n/).some((l) => l.trim() === DESKTOP_MARKER);
 }
 
+/** True when the start-script text carries our marker. */
+function scriptCarriesMarker(text) {
+  return typeof text === 'string' && text.split(/\r?\n/).some((l) => l.trim() === SCRIPT_MARKER);
+}
+
 /** True when a desktop entry has been switched off by hand (Hidden=true / Autostart-enabled=false). */
 function switchedOff(text) {
   return text.split(/\r?\n/).some((raw) => {
@@ -47,12 +52,14 @@ function switchedOff(text) {
 
 /**
  * @param {{ app?: any, platform: string, packaged: boolean, dev: boolean, homeDir?: string,
- *   env?: Record<string, string|undefined>, appId?: string, resolveNpx?: () => (string|null|undefined) }} opts
+ *   env?: Record<string, string|undefined>, appId?: string, resolveNpx?: () => (string|null|undefined),
+ *   warn?: (message: string, meta?: object) => void }} opts
  */
 function createLoginItem(opts) {
   const { app, platform, packaged, dev, homeDir, appId } = opts;
   const env = opts.env || {};
   const resolveNpx = opts.resolveNpx || (() => null);
+  const warn = opts.warn || ((message, meta) => console.warn(message, meta || ''));
 
   function plan() {
     return planLoginItem({
@@ -92,6 +99,8 @@ function createLoginItem(opts) {
       reason = `${p.entryPath} has been switched off.`;
     } else if (p.starts === 'npx' && !exists(p.scriptPath)) {
       reason = `${p.scriptPath} is missing.`;
+    } else if (p.starts === 'npx' && !scriptCarriesMarker(readOrNull(p.scriptPath))) {
+      reason = `${p.scriptPath} was not written by Session Manager.`;
     } else {
       enabled = true;
     }
@@ -106,6 +115,12 @@ function createLoginItem(opts) {
     const text = readOrNull(p.entryPath);
     if (text !== null && !carriesMarker(p, text)) {
       throw new Error(`${p.entryPath} was not written by Session Manager; leaving it alone.`);
+    }
+    if (p.scriptPath) {
+      const script = readOrNull(p.scriptPath);
+      if (script !== null && !scriptCarriesMarker(script)) {
+        throw new Error(`${p.scriptPath} was not written by Session Manager; leaving it alone.`);
+      }
     }
   }
 
@@ -128,7 +143,29 @@ function createLoginItem(opts) {
     return statusOf(p);
   }
 
-  return { status, setEnabled };
+  /**
+   * Rewrite the entry and the script when the login item is on and either differs from what
+   * this build would write (a later release changed the script, or npx moved). Never throws.
+   * @returns {Promise<boolean>} true when the files were rewritten
+   */
+  async function refreshIfStale() {
+    try {
+      const p = plan();
+      if (!p.supported || p.mechanism === 'electron-login-item') return false;
+      if (!statusOf(p).enabled) return false;
+      const entryStale = readOrNull(p.entryPath) !== p.entryText;
+      const scriptStale = !!p.scriptPath && readOrNull(p.scriptPath) !== p.scriptText;
+      if (!entryStale && !scriptStale) return false;
+      if (p.scriptPath) await writeTextAtomic(p.scriptPath, p.scriptText, { mode: 0o700 });
+      await writeTextAtomic(p.entryPath, p.entryText);
+      return true;
+    } catch (e) {
+      warn('login item refresh failed', { error: e && /** @type {Error} */ (e).message });
+      return false;
+    }
+  }
+
+  return { status, setEnabled, refreshIfStale };
 }
 
 module.exports = { createLoginItem };

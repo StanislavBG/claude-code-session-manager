@@ -479,6 +479,11 @@ contextBridge.exposeInMainWorld('api', {
     status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
     fileStatus: (cwd) => ipcRenderer.invoke('git:file-status', { cwd }),
   },
+  loginItem: {
+    // Desktop-only (apiSurface remote: deny) — start Session Manager at OS login.
+    status: () => ipcRenderer.invoke('loginItem:status'),
+    setEnabled: (enabled) => ipcRenderer.invoke('loginItem:set-enabled', { enabled }),
+  },
   updater: {
     status: () => ipcRenderer.invoke('updater:status'),
     check: () => ipcRenderer.invoke('updater:check'),

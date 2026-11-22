@@ -31,6 +31,16 @@ export type UpdateCheckResult = {
   downloadUrl?: string | null;
 };
 
+/** Answer of `loginItem.status()` — whether Session Manager starts at OS login, and how. */
+export type LoginItemStatus = {
+  supported: boolean;
+  enabled: boolean;
+  mechanism: 'electron-login-item' | 'xdg-autostart' | 'launch-agent' | null;
+  starts: 'npx' | 'app' | null;
+  entryPath: string | null;
+  reason: string | null;
+};
+
 export type AutoUpdaterStatus = {
   state: AutoUpdaterState;
   current: string;
@@ -2982,6 +2992,12 @@ export interface SessionManagerAPI {
      *  Same 5s cache as status(). Designed for a file-tree sidebar where the
      *  renderer needs per-row badges without a separate git call per file. */
     fileStatus: (cwd: string) => Promise<GitFileStatusMap>;
+  };
+  loginItem: {
+    status: () => Promise<LoginItemStatus>;
+    setEnabled: (
+      enabled: boolean,
+    ) => Promise<{ ok: true; status: LoginItemStatus } | { ok: false; error: string }>;
   };
   updater: {
     status: () => Promise<AutoUpdaterStatus>;

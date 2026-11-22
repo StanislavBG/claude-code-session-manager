@@ -1927,6 +1927,23 @@
   "remote": "deny"
  },
  {
+  "ns": "loginItem",
+  "method": "status",
+  "channel": "loginItem:status",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "loginItem",
+  "method": "setEnabled",
+  "channel": "loginItem:set-enabled",
+  "kind": "invoke",
+  "remote": "deny",
+  "pack": [
+   "enabled"
+  ]
+ },
+ {
   "ns": "opsRetention",
   "method": "get",
   "channel": "opsRetention:get",

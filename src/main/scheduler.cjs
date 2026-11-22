@@ -1091,6 +1091,29 @@ function heartbeatTick(deps = {}) {
       // flag masked before (the burrow-vs-others incident this PRD fixes).
       const now = Date.now();
       const stalledCwds = Object.keys(summary.byProject).filter((cwd) => summary.byProject[cwd].stalled);
+      // Dependency-held stall: pending rows that can never dispatch because
+      // every one waits (directly or down its chain) on a failed/cancelled/
+      // unresolved row. computeStallSummary needs 0 pending, so it never saw
+      // Self's 16 rows held behind a cancelled dep (2026-11-22). Classified
+      // from the dispatch tick's cached satisfied map; until one exists, a
+      // refresh is kicked off asynchronously so the heartbeat never blocks.
+      const heldByDependencyByCwd = {};
+      if (lastSatisfiedSlugsByCwd) {
+        const classified = budget.classifyPendingHolds(s.jobs, {
+          satisfiedSlugsByCwd: lastSatisfiedSlugsByCwd,
+          holds: lastTick?.holds ?? [],
+          now,
+          thresholdMs: POLL_INTERVAL_MS,
+          loadGated: lastTick?.reason === 'load-deferred',
+        });
+        Object.assign(heldByDependencyByCwd, budget.findDependencyStalledProjects(s.jobs, classified));
+      } else {
+        refreshSatisfiedSlugsCache(s);
+      }
+      for (const cwd of Object.keys(heldByDependencyByCwd)) {
+        if (summary.byProject[cwd]) summary.byProject[cwd].heldByDependency = heldByDependencyByCwd[cwd];
+        if (!stalledCwds.includes(cwd)) stalledCwds.push(cwd);
+      }
       for (const cwd of [...stallSince.keys()]) {
         if (!stalledCwds.includes(cwd)) {
           stallSince.delete(cwd);
@@ -1106,18 +1129,23 @@ function heartbeatTick(deps = {}) {
         }
       }
       if (toAlert.length > 0) {
+        const heldByDependency = toAlert.flatMap((cwd) => (heldByDependencyByCwd[cwd] ?? []).map((h) => ({ cwd, ...h })));
         console.error(
-          `[scheduler] STALL DETECTED in project(s): ${toAlert.join(', ')} — 0 running, 0 pending, not paused, `
+          `[scheduler] STALL DETECTED in project(s): ${toAlert.join(', ')} — nothing dispatchable `
+          + `(0 running + 0 pending, or every pending row held by a dead dependency), not paused, `
           + `for >= ${Math.round(POLL_INTERVAL_MS / 1000)}s`,
           summary.byProject,
         );
-        appendAuditEvent('scheduler_stall_detected', { projects: toAlert, total: summary.total, byProject: summary.byProject });
+        appendAuditEvent('scheduler_stall_detected', {
+          projects: toAlert, total: summary.total, byProject: summary.byProject, heldByDependency,
+        });
         if (mainWindow && !mainWindow.isDestroyed()) {
           sendIfAlive(mainWindow, 'schedule:stall', {
             message: `Scheduler stall in ${toAlert.length} project(s): ${toAlert.join(', ')}. Check the Scheduler tab.`,
             projects: toAlert,
             total: summary.total,
             byProject: summary.byProject,
+            heldByDependency,
           });
         }
       }
@@ -2571,6 +2599,19 @@ let dispatchLoopHandle = null;
 // stalled) rather than every 60s heartbeat tick.
 let stallSince = new Map();
 let stallToasted = new Map();
+// Latest budget.computeDepHistorySatisfaction map — set by every dispatch tick
+// (and by refreshSatisfiedSlugsCache when the heartbeat runs before any tick)
+// so the heartbeat's dependency-held stall check never does its own fs read.
+let lastSatisfiedSlugsByCwd = null;
+let satisfiedRefreshInFlight = false;
+function refreshSatisfiedSlugsCache(state) {
+  if (satisfiedRefreshInFlight) return;
+  satisfiedRefreshInFlight = true;
+  budget.computeDepHistorySatisfaction(state)
+    .then((m) => { if (!lastSatisfiedSlugsByCwd) lastSatisfiedSlugsByCwd = m; })
+    .catch((e) => console.error('[scheduler] satisfied-slugs cache refresh failed', e))
+    .finally(() => { satisfiedRefreshInFlight = false; });
+}
 // (The 5-minute feedback sweep that used to piggyback on this heartbeat is
 // gone: it scanned each active project's session-manager-operations/feedback/
 // and auto-queued a /process-feedback PRD. Both the folder and that skill are
@@ -8229,6 +8270,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
     const heldSlugs = await computeLaunchHolds(state);
     if (stale()) return STALE_TICK;
     const satisfiedSlugsByCwd = await budget.computeDepHistorySatisfaction(state);
+    lastSatisfiedSlugsByCwd = satisfiedSlugsByCwd;
     if (stale()) return STALE_TICK;
     const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots, {
       leaseHeld: quietMachineLease.isHeld(),

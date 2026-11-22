@@ -12,7 +12,10 @@ const { claudePidAlive } = require('../lib/scheduler/reaperHelpers.cjs');
 const queueHistory = require('../lib/scheduler/queueHistory.cjs');
 const { listArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
 const { LEGAL_TRANSITIONS } = require('../lib/scheduler/scheduleJobTransitions.cjs');
-const { DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('../lib/scheduler/schedulerBatch.cjs');
+const {
+  DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN, enqueueTimestamp, findBlockingDep,
+} = require('../lib/scheduler/schedulerBatch.cjs');
+const { makeDepResolver, isCancelledRow, isSatisfiedDepRow } = require('../lib/prd/depSlugResolve.cjs');
 const {
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
@@ -38,6 +41,19 @@ const JOB_OVERRUN_FLOOR_MS = numEnvOverride('SM_JOB_OVERRUN_FLOOR_MINUTES', 60_0
 const JOB_BUDGET_FACTOR = numEnvOverride('SM_JOB_BUDGET_FACTOR', 1, JOB_BUDGET_FACTOR_DEFAULT);
 const JOB_BUDGET_FLOOR_MS = numEnvOverride('SM_JOB_BUDGET_FLOOR_MINUTES', 60_000, JOB_BUDGET_FLOOR_MS_DEFAULT);
 const JOB_BUDGET_CEILING_MS = numEnvOverride('SM_JOB_BUDGET_CEILING_MINUTES', 60_000, JOB_BUDGET_CEILING_MS_DEFAULT);
+
+/**
+ * isNonProblemRow(row) — a row that is NOT waiting on anyone: completed,
+ * skipped, or a `failed` row a human cancelled (isCancelledRow — `cancelledAt`
+ * or an error starting 'cancelled via admin API'). A cancel is a decision,
+ * not a fault; counting it as a parked problem flagged Self's closed Epic
+ * (cancelled 1012-1016) as stalled every ~8 minutes (2026-11-22).
+ */
+function isNonProblemRow(row) {
+  if (!row) return false;
+  if (row.status === 'completed' || row.status === 'skipped') return true;
+  return row.status === 'failed' && isCancelledRow(row);
+}
 
 /**
  * computeStallSummary(state) → { stalled, total, running, pending, byProject }
@@ -68,25 +84,29 @@ function computeStallSummary(state) {
   let running = 0;
   let pending = 0;
   const byProject = {};
+  // Per-project "holds at least one parked problem row" — tracked beside the
+  // status counts (not as a count key) so the counts stay a pure status tally.
+  const problemByProject = new Map();
   for (const j of jobs) {
     if (j.status === 'running') running += 1;
     if (j.status === 'pending') pending += 1;
     const key = j.cwd || '(unknown)';
     byProject[key] = byProject[key] || {};
     byProject[key][j.status] = (byProject[key][j.status] || 0) + 1;
+    if (j.status !== 'running' && j.status !== 'pending' && !isNonProblemRow(j)) problemByProject.set(key, true);
   }
   for (const inv of invalidJobs) {
     const key = inv.row?.cwd || '(unknown)';
     byProject[key] = byProject[key] || {};
     byProject[key].invalid = (byProject[key].invalid || 0) + 1;
+    problemByProject.set(key, true);
   }
   const total = jobs.length + invalidJobs.length;
-  // A drained queue (every row completed/skipped) is idle, not stalled — a
-  // stall needs at least one parked problem row (failed/needs_review/
-  // quarantined/invalid) that is waiting on someone.
-  const isProblemStatus = (st) => st !== 'completed' && st !== 'skipped';
+  // A drained queue (every row completed/skipped/cancelled) is idle, not
+  // stalled — a stall needs at least one parked problem row (failed/
+  // needs_review/quarantined/invalid) that is waiting on someone.
   const stalled = total > 0 && running === 0 && pending === 0 && !state?.paused
-    && (invalidJobs.length > 0 || jobs.some((j) => isProblemStatus(j.status)));
+    && (invalidJobs.length > 0 || jobs.some((j) => j.status !== 'running' && j.status !== 'pending' && !isNonProblemRow(j)));
   for (const key of Object.keys(byProject)) {
     const counts = byProject[key];
     const projRunning = counts.running || 0;
@@ -94,11 +114,130 @@ function computeStallSummary(state) {
     const projTotal = Object.keys(counts)
       .filter((k) => k !== 'stalled')
       .reduce((sum, k) => sum + counts[k], 0);
-    const projProblem = Object.keys(counts)
-      .some((k) => k !== 'stalled' && k !== 'completed' && k !== 'skipped' && counts[k] > 0);
-    counts.stalled = projTotal > 0 && projRunning === 0 && projPending === 0 && !state?.paused && projProblem;
+    counts.stalled = projTotal > 0 && projRunning === 0 && projPending === 0 && !state?.paused
+      && problemByProject.get(key) === true;
   }
   return { stalled, total, running, pending, byProject };
+}
+
+/** Statuses a dependency can sit in that will never clear on their own. */
+const DEAD_DEP_STATUSES = new Set(['failed', 'cancelled', 'unresolved', 'skipped', 'needs_review', 'quarantined']);
+
+/**
+ * classifyPendingHolds(jobs, { satisfiedSlugsByCwd, holds, now, thresholdMs, loadGated })
+ *   → [{ slug, cwd, ageMs, cause, dep?, depSlug?, depStatus?, rootSlug?, rootStatus?, overlapWith? }]
+ *
+ * Pure, no IO. Every `pending` row that has waited longer than `thresholdMs`
+ * (age from schedulerBatch.enqueueTimestamp) gets ONE cause, checked in order:
+ *   - 'dependency'    — findBlockingDep names a dep (the same resolver
+ *                       dispatch uses). `depSlug`/`depStatus` name the
+ *                       resolved blocking ROW ('cancelled' for a human cancel,
+ *                       'unresolved' with depSlug null when no row/record
+ *                       exists). `rootSlug`/`rootStatus` follow pending
+ *                       blockers down the chain to the row actually stuck.
+ *   - 'files-overlap' — the picker's `holds` carries a files-overlap record.
+ *   - 'load-gate'     — the last tick was load-deferred (`loadGated`).
+ *   - 'concurrency'   — otherwise: eligible, simply waiting for a slot.
+ * `satisfiedSlugsByCwd` is budget.computeDepHistorySatisfaction's map (a
+ * DEP_HISTORY_FAIL_OPEN value fails that project open, as dispatch does).
+ */
+function classifyPendingHolds(jobs, opts = {}) {
+  const {
+    satisfiedSlugsByCwd = new Map(), holds = [], now = Date.now(), thresholdMs = 0, loadGated = false,
+  } = opts;
+  const all = Array.isArray(jobs) ? jobs : [];
+  const byCwd = new Map();
+  for (const j of all) {
+    const cwd = j.cwd || DEFAULT_PROJECT_CWD;
+    if (!byCwd.has(cwd)) byCwd.set(cwd, []);
+    byCwd.get(cwd).push(j);
+  }
+  const holdBySlug = new Map();
+  for (const h of holds ?? []) if (h?.slug && !holdBySlug.has(h.slug)) holdBySlug.set(h.slug, h);
+
+  const out = [];
+  for (const [cwd, projectJobs] of byCwd) {
+    const sat = satisfiedSlugsByCwd instanceof Map ? satisfiedSlugsByCwd.get(cwd) : undefined;
+    const failOpen = sat === DEP_HISTORY_FAIL_OPEN;
+    const resolver = makeDepResolver(projectJobs, failOpen ? new Set() : (sat ?? new Set()), { failOpen });
+    const blockerOf = (job) => {
+      const dep = findBlockingDep(job, projectJobs, null, resolver);
+      if (!dep) return null;
+      const { rows } = resolver.resolve(dep, job);
+      const row = rows.find((r) => !isSatisfiedDepRow(r)) ?? null;
+      if (!row) return { dep, row: null, depSlug: null, depStatus: 'unresolved' };
+      return { dep, row, depSlug: row.slug, depStatus: isCancelledRow(row) ? 'cancelled' : row.status };
+    };
+    for (const job of projectJobs) {
+      if (job.status !== 'pending') continue;
+      const ageMs = now - enqueueTimestamp(job);
+      if (!(ageMs >= thresholdMs)) continue;
+      const base = { slug: job.slug, cwd, ageMs: Number.isFinite(ageMs) ? ageMs : null };
+      const blocker = blockerOf(job);
+      if (blocker) {
+        // Follow pending blockers to the root actually stuck (cycle-safe).
+        let root = blocker;
+        let cycle = false;
+        const seen = new Set([job.slug]);
+        while (root.row && root.row.status === 'pending') {
+          if (seen.has(root.row.slug)) { cycle = true; break; }
+          seen.add(root.row.slug);
+          const next = blockerOf(root.row);
+          if (!next) break;
+          root = next;
+        }
+        out.push({
+          ...base,
+          cause: 'dependency',
+          dep: blocker.dep,
+          depSlug: blocker.depSlug,
+          depStatus: blocker.depStatus,
+          rootSlug: root.depSlug,
+          rootStatus: cycle ? 'cycle' : root.depStatus,
+        });
+        continue;
+      }
+      const hold = holdBySlug.get(job.slug);
+      if (typeof hold?.reason === 'string' && hold.reason.startsWith('files-overlap')) {
+        out.push({ ...base, cause: 'files-overlap', overlapWith: hold.reason.slice('files-overlap:'.length) || null });
+        continue;
+      }
+      out.push({ ...base, cause: loadGated ? 'load-gate' : 'concurrency' });
+    }
+  }
+  return out;
+}
+
+/**
+ * findDependencyStalledProjects(jobs, classified) → { [cwd]: [{ slug, dep, depSlug, depStatus }] }
+ *
+ * Pure. A project is dependency-stalled when it has pending rows, nothing
+ * running, and EVERY pending row is classified 'dependency' whose chain ends
+ * at a row that will never clear on its own (DEAD_DEP_STATUSES — failed,
+ * cancelled, unresolved, ...). computeStallSummary can't see this: it needs
+ * 0 pending, and the Self incident held 16 pending rows behind a cancelled dep.
+ */
+function findDependencyStalledProjects(jobs, classified) {
+  const pendingByCwd = new Map();
+  const runningCwds = new Set();
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    const cwd = j.cwd || DEFAULT_PROJECT_CWD;
+    if (j.status === 'running') runningCwds.add(cwd);
+    if (j.status === 'pending') pendingByCwd.set(cwd, (pendingByCwd.get(cwd) || 0) + 1);
+  }
+  const heldByCwd = new Map();
+  for (const c of classified ?? []) {
+    if (c.cause !== 'dependency' || !DEAD_DEP_STATUSES.has(c.rootStatus)) continue;
+    if (!heldByCwd.has(c.cwd)) heldByCwd.set(c.cwd, []);
+    heldByCwd.get(c.cwd).push({ slug: c.slug, dep: c.dep, depSlug: c.depSlug, depStatus: c.depStatus });
+  }
+  const out = {};
+  for (const [cwd, held] of heldByCwd) {
+    if (runningCwds.has(cwd)) continue;
+    if (held.length !== pendingByCwd.get(cwd)) continue;
+    out[cwd] = held;
+  }
+  return out;
 }
 
 /**
@@ -731,6 +870,10 @@ module.exports = {
   JOB_BUDGET_FLOOR_MS,
   JOB_BUDGET_CEILING_MS,
   computeStallSummary,
+  isCancelledRow,
+  isNonProblemRow,
+  classifyPendingHolds,
+  findDependencyStalledProjects,
   findStaleQuarantinedJobs,
   findOverrunningJobs,
   computeJobBudgetMs,

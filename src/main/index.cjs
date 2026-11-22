@@ -117,6 +117,8 @@ require('./lib/epic/epicAdminRoutes.cjs').registerAdminRoute(adminHttp, {
   isTabBusy: chatRunner.isTabBusy,
   listJobs: () => scheduler.remote.listJobs(),
 });
+// The scheduler tick turns Epic state changes into epic_state_changed audit rows.
+require('./lib/epic/epicStateWatcher.cjs').configureEpicStateWatcher({ isTabBusy: chatRunner.isTabBusy });
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const queueOps = require('./queueOps.cjs');

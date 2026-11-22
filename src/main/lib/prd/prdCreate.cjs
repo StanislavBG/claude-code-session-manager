@@ -28,7 +28,7 @@ const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('../scheduler/fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
-const { resolveDepSlug, findNearMatches, epicOf } = require('./depSlugResolve.cjs');
+const { bareSlug, resolveDepSlug, findNearMatches, epicOf } = require('./depSlugResolve.cjs');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
@@ -279,10 +279,39 @@ function resolveDependsOnToFullSlugs(dependsOn, rows, { epicId = null, siblingSl
   return { dependsOn: Array.from(new Set(out)), siblingDeps, warnings };
 }
 
-async function createPrd(input, remote) {
+/**
+ * Cross-Epic duplicate guard (2026-11-22 Self stall: 1047-sm-contract-client and
+ * 1056-sm-contract-client queued ~2 minutes apart from two Epics). Pure: returns
+ * every listing row whose bare slug equals `newBareSlug` and whose `epicId` is set
+ * and differs from `epicId`. Rows with no epicId (retired flat layout) are ignored;
+ * live and archived rows of any status count.
+ */
+function findCrossEpicDuplicates(newBareSlug, epicId, rows) {
+  if (!newBareSlug || !Array.isArray(rows)) return [];
+  const target = bareSlug(newBareSlug);
+  return rows.filter((r) => r && typeof r.slug === 'string'
+    && r.epicId != null && r.epicId !== ''
+    && r.epicId !== (epicId ?? null)
+    && bareSlug(r.slug) === target);
+}
+
+function crossEpicDuplicateError(slug, dups) {
+  const list = dups.map((r) => `${r.slug} (Epic ${r.epicId}, status ${r.status ?? 'unknown'})`).join('; ');
+  const slugs = dups.map((r) => r.slug);
+  return `A PRD with slug "${slug}" already exists in another Epic: ${list}. ` +
+    `Add ${slugs.length === 1 ? 'it' : 'them'} to dependsOn instead of queueing the same work twice, ` +
+    `or pass allowDuplicateOf: [${slugs.join(', ')}] to create a deliberate duplicate.`;
+}
+
+/**
+ * createPrd(input, remote, opts?) — opts.internalMint: true marks a scheduler-
+ * internal mint (defaultScheduleSettle's validate-sweep validators), which skips
+ * the cross-Epic duplicate guard.
+ */
+async function createPrd(input, remote, opts = {}) {
   const ctl = { key: null };
   try {
-    return await createPrdInner(input, remote, ctl);
+    return await createPrdInner(input, remote, ctl, { internalMint: opts?.internalMint === true });
   } finally {
     if (ctl.key) inFlightCreates.delete(ctl.key);
   }
@@ -596,6 +625,35 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     }
   }
 
+  // One full listing (slug/epicId/status per live + archived PRD) serves both the
+  // cross-Epic duplicate guard below and the dependsOn FK check after NN allocation.
+  // A read failure is skipped-with-a-warning, never a write outage.
+  const needCrossEpicGuard = opts.internalMint !== true;
+  let listing = null;
+  if (needCrossEpicGuard || (input.dependsOn && input.dependsOn.length)) {
+    try {
+      listing = opts.listingCache
+        ? await (opts.listingCache.promise ??= remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER }))
+        : await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
+    } catch (e) {
+      console.warn(`[prdCreate] listPrds failed (cross-Epic duplicate + dependsOn checks skipped): ${e?.message ?? e}`);
+      listing = null;
+    }
+  }
+
+  // Cross-Epic duplicate guard: refused before NN allocation so it burns no number.
+  let duplicateAllowed = null;
+  if (needCrossEpicGuard && listing) {
+    const dups = findCrossEpicDuplicates(slug, input.sourcePromptId ?? null, listing.prds ?? []);
+    if (dups.length) {
+      const allowed = new Set(Array.isArray(input.allowDuplicateOf) ? input.allowDuplicateOf : []);
+      if (!dups.every((r) => allowed.has(r.slug))) {
+        return { ok: false, applied: false, status: 409, error: crossEpicDuplicateError(slug, dups) };
+      }
+      duplicateAllowed = dups.map((r) => ({ slug: r.slug, epicId: r.epicId, status: r.status ?? null }));
+    }
+  }
+
   // Dry run burns no number: a placeholder keeps the filename-shaped guards below meaningful.
   const nn = opts.dryRun ? 9999999 : await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
@@ -676,13 +734,6 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // write in the project.
   let depRows = null;
   if (input.dependsOn && input.dependsOn.length) {
-    let listing;
-    try {
-      listing = await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
-    } catch (e) {
-      console.warn(`[prdCreate] dependsOn validation skipped (listPrds failed): ${e?.message ?? e}`);
-      listing = null;
-    }
     if (listing) {
       depRows = listing.prds ?? [];
       const candidateSlugs = [...depRows.map((p) => p.slug), ...(opts.extraDepSlugs ?? [])];
@@ -764,7 +815,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   if (opts.dryRun) {
     return {
       ok: true, dryRun: true, slug, input, gateCommands, filesList,
-      inheritedPlanId, warnings: [...extraWarnings, ...sizingWarnings(input)],
+      inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input)],
     };
   }
 
@@ -783,6 +834,11 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     sourcePromptId: input.sourcePromptId ?? null,
     sourceTabId: input.sourceTabId ?? null,
   });
+  if (duplicateAllowed) {
+    appendAuditEvent('prd_create_duplicate_allowed', {
+      cwd: input.cwd, slug: filenameSlug, sourcePromptId: input.sourcePromptId ?? null, duplicates: duplicateAllowed,
+    });
+  }
   // Anonymous counter: enum-mapped agentType only (telemetryCounters.cjs).
   telemetryCounters.trackPrdCreate({ agentType: input.agentType || DEFAULT_PRD_AGENT_TYPE });
 
@@ -860,7 +916,11 @@ const PRD_BATCH_MAX = 40;
  * gap, not an inconsistency.
  */
 async function createPrdBatch(inputs, remote, opts = {}) {
-  const fail = (errors) => ({ ok: false, applied: false, errors });
+  // status: 409 when every refusal is a conflict (e.g. cross-Epic duplicate), else 400.
+  const fail = (errors) => ({
+    ok: false, applied: false, errors: errors.map(({ status: _s, ...e }) => e),
+    status: errors.length && errors.every((e) => e.status === 409) ? 409 : 400,
+  });
   if (!Array.isArray(inputs) || inputs.length === 0) return fail([{ index: -1, slug: null, error: 'batch needs at least one entry' }]);
   if (inputs.length > PRD_BATCH_MAX) return fail([{ index: -1, slug: null, error: `batch has ${inputs.length} entries; the maximum is ${PRD_BATCH_MAX}` }]);
 
@@ -883,10 +943,14 @@ async function createPrdBatch(inputs, remote, opts = {}) {
   const batchSlugs = slugs.filter(Boolean);
 
   // Pass 2: per-entry validation through createPrd's own checks.
+  // Every entry is checked (all-or-nothing); one shared listing serves them all.
   const prepared = [];
+  const listingCache = {};
   for (let i = 0; i < entries.length; i++) {
-    const r = await createPrdInner(entries[i], remote, { key: null }, { dryRun: true, extraDepSlugs: batchSlugs });
-    if (!r.ok) { errors.push({ index: i, slug: slugs[i] ?? null, error: r.error }); continue; }
+    const r = await createPrdInner(entries[i], remote, { key: null }, {
+      dryRun: true, extraDepSlugs: batchSlugs, internalMint: opts.internalMint === true, listingCache,
+    });
+    if (!r.ok) { errors.push({ index: i, slug: slugs[i] ?? null, error: r.error, status: r.status }); continue; }
     if (r.alreadyExisted) { errors.push({ index: i, slug: slugs[i], error: `slug "${slugs[i]}" already exists in this Epic as "${r.filename}"` }); continue; }
     prepared.push(r);
   }
@@ -963,6 +1027,12 @@ async function createPrdBatch(inputs, remote, opts = {}) {
       cwd: p.input.cwd, slug: `${results[i].nn}-${p.slug}`, title: p.input.title,
       sourcePromptId: p.input.sourcePromptId ?? null, sourceTabId: p.input.sourceTabId ?? null, batch: true,
     });
+    if (p.duplicateAllowed) {
+      appendAuditEvent('prd_create_duplicate_allowed', {
+        cwd: p.input.cwd, slug: `${results[i].nn}-${p.slug}`, sourcePromptId: p.input.sourcePromptId ?? null,
+        duplicates: p.duplicateAllowed, batch: true,
+      });
+    }
     telemetryCounters.trackPrdCreate({ agentType: p.input.agentType || DEFAULT_PRD_AGENT_TYPE });
   }
 
@@ -1050,7 +1120,7 @@ function registerAdminRoute(adminHttp, remote) {
     const { prds, ...envelope } = input;
     const result = await createPrdBatch(prds, remote, envelope);
     if (!result.ok) {
-      sendJson(res, 400, { ok: false, applied: false, errors: result.errors });
+      sendJson(res, result.status ?? 400, { ok: false, applied: false, errors: result.errors });
       return;
     }
     sendJson(res, 200, { ok: true, applied: true, prds: result.prds });
@@ -1066,6 +1136,7 @@ module.exports = {
   resolveSourcePromptIdFromClaudeSession,
   createPrd,
   createPrdBatch,
+  findCrossEpicDuplicates,
   PRD_BATCH_MAX,
   registerAdminRoute,
 };

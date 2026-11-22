@@ -977,7 +977,7 @@ test('createPrd refuses dependsOn naming nothing, listing near-matches in the me
   expect(entries.filter((f) => f.endsWith('.md') && f.includes('widget-follow-up-3')).length).toBe(0);
 });
 
-test('createPrd treats an empty dependsOn array as a no-op (no listPrds call, no rejection)', async () => {
+test('createPrd treats an empty dependsOn array as a no-op (one listPrds call, shared with the cross-Epic duplicate guard; no rejection)', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
   const listPrdsSpy = vi.fn(remote.listPrds);
@@ -986,10 +986,10 @@ test('createPrd treats an empty dependsOn array as a no-op (no listPrds call, no
   const result = await createPrd(validCreateBody({ slug: 'no-deps-here', dependsOn: [] }), remote);
 
   expect(result.ok).toBe(true);
-  expect(listPrdsSpy).not.toHaveBeenCalled();
+  expect(listPrdsSpy).toHaveBeenCalledTimes(1);
 });
 
-test('createPrd treats an absent dependsOn as a no-op (no listPrds call, no rejection)', async () => {
+test('createPrd treats an absent dependsOn as a no-op (one listPrds call, shared with the cross-Epic duplicate guard; no rejection)', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
   const listPrdsSpy = vi.fn(remote.listPrds);
@@ -998,7 +998,7 @@ test('createPrd treats an absent dependsOn as a no-op (no listPrds call, no reje
   const result = await createPrd(validCreateBody({ slug: 'no-deps-field' }), remote);
 
   expect(result.ok).toBe(true);
-  expect(listPrdsSpy).not.toHaveBeenCalled();
+  expect(listPrdsSpy).toHaveBeenCalledTimes(1);
 });
 
 test('createPrd warns and skips dependsOn validation (never fails the write) when listPrds throws', async () => {

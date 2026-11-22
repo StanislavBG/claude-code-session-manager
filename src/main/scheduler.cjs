@@ -3589,7 +3589,9 @@ function defaultScheduleSettle({ cwd, epicId }) {
   const deps = {
     loadJobs: async () => (await readQueue()).jobs || [],
     loadHistory: () => queueHistory.readHistory({ limit: 500 }),
-    createPrd: (input) => prdCreate.createPrd(input, remote),
+    // Scheduler-internal mint: validate-sweep validator slugs are timestamped and
+    // have collided across Epics before, so the cross-Epic duplicate guard is skipped.
+    createPrd: (input) => prdCreate.createPrd(input, remote, { internalMint: true }),
     resolveBaseSha: async (c, commit) => {
       try {
         return String(await execGitAt(c, ['rev-parse', `${commit}^`])).trim() || null;

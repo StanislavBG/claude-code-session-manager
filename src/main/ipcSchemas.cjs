@@ -450,6 +450,10 @@ const schedulerCreatePrd = z.object({
   // Explicit ordering (PRD 832): slugs that must complete before this PRD
   // becomes eligible. Written to frontmatter as `dependsOn: [a, b]`.
   dependsOn: z.array(DepSlugSchema).max(MAX_DEPENDS_ON).optional(),
+  // Deliberate cross-Epic duplicate: exact NN slugs of other Epics' PRDs that
+  // share this PRD's bare slug. createPrd refuses such a duplicate (409) unless
+  // this lists every one of them (prdCreate.cjs findCrossEpicDuplicates).
+  allowDuplicateOf: z.array(z.string().min(1).max(160).regex(/^\d+-[A-Za-z0-9][\w.-]*$/, 'must be an exact NN-prefixed slug')).max(MAX_DEPENDS_ON).optional(),
   // Explicit wave-authoring decision (scheduler wave-disposition PRD) — only
   // meaningful (and only stamped) when this PRD joins an Epic that already
   // has incomplete PRDs and lands as a wave root (no dependsOn of its own);

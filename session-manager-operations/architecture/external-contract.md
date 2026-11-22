@@ -614,7 +614,32 @@ The matching event:
 { "at": "2026-11-21T18:05:12.010Z", "kind": "needs_you_answered", "app": "planner", "id": "task-4821-date", "answer": "Thursday", "externalRef": "planner:task/4821" }
 ```
 
-## 7. Not part of the contract
+## 7. Tasks — one Claude call for a project
+
+A script can run ONE headless `claude -p` for a project, under the machine-wide slot cap, recorded in that
+project's Task ledger (`session-manager-operations/tasks/`). The owner must first turn on **Scripts may run
+Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tasks/taskAdminRoutes.cjs`
+(route), `taskRun.cjs` (spawn), `taskLedger.cjs` (ledger), `taskSwitch.cjs` (switch).
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /admin/tasks` | `{ cwd, agent, missionId, prompt, timeoutSec?, slotWaitSec?, priority?, caller?, runtime? }` | `200 { ok: true, taskId, status, stdout, envelope, usage, costUsd, cliCostUsd, durationMs, slotWaitMs, exitCode, model, effort, sessionId, quota }` |
+
+- `cwd` is the absolute project root. `agent` names a persona; its `model` and `effort` are used, never its
+  body. `timeoutSec` 1-3600 (default 600), `slotWaitSec` 0-3600 (default 120), `priority` `interactive` or
+  `batch` (default). `caller` is `{ pipeline?, runId?, step?, attempt? }`.
+- `runtime` is `{ outputFormat?: json|text|stream-json, settingSources?, mcpConfig?: string[] (relative to
+  cwd), strictMcpConfig?, allowedTools?: string[], tools?: string[] (an empty array denies all), maxTurns?
+  1-200, systemPrompt? (≤ 100 KiB, replaces the system prompt), skipPermissions?, disableAutoMemory?,
+  sessionId? (uuid), resume? (uuid), persistSession?, cwd? (absolute dir to run in) }`. Unknown keys are
+  rejected. No caller environment variable reaches the child.
+- Errors: `400 invalid_request` (with `details`; also `sessionId` with `resume`, or `resume` with
+  `persistSession: false`), `400 mcp_config_missing`, `403 tasks_disabled` (with `hint`), `404 unknown_agent`,
+  `409 session_busy`, `422 model_unresolved` / `effort_unresolved`, `429 too_many_waiting`, `503 slot_timeout`.
+- `status` in a `200` is the run's outcome: `ok`, `error`, `rate_limited`, `timeout`, `spawn_failed`. Closing
+  the connection before the answer cancels the wait or the run (ledger status `caller_gone`).
+
+## 8. Not part of the contract
 
 Do not build on these. They change without a version bump.
 

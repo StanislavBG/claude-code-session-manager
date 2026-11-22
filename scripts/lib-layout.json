@@ -12,6 +12,7 @@
   "taskSwitch": "tasks",
   "taskRun": "tasks",
   "taskIpc": "tasks",
+  "taskAdminRoutes": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

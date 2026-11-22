@@ -52,6 +52,7 @@ const CONTRACT = deepFreeze({
     { method: 'POST', path: '/admin/needs-you' },
     { method: 'POST', path: '/admin/needs-you/withdraw' },
     { method: 'GET', path: '/admin/needs-you' },
+    { method: 'POST', path: '/admin/tasks' },
   ],
   tools: {
     feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
@@ -104,8 +105,8 @@ function contractFingerprint() {
 
 /** Fingerprint recorded for each contract version. */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered), so its fingerprint was replaced, not bumped.
-  1: '6e8615100a963fd9691ab651948d21e04c8d54a5b07446e959371d17b834cddd',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks), so its fingerprint was replaced, not bumped.
+  1: 'ef00d8f637d0b4e138b7b245e1702acc4834a235dec7976a76c582d25589e0e6',
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

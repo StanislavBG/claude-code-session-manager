@@ -128,6 +128,8 @@ require('./lib/epic/epicAdminRoutes.cjs').registerAdminRoute(adminHttp, {
 });
 // Persona roster + per-project effective model/effort for outside apps (read-only).
 require('./lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(adminHttp);
+// Task primitive: one headless claude -p run for a project, under the slot cap (POST /admin/tasks).
+require('./lib/tasks/taskAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // The scheduler tick turns Epic state changes into epic_state_changed audit rows.
 require('./lib/epic/epicStateWatcher.cjs').configureEpicStateWatcher({ isTabBusy: chatRunner.isTabBusy });
 const supervisor = require('./supervisor.cjs');

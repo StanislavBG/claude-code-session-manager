@@ -1,7 +1,7 @@
 /**
- * useFileAges — the on-disk age of each source an Extensions 3a tab edits, for
- * the tab row's "<path> · <age>" list (design-mocks/extensions-3a/DESIGN_SPEC.md
- * §1 Sources). formatSourceAge turns one age into that row's label.
+ * useFileAges — the on-disk age of each source a Claude config tab edits, for
+ * the file card's "<path> · <age>" list
+ * (session-manager-operations/design-mocks/claude-config/DESIGN_SPEC.md §2 Left column). formatSourceAge turns one age into that row's label.
  *
  * A file reads its mtime the way SourceChip does: config.readText(path, { maxBytes: 1 }).
  * A directory goes through config.exists instead and never through readText: a

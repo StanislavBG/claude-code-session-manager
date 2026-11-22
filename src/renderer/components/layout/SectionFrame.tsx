@@ -14,8 +14,8 @@ import { LearningPanel } from '../LearningPanel'
  * `frame={false}` lets a screen opt out of the editorial header entirely
  * while still inheriting the consistent padding + flex column.
  *
- * `hideTitle` is the Extensions 3a header (design-mocks/extensions-3a/DESIGN_SPEC.md
- * §1): no h1 (the sidebar already names the page) — eyebrow, an 8px spacer, then
+ * `hideTitle` is the Claude config page header
+ * (session-manager-operations/design-mocks/claude-config/DESIGN_SPEC.md §2 Band): no h1 (the sidebar already names the page) — eyebrow, an 8px spacer, then
  * the subtitle, with Learn kept top-right. The header drops its bottom padding,
  * so the page's own first row sets the gap below the subtitle.
  */

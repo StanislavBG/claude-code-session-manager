@@ -23,7 +23,7 @@ const { z } = require('zod');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'epics']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'epics', 'agents']),
   purpose: z.string().min(1),
   summary: z.string().min(10).max(90).regex(/^[^|`\n]+$/),
   whenToUse: z.string().min(1),
@@ -648,6 +648,23 @@ const MCP_TOOL_CATALOG = [
     exampleArgs: { cwd: '/home/bilko/Projects/session-manager', id: 'epic-id-from-epic-list' },
     notes: null,
     requiredOneOf: [['id', 'externalRef']],
+  },
+  {
+    name: 'agent_list',
+    group: 'agents',
+    purpose: "Read-only list of this machine's agent library (personas) via the session-manager app's admin API "
+      + '(GET /admin/agents) — the same roster a script gets, sorted by name: each agent\'s name, title, description, '
+      + 'model, effort, tags, tools, executorOnly, agentCli and path, never the persona body. With `cwd`, each agent '
+      + 'also carries `resolved` { modelId, modelSource, effort, effortSource } for that project, or null when it '
+      + 'cannot be resolved.',
+    summary: 'List the agents you can launch and the model each one runs on.',
+    whenToUse: 'Use to see which agent personas exist and which model and effort each one pins, before naming an '
+      + 'agentType in a PRD or a macro. Pass `cwd` to see what each agent resolves to in that project.',
+    whenNotToUse: 'Do not use this to create, edit or delete an agent — it is read-only. Do not use it to list '
+      + 'saved macros; use macro_list. A `cwd` that is not an absolute path to a project with a '
+      + 'session-manager-operations folder is refused.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
+    notes: 'Returns { ok: true, agents }.',
   },
   {
     name: 'session_manager_help',

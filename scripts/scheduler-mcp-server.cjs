@@ -30,6 +30,8 @@
  *   epic_list({ cwd, state?, limit?, offset? }) -> GET /admin/epics?cwd=<encoded>&...
  *   epic_get({ cwd, id? | externalRef?, receipt? }) -> GET /admin/epic?cwd=<encoded>&(id|externalRef)=...[&receipt=1]
  *
+ *   agent_list({ cwd? }) -> GET /admin/agents[?cwd=<encoded>]
+ *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
  * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin API (loopback +
@@ -408,6 +410,16 @@ const TOOLS = [
         offset: { type: 'number', description: 'Optional: page offset, default 0' },
       },
       required: ['cwd'],
+    },
+  },
+  {
+    name: 'agent_list',
+    description: descriptionFor('agent_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute project path; when given, each agent also carries the model and effort it resolves to there" },
+      },
     },
   },
   {
@@ -996,6 +1008,13 @@ async function handleCallTool(request) {
       if (result?.ok && result.hasMore) {
         result.note = `partial list: returned ${result.epics.length} of ${result.total} Epics (offset ${result.offset}, limit ${result.limit}) — pass a higher offset to see more`;
       }
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'agent_list') {
+      const qs = new URLSearchParams();
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      const result = await adminRequest('GET', `/admin/agents${suffix}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'epic_get') {

@@ -191,6 +191,16 @@ test('epic_list requires only cwd; epic_get requires cwd plus exactly one of id 
   }
 });
 
+test('agent_list takes one optional cwd, sits in the agents group and its description comes from the catalog', () => {
+  const tool = TOOLS.find((t) => t.name === 'agent_list');
+  expect(tool).toBeDefined();
+  expect(Object.keys(tool.inputSchema.properties)).toEqual(['cwd']);
+  expect(tool.inputSchema.required).toBeUndefined();
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'agent_list');
+  expect(entry.group).toBe('agents');
+  expect(tool.description).toBe(composeDescription(entry));
+});
+
 test('epic_get with both id and externalRef is refused before any admin call', async () => {
   const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
   const saved = process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
@@ -257,8 +267,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 32 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(32);
+test('catalog has 33 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(33);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });

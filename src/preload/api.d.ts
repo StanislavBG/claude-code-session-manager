@@ -283,7 +283,7 @@ export type McpCheckResult =
  *  HomeAgentTools section. */
 export interface McpToolCatalogEntry {
   name: string;
-  group: 'scheduler' | 'chat' | 'feedback' | 'help' | 'project-home' | 'macros' | 'customer-feedback' | 'epics';
+  group: 'scheduler' | 'chat' | 'feedback' | 'help' | 'project-home' | 'macros' | 'customer-feedback' | 'epics' | 'agents';
   purpose: string;
   /** Plain one-line summary (10-90 chars) — the Dashboard row text. */
   summary: string;

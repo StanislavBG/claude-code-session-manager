@@ -76,6 +76,11 @@ const OWNERS = Object.freeze({
   // tasks/bodies/<taskId>.json prompt/output bodies. lib/tasks/taskLedger.cjs is
   // the ONLY writer; routes, IPC and history read through it. See tasks/README.md.
   'tasks': 'tasks',
+  // Per-run plan records (validator + ship/deploy records), laid out as
+  // plan-records/<epic-id>/<slug>.md. Machine-local runtime state: the
+  // scheduler copies them out of job worktrees and prunes them after the Epic
+  // completes. See plan-records/README.md.
+  'plan-records': 'scheduler',
 });
 
 /**
@@ -87,6 +92,7 @@ const OWNERS = Object.freeze({
  */
 const RUNTIME_NAMESPACES = Object.freeze([
   'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
+  'plan-records',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

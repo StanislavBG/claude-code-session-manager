@@ -19,14 +19,16 @@ describe('ensureRuntimeIgnores', () => {
     };
     put('scheduler/state/x.jsonl');
     put('ui-prefs/prefs.json');
+    put('plan-records/epic-1/3579-x.md');
     put('reviews/validation/r.md');
     const written = ensureRuntimeIgnores(root);
-    expect(written.length).toBe(2);
+    expect(written.length).toBe(3);
     expect(fs.existsSync(path.join(ops, 'logs'))).toBe(false);
     const st = git(root, 'status', '--porcelain', '-uall');
-    expect(st).not.toMatch(/scheduler|ui-prefs/);
+    expect(st).not.toMatch(/scheduler|ui-prefs|plan-records/);
     expect(st).toMatch(/reviews\/validation\/r\.md/);
     git(root, 'check-ignore', '-q', 'session-manager-operations/scheduler/state/x.jsonl');
+    git(root, 'check-ignore', '-q', 'session-manager-operations/plan-records/epic-1/3579-x.md');
     expect(() => git(root, 'check-ignore', '-q', 'session-manager-operations/reviews/validation/r.md')).toThrow();
     expect(ensureRuntimeIgnores(root)).toEqual([]);
   });

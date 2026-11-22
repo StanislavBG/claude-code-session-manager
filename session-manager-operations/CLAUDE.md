@@ -5,12 +5,11 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-14 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+15 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
 - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` →
   epics · `scheduler` → scheduler · `project-brief` → project-home ·
-  `logs` → logs · `memory-clusters` →
-  memory-clusters · `ui-prefs` → ui-prefs · `tasks` → tasks · `project-pages` → project-home
+  `logs` → logs · `memory-clusters` → memory-clusters · `ui-prefs` → ui-prefs · `tasks` → tasks · `plan-records` → scheduler · `project-pages` → project-home
   (admin render route only; a Builder Epic's own authoring stays ungoverned
   — see [`project-pages/README.md`](project-pages/README.md)).
 - **Deliberately NOT owned** (skill-authored docs/artifacts, no write
@@ -35,10 +34,11 @@ Epic lifecycle is specified exactly once, at
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the free Field Manual | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
 | `memory-clusters` | OWNERS → memory-clusters | per-project memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
+| `plan-records` | OWNERS → scheduler | validator + ship/deploy records, `<epic-id>/<slug>.md` | `planRecordsDays` after Epic completes (default 14d) | [link](plan-records/README.md) |
 | `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep | [link](project-brief/README.md) |
 | `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |
 | `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep | [link](prompt-sessions/README.md) |
-| `reviews` | not owned | frozen audit-trail review docs, incl. `validation/<epic-id>/` plan records committed by validator jobs | keep | [link](reviews/README.md) |
+| `reviews` | not owned | frozen audit-trail review docs; `validation/<epic-id>/` is legacy plan-record history; new records: `plan-records/` | keep | [link](reviews/README.md) |
 | `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep | [link](scheduler/README.md) |
 | `tasks` | OWNERS → tasks | runtime Task ledger (headless `claude -p` runs) | `tasksDays`, opsRetentionSettings (default 30d) | [link](tasks/README.md) |
 | `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep | [link](ui-prefs/README.md) |

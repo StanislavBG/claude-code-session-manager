@@ -96,6 +96,31 @@ test("tasks/ is owned by 'tasks' (taskLedger.cjs) and is a runtime namespace", (
   assert.equal(checkOpsWrite(`${P}/tasks/.gitignore`, 'runtime-ignore').ok, true);
 });
 
+test("plan-records/ is owned by 'scheduler' and is a runtime namespace", () => {
+  const { RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+  assert.equal(OWNERS['plan-records'], 'scheduler');
+  assert.ok(RUNTIME_NAMESPACES.includes('plan-records'));
+  assert.equal(checkOpsWrite(`${P}/plan-records/epic-1/3579-x.md`, 'scheduler').ok, true);
+  assert.equal(checkOpsWrite(`${P}/plan-records/epic-1/3579-x.md`, 'epics').ok, false);
+  assert.equal(checkOpsWrite(`${P}/plan-records/.gitignore`, 'runtime-ignore').ok, true);
+});
+
+// The root .gitignore mirrors RUNTIME_NAMESPACES: each namespace's contents are
+// ignored with its README kept tracked (feedback/ is retired: whole dir ignored).
+test('root .gitignore mirrors every runtime namespace', () => {
+  const { RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+  const lines = fs.readFileSync(path.join(__dirname, '../../../../.gitignore'), 'utf8')
+    .split('\n').map((l) => l.trim());
+  for (const ns of RUNTIME_NAMESPACES) {
+    if (ns === 'feedback') {
+      assert.ok(lines.includes('session-manager-operations/feedback/'), ns);
+      continue;
+    }
+    assert.ok(lines.includes(`session-manager-operations/${ns}/*`), `${ns}/* missing`);
+    assert.ok(lines.includes(`!session-manager-operations/${ns}/README.md`), `${ns} README unignore missing`);
+  }
+});
+
 test('every declared owner is a non-empty string (table sanity)', () => {
   for (const [ns, owner] of Object.entries(OWNERS)) {
     assert.equal(typeof owner, 'string', `${ns} owner must be a string`);

@@ -58,6 +58,8 @@ session-manager-operations/memory-clusters/*
 !session-manager-operations/memory-clusters/README.md
 session-manager-operations/tasks/*
 !session-manager-operations/tasks/README.md
+session-manager-operations/plan-records/*
+!session-manager-operations/plan-records/README.md
 
 # electron-builder staging + installer output (scripts/package/stage.cjs)
 release/

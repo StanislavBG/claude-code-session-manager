@@ -2939,3 +2939,72 @@ test('[runtime-state] modifying a tracked, un-ignored scheduler/README.md integr
   expect(outcome.integrated).toBe(true);
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
+
+// ── Namespace READMEs are the tracked layout contract: a branch that un-ignores
+// and adds <ns>/README.md must integrate; other runtime files stay refused.
+const NS_README = 'session-manager-operations/logs/README.md';
+const UNIGNORE_LINES = ['session-manager-operations/logs/*', '!session-manager-operations/logs/README.md'];
+
+async function readmeBranch({ slug, baseBytes = 'layout\n', extraForceAdd = null }) {
+  commitGitignore(['session-manager-operations/logs/']);
+  fs.mkdirSync(path.join(repoCwd, path.dirname(NS_README)), { recursive: true });
+  fs.writeFileSync(path.join(repoCwd, NS_README), baseBytes, 'utf8');
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  fs.writeFileSync(path.join(worktree.dir, '.gitignore'), UNIGNORE_LINES.join('\n') + '\n', 'utf8');
+  fs.mkdirSync(path.join(worktree.dir, path.dirname(NS_README)), { recursive: true });
+  fs.writeFileSync(path.join(worktree.dir, NS_README), 'layout\n', 'utf8');
+  git(['add', '.gitignore', NS_README], worktree.dir);
+  if (extraForceAdd) {
+    fs.writeFileSync(path.join(worktree.dir, extraForceAdd), 'x\n', 'utf8');
+    git(['add', '-f', extraForceAdd], worktree.dir);
+  }
+  git(['commit', '-q', '-m', 'track logs readme'], worktree.dir);
+  return worktree;
+}
+
+test('[runtime-state] (a) branch un-ignoring + adding a byte-identical namespace README integrates', async () => {
+  const slug = 'rs-ns-readme';
+  const worktree = await readmeBranch({ slug });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.reason).toBeUndefined();
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(git(['ls-files', NS_README], repoCwd).trim()).toBe(NS_README);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[runtime-state] (b) a force-added non-README runtime file is still refused', async () => {
+  const slug = 'rs-ns-readme-x';
+  const worktree = await readmeBranch({ slug, extraForceAdd: 'session-manager-operations/logs/x.json' });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/app runtime state/);
+  expect(outcome.runtimeStatePaths).toEqual(['session-manager-operations/logs/x.json']);
+  expect(git(['branch', '--list', worktree.branch], repoCwd).trim()).not.toBe('');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[runtime-state] (c) a differing untracked base README is refused by the ignored-live-path guard', async () => {
+  const slug = 'rs-ns-readme-diff';
+  const worktree = await readmeBranch({ slug, baseBytes: 'different live bytes\n' });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).not.toMatch(/app runtime state/);
+  expect(fs.readFileSync(path.join(repoCwd, NS_README), 'utf8')).toBe('different live bytes\n');
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[runtime-state] (d) ref-landing a README-only branch is not refused as runtime state', async () => {
+  const slug = 'rs-ns-readme-ref';
+  const worktree = await readmeBranch({ slug });
+  const baseBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-q', '-b', 'human/side-readme'], repoCwd);
+  const outcome = await gitWorktree.integrateJobBranch({
+    cwd: repoCwd, branch: worktree.branch, slug, baseBranch, allowRefLanding: true,
+  });
+  expect(outcome.runtimeStatePaths).toBeUndefined();
+  expect(outcome.reason || '').not.toMatch(/app runtime state/);
+  git(['checkout', '-q', baseBranch], repoCwd);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});

@@ -50,9 +50,12 @@ session-manager-operations/scheduler/*
 session-manager-operations/prompt-sessions/*
 !session-manager-operations/prompt-sessions/README.md
 session-manager-operations/feedback/
-session-manager-operations/logs/
-session-manager-operations/ui-prefs/
-session-manager-operations/memory-clusters/
+session-manager-operations/logs/*
+!session-manager-operations/logs/README.md
+session-manager-operations/ui-prefs/*
+!session-manager-operations/ui-prefs/README.md
+session-manager-operations/memory-clusters/*
+!session-manager-operations/memory-clusters/README.md
 session-manager-operations/tasks/*
 !session-manager-operations/tasks/README.md
 

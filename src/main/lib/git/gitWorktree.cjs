@@ -1086,6 +1086,20 @@ async function pathsIdenticalToBranch({ cwd, branch, paths }) {
 }
 
 /**
+ * Drops namespace READMEs whose on-disk bytes equal the branch blob — deleting
+ * and re-checking-out identical bytes loses nothing (handled by the
+ * identical-duplicates retry). Anything else is kept (fail closed).
+ */
+async function dropIdenticalNamespaceReadmes({ cwd, branch, paths }) {
+  const keep = [];
+  for (const p of paths) {
+    if (isNamespaceReadme(p) && (await pathsIdenticalToBranch({ cwd, branch, paths: [p] }))) continue;
+    keep.push(p);
+  }
+  return keep;
+}
+
+/**
  * Returns the entries of `paths` whose bytes in `dir` still equal the bytes in
  * `cwd` (carried-but-untouched), plus entries absent from both (a carried
  * deletion). Any read error, or a path resolving outside cwd/dir, leaves that
@@ -1797,7 +1811,7 @@ async function integrateBranchInCheckout({ cwd, branch, carriedPaths, forkSha, m
           return { ok: false, reason: `linear landing failed: ${ffText}`, failureKind: 'other', baseHeadSha: headSha };
         }
         const allPaths = [...blocking.tracked, ...blocking.untracked];
-        const ignoredBlock = await filterIgnoredPaths({ cwd, paths: allPaths });
+        const ignoredBlock = await dropIdenticalNamespaceReadmes({ cwd, branch: r.tipSha, paths: await filterIgnoredPaths({ cwd, paths: allPaths }) });
         if (ignoredBlock.length) {
           return {
             ok: false,
@@ -1852,7 +1866,7 @@ async function integrateBranchInCheckout({ cwd, branch, carriedPaths, forkSha, m
     const blocking = parseBlockingMergePaths(stderrText);
     if (blocking) {
       const allPaths = [...blocking.tracked, ...blocking.untracked];
-      const ignoredBlock = await filterIgnoredPaths({ cwd, paths: allPaths });
+      const ignoredBlock = await dropIdenticalNamespaceReadmes({ cwd, branch, paths: await filterIgnoredPaths({ cwd, paths: allPaths }) });
       if (ignoredBlock.length) {
         return {
           ok: false,
@@ -1947,6 +1961,16 @@ async function filterIgnoredPaths({ cwd, paths }) {
 }
 
 /**
+ * True exactly for `${OPS_ROOT_DIR}/<ns>/README.md` with ns in RUNTIME_NAMESPACES
+ * (top level only) — the tracked storage-layout contract of a runtime folder,
+ * never runtime state. Mirrors lib/git/runtimeStateUntrack.cjs.
+ * @param {string} p repo-relative posix path
+ */
+function isNamespaceReadme(p) {
+  return RUNTIME_NAMESPACES.some((ns) => p === `${OPS_ROOT_DIR}/${ns}/README.md`);
+}
+
+/**
  * Paths the branch changed since the merge base that are git-ignored AND
  * present on disk in `cwd` — the live files a merge would overwrite (git's
  * default --overwrite-ignore) or a later `merge --abort` would delete.
@@ -1964,7 +1988,18 @@ async function findIgnoredLivePaths({ cwd, branch, mergeBase }) {
   const ignored = await filterIgnoredPaths({ cwd, paths: changed });
   const live = [];
   for (const p of ignored) {
-    try { await fsp.lstat(path.join(cwd, p)); live.push(p); } catch { /* absent — safe */ }
+    try { await fsp.lstat(path.join(cwd, p)); } catch { continue; /* absent — safe */ }
+    if (isNamespaceReadme(p)) {
+      // Overwriting with identical bytes loses nothing; any doubt keeps it (fail closed).
+      try {
+        const [onDisk, inBranch] = await Promise.all([
+          execGit(['hash-object', '--', path.join(cwd, p)], { cwd, timeout: 15_000 }),
+          execGit(['rev-parse', `${branch}:${p}`], { cwd, timeout: 15_000 }),
+        ]);
+        if (onDisk.trim() && onDisk.trim() === inBranch.trim()) continue;
+      } catch { /* keep */ }
+    }
+    live.push(p);
   }
   return live;
 }
@@ -1974,7 +2009,8 @@ async function findIgnoredLivePaths({ cwd, branch, mergeBase }) {
  * (`session-manager-operations/<ns>/`, ns from RUNTIME_NAMESPACES — state
  * that must never be committed) AND that are git-ignored in `cwd`, i.e. a
  * force-added runtime file. Modified/deleted paths and deliberately
- * un-ignored ones are never returned. A diff error returns [].
+ * un-ignored ones are never returned; neither is a top-level namespace
+ * README.md — the tracked layout contract (see runtimeStateUntrack.cjs). A diff error returns [].
  * @param {{cwd: string, branch: string, mergeBase: string}} a
  * @returns {Promise<string[]>}
  */
@@ -1986,7 +2022,7 @@ async function findRuntimeStateAdds({ cwd, branch, mergeBase }) {
       ['diff', '--name-only', '-z', '--diff-filter=A', `${mergeBase || 'HEAD'}..${branch}`, '--', ...pathspecs],
       { cwd, timeout: 15_000 },
     );
-    added = out.split('\0').filter(Boolean);
+    added = out.split('\0').filter(Boolean).filter((p) => !isNamespaceReadme(p));
   } catch {
     return [];
   }

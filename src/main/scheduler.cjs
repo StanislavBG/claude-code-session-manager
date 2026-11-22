@@ -417,7 +417,7 @@ ${commitStepNum}. COMMIT — stage only the exact paths you created or changed f
    PRD's # Files section names that exact path. If git add refuses a path as
    ignored, leave it out of the commit and name it in your final report.
    Why: an ignored path is usually live runtime state, not work product.
-   Never commit any file under these folders, even when the PRD names it:
+   Never commit any file under these folders (except each folder's top-level README.md, the layout contract), even when the PRD names it:
      ${FINISH_RUNTIME_FOLDERS}
    Why: those folders hold the app's live state. A commit of them breaks the
    running scheduler for every checkout that pulls it.${isArtifactOnly ? FINISH_ARTIFACT_ONLY_COMMIT_LINE : ''}

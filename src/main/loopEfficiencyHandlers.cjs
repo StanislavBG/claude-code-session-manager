@@ -157,4 +157,4 @@ function registerLoopEfficiencyHandlers() {
   });
 }
 
-module.exports = { gatherLoopEfficiency, registerLoopEfficiencyHandlers, defaultUsage };
+module.exports = { gatherLoopEfficiency, registerLoopEfficiencyHandlers, defaultUsage, runIdToMs };

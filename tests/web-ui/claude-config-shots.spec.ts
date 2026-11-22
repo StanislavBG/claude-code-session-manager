@@ -288,6 +288,33 @@ async function narrowTabStrip(page: Page) {
   expect(tab!.y + tab!.height + 2).toBeLessThanOrEqual(box.bottom)
 }
 
+/**
+ * An @-import is editable from the page: select the first import of ~/.claude/CLAUDE.md (the
+ * stub's canWrite says ok) and check the document pane carries no read-only badge and no
+ * read-only note, then shoot it. Leaves the Agents tab open again for the checks that follow.
+ */
+async function homeImportShot(page: Page, written: string[]) {
+  await page.getByTestId('config-band-tab-claude-md').click()
+  const panel = page.getByTestId('home-claude-config-panel-claude-md')
+  const first = panel.getByTestId('referenced-file-row').first()
+  await expect(first).toContainText('git.md')
+  await expect(first).toContainText('Imported · editable here')
+  await first.click()
+  await expect(first).toHaveAttribute('aria-checked', 'true')
+  await expect(panel.getByTestId('config-detail-header').first()).toContainText('IMPORTED BY CLAUDE.md')
+  const doc = panel.getByTestId('document-editor-pane')
+  await expect(doc).toHaveCount(1)
+  await expect(doc.getByText('read-only', { exact: true })).toHaveCount(0)
+  await expect(panel.locator('[data-testid$="-readonly-note"]')).toHaveCount(0)
+  await expect(panel.getByTestId('editor-save')).toHaveCount(1)
+  await page.waitForTimeout(400) // fonts + editor settle
+  const file = path.join(OUT, 'home-claude-md-import.png')
+  await page.screenshot({ path: file })
+  written.push(file)
+  await page.getByTestId('config-band-tab-agents').click()
+  await expect(page.getByTestId('home-claude-config-panel-agents')).toBeVisible()
+}
+
 test('Claude config screenshots: every Home and Project tab at 1592x1040', async () => {
   if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
     execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
@@ -361,6 +388,7 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         written.push(file)
       }
       if (face === 'home') {
+        await homeImportShot(page, written)
         await shortBodyFills(page)
         await shortPane(page)
         await narrowTabStrip(page)
@@ -373,7 +401,7 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
   expect(pageErrors).toEqual([])
   expect(unmodelled).toEqual([])
   expect(written.map((f) => path.basename(f, '.png')).sort()).toEqual([
-    'home-agents', 'home-claude-md', 'home-mcp', 'home-plugins', 'home-settings', 'home-skills',
+    'home-agents', 'home-claude-md', 'home-claude-md-import', 'home-mcp', 'home-plugins', 'home-settings', 'home-skills',
     'project-claude-md', 'project-mcp', 'project-memory', 'project-settings', 'project-skills',
   ])
   for (const f of written) {

@@ -99,4 +99,23 @@ describe('config save conflict guard', () => {
     expect((await useConfig.getState().saveText(T, { force: true })).ok).toBe(true)
     expect(disk.get(T)!.raw).toBe('two')
   })
+
+  it('saveText forwards importedBy to writeText and still checks the mtime', async () => {
+    const R = '/x/CLAUDE.md'
+    const I = '/y/shared/core.md'
+    disk.set(I, { raw: 'one', mtimeMs: ++clock })
+    await useConfig.getState().loadText(I)
+    useConfig.getState().setDraft(I, 'two')
+    expect((await useConfig.getState().saveText(I, { importedBy: R })).ok).toBe(true)
+    expect(writeText).toHaveBeenLastCalledWith(I, 'two', undefined, { importedBy: R })
+
+    useConfig.getState().setDraft(I, 'three')
+    expect((await useConfig.getState().saveText(I)).ok).toBe(true)
+    expect(writeText).toHaveBeenLastCalledWith(I, 'three', undefined, undefined)
+
+    useConfig.getState().setDraft(I, 'four')
+    disk.set(I, { raw: 'ext', mtimeMs: ++clock })
+    expect(await useConfig.getState().saveText(I, { importedBy: R })).toEqual({ ok: false, error: 'conflict' })
+    expect(disk.get(I)!.raw).toBe('ext')
+  })
 })

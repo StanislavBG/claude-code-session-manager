@@ -59,7 +59,7 @@ function installApi() {
       listDir: vi.fn().mockResolvedValue({ ok: true, error: null, entries: [] }),
       exists: vi.fn().mockResolvedValue(true),
       parseImports: vi.fn().mockResolvedValue({ ok: true, imports: [] }),
-      canWrite: vi.fn().mockResolvedValue(true),
+      canWrite: vi.fn().mockResolvedValue({ ok: true }),
       watch: vi.fn(),
       unwatch: vi.fn(),
       onChanged: vi.fn(() => () => {}),
@@ -344,7 +344,7 @@ describe('ProjectClaudeConfig', () => {
 
     await act(async () => { q('doc-editor-type')!.click() })
     await clickSave()
-    expect(api.config.writeText).toHaveBeenCalledWith(MD, '# alpha rules\nedited\n')
+    expect(api.config.writeText).toHaveBeenCalledWith(MD, '# alpha rules\nedited\n', undefined, undefined)
     expect(disk[MD].text).toBe('# alpha rules\nedited\n')
     expect(useConfig.getState().files[MD]?.dirty).toBe(false)
 
@@ -354,6 +354,8 @@ describe('ProjectClaudeConfig', () => {
     await act(async () => { q('doc-editor-type')!.click() })
     await clickSave()
     expect(disk[LOCAL_MD].text).toBe('# my local notes\nedited\n')
+    expect(api.config.canWrite).toHaveBeenCalledWith(LOCAL_MD)
+    expect(api.config.writeText).toHaveBeenCalledWith(LOCAL_MD, '# my local notes\nedited\n', undefined, undefined)
   })
 
   it('CLAUDE.md tab keeps the conflict check: a newer disk copy is not overwritten', async () => {

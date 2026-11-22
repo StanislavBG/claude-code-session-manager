@@ -240,7 +240,7 @@ const api = {
     exists: async (p: string) => files.has(norm(p)) || dirs.has(norm(p)),
     writeText,
     writeJson: async (p: string, data: unknown) => writeText(p, JSON.stringify(data, null, 2)),
-    canWrite: async () => true,
+    canWrite: async () => ({ ok: true }),
     parseImports: async (p: string) => parseImports(p),
     watch: () => {},
     unwatch: () => {},

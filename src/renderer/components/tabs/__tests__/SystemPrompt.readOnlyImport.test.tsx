@@ -38,7 +38,7 @@ function installApi() {
       writeJson: vi.fn(),
       listDir: vi.fn().mockResolvedValue({ ok: true, error: null, entries: [] }),
       exists: vi.fn().mockResolvedValue(true),
-      canWrite: vi.fn(async (p: string) => p !== OUTSIDE),
+      canWrite: vi.fn(async (p: string) => (p === OUTSIDE ? { ok: false, reason: 'outside-boundary' } : { ok: true })),
       parseImports: vi.fn().mockResolvedValue({ ok: true, imports: IMPORTS, error: null }),
       watch: vi.fn(),
       unwatch: vi.fn(),
@@ -72,12 +72,16 @@ afterEach(() => {
 })
 
 describe('SystemPrompt imports outside the write boundary', () => {
-  it('opens an unwritable import read-only with a note naming its path', async () => {
+  it('opens an unwritable import read-only with a note saying why', async () => {
     const el = await mount()
     await click(rows(el)[1])
     expect(pane(el).getAttribute('data-path')).toBe(OUTSIDE)
     expect(pane(el).getAttribute('data-readonly')).toBe('true')
-    expect(el.querySelector('[data-testid="system-prompt-readonly-note"]')?.textContent).toContain(OUTSIDE)
+    expect(el.querySelector('[data-testid="system-prompt-readonly-note"]')?.textContent).toBe(
+      'Read-only: this file is outside your home folder and the projects open in Session Manager.',
+    )
+    expect(rows(el)[1].textContent).toContain('Imported · read-only')
+    expect(rows(el)[0].textContent).toContain('Imported · editable here')
     expect(el.textContent).not.toContain('Save')
   })
 
@@ -87,5 +91,6 @@ describe('SystemPrompt imports outside the write boundary', () => {
     expect(pane(el).getAttribute('data-path')).toBe(INSIDE)
     expect(pane(el).getAttribute('data-readonly')).toBe('false')
     expect(el.querySelector('[data-testid="system-prompt-readonly-note"]')).toBeNull()
+    expect((window as any).api.config.canWrite).toHaveBeenCalledWith(INSIDE, { importedBy: ROOT })
   })
 })

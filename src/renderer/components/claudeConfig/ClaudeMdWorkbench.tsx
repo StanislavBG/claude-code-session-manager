@@ -28,7 +28,7 @@ import { basename } from '../../lib/basename'
 import { dirname, segments } from '../../lib/pathSep'
 import { Z } from '../../lib/zLayers'
 import { estimateTokens } from '../../lib/estimateTokens'
-import type { ImportRef } from '../../../preload/api'
+import type { ConfigWriteAccess, ImportRef } from '../../../preload/api'
 
 const EYEBROW = 'text-[10.5px] font-semibold uppercase tracking-[0.1em] text-fg-faint'
 const CONFLICT_HINT = 'changed on disk since it was loaded. Revert reloads it'
@@ -86,6 +86,23 @@ export interface ClaudeMdWorkbenchProps {
  * The root file's flattened `@`-import chain, re-parsed when its saved disk text changes.
  * `ready` turns true once a parse of `activePath` has settled (so an empty list is final).
  */
+/** One sentence per config:can-write refusal reason. */
+function readOnlyReason(reason: ConfigWriteAccess['reason'], rootName: string): string {
+  switch (reason) {
+    case 'sensitive':
+      return 'Read-only: Session Manager never writes credential, SSH or autostart files.'
+    case 'ops-root':
+      return 'Read-only: this file is inside session-manager-operations/, which only its owning writer may change.'
+    case 'outside-boundary':
+      return 'Read-only: this file is outside your home folder and the projects open in Session Manager.'
+    case 'not-imported':
+      return `Read-only: this file is no longer imported by ${rootName}.`
+    case 'permission':
+    default:
+      return 'Read-only: your system does not allow writing this file.'
+  }
+}
+
 function useImports(activePath: string): { imports: ImportRef[]; ready: boolean } {
   const [found, setFound] = useState<{ path: string; imports: ImportRef[] } | null>(null)
   const generationRef = useRef(0)
@@ -303,18 +320,28 @@ export function ClaudeMdWorkbench({
   const [typingIn, setTypingIn] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  // Imports outside the write boundary are viewable but config:write-text would refuse them.
-  const [unwritable, setUnwritable] = useState<Record<string, boolean>>({})
+  // Main's write decision for the active root and each resolvable import (keyed by path), asked
+  // with the same `importedBy` the save will send. Unknown (not asked yet / probe failed) renders
+  // editable; main still refuses a bad write.
+  const [access, setAccess] = useState<Record<string, ConfigWriteAccess>>({})
   useEffect(() => {
-    const p = selectedRef?.path
-    if (!p || !selectedRef.ok || !selectedRef.exists) return
     let live = true
-    Promise.resolve()
-      .then(() => window.api.config.canWrite(p))
-      .then((ok) => { if (live) setUnwritable((m) => ({ ...m, [p]: ok === false })) })
-      .catch(() => {})
+    const probes: Array<[string, Promise<ConfigWriteAccess>]> = [
+      [activeRoot, Promise.resolve().then(() => window.api.config.canWrite(activeRoot))],
+      ...imports
+        .filter((ref) => ref.ok && ref.exists)
+        .map((ref): [string, Promise<ConfigWriteAccess>] => [
+          ref.path,
+          Promise.resolve().then(() => window.api.config.canWrite(ref.path, { importedBy: activeRoot })),
+        ]),
+    ]
+    for (const [p, probe] of probes) {
+      probe
+        .then((res) => { if (live && res && typeof res.ok === 'boolean') setAccess((m) => ({ ...m, [p]: res })) })
+        .catch(() => {})
+    }
     return () => { live = false }
-  }, [selectedRef])
+  }, [imports, activeRoot])
 
   useEffect(() => {
     // Re-read on every open so edits made elsewhere show up; keepDirty keeps an unsaved draft.
@@ -380,9 +407,9 @@ export function ClaudeMdWorkbench({
   const save = useCallback(async () => {
     setSaveError(null)
     // No `force`: saveText refuses with 'conflict' when the disk copy is newer than the draft's base.
-    const res = await saveText(docPath)
+    const res = await saveText(docPath, selectedRef ? { importedBy: activeRoot } : undefined)
     if (!res.ok) setSaveError(res.error === 'conflict' ? CONFLICT_HINT : res.error ?? 'save failed')
-  }, [docPath, saveText])
+  }, [docPath, selectedRef, activeRoot, saveText])
 
   // Revert re-reads the file, so after a conflict the draft is rebased on what is on disk now.
   const revert = useCallback(() => {
@@ -401,9 +428,10 @@ export function ClaudeMdWorkbench({
 
   const doc = files[docPath]
   const docText = doc?.draftRaw ?? ''
-  const outsideBoundary = !!selectedRef && unwritable[selectedRef.path] === true
   const importMissing = !!selectedRef && (!selectedRef.ok || !selectedRef.exists)
-  const readOnly = importMissing || outsideBoundary
+  const docAccess = importMissing ? undefined : access[docPath]
+  const refused = docAccess?.ok === false
+  const readOnly = importMissing || refused
   const rootMissing = !selectedRef && !rootFile.exists
   const showEmpty = rootMissing && docText === '' && typingIn !== activeRoot
 
@@ -477,7 +505,7 @@ export function ClaudeMdWorkbench({
                       `${countLines(textOf(ref.path)?.text ?? '')} lines`
                     )
                   }
-                  meta="Imported · editable here"
+                  meta={missing || access[ref.path]?.ok === false ? 'Imported · read-only' : 'Imported · editable here'}
                   title={ref.path}
                   selected={selectedRef?.path === ref.path}
                   testId="referenced-file-row"
@@ -536,9 +564,9 @@ export function ClaudeMdWorkbench({
             This import does not resolve to a readable file — the CLI will skip it.
           </div>
         )}
-        {outsideBoundary && selectedRef && (
+        {refused && (
           <div data-testid={`${testIdPrefix}-readonly-note`} className="shrink-0 text-[11px] text-amber-400/90">
-            Read-only: <span className="font-mono">{selectedRef.path}</span> is outside the folders Session Manager may write to.
+            {readOnlyReason(docAccess?.reason, basename(activeRoot))}
           </div>
         )}
         <div className="flex-1 min-h-[320px] flex flex-col rounded-[14px] border border-line bg-bg-hi overflow-hidden">

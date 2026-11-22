@@ -94,7 +94,7 @@ describe('EditorView config-file routing', () => {
     expect(useConfig.getState().files['/r/.claude/settings.json'].draftRaw).toBe('edited')
     await act(async () => { (el.querySelector('[data-testid=save]') as HTMLElement).click() })
     await flush()
-    expect(api.config.writeText).toHaveBeenCalledWith('/r/.claude/settings.json', 'edited')
+    expect(api.config.writeText).toHaveBeenCalledWith('/r/.claude/settings.json', 'edited', undefined, undefined)
     expect(api.files.write).not.toHaveBeenCalled()
   })
 

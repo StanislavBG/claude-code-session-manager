@@ -123,6 +123,12 @@ export interface ImportRef {
  *  src/main/lib/opsOwnership.cjs — one writer per namespace; everyone reads. */
 export type OpsWriter = 'epics' | 'scheduler' | 'project-home' | 'ui-prefs';
 
+/** Result of config:can-write. */
+export interface ConfigWriteAccess {
+  ok: boolean;
+  reason?: 'outside-boundary' | 'sensitive' | 'ops-root' | 'not-imported' | 'permission';
+}
+
 export interface WriteResult {
   ok: boolean;
   mtimeMs: number;
@@ -2660,10 +2666,14 @@ export interface SessionManagerAPI {
     /** `writer` declares the owning surface for the single-writer law — required
      *  when `path` is inside a project's session-manager-operations/ root. */
     writeJson: (path: string, data: unknown, writer?: OpsWriter) => Promise<WriteResult>;
-    writeText: (path: string, text: string, writer?: OpsWriter) => Promise<WriteResult>;
+    /** `opts.importedBy` names the root instruction file that @-imports `path`; main
+     *  accepts an imported file only while that root still imports it. */
+    writeText: (path: string, text: string, writer?: OpsWriter, opts?: { importedBy?: string }) => Promise<WriteResult>;
     listDir: (path: string, opts?: { filesOnly?: boolean; dirsOnly?: boolean; includeHidden?: boolean }) => Promise<ListDirResult>;
-    /** True when config:write-text would accept this path (same validateWrite). */
-    canWrite: (path: string) => Promise<boolean>;
+    /** Whether config:write-text would accept this path (same decision, plus a W_OK
+     *  probe); `opts.importedBy` is passed through exactly as for writeText. A refusal
+     *  carries the reason the UI explains. */
+    canWrite: (path: string, opts?: { importedBy?: string }) => Promise<ConfigWriteAccess>;
     exists: (path: string) => Promise<boolean>;
     watch: (paths: string[], opts?: { depth?: 0 | 1 | 2 }) => void;
     unwatch: (paths: string[], opts?: { depth?: 0 | 1 | 2 }) => void;

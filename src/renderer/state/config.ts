@@ -31,6 +31,8 @@ export interface FileState {
 
 export interface SaveOptions {
   force?: boolean
+  /** Root instruction file that @-imports `path`; forwarded to config:write-text. */
+  importedBy?: string
 }
 
 interface ConfigState {
@@ -209,7 +211,12 @@ export const useConfig = create<ConfigState>((set, get) => ({
     set({ files: { ...get().files, [path]: { ...cur, busy: true } } })
     let res: { ok: boolean; error?: string }
     try {
-      res = await window.api.config.writeText(path, cur.draftRaw)
+      res = await window.api.config.writeText(
+        path,
+        cur.draftRaw,
+        undefined,
+        opts?.importedBy ? { importedBy: opts.importedBy } : undefined,
+      )
     } catch (e) {
       set({ files: { ...get().files, [path]: { ...cur, busy: false } } })
       return { ok: false, error: (e as Error)?.message ?? String(e) }

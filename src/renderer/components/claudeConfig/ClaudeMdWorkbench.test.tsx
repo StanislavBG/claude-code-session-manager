@@ -43,7 +43,7 @@ function installApi() {
     config: {
       readText: vi.fn(async (p: string) => ({ text: disk[p] ?? '', raw: disk[p] ?? '', exists: p in disk, mtimeMs: 1, error: null })),
       writeText: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 2 }),
-      canWrite: vi.fn().mockResolvedValue(true),
+      canWrite: vi.fn().mockResolvedValue({ ok: true }),
       parseImports: vi.fn(async (p: string) =>
         p === MD
           ? {
@@ -177,7 +177,7 @@ describe('ClaudeMdWorkbench', () => {
     expect(all('editor-status-bar')).toHaveLength(1)
     await act(async () => { q('editor-save')!.click() })
     await flushAsync(8)
-    expect((window as any).api.config.writeText).toHaveBeenCalledWith(MD, `${disk[MD]}EDIT`)
+    expect((window as any).api.config.writeText).toHaveBeenCalledWith(MD, `${disk[MD]}EDIT`, undefined, undefined)
     expect(q('editor-save-state')?.textContent).toBe('Saved · matches the file on disk')
 
     await act(async () => { q('pane-text')!.click() })
@@ -226,6 +226,78 @@ describe('ClaudeMdWorkbench', () => {
     expect(pane()?.getAttribute('data-path')).toBe(MD)
     expect(q('pane-text')).not.toBeNull()
     expect(q('editor-save')?.textContent).toBe('Create fileCtrl S')
+  })
+})
+
+describe('ClaudeMdWorkbench write access (config:can-write)', () => {
+  const api = () => (window as any).api.config
+  // RULES (~/shared/rules.md — outside ~/.claude) is the last import row in either scope.
+  const importRow = () => all('referenced-file-row').at(-1)!
+  const readOnlyNote = () => q('claude-md-readonly-note')
+
+  it('asks canWrite for the active root and for each import with importedBy = the root', async () => {
+    await mount()
+    expect(api().canWrite).toHaveBeenCalledWith(MD)
+    expect(api().canWrite).toHaveBeenCalledWith(GIT, { importedBy: MD })
+    expect(api().canWrite).toHaveBeenCalledWith(RULES, { importedBy: MD })
+  })
+
+  it('an import outside ~/.claude that main accepts opens editable and saves with importedBy', async () => {
+    await mount(MD, vi.fn(), 'user')
+    expect(importRow().textContent).toContain('Imported · editable here')
+    await act(async () => { importRow().click() })
+    await flushAsync(8)
+    expect(pane()?.getAttribute('data-path')).toBe(RULES)
+    expect(readOnlyNote()).toBeNull()
+    await act(async () => { q('pane-text')!.click() })
+    await act(async () => { q('editor-save')!.click() })
+    await flushAsync(8)
+    expect(api().writeText).toHaveBeenCalledWith(RULES, `${disk[RULES]}EDIT`, undefined, { importedBy: MD })
+    expect(q('editor-save-state')?.textContent).toBe('Saved · matches the file on disk')
+  })
+
+  it('a sensitive import is read-only and says why', async () => {
+    api().canWrite.mockImplementation(async (p: string) => (p === RULES ? { ok: false, reason: 'sensitive' } : { ok: true }))
+    await mount()
+    expect(importRow().textContent).toContain('Imported · read-only')
+    expect(importRow().textContent).not.toContain('editable here')
+    await act(async () => { importRow().click() })
+    await flushAsync(8)
+    expect(pane()?.getAttribute('data-path')).toBe(RULES)
+    expect(readOnlyNote()?.textContent).toBe('Read-only: Session Manager never writes credential, SSH or autostart files.')
+    expect(q('editor-save')).toBeNull()
+    expect(container.textContent).not.toContain('outside the folders Session Manager may write to')
+  })
+
+  it.each([
+    ['ops-root', 'Read-only: this file is inside session-manager-operations/, which only its owning writer may change.'],
+    ['outside-boundary', 'Read-only: this file is outside your home folder and the projects open in Session Manager.'],
+    ['not-imported', 'Read-only: this file is no longer imported by CLAUDE.md.'],
+    ['permission', 'Read-only: your system does not allow writing this file.'],
+  ])('reason %s gets its own sentence', async (reason, sentence) => {
+    api().canWrite.mockImplementation(async (p: string) => (p === RULES ? { ok: false, reason } : { ok: true }))
+    await mount()
+    await act(async () => { importRow().click() })
+    await flushAsync(8)
+    expect(readOnlyNote()?.textContent).toBe(sentence)
+  })
+
+  it('a refused root opens read-only with the note', async () => {
+    api().canWrite.mockImplementation(async (p: string) => (p === MD ? { ok: false, reason: 'permission' } : { ok: true }))
+    await mount()
+    expect(pane()?.getAttribute('data-path')).toBe(MD)
+    expect(readOnlyNote()?.textContent).toBe('Read-only: your system does not allow writing this file.')
+    expect(q('editor-save')).toBeNull()
+  })
+
+  it('a Project CLAUDE.local.md root main accepts saves without importedBy', async () => {
+    await mount(LOCAL)
+    expect(api().canWrite).toHaveBeenCalledWith(LOCAL)
+    expect(readOnlyNote()).toBeNull()
+    await act(async () => { q('pane-text')!.click() })
+    await act(async () => { q('editor-save')!.click() })
+    await flushAsync(8)
+    expect(api().writeText).toHaveBeenCalledWith(LOCAL, `${disk[LOCAL]}EDIT`, undefined, undefined)
   })
 })
 

@@ -15,7 +15,8 @@
  * - List markers normalized to `-` (source may use `*`)
  * - Headings normalized to ATX (`#`) style
  * - Bold = `**`, italic = `*`
- * - Trailing spaces stripped; exactly one trailing newline
+ * - Trailing spaces stripped; the source body's trailing newlines are kept (bodyMarkdown)
+ * - CLAUDE.md `@path` import lines are written back verbatim (ImportLine)
  * These are acceptable for user-edited notes. For surgical edits (PRDs, agent
  * files) the user should switch to Source mode.
  *
@@ -25,12 +26,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Z } from '../../../lib/zLayers'
-import { useEditor, useEditorState, EditorContent, Extension, type Editor } from '@tiptap/react'
+import { useEditor, useEditorState, EditorContent, Extension, Node as TiptapNode, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import { Markdown, type MarkdownStorage } from 'tiptap-markdown'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import { splitFrontmatter, joinFrontmatter, type SplitDoc } from '../../../lib/markdownDoc'
 import { blockKey } from './changedLines'
 
@@ -77,6 +79,132 @@ function markedBlocksExtension(getKeys: () => Set<string>) {
     },
   })
 }
+
+// --- CLAUDE.md `@path` import lines ---
+//
+// Claude Code reads any source line matching ^@\S+ as an import. Plain
+// markdown folds consecutive such lines into one paragraph (and escapes `~`
+// on save), so each gets its own atom block. The raw line is kept verbatim
+// and written back unescaped; `blankBefore`/`blankAfter` record whether a
+// blank line sat next to it in the source so tight runs stay tight.
+
+/** markdown-it instances that already carry the rule (tiptap-markdown calls setup on every parse). */
+const importRuleInstalled = new WeakSet<object>()
+const IMPORT_LINE_RE = /^@\S+/
+
+interface MdBlockState {
+  src: string
+  bMarks: number[]
+  eMarks: number[]
+  tShift: number[]
+  line: number
+  push: (type: string, tag: string, nesting: number) => { meta: unknown; map: [number, number] | null }
+}
+interface MdIt {
+  block: { ruler: { before: (anchor: string, name: string, fn: (s: MdBlockState, start: number, end: number, silent: boolean) => boolean, opts?: { alt: string[] }) => void } }
+  renderer: { rules: Record<string, (tokens: { meta: unknown }[], idx: number) => string> }
+}
+interface ImportMeta { path: string; blankBefore: boolean; blankAfter: boolean }
+
+const escAttr = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+function installImportRule(md: MdIt) {
+  if (importRuleInstalled.has(md)) return
+  importRuleInstalled.add(md)
+  md.block.ruler.before('lheading', 'sm_import', (state, startLine, _endLine, silent) => {
+    const contentStart = state.bMarks[startLine] + state.tShift[startLine]
+    // The physical source line — not markdown-it's view of it, which strips
+    // blockquote markers. Only a line starting at column 0 is an import.
+    const lineStart = state.src.lastIndexOf('\n', contentStart - 1) + 1
+    if (contentStart !== lineStart) return false
+    const raw = state.src.slice(lineStart, state.eMarks[startLine]).replace(/\r$/, '')
+    if (!IMPORT_LINE_RE.test(raw)) return false
+    if (silent) return true
+    const prevStart = lineStart === 0 ? -1 : state.src.lastIndexOf('\n', lineStart - 2) + 1
+    const prevLine = prevStart < 0 ? '' : state.src.slice(prevStart, lineStart - 1)
+    const nextNl = state.src.indexOf('\n', state.eMarks[startLine])
+    const nextEnd = nextNl < 0 ? -1 : state.src.indexOf('\n', nextNl + 1)
+    const nextLine = nextNl < 0 ? '' : state.src.slice(nextNl + 1, nextEnd < 0 ? undefined : nextEnd)
+    const token = state.push('sm_import', 'div', 0)
+    token.map = [startLine, startLine + 1]
+    token.meta = {
+      path: raw.slice(1),
+      blankBefore: prevLine.trim() === '',
+      blankAfter: nextLine.trim() === '',
+    } satisfies ImportMeta
+    state.line = startLine + 1
+    return true
+  }, { alt: ['paragraph', 'reference', 'blockquote', 'list'] })
+  md.renderer.rules.sm_import = (tokens, idx) => {
+    const m = tokens[idx].meta as ImportMeta
+    return `<div data-sm-import="${escAttr(m.path)}" data-blank-before="${m.blankBefore}" data-blank-after="${m.blankAfter}"></div>`
+  }
+}
+
+interface MdSerializerState {
+  write: (s?: string) => void
+  ensureNewLine: () => void
+  flushClose: (size?: number) => void
+  closeBlock: (node: PMNode) => void
+}
+
+export const ImportLine = TiptapNode.create({
+  name: 'smImportLine',
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      path: { default: '' },
+      blankBefore: { default: true },
+      blankAfter: { default: true },
+    }
+  },
+  parseHTML() {
+    return [{
+      tag: 'div[data-sm-import]',
+      getAttrs: (el) => {
+        const e = el as HTMLElement
+        return {
+          path: e.getAttribute('data-sm-import') ?? '',
+          blankBefore: e.getAttribute('data-blank-before') !== 'false',
+          blankAfter: e.getAttribute('data-blank-after') !== 'false',
+        }
+      },
+    }]
+  },
+  renderHTML({ node }) {
+    return [
+      'div',
+      {
+        'data-sm-import': node.attrs.path,
+        'data-blank-before': String(node.attrs.blankBefore),
+        'data-blank-after': String(node.attrs.blankAfter),
+        class: 'flex gap-2 mt-2 text-[12.5px] leading-relaxed',
+      },
+      ['span', { 'data-sm-import-marker': '', class: 'min-w-[16px] shrink-0 font-mono font-semibold text-accent' }, '@'],
+      ['span', { 'data-sm-import-path': '', class: 'min-w-0 font-mono text-fg break-all' }, node.attrs.path],
+    ]
+  },
+  addStorage() {
+    return {
+      markdown: {
+        serialize(state: MdSerializerState, node: PMNode, parent: PMNode, index: number) {
+          // A tight neighbour above: one newline, not the default blank line.
+          if (index > 0 && !node.attrs.blankBefore) state.flushClose(1)
+          state.write(`@${node.attrs.path}`)
+          if (index + 1 < parent.childCount && !node.attrs.blankAfter) state.ensureNewLine()
+          else state.closeBlock(node)
+        },
+        parse: {
+          setup(md: MdIt) { installImportRule(md) },
+        },
+      },
+    }
+  },
+})
 
 // --- Toolbar button ---
 
@@ -282,6 +410,18 @@ function FrontmatterChip({ frontmatter }: { frontmatter: string }) {
 
 // --- Main component ---
 
+/**
+ * The editor's markdown, ending the way the source body ended. tiptap-markdown
+ * trims every trailing newline; a CLAUDE.md that ends in one must still end in
+ * one after a save that changed nothing at the end.
+ */
+function bodyMarkdown(ed: Editor, sourceBody: string): string {
+  const md = (ed.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
+  if (!md) return md
+  const tail = /(\r?\n)*$/.exec(sourceBody)?.[0] ?? ''
+  return md.replace(/\n*$/, '') + tail
+}
+
 export function TiptapBody({ value, onChange, markedBlocks }: Props) {
   // Split frontmatter once on mount; capture it for the lifetime of this
   // component instance (keyed by path in EditorView, so remount = new path).
@@ -297,11 +437,12 @@ export function TiptapBody({ value, onChange, markedBlocks }: Props) {
       StarterKit,
       Link.configure({ autolink: true, openOnClick: false }),
       Markdown.configure({ html: false, tightLists: true }),
+      ImportLine,
       markedBlocksExtension(() => markedKeysRef.current),
     ],
     content: splitRef.current.body,
     onUpdate: ({ editor: ed }) => {
-      const body = (ed.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
+      const body = bodyMarkdown(ed, splitRef.current.body)
       suppressExternalRef.current = true
       onChange(joinFrontmatter(splitRef.current, body))
       // Allow external updates again on next tick.
@@ -320,7 +461,7 @@ export function TiptapBody({ value, onChange, markedBlocks }: Props) {
     if (!editor || suppressExternalRef.current) return
     const newSplit = splitFrontmatter(value)
     // Only re-load if the body actually changed from outside.
-    const currentBody = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
+    const currentBody = bodyMarkdown(editor, newSplit.body)
     if (newSplit.body !== currentBody) {
       splitRef.current = newSplit
       editor.commands.setContent(newSplit.body)

@@ -107,6 +107,8 @@ function machineStatePath() { return assertNotLiveRoot(path.join(schedulerHome()
 function schedulerStatePath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-state.json'), 'schedulerStatePath'); }
 function heartbeatPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-heartbeat.log'), 'heartbeatPath'); }
 function sessionSlotsConfigPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'session-slots-config.json'), 'sessionSlotsConfigPath'); }
+/** Machine-level (project cwd, externalRef) -> Epic id index (epic/externalRefIndex.cjs). */
+function externalRefIndexPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'external-refs.json'), 'externalRefIndexPath'); }
 function watchdogLogsDir() { return assertNotLiveRoot(path.join(schedulerHome(), 'logs'), 'watchdogLogsDir'); }
 function restartRequestPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'restart-request.json'), 'restartRequestPath'); }
 function restartingMarkerPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'restarting.json'), 'restartingMarkerPath'); }
@@ -198,6 +200,7 @@ module.exports = {
   schedulerStatePath,
   heartbeatPath,
   sessionSlotsConfigPath,
+  externalRefIndexPath,
   adminTokenPath,
   machineStateLogCwd,
   worktreeBase,

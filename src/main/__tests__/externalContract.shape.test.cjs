@@ -5,7 +5,7 @@
  *    current CONTRACT_VERSION — a shape change without a version bump fails.
  * 2. The manifest matches the code: routes are registered by their modules,
  *    tools carry exactly the listed required arguments, states/event kinds
- *    equal the code's lists, record/receipt/admin-api.json keys match.
+ *    equal the code's lists, record/receipt/agent/admin-api.json keys match.
  *
  * Run: timeout 180 npx vitest run src/main/__tests__/externalContract.shape.test.cjs
  */
@@ -75,6 +75,7 @@ test('every listed admin route is registered by its module', async () => {
   require('../lib/telemetry/eventsAdminRoutes.cjs').registerAdminRoute(fake);
   require('../lib/feedback-remote/macroAdminRoutes.cjs').registerAdminRoute(fake, { startExternalNewSession: async () => ({}) });
   require('../lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(fake);
+  require('../lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(fake, { listPersonas: async () => [] });
 
   // The health route lives inside localAdminHttp.cjs itself — check it on a real server.
   const admin = createAdminHttp();
@@ -256,4 +257,36 @@ test('an event-mode epic_cross_project_reply row carries only listed keys and ex
   for (const k of Object.keys(events[0])) expect(allowed.has(k), `unlisted key ${k}`).toBe(true);
   expect(events[0]).toMatchObject({ kind: 'epic_cross_project_reply', mode: 'event', externalRef: 'portfolio:action-1' });
   expect(Object.keys(events[0]).sort()).toEqual([...CONTRACT.replyEventFields].sort());
+});
+
+// ── agent keys from a real GET /admin/agents answer with a cwd ──
+
+test('the keys of an agent from GET /admin/agents with a cwd equal agentFields', async () => {
+  const { registerAdminRoute } = require('../lib/persona-macro/agentAdminRoutes.cjs');
+  const handlers = new Map();
+  // A full listPersonas row: body and override details must not reach the answer.
+  const row = {
+    name: 'dev-lead', description: 'd', tools: ['Read'], model: 'opus', effort: 'high', color: 'blue', tags: ['feature'],
+    projects: [], action: null, actionLabel: null, title: 'T', seedVersion: 3, executorOnly: false, agentCli: null,
+    agentCliModel: null, path: '/home/x/.claude/agents/dev-lead.md', body: 'BODY', overridingProjects: [], overrideDetails: [],
+  };
+  registerAdminRoute({ registerRoute: (m, p, h) => { handlers.set(`${m} ${p}`, h); } }, {
+    listPersonas: async () => [row],
+    resolveEffectiveModelInfo: async () => ({
+      resolvedModelId: 'claude-opus-x', modelSource: 'persona', personaEffort: 'high', personaEffortSource: 'persona',
+    }),
+  });
+  const cwd = await mkTmp('sm-contract-agents-cwd-');
+  fs.mkdirSync(path.join(cwd, 'session-manager-operations'), { recursive: true });
+  const res = {
+    statusCode: 0, body: '',
+    writeHead(code) { this.statusCode = code; return this; },
+    end(chunk) { if (chunk) this.body += String(chunk); },
+  };
+  await handlers.get('GET /admin/agents')({}, res, new URLSearchParams({ cwd }));
+  expect(res.statusCode).toBe(200);
+  const { agents } = JSON.parse(res.body);
+  expect(agents).toHaveLength(1);
+  expect(Object.keys(agents[0]).sort()).toEqual([...CONTRACT.agentFields].sort());
+  expect(Object.keys(agents[0].resolved).sort()).toEqual(['effort', 'effortSource', 'modelId', 'modelSource']);
 });

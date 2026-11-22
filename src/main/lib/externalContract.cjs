@@ -48,12 +48,14 @@ const CONTRACT = deepFreeze({
     { method: 'GET', path: '/admin/epics' },
     { method: 'GET', path: '/admin/epic' },
     { method: 'GET', path: '/admin/events' },
+    { method: 'GET', path: '/admin/agents' },
   ],
   tools: {
     feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
     epic_list: { required: ['cwd'] },
     epic_get: { required: ['cwd'], requiredOneOf: [['id', 'externalRef']] },
     feedback_reply: { required: ['message', 'outcome'] },
+    agent_list: { required: [] },
   },
   epicStates: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open'],
   epicRecordFields: [
@@ -66,6 +68,11 @@ const CONTRACT = deepFreeze({
   replyEventFields: [
     'at', 'kind', 'cwd', 'epicId', 'fromCwd', 'fromEpicId', 'outcome', 'delivery', 'mode', 'externalRef',
     'message', 'referencePaths',
+  ],
+  // Keys of one agent in GET /admin/agents?cwd=… (agentAdminRoutes.cjs publicAgent + resolved).
+  agentFields: [
+    'name', 'title', 'description', 'model', 'effort', 'tags', 'tools', 'executorOnly', 'agentCli', 'agentCliModel',
+    'seedVersion', 'path', 'resolved',
   ],
   eventKinds: ['epic_state_changed', 'job_transition', 'epic_cross_project_reply'],
   adminApiFields: ['port', 'token', 'appVersion', 'contractVersion'],
@@ -87,8 +94,8 @@ function contractFingerprint() {
 
 /** Fingerprint recorded for each contract version. */
 const CONTRACT_FINGERPRINTS = Object.freeze({
-  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields), so its fingerprint was replaced, not bumped.
-  1: '8056c0386a184916e0b6f5d727353cfec95217a4e802f368c6f1ef852a104cf3',
+  // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields), so its fingerprint was replaced, not bumped.
+  1: 'b14b7bf3d410c276165d9c6ab5c35b9b1e0de7368d719143f6bbf64004ec2a24',
 });
 
 module.exports = { CONTRACT_VERSION, contractInfo, CONTRACT, contractFingerprint, CONTRACT_FINGERPRINTS };

@@ -380,7 +380,74 @@ A consumer loop:
 3. On `gap: true`, do not trust your old view: **re-read the states** with `epic_get` / `epic_list`, then
    carry on from the new `next`.
 
-## 5. Not part of the contract
+## 5. Agent library
+
+Lists this machine's agent personas, so an outside launcher can start a job from the same roster with a
+pinned model instead of copying persona text into its own prompts. Code:
+`src/main/lib/persona-macro/agentAdminRoutes.cjs` (route), `src/main/agentLibrary.cjs` (`listPersonas`),
+`src/main/lib/claude/effectiveModelInfo.cjs` (`resolveEffectiveModelInfo`, the `resolved` values). The read
+writes no file and no audit row.
+
+| Route | MCP tool | Query / args | Answer |
+| --- | --- | --- | --- |
+| `GET /admin/agents` | `agent_list` | `cwd?` (absolute project path) | `{ ok: true, agents }`, sorted by `name` |
+
+- No argument is required. Without `cwd`, no agent has a `resolved` key.
+- A bad query is `400 { ok: false, error: "invalid query", details }`. A `cwd` that is not absolute or has
+  no `session-manager-operations/` folder is `400` with the reason.
+- The list is the global persona folder (`~/.claude/agents/`). A project's own override of a persona is
+  not shown in the fields below; it shows only in `resolved`.
+
+### The agent
+
+These are the persona file's frontmatter fields, plus `path` and `resolved`. The persona body (its prompt
+text) is never in the answer.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | The persona's name. Use it as `agentType`. Falls back to the file name. |
+| `title` | string or null | A short display title. |
+| `description` | string or null | One line on what the persona is for. |
+| `model` | string or null | The model the frontmatter pins: an alias (`opus`), a full id, or `inherit`. |
+| `effort` | string or null | The effort level the frontmatter pins. |
+| `tags` | string[] | Mission tags the persona fits. Empty when none are set. |
+| `tools` | string[] | Tools the persona may use. Empty when the frontmatter lists none. |
+| `executorOnly` | boolean | `true` when the persona only executes one scoped PRD. The app warns when one is picked to lead an Epic. |
+| `agentCli` | string or null | Another agent CLI the persona runs on. `null` means Claude Code. |
+| `agentCliModel` | string or null | The model for that other CLI. `null` when `agentCli` is `null`. |
+| `seedVersion` | number or null | The version stamp of a persona Session Manager seeds. `null` when the file has none. |
+| `path` | string | Absolute path of the persona file in the global folder. |
+| `resolved` | object or null | Present only when you passed `cwd`. See below. |
+
+### `resolved`
+
+What the persona resolves to when it runs in the project `cwd`. That takes in the project's own override
+of the persona and the project's Claude settings.
+
+| Field | Meaning |
+| --- | --- |
+| `modelId` | The concrete model id. It is the pinned id when the model is already a full id. For an alias it is the id the newest scheduler run or chat of this persona in this project used. `null` when there is no such evidence yet. |
+| `modelSource` | Where the model came from: `persona`, `persona-overlay` (the project's override), `settings` (the persona sets none; the Claude settings model is used), `inherit` (no model anywhere) or `fallback` (the persona could not be read). |
+| `effort` | The effort level, or `null` when the persona sets none. |
+| `effortSource` | `persona`, `persona-overlay`, `inherit` (the persona sets no level) or `null` (the persona could not be read). |
+
+`resolved` is absent when you did not pass `cwd`. It is `null` when resolving that persona threw. Today
+the resolver never throws, so expect an object; still handle `null`.
+
+### Launching from an outside app
+
+1. Call `GET /admin/agents?cwd=<project>` and pick an agent by `name`.
+2. Read the file at `path` for the prompt text. Strip the frontmatter (the block between the first two
+   `---` lines); the rest is the body.
+3. Pin the model with `--model <resolved.modelId>`. When `modelId` is `null`, pin `model` (the alias)
+   instead; never launch without `--model`.
+4. Pass `resolved.effort` as the effort when it is not `null`.
+
+`path` is the global file. A project override of the body is not in it. When `resolved.modelSource` is
+`persona-overlay`, the project changed this persona; read `<cwd>/.claude/agents/<name>.md` as well if
+you need the project's own text.
+
+## 6. Not part of the contract
 
 Do not build on these. They change without a version bump.
 

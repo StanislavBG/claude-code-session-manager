@@ -393,7 +393,7 @@ describe('useMacroLaunch', () => {
 
       expect(createPromptSessionSpy).not.toHaveBeenCalled()
       expect(dispatchJob).toHaveBeenCalledWith({
-        cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: undefined, effort: 'medium',
+        cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: undefined, effort: 'medium', inputValues: {},
       })
     })
 
@@ -449,7 +449,7 @@ describe('useMacroLaunch', () => {
       const onSelect = vi.fn()
       const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} macroOver={{ job: JOB }} extraInstructions="more" />)
       await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
-      expect(dispatchJob).toHaveBeenCalledWith({ cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: 'more' })
+      expect(dispatchJob).toHaveBeenCalledWith({ cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: 'more', inputValues: {} })
       expect(createPromptSessionSpy).not.toHaveBeenCalled()
       expect(sendSpy).not.toHaveBeenCalled()
       expect(onSelect).not.toHaveBeenCalled()
@@ -465,6 +465,102 @@ describe('useMacroLaunch', () => {
       expect(sendSpy).not.toHaveBeenCalled()
       expect(onSelect).not.toHaveBeenCalled()
       expect(useToast.getState().toasts.some((t) => t.message.includes('a build is already running') && t.message.includes('build was not queued'))).toBe(true)
+    })
+
+    const INPUTS = [{ name: 'topic', label: 'Topic', default: 'dogs' }]
+    const TOOL_JOB = { estimateMinutes: 10, review: true, entryKind: 'video' as const }
+    const toolOver = (over: Partial<Macro> = {}): Partial<Macro> => ({
+      id: 'tool-1', surface: 'project-video', job: TOOL_JOB, prompt: 'Make {{topic}}', inputs: INPUTS, ...over,
+    })
+
+    it('existing Epic: the press values reach dispatchJob', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'act1' })
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active' } as any },
+      })
+      const el = await mount(
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB, prompt: 'Do {{topic}}', inputs: INPUTS }} inputValues={{ topic: 'cats' }} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob).toHaveBeenCalledWith({ cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: undefined, inputValues: { topic: 'cats' } })
+    })
+
+    it('mint path: the default values reach dispatchJob when the press passed none', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e' })
+      const el = await mount(
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB, prompt: 'Do {{topic}}', inputs: INPUTS }} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(dispatchJob).toHaveBeenCalledTimes(1)
+      expect(dispatchJob.mock.calls[0][0]).toMatchObject({ macroId: 'm1', inputValues: { topic: 'dogs' } })
+    })
+
+    it('built-in job press: every other dispatch field is unchanged on the mint path', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e' })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} extraInstructions="more" />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      const created = Object.values(usePromptSessions.getState().sessions)[0]
+      expect(dispatchJob.mock.calls[0][0]).toEqual({ cwd: CWD, macroId: 'm1', epicId: created.id, extraInstructions: 'more', inputValues: {} })
+    })
+
+    it('a built-in job macro still joins an active Epic by tag + agent', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'act1' })
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active', source: { producer: 'new-epic-ui', macroId: 'other' } } as any },
+      })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(dispatchJob.mock.calls[0][0]).toMatchObject({ epicId: 'act1' })
+    })
+
+    it("a project-video tool joins only its own active Epic (by macroId), never another tool's or Demo Video's", async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'mine' })
+      usePromptSessions.setState({
+        sessions: {
+          demo: { id: 'demo', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active', source: { producer: 'new-epic-ui', macroId: 'demo-video' } } as any,
+          other: { id: 'other', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active', source: { producer: 'new-epic-ui', macroId: 'tool-2' } } as any,
+          away: { id: 'away', cwd: '/elsewhere', tag: 'bug', agentType: 'scout', status: 'active', source: { producer: 'new-epic-ui', macroId: 'tool-1' } } as any,
+          done: { id: 'done', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'completed', source: { producer: 'new-epic-ui', macroId: 'tool-1' } } as any,
+          mine: { id: 'mine', cwd: CWD, tag: 'feature', agentType: 'someone-else', status: 'active', source: { producer: 'new-epic-ui', macroId: 'tool-1' } } as any,
+        },
+      })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={toolOver()} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(dispatchJob).toHaveBeenCalledWith({ cwd: CWD, macroId: 'tool-1', epicId: 'mine', extraInstructions: undefined, inputValues: { topic: 'dogs' } })
+    })
+
+    it('a project-video tool with no Epic of its own mints instead of joining a tag + agent match', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e' })
+      usePromptSessions.setState({
+        sessions: { demo: { id: 'demo', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active', source: { producer: 'new-epic-ui', macroId: 'demo-video' } } as any },
+      })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={toolOver()} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(dispatchJob.mock.calls[0][0].epicId).not.toBe('demo')
+    })
+
+    it('a project-video tool whose persona is project-local (not in the global list) is not blocked', async () => {
+      dispatchJob.mockResolvedValue({ ok: false, error: 'persona local-cutter not found in this project' })
+      const el = await mount(
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={toolOver({ agentName: 'local-cutter' })} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      const messages = useToast.getState().toasts.map((t) => t.message)
+      expect(messages.some((m) => m.includes('not found — edit the macro'))).toBe(false)
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(dispatchJob).toHaveBeenCalledTimes(1)
+      expect(messages.some((m) => m.includes('persona local-cutter not found in this project'))).toBe(true)
+    })
+
+    it('a built-in job macro with a missing persona is still blocked', async () => {
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB, agentName: 'ghost' }} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob).not.toHaveBeenCalled()
+      expect(useToast.getState().toasts.map((t) => t.message)).toContain('Agent ghost not found — edit the macro')
     })
 
     it('still runs the readiness check first', async () => {

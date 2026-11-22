@@ -368,10 +368,15 @@ export interface MacroInput {
   options?: string[];
 }
 
-/** Background-build descriptor on a built-in macro. */
+/** Background-build descriptor on a built-in macro or a project Video tool (surface 'project-video'). */
 export interface MacroJob {
   estimateMinutes: number;
-  artifactPaths: string[];
+  /** Project Video tool: repos the run may write to. */
+  repoPaths?: string[];
+  /** Project Video tool: true adds a human review step before the entry is published. */
+  review?: boolean;
+  entryKind?: 'knowledge' | 'video';
+  artifactPaths?: string[];
 }
 
 export interface MacroJobDispatchInput {
@@ -382,6 +387,8 @@ export interface MacroJobDispatchInput {
   /** Per-launch effort chosen in the high-effort cost dialog: one of low, medium, high, xhigh, max;
    *  main refuses anything else. Omitted = the persona's own effort. */
   effort?: string;
+  /** The press's {{name}} input values; a project Video tool renders its prompt with them. */
+  inputValues?: Record<string, string>;
 }
 
 export type MacroJobDispatchResult =
@@ -395,8 +402,11 @@ export interface MacroJobStatus {
   epicId: string | null;
   slug: string;
   state: MacroJobState;
-  status: string;
-  reason: string | null;
+  /** Raw queue status; a project Video tool whose entry waits on the human reports 'awaiting_review'. */
+  status: 'awaiting_review' | (string & {});
+  reason?: string | null;
+  /** Project Video tool only: the video entry this run feeds (null when none matched). */
+  entryId?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
 }
@@ -427,7 +437,7 @@ export interface Macro {
   prompt: string;
   projects: string[];
   /** Which strip shows this macro. Defaults to `'sessions'` when absent. */
-  surface: 'sessions' | 'project-home';
+  surface: 'sessions' | 'project-home' | 'project-video';
   /** True for a seeded, machine-authored macro (e.g. the built-in Project Home actions). */
   builtin?: boolean;
   /** Bumped by the seed when a builtin macro's definition changes, to reseed it. */
@@ -439,7 +449,7 @@ export interface Macro {
   autoStartTargets?: string[];
   /** True lets a script start this macro via POST /admin/macros/run. */
   scriptStart?: boolean;
-  /** Set only on built-ins whose press builds in the background. */
+  /** Set on built-ins whose press builds in the background, and on every project Video tool. */
   job?: MacroJob;
 }
 
@@ -463,7 +473,7 @@ export interface MacroSaveInput {
   tag: AgentPersonaTag;
   prompt: string;
   projects?: string[];
-  surface?: 'sessions' | 'project-home';
+  surface?: 'sessions' | 'project-home' | 'project-video';
   /** Omitted keeps the stored list on update; `[]` clears it. */
   inputs?: MacroInput[];
   /** Same omit/clear semantics as `inputs`. */

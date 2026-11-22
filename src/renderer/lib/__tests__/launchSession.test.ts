@@ -155,6 +155,15 @@ describe('launchSession', () => {
     expect(createPromptSession.mock.calls[1][7]).toEqual({ macroId: 'm9' })
   })
 
+  it("run 'job': forwards inputValues to dispatchJob, omits the key when unset", async () => {
+    dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e1' })
+    await launchSession({ ...input, macroId: 'm9', run: 'job', inputValues: { topic: 'cats' } })
+    expect(dispatchJob.mock.calls[0][0]).toEqual({ cwd: '/p', macroId: 'm9', epicId: 'e1', extraInstructions: undefined, inputValues: { topic: 'cats' } })
+    dispatchJob.mockClear()
+    await launchSession({ ...input, macroId: 'm9', run: 'job' })
+    expect(dispatchJob.mock.calls[0][0]).not.toHaveProperty('inputValues')
+  })
+
   it('passes the persona body to composeEpicIntake when persona readable', async () => {
     getPersonaBody.mockResolvedValueOnce({ path: '/a/dev-lead.md', text: 'BODY' })
     await launchSession(input)

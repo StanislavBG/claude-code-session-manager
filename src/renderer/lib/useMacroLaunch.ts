@@ -35,9 +35,16 @@ export function useMacroLaunch(
   const launch = async (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => {
     if (!activeTabCwd || launching) return
 
+    // A project Video tool joins only its own Epic (stamped macroId); built-ins keep the tag + agent match.
+    const projectVideoTool = macro.surface === 'project-video'
     const findActive = () =>
       Object.values(usePromptSessions.getState().sessions).find(
-        (s) => s.cwd === activeTabCwd && s.tag === macro.tag && s.agentType === macro.agentName && s.status === 'active',
+        (s) =>
+          s.cwd === activeTabCwd &&
+          s.status === 'active' &&
+          (projectVideoTool
+            ? s.source?.macroId === macro.id
+            : s.tag === macro.tag && s.agentType === macro.agentName),
       )
 
     const persona = personas.find((p) => p.name === macro.agentName)
@@ -45,7 +52,10 @@ export function useMacroLaunch(
     // prompt rather than block. Once loaded, a missing agent must not mint.
     // Job macros tighten this: a missing persona blocks even while the list
     // is still empty, since that path must never mint on a guess.
-    if (!persona && (personas.length > 0 || !!macro.job)) {
+    // A project Video tool is exempt: its persona may live in <cwd>/.claude/agents/
+    // (absent from the global list); main's PRD write validates it and a refusal
+    // surfaces as the dispatch error toast.
+    if (!persona && !projectVideoTool && (personas.length > 0 || !!macro.job)) {
       toast.error(`Agent ${macro.agentName} not found — edit the macro`)
       return
     }
@@ -64,7 +74,8 @@ export function useMacroLaunch(
     if (choice && !choice.proceed) return
     const effort = choice && choice.proceed && choice.effort ? choice.effort : undefined
 
-    const rendered = renderMacroPrompt(macro.prompt, macro.inputs, inputValues ?? defaultMacroValues(macro.inputs))
+    const values = inputValues ?? defaultMacroValues(macro.inputs)
+    const rendered = renderMacroPrompt(macro.prompt, macro.inputs, values)
     if (!rendered.ok) {
       toast.error(`Cannot start "${macro.label}" — ${rendered.error}`)
       return
@@ -103,6 +114,7 @@ export function useMacroLaunch(
             epicId: existing.id,
             extraInstructions: trimmedExtra || undefined,
             ...(effort ? { effort } : {}),
+            inputValues: values,
           })
           if (!res.ok) throw new Error(res.error)
         } else {
@@ -118,6 +130,7 @@ export function useMacroLaunch(
             run: 'job',
             extraInstructions: trimmedExtra || undefined,
             ...(effort ? { effort } : {}),
+            inputValues: values,
           })
         }
         toast.success(`${macro.label} is building in the background`)

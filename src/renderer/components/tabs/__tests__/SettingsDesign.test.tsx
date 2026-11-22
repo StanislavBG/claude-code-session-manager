@@ -160,7 +160,7 @@ describe('Settings — ConfigWorkbench design', () => {
     disk = {}
     const el = await mount('project')
     const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-testid^="settings-row-"]')).map((r) => r.dataset.testid)
-    expect(rows).toEqual(['settings-row-permissions', 'settings-row-hooks', 'settings-row-epic-isolation'])
+    expect(rows).toEqual(['settings-row-permissions', 'settings-row-hooks', 'settings-row-tool-risk', 'settings-row-epic-isolation'])
     expect(q(el, 'settings-epic-isolation')).toBeNull()
     await act(async () => {
       q(el, 'settings-row-epic-isolation')!.click()

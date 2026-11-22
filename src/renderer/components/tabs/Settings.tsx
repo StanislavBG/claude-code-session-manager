@@ -5,8 +5,8 @@
  * Left column (ConfigWorkbench list): the SETTINGS FILE card — Project / Local radio rows in a
  * project (the caller owns the choice via `onScopeChange`), the user file on Home — a
  * 'Search N settings' field, the group rail (icon, title, set/total) and, below a divider,
- * Permissions and Hooks rows that open the existing editors in the detail, and (project scope
- * only) an Epic isolation row for Session Manager's per-project worktree toggle.
+ * Permissions and Hooks rows that open the existing editors in the detail, a Tool risk row
+ * (SettingsToolRisk, both faces), and (project scope only) an Epic isolation row for Session Manager's per-project worktree toggle.
  * Detail: one group's setting cards (EffectiveCards) under a header with Show unset / Advanced
  * switches and a '{ } Raw JSON' button that opens the existing raw JSON editor.
  */
@@ -18,6 +18,7 @@ import { Toggle } from '../ui/Toggle'
 import { PermissionsRulesEditor } from './Permissions'
 import { HooksEventsEditor } from './Hooks'
 import { SettingsEpicIsolation } from './SettingsEpicIsolation'
+import { SettingsToolRisk } from './SettingsToolRisk'
 import { KEY_OWNERS } from '../../lib/settingsGroups'
 import { useEffectiveCards, SettingsGroupRail, SettingsGroupCards } from '../ui/EffectiveCards'
 import { ConfigWorkbench } from '../claudeConfig/ConfigLayout'
@@ -64,7 +65,7 @@ export const SETTINGS_SCOPE_NOTES: Record<Scope, { title: string; body: string }
 }
 
 export type ProjectSettingsScope = 'project' | 'local'
-type View = 'general' | 'permissions' | 'hooks' | 'epic-isolation' | 'raw'
+type View = 'general' | 'permissions' | 'hooks' | 'tool-risk' | 'epic-isolation' | 'raw'
 
 const EYEBROW = 'text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint'
 
@@ -441,6 +442,14 @@ function SettingsComponent({
           selected={view === 'hooks'}
           onSelect={() => setView('hooks')}
         />
+        <PaneRow
+          testId="settings-row-tool-risk"
+          icon="shield"
+          label="Tool risk"
+          trailing={scope === 'user' ? 'system' : 'this project'}
+          selected={view === 'tool-risk'}
+          onSelect={() => setView('tool-risk')}
+        />
         {scope !== 'user' && (
           <PaneRow
             testId="settings-row-epic-isolation"
@@ -483,6 +492,9 @@ function SettingsComponent({
     detail = <EmptyState title="no active project" hint="open a tab in a project directory to edit project or local settings" />
   } else if (!activePath) {
     detail = <EmptyState title="resolving…" />
+  } else if (view === 'tool-risk') {
+    // Tool-risk marks have two layers (System / Project); the Local radio edits the Project layer.
+    detail = <SettingsToolRisk scope={scope === 'user' ? 'user' : 'project'} cwd={scope === 'user' ? null : cwd} />
   } else if (view === 'epic-isolation' && scope !== 'user' && cwd) {
     detail = <SettingsEpicIsolation cwd={cwd} />
   } else if (view === 'general' || view === 'epic-isolation') {

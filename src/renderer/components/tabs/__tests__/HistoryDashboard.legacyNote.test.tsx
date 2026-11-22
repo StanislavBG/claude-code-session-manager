@@ -66,6 +66,7 @@ function installWindowApiMock(legacyDates: string[] | undefined) {
     history: {
       dashboard: vi.fn().mockResolvedValue(buildRaw(legacyDates)),
       loopEfficiency: vi.fn().mockResolvedValue({ fromMs: 0, toMs: 0, rows: [], totals: { runs: 0, wastedRuns: 0, verified: 0, refuted: 0, executorUsd: 0, wastedRunRate: 0 }, weeklyUtilizationPct: null, verifiedPerUsagePct: null }),
+      validationQuality: vi.fn().mockResolvedValue({ ok: true, projects: [] }),
       onUpdated: vi.fn(() => () => {}),
     },
     config: {

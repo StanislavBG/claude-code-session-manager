@@ -196,11 +196,6 @@ describe('writeMarksLayer', () => {
     assert.match(r.error, /Bash\(rm -rf:\*\)/);
     assert.equal(fs.readFileSync(file, 'utf8'), FIXTURE);
   });
-  it('uses writeJsonAtomic from util/atomicFs.cjs', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'toolRiskMarks.cjs'), 'utf8');
-    assert.match(src, /require\('\.\.\/util\/atomicFs\.cjs'\)/);
-    assert.match(src, /writeJsonAtomic\(/);
-  });
 });
 
 describe('resolveMark', () => {

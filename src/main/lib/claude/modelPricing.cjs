@@ -8,9 +8,9 @@
  * read on 2026-11-21. Prices are dollars per million tokens.
  *
  * Cache writes cost CACHE_WRITE_5M_MULTIPLIER × input for the 5-minute cache and
- * CACHE_WRITE_1H_MULTIPLIER × input for the 1-hour cache, on every model. When a bucket does not
- * say how its cache writes split, all of them are charged at the 1-hour rate and the result is
- * marked estimated: on 2026-11-21 this machine's last 48 hours of transcripts had 93.5% of
+ * CACHE_WRITE_1H_MULTIPLIER × input for the 1-hour cache, on every model. Cache writes whose split
+ * is unknown (cacheCreationUnknownTokens, or all of them when cacheCreation1hTokens is absent) are
+ * charged at the 1-hour rate and the result is marked estimated: on 2026-11-21 this machine's last 48 hours of transcripts had 93.5% of
  * cache-write tokens as 1-hour writes.
  *
  * Known limits, deliberately NOT modeled (on 2026-11-21 the last 48 hours of transcripts had no
@@ -95,8 +95,17 @@ function priceForModel(modelId) {
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 /**
+ * Cache writes split three ways:
+ *   - cacheCreationUnknownTokens: cache-write tokens whose 5-minute / 1-hour split was not
+ *     recorded. Clamped to [0, cacheCreationTokens], charged at the 1-hour rate, and they mark
+ *     the result estimated when above zero. It is a plain number so buckets that mix lines with
+ *     and without a recorded split still sum correctly.
+ *   - cacheCreation1hTokens: recorded 1-hour writes, clamped to what is left after the unknown part.
+ *   - the rest is 5-minute writes.
+ * When cacheCreation1hTokens is not a number at all, every cache write counts as unknown.
+ *
  * @param {unknown} modelId
- * @param {unknown} bucket  { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, cacheCreation1hTokens? }
+ * @param {unknown} bucket  { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, cacheCreation1hTokens?, cacheCreationUnknownTokens? }
  * @returns {{ costUsd: number, cacheSavingsUsd: number, estimated: boolean }}
  */
 function costOfUsage(modelId, bucket) {
@@ -108,20 +117,23 @@ function costOfUsage(modelId, bucket) {
   const cacheRead = num(b.cacheReadTokens);
   const cacheWrite = Math.max(0, num(b.cacheCreationTokens));
   let estimated = price.estimated;
+  let writeUnknown;
   let write1h;
   if (typeof b.cacheCreation1hTokens === 'number' && Number.isFinite(b.cacheCreation1hTokens)) {
-    write1h = Math.min(Math.max(0, b.cacheCreation1hTokens), cacheWrite);
+    writeUnknown = Math.min(Math.max(0, num(b.cacheCreationUnknownTokens)), cacheWrite);
+    write1h = Math.min(Math.max(0, b.cacheCreation1hTokens), cacheWrite - writeUnknown);
   } else {
-    write1h = cacheWrite;
-    if (cacheWrite > 0) estimated = true;
+    writeUnknown = cacheWrite;
+    write1h = 0;
   }
-  const write5m = cacheWrite - write1h;
+  if (writeUnknown > 0) estimated = true;
+  const write5m = cacheWrite - writeUnknown - write1h;
   const costUsd = (
     input * price.input +
     output * price.output +
     cacheRead * price.cacheRead +
     write5m * price.input * CACHE_WRITE_5M_MULTIPLIER +
-    write1h * price.input * CACHE_WRITE_1H_MULTIPLIER
+    (writeUnknown + write1h) * price.input * CACHE_WRITE_1H_MULTIPLIER
   ) / 1e6;
   const cacheSavingsUsd = cacheRead * (price.input - price.cacheRead) / 1e6;
   return { costUsd, cacheSavingsUsd, estimated };

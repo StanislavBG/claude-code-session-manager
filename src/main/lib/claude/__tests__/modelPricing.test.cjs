@@ -96,6 +96,43 @@ describe('costOfUsage', () => {
     close(r.costUsd, 8);
     expect(r.estimated).toBe(true);
   });
+  it('charges an explicit unknown part at 1h and marks estimated', () => {
+    const r = costOfUsage('claude-opus-5-5', {
+      cacheCreationTokens: 1e6, cacheCreationUnknownTokens: 4e5, cacheCreation1hTokens: 3e5,
+    });
+    // (4e5 + 3e5) at 8/M (5.6) + 3e5 at 5/M (1.5)
+    close(r.costUsd, 7.1);
+    expect(r.estimated).toBe(true);
+  });
+  it('prices the same bucket with no unknown part as known', () => {
+    for (const unknown of [undefined, 0]) {
+      const r = costOfUsage('claude-opus-5-5', {
+        cacheCreationTokens: 1e6, cacheCreationUnknownTokens: unknown, cacheCreation1hTokens: 3e5,
+      });
+      // 3e5 at 8/M (2.4) + 7e5 at 5/M (3.5)
+      close(r.costUsd, 5.9);
+      expect(r.estimated).toBe(false);
+    }
+  });
+  it('clamps an unknown part larger than the total, and a negative one to zero', () => {
+    const big = costOfUsage('claude-opus-5-5', {
+      cacheCreationTokens: 1e6, cacheCreationUnknownTokens: 5e6, cacheCreation1hTokens: 3e5,
+    });
+    close(big.costUsd, 8);
+    expect(big.estimated).toBe(true);
+    const neg = costOfUsage('claude-opus-5-5', {
+      cacheCreationTokens: 1e6, cacheCreationUnknownTokens: -5e5, cacheCreation1hTokens: 3e5,
+    });
+    close(neg.costUsd, 5.9);
+    expect(neg.estimated).toBe(false);
+  });
+  it('clamps the 1h part to what is left after the unknown part', () => {
+    const r = costOfUsage('claude-opus-5-5', {
+      cacheCreationTokens: 1e6, cacheCreationUnknownTokens: 6e5, cacheCreation1hTokens: 9e5,
+    });
+    close(r.costUsd, 8);
+    expect(r.estimated).toBe(true);
+  });
   it('does not mark estimated for an unknown split with no cache writes', () => {
     const r = costOfUsage('claude-opus-5-5', { inputTokens: 1e6 });
     close(r.costUsd, 4);

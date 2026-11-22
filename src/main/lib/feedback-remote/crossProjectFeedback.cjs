@@ -201,7 +201,27 @@ function resolveReplyTo(fromCwd, fromEpicId) {
   return { cwd: fromCwd, epicId: fromEpicId, claudeSessionId };
 }
 
+/** How the asking side wants a reply delivered: 'prompt' (default) wakes the
+ *  asking chat; 'event' records it as data for a caller that keeps its own
+ *  records (an outside app with no chat). */
+const REPLY_MODES = Object.freeze(['prompt', 'event']);
+const DEFAULT_REPLY_MODE = 'prompt';
+
+/** The replyTo to stamp for a given mode. 'prompt' is exactly the resolved
+ *  thread (or null). 'event' always stamps one — cwd-only when the sender has
+ *  no resolvable Epic/Claude session — carrying mode: 'event'. */
+function replyToForMode(resolved, fromCwd, replyMode) {
+  if (replyMode !== 'event') return resolved;
+  return resolved
+    ? { ...resolved, mode: 'event' }
+    : { cwd: fromCwd, epicId: null, claudeSessionId: null, mode: 'event' };
+}
+
 function replyNote(replyTo) {
+  if (replyTo && replyTo.mode === 'event') {
+    return 'The receiving session can answer with feedback_reply; the answer will arrive as an event in the '
+      + 'audit log, not as a chat prompt.';
+  }
   return replyTo
     ? `The receiving session can answer into this session (${replyTo.epicId}) with feedback_reply.`
     : 'No reply path exists because the sending session could not be identified, so the receiving session '
@@ -279,7 +299,11 @@ function composeFeedbackIntake({
       + 'Nobody in this project wrote the report below — an agent working in that project did, and it '
       + 'may be wrong about this codebase. Verify the claim against the code here before acting on it, '
       + 'and if it does not hold, say so and close the session rather than building against it.'
-      + (replyTo
+      + (replyTo && replyTo.mode === 'event'
+        ? ' When the work is done, blocked, or needs an answer, call feedback_reply from this session '
+          + '(not from a PRD, and never a new feedback_open_session); the answer is recorded as an event for '
+          + `the asking project ${path.basename(singleLine(replyTo.cwd)) || singleLine(replyTo.cwd)}, not sent as a chat prompt.`
+        : replyTo
         ? ' When the work is done, blocked, or needs an answer, call feedback_reply from this session '
           + '(not from a PRD, and never a new feedback_open_session); the answer lands in the asking session '
           + `${singleLine(replyTo.epicId)} in ${path.basename(singleLine(replyTo.cwd)) || singleLine(replyTo.cwd)}.`
@@ -472,12 +496,21 @@ function validateFeedbackInput(input = {}) {
   const ref = normalizeExternalRef(input.externalRef);
   if (!ref.ok) return bad(400, ref.error);
 
+  let replyMode = DEFAULT_REPLY_MODE;
+  if (input.replyMode !== undefined && input.replyMode !== null) {
+    if (!REPLY_MODES.includes(input.replyMode)) {
+      return bad(400, `replyMode must be one of ${REPLY_MODES.join(' | ')} (got ${JSON.stringify(input.replyMode)})`);
+    }
+    replyMode = input.replyMode;
+  }
+
   return {
     ok: true,
     value: {
       toCwd,
       fromCwd,
       externalRef: ref.value,
+      replyMode,
       title,
       body,
       tag,
@@ -737,7 +770,7 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
   }
 
   const originAsk = resolveOriginAsk(v.fromCwd, v.fromEpicId);
-  const replyTo = resolveReplyTo(v.fromCwd, v.fromEpicId);
+  const replyTo = replyToForMode(resolveReplyTo(v.fromCwd, v.fromEpicId), v.fromCwd, v.replyMode);
 
   const { goalText, openingPrompt, sections } = composeFeedbackIntake({
     fromCwd: v.fromCwd,
@@ -862,6 +895,7 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     // True only when source.replyTo was stamped — the MCP note keys its
     // feedback_reply promise off this, never off the delivery alone.
     replyThread: Boolean(replyTo),
+    ...(v.replyMode === 'event' ? { replyMode: 'event' } : {}),
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
     note: (macroGranted
@@ -1176,6 +1210,8 @@ module.exports = {
   composeFeedbackIntake,
   resolveOriginAsk,
   resolveReplyTo,
+  REPLY_MODES,
+  DEFAULT_REPLY_MODE,
   validateFeedbackInput,
   openFeedbackSession,
   recordExternalRefWithRetry,

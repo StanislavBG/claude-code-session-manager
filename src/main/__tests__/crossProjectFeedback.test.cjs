@@ -944,6 +944,74 @@ test('grounding mentions feedback_reply only with replyTo; byte-identical withou
   expect(threaded.sections.map((x) => x.part)).toEqual(plain.sections.map((x) => x.part));
 });
 
+test('replyMode: absent defaults to prompt; prompt/event accepted; anything else is 400', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const absent = validateFeedbackInput(payload(to, from));
+  expect(absent.ok).toBe(true);
+  expect(absent.value.replyMode).toBe('prompt');
+  expect(validateFeedbackInput(payload(to, from, { replyMode: 'prompt' })).value.replyMode).toBe('prompt');
+  expect(validateFeedbackInput(payload(to, from, { replyMode: 'event' })).value.replyMode).toBe('event');
+  for (const bad of ['webhook', 'EVENT', '', 1, true, {}]) {
+    const r = validateFeedbackInput(payload(to, from, { replyMode: bad }));
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/replyMode must be one of prompt \| event/);
+  }
+});
+
+test("replyMode 'prompt' explicitly behaves exactly as absent", async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from);
+  const r = await openFeedbackSession(
+    payload(to, from, { originClaudeSessionId: s.sessionId, replyMode: 'prompt' }),
+    { appendResponseEventIfKnown: async () => true },
+  );
+  expect(r.ok).toBe(true);
+  expect(r.replyMode).toBeUndefined();
+  expect(r.replyThread).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.source.replyTo).toEqual({ cwd: from, epicId: s.epicId, claudeSessionId: s.sessionId });
+});
+
+test("replyMode 'event' stamps mode on a resolved replyTo and says the answer arrives as an event", async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from);
+  const r = await openFeedbackSession(
+    payload(to, from, { originClaudeSessionId: s.sessionId, replyMode: 'event' }),
+    { appendResponseEventIfKnown: async () => true },
+  );
+  expect(r.ok).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.source.replyTo).toEqual({ cwd: from, epicId: s.epicId, claudeSessionId: s.sessionId, mode: 'event' });
+  assertValidPromptSession(epic);
+  expect(r.replyMode).toBe('event');
+  expect(r.replyThread).toBe(true);
+  expect(r.note).toMatch(/arrive as an event in the audit log, not as a chat prompt/);
+});
+
+test("replyMode 'event' stamps a cwd-only replyTo when the sender is unresolved", async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const r = await openFeedbackSession(
+    payload(to, from, { replyMode: 'event' }),
+    { appendResponseEventIfKnown: async () => true },
+  );
+  expect(r.ok).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.source.replyTo).toEqual({ cwd: from, epicId: null, claudeSessionId: null, mode: 'event' });
+  expect(r.replyMode).toBe('event');
+  expect(r.replyThread).toBe(true);
+  expect(r.note).toMatch(/arrive as an event in the audit log, not as a chat prompt/);
+  expect(r.note).not.toMatch(/No reply path exists/);
+  const grounding = epic.sections.find((x) => x.part === 'grounding');
+  expect(grounding.text).toContain('feedback_reply');
+  expect(grounding.text).toContain('recorded as an event');
+  expect(grounding.text).not.toContain('null');
+});
+
 test('EpicSourceSchema.parse keeps replyTo and replyOf', () => {
   const src = {
     producer: 'cross-project-feedback',

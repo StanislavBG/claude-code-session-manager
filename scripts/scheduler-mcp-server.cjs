@@ -605,6 +605,11 @@ const TOOLS = [
           type: 'string',
           description: 'Optional: your own id for this handoff, 1 to 200 characters of letters, digits or . _ : / @ - (trimmed). It is stored on the new session and returned. Repeating a call with the same toCwd, fromCwd and externalRef opens nothing new and returns the session that already exists (status "existing", existing: true); the same externalRef already used by a different sender is refused with 409.',
         },
+        replyMode: {
+          type: 'string',
+          enum: ['prompt', 'event'],
+          description: "Optional: how a reply comes back — 'prompt' (default) wakes your chat session, 'event' records it as data in the audit log for a caller with no chat.",
+        },
       },
       required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'],
     },

@@ -27,7 +27,18 @@ const { readTail } = require('../util/fileTail.cjs');
  *  pause at 58% weekly). Tool output may also mention 429 or "rate limit". */
 function detectRateLimitInLog(logPath) {
   try {
-    const text = readTail(logPath, 16384);
+    return detectRateLimitInText(readTail(logPath, 16384));
+  } catch {
+    return false;
+  }
+}
+
+/** Same detection over already-captured text (e.g. a captured stdout tail).
+ *  Only the last 16 KB is scanned, matching the log-tail variant. Never throws. */
+function detectRateLimitInText(rawText) {
+  try {
+    const all = typeof rawText === 'string' ? rawText : '';
+    const text = all.length > 16384 ? all.slice(-16384) : all;
     if (!text) return false;
     for (const line of text.split('\n')) {
       const t = line.trim();
@@ -51,4 +62,4 @@ function detectRateLimitInLog(logPath) {
   }
 }
 
-module.exports = { detectRateLimitInLog };
+module.exports = { detectRateLimitInLog, detectRateLimitInText };

@@ -10,6 +10,7 @@
   "atomicFs": "util",
   "taskLedger": "tasks",
   "taskSwitch": "tasks",
+  "taskRun": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

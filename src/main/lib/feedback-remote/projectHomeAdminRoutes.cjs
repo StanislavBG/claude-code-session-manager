@@ -79,6 +79,23 @@ const NETWORK_CHECKS = [
   { re: /<a\b[^>]*\bhref\s*=\s*["']?\s*(?:https?:|\/\/|javascript:)/i, message: '<a href="http(s):|//|javascript:…"> is not allowed' },
 ];
 
+// <meta name="sm-demo-aspect" content="..."> in any attribute order, either quote style.
+const META_TAG_RE = /<meta\b[^>]*>/gi;
+const ASPECT_NAME_RE = /\bname\s*=\s*(["'])\s*sm-demo-aspect\s*\1/i;
+const CONTENT_ATTR_RE = /\bcontent\s*=\s*(["'])(.*?)\1/i;
+const VIDEO_ASPECTS = ['16:9', '9:16'];
+
+/** The document's declared aspect: '16:9' when no tag, an error for any other value. */
+function readAspect(html) {
+  for (const tag of html.match(META_TAG_RE) ?? []) {
+    if (!ASPECT_NAME_RE.test(tag)) continue;
+    const content = (tag.match(CONTENT_ATTR_RE)?.[2] ?? '').trim();
+    if (VIDEO_ASPECTS.includes(content)) return { aspect: content };
+    return { error: `sm-demo-aspect content must be '16:9' or '9:16' (got '${content.slice(0, 40)}')` };
+  }
+  return { aspect: '16:9' };
+}
+
 const DURATION_META_RE = /<meta\b[^>]*\bname\s*=\s*["']sm-demo-duration["'][^>]*\bcontent\s*=\s*["'](\d+)["'][^>]*>/i;
 const MIN_DEMO_DURATION_S = 5;
 const MAX_DEMO_DURATION_S = 60;
@@ -220,7 +237,7 @@ function makeWriteHandler({ schema, bodyLimit, build }) {
       const abs = path.join(dir, 'index.html');
       await config.writeTextAtomic(abs, built.html, { writer: 'project-home' });
       await config.writeTextAtomic(path.join(dir, 'meta.json'), JSON.stringify(built.meta, null, 2) + '\n', { writer: 'project-home' });
-      sendJson(res, 200, { ok: true, path: abs, bytes: Buffer.byteLength(built.html, 'utf8'), id: built.meta.id });
+      sendJson(res, 200, { ok: true, path: abs, bytes: Buffer.byteLength(built.html, 'utf8'), id: built.meta.id, meta: built.meta });
     } catch (e) {
       sendJson(res, 500, { ok: false, error: e?.message ?? 'write failed' });
     }
@@ -257,6 +274,9 @@ function buildVideo(input, { videoId, title, kind, lengthS, meta }) {
   if (rejection) return { error: rejection };
   const declared = Number(input.html.match(DURATION_META_RE)[1]);
   if (declared !== lengthS) return { error: `sm-demo-duration (${declared}) must equal lengthS (${lengthS})` };
+  // The document's tag is the one source; a caller-supplied meta.aspect is ignored.
+  const declaredAspect = readAspect(input.html);
+  if (declaredAspect.error) return { error: declaredAspect.error };
   const html = injectPlayerBridge(injectCsp(input.html));
   const bytes = Buffer.byteLength(html, 'utf8');
   return {
@@ -268,6 +288,7 @@ function buildVideo(input, { videoId, title, kind, lengthS, meta }) {
       title,
       kind,
       lengthS,
+      aspect: declaredAspect.aspect,
       createdAt: new Date().toISOString(),
       report: { ...meta.report, bytes },
     }),

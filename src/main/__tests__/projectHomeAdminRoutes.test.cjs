@@ -287,6 +287,67 @@ test('videos/write saves HTML with the CSP and the bridge, stamps id/createdAt/b
   expect(fs.readdirSync(path.join(pagesRoot(cwd), 'videos')).sort()).toEqual(['my-vid', 'other-vid']);
 });
 
+const withAspectTag = (tag) => GOOD_DEMO_VIDEO_HTML.replace('<meta name="sm-demo-duration"', `${tag}<meta name="sm-demo-duration"`);
+const readVideoMeta = (cwd, id = 'my-vid') => JSON.parse(fs.readFileSync(path.join(pagesRoot(cwd), 'videos', id, 'meta.json'), 'utf8'));
+
+test.each([
+  ['<meta name="sm-demo-aspect" content="9:16">', '9:16'],
+  ["<meta content='9:16' name='SM-Demo-Aspect'>", '9:16'],
+  ['<meta name="sm-demo-aspect" content="16:9">', '16:9'],
+  ['', '16:9'],
+])('videos/write reads the sm-demo-aspect tag %j into meta.aspect %s', async (tag, aspect) => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const r = await adminHttp.call('POST', '/admin/project-home/videos/write', { body: videoBody(cwd, { html: withAspectTag(tag) }) });
+  expect(r.status).toBe(200);
+  expect(r.body.meta.aspect).toBe(aspect);
+  expect(readVideoMeta(cwd).aspect).toBe(aspect);
+});
+
+test('videos/write ignores a caller-supplied meta.aspect; the document tag is the one source', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const r = await adminHttp.call('POST', '/admin/project-home/videos/write', { body: videoBody(cwd, { meta: videoMeta({ aspect: '9:16' }) }) });
+  expect(r.status).toBe(200);
+  expect(r.body.meta.aspect).toBe('16:9');
+  expect(readVideoMeta(cwd).aspect).toBe('16:9');
+});
+
+test('videos/write refuses an sm-demo-aspect content other than 16:9 or 9:16 with a 400 naming both', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const r = await adminHttp.call('POST', '/admin/project-home/videos/write', { body: videoBody(cwd, { html: withAspectTag('<meta name="sm-demo-aspect" content="4:3">') }) });
+  expect(r.status).toBe(400);
+  expect(r.body.ok).toBe(false);
+  expect(r.body.error).toContain('16:9');
+  expect(r.body.error).toContain('9:16');
+  expect(fs.existsSync(path.join(pagesRoot(cwd), 'videos'))).toBe(false);
+});
+
+test("videos/write accepts kind 'episode' (a vertical series episode)", async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const html = withAspectTag('<meta name="sm-demo-aspect" content="9:16">');
+  const r = await adminHttp.call('POST', '/admin/project-home/videos/write', { body: videoBody(cwd, { kind: 'episode', html, meta: videoMeta({ kind: 'episode' }) }) });
+  expect(r.status).toBe(200);
+  expect(readVideoMeta(cwd)).toMatchObject({ kind: 'episode', aspect: '9:16' });
+});
+
+test('projectVideoMeta still parses a stored meta.json without aspect', () => {
+  const { schemas } = require('../ipcSchemas.cjs');
+  const stored = {
+    ...videoMeta(), id: 'old-vid', createdAt: '2026-11-01T00:00:00.000Z',
+    report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: [], bytes: 10 },
+  };
+  const parsed = schemas.projectVideoMeta.parse(stored);
+  expect(parsed.aspect).toBeUndefined();
+  expect(schemas.projectVideoMeta.safeParse({ ...stored, aspect: '4:3' }).success).toBe(false);
+});
+
 test('videos/write rejects schema errors, bad ids, duration mismatch and network APIs with 400', async () => {
   const cwd = await mkProjectCwd();
   const adminHttp = makeFakeAdminHttp();

@@ -1077,8 +1077,10 @@ const projectVideoReportFields = {
 const projectVideoMeta = z.object({
   id: entryId,
   title: z.string().min(1).max(120),
-  kind: z.enum(['project-demo', 'blog-post', 'feature']),
+  kind: z.enum(['project-demo', 'blog-post', 'feature', 'episode']),
   target: z.string().max(300).optional(),
+  // From the document's sm-demo-aspect tag; absent on older entries (treat as '16:9').
+  aspect: z.enum(['16:9', '9:16']).optional(),
   style: z.string().max(40),
   lengthS: z.number().int().min(5).max(60),
   createdAt: z.string().datetime(),
@@ -1125,7 +1127,7 @@ const projectVideoAdminWriteBody = z.object({
   cwd: z.string().min(1).max(4096).optional(),
   videoId: entryId,
   title: z.string().min(1).max(120),
-  kind: z.enum(['project-demo', 'blog-post', 'feature']),
+  kind: z.enum(['project-demo', 'blog-post', 'feature', 'episode']),
   lengthS: z.number().int().min(5).max(60),
   html: z.string(),
   meta: projectVideoMeta.omit({ id: true, createdAt: true }).extend({

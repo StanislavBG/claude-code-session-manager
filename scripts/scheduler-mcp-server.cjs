@@ -848,7 +848,7 @@ const TOOLS = [
         cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
         videoId: { type: 'string', description: 'Stable id (kebab-case) of the video; writing the same id replaces that video.' },
         title: { type: 'string', description: 'Human title shown in the video list.' },
-        kind: { type: 'string', description: 'What the video is: exactly one of project-demo, blog-post, feature.' },
+        kind: { type: 'string', enum: ['project-demo', 'blog-post', 'feature', 'episode'], description: 'What the video is: exactly one of project-demo, blog-post, feature, episode (one episode of a series, such as a TikTok short). The aspect comes from the document\'s <meta name="sm-demo-aspect" content="16:9|9:16"> tag (default 16:9).' },
         lengthS: { type: 'number', description: 'Length of the video in seconds. Also sets the size cap: 2 MiB per started 30 s (30 s = 2 MiB, 60 s = 4 MiB).' },
         html: { type: 'string', description: 'The complete self-contained HTML/JS video document (<= 2 MiB per started 30 s of lengthS, e.g. 4 MiB for 60 s; no remote references or network-capable APIs).' },
         htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (<= 2 MiB per started 30 s of lengthS, e.g. 4 MiB for 60 s). Prefer this for base64 data URIs. Give exactly one of html / htmlPath.' },

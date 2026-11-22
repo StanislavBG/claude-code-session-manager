@@ -22,6 +22,7 @@ Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subs
 | [identity-boundary.md](identity-boundary.md) | public-repo persona rule, identity guard, machine setup | LAW-RATIONALE |
 | [page-stewards.md](page-stewards.md) | per-page steward subagents and the six page principles | REFERENCE |
 | [customer-feedback.md](customer-feedback.md) | Feedback button customer feedback: three stores, bilko.run wire contract, lifecycle | REFERENCE |
+| [tasks.md](tasks.md) | Task admin contract for outside callers: routes, errors, statuses, argv, env, fallback | REFERENCE |
 | [external-contract.md](external-contract.md) | what outside apps may rely on: discovery, handoff, Epic reads, events, version rule | REFERENCE |
 | [application-menu.md](application-menu.md) | Electron application menu structure | REFERENCE |
 | [heap-snapshot-diagnostics.md](heap-snapshot-diagnostics.md) | renderer heap-snapshot procedure | RUNBOOK |

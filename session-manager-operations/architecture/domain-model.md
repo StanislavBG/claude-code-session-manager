@@ -338,6 +338,7 @@ scoping scheme. The one Epic-less unit is the [Task](#tasks), scoped TAB → ope
   `lib/tasks/taskLedger.cjs`). Day-file JSONL summaries plus `bodies/<taskId>.json`; retention is `tasksDays`
   from `opsRetentionSettings.cjs`. A run made without Session Manager ("ran without SM") can be imported as an
   `imported` ledger line. Layout: [`../tasks/README.md`](../tasks/README.md).
+- **Caller contract** (routes, errors, statuses, argv, env, fallback rule): [tasks.md](tasks.md).
 
 ## Single-writer law
 

@@ -54,7 +54,7 @@ export function ConfigFileCard({ eyebrow, badge, path, note, children }: ConfigF
           <span className="text-[11.5px] font-semibold px-2 py-0.5 rounded-full bg-sage/15 text-sage-dark">{badge}</span>
         )}
       </div>
-      <span className="font-mono text-[12.5px] text-fg truncate" title={path}>{path}</span>
+      <span data-testid="config-file-card-path" className="font-mono text-[12.5px] text-fg break-all">{path}</span>
       {note !== undefined && <span className="text-xs text-fg-faint">{note}</span>}
       {children}
     </div>

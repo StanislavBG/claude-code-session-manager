@@ -62,6 +62,16 @@ describe('ConfigLayout', () => {
     expect(container.querySelector('[data-testid="config-workbench-detail"]')).not.toBeNull()
   })
 
+  it('file card path wraps across lines in full (break-all, never truncated)', () => {
+    const long = '~/.claude/projects/-home-bilko-Self/memory/'
+    render(<ConfigFileCard eyebrow="MEMORY FOLDER" path={long} />)
+    const path = container.querySelector('[data-testid="config-file-card-path"]') as HTMLElement
+    expect(path.textContent).toBe(long)
+    expect(path.classList.contains('truncate')).toBe(false)
+    expect(path.classList.contains('break-all')).toBe(true)
+    expect(path.className).not.toMatch(/whitespace-nowrap|text-ellipsis/)
+  })
+
   it('row click calls onSelect and the selected row has aria-selected=true', () => {
     const a = vi.fn()
     const b = vi.fn()

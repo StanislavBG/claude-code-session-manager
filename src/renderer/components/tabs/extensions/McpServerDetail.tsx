@@ -557,6 +557,9 @@ export function ToolsCard({
         data-testid="mcp-tools"
         className="flex items-center gap-4 px-[18px] py-4 rounded-[14px] border border-dashed border-rule"
       >
+        <span data-testid="mcp-tools-empty-icon" className="shrink-0 flex text-fg-faint">
+          <AlmanacIcon name="tool" size={26} />
+        </span>
         <div data-testid="mcp-tools-empty" className="flex-1 min-w-0">
           <div className="text-[15px] font-semibold text-fg">Tools appear after a check</div>
           <div className="text-[13.5px] text-fg-dim">

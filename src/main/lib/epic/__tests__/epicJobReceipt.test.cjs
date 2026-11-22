@@ -5,10 +5,11 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const fsp = require('node:fs/promises');
 const { gatherEpicJobReceipt } = require('../epicJobReceipt.cjs');
 
 let root;
@@ -22,7 +23,7 @@ function addRun(runId, slug, meta) {
 }
 
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'epicreceipt-')); });
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }); });
 
 test('sums attempts per PRD; ignores other projects, old runs; null cost counted as run only', async () => {
   addRun('2026-10-22T01-00-00-000Z', '100-a', {
@@ -99,4 +100,32 @@ test('slugs with a slash, backslash, "." or ".." are dropped; files they would r
   } finally {
     fs.rmSync(parentBait, { force: true });
   }
+});
+
+test('lists each run folder once and opens only the wanted meta files that exist', async () => {
+  addRun('2026-10-22T01-00-00-000Z', '100-a', { exitCode: 0, numTurns: 1, totalCostUsd: 1, finishedAt: 1000 });
+  addRun('2026-10-22T02-00-00-000Z', '101-b', { exitCode: 0, numTurns: 2, totalCostUsd: 2, finishedAt: 2000 });
+  fs.mkdirSync(path.join(root, '2026-10-22T03-00-00-000Z'));
+  // A meta file for a slug nobody asked for — listed, never opened.
+  addRun('2026-10-22T03-00-00-000Z', '900-x', { totalCostUsd: 9 });
+  const readSpy = vi.spyOn(fsp, 'readFile');
+  const readdirSpy = vi.spyOn(fsp, 'readdir');
+
+  const r = await gatherEpicJobReceipt({
+    cwd: CWD, slugs: ['100-a', '101-b', '102-c', '103-d', '104-e'], sinceMs: SINCE, runsRoot: root,
+  });
+
+  const metaReads = readSpy.mock.calls.map((c) => String(c[0])).filter((p) => p.endsWith('.meta.json'));
+  expect(metaReads.sort()).toEqual([
+    path.join(root, '2026-10-22T01-00-00-000Z', '100-a.meta.json'),
+    path.join(root, '2026-10-22T02-00-00-000Z', '101-b.meta.json'),
+  ]);
+  const runDirListings = readdirSpy.mock.calls.map((c) => String(c[0])).filter((p) => p !== root);
+  expect(runDirListings.sort()).toEqual([
+    path.join(root, '2026-10-22T01-00-00-000Z'),
+    path.join(root, '2026-10-22T02-00-00-000Z'),
+    path.join(root, '2026-10-22T03-00-00-000Z'),
+  ]);
+  expect(r.runs).toBe(2);
+  expect(r.costUsd).toBeCloseTo(3);
 });

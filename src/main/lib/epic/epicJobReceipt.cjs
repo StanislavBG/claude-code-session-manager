@@ -2,8 +2,8 @@
  * epicJobReceipt.cjs — sums the scheduler run metadata (`<runId>/<slug>.meta.json`)
  * of one Epic's PRDs, every attempt included, into a cost/usage receipt.
  *
- * Complexity O(run dirs since sinceMs × slugs). Never rejects: a missing runs
- * dir, unreadable run dir or malformed meta file is skipped.
+ * Complexity: one listing per run dir since sinceMs; only wanted meta files that exist are
+ * opened. Never rejects: a missing runs dir, unreadable run dir or malformed meta file is skipped.
  */
 
 'use strict';
@@ -12,6 +12,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { runIdToMs } = require('../../loopEfficiencyHandlers.cjs');
 
+const META_SUFFIX = '.meta.json';
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 async function readJson(p) {
@@ -30,8 +31,8 @@ async function gatherEpicJobReceipt({ cwd, slugs, sinceMs, runsRoot } = /** @typ
     const root = runsRoot || require('../scheduler/schedulerPaths.cjs').runsDir();
     const since = typeof sinceMs === 'number' && Number.isFinite(sinceMs) ? sinceMs : -Infinity;
     // Slugs name files inside a run dir — reject anything that could escape it.
-    const wanted = [...new Set(Array.isArray(slugs) ? slugs : [])]
-      .filter((s) => typeof s === 'string' && s && !s.includes('/') && !s.includes('\\') && s !== '.' && s !== '..');
+    const wanted = new Set((Array.isArray(slugs) ? slugs : [])
+      .filter((s) => typeof s === 'string' && s && !s.includes('/') && !s.includes('\\') && s !== '.' && s !== '..'));
     /** @type {Map<string, { slug: string, runs: number, costUsd: number, lastExitCode: number|null, lastFinishedAt: number|null, lastAt: number }>} */
     const per = new Map();
 
@@ -42,8 +43,14 @@ async function gatherEpicJobReceipt({ cwd, slugs, sinceMs, runsRoot } = /** @typ
       const t = runIdToMs(runId);
       if (!Number.isFinite(t) || t < since) continue;
       const runDir = path.join(root, runId);
-      for (const slug of wanted) {
-        const meta = await readJson(path.join(runDir, `${slug}.meta.json`));
+      let files;
+      try { files = await fsp.readdir(runDir); } catch { continue; }
+      for (const f of files) {
+        if (!f.endsWith(META_SUFFIX)) continue;
+        // Slug comes from the filename and must be in the guarded wanted set.
+        const slug = f.slice(0, -META_SUFFIX.length);
+        if (!wanted.has(slug)) continue;
+        const meta = await readJson(path.join(runDir, f));
         if (!meta || typeof meta !== 'object' || meta.cwd !== cwd) continue;
         let row = per.get(slug);
         if (!row) {

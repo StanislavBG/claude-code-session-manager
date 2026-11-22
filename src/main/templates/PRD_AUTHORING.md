@@ -223,6 +223,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **Every command bounded:** every test/build/deploy command is wrapped in `timeout` (typecheck/unit 300s, e2e 120s, `curl --max-time 15`).
 - [ ] **§2 No bonus work:** the AC list is the only source of work.
 - [ ] **§3 Verify, don't poll:** every deploy/migration step is followed by a test command that exits 1 on failure; the AC test command ran green once before you declare done.
+- [ ] **Traceable criteria:** every criterion must be checkable after the run from the tree, a commit, or a read-only probe (registry, API, file); run-time steps such as printing probe output or a value seen mid-run belong in the run report, not in a criterion. Why: the 2026-11-21 release fix plan (3240) had process claims as criteria, and its validator could not verify them.
 - [ ] **§4 Bounded generators:** any search/seed loop has an explicit max and surfaces failure on exhaustion.
 - [ ] **§5 Frontmatter:** `title`, `cwd` (exists on this machine); `estimateMinutes` omitted (optional); `dependsOn` used for ordering, not `parallelGroup`.
 - [ ] **§6 Gate and files:** `gate` follows every rule in §6 (or is `["none"]` alone); `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.

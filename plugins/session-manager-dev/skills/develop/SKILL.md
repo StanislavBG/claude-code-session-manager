@@ -252,11 +252,18 @@ Rules:
       safest reasonable choice, and report it. Why: queued work runs with no questions asked.
    2. **A PLAN SETTLED digest.** Read the validator records it names. A `REFUTED` PRD, or a
       Critical or Important finding, means a fix wave: one `behavior` or `wire` PRD per finding
-      plus a new validate PRD. Never fix inline. A Not validated list means validate exactly
-      those PRDs here. All `VERIFIED` with nothing open means Done: write the final report.
-4. **Done** = the latest validator marked every PRD `VERIFIED`, no Critical or Important
-   finding is open, and its record is committed. Never "done with caveats": a REFUTED PRD gets
-   a fix wave or an explicit human decision to stop.
+      plus a new validate PRD. Never fix inline. The new validate PRD has one criterion per fix
+      PRD and one per PRD the earlier validator marked `REFUTED`, each cited by slug. Why: a
+      refuted PRD keeps its Epic blocked until a validator verifies that same PRD. A PRD marked
+      `REFUTED` again after its fix wave, on the same criterion, gets no third fix wave: list it
+      as open in the final report with the validator's reason and what was tried, for the human
+      to decide. Why: a second miss on the same criterion means the plan is wrong, and another
+      wave would repeat it. A Not validated list means validate exactly those PRDs here. All
+      `VERIFIED` with nothing open means Done: write the final report.
+4. **Done** = the latest validator marked every PRD `VERIFIED`, including each PRD an earlier
+   validator refuted, no Critical or Important finding is open, and its record is committed.
+   Never "done with caveats": a REFUTED PRD gets a fix wave, or after its second refutation an
+   open entry in the final report for the human to decide.
 
 ### Final report
 

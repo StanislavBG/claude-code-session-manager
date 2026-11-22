@@ -52,7 +52,7 @@ const { startDispatchLoop } = require('./lib/scheduler/dispatchLoop.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 const { randomUUID } = require('node:crypto');
 const { execFile, execFileSync, spawnSync } = require('node:child_process');
-const { buildJobSandboxSettings, sandboxDependencies } = require('./lib/claude/jobSandboxPolicy.cjs');
+const { buildJobSandboxSettings, sandboxDependencies, sandboxChildEnv, SANDBOX_PROFILES } = require('./lib/claude/jobSandboxPolicy.cjs');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
@@ -5717,17 +5717,41 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
     // Distinct comm (`sm-claude-job`) + slug-labelled argv0 for System Monitor.
     // Both keep the word `claude`, which the /\bclaude\b/ reaper gates need.
+    // An os-sandbox job gets its own private temp dir as its only tmp write
+    // root (TMPDIR/TMP/TEMP point at it), so its Bash cannot write into other
+    // /tmp dirs. Kept short and directly under os.tmpdir(): the CLI puts its
+    // proxy unix sockets under $TMPDIR and socket paths cap at 108 bytes —
+    // never move it under the run directory.
+    const sandboxDeps = resolveJobSandboxDeps();
+    const sandboxAgentType = job.agentType || 'dev-lead';
+    /** @type {string|null} */
+    let sandboxTmpDir = null;
+    if (sandboxDeps.available && Object.prototype.hasOwnProperty.call(SANDBOX_PROFILES, sandboxAgentType)) {
+      try {
+        sandboxTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smj-'));
+      } catch (e) {
+        sandboxTmpDir = null;
+        safeLog(`[scheduler] sandbox: private tmp dir not created (${(e && e.message) || e}); using ${os.tmpdir()}\n`);
+      }
+    }
+    const removeSandboxTmp = () => {
+      if (!sandboxTmpDir) return;
+      try { fs.rmSync(sandboxTmpDir, { recursive: true, force: true }); } catch { /* never throws */ }
+    };
     const sandboxPolicy = buildJobSandboxSettings({
-      agentType: job.agentType || 'dev-lead',
+      agentType: sandboxAgentType,
       worktreeDir: spawnCwd,
       projectRoot: cwd,
       homeDir: os.homedir(),
-      tmpDir: os.tmpdir(),
-      deps: resolveJobSandboxDeps(),
+      tmpDir: sandboxTmpDir || os.tmpdir(),
+      deps: sandboxDeps,
     });
-    const sandboxMeta = sandboxPolicy.summary;
+    // childEnv was built (and cleanChildEnv already ran) above.
+    Object.assign(childEnv, sandboxChildEnv(sandboxPolicy, sandboxTmpDir || os.tmpdir()));
+    const sandboxMeta = { ...sandboxPolicy.summary, tmpDir: sandboxTmpDir };
     safeLog(`[scheduler] sandbox: level=${sandboxMeta.level} profile=${sandboxMeta.profile ?? 'none'} ` +
-      `network=${sandboxMeta.network ? (sandboxMeta.network.join(',') || 'none') : 'unrestricted'} reason=${sandboxMeta.reason ?? 'none'}\n`);
+      `network=${sandboxMeta.network ? (sandboxMeta.network.join(',') || 'none') : 'unrestricted'} reason=${sandboxMeta.reason ?? 'none'} ` +
+      `tmp=${sandboxTmpDir ?? 'none'}\n`);
     const jobArgs = buildClaudeSpawnArgs({
       sandboxArgs: sandboxPolicy.argv,
       model: personaResolution.model,
@@ -5749,6 +5773,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       safeLog(`[scheduler] ${errMsg}\n`);
       closeFd();
       config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta });
+      removeSandboxTmp();
       resolve({ exitCode: -1, durationMs: 0, error: errMsg, launchError: 'argv_too_large', sessionId });
       return;
     }
@@ -5801,6 +5826,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
           config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied });
+          removeSandboxTmp();
           resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId,
             ...(launchFailure.isArgvTooLargeSpawnError(error?.message) ? { launchError: 'argv_too_large' } : {}) });
           return;
@@ -5867,6 +5893,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
         });
+        removeSandboxTmp();
         resolve({
           exitCode: effectiveCode, durationMs, rateLimited, networkError, launchFailure: launchFailed, resultStats,
           leakedDescendants: leaked, sessionId, killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,

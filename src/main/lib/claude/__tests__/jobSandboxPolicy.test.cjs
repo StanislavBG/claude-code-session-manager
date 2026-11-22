@@ -9,6 +9,7 @@ const {
   SANDBOX_PROFILES,
   sandboxDependencies,
   buildJobSandboxSettings,
+  sandboxChildEnv,
 } = require('../jobSandboxPolicy.cjs');
 
 const BASE = Object.freeze({
@@ -200,4 +201,23 @@ describe('argument validation', () => {
       assert.throws(() => buildJobSandboxSettings(args), (e) => e instanceof TypeError && e.message.includes(field));
     });
   }
+});
+
+describe('sandboxChildEnv', () => {
+  it('points TMPDIR, TMP and TEMP at the private dir for os-sandbox', () => {
+    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', deps: OK_DEPS });
+    assert.equal(p.level, 'os-sandbox');
+    assert.deepEqual(sandboxChildEnv(p, '/tmp/smj-abc123'), {
+      TMPDIR: '/tmp/smj-abc123',
+      TMP: '/tmp/smj-abc123',
+      TEMP: '/tmp/smj-abc123',
+    });
+  });
+
+  it('returns {} for tool-rules', () => {
+    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', deps: { available: false, missing: ['socat'] } });
+    assert.equal(p.level, 'tool-rules');
+    assert.deepEqual(sandboxChildEnv(p, '/tmp/smj-abc123'), {});
+    assert.deepEqual(sandboxChildEnv(null, '/tmp/smj-abc123'), {});
+  });
 });

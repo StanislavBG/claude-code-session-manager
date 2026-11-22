@@ -82,3 +82,19 @@ test('without sandboxArgs (null or empty) the argv is unchanged', () => {
   expect(plain.filter((a) => a === '--dangerously-skip-permissions')).toHaveLength(1);
   expect(plain).not.toContain('--settings');
 });
+
+test('an os-sandbox policy with a private tmpDir declares that dir, not os.tmpdir(), as a write root', () => {
+  const privateTmp = path.join(os.tmpdir(), 'smj-test01');
+  const p = buildJobSandboxSettings({
+    agentType: 'dev-lead',
+    worktreeDir: path.join(tmpHome, 'wt'),
+    projectRoot: path.join(tmpHome, 'proj'),
+    homeDir: tmpHome,
+    tmpDir: privateTmp,
+    deps: { available: true, missing: [] },
+  });
+  expect(p.level).toBe('os-sandbox');
+  const allowWrite = p.settings.sandbox.filesystem.allowWrite;
+  expect(allowWrite).toContain(privateTmp);
+  expect(allowWrite).not.toContain(os.tmpdir());
+});

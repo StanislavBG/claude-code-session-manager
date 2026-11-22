@@ -179,9 +179,24 @@ function buildJobSandboxSettings(args) {
   };
 }
 
+/**
+ * Env vars a job's child process needs for its sandbox level. An os-sandbox
+ * job gets TMPDIR/TMP/TEMP pointed at its private temp dir (the only tmp
+ * write root its settings declare); tool-rules jobs get no env change.
+ *
+ * @param {{ level?: string }|null|undefined} policy
+ * @param {string} tmpDir
+ * @returns {Record<string, string>}
+ */
+function sandboxChildEnv(policy, tmpDir) {
+  if (!policy || policy.level !== 'os-sandbox') return {};
+  return { TMPDIR: tmpDir, TMP: tmpDir, TEMP: tmpDir };
+}
+
 module.exports = {
   SANDBOX_SECRET_PATHS,
   SANDBOX_PROFILES,
   sandboxDependencies,
   buildJobSandboxSettings,
+  sandboxChildEnv,
 };

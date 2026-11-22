@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
 import { useState } from 'react'
-import { ConfigBand, ConfigSearchResults, type ConfigBandTab } from './ConfigBand'
+import { ConfigBand, ConfigSearchResults, compactScopePath, type ConfigBandTab } from './ConfigBand'
 import type { ConfigSearchGroup } from '../../lib/configSearch'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -103,6 +103,41 @@ describe('ConfigBand', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(onSearch).toHaveBeenLastCalledWith('model')
+  })
+})
+
+describe('compactScopePath', () => {
+  it('returns a path that fits unchanged', () => {
+    expect(compactScopePath('~/Projects/Self')).toBe('~/Projects/Self')
+    expect(compactScopePath('~/.claude')).toBe('~/.claude')
+  })
+
+  it('elides a long nested path from the start, keeping the last folder', () => {
+    const long = '~/Projects/clients/acme-corp/monorepo/packages/web-frontend'
+    const out = compactScopePath(long)
+    expect(out.startsWith('…/')).toBe(true)
+    expect(out.endsWith('/web-frontend')).toBe(true)
+    expect(out.length).toBeLessThanOrEqual(32)
+    expect(out).toBe('…/monorepo/packages/web-frontend')
+    expect(compactScopePath(long, 20)).toBe('…/web-frontend')
+  })
+
+  it('keeps a single overlong last segment whole', () => {
+    const seg = 'an-extremely-long-project-folder-name-that-cannot-fit'
+    expect(compactScopePath(`~/Projects/${seg}`)).toBe(`…/${seg}`)
+  })
+})
+
+describe('ConfigBand scope path', () => {
+  it('renders the compacted path with the full path as its title, no CSS truncate', () => {
+    const full = '~/Projects/clients/acme-corp/monorepo/packages/web-frontend'
+    act(() => {
+      root.render(<ConfigBand eyebrow="E" title="T" scopePath={full} tabs={TABS} activeKey="mcp" onSelect={vi.fn()} />)
+    })
+    const path = container.querySelector<HTMLElement>('[data-testid="config-band-path"]')!
+    expect(path.textContent).toBe(compactScopePath(full))
+    expect(path.getAttribute('title')).toBe(full)
+    expect(path.className).not.toContain('truncate')
   })
 })
 

@@ -35,6 +35,26 @@ export interface ConfigBandTab<K extends string = string> {
   warn?: boolean
 }
 
+/**
+ * Shortens a scope path for the band by eliding from the START, so the last
+ * folder — the part that names the scope — always shows. Returns `path`
+ * unchanged when it is at most `max` characters; otherwise `…/` plus as many
+ * trailing segments as fit, and always the last segment whole even if that
+ * alone exceeds `max`.
+ */
+export function compactScopePath(path: string, max = 32): string {
+  if (path.length <= max) return path
+  const segments = path.split('/').filter((s) => s !== '')
+  if (segments.length === 0) return path
+  let tail = segments[segments.length - 1]
+  for (let i = segments.length - 2; i >= 0; i--) {
+    const next = `${segments[i]}/${tail}`
+    if (2 + next.length > max) break
+    tail = next
+  }
+  return `…/${tail}`
+}
+
 export interface ConfigBandProps<K extends string = string> {
   eyebrow: string
   title: string
@@ -166,15 +186,18 @@ export function ConfigBand<K extends string = string>({
       // Design band (ConfigWorkbench.dc.html): 84px tall border-box, 0 28px padding, 236px title column.
       className="shrink-0 box-border h-[84px] bg-fg text-bg-hi border-b border-fg px-7 py-0 flex items-center gap-[26px] whitespace-nowrap"
     >
-      <div data-testid="config-band-title" className="flex flex-col gap-0.5 w-[236px] shrink-0 min-w-0">
+      {/* Title group never shrinks below its content (236px floor); the tab strip yields first. */}
+      <div data-testid="config-band-title" className="flex flex-col gap-0.5 min-w-[236px] shrink-0">
         <span className="text-[10.5px] font-semibold tracking-[0.1em] text-bg-hi/60">{eyebrow}</span>
         <span className="flex items-baseline gap-2.5">
           <span className="font-serif text-[25px] font-medium leading-[1.15] text-bg-hi">{title}</span>
-          <span className="font-mono text-xs text-rhythm truncate">{scopePath}</span>
+          <span data-testid="config-band-path" title={scopePath} className="inline-block font-mono text-xs text-rhythm">
+            {compactScopePath(scopePath)}
+          </span>
         </span>
       </div>
 
-      <div role="tablist" aria-label={title} className="flex items-center gap-1.5">
+      <div role="tablist" aria-label={title} className="flex items-center gap-1.5 min-w-0 overflow-x-auto">
         {tabs.map((tab, i) => {
           const active = tab.key === activeKey
           return (

@@ -297,6 +297,12 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
       const band = page.getByTestId('config-band')
       await expect(band).toContainText(spec.eyebrow)
       await expect(band).toContainText(spec.scope)
+      // Scope path shows whole (the last folder names the scope) — not clipped by CSS.
+      const scopePath = band.getByTestId('config-band-path')
+      await expect(scopePath).toHaveText(spec.scope)
+      await expect(scopePath).toHaveAttribute('title', spec.scope)
+      const clip = await scopePath.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+      expect(clip.scroll).toBeLessThanOrEqual(clip.client)
       for (const [tab, count] of Object.entries(spec.counts)) {
         await expect(page.getByTestId(`config-band-tab-${tab}`).getByTestId('config-band-count')).toHaveText(count)
       }

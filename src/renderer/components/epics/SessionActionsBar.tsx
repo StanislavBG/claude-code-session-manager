@@ -3,7 +3,10 @@
  *
  * "+ New Session" is fixed; then one button per Macro shown in the active
  * project (machine-local macro library, `lib/useMacros.ts`), then "New Macro"
- * and a "⋯" manage panel (per-project visibility, edit, delete).
+ * and a "⋯" manage panel (per-project visibility, edit, delete). A
+ * `surface: 'project-video'` macro is one project's own Video tool (Project
+ * Home ▸ Video): it is never shown here — not in the strip, not in the manage
+ * panel — so no other project can switch it on.
  *
  * Pressing a Macro button is the same act as pressing "+ New Session" and
  * filling the card in — it goes through the one Epic-minting IPC handler that
@@ -131,7 +134,9 @@ export interface SessionActionsBarProps {
 export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
   const personas = useAgentPersonas()
   const { launch, launching, cwd } = useMacroLaunch(onSelect, personas)
-  const { macros: library, loaded } = useMacros()
+  const { macros: all, loaded } = useMacros()
+  // Project Video tools live only in their project's Project Home ▸ Video.
+  const library = all.filter((m) => m.surface !== 'project-video')
   const macros = macrosForProject(library, cwd)
   const [editor, setEditor] = useState<{ macro: Macro | null } | null>(null)
   const [managing, setManaging] = useState(false)

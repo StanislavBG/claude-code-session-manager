@@ -219,6 +219,28 @@ describe('SessionActionsBar', () => {
     expect(chip(rows.find((r) => r.getAttribute('data-macro-id') === 'm2')!)?.textContent).toBe('Project Home')
   })
 
+  it("never renders a 'project-video' macro: not in the strip, not in the manage panel", async () => {
+    library = [
+      macro(),
+      macro({ id: 'vid-here', label: 'Shorts', surface: 'project-video', projects: [CWD], job: { estimateMinutes: 10 } }),
+      macro({ id: 'vid-other', label: 'Reels', surface: 'project-video', projects: [OTHER], job: { estimateMinutes: 10 } }),
+    ]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    expect(qa(el, 'hotkey-macro').map((b) => b.getAttribute('data-macro-id'))).toEqual(['m1'])
+    act(() => q(el, 'hotkey-manage')!.click())
+    expect(qa(el, 'hotkey-manage-row').map((r) => r.getAttribute('data-macro-id'))).toEqual(['m1'])
+    expect(qa(el, 'hotkey-manage-toggle')).toHaveLength(1)
+    expect(el.textContent).not.toContain('Shorts')
+    expect(el.textContent).not.toContain('Reels')
+  })
+
+  it("hides the manage button when the library holds only 'project-video' macros", async () => {
+    library = [macro({ id: 'vid', surface: 'project-video', projects: [CWD] })]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    expect(qa(el, 'hotkey-macro')).toHaveLength(0)
+    expect(q(el, 'hotkey-manage')).toBeNull()
+  })
+
   it('delete requires a confirm step', async () => {
     library = [macro()]
     const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)

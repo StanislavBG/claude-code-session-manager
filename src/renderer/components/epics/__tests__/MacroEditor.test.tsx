@@ -313,6 +313,82 @@ describe('MacroEditor', () => {
     })
   })
 
+  describe("Project Home ▸ Video (surface 'project-video')", () => {
+    const VIDEO_LABEL = 'Project Home ▸ Video — this project only'
+    const options = () => Array.from((q('macro-surface') as HTMLSelectElement).options).map((o) => [o.value, o.textContent])
+    const hasVideo = () => options().some(([v]) => v === 'project-video')
+    const fill = () => act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+
+    it('offers the Video choice for a macro of this one project, labelled for this project only', () => {
+      mount({ macro: mac({ surface: 'sessions', projects: [CWD] }) })
+      expect(options()).toContainEqual(['project-video', VIDEO_LABEL])
+    })
+
+    it('offers it for a new macro (which belongs to this project)', () => {
+      mount()
+      expect(hasVideo()).toBe(true)
+    })
+
+    it('does not offer it for a macro shown in every project or in several projects', () => {
+      mount({ macro: mac({ surface: 'sessions', projects: ['*'] }) })
+      expect(hasVideo()).toBe(false)
+      act(() => root.unmount()); container.remove()
+      mount({ macro: mac({ surface: 'sessions', projects: [CWD, '/p/beta'] }) })
+      expect(hasVideo()).toBe(false)
+      act(() => root.unmount()); container.remove()
+      mount({ macro: mac({ surface: 'sessions', projects: ['/p/beta'] }) })
+      expect(hasVideo()).toBe(false)
+    })
+
+    it('choosing it hides the project-scope controls and saves surface project-video with projects [cwd]', async () => {
+      mount({ macro: mac({ surface: 'sessions', projects: [CWD] }) })
+      expect(q('macro-everywhere')).not.toBeNull()
+      pickSurface('project-video')
+      expect(q('macro-everywhere')).toBeNull()
+      expect(q('macro-everywhere-note')).toBeNull()
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ id: 'm', surface: 'project-video', projects: [CWD] }))
+    })
+
+    it('a new macro with "every project" ticked still saves [cwd] once moved to Video', async () => {
+      mount()
+      fill()
+      act(() => q('macro-everywhere').click())
+      pickSurface('project-video')
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ surface: 'project-video', projects: [CWD] }))
+    })
+
+    it('never sends job, so a saved Video tool keeps its stored job', async () => {
+      mount({ macro: mac({ surface: 'project-video', projects: [CWD], job: { estimateMinutes: 12, review: true } }) })
+      expect((q('macro-surface') as HTMLSelectElement).value).toBe('project-video')
+      expect(q('macro-everywhere')).toBeNull()
+      await act(async () => { q('macro-save').click() })
+      const sent = save.mock.calls[0][0]
+      expect(sent).toEqual(expect.objectContaining({ surface: 'project-video', projects: [CWD] }))
+      expect('job' in sent).toBe(false)
+    })
+
+    it('moves a Video tool back to Sessions with projects [cwd] and no job', async () => {
+      mount({ macro: mac({ surface: 'project-video', projects: [CWD], job: { estimateMinutes: 12 } }) })
+      pickSurface('sessions')
+      expect(q('macro-everywhere')).not.toBeNull()
+      await act(async () => { q('macro-save').click() })
+      const sent = save.mock.calls[0][0]
+      expect(sent).toEqual(expect.objectContaining({ surface: 'sessions', projects: [CWD] }))
+      expect('job' in sent).toBe(false)
+    })
+
+    it('a built-in cannot change surface: no surface control and no surface sent', async () => {
+      mount({ macro: mac({ builtin: true, surface: 'sessions', projects: [CWD], job: { estimateMinutes: 5 } }) })
+      expect(q('macro-surface')).toBeNull()
+      await act(async () => { q('macro-save').click() })
+      const sent = save.mock.calls[0][0]
+      expect('surface' in sent).toBe(false)
+      expect('job' in sent).toBe(false)
+    })
+  })
+
   describe('Project Home tools are shown in every project', () => {
     const NOTE = "Project Home tools are part of every project's Project Home. What a tool generates stays with each project."
     const box = () => q('macro-everywhere') as HTMLInputElement

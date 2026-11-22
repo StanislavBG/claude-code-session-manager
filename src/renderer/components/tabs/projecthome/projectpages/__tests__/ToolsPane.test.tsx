@@ -229,6 +229,15 @@ describe('ToolsPane list', () => {
     expect(q('project-home-add-tool')!.textContent).toContain('Add a tool')
   })
 
+  it("never lists a 'project-video' macro, with the built-in rows and footnote unchanged", () => {
+    const VIDEO_TOOL = macro({ id: 'video-tool', label: 'Shorts', surface: 'project-video', projects: ['/p/alpha'], job: { estimateMinutes: 10 } })
+    render({ macros: [REVIEW, VIDEO_TOOL, MATRIX_TOOL, HOME, DEMO] })
+    expect(rowIds()).toEqual(['builtin-review-md-network', 'builtin-competitor-matrix'])
+    expect(q('project-home-tools-count')!.textContent).toBe('2')
+    expect(q('project-home-tools')!.textContent).not.toContain('Shorts')
+    expect(q('project-home-tools-footnote')!.textContent).toBe('Every Project Home tool shows up here in every project. What it generates stays with each project.')
+  })
+
   it('shows each row with its label and agent', () => {
     render({ macros: [REVIEW, SWEEP] })
     expect(row('sweep').textContent).toContain('Sweep')

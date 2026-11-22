@@ -4,6 +4,12 @@
  * rail, so every field stacks vertically. Saves through `window.api.macros`.
  * Project Home's Tools pane mounts it for "Add a tool" with `defaultSurface`
  * 'project-home'.
+ *
+ * A macro of this one project (new, or stored as exactly [cwd]) may also move
+ * to 'project-video' — this project's Project Home ▸ Video — which saves
+ * projects [cwd] and hides the project-scope controls. The editor never sends
+ * `job`, so a Video tool keeps its stored job either way. Built-ins never
+ * change surface.
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentPersona, Macro, MacroInput } from '../../../preload/api'
@@ -12,6 +18,7 @@ import { missionTagsForAgent } from '../../lib/missionTags'
 import { tagLibraryEntry } from '../../lib/tagLibrary'
 import { macroPlaceholders } from '../../lib/macroPrompt'
 import { basename } from '../../lib/basename'
+import { normalizeCwd } from '../../lib/knownProjectAggregate'
 import { useSessions } from '../../state/sessions'
 import { AgentPicker } from './AgentPicker'
 
@@ -51,6 +58,13 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
   // generates is per project. `everywhere` keeps the user's own choice so
   // switching back to Sessions restores it.
   const projectHome = surface === 'project-home'
+  // A Video tool belongs to this one project: projects is always [cwd].
+  const projectVideo = surface === 'project-video'
+  const ofThisProject =
+    !macro ||
+    macro.surface === 'project-video' ||
+    (macro.projects.length === 1 && macro.projects[0] !== '*' && normalizeCwd(macro.projects[0]) === normalizeCwd(cwd))
+  const offerVideo = !macro?.builtin && ofThisProject
   const [inputs, setInputs] = useState<MacroInput[]>(macro?.inputs ?? [])
   const storedTargets = macro?.autoStartTargets
   const [autoMode, setAutoMode] = useState<'off' | 'all' | 'selected'>(
@@ -132,6 +146,7 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
       let projects: string[]
       const base = latest ?? macro
       if (projectHome) projects = ['*']
+      else if (projectVideo) projects = [cwd]
       else if (!base) projects = everywhere ? ['*'] : [cwd]
       else if (everywhere === initialEverywhere) projects = base.projects
       else if (everywhere) projects = ['*']
@@ -312,27 +327,32 @@ export function MacroEditor({ cwd, agents, macro, latest, defaultSurface, onClos
             data-testid="macro-surface"
             className={FIELD}
             value={surface}
-            onChange={(e) => setSurface(e.target.value as 'sessions' | 'project-home')}
+            onChange={(e) => setSurface(e.target.value as Macro['surface'])}
           >
             <option value="sessions">Sessions</option>
             <option value="project-home">Project Home</option>
+            {offerVideo && <option value="project-video">Project Home ▸ Video — this project only</option>}
           </select>
           <div className="text-[11px] text-fg-faint">
-            Project Home lists it under Tools on every project&apos;s Project Home page.
+            {projectVideo
+              ? 'Project Home ▸ Video lists it in this project only.'
+              : 'Project Home lists it under Tools on every project\'s Project Home page.'}
           </div>
         </div>
       )}
 
-      <label className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
-        <input
-          type="checkbox"
-          data-testid="macro-everywhere"
-          checked={projectHome || everywhere}
-          disabled={projectHome}
-          onChange={(e) => setEverywhere(e.target.checked)}
-        />
-        Show in every project
-      </label>
+      {!projectVideo && (
+        <label className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
+          <input
+            type="checkbox"
+            data-testid="macro-everywhere"
+            checked={projectHome || everywhere}
+            disabled={projectHome}
+            onChange={(e) => setEverywhere(e.target.checked)}
+          />
+          Show in every project
+        </label>
+      )}
       {projectHome && (
         <div data-testid="macro-everywhere-note" className="text-[11px] text-fg-faint">
           Project Home tools are part of every project&apos;s Project Home. What a tool generates stays with each project.

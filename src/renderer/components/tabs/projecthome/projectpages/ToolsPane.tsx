@@ -216,9 +216,10 @@ function useMdReview(cwd: string | null | undefined, active: boolean, epicIds: r
 const PRIMARY_CLASS =
   'inline-flex h-[34px] flex-none items-center gap-[7px] whitespace-nowrap rounded-lg bg-accent px-[15px] text-[13px] font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
 
-/** Review MD network first, then the other project-home macros in the given order. */
+/** Review MD network first, then the other project-home macros in the given order.
+ *  Only `surface: 'project-home'` qualifies — a 'project-video' tool belongs to Project Home ▸ Video. */
 function toolMacros(macros: readonly Macro[]): Macro[] {
-  const tools = macros.filter((m) => (m.surface ?? 'sessions') === 'project-home' && !LIBRARY_MACRO_IDS.includes(m.id))
+  const tools = macros.filter((m) => m.surface === 'project-home' && !LIBRARY_MACRO_IDS.includes(m.id))
   return [...tools.filter((m) => m.id === REVIEW_MD_NETWORK_ID), ...tools.filter((m) => m.id !== REVIEW_MD_NETWORK_ID)]
 }
 

@@ -22,6 +22,7 @@ const { evaluateDispatchLiveness } = require('./lib/scheduler/watchdogHelpers.cj
 const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCALATION_MS } = require('./scheduler/budget.cjs');
 const { classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler/starvation.cjs');
 const { REVERIFY_INTERVAL_MS } = require('./scheduler/reviewLadder.cjs');
+const { makeDepResolver } = require('./lib/prd/depSlugResolve.cjs');
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
 const { checkMainDependencyHealth } = require('./lib/git/depHealth.cjs');
@@ -602,7 +603,8 @@ function evaluateUnresolvableDepHealth(jobs, satisfiedSlugsByCwd) {
     const roots = findUnresolvableDepRoots(rows, satisfied);
     if (roots.length === 0) continue;
     const rootSet = new Set(roots);
-    const bare = (x) => String(x ?? '').replace(/^\d+-/, '');
+    // Same resolver dispatch uses (depSlugResolve.cjs makeDepResolver).
+    const { rowsForDep } = makeDepResolver(rows, satisfied);
     const held = new Set();
     let grew = true;
     while (grew) {
@@ -610,7 +612,7 @@ function evaluateUnresolvableDepHealth(jobs, satisfiedSlugsByCwd) {
       for (const j of pending) {
         if (held.has(j.slug)) continue;
         const isHeld = (j.dependsOn ?? []).some((d) => rootSet.has(d)
-          || pending.some((p) => held.has(p.slug) && (p.slug === d || bare(p.slug) === bare(d))));
+          || rowsForDep(d, j).some((p) => p.status === 'pending' && held.has(p.slug)));
         if (isHeld) { held.add(j.slug); grew = true; }
       }
     }
@@ -806,8 +808,8 @@ function loadUsagePollerState(statePath) {
  *
  * Pure. A `needs_review` row parked longer than one full periodic-reverify
  * interval that STILL holds >= 1 pending dependent (transitively, through
- * pending rows, via dependsOn — exact or bare slug, same matching as the
- * picker) is a silently-blocking park: the self-heal ladder had a full pass
+ * pending rows, via dependsOn — resolved by depSlugResolve.cjs
+ * makeDepResolver, the picker's own rule) is a silently-blocking park: the self-heal ladder had a full pass
  * and did not release it. 2026-09-18: 1229-fo-03 held 19 of 20 pending rows
  * while every other component read GREEN. Parked-since is the row's last
  * `to: needs_review` statusHistory entry (fallback finishedAt); a row with no
@@ -815,7 +817,6 @@ function loadUsagePollerState(statePath) {
  */
 function evaluateBlockingParkHealth(jobs, now, thresholdMs = REVERIFY_INTERVAL_MS) {
   const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
-  const bare = (x) => String(x ?? '').replace(/^\d+-/, '');
   const byCwd = new Map();
   for (const j of rows) {
     const cwd = j.cwd || DEFAULT_PROJECT_CWD;
@@ -826,6 +827,8 @@ function evaluateBlockingParkHealth(jobs, now, thresholdMs = REVERIFY_INTERVAL_M
   for (const [cwd, group] of byCwd) {
     const pending = group.filter((j) => j.status === 'pending');
     if (pending.length === 0) continue;
+    // Same resolver dispatch uses (depSlugResolve.cjs makeDepResolver).
+    const { rowsForDep } = makeDepResolver(group);
     for (const park of group) {
       if (park.status !== 'needs_review') continue;
       const history = Array.isArray(park.statusHistory) ? park.statusHistory : [];
@@ -836,13 +839,13 @@ function evaluateBlockingParkHealth(jobs, now, thresholdMs = REVERIFY_INTERVAL_M
       const since = Date.parse(at ?? park.finishedAt ?? '');
       if (Number.isNaN(since) || now - since <= thresholdMs) continue;
       const held = new Set();
-      const heldBy = (d, root) => root.slug === d || bare(root.slug) === bare(d);
       let grew = true;
       while (grew) {
         grew = false;
         for (const j of pending) {
           if (held.has(j.slug)) continue;
-          if ((j.dependsOn ?? []).some((d) => heldBy(d, park) || pending.some((p) => held.has(p.slug) && heldBy(d, p)))) {
+          if ((j.dependsOn ?? []).some((d) => rowsForDep(d, j)
+            .some((p) => p === park || (p.status === 'pending' && held.has(p.slug))))) {
             held.add(j.slug);
             grew = true;
           }

@@ -7,10 +7,15 @@
 
 const launchFailure = require('../lib/scheduler/launchFailure.cjs');
 const { findBlockingDep, DEP_HISTORY_FAIL_OPEN } = require('../lib/scheduler/schedulerBatch.cjs');
+const { makeDepResolver, isSatisfiedDepRow } = require('../lib/prd/depSlugResolve.cjs');
 const { STARVE_ESCALATION_MS } = require('../lib/scheduler/schedulerConfig.cjs');
 
 /**
- * computeBlockedChains(jobs) → [{ cwd, blockedBy, blocked }]
+ * computeBlockedChains(jobs, satisfiedSlugsByCwd?) → [{ cwd, blockedBy, blocked }]
+ *
+ * `satisfiedSlugsByCwd`: optional `Map<cwd, Set<string>|DEP_HISTORY_FAIL_OPEN>`
+ * of history/archive completion records (budget.computeDepHistorySatisfaction),
+ * fed to the shared dep resolver; default empty (no records known).
  *
  * Pure, no IO. The gap computeStallSummary above cannot see.
  *
@@ -31,7 +36,7 @@ const { STARVE_ESCALATION_MS } = require('../lib/scheduler/schedulerConfig.cjs')
  * Transitive by construction: a row blocked by a row that is itself blocked
  * resolves through the same walk.
  */
-function computeBlockedChains(jobs) {
+function computeBlockedChains(jobs, satisfiedSlugsByCwd = new Map()) {
   const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
   const byCwd = new Map();
   for (const j of rows) {
@@ -42,20 +47,14 @@ function computeBlockedChains(jobs) {
 
   const out = [];
   for (const [cwd, projectJobs] of byCwd) {
-    // Reuse the picker's OWN dep resolution so this can never disagree with
-    // what the scheduler will actually dispatch (bare-name fallback included).
-    const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
-    const rowsByBareSlug = new Map();
-    for (const j of projectJobs) {
-      const bare = String(j.slug ?? '').replace(/^\d+-/, '');
-      if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
-      rowsByBareSlug.get(bare).push(j);
-    }
-    const rowsForDep = (slug) => {
-      const exact = rowBySlug.get(slug);
-      if (exact) return [exact];
-      return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
-    };
+    // The ONE run-time dep rule (depSlugResolve.cjs makeDepResolver) — the
+    // same resolver schedulerBatch.findBlockingDep dispatches with, so this
+    // monitor can never disagree with dispatch (exact row, exact satisfied
+    // record, Epic-scoped prefixed fallback, cancelled-duplicate drop).
+    const satisfied = satisfiedSlugsByCwd?.get?.(cwd) ?? new Set();
+    const { rowsForDep } = satisfied === DEP_HISTORY_FAIL_OPEN
+      ? makeDepResolver(projectJobs, new Set(), { failOpen: true })
+      : makeDepResolver(projectJobs, satisfied);
 
     // Memoised walk: does this row's dep closure hit a terminally-stuck row?
     const TERMINAL_STUCK = new Set(['failed', 'skipped']);
@@ -68,9 +67,12 @@ function computeBlockedChains(jobs) {
       visiting.add(job.slug);
       const found = new Set();
       for (const depSlug of job.dependsOn ?? []) {
-        for (const dep of rowsForDep(depSlug)) {
+        for (const dep of rowsForDep(depSlug, job)) {
+          // isSatisfiedDepRow: completed, or an auto-resolve skip — the
+          // dispatcher's own predicate, so neither is a terminal blocker.
+          if (isSatisfiedDepRow(dep)) continue;
           if (TERMINAL_STUCK.has(dep.status)) found.add(dep.slug);
-          else if (dep.status !== 'completed') for (const b of blockersFor(dep)) found.add(b);
+          else for (const b of blockersFor(dep)) found.add(b);
         }
       }
       visiting.delete(job.slug);

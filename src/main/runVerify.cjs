@@ -45,7 +45,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { parsePrdFile, isArtifactOnlyDeclaration } = require('./lib/prd/prdFrontmatter.cjs');
-const { isSatisfiedDepRow } = require('./lib/prd/depSlugResolve.cjs');
+const { isSatisfiedDepRow, makeDepResolver } = require('./lib/prd/depSlugResolve.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
 
@@ -220,32 +220,26 @@ function hasAbandonedBackgroundTask(events) {
  * One layer: queue.json's `dependsOn` array — the same and only dependency
  * signal the dispatcher (findBlockingDep) uses. PRD body prose is NOT parsed.
  *
+ * Resolution is depSlugResolve.cjs makeDepResolver — the ONE run-time rule
+ * findBlockingDep dispatches with, so the verifier can never disagree with
+ * the picker. `satisfiedSlugs` (optional history/archive completion records,
+ * or DEP_HISTORY_FAIL_OPEN) lets an exact satisfied record win over a live
+ * same-bare failed/cancelled row, exactly as dispatch does.
+ *
  * @returns {{ ok: boolean, reason?: string }}
  */
-function checkDeps(queueEntry, allJobs) {
-  const bySlug = new Map(allJobs.map((j) => [j.slug, j]));
-  // A PRD's filename carries the allocator's `NN-` prefix, but `dependsOn:` is
-  // authored with the bare name (the author cannot know the number that will
-  // be issued). Resolve exact slug first, then bare-name — identical rule to
-  // schedulerBatch.pickForProject's rowsForDep, which MUST agree with this
-  // function (see the missing-row note below).
-  const rowsByBareSlug = new Map();
-  for (const j of allJobs) {
-    const bare = String(j.slug ?? '').replace(/^\d+-/, '');
-    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
-    rowsByBareSlug.get(bare).push(j);
-  }
-  const rowsForDep = (slug) => {
-    const exact = bySlug.get(slug);
-    if (exact) return [exact];
-    return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
-  };
+function checkDeps(queueEntry, allJobs, satisfiedSlugs = new Set()) {
+  const jobs = Array.isArray(allJobs) ? allJobs.filter(Boolean) : [];
+  const { resolve } = typeof satisfiedSlugs === 'symbol'
+    ? makeDepResolver(jobs, new Set(), { failOpen: true })
+    : makeDepResolver(jobs, satisfiedSlugs);
 
   // 1. Queue-level dependsOn (explicit).
   const queueDeps = Array.isArray(queueEntry.dependsOn) ? queueEntry.dependsOn : [];
   for (const depSlug of queueDeps) {
-    const deps = rowsForDep(depSlug);
-    // A dep with NO row is SATISFIED, not unmet. Completed rows are retired to
+    const { kind, rows: deps } = resolve(depSlug, queueEntry);
+    // A dep resolved 'satisfied' (completion record) is met. A dep with NO row
+    // ('unresolved' here) is ALSO treated as SATISFIED, not unmet. Completed rows are retired to
     // history shards and their PRD is archived, so absence is the normal
     // end-state of a finished dependency — exactly how pickForProject reads it.
     //
@@ -257,7 +251,7 @@ function checkDeps(queueEntry, allJobs) {
     // real work: PRDs 854 and 857 each ran to exit 0, were downgraded on a
     // bare dep name that never matched any row, and ended up on disk with no
     // queue row at all.
-    if (deps.length === 0) continue;
+    if (kind !== 'row' || deps.length === 0) continue;
     // Same predicate as findBlockingDep — an auto-resolve skip the picker
     // dispatched past must not be re-judged unmet here (same infinite re-run).
     const unfinished = deps.find((d) => !isSatisfiedDepRow(d));

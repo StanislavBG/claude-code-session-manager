@@ -96,6 +96,7 @@
   "mdReviewRecord": ".",
   "memoryScope": "process",
   "modelCatalog": "claude",
+  "modelPricing": "claude",
   "needsReviewLedger": "scheduler",
   "opsErrorLog": "telemetry",
   "otlpTraceExporter": "telemetry",

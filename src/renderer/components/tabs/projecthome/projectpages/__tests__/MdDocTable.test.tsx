@@ -145,27 +145,19 @@ describe('MdDocTable', () => {
     expect(rowPaths()[0]).toBe('docs/Guide.md')
   })
 
-  it('rows show meta, flags and verdict; click selects', () => {
-    const p = render({ selectedPath: 'docs/Guide.md', verdicts: { 'docs/Guide.md': 'update' } })
+  it('rows show meta and flags; click selects', () => {
+    const p = render({ selectedPath: 'docs/Guide.md' })
     const guide = rows().find((r) => r.dataset.path === 'docs/Guide.md')!
     expect(guide.textContent).toContain('doc')
     expect(guide.textContent).toContain('1y ago')
     expect(guide.textContent).toContain('80')
     expect(guide.textContent).toContain('no change in 90+ days')
-    expect(guide.querySelector('[data-testid="md-doc-table-verdict"]')?.textContent).toBe('update')
     expect(guide.getAttribute('aria-selected')).toBe('true')
     const orphan = rows().find((r) => r.dataset.path === 'docs/orphan.md')!
     expect(orphan.getAttribute('aria-selected')).toBe('false')
     expect(orphan.textContent).toContain('unlinked')
-    expect(orphan.querySelector('[data-testid="md-doc-table-verdict"]')).toBeNull()
     act(() => orphan.click())
     expect(p.onSelect).toHaveBeenCalledWith('docs/orphan.md')
-  })
-
-  it('reviewedAt suppresses the stale flag', () => {
-    render({ reviewedAt: { 'docs/Guide.md': NOW - DAY } })
-    const guide = rows().find((r) => r.dataset.path === 'docs/Guide.md')!
-    expect(guide.textContent).not.toContain('no change in 90+ days')
   })
 
   it('caps rendering at 500 rows with a note', () => {
@@ -180,7 +172,7 @@ describe('MdDocTable', () => {
     expect(host.querySelector('[data-testid="md-doc-table-cap"]')).toBeNull()
   })
 
-  it('collections show folder, docs, linked and last change; no toggles without onFolderKind', () => {
+  it('collections show folder, docs, linked and last change', () => {
     render()
     const cols = Array.from(host.querySelectorAll<HTMLElement>('[data-testid="md-doc-table-collection"]'))
     expect(cols.map((c) => c.dataset.folder)).toEqual(['records/', 'notes/'])
@@ -188,30 +180,5 @@ describe('MdDocTable', () => {
     expect(cols[0].textContent).toContain('3d ago')
     expect(cols[1].textContent).toContain('4 docs')
     expect(cols[1].textContent).toContain('1 linked')
-    expect(host.querySelector('[data-testid="md-doc-table-folder-records"]')).toBeNull()
-  })
-
-  it('folder toggles reflect recordFolders/docFolders and call onFolderKind', () => {
-    const onFolderKind = vi.fn()
-    render({ onFolderKind, recordFolders: ['records/'], docFolders: ['notes/'] })
-    const cols = Array.from(host.querySelectorAll<HTMLElement>('[data-testid="md-doc-table-collection"]'))
-    const rec0 = cols[0].querySelector<HTMLButtonElement>('[data-testid="md-doc-table-folder-records"]')!
-    const doc0 = cols[0].querySelector<HTMLButtonElement>('[data-testid="md-doc-table-folder-docs"]')!
-    const rec1 = cols[1].querySelector<HTMLButtonElement>('[data-testid="md-doc-table-folder-records"]')!
-    const doc1 = cols[1].querySelector<HTMLButtonElement>('[data-testid="md-doc-table-folder-docs"]')!
-    expect(rec0.textContent).toBe('Treat as records')
-    expect(doc0.textContent).toBe('Count as docs')
-    expect(rec0.getAttribute('aria-pressed')).toBe('true')
-    expect(doc0.getAttribute('aria-pressed')).toBe('false')
-    expect(rec1.getAttribute('aria-pressed')).toBe('false')
-    expect(doc1.getAttribute('aria-pressed')).toBe('true')
-    act(() => rec0.click())
-    expect(onFolderKind).toHaveBeenLastCalledWith('records/', null)
-    act(() => doc0.click())
-    expect(onFolderKind).toHaveBeenLastCalledWith('records/', 'docs')
-    act(() => rec1.click())
-    expect(onFolderKind).toHaveBeenLastCalledWith('notes/', 'records')
-    act(() => doc1.click())
-    expect(onFolderKind).toHaveBeenLastCalledWith('notes/', null)
   })
 })

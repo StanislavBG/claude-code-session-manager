@@ -595,12 +595,6 @@ function ReviewTool({
                   path={id}
                   network={network}
                   onNavigate={select}
-                  verdict={curation.verdicts[id] ?? null}
-                  note={curation.notes[id] ?? ''}
-                  reviewedAtMs={curation.reviewedAt[id] ?? null}
-                  onVerdict={(v) => md.setVerdict(id, v)}
-                  onNote={(text) => md.setNote(id, text)}
-                  onMarkReviewed={() => md.markReviewed(id)}
                 />
               ) : (
                 <ExplorerFallbackInspector network={network} id={id} select={select} />
@@ -614,11 +608,6 @@ function ReviewTool({
                     census={network.census}
                     selectedPath={explorerSel}
                     onSelect={select}
-                    verdicts={curation.verdicts}
-                    reviewedAt={curation.reviewedAt}
-                    recordFolders={curation.recordFolders}
-                    docFolders={curation.docFolders}
-                    onFolderKind={md.setFolderKind}
                   />
                 )
               : undefined

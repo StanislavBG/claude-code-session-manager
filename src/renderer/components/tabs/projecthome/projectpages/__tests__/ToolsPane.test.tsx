@@ -698,17 +698,11 @@ describe('ToolsPane Review MD network curation', () => {
     expect((b('md-curation-review') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('a verdict picked in the preview counts in the tray and persists, without a rescan; Clear removes every verdict', async () => {
+  it('Clear removes every saved verdict and persists, without a rescan', async () => {
+    prefsFiles[PREFS] = { mdCuration: SAVED }
     mdNetwork.mockResolvedValue(NET)
-    render({ macros: [REVIEW] })
-    await settle()
-    click(cardNode('src/CLAUDE.md'))
-    await settle()
-    click(b('md-doc-preview-verdict-merge'))
-    await settle()
-    expect(b('md-curation-tray')!.textContent).toContain('1 doc picked')
-    expect(savedCuration().verdicts).toEqual({ 'src/CLAUDE.md': 'merge' })
-    expect(mdNetwork).toHaveBeenCalledTimes(1)
+    await openExplorer()
+    expect(b('md-curation-tray')!.textContent).toContain('2 docs picked')
     click(b('md-curation-clear'))
     await settle()
     expect(b('md-curation-tray')!.textContent).toContain('0 docs picked')
@@ -716,30 +710,28 @@ describe('ToolsPane Review MD network curation', () => {
     expect(mdNetwork).toHaveBeenCalledTimes(1)
   })
 
-  it('a folder marked as records persists and rescans with the folder override', async () => {
-    const withLogs: MdNetwork = {
-      ...NET,
-      census: { ...census(), collections: [{ folder: 'logs/', docs: 40, linked: 0, lastCommitMs: null, source: 'heuristic' }] },
-    }
-    mdNetwork.mockResolvedValue(withLogs)
-    await openExplorer()
-    click(b('md-explorer-view-docs'))
-    click(b('md-doc-table-folder-records'))
-    await settle()
-    expect(savedCuration().recordFolders).toEqual(['logs/'])
-    expect(mdNetwork.mock.calls).toEqual([[scanOf(CWD)], [scanOf(CWD, ['logs/'])]])
-  })
-
-  it('a failed curation write toasts and keeps the pick', async () => {
+  it('the explorer preview and docs table carry no curation controls', async () => {
     mdNetwork.mockResolvedValue(NET)
-    writeJson.mockRejectedValue(new Error('remote config writes are off'))
     render({ macros: [REVIEW] })
     await settle()
     click(cardNode('src/CLAUDE.md'))
     await settle()
-    click(b('md-doc-preview-verdict-keep'))
+    expect(b('md-doc-preview')).not.toBeNull()
+    expect(b('md-doc-preview-curation')).toBeNull()
+    click(b('md-explorer-view-docs'))
+    expect(b('md-doc-table')).not.toBeNull()
+    expect(b('md-doc-table-verdict')).toBeNull()
+    expect(b('md-doc-table-folder-records')).toBeNull()
+  })
+
+  it('a failed curation write toasts and keeps the in-memory state', async () => {
+    prefsFiles[PREFS] = { mdCuration: SAVED }
+    mdNetwork.mockResolvedValue(NET)
+    await openExplorer()
+    writeJson.mockRejectedValue(new Error('remote config writes are off'))
+    click(b('md-curation-clear'))
     await settle()
-    expect(b('md-curation-tray')!.textContent).toContain('1 doc picked')
+    expect(b('md-curation-tray')!.textContent).toContain('0 docs picked')
     expect(useToast.getState().toasts.map((t) => t.kind)).toEqual(['error'])
   })
 })

@@ -2,12 +2,11 @@
  * The MD network explorer's Docs view: a table of every census doc, so a human
  * can study hundreds of docs a graph cannot show. Filters by role, searches by
  * path, sorts by recency / size / links / code use, shows staleness flags,
- * summarises the record collections, and offers optional curation badges and
- * folder controls. Curation is persisted by the parent via callbacks.
+ * and summarises the record collections.
  */
 import { useMemo, useState } from 'react'
 import type { MdCensus, MdDoc } from '../../../../../preload/api'
-import { docFlags, relativeAge, type MdVerdict } from '../../../../lib/mdCurate'
+import { docFlags, relativeAge } from '../../../../lib/mdCurate'
 
 export type MdDocFilter = 'all' | 'map' | 'scoped' | 'agent' | 'doc' | 'record' | 'unlinked'
 export type MdDocSort = 'newest' | 'oldest' | 'lines' | 'linkedFrom' | 'codeRefs'
@@ -31,13 +30,6 @@ const SORTS: readonly { key: MdDocSort; label: string }[] = [
   { key: 'linkedFrom', label: 'Most linked-from' },
   { key: 'codeRefs', label: 'Most code refs' },
 ]
-
-const VERDICT_CLASS: Record<MdVerdict, string> = {
-  keep: 'bg-sage-dark text-bg-hi',
-  update: 'bg-honey text-fg',
-  merge: 'bg-fg text-bg-hi',
-  delete: 'bg-accent text-bg-hi',
-}
 
 function matchesFilter(d: MdDoc, filter: MdDocFilter): boolean {
   if (filter === 'all') return true
@@ -85,27 +77,12 @@ export interface MdDocTableProps {
   selectedPath: string | null
   onSelect: (path: string) => void
   nowMs?: number
-  verdicts?: Record<string, MdVerdict>
-  reviewedAt?: Record<string, number>
-  recordFolders?: string[]
-  docFolders?: string[]
-  onFolderKind?: (folder: string, kind: 'records' | 'docs' | null) => void
 }
 
 const TOGGLE_ON = 'border-accent bg-bg-hi text-fg'
 const TOGGLE_OFF = 'border-rule-structural text-fg-dim hover:border-fg-faint'
 
-export function MdDocTable({
-  census,
-  selectedPath,
-  onSelect,
-  nowMs,
-  verdicts,
-  reviewedAt,
-  recordFolders,
-  docFolders,
-  onFolderKind,
-}: MdDocTableProps) {
+export function MdDocTable({ census, selectedPath, onSelect, nowMs }: MdDocTableProps) {
   const [filter, setFilter] = useState<MdDocFilter>('all')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<MdDocSort>('newest')
@@ -129,45 +106,19 @@ export function MdDocTable({
         <div className="flex flex-none flex-col gap-1.5">
           <span className="font-mono text-[11px] text-fg-faint">Record collections</span>
           <div className="flex flex-wrap gap-2">
-            {census.collections.map((c) => {
-              const isRecords = recordFolders?.includes(c.folder) ?? false
-              const isDocs = docFolders?.includes(c.folder) ?? false
-              return (
-                <div
-                  key={c.folder}
-                  data-testid="md-doc-table-collection"
-                  data-folder={c.folder}
-                  className="flex flex-col gap-1 rounded-[9px] border border-rule-structural bg-bg-hi px-3 py-2"
-                >
-                  <span className="truncate font-mono text-[12px] font-semibold text-fg">{c.folder}</span>
-                  <span className="font-mono text-[11px] text-fg-faint">
-                    {`${c.docs} docs · ${c.linked} linked · ${relativeAge(c.lastCommitMs, now)}`}
-                  </span>
-                  {onFolderKind && (
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        data-testid="md-doc-table-folder-records"
-                        aria-pressed={isRecords}
-                        onClick={() => onFolderKind(c.folder, isRecords ? null : 'records')}
-                        className={`rounded-[7px] border px-2 py-0.5 text-[11px] cursor-pointer ${isRecords ? TOGGLE_ON : TOGGLE_OFF}`}
-                      >
-                        Treat as records
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="md-doc-table-folder-docs"
-                        aria-pressed={isDocs}
-                        onClick={() => onFolderKind(c.folder, isDocs ? null : 'docs')}
-                        className={`rounded-[7px] border px-2 py-0.5 text-[11px] cursor-pointer ${isDocs ? TOGGLE_ON : TOGGLE_OFF}`}
-                      >
-                        Count as docs
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {census.collections.map((c) => (
+              <div
+                key={c.folder}
+                data-testid="md-doc-table-collection"
+                data-folder={c.folder}
+                className="flex flex-col gap-1 rounded-[9px] border border-rule-structural bg-bg-hi px-3 py-2"
+              >
+                <span className="truncate font-mono text-[12px] font-semibold text-fg">{c.folder}</span>
+                <span className="font-mono text-[11px] text-fg-faint">
+                  {`${c.docs} docs · ${c.linked} linked · ${relativeAge(c.lastCommitMs, now)}`}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -218,8 +169,7 @@ export function MdDocTable({
       <div role="listbox" aria-label="Docs" className="flex min-h-0 flex-col gap-1 overflow-auto">
         {shown.map((d) => {
           const selected = d.path === selectedPath
-          const verdict = verdicts?.[d.path]
-          const flags = docFlags(d, reviewedAt?.[d.path] ?? null, now)
+          const flags = docFlags(d, null, now)
           return (
             <div
               key={d.path}
@@ -255,15 +205,6 @@ export function MdDocTable({
                   {f.label}
                 </span>
               ))}
-              {verdict && (
-                <span
-                  data-testid="md-doc-table-verdict"
-                  data-verdict={verdict}
-                  className={`rounded-[7px] px-1.5 py-0.5 text-[11px] font-semibold ${VERDICT_CLASS[verdict]}`}
-                >
-                  {verdict}
-                </span>
-              )}
             </div>
           )
         })}

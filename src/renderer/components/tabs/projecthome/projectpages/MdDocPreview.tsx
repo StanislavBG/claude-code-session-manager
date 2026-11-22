@@ -6,24 +6,16 @@
  * agents meet it, when it last changed, its in/out links, the code files that
  * name it, and what it names that changed since or no longer exists. Links
  * clicked inside the preview move the explorer (onNavigate) — the app window
- * never navigates. Curation controls render only when the parent passes all
- * three callbacks; persisting them is the parent's job.
+ * never navigates.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { MarkdownPreview } from '../../editor/MarkdownPreview'
 import { toast } from '../../../../state/toast'
 import { useEditor } from '../../../../state/editor'
-import { docFlags, relativeAge, usageLine, type MdVerdict } from '../../../../lib/mdCurate'
+import { docFlags, relativeAge, usageLine } from '../../../../lib/mdCurate'
 import type { MdDocRole, MdNetwork } from '../../../../../preload/api'
 
 export const MAX_PREVIEW_CHARS = 200_000
-const MAX_NOTE = 280
-const VERDICTS: { v: MdVerdict; label: string }[] = [
-  { v: 'keep', label: 'Keep' },
-  { v: 'update', label: 'Update' },
-  { v: 'merge', label: 'Merge' },
-  { v: 'delete', label: 'Delete' },
-]
 
 const ROLE_LABEL: Record<MdDocRole, string> = {
   map: 'map',
@@ -38,13 +30,7 @@ export interface MdDocPreviewProps {
   path: string
   network: MdNetwork
   nowMs?: number
-  verdict?: MdVerdict | null
-  note?: string
-  reviewedAtMs?: number | null
   onNavigate: (path: string) => void
-  onVerdict?: (v: MdVerdict | null) => void
-  onNote?: (text: string) => void
-  onMarkReviewed?: () => void
 }
 
 export function absolutePath(cwd: string, rel: string): string {
@@ -97,15 +83,9 @@ function DocList({ name, title, items }: { name: string; title: string; items: {
   )
 }
 
-export function MdDocPreview({
-  cwd, path, network, nowMs, verdict, note, reviewedAtMs,
-  onNavigate, onVerdict, onNote, onMarkReviewed,
-}: MdDocPreviewProps) {
+export function MdDocPreview({ cwd, path, network, nowMs, onNavigate }: MdDocPreviewProps) {
   const [text, setText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState(note ?? '')
-
-  useEffect(() => { setDraft(note ?? '') }, [note, path])
 
   useEffect(() => {
     let live = true
@@ -190,8 +170,6 @@ export function MdDocPreview({
     ),
   })
 
-  const curation = !!(onVerdict && onNote && onMarkReviewed)
-
   return (
     <div data-testid="md-doc-preview" className="flex h-full min-h-0 flex-col gap-3 overflow-auto">
       <header className="flex flex-col gap-1.5">
@@ -232,7 +210,7 @@ export function MdDocPreview({
               {doc.bytes != null && <span>{(doc.bytes / 1024).toFixed(1)} KB</span>}
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {docFlags(doc, reviewedAtMs ?? null, now).map((f) => (
+              {docFlags(doc, null, now).map((f) => (
                 <span
                   key={f.flag}
                   data-testid={`md-doc-preview-flag-${f.flag}`}
@@ -245,47 +223,6 @@ export function MdDocPreview({
           </>
         )}
       </header>
-
-      {curation && (
-        <section data-testid="md-doc-preview-curation" className="flex flex-wrap items-center gap-2">
-          <div role="group" aria-label="Verdict" className="flex overflow-hidden rounded border border-rule-inner">
-            {VERDICTS.map(({ v, label }) => (
-              <button
-                key={v}
-                type="button"
-                data-testid={`md-doc-preview-verdict-${v}`}
-                aria-pressed={verdict === v}
-                onClick={() => onVerdict!(verdict === v ? null : v)}
-                className={verdict === v ? 'bg-accent px-2 py-0.5 text-[11.5px] text-bg' : 'px-2 py-0.5 text-[11.5px] text-fg hover:bg-bg'}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <input
-            type="text"
-            data-testid="md-doc-preview-note"
-            aria-label="Note"
-            placeholder="Note"
-            maxLength={MAX_NOTE}
-            value={draft}
-            onChange={(e) => {
-              const v = e.target.value.slice(0, MAX_NOTE)
-              setDraft(v)
-              onNote!(v)
-            }}
-            className="min-w-0 flex-1 rounded border border-rule-inner bg-bg px-2 py-0.5 text-[11.5px] text-fg"
-          />
-          <button
-            type="button"
-            data-testid="md-doc-preview-mark-reviewed"
-            onClick={() => onMarkReviewed!()}
-            className="rounded border border-rule-inner px-2 py-0.5 text-[11.5px] text-fg hover:bg-bg"
-          >
-            {reviewedAtMs != null ? `Reviewed ${relativeAge(reviewedAtMs, now)}` : 'Mark reviewed'}
-          </button>
-        </section>
-      )}
 
       <div className="grid grid-cols-2 gap-3">
         <DocList name="linked-from" title="LINKED FROM" items={linkedFrom.map(navItem)} />

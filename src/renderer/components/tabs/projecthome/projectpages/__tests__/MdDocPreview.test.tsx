@@ -207,35 +207,4 @@ describe('MdDocPreview', () => {
     await flush()
     expect(toasts().some((t) => t.kind === 'error' && t.message.includes('no file manager'))).toBe(true)
   })
-
-  it('hides curation controls without all three callbacks', async () => {
-    await render({ onVerdict: vi.fn() })
-    expect(q('md-doc-preview-curation')).toBeNull()
-  })
-
-  it('renders curation controls and reports changes', async () => {
-    const onVerdict = vi.fn()
-    const onNote = vi.fn()
-    const onMarkReviewed = vi.fn()
-    const props = await render({ onVerdict, onNote, onMarkReviewed, verdict: 'keep', note: 'hi' })
-    expect(q('md-doc-preview-verdict-keep')!.getAttribute('aria-pressed')).toBe('true')
-    act(() => { q('md-doc-preview-verdict-keep')!.click() })
-    expect(onVerdict).toHaveBeenLastCalledWith(null)
-    act(() => { q('md-doc-preview-verdict-merge')!.click() })
-    expect(onVerdict).toHaveBeenLastCalledWith('merge')
-    const input = q('md-doc-preview-note') as HTMLInputElement
-    expect(input.value).toBe('hi')
-    expect(input.maxLength).toBe(280)
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
-    act(() => {
-      setter.call(input, 'x'.repeat(300))
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    expect(onNote).toHaveBeenLastCalledWith('x'.repeat(280))
-    expect(q('md-doc-preview-mark-reviewed')!.textContent).toBe('Mark reviewed')
-    act(() => { q('md-doc-preview-mark-reviewed')!.click() })
-    expect(onMarkReviewed).toHaveBeenCalledTimes(1)
-    await act(async () => { root.render(<MdDocPreview {...props} reviewedAtMs={NOW - 2 * DAY} />) })
-    expect(q('md-doc-preview-mark-reviewed')!.textContent).toBe('Reviewed 2d ago')
-  })
 })

@@ -39,6 +39,7 @@ import { buildHomeProjectRows, type HomeProjectRow } from '../../lib/homeProject
 import { projectNameFromCwd } from '../../lib/knownProjectAggregate'
 import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
 import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
+import { useOutsideNeedsYou } from '../../lib/useOutsideNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { runSchedulerNow } from '../../lib/schedulerActions'
 import { projectColorFor } from '../../lib/projectColor'
@@ -79,7 +80,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
   }, [])
 
   useHydrateKnownEpics()
-  const needsRows = useNeedsYouRows()
+  const { rows: needsRows, answer: answerOutside } = useNeedsYouRows()
   const projectRows = useHomeProjectRows()
   const tabs = useSessions((s) => s.tabs)
   const addTab = useSessions((s) => s.addTab)
@@ -111,7 +112,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
           </div>
           <ProjectsCard projectRows={projectRows} />
           <QueuedCard onNavigate={onNavigate} />
-          <NeedsYouSection rows={needsRows} onNavigate={onNavigate} />
+          <NeedsYouSection rows={needsRows} onNavigate={onNavigate} onAnswer={answerOutside} />
           <ActiveSessionsCard onNavigate={onNavigate} />
           <RecentSessionsCard onNavigate={onNavigate} />
         </div>
@@ -164,18 +165,22 @@ function useHomeProjectRows(): HomeProjectRow[] {
 // (`needs-input`), or a scheduler job the queue itself flagged `failed` /
 // `needs_review`. See lib/homeNeedsYou.ts for the join.
 // ────────────────────────────────────────────────────────────────────
-function useNeedsYouRows(): NeedsYouRow[] {
+type OutsideAnswer = ReturnType<typeof useOutsideNeedsYou>['answer']
+
+function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer } {
   const sessions = usePromptSessions((s) => s.sessions)
   const chats = useChatSignals()
   const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
-  return useMemo(() => {
+  const { items: outside, answer } = useOutsideNeedsYou()
+  const rows = useMemo(() => {
     const proposed: Record<string, { id: string; cwd: string; goalText: string; tag?: string }> = {}
     for (const id of Object.keys(sessions)) {
       const s = sessions[id]
       if (s.status === 'proposed') proposed[id] = { id, cwd: s.cwd, goalText: s.goalText, tag: s.tag }
     }
-    return buildNeedsYouRows(proposed, chats, jobs)
-  }, [sessions, chats, jobs])
+    return buildNeedsYouRows(proposed, chats, jobs, Date.now(), outside)
+  }, [sessions, chats, jobs, outside])
+  return { rows, answer }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -393,7 +398,16 @@ function HeroButton({ children, onClick, primary }: { children: ReactNode; onCli
 // ────────────────────────────────────────────────────────────────────
 // Needs you section — expandable rows, one card per real signal.
 // ────────────────────────────────────────────────────────────────────
-export function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate?: (k: NavKey) => void }) {
+export function NeedsYouSection({
+  rows,
+  onNavigate,
+  onAnswer,
+}: {
+  rows: NeedsYouRow[]
+  onNavigate?: (k: NavKey) => void
+  /** useOutsideNeedsYou().answer — sends an 'outside-item' row's chosen option. */
+  onAnswer?: OutsideAnswer
+}) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const paged = usePagedList(rows, 4)
@@ -462,6 +476,22 @@ export function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onN
       .finally(() => { setBusyId(null); setOpenId(null) })
   }
 
+  const answerOutside = (row: NeedsYouRow, value: string) => {
+    if (!row.app || !row.itemId || !onAnswer || busyId) return
+    setBusyId(row.id)
+    onAnswer(row.app, row.itemId, value)
+      .then((r) => { if (!r.ok) toast.error(r.error || 'Could not send the answer.'); else toast.info(`Answered "${value}" for ${row.app}.`) })
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+      .finally(() => { setBusyId(null); setOpenId(null) })
+  }
+
+  const openOutsideLink = (row: NeedsYouRow) => {
+    if (!row.link) return
+    window.api.shell
+      .open({ as: 'external', url: row.link })
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+  }
+
   return (
     <section id="home-needs-you" className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto scroll-mt-4">
       <div className="flex items-baseline justify-between gap-2 mb-2.5">
@@ -479,7 +509,7 @@ export function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onN
           const tone =
             row.kind === 'job-failed' ? 'bg-accent'
             : row.kind === 'job-quarantined' ? (row.escalated ? 'bg-accent' : 'bg-honey')
-            : row.kind === 'needs-input' ? 'bg-honey'
+            : row.kind === 'needs-input' || row.kind === 'outside-item' ? 'bg-honey'
             : 'bg-sage'
           return (
             <div key={row.id} className={`border rounded-[11px] overflow-hidden ${open ? 'bg-bg-hi border-line' : 'bg-bg border-line/60'}`}>
@@ -520,6 +550,16 @@ export function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onN
                       <>
                         <NeedsButton onClick={() => adoptJob(row)} disabled={busyId === row.id}>Adopt PRD</NeedsButton>
                         <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
+                      </>
+                    )}
+                    {row.kind === 'outside-item' && (
+                      <>
+                        {(row.options ?? []).map((opt) => (
+                          <NeedsButton key={opt} onClick={() => answerOutside(row, opt)} disabled={busyId === row.id}>{opt}</NeedsButton>
+                        ))}
+                        {row.link && (
+                          <NeedsButton quiet onClick={() => openOutsideLink(row)}>Open</NeedsButton>
+                        )}
                       </>
                     )}
                   </div>

@@ -36,23 +36,43 @@ export interface ConfigBandTab<K extends string = string> {
 }
 
 /**
- * Shortens a scope path for the band by eliding from the START, so the last
- * folder — the part that names the scope — always shows. Returns `path`
- * unchanged when it is at most `max` characters; otherwise `…/` plus as many
- * trailing segments as fit, and always the last segment whole even if that
- * alone exceeds `max`.
+ * The band's title column floor in px — the `min-w-[236px]` class on the
+ * `config-band-title` group below. Tailwind needs that class literal, so keep
+ * the two in step by hand.
  */
-export function compactScopePath(path: string, max = 32): string {
+export const BAND_TITLE_MIN_W_PX = 236
+
+/**
+ * Default `compactScopePath` limit, derived from BAND_TITLE_MIN_W_PX: the path
+ * is `font-mono text-xs` (12px IBM Plex Mono, a 0.6em = 7.2px advance), so
+ * floor(236 / 7.2) = 32 characters fill the title column's width.
+ */
+export const SCOPE_PATH_MAX_CHARS = Math.floor(BAND_TITLE_MIN_W_PX / 7.2)
+
+/**
+ * Shortens a scope path for the band by eliding from the START, so the last
+ * folder — the part that names the scope — always shows. Splits on both `/`
+ * and `\` and joins with the path's own separator (a Windows path shortens to
+ * `…\` plus its trailing segments). Returns `path` unchanged when it is at
+ * most `max` characters; otherwise `…` + separator plus as many trailing
+ * segments as fit, and always the last segment whole even if that alone
+ * exceeds `max`.
+ */
+export function compactScopePath(path: string, max = SCOPE_PATH_MAX_CHARS): string {
   if (path.length <= max) return path
-  const segments = path.split('/').filter((s) => s !== '')
+  const segments = path.split(/[\\/]/).filter((s) => s !== '')
   if (segments.length === 0) return path
+  // The path's own separator: backslash when it has one and no forward slash before it.
+  const slash = path.indexOf('/')
+  const back = path.indexOf('\\')
+  const sep = back !== -1 && (slash === -1 || back < slash) ? '\\' : '/'
   let tail = segments[segments.length - 1]
   for (let i = segments.length - 2; i >= 0; i--) {
-    const next = `${segments[i]}/${tail}`
+    const next = `${segments[i]}${sep}${tail}`
     if (2 + next.length > max) break
     tail = next
   }
-  return `…/${tail}`
+  return `…${sep}${tail}`
 }
 
 export interface ConfigBandProps<K extends string = string> {
@@ -186,7 +206,7 @@ export function ConfigBand<K extends string = string>({
       // Design band (ConfigWorkbench.dc.html): 84px tall border-box, 0 28px padding, 236px title column.
       className="shrink-0 box-border h-[84px] bg-fg text-bg-hi border-b border-fg px-7 py-0 flex items-center gap-[26px] whitespace-nowrap"
     >
-      {/* Title group never shrinks below its content (236px floor); the tab strip yields first. */}
+      {/* Title group never shrinks below its content (BAND_TITLE_MIN_W_PX = 236px floor); the tab strip yields first. */}
       <div data-testid="config-band-title" className="flex flex-col gap-0.5 min-w-[236px] shrink-0">
         <span className="text-[10.5px] font-semibold tracking-[0.1em] text-bg-hi/60">{eyebrow}</span>
         <span className="flex items-baseline gap-2.5">
@@ -197,7 +217,9 @@ export function ConfigBand<K extends string = string>({
         </span>
       </div>
 
-      <div role="tablist" aria-label={title} className="flex items-center gap-1.5 min-w-0 overflow-x-auto">
+      {/* p-1 / -m-1: the scroller clips at its padding box, so 4px of padding keeps the active
+          tab's shadow and its 2px focus ring inside it; the negative margin keeps the layout. */}
+      <div role="tablist" aria-label={title} className="flex items-center gap-1.5 min-w-0 overflow-x-auto p-1 -m-1">
         {tabs.map((tab, i) => {
           const active = tab.key === activeKey
           return (

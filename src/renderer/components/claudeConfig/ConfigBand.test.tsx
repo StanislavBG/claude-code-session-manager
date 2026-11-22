@@ -4,7 +4,14 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
 import { useState } from 'react'
-import { ConfigBand, ConfigSearchResults, compactScopePath, type ConfigBandTab } from './ConfigBand'
+import {
+  BAND_TITLE_MIN_W_PX,
+  ConfigBand,
+  ConfigSearchResults,
+  SCOPE_PATH_MAX_CHARS,
+  compactScopePath,
+  type ConfigBandTab,
+} from './ConfigBand'
 import type { ConfigSearchGroup } from '../../lib/configSearch'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -125,6 +132,45 @@ describe('compactScopePath', () => {
   it('keeps a single overlong last segment whole', () => {
     const seg = 'an-extremely-long-project-folder-name-that-cannot-fit'
     expect(compactScopePath(`~/Projects/${seg}`)).toBe(`…/${seg}`)
+  })
+
+  it('shortens a Windows path on backslashes and keeps the backslash separator', () => {
+    const win = 'C:\\Users\\dev\\Projects\\clients\\acme-corp\\monorepo\\web-frontend'
+    const out = compactScopePath(win)
+    expect(out).toBe('…\\monorepo\\web-frontend')
+    expect(out).not.toContain('/')
+    expect(out.length).toBeLessThanOrEqual(SCOPE_PATH_MAX_CHARS)
+    expect(compactScopePath(win, 20)).toBe('…\\web-frontend')
+    expect(compactScopePath('C:\\Users\\dev')).toBe('C:\\Users\\dev')
+  })
+
+  it('defaults its limit to SCOPE_PATH_MAX_CHARS, derived from the title column width', () => {
+    // 12px IBM Plex Mono advances 0.6em = 7.2px per character.
+    expect(SCOPE_PATH_MAX_CHARS).toBe(Math.floor(BAND_TITLE_MIN_W_PX / 7.2))
+    expect(SCOPE_PATH_MAX_CHARS).toBe(32)
+    const exact = `~/${'a'.repeat(SCOPE_PATH_MAX_CHARS - 2)}`
+    expect(compactScopePath(exact)).toBe(exact)
+    const over = `~/x/${'b'.repeat(SCOPE_PATH_MAX_CHARS - 4)}`
+    expect(over.length).toBe(SCOPE_PATH_MAX_CHARS)
+    expect(compactScopePath(`${over}c`)).toBe(compactScopePath(`${over}c`, SCOPE_PATH_MAX_CHARS))
+    expect(compactScopePath(`${over}c`)).toBe(`…/${'b'.repeat(SCOPE_PATH_MAX_CHARS - 4)}c`)
+  })
+})
+
+describe('ConfigBand tab strip', () => {
+  it('pads the horizontal scroller so the active tab shadow and focus ring are not clipped', () => {
+    render()
+    const list = container.querySelector<HTMLElement>('[role="tablist"]')!
+    const cls = list.className.split(/\s+/)
+    expect(cls).toContain('overflow-x-auto')
+    expect(cls).toContain('p-1')
+    expect(cls).toContain('-m-1')
+  })
+
+  it('keeps the title column at the BAND_TITLE_MIN_W_PX floor', () => {
+    render()
+    const title = container.querySelector<HTMLElement>('[data-testid="config-band-title"]')!
+    expect(title.className.split(/\s+/)).toContain(`min-w-[${BAND_TITLE_MIN_W_PX}px]`)
   })
 })
 

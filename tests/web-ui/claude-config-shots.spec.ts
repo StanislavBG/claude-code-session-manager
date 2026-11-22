@@ -265,6 +265,29 @@ async function shortPane(page: Page) {
   expect(status!.y + status!.height).toBeLessThanOrEqual(box.bottom)
 }
 
+/**
+ * Narrow tab strip (wave-9 Minor 4): at 1100px wide the band's tablist scrolls horizontally, and a
+ * scroller clips at its padding box. Focus the active tab from the keyboard and check its box plus
+ * 2px (the focus ring / shadow) sits inside the tablist's client box vertically. Runs after every
+ * PNG is written and writes none itself.
+ */
+async function narrowTabStrip(page: Page) {
+  await page.setViewportSize({ width: 1100, height: VIEWPORT.height })
+  const list = page.getByTestId('config-band').locator('[role="tablist"]')
+  const active = list.locator('[role="tab"][aria-selected="true"]')
+  await active.focus()
+  await page.keyboard.press('End') // keyboard focus → :focus-visible ring; End keeps the last tab active
+  await expect(list.locator('[role="tab"][aria-selected="true"]')).toBeFocused()
+  const box = await list.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight, scrolls: el.scrollWidth > el.clientWidth }
+  })
+  expect(box.scrolls).toBe(true)
+  const tab = await list.locator('[role="tab"][aria-selected="true"]').boundingBox()
+  expect(tab!.y - 2).toBeGreaterThanOrEqual(box.top)
+  expect(tab!.y + tab!.height + 2).toBeLessThanOrEqual(box.bottom)
+}
+
 test('Claude config screenshots: every Home and Project tab at 1592x1040', async () => {
   if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
     execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
@@ -340,6 +363,7 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
       if (face === 'home') {
         await shortBodyFills(page)
         await shortPane(page)
+        await narrowTabStrip(page)
       }
       await ctx.close()
     }

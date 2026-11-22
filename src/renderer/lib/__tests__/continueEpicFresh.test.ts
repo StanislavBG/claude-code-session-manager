@@ -121,10 +121,27 @@ describe('continueEpicFresh', () => {
     expect(launchSession.mock.calls[0][0]).toMatchObject({ title: 'Only a title', goal: 'Only a title' })
   })
 
-  it('throws in words when the Epic has no agent', async () => {
+  it('launches without an agent when the Epic has no agent saved', async () => {
     state.sessions = { 'old-1': { ...epic, agentType: undefined } }
-    await expect(continueEpicFresh('old-1', 'src')).rejects.toThrow(/no agent/)
-    expect(launchSession).not.toHaveBeenCalled()
+    const id = await continueEpicFresh('old-1', 'src')
+    expect(id).toBe('new-1')
+    expect(launchSession).toHaveBeenCalledTimes(1)
+    const input = launchSession.mock.calls[0][0]
+    expect(input).not.toHaveProperty('agentName')
+    expect(input).toMatchObject({
+      cwd: '/p',
+      title: 'My title',
+      goal: 'The goal\n\nwith more',
+      tag: 'feature',
+      model: 'opus',
+      effort: 'high',
+      packs: ['pack-a'],
+      agentCli: 'codex',
+      agentCliModel: 'gpt-x',
+      developLoop: false,
+      source: 'src',
+    })
+    expect(input.handoff.fromEpicId).toBe('old-1')
   })
 
   it('throws in words when the Epic is not in the store', async () => {

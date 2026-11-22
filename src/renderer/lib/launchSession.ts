@@ -7,14 +7,15 @@
 import { usePromptSessions, awaitApprovePersisted } from '../state/promptSessions'
 import { useChat } from '../state/chat'
 import { composeEpicIntake } from './epicIntake'
-import { defaultContextInjectionsForTag } from './contextInjections'
+import { defaultContextInjectionsForTag, resolveContextInjections } from './contextInjections'
 import type { EpicTag } from './tagLibrary'
 import type { EpicIntakeFields } from './epicIntake'
 import type { PromptSessionsCreateEpicPayload } from '../../preload/api'
 
 export interface LaunchSessionInput {
   cwd: string
-  agentName: string
+  /** Persona to act as; absent = no agent (like the New Session card's default with no agent picked). */
+  agentName?: string
   tag: EpicTag
   title: string
   goal: string
@@ -68,18 +69,21 @@ export async function resolvePersonaBody(
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
   const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, effort, approve = true, origin, handoff, model, packs, agentCli, agentCliModel, developLoop } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
-  if (!agentName) throw new Error('launchSession: agentName is required')
+  // Absent = launch with no agent; an explicit empty name is a caller bug.
+  if (agentName !== undefined && !agentName) throw new Error('launchSession: agentName must not be empty')
   if (!title) throw new Error('launchSession: title is required')
   if (!goal) throw new Error('launchSession: goal is required')
 
-  const persona = await resolvePersonaBody(cwd, agentName)
+  const persona = agentName ? await resolvePersonaBody(cwd, agentName) : null
   const { goalText, openingPrompt, sections } = composeEpicIntake({
     title,
     goal,
     tag,
-    agentName,
-    agentDescription,
-    contextInjections: defaultContextInjectionsForTag(tag),
+    ...(agentName ? { agentName, agentDescription } : {}),
+    // No agent: the New Session card's agentless rule, not the per-tag default.
+    contextInjections: agentName
+      ? defaultContextInjectionsForTag(tag)
+      : resolveContextInjections({ tag, agentless: true, developLoop: developLoop !== false }),
     ...(handoff ? { handoff } : {}),
     ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
   })

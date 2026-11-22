@@ -4,6 +4,7 @@
  * handoff (epicHandoff.ts) instead of the old session's whole history.
  * Created through launchSession -> window.api.promptSessions.create, the
  * normal New Session path, on a human press. The old Epic is left untouched.
+ * An Epic with no agent saved continues with no agent.
  * Throws when the Epic is not in the store; callers own any toasting.
  */
 import { usePromptSessions, emitAuditEvent } from '../state/promptSessions'
@@ -32,9 +33,6 @@ export async function continueEpicFresh(epicId: string, source: string): Promise
   const epic = state.sessions[epicId]
   if (!epic) throw new Error(`Cannot continue: no session with id "${epicId}" is loaded.`)
 
-  if (!epic.agentType) {
-    throw new Error(`Cannot continue session "${epicId}": it has no agent saved, so there is no agent to start the new session with.`)
-  }
   const { title, goal: splitGoal } = splitTitleAndGoal(epic.goalText)
   // Older Epics have no blank line in goalText: the whole text is the title,
   // and launchSession needs a goal, so the title stands in for it.
@@ -49,7 +47,8 @@ export async function continueEpicFresh(epicId: string, source: string): Promise
 
   const { epicId: newId } = await launchSession({
     cwd: epic.cwd,
-    agentName: epic.agentType,
+    // No agentType = the default (no agent) was left selected; launch agentless.
+    ...(epic.agentType ? { agentName: epic.agentType } : {}),
     tag: epic.tag as EpicTag,
     title,
     goal,

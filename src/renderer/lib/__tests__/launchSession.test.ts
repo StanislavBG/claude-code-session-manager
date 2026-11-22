@@ -22,7 +22,7 @@ vi.mock('../epicIntake', () => ({
 
 import { launchSession } from '../launchSession'
 import { composeEpicIntake } from '../epicIntake'
-import { CONTEXT_INJECTIONS } from '../contextInjections'
+import { CONTEXT_INJECTIONS, resolveContextInjections } from '../contextInjections'
 
 const input = {
   cwd: '/p',
@@ -65,6 +65,31 @@ describe('launchSession', () => {
     expect(approveProposed).toHaveBeenCalledWith('e1', 'src')
     expect(send).toHaveBeenCalledWith({ tabId: 'e1', sessionId: 'c1', cwd: '/p', prompt: 'OPEN' })
     expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+  })
+
+  it('launches with no agent: no persona lookup, no agent in compose or create', async () => {
+    const { agentName: _a, agentDescription: _d, ...noAgent } = input
+    const out = await launchSession(noAgent)
+    expect(getPersonaBody).not.toHaveBeenCalled()
+    expect(calls).toEqual(['compose', 'create', 'approve', 'send'])
+    const fields = vi.mocked(composeEpicIntake).mock.calls[0][0]
+    expect(fields).not.toHaveProperty('agentName')
+    expect(fields).not.toHaveProperty('agentDescription')
+    expect(fields).not.toHaveProperty('agentBody')
+    expect(fields).not.toHaveProperty('agentPath')
+    expect(fields.contextInjections).toEqual(resolveContextInjections({ tag: 'feature', agentless: true, developLoop: true }))
+    expect(createPromptSession).toHaveBeenCalledWith(
+      '/p', 'GOAL', 'feature', 'src', undefined, 'OPEN', [{ kind: 'mission', part: 'goal', label: 'g', text: 't' }],
+    )
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+  })
+
+  it('with no agent and developLoop false, uses the agentless rule (no delegate injection)', async () => {
+    const { agentName: _a, ...noAgent } = input
+    await launchSession({ ...noAgent, developLoop: false })
+    const fields = vi.mocked(composeEpicIntake).mock.calls[0][0]
+    expect(fields.contextInjections).toEqual(resolveContextInjections({ tag: 'feature', agentless: true, developLoop: false }))
+    expect(fields.contextInjections?.['delegate-implementation']).toBe(false)
   })
 
   it("passes origin 'external' to send only when set", async () => {

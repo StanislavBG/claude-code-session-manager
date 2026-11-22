@@ -118,4 +118,4 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   return { settled, uncovered, verified, refuted, failed, parked, cancelled, digestKey, hasContent };
 }
 
-module.exports = { evaluateEpicSettle, DEFAULT_SETTLE_HORIZON_MS };
+module.exports = { evaluateEpicSettle, DEFAULT_SETTLE_HORIZON_MS, isCancelledRow };

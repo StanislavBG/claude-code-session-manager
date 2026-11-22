@@ -5,6 +5,11 @@ interface Props {
   disabled?: boolean
 }
 
+/**
+ * Switch per design-mocks/claude-config (renders 07, 13): a pill track — accent when on,
+ * line colour when off — with a white (bg-bg-hi) thumb inside it. The track never shrinks
+ * in a flex row, so the thumb can't spill over the optional label, which sits after it.
+ */
 export function Toggle({ checked, onChange, label, disabled }: Props) {
   return (
     <label
@@ -18,17 +23,23 @@ export function Toggle({ checked, onChange, label, disabled }: Props) {
         aria-checked={checked}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
-        className={`relative w-7 h-4 rounded-full transition-colors ${
-          checked ? 'bg-accent' : 'bg-bg-hi border border-line'
+        className={`relative inline-flex shrink-0 items-center w-8 h-[18px] rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+          checked ? 'bg-accent' : 'bg-line'
         }`}
       >
         <span
-          className={`absolute top-0.5 w-3 h-3 rounded-full bg-fg transition-transform ${
-            checked ? 'translate-x-3.5' : 'translate-x-0.5'
+          data-testid="toggle-thumb"
+          aria-hidden
+          className={`absolute left-0.5 top-0.5 w-3.5 h-3.5 rounded-full bg-bg-hi shadow-sm transition-transform ${
+            checked ? 'translate-x-3.5' : 'translate-x-0'
           }`}
         />
       </button>
-      {label && <span className="text-fg-dim">{label}</span>}
+      {label && (
+        <span data-testid="toggle-label" className="whitespace-nowrap text-fg-dim">
+          {label}
+        </span>
+      )}
     </label>
   )
 }

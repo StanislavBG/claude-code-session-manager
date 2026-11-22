@@ -1,12 +1,12 @@
 /**
  * ConfigLayout — presentational building blocks shared by every Claude config tab
- * (Home `~/.claude` and Project scopes): a ~300px left column (file card, filter +
+ * (Home `~/.claude` and Project scopes): a 318px left column (file card, filter +
  * primary action, selectable rows) beside a flexible detail area (eyebrow header,
  * labelled cards, saved line).
  *
  * Design: session-manager-operations/design-mocks/claude-config/ (DESIGN_SPEC.md §2,
- * ConfigWorkbench.dc.html; renders 12/14/15). Colors are app tokens only — mapping in
- * ../extensions-3a/DESIGN_SPEC.md §6. No data loading here; callers own state.
+ * ConfigWorkbench.dc.html; renders 12/14/15; list column 318px of the 1592px main area).
+ * Colors are app tokens only (no raw hex). No data loading here; callers own state.
  */
 import type { ReactNode } from 'react'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
@@ -25,7 +25,7 @@ export function ConfigWorkbench({ list, detail }: ConfigWorkbenchProps) {
     <div data-testid="config-workbench" className="flex flex-1 min-h-0 min-w-0">
       <div
         data-testid="config-workbench-list"
-        className="w-[300px] shrink-0 bg-bg-elev border-r border-line px-4 py-[18px] flex flex-col gap-3 overflow-y-auto"
+        className="w-[318px] shrink-0 bg-bg-elev border-r border-line px-4 py-[18px] flex flex-col gap-3 overflow-y-auto"
       >
         {list}
       </div>

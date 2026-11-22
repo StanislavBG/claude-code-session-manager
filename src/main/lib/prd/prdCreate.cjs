@@ -28,7 +28,7 @@ const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('../scheduler/fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
-const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
+const { resolveDepSlug, findNearMatches, epicOf } = require('./depSlugResolve.cjs');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
@@ -238,6 +238,46 @@ async function worktreeReachAdvisory(input, cwd) {
  * (400/409/500), left to the caller since only the HTTP route needs it.
  */
 const inFlightCreates = new Set();
+
+const nnOf = (slug) => {
+  const m = /^(\d+)-/.exec(slug);
+  return m ? Number(m[1]) : -1;
+};
+
+/**
+ * Map each `dependsOn` entry to the full NN slug it names, in priority order: a
+ * batch sibling's bare slug (kept bare; the batch path rewrites it after NN
+ * allocation), an exact existing slug, then bare-name matches in the new PRD's own
+ * Epic, then bare-name matches anywhere. Within the chosen tier the highest NN (the
+ * most recent same-name PRD) wins. A bare match spanning more than one Epic yields a
+ * warning naming every candidate and the one chosen. Entries that resolve to nothing
+ * are kept verbatim (the FK check above already refused those when it could read).
+ */
+function resolveDependsOnToFullSlugs(dependsOn, rows, { epicId = null, siblingSlugs = [] } = {}) {
+  const slugs = rows.map((r) => r.slug);
+  const epicBySlug = new Map(rows.map((r) => [r.slug, epicOf(r)]));
+  const siblings = new Set(siblingSlugs);
+  const out = [];
+  const siblingDeps = [];
+  const warnings = [];
+  for (const dep of dependsOn) {
+    if (siblings.has(dep)) { out.push(dep); siblingDeps.push(dep); continue; }
+    const matches = resolveDepSlug(dep, slugs);
+    if (matches.length === 0) { out.push(dep); continue; }
+    if (matches.length === 1 && matches[0] === dep) { out.push(dep); continue; }
+    const sameEpic = epicId != null ? matches.filter((m) => epicBySlug.get(m) === epicId) : [];
+    const tier = sameEpic.length ? sameEpic : matches;
+    const chosen = [...tier].sort((a, b) => nnOf(b) - nnOf(a) || b.localeCompare(a))[0];
+    const epics = new Set(matches.map((m) => epicBySlug.get(m) ?? null));
+    if (epics.size > 1) {
+      const list = matches.map((m) => `${m} (Epic ${epicBySlug.get(m) ?? 'none'})`).join(', ');
+      warnings.push(`dependsOn "${dep}" matches PRDs in more than one Epic: ${list}. Stored as "${chosen}". ` +
+        'Pass the exact NN-prefixed slug if you meant another one.');
+    }
+    out.push(chosen);
+  }
+  return { dependsOn: Array.from(new Set(out)), siblingDeps, warnings };
+}
 
 async function createPrd(input, remote) {
   const ctl = { key: null };
@@ -660,12 +700,33 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     }
   }
 
+  // Store every dependsOn entry as the full NN slug it resolved to (queue rows keep
+  // dependsOn verbatim, so a bare name would silently re-point at a later same-name
+  // PRD). Batch siblings stay bare here — createPrdBatch rewrites them to the
+  // sibling's allocated slug once NNs exist — and are excluded from planId
+  // inheritance (they share the batch's planId).
+  const batchSiblingDeps = new Set();
+  if (input.dependsOn && input.dependsOn.length && depRows) {
+    const resolvedDeps = resolveDependsOnToFullSlugs(input.dependsOn, depRows, {
+      epicId: input.sourcePromptId ?? null,
+      siblingSlugs: opts.extraDepSlugs ?? [],
+    });
+    for (const d of resolvedDeps.siblingDeps) batchSiblingDeps.add(d);
+    extraWarnings.push(...resolvedDeps.warnings);
+    input = { ...input, dependsOn: resolvedDeps.dependsOn };
+  }
+
   // planId is API-owned: any caller-supplied value is discarded. Inherited from the
   // resolved dependencies (append terminals or explicit dependsOn) using the FK-check
   // listing above; otherwise (first-ever / new-head / legacy deps) freshly minted.
   let planId = null;
   if (input.dependsOn && input.dependsOn.length && depRows) {
-    const inherited = resolveInheritedPlanId(input.dependsOn, depRows);
+    const inherited = resolveInheritedPlanId(
+      input.dependsOn.filter((d) => !batchSiblingDeps.has(d)),
+      depRows,
+      // Scoped only when this PRD has an Epic: an Epic-less PRD has no plan boundary to protect.
+      input.sourcePromptId ? { epicId: input.sourcePromptId } : {},
+    );
     planId = inherited.planId;
     if (inherited.diverged) {
       console.warn(`[prdCreate] dependsOn spans plans ${inherited.diverged.join(', ')} — inheriting ${planId} (lowest-numbered dependency)`);
@@ -867,13 +928,25 @@ async function createPrdBatch(inputs, remote, opts = {}) {
       } catch (e) { console.warn(`[prdCreate] batch rollback could not remove ${w.filenameSlug}: ${e?.message ?? e}`); }
     }
   };
+  // Allocate every NN before writing anything, so a dep on a LATER sibling can be
+  // rewritten to that sibling's full `${nn}-${slug}` too. Burned numbers on an
+  // allocation failure leave a gap, never an inconsistency.
+  const nns = [];
+  try {
+    for (const p of prepared) nns.push(await remote.allocateParallelGroup(p.input.cwd));
+  } catch (e) {
+    return fail([{ index: nns.length, slug: prepared[nns.length]?.slug ?? null, error: `NN allocation failed: ${e?.message ?? e}` }]);
+  }
+  const fullDeps = (deps) => (deps && deps.length
+    ? Array.from(new Set(deps.map((d) => (firstIndex.has(d) ? `${nns[firstIndex.get(d)]}-${d}` : d))))
+    : deps);
   for (let i = 0; i < prepared.length; i++) {
     const p = prepared[i];
     let nn; let filenameSlug;
     try {
-      nn = await remote.allocateParallelGroup(p.input.cwd);
+      nn = nns[i];
       filenameSlug = `${nn}-${p.slug}`;
-      const body = buildPrdBody({ ...p.input, planId, gate: p.gateCommands, files: p.filesList });
+      const body = buildPrdBody({ ...p.input, dependsOn: fullDeps(p.input.dependsOn), planId, gate: p.gateCommands, files: p.filesList });
       const w = await remote.writePrd(filenameSlug, body, p.input.cwd);
       if (!w?.ok) throw new Error(w?.error ?? 'write failed');
       written.push({ filenameSlug, path: w.path ?? null, cwd: p.input.cwd });

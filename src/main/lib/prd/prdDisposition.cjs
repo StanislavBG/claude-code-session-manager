@@ -29,7 +29,7 @@
  */
 
 const crypto = require('node:crypto');
-const { resolveDepSlug } = require('./depSlugResolve.cjs');
+const { resolveDepSlug, epicOf } = require('./depSlugResolve.cjs');
 
 /** A row is "incomplete" (still part of the Epic's active plan) unless it
  *  has actually finished. Treats every other status — including a brand-new
@@ -211,8 +211,17 @@ function mintPlanId() {
  * { planId, diverged } — planId is null when no dependency carries a valid one (caller
  * mints). When dependencies carry two or more DIFFERENT planIds, the lowest-numbered
  * dependency's wins (ties broken by slug) and `diverged` lists the distinct ids.
+ *
+ * `opts.epicId` (key present, even when null): only rows whose Epic (epicId, else
+ * sourcePromptId) equals it can donate a planId — a bare dep that also names another
+ * Epic's PRD must never pull this PRD into that Epic's plan (Self rows 1048-1055 of
+ * Epic f25f3d71 and 1056-1065 of Epic a23ae9c4 shared pl-mws3hfco-8a3e00).
  */
-function resolveInheritedPlanId(depSlugs, rows) {
+function resolveInheritedPlanId(depSlugs, rows, opts = {}) {
+  if (Object.prototype.hasOwnProperty.call(opts, 'epicId')) {
+    const epicId = opts.epicId ?? null;
+    rows = rows.filter((r) => epicOf(r) === epicId);
+  }
   const slugs = rows.map((r) => r.slug);
   const seen = new Set();
   const deps = [];

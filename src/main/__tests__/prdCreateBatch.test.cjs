@@ -51,7 +51,7 @@ const entry = (slug, o = {}) => ({
 });
 const files = () => fs.readdirSync(outDir).sort();
 
-test('returns prds in input order and writes bare intra-batch deps (earlier and later)', async () => {
+test('returns prds in input order and writes intra-batch deps (earlier and later) as full NN slugs', async () => {
   const r = await createPrdBatch([
     entry('step-b', { dependsOn: ['step-a'] }),
     entry('step-a'),
@@ -65,7 +65,7 @@ test('returns prds in input order and writes bare intra-batch deps (earlier and 
   expect(Array.isArray(r.prds[0].warnings)).toBe(true);
   expect(files()).toEqual(['100-step-b.md', '101-step-a.md', '102-step-validate.md']);
   const v = fs.readFileSync(path.join(outDir, '102-step-validate.md'), 'utf8');
-  expect(v).toContain('dependsOn: [step-a, step-b]');
+  expect(v).toContain('dependsOn: [101-step-a, 100-step-b]');
   expect(v).toContain('agentType: validator');
 });
 

@@ -939,7 +939,7 @@ test('createPrd still accepts a bare (non-prefixed) caller-supplied slug', async
   expect(result.filename).toMatch(/^\d+-perf-x\.md$/);
 });
 
-test('createPrd accepts dependsOn naming an existing bare slug', async () => {
+test('createPrd accepts dependsOn naming an existing bare slug and stores the full NN slug', async () => {
   const prdsDir = await mkTmpPrdsDir();
   await seedExistingPrd(prdsDir, '3-widget-base');
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
@@ -948,7 +948,7 @@ test('createPrd accepts dependsOn naming an existing bare slug', async () => {
 
   expect(result.ok).toBe(true);
   const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
-  expect(written).toMatch(/^dependsOn: \[widget-base\]$/m);
+  expect(written).toMatch(/^dependsOn: \[3-widget-base\]$/m);
 });
 
 test('createPrd accepts dependsOn naming an existing full NN-prefixed slug', async () => {

@@ -12,10 +12,11 @@ interface Props {
 const LAUNCHER_LABELS: Record<HistoryLauncher, string> = {
   epic: 'Epic sessions',
   job: 'Scheduler jobs',
+  task: 'Tasks',
   other: 'Other sessions',
 }
 
-/** Cost in view split by who launched the session — Epic chat, scheduled job, or anything else. */
+/** Cost in view split by who launched the session — Epic chat, scheduled job, Task, or anything else. */
 export function LauncherMix({ byLauncherTotals }: Props) {
   const entries = HISTORY_LAUNCHERS.map((l) => [l, byLauncherTotals[l]?.costUsd ?? 0] as const)
   const total = entries.reduce((sum, [, cost]) => sum + cost, 0)

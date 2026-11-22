@@ -24,7 +24,7 @@
  * Kept pure (no store/window imports) so it is unit-testable directly.
  */
 import type { HistoryDashboardDay, HistoryDashboardProjectRow } from '../../preload/api'
-import { launcherOfEncodedDir, type HistoryLauncher } from './historyLauncher'
+import { TASK_ROW_PREFIX, launcherOfEncodedDir, type HistoryLauncher } from './historyLauncher'
 
 /** One launcher's share of a folded project row. */
 export interface LauncherBucket {
@@ -138,6 +138,15 @@ export function foldHistoryDaysByCwd(
   const foldedDays = days.map((day) => {
     const byProject: Record<string, FoldedProjectRow> = {}
     for (const [encoded, row] of Object.entries(day.byProject)) {
+      // A Task row already names its cwd — no transcript-folder lookup, and it
+      // is never "unresolvable", so it never lands in `excluded`.
+      if (encoded.startsWith(TASK_ROW_PREFIX)) {
+        const taskCwd = encoded.slice(TASK_ROW_PREFIX.length)
+        const existingTask = byProject[taskCwd]
+        if (existingTask) mergeRow(existingTask, row, 'task')
+        else byProject[taskCwd] = cloneRow(row, taskCwd, 'task')
+        continue
+      }
       const cwd = cwdByEncoded[encoded]
       if (!cwd) {
         excludedFolders.add(encoded)

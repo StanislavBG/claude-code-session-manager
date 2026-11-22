@@ -158,5 +158,34 @@ describe('foldHistoryDaysByCwd', () => {
       expect(Object.keys(r.byLauncher)).toEqual(['other'])
       expect(r.byLauncher.other).toEqual({ inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.5, sessionCount: 1 })
     })
+    it('folds a Task row onto the cwd after the prefix, without a cwdByEncoded lookup', () => {
+      const TASK = 'sm-task:/p/foo'
+      const days = [day('2026-08-01', {
+        [EPIC]: row(EPIC, { estimatedCostUsd: 1, sessionCount: 2 }),
+        [JOB]: row(JOB, { estimatedCostUsd: 2, sessionCount: 3 }),
+        [TASK]: row(TASK, { inputTokens: 7, outputTokens: 3, estimatedCostUsd: 0.25, sessionCount: 1 }),
+      })]
+      // The Task key is deliberately absent from the map.
+      const { days: out, excluded } = foldHistoryDaysByCwd(days, { [EPIC]: '/p/foo', [JOB]: '/p/foo' })
+      expect(Object.keys(out[0].byProject)).toEqual(['/p/foo'])
+      const r = out[0].byProject['/p/foo']
+      expect(Object.keys(r.byLauncher).sort()).toEqual(['epic', 'job', 'task'])
+      expect(r.byLauncher.task).toEqual({ inputTokens: 7, outputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.25, sessionCount: 1 })
+      expect(r.estimatedCostUsd).toBe(3.25)
+      expect(r.sessionCount).toBe(6)
+      expect(hasExclusions(excluded)).toBe(false)
+      expect(excluded.estimatedCostUsd).toBe(0)
+    })
+
+    it('gives a Task-only project its own row and never excludes it', () => {
+      const TASK = 'sm-task:/home/user/Projects/burrow'
+      const days = [day('2026-08-01', { [TASK]: row(TASK) })]
+      const { days: out, excluded } = foldHistoryDaysByCwd(days, { [TASK]: '/wrong/should/not/be/used' })
+      expect(Object.keys(out[0].byProject)).toEqual(['/home/user/Projects/burrow'])
+      const r = out[0].byProject['/home/user/Projects/burrow']
+      expect(r.projectDir).toBe('/home/user/Projects/burrow')
+      expect(Object.keys(r.byLauncher)).toEqual(['task'])
+      expect(excluded).toEqual({ folderCount: 0, sessionCount: 0, promptCount: 0, estimatedCostUsd: 0, totalTokens: 0 })
+    })
   })
 })

@@ -40,30 +40,42 @@ describe('LauncherMix', () => {
     expect(el.textContent).not.toContain('07 · composition')
   })
 
-  it('renders three lines in fixed order with cost and share', () => {
+  it('renders four lines in fixed order with cost and share', () => {
     const el = mount({ other: bucket(1), epic: bucket(2), job: bucket(1) })
     const ls = lines(el)
-    expect(ls).toHaveLength(3)
+    expect(ls).toHaveLength(4)
     expect(ls[0]).toContain('Epic sessions')
     expect(ls[0]).toContain('$2.00')
     expect(ls[0]).toContain('50%')
     expect(ls[1]).toContain('Scheduler jobs')
     expect(ls[1]).toContain('$1.00')
     expect(ls[1]).toContain('25%')
-    expect(ls[2]).toContain('Other sessions')
-    expect(ls[2]).toContain('25%')
+    expect(ls[2]).toContain('Tasks')
+    expect(ls[2]).toContain('0%')
+    expect(ls[3]).toContain('Other sessions')
+    expect(ls[3]).toContain('25%')
     expect(el.textContent).toContain('$4.00 total')
   })
 
   it('shows zero for a launcher with no data', () => {
     const el = mount({ epic: bucket(3) })
     const ls = lines(el)
-    expect(ls).toHaveLength(3)
+    expect(ls).toHaveLength(4)
     expect(ls[0]).toContain('100%')
     expect(ls[1]).toContain('Scheduler jobs')
     expect(ls[1]).toContain('$0.00')
     expect(ls[1]).toContain('0%')
     expect(ls[2]).toContain('0%')
+    expect(ls[3]).toContain('0%')
+  })
+
+  it('renders Task spend as its own Tasks line', () => {
+    const el = mount({ epic: bucket(1), task: bucket(3) })
+    const task = el.querySelector('[data-testid="history-launcher-task"]')
+    expect(task?.textContent).toContain('Tasks')
+    expect(task?.textContent).toContain('$3.00')
+    expect(task?.textContent).toContain('75%')
+    expect(el.textContent).toContain('$4.00 total')
   })
 
   it('shows one empty-state line with no cost at all', () => {

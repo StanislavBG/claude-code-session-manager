@@ -12162,7 +12162,17 @@ const remote = {
 
   async listJobs() {
     const state = await readQueue();
-    return state.jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd, agentType: j.agentType ?? null }));
+    // epicId + sourcePromptId are what epicOutsideState.buildKnownPrds joins
+    // rows to an Epic on — dropping them made GET /admin/epic count no rows.
+    return state.jobs.map((j) => ({
+      slug: j.slug,
+      title: j.title,
+      status: j.status,
+      cwd: j.cwd,
+      agentType: j.agentType ?? null,
+      epicId: j.epicId ?? null,
+      sourcePromptId: j.sourcePromptId ?? null,
+    }));
   },
 
   // Single queue row lookup, used by cancelJob/updatePrd's status guards and

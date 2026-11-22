@@ -35,7 +35,7 @@ Give every doc exactly one verdict.
 
 | Verdict | Meaning |
 | --- | --- |
-| KEEP-OWNER | The doc is the single owner of its facts. Keep it and trim copies of other docs' facts out of it. |
+| KEEP-TOPIC | The doc is the single owner of its facts. Keep it and trim copies of other docs' facts out of it. |
 | MERGE-INTO `<doc>` | The doc's facts belong in another topic doc. Move them there, then remove the doc and repoint every link. |
 | SHRINK-TO-POINTER | Reduce the doc to a few lines that point to the owner. Use this when a link, a heading cited by name or a program still needs the path. |
 | MOVE-TO-OWNING-REPO | The facts belong to another repo. Hand them over as described in Other repos. |

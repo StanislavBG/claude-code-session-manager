@@ -9,7 +9,7 @@ Every doc is one of five kinds. A kind says how a doc is used, never who owns it
 - **Map.** The root CLAUDE.md or AGENTS.md. It holds one-line rules and links, and it loads every session.
 - **Folder notes.** A CLAUDE.md inside a folder. It holds only that folder's facts. It never restates a root rule.
 - **Topic docs.** The one doc per topic that holds its full text. Everything else links to it.
-- **Agent files.** Personas, skills, plugin packs and commands. They load by name. They link to topic docs instead of copying them.
+- **Agent files.** Personas (subagent definitions), skills, plugin packs (a plugin plus its always-on rules), commands. They load by name. They link to topic docs instead of copying them.
 - **History.** Dated reports and logs. They are never edited, and they are never the current answer. A finding that still matters moves into its topic doc.
 
 Rules:
@@ -32,7 +32,7 @@ Rules:
 | Noisy side research | A subagent that returns a short summary | The subagent reads in its own context and hands back only the conclusion. Sources: best-practices, context-engineering article. |
 | Notes for human maintainers | An HTML block comment (`<!-- ... -->`) | Block comments are stripped before the file loads, so they cost no context. Source: memory. |
 | Progress records and history | Progress files and git history | Let the next session read them to pick up where the last stopped. Source: long-running harnesses article. |
-| Ownership of a doc | One named owner per doc, reviewed every 3-6 months | Assign an owner so the doc is not left to drift. Source: large-codebases blog. |
+| Maintainer of a doc | One named maintainer per doc, reviewed every 3-6 months | Assign an owner so the doc is not left to drift. Source: large-codebases blog. |
 
 ## Size and load rules
 

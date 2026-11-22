@@ -153,9 +153,9 @@ Template:
 
 ## Verdicts
 
-| Doc | Verdict | Owner doc |
+| Doc | Verdict | Topic doc |
 | --- | --- | --- |
-| <path> | KEEP-OWNER / MERGE-INTO / SHRINK-TO-POINTER / MOVE-TO-OWNING-REPO / DELETE | <doc that owns the facts> |
+| <path> | KEEP-TOPIC / MERGE-INTO / SHRINK-TO-POINTER / MOVE-TO-OWNING-REPO / DELETE | <doc that owns the facts> |
 
 ## Decisions
 

@@ -11,13 +11,22 @@
  * (git only lists the files), and it does I/O, so it is not util/. It sits
  * beside memoryMdNetwork.cjs, the other reader of the same docs network.
  *
- * - buildMdNetwork({ files, root, exists, records }) — pure graph builder over
- *   in-memory docs; `records` paths never appear in orphan findings.
+ * - buildMdNetwork({ files, root, exists, localOnly, records, loadedByTools, history })
+ *   — pure graph builder over in-memory docs. Docs a tool loads by name
+ *   (LOADED_BY_TOOLS, any `/skills/` folder, the GitHub root files, plus
+ *   `loadedByTools` prefixes) are entry points, never orphans. `history`
+ *   prefixes and `records` docs are never walked: a link into one is an edge
+ *   and the doc a leaf node, but its own links pull nothing in; they are never
+ *   orphans either.
  * - scanMdNetwork(cwd, deps, opts) — thin I/O wrapper: one `git ls-files -z`, at
  *   most MAX_DOCS docs read (the root, then breadth-first along its links, then
  *   the rest shallowest-first, so the cap drops unreachable docs before reachable
  *   ones), at most MAX_DOC_BYTES each, READ_BATCH reads in parallel, async fs only.
- *   Untracked link targets (e.g. gitignored files) are checked on disk.
+ *   A link target git does not track is a broken link in every checkout; it is
+ *   flagged localOnly when it is gitignored (one `git check-ignore --no-index`
+ *   per 100 targets) or present on disk here.
+ *   Optional `mdNetwork.loadedByTools` / `mdNetwork.history` string-prefix
+ *   arrays come from the project's tracked .session-manager.json.
  *   It also attaches a per-doc census (mdDocCensus.cjs + mdDocRefs.cjs) over
  *   every tracked .md: one `git log --max-count=2000 --name-only` (64 MB buffer)
  *   for recency, one `git grep -F -o` over non-.md files (16 MB buffer) for code
@@ -43,7 +52,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execGit } = require('./git/gitExec.cjs');
-const { censusMdDocs, parseGitLog } = require('./mdDocCensus.cjs');
+const { censusMdDocs, parseGitLog, recordCollectionDocs } = require('./mdDocCensus.cjs');
 const { assessRefs, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
 // The link convention (links, imports, backticked paths) is written once, in the skill's mdLinks.cjs.
 const { linksOf, importsOf, backtickPaths, toRepoPath } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
@@ -63,6 +72,18 @@ const OWNER_NAMES = new Set(['CLAUDE.md', 'README.md', 'AGENTS.md']);
 const MISSING_CODES = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
 const DETAIL_MISSING = 'The link target doesn’t exist.';
 const DETAIL_ESCAPES = 'The link target is outside the project.';
+const DETAIL_LOCAL_ONLY = 'Works only on this machine: the target is not tracked in git.';
+const CONFIG_FILE = '.session-manager.json';
+const CHECK_IGNORE_BATCH = 100;
+
+/**
+ * Doc prefixes a tool loads by name (agents, plugin packs, seeds, GitHub files):
+ * entry points, never orphans. The doc-hierarchy lint's EXEMPT_PREFIXES calls
+ * these "tool-loaded", "seeded" and "github".
+ */
+const LOADED_BY_TOOLS = Object.freeze(['.claude/', '.github/', 'plugins/', 'src/seed/']);
+/** Root files GitHub (or a contributor) opens by name. */
+const LOADED_BY_TOOLS_ROOT_FILES = new Set(['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'SECURITY.md', 'CHANGELOG.md']);
 
 const MD_RE = /\.md$/i;
 
@@ -75,7 +96,8 @@ const MD_RE = /\.md$/i;
  * @typedef {{ id: string, path: string, depth: number, type: MdNetworkNodeType, linksOut: number, linkedFrom: number }} MdNetworkNode
  * @typedef {{ from: string, to: string, broken?: boolean }} MdNetworkEdge
  *   `to` of a broken edge is the missing (or escaping) resolved target, not a node
- * @typedef {{ type: 'broken-link', file: string, line: number, target: string, to: string, where: string, detail: string }} MdNetworkBrokenLink
+ * @typedef {{ type: 'broken-link', file: string, line: number, target: string, to: string, where: string, detail: string, localOnly?: boolean }} MdNetworkBrokenLink
+ *   `localOnly`: the target is not tracked but is gitignored or on disk here
  * @typedef {{ type: 'orphan', where: string, count: number, paths: string[], detail: string }} MdNetworkOrphan
  * @typedef {MdNetworkBrokenLink | MdNetworkOrphan} MdNetworkFinding
  * @typedef {{ ok: true, root: string, nodes: MdNetworkNode[], edges: MdNetworkEdge[], findings: MdNetworkFinding[], docs: number, links: number, scopes: string[] }} MdLinkNetwork
@@ -169,6 +191,21 @@ function refsOf(file, isDoc) {
   return refs;
 }
 
+/** @param {unknown} list @returns {string[]} the non-empty strings of `list` */
+function prefixList(list) {
+  return Array.isArray(list) ? list.filter((p) => typeof p === 'string' && p !== '') : [];
+}
+
+/** @param {string} p @param {readonly string[]} prefixes */
+function hasPrefix(p, prefixes) {
+  return prefixes.some((pre) => p.startsWith(pre));
+}
+
+/** A doc a tool loads by name. @param {string} p @param {readonly string[]} extra */
+function isLoadedByTools(p, extra) {
+  return LOADED_BY_TOOLS_ROOT_FILES.has(p) || p.startsWith('skills/') || p.includes('/skills/') || hasPrefix(p, LOADED_BY_TOOLS) || hasPrefix(p, extra);
+}
+
 /** @param {string} id @param {number} depth @returns {MdNetworkNodeType} */
 function nodeType(id, depth) {
   if (depth === 0) return 'hub';
@@ -191,12 +228,15 @@ function missingRoot(root) {
  * Pure: the link network reachable from `root` over in-memory docs.
  * `exists(relPath)` vouches for link targets that are neither one of `files`
  * nor a folder holding one (code files, docs left unread, untracked files);
- * without it such targets are missing. `records` (record-collection docs, not
- * meant to be linked) are left out of orphan groups.
- * @param {{ files?: MdFile[], root?: string, exists?: (relPath: string) => boolean, records?: ReadonlySet<string> }} [input]
+ * without it such targets are missing. A missing target `localOnly` vouches
+ * for (untracked here, e.g. gitignored) is a broken link flagged localOnly.
+ * `records` (record-collection docs) and `history` prefixes are never walked
+ * and never orphans; docs a tool loads by name (LOADED_BY_TOOLS + `loadedByTools`
+ * prefixes) are never orphans.
+ * @param {{ files?: MdFile[], root?: string, exists?: (relPath: string) => boolean, localOnly?: (relPath: string) => boolean, records?: ReadonlySet<string>, loadedByTools?: string[], history?: string[] }} [input]
  * @returns {MdLinkNetworkResult}
  */
-function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
+function buildMdNetwork({ files = [], root = ROOT_DOC, exists, localOnly, records, loadedByTools, history } = {}) {
   try {
     const rootPath = toRepoPath(root);
     /** @type {Map<string, MdFile>} */
@@ -210,6 +250,10 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
     const present = (p) => p === '.' || docs.has(p) || folders.has(p) || (exists !== undefined && exists(p) === true);
     /** @param {string} p */
     const isDoc = (p) => docs.has(p);
+    const historyPrefixes = prefixList(history);
+    const toolPrefixes = prefixList(loadedByTools);
+    /** A doc whose own links are never followed. @param {string} p */
+    const isLeaf = (p) => p !== rootPath && ((records !== undefined && records.has(p)) || hasPrefix(p, historyPrefixes));
 
     /** @type {Map<string, number>} */
     const depth = new Map([[rootPath, 0]]);
@@ -228,7 +272,7 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
     for (let i = 0; i < order.length; i += 1) {
       const from = order[i];
       const file = docs.get(from);
-      if (!file) continue;
+      if (!file || isLeaf(from)) continue;
       const nextDepth = (depth.get(from) ?? 0) + 1;
       for (const link of refsOf(file, isDoc)) {
         const broken = link.kind === 'link' && (link.escapes || !present(link.to));
@@ -236,8 +280,12 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
           const where = `${from}:${link.line} → ${link.target}`;
           if (!findingKeys.has(where)) {
             findingKeys.add(where);
-            const detail = link.escapes ? DETAIL_ESCAPES : DETAIL_MISSING;
-            findings.push({ type: 'broken-link', file: from, line: link.line, target: link.target, to: link.to, where, detail });
+            const local = !link.escapes && localOnly !== undefined && localOnly(link.to) === true;
+            const detail = link.escapes ? DETAIL_ESCAPES : local ? DETAIL_LOCAL_ONLY : DETAIL_MISSING;
+            /** @type {MdNetworkBrokenLink} */
+            const finding = { type: 'broken-link', file: from, line: link.line, target: link.target, to: link.to, where, detail };
+            if (local) finding.localOnly = true;
+            findings.push(finding);
           }
         } else if (link.to === from || !docs.has(link.to)) {
           continue; // a self link, or a present target that is not a doc: no edge
@@ -263,7 +311,7 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, records } = {}) {
     /** @type {Map<string, string[]>} */
     const orphans = new Map();
     for (const p of docs.keys()) {
-      if (depth.has(p) || (records !== undefined && records.has(p))) continue;
+      if (depth.has(p) || isLeaf(p) || isLoadedByTools(p, toolPrefixes)) continue;
       const top = topFolder(p);
       const group = orphans.get(top);
       if (group) group.push(p);
@@ -310,6 +358,36 @@ function pathExists(absPath) {
   );
 }
 
+/**
+ * The project's optional mdNetwork prefixes from its tracked .session-manager.json.
+ * @param {string} cwd @param {boolean} tracked
+ * @returns {Promise<{ loadedByTools: string[], history: string[], warning: string | null }>}
+ */
+async function readNetworkConfig(cwd, tracked) {
+  const none = { loadedByTools: [], history: [], warning: null };
+  if (!tracked) return none;
+  let text;
+  try {
+    text = await fs.promises.readFile(path.join(cwd, CONFIG_FILE), 'utf8');
+  } catch (err) {
+    if (MISSING_CODES.has(String(errorField(err, 'code')))) return none;
+    return { ...none, warning: `${CONFIG_FILE} unreadable, mdNetwork settings ignored: ${errorText(err)}` };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    const net = parsed !== null && typeof parsed === 'object' ? parsed.mdNetwork : undefined;
+    if (net === undefined) return none;
+    if (net === null || typeof net !== 'object' || Array.isArray(net)) throw new Error('mdNetwork is not an object');
+    for (const key of ['loadedByTools', 'history']) {
+      const v = net[key];
+      if (v !== undefined && !(Array.isArray(v) && v.every((p) => typeof p === 'string'))) throw new Error(`mdNetwork.${key} is not a string array`);
+    }
+    return { loadedByTools: prefixList(net.loadedByTools), history: prefixList(net.history), warning: null };
+  } catch (err) {
+    return { ...none, warning: `${CONFIG_FILE} unreadable, mdNetwork settings ignored: ${errorText(err)}` };
+  }
+}
+
 /** The `fatal:`/`error:` line of a failed git call, else its first line. @param {unknown} err @returns {string} */
 function gitFailure(err) {
   const stderr = errorField(err, 'stderrText');
@@ -349,6 +427,8 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
     const trackedFolders = foldersOf(tracked);
     const docPaths = tracked.filter((p) => MD_RE.test(p));
     const docSet = new Set(docPaths);
+    const config = await readNetworkConfig(cwd, trackedSet.has(CONFIG_FILE));
+    const { loadedByTools, history } = config;
 
     /** @type {Set<string>} docs whose read was started; never more than MAX_DOCS */
     const attempted = new Set();
@@ -395,6 +475,7 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
       /** @type {string[]} */
       const next = [];
       for (const file of wave) {
+        if (file.path !== ROOT_DOC && hasPrefix(file.path, history)) continue; // history docs are never walked
         for (const link of refsOf(file, isDocPath)) {
           if (link.escapes || queued.has(link.to)) continue;
           if (docSet.has(link.to)) {
@@ -421,9 +502,14 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
       files.push(...(await readAll(rest)));
     }
 
-    // Untracked link targets (e.g. gitignored files) are checked on disk.
+    // Untracked link targets: on disk here, or gitignored, they work only on this machine.
     /** @type {Set<string>} */
     const onDisk = new Set();
+    /** @type {Set<string>} */
+    const ignored = new Set();
+    /** @type {string[]} */
+    const warnings = [];
+    if (config.warning) warnings.push(config.warning);
     const candidates = [...unvouched];
     /** @param {string} rel @returns {Promise<boolean>} */
     const probe = async (rel) => {
@@ -440,17 +526,32 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
         if (hits[k]) onDisk.add(rel);
       });
     }
+    const notOnDisk = candidates.filter((rel) => !onDisk.has(rel));
+    for (let i = 0; i < notOnDisk.length; i += CHECK_IGNORE_BATCH) {
+      const batch = notOnDisk.slice(i, i + CHECK_IGNORE_BATCH);
+      try {
+        // -z needs --stdin, so paths go as args and come back one per line, unquoted.
+        const out = String(await runGit(cwd, ['-c', 'core.quotePath=false', 'check-ignore', '--no-index', '--', ...batch]));
+        for (const rel of out.split('\n')) if (rel !== '') ignored.add(toRepoPath(rel));
+      } catch (err) {
+        if (errorField(err, 'code') !== 1) {
+          warnings.push(`gitignore check unavailable: ${gitFailure(err)}`);
+          break;
+        }
+      }
+    }
 
     /** @param {string} p */
     const vouched = (p) => !gone.has(p) && (trackedSet.has(p) || trackedFolders.has(p));
     /** @param {string} p */
-    const present = (p) => onDisk.has(p) || vouched(p);
-    const network = buildMdNetwork({ files, root: ROOT_DOC, exists: present });
+    const present = (p) => vouched(p);
+    /** @param {string} p */
+    const localOnly = (p) => onDisk.has(p) || ignored.has(p);
+    const networkInput = { files, root: ROOT_DOC, exists: present, localOnly, loadedByTools, history };
+    const network = buildMdNetwork(networkInput);
     if (!network.ok) return network;
 
     // ── Census ──
-    /** @type {string[]} */
-    const warnings = [];
 
     // Recency: one capped git log; newest first, so the first sighting wins.
     /** @type {import('./mdDocCensus.cjs').GitLogEntry[]} */
@@ -506,7 +607,7 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
     }
     /** @param {string} p */
     const refExists = (p) => {
-      if (present(p)) return true;
+      if (present(p) || onDisk.has(p)) return true;
       if (gone.has(p)) return false;
       const hit = probed.get(p);
       return hit === undefined ? true : hit;
@@ -516,7 +617,7 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
     const refs = new Map();
     for (const file of files) {
       const linkTargets = linksOf(file)
-        .filter((l) => !l.escapes && present(l.to))
+        .filter((l) => !l.escapes && (present(l.to) || onDisk.has(l.to)))
         .map((l) => l.to);
       refs.set(
         file.path,
@@ -564,13 +665,14 @@ async function scanMdNetwork(cwd, deps = {}, opts = {}) {
     });
     census.warnings.unshift(...warnings);
 
-    const records = new Set(census.docs.filter((d) => d.role === 'record').map((d) => d.path));
+    // Record-collection docs leave orphans and are never walked, linked or not.
+    const records = new Set(recordCollectionDocs(census));
     if (records.size === 0) return { ...network, census };
-    const pruned = buildMdNetwork({ files, root: ROOT_DOC, exists: present, records });
+    const pruned = buildMdNetwork({ ...networkInput, records });
     return pruned.ok ? { ...pruned, census } : pruned;
   } catch (err) {
     return { ok: false, error: errorText(err) };
   }
 }
 
-module.exports = { buildMdNetwork, scanMdNetwork };
+module.exports = { buildMdNetwork, scanMdNetwork, LOADED_BY_TOOLS };

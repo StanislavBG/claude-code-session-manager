@@ -15,6 +15,8 @@
  * - parseGitLog(stdout) — `git log --max-count=2000 --no-renames
  *   --format=%x01%ct --name-only -z` stdout -> newest-first { ms, files }.
  * - importsOf(text, fromPath) — the path.md imports (at-sign prefixed) a doc makes.
+ * - recordCollectionDocs(census) — every doc inside a record collection, linked
+ *   or not, except the root and README/CLAUDE/AGENTS/index docs.
  *
  * Roles, by precedence: map (the root + its transitive imports, depth <= 5)
  * > scoped (any other CLAUDE.md / AGENTS.md / CLAUDE.local.md) > agent
@@ -322,4 +324,17 @@ function censusMdDocs(input) {
   };
 }
 
-module.exports = { censusMdDocs, parseGitLog, importsOf };
+/**
+ * Every doc inside one of `census`'s record collections: the role-`record`
+ * docs plus linked docs in a collection folder. README/CLAUDE/AGENTS/index docs
+ * and map docs are never records. The network scan never walks these.
+ * @param {MdCensus} census @returns {string[]}
+ */
+function recordCollectionDocs(census) {
+  const folders = census.collections.map((c) => c.folder);
+  return census.docs
+    .filter((d) => d.role === 'record' || (d.role === 'doc' && !NEVER_RECORD_NAMES.has(baseName(d.path)) && folders.some((f) => d.path.startsWith(f))))
+    .map((d) => d.path);
+}
+
+module.exports = { censusMdDocs, parseGitLog, importsOf, recordCollectionDocs };

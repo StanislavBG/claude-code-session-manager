@@ -1913,6 +1913,8 @@ export interface MdNetworkBrokenLink {
   /** `${file}:${line} → ${target}` */
   where: string;
   detail: string;
+  /** The target is not tracked in git but is gitignored or on disk here: the link works only on this machine. */
+  localOnly?: boolean;
 }
 
 /** Docs that no link path from the root reaches, grouped by top-level folder. */

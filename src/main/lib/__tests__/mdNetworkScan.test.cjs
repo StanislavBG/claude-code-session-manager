@@ -13,12 +13,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { buildMdNetwork, scanMdNetwork } = require('../mdNetworkScan.cjs');
+const { buildMdNetwork, scanMdNetwork, LOADED_BY_TOOLS } = require('../mdNetworkScan.cjs');
 
 const doc = (p, ...lines) => ({ path: p, text: lines.join('\n') });
 const brokenLinks = (r) => r.findings.filter((f) => f.type === 'broken-link');
 const MISSING = 'The link target doesn’t exist.';
 const ESCAPES = 'The link target is outside the project.';
+const LOCAL_ONLY = 'Works only on this machine: the target is not tracked in git.';
 const LOG_ARGS = ['log', '--max-count=2000', '--no-renames', '--format=%x01%ct', '--name-only', '-z'];
 
 describe('buildMdNetwork', () => {
@@ -142,6 +143,54 @@ describe('buildMdNetwork', () => {
     const r = buildMdNetwork({ files, records: new Set(['log/a.md', 'log/b.md', 'notes/x.md']) });
     expect(r.findings.map((f) => [f.where, f.paths])).toEqual([['notes/', ['notes/y.md']]]);
     expect(buildMdNetwork({ files }).findings.map((f) => f.where)).toEqual(['log/', 'notes/']);
+  });
+
+  it('never orphans docs a tool loads by name: .claude/, .github/, plugins/, src/seed/, any skills/ folder and GitHub root files', () => {
+    expect(LOADED_BY_TOOLS).toEqual(['.claude/', '.github/', 'plugins/', 'src/seed/']);
+    const files = [
+      doc('CLAUDE.md', ''),
+      doc('.claude/agents/dev-lead.md', ''),
+      doc('src/seed/welcome.md', ''),
+      doc('.github/PULL_REQUEST_TEMPLATE.md', ''),
+      doc('plugins/packs/x/rules.md', ''),
+      doc('tools/skills/run/SKILL.md', ''),
+      doc('README.md', ''),
+      doc('CONTRIBUTING.md', ''),
+      doc('CHANGELOG.md', ''),
+      doc('docs/README.md', ''),
+      doc('extra/loaded.md', ''),
+    ];
+    const r = buildMdNetwork({ files });
+    expect(r.findings.map((f) => [f.where, f.paths])).toEqual([
+      ['docs/', ['docs/README.md']],
+      ['extra/', ['extra/loaded.md']],
+    ]);
+    const extra = buildMdNetwork({ files, loadedByTools: ['extra/'] });
+    expect(extra.findings.map((f) => f.where)).toEqual(['docs/']);
+  });
+
+  it('never walks history or record docs: links into them are edges, but their own links pull nothing in', () => {
+    const files = [
+      doc('CLAUDE.md', '[past](history/2026-01-01.md) [rec](log/a.md)'),
+      doc('history/2026-01-01.md', '[gone](nowhere.md) [only via history](notes/old.md)'),
+      doc('history/2026-02-01.md', ''),
+      doc('log/a.md', '[via record](notes/rec.md)'),
+      doc('notes/old.md', ''),
+      doc('notes/rec.md', ''),
+    ];
+    const r = buildMdNetwork({ files, history: ['history/'], records: new Set(['log/a.md']) });
+    expect(r.edges).toEqual([
+      { from: 'CLAUDE.md', to: 'history/2026-01-01.md' },
+      { from: 'CLAUDE.md', to: 'log/a.md' },
+    ]);
+    expect(r.nodes.map((n) => [n.id, n.depth, n.linksOut])).toEqual([
+      ['CLAUDE.md', 0, 2],
+      ['history/2026-01-01.md', 1, 0],
+      ['log/a.md', 1, 0],
+    ]);
+    expect(brokenLinks(r)).toEqual([]);
+    // history docs are never orphans; docs only a history/record doc links to are
+    expect(r.findings.map((f) => [f.where, f.paths])).toEqual([['notes/', ['notes/old.md', 'notes/rec.md']]]);
   });
 
   it('follows backticked repo-root .md paths in a table like links', () => {
@@ -415,6 +464,35 @@ describe('scanMdNetwork with injected git and fs', () => {
     const forced = await scanMdNetwork('/repo', fakeRepo({ tracked, texts }).deps, { recordFolders: ['notes'], docFolders: ['records/'] });
     expect(forced.census.collections.map((c) => [c.folder, c.source])).toEqual([['notes/', 'override']]);
     expect(forced.findings.map((f) => [f.where, f.count])).toEqual([['records/', 25]]);
+
+    // A linked record is a leaf: its own links pull nothing into the network.
+    const linked = { ...texts, 'CLAUDE.md': '[one record](records/r-00.md)', 'records/r-00.md': '[lost](../notes/lost.md)' };
+    const leaf = await scanMdNetwork('/repo', fakeRepo({ tracked, texts: linked }).deps);
+    expect(leaf.census.collections.map((c) => c.folder)).toEqual(['records/']);
+    expect(leaf.nodes.map((n) => n.id)).toEqual(['CLAUDE.md', 'records/r-00.md']);
+    expect(leaf.findings.map((f) => f.where)).toEqual(['notes/']);
+  });
+
+  it('reads mdNetwork.loadedByTools / history from a tracked .session-manager.json, warning on a malformed one', async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'md-network-cfg-'));
+    try {
+      const tracked = ['.session-manager.json', 'CLAUDE.md', 'past/old.md', 'agents/a.md', 'notes/n.md'];
+      const texts = { 'CLAUDE.md': '[old](past/old.md)', 'past/old.md': '[n](../notes/n.md)', 'agents/a.md': '', 'notes/n.md': '' };
+      const deps = fakeRepo({ tracked, texts }).deps;
+      fs.writeFileSync(path.join(base, '.session-manager.json'), JSON.stringify({ mdNetwork: { loadedByTools: ['agents/'], history: ['past/'] } }));
+      const r = await scanMdNetwork(base, { ...deps, readFile: async (abs) => deps.readFile(path.join('/repo', path.relative(base, abs))) });
+      expect(r.nodes.map((n) => n.id)).toEqual(['CLAUDE.md', 'past/old.md']);
+      expect(r.findings.map((f) => [f.where, f.paths])).toEqual([['notes/', ['notes/n.md']]]);
+      expect(r.census.warnings).toEqual([]);
+
+      fs.writeFileSync(path.join(base, '.session-manager.json'), '{ not json');
+      const bad = await scanMdNetwork(base, { ...deps, readFile: async (abs) => deps.readFile(path.join('/repo', path.relative(base, abs))) });
+      expect(bad.nodes.map((n) => n.id)).toEqual(['CLAUDE.md', 'past/old.md', 'notes/n.md']);
+      expect(bad.findings.map((f) => f.where)).toEqual(['agents/']);
+      expect(bad.census.warnings).toEqual([expect.stringMatching(/^\.session-manager\.json unreadable, mdNetwork settings ignored: /)]);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it('returns the missing-root error when CLAUDE.md cannot be found', async () => {
@@ -462,19 +540,27 @@ describe('scanMdNetwork on a scratch git repo (real git and fs)', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('lists tracked docs with git, checks untracked targets on disk and reads at most 256 KB per doc', async () => {
-    write('CLAUDE.md', ['# Map', '[big](docs/big.md)', '[local notes](local.txt)', '[gone](docs/gone.md)'].join('\n'));
+  it('lists tracked docs with git, flags untracked targets local-only and reads at most 256 KB per doc', async () => {
+    write('CLAUDE.md', ['# Map', '[big](docs/big.md)', '[local notes](local.txt)', '[gone](docs/gone.md)', '[ignored, absent](cache/out.md)', '[untracked](scratch.txt)'].join('\n'));
     write('docs/big.md', `${'x'.repeat(300 * 1024)}\n[past the read cap](missing-late.md)\n`);
     write('notes/orphan.md', 'nobody links here');
-    write('.gitignore', 'local.txt\n');
+    write('.gitignore', 'local.txt\ncache/\nscratch.txt\n');
     write('local.txt', 'on disk, not tracked');
     execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'pipe' });
     execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'pipe' });
+    write('.gitignore', 'local.txt\ncache/\n'); // scratch.txt: on disk, untracked, not ignored
+    write('scratch.txt', 'untracked');
 
     const r = await scanMdNetwork(root);
-    expect(r).toMatchObject({ ok: true, root: 'CLAUDE.md', docs: 3, links: 2, scopes: ['docs/'] });
+    expect(r).toMatchObject({ ok: true, root: 'CLAUDE.md', docs: 3, links: 5, scopes: ['docs/'] });
     expect(r.nodes.map((n) => n.id)).toEqual(['CLAUDE.md', 'docs/big.md']);
-    expect(r.findings.map((f) => f.where)).toEqual(['CLAUDE.md:4 → docs/gone.md', 'notes/']);
+    expect(r.findings.map((f) => [f.where, f.localOnly ?? false, f.detail])).toEqual([
+      ['CLAUDE.md:3 → local.txt', true, LOCAL_ONLY],
+      ['CLAUDE.md:4 → docs/gone.md', false, MISSING],
+      ['CLAUDE.md:5 → cache/out.md', true, LOCAL_ONLY],
+      ['CLAUDE.md:6 → scratch.txt', true, LOCAL_ONLY],
+      ['notes/', false, expect.any(String)],
+    ]);
     expect(r.census.docs.map((d) => [d.path, d.lastCommitMs])).toEqual([
       ['CLAUDE.md', null],
       ['docs/big.md', null],

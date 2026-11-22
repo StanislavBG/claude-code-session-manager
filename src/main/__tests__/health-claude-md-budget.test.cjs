@@ -11,7 +11,16 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../health.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { parseClaudeMdBudget, evaluateClaudeMdBudget, measureRootClaudeMdPair, evaluateRootClaudeMdBudget } = require('../health.cjs');
+
+function scratch(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-md-pair-'));
+  for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
+  return dir;
+}
 
 test('under budget reports ok with no issue', () => {
   const result = evaluateClaudeMdBudget(11873, 12000);
@@ -54,4 +63,44 @@ test('malformed/unparseable budget line -> null, no throw', () => {
 test('comma-separated form parses to a plain integer', () => {
   const text = '> **SIZE BUDGET — 12,000 chars**, checked with `wc -c CLAUDE.md` before every commit.';
   expect(parseClaudeMdBudget(text)).toBe(12000);
+});
+
+test('AGENTS.md + CLAUDE.md pair: budget comes from AGENTS.md and both files count', () => {
+  const stub = '@AGENTS.md\n';
+  const map = '> **SIZE BUDGET — 100 chars**\n' + 'x'.repeat(40) + '\n';
+  const dir = scratch({ 'CLAUDE.md': stub, 'AGENTS.md': map });
+  try {
+    const m = measureRootClaudeMdPair(dir);
+    expect(m.mapName).toBe('AGENTS.md');
+    expect(m.budget).toBe(100);
+    expect(m.chars).toBe(Buffer.byteLength(stub) + Buffer.byteLength(map));
+    expect(evaluateRootClaudeMdBudget(dir).ok).toBe(true);
+    // Grow the stub so only the PAIR goes over budget.
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), stub + 'y'.repeat(40));
+    const r = evaluateRootClaudeMdBudget(dir);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('CLAUDE.md + AGENTS.md');
+    expect(r.message).toContain('AGENTS.md)');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('CLAUDE.md alone: measured and budgeted as before', () => {
+  const text = '> **SIZE BUDGET — 50 chars**\n' + 'z'.repeat(40) + '\n';
+  const dir = scratch({ 'CLAUDE.md': text });
+  try {
+    const m = measureRootClaudeMdPair(dir);
+    expect(m.mapName).toBe('CLAUDE.md');
+    expect(m.chars).toBe(Buffer.byteLength(text));
+    const r = evaluateRootClaudeMdBudget(dir);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/^CLAUDE\.md is \d+ chars/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('neither file: not applicable', () => {
+  const dir = scratch({});
+  try {
+    expect(measureRootClaudeMdPair(dir)).toBeNull();
+    expect(evaluateRootClaudeMdBudget(dir)).toEqual({ ok: true, applicable: false });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

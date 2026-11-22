@@ -4,13 +4,19 @@
 // Keeps the markdown hierarchy honest (nothing else lints .md outside
 // session-manager-operations/). Checks, one diagnostic line per failure:
 //  1. every JUNCTIONS file (+ every ops <namespace>/README.md on disk) exists;
-//  2. every nested CLAUDE.md <= 4000 bytes; root CLAUDE.md within its own
-//     SIZE BUDGET (health.cjs's parseClaudeMdBudget/evaluateClaudeMdBudget);
+//  2. every nested folder's CLAUDE.md + AGENTS.md <= 4000 bytes together; the
+//     root pair within the map's SIZE BUDGET (health.cjs's
+//     evaluateRootClaudeMdBudget); a CLAUDE.md beside an AGENTS.md must be a
+//     stub whose first non-blank line is @AGENTS.md;
 //  3. every relative markdown link in the junctions + architecture/*.md resolves;
 //  4. no file:// link in those files;
-//  5. every path in the root CLAUDE.md "Scoped MDs" table resolves;
-//  6. every tracked *.md is reachable by relative links from root CLAUDE.md
-//     (tree-DAG), except files under EXEMPT_PREFIXES.
+//  5. every path in the map's "Scoped MDs" table resolves;
+//  6. every tracked *.md is reachable by relative links from the root
+//     CLAUDE.md / AGENTS.md (tree-DAG), except files under EXEMPT_PREFIXES.
+//
+// The MAP is root AGENTS.md when it exists (so Codex and other CLIs read the
+// same file), else root CLAUDE.md. A listed CLAUDE.md junction is also met by
+// an AGENTS.md in the same folder.
 //
 // Root dir: first CLI argument or SM_DOC_ROOT (tests point it at a scratch
 // tree); defaults to the repo. Complexity: O(files x links), all small.
@@ -18,7 +24,7 @@
 const fs = require('fs')
 const { spawnSync, execFileSync } = require('child_process')
 const path = require('path')
-const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../src/main/health.cjs')
+const { evaluateRootClaudeMdBudget } = require('../src/main/health.cjs')
 // The link convention (what counts as a link, outside code fences, inline code and comments) is written once here.
 const { linksOf, rawLinksOf, followLink, visibleText } = require('../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs')
 
@@ -78,16 +84,27 @@ function listDirs(dir) {
   } catch { return [] }
 }
 
-function findNestedClaudeMds(dir, out) {
+/** Every folder (abs path) holding a CLAUDE.md or AGENTS.md, ROOT included. */
+function findMapFolders(dir, out) {
   let entries
   try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return out }
   for (const e of entries) {
     if (e.name === 'node_modules' || e.name === '.git') continue
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) findNestedClaudeMds(p, out)
-    else if (e.name === 'CLAUDE.md' && dir !== ROOT) out.push(p)
+    if (e.isDirectory()) findMapFolders(p, out)
+    else if ((e.name === 'CLAUDE.md' || e.name === 'AGENTS.md') && !out.includes(dir)) out.push(dir)
   }
   return out
+}
+
+/** The entry map: root AGENTS.md when present, else root CLAUDE.md. */
+function mapFile() {
+  return exists('AGENTS.md') ? 'AGENTS.md' : 'CLAUDE.md'
+}
+
+/** A listed CLAUDE.md junction's sibling AGENTS.md, else null. */
+function agentsSibling(f) {
+  return path.posix.basename(f) === 'CLAUDE.md' ? path.posix.join(path.posix.dirname(f), 'AGENTS.md') : null
 }
 
 // (1) manifest
@@ -95,22 +112,35 @@ const manifest = [...JUNCTIONS]
 for (const ns of listDirs(path.join(ROOT, OPS)).sort()) manifest.push(`${OPS}/${ns}/README.md`)
 for (const f of manifest) {
   if (exists(f)) continue
+  const sib = agentsSibling(f)
+  if (sib && exists(sib)) continue
   fail(`missing junction: ${f}`)
 }
 
-// (2) budgets
-for (const abs of findNestedClaudeMds(ROOT, [])) {
-  const bytes = fs.statSync(abs).size
-  if (bytes > NESTED_CLAUDE_MD_MAX_BYTES) fail(`${rel(abs)} is ${bytes} bytes, over the ${NESTED_CLAUDE_MD_MAX_BYTES}-byte nested CLAUDE.md limit`)
+// (2) budgets + stub rule
+for (const dir of findMapFolders(ROOT, []).sort()) {
+  const claude = path.join(dir, 'CLAUDE.md')
+  const agents = path.join(dir, 'AGENTS.md')
+  const present = [claude, agents].filter((p) => fs.existsSync(p))
+  if (fs.existsSync(claude) && fs.existsSync(agents)) {
+    const first = fs.readFileSync(claude, 'utf8').split(/\r?\n/).find((l) => l.trim() !== '')
+    if ((first || '').trim() !== '@AGENTS.md') fail(`${rel(claude)}: has an AGENTS.md beside it, so its first non-blank line must be @AGENTS.md`)
+  }
+  if (dir === ROOT) continue
+  const bytes = present.reduce((n, p) => n + fs.statSync(p).size, 0)
+  if (bytes > NESTED_CLAUDE_MD_MAX_BYTES) fail(`${present.map(rel).join(' + ')} is ${bytes} bytes, over the ${NESTED_CLAUDE_MD_MAX_BYTES}-byte nested CLAUDE.md limit`)
 }
-if (exists('CLAUDE.md')) {
-  const text = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8')
-  const res = evaluateClaudeMdBudget(Buffer.byteLength(text), parseClaudeMdBudget(text))
-  if (!res.ok) fail(`CLAUDE.md: ${res.message}`)
+{
+  const res = evaluateRootClaudeMdBudget(ROOT)
+  if (!res.ok) fail(`${mapFile()}: ${res.message}`)
 }
 
 // (3)+(4) links
 const linted = new Set(manifest.filter((f) => exists(f)))
+for (const f of manifest) {
+  const sib = agentsSibling(f)
+  if (sib && exists(sib)) linted.add(sib)
+}
 const archDir = path.join(ROOT, OPS, 'architecture')
 try {
   for (const f of fs.readdirSync(archDir)) if (f.endsWith('.md')) linted.add(`${OPS}/architecture/${f}`)
@@ -140,27 +170,28 @@ for (const f of [...linted].sort()) {
   }
 }
 
-// (5) scoped-MD table rows in root CLAUDE.md
-if (exists('CLAUDE.md')) {
-  const lines = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8').split('\n')
+// (5) scoped-MD table rows in the map
+const MAP = mapFile()
+if (exists(MAP)) {
+  const lines = fs.readFileSync(path.join(ROOT, MAP), 'utf8').split('\n')
   const start = lines.findIndex((l) => /^##\s+Scoped MDs/.test(l))
-  if (start === -1) fail('CLAUDE.md: no "Scoped MDs" table found')
+  if (start === -1) fail(`${MAP}: no "Scoped MDs" table found`)
   else {
     for (let i = start + 1; i < lines.length && !/^##\s/.test(lines[i]); i++) {
       if (!lines[i].startsWith('|')) continue
       const firstCell = lines[i].split('|')[1] || ''
       // Link targets win; backticked text is a path only where the cell has no links.
-      const links = linksOf({ path: 'CLAUDE.md', text: firstCell }).map((l) => l.to)
+      const links = linksOf({ path: MAP, text: firstCell }).map((l) => l.to)
       const paths = links.length ? links : [...firstCell.matchAll(/`([^`]+\.md)`/g)].map((m) => m[1])
       for (const p of paths) {
         if (/^(https?:|mailto:|file:)/i.test(p)) continue
-        if (!exists(p)) fail(`CLAUDE.md: scoped-MD row does not resolve: ${p}`)
+        if (!exists(p)) fail(`${MAP}: scoped-MD row does not resolve: ${p}`)
       }
     }
   }
 }
 
-// (6) reachability from root CLAUDE.md
+// (6) reachability from root CLAUDE.md + AGENTS.md
 function listMarkdown() {
   try {
     const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.md'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
@@ -181,11 +212,15 @@ function listMarkdown() {
   return out
 }
 
-if (exists('CLAUDE.md')) {
-  const reached = new Set(['CLAUDE.md'])
-  const queue = ['CLAUDE.md']
+const roots = ['CLAUDE.md', 'AGENTS.md'].filter((f) => exists(f))
+if (roots.length) {
+  const reached = new Set(roots)
+  const queue = [...roots]
   while (queue.length) {
     const f = queue.shift()
+    // A reached CLAUDE.md imports its sibling AGENTS.md (@AGENTS.md stub rule, check 2).
+    const sib = agentsSibling(f)
+    if (sib && exists(sib) && !reached.has(sib)) { reached.add(sib); queue.push(sib) }
     const abs = path.join(ROOT, f)
     for (const link of linksOf({ path: f, text: fs.readFileSync(abs, 'utf8') })) {
       if (link.escapes || !link.to.toLowerCase().endsWith('.md')) continue
@@ -197,7 +232,7 @@ if (exists('CLAUDE.md')) {
   }
   for (const f of listMarkdown().sort()) {
     if (reached.has(f) || EXEMPT_PREFIXES.some((x) => f.startsWith(x))) continue
-    fail(`${f}: orphan markdown, not reachable by links from CLAUDE.md`)
+    fail(`${f}: orphan markdown, not reachable by links from ${roots.join(' / ')}`)
   }
 }
 

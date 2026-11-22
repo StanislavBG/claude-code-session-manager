@@ -277,7 +277,7 @@ function parseClaudeMdBudget(text) {
 // Pure comparison of CLAUDE.md's actual byte size against its self-declared
 // budget (see parseClaudeMdBudget). budget === null means "no budget
 // declared" — skip silently rather than treating it as 0 or infinite.
-function evaluateClaudeMdBudget(chars, budget) {
+function evaluateClaudeMdBudget(chars, budget, label = 'CLAUDE.md', mapName = 'CLAUDE.md') {
   if (budget == null) return { ok: true, applicable: false };
   const overage = chars - budget;
   if (overage <= 0) return { ok: true, applicable: true, chars, budget };
@@ -287,8 +287,38 @@ function evaluateClaudeMdBudget(chars, budget) {
     chars,
     budget,
     overage,
-    message: `CLAUDE.md is ${chars} chars, over its ${budget}-char budget by ${overage} (see the SIZE BUDGET note in CLAUDE.md)`,
+    message: `${label} is ${chars} chars, over its ${budget}-char budget by ${overage} (see the SIZE BUDGET note in ${mapName})`,
   };
+}
+
+// Measures a project root's entry-map pair. The map is AGENTS.md when it
+// exists (CLAUDE.md is then a one-line @AGENTS.md stub), else CLAUDE.md. The
+// SIZE BUDGET is parsed from the map; the size counted is CLAUDE.md +
+// AGENTS.md together, since the CLI loads both every turn. Returns null when
+// neither file exists.
+function measureRootClaudeMdPair(rootDir) {
+  const read = (name) => {
+    try { return fs.readFileSync(path.join(rootDir, name), 'utf8'); } catch { return null; }
+  };
+  const claude = read('CLAUDE.md');
+  const agents = read('AGENTS.md');
+  if (claude == null && agents == null) return null;
+  const mapName = agents != null ? 'AGENTS.md' : 'CLAUDE.md';
+  const present = [claude != null && 'CLAUDE.md', agents != null && 'AGENTS.md'].filter(Boolean);
+  const chars = Buffer.byteLength(claude || '', 'utf8') + Buffer.byteLength(agents || '', 'utf8');
+  return {
+    mapName,
+    label: present.join(' + '),
+    chars,
+    budget: parseClaudeMdBudget(agents != null ? agents : claude),
+  };
+}
+
+// Root pair (measureRootClaudeMdPair) evaluated against the map's budget.
+function evaluateRootClaudeMdBudget(rootDir) {
+  const m = measureRootClaudeMdPair(rootDir);
+  if (!m) return { ok: true, applicable: false };
+  return evaluateClaudeMdBudget(m.chars, m.budget, m.label, m.mapName);
 }
 
 // Pure evaluator over migratePrds()'s { moved, skipped, unresolved } result —
@@ -1227,11 +1257,7 @@ async function check(opts = {}) {
   // header (see the CLAUDE.md size-budget note). Skips silently when no
   // budget line is present — this is not required for every project.
   try {
-    const claudeMdPath = path.join(PROJECT_ROOT, 'CLAUDE.md');
-    const claudeMdText = fs.readFileSync(claudeMdPath, 'utf8');
-    const chars = Buffer.byteLength(claudeMdText, 'utf8');
-    const budget = parseClaudeMdBudget(claudeMdText);
-    const budgetResult = evaluateClaudeMdBudget(chars, budget);
+    const budgetResult = evaluateRootClaudeMdBudget(PROJECT_ROOT);
     status.components.claude_md_budget = budgetResult;
     if (!budgetResult.ok) {
       status.issues.push(budgetResult.message);
@@ -1468,6 +1494,8 @@ module.exports = {
   evaluatePerProjectStall,
   parseClaudeMdBudget,
   evaluateClaudeMdBudget,
+  measureRootClaudeMdPair,
+  evaluateRootClaudeMdBudget,
   evaluateUsagePollerHealth,
   loadUsagePollerState,
   evaluateQueueDispatchHealth,

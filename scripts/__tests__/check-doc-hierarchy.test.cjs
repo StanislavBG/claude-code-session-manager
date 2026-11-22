@@ -94,3 +94,88 @@ test('reachable nested markdown passes; orphan fails; exempt-prefix orphan passe
   r = run();
   expect(r.status, r.stderr).toBe(0);
 });
+
+// AGENTS.md as the entry map: CLAUDE.md becomes a one-line @AGENTS.md stub.
+const rootMap = (budget) => fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8').replace('12,000', budget);
+const moveMapToAgents = (budget = '12,000') => {
+  write('AGENTS.md', rootMap(budget));
+  write('CLAUDE.md', '@AGENTS.md\n');
+};
+
+test('map choice: with root AGENTS.md, the Scoped MDs table is read from AGENTS.md', () => {
+  moveMapToAgents();
+  let r = run();
+  expect(r.status, r.stderr).toBe(0);
+  write('AGENTS.md', fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8').replace('| [`src/CLAUDE.md`](src/CLAUDE.md) | main |', '| `src/gone/CLAUDE.md` | main |'));
+  r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('AGENTS.md: scoped-MD row does not resolve: src/gone/CLAUDE.md');
+  write('AGENTS.md', '# map without a table\n');
+  r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('AGENTS.md: no "Scoped MDs" table found');
+});
+
+test('map choice: without AGENTS.md, a CLAUDE.md lacking the table still fails as before', () => {
+  write('CLAUDE.md', '# no table\n');
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('CLAUDE.md: no "Scoped MDs" table found');
+});
+
+test('root pair budget: budget from AGENTS.md, CLAUDE.md + AGENTS.md bytes counted together', () => {
+  const size = Buffer.byteLength(rootMap('12,000'));
+  // Budget equal to AGENTS.md alone: the stub's bytes push the pair over.
+  moveMapToAgents(String(size));
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('CLAUDE.md + AGENTS.md is');
+});
+
+test('nested pair: CLAUDE.md + AGENTS.md bytes in one folder share the 4000-byte limit', () => {
+  write('src/AGENTS.md', 'x'.repeat(3000));
+  write('src/CLAUDE.md', '@AGENTS.md\n' + 'y'.repeat(1000));
+  let r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('src/CLAUDE.md + src/AGENTS.md is 4011 bytes');
+  write('src/CLAUDE.md', '@AGENTS.md\n');
+  r = run();
+  expect(r.status, r.stderr).toBe(0);
+  write('web/AGENTS.md', 'z'.repeat(4001));
+  r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('web/AGENTS.md is 4001 bytes');
+});
+
+test('stub rule: a CLAUDE.md beside an AGENTS.md must start with @AGENTS.md', () => {
+  write('plugins/AGENTS.md', '# plugins map\n');
+  let r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('plugins/CLAUDE.md: has an AGENTS.md beside it, so its first non-blank line must be @AGENTS.md');
+  write('plugins/CLAUDE.md', '\n\n@AGENTS.md\n\nextra Claude-only note\n');
+  r = run();
+  expect(r.status, r.stderr).toBe(0);
+  write('AGENTS.md', fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'));
+  r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('CLAUDE.md: has an AGENTS.md beside it');
+});
+
+test('junction: an AGENTS.md beside a listed CLAUDE.md junction satisfies it', () => {
+  fs.rmSync(path.join(root, 'web-remote/CLAUDE.md'));
+  write('web-remote/AGENTS.md', '# relay\n');
+  write('CLAUDE.md', fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8').replace(/web-remote\/CLAUDE\.md/g, 'web-remote/AGENTS.md'));
+  const r = run();
+  expect(r.status, r.stderr).toBe(0);
+});
+
+test('reachability starts from both root files: linked only from AGENTS.md is not an orphan', () => {
+  moveMapToAgents();
+  write('docs/only-agents.md', '# x\n');
+  let r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('docs/only-agents.md: orphan markdown');
+  write('AGENTS.md', fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8') + '[x](docs/only-agents.md)\n');
+  r = run();
+  expect(r.status, r.stderr).toBe(0);
+});

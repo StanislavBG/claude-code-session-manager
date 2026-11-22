@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { registerVideoReviewIpc, formatLocalAt, replaceEntryInstructions, INACTIVE_ERROR } = require('../videoReviewIpc.cjs');
+const { registerVideoReviewIpc, formatLocalAt, replaceEntryInstructions, retryable, INACTIVE_ERROR, NOT_RETRYABLE_ERROR } = require('../videoReviewIpc.cjs');
 const videoReview = require('../videoReview.cjs');
 const { schemas } = require('../../../ipcSchemas.cjs');
 
@@ -60,21 +60,35 @@ async function setup({ epicStatus = 'active', createPrd, ...over } = {}) {
   };
   registerVideoReviewIpc(ipcMain, deps);
   const decide = (p) => handlers['project-videos:review-decide']({}, { cwd, entryId: ENTRY, ...p });
-  return { cwd, handlers, deps, decide };
+  const retry = () => handlers['project-videos:review-retry']({}, { cwd, entryId: ENTRY });
+  return { cwd, handlers, deps, decide, retry };
+}
+
+/** An approved entry whose final run's job row has `status` (null = no row). */
+async function approvedWithJob(status, over = {}) {
+  const ctx = await setup(over);
+  expect((await ctx.decide({ decision: 'approve' })).ok).toBe(true);
+  const rev = await videoReview.readReview(ctx.cwd, ENTRY);
+  const finalSlug = rev.dispatch.slug;
+  const rows = status ? [{ slug: finalSlug, cwd: ctx.cwd, status, finishedAt: new Date().toISOString() }] : [];
+  ctx.deps.loadJobs.mockImplementation(async () => rows);
+  ctx.deps.readHistoryTail = vi.fn(async () => '');
+  ctx.deps.createPrd.mockClear();
+  return { ...ctx, rev, finalSlug, rows };
 }
 
 const decisionPath = (cwd) => path.join(cwd, 'session-manager-operations', 'project-pages', 'videos', ENTRY, 'review', 'decision.json');
 
 test('registers exactly the two renderer channels', async () => {
   const { handlers } = await setup();
-  expect(Object.keys(handlers).sort()).toEqual(['project-videos:review-decide', 'project-videos:review-list']);
+  expect(Object.keys(handlers).sort()).toEqual(['project-videos:review-decide', 'project-videos:review-list', 'project-videos:review-retry']);
 });
 
 test('review-list returns listReviews for a validatePath-checked cwd', async () => {
   const { cwd, handlers, deps } = await setup();
   const r = await handlers['project-videos:review-list']({}, { cwd });
   expect(deps.validatePath).toHaveBeenCalledWith(cwd);
-  expect(r).toEqual(await videoReview.listReviews(cwd));
+  expect(r).toEqual((await videoReview.listReviews(cwd)).map((e) => ({ ...e, job: null, canRetry: false })));
   expect(r[0]).toMatchObject({ entryId: ENTRY, status: 'waiting' });
 });
 
@@ -177,4 +191,99 @@ test('formatLocalAt and replaceEntryInstructions', () => {
   expect(formatLocalAt(new Date())).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} \S+$/);
   expect(replaceEntryInstructions('a\n  replace entry: x\nb', 'vid-1')).toBe('a\nb\nReplace entry: vid-1');
   expect(replaceEntryInstructions(undefined, 'vid-1')).toBe('Replace entry: vid-1');
+});
+
+test('review-list: canRetry only for approved + final + failed', async () => {
+  for (const [status, want] of [['failed', true], ['needs_review', true], ['running', false], ['completed', false], ['pending', false], [null, false]]) {
+    const { cwd, handlers, finalSlug } = await approvedWithJob(status);
+    const [e] = await handlers['project-videos:review-list']({}, { cwd });
+    expect(e.status).toBe('approved');
+    expect(e.canRetry).toBe(want);
+    if (status) expect(e.job).toMatchObject({ slug: finalSlug });
+    else expect(e.job).toBeNull();
+  }
+  // a waiting entry whose review-stage run failed is not retryable
+  const { cwd, handlers, deps } = await setup();
+  deps.loadJobs.mockImplementation(async () => [{ slug: 'short-video-build-1', cwd, status: 'failed' }]);
+  const [e] = await handlers['project-videos:review-list']({}, { cwd });
+  expect(e.job).toMatchObject({ state: 'failed' });
+  expect(e.canRetry).toBe(false);
+});
+
+test('retryable is pure and strict about the decision', () => {
+  const rev = { status: 'approved', decision: { decision: 'approve', at: '2026-11-22 13:05 PST' }, dispatch: { stage: 'final' } };
+  expect(retryable(rev, { state: 'failed' })).toBe(true);
+  expect(retryable(rev, null)).toBe(false);
+  expect(retryable({ ...rev, decision: { decision: 'approve', at: '' } }, { state: 'failed' })).toBe(false);
+  expect(retryable({ ...rev, dispatch: { stage: 'review' } }, { state: 'failed' })).toBe(false);
+  expect(retryable({ ...rev, status: 'waiting' }, { state: 'failed' })).toBe(false);
+});
+
+test('retry: final run carries the stored at and Replace entry, archives the old slug, writes no decision', async () => {
+  const { cwd, deps, retry, finalSlug } = await approvedWithJob('failed');
+  const before = fs.readFileSync(decisionPath(cwd), 'utf8');
+  const r = await retry();
+  expect(r.ok).toBe(true);
+  expect(r.stage).toBe('final');
+  expect(r.slug).not.toBe(finalSlug);
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+  const goal = deps.createPrd.mock.calls[0][0].goal;
+  expect(goal).toContain('Make cats');
+  expect(goal).toContain('keep it short');
+  expect(goal).toContain(`Replace entry: ${ENTRY}`);
+  expect(goal.match(/Replace entry:/g)).toHaveLength(1);
+  const at = JSON.parse(before).at;
+  expect(/Review: approved by the owner at (.+)/.exec(goal)[1].trim()).toBe(at);
+  expect(goal).not.toContain('Review stage:');
+  expect(fs.readFileSync(decisionPath(cwd), 'utf8')).toBe(before);
+  expect(deps.archivePrd).toHaveBeenCalledWith(finalSlug, cwd);
+  const rev = await videoReview.readReview(cwd, ENTRY);
+  expect(rev.status).toBe('approved');
+  expect(rev.dispatch).toMatchObject({ stage: 'final', slug: r.slug });
+  // the new run has no row yet -> not failed -> a second retry is refused
+  const again = await retry();
+  expect(again).toEqual({ ok: false, error: NOT_RETRYABLE_ERROR });
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+});
+
+test('retry of a not-retryable entry is refused and dispatches nothing', async () => {
+  for (const status of ['running', 'completed', null]) {
+    const { deps, retry } = await approvedWithJob(status);
+    expect(await retry()).toEqual({ ok: false, error: NOT_RETRYABLE_ERROR });
+    expect(deps.createPrd).not.toHaveBeenCalled();
+    expect(deps.archivePrd).not.toHaveBeenCalled();
+  }
+  const { deps, retry } = await setup();
+  expect(await retry()).toEqual({ ok: false, error: NOT_RETRYABLE_ERROR });
+  expect(deps.createPrd).not.toHaveBeenCalled();
+});
+
+test('retry with an inactive Epic returns runToolJob\'s refusal', async () => {
+  const { deps, retry } = await approvedWithJob('failed');
+  deps.readActiveIndex.mockImplementation(() => ({ sessions: { e1: { status: 'completed' } } }));
+  const r = await retry();
+  expect(r).toEqual({ ok: false, error: 'epic e1 is not an active session in this project' });
+  expect(deps.createPrd).not.toHaveBeenCalled();
+  expect(deps.archivePrd).not.toHaveBeenCalled();
+});
+
+test('two concurrent retries dispatch once', async () => {
+  const { deps, retry } = await approvedWithJob('failed');
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  deps.createPrd.mockImplementation(async () => { await gate; return { ok: true }; });
+  const first = retry();
+  const second = await retry();
+  expect(second.ok).toBe(false);
+  expect(second.error).toMatch(/already being sent/);
+  release();
+  expect((await first).ok).toBe(true);
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+});
+
+test('retry schema is strict; entryId matches ENTRY_ID_RE', () => {
+  const ok = { cwd: '/p', entryId: 'vid-1' };
+  expect(schemas.projectVideosReviewRetry.parse(ok)).toEqual(ok);
+  expect(schemas.projectVideosReviewRetry.safeParse({ ...ok, x: 1 }).success).toBe(false);
+  expect(schemas.projectVideosReviewRetry.safeParse({ ...ok, entryId: '_character' }).success).toBe(false);
 });

@@ -1076,6 +1076,7 @@ const projectVideosReviewDecide = z.object({
   decision: z.enum(['approve', 'changes']),
   note: z.string().max(2000).optional(),
 }).strict();
+const projectVideosReviewRetry = z.object({ cwd: z.string().min(1).max(4096), entryId }).strict();
 const projectVideoReportFields = {
   lufs: z.number().nullable(),
   truePeakDb: z.number().nullable(),
@@ -1824,6 +1825,7 @@ module.exports = {
     macrosJobStatus,
     projectVideosReviewList,
     projectVideosReviewDecide,
+    projectVideosReviewRetry,
     needsYouList,
     needsYouAnswer,
     agentsGetPersonaBody,

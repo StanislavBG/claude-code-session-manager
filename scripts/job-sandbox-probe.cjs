@@ -16,7 +16,9 @@
  * Each profile is built the way the scheduler builds it: a private
  * /tmp/smj-* tmpDir, and the child env merged with sandboxChildEnv(). Two
  * extra outside targets catch writes to $HOME and to a sibling dir in /tmp.
- * Claude runs with --no-session-persistence so probes leave no transcript.
+ * Claude runs with --no-session-persistence and CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+ * so probes leave no transcript and no ~/.claude/projects folder; a folder left
+ * for a probe cwd prints 'LEAK: project folder <path>' and exits 1 (never deleted).
  *
  * --dry-run: prints { deps, profiles } JSON (each profile carries its tmpDir)
  * built with a temp fake home and spawns nothing.
@@ -59,6 +61,28 @@ function classifyProbeRun({ canary, output, outsideEntries, homeOutsideEntries, 
   const controlsFailed = [];
   if (!insideExists) controlsFailed.push('inside write');
   return { escapes, controlsFailed };
+}
+
+/**
+ * Child env for every live probe spawn. CLAUDE_CODE_DISABLE_AUTO_MEMORY stops
+ * the CLI creating ~/.claude/projects/<cwd>/memory, which
+ * --no-session-persistence alone does not.
+ *
+ * @param {NodeJS.ProcessEnv} baseEnv
+ * @param {{ level: string }} policy
+ * @param {string} tmpDir
+ * @returns {NodeJS.ProcessEnv}
+ */
+function probeChildEnv(baseEnv, policy, tmpDir) {
+  return { ...baseEnv, SM_KG_INTERNAL: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ...sandboxChildEnv(policy, tmpDir) };
+}
+
+/**
+ * The CLI's ~/.claude/projects folder name for a cwd.
+ * @param {string} cwd
+ */
+function projectFolderName(cwd) {
+  return String(cwd).replace(/[^A-Za-z0-9]/g, '-');
 }
 
 /**
@@ -273,6 +297,8 @@ async function main() {
 
     /** @type {Array<{ profile: string, level: string, escapes: string[], controlsFailed: string[], note: string }>} */
     const rows = [];
+    /** @type {string[]} every cwd a live claude ran in */
+    const cwds = [];
     for (const profile of PROFILES) {
       const runRoot = path.join(root, profile);
       fs.mkdirSync(runRoot);
@@ -283,7 +309,8 @@ async function main() {
       };
       const tmpDir = mkTmp(path.join(os.tmpdir(), 'smj-'));
       const built = buildProfile(profile, dirs, deps, tmpDir);
-      const env = { ...process.env, PATH: searchPath, SM_KG_INTERNAL: '1', ...sandboxChildEnv(built, tmpDir) };
+      const env = probeChildEnv({ ...process.env, PATH: searchPath }, built, tmpDir);
+      cwds.push(dirs.work);
       const res = await runClaude(built.argv, promptFor(profile, dirs), dirs.work, env);
       const verdict = classifyProbeRun({
         canary: dirs.canary,
@@ -308,7 +335,15 @@ async function main() {
     for (const r of rows) console.log([r.profile, r.level, fmt(r.escapes), fmt(r.controlsFailed), r.note].join('\t'));
     const bad = rows.some((r) => r.escapes.length || r.controlsFailed.length);
     console.log(bad ? 'FAIL: sandbox escape or failed control' : 'PASS: no escapes, controls ok');
-    return bad ? 1 : 0;
+    let leaked = false;
+    for (const cwd of cwds) {
+      const folder = path.join(os.homedir(), '.claude', 'projects', projectFolderName(cwd));
+      if (fs.existsSync(folder)) {
+        leaked = true;
+        console.log(`LEAK: project folder ${folder}`);
+      }
+    }
+    return bad || leaked ? 1 : 0;
   } finally {
     for (const d of temps.reverse()) fs.rmSync(d, { recursive: true, force: true });
   }
@@ -324,4 +359,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { classifyProbeRun };
+module.exports = { classifyProbeRun, probeChildEnv, projectFolderName };

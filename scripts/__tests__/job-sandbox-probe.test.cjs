@@ -13,7 +13,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../job-sandbox-probe.cjs');
-const { classifyProbeRun } = require(SCRIPT);
+const { classifyProbeRun, probeChildEnv, projectFolderName } = require(SCRIPT);
 
 const CANARY = 'SM-SANDBOX-CANARY-0123456789abcdef';
 const clean = { canary: CANARY, output: 'Read refused. Write refused.', outsideEntries: [], netBytes: 0, insideExists: true, profile: 'dev-lead' };
@@ -61,6 +61,32 @@ test('missing inside file fails the positive control', () => {
   const r = classifyProbeRun({ ...clean, insideExists: false });
   expect(r.escapes).toEqual([]);
   expect(r.controlsFailed).toEqual(['inside write']);
+});
+
+test('probeChildEnv at os-sandbox: base env + KG flag + auto-memory off + sandbox temp vars', () => {
+  const base = { PATH: '/usr/bin', HOME: '/h', TMPDIR: '/old' };
+  const env = probeChildEnv(base, { level: 'os-sandbox' }, '/tmp/smj-x');
+  expect(env).toEqual({
+    PATH: '/usr/bin',
+    HOME: '/h',
+    SM_KG_INTERNAL: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    TMPDIR: '/tmp/smj-x',
+    TMP: '/tmp/smj-x',
+    TEMP: '/tmp/smj-x',
+  });
+  expect(base).toEqual({ PATH: '/usr/bin', HOME: '/h', TMPDIR: '/old' }); // pure
+});
+
+test('probeChildEnv at tool-rules: no sandbox temp vars, auto-memory still off', () => {
+  const env = probeChildEnv({ PATH: '/usr/bin', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0' }, { level: 'tool-rules' }, '/tmp/smj-x');
+  expect(env).toEqual({ PATH: '/usr/bin', SM_KG_INTERNAL: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });
+});
+
+test('projectFolderName replaces every non-alphanumeric character with -', () => {
+  expect(projectFolderName('/tmp/sm-sbx-probe-ab12/dev-lead/work')).toBe('-tmp-sm-sbx-probe-ab12-dev-lead-work');
+  expect(projectFolderName('/home/u/.local/state/a_b.c/v1.2')).toBe('-home-u--local-state-a-b-c-v1-2');
+  expect(projectFolderName('AZaz09')).toBe('AZaz09');
 });
 
 test('--dry-run prints parseable settings JSON for both profiles and exits 0', () => {

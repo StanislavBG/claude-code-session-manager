@@ -25,15 +25,57 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Z } from '../../../lib/zLayers'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, Extension } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import { Markdown, type MarkdownStorage } from 'tiptap-markdown'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { splitFrontmatter, joinFrontmatter, type SplitDoc } from '../../../lib/markdownDoc'
+import { blockKey } from './changedLines'
 
 interface Props {
   value: string
   onChange: (v: string) => void
+  /** Markdown blocks to highlight (honey tint + left rule) — matched to top-level nodes by text. */
+  markedBlocks?: string[]
+}
+
+// --- Changed-block marks ---
+
+const markedKey = new PluginKey('sm-marked-blocks')
+// Literal class string (Tailwind JIT).
+const MARKED_CLASS = 'bg-honey/10 border-l-[3px] border-honey pl-2 -ml-[11px] rounded-r'
+
+/** Node decorations on every top-level node whose text matches one of `getKeys()`. */
+function markedBlocksExtension(getKeys: () => Set<string>) {
+  return Extension.create({
+    name: 'smMarkedBlocks',
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          key: markedKey,
+          props: {
+            decorations(state) {
+              const keys = getKeys()
+              if (keys.size === 0) return DecorationSet.empty
+              const decos: Decoration[] = []
+              state.doc.forEach((node, offset) => {
+                const k = blockKey(node.textContent, false)
+                if (k && keys.has(k)) {
+                  decos.push(Decoration.node(offset, offset + node.nodeSize, {
+                    class: MARKED_CLASS,
+                    'data-changed': 'true',
+                  }))
+                }
+              })
+              return DecorationSet.create(state.doc, decos)
+            },
+          },
+        }),
+      ]
+    },
+  })
 }
 
 // --- Toolbar button ---
@@ -101,19 +143,22 @@ function FrontmatterChip({ frontmatter }: { frontmatter: string }) {
 
 // --- Main component ---
 
-export function TiptapBody({ value, onChange }: Props) {
+export function TiptapBody({ value, onChange, markedBlocks }: Props) {
   // Split frontmatter once on mount; capture it for the lifetime of this
   // component instance (keyed by path in EditorView, so remount = new path).
   const splitRef = useRef<SplitDoc>(splitFrontmatter(value))
   // Track whether this is an internal update (Tiptap → onChange) to avoid
   // re-setting content from outside while the user is typing.
   const suppressExternalRef = useRef(false)
+  const markedKeysRef = useRef<Set<string>>(new Set())
+  markedKeysRef.current = new Set((markedBlocks ?? []).map((b) => blockKey(b, true)).filter(Boolean))
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       Link.configure({ autolink: true, openOnClick: false }),
       Markdown.configure({ html: false, tightLists: true }),
+      markedBlocksExtension(() => markedKeysRef.current),
     ],
     content: splitRef.current.body,
     onUpdate: ({ editor: ed }) => {
@@ -142,6 +187,13 @@ export function TiptapBody({ value, onChange }: Props) {
       editor.commands.setContent(newSplit.body)
     }
   }, [value, editor])
+
+  // Re-run the decorations prop when the marked set changes (no doc change).
+  const markedSig = markedBlocks?.join('\u0000') ?? ''
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return
+    editor.view.dispatch(editor.state.tr.setMeta(markedKey, markedSig))
+  }, [markedSig, editor])
 
   if (!editor) return null
 

@@ -24,7 +24,7 @@
  * config-editing screen should not inherit implicitly.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { editor } from 'monaco-editor'
 import { isMarkdown, extOf, type ViewMode } from '../../../state/editor'
 import { useEditorPrefs } from '../../../state/editorPrefs'
@@ -36,6 +36,7 @@ import { TiptapBody } from './TiptapBody'
 import { DocOutline } from './DocOutline'
 import { EditorStatusBar, SaveDot, type SaveState } from './EditorStatusBar'
 import { basename } from '../../../lib/basename'
+import { changedLines, changedBlocks } from './changedLines'
 
 interface CursorInfo { line: number; col: number; selected: number }
 
@@ -93,6 +94,12 @@ interface Props {
   headerRight?: React.ReactNode
   /** Hide the status strip (a host that already shows metrics). */
   hideStatusBar?: boolean
+  /**
+   * Baseline text to show changes against (e.g. the file before Claude edited
+   * it). Markdown mode marks changed lines with a honey left rule; Document
+   * mode highlights the changed blocks. Omit for no marks.
+   */
+  changedFrom?: string
 }
 
 export function DocumentEditorPane({
@@ -107,6 +114,7 @@ export function DocumentEditorPane({
   defaultMode,
   headerRight,
   hideStatusBar,
+  changedFrom,
 }: Props) {
   const prefs = useEditorPrefs()
   const markdown = isMarkdown(path)
@@ -115,6 +123,15 @@ export function DocumentEditorPane({
   const [showOutline, setShowOutline] = useState(true)
   const [fullScreen, setFullScreen] = useState(false)
   const [cursor, setCursor] = useState<CursorInfo | null>(null)
+
+  const markedLines = useMemo(
+    () => (changedFrom === undefined ? undefined : changedLines(changedFrom, value)),
+    [changedFrom, value],
+  )
+  const markedBlocks = useMemo(
+    () => (changedFrom === undefined ? undefined : changedBlocks(changedFrom, value)),
+    [changedFrom, value],
+  )
 
   const monacoRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const docScrollRef = useRef<HTMLDivElement>(null)
@@ -165,6 +182,7 @@ export function DocumentEditorPane({
       onReady={registerEditor}
       onCursor={setCursor}
       readOnly={readOnly}
+      markedLines={markedLines}
     />
   )
 
@@ -174,7 +192,7 @@ export function DocumentEditorPane({
         <MarkdownPreview ref={docScrollRef} text={value} wideMeasure={prefs.wideMeasure} />
       ) : (
         <div ref={docScrollRef} className="h-full min-h-0">
-          <TiptapBody value={value} onChange={onChange} />
+          <TiptapBody value={value} onChange={onChange} markedBlocks={markedBlocks} />
         </div>
       )
     ) : markdown ? (

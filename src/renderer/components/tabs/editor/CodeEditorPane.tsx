@@ -32,6 +32,8 @@ interface Props {
   onCursor?: (info: { line: number; col: number; selected: number }) => void
   /** Render the buffer but refuse edits (a file the host screen only peeks at). */
   readOnly?: boolean
+  /** 1-based lines to mark with a honey left rule (what changed vs a baseline). */
+  markedLines?: number[]
 }
 
 // Extension → Monaco language id. Anything unlisted falls back to plaintext.
@@ -69,9 +71,12 @@ function defineThemes(monaco: typeof import('monaco-editor')) {
   })
 }
 
-export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, onCursor, readOnly }: Props) {
+export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, onCursor, readOnly, markedLines }: Props) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
+  const marksRef = useRef<editor.IEditorDecorationsCollection | null>(null)
+  const markedRef = useRef(markedLines)
+  markedRef.current = markedLines
   const onSaveRef = useRef(onSave)
   onSaveRef.current = onSave
   const consumeReveal = useEditor((s) => s.consumeReveal)
@@ -99,7 +104,32 @@ export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, o
     ed.onDidChangeCursorSelection(emit)
     emit()
     revealPending(ed)
+    applyMarks(ed)
   }
+
+  // Changed-line marks: a honey rule in the line-decoration gutter plus a faint
+  // honey tint on the line. Literal class strings (Tailwind JIT).
+  const applyMarks = (ed: editor.IStandaloneCodeEditor) => {
+    const lines = markedRef.current ?? []
+    const max = ed.getModel()?.getLineCount() ?? 0
+    const decos: editor.IModelDeltaDecoration[] = lines
+      .filter((l) => l >= 1 && l <= max)
+      .map((l) => ({
+        range: { startLineNumber: l, startColumn: 1, endLineNumber: l, endColumn: 1 },
+        options: {
+          isWholeLine: true,
+          className: 'bg-honey/10',
+          linesDecorationsClassName: 'border-l-[3px] border-honey',
+        },
+      }))
+    if (!marksRef.current) marksRef.current = ed.createDecorationsCollection(decos)
+    else marksRef.current.set(decos)
+  }
+
+  const markedKey = markedLines?.join(',') ?? ''
+  useEffect(() => {
+    if (editorRef.current) applyMarks(editorRef.current)
+  }, [markedKey])
 
   const revealPending = (ed: editor.IStandaloneCodeEditor) => {
     const reveal = consumeReveal(path)

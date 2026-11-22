@@ -100,4 +100,6 @@ className. The band's dark `#2a221a` = `bg-fg` with `text-bg-hi`.
    "Approved" toggle in the detail header (the settings keys the old gating checkboxes wrote).
 6. **Epic isolation** (Session Manager's own worktree setting) is an "Epic isolation" entry in the Project
    Settings rail, not a strip above the page.
+8. **Memory list keeps its toolbar row** ("All memories N", Filter, "+ New", sort) under the chips: the same
+   Filter + primary-action pattern every other tab's list column uses, so memories can still be created and sorted.
 7. Sample-data differences (names, counts, dates, descriptions) are never findings.

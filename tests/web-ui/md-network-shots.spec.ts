@@ -13,7 +13,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // scan with 2 duplicate pairs, 1 localOnly broken link and 1 orphan group. Writes the pane in
 // light + dark and the explorer in Graph view to the Playwright output folder (gitignored).
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation plus
-// an inverted render of the same page (as project-home-library-shots.spec.ts does).
+// an inverted render of the same page (as project-home-library-shots.spec.ts does). The Graph shot
+// has one doc node selected so the inspector shows that doc's path and links.
 const root = path.resolve(__dirname, '../..')
 
 test('Review MD network screenshots: pane light + dark, explorer Graph view', async ({}, testInfo) => {
@@ -64,6 +65,23 @@ test('Review MD network screenshots: pane light + dark, explorer Graph view', as
         await expect(page.getByTestId('md-explorer-view-map')).toHaveAttribute('aria-pressed', 'true')
         await expect(page.getByTestId('md-explorer-canvas')).toBeVisible()
         await expect(page.getByTestId('md-link-map-node').first()).toBeAttached()
+        // Header 'N findings' must equal the pane's FIX LIST count.
+        const fixCount = (await page.getByTestId('md-fix-count').textContent())?.trim()
+        expect(fixCount).toMatch(/^\d+$/)
+        await expect(page.getByTestId('md-explorer-counts')).toContainText(`${fixCount} finding${fixCount === '1' ? '' : 's'}`)
+        // Select one doc node so the Graph shot shows a doc in the inspector, not the empty hint.
+        const docNode = page
+          .getByTestId('md-explorer-canvas')
+          .locator('[data-testid="md-link-map-node"]:not([data-kind="folder"]):not([data-kind="missing"]):not([data-kind="orphan"])')
+          .first()
+        const docPath = await docNode.getAttribute('aria-label')
+        expect(docPath).toBeTruthy()
+        await docNode.click()
+        await expect(docNode).toHaveAttribute('data-selected', 'true')
+        const inspector = page.getByTestId('md-explorer-inspector')
+        await expect(inspector.getByTestId('project-home-review-inspector-hint')).toHaveCount(0)
+        await expect(inspector.getByTestId('md-doc-preview')).toBeVisible()
+        await expect(inspector.getByTestId('md-doc-preview-path')).toHaveText(docPath!)
         await page.waitForTimeout(300)
         const graph = testInfo.outputPath('review-md-network-explorer-graph.png')
         await page.screenshot({ path: graph })

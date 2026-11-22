@@ -19,6 +19,7 @@ const GROUP_LABELS: Record<string, string> = {
   'project-home': 'Project Home',
   macros: 'Macros',
   'customer-feedback': 'Customer feedback',
+  epics: 'Epics',
 }
 const GROUP_ORDER = Object.keys(GROUP_LABELS)
 

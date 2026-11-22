@@ -23,7 +23,7 @@ const { z } = require('zod');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'epics']),
   purpose: z.string().min(1),
   summary: z.string().min(10).max(90).regex(/^[^|`\n]+$/),
   whenToUse: z.string().min(1),
@@ -618,6 +618,36 @@ const MCP_TOOL_CATALOG = [
     exampleArgs: { id: 'blog-video-8d618a' },
     notes: 'Returns { ok, deleted, macro }. `deleted: true` means the macro is gone and `macro` is its last copy. '
       + '`deleted: false` means other projects still list it, so only this project was dropped. A refusal comes back as an error result.',
+  },
+  {
+    name: 'epic_list',
+    group: 'epics',
+    purpose: "Read-only list of one project's open Epics (sessions) via the session-manager app's admin API "
+      + '(GET /admin/epics) — the same outside-facing records a script gets: each Epic\'s epicId, title, '
+      + 'outside-facing state and PRD progress. Optionally filter by `state`. Results are paginated (default limit 50, '
+      + 'max 200) — check `hasMore`/`total` before assuming you received every Epic; page further with `offset`.',
+    summary: 'List the open sessions of one project and what state each is in.',
+    whenToUse: 'Use to survey which Epics a project has open and which need input, review or approval, before '
+      + 'reading one in full with epic_get.',
+    whenNotToUse: 'Do not use this to create, approve or change an Epic — it is read-only, and an Epic is only '
+      + 'ever created by a human pressing New Epic. Do not use it for PRD status; use scheduler_list_prds.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', state: 'needs_input' },
+    notes: 'A partial page carries a `note` naming how many Epics were returned out of `total`.',
+  },
+  {
+    name: 'epic_get',
+    group: 'epics',
+    purpose: "Read-only fetch of one Epic's outside-facing record via the session-manager app's admin API "
+      + '(GET /admin/epic), looked up in project `cwd` by exactly one of `id` (the Epic id) or `externalRef` '
+      + '(the reference it was opened with). Returns `{ ok: true, epic }`, or `{ ok: false, error: "not found" }`.',
+    summary: 'Read one session by its id or by the outside reference it was opened with.',
+    whenToUse: 'Use after epic_list, or when you already hold an Epic id or external reference, to read that '
+      + "one Epic's state and progress.",
+    whenNotToUse: 'Do not pass both `id` and `externalRef`, or neither — the call is refused without reaching '
+      + 'the app. Do not use it to change an Epic; it is read-only.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', id: 'epic-id-from-epic-list' },
+    notes: null,
+    requiredOneOf: [['id', 'externalRef']],
   },
   {
     name: 'session_manager_help',

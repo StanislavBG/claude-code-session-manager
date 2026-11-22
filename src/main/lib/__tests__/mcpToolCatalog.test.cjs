@@ -177,6 +177,33 @@ test('feedback_open_session advertises the structured proposal contract', () => 
   expect(entry.exampleArgs).toHaveProperty('series');
 });
 
+test('epic_list requires only cwd; epic_get requires cwd plus exactly one of id / externalRef', () => {
+  const list = TOOLS.find((t) => t.name === 'epic_list');
+  expect(list.inputSchema.required).toEqual(['cwd']);
+  expect(Object.keys(list.inputSchema.properties).sort()).toEqual(['cwd', 'limit', 'offset', 'state']);
+  const get = TOOLS.find((t) => t.name === 'epic_get');
+  expect(get.inputSchema.required).toEqual(['cwd']);
+  expect(Object.keys(get.inputSchema.properties).sort()).toEqual(['cwd', 'externalRef', 'id']);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'epic_get');
+  expect(entry.requiredOneOf).toEqual([['id', 'externalRef']]);
+  for (const name of ['epic_list', 'epic_get']) {
+    expect(MCP_TOOL_CATALOG.find((e) => e.name === name).group).toBe('epics');
+  }
+});
+
+test('epic_get with both id and externalRef is refused before any admin call', async () => {
+  const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
+  const saved = process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  delete process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  try {
+    const result = await handleCallTool({ params: { name: 'epic_get', arguments: { cwd: '/tmp/x', id: 'a', externalRef: 'b' } } });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('exactly one of');
+  } finally {
+    if (saved !== undefined) process.env.SM_SCHEDULER_JOB_MCP_TOOLS = saved;
+  }
+});
+
 test('scheduler_create_prd does not require estimateMinutes but keeps the other required fields', () => {
   const tool = TOOLS.find((t) => t.name === 'scheduler_create_prd');
   const required = tool.inputSchema.required;
@@ -230,8 +257,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 30 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(30);
+test('catalog has 32 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(32);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -256,6 +283,7 @@ const ONE_OF_TOOLS = MCP_TOOL_CATALOG.filter((e) => e.requiredOneOf);
 
 test('requiredOneOf is set on exactly the tools whose handler resolves exactly one of a group', () => {
   expect(ONE_OF_TOOLS.map((e) => e.name).sort()).toEqual([
+    'epic_get',
     'project_character_write',
     'project_demo_video_write',
     'project_matrix_write',

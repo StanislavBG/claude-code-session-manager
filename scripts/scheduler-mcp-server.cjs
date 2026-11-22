@@ -27,6 +27,9 @@
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
  *   customer_feedback_submit({ goal, description, tag, imagePaths? }) -> POST /admin/customer-feedback/submit
  *
+ *   epic_list({ cwd, state?, limit?, offset? }) -> GET /admin/epics?cwd=<encoded>&...
+ *   epic_get({ cwd, id? | externalRef? }) -> GET /admin/epic?cwd=<encoded>&(id|externalRef)=...
+ *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
  * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin API (loopback +
@@ -46,6 +49,7 @@ const fsp = require('node:fs/promises');
 const { createStdioServer } = require('../src/main/lib/mcpStdioServer.cjs');
 const { PRD_WORK_TYPES } = require('../src/main/lib/prd/workTypeLibrary.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
+const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
 
 const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
 
@@ -390,6 +394,33 @@ const TOOLS = [
         offset: { type: 'number', description: 'Optional: page offset, default 0' },
         fields: { type: 'string', enum: ['compact', 'full'], description: 'Optional: "full" restores secondary detail fields; default "compact"' },
       },
+    },
+  },
+  {
+    name: 'epic_list',
+    description: descriptionFor('epic_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Absolute path of the project whose open Epics to list' },
+        state: { type: 'string', enum: [...EPIC_OUTSIDE_STATES], description: 'Optional: only Epics in this outside-facing state' },
+        limit: { type: 'number', description: 'Optional: page size, default 50, max 200' },
+        offset: { type: 'number', description: 'Optional: page offset, default 0' },
+      },
+      required: ['cwd'],
+    },
+  },
+  {
+    name: 'epic_get',
+    description: descriptionFor('epic_get'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Absolute path of the project the Epic belongs to' },
+        id: { type: 'string', description: 'The Epic id. Give exactly one of id / externalRef.' },
+        externalRef: { type: 'string', description: 'The external reference the Epic was opened with. Give exactly one of id / externalRef.' },
+      },
+      required: ['cwd'],
     },
   },
   {
@@ -945,6 +976,33 @@ async function handleCallTool(request) {
       if (result?.ok && result.hasMore) {
         result.note = `partial list: returned ${result.prds.length} of ${result.total} PRDs (offset ${result.offset}, limit ${result.limit}) — pass a higher offset to see more`;
       }
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'epic_list') {
+      const qs = new URLSearchParams();
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      if (args?.state) qs.set('state', args.state);
+      if (args?.limit !== undefined) qs.set('limit', String(args.limit));
+      if (args?.offset !== undefined) qs.set('offset', String(args.offset));
+      const result = await adminRequest('GET', `/admin/epics?${qs.toString()}`);
+      // Same partial-page guard as scheduler_list_prds: never let a page pass
+      // for the full list.
+      if (result?.ok && result.hasMore) {
+        result.note = `partial list: returned ${result.epics.length} of ${result.total} Epics (offset ${result.offset}, limit ${result.limit}) — pass a higher offset to see more`;
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'epic_get') {
+      const hasId = typeof args?.id === 'string' && args.id !== '';
+      const hasRef = typeof args?.externalRef === 'string' && args.externalRef !== '';
+      if (hasId === hasRef) {
+        return errorResult('provide exactly one of id or externalRef');
+      }
+      const qs = new URLSearchParams();
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      if (hasId) qs.set('id', args.id);
+      else qs.set('externalRef', args.externalRef);
+      const result = await adminRequest('GET', `/admin/epic?${qs.toString()}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_get_prd') {

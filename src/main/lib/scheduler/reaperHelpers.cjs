@@ -289,12 +289,18 @@ function mapOutcomeToGateOutcome(outcome) {
  * was stamped 'passed'). 'passed' requires the run's own LAST
  * `SCHEDULER_VERDICT:` line to say PASS. Each line is classified by
  * runVerify.cjs's scanSentinel (the one SCHEDULER_VERDICT parser), scanned
- * from the end so the final say wins.
+ * from the end so the final say wins. A `--json-schema` run's
+ * structured_output.schedulerVerdict (same scanSentinel) is checked first.
  */
-function lastVerdictLine(resultText) {
-  if (typeof resultText !== 'string' || !resultText) return null;
+function lastVerdictLine(resultText, structuredOutput) {
   // Lazy require: runVerify.cjs is a larger module; keep this lib cheap to load.
   const { scanSentinel } = require('../../runVerify.cjs');
+  const so = structuredOf(resultText, structuredOutput);
+  if (so) {
+    const v = scanSentinel({ resultText: '', structuredOutput: so }, []);
+    if (v) return v;
+  }
+  if (typeof resultText !== 'string' || !resultText) return null;
   const lines = resultText.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
     const v = scanSentinel({ resultText: lines[i].replace(/\r$/, '') }, []);
@@ -303,11 +309,35 @@ function lastVerdictLine(resultText) {
   return null;
 }
 
-function resolveReapGateOutcome(outcome, resultText) {
+/**
+ * The run's `--json-schema` structured output: the explicit object when the
+ * caller has it, else the result text parsed as a JSON object (under
+ * `--json-schema` the CLI's `result` is the structured output's string form).
+ * null for text-only runs.
+ */
+function structuredOf(resultText, structuredOutput) {
+  if (structuredOutput && typeof structuredOutput === 'object' && !Array.isArray(structuredOutput)) return structuredOutput;
+  if (typeof resultText !== 'string') return null;
+  const t = resultText.trim();
+  if (!t.startsWith('{')) return null;
+  try {
+    const obj = JSON.parse(t);
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} outcome classifyRunOutcome() result
+ * @param {string|null} resultText the last result event's `result` string
+ * @param {object|null} [structuredOutput] the last result event's `structured_output`
+ */
+function resolveReapGateOutcome(outcome, resultText, structuredOutput) {
   if (outcome === 'failed') return 'failed';
   if (outcome === 'no_result') return 'never_ran';
   if (outcome !== 'success') return 'unknown';
-  const verdict = lastVerdictLine(resultText);
+  const verdict = lastVerdictLine(resultText, structuredOutput);
   if (verdict === 'pass') return 'passed';
   if (verdict === 'fail') return 'failed';
   return 'unknown';

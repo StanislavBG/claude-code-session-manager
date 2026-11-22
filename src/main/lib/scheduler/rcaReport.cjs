@@ -169,6 +169,26 @@ const STUCK_LOOP_WINDOW = 40; // "final lines" per AC
 const POST_AC_OVERRUN_MIN_TAIL_FRACTION = 0.3;
 
 /**
+ * True when a log line is a stream-json result event whose `--json-schema`
+ * structured_output says schedulerVerdict PASS — judged by runVerify.cjs's
+ * scanSentinel (the one SCHEDULER_VERDICT parser). Under --json-schema the
+ * result text is the JSON string, so SENTINEL_PASS_RE never sees a PASS line.
+ */
+function structuredPassLine(line) {
+  if (!line.includes('"type":"result"') || !line.includes('"structured_output"')) return false;
+  try {
+    const obj = JSON.parse(line.trim());
+    const so = obj && obj.type === 'result' ? obj.structured_output : null;
+    if (!so || typeof so !== 'object' || Array.isArray(so)) return false;
+    // Lazy require: runVerify.cjs is large; only result lines pay for it.
+    const { scanSentinel } = require('../../runVerify.cjs');
+    return scanSentinel({ resultText: '', structuredOutput: so }, []) === 'pass';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Drop every stream-json harness init event (`"type":"system"` +
  * `"subtype":"init"`) from a log tail. That line names every available tool
  * and would otherwise false-match tool-name/word rules. Other system events
@@ -247,7 +267,7 @@ function classifyFailure({ verdict, logTail: rawLogTail }) {
   });
   if (lastAcIdx >= 0 && lines.length > 0) {
     const tailAfterAc = lines.slice(lastAcIdx + 1);
-    const passSeenAfter = tailAfterAc.some((l) => SENTINEL_PASS_RE.test(l));
+    const passSeenAfter = tailAfterAc.some((l) => SENTINEL_PASS_RE.test(l) || structuredPassLine(l));
     const remainingFraction = tailAfterAc.length / lines.length;
     if (!passSeenAfter && remainingFraction > POST_AC_OVERRUN_MIN_TAIL_FRACTION) {
       return FAILURE_CLASSES.POST_AC_OVERRUN;

@@ -14,6 +14,7 @@ const path = require('path');
 const { ipcMain } = require('electron');
 const { computeLoopEfficiency } = require('./lib/scheduler/loopEfficiency.cjs');
 const { parseValidationSentinels } = require('./lib/scheduler/validationSentinels.cjs');
+const { parseValidatorVerdict, verdictRowsFromStructured } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const LOG_TAIL_BYTES = 1024 * 1024;
@@ -60,7 +61,15 @@ async function validationsForLog(logPath) {
     if (!lines[i].includes('"type":"result"')) continue;
     try {
       const obj = JSON.parse(lines[i]);
-      if (typeof obj.result === 'string') out = parseValidationSentinels(obj.result);
+      // `--json-schema` validator runs: the checked JSON is structured_output
+      // and `result` is its string form, so read it first. Older logs and
+      // non-validator runs fall back to the text sentinels.
+      if (obj.structured_output && parseValidatorVerdict(obj.structured_output).ok) {
+        out = verdictRowsFromStructured(obj.structured_output)
+          .map((r) => ({ slug: r.slug, verdict: r.verdict, reason: r.reason }));
+      } else if (typeof obj.result === 'string') {
+        out = parseValidationSentinels(obj.result);
+      }
     } catch { /* torn line — treat as no verdicts */ }
     break;
   }

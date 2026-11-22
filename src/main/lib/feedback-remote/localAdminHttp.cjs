@@ -150,13 +150,14 @@ function createAdminHttp() {
       if (!handler) {
         // Keep error 'not found' so older MCP servers still see the same key;
         // unknownRoute marks this as transport-level (version skew), not a
-        // route handler's own 'not found'.
+        // route handler's own 'not found'. appVersion is always present
+        // (null when unreadable) so outside callers see one shape.
         const { appVersion, contractVersion } = contractInfo();
         sendJson(res, 404, {
           ok: false,
           error: 'not found',
           unknownRoute: `${req.method} ${urlObj.pathname}`,
-          ...(appVersion ? { appVersion } : {}),
+          appVersion: appVersion ?? null,
           contractVersion,
         });
         return;

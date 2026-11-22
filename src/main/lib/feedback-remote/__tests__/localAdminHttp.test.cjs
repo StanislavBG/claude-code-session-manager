@@ -112,6 +112,50 @@ test('unregistered path/method returns 404', async () => {
   }
 });
 
+test('unknown-route 404 always carries appVersion: string when readable, null when not', async () => {
+  // Readable: the key is present and a non-empty string.
+  {
+    const admin = createAdminHttp();
+    const { port, token } = await admin.start();
+    try {
+      const res = await request(port, { path: '/nope', token });
+      expect(res.status).toBe(404);
+      expect(Object.prototype.hasOwnProperty.call(res.json, 'appVersion')).toBe(true);
+      expect(typeof res.json.appVersion).toBe('string');
+      expect(res.json.appVersion.length).toBeGreaterThan(0);
+    } finally {
+      await admin.stop();
+    }
+  }
+  // Unreadable: load a fresh localAdminHttp against an externalContract whose
+  // version read failed (appVersion null), then restore the module cache.
+  const httpPath = require.resolve('../localAdminHttp.cjs');
+  const contractPath = require.resolve('../../externalContract.cjs');
+  const realContract = require.cache[contractPath];
+  const realHttp = require.cache[httpPath];
+  const real = require(contractPath);
+  try {
+    delete require.cache[httpPath];
+    require.cache[contractPath] = {
+      id: contractPath, filename: contractPath, loaded: true,
+      exports: { ...real, contractInfo: () => ({ ...real.contractInfo(), appVersion: null }) },
+    };
+    const { createAdminHttp: createUnversioned } = require(httpPath);
+    const admin = createUnversioned();
+    const { port, token } = await admin.start();
+    try {
+      const res = await request(port, { path: '/nope', token });
+      expect(res.status).toBe(404);
+      expect(res.json).toEqual({ ok: false, error: 'not found', unknownRoute: 'GET /nope', appVersion: null, contractVersion: 1 });
+    } finally {
+      await admin.stop();
+    }
+  } finally {
+    if (realContract) require.cache[contractPath] = realContract; else delete require.cache[contractPath];
+    if (realHttp) require.cache[httpPath] = realHttp; else delete require.cache[httpPath];
+  }
+});
+
 test('server binds only to 127.0.0.1', async () => {
   const admin = createAdminHttp();
   await admin.start();

@@ -12,7 +12,7 @@ description: >-
 
 # maintaining-md-network
 
-**Goal:** every agent that works on or with this project starts from one short entry map, follows links to a few owner docs, and finds each fact in exactly one place, with nothing stale.
+**Goal:** every agent that works on or with this project starts from one short entry map, follows links to a few topic docs, and finds each fact in exactly one place, with nothing stale.
 
 ## Inputs
 
@@ -38,7 +38,7 @@ Each is one level deep; none links another.
 
 - [placement.md](placement.md): read when deciding where a kind of instruction belongs, or what moves into a skill, rule, hook or subagent.
 - [audit.md](audit.md): read for steps 1-4 (census, audiences, links, truth check), the time box and the subagent brief.
-- [plan.md](plan.md): read for the report contents, verdicts, records and runtime state, the `/develop` order and cross-repo routing.
+- [plan.md](plan.md): read for the report contents, verdicts, history and runtime state, the `/develop` order and cross-repo routing.
 - [drift-check.md](drift-check.md): read for Drift check mode, running the script and the review record.
 
 The script is `<skill base dir>/scripts/drift-check.cjs`.
@@ -53,7 +53,7 @@ Full review
 - [ ] 2. Audiences and entry points (audit.md)
 - [ ] 3. Links and consumers (audit.md)
 - [ ] 4. Truth check against code and config (audit.md)
-- [ ] 5. Report: proposed network, one-owner table, verdicts, placement, maintenance plan (plan.md, placement.md)
+- [ ] 5. Report: proposed network, one-home table, verdicts, placement, maintenance plan (plan.md, placement.md)
 - [ ] 6. After approval, plan with /develop in the order plan.md gives; commit the review record (plan.md, drift-check.md)
 - [ ] 7. Route cross-repo findings (plan.md)
 ```

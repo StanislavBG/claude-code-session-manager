@@ -59,14 +59,14 @@ Record these fields for each file:
 
 Do the lines and dates in one pass over the file list, not one command per file by hand. Find the writer of a suspect file with `git grep -n "<file name>" -- '*.js' '*.cjs' '*.ts' '*.py' '*.sh'`.
 
-Then report the share of markdown that is machine-written records or runtime state: files and lines of that kind, divided by all markdown files and lines. The drift-check script does not compute this share. Compute it by hand, per top-level folder:
+Then report the share of markdown that is machine-written history or runtime state: files and lines of that kind, divided by all markdown files and lines. The drift-check script does not compute this share. Compute it by hand, per top-level folder:
 
 ```
 git ls-files -- '*.md' | cut -d/ -f1 | sort | uniq -c
 git ls-files -z -- '*.md' | xargs -0 wc -l | sort -n
 ```
 
-The first command counts tracked markdown files per top-level folder (files in the repo root show as their own name). In the second, sum the lines per folder and read the last `total` line for all markdown. Mark each folder as docs, records or state by the writer check above, then divide. Run the same two commands with `--others --exclude-standard` for untracked files. Records and state are not docs. Keep them out of the owner-doc plan, and never propose deleting state that a program reads.
+The first command counts tracked markdown files per top-level folder (files in the repo root show as their own name). In the second, sum the lines per folder and read the last `total` line for all markdown. Mark each folder as docs, history or state by the writer check above, then divide. Run the same two commands with `--others --exclude-standard` for untracked files. History and state are not docs. Keep them out of the topic-doc plan, and never propose deleting state that a program reads.
 
 ## 2. Audiences and entry points
 

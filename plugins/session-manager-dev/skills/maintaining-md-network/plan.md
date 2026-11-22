@@ -6,7 +6,7 @@ Use this after the audit steps. It sets what the review report must contain, how
 
 - [Report](#report)
 - [Verdicts](#verdicts)
-- [Records and runtime state](#records-and-runtime-state)
+- [History and runtime state](#history-and-runtime-state)
 - [After approval](#after-approval)
 - [Other repos](#other-repos)
 
@@ -17,10 +17,10 @@ Write one report. Include every item below.
 1. **The proposed network.**
    - One map of at most 70 lines.
    - One entry point per audience.
-   - The fewest owner docs that cover the rest.
+   - The fewest topic docs that cover the rest.
    - A contents list on every reference doc over 100 lines.
-   - Links one level deep from the map: the map links to an owner doc, and the owner doc does not need another hop to answer the question.
-2. **A one-owner table.** Add a row for every fact that appears in more than one doc. Give the owning doc, the docs that must lose the fact, and the single term used for the concept. Use one term per concept across the whole network.
+   - Links one level deep from the map: the map links to a topic doc, and the topic doc does not need another hop to answer the question.
+2. **A one-home table.** Add a row for every fact that appears in more than one doc. Give the owning doc, the docs that must lose the fact, and the single term used for the concept. Use one term per concept across the whole network.
 3. **What moves out of the always-loaded files.** Name each item and its destination: a skill, a path-scoped rule, a hook, a permission rule or a subagent.
 4. **Wrong claims and bugs.** List each claim that would mislead an agent, with the evidence as `file:line`. List bugs found in code, config or scripts while checking.
 5. **A maintenance plan.**
@@ -36,7 +36,7 @@ Give every doc exactly one verdict.
 | Verdict | Meaning |
 | --- | --- |
 | KEEP-OWNER | The doc is the single owner of its facts. Keep it and trim copies of other docs' facts out of it. |
-| MERGE-INTO `<doc>` | The doc's facts belong in another owner doc. Move them there, then remove the doc and repoint every link. |
+| MERGE-INTO `<doc>` | The doc's facts belong in another topic doc. Move them there, then remove the doc and repoint every link. |
 | SHRINK-TO-POINTER | Reduce the doc to a few lines that point to the owner. Use this when a link, a heading cited by name or a program still needs the path. |
 | MOVE-TO-OWNING-REPO | The facts belong to another repo. Hand them over as described in Other repos. |
 | DELETE | Remove the doc. Allowed only under the rule below. |
@@ -49,23 +49,23 @@ DELETE is allowed only when all three hold:
 
 Git history keeps everything else. When any one of the three fails, choose SHRINK-TO-POINTER or MERGE-INTO instead.
 
-## Records and runtime state
+## History and runtime state
 
 Some markdown is written by a program: logs, queue records, generated reports, state files. Count it in the census, and report its share of all markdown.
 
 - Never delete state a program reads.
 - Leave untracking to the tool that owns it. Do not run `git rm --cached` or edit ignore rules for files another tool writes. Name the owner and the finding in the report.
-- Keep machine-written files out of the map and out of the owner docs.
+- Keep machine-written files out of the map and out of the topic docs.
 
 ## After approval
 
 Plan the work with `/develop`, in this order:
 
 1. **Delete obsolete docs.** Only docs with the DELETE verdict.
-2. **One PRD per owner doc.** Each PRD moves that doc's facts into it and removes the same facts from the entry files in the same commit.
+2. **One PRD per topic doc.** Each PRD moves that doc's facts into it and removes the same facts from the entry files in the same commit.
 3. **Rewrite the map and entry files.** This PRD depends on all of step 2.
 4. **Change any tool that serves docs.** Add the drift-check script as a gate or CI step.
-5. **Validate.** Re-run the drift-check script and record the flags you used in the review record. Run `git grep -n -F -e "<old name>" -e "<old path>"` with no file-type filter for every deleted or renamed doc, so code strings, scripts and tool descriptions are covered, not only markdown links. Open each audience's entry point to confirm it reaches its owner docs.
+5. **Validate.** Re-run the drift-check script and record the flags you used in the review record. Run `git grep -n -F -e "<old name>" -e "<old path>"` with no file-type filter for every deleted or renamed doc, so code strings, scripts and tool descriptions are covered, not only markdown links. Open each audience's entry point to confirm it reaches its topic docs.
 
 Links must resolve for every audience. Tools that return text verbatim need repo-root paths. Commit a dated review record in the format drift-check.md defines, as the next drift check's baseline.
 

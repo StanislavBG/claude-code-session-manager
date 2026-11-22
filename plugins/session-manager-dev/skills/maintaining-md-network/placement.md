@@ -2,6 +2,23 @@
 
 Use this to decide where each kind of instruction belongs, and cite the source for every move a review proposes.
 
+## Doc kinds
+
+Every doc is one of five kinds. A kind says how a doc is used, never who owns it.
+
+- **Map.** The root CLAUDE.md or AGENTS.md. It holds one-line rules and links, and it loads every session.
+- **Folder notes.** A CLAUDE.md inside a folder. It holds only that folder's facts. It never restates a root rule.
+- **Topic docs.** The one doc per topic that holds its full text. Everything else links to it.
+- **Agent files.** Personas, skills, plugin packs and commands. They load by name. They link to topic docs instead of copying them.
+- **History.** Dated reports and logs. They are never edited, and they are never the current answer. A finding that still matters moves into its topic doc.
+
+Rules:
+
+- One topic, one topic doc.
+- Code owns every list. A doc names the file or command that holds the list; it does not copy it.
+- A rule a check enforces gets one line that names the check.
+- Every doc belongs to the project, whoever wrote it. It must read sensibly to the project's owner.
+
 ## Where each kind belongs
 
 | Kind of instruction | Put it in | Rule and source |

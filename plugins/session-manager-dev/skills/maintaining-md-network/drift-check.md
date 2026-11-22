@@ -4,7 +4,7 @@
 
 - [Running the script](#running-the-script)
 - [Path conventions](#path-conventions)
-- [First run: exclude machine records](#first-run-exclude-machine-records)
+- [First run: exclude history](#first-run-exclude-history)
 - [Drift check mode](#drift-check-mode)
 - [Review record](#review-record)
 - [The map's maintainer comment](#the-maps-maintainer-comment)
@@ -52,8 +52,8 @@ One JSON object on stdout, with its keys in this order:
 | `unanchored-path` | file, line, target, matches | Only with `--strict-paths`. The span does not resolve from the root or the doc, but tracked files match it as a path suffix or folder. The doc names the path without its full prefix. |
 | `over-line-limit` | file, lines, expandedLines, limit | A CLAUDE.md, AGENTS.md or unscoped `.claude/rules` file has more than 200 lines, or the map has more than 70. `expandedLines` counts the file plus every `.md` it pulls in with an at-sign import (up to 4 hops, each file once); the limit applies to `expandedLines`. |
 | `no-contents-list` | file, lines | A doc over 100 lines has no Contents heading and no list of anchor links near the top. |
-| `orphan` | file | Only with `--checks orphans` (opt-in). No chain of references from the root CLAUDE.md reaches this checked doc, by SKILL.md's [link convention](SKILL.md#what-counts-as-a-link): markdown links and `<x.md>` autolinks, backticked `.md` paths (repo-root form first, then doc-relative) and at-sign imports, outside fences and HTML comments. All tracked docs carry reachability; `--exclude` and `--file` only limit what is reported. No root CLAUDE.md adds a note instead. Keep record collections out with `--exclude`. |
-| `duplicate` | file, other, sharedRuns, detail (also `type: 'duplicate'`) | Only with `--checks duplicates` (opt-in). Two checked docs share at least 10 distinct runs of 8 consecutive words (`scripts/mdDuplicates.cjs` `findDuplicates`, the same function the app's scan runs); `file` is the first doc in path order, `other` the second. Code fences and link targets are ignored; text found in more than 6 docs is boilerplate and skipped. Keep history and record collections out with `--exclude`. |
+| `orphan` | file | Only with `--checks orphans` (opt-in). No chain of references from the root CLAUDE.md reaches this checked doc, by SKILL.md's [link convention](SKILL.md#what-counts-as-a-link): markdown links and `<x.md>` autolinks, backticked `.md` paths (repo-root form first, then doc-relative) and at-sign imports, outside fences and HTML comments. All tracked docs carry reachability; `--exclude` and `--file` only limit what is reported. No root CLAUDE.md adds a note instead. Keep history collections out with `--exclude`. |
+| `duplicate` | file, other, sharedRuns, detail (also `type: 'duplicate'`) | Only with `--checks duplicates` (opt-in). Two checked docs share at least 10 distinct runs of 8 consecutive words (`scripts/mdDuplicates.cjs` `findDuplicates`, the same function the app's scan runs); `file` is the first doc in path order, `other` the second. Code fences and link targets are ignored; text found in more than 6 docs is boilerplate and skipped. Keep history collections out with `--exclude`. |
 
 Links and code spans inside fenced code blocks and HTML comments are ignored.
 
@@ -79,11 +79,11 @@ Template placeholders: the links check skips a link target that contains double 
 
 Template folders: a folder of templates, such as docs/templates, holds relative links that only resolve once the template is rendered somewhere else. Pass each such folder as its own `--exclude` prefix, and record the flag in the review record's Drift-check command line.
 
-## First run: exclude machine records
+## First run: exclude history
 
-Machine-written records and runtime folders (job logs, archived PRDs, review records, generated reports) hold thousands of stale path mentions and drown real findings. On the first Full review:
+Machine-written history and runtime folders (job logs, archived PRDs, review records, generated reports) hold thousands of stale path mentions and drown real findings. On the first Full review:
 
-1. From the census, list every machine-record and runtime folder.
+1. From the census, list every history and runtime folder.
 2. Pass each one as its own `--exclude` prefix, for example `--exclude <folder>/`.
 3. Run the script. If findings still come mostly from one folder, exclude it too.
 4. Write the exact flags into the review record's Drift-check command line.

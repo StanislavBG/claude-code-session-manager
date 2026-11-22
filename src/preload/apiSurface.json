@@ -558,6 +558,27 @@
   "remote": "read"
  },
  {
+  "ns": "needsYou",
+  "method": "list",
+  "channel": "needsYou:list",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "needsYou",
+  "method": "answer",
+  "channel": "needsYou:answer",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "needsYou",
+  "method": "onChanged",
+  "channel": "needsYou:changed",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
   "ns": "appPreview",
   "method": "scripts",
   "channel": "appPreview:scripts",

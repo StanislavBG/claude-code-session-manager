@@ -164,6 +164,17 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('macros:changed', listener);
     },
   },
+  // Dashboard "Needs you": outside apps' open questions (main/lib/feedback-remote/needsYouIpc.cjs).
+  needsYou: {
+    list: () => ipcRenderer.invoke('needsYou:list'),
+    answer: (payload) => ipcRenderer.invoke('needsYou:answer', payload),
+    // Fired after any post/withdraw/answer so every subscriber re-fetches list().
+    onChanged: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('needsYou:changed', listener);
+      return () => ipcRenderer.removeListener('needsYou:changed', listener);
+    },
+  },
   appPreview: {
     scripts: (payload) => ipcRenderer.invoke('appPreview:scripts', payload),
     start: (payload) => ipcRenderer.invoke('appPreview:start', payload),

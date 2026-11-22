@@ -386,6 +386,23 @@ export interface MacroJobStatus {
 }
 
 /** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project); a surface `'project-home'` macro is always `['*']` (only its generated artifacts are per project). */
+/** One "Needs you" item an outside app posted (main/lib/feedback-remote/needsYouStore.cjs StoredItemSchema). */
+export interface NeedsYouItem {
+  app: string;
+  id: string;
+  title: string;
+  why: string;
+  link: string | null;
+  /** 2-5 distinct choices; null = no answer buttons (informational only). */
+  options: string[] | null;
+  externalRef: string | null;
+  status: 'open' | 'answered' | 'withdrawn';
+  answer: string | null;
+  createdAt: string;
+  updatedAt: string;
+  answeredAt: string | null;
+}
+
 export interface Macro {
   id: string;
   label: string;
@@ -2416,6 +2433,14 @@ export interface SessionManagerAPI {
     /** Status of this project's macro background builds. */
     jobStatus: (payload: { cwd: string }) => Promise<MacroJobStatus[]>;
     /** Fires after any save/delete/setProject — re-fetch list(). */
+    onChanged: (handler: () => void) => () => void;
+  };
+  needsYou: {
+    /** Open items only, across every app. */
+    list: () => Promise<{ ok: true; items: NeedsYouItem[] }>;
+    /** Answer one open item with one of its options; `ok: false` + error in words when no such open item/option. */
+    answer: (payload: { app: string; id: string; answer: string }) => Promise<{ ok: true; item: NeedsYouItem } | { ok: false; error: string }>;
+    /** Fires after any post/withdraw/answer — re-fetch list(). */
     onChanged: (handler: () => void) => () => void;
   };
   appPreview: {

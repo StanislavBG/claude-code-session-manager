@@ -143,6 +143,9 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
           expect(await page.getByTestId('config-workbench-detail').evaluate((el) => el.scrollTop)).toBe(0)
           const status = await panel.getByTestId('editor-status-bar').boundingBox()
           expect(status!.y + status!.height).toBeLessThanOrEqual(VIEWPORT.height)
+          // …and reaches the bottom of the pane: an editor shrunk back to its floor fails (wave-6 Minor 1).
+          const detail = await page.getByTestId('config-workbench-detail').boundingBox()
+          expect(detail!.y + detail!.height - (status!.y + status!.height)).toBeLessThanOrEqual(48)
           await editorChrome(panel)
         },
       },
@@ -218,6 +221,29 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
   },
 }
 
+/**
+ * Short pane (wave-6 Minor 2): with the Agents tab still open, shrink the viewport to 1592x700 so
+ * the detail column is the single scroller. The editor keeps its 320px floor, and scrolling the
+ * column to its end (scrollTop, never scrollIntoView) brings the status bar inside the column's
+ * visible box. Runs after every PNG is written and writes none itself.
+ */
+async function shortPane(page: Page) {
+  await page.setViewportSize({ width: VIEWPORT.width, height: 700 })
+  const detail = page.getByTestId('config-workbench-detail')
+  await expect.poll(() => detail.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+  const editor = await page.getByTestId('agent-detail-editor').boundingBox()
+  expect(editor!.height).toBeGreaterThanOrEqual(320)
+  await detail.evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await expect.poll(() => detail.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1)).toBe(true)
+  const box = await detail.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight }
+  })
+  const status = await page.getByTestId('editor-status-bar').boundingBox()
+  expect(status!.y).toBeGreaterThanOrEqual(box.top)
+  expect(status!.y + status!.height).toBeLessThanOrEqual(box.bottom)
+}
+
 test('Claude config screenshots: every Home and Project tab at 1592x1040', async () => {
   if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
     execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
@@ -284,6 +310,7 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         await page.screenshot({ path: file })
         written.push(file)
       }
+      if (face === 'home') await shortPane(page)
       await ctx.close()
     }
   } finally {

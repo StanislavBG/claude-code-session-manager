@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 
-export type EpicUsage = { inputTokens: number; outputTokens: number }
+/** `lastContext` = input + cache-read + cache-creation tokens of the newest
+ *  API call (what the next turn re-reads), null when unknown; `calls` = API
+ *  calls counted. Both optional: older payloads/tests may omit them. */
+export type EpicUsage = { inputTokens: number; outputTokens: number; lastContext?: number | null; calls?: number }
 
 /**
  * Token-usage totals per Epic, fetched in batches from

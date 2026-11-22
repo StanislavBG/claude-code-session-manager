@@ -26,6 +26,7 @@ let _resetForTests: typeof import('../../../state/promptSessions')._resetForTest
 let useChat: typeof import('../../../state/chat').useChat
 let useScheduleState: typeof import('../../../state/scheduleState').useScheduleState
 let EpicDetail: typeof import('../EpicDetail').EpicDetail
+let useEpicUsage: typeof import('../../../state/epicUsage').useEpicUsage
 
 function installWindowApiMock(opts: {
   branch?: string | null
@@ -120,12 +121,14 @@ describe('EpicDetail (PRD 827)', () => {
     ;({ useChat } = await import('../../../state/chat'))
     ;({ useScheduleState } = await import('../../../state/scheduleState'))
     ;({ EpicDetail } = await import('../EpicDetail'))
+    ;({ useEpicUsage } = await import('../../../state/epicUsage'))
   })
 
   beforeEach(() => {
     _resetForTests()
     useChat.setState({ chats: {} })
     useScheduleState.setState({ snapshot: null, loaded: false })
+    useEpicUsage.setState({ usage: {} })
   })
 
   afterEach(() => {
@@ -479,6 +482,44 @@ describe('EpicDetail (PRD 827)', () => {
     expect(turnsAgo.getAttribute('title')).toContain('opened')
     expect(turnsAgo.getAttribute('title')).toContain('tool calls')
     expect(turnsAgo.getAttribute('title')).toContain(`session ${session.claudeSessionId}`)
+  })
+
+  it('shows the context readout after the branch only when usage carries lastContext, toned once large', async () => {
+    installWindowApiMock({ branch: 'epic/ctx' })
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-ctx', 'Ship it', 'feature')
+    const { AMBER_TEXT } = await import('../../ChatTranscriptTurn')
+    const chat = { turns: [{ id: 't1', role: 'user', text: 'hi', at: Date.now() }], running: false, stream: '', queuedPosition: 0 } as any
+    useChat.setState({ chats: { [session.id]: chat } })
+
+    // Absent without usage.
+    let el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+    expect(el.querySelector('[data-testid="epic-detail-context"]')).toBeNull()
+    act(() => root?.unmount())
+    container?.remove()
+
+    // Present, small: neutral, after the branch text.
+    useEpicUsage.setState({ usage: { [session.id]: { inputTokens: 10, outputTokens: 5, lastContext: 120_000, calls: 2 } } })
+    el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+    let ctx = el.querySelector('[data-testid="epic-detail-context"]') as HTMLElement
+    expect(ctx).not.toBeNull()
+    expect(ctx.textContent).toContain('context 120K')
+    const meta = el.querySelector('[data-testid="epic-detail-meta-line"]')!.textContent!
+    expect(meta.indexOf('epic/ctx')).toBeLessThan(meta.indexOf('context 120K'))
+    expect(ctx.className).not.toContain(AMBER_TEXT)
+    act(() => root?.unmount())
+    container?.remove()
+
+    // Large: attention tone + fresh-session hint.
+    useEpicUsage.setState({ usage: { [session.id]: { inputTokens: 10, outputTokens: 5, lastContext: 412_000, calls: 9 } } })
+    el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+    ctx = el.querySelector('[data-testid="epic-detail-context"]') as HTMLElement
+    expect(ctx.textContent).toContain('context 412K')
+    expect(ctx.className).toContain(AMBER_TEXT)
+    expect(ctx.getAttribute('title')).toMatch(/every turn re-reads/i)
+    expect(ctx.getAttribute('title')).toMatch(/fresh session/i)
   })
 
   it('renders "Resume" instead of "Mark completed" for a completed Epic', async () => {

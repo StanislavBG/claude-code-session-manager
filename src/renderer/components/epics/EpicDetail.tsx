@@ -3,6 +3,7 @@ import { useChat, attachTranscriptFeed, detachTranscriptFeed, type ChatTurn } fr
 import { buildEpicTimeline } from '../../lib/epicTimeline'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
+import { useEpicUsage } from '../../state/epicUsage'
 import { useEpicTerminal, isWebRemote, WEB_TERMINAL_TOOLTIP, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { EpicAppPreview } from './EpicAppPreview'
@@ -679,6 +680,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const chat = useChat((s) => s.chats[epicId])
   const hydrate = useChat((s) => s.hydrate)
   const sessions = usePromptSessions((s) => s.sessions)
+  // Stored reference (or undefined) — never a freshly-built value.
+  const epicUsage = useEpicUsage((s) => s.usage[epicId])
   const sessionEvents = usePromptSessions((s) => s.events[epicId]) ?? EMPTY_EVENTS
   const isInboundProposal = promptSession.status === 'proposed' && inboundFeedbackOrigin(promptSession) !== null
   const proposalSiblings = useMemo(
@@ -819,6 +822,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     jobs: scheduleJobs,
     prds,
     events: { [epicId]: sessionEvents },
+    usage: epicUsage ? { [epicId]: epicUsage } : undefined,
   }
   // Background-build Epic = launched by a macro with `job` set (Demo Video,
   // Project Home pages, …): it never runs a chat turn, so the Discussion
@@ -1012,6 +1016,19 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   </span>
                 )}
                 {branchText && ` · ${branchText}`}
+                {stats?.context && (
+                  <span
+                    data-testid="epic-detail-context"
+                    className={stats.contextLarge ? AMBER_TEXT : undefined}
+                    title={
+                      stats.contextLarge
+                        ? `Context ${stats.context} tokens — every turn re-reads this much; new work is cheaper in a fresh session`
+                        : `Context ${stats.context} tokens — re-read by every turn`
+                    }
+                  >
+                    {` · context ${stats.context}`}
+                  </span>
+                )}
               </span>
             </div>
             <div className="flex items-baseline gap-2">

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { epicDisplayStatus, epicPrds, epicQueuedDetail, epicStats, type EpicSnapshots } from '../epicDerive'
+import { EPIC_CONTEXT_WARN_TOKENS, epicDisplayStatus, epicPrds, epicQueuedDetail, epicStats, type EpicSnapshots } from '../epicDerive'
 import type { PromptSession, PromptSessionEvent } from '../../state/promptSessions'
 import type { TabChat } from '../../state/chat'
 import type { ScheduleJob, PrdListItem } from '../../../preload/api'
@@ -353,7 +353,7 @@ describe('epicDerive.epicStats', () => {
         }),
       },
     })
-    expect(epicStats('epic-1', snapshots)).toEqual({ turns: 3, toolCalls: 3, tokens: null })
+    expect(epicStats('epic-1', snapshots)).toEqual({ turns: 3, toolCalls: 3, tokens: null, context: null, contextLarge: false })
   })
 
   it('formats tokens as k/M and omits them when no usage is recorded', () => {
@@ -367,5 +367,30 @@ describe('epicDerive.epicStats', () => {
       chats: { 'epic-1': makeChat({ turns: [{ id: 't1', role: 'user', text: 'hi', at: 0 }] }) },
     })
     expect(epicStats('epic-1', withoutUsage)?.tokens).toBeNull()
+  })
+
+  it('formats lastContext as a compact context size, null when unknown', () => {
+    const chats = { 'epic-1': makeChat({ turns: [{ id: 't1', role: 'user' as const, text: 'hi', at: 0 }] }) }
+    const known = makeSnapshots({ chats, usage: { 'epic-1': { inputTokens: 1, outputTokens: 1, lastContext: 412_000, calls: 3 } } })
+    expect(epicStats('epic-1', known)?.context).toBe('412K')
+
+    const nullCtx = makeSnapshots({ chats, usage: { 'epic-1': { inputTokens: 1, outputTokens: 1, lastContext: null, calls: 0 } } })
+    expect(epicStats('epic-1', nullCtx)?.context).toBeNull()
+    expect(epicStats('epic-1', nullCtx)?.contextLarge).toBe(false)
+
+    const noField = makeSnapshots({ chats, usage: { 'epic-1': { inputTokens: 1, outputTokens: 1 } } })
+    expect(epicStats('epic-1', noField)?.context).toBeNull()
+    expect(epicStats('epic-1', makeSnapshots({ chats }))?.context).toBeNull()
+  })
+
+  it('marks contextLarge at or above EPIC_CONTEXT_WARN_TOKENS only', () => {
+    expect(EPIC_CONTEXT_WARN_TOKENS).toBe(200_000)
+    const chats = { 'epic-1': makeChat({ turns: [{ id: 't1', role: 'user' as const, text: 'hi', at: 0 }] }) }
+    const at = (lastContext: number) =>
+      epicStats('epic-1', makeSnapshots({ chats, usage: { 'epic-1': { inputTokens: 1, outputTokens: 1, lastContext, calls: 1 } } }))
+    expect(at(EPIC_CONTEXT_WARN_TOKENS - 1)?.contextLarge).toBe(false)
+    expect(at(EPIC_CONTEXT_WARN_TOKENS)?.contextLarge).toBe(true)
+    expect(at(EPIC_CONTEXT_WARN_TOKENS)?.context).toBe('200K')
+    expect(at(EPIC_CONTEXT_WARN_TOKENS + 1)?.contextLarge).toBe(true)
   })
 })

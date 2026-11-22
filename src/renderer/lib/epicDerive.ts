@@ -202,7 +202,16 @@ export interface EpicStats {
   /** Formatted k/M token total (e.g. "1.2M"), or null when no usage has been
    *  fetched yet for this Epic — callers omit the metric rather than show 0. */
   tokens: string | null
+  /** Compact size of the Epic's current context (`lastContext`, e.g. "412K"),
+   *  or null when unknown. */
+  context: string | null
+  /** True when lastContext is at or above EPIC_CONTEXT_WARN_TOKENS. */
+  contextLarge: boolean
 }
+
+/** Context size at which every further turn is costly enough that new work is
+ *  cheaper in a fresh session. */
+export const EPIC_CONTEXT_WARN_TOKENS = 200_000
 
 /**
  * `{ turns, toolCalls, tokens }` derived from useChat's turns + the batched
@@ -218,5 +227,8 @@ export function epicStats(epicId: string, snapshots: EpicSnapshots): EpicStats |
   const usage = snapshots.usage?.[epicId]
   const totalTokens = usage ? usage.inputTokens + usage.outputTokens : 0
   const tokens = totalTokens > 0 ? formatCompactCount(totalTokens) : null
-  return { turns: turns.length, toolCalls, tokens }
+  const lastContext = typeof usage?.lastContext === 'number' && usage.lastContext > 0 ? usage.lastContext : null
+  const context = lastContext !== null ? formatCompactCount(lastContext, { suffixCase: 'upper' }) : null
+  const contextLarge = lastContext !== null && lastContext >= EPIC_CONTEXT_WARN_TOKENS
+  return { turns: turns.length, toolCalls, tokens, context, contextLarge }
 }

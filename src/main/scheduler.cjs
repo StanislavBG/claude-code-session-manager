@@ -2358,6 +2358,16 @@ async function reconcilePass(state) {
   } catch (e) {
     console.warn('[scheduler] autoArchiveCompleted failed', e?.message);
   }
+  // Auto-dismiss cancelled rows of closed Epics (PRD 3492). In place on
+  // state.jobs — this runs inside a mutate body, so it must never mutate().
+  try {
+    const dismissResult = await queueOps.autoDismissCancelled(state);
+    if (dismissResult.dismissed?.length > 0) {
+      console.log(`[scheduler] auto-dismissed ${dismissResult.dismissed.length} cancelled row(s) of closed Epics: ${dismissResult.dismissed.join(', ')}`);
+    }
+  } catch (e) {
+    console.warn('[scheduler] autoDismissCancelled failed', e?.message);
+  }
   phaseMs.queueWrite = Date.now() - phaseStartMs;
 
   const totalMs = Date.now() - reconcileStartMs;
@@ -12735,6 +12745,16 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
     sendJson(res, 200, result);
   });
 }
+
+// queueOps.dismissCancelled needs the serialized queue writer; queueOps
+// cannot require this module (circular), so it is bound here (PRD 3492).
+queueOps.bindQueueAccess({
+  readQueue,
+  mutate,
+  broadcast: (opts) => broadcast(opts),
+  updatePrd: (args) => remote.updatePrd(args),
+  transitionJob,
+});
 
 module.exports = {
   applyDepHoldNotices,

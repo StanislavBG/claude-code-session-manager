@@ -734,6 +734,11 @@ async function computeDepHistorySatisfaction(state) {
     try {
       for (const slug of await queueHistory.completedSlugsForCwd(cwd)) satisfied.add(slug);
       for (const dir of listArchivedPrdDirs(cwd)) {
+        // Only prds-archived/ means "shipped". A dismissed cancelled PRD lives
+        // in the sibling prds-cancelled/ (queueOps.dismissCancelled) and must
+        // NEVER satisfy a dependsOn — guard by name so a future change to
+        // listArchivedPrdDirs cannot start counting it (PRD 3492).
+        if (path.basename(dir) !== 'prds-archived') continue;
         let entries;
         try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
         for (const ent of entries) {

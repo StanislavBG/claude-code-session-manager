@@ -127,7 +127,13 @@ const INTERACTIVE_AC_PATTERNS = [
 ];
 
 const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
-const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prd/prdLocations.cjs');
+const {
+  resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, deriveEpicIdFromPrdPath, deriveProjectCwdFromPrdPath,
+} = require('./lib/prd/prdLocations.cjs');
+const { opsPath, assertOpsWrite } = require('./lib/opsOwnership.cjs');
+const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
+const cancelDependents = require('./scheduler/cancelDependents.cjs');
 
 // PRD 808: PRDS_DIR is now the LEGACY global dir — kept as a migration
 // source and search fallback for not-yet-migrated files. Live PRDs resolve
@@ -346,10 +352,61 @@ async function archiveOne(slug, ts, cwd) {
  */
 let retireCompletedSlugsFn = async () => {};
 
-async function archiveMany(slugs, cwd, { retire = true } = {}) {
+const DISMISS_ROUTE = 'POST /admin/scheduler/dismiss-cancelled';
+
+/**
+ * A cancelled row is a 'failed' row carrying the cancel marker remote.cancelJob
+ * stamps (`cancelledAt`). JOB_STATUSES is closed, so the marker — not a status —
+ * is what tells a cancel apart from a real failure.
+ */
+function isCancelledRow(j) {
+  return !!j && j.status === 'failed' && typeof j.cancelledAt === 'string' && j.cancelledAt.length > 0;
+}
+
+function cancelledSlugsIn(jobs, cwd) {
+  const out = new Set();
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (!isCancelledRow(j)) continue;
+    if (cwd && j.cwd !== cwd) continue;
+    out.add(j.slug);
+  }
+  return out;
+}
+
+async function archiveMany(slugs, cwd, { retire = true, jobs } = {}) {
   if (!Array.isArray(slugs) || slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
   }
+  // A cancelled row must never be archived: prds-archived/ is read by
+  // budget.computeDepHistorySatisfaction as "satisfied", so archiving a
+  // cancelled PRD would silently release its dependents. Refuse with a
+  // warning pointing at dismiss (prds-cancelled/, never a satisfier).
+  let cancelled = new Set();
+  if (Array.isArray(jobs)) {
+    cancelled = cancelledSlugsIn(jobs, cwd);
+  } else if (queueAccess) {
+    try { cancelled = cancelledSlugsIn((await queueAccess.readQueue()).jobs, cwd); } catch { /* unreadable queue: no cancel info */ }
+  }
+  const warnings = [];
+  const toArchive = [];
+  const refused = [];
+  for (const slug of slugs) {
+    if (!cancelled.has(slug)) { toArchive.push(slug); continue; }
+    const warning = `"${slug}" is a cancelled job — archiving it would make it satisfy dependsOn. `
+      + `Dismiss it instead (${DISMISS_ROUTE}); not archived.`;
+    warnings.push(warning);
+    refused.push({ ok: false, slug, cancelled: true, warning, error: warning });
+  }
+  if (toArchive.length === 0) {
+    return { ok: true, archived: 0, archivedTo: null, results: refused, warnings };
+  }
+  const inner = await archiveAll(toArchive, cwd, { retire });
+  inner.results = [...refused, ...inner.results];
+  if (warnings.length > 0) inner.warnings = warnings;
+  return inner;
+}
+
+async function archiveAll(slugs, cwd, { retire }) {
   // One timestamp for the whole batch (so a multi-slug archive reads as one
   // event), but each slug's destination DIRECTORY is resolved from its own
   // source inside archiveOne — see archiveDirForSource. mkdir moved in there
@@ -456,7 +513,7 @@ async function autoArchiveCompleted(state, { nowMs } = {}) {
   if (slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
   }
-  const result = await archiveMany(slugs, undefined, { retire: false });
+  const result = await archiveMany(slugs, undefined, { retire: false, jobs });
   for (const r of result.results) {
     if (r.ok) {
       logs.writeLine({
@@ -468,6 +525,202 @@ async function autoArchiveCompleted(state, { nowMs } = {}) {
     }
   }
   return result;
+}
+
+// ────────────────────────────────────────────── dismiss cancelled rows
+//
+// A cancelled job lands as 'failed' + cancelledAt. Archiving it would file the
+// PRD under prds-archived/, which dependency satisfaction counts as "shipped".
+// Dismiss is the honest exit: the row leaves the live queue and the PRD moves
+// to a prds-cancelled/<ts>/ sibling dir that nothing ever reads as satisfied.
+
+/**
+ * Queue access injected by scheduler.cjs at load (queueOps cannot require
+ * scheduler.cjs — circular). `mutate` is scheduler's serialized mutate();
+ * dismissCancelled calls it from OUTSIDE any mutate body only (2026-09-25
+ * deadlock), and autoDismissCancelled never calls it at all.
+ */
+let queueAccess = null;
+function bindQueueAccess(access) {
+  queueAccess = access && typeof access.mutate === 'function' && typeof access.readQueue === 'function' ? access : null;
+}
+
+const CLOSED_EPIC_STATUSES = new Set(['completed', 'archived']);
+
+function cancelledDirForSource(srcDir, ts) {
+  const parent = path.dirname(srcDir);
+  const epicId = deriveEpicIdFromPrdPath(path.join(srcDir, 'x.md'));
+  const projectCwd = deriveProjectCwdFromPrdPath(path.join(srcDir, 'x.md'));
+  if (projectCwd) {
+    try {
+      const segs = epicId ? ['scheduler', 'epics', epicId, 'prds-cancelled', ts] : ['scheduler', 'prds-cancelled', ts];
+      const dir = opsPath(projectCwd, ...segs);
+      if (path.dirname(path.dirname(dir)) === parent) return { dir, owned: true };
+    } catch { /* fall through to the plain sibling */ }
+  }
+  return { dir: path.join(parent, 'prds-cancelled', ts), owned: false };
+}
+
+/** Move `<prds>/<slug>.md` → `<prds>/../prds-cancelled/<ts>/<slug>.md`. */
+async function moveToCancelled(slug, cwd, ts) {
+  const srcDir = await findPrdDir(slug, cwd);
+  if (!srcDir) return { ok: true, movedTo: null };
+  const src = path.resolve(path.join(srcDir, `${slug}.md`));
+  if (!src.startsWith(srcDir + path.sep)) return { ok: false, error: 'path escape (src)' };
+  const { dir, owned } = cancelledDirForSource(srcDir, ts);
+  const dst = path.resolve(path.join(dir, `${slug}.md`));
+  if (!dst.startsWith(path.resolve(dir) + path.sep)) return { ok: false, error: 'path escape (dst)' };
+  try {
+    if (owned) assertOpsWrite(dst, 'scheduler');
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.rename(src, dst);
+    return { ok: true, movedTo: dst };
+  } catch (e) {
+    return { ok: false, error: e?.message ?? 'rename failed' };
+  }
+}
+
+function newTs() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+/**
+ * dismissCancelled(slug, cwd, { dependents? }) — remove a cancelled row from
+ * the live queue and file its PRD under prds-cancelled/. Refuses rows without
+ * a cancel marker, and refuses while pending dependents exist unless the same
+ * dependents choice cancelJob takes is passed (cancelDependents.cjs).
+ */
+async function dismissCancelled(slug, cwd, opts = {}) {
+  if (!SLUG_RE.test(String(slug ?? ''))) return { ok: false, error: 'invalid slug' };
+  if (!queueAccess) return { ok: false, error: 'queue access not bound (scheduler not loaded)' };
+  const state = await queueAccess.readQueue();
+  if (state?.unreadable) return { ok: false, error: `queue unreadable (${state.unreadable})` };
+  const jobs = Array.isArray(state?.jobs) ? state.jobs : [];
+  const job = jobs.find((j) => j && j.slug === slug && (!cwd || j.cwd === cwd));
+  if (!job) {
+    return { ok: false, error: `unknown slug "${slug}": no queued job with that name${cwd ? ` in cwd ${cwd}` : ''}` };
+  }
+  if (!isCancelledRow(job)) {
+    return {
+      ok: false,
+      error: `job "${slug}" is not a cancelled row (status "${job.status}", no cancel marker) — dismiss only applies to cancelled jobs`,
+      notCancelled: true,
+    };
+  }
+  const depCwd = job.cwd ?? null;
+  const pending = cancelDependents.findPendingDependents(jobs, slug, depCwd);
+  let depPlan = null;
+  if (pending.length > 0) {
+    const names = pending.map((d) => d.slug);
+    if (!opts.dependents) {
+      return {
+        ok: false,
+        error: `cancelled job "${slug}" has ${names.length} pending dependent(s): ${names.join(', ')}. `
+          + 'Pass dependents: { action: "cascade" } to cancel them too, '
+          + '{ action: "repoint", to: "<slug>" } to make them depend on another PRD instead, '
+          + 'or { action: "clear" } to drop the dependency.',
+        dependents: names,
+        choices: [...cancelDependents.DEPENDENTS_ACTIONS],
+      };
+    }
+    depPlan = cancelDependents.planDependentsUpdate(jobs, slug, opts.dependents, depCwd);
+    if (!depPlan.ok) return { ok: false, error: depPlan.error, dependents: names };
+    if (depPlan.action !== 'cascade' && typeof queueAccess.updatePrd !== 'function') {
+      return { ok: false, error: 'updatePrd not bound — cannot rewrite dependents', dependents: names };
+    }
+    const applied = [];
+    for (const edit of depPlan.edits) {
+      if (edit.action !== 'setDependsOn') continue;
+      const res = await queueAccess.updatePrd({ slug: edit.slug, cwd: depCwd ?? undefined, frontmatter: { dependsOn: edit.dependsOn } });
+      if (!res?.ok) {
+        for (const done of applied.reverse()) {
+          await queueAccess.updatePrd({ slug: done.slug, cwd: depCwd ?? undefined, frontmatter: { dependsOn: done.previous } }).catch(() => null);
+        }
+        return {
+          ok: false,
+          error: `could not update dependent ${edit.slug}: ${res?.error ?? 'unknown error'} — "${slug}" was not dismissed`,
+          dependents: names,
+        };
+      }
+      applied.push(edit);
+    }
+  }
+  // File first, row second: a row with no file is harmless, but a live PRD
+  // file with no row would be re-minted as pending by the next reconcile.
+  const move = await moveToCancelled(slug, depCwd ?? undefined, newTs());
+  if (!move.ok) return { ok: false, error: `could not move PRD to prds-cancelled/: ${move.error}` };
+  const cascadeEdits = depPlan?.action === 'cascade' ? depPlan.edits : [];
+  const dependsOnEdits = depPlan && depPlan.action !== 'cascade' ? depPlan.edits : [];
+  const cancelledAt = new Date().toISOString();
+  let removed = false;
+  await queueAccess.mutate((s) => {
+    for (const edit of cascadeEdits) {
+      const d = s.jobs.find((x) => x.slug === edit.slug && x.cwd === job.cwd);
+      if (!d || d.status !== 'pending') continue;
+      if (queueAccess.transitionJob && !queueAccess.transitionJob(d, 'failed', { reason: edit.reason, source: 'queueOps:dismissCancelled' })) continue;
+      if (!queueAccess.transitionJob) d.status = 'failed';
+      d.error = edit.reason;
+      d.cancelledAt = cancelledAt;
+      d.finishedAt = cancelledAt;
+      d.exitCode = d.exitCode ?? null;
+      delete d.runtime;
+    }
+    for (const edit of dependsOnEdits) {
+      const d = s.jobs.find((x) => x.slug === edit.slug && x.cwd === job.cwd);
+      if (d) d.dependsOn = edit.dependsOn;
+    }
+    const idx = s.jobs.findIndex((x) => x.slug === slug && x.cwd === job.cwd && isCancelledRow(x));
+    if (idx >= 0) { s.jobs.splice(idx, 1); removed = true; }
+  });
+  if (typeof queueAccess.broadcast === 'function') {
+    await Promise.resolve(queueAccess.broadcast({ flush: true })).catch(() => {});
+  }
+  const audit = { slug, cwd: depCwd, source: 'manual', movedTo: move.movedTo, removed };
+  if (depPlan) Object.assign(audit, { action: depPlan.action, to: depPlan.to ?? null, dependents: depPlan.dependents });
+  appendAuditEvent('job_dismiss_cancelled', audit);
+  const result = { ok: true, slug, cwd: depCwd, movedTo: move.movedTo, removed };
+  if (depPlan) result.dependents = { action: depPlan.action, to: depPlan.to ?? null, slugs: depPlan.dependents };
+  return result;
+}
+
+/**
+ * autoDismissCancelled(state) — reconcile-time pass. Runs INSIDE a mutate
+ * body, so it edits `state.jobs` in place and never calls mutate(). Dismisses
+ * a cancelled row when its Epic is completed/archived and no pending row in
+ * its project (any Epic) still depends on it. Kill switch:
+ * SM_CANCELLED_AUTODISMISS_DISABLE=1.
+ */
+async function autoDismissCancelled(state) {
+  if (process.env.SM_CANCELLED_AUTODISMISS_DISABLE === '1') return { dismissed: [], skipped: 'disabled' };
+  const jobs = Array.isArray(state?.jobs) ? state.jobs : [];
+  const candidates = jobs.filter((j) => isCancelledRow(j) && j.epicId && j.cwd);
+  if (candidates.length === 0) return { dismissed: [] };
+  const indexByCwd = new Map();
+  const epicStatus = (cwd, epicId) => {
+    if (!indexByCwd.has(cwd)) indexByCwd.set(cwd, readActiveIndex(cwd).sessions);
+    const sessions = indexByCwd.get(cwd);
+    return Object.prototype.hasOwnProperty.call(sessions, epicId) ? sessions[epicId]?.status ?? null : null;
+  };
+  const ts = newTs();
+  const dismissed = [];
+  const drop = new Set();
+  for (const j of candidates) {
+    const status = epicStatus(j.cwd, j.epicId);
+    if (!CLOSED_EPIC_STATUSES.has(status)) continue;
+    if (cancelDependents.findPendingDependents(jobs, j.slug, j.cwd).length > 0) continue;
+    const move = await moveToCancelled(j.slug, j.cwd, ts);
+    if (!move.ok) {
+      logs.writeLine({ level: 'warn', scope: 'queueOps', message: `auto-dismiss: move failed for ${j.slug}`, meta: { error: move.error } });
+      continue;
+    }
+    drop.add(j);
+    dismissed.push(j.slug);
+    appendAuditEvent('job_dismiss_cancelled', {
+      slug: j.slug, cwd: j.cwd, source: 'auto', epicId: j.epicId, epicStatus: status, movedTo: move.movedTo, removed: true,
+    });
+  }
+  if (drop.size > 0) state.jobs = jobs.filter((j) => !drop.has(j));
+  return { dismissed };
 }
 
 // ────────────────────────────────────────────── retag
@@ -630,6 +883,10 @@ module.exports = {
   lintAll,
   lintOneAsync,
   archiveMany,
+  bindQueueAccess,
+  isCancelledRow,
+  dismissCancelled,
+  autoDismissCancelled,
   selectAutoArchivable,
   autoArchiveCompleted,
   retagMany,

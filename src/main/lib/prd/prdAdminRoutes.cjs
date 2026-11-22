@@ -200,6 +200,36 @@ function registerAdminRoute(adminHttp, remote) {
     sendJson(res, 200, result);
   });
 
+  // POST /admin/scheduler/dismiss-cancelled — the honest exit for a cancelled
+  // row (PRD 3492): removes it from the live queue and files its PRD under
+  // prds-cancelled/, which never satisfies a dependsOn (archive-prd refuses
+  // cancelled rows). Same body shape as cancel-job, including `dependents`.
+  adminHttp.registerRoute('POST', '/admin/scheduler/dismiss-cancelled', async (req, res) => {
+    const raw = await readBody(req);
+    const parsedBody = parseJsonBody(raw);
+    if (!parsedBody.ok) {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    let input;
+    try {
+      input = schemas.adminCancelJob.parse(parsedBody.value);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = await queueOps.dismissCancelled(input.slug, input.cwd, { dependents: input.dependents });
+    if (!result.ok) {
+      const status = Array.isArray(result.dependents) || result.notCancelled ? 409
+        : result.error === 'invalid slug' ? 400
+        : /unknown slug/i.test(result.error ?? '') ? 404
+          : 500;
+      sendJson(res, status, result);
+      return;
+    }
+    sendJson(res, 200, result);
+  });
+
   adminHttp.registerRoute('POST', '/admin/scheduler/retag-prd', async (req, res) => {
     const raw = await readBody(req);
     const parsedBody = parseJsonBody(raw);

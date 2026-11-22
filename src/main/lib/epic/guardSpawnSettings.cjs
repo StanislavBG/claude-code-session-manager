@@ -73,4 +73,60 @@ async function writeGuardSpawnSettingsFile({ spawnCwd, homeDir = os.homedir(), d
   }
 }
 
-module.exports = { buildGuardSpawnSettings, writeGuardSpawnSettingsFile };
+/** Every tool class guard-tool-risk.cjs can mark: Bash rules, file writes, MCP calls. */
+const TOOL_RISK_MATCHER = 'Bash|Write|Edit|NotebookEdit|mcp__.*';
+
+/**
+ * Settings carrying ONLY the guard-tool-risk PreToolUse hook, for headless
+ * spawns (scheduler jobs, Tasks) whose worktree never sees the project's
+ * untracked .claude/settings.json.
+ * @param {{ homeDir?: string }} [opts]
+ */
+function buildToolRiskGuardSettings({ homeDir = os.homedir() } = {}) {
+  return {
+    hooks: {
+      PreToolUse: [{
+        matcher: TOOL_RISK_MATCHER,
+        hooks: [{ type: 'command', command: nodeShellCommand(guardShimPath('guard-tool-risk.cjs', homeDir)) }],
+      }],
+    },
+  };
+}
+
+/**
+ * Write buildToolRiskGuardSettings() content-addressed to
+ * <homeDir>/.claude/session-manager/spawn-settings/tool-risk-<sha1[0..12]>.json
+ * after the shims are ensured. Returns its path, or null (logged, never thrown).
+ *
+ * @param {{ homeDir?: string, deps?: { ensureShims?: (homeDir: string) => Promise<any> } }} [opts]
+ * @returns {Promise<string | null>}
+ */
+async function writeToolRiskGuardSettingsFile({ homeDir = os.homedir(), deps = {} } = {}) {
+  const ensureShims = deps.ensureShims || ensureGuardShimsOrError;
+  try {
+    const shimError = await ensureShims(homeDir);
+    if (shimError) {
+      console.warn(`[guardSpawnSettings] tool-risk guard shim unavailable: ${shimError.error ?? shimError}`);
+      return null;
+    }
+    const content = `${JSON.stringify(buildToolRiskGuardSettings({ homeDir }), null, 2)}\n`;
+    const hash = crypto.createHash('sha1').update(content).digest('hex').slice(0, 12);
+    const dir = path.join(homeDir, '.claude', 'session-manager', 'spawn-settings');
+    const file = path.join(dir, `tool-risk-${hash}.json`);
+    if (fs.existsSync(file)) return file;
+    fs.mkdirSync(dir, { recursive: true });
+    await writeTextAtomic(file, content);
+    return file;
+  } catch (err) {
+    console.warn(`[guardSpawnSettings] could not write tool-risk spawn settings: ${err?.message ?? err}`);
+    return null;
+  }
+}
+
+module.exports = {
+  buildGuardSpawnSettings,
+  writeGuardSpawnSettingsFile,
+  TOOL_RISK_MATCHER,
+  buildToolRiskGuardSettings,
+  writeToolRiskGuardSettingsFile,
+};

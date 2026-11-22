@@ -11,7 +11,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { writeClaudeStub, reapClaudeStubs } = require('../../../../../tests/helpers/claudeStub.cjs');
-const { buildTaskArgs, buildTaskEnv, runTask, textStdoutFor } = require('../taskRun.cjs');
+const { buildTaskArgs, buildTaskEnv, withToolRiskGuard, runTask, textStdoutFor } = require('../taskRun.cjs');
+const { writeToolRiskGuardSettingsFile } = require('../../epic/guardSpawnSettings.cjs');
 
 const PROJ = path.resolve(os.tmpdir(), 'sm-taskrun-proj');
 
@@ -102,6 +103,28 @@ describe('buildTaskArgs', () => {
   });
 });
 
+describe('withToolRiskGuard', () => {
+  test('adds --settings <path> after -p and SM_TOOL_RISK_HEADLESS=1; never mutates inputs', () => {
+    const args = buildTaskArgs({ model: 'm', effort: 'e', runtime: { allowedTools: ['Read'], mcpConfig: ['/a.json'] } });
+    const env = buildTaskEnv({}, { A: '1' });
+    const before = args.slice();
+    const r = withToolRiskGuard({ args, env, settingsPath: '/h/.claude/session-manager/spawn-settings/tool-risk-x.json' });
+    expect(r.args.slice(0, 3)).toEqual(['-p', '--settings', '/h/.claude/session-manager/spawn-settings/tool-risk-x.json']);
+    expect(r.args.slice(3)).toEqual(before.slice(1));
+    expect(r.env.SM_TOOL_RISK_HEADLESS).toBe('1');
+    expect(r.env.SM_SCHEDULER_JOB_RISK_TOOLS).toBeUndefined();
+    expect(args).toEqual(before);
+    expect(env.SM_TOOL_RISK_HEADLESS).toBeUndefined();
+  });
+  test('null path: unchanged', () => {
+    const args = ['-p', '--model', 'm'];
+    const env = { A: '1' };
+    const r = withToolRiskGuard({ args, env, settingsPath: null });
+    expect(r.args).toEqual(args);
+    expect(r.env).toEqual(env);
+  });
+});
+
 describe('runTask (fake claude binary)', () => {
   const prevBin = process.env.SM_CLAUDE_BIN;
   const prevMem = process.env.SM_JOB_MEMORY_MAX_MB;
@@ -135,6 +158,10 @@ if (mode === 'ratelimit') {
   process.exit(1);
 }
 if (mode === 'hang') { setInterval(() => {}, 1000); }
+if (mode === 'argv') {
+  process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: JSON.stringify({ argv: process.argv.slice(2), headless: process.env.SM_TOOL_RISK_HEADLESS || null }), ...env }));
+  process.exit(0);
+}
 `,
     });
   });
@@ -146,10 +173,37 @@ if (mode === 'hang') { setInterval(() => {}, 1000); }
   });
 
   const envFor = (mode) => buildTaskEnv({}, { PATH: process.env.PATH, HOME: process.env.HOME, TASK_STUB_MODE: mode });
+  // The real settings writer, pointed at the temp dir — never the real ~/.claude.
+  const deps = { writeToolRiskGuardSettingsFile: () => writeToolRiskGuardSettingsFile({ homeDir: dir, deps: { ensureShims: async () => null } }) };
+
+  test('Task argv carries --settings <tool-risk file> and env SM_TOOL_RISK_HEADLESS=1', async () => {
+    const r = await runTask({ deps, args: buildTaskArgs({ model: 'm', effort: 'e' }), env: envFor('argv'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
+    expect(r.status).toBe('ok');
+    const seen = JSON.parse(r.envelope.result);
+    const i = seen.argv.indexOf('--settings');
+    expect(i).toBeGreaterThan(-1);
+    const file = seen.argv[i + 1];
+    expect(file.startsWith(path.join(dir, '.claude', 'session-manager', 'spawn-settings'))).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash|Write|Edit|NotebookEdit|mcp__.*');
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('guard-tool-risk.cjs');
+    expect(seen.headless).toBe('1');
+  });
+
+  test('settings file unavailable: Task still runs, without --settings or the headless marker', async () => {
+    const r = await runTask({
+      args: buildTaskArgs({ model: 'm', effort: 'e' }), env: envFor('argv'), prompt: 'x', cwd: dir, timeoutMs: 30_000,
+      deps: { writeToolRiskGuardSettingsFile: async () => null },
+    });
+    expect(r.status).toBe('ok');
+    const seen = JSON.parse(r.envelope.result);
+    expect(seen.argv).not.toContain('--settings');
+    expect(seen.headless).toBeNull();
+  });
 
   test('json envelope', async () => {
     let pid = null;
-    const r = await runTask({ args: buildTaskArgs({ model: 'm', effort: 'e' }), env: envFor('json'), prompt: 'hi', cwd: dir, timeoutMs: 30_000, onSpawn: (p) => { pid = p; } });
+    const r = await runTask({ deps, args: buildTaskArgs({ model: 'm', effort: 'e' }), env: envFor('json'), prompt: 'hi', cwd: dir, timeoutMs: 30_000, onSpawn: (p) => { pid = p; } });
     expect(pid).toBeGreaterThan(0);
     expect(r.status).toBe('ok');
     expect(r.exitCode).toBe(0);
@@ -164,14 +218,14 @@ if (mode === 'hang') { setInterval(() => {}, 1000); }
   });
 
   test('stream-json: last result line', async () => {
-    const r = await runTask({ args: buildTaskArgs({ model: 'm', effort: 'e', runtime: { outputFormat: 'stream-json' } }), env: envFor('stream'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
+    const r = await runTask({ deps, args: buildTaskArgs({ model: 'm', effort: 'e', runtime: { outputFormat: 'stream-json' } }), env: envFor('stream'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
     expect(r.status).toBe('ok');
     expect(r.envelope.result).toBe('streamed');
     expect(textStdoutFor(r.envelope)).toBe('streamed\n');
   });
 
   test('non-zero exit → error with stderr tail', async () => {
-    const r = await runTask({ args: ['-p'], env: envFor('fail'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
+    const r = await runTask({ deps, args: ['-p'], env: envFor('fail'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
     expect(r.status).toBe('error');
     expect(r.exitCode).toBe(3);
     expect(r.stderrTail).toContain('boom');
@@ -179,19 +233,19 @@ if (mode === 'hang') { setInterval(() => {}, 1000); }
   });
 
   test('timeout kills the tree', async () => {
-    const r = await runTask({ args: ['-p'], env: envFor('hang'), prompt: 'x', cwd: dir, timeoutMs: 500 });
+    const r = await runTask({ deps, args: ['-p'], env: envFor('hang'), prompt: 'x', cwd: dir, timeoutMs: 500 });
     expect(r.status).toBe('timeout');
   });
 
   test('abort → caller_gone', async () => {
     const ac = new AbortController();
-    const p = runTask({ args: ['-p'], env: envFor('hang'), prompt: 'x', cwd: dir, timeoutMs: 30_000, signal: ac.signal, onSpawn: () => setTimeout(() => ac.abort(), 200) });
+    const p = runTask({ deps, args: ['-p'], env: envFor('hang'), prompt: 'x', cwd: dir, timeoutMs: 30_000, signal: ac.signal, onSpawn: () => setTimeout(() => ac.abort(), 200) });
     const r = await p;
     expect(r.status).toBe('caller_gone');
   });
 
   test('rate limit', async () => {
-    const r = await runTask({ args: ['-p'], env: envFor('ratelimit'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
+    const r = await runTask({ deps, args: ['-p'], env: envFor('ratelimit'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
     expect(r.status).toBe('rate_limited');
     expect(r.quota.rateLimited).toBe(true);
     expect(r.quota.resetsAt).toBe(new Date(1900000000 * 1000).toISOString());
@@ -199,7 +253,7 @@ if (mode === 'hang') { setInterval(() => {}, 1000); }
 
   test('spawn failure never throws', async () => {
     process.env.SM_CLAUDE_BIN = path.join(dir, 'does-not-exist');
-    const r = await runTask({ args: ['-p'], env: envFor('json'), prompt: 'x', cwd: dir, timeoutMs: 5_000 });
+    const r = await runTask({ deps, args: ['-p'], env: envFor('json'), prompt: 'x', cwd: dir, timeoutMs: 5_000 });
     expect(r.status).toBe('spawn_failed');
   });
 });

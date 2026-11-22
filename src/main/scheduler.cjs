@@ -207,7 +207,9 @@ const { splitFrontmatter, parsePrdFile, serializePrdFile, isArtifactOnlyDeclarat
 const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
 const { resolvePersonaDefaultEstimate, DEFAULT_PRD_AGENT_TYPE } = require('./lib/prd/prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches, bareSlug } = require('./lib/prd/depSlugResolve.cjs');
-const { writeJsonAtomic } = require('./lib/util/atomicFs.cjs');
+const { writeJsonAtomic, readJsonOrSync } = require('./lib/util/atomicFs.cjs');
+const { writeToolRiskGuardSettingsFile } = require('./lib/epic/guardSpawnSettings.cjs');
+const toolRiskMarks = require('./lib/claude/toolRiskMarks.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
 const cancelDependents = require('./scheduler/cancelDependents.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -5025,7 +5027,64 @@ function knownMcpServers() {
   return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [], jsonSchema = null, sandboxArgs = null }) {
+/**
+ * The CLI keeps only the LAST --settings value, and the job sandbox argv
+ * already carries one inline JSON --settings. When it does, fold the
+ * tool-risk guard file's PreToolUse hooks into that JSON instead of adding a
+ * second --settings that would silently drop one of the two. Returns null
+ * when there is nothing to merge into (or the guard file cannot be read).
+ * @param {string[]} sandboxArgs
+ * @param {string} riskGuardSettingsPath
+ * @returns {string[]|null}
+ */
+function mergeRiskGuardIntoSandboxArgs(sandboxArgs, riskGuardSettingsPath) {
+  const i = sandboxArgs.indexOf('--settings');
+  if (i === -1 || typeof sandboxArgs[i + 1] !== 'string') return null;
+  let inline;
+  try { inline = JSON.parse(sandboxArgs[i + 1]); } catch { return null; }
+  if (!inline || typeof inline !== 'object' || Array.isArray(inline)) return null;
+  const guard = readJsonOrSync(riskGuardSettingsPath, null);
+  const guardHooks = guard && guard.hooks && Array.isArray(guard.hooks.PreToolUse) ? guard.hooks.PreToolUse : null;
+  if (!guardHooks) return null;
+  const hooks = inline.hooks && typeof inline.hooks === 'object' ? inline.hooks : {};
+  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
+  const merged = { ...inline, hooks: { ...hooks, PreToolUse: [...pre, ...guardHooks] } };
+  const out = sandboxArgs.slice();
+  out[i + 1] = JSON.stringify(merged);
+  return out;
+}
+
+/**
+ * A job's tool-risk clearance list (env SM_SCHEDULER_JOB_RISK_TOOLS): the
+ * PRD's riskTools plus the persona's tools, keeping only entries
+ * toolRiskMarks.parseRule accepts (MCP names, Bash(...) rules). Deduped,
+ * order-preserving. Never throws.
+ * @param {unknown} prdRiskTools
+ * @param {unknown} personaTools
+ * @returns {string[]}
+ */
+function jobRiskToolsClearance(prdRiskTools, personaTools) {
+  const out = [];
+  const seen = new Set();
+  for (const list of [prdRiskTools, personaTools]) {
+    if (!Array.isArray(list)) continue;
+    for (const t of list) {
+      if (typeof t !== 'string' || seen.has(t) || !toolRiskMarks.parseRule(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null }) {
+  let permissionArgs = Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions'];
+  let riskArgs = [];
+  if (typeof riskGuardSettingsPath === 'string' && riskGuardSettingsPath) {
+    const merged = mergeRiskGuardIntoSandboxArgs(permissionArgs, riskGuardSettingsPath);
+    if (merged) permissionArgs = merged;
+    else riskArgs = ['--settings', riskGuardSettingsPath];
+  }
   return [
     '-p',
     '--model', model,
@@ -5034,7 +5093,8 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers() }),
     ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
     ...(jsonSchema && typeof jsonSchema === 'object' ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
-    ...(Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions']),
+    ...riskArgs,
+    ...permissionArgs,
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
     '--output-format', 'stream-json',
@@ -5198,6 +5258,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // the scheduler's own short status chip (that's notifyOriginatingTab's job
   // for the assistant side).
   let parsedPrdMeta = null;
+  // The PRD file's own riskTools frontmatter (tool-risk clearance). Fresh
+  // spawns fill it from the isArtifactOnly read; resume spawns re-resolve the
+  // PRD file below so a resumed session keeps the same clearance.
+  let prdRiskTools = [];
   if (resumeTarget) {
     // Resume mode (PRD 1111): a short deterministic preamble naming the
     // recorded dirty paths, NEVER the original PRD body — the resumed
@@ -5364,6 +5428,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     try {
       const fm = parsePrdFile(await fsp.readFile(prdPath, 'utf8')).frontmatter;
       isArtifactOnly = isArtifactOnlyDeclaration(fm);
+      // Tool-risk clearance (PRD scheduler-tool-risk-wiring): same read.
+      prdRiskTools = Array.isArray(fm && fm.riskTools) ? fm.riskTools : [];
     } catch {
       isArtifactOnly = false;
     }
@@ -5398,6 +5464,25 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // a dangling/absent agentType falls back to no persona + FALLBACK_MODEL
   // and is logged once by resolvePrdPersonaForSpawn itself.
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
+  if (resumeTarget) {
+    try {
+      const dir = await prdPaths.findPrdDirForJob(job);
+      const file = dir ? path.join(dir, `${job.slug}.md`) : prdPaths.prdPathForJob(job);
+      const fm = parsePrdFile(await fsp.readFile(file, 'utf8')).frontmatter;
+      prdRiskTools = Array.isArray(fm && fm.riskTools) ? fm.riskTools : [];
+    } catch {
+      prdRiskTools = [];
+    }
+  }
+  // Tool-risk guard (PRD scheduler-tool-risk-wiring): a job worktree never
+  // sees the project's untracked .claude/settings.json, so guard-tool-risk
+  // loads via --settings <file>. Resolved once per job; null never blocks
+  // the spawn.
+  const jobRiskTools = jobRiskToolsClearance(prdRiskTools, personaResolution.tools);
+  const riskGuardSettingsPath = await writeToolRiskGuardSettingsFile({ homeDir: os.homedir() });
+  if (!riskGuardSettingsPath) {
+    safeLog(`[scheduler] tool-risk guard settings unavailable for ${job.slug}; spawning without guard-tool-risk\n`);
+  }
   const effortResolution = resolveEpicEffort({ cwd, agentType: job.agentType, prdEffort: job.effort });
   const personaEffort = effortResolution.effort;
   // Validator jobs (fresh and resume) return a schema-checked verdict:
@@ -5461,6 +5546,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       SM_SCHEDULER_JOB_SLUG: job.slug,
       SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
       ...personaToolScopeEnv(personaToolScope),
+      SM_SCHEDULER_JOB_RISK_TOOLS: JSON.stringify(jobRiskTools),
       BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
@@ -5652,6 +5738,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       toolScope: personaToolScope,
       pluginDirArgs: packArgs.pluginDirArgs,
       jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : null,
+      riskGuardSettingsPath,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 
@@ -13123,6 +13210,7 @@ module.exports = {
   INVESTIGATION_MAX_MS,
   buildResumeRecoveryPreamble,
   buildClaudeSpawnArgs,
+  jobRiskToolsClearance,
   HEADLESS_DISALLOWED_TOOLS,
   spawnResumeRecovery,
   resolveHeadShasForPass,

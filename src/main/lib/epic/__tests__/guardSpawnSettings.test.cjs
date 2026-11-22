@@ -82,3 +82,43 @@ test('shim failure gives null', async () => {
   expect(r).toBeNull();
   expect(fs.existsSync(path.join(home, '.claude', 'session-manager', 'spawn-settings'))).toBe(false);
 });
+
+const { writeToolRiskGuardSettingsFile, TOOL_RISK_MATCHER } = require('../guardSpawnSettings.cjs');
+
+test('writeToolRiskGuardSettingsFile: content-addressed file with only the tool-risk hook', async () => {
+  const f = await writeToolRiskGuardSettingsFile({ homeDir: home });
+  expect(path.isAbsolute(f)).toBe(true);
+  expect(path.dirname(f)).toBe(path.join(home, '.claude', 'session-manager', 'spawn-settings'));
+  expect(f).toMatch(/tool-risk-[0-9a-f]{12}\.json$/);
+  const s = JSON.parse(fs.readFileSync(f, 'utf8'));
+  expect(s).toEqual({
+    hooks: {
+      PreToolUse: [{
+        matcher: 'Bash|Write|Edit|NotebookEdit|mcp__.*',
+        hooks: [{ type: 'command', command: nodeShellCommand(shimPath('guard-tool-risk.cjs', home)) }],
+      }],
+    },
+  });
+  expect(TOOL_RISK_MATCHER).toBe('Bash|Write|Edit|NotebookEdit|mcp__.*');
+  // shims were ensured first
+  expect(fs.existsSync(shimPath('guard-tool-risk.cjs', home))).toBe(true);
+  const past = new Date(Date.now() - 100000);
+  fs.utimesSync(f, past, past);
+  const mtime = fs.statSync(f).mtimeMs;
+  expect(await writeToolRiskGuardSettingsFile({ homeDir: home })).toBe(f);
+  expect(fs.statSync(f).mtimeMs).toBe(mtime);
+});
+
+test('writeToolRiskGuardSettingsFile: shim failure → null, nothing written', async () => {
+  const r = await writeToolRiskGuardSettingsFile({
+    homeDir: home,
+    deps: { ensureShims: async () => ({ ok: false, action: 'error', error: 'boom' }) },
+  });
+  expect(r).toBeNull();
+  expect(fs.existsSync(path.join(home, '.claude', 'session-manager', 'spawn-settings'))).toBe(false);
+});
+
+test('writeToolRiskGuardSettingsFile: a throwing ensureShims → null, never throws', async () => {
+  const r = await writeToolRiskGuardSettingsFile({ homeDir: home, deps: { ensureShims: async () => { throw new Error('x'); } } });
+  expect(r).toBeNull();
+});

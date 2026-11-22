@@ -28,6 +28,7 @@ const { feedChildStdin } = require('../process/childStdin.cjs');
 const { withProcRole } = require('../process/cleanEnv.cjs');
 const { killTree, detachedSpawnOpts } = require('../process/killTree.cjs');
 const memoryScope = require('../process/memoryScope.cjs');
+const { writeToolRiskGuardSettingsFile } = require('../epic/guardSpawnSettings.cjs');
 
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 16 * 1024;
@@ -94,6 +95,22 @@ function buildTaskEnv(runtime, baseEnv) {
   return env;
 }
 
+/**
+ * Load guard-tool-risk into a Task run: '--settings', <path> right after '-p'
+ * (ahead of every variadic flag) and SM_TOOL_RISK_HEADLESS='1' (no clearance —
+ * a Task has no PRD riskTools). A null path returns the inputs unchanged.
+ * Pure: never mutates args/env.
+ *
+ * @param {{ args: string[], env: Record<string, string|undefined>, settingsPath: string|null }} o
+ */
+function withToolRiskGuard({ args, env, settingsPath }) {
+  if (typeof settingsPath !== 'string' || !settingsPath) return { args, env };
+  const a = Array.isArray(args) ? args.slice() : [];
+  const at = a[0] === '-p' ? 1 : 0;
+  a.splice(at, 0, '--settings', settingsPath);
+  return { args: a, env: { ...(env || {}), SM_TOOL_RISK_HEADLESS: '1' } };
+}
+
 /** Parse json stdout, or the last stream-json `type: 'result'` line. */
 function parseEnvelope(stdout) {
   const text = String(stdout || '').trim();
@@ -145,7 +162,7 @@ function textStdoutFor(envelope) {
  * @param {{ args: string[], env: Record<string, string|undefined>, prompt: string, cwd: string,
  *   timeoutMs?: number, signal?: AbortSignal, onSpawn?: (pid: number) => void }} o
  */
-async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn } = /** @type {any} */ ({})) {
+async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn, deps = {} } = /** @type {any} */ ({})) {
   const startedAt = Date.now();
   const base = () => ({
     status: /** @type {string} */ ('spawn_failed'),
@@ -164,6 +181,14 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
   });
   try { await ensureCliCapsProbed(); } catch { /* probe is best effort */ }
   if (signal && signal.aborted) return { ...base(), status: 'caller_gone', durationMs: Date.now() - startedAt };
+
+  // guard-tool-risk (PRD scheduler-tool-risk-wiring): a null settings path
+  // never blocks the run — log one line and spawn without it.
+  const writeRiskSettings = deps.writeToolRiskGuardSettingsFile || writeToolRiskGuardSettingsFile;
+  let settingsPath = null;
+  try { settingsPath = await writeRiskSettings({ homeDir: os.homedir() }); } catch { settingsPath = null; }
+  if (!settingsPath) console.warn('[taskRun] tool-risk guard settings unavailable; running the Task without guard-tool-risk');
+  ({ args, env } = withToolRiskGuard({ args, env, settingsPath }));
 
   return new Promise((resolve) => {
     let settled = false;
@@ -275,4 +300,4 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
   });
 }
 
-module.exports = { buildTaskArgs, buildTaskEnv, runTask, textStdoutFor, parseEnvelope, MAX_STDOUT_BYTES, STDERR_TAIL_BYTES, MAX_ARG_BYTES };
+module.exports = { buildTaskArgs, buildTaskEnv, withToolRiskGuard, runTask, textStdoutFor, parseEnvelope, MAX_STDOUT_BYTES, STDERR_TAIL_BYTES, MAX_ARG_BYTES };

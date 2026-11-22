@@ -26,7 +26,7 @@ Base: 75027f57 (known). Commits: 1981fc0c (check), 6b7fde6c (wire), e3f4e144 (do
 ### Critical
 - none
 ### Important
-- none
+- src/main/lib/project-pages/__tests__/videoReviewIpc.test.cjs:35 (tool `agentName: 'demo-video-builder'`, review job) — 10 of 18 tests fail since 6b7fde6c. That suite drives the real `runToolJob` with no stub for the new check, so it resolves the owner's real `~/.claude/agents/demo-video-builder.md`. That persona lists tools without `project_video_review_write`, so the dispatch is refused (reproduced: check returns "...Add mcp__session-manager-scheduler__project_video_review_write to the tools: line of ~/.claude/agents/demo-video-builder.md"). The refusal is the intended behaviour; the gap is that the PRD's Files list omitted this suite, so it now depends on the host's persona files. Fix: inject `checkProjectVideoToolRunnable` in that test's deps. Separately, the real demo-video-builder persona would be refused for a review tool on this host.
 ### Minor
 - src/main/index.cjs (~macros:save): `agentName` comes from `payload.agentName` only; an IPC update that omits agentName (the admin route falls back to `existing.agentName`) would be refused as "no persona". Likely harmless if the editor always sends the full macro; not verified.
 - No security issues seen: persona name goes through the existing assertAgentTypeWritable path; no new file writes.

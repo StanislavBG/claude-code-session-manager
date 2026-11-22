@@ -6,6 +6,9 @@
  * macro's persona under the scheduler's budget instead of a chat turn.
  * Never mints an Epic (single-creator law): the caller supplies epicId.
  * A press may carry a lower per-run effort, written as the PRD's `effort` frontmatter.
+ * A project's own Video tool (library macro, surface 'project-video', projects
+ * [cwd], with a job) dispatches the same way: artifact-only, or a committing PRD
+ * when job.repoPaths is set, with an optional review stage when job.review is set.
  *
  * Plain Node, no Electron imports; all I/O is injected.
  */
@@ -14,6 +17,7 @@ const path = require('node:path');
 const { BUILTIN_MACROS } = require('./builtinMacros.cjs');
 const { kebabCase } = require('../util/kebabCase.cjs');
 const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
+const { renderMacroPrompt } = require('./macroLibrary.cjs');
 
 const ACTIVE = new Set(['pending', 'held', 'running']);
 const RETRYABLE = new Set(['needs_review', 'failed']);
@@ -55,21 +59,67 @@ function rawEntryIdFor(kind, extra, t) {
   return kebabCase(custom ? custom[1] : name, { maxLen: 40, fallback: 'overview' });
 }
 
+const VIDEO_INDEX_REL = 'session-manager-operations/project-pages/videos/{id}/index.html';
+// Same string as video-review-store's REVIEW_MATERIAL_REL (asserted by the IPC wiring test).
+const REVIEW_MATERIAL_REL = 'session-manager-operations/project-pages/videos/{id}/review/material.json';
+
+const oneLine = (v) => String(v).replace(/[\r\n]+/g, ' ').trim();
+
+// A caller can never forge a review decision: every 'Review:' line goes, and
+// only the internal `review` param writes one back.
+function stripReviewLines(extra) {
+  return extra.split(/\r?\n/).filter((l) => !/^\s*review:/i.test(l)).join('\n').trim();
+}
+
+function reviewLine(review) {
+  if (!review || typeof review !== 'object') return '';
+  if (review.decision === 'approved' && typeof review.at === 'string' && oneLine(review.at)) {
+    return `Review: approved by the owner at ${oneLine(review.at)}`;
+  }
+  if (review.decision === 'changes' && typeof review.note === 'string' && oneLine(review.note)) {
+    return `Review: changes requested: ${oneLine(review.note)}`;
+  }
+  return '';
+}
+
+// A project's own Video tool: only from the library, only on the Video surface,
+// only for exactly this project, only with a job declaration.
+function resolveProjectTool(macros, macroId, cwd) {
+  const m = (Array.isArray(macros) ? macros : []).find((x) => x && x.id === macroId);
+  if (!m || m.builtin || m.surface !== 'project-video' || !m.job || typeof m.job !== 'object') return null;
+  if (!Array.isArray(m.projects) || m.projects.length !== 1 || m.projects[0] !== cwd) return null;
+  return m;
+}
+
 async function dispatchMacroJob(
-  { cwd, macroId, epicId, extraInstructions, effort } = {},
-  { createPrd, listRows, archivePrd, builtins = BUILTIN_MACROS, now = Date.now } = {},
+  { cwd, macroId, epicId, extraInstructions, effort, inputValues, review } = {},
+  { createPrd, listRows, archivePrd, builtins = BUILTIN_MACROS, macros = [], now = Date.now } = {},
 ) {
-  const macro = (builtins || []).find((m) => m && m.id === macroId);
+  const builtin = (builtins || []).find((m) => m && m.id === macroId);
+  const tool = builtin ? null : resolveProjectTool(macros, macroId, cwd);
+  const macro = builtin || tool;
   if (!macro || !macro.job) return { ok: false, error: `macro ${macroId} has no background job declaration` };
   if (typeof epicId !== 'string' || !epicId.trim()) return { ok: false, error: 'epicId is required — a background build joins an existing Epic' };
   if (typeof cwd !== 'string' || !cwd) return { ok: false, error: 'cwd is required' };
   if (typeof createPrd !== 'function') return { ok: false, error: 'createPrd is not available' };
 
+  let prompt = macro.prompt;
+  if (tool) {
+    const r = renderMacroPrompt(tool.prompt, tool.inputs, inputValues);
+    if (!r.ok) return { ok: false, error: r.error };
+    prompt = r.prompt;
+  }
+
   const t = now();
-  const extra = typeof extraInstructions === 'string' ? extraInstructions.trim() : '';
-  const entryKind = macro.job.entryKind;
+  const rLine = reviewLine(review);
+  const extra = [stripReviewLines(typeof extraInstructions === 'string' ? extraInstructions : ''), rLine].filter(Boolean).join('\n');
+  const entryKind = tool ? 'video' : macro.job.entryKind;
   const entryId = entryKind ? entryIdFor(entryKind, extra, t) : null;
-  const artifactPaths = macro.job.artifactPaths.map((p) => (entryId ? p.split('{id}').join(entryId) : p));
+  const stage = tool && tool.job.review ? (review && review.decision === 'approved' ? 'final' : 'review') : null;
+  const repoPaths = tool && Array.isArray(tool.job.repoPaths) && tool.job.repoPaths.length ? tool.job.repoPaths.slice() : null;
+  const artifactPaths = tool
+    ? [(stage === 'review' ? REVIEW_MATERIAL_REL : VIDEO_INDEX_REL).split('{id}').join(entryId)]
+    : macro.job.artifactPaths.map((p) => (entryId ? p.split('{id}').join(entryId) : p));
   const absPaths = artifactPaths.map((p) => path.join(cwd, p));
   for (const s of [cwd, ...absPaths]) {
     if (s.includes("'") || /[\r\n]/.test(s)) return { ok: false, error: "cwd or artifact path contains a character the gate cannot quote (single quote or newline)" };
@@ -93,33 +143,53 @@ async function dispatchMacroJob(
   }
 
   const slug = `${kebabCase(macro.label, { maxLen: 30, fallback: 'macro' })}-build-${t.toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-  let goal = extra ? `${macro.prompt}\n\nAdditional instructions: ${extra}` : macro.prompt;
+  let goal = extra ? `${prompt}\n\nAdditional instructions: ${extra}` : prompt;
   if (entryId) goal += `\n\nEntry id: ${entryId}. Save with ${entryKind === 'video' ? 'videoId' : 'pageId'} = ${entryId}.`;
+  if (stage === 'review') {
+    goal += `\n\nReview stage: save the review material for entry ${entryId} with one project_video_review_write call (images and short text), then end; do not build or save the video in this run.`;
+  }
 
+  const saveTool = stage === 'review' ? 'the project_video_review_write tool' : 'the save tool your persona names';
   const input = {
-    title: `${macro.label}: background build`,
+    title: `${macro.label}: ${stage === 'review' ? 'review material' : 'background build'}`,
     slug,
     cwd,
     agentType: macro.agentName,
     tag: macro.tag,
-    deliverable: 'artifact',
-    artifactPaths,
-    files: artifactPaths,
     estimateMinutes: macro.job.estimateMinutes,
     macroId,
     sourcePromptId: epicId,
     disposition: 'new-head',
     goal,
-    acceptanceCriteria: [
-      `${artifactPaths[0]} is written during this run by the save tool your persona names, never by hand.`,
-      'Nothing in the repository is committed. No commit is the expected result: once the gate is green, end with SCHEDULER_VERDICT: PASS, never FAIL for the missing commit.',
-    ],
-    implementationNotes:
-      `Work as the ${macro.agentName} persona (your system prompt) end to end. This build was started from Project Home and no one is watching: never stop to ask. `
-      + 'Build outside the repository (mktemp -d under ~/.cache). SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd. '
-      + 'This build is artifact-only (deliverable: artifact) and lands no commit by design: a green gate with no commit means SCHEDULER_VERDICT: PASS.',
     gate: absPaths.map((p) => buildGate(p, t)),
   };
+  if (repoPaths) {
+    Object.assign(input, {
+      files: repoPaths,
+      acceptanceCriteria: [
+        `${artifactPaths[0]} is written during this run by ${saveTool}, never by hand. That entry is saved by the save tool and is never committed.`,
+        `This run must commit its changes under ${repoPaths.join(', ')} (stage only those paths). With nothing to commit it fails like any PRD.`,
+      ],
+      implementationNotes:
+        `Work as the ${macro.agentName} persona (your system prompt) end to end. This build was started from Project Home and no one is watching: never stop to ask. `
+        + 'SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd. '
+        + `This build lands a commit: change files only under ${repoPaths.join(', ')}, commit them, and never commit the saved entry.`,
+    });
+  } else {
+    Object.assign(input, {
+      deliverable: 'artifact',
+      artifactPaths,
+      files: artifactPaths,
+      acceptanceCriteria: [
+        `${artifactPaths[0]} is written during this run by ${saveTool}, never by hand.`,
+        'Nothing in the repository is committed. No commit is the expected result: once the gate is green, end with SCHEDULER_VERDICT: PASS, never FAIL for the missing commit.',
+      ],
+      implementationNotes:
+        `Work as the ${macro.agentName} persona (your system prompt) end to end. This build was started from Project Home and no one is watching: never stop to ask. `
+        + 'Build outside the repository (mktemp -d under ~/.cache). SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd. '
+        + 'This build is artifact-only (deliverable: artifact) and lands no commit by design: a green gate with no commit means SCHEDULER_VERDICT: PASS.',
+    });
+  }
   if (typeof effort === 'string' && PRD_EFFORT_LEVELS.includes(effort)) input.effort = effort;
 
   let res;
@@ -129,7 +199,7 @@ async function dispatchMacroJob(
     return { ok: false, error: `createPrd failed: ${e?.message ?? e}` };
   }
   if (!res || res.ok === false) return { ok: false, error: res?.error || 'createPrd failed' };
-  return { ok: true, slug, epicId };
+  return { ok: true, slug, epicId, entryId, stage };
 }
 
 module.exports = { dispatchMacroJob };

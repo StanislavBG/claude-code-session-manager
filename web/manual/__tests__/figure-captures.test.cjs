@@ -63,8 +63,22 @@ test('KNOWN_UNREACHABLE figures do not also have a recipe', () => {
 });
 
 test("every recipe's navKey (when present) is a real NAV_ITEMS key", () => {
+  // Structural guard (no count): an empty or broken NAV_ITEMS import must not
+  // make the navKey check below pass vacuously.
+  expect(Array.isArray(NAV_ITEMS), 'sanity: NAV_ITEMS should be an array').toBe(true);
+  expect(NAV_ITEMS.length, 'sanity: NAV_ITEMS should be non-empty').not.toBe(0);
+  const badItems = NAV_ITEMS.filter((item) => typeof item?.key !== 'string' || item.key.length === 0);
+  expect(badItems, 'sanity: every NAV_ITEMS item should have a non-empty string key').toEqual([]);
   const validKeys = new Set(NAV_ITEMS.map((item) => item.key));
-  expect(validKeys.size, 'sanity: NAV_ITEMS should be non-trivial').toBeGreaterThan(5);
+
+  // The loop below must not pass vacuously either: once any recipe exists, at
+  // least one must declare a navKey. (Manual 2.0.0 ships zero recipes — no
+  // chapter declares a figure — so an empty recipe set is legitimate; the
+  // coverage tests above keep recipes and declared figures in lockstep.)
+  if (RECIPE_KEYS.length > 0) {
+    const withNavKey = RECIPE_KEYS.filter((k) => RECIPES[k].navKey);
+    expect(withNavKey.length, 'sanity: at least one recipe should declare a navKey').not.toBe(0);
+  }
 
   const bad = [];
   for (const [figureId, recipe] of Object.entries(RECIPES)) {

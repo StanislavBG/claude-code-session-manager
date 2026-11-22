@@ -895,7 +895,8 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     // True only when source.replyTo was stamped — the MCP note keys its
     // feedback_reply promise off this, never off the delivery alone.
     replyThread: Boolean(replyTo),
-    ...(v.replyMode === 'event' ? { replyMode: 'event' } : {}),
+    // Always echoed so every caller can confirm the mode it got.
+    replyMode: v.replyMode,
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
     note: (macroGranted

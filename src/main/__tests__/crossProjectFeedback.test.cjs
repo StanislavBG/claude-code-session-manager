@@ -969,10 +969,22 @@ test("replyMode 'prompt' explicitly behaves exactly as absent", async () => {
     { appendResponseEventIfKnown: async () => true },
   );
   expect(r.ok).toBe(true);
-  expect(r.replyMode).toBeUndefined();
+  expect(r.replyMode).toBe('prompt');
   expect(r.replyThread).toBe(true);
   const epic = readActiveIndex(to).sessions[r.epicId];
   expect(epic.source.replyTo).toEqual({ cwd: from, epicId: s.epicId, claudeSessionId: s.sessionId });
+});
+
+test("replyMode absent: the success result still says 'prompt'", async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from);
+  const r = await openFeedbackSession(
+    payload(to, from, { originClaudeSessionId: s.sessionId }),
+    { appendResponseEventIfKnown: async () => true },
+  );
+  expect(r.ok).toBe(true);
+  expect(r.replyMode).toBe('prompt');
 });
 
 test("replyMode 'event' stamps mode on a resolved replyTo and says the answer arrives as an event", async () => {

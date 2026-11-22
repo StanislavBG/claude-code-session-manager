@@ -168,7 +168,7 @@ Result fields of the first call:
 | Field | Meaning |
 | --- | --- |
 | `replyThread` | `true` when the new Epic has a way to reply back. Always `true` in `event` mode. In `prompt` mode it is `false` when the sending Epic could not be found. |
-| `replyMode` | `"event"`, present only in `event` mode. Absent in `prompt` mode. |
+| `replyMode` | Always in the result: `"prompt"` or `"event"`, the mode the handoff got. |
 
 A repeat call with the same `externalRef` (`status: "existing"`) carries neither field.
 

@@ -266,7 +266,7 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 | `status` | string or null | Lifecycle: `proposed`, `active` or `completed`. |
 | `state` | string | The outside state (table below). Use this, not `status`. |
 | `blocked` | object or null | Set only when `state` is `blocked`: `{ kind, prds: [{ slug, reason }] }`. |
-| `prds` | object | Counts of the Epic's scheduler jobs: `total`, `pending`, `running`, `completed`, `failed`, `needsReview`, `quarantined`, `skipped`, `cancelled`. `cancelled` counts PRDs a human cancelled (their row reads `failed` or `needs_review`); a cancelled PRD never counts as `failed` or `needsReview` and never blocks the Epic. |
+| `prds` | object | Counts of the Epic's scheduler jobs: `total`, `pending`, `running`, `completed`, `failed`, `needsReview`, `quarantined`, `skipped`, `cancelled`. `cancelled` counts PRDs a human cancelled (their row reads `failed` or `needs_review`); a cancelled PRD never counts as `failed` or `needsReview` and never blocks the Epic. See [Cancelled rows](#cancelled-rows). |
 | `verified` | string[] | PRD slugs whose newest validator verdict is VERIFIED. |
 | `refuted` | `{ slug, reason }[]` | PRD slugs whose newest verdict is REFUTED. `reason` is at most 300 characters. |
 | `unvalidated` | string[] | Completed work PRDs with no verdict newer than their finish. |
@@ -276,6 +276,15 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 | `completedAt` | string or null | ISO time. |
 | `verdicts` | object[] | Checked validator verdicts, newest per PRD slug, sorted by `prd`. Item shape below. `[]` when none. |
 | `receipt` | object | Only when you asked for it. See below. |
+
+### Cancelled rows
+
+- `GET /admin/scheduler/prds` (compact and full) and `GET /admin/scheduler/jobs` (`scheduler_list_prds`,
+  `scheduler_list_jobs`) mark a human-cancelled row with `cancelled: true`. A real failure has no `cancelled`
+  field. Only this field of those two routes is part of the contract.
+- Every cancelled row leaves the queue (its PRD file moves to `prds-cancelled/`) once its Epic is completed
+  and no pending PRD depends on it. This includes the `needs_review` row a cancel writes when the killed
+  run's commit had landed; that commit stays in git history.
 
 ### `verdicts` items
 

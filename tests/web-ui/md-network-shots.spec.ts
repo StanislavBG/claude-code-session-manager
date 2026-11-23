@@ -14,7 +14,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // light + dark and the explorer in Graph view to the Playwright output folder (gitignored).
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation plus
 // an inverted render of the same page (as project-home-library-shots.spec.ts does). The Graph shot
-// has one doc node selected so the inspector shows that doc's path and links.
+// has one doc node selected so the inspector shows that doc's path, links and a realistic body,
+// with the pointer moved off the canvas so no hover dims the graph.
 const root = path.resolve(__dirname, '../..')
 
 test('Review MD network screenshots: pane light + dark, explorer Graph view', async ({}, testInfo) => {
@@ -54,6 +55,11 @@ test('Review MD network screenshots: pane light + dark, explorer Graph view', as
       await expect(rows.nth(2).getByTestId('md-fix-detail')).toContainText('Works only on this machine')
       await expect(page.getByTestId('md-link-map-svg')).toBeVisible()
       await expect(page.getByTestId('project-home-review-info-text')).toContainText('4 findings')
+      // FIX LIST card sits above the LINK MAP card in the pane.
+      const fixBox = await page.getByTestId('md-fix-list').boundingBox()
+      const mapBox = await page.getByTestId('md-link-map').boundingBox()
+      expect(fixBox && mapBox).toBeTruthy()
+      expect(fixBox!.y + fixBox!.height).toBeLessThanOrEqual(mapBox!.y)
       await page.waitForTimeout(300)
       const pane = testInfo.outputPath(`review-md-network-${scheme}.png`)
       await page.screenshot({ path: pane, fullPage: true })
@@ -65,6 +71,7 @@ test('Review MD network screenshots: pane light + dark, explorer Graph view', as
         await expect(page.getByTestId('md-explorer-view-map')).toHaveAttribute('aria-pressed', 'true')
         await expect(page.getByTestId('md-explorer-canvas')).toBeVisible()
         await expect(page.getByTestId('md-link-map-node').first()).toBeAttached()
+        await expect(page.getByTestId('md-explorer-legend')).toBeVisible()
         // Header 'N findings' must equal the pane's FIX LIST count.
         const fixCount = (await page.getByTestId('md-fix-count').textContent())?.trim()
         expect(fixCount).toMatch(/^\d+$/)
@@ -82,6 +89,15 @@ test('Review MD network screenshots: pane light + dark, explorer Graph view', as
         await expect(inspector.getByTestId('project-home-review-inspector-hint')).toHaveCount(0)
         await expect(inspector.getByTestId('md-doc-preview')).toBeVisible()
         await expect(inspector.getByTestId('md-doc-preview-path')).toHaveText(docPath!)
+        // The preview renders the fixture's realistic body: heading, paragraphs, list, link.
+        const body = inspector.getByTestId('md-doc-preview-body')
+        await expect(body.locator('h1')).toHaveCount(1)
+        await expect(body.locator('p').first()).toBeVisible()
+        await expect(body.locator('li')).toHaveCount(3)
+        await expect(body.locator('a[href$=".md"]')).toHaveCount(1)
+        // Move the pointer off the canvas so the hover focus does not dim the selected node's neighbours.
+        await page.mouse.move(1, 1)
+        await expect(page.getByTestId('md-explorer-legend')).toBeVisible()
         await page.waitForTimeout(300)
         const graph = testInfo.outputPath('review-md-network-explorer-graph.png')
         await page.screenshot({ path: graph })

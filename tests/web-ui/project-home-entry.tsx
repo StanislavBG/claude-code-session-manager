@@ -81,7 +81,33 @@ const mdNetwork = {
     { a: 'src/CLAUDE.md', b: 'docs/architecture.md', sharedRuns: 6, samples: ['main and preload are CommonJS only'] },
   ],
 }
-const mdFile = (p: string) => `# ${p}\n\nStubbed doc body for the screenshot fixture.\n`
+// Realistic doc body for the explorer's preview: a heading, two short paragraphs, a bullet list
+// and a relative link to another doc in the network (resolved from the doc's own folder).
+const relLink = (from: string, to: string) => {
+  const a = from.split('/').slice(0, -1)
+  const b = to.split('/')
+  let i = 0
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++
+  return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/')
+}
+const mdFile = (p: string) => {
+  const target = mdNetwork.edges.find((e) => e.from === p && !e.broken)?.to ?? (p === 'docs/architecture.md' ? 'docs/conventions.md' : 'docs/architecture.md')
+  const title = (p.split('/').pop() ?? p).replace(/\.md$/, '').replace(/[-_]/g, ' ')
+  return [
+    `# ${title[0].toUpperCase()}${title.slice(1)}`,
+    '',
+    'This doc owns one topic for the project. Other docs link here instead of restating it.',
+    '',
+    'Keep each rule to one line. Put the reasoning behind a rule in the doc it links to.',
+    '',
+    '- Main and preload stay CommonJS.',
+    '- Renderer stores never subscribe to each other.',
+    '- Every scheduler job takes a slot first.',
+    '',
+    `See [${target}](${relLink(p, target)}) for the related detail.`,
+    '',
+  ].join('\n')
+}
 
 const page = (t: string, body: string) =>
   `<!doctype html><html><body style="font-family:sans-serif;padding:32px"><h1>${t}</h1><p>${body}</p><ul><li>Fixture section one</li><li>Fixture section two</li><li>Fixture section three</li></ul></body></html>`

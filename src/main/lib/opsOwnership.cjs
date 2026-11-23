@@ -315,7 +315,11 @@ function resolveProjectRoot(cwd, { opsInternal = 'normalize' } = {}) {
   // `unknown` deliberately does NOT throw here: reads and dispatch must keep
   // working; assertOpsWrite is the choke point that refuses the WRITE.
   const root = classifyCwd(cwd).projectRoot;
-  if (isEphemeralCwd(root)) {
+  // refuseMissingInTmp:false — a MISSING path is not a write target this
+  // resolver can refuse; readers need its path, and existence-aware callers
+  // report it themselves (see ephemeralCwd.cjs). Existing tmpdir roots and
+  // linked worktrees are still refused below.
+  if (isEphemeralCwd(root, { refuseMissingInTmp: false })) {
     const err = new Error(
       `resolveProjectRoot: refusing ephemeral cwd (tmpdir or linked git worktree), got "${cwd}"`,
     );

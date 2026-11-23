@@ -68,12 +68,23 @@ function tmpRoots() {
   return roots;
 }
 
-function isEphemeralCwd(cwd) {
+/**
+ * `refuseMissingInTmp` (default true) applies the MISSING-under-tmpdir rule.
+ * opsOwnership.resolveProjectRoot passes false: it is a path resolver shared
+ * by readers (fix-plan flat-dir fallback, drill-down transcript lookups) and
+ * by callers that run their own existence check first (delegationReadiness's
+ * "does not exist on disk"); refusing there broke them all (7071526a). The
+ * writers that must never recreate a deleted tmp cwd call this predicate
+ * directly (opsErrorLog) or check existence themselves (queueStore.writeSplit).
+ */
+function isEphemeralCwd(cwd, { refuseMissingInTmp = true } = {}) {
   if (!cwd || typeof cwd !== 'string' || !path.isAbsolute(cwd)) return false;
   const abs = path.resolve(cwd);
-  let exists = true;
-  try { exists = fs.existsSync(abs); } catch { exists = true; }
-  if (!exists && tmpRoots().some((root) => isInside(abs, root))) return true;
+  if (refuseMissingInTmp) {
+    let exists = true;
+    try { exists = fs.existsSync(abs); } catch { exists = true; }
+    if (!exists && tmpRoots().some((root) => isInside(abs, root))) return true;
+  }
   const { kind } = classifyCwd(abs);
   return kind === 'ephemeral' || kind === 'worktree';
 }

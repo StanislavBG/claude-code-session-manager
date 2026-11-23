@@ -24,7 +24,10 @@ const {
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,
+  maxExportMp4Bytes,
+  MAX_EXPORT_POSTER_BYTES,
 } = require('../lib/feedback-remote/projectHomeAdminRoutes.cjs');
+const { TIKTOK_CHECK_IDS } = require('../lib/demo-video-kit/checks.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -347,6 +350,116 @@ test('projectVideoMeta still parses a stored meta.json without aspect', () => {
   const parsed = schemas.projectVideoMeta.parse(stored);
   expect(parsed.aspect).toBeUndefined();
   expect(schemas.projectVideoMeta.safeParse({ ...stored, aspect: '4:3' }).success).toBe(false);
+});
+
+// ─────────────────────────────── videos/write: tiktok / marketing exports
+
+const MP4_BYTES = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(16, 1)]);
+const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16, 2)]);
+const goodExports = () => ({ mp4Base64: MP4_BYTES.toString('base64'), posterBase64: PNG_BYTES.toString('base64') });
+const tiktokChecks = () => TIKTOK_CHECK_IDS.map((id) => ({ id, ok: true, detail: '' }));
+const VERTICAL_HTML = withAspectTag('<meta name="sm-demo-aspect" content="9:16">');
+const tiktokBody = (cwd, over = {}, metaOver = {}) => videoBody(cwd, {
+  kind: 'tiktok',
+  html: VERTICAL_HTML,
+  exports: goodExports(),
+  meta: videoMeta({
+    kind: 'tiktok',
+    post: { caption: 'Would you ship this today? #devtools', audience: 'solo developers' },
+    report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: tiktokChecks() },
+    ...metaOver,
+  }),
+  ...over,
+});
+const marketingBody = (cwd, over = {}) => videoBody(cwd, { kind: 'marketing', exports: goodExports(), meta: videoMeta({ kind: 'marketing' }), ...over });
+const VIDEOS_ROUTE = '/admin/project-home/videos/write';
+
+test('videos/write saves a tiktok video: video.mp4 + poster.png beside index.html and meta.json', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const r = await adminHttp.call('POST', VIDEOS_ROUTE, { body: tiktokBody(cwd) });
+  expect(r.status).toBe(200);
+  const dir = path.join(pagesRoot(cwd), 'videos', 'my-vid');
+  expect(fs.readdirSync(dir).sort()).toEqual(['index.html', 'meta.json', 'poster.png', 'video.mp4']);
+  expect(fs.readFileSync(path.join(dir, 'video.mp4')).equals(MP4_BYTES)).toBe(true);
+  expect(fs.readFileSync(path.join(dir, 'poster.png')).equals(PNG_BYTES)).toBe(true);
+  const meta = readVideoMeta(cwd);
+  expect(meta).toMatchObject({ kind: 'tiktok', aspect: '9:16', post: { caption: 'Would you ship this today? #devtools' } });
+  expect(meta.exports).toBeUndefined();
+});
+
+test('videos/write saves a marketing video with its exports', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const r = await adminHttp.call('POST', VIDEOS_ROUTE, { body: marketingBody(cwd) });
+  expect(r.status).toBe(200);
+  expect(fs.readdirSync(path.join(pagesRoot(cwd), 'videos', 'my-vid')).sort()).toEqual(['index.html', 'meta.json', 'poster.png', 'video.mp4']);
+});
+
+test('videos/write: other kinds ignore exports and write only index.html + meta.json', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const withExp = await adminHttp.call('POST', VIDEOS_ROUTE, { body: videoBody(cwd, { exports: goodExports() }) });
+  expect(withExp.status).toBe(200);
+  const bad = await adminHttp.call('POST', VIDEOS_ROUTE, { body: videoBody(cwd, { videoId: 'v2', exports: { mp4Base64: 'AAAA', posterBase64: 'AAAA' } }) });
+  expect(bad.status).toBe(200);
+  for (const id of ['my-vid', 'v2']) {
+    expect(fs.readdirSync(path.join(pagesRoot(cwd), 'videos', id)).sort()).toEqual(['index.html', 'meta.json']);
+  }
+});
+
+const MiB = 1024 * 1024;
+const notMp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('moovisom'), Buffer.alloc(16)]);
+const notPng = Buffer.from('GIF89a-not-a-png-at-all');
+const oversizedMp4 = () => {
+  const b = Buffer.alloc(maxExportMp4Bytes(15) + 1);
+  MP4_BYTES.copy(b);
+  return b.toString('base64');
+};
+const oversizedPng = () => {
+  const b = Buffer.alloc(MAX_EXPORT_POSTER_BYTES + 1);
+  PNG_BYTES.copy(b);
+  return b.toString('base64');
+};
+
+test('export caps: 24 MiB per started 30 s for the MP4, 4 MiB for the poster', () => {
+  expect(maxExportMp4Bytes(15)).toBe(24 * MiB);
+  expect(maxExportMp4Bytes(30)).toBe(24 * MiB);
+  expect(maxExportMp4Bytes(31)).toBe(48 * MiB);
+  expect(maxExportMp4Bytes(60)).toBe(48 * MiB);
+  expect(MAX_EXPORT_POSTER_BYTES).toBe(4 * MiB);
+});
+
+test.each([
+  ['tiktok without exports', (cwd) => tiktokBody(cwd, { exports: undefined }), /requires exports\.mp4Base64 and exports\.posterBase64/],
+  ['marketing without exports', (cwd) => marketingBody(cwd, { exports: undefined }), /requires exports\.mp4Base64 and exports\.posterBase64/],
+  ['an MP4 without ftyp', (cwd) => tiktokBody(cwd, { exports: { ...goodExports(), mp4Base64: notMp4.toString('base64') } }), /'ftyp' at bytes 4-7/],
+  ['a poster without the PNG signature', (cwd) => tiktokBody(cwd, { exports: { ...goodExports(), posterBase64: notPng.toString('base64') } }), /PNG signature/],
+  ['an MP4 over its cap', (cwd) => tiktokBody(cwd, { exports: { ...goodExports(), mp4Base64: oversizedMp4() } }), new RegExp(`mp4Base64 exceeds the ${24 * MiB}-byte limit`)],
+  ['a poster over 4 MiB', (cwd) => tiktokBody(cwd, { exports: { ...goodExports(), posterBase64: oversizedPng() } }), new RegExp(`posterBase64 exceeds the ${4 * MiB}-byte limit`)],
+  ['non-base64 exports', (cwd) => tiktokBody(cwd, { exports: { ...goodExports(), mp4Base64: '!!!!' } }), /not valid base64/],
+  ['tiktok at 16:9', (cwd) => tiktokBody(cwd, { html: GOOD_DEMO_VIDEO_HTML }), /kind 'tiktok' requires aspect '9:16'/],
+  ['marketing at 9:16', (cwd) => marketingBody(cwd, { html: VERTICAL_HTML }), /kind 'marketing' requires aspect '16:9'/],
+  ['tiktok without meta.post', (cwd) => tiktokBody(cwd, {}, { post: undefined }), /requires meta\.post/],
+  ['tiktok with a failing post caption', (cwd) => tiktokBody(cwd, {}, { post: { caption: 'No question here #a', audience: 'devs' } }), /post caption check failed/],
+  ['tiktok missing a TikTok check', (cwd) => tiktokBody(cwd, {}, {
+    report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: tiktokChecks().filter((c) => c.id !== 'tiktok-loop') },
+  }), /every TikTok check.*tiktok-loop/],
+  ['tiktok with a failed TikTok check', (cwd) => tiktokBody(cwd, {}, {
+    report: { lufs: null, truePeakDb: null, speechS: null, readingGrade: null, checks: tiktokChecks().map((c) => (c.id === 'tiktok-hook' ? { ...c, ok: false } : c)) },
+  }), /tiktok-hook/],
+])('videos/write refuses %s with a 400 naming the rule and writes nothing', async (_label, body, reason) => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const r = await adminHttp.call('POST', VIDEOS_ROUTE, { body: body(cwd) });
+  expect(r.status).toBe(400);
+  expect(r.body.ok).toBe(false);
+  expect(r.body.error).toMatch(reason);
+  expect(fs.existsSync(path.join(pagesRoot(cwd), 'videos'))).toBe(false);
 });
 
 test('videos/write rejects schema errors, bad ids, duration mismatch and network APIs with 400', async () => {

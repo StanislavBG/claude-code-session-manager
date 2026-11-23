@@ -442,8 +442,9 @@ const MCP_TOOL_CATALOG = [
     group: 'project-home',
     purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "
       + "via the session-manager app's admin API. Writing an existing videoId replaces that video. `kind` is 'project-demo', 'blog-post', "
-      + "'feature' or 'episode' (an episode of a series, e.g. from a Project Video tool). The video is 16:9 by default; a vertical 9:16 video "
-      + 'declares <meta name="sm-demo-aspect" content="9:16"> in its head.',
+      + "'feature', 'episode' (an episode of a series, e.g. from a Project Video tool), 'tiktok' (9:16) or 'marketing' (16:9). The video is 16:9 by default; a vertical 9:16 video "
+      + 'declares <meta name="sm-demo-aspect" content="9:16"> in its head. A tiktok or marketing save also needs `mp4Path` + `posterPath` '
+      + '(the exported MP4 and PNG poster); a tiktok save also needs meta.post and every TikTok check passing.',
     summary: 'Save one self-contained HTML video for Project Home.',
     whenToUse: 'Use when asked to make a project video (demo, marketing). Compose the whole document yourself (inline <style>/<script>, '
       + 'data: URIs for assets, CSS/JS-driven animation) from what is really true about the project, declare `kind` and `lengthS`, '

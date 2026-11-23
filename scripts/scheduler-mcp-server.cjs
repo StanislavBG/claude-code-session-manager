@@ -18,7 +18,7 @@
  *   project_matrix_read({ cwd? }) -> POST /admin/project-home/matrix/read
  *   project_matrix_write({ cwd?, matrix? | matrixPath?, model? }) -> POST /admin/project-home/matrix/write
  *   project_character_write({ cwd?, json, js? | jsPath?, replace? }) -> POST /admin/project-home/character/write
- *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta? }) -> POST /admin/project-home/videos/write
+ *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta?, mp4Path?, posterPath? }) -> POST /admin/project-home/videos/write
  *   project_video_review_write({ cwd?, videoId, text, imagePaths }) -> POST /admin/project-home/videos/review/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
@@ -93,6 +93,54 @@ function maxVideoBytesFor(lengthS) {
   return Math.ceil(lengthS / 30) * MAX_DEMO_VIDEO_BYTES;
 }
 const MAX_MATRIX_JSON_BYTES = 1048576;
+
+/**
+ * project_video_write export caps — MP4: 24 MiB per started 30 s of lengthS;
+ * poster: 4 MiB. Mirror maxExportMp4Bytes / MAX_EXPORT_POSTER_BYTES in
+ * projectHomeAdminRoutes.cjs (the route enforces them again, plus the magic
+ * bytes); scheduler-mcp-server-htmlPath.test.cjs asserts they agree.
+ */
+const MAX_EXPORT_MP4_BYTES_PER_30S = 24 * 1024 * 1024;
+const MAX_EXPORT_POSTER_BYTES = 4 * 1024 * 1024;
+function maxExportMp4BytesFor(lengthS) {
+  if (typeof lengthS !== 'number' || !Number.isFinite(lengthS) || lengthS <= 0) return MAX_EXPORT_MP4_BYTES_PER_30S;
+  return Math.ceil(lengthS / 30) * MAX_EXPORT_MP4_BYTES_PER_30S;
+}
+
+/**
+ * Reads one binary export (mp4Path / posterPath) into { base64 } or { error }.
+ * Errors carry only the reason, never file contents.
+ */
+async function readExportFile(p, { argName, ext, maxBytes }) {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: `${argName} must be an absolute path` };
+  if (!p.toLowerCase().endsWith(ext)) return { error: `${argName} must end in ${ext}` };
+  try {
+    const st = await fsp.stat(p);
+    if (!st.isFile()) return { error: `${argName} is not a regular file` };
+    if (st.size > maxBytes) return { error: `${argName} file exceeds ${maxBytes} bytes` };
+    if (st.size === 0) return { error: `${argName} file is empty` };
+    return { base64: (await fsp.readFile(p)).toString('base64') };
+  } catch (err) {
+    return { error: `cannot read ${argName}: ${err && err.code ? err.code : 'read failed'}` };
+  }
+}
+
+/**
+ * Resolves project_video_write's optional mp4Path + posterPath into
+ * { exports } (both given), {} (neither given) or { error }.
+ */
+async function resolveVideoExports(args) {
+  const given = (v) => v !== undefined && v !== null && v !== '';
+  const hasMp4 = !!args && given(args.mp4Path);
+  const hasPoster = !!args && given(args.posterPath);
+  if (!hasMp4 && !hasPoster) return {};
+  if (hasMp4 !== hasPoster) return { error: 'provide both mp4Path and posterPath, or neither' };
+  const mp4 = await readExportFile(args.mp4Path, { argName: 'mp4Path', ext: '.mp4', maxBytes: maxExportMp4BytesFor(args.lengthS) });
+  if (mp4.error) return { error: mp4.error };
+  const poster = await readExportFile(args.posterPath, { argName: 'posterPath', ext: '.png', maxBytes: MAX_EXPORT_POSTER_BYTES });
+  if (poster.error) return { error: poster.error };
+  return { exports: { mp4Base64: mp4.base64, posterBase64: poster.base64 } };
+}
 
 /** Reads a local .js file for project_character_write; errors carry only the reason, never file contents. */
 async function readCharacterJsFile(p) {
@@ -888,11 +936,13 @@ const TOOLS = [
         cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
         videoId: { type: 'string', description: 'Stable id (kebab-case) of the video; writing the same id replaces that video.' },
         title: { type: 'string', description: 'Human title shown in the video list.' },
-        kind: { type: 'string', enum: ['project-demo', 'blog-post', 'feature', 'episode'], description: 'What the video is: exactly one of project-demo, blog-post, feature, episode (one episode of a series, such as a TikTok short). The aspect comes from the document\'s <meta name="sm-demo-aspect" content="16:9|9:16"> tag (default 16:9).' },
+        kind: { type: 'string', enum: ['project-demo', 'blog-post', 'feature', 'episode', 'tiktok', 'marketing'], description: 'What the video is: exactly one of project-demo, blog-post, feature, episode (one episode of a series), tiktok (a 9:16 TikTok short) or marketing (a 16:9 marketing video). The aspect comes from the document\'s <meta name="sm-demo-aspect" content="16:9|9:16"> tag (default 16:9). tiktok and marketing also require mp4Path + posterPath; tiktok also requires meta.post and every TikTok check passing in meta.report.checks.' },
         lengthS: { type: 'number', description: 'Length of the video in seconds. Also sets the size cap: 2 MiB per started 30 s (30 s = 2 MiB, 60 s = 4 MiB).' },
         html: { type: 'string', description: 'The complete self-contained HTML/JS video document (<= 2 MiB per started 30 s of lengthS, e.g. 4 MiB for 60 s; no remote references or network-capable APIs).' },
         htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (<= 2 MiB per started 30 s of lengthS, e.g. 4 MiB for 60 s). Prefer this for base64 data URIs. Give exactly one of html / htmlPath.' },
-        meta: { type: 'object', description: 'Required by the save route, which rejects any other key. Keys: title, kind, target (optional), style, lengthS, character (null when there is no mascot), sources [{claim, source, ref}], report {lufs, truePeakDb, speechS, readingGrade, checks [{id, ok, detail}]}, macroVersion, seedVersion, model, effort.' },
+        mp4Path: { type: 'string', description: 'Absolute path to the exported .mp4 (<= 24 MiB per started 30 s of lengthS). Required for kind tiktok and marketing; give it together with posterPath. Read and sent by this server.' },
+        posterPath: { type: 'string', description: 'Absolute path to the poster .png (<= 4 MiB). Required for kind tiktok and marketing; give it together with mp4Path. Read and sent by this server.' },
+        meta: { type: 'object', description: 'Required by the save route, which rejects any other key. Keys: title, kind, target (optional), post {caption, audience} (tiktok only), style, lengthS, character (null when there is no mascot), sources [{claim, source, ref}], report {lufs, truePeakDb, speechS, readingGrade, checks [{id, ok, detail}]}, macroVersion, seedVersion, model, effort.' },
       },
       required: ['videoId', 'title', 'kind', 'lengthS', 'meta'],
     },
@@ -1540,9 +1590,12 @@ async function handleCallTool(request) {
       }
       const loaded = await resolveHtmlArg(args, { maxBytes: maxVideoBytesFor(args.lengthS), lengthS: args.lengthS });
       if (loaded.error) return errorResult(loaded.error);
+      const exported = await resolveVideoExports(args);
+      if (exported.error) return errorResult(exported.error);
       const cwd = resolveCwdArg(args);
       const body = { cwd, videoId: args.videoId, title: args.title, kind: args.kind, lengthS: args.lengthS, html: loaded.html };
       if (args.meta && typeof args.meta === 'object') body.meta = args.meta;
+      if (exported.exports) body.exports = exported.exports;
       const result = await adminRequest('POST', '/admin/project-home/videos/write', body);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
@@ -1717,5 +1770,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  TOOLS, handleCallTool, HELP_POINTER, maxVideoBytesFor, resolveHtmlArg, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions,
+  TOOLS, handleCallTool, HELP_POINTER, maxVideoBytesFor, resolveHtmlArg, maxExportMp4BytesFor, MAX_EXPORT_POSTER_BYTES, resolveVideoExports, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions,
 };

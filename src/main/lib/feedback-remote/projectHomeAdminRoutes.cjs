@@ -2,6 +2,7 @@
  * projectHomeAdminRoutes.cjs — admin routes behind Project Home's library:
  *   POST /admin/project-home/pages/write        -> project-pages/knowledge/<pageId>/{index.html,meta.json}
  *   POST /admin/project-home/videos/write       -> project-pages/videos/<videoId>/{index.html,meta.json}
+ *     (+ video.mp4 and poster.png, required for kind 'tiktok' / 'marketing')
  *   POST /admin/project-home/write              alias: {cwd, html} -> knowledge/overview/
  *   POST /admin/project-home/demo-video/write   alias: {cwd, html} -> a new videos/vid-<id>/ project-demo entry
  *   POST /admin/project-home/matrix/read        {cwd} -> project-pages/matrix/matrix.json (+ its JSON Schema)
@@ -35,7 +36,7 @@ const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
 const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
 const { validateCharacterJson, validateCharacterJs, readCharacter, characterDir, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
-const { checkHtmlLimits } = require('../demo-video-kit/checks.cjs');
+const { checkHtmlLimits, checkPostCaption, TIKTOK_CHECK_IDS } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 const { readMatrix, matrixJsonSchema, MAX_MATRIX_BYTES } = require('../project-pages/competitiveMatrix.cjs');
 const { writeMatrix } = require('../project-pages/matrixStore.cjs');
@@ -43,6 +44,13 @@ const videoReview = require('../project-pages/videoReview.cjs');
 
 const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
+/** Exported MP4 cap: 24 MiB per started 30 s of lengthS. */
+const MAX_EXPORT_MP4_BYTES_PER_30S = 24 * 1024 * 1024;
+const MAX_EXPORT_POSTER_BYTES = 4 * 1024 * 1024;
+/** Kinds whose save must carry an MP4 + poster export, and the aspect each requires. */
+const EXPORT_KIND_ASPECT = Object.freeze({ tiktok: '9:16', marketing: '16:9' });
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 /** Review write body cap: 6 base64 images of 2 MiB (16 MiB) + a 32000-char text and JSON overhead. */
 const REVIEW_WRITE_BODY_MAX = 18 * 1024 * 1024;
 const REVIEW_DECISION_KEYS = Object.freeze(['decision', 'status', 'approved', 'approvedAt']);
@@ -201,13 +209,14 @@ function resolveCwd(rawCwd) {
  * meta}. The entry folder gets index.html then meta.json, both atomically as
  * writer 'project-home'. Responds {ok, path (index.html), bytes}.
  */
-function makeWriteHandler({ schema, bodyLimit, build }) {
+function makeWriteHandler({ schema, bodyLimit, extraBodyBytes = 0, build }) {
   return async (req, res) => {
     // Headroom over the html limit for JSON escaping; the html byte limit
-    // itself is enforced by `build`.
+    // itself is enforced by `build`. `extraBodyBytes` makes room for base64
+    // binary exports, whose decoded caps `build` enforces too.
     let raw;
     try {
-      raw = await readBody(req, bodyLimit * 2 + 4096);
+      raw = await readBody(req, bodyLimit * 2 + extraBodyBytes + 4096);
     } catch (e) {
       sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'} (html limit is ${bodyLimit} bytes)` });
       return;
@@ -242,6 +251,10 @@ function makeWriteHandler({ schema, bodyLimit, build }) {
     try {
       const dir = opsPath(resolved.cwd, 'project-pages', ...built.dirParts);
       await fs.promises.mkdir(dir, { recursive: true });
+      // Binary exports first, then index.html, then meta.json last: meta.json marks a complete entry.
+      for (const file of built.files ?? []) {
+        await config.writeBinaryAtomic(path.join(dir, file.name), file.buffer, { writer: 'project-home' });
+      }
       const abs = path.join(dir, 'index.html');
       await config.writeTextAtomic(abs, built.html, { writer: 'project-home' });
       await config.writeTextAtomic(path.join(dir, 'meta.json'), JSON.stringify(built.meta, null, 2) + '\n', { writer: 'project-home' });
@@ -255,6 +268,63 @@ function makeWriteHandler({ schema, bodyLimit, build }) {
 /** Size cap for a video of `lengthS` seconds: 2 MiB per started 30 s. */
 function maxVideoBytes(lengthS) {
   return Math.ceil(lengthS / 30) * MAX_DEMO_VIDEO_BYTES;
+}
+
+/** Exported MP4 cap for a video of `lengthS` seconds: 24 MiB per started 30 s. */
+function maxExportMp4Bytes(lengthS) {
+  return Math.ceil(lengthS / 30) * MAX_EXPORT_MP4_BYTES_PER_30S;
+}
+
+/** Base64 length that decodes to at most `bytes` bytes. */
+function base64LengthFor(bytes) {
+  return Math.ceil(bytes / 3) * 4;
+}
+
+/** Decodes one base64 export under `maxBytes`; -> {buffer} | {error}. Errors never echo the payload. */
+function decodeExport(b64, label, maxBytes) {
+  if (b64.length > base64LengthFor(maxBytes)) return { error: `exports.${label} exceeds the ${maxBytes}-byte limit` };
+  if (b64.length % 4 !== 0 || !BASE64_RE.test(b64)) return { error: `exports.${label} is not valid base64` };
+  const buffer = Buffer.from(b64, 'base64');
+  if (buffer.length > maxBytes) return { error: `exports.${label} exceeds the ${maxBytes}-byte limit` };
+  return { buffer };
+}
+
+/**
+ * Rules for kinds that must ship an MP4 + poster ('tiktok', 'marketing'):
+ * both exports present, magic bytes, size caps, the kind's aspect, and for
+ * 'tiktok' the post caption and every TikTok check passing.
+ * -> {files: [{name, buffer}]} | {error}.
+ */
+function validateExportKind(input, aspect) {
+  const { kind, lengthS } = input;
+  const exp = input.exports;
+  if (!exp || !exp.mp4Base64 || !exp.posterBase64) {
+    return { error: `kind '${kind}' requires exports.mp4Base64 and exports.posterBase64 (the MP4 and poster)` };
+  }
+  const mp4 = decodeExport(exp.mp4Base64, 'mp4Base64', maxExportMp4Bytes(lengthS));
+  if (mp4.error) return { error: `${mp4.error} (24 MiB per started 30 s of lengthS ${lengthS})` };
+  if (mp4.buffer.length < 8 || mp4.buffer.toString('latin1', 4, 8) !== 'ftyp') {
+    return { error: "exports.mp4Base64 is not an MP4 (no 'ftyp' at bytes 4-7)" };
+  }
+  const poster = decodeExport(exp.posterBase64, 'posterBase64', MAX_EXPORT_POSTER_BYTES);
+  if (poster.error) return { error: poster.error };
+  if (poster.buffer.length < PNG_SIGNATURE.length || !poster.buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    return { error: 'exports.posterBase64 is not a PNG (missing the PNG signature)' };
+  }
+  const wantAspect = EXPORT_KIND_ASPECT[kind];
+  if (aspect !== wantAspect) {
+    return { error: `kind '${kind}' requires aspect '${wantAspect}' (the document declares '${aspect}' via sm-demo-aspect)` };
+  }
+  if (kind === 'tiktok') {
+    const post = input.meta?.post;
+    if (!post) return { error: "kind 'tiktok' requires meta.post {caption, audience}" };
+    const caption = checkPostCaption(post.caption);
+    if (!caption.ok) return { error: `kind 'tiktok' post caption check failed: ${caption.detail}` };
+    const checks = input.meta?.report?.checks ?? [];
+    const missing = TIKTOK_CHECK_IDS.filter((id) => !checks.some((c) => c.id === id && c.ok === true));
+    if (missing.length) return { error: `kind 'tiktok' requires every TikTok check in meta.report.checks with ok true; missing or failed: ${missing.join(', ')}` };
+  }
+  return { files: [{ name: 'video.mp4', buffer: mp4.buffer }, { name: 'poster.png', buffer: poster.buffer }] };
 }
 
 // Owned by the Competitor matrix store (project-pages/matrixStore.cjs writes
@@ -323,13 +393,19 @@ function registerAdminRoute(adminHttp) {
   adminHttp.registerRoute('POST', '/admin/project-home/videos/write', makeWriteHandler({
     schema: schemas.projectVideoAdminWriteBody,
     bodyLimit: maxVideoBytes(MAX_DEMO_DURATION_S),
+    extraBodyBytes: base64LengthFor(maxExportMp4Bytes(MAX_DEMO_DURATION_S)) + base64LengthFor(MAX_EXPORT_POSTER_BYTES),
     build: (i) => {
       // Cheap kit checks re-run server-side; the alias route is exempt (Burrow sends no report).
       const failed = (i.meta?.report?.checks ?? []).find((c) => c.ok === false);
       if (failed) return { error: `report.checks failed: ${failed.id}${failed.detail ? ` (${failed.detail})` : ''}` };
       const limits = checkHtmlLimits({ html: i.html, lengthS: i.lengthS });
       if (!limits.ok) return { error: `${limits.id} check failed: ${limits.detail}` };
-      return buildVideo(i, i);
+      const built = buildVideo(i, i);
+      // Other kinds ignore any exports, exactly as before.
+      if (built.error || !Object.hasOwn(EXPORT_KIND_ASPECT, i.kind)) return built;
+      const exported = validateExportKind(i, built.meta.aspect ?? '16:9');
+      if (exported.error) return { error: exported.error };
+      return { ...built, files: exported.files };
     },
   }));
 
@@ -548,6 +624,8 @@ module.exports = {
   validateDemoVideoHtml,
   injectCsp,
   maxVideoBytes,
+  maxExportMp4Bytes,
+  MAX_EXPORT_POSTER_BYTES,
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,

@@ -2775,6 +2775,10 @@ let lastMemGate = null;
 // predicate after pool → project cap → memory. Withholds launches only.
 let loadGate = createLoadGate();
 function _setLoadGateForTests(gate) { loadGate = gate; }
+// tickBody's dispatch goes through this indirection so a test can record launches
+// without forking a real child job (whose completion tick races the next test).
+let dispatchSpawnJob = (...args) => spawnJob(...args);
+function _setSpawnJobForTests(fn) { dispatchSpawnJob = fn || ((...args) => spawnJob(...args)); }
 
 // Last tickQueue outcome, kept for the UI. tickQueue already computes a precise
 // reason for every way a batch can come back empty (dependency holds, slot
@@ -8897,7 +8901,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
       // state.jobs is the queue's rows in scope at THIS dispatch (PRD 1408) —
       // threaded straight through so spawnJob's hasDownstreamValidator check
       // never re-reads the queue itself.
-      spawnJob(job, runId, runDir, state.config.defaultCwd, null, state.jobs).catch((e) => reportSchedulerError('spawnJob dispatch rejected', job.slug, e));
+      dispatchSpawnJob(job, runId, runDir, state.config.defaultCwd, null, state.jobs).catch((e) => reportSchedulerError('spawnJob dispatch rejected', job.slug, e));
       issued += 1;
     }
     if (issued > 0) {
@@ -13158,6 +13162,7 @@ module.exports = {
   writeQueue,
   _setPeriodicReverifyEnabledForTests,
   _setLoadGateForTests,
+  _setSpawnJobForTests,
   _mutateForTests: mutate, // mutate() has no other exported call site; test-only seam.
   reconcile,
   broadcast,

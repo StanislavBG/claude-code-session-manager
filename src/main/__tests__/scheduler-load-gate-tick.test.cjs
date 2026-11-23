@@ -3,12 +3,17 @@
  * gate: high loadavg + idle CPU stands down and fires; high loadavg + busy CPU
  * returns 'load-deferred' and names the CPU figure in lastTick.detail.
  *
+ * Deterministic by construction: launches go to an injected spawn recorder
+ * (_setSpawnJobForTests) so no child job runs and no completion tick races the
+ * next case; the memory gate reads a fixture (SM_MEMINFO_PATH); the load gate's
+ * loadavg, CPU sample and clock are all injected.
+ *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-load-gate-tick.test.cjs
  */
 
 'use strict';
 
-import { test, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { test, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -25,6 +30,11 @@ let createLoadGate;
 let queueStore;
 let holdGate;
 let auditLogPath;
+let originalMeminfo;
+// Slugs the tick dispatched, in order; reset before every case.
+let spawned = [];
+// Fixed clock for gates whose test does not move time itself.
+const FIXED_NOW = () => 42_000_000;
 
 function makeProject(name) {
   const cwd = path.join(tmpHome, 'Projects', name);
@@ -52,6 +62,7 @@ function gateWithCpu(busyFraction) {
     cores: () => 14,
     threshold: 0.85,
     cpu: { observe() {}, sample: () => ({ busyFraction, iowaitFraction: 0, windowMs: 61_000 }) },
+    now: FIXED_NOW,
   });
 }
 
@@ -73,6 +84,11 @@ beforeAll(() => {
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
   process.env.SM_AUTOFIX_DISABLE = '1';
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
+  // Ample memory, no swap: the memory gate must never depend on the real host.
+  originalMeminfo = process.env.SM_MEMINFO_PATH;
+  const ample = path.join(tmpHome, 'meminfo-64gb');
+  fs.writeFileSync(ample, 'MemAvailable:    67108864 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\n');
+  process.env.SM_MEMINFO_PATH = ample;
   scheduler = require('../scheduler.cjs');
   ({ createLoadGate } = require('../lib/scheduler/loadGate.cjs'));
   queueStore = require('../lib/scheduler/queueStore.cjs');
@@ -81,39 +97,34 @@ beforeAll(() => {
     cores: () => 14,
     threshold: 0.85,
     cpu: { observe() {}, sample: () => ({ busyFraction: 0.95, iowaitFraction: 0, windowMs: 61_000 }) },
+    now: FIXED_NOW,
   });
   ({ auditLogPath } = require('../lib/telemetry/auditLog.cjs'));
+  // Pin the version so no tick execs a binary; the stub stays as a tripwire —
+  // dispatch is injected, so ran-here.marker must never appear.
+  process.env.SM_CLAUDE_VERSION = '2.0.0-test';
   process.env.SM_CLAUDE_BIN = claudeStub.writeClaudeStub({ body: `
     require('fs').writeFileSync(require('path').join(process.cwd(), 'ran-here.marker'), 'yes');
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok\\nSCHEDULER_VERDICT: PASS' }) + '\\n');
     process.exit(0);
   ` });
+  scheduler._setSpawnJobForTests(async (job) => { spawned.push(job.slug); });
 });
 
-function anyRunning() {
-  try {
-    const projects = path.join(tmpHome, 'Projects');
-    for (const name of fs.readdirSync(projects)) {
-      const qf = path.join(projects, name, 'session-manager-operations', 'scheduler', 'state', 'queue.json');
-      try {
-        const q = JSON.parse(fs.readFileSync(qf, 'utf8'));
-        if ((q.jobs || []).some((j) => j.status === 'running')) return true;
-      } catch { /* missing or mid-write */ }
-    }
-  } catch { /* no projects dir */ }
-  return false;
-}
+beforeEach(() => { spawned = []; });
 
 afterEach(() => settleScheduler({ scheduler, holdGate, projectsDir: path.join(tmpHome, 'Projects') }));
 
-afterAll(async () => {
-  // A stub job may still be finalizing; removing HOME under it prints ENOENT noise.
-  for (let i = 0; i < 100 && anyRunning(); i += 1) await new Promise((r) => setTimeout(r, 50));
+afterAll(() => {
+  scheduler._setSpawnJobForTests(null);
+  if (originalMeminfo === undefined) delete process.env.SM_MEMINFO_PATH;
+  else process.env.SM_MEMINFO_PATH = originalMeminfo;
   process.env.HOME = originalHome;
   if (originalWt === undefined) delete process.env.SM_JOB_WORKTREE_DISABLE;
   else process.env.SM_JOB_WORKTREE_DISABLE = originalWt;
   delete process.env.SM_AUTOFIX_DISABLE;
   delete process.env.SM_CLAUDE_BIN;
+  delete process.env.SM_CLAUDE_VERSION;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
@@ -127,6 +138,7 @@ test('high loadavg with a busy CPU defers and names the CPU figure', async () =>
   expect(result.reason).toBe('load-deferred');
   const payload = scheduler.buildScheduleStatePayload({ config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null });
   expect(payload.lastTick.detail).toContain('CPU 91% busy over 61s');
+  expect(spawned).toEqual([]);
   expect(fs.existsSync(path.join(proj.cwd, 'ran-here.marker'))).toBe(false);
 }, 120_000);
 
@@ -137,6 +149,7 @@ test('high loadavg with an idle CPU stands down and fires the batch', async () =
   const result = await scheduler.tickQueue();
   expect(result.reason).not.toBe('load-deferred');
   expect(result.fired).toBe(true);
+  expect(spawned).toEqual([`9202-idle-${process.pid}`]);
   const rows = readAuditKind('load_gate_stood_down');
   expect(rows.length).toBeGreaterThanOrEqual(1);
   expect(rows[0].cpuBusy).toBe(0.13);
@@ -175,14 +188,11 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
   expect(rows.length).toBe(1);
   expect(rows[0].stillHeld.length).toBe(1);
   expect(sent.filter((m) => m.channel === 'schedule:stall').length).toBe(1);
-  // spawnJob is fire-and-forget: wait for the launched row to leave 'pending'.
-  let pending = 2;
-  for (let i = 0; i < 50 && pending > 1; i += 1) {
-    await new Promise((r) => setTimeout(r, 100));
-    const queue = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8'));
-    pending = queue.jobs.filter((j) => j.status === 'pending').length;
-  }
-  expect(pending).toBe(1);
+  // Exactly one of the two rows was dispatched; the other stays held.
+  expect(spawned.length).toBe(1);
+  expect(slugs).toContain(spawned[0]);
+  expect(rows[0].launched).toBe(spawned[0]);
+  expect(rows[0].stillHeld).toEqual(slugs.filter((s) => s !== spawned[0]));
 }, 120_000);
 
 test('a saturated hold at the yield window launches nothing, with one audit row and one toast', async () => {
@@ -217,6 +227,7 @@ test('a saturated hold at the yield window launches nothing, with one audit row 
   expect(second.fired).toBe(false);
   const queue = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8'));
   expect(queue.jobs.filter((j) => j.status === 'pending').length).toBe(2);
+  expect(spawned).toEqual([]);
   const rows = readAuditKind('load_gate_escalated').slice(before);
   expect(rows.length).toBe(1);
   expect(rows[0].held).toEqual(expect.arrayContaining(slugs));
@@ -274,6 +285,7 @@ test('endHold is called on a drained tick and a paused tick, not on a memory-def
   spy.mockClear();
   const launched = await scheduler.tickQueue({ bypassLoadGate: true });
   expect(launched.fired).toBe(true);
+  expect(spawned).toEqual([slug]);
   expect(spy).toHaveBeenCalledTimes(1);
 }, 120_000);
 
@@ -305,4 +317,6 @@ test('a yield stamps lastDispatchAtByCwd only for the launched row\'s project', 
   const stamps = readDispatchStamps();
   const stamped = [a.cwd, b.cwd].filter((c) => stamps[c]);
   expect(stamped.length).toBe(1);
+  expect(spawned.length).toBe(1);
+  expect(stamped[0]).toBe(spawned[0] === slugA ? a.cwd : b.cwd);
 }, 120_000);

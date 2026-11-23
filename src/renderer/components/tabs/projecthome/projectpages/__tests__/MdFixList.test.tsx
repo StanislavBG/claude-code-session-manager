@@ -142,8 +142,9 @@ describe('MdNetworkCards with the fix list', () => {
     ])
     const where = all('md-fix-where')
     expect(where.every((w) => !w.className.includes('break-all'))).toBe(true)
-    expect(where.every((w) => w.className.includes('break-words'))).toBe(true)
-    expect(all('md-fix-open').map((b) => b.textContent)).toEqual(['Open topic.md', 'Open', 'Open'])
+    expect(where.every((w) => w.className.includes('[overflow-wrap:anywhere]'))).toBe(true)
+    expect(all('md-fix-detail').every((d) => !d.className.includes('break-all') && !d.className.includes('[overflow-wrap:anywhere]'))).toBe(true)
+    expect(all('md-fix-open').map((b) => b.textContent)).toEqual(['Open docs/topic.md', 'Open', 'Open'])
     act(() => all('md-fix-open')[0].click())
     expect((window.api as unknown as { shell: { open: ReturnType<typeof vi.fn> } }).shell.open).toHaveBeenCalledWith({ as: 'revealPath', path: '/p/alpha/docs/topic.md' })
     hover(rows[0])
@@ -151,5 +152,29 @@ describe('MdNetworkCards with the fix list', () => {
     expect(all('md-link-map-caption')[0].textContent).toBe('duplicate · Same text in CLAUDE.md and docs/topic.md (2 shared runs)')
     hover(rows[2])
     expect(hot()).toEqual(['orphan:notes/'])
+  })
+
+  it('stacks the FIX LIST card above the LINK MAP card, each full width', () => {
+    mount(net([BROKEN], []))
+    const list = all('md-fix-list')[0]
+    const map = all('md-link-map')[0]
+    const wrap = list.parentElement!
+    expect(map.parentElement).toBe(wrap)
+    expect(Array.from(wrap.children)).toEqual([list, map])
+    expect(wrap.className).toContain('flex-col')
+    expect(wrap.className).not.toContain('flex-wrap')
+    for (const card of [list, map]) {
+      expect(card.className).toContain('w-full')
+      expect(card.className).not.toMatch(/flex-\[/)
+    }
+  })
+
+  it('names a nested doc by <parent>/<file> and a root doc by its file name on Open', () => {
+    mount(net([], [
+      { a: 'CLAUDE.md', b: 'src/CLAUDE.md', sharedRuns: 2, samples: [] },
+      { a: 'README.md', b: 'CLAUDE.md', sharedRuns: 2, samples: [] },
+    ]))
+    expect(all('md-fix-open').map((b) => b.textContent)).toEqual(['Open src/CLAUDE.md', 'Open CLAUDE.md'])
+    expect(all('md-fix-open').every((b) => b.className.includes('[overflow-wrap:anywhere]'))).toBe(true)
   })
 })

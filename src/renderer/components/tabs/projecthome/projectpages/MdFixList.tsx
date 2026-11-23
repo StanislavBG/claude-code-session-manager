@@ -93,10 +93,14 @@ export function fixListCount(net: MdNetwork): number {
   return (net.duplicates?.length ?? 0) + net.findings.length
 }
 
-/** The Open button's label: a duplicate row names the doc it opens (the one to edit). */
+/**
+ * The Open button's label: a duplicate row names the doc it opens (the one to edit) as
+ * `<parent>/<file>` when it sits in a folder, so `src/CLAUDE.md` never reads as the root file.
+ */
 function openLabel(r: MdFixRow): string {
   if (r.kind !== 'duplicate') return 'Open'
-  const name = r.open.replace(/\/+$/, '').split('/').pop() || r.open
+  const parts = r.open.replace(/^\.\//, '').replace(/\/+$/, '').split('/').filter(Boolean)
+  const name = parts.slice(-2).join('/') || r.open
   return `Open ${name}`
 }
 
@@ -138,7 +142,7 @@ export function MdFixList({
     <section
       data-testid="md-fix-list"
       aria-label="Fix list"
-      className="min-w-0 flex-[1_1_300px] overflow-hidden rounded-xl border border-rule-structural bg-bg-hi"
+      className="w-full min-w-0 overflow-hidden rounded-xl border border-rule-structural bg-bg-hi"
     >
       <div className="flex justify-between px-4 py-3 font-mono text-[10.5px] text-fg-faint">
         <span className="tracking-[.1em]">FIX LIST</span>
@@ -165,7 +169,7 @@ export function MdFixList({
             >
               {r.kind}
             </span>
-            <span className="flex-1" />
+            <span className="min-w-0 flex-1" />
             <button
               type="button"
               data-testid="md-fix-open"
@@ -173,12 +177,12 @@ export function MdFixList({
               onClick={() => {
                 if (cwd) openRow(cwd, r.open)
               }}
-              className="text-[12px] font-semibold text-accent-dark cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+              className="min-w-0 text-right text-[12px] font-semibold text-accent-dark [overflow-wrap:anywhere] cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {openLabel(r)}
             </button>
           </div>
-          <span data-testid="md-fix-where" className="break-words font-mono text-[11.5px] text-fg">
+          <span data-testid="md-fix-where" className="font-mono [overflow-wrap:anywhere] text-[11.5px] text-fg">
             {r.where}
           </span>
           <span data-testid="md-fix-detail" className="text-[12.5px] leading-[1.45] text-fg-dim">

@@ -1,5 +1,5 @@
 /**
- * Review MD network's LINK MAP card (and, beside it, MdFixList's FIX LIST) (Project Home v2 DESIGN_SPEC §6), drawn from
+ * Review MD network's LINK MAP card (stacked below MdFixList's FIX LIST) (Project Home v2 DESIGN_SPEC §6), drawn from
  * the one `window.api.projectPages.mdNetwork` scan ToolsPane fetches. Purely presentational.
  *
  * `layoutMdNetwork` is the pure layout: four columns by link depth from the root CLAUDE.md
@@ -520,7 +520,7 @@ export function MdLinkMap({
     <section
       data-testid="md-link-map"
       aria-label="Link map"
-      className="min-w-0 flex-[1_1_560px] overflow-hidden rounded-xl border border-rule-structural bg-bg-hi"
+      className="w-full min-w-0 overflow-hidden rounded-xl border border-rule-structural bg-bg-hi"
     >
       <div className="flex flex-wrap items-center gap-3.5 border-b border-rule-inner px-4 py-3">
         <span className="font-mono text-[10.5px] tracking-[.1em] text-fg-faint">LINK MAP</span>
@@ -556,7 +556,10 @@ export function MdLinkMap({
   )
 }
 
-/** The link map and the fix list side by side over one scan; a hovered fix row lights its nodes on the map. */
+/**
+ * The fix list stacked above the link map, each full width so the 760-wide map is never scaled
+ * below 1:1 beside it; a hovered fix row lights its nodes on the map.
+ */
 export function MdNetworkCards({
   cwd,
   network,
@@ -579,9 +582,9 @@ export function MdNetworkCards({
     focusFinding = { ids, caption: `${row.kind} · ${row.where}` }
   }
   return (
-    <div className="flex flex-none flex-wrap items-start gap-4">
-      <MdLinkMap layout={layout} focusFinding={focusFinding} onExplore={onExplore} />
+    <div className="flex flex-none flex-col gap-4">
       <MdFixList cwd={cwd} rows={rows} hovered={hoverRow} onHover={setHoverRow} />
+      <MdLinkMap layout={layout} focusFinding={focusFinding} onExplore={onExplore} />
     </div>
   )
 }

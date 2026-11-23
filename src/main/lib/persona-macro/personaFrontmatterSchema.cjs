@@ -7,6 +7,9 @@
  *
  * - `.strict()` over exactly agentLibrary.cjs's MANAGED_PERSONA_KEYS
  *   (imported, never copied) — an unknown key fails, naming the key.
+ * - `mcpServers` / `packs` are string lists (or a comma string): the exact
+ *   MCP servers and context packs a scheduler job running as this persona
+ *   loads under --strict-mcp-config.
  * - `model` is required and must be concrete (not `inherit`): every persona
  *   can be a PRD `agentType`, so every persona is headless-capable, and an
  *   unpinned headless run drifts to the CLI default model.
@@ -34,6 +37,15 @@ const ModelSchema = z
 const shape = {};
 for (const key of MANAGED_PERSONA_KEYS) shape[key] = FmValue.optional();
 shape.model = ModelSchema;
+// Declared capabilities (personaToolScope.cjs): a string list, or the parsed
+// frontmatter's comma string ("a, b") of non-empty names — never a number or
+// boolean. Every listed name must resolve at dispatch or the job parks.
+const CapabilityList = z.union([
+  z.array(z.string().trim().min(1, 'entries must be non-empty names')),
+  z.string().trim().min(1, 'must list at least one name (or omit the key)'),
+]);
+shape.mcpServers = CapabilityList.optional();
+shape.packs = CapabilityList.optional();
 // Not a MANAGED_PERSONA_KEYS entry (the save path preserves it as an
 // unmanaged line), but prdAgentType.cjs's readPersonaDefaultEstimateMinutes
 // reads it at dispatch, so a dispatch-time validation must admit it.

@@ -33,6 +33,24 @@ function parseTools(raw) {
   return raw.split(',').map((t) => t.trim()).filter(Boolean);
 }
 
+/**
+ * A declared-capability frontmatter value (`mcpServers:` / `packs:`) as a
+ * list: a comma string ("a, b") or a string list (structured callers).
+ * Trimmed, deduped, order-preserving; anything else → [].
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function parseCapabilityList(raw) {
+  const items = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : [];
+  const out = [];
+  for (const it of items) {
+    if (typeof it !== 'string') continue;
+    const v = it.trim();
+    if (v && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
 /** Sentinel `projects:` entry meaning "this agent's Action button shows in every project". */
 const ALL_PROJECTS = '*';
 
@@ -75,8 +93,14 @@ function decodeLine(s) {
  *
  * `agentCli` / `agentCliModel` are this app's extension too: the persona's
  * default agent CLI (and its model) for New Session — Claude Code ignores them.
+ *
+ * `mcpServers` / `packs` are the persona's declared capabilities (comma
+ * lists): the exact MCP servers and context packs a scheduler job running as
+ * this persona loads (personaToolScope.cjs passes them under
+ * --strict-mcp-config; an unknown name parks the job). The Agent Library form
+ * has no field for them, so savePersona carries the file's values over.
  */
-const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly', 'agentCli', 'agentCliModel']);
+const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly', 'agentCli', 'agentCliModel', 'mcpServers', 'packs']);
 
 /**
  * Raw text lines of every top-level frontmatter key block in `raw` whose key
@@ -97,7 +121,7 @@ function extractUnmanagedLines(raw, managed) {
   return out;
 }
 
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, body, preservedLines }) {
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, mcpServers, packs, body, preservedLines }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
@@ -116,6 +140,8 @@ function serializePersona({ name, description, tools, model, effort, color, tags
   if (title) lines.push(`title: ${title}`);
   if (typeof seedVersion === 'number' && Number.isFinite(seedVersion)) lines.push(`seedVersion: ${seedVersion}`);
   if (executorOnly === true) lines.push('executorOnly: true');
+  if (Array.isArray(mcpServers) && mcpServers.length) lines.push(`mcpServers: ${mcpServers.join(', ')}`);
+  if (Array.isArray(packs) && packs.length) lines.push(`packs: ${packs.join(', ')}`);
   if (Array.isArray(preservedLines) && preservedLines.length) lines.push(...preservedLines);
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
@@ -249,6 +275,8 @@ async function savePersona({
   executorOnly,
   agentCli,
   agentCliModel,
+  mcpServers,
+  packs,
   body,
   projectCwd,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -278,11 +306,13 @@ async function savePersona({
   // agentCli undefined = carry the file's pair over; 'claude' (or any non-CLI value) = write neither line.
   let resolvedAgentCli = agentCli;
   let resolvedAgentCliModel = agentCliModel;
+  let resolvedMcpServers = mcpServers;
+  let resolvedPacks = packs;
   let preservedLines = [];
   try {
     preservedLines = extractUnmanagedLines(fsSync.readFileSync(target, 'utf8'), MANAGED_PERSONA_KEYS);
   } catch { /* no existing file — nothing to preserve */ }
-  if ([seedVersion, title, projects, action, actionLabel, executorOnly, agentCli].some((v) => v === undefined)) {
+  if ([seedVersion, title, projects, action, actionLabel, executorOnly, agentCli, mcpServers, packs].some((v) => v === undefined)) {
     try {
       const { fm } = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
       if (resolvedSeedVersion === undefined) {
@@ -299,9 +329,11 @@ async function savePersona({
       if (resolvedProjects === undefined && fm.projects) resolvedProjects = parseTools(fm.projects);
       if (resolvedAction === undefined && fm.action) resolvedAction = decodeLine(fm.action);
       if (resolvedActionLabel === undefined && fm.actionLabel) resolvedActionLabel = decodeLine(fm.actionLabel);
+      if (resolvedMcpServers === undefined && fm.mcpServers) resolvedMcpServers = parseCapabilityList(fm.mcpServers);
+      if (resolvedPacks === undefined && fm.packs) resolvedPacks = parseCapabilityList(fm.packs);
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, body, preservedLines });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, mcpServers: resolvedMcpServers, packs: resolvedPacks, body, preservedLines });
   assertValidPersonaText(name, text, preservedLines);
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
@@ -512,4 +544,5 @@ module.exports = {
   PERSONA_NAME_RE,
   ALL_PROJECTS,
   MANAGED_PERSONA_KEYS,
+  parseCapabilityList,
 };

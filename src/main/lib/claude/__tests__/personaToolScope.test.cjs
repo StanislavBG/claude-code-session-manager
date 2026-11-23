@@ -46,7 +46,7 @@ describe('personaToolScope', () => {
     for (const t of [null, undefined, [], ['*'], ['Read', '*']]) {
       assert.equal(buildPersonaToolScope(t), null);
     }
-    assert.deepEqual(personaToolScopeArgs(null), []);
+    assert.deepEqual(personaToolScopeArgs(null), { args: ['--strict-mcp-config'], refusal: null });
   });
 
   it('passes MCP names through and appends the floor once', () => {
@@ -95,7 +95,7 @@ describe('personaToolScope', () => {
 
   it('builds --agents JSON that parses back', () => {
     const scope = buildPersonaToolScope(['Read']);
-    const args = personaToolScopeArgs(scope);
+    const { args } = personaToolScopeArgs(scope);
     assert.equal(args.length, 5);
     assert.equal(args[0], '--agents');
     assert.equal(args[2], '--agent');
@@ -109,15 +109,15 @@ describe('personaToolScope', () => {
   });
 
   it('adds --strict-mcp-config when scope names no mcp__ tool', () => {
-    const args = personaToolScopeArgs(buildPersonaToolScope(['Read', 'Bash']));
+    const { args } = personaToolScopeArgs(buildPersonaToolScope(['Read', 'Bash']));
     assert.equal(args[args.length - 1], '--strict-mcp-config');
     assert.ok(!args.includes('--mcp-config'));
   });
 
-  it('omits --strict-mcp-config when scope names an mcp__ tool', () => {
-    const args = personaToolScopeArgs(buildPersonaToolScope(['Read', 'mcp__blender']));
-    assert.equal(args.length, 4);
-    assert.ok(!args.includes('--strict-mcp-config'));
+  it('an unknown mcp__ server is refused and never drops --strict-mcp-config', () => {
+    const { args, refusal } = personaToolScopeArgs(buildPersonaToolScope(['Read', 'mcp__blender']));
+    assert.deepEqual(refusal, { code: 'capability_unknown', name: 'blender' });
+    assert.equal(args[args.length - 1], '--strict-mcp-config');
     assert.ok(!args.includes('--mcp-config'));
   });
 });
@@ -136,7 +136,13 @@ describe('seed personas that save through an MCP tool', () => {
       const tools = splitFrontmatter(raw).fm.tools.split(',').map((t) => t.trim());
       const scope = buildPersonaToolScope(tools);
       assert.ok(scope.tools.includes(tool));
-      assert.ok(!personaToolScopeArgs(scope).includes('--strict-mcp-config'));
+      const { SERVER_NAME } = require('../../../seedSchedulerMcp.cjs');
+      const entry = { command: 'node', args: ['/x.cjs'] };
+      const { args, refusal } = personaToolScopeArgs(scope, { mcpServers: { [SERVER_NAME]: entry } });
+      assert.equal(refusal, null);
+      const i = args.indexOf('--mcp-config');
+      assert.deepEqual(Object.keys(JSON.parse(args[i + 1]).mcpServers), [SERVER_NAME]);
+      assert.equal(args[i + 2], '--strict-mcp-config');
     });
   }
 });

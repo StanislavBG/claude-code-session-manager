@@ -167,7 +167,7 @@ const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/ep
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
-const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames } = require('./lib/claude/personaToolScope.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured, expectedFromCriteria, formatCriteriaChecksSection } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
@@ -5199,7 +5199,7 @@ function jobRiskToolsClearance(prdRiskTools, personaTools) {
   return out;
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null }) {
   let permissionArgs = Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions'];
   let riskArgs = [];
   if (typeof riskGuardSettingsPath === 'string' && riskGuardSettingsPath) {
@@ -5212,7 +5212,9 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     '--model', model,
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
-    ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers() }),
+    // Always strict: exactly the persona's resolved servers (dispatch already
+    // parked any job whose set names an unknown server — capability_unknown).
+    ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers(), declaredServers: mcpServerNames }).args,
     ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
     ...(jsonSchema && typeof jsonSchema === 'object' ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
     ...riskArgs,
@@ -5312,10 +5314,15 @@ function ensureTimeoutShimOnce() {
  * (persona refusals pass through unchanged), writeAgentSnapshot, and stamp
  * job.agentSnapshotId in memory (spawnJob's onPid mutate persists it).
  * A store write failure is logged and the job spawns unpinned. Never throws.
+ * Declared capabilities (ma-persona-declared-capabilities): an unpinned build
+ * records the RESOLVED set in the snapshot — mcpServers = the persona's
+ * `mcpServers:` plus its tool-named servers, packs = the Epic's packs plus the
+ * persona's `packs:` — and every spawn (pinned or not) loads exactly the
+ * snapshot's set.
  * @param {any} job
  * @param {string} cwd
  * @param {string[]|undefined} packs
- * @returns {Promise<{ refusal: null|{ code: string, detail: string }, systemPrompt?: string|null, model?: string, tools?: string[]|null, personaPath?: string|null, agentSnapshotId?: string|null, pinned?: boolean }>}
+ * @returns {Promise<{ refusal: null|{ code: string, detail: string }, systemPrompt?: string|null, model?: string, tools?: string[]|null, mcpServers?: string[], packs?: string[], personaPath?: string|null, agentSnapshotId?: string|null, pinned?: boolean }>}
  */
 async function resolveJobAgentSnapshot(job, cwd, packs) {
   if (typeof job.agentSnapshotId === 'string' && job.agentSnapshotId) {
@@ -5328,6 +5335,8 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
       systemPrompt: snap.body || null,
       model: snap.model || agentModelResolve.FALLBACK_MODEL,
       tools: Array.isArray(snap.tools) ? snap.tools : null,
+      mcpServers: Array.isArray(snap.mcpServers) ? snap.mcpServers.map(String) : [],
+      packs: Array.isArray(snap.packs) ? snap.packs.map(String) : [],
       personaPath: null,
       agentSnapshotId: job.agentSnapshotId,
       pinned: true,
@@ -5341,7 +5350,16 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
     return { refusal: { code: 'persona_invalid', detail: `agent snapshot build failed: ${err?.message ?? err}` } };
   }
   if (built.refusal) return { refusal: built.refusal };
-  const snap = built.snapshot;
+  const declared = readPersonaDeclaredCapabilities(cwd, job.agentType);
+  const resolvedPacks = [];
+  for (const p of [...(Array.isArray(built.snapshot.packs) ? built.snapshot.packs : []), ...declared.packs]) {
+    if (!resolvedPacks.includes(String(p))) resolvedPacks.push(String(p));
+  }
+  const snap = {
+    ...built.snapshot,
+    mcpServers: resolvedMcpServerNames(built.snapshot.tools, [...(built.snapshot.mcpServers || []), ...declared.mcpServers]),
+    packs: resolvedPacks,
+  };
   let id = null;
   try {
     id = (await agentSnapshot.writeAgentSnapshot(cwd, snap)).id;
@@ -5354,10 +5372,32 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
     systemPrompt: snap.body || null,
     model: snap.model || agentModelResolve.FALLBACK_MODEL,
     tools: snap.tools,
+    mcpServers: snap.mcpServers,
+    packs: snap.packs,
     personaPath: null,
     agentSnapshotId: id,
     pinned: false,
   };
+}
+
+/**
+ * The persona's declared `mcpServers:` / `packs:` (agentLibrary.cjs's
+ * parseCapabilityList), via the same overlay-aware reader the snapshot uses.
+ * A missing/unreadable persona → both empty (the snapshot build already
+ * refused that case). Never throws.
+ * @param {string} cwd
+ * @param {string|null|undefined} agentType
+ * @returns {{ mcpServers: string[], packs: string[] }}
+ */
+function readPersonaDeclaredCapabilities(cwd, agentType) {
+  try {
+    const persona = agentModelResolve.readOverlayAwarePersona(agentType || agentModelResolve.DEFAULT_PRD_AGENT_TYPE, { cwd });
+    const fm = (persona && persona.fm) || {};
+    const { parseCapabilityList } = require('./agentLibrary.cjs');
+    return { mcpServers: parseCapabilityList(fm.mcpServers), packs: parseCapabilityList(fm.packs) };
+  } catch {
+    return { mcpServers: [], packs: [] };
+  }
 }
 
 /**
@@ -5727,14 +5767,42 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // --plugin-dir per pack, and their laws are appended AFTER the (already
   // capped) persona body — the persona cap never applies to laws. Fresh and
   // resume spawns alike; no Epic / no packs / an error = today's argv.
+  // Persona-declared packs (`packs:`, recorded in the snapshot) load with the
+  // Epic's. An unknown persona-declared pack parks the job (below); an
+  // unknown Epic pack keeps being skipped (it was picked by a human at mint).
+  const epicPackIds = Array.isArray(packEpic?.packs) ? packEpic.packs.map(String) : [];
+  const personaPackIds = (personaResolution.packs || []).filter((p) => !epicPackIds.includes(p));
+  const jobPackIds = [...epicPackIds, ...personaPackIds];
   let packArgs = { pluginDirArgs: [], laws: '' };
+  /** @type {string[]|null} null = catalog unavailable (no pack refusal) */
+  let unknownPacks = null;
   try {
-    const composed = packSpawnArgs.composePackSpawnArgs({ packIds: packEpic?.packs });
+    const composed = packSpawnArgs.composePackSpawnArgs({ packIds: jobPackIds.length ? jobPackIds : packEpic?.packs });
     if (composed && Array.isArray(composed.pluginDirArgs)) {
       packArgs = { pluginDirArgs: composed.pluginDirArgs, laws: typeof composed.laws === 'string' ? composed.laws : '' };
+      unknownPacks = Array.isArray(composed.unknown) ? composed.unknown.map(String) : [];
     }
   } catch (err) {
     safeLog(`[scheduler] context packs skipped for ${job.slug}: ${err && err.message ? err.message : String(err)}\n`);
+  }
+  // Declared capabilities, fail-closed: an MCP server (declared or tool-named)
+  // missing from knownMcpServers(), or an unknown persona-declared pack,
+  // parks the job needs_review 'capability_unknown: <name>' — never spawned
+  // with a widened (every-server) config.
+  const capabilityCheck = personaToolScopeArgs(personaToolScope, {
+    mcpServers: knownMcpServers(),
+    declaredServers: personaResolution.mcpServers || [],
+    packs: unknownPacks ? personaPackIds : [],
+    knownPacks: unknownPacks ? personaPackIds.filter((p) => !unknownPacks.includes(p)) : [],
+  });
+  if (capabilityCheck.refusal) {
+    const code = capabilityCheck.refusal.code;
+    const detail = capabilityCheck.refusal.name;
+    const refusalError = `${code}: ${detail}`;
+    safeLog(`[scheduler] capability refused for ${job.slug} — not spawned: ${refusalError}\n`);
+    closeFd();
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: refusalError, personaRefusal: { code, detail }, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta, agentSnapshotId: personaResolution.agentSnapshotId || null });
+    return { exitCode: -1, durationMs: 0, error: refusalError, sessionId, personaRefusal: { code, detail } };
   }
   const jobSystemPrompt = packArgs.laws
     ? (personaResolution.systemPrompt ? `${personaResolution.systemPrompt}\n\n${packArgs.laws}` : packArgs.laws)
@@ -5992,6 +6060,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       resume: !!resumeTarget,
       systemPrompt: jobSystemPrompt,
       toolScope: personaToolScope,
+      mcpServerNames: personaResolution.mcpServers || [],
       pluginDirArgs: packArgs.pluginDirArgs,
       jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : null,
       riskGuardSettingsPath,

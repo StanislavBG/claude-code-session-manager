@@ -54,42 +54,92 @@ function buildPersonaToolScope(tools, { disallowed = [], structuredOutput = fals
   return { tools: out };
 }
 
+/** Server name of an mcp__<server>__<tool> entry ('' when malformed). */
+function mcpServerOf(tool) {
+  return String(tool).slice(5).split('__')[0];
+}
+
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
 /**
- * @param {{ tools: string[] }|null} scope result of buildPersonaToolScope
- * @param {{ mcpServers?: Record<string, object> }} [opts] known MCP server
- *   definitions by name. When EVERY mcp__ tool in scope names a server here,
- *   only those servers are passed (--mcp-config <json> --strict-mcp-config).
- * @returns {string[]} argv fragment ([] when unscoped)
+ * The argv that loads EXACTLY a job's MCP servers, fail-closed.
+ *
+ * Always pushes --strict-mcp-config (the CLI then ignores the user/project
+ * MCP config). The server set = the persona's declared `mcpServers:` plus the
+ * servers named by its mcp__<server>__<tool> tools; each must resolve in the
+ * known map, and only those are passed via --mcp-config. Any name that does
+ * not resolve — and any declared pack not in `knownPacks` — is a refusal
+ * { code: 'capability_unknown', name } (first one found); the caller parks
+ * the job naming it. There is no widening branch: an unknown server never
+ * loads every server.
+ *
+ * @param {{ tools: string[] }|null} scope result of buildPersonaToolScope (null = unscoped tools)
+ * @param {{ mcpServers?: Record<string, object>, declaredServers?: readonly string[], packs?: readonly string[], knownPacks?: readonly string[] }} [opts]
+ *   mcpServers: known server definitions by name. declaredServers: the
+ *   persona's `mcpServers:`. packs / knownPacks: the job's packs and those the
+ *   catalog resolves.
+ * @returns {{ args: string[], refusal: null|{ code: 'capability_unknown', name: string } }}
  */
-function personaToolScopeArgs(scope, { mcpServers } = {}) {
-  if (!scope) return [];
-  const def = {
-    description: 'Headless run with a scheduler-enforced tool scope.',
-    prompt: 'Tool scope is enforced by the scheduler.',
-    tools: scope.tools,
-  };
-  const args = [
-    '--agents', JSON.stringify({ [HEADLESS_SCOPE_AGENT_NAME]: def }),
-    '--agent', HEADLESS_SCOPE_AGENT_NAME,
-  ];
-  // A scope naming no MCP tool never uses a server: with --strict-mcp-config and
-  // no --mcp-config (variadic; would swallow later args) the CLI boots none.
-  const mcpTools = scope.tools.map(String).filter((t) => t.startsWith('mcp__'));
-  if (mcpTools.length === 0) {
-    args.push('--strict-mcp-config');
-    return args;
+function personaToolScopeArgs(scope, { mcpServers, declaredServers = [], packs = [], knownPacks = [] } = {}) {
+  /** @type {string[]} */
+  const args = [];
+  if (scope) {
+    const def = {
+      description: 'Headless run with a scheduler-enforced tool scope.',
+      prompt: 'Tool scope is enforced by the scheduler.',
+      tools: scope.tools,
+    };
+    args.push('--agents', JSON.stringify({ [HEADLESS_SCOPE_AGENT_NAME]: def }), '--agent', HEADLESS_SCOPE_AGENT_NAME);
   }
-  // Server name = the segment between `mcp__` and the next `__`.
-  const named = new Set(mcpTools.map((t) => t.slice(5).split('__')[0]));
+  /** @type {null|{ code: 'capability_unknown', name: string }} */
+  let refusal = null;
+  const refuse = (name) => { if (!refusal) refusal = { code: 'capability_unknown', name }; };
   const known = mcpServers || {};
-  const allKnown = [...named].every((n) => n && Object.prototype.hasOwnProperty.call(known, n));
-  if (allKnown) {
-    const picked = {};
-    for (const n of named) picked[n] = known[n];
-    // --mcp-config is variadic: the caller must keep a `--flag` right after.
-    args.push('--mcp-config', JSON.stringify({ mcpServers: picked }), '--strict-mcp-config');
+  /** @type {string[]} */
+  const named = [];
+  for (const d of Array.isArray(declaredServers) ? declaredServers : []) {
+    const n = String(d).trim();
+    if (n && !named.includes(n)) named.push(n);
   }
-  return args;
+  const mcpTools = scope ? scope.tools.map(String).filter((t) => t.startsWith('mcp__')) : [];
+  for (const t of mcpTools) {
+    const n = mcpServerOf(t);
+    if (!n) { refuse(t); continue; }
+    if (!named.includes(n)) named.push(n);
+  }
+  /** @type {Record<string, object>} */
+  const picked = {};
+  for (const n of named) {
+    if (hasOwn(known, n)) picked[n] = known[n];
+    else refuse(n);
+  }
+  const knownPackSet = new Set(Array.isArray(knownPacks) ? knownPacks.map(String) : []);
+  for (const p of Array.isArray(packs) ? packs : []) {
+    if (!knownPackSet.has(String(p))) refuse(String(p));
+  }
+  // --mcp-config is variadic: it is followed immediately by --strict-mcp-config.
+  // With no server, no --mcp-config at all — strict mode alone boots none.
+  if (Object.keys(picked).length) args.push('--mcp-config', JSON.stringify({ mcpServers: picked }));
+  args.push('--strict-mcp-config');
+  return { args, refusal };
+}
+
+/**
+ * The resolved MCP server set a job runs with: declared + tool-named, sorted,
+ * unique (the AgentSnapshot's `mcpServers`).
+ * @param {readonly string[]|null|undefined} tools
+ * @param {readonly string[]|null|undefined} declared
+ * @returns {string[]}
+ */
+function resolvedMcpServerNames(tools, declared) {
+  const names = new Set();
+  for (const d of Array.isArray(declared) ? declared : []) { const n = String(d).trim(); if (n) names.add(n); }
+  for (const t of Array.isArray(tools) ? tools.map(String) : []) {
+    if (!t.startsWith('mcp__')) continue;
+    const n = mcpServerOf(t);
+    if (n) names.add(n);
+  }
+  return [...names].sort();
 }
 
 const JOB_MCP_TOOLS_ENV = 'SM_SCHEDULER_JOB_MCP_TOOLS';
@@ -115,4 +165,5 @@ module.exports = {
   HEADLESS_SCOPE_AGENT_NAME,
   buildPersonaToolScope,
   personaToolScopeArgs,
+  resolvedMcpServerNames,
 };

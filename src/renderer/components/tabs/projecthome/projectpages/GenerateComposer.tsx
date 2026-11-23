@@ -15,12 +15,14 @@ import {
   pagePromptLines,
   pageTemplate,
   videoDefaults,
+  videoLengthFor,
+  videoLengthsFor,
   videoPromptLines,
   videoTemplate,
   type PageCfg,
   type ReadSourceId,
   type VideoCfg,
-  type VideoLength,
+  type VideoKind,
 } from './composerTemplates'
 
 /** What Regenerate rebuilds: the entry plus its pre-fill (`pageCfgFromEntry` / `videoCfgFromEntry`). */
@@ -38,8 +40,13 @@ export interface GenerateComposerProps {
   /** Generate mode's starting template (default: the kind's first template). */
   initialTplId?: string
   onClose: () => void
-  /** The builder's prompt lines. The caller launches, appends `Replace entry: <id>`, and closes. */
-  onGenerate: (lines: string[], replaceEntryId?: string) => void
+  /**
+   * The builder's prompt lines. The caller launches, appends `Replace entry: <id>`, and closes. A video
+   * with Review first on adds `{ review: true }` (sent as the press's `reviewStage`); otherwise no third argument.
+   */
+  onGenerate: (lines: string[], replaceEntryId?: string, opts?: { review: true }) => void
+  /** The project persona's name: the Character toggle reads `Persona: <name>` and new forms start with it on. */
+  personaName?: string
 }
 
 type Form = { kind: 'page'; tplId: string; cfg: PageCfg } | { kind: 'video'; tplId: string; cfg: VideoCfg }
@@ -65,7 +72,21 @@ const VIDEO_ROWS: readonly TemplateRow[] = VIDEO_TEMPLATES.map((t) => ({
   preset: `${t.kind.toLowerCase()} · ${t.length}s · ${t.style.toLowerCase()}`,
 }))
 
-const VIDEO_LENGTHS: readonly VideoLength[] = [30, 60]
+/** Target field per kind (Project demo has none). TikTok and Marketing targets are optional. */
+function targetField(kind: VideoKind): { label: string; placeholder: string; required: boolean } {
+  switch (kind) {
+    case 'Feature':
+      return { label: 'Feature', placeholder: 'Name one feature, e.g. the search box', required: true }
+    case 'TikTok':
+      return { label: 'Series brief', placeholder: 'Series brief path (optional)', required: false }
+    case 'Marketing':
+      return { label: 'Landing page', placeholder: 'Landing page URL (optional)', required: false }
+    default:
+      return { label: 'Post', placeholder: 'Post path or URL', required: true }
+  }
+}
+
+const lengthLabel = (s: number) => (s === 60 ? '1 minute' : s === 15 ? '15 seconds' : '30 seconds')
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -76,18 +97,23 @@ const INPUT =
 const isPageCfg = (cfg: PageCfg | VideoCfg): cfg is PageCfg => 'audience' in cfg
 
 /** A template with every setting at its defaults — what picking a template resets to. */
-function templateForm(kind: Form['kind'], tplId: string): Form {
+function templateForm(kind: Form['kind'], tplId: string, hasPersona: boolean): Form {
   if (kind === 'page') {
     const id = pageTemplate(tplId).id
     return { kind, tplId: id, cfg: pageDefaults(id) }
   }
   const id = videoTemplate(tplId).id
-  return { kind, tplId: id, cfg: videoDefaults(id) }
+  return { kind, tplId: id, cfg: videoDefaults(id, { hasPersona }) }
 }
 
-function initialForm(kind: Form['kind'], regen: ComposerRegen | undefined, initialTplId: string | undefined): Form {
+function initialForm(
+  kind: Form['kind'],
+  regen: ComposerRegen | undefined,
+  initialTplId: string | undefined,
+  hasPersona: boolean,
+): Form {
   const first = (kind === 'page' ? PAGE_TEMPLATES : VIDEO_TEMPLATES)[0].id
-  const form = templateForm(kind, regen?.tplId ?? initialTplId ?? first)
+  const form = templateForm(kind, regen?.tplId ?? initialTplId ?? first, hasPersona)
   if (!regen) return form
   if (form.kind === 'page' && isPageCfg(regen.cfg)) return { ...form, cfg: { ...regen.cfg, reads: [...regen.cfg.reads] } }
   if (form.kind === 'video' && !isPageCfg(regen.cfg)) return { ...form, cfg: { ...regen.cfg } }
@@ -123,8 +149,10 @@ function trapTab(e: KeyboardEvent, panel: HTMLElement | null) {
  * composer per open. A local overlay on `Z.dialog` rather than `ui/Modal`, which has no
  * 1040×710 panel; it keeps Modal's Escape, backdrop-click and focus behaviour.
  */
-export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerate }: GenerateComposerProps) {
-  const [form, setForm] = useState<Form>(() => initialForm(kind, regen, initialTplId))
+export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerate, personaName }: GenerateComposerProps) {
+  const persona = personaName?.trim() ?? ''
+  const hasPersona = persona !== ''
+  const [form, setForm] = useState<Form>(() => initialForm(kind, regen, initialTplId, hasPersona))
   const panelRef = useRef<HTMLDivElement | null>(null)
   const onCloseRef = useRef(onClose)
   // A press that starts inside the panel and is released over the overlay (selecting text)
@@ -154,7 +182,7 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
     }
   }, [])
 
-  const pick = (id: string) => setForm((f) => templateForm(f.kind, id))
+  const pick = (id: string) => setForm((f) => templateForm(f.kind, id, hasPersona))
   const setPage = (patch: Partial<PageCfg>) =>
     setForm((f) => (f.kind === 'page' ? { ...f, cfg: { ...f.cfg, ...patch } } : f))
   const setVideo = (patch: Partial<VideoCfg>) =>
@@ -165,8 +193,12 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
       const reads = f.cfg.reads.includes(id) ? f.cfg.reads.filter((r) => r !== id) : [...f.cfg.reads, id]
       return { ...f, cfg: { ...f.cfg, reads } }
     })
+  const setKind = (k: VideoKind) =>
+    setForm((f) => (f.kind === 'video' ? { ...f, cfg: { ...f.cfg, kind: k, length: videoLengthFor(k, f.cfg.length) } } : f))
   const toggleMascot = () =>
     setForm((f) => (f.kind === 'video' ? { ...f, cfg: { ...f.cfg, mascot: !f.cfg.mascot } } : f))
+  const toggleReview = () =>
+    setForm((f) => (f.kind === 'video' ? { ...f, cfg: { ...f.cfg, review: !f.cfg.review } } : f))
   const setFocus = (focus: string) => setForm((f) => withFocus(f, focus))
   const appendChip = (chip: string) => setForm((f) => withFocus(f, addChip(f.cfg.focus, chip)))
 
@@ -178,9 +210,12 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
   const promptLine = lines.join(' · ')
   const ready = canGenerate(form.kind, form.tplId, form.cfg)
 
+  const review = form.kind === 'video' && form.cfg.review
+
   const generate = () => {
     if (!ready) return
-    if (regen) onGenerate(lines, regen.entryId)
+    if (review) onGenerate(lines, regen?.entryId, { review: true })
+    else if (regen) onGenerate(lines, regen.entryId)
     else onGenerate(lines)
   }
 
@@ -332,17 +367,21 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
 
               {form.kind === 'video' && (
                 <>
-                  <Segmented label="Kind" options={VIDEO_KINDS} value={form.cfg.kind} onPick={(k) => setVideo({ kind: k })} />
+                  <Segmented label="Kind" options={VIDEO_KINDS} value={form.cfg.kind} onPick={setKind} />
                   {form.cfg.kind !== 'Project demo' && (
                     <label className="flex flex-col gap-[7px]">
-                      <FieldLabel note="required" required testId="composer-target-label">
-                        {form.cfg.kind === 'Feature' ? 'Feature' : 'Post'}
+                      <FieldLabel
+                        note={targetField(form.cfg.kind).required ? 'required' : 'optional'}
+                        required={targetField(form.cfg.kind).required}
+                        testId="composer-target-label"
+                      >
+                        {targetField(form.cfg.kind).label}
                       </FieldLabel>
                       <input
                         data-testid="composer-target"
                         value={form.cfg.target}
                         onChange={(e) => setVideo({ target: e.target.value })}
-                        placeholder={form.cfg.kind === 'Feature' ? 'Name one feature, e.g. the search box' : 'Post path or URL'}
+                        placeholder={targetField(form.cfg.kind).placeholder}
                         className={INPUT}
                       />
                     </label>
@@ -379,10 +418,10 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
                   <div className="flex flex-wrap gap-7">
                     <Segmented
                       label="Length"
-                      options={VIDEO_LENGTHS}
+                      options={videoLengthsFor(form.cfg.kind)}
                       value={form.cfg.length}
                       onPick={(length) => setVideo({ length })}
-                      format={(s) => (s === 60 ? '1 minute' : '30 seconds')}
+                      format={lengthLabel}
                     />
                     <div className="flex flex-col gap-[7px]">
                       <FieldLabel>Character</FieldLabel>
@@ -402,7 +441,28 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
                             className={`absolute top-0.5 w-4 h-4 rounded-full bg-bg-hi shadow transition-all ${form.cfg.mascot ? 'left-[18px]' : 'left-0.5'}`}
                           />
                         </span>
-                        Use the project’s mascot
+                        {hasPersona ? `Persona: ${persona}` : 'Use the project’s mascot'}
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-[7px]">
+                      <FieldLabel>Review first</FieldLabel>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={form.cfg.review}
+                        data-testid="video-review-toggle"
+                        onClick={toggleReview}
+                        className="flex items-center gap-2.5 h-9 text-[12.5px] text-fg"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`relative w-9 h-5 rounded-[10px] transition-colors ${form.cfg.review ? 'bg-sage-dark' : 'bg-rule-structural'}`}
+                        >
+                          <span
+                            className={`absolute top-0.5 w-4 h-4 rounded-full bg-bg-hi shadow transition-all ${form.cfg.review ? 'left-[18px]' : 'left-0.5'}`}
+                          />
+                        </span>
+                        Stop for my review before the final save
                       </button>
                     </div>
                   </div>

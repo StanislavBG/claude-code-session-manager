@@ -29,12 +29,16 @@ export const READ_SOURCES = [
 ] as const
 export type ReadSourceId = (typeof READ_SOURCES)[number]['id']
 
-export const VIDEO_KINDS = ['Project demo', 'Blog post', 'Feature'] as const
+export const VIDEO_KINDS = ['Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing'] as const
 export type VideoKind = (typeof VIDEO_KINDS)[number]
 
 export type PageKind = 'Overview' | 'How it works' | 'FAQ' | 'Custom topic'
 export type VideoStyleId = 'Auto' | 'Professional' | 'Fun' | 'Animated whiteboard' | 'Kinetic typography'
-export type VideoLength = 30 | 60
+/** 15 s is a TikTok-only length (`videoLengthsFor`); every other kind is 30 or 60. */
+export type VideoLength = 15 | 30 | 60
+
+/** Kinds whose target is optional: they generate with or without one. */
+const OPTIONAL_TARGET_KINDS: readonly VideoKind[] = ['TikTok', 'Marketing']
 
 export interface PageTemplate {
   readonly id: string
@@ -61,6 +65,8 @@ export interface VideoTemplate {
   readonly style: VideoStyleId
   readonly length: VideoLength
   readonly mascot: boolean
+  /** Review first: the job stops for a human review before the final save (sent as `reviewStage`). */
+  readonly review: boolean
   /** `Scenes` chips. */
   readonly scenes: readonly string[]
   readonly chips: readonly string[]
@@ -91,6 +97,8 @@ export interface VideoCfg {
   style: string
   length: VideoLength
   mascot: boolean
+  /** Review first — sent with the press as `reviewStage`, never as a prompt line. */
+  review: boolean
   focus: string
 }
 
@@ -175,6 +183,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     style: 'Auto',
     length: 30,
     mascot: true,
+    review: false,
     scenes: ['The problem', 'What it is', 'Three key features', 'Try it'],
     chips: ['Close on the project link', 'Lead with the main feature', 'Keep it upbeat'],
   },
@@ -187,6 +196,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     style: 'Kinetic typography',
     length: 30,
     mascot: false,
+    review: false,
     scenes: ['Why it exists', 'How it works', 'Try it'],
     chips: ['Show it step by step', 'Name who it helps', 'No jargon'],
   },
@@ -199,6 +209,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     style: 'Professional',
     length: 60,
     mascot: false,
+    review: false,
     scenes: ['The headline', 'Key points', 'The takeaway'],
     chips: ['Quote the post’s title', 'Three points max', 'Point to the post at the end'],
   },
@@ -210,6 +221,7 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     style: 'Animated whiteboard',
     length: 60,
     mascot: true,
+    review: false,
     scenes: ['The pieces', 'How they connect', 'One request, end to end', 'Recap'],
     chips: ['Draw the main pieces', 'Trace one task end to end', 'Slow, calm pace'],
   },
@@ -221,8 +233,35 @@ export const VIDEO_TEMPLATES: readonly VideoTemplate[] = [
     style: 'Auto',
     length: 30,
     mascot: false,
+    review: false,
     scenes: ['Shaped by your brief'],
     chips: ['For a conference talk', 'Focus on privacy', 'No mascot, all type'],
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok',
+    blurb: 'A vertical short with a hook in the first second, made for a feed.',
+    kind: 'TikTok',
+    target: '',
+    style: 'Fun',
+    length: 30,
+    mascot: true,
+    review: true,
+    scenes: ['The hook', 'One surprising fact', 'The payoff', 'Follow for more'],
+    chips: ['Hook in the first second', 'One idea only', 'End on a question'],
+  },
+  {
+    id: 'marketing',
+    name: 'Marketing',
+    blurb: 'A punchy pitch that sells the project and ends on a call to action.',
+    kind: 'Marketing',
+    target: '',
+    style: 'Kinetic typography',
+    length: 30,
+    mascot: true,
+    review: false,
+    scenes: ['The pain', 'The promise', 'Proof', 'Call to action'],
+    chips: ['Lead with the benefit', 'Name who it is for', 'Close on the link'],
   },
 ]
 
@@ -261,10 +300,28 @@ export function pageDefaults(tplId: string): PageCfg {
   return { audience: t.audience, length: t.length, reads: [...t.reads], focus: '', topic: t.topic ?? '' }
 }
 
-/** A fresh video form for a template. */
-export function videoDefaults(tplId: string): VideoCfg {
+/** A fresh video form for a template; a project with a persona always starts with Character on. */
+export function videoDefaults(tplId: string, opts: { hasPersona?: boolean } = {}): VideoCfg {
   const t = videoTemplate(tplId)
-  return { kind: t.kind, target: t.target ?? '', style: t.style, length: t.length, mascot: t.mascot, focus: '' }
+  return {
+    kind: t.kind,
+    target: t.target ?? '',
+    style: t.style,
+    length: t.length,
+    mascot: t.mascot || opts.hasPersona === true,
+    review: t.review,
+    focus: '',
+  }
+}
+
+/** The length chips a kind offers: 15 s only for TikTok. */
+export function videoLengthsFor(kind: VideoKind): readonly VideoLength[] {
+  return kind === 'TikTok' ? [15, 30, 60] : [30, 60]
+}
+
+/** A length valid for the kind: leaving TikTok turns 15 s into 30 s. */
+export function videoLengthFor(kind: VideoKind, length: VideoLength): VideoLength {
+  return length === 15 && kind !== 'TikTok' ? 30 : length
 }
 
 /** The page builder's prompt lines (joined with `\n` as the macro's extraInstructions). */
@@ -283,7 +340,10 @@ export function pagePromptLines(tplId: string, cfg: PageCfg): string[] {
   return lines
 }
 
-/** The video builder's prompt lines; a target is named only for a non-demo kind. */
+/**
+ * The video builder's prompt lines; a target is named only for a non-demo kind. Review first is never a
+ * line (main strips every `Review:` line) — it travels only as the press's `reviewStage` field.
+ */
 export function videoPromptLines(cfg: VideoCfg): string[] {
   const lines = [`Video kind: ${cfg.kind}`]
   const target = cfg.target.trim()
@@ -315,6 +375,10 @@ function videoKindFor(slug: string): { tplId: string; kind: VideoKind } {
       return { tplId: 'blog', kind: 'Blog post' }
     case 'feature':
       return { tplId: 'feature', kind: 'Feature' }
+    case 'tiktok':
+      return { tplId: 'tiktok', kind: 'TikTok' }
+    case 'marketing':
+      return { tplId: 'marketing', kind: 'Marketing' }
     default: // 'project-demo', and any kind this build does not know
       return { tplId: 'demo', kind: 'Project demo' }
   }
@@ -331,7 +395,10 @@ export function pageCfgFromEntry(id: string, meta: ProjectPageMeta | null): { tp
   return { tplId, cfg: tplId === 'custom' ? { ...cfg, topic: meta?.topic ?? '' } : cfg }
 }
 
-/** Regenerate pre-fill for a video: kind / target / style / length / Character from `meta` (target `''` when unrecorded). */
+/**
+ * Regenerate pre-fill for a video: kind / target / style / length / Character from `meta` (target `''` when
+ * unrecorded; 15 s only for a TikTok of 15 s or less); Review first is the mapped template's default.
+ */
 export function videoCfgFromEntry(meta: ProjectVideoMeta): { tplId: string; cfg: VideoCfg } {
   const { tplId, kind } = videoKindFor(meta.kind)
   return {
@@ -340,8 +407,9 @@ export function videoCfgFromEntry(meta: ProjectVideoMeta): { tplId: string; cfg:
       kind,
       target: meta.target?.trim() ?? '',
       style: meta.style,
-      length: meta.lengthS > 30 ? 60 : 30,
+      length: meta.lengthS > 30 ? 60 : kind === 'TikTok' && meta.lengthS > 0 && meta.lengthS <= 15 ? 15 : 30,
       mascot: meta.character !== null,
+      review: videoTemplate(tplId).review,
       focus: '',
     },
   }
@@ -349,11 +417,13 @@ export function videoCfgFromEntry(meta: ProjectVideoMeta): { tplId: string; cfg:
 
 /**
  * Whether the composer's primary button is enabled. Blocked: a Custom topic page without a topic, and a
- * Blog post or Feature video without a target (the builder would otherwise guess one). A Project demo
- * video always generates.
+ * Blog post or Feature video without a target (the builder would otherwise guess one). A Project demo,
+ * TikTok or Marketing video always generates (their target is optional).
  */
 export function canGenerate(kind: 'page' | 'video', tplId: string, cfg: PageCfg | VideoCfg): boolean {
-  if (kind === 'video') return 'kind' in cfg && (cfg.kind === 'Project demo' || cfg.target.trim() !== '')
+  if (kind === 'video') {
+    return 'kind' in cfg && (cfg.kind === 'Project demo' || OPTIONAL_TARGET_KINDS.includes(cfg.kind) || cfg.target.trim() !== '')
+  }
   if (pageTemplate(tplId).page !== 'Custom topic') return true
   return 'topic' in cfg && cfg.topic.trim() !== ''
 }

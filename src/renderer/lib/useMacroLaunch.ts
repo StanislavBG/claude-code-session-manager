@@ -14,6 +14,9 @@
  * (useMacroCostPrompt) before minting: cancel mints nothing; run as-is keeps the
  * persona's effort; run lower carries the chosen effort into the launch — the Epic's
  * per-Epic `effort` override for chat macros, the dispatchJob payload for job macros.
+ *
+ * A job press may ask for the review stage (`opts.reviewStage`, the Demo Video composer's Review first):
+ * the dispatchJob payload then carries `reviewStage: true`; otherwise the field is omitted.
  */
 import { useState } from 'react'
 import { usePromptSessions } from '../state/promptSessions'
@@ -32,7 +35,13 @@ export function useMacroLaunch(
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const [launching, setLaunching] = useState<string | null>(null)
 
-  const launch = async (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => {
+  const launch = async (
+    macro: Macro,
+    extraInstructions?: string,
+    inputValues?: Record<string, string>,
+    opts?: { reviewStage?: boolean },
+  ) => {
+    const reviewStage = opts?.reviewStage === true
     if (!activeTabCwd || launching) return
 
     // A project Video tool joins only its own Epic (stamped macroId); built-ins keep the tag + agent match.
@@ -115,6 +124,7 @@ export function useMacroLaunch(
             extraInstructions: trimmedExtra || undefined,
             ...(effort ? { effort } : {}),
             inputValues: values,
+            ...(reviewStage ? { reviewStage: true } : {}),
           })
           if (!res.ok) throw new Error(res.error)
         } else {
@@ -131,6 +141,7 @@ export function useMacroLaunch(
             extraInstructions: trimmedExtra || undefined,
             ...(effort ? { effort } : {}),
             inputValues: values,
+            ...(reviewStage ? { reviewStage: true } : {}),
           })
         }
         toast.success(`${macro.label} is building in the background`)

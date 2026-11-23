@@ -446,7 +446,7 @@ describe('VideosPane Generate and Regenerate', () => {
     expect(tid('project-home-composer')).toBeNull()
     click(tid('project-home-generate'))
     expect(tid('composer-title')?.textContent).toBe('Generate video')
-    expect(tids('composer-template').map((t) => t.getAttribute('data-tpl'))).toEqual(['demo', 'feature', 'blog', 'whiteboard', 'custom'])
+    expect(tids('composer-template').map((t) => t.getAttribute('data-tpl'))).toEqual(['demo', 'feature', 'blog', 'whiteboard', 'custom', 'tiktok', 'marketing'])
     click(tid('composer-generate'))
     expect(onLaunch.mock.calls).toEqual([[DEMO, DEMO_LINES]])
     expect(tid('project-home-composer')).toBeNull()

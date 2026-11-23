@@ -17,6 +17,8 @@ import {
   pageTemplate,
   videoCfgFromEntry,
   videoDefaults,
+  videoLengthFor,
+  videoLengthsFor,
   videoPromptLines,
   videoTemplate,
 } from '../composerTemplates'
@@ -95,13 +97,28 @@ describe('template data — prototype lines 779–856, verbatim', () => {
     }
   })
 
-  it('VIDEO_TEMPLATES are the prototype VIDEO_TPLS in order', () => {
-    expect(VIDEO_TEMPLATES.map((t) => t.id)).toEqual(['demo', 'feature', 'blog', 'whiteboard', 'custom'])
+  it('VIDEO_TEMPLATES are the prototype VIDEO_TPLS in order, then TikTok and Marketing', () => {
+    expect(VIDEO_TEMPLATES.map((t) => t.id)).toEqual(['demo', 'feature', 'blog', 'whiteboard', 'custom', 'tiktok', 'marketing'])
     // One deliberate deviation: the Feature template names no default feature (a blank target blocks Generate).
     // Second deviation: chips are project-neutral (checked below), so they are not compared.
-    const noChips = ({ chips: _chips, ...rest }: Row) => rest
+    // Third: `review` (Review first) is not in the prototype; every prototype template has it off.
+    const noChips = ({ chips: _chips, review: _review, ...rest }: Row) => rest
     const proto = protoRows('VIDEO_TPLS').map((r) => (r.id === 'feature' ? { ...r, target: '' } : r))
-    expect(VIDEO_TEMPLATES.map((t) => noChips({ ...t }))).toEqual(proto.map(noChips))
+    const fromProto = VIDEO_TEMPLATES.slice(0, proto.length)
+    expect(fromProto.map((t) => noChips({ ...t }))).toEqual(proto.map(noChips))
+    for (const t of fromProto) expect(t.review).toBe(false)
+  })
+
+  it('adds a TikTok and a Marketing template: 30 s, Character on, Review first on for TikTok only', () => {
+    expect(videoTemplate('tiktok')).toMatchObject({ kind: 'TikTok', length: 30, mascot: true, review: true, target: '' })
+    expect(videoTemplate('marketing')).toMatchObject({ kind: 'Marketing', length: 30, mascot: true, review: false, target: '' })
+    for (const id of ['tiktok', 'marketing']) {
+      const t = videoTemplate(id)
+      expect(t.name.length).toBeGreaterThan(0)
+      expect(t.blurb.length).toBeGreaterThan(0)
+      expect(t.scenes.length).toBeGreaterThan(0)
+      expect(t.chips.length).toBeGreaterThan(0)
+    }
   })
 
   it('option lists are the prototype AUDIENCES / LENGTHS / READS / KINDS / STYLES', () => {
@@ -113,7 +130,8 @@ describe('template data — prototype lines 779–856, verbatim', () => {
       { id: 'git', label: 'Git log' },
     ])
     expect(READ_SOURCES).toEqual(prototypeConst('READS'))
-    expect(VIDEO_KINDS).toEqual(prototypeConst('KINDS'))
+    expect(VIDEO_KINDS).toEqual([...(prototypeConst('KINDS') as string[]), 'TikTok', 'Marketing'])
+    expect(VIDEO_KINDS).toEqual(['Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing'])
     expect(VIDEO_STYLES.map(({ id, note, sample }) => ({ id, note, sample }))).toEqual(
       protoRows('STYLES').map(({ id, note, sample }) => ({ id, note, sample })),
     )
@@ -171,6 +189,7 @@ describe('pageDefaults / videoDefaults', () => {
       style: 'Auto',
       length: 30,
       mascot: true,
+      review: false,
       focus: '',
     })
     expect(videoDefaults('feature')).toEqual({
@@ -179,8 +198,28 @@ describe('pageDefaults / videoDefaults', () => {
       style: 'Kinetic typography',
       length: 30,
       mascot: false,
+      review: false,
       focus: '',
     })
+    expect(videoDefaults('tiktok')).toMatchObject({ kind: 'TikTok', length: 30, mascot: true, review: true })
+    expect(videoDefaults('marketing')).toMatchObject({ kind: 'Marketing', length: 30, mascot: true, review: false })
+  })
+
+  it('turn Character on when the project has a persona, and leave it at the template default otherwise', () => {
+    expect(videoDefaults('feature', { hasPersona: true }).mascot).toBe(true)
+    expect(videoDefaults('blog', { hasPersona: true }).mascot).toBe(true)
+    expect(videoDefaults('feature', { hasPersona: false }).mascot).toBe(false)
+    expect(videoDefaults('feature', {}).mascot).toBe(false)
+    expect(videoDefaults('demo', { hasPersona: false }).mascot).toBe(true)
+  })
+
+  it('15 s is a TikTok-only length', () => {
+    expect(videoLengthsFor('TikTok')).toEqual([15, 30, 60])
+    for (const k of ['Project demo', 'Blog post', 'Feature', 'Marketing'] as const) expect(videoLengthsFor(k)).toEqual([30, 60])
+    expect(videoLengthFor('TikTok', 15)).toBe(15)
+    expect(videoLengthFor('Marketing', 15)).toBe(30)
+    expect(videoLengthFor('Project demo', 15)).toBe(30)
+    expect(videoLengthFor('Feature', 60)).toBe(60)
   })
 
   it('hand back a fresh reads array, never the template’s own', () => {
@@ -270,6 +309,30 @@ describe('videoPromptLines', () => {
     ])
     expect(videoPromptLines({ ...videoDefaults('whiteboard'), focus: '  ' })).toHaveLength(4)
   })
+
+  it('names TikTok / Marketing kinds and an optional target, and never emits a Review line', () => {
+    expect(videoPromptLines(videoDefaults('tiktok'))).toEqual([
+      'Video kind: TikTok',
+      'Video style: Fun',
+      'Video length: 30',
+      'Character: on',
+    ])
+    expect(videoPromptLines({ ...videoDefaults('tiktok'), length: 15, target: 'docs/series.md' })).toEqual([
+      'Video kind: TikTok',
+      'Video target: docs/series.md',
+      'Video style: Fun',
+      'Video length: 15',
+      'Character: on',
+    ])
+    expect(videoPromptLines({ ...videoDefaults('marketing'), target: 'https://example.com' })[1]).toBe(
+      'Video target: https://example.com',
+    )
+    for (const t of VIDEO_TEMPLATES) {
+      for (const review of [true, false]) {
+        expect(videoPromptLines({ ...videoDefaults(t.id), review }).some((l) => /^review\b/i.test(l))).toBe(false)
+      }
+    }
+  })
 })
 
 describe('pageCfgFromEntry', () => {
@@ -297,15 +360,15 @@ describe('videoCfgFromEntry', () => {
   it('maps the kind slug to its display name and template, keeping style, with an empty target when none was recorded', () => {
     expect(videoCfgFromEntry(videoMeta({ kind: 'project-demo', style: 'Fun', lengthS: 30, character: 'otter' }))).toEqual({
       tplId: 'demo',
-      cfg: { kind: 'Project demo', target: '', style: 'Fun', length: 30, mascot: true, focus: '' },
+      cfg: { kind: 'Project demo', target: '', style: 'Fun', length: 30, mascot: true, review: false, focus: '' },
     })
     expect(videoCfgFromEntry(videoMeta({ kind: 'blog-post', style: 'Professional', lengthS: 60 }))).toEqual({
       tplId: 'blog',
-      cfg: { kind: 'Blog post', target: '', style: 'Professional', length: 60, mascot: false, focus: '' },
+      cfg: { kind: 'Blog post', target: '', style: 'Professional', length: 60, mascot: false, review: false, focus: '' },
     })
     expect(videoCfgFromEntry(videoMeta({ kind: 'feature', style: 'Kinetic typography' }))).toEqual({
       tplId: 'feature',
-      cfg: { kind: 'Feature', target: '', style: 'Kinetic typography', length: 30, mascot: false, focus: '' },
+      cfg: { kind: 'Feature', target: '', style: 'Kinetic typography', length: 30, mascot: false, review: false, focus: '' },
     })
   })
 
@@ -328,6 +391,18 @@ describe('videoCfgFromEntry', () => {
   it('turns Character on for any non-null meta.character', () => {
     expect(videoCfgFromEntry(videoMeta({ character: '' })).cfg.mascot).toBe(true)
     expect(videoCfgFromEntry(videoMeta({ character: null })).cfg.mascot).toBe(false)
+  })
+
+  it('maps tiktok and marketing to their templates, with Review first at the template default', () => {
+    expect(videoCfgFromEntry(videoMeta({ kind: 'tiktok', lengthS: 15, character: 'Pip' }))).toEqual({
+      tplId: 'tiktok',
+      cfg: { kind: 'TikTok', target: '', style: 'Fun', length: 15, mascot: true, review: true, focus: '' },
+    })
+    expect(videoCfgFromEntry(videoMeta({ kind: 'tiktok', lengthS: 28 })).cfg.length).toBe(30)
+    expect(videoCfgFromEntry(videoMeta({ kind: 'marketing', lengthS: 12, target: 'https://x.dev' }))).toMatchObject({
+      tplId: 'marketing',
+      cfg: { kind: 'Marketing', target: 'https://x.dev', length: 30, review: false },
+    })
   })
 
   it('reads an unrecognised kind as a Project demo', () => {
@@ -358,6 +433,15 @@ describe('canGenerate', () => {
     for (const id of ['demo', 'whiteboard', 'custom']) expect(canGenerate('video', id, videoDefaults(id))).toBe(true)
     expect(canGenerate('video', 'demo', { ...videoDefaults('demo'), kind: 'Blog post', target: '  ' })).toBe(false)
     expect(VIDEO_TEMPLATES.find((t) => t.id === 'feature')?.target).toBe('')
+  })
+
+  it('is true for TikTok and Marketing with or without a target', () => {
+    for (const id of ['tiktok', 'marketing']) {
+      expect(canGenerate('video', id, videoDefaults(id))).toBe(true)
+      expect(canGenerate('video', id, { ...videoDefaults(id), target: '   ' })).toBe(true)
+      expect(canGenerate('video', id, { ...videoDefaults(id), target: 'x' })).toBe(true)
+    }
+    expect(canGenerate('video', 'demo', { ...videoDefaults('demo'), kind: 'TikTok', target: '' })).toBe(true)
   })
 })
 

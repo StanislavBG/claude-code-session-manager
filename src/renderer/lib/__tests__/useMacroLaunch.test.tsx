@@ -48,19 +48,22 @@ async function mount(el: React.ReactElement) {
   return container
 }
 
-function Harness({ personas, onSelect, extraInstructions, macroOver, inputValues }: {
+function Harness({ personas, onSelect, extraInstructions, macroOver, inputValues, reviewStage }: {
   personas: AgentPersona[]
   onSelect: (id: string) => void
   extraInstructions?: string
   macroOver?: Partial<Macro>
   inputValues?: Record<string, string>
+  reviewStage?: boolean
 }) {
   const { launch, launching } = useMacroLaunch(onSelect, personas)
   return (
     <button
       type="button"
       disabled={launching !== null}
-      onClick={() => void launch(macro(macroOver), extraInstructions, inputValues)}
+      onClick={() =>
+        void launch(macro(macroOver), extraInstructions, inputValues, reviewStage === undefined ? undefined : { reviewStage })
+      }
     >
       Launch
     </button>
@@ -502,6 +505,41 @@ describe('useMacroLaunch', () => {
       await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
       const created = Object.values(usePromptSessions.getState().sessions)[0]
       expect(dispatchJob.mock.calls[0][0]).toEqual({ cwd: CWD, macroId: 'm1', epicId: created.id, extraInstructions: 'more', inputValues: {} })
+    })
+
+    it('review press, existing Epic: dispatchJob gets reviewStage: true', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'act1' })
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active' } as any },
+      })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} extraInstructions="more" reviewStage />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob).toHaveBeenCalledWith({ cwd: CWD, macroId: 'm1', epicId: 'act1', extraInstructions: 'more', inputValues: {}, reviewStage: true })
+    })
+
+    it('review press, mint path: dispatchJob gets reviewStage: true', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e' })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} extraInstructions="more" reviewStage />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      const created = Object.values(usePromptSessions.getState().sessions)[0]
+      expect(dispatchJob.mock.calls[0][0]).toEqual({ cwd: CWD, macroId: 'm1', epicId: created.id, extraInstructions: 'more', inputValues: {}, reviewStage: true })
+    })
+
+    it('no review asked (false or absent): the payload omits reviewStage on both paths', async () => {
+      dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e' })
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} reviewStage={false} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob.mock.calls[0][0]).not.toHaveProperty('reviewStage')
+      dispatchJob.mockClear()
+      act(() => root?.unmount())
+      container?.remove()
+      usePromptSessions.setState({
+        sessions: { act1: { id: 'act1', cwd: CWD, tag: 'bug', agentType: 'scout', status: 'active' } as any },
+      })
+      const el2 = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ job: JOB }} />)
+      await act(async () => { (el2.querySelector('button') as HTMLButtonElement).click() })
+      expect(dispatchJob.mock.calls[0][0]).toMatchObject({ epicId: 'act1' })
+      expect(dispatchJob.mock.calls[0][0]).not.toHaveProperty('reviewStage')
     })
 
     it('a built-in job macro still joins an active Epic by tag + agent', async () => {

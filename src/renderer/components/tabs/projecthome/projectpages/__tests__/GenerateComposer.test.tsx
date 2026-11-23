@@ -56,6 +56,9 @@ const readsOn = () =>
 const style = (id: string) => $(`[data-testid="composer-style"][data-style="${id}"]`)
 const pickedStyle = () => $('[data-testid="composer-style"][aria-pressed="true"]').dataset.style
 const character = () => $('[data-testid="composer-character"]')
+const review = () => $('[data-testid="video-review-toggle"]')
+const lengthOptions = () =>
+  Array.from(document.querySelectorAll<HTMLElement>('[role="group"][aria-label="Length"] button')).map((b) => b.textContent)
 const chip = (label: string) => $(`[data-testid="composer-chip"][data-chip="${label}"]`)
 
 /** React tracks input values itself — set through the native setter, then fire `input`. */
@@ -270,7 +273,7 @@ describe('GenerateComposer — Regenerate mode', () => {
 
   it('pre-fills a video from its recorded settings and passes the entry id', () => {
     const onGenerate = vi.fn<OnGenerate>()
-    const cfg: VideoCfg = { kind: 'Project demo', target: '', style: 'Fun', length: 60, mascot: false, focus: '' }
+    const cfg: VideoCfg = { kind: 'Project demo', target: '', style: 'Fun', length: 60, mascot: false, review: false, focus: '' }
     mount(
       <GenerateComposer
         kind="video"
@@ -286,6 +289,103 @@ describe('GenerateComposer — Regenerate mode', () => {
     expect(onGenerate.mock.calls).toEqual([
       [['Video kind: Project demo', 'Video style: Fun', 'Video length: 60', 'Character: off'], 'project-demo'],
     ])
+  })
+})
+
+describe('GenerateComposer — TikTok and Marketing', () => {
+  it('lists the two new templates and the two new kinds', () => {
+    mount(<GenerateComposer kind="video" onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
+    expect(Array.from(document.querySelectorAll<HTMLElement>('[data-testid="composer-template"]')).map((b) => b.dataset.tpl)).toEqual([
+      'demo', 'feature', 'blog', 'whiteboard', 'custom', 'tiktok', 'marketing',
+    ])
+    expect(Array.from(document.querySelectorAll('[role="group"][aria-label="Kind"] button')).map((b) => b.textContent)).toEqual([
+      'Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing',
+    ])
+  })
+
+  it('offers 15 seconds only for TikTok; leaving TikTok resets 15 s to 30 s', () => {
+    mount(<GenerateComposer kind="video" initialTplId="tiktok" onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
+    expect(lengthOptions()).toEqual(['15 seconds', '30 seconds', '1 minute'])
+    click(option('Length', '15 seconds'))
+    expect(lines()).toContain('Video length: 15')
+    click(option('Kind', 'Marketing'))
+    expect(lengthOptions()).toEqual(['30 seconds', '1 minute'])
+    expect(picked('Length')).toBe('30 seconds')
+    expect(lines()).toContain('Video length: 30')
+    click(option('Kind', 'TikTok'))
+    click(option('Length', '1 minute'))
+    click(option('Kind', 'Feature'))
+    expect(picked('Length')).toBe('1 minute')
+  })
+
+  it('shows an optional target per kind; both kinds generate without one', () => {
+    mount(<GenerateComposer kind="video" initialTplId="tiktok" onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
+    expect(target().placeholder).toBe('Series brief path (optional)')
+    expect($('[data-testid="composer-target-label"]').textContent).toBe('Series brief · optional')
+    expect(generate().disabled).toBe(false)
+    click(template('marketing'))
+    expect(target().placeholder).toBe('Landing page URL (optional)')
+    expect($('[data-testid="composer-target-label"]').textContent).toBe('Landing page · optional')
+    expect(generate().disabled).toBe(false)
+    type(target(), 'https://example.com')
+    expect(lines()).toContain('Video target: https://example.com')
+  })
+
+  it('Review first defaults on for TikTok only and rides along as { review: true }, never as a line', () => {
+    const onGenerate = vi.fn<OnGenerate>()
+    mount(<GenerateComposer kind="video" initialTplId="tiktok" onClose={vi.fn()} onGenerate={onGenerate} />)
+    expect(review().getAttribute('aria-checked')).toBe('true')
+    expect(lines()).not.toMatch(/Review/)
+    click(generate())
+    expect(onGenerate.mock.calls).toEqual([
+      [['Video kind: TikTok', 'Video style: Fun', 'Video length: 30', 'Character: on'], undefined, { review: true }],
+    ])
+
+    onGenerate.mockClear()
+    click(template('marketing'))
+    expect(review().getAttribute('aria-checked')).toBe('false')
+    click(generate())
+    expect(onGenerate.mock.calls).toEqual([
+      [['Video kind: Marketing', 'Video style: Kinetic typography', 'Video length: 30', 'Character: on']],
+    ])
+
+    onGenerate.mockClear()
+    click(template('demo'))
+    expect(review().getAttribute('aria-checked')).toBe('false')
+    click(review())
+    click(generate())
+    expect(onGenerate.mock.calls[0][2]).toEqual({ review: true })
+    expect(onGenerate.mock.calls[0][0].some((l) => l.startsWith('Review'))).toBe(false)
+  })
+
+  it('passes review with the entry id when regenerating', () => {
+    const onGenerate = vi.fn<OnGenerate>()
+    const cfg: VideoCfg = { kind: 'TikTok', target: '', style: 'Fun', length: 15, mascot: true, review: true, focus: '' }
+    mount(
+      <GenerateComposer
+        kind="video"
+        regen={{ entryId: 'tt-1', title: 'TikTok', tplId: 'tiktok', cfg }}
+        onClose={vi.fn()}
+        onGenerate={onGenerate}
+      />,
+    )
+    expect(picked('Length')).toBe('15 seconds')
+    click(generate())
+    expect(onGenerate.mock.calls[0].slice(1)).toEqual(['tt-1', { review: true }])
+  })
+
+  it('labels Character with the persona name and starts it on when the project has a persona', () => {
+    mount(<GenerateComposer kind="video" initialTplId="feature" personaName="Pip" onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
+    expect(character().textContent).toBe('Persona: Pip')
+    expect(character().getAttribute('aria-checked')).toBe('true')
+    click(template('blog'))
+    expect(character().getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps the mascot label and template defaults without a persona', () => {
+    mount(<GenerateComposer kind="video" initialTplId="feature" onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
+    expect(character().textContent).toBe('Use the project’s mascot')
+    expect(character().getAttribute('aria-checked')).toBe('false')
   })
 })
 

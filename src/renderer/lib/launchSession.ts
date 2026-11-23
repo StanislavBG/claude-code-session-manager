@@ -30,6 +30,8 @@ export interface LaunchSessionInput {
   extraInstructions?: string
   /** run 'job' only: the press's {{name}} input values, forwarded to macros.dispatchJob. */
   inputValues?: Record<string, string>
+  /** run 'job' only: true = the build stops for a human review before the final save (dispatchJob `reviewStage`). */
+  reviewStage?: boolean
   /** Per-launch effort chosen in the high-effort cost dialog; omitted keeps the persona's. */
   effort?: string
   /** Default true. false = mint only: the Epic stays proposed (no approve, no opening prompt, no job). */
@@ -69,7 +71,7 @@ export async function resolvePersonaBody(
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, inputValues, effort, approve = true, origin, handoff, model, packs, agentCli, agentCliModel, developLoop } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, inputValues, reviewStage, effort, approve = true, origin, handoff, model, packs, agentCli, agentCliModel, developLoop } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   // Absent = launch with no agent; an explicit empty name is a caller bug.
   if (agentName !== undefined && !agentName) throw new Error('launchSession: agentName must not be empty')
@@ -114,7 +116,7 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(`"${title}" session was created but its build was not queued (approval not saved: ${msg}) — press it again to retry.`)
     }
-    const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions, ...(effort ? { effort } : {}), ...(inputValues ? { inputValues } : {}) })
+    const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions, ...(effort ? { effort } : {}), ...(inputValues ? { inputValues } : {}), ...(reviewStage ? { reviewStage: true } : {}) })
     if (!res.ok) throw new Error(`"${title}" session was created but its build was not queued: ${res.error} — press it again to retry.`)
     return { epicId: session.id, claudeSessionId: session.claudeSessionId }
   }

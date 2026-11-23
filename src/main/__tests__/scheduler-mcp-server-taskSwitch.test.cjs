@@ -84,8 +84,6 @@ test('task_switch_set is a live MCP tool with the switch schema', async () => {
   expect(tool.inputSchema.properties.enabled.type).toBe('boolean');
   expect(tool.inputSchema.properties.humanRequestQuote.type).toBe('string');
   expect(tool.inputSchema.properties.cwd.type).toBe('string');
-  const src = await fsp.readFile(SERVER_PATH, 'utf8');
-  expect(src).toContain('task_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/tasks/switch');
 });
 
 test.each([

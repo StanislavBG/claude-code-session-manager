@@ -676,8 +676,10 @@ async function dismissCancelled(slug, cwd, opts = {}) {
     for (const edit of cascadeEdits) {
       const d = s.jobs.find((x) => x.slug === edit.slug && x.cwd === job.cwd);
       if (!d || d.status !== 'pending') continue;
-      if (queueAccess.transitionJob && !queueAccess.transitionJob(d, 'failed', { reason: edit.reason, source: 'queueOps:dismissCancelled' })) continue;
-      if (!queueAccess.transitionJob) d.status = 'failed';
+      // Every job status write goes through transitionJob (lint:status-writes); an
+      // access binding without its own falls back to the chokepoint module directly.
+      const transition = queueAccess.transitionJob || require('./lib/scheduler/scheduleJobTransitions.cjs').transitionJob;
+      if (!transition(d, 'failed', { reason: edit.reason, source: 'queueOps:dismissCancelled' })) continue;
       d.error = edit.reason;
       d.cancelledAt = cancelledAt;
       d.finishedAt = cancelledAt;

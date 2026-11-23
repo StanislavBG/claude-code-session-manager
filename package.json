@@ -73,6 +73,7 @@
     "lint:readme": "node scripts/check-readme.cjs",
     "readme:build": "node scripts/check-readme.cjs --write",
     "lint:paths": "node scripts/check-ops-path-literals.cjs",
+    "lint:status-writes": "node scripts/check-status-writes.cjs",
     "lint:event-log": "node scripts/check-event-log-writers.cjs",
     "lint:any": "node scripts/check-explicit-any.cjs",
     "lint:main-ts-check": "node scripts/check-main-ts-check.cjs",
@@ -83,7 +84,7 @@
     "lint:e2e-budget": "node scripts/check-e2e-budget.cjs",
     "lint:scroll": "node scripts/check-scroll-into-view.cjs",
     "check:frame": "node scripts/frame-integrity.mjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:event-log && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage && npm run lint:test-smells && npm run lint:page-stewards && npm run lint:e2e-budget && npm run lint:scroll && npm run lint:readme",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:status-writes && npm run lint:event-log && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage && npm run lint:test-smells && npm run lint:page-stewards && npm run lint:e2e-budget && npm run lint:scroll && npm run lint:readme",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [

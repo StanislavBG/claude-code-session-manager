@@ -23,10 +23,10 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v9 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v10 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(9);
-  expect(macro.priorPrompts).toHaveLength(8);
+  expect(macro.builtinVersion).toBe(10);
+  expect(macro.priorPrompts).toHaveLength(9);
   expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
   for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
@@ -157,8 +157,8 @@ test('built-in macros declare a frozen background job', () => {
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(9);
-  expect(demo.priorPrompts).toHaveLength(8);
+  expect(demo.builtinVersion).toBe(10);
+  expect(demo.priorPrompts).toHaveLength(9);
 });
 
 // The Project Home Generate composer always sends these lines (design-mocks/project-home-v2/DESIGN_SPEC.md
@@ -184,8 +184,8 @@ test('Project Home v3 honours the Audience, Length and Read from lines and keeps
 
 test('Demo Video v7+ honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(demo.builtinVersion).toBe(9);
-  expect(demo.priorPrompts).toHaveLength(8);
+  expect(demo.builtinVersion).toBe(10);
+  expect(demo.priorPrompts).toHaveLength(9);
   // priorPrompts[5] is the shipped v6 prompt, byte for byte; v7 kept every v6 clause
   expect(sha256(demo.priorPrompts[5])).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
   for (const clause of priorClauses(demo.priorPrompts[5]).slice(1)) expect(demo.prompt).toContain(clause);
@@ -213,16 +213,29 @@ const V9_INSERT = "A Blog post or Feature kind with no 'Video target:' line, or 
 test('Demo Video v9 adds the no-target and target-claims rules and keeps every v8 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
   const v8 = demo.priorPrompts[7];
+  const v9 = demo.priorPrompts[8];
   // priorPrompts[7] is the shipped v8 prompt, byte for byte
   expect(sha256(v8)).toBe('089a1e9e8903f232ef1881cfaf556d334cef19169391275f0c0d88eeab1d6b7d');
   for (const t of ['never pick a post or feature yourself', 'save the kind as project-demo', 'check each one against the code']) {
-    expect(demo.prompt).toContain(t);
+    expect(v9).toContain(t);
   }
-  for (const clause of priorClauses(v8)) expect(demo.prompt).toContain(clause);
+  for (const clause of priorClauses(v8)) expect(v9).toContain(clause);
   // v9 is v8 with exactly the inserted text after the Project demo sentence
   const anchor = "A 'Video kind: Project demo' line means that same whole-project demo.";
   expect(v8.split(anchor)).toHaveLength(2);
-  expect(demo.prompt).toBe(v8.replace(anchor, `${anchor} ${V9_INSERT}`));
+  expect(v9).toBe(v8.replace(anchor, `${anchor} ${V9_INSERT}`));
+});
+
+test('Demo Video v10 names the TikTok and Marketing kinds and the project persona voice, and keeps every v9 clause', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const v9 = demo.priorPrompts[8];
+  // priorPrompts[8] is the shipped v9 prompt, byte for byte
+  expect(sha256(v9)).toBe('a6cb8cbd45475025db8aec5248b74d66afefde22f57c933042d5ac53a26b1989');
+  for (const clause of priorClauses(v9)) expect(demo.prompt).toContain(clause);
+  for (const t of ["'Video kind: TikTok'", "'Video kind: Marketing'", 'kind-tiktok.md', 'kind-marketing.md', 'kind tiktok', 'kind marketing',
+    'MP4', 'poster', 'post caption', 'never falls back to a Project demo', "saved project persona's voice", 'no fallback', 'a failure fails the run', 'Kokoro']) {
+    expect(demo.prompt).toContain(t);
+  }
 });
 
 test('every built-in macro keeps builtinVersion === priorPrompts.length + 1', () => {
@@ -234,7 +247,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
-  expect(sha('builtin-demo-video')).toBe('e805a63d2c034933a141d89d412f7208402b586b6660db4f72604f89795e252d');
+  expect(sha('builtin-demo-video')).toBe('551f50b8e6278d7c5c5096630808fb79ce4694e422b7624cf606822230440587');
   expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');
@@ -372,7 +385,8 @@ test('persona v13: step 8 lists exactly the meta keys the save route accepts', (
   for (const key of ['`title`', '`kind`', '`target`', '`style`', '`lengthS`', '`character`', '`sources`', '`report`', '`macroVersion`', '`seedVersion`', '`model`', '`effort`', '{claim, source, ref}', 'verbatim span', 'rejected']) {
     expect(step8).toContain(key);
   }
-  expect(step8).not.toContain('audience');
+  expect(step8).not.toContain('`audience`');
+  expect(step8).toContain('`post`');
   expect(step8).not.toContain('the Kind and Target lines');
 });
 
@@ -380,4 +394,43 @@ test('persona and the builtin-demo-video prompt share the no-guess rule', () => 
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
   expect(demo.prompt).toContain('never pick a post or feature yourself');
   expect(personaBody()).toContain('never pick a post or feature yourself');
+});
+
+test('persona v15: the project persona hosts the video and its command voice has no fallback', () => {
+  const raw = fs.readFileSync(personaPath, 'utf8');
+  const fm = frontmatter(raw);
+  expect(Number(fm.seedVersion) >= 15).toBe(true);
+  expect(fm.tools.split(',').map((t) => t.trim())).toContain('mcp__session-manager-scheduler__project_video_review_write');
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(27000);
+  const pp = personaSection('project_persona');
+  for (const needle of ['_character', 'Character: off', '`name`', '`character.js`', '`palette`', '`personality`', '`who`', '`speech`', '`readingLevel`', '`neverSay`']) {
+    expect(pp).toContain(needle);
+  }
+  const audio = personaSection('audio_policy');
+  for (const needle of ["`voice.engine: 'command'`", 'character.cjs speak', '$SM_PROJECT_ROOT', 'Never use Kokoro', 'the run fails', "`voice.engine: 'kokoro'`", '`voice.id`', 'af_heart']) {
+    expect(audio).toContain(needle);
+  }
+  for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
+});
+
+test('persona v15: TikTok and Marketing follow the kit playbooks and export MP4 + poster', () => {
+  const kt = personaSection('kind_and_target');
+  for (const needle of ['TikTok', 'Marketing', 'kind-tiktok.md', 'kind-marketing.md', '`tiktok`', '`marketing`', 'never fall back to a Project demo']) {
+    expect(kt).toContain(needle);
+  }
+  const kit = personaSection('kit');
+  for (const needle of ['export.cjs', 'character.cjs', '1080x1920']) expect(kit).toContain(needle);
+  const proc = personaSection('process');
+  for (const needle of ['`mp4Path`', '`posterPath`', '`tiktok` input', 'postCaption: meta.post.caption', '`post`']) expect(proc).toContain(needle);
+  const out = personaSection('output_contract');
+  for (const needle of ['9:16, 1080x1920', 'smDemo.beats', 'smDemo.cuts']) expect(out).toContain(needle);
+});
+
+test('persona v15: the review stage saves review material only, and an approval builds exactly that', () => {
+  const proc = personaSection('process');
+  for (const needle of ["'Review stage:'", 'project_video_review_write', 'exactly once', 'storyboard', 'timing', 'post caption', 'contact sheet',
+    'Build and save no video', "'Review: approved by the owner at ...'", 'videos/<Entry id>/review/material.json', 'build exactly that',
+    "'Review: changes requested: <note>'", 'redo the review material']) {
+    expect(proc).toContain(needle);
+  }
 });

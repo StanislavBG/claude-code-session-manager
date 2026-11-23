@@ -606,6 +606,21 @@ test('demo-video-builder: the bundled tools line carries the demo video save too
   expect(fm.tools.split(',').map((t) => t.trim())).toContain(DVB_TOOL);
 });
 
+test('demo-video-builder: the bundled tools line carries the review save tool, and its body is sent whole', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { personaBodyHash } = require('../seedAgentPersonas.cjs');
+  const { SHIPPED_PERSONA_SEEDS } = require('../lib/persona-macro/shippedPersonaSeeds.cjs');
+  const { AGENT_BODY_CHAR_CAP } = require('../lib/claude/agentModelResolve.cjs');
+  const raw = dvbBundled();
+  const { fm, body } = splitFrontmatter(raw);
+  expect(fm.tools.split(',').map((t) => t.trim())).toContain('mcp__session-manager-scheduler__project_video_review_write');
+  expect(Number(fm.seedVersion)).toBeGreaterThan(14);
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(27000);
+  // longer than the intake cap, so only the shipped hash keeps it whole
+  expect(body.trim().length).toBeGreaterThan(AGENT_BODY_CHAR_CAP);
+  expect(SHIPPED_PERSONA_SEEDS['demo-video-builder'].map((e) => e.bodySha256)).toContain(personaBodyHash(raw));
+});
+
 // --- competitive-researcher (Haiku collector for the Competitor matrix macro) ---
 
 test('competitive-researcher: seeded file parses with model haiku and the collector contract', async () => {

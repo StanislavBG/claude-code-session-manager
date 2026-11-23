@@ -375,3 +375,24 @@ test('a non-reviewable built-in ignores reviewStage and review', async () => {
     expect(q.goal).not.toContain('Review stage:');
   }
 });
+
+test('every review line the Demo Video dispatch writes is one the demo-video-builder persona acts on', async () => {
+  const fs = require('node:fs');
+  const persona = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'seed', 'agents', 'demo-video-builder.md'), 'utf8');
+  const goals = [];
+  for (const args of [
+    { reviewStage: true },
+    { review: { decision: 'approved', at: '2026-11-23T10:00:00Z' } },
+    { review: { decision: 'changes', note: 'more cats' } },
+  ]) {
+    const d = mk();
+    await dispatchMacroJob({ ...base, extraInstructions: 'Replace entry: vid-b1', ...args }, d);
+    goals.push(d.createPrd.mock.calls[0][0].goal);
+  }
+  expect(goals[0]).toContain('Review stage:');
+  expect(goals[1]).toContain('Review: approved by the owner at ');
+  expect(goals[2]).toContain('Review: changes requested: ');
+  for (const phrase of ["'Review stage:'", "'Review: approved by the owner at ...'", "'Review: changes requested: <note>'", 'project_video_review_write', 'review/material.json']) {
+    expect(persona).toContain(phrase);
+  }
+});

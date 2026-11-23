@@ -129,7 +129,7 @@ const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSin
 const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
-const { harvestPlanRecords } = require('./lib/scheduler/planRecordHarvest.cjs');
+const { harvestPlanRecords, saveValidatorVerdicts } = require('./lib/scheduler/planRecordHarvest.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/feedback-remote/localAdminHttp.cjs');
@@ -4036,14 +4036,19 @@ async function notifyOriginatingTab(job, {
     } else if (epicId && checkedVerdict && job.cwd) {
       // PRD 3614: keep the checked object beside the Markdown plan record.
       try {
-        const file = opsPath(job.cwd, 'plan-records', epicId, `${bareSlug(job.slug)}.verdicts.json`);
-        assertOpsWrite(file, 'scheduler');
-        await writeVerdictsFile(file, {
-          validator: job.slug,
-          runId: job.runId || null,
-          at: new Date().toISOString(),
-          schedulerVerdict: checkedVerdict.schedulerVerdict,
-          verdicts: checkedVerdict.verdicts,
+        // Writes the file, then appends validator.verdict to the Epic's event log.
+        await saveValidatorVerdicts({
+          cwd: job.cwd,
+          epicId,
+          validateSlug: bareSlug(job.slug),
+          write: writeVerdictsFile,
+          record: {
+            validator: job.slug,
+            runId: job.runId || null,
+            at: new Date().toISOString(),
+            schedulerVerdict: checkedVerdict.schedulerVerdict,
+            verdicts: checkedVerdict.verdicts,
+          },
         });
       } catch (e) {
         console.error('[scheduler] notifyOriginatingTab verdicts file write error', job?.slug, e);

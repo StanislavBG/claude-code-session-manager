@@ -13,6 +13,7 @@
  */
 
 const fsp = require('node:fs/promises');
+const path = require('node:path');
 const { z } = require('zod');
 const { writeJsonAtomic } = require('../util/atomicFs.cjs');
 const { needsYouPath } = require('../scheduler/schedulerPaths.cjs');
@@ -49,6 +50,11 @@ function refSchema(label, required) {
 const TitleSchema = z.string().min(1).max(200).refine((s) => !/[\r\n]/.test(s), 'title must be one line');
 const WhySchema = z.string().max(1000);
 const LinkSchema = z.string().max(2000).regex(/^https?:\/\//, 'link must start with http:// or https://');
+// Optional Epic link: an item posted with both epicId and cwd (the Epic's
+// project root) also lands on that Epic's event log (job.needs_input on create,
+// human.answer on answer). Stored only when given, so unlinked items keep their shape.
+const EpicIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/, 'epicId must be a safe Epic id');
+const CwdSchema = z.string().min(1).max(4096).refine((s) => path.isAbsolute(s), 'cwd must be an absolute path');
 const OptionsSchema = z.array(z.string().min(1).max(80)).min(2).max(5)
   .refine((opts) => new Set(opts).size === opts.length, 'options must be distinct');
 
@@ -60,6 +66,8 @@ const NeedsYouPostSchema = z.object({
   link: LinkSchema.optional(),
   options: OptionsSchema.optional(),
   externalRef: refSchema('externalRef', false),
+  epicId: EpicIdSchema.optional(),
+  cwd: CwdSchema.optional(),
 });
 
 const KeySchema = z.object({ app: AppSchema, id: refSchema('id', true) });
@@ -77,6 +85,8 @@ const StoredItemSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   answeredAt: z.string().nullable(),
+  epicId: EpicIdSchema.optional(),
+  cwd: CwdSchema.optional(),
 });
 
 /** @typedef {z.infer<typeof StoredItemSchema>} NeedsYouItem */
@@ -152,6 +162,22 @@ async function writeStore(filePath, items) {
   await writeJsonAtomic(filePath, { version: STORE_VERSION, items: prune(items, Date.now()) });
 }
 
+/**
+ * Append one event for an item linked to an Epic (epicId + cwd). Never throws:
+ * an append failure is logged so the store write it follows still succeeds.
+ * @param {NeedsYouItem} item
+ * @param {Record<string, unknown>} event
+ */
+async function emitItemEvent(item, event) {
+  if (!item || !item.epicId || !item.cwd) return;
+  try {
+    const { appendEpicEvent } = require('../epic/epicEventLog.cjs');
+    await appendEpicEvent(item.cwd, item.epicId, event);
+  } catch (err) {
+    console.error('[needsYouStore] event append failed', item.epicId, event.kind, err && err.message ? err.message : err);
+  }
+}
+
 function limitError(message) {
   const err = /** @type {Error & { code: string }} */ (new Error(message));
   err.code = 'NEEDS_YOU_LIMIT';
@@ -187,7 +213,7 @@ function callerKey(item) {
 async function postNeedsYou(input) {
   const data = NeedsYouPostSchema.parse(input);
   const filePath = needsYouPath();
-  return serialize(async () => {
+  const result = await serialize(async () => {
     const items = await loadForWrite(filePath);
     const now = new Date().toISOString();
     const existing = items.find((it) => it.app === data.app && it.id === data.id);
@@ -225,11 +251,22 @@ async function postNeedsYou(input) {
       createdAt: now,
       updatedAt: now,
       answeredAt: null,
+      ...(data.epicId && data.cwd ? { epicId: data.epicId, cwd: data.cwd } : {}),
     };
     items.push(item);
     await writeStore(filePath, items);
     return { item, created: true, changed: true };
   });
+  if (result.created) {
+    await emitItemEvent(result.item, {
+      kind: 'job.needs_input',
+      app: result.item.app,
+      id: result.item.id,
+      title: result.item.title,
+      ...(result.item.options ? { options: result.item.options } : {}),
+    });
+  }
+  return result;
 }
 
 /** Apply `mutate` to the open item app+id; returns it, or null when none / mutate refuses. */
@@ -264,13 +301,17 @@ async function withdrawNeedsYou({ app, id }) {
  * @returns {Promise<NeedsYouItem | null>}
  */
 async function answerNeedsYou({ app, id, answer }) {
-  return updateOpen(app, id, (item, now) => {
-    if (!item.options || typeof answer !== 'string' || !item.options.includes(answer)) return false;
-    item.status = 'answered';
-    item.answer = answer;
-    item.answeredAt = now;
+  const item = await updateOpen(app, id, (it, now) => {
+    if (!it.options || typeof answer !== 'string' || !it.options.includes(answer)) return false;
+    it.status = 'answered';
+    it.answer = answer;
+    it.answeredAt = now;
     return true;
   });
+  if (item) {
+    await emitItemEvent(item, { kind: 'human.answer', app: item.app, id: item.id, answer: item.answer });
+  }
+  return item;
 }
 
 module.exports = {

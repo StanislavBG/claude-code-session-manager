@@ -12,7 +12,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { OPS_ROOT_DIR, opsPath, checkOpsWrite, assertOpsWrite } = require('../opsOwnership.cjs');
-const { writeTextAtomicSync } = require('../util/atomicFs.cjs');
+const { writeTextAtomicSync, writeJsonAtomic } = require('../util/atomicFs.cjs');
 
 const NAMESPACE = 'plan-records';
 const WRITER = 'scheduler';
@@ -105,4 +105,34 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, fsImpl = fs } = 
   return { copied, skipped };
 }
 
-module.exports = { harvestPlanRecords, MAX_BYTES, NAME_RE, EPIC_ID_RE };
+/**
+ * saveValidatorVerdicts({ cwd, epicId, validateSlug, record, write, appendEvent })
+ *   → Promise<string> (the written path)
+ * Writes `plan-records/<epicId>/<validateSlug>.verdicts.json` as the namespace
+ * owner, then appends one `validator.verdict` { validateSlug, verdicts:
+ * [{ prd, verdict }] } event to the Epic's event log. A write failure rejects
+ * (the caller logs it); an event-log append failure is logged, never thrown.
+ */
+async function saveValidatorVerdicts({
+  cwd, epicId, validateSlug, record, write = writeJsonAtomic, appendEvent = null,
+} = {}) {
+  const file = opsPath(cwd, NAMESPACE, epicId, `${validateSlug}.verdicts.json`);
+  assertOpsWrite(file, WRITER);
+  await write(file, record);
+  try {
+    const append = appendEvent || require('../epic/epicEventLog.cjs').appendEpicEvent;
+    const rows = Array.isArray(record && record.verdicts) ? record.verdicts : [];
+    await append(cwd, epicId, {
+      kind: 'validator.verdict',
+      validateSlug,
+      verdicts: rows
+        .filter((v) => v && typeof v === 'object')
+        .map((v) => ({ prd: String(v.prd ?? ''), verdict: String(v.verdict ?? '') })),
+    });
+  } catch (e) {
+    console.error('[planRecordHarvest] validator.verdict event append failed', epicId, validateSlug, errMsg(e));
+  }
+  return file;
+}
+
+module.exports = { harvestPlanRecords, saveValidatorVerdicts, MAX_BYTES, NAME_RE, EPIC_ID_RE };

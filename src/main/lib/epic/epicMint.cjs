@@ -527,6 +527,19 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
     fs.mkdirSync(prdDir, { recursive: true });
     telemetryCounters.trackEpicCreate({ tag, agentType });
+    // Durable Epic event log: one epic.minted per successful mint. Awaited so
+    // the event is on disk when ensureEpic resolves; a failure is logged, never thrown.
+    try {
+      const append = deps.appendEpicEvent || require('./epicEventLog.cjs').appendEpicEvent;
+      await append(cwd, epicId, {
+        kind: 'epic.minted',
+        agentType: agentType ?? null,
+        tag: tag ?? null,
+        agentSnapshotId: pinned ? pinned.id : null,
+      });
+    } catch (err) {
+      console.error('[epicMint] epic.minted event append failed', epicId, err && err.message ? err.message : err);
+    }
     return { epicId, prdDir, created: true };
   });
 }

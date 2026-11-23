@@ -24,3 +24,18 @@ test('kind-tiktok.md is seeded and states the TikTok format, contract and rules'
 test('kind-tiktok.md holds no other project\'s own content', () => {
   expect(readTiktok()).not.toMatch(/burrow|bilko|veggie|garden/i);
 });
+
+const MARKETING_MD = path.join(KIT_DIR, 'kind-marketing.md');
+const readMarketing = () => fs.readFileSync(MARKETING_MD, 'utf8');
+
+test('kind-marketing.md is seeded and states the Marketing format, grounding and kit rules', () => {
+  expect(kitFiles()).toContain('kind-marketing.md');
+  const md = readMarketing();
+  for (const s of ['16:9', 'verbatim', 'capture.cjs', 'call to action', '-14 LUFS']) {
+    expect(md).toContain(s);
+  }
+});
+
+test('kind-marketing.md holds no other project\'s own content', () => {
+  expect(readMarketing()).not.toMatch(/burrow|bilko|veggie|garden/i);
+});

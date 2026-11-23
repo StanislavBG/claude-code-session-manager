@@ -30,7 +30,7 @@ test('fresh install copies all kit files and the stamp', async () => {
   const { srcDir, destDir } = setup();
   const r = await seedDemoVideoKit({ logger: quiet, srcDir, destDir, kitVersion: '1' });
   expect(r).toEqual({ seeded: true, reason: 'fresh' });
-  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md']);
+  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md']);
   for (const f of KIT_FILES) expect(fs.readFileSync(path.join(destDir, f), 'utf8')).toBe(`// ${f} v1\n`);
   expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe('1');
 });
@@ -73,6 +73,7 @@ test('a fresh install copies the kind playbooks with the modules', async () => {
   const destDir = path.join(root, 'kit');
   await seedDemoVideoKit({ logger: quiet, destDir });
   expect(fs.readFileSync(path.join(destDir, 'kind-tiktok.md'))).toEqual(fs.readFileSync(path.join(__dirname, '..', 'kind-tiktok.md')));
+  expect(fs.readFileSync(path.join(destDir, 'kind-marketing.md'))).toEqual(fs.readFileSync(path.join(__dirname, '..', 'kind-marketing.md')));
 });
 
 test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
@@ -87,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 7 (the kind-tiktok.md playbook must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('7');
+test('KIT_VERSION is bumped to 8 (the kind-marketing.md playbook must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('8');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

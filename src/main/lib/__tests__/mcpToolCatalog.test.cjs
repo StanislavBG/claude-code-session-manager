@@ -492,3 +492,16 @@ test('scheduler_update_prd frontmatter patch accepts riskTools (array of strings
   expect(rt.description).toMatch(/empty array clears/i);
   expect(rt.description).toMatch(/scheduler_create_prd/);
 });
+
+test('video kinds, exports and persona: project_video_write, project_character_write and session_manager_help name them', () => {
+  const textOf = (n) => composeDescription(MCP_TOOL_CATALOG.find((e) => e.name === n));
+  const video = textOf('project_video_write');
+  for (const s of ["'tiktok'", "'marketing'", 'A tiktok video must be 9:16', 'mp4Path', 'posterPath', 'video.mp4', 'poster.png',
+    'entry folder', 'meta.post']) expect(video).toContain(s);
+  const persona = textOf('project_character_write');
+  for (const s of ['name', 'character.js', 'palette', 'voice', 'personality', 'who', 'speech', 'readingLevel', 'neverSay',
+    'hosts every Demo Video unless a press turns Character off', 'no fallback', 'fails the run']) expect(persona).toContain(s);
+  const help = textOf('session_manager_help');
+  for (const s of ['Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing', 'Review first', 'default on for TikTok',
+    'series brief']) expect(help).toContain(s);
+});

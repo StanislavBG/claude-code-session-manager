@@ -80,8 +80,8 @@ and a `“<title>” is ready` toast fires when it is done.
 
 `Generate page` / `Generate video` open `GenerateComposer.tsx` on that kind's templates
 (`composerTemplates.ts`): Overview, How it works, FAQ, Getting started, What’s new and Custom
-topic for pages; Project demo, Feature spotlight, Blog post, Whiteboard explainer and Custom for
-videos. Picking a template resets every setting to its defaults; Focus is free text with
+topic for pages; Project demo, Feature spotlight, Blog post, Whiteboard explainer, TikTok,
+Marketing and Custom for videos. Picking a template resets every setting to its defaults; Focus is free text with
 `+ <chip>` suggestions. `pagePromptLines` / `videoPromptLines` turn the form into the builder's
 prompt lines, which the pane sends, joined with `\n`, as the macro's `extraInstructions`:
 
@@ -94,13 +94,20 @@ Read from: <README & docs, Source tree, Git log — the selected ones, in this o
 ```
 
 ```text
-Video kind: Project demo | Blog post | Feature
-Video target: <post path or URL | feature name>      (Blog post / Feature only, when set)
+Video kind: Project demo | Blog post | Feature | TikTok | Marketing
+Video target: <post path or URL | feature name | series brief path | landing page URL>   (not for Project demo; when set)
 Video style: Auto | Professional | Fun | Animated whiteboard | Kinetic typography
-Video length: 30 | 60
+Video length: 15 | 30 | 60                               (15 for TikTok only)
 Character: on | off
 <Focus text, when set>
 ```
+
+A TikTok's target (a series brief path) and a Marketing's target (a landing page URL) are
+optional; Blog post and Feature need one. **Review first** (`VideoCfg.review`, on by default only
+for the TikTok template) is never a prompt line: it travels as the press's `reviewStage`, and
+`builtin-demo-video` (`job.reviewable`) then runs the review stage described in
+[Review step](#review-step-videosidreview) before the final save. When the project has a saved
+persona, the Character toggle reads `Persona: <name>` and starts on.
 
 Both library macro prompts read these lines. `fitInstructions` (`PagesPane.tsx`) keeps the
 joined text within the 4000-character `extraInstructions` cap (`src/main/ipcSchemas.cjs`),
@@ -174,9 +181,10 @@ the project. A project holds many of each; the folder listing IS the library (no
 project-pages/
   knowledge/<id>/index.html + meta.json     one folder per Knowledge Page
   videos/<id>/index.html   + meta.json      one folder per video
-  videos/<id>/review/                       the human review step of a Project Video tool (below)
-  videos/_character/                        shared mascot assets; never an entry, skipped by
-                                            the lister, the watcher, rename and delete
+  videos/<id>/video.mp4    + poster.png     the MP4 + PNG poster export (required for tiktok / marketing)
+  videos/<id>/review/                       the human review step (a Project Video tool, or Demo Video's Review first)
+  videos/_character/                        the project persona (character.json + character.js); never an
+                                            entry, skipped by the lister, the watcher, rename and delete
 ```
 
 `<id>` matches `ENTRY_ID_RE` (`/^[a-z0-9][a-z0-9-]{0,63}$/`, `src/main/ipcSchemas.cjs`);
@@ -188,8 +196,9 @@ atomically as writer `project-home`. Storage code: `src/main/lib/project-pages/p
 
 - **Knowledge** (`projectPageMeta`): `id`, `title` (1-120), `topic` (<=120), `createdAt`
   (ISO datetime), `model` (<=60).
-- **Video** (`projectVideoMeta`): `id`, `title` (1-120), `kind` (`project-demo` | `blog-post`
-  | `feature` | `episode`), `target` (<=300, optional), `aspect` (`16:9` | `9:16`, optional), `style` (<=40), `lengthS` (int 5-60), `createdAt`, `character` (<=80 or
+- **Video** (`projectVideoMeta`): `id`, `title` (1-120), `kind` (`PROJECT_VIDEO_KINDS`: `project-demo` | `blog-post`
+  | `feature` | `episode` | `tiktok` | `marketing`), `target` (<=300, optional), `aspect` (`16:9` | `9:16`, optional),
+  `post` (`{caption, audience}`, tiktok only, optional), `style` (<=40), `lengthS` (int 5-60), `createdAt`, `character` (<=80 or
   null), `sources[]` (`{claim, source, ref}`, <=40), `report` (`lufs`, `truePeakDb`,
   `speechS`, `readingGrade`, all number|null; `checks[]` of `{id, ok, detail}`; `bytes`),
   `macroVersion`, `seedVersion`, `model`, `effort`. The server stamps `id`, `createdAt` and
@@ -200,11 +209,38 @@ atomically as writer `project-home`. Storage code: `src/main/lib/project-pages/p
   (`projectHomeAdminRoutes.cjs`); any other value is refused, no tag means `16:9`, and a caller's
   `meta.aspect` is ignored — the document is the one source. An entry with no `aspect` (older
   entries) is treated as `16:9`.
+- **`kind: 'tiktok'` / `'marketing'`** are Demo Video's vertical short and landing-page video.
+  How to make each is the kit's playbook (`src/main/lib/demo-video-kit/kind-tiktok.md`,
+  `kind-marketing.md`); what a save must carry is `validateExportKind`
+  (`projectHomeAdminRoutes.cjs`): both exports, aspect `9:16` for tiktok and `16:9` for
+  marketing, and for tiktok `meta.post` plus every `TIKTOK_CHECK_IDS` check
+  (`demo-video-kit/checks.cjs`) passing. The MP4 is rendered by `demo-video-kit/export.cjs`.
+
+### Exports: video.mp4 + poster.png
+
+`project_video_write`'s `mp4Path` + `posterPath` (given together or not at all) are read by the
+MCP server and sent as `exports.mp4Base64` / `exports.posterBase64` — top level, never inside
+`meta`. The route checks the MP4's `ftyp` and the PNG signature and the size caps
+(`MAX_EXPORT_MP4_BYTES_PER_30S`, `MAX_EXPORT_POSTER_BYTES`), then writes them under the fixed
+names `video.mp4` and `poster.png` in the entry folder. `listLibrary` reports each video's
+`exports: {mp4, poster}` (absolute path or null).
+
+### Persona: videos/_character/
+
+The project persona is `character.json` + `character.js`, written only by
+`project_character_write` (`POST /admin/project-home/character/write`; 409 unless `replace`).
+`character.json` holds `name`, `palette`, `voice` and an optional `personality`
+(`who`, `speech`, `readingLevel`, `neverSay[]`); the look is drawn by `character.js`. The field
+rules are `validateCharacterJson` in `demo-video-kit/character.cjs` — read them there.
+`listLibrary` returns `persona: {name} | null`. A saved persona hosts every Demo Video unless the
+press turns Character off; a `command` voice speaks every line through `speakLines` with no
+fallback voice, so a failing command fails the run.
 
 ### Review step: videos/<id>/review/
 
 A Project Video tool (`surface: 'project-video'`, one project's tool, shown only in its Project
-Home ▸ Video) whose `job` has `review: true` stops after a first run for a human review. Its
+Home ▸ Video) whose `job` has `review: true` stops after a first run for a human review; so does
+a Demo Video press with Review first on (`stageFor` in `macroJobDispatch.cjs`). Its
 records live in the entry's `review/` folder, written as writer `project-home` through
 `lib/project-pages/videoReview.cjs` (the one writer; tmp+rename via `util/atomicFs.cjs`):
 

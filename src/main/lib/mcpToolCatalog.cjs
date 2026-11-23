@@ -443,8 +443,9 @@ const MCP_TOOL_CATALOG = [
     purpose: "Write one video for this project's Project Home — ONE self-contained HTML/JS document identified by `videoId` — "
       + "via the session-manager app's admin API. Writing an existing videoId replaces that video. `kind` is 'project-demo', 'blog-post', "
       + "'feature', 'episode' (an episode of a series, e.g. from a Project Video tool), 'tiktok' (9:16) or 'marketing' (16:9). The video is 16:9 by default; a vertical 9:16 video "
-      + 'declares <meta name="sm-demo-aspect" content="9:16"> in its head. A tiktok or marketing save also needs `mp4Path` + `posterPath` '
-      + '(the exported MP4 and PNG poster); a tiktok save also needs meta.post and every TikTok check passing.',
+      + 'declares <meta name="sm-demo-aspect" content="9:16"> in its head. A tiktok video must be 9:16 and a marketing video 16:9 (the save is refused otherwise). '
+      + 'A tiktok or marketing save also needs `mp4Path` + `posterPath` (the exported MP4 and PNG poster, required for both kinds), saved as video.mp4 and poster.png '
+      + 'in the entry folder beside index.html and meta.json; a tiktok save also needs meta.post {caption, audience} and every TikTok check passing in meta.report.checks.',
     summary: 'Save one self-contained HTML video for Project Home.',
     whenToUse: 'Use when asked to make a project video (demo, marketing). Compose the whole document yourself (inline <style>/<script>, '
       + 'data: URIs for assets, CSS/JS-driven animation) from what is really true about the project, declare `kind` and `lengthS`, '
@@ -461,7 +462,8 @@ const MCP_TOOL_CATALOG = [
       meta: {},
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
-      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2 MiB per started 30 s of lengthS).',
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2 MiB per started 30 s of lengthS). '
+      + 'Give `mp4Path` (absolute .mp4, <= 24 MiB per started 30 s of lengthS) and `posterPath` (absolute .png, <= 4 MiB) together or not at all.',
   },
   {
     name: 'project_demo_video_write',
@@ -494,8 +496,12 @@ const MCP_TOOL_CATALOG = [
     name: 'project_character_write',
     requiredOneOf: [['js', 'jsPath']],
     group: 'project-home',
-    purpose: "Write this project's reusable video character — a `character.json` descriptor plus a `character.js` drawing module — to "
-      + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same mascot.",
+    purpose: "Write this project's persona — its reusable video character: a `character.json` descriptor plus a `character.js` drawing module — to "
+      + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same host. "
+      + 'The descriptor holds `name`, `palette` (a non-empty list of colors), `voice` ({engine: \'kokoro\', id} or {engine: \'command\', command: [...] '
+      + 'with {text} and {out} placeholders}) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
+      + 'A saved persona hosts every Demo Video unless a press turns Character off. A command voice speaks every narration line with no fallback voice: '
+      + 'a failing command (non-zero exit or no WAV written) fails the run.',
     summary: "Save the reusable character used in this project's videos.",
     whenToUse: 'Use once per project, before building character videos, to save the mascot you designed. Pass `json` (the descriptor object or its JSON text) '
       + 'and the module as `js` or — preferred for large modules — an absolute `jsPath` to a local .js file. Pass `replace: true` only to deliberately overwrite an existing character.',
@@ -503,7 +509,12 @@ const MCP_TOOL_CATALOG = [
       + 'and for invalid `json`, `js` over 300KB, or `js` with remote references or network-capable APIs.',
     exampleArgs: {
       cwd: '/home/bilko/Projects/session-manager',
-      json: { name: 'Bit', voice: 'af_heart' },
+      json: {
+        name: 'Bit',
+        palette: ['#ffcc00', '#222222'],
+        voice: { engine: 'kokoro', id: 'af_heart' },
+        personality: { who: 'A curious robot guide', speech: 'Short, warm sentences', readingLevel: 'grade 6', neverSay: ['synergy'] },
+      },
       js: 'export function draw(ctx, t) {}',
       replace: false,
     },
@@ -767,7 +778,11 @@ const MCP_TOOL_CATALOG = [
       + "documentation and never a substitute for calling the tool it describes.",
     exampleArgs: {},
     notes: 'Always returns the static catalog even when the session-manager app is not running — only the '
-      + '`readiness` section of the response depends on the admin API being reachable.',
+      + '`readiness` section of the response depends on the admin API being reachable. '
+      + 'Demo Video (Project Home ▸ Videos ▸ Generate video) makes five kinds: Project demo, Blog post, Feature, TikTok (9:16) and Marketing (16:9). '
+      + 'Its Review first option (default on for TikTok, off for the others) stops the job for a human review before the final save. '
+      + 'A TikTok takes an optional series brief path as its target, a Marketing an optional landing page URL. '
+      + 'TikTok and Marketing save an MP4 and poster with project_video_write; a persona saved with project_character_write hosts every Demo Video unless Character is off.',
   },
 ];
 

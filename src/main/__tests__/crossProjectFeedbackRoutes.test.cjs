@@ -68,7 +68,7 @@ async function mkProject({ managed = true } = {}) {
   // hermetic instead of depending on the host's ~/.claude/agents/.
   const agentsDir = path.join(cwd, '.claude', 'agents');
   fs.mkdirSync(agentsDir, { recursive: true });
-  fs.writeFileSync(path.join(agentsDir, 'architect.md'), '---\nname: architect\n---\nFixture persona for tests.\n');
+  fs.writeFileSync(path.join(agentsDir, 'architect.md'), '---\nname: architect\nmodel: sonnet\n---\nFixture persona for tests.\n');
   return fs.realpathSync(cwd);
 }
 

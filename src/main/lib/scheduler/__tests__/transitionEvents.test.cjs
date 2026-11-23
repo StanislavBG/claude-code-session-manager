@@ -19,13 +19,17 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const flush = () => new Promise((r) => setTimeout(r, 20));
+// Deterministic wait: poll the epic event log until `kinds` events reach `n`.
+const waitForEvents = (epicId, n, opts) => vi.waitFor(async () => {
+  const { events } = await epicEventLog.readEpicEvents(tmp, epicId, opts);
+  expect(events).toHaveLength(n);
+}, { timeout: 2000 });
 
 test('accepted edge appends job.status_changed { slug, from, to, reason, source }', async () => {
   const job = { slug: '9001-x', status: 'pending', cwd: tmp, epicId: 'epic-abc' };
   expect(transitionJob(job, 'running', { reason: 'dispatch', source: 'test:dispatch' })).toBe(true);
   expect(job.status).toBe('running');
-  await flush();
+  await waitForEvents('epic-abc', 1);
   const { events } = await epicEventLog.readEpicEvents(tmp, 'epic-abc');
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({
@@ -72,8 +76,7 @@ test('append failure (rejection or sync throw) never blocks the transition; logg
   const a = { slug: '9001-x', status: 'pending', cwd: tmp, epicId: 'epic-abc' };
   expect(transitionJob(a, 'running', { reason: 'dispatch', source: 'test' })).toBe(true);
   expect(a.status).toBe('running');
-  await flush();
-  expect(errSpy).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(errSpy).toHaveBeenCalledTimes(1), { timeout: 2000 });
   expect(errSpy.mock.calls[0][0]).toMatchObject({ cwd: tmp, scope: 'scheduler', level: 'error', epicId: 'epic-abc' });
   expect(errSpy.mock.calls[0][0].message).toMatch(/job\.status_changed.*disk full/);
 
@@ -88,7 +91,7 @@ test('append failure (rejection or sync throw) never blocks the transition; logg
 test('emitJobEvent writes job.queued { slug, agentType } for the queue-row insert', async () => {
   emitJobEvent({ slug: '9003-z', cwd: tmp, epicId: 'epic-abc', agentType: 'dev-lead' },
     { kind: 'job.queued', slug: '9003-z', agentType: 'dev-lead' });
-  await flush();
+  await waitForEvents('epic-abc', 1, { kinds: ['job.queued'] });
   const { events } = await epicEventLog.readEpicEvents(tmp, 'epic-abc', { kinds: ['job.queued'] });
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ kind: 'job.queued', slug: '9003-z', agentType: 'dev-lead' });

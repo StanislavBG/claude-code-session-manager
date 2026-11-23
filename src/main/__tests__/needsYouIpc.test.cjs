@@ -53,8 +53,8 @@ const post = (over = {}) => store.postNeedsYou({
   app: 'portfolio', id: 'q-1', title: 'Pick a plan', options: ['yes', 'no'], ...over,
 });
 
-test('registers both channels', () => {
-  expect([...handlers.keys()].sort()).toEqual(['needsYou:answer', 'needsYou:list']);
+test('registers all three channels', () => {
+  expect([...handlers.keys()].sort()).toEqual(['needsYou:answer', 'needsYou:list', 'scheduler:confirm-tool']);
 });
 
 test('needsYou:list returns only the open items', async () => {

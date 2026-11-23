@@ -51,7 +51,7 @@ function putEntry(cwd, kind, id, meta, html = '<p>x</p>') {
 
 test('empty project lists nothing', async () => {
   const cwd = await mkTmpCwd();
-  expect(await listLibrary(cwd)).toEqual({ knowledge: [], videos: [] });
+  expect(await listLibrary(cwd)).toEqual({ knowledge: [], videos: [], persona: null });
 });
 
 test('sorts newest first by createdAt, falling back to mtime', async () => {
@@ -167,4 +167,55 @@ test('a failed copy leaves the legacy file in place', async () => {
   await migrateLegacy(cwd).catch(() => {});
   expect(fs.existsSync(path.join(pagesDir(cwd), 'home.html'))).toBe(true);
   expect(fs.existsSync(path.join(pagesDir(cwd), 'home.html.migrated'))).toBe(false);
+});
+
+function putCharacter(cwd, json, js) {
+  const d = path.join(pagesDir(cwd), 'videos', '_character');
+  fs.mkdirSync(d, { recursive: true });
+  if (json !== undefined) fs.writeFileSync(path.join(d, 'character.json'), typeof json === 'string' ? json : JSON.stringify(json));
+  if (js !== undefined) fs.writeFileSync(path.join(d, 'character.js'), js);
+}
+const validCharacter = { name: 'Burrow', palette: ['#fff'], voice: { engine: 'kokoro', id: 'af_heart' } };
+
+test('persona is { name } when videos/_character holds a valid character', async () => {
+  const cwd = await mkTmpCwd();
+  putCharacter(cwd, validCharacter, 'export default 1;');
+  expect((await listLibrary(cwd)).persona).toEqual({ name: 'Burrow' });
+});
+
+test('persona is null when there is no character', async () => {
+  const cwd = await mkTmpCwd();
+  putEntry(cwd, 'videos', 'a', videoMeta('a', '2026-01-01T00:00:00.000Z'));
+  expect((await listLibrary(cwd)).persona).toBeNull();
+});
+
+test('invalid or half-written character reads as null and never throws', async () => {
+  for (const [json, js] of [
+    [{ name: '', palette: ['#fff'], voice: { engine: 'kokoro', id: 'x' } }, 'x'], // invalid json
+    ['{not json', 'x'], // garbled json
+    [validCharacter, undefined], // half-written: no character.js
+    [validCharacter, '   '], // empty js
+    [undefined, 'x'], // half-written: no character.json
+  ]) {
+    const cwd = await mkTmpCwd();
+    putCharacter(cwd, json, js);
+    await expect(listLibrary(cwd)).resolves.toMatchObject({ persona: null });
+  }
+});
+
+test('video entries carry exports paths when video.mp4 / poster.png exist', async () => {
+  const cwd = await mkTmpCwd();
+  putEntry(cwd, 'videos', 'with', videoMeta('with', '2026-02-01T00:00:00.000Z'));
+  putEntry(cwd, 'videos', 'half', videoMeta('half', '2026-01-15T00:00:00.000Z'));
+  putEntry(cwd, 'videos', 'without', videoMeta('without', '2026-01-01T00:00:00.000Z'));
+  const vdir = (id) => path.join(pagesDir(cwd), 'videos', id);
+  fs.writeFileSync(path.join(vdir('with'), 'video.mp4'), 'mp4');
+  fs.writeFileSync(path.join(vdir('with'), 'poster.png'), 'png');
+  fs.writeFileSync(path.join(vdir('half'), 'poster.png'), 'png');
+  fs.mkdirSync(path.join(vdir('without'), 'video.mp4')); // a directory is not an export
+  const byId = Object.fromEntries((await listLibrary(cwd)).videos.map((e) => [e.id, e]));
+  expect(byId.with.exports).toEqual({ mp4: path.join(vdir('with'), 'video.mp4'), poster: path.join(vdir('with'), 'poster.png') });
+  expect(path.isAbsolute(byId.with.exports.mp4)).toBe(true);
+  expect(byId.half.exports).toEqual({ mp4: null, poster: path.join(vdir('half'), 'poster.png') });
+  expect(byId.without.exports).toEqual({ mp4: null, poster: null });
 });

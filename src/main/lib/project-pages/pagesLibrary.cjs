@@ -17,6 +17,7 @@ const crypto = require('node:crypto');
 const config = require('../../config.cjs');
 const { opsPath, assertOpsWrite } = require('../opsOwnership.cjs');
 const { injectPlayerBridge } = require('./playerBridge.cjs');
+const { readCharacter } = require('../demo-video-kit/character.cjs');
 
 const WRITER = 'project-home';
 const MAX_ENTRIES = 500;
@@ -57,7 +58,37 @@ async function readEntry(kind, dir, id) {
   } catch (e) {
     error = oneLine(e && e.code === 'ENOENT' ? 'meta.json missing' : `meta.json unreadable: ${e && e.message}`);
   }
-  return { id, path: file, mtimeMs: st.mtimeMs, meta, error };
+  const entry = { id, path: file, mtimeMs: st.mtimeMs, meta, error };
+  if (kind === 'videos') entry.exports = await readExports(dir);
+  return entry;
+}
+
+/** Absolute path of `file` when it exists as a regular file, else null. */
+async function fileOrNull(file) {
+  try {
+    return (await fsp.stat(file)).isFile() ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fixed names the save route writes: video.mp4 + poster.png. */
+async function readExports(dir) {
+  const [mp4, poster] = await Promise.all([
+    fileOrNull(path.join(dir, 'video.mp4')),
+    fileOrNull(path.join(dir, 'poster.png')),
+  ]);
+  return { mp4, poster };
+}
+
+/** -> { name } when videos/_character holds a valid character, else null. Never throws. */
+function readPersona(realCwd) {
+  try {
+    const c = readCharacter(realCwd);
+    return c ? { name: c.json.name } : null;
+  } catch {
+    return null;
+  }
 }
 
 async function listKind(realCwd, kind) {
@@ -79,10 +110,11 @@ async function listKind(realCwd, kind) {
   return entries.sort((a, b) => stamp(b) - stamp(a));
 }
 
-/** -> { knowledge: Entry[], videos: Entry[] }, newest first. */
+/** -> { knowledge: Entry[], videos: Entry[] (with exports), persona: {name}|null }, newest first. */
 async function listLibrary(realCwd) {
   const [knowledge, videos] = await Promise.all(KINDS.map((k) => listKind(realCwd, k)));
-  return { knowledge, videos };
+  const persona = pagesPath(realCwd) ? readPersona(realCwd) : null;
+  return { knowledge, videos, persona };
 }
 
 /** Write `outBuf` into `destDir/index.html` + meta; true only after a byte-equal verified write. */

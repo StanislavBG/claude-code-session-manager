@@ -1906,9 +1906,13 @@ export interface ProjectLibraryEntry<M> {
   mtimeMs: number;
   meta: M | null;
   error: string | null;
+  /** Video entries only: absolute paths of the exported videos/<id>/video.mp4 and poster.png, null when absent. */
+  exports?: { mp4: string | null; poster: string | null };
 }
 
 export interface ProjectPagesGetResult {
+  /** The project's saved persona (videos/_character), or null when none/invalid. */
+  persona?: { name: string } | null;
   /** Knowledge pages, newest first. */
   knowledge: ProjectLibraryEntry<ProjectPageMeta>[];
   /** Videos, newest first. */

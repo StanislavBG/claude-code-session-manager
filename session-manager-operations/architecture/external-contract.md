@@ -266,7 +266,7 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 | `status` | string or null | Lifecycle: `proposed`, `active` or `completed`. |
 | `state` | string | The outside state (table below). Use this, not `status`. |
 | `blocked` | object or null | Set only when `state` is `blocked`: `{ kind, prds: [{ slug, reason }] }`. |
-| `prds` | object | Counts of the Epic's scheduler jobs: `total`, `pending`, `running`, `completed`, `failed`, `needsReview`, `quarantined`, `skipped`. |
+| `prds` | object | Counts of the Epic's scheduler jobs: `total`, `pending`, `running`, `completed`, `failed`, `needsReview`, `quarantined`, `skipped`, `cancelled`. `cancelled` counts PRDs a human cancelled (their row reads `failed` or `needs_review`); a cancelled PRD never counts as `failed` or `needsReview` and never blocks the Epic. |
 | `verified` | string[] | PRD slugs whose newest validator verdict is VERIFIED. |
 | `refuted` | `{ slug, reason }[]` | PRD slugs whose newest verdict is REFUTED. `reason` is at most 300 characters. |
 | `unvalidated` | string[] | Completed work PRDs with no verdict newer than their finish. |

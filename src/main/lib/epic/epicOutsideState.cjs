@@ -135,7 +135,7 @@ function reviewReason(row) {
  * @returns {{
  *   state: string,
  *   blocked: null | { kind: 'refuted'|'failed'|'needs_review'|'quarantined', prds: { slug: string, reason: string }[] },
- *   prds: { total: number, pending: number, running: number, completed: number, failed: number, needsReview: number, quarantined: number, skipped: number },
+ *   prds: { total: number, pending: number, running: number, completed: number, failed: number, needsReview: number, quarantined: number, skipped: number, cancelled: number },
  *   verified: string[],
  *   refuted: { slug: string, reason: string }[],
  *   unvalidated: string[],
@@ -151,9 +151,11 @@ function computeEpicOutsideState(args) {
 
   const known = [...buildKnownPrds(session, events, allRows).values()];
 
-  const prds = { total: 0, pending: 0, running: 0, completed: 0, failed: 0, needsReview: 0, quarantined: 0, skipped: 0 };
+  const prds = { total: 0, pending: 0, running: 0, completed: 0, failed: 0, needsReview: 0, quarantined: 0, skipped: 0, cancelled: 0 };
   for (const k of known) {
     prds.total++;
+    // A cancelled row (failed/needs_review by a cancel) is its own count, never failed or needsReview.
+    if (k.row && isCancelledRow(k.row)) { prds.cancelled++; continue; }
     switch (k.status) {
       case 'pending': prds.pending++; break;
       case 'running':

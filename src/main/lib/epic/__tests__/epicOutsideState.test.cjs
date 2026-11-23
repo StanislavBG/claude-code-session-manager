@@ -81,7 +81,7 @@ test('verified: every completed work job has a newer verified verdict', () => {
   const r = run({ jobs: [job('1-a', 'completed'), job('2-validate-plan', 'completed'), job('3-c', 'skipped')], events: [verdict('a', 5)] });
   expect(r.state).toBe('verified');
   expect(r.unvalidated).toEqual([]);
-  expect(r.prds).toEqual({ total: 3, pending: 0, running: 0, completed: 2, failed: 0, needsReview: 0, quarantined: 0, skipped: 1 });
+  expect(r.prds).toEqual({ total: 3, pending: 0, running: 0, completed: 2, failed: 0, needsReview: 0, quarantined: 0, skipped: 1, cancelled: 0 });
 });
 
 test('open: no jobs at all, and only-validator jobs', () => {
@@ -105,6 +105,30 @@ test('a cancelled failed row does not block', () => {
   const r = run({ jobs: rows, events: [verdict('c', 5)] });
   expect(r.blocked).toBeNull();
   expect(r.state).toBe('verified');
+});
+
+test('a cancelled failed row (cancelledAt) counts as cancelled, not failed', () => {
+  const r = run({ jobs: [job('1-a', 'failed', { cancelledAt: at(2), error: 'cancelled' }), job('2-b', 'completed'), job('3-c', 'completed')], events: [verdict('b', 5), verdict('c', 5)] });
+  expect(r.state).toBe('verified');
+  expect(r.blocked).toBeNull();
+  expect(r.prds).toMatchObject({ total: 3, completed: 2, failed: 0, needsReview: 0, cancelled: 1 });
+});
+
+test('a cancelled row known only by statusHistory remote:cancelJob counts as cancelled', () => {
+  const r = run({ jobs: [job('1-a', 'failed', { statusHistory: [{ to: 'failed', source: 'remote:cancelJob' }] }), job('2-b', 'completed')], events: [verdict('b', 5)] });
+  expect(r.state).toBe('verified');
+  expect(r.blocked).toBeNull();
+  expect(r.prds).toMatchObject({ total: 2, completed: 1, failed: 0, cancelled: 1 });
+  const r2 = run({ jobs: [job('1-a', 'needs_review', { statusHistory: [{ to: 'needs_review', source: 'remote:cancelJob' }] }), job('2-b', 'completed')], events: [verdict('b', 5)] });
+  expect(r2.state).toBe('verified');
+  expect(r2.prds).toMatchObject({ total: 2, needsReview: 0, cancelled: 1 });
+});
+
+test('a real failed row still blocks and counts as failed', () => {
+  const r = run({ jobs: [job('1-a', 'failed', { error: 'boom' }), job('2-b', 'completed')], events: [verdict('b', 5)] });
+  expect(r.state).toBe('blocked');
+  expect(r.blocked.kind).toBe('failed');
+  expect(r.prds).toMatchObject({ failed: 1, cancelled: 0 });
 });
 
 test('a validator job with no verdict is not unvalidated', () => {
@@ -154,7 +178,7 @@ test('no live rows: 22 checked-in PRDs each verified after its check-in → veri
   const r = run({ events });
   expect(r.state).toBe('verified');
   expect(r.unvalidated).toEqual([]);
-  expect(r.prds).toEqual({ total: 24, pending: 0, running: 0, completed: 24, failed: 0, needsReview: 0, quarantined: 0, skipped: 0 });
+  expect(r.prds).toEqual({ total: 24, pending: 0, running: 0, completed: 24, failed: 0, needsReview: 0, quarantined: 0, skipped: 0, cancelled: 0 });
 });
 
 test('a check-in with no verdict and no row is unvalidated → in_review', () => {
@@ -204,7 +228,7 @@ test('a completed re-run after a failed check-in clears it', () => {
 
 test('an unknown status counts only in total', () => {
   const r = run({ events: [checkin('1-a', 1, 'weird')] });
-  expect(r.prds).toEqual({ total: 1, pending: 0, running: 0, completed: 0, failed: 0, needsReview: 0, quarantined: 0, skipped: 0 });
+  expect(r.prds).toEqual({ total: 1, pending: 0, running: 0, completed: 0, failed: 0, needsReview: 0, quarantined: 0, skipped: 0, cancelled: 0 });
   expect(r.state).toBe('open');
 });
 

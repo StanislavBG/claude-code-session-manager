@@ -96,7 +96,7 @@ test('an open Epic record joins session, events, jobs, needs-input and busy', as
     status: 'active',
     state: 'verified',
     blocked: null,
-    prds: { total: 1, pending: 0, running: 0, completed: 1, failed: 0, needsReview: 0, quarantined: 0, skipped: 0 },
+    prds: { total: 1, pending: 0, running: 0, completed: 1, failed: 0, needsReview: 0, quarantined: 0, skipped: 0, cancelled: 0 },
     verified: ['do-thing'],
     refuted: [],
     unvalidated: [],

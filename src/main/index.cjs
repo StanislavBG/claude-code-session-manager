@@ -1146,6 +1146,7 @@ epicWorktreeMerge.registerEpicWorktreeMergeHandlers();
 require('./lib/epic/epicChanges.cjs').registerEpicChangesHandlers();
 registerAppPreviewHandlers(ipcMain, { getWindow: () => mainWindow });
 require('./lib/epic/epicReopen.cjs').registerEpicReopenHandlers();
+require('./lib/epic/epicAgentRefresh.cjs').registerEpicAgentRefreshHandlers();
 epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();

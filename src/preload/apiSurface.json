@@ -2260,6 +2260,13 @@
  },
  {
   "ns": "promptSessions",
+  "method": "refreshAgentSnapshot",
+  "channel": "epic:refresh-agent-snapshot",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
   "method": "loadActiveIndex",
   "channel": "promptSessions:load-active-index",
   "kind": "invoke",

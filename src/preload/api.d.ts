@@ -3334,10 +3334,18 @@ export interface SessionManagerAPI {
     archiveTranscript: (payload: { cwd: string; epicId: string; claudeSessionId: string }) => Promise<{ path: string; bytes: number; gzBytes: number; sha256: string } | null>;
     /** Reopens a completed Epic in place (same id + claudeSessionId); never mints an Epic. */
     reopen: (payload: PromptSessionsReopenPayload) => Promise<PromptSessionsReopenResult>;
+    /** Re-snapshots the Epic's persona and re-stamps its agentSnapshotId — the only way a live
+     *  persona edit reaches an existing Epic (lib/epic/epicAgentRefresh.cjs). Audited; same id = no-op. */
+    refreshAgentSnapshot: (payload: EpicRefreshAgentSnapshotPayload) => Promise<EpicRefreshAgentSnapshotResult>;
   };
 }
 
 export interface PromptSessionsReopenPayload { cwd: string; epicId: string }
+export interface EpicRefreshAgentSnapshotPayload { cwd: string; epicId: string }
+export type EpicRefreshAgentSnapshotResult =
+  | { ok: true; changed: boolean; from: string | null; to: string; session: PromptSession }
+  | { ok: false; code: string; message: string };
+
 export type PromptSessionsReopenResult =
   | { ok: true; session: PromptSession; events: PromptSessionEvent[]; alreadyOpen: boolean }
   | { ok: false; code: 'not_found' | 'transcript_missing' | 'invalid_session_id' | 'restore_failed' | 'write_failed'; message: string };

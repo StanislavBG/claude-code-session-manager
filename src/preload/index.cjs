@@ -674,6 +674,8 @@ contextBridge.exposeInMainWorld('api', {
     archiveTranscript: (payload) => ipcRenderer.invoke('promptSessions:archiveTranscript', payload),
     /** Reopens a completed Epic in place (same id + claudeSessionId); never mints an Epic. */
     reopen: (payload) => ipcRenderer.invoke('promptSessions:reopen', payload),
+    /** Re-snapshots an Epic's persona and re-stamps its agentSnapshotId (audited); same id = no-op. */
+    refreshAgentSnapshot: (payload) => ipcRenderer.invoke('epic:refresh-agent-snapshot', payload),
     /** Read-tier (remote-safe) Sessions reads — see main/promptSessionsIpc.cjs. */
     loadActiveIndex: (payload) => ipcRenderer.invoke('promptSessions:load-active-index', payload),
     listArchived: (payload) => ipcRenderer.invoke('promptSessions:list-archived', payload),

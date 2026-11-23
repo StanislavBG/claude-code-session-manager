@@ -485,4 +485,5 @@ module.exports = {
   getPersonaBody,
   PERSONA_NAME_RE,
   ALL_PROJECTS,
+  MANAGED_PERSONA_KEYS,
 };

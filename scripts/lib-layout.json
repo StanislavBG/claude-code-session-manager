@@ -108,6 +108,7 @@
   "needsReviewLedger": "scheduler",
   "opsErrorLog": "telemetry",
   "otlpTraceExporter": "telemetry",
+  "personaFrontmatterSchema": "persona-macro",
   "personaImportHealth": "persona-macro",
   "personaMerge": "persona-macro",
   "personaToolScope": "claude",

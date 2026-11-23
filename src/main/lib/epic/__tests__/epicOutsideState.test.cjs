@@ -124,6 +124,13 @@ test('a cancelled row known only by statusHistory remote:cancelJob counts as can
   expect(r2.prds).toMatchObject({ total: 2, needsReview: 0, cancelled: 1 });
 });
 
+test('an error-only legacy cancelled row counts as cancelled, not failed, and does not block', () => {
+  const r = run({ jobs: [job('1-a', 'failed', { error: 'cancelled via admin API' }), job('2-b', 'completed')], events: [verdict('b', 5)] });
+  expect(r.state).toBe('verified');
+  expect(r.blocked).toBeNull();
+  expect(r.prds).toMatchObject({ total: 2, completed: 1, failed: 0, cancelled: 1 });
+});
+
 test('a real failed row still blocks and counts as failed', () => {
   const r = run({ jobs: [job('1-a', 'failed', { error: 'boom' }), job('2-b', 'completed')], events: [verdict('b', 5)] });
   expect(r.state).toBe('blocked');

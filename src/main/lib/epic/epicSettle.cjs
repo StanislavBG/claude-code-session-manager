@@ -5,11 +5,13 @@
  *
  * Given the Epic's event chain and the scheduler queue rows, says whether the
  * Epic has settled (no pending/running PRD) and which finished PRDs no
- * validator has checked yet. No fs, no scheduler require.
+ * validator has checked yet. No fs; only the pure lib/scheduler/cancelledRow
+ * predicate, never the scheduler itself.
  */
 
 const { createHash } = require('node:crypto');
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
+const { isCancelledRow } = require('../scheduler/cancelledRow.cjs');
 
 const DEFAULT_SETTLE_HORIZON_MS = 24 * 60 * 60 * 1000;
 
@@ -20,17 +22,6 @@ const ts = (at) => {
 
 const isValidatorCheckin = (e, bare) =>
   e.agentType === 'validator' || (e.agentType == null && bare.startsWith('validate-'));
-
-// Mirrors the scheduler's cancel rule locally (lib/epic stays free of scheduler deps).
-const isCancelledRow = (r) => {
-  if (!r || (r.status !== 'failed' && r.status !== 'needs_review')) return false;
-  if (typeof r.cancelledAt === 'string' && r.cancelledAt) return true;
-  const hist = Array.isArray(r.statusHistory) ? r.statusHistory : [];
-  for (let i = hist.length - 1; i >= 0; i--) {
-    if (hist[i] && hist[i].to === r.status) return hist[i].source === 'remote:cancelJob';
-  }
-  return false;
-};
 
 /**
  * @param {{ epicId: string, cwd?: string|null, events?: any[], jobs?: any[], now?: number, horizonMs?: number }} args
@@ -118,4 +109,4 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   return { settled, uncovered, verified, refuted, failed, parked, cancelled, digestKey, hasContent };
 }
 
-module.exports = { evaluateEpicSettle, DEFAULT_SETTLE_HORIZON_MS, isCancelledRow };
+module.exports = { evaluateEpicSettle, DEFAULT_SETTLE_HORIZON_MS };

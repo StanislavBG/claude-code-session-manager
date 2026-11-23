@@ -25,7 +25,7 @@
  * Epic chat with an open question (needs-input) are real questions.
  */
 
-const { isCancelledRow } = require('./epic/epicSettle.cjs');
+const { isCancelledRow } = require('./scheduler/cancelledRow.cjs');
 
 const PHASES = Object.freeze(['idle', 'running', 'rescheduling', 'waiting_on_human', 'terminated']);
 

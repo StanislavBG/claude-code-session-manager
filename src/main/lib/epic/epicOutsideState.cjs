@@ -15,7 +15,7 @@
  */
 
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
-const { isCancelledRow } = require('./epicSettle.cjs');
+const { isCancelledRow } = require('../scheduler/cancelledRow.cjs');
 const { phaseOfJob, phaseOfEpic } = require('../phaseProjection.cjs');
 
 // Mirrors epicSettle's (unexported) isValidatorCheckin.

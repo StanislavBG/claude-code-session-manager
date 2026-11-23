@@ -66,6 +66,19 @@ test('cancelled failed row is reported as cancelled, not failed; ordinary failed
   expect(run([], [{ slug: '5-dead', status: 'failed', epicId: 'e1', cancelledAt: 'x' }]).digestKey).not.toBe(run([]).digestKey);
 });
 
+test('needs_review + cancelledAt row is cancelled, not parked; error-only legacy row is cancelled', () => {
+  const r = run([], [
+    { slug: '7-landed', status: 'needs_review', epicId: 'e1', cancelledAt: '2026-11-01T00:00:00.000Z' },
+    { slug: '8-old', status: 'failed', epicId: 'e1', error: 'cancelled via admin API' },
+  ]);
+  expect(r.cancelled).toEqual(['7-landed', '8-old']);
+  expect(r.parked).toEqual([]);
+});
+
+test('epicSettle exports only evaluateEpicSettle and DEFAULT_SETTLE_HORIZON_MS', () => {
+  expect(Object.keys(require('../epicSettle.cjs')).sort()).toEqual(['DEFAULT_SETTLE_HORIZON_MS', 'evaluateEpicSettle']);
+});
+
 test('digest built from a cancelled settle has the Cancelled section; omitted when empty', () => {
   const { buildSettledDigest } = require('../epicValidationHook.cjs');
   const s = run([], [{ slug: '5-dead', status: 'failed', epicId: 'e1', cancelledAt: '2026-10-19T00:00:00.000Z' }]);

@@ -195,5 +195,6 @@
   "agentCliRegistry": "agent-cli",
   "agentCliSessionStore": "agent-cli",
   "agentCliTurn": "agent-cli",
-  "agentCliIpc": "agent-cli"
+  "agentCliIpc": "agent-cli",
+  "geminiContextDefaults": "agent-cli"
 }

@@ -145,6 +145,7 @@ function createTranscriptWriter({ claudeSessionId, cwd, cli } = {}) {
 }
 
 module.exports = {
+  rootDir,
   readNativeSession,
   writeNativeSession,
   transcriptPathFor,

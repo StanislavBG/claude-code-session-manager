@@ -72,6 +72,7 @@
   "fixPlanSlug": "scheduler",
   "baselineGate": "scheduler",
   "gateAuthority": "scheduler",
+  "criteriaChecks": "scheduler",
   "jobLeftovers": "scheduler",
   "guardSpawnSettings": "epic",
   "gitExec": "git",

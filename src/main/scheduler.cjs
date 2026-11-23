@@ -154,6 +154,7 @@ const { runDefinitionOfDoneOnDrain } = require('./lib/scheduler/dodDrainHook.cjs
 const { writeRcaReport, extractRcaBlock } = require('./lib/scheduler/rcaReport.cjs');
 const queueHistory = require('./lib/scheduler/queueHistory.cjs');
 const { resolveGate, runGateSequence, gateTimeoutMs } = require('./lib/scheduler/definitionOfDone.cjs');
+const { runCriteriaChecks } = require('./lib/scheduler/criteriaChecks.cjs');
 const queueOps = require('./queueOps.cjs');
 // Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
 // while the app was down (PRD 686 moved it in-app so it also runs while alive).
@@ -11032,6 +11033,20 @@ async function runGateShadow(job) {
   const definitive = headStable && cleanOk && (outcome.status === 'green' || outcome.status === 'red');
   const gateShadow = { ...outcome, head: headBefore, source: gate.source, ranAt: new Date().toISOString(), definitive, ...(mainDeps ? { mainDeps } : {}) };
 
+  // Structured criteria (prdCriteria.cjs): after the gate re-run, run each
+  // criterion's mechanical check in the same tree and keep the observed
+  // results for the run record and the validator. Runs after headAfter/
+  // dirtAfter are taken so a check can never sway the gate's own judgement.
+  let criteriaFm = null;
+  try { criteriaFm = parsePrdFile(prdText).frontmatter.criteria; } catch { criteriaFm = null; }
+  if (Array.isArray(criteriaFm) && criteriaFm.length) {
+    try {
+      gateShadow.criteriaChecks = await runCriteriaChecks({ criteria: criteriaFm, cwd: job.cwd });
+    } catch (e) {
+      console.warn('[scheduler] criteria checks error', job.slug, e && e.message ? e.message : e);
+    }
+  }
+
   // Gate authority: a green re-run may complete the row outright, but only
   // for transcript-noise verdicts with a landed commit — every other park
   // (including no verdict at all) falls through to the plain observe-only
@@ -11124,7 +11139,8 @@ async function runGateShadow(job) {
     if (fs.existsSync(path.dirname(verdictsPath))) {
       let existing = {};
       try { existing = JSON.parse(fs.readFileSync(verdictsPath, 'utf8')) || {}; } catch { /* absent/unparseable → fresh */ }
-      try { config.writeJsonSync(verdictsPath, { ...existing, gateShadow }); } catch { /* best-effort */ }
+      const criteriaRecord = gateShadow.criteriaChecks ? { criteriaChecks: { head: headBefore, ranAt: gateShadow.ranAt, results: gateShadow.criteriaChecks } } : {};
+      try { config.writeJsonSync(verdictsPath, { ...existing, gateShadow, ...criteriaRecord }); } catch { /* best-effort */ }
     }
   }
 

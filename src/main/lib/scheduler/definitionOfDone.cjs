@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { splitFrontmatter } = require('../prd/prdFrontmatter.cjs');
+const { splitFrontmatter, parsePrdFile } = require('../prd/prdFrontmatter.cjs');
 const { resolvePrdWriteDir } = require('../prd/prdLocations.cjs');
 const schedulerPaths = require('./schedulerPaths.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
@@ -488,7 +488,9 @@ function extractAcCommand(prdBody) {
  * @param {{ resolvePrdPath?: (job: object) => (string|null|Promise<string|null>) }} opts
  *   resolvePrdPath  Finds the PRD's current absolute path for this job.
  *                    Required — with none, the result is always unverifiable.
- * @returns {Promise<{ slug: string, status: 'pass'|'fail'|'unverifiable', code: number|null, ms: number, reason?: string }>}
+ * @returns {Promise<{ slug: string, status: 'pass'|'fail'|'unverifiable', code: number|null, ms: number, reason?: string, criteriaChecks?: Array<{id: string, kind: string, ok: boolean|null, detail: string}> }>}
+ *   criteriaChecks  present when the PRD frontmatter has structured `criteria`
+ *                   and the gate actually ran (see criteriaChecks.cjs).
  */
 async function reverifyAc(job, { resolvePrdPath } = {}) {
   const startNs = process.hrtime.bigint();
@@ -531,9 +533,23 @@ async function reverifyAc(job, { resolvePrdPath } = {}) {
   if (source === 'none' || source === 'absent' || !sequence.length) return unverifiable('no-parseable-gate');
 
   const result = await runGateSequence(sequence, { cwd: job.cwd });
-  if (result.status === 'green') return { slug: job.slug, status: 'pass', code: 0, ms: elapsedMs() };
   if (result.status === 'busy') return unverifiable('busy');
   if (result.status === 'unavailable') return unverifiable('gate-unavailable');
+
+  // Structured criteria: after the gate re-run, run each criterion's
+  // mechanical check in the same tree (criteriaChecks.cjs) and attach the
+  // observed results. Lazy require — criteriaChecks requires this module.
+  let criteriaChecks;
+  let fmCriteria = null;
+  try { fmCriteria = parsePrdFile(raw).frontmatter.criteria; } catch { fmCriteria = null; }
+  if (Array.isArray(fmCriteria) && fmCriteria.length) {
+    try {
+      criteriaChecks = await require('./criteriaChecks.cjs').runCriteriaChecks({ criteria: fmCriteria, cwd: job.cwd });
+    } catch { criteriaChecks = undefined; }
+  }
+  const withChecks = (r) => (criteriaChecks ? { ...r, criteriaChecks } : r);
+
+  if (result.status === 'green') return withChecks({ slug: job.slug, status: 'pass', code: 0, ms: elapsedMs() });
 
   // status === 'red': a step exited non-zero. A step that was killed for
   // running past its own `timeout N` is not trustworthy evidence of a real
@@ -541,9 +557,9 @@ async function reverifyAc(job, { resolvePrdPath } = {}) {
   // unverifiable instead of fail — same reasoning reverifyAc has always used
   // for a step that couldn't even start.
   const timedOutStep = result.results.find((r) => r.timedOut);
-  if (timedOutStep) return unverifiable('timeout');
+  if (timedOutStep) return withChecks(unverifiable('timeout'));
   const failedStep = result.results.find((r) => r.status === 'fail');
-  return { slug: job.slug, status: 'fail', code: failedStep ? failedStep.code : null, ms: elapsedMs() };
+  return withChecks({ slug: job.slug, status: 'fail', code: failedStep ? failedStep.code : null, ms: elapsedMs() });
 }
 
 /**
@@ -730,6 +746,20 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
     ...acRows,
   ].join('\n');
 
+  // ── Criteria checks (structured criteria, criteriaChecks.cjs) ───────────────
+  const CHECK_MARK = (ok) => (ok === true ? '✅ pass' : ok === false ? '❌ fail' : '— manual');
+  const cell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+  const criteriaRows = [];
+  for (const r of acResults) {
+    if (!Array.isArray(r.criteriaChecks)) continue;
+    for (const c of r.criteriaChecks) {
+      criteriaRows.push(`| ${r.slug} | ${cell(c.id)} | ${cell(c.kind)} | ${CHECK_MARK(c.ok)} | ${cell(c.detail)} |`);
+    }
+  }
+  const criteriaSection = criteriaRows.length
+    ? ['| Slug | Criterion | Kind | Result | Detail |', '|------|-----------|------|--------|--------|', ...criteriaRows].join('\n')
+    : '_No structured criteria._';
+
   // ── Risk flags table ─────────────────────────────────────────────────────────
   let riskSection;
   if (riskFlags.length === 0) {
@@ -750,6 +780,11 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
     } else if (r.status === 'unverifiable') {
       attentionLines.push(`- **${r.slug}** — unverifiable AC; manual inspection recommended for ${r.slug}`);
     }
+  }
+  for (const r of acResults) {
+    if (!Array.isArray(r.criteriaChecks)) continue;
+    const failed = r.criteriaChecks.filter((c) => c.ok === false).map((c) => c.id);
+    if (failed.length) attentionLines.push(`- **${r.slug}** — criteria check failed: ${failed.join(', ')}`);
   }
   for (const r of riskFlags) {
     attentionLines.push(
@@ -773,6 +808,10 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
     '## AC Results',
     '',
     acTable,
+    '',
+    '## Criteria Checks',
+    '',
+    criteriaSection,
     '',
     '## Risk Flags',
     '',

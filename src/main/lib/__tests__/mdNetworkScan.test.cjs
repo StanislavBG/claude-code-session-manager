@@ -169,6 +169,22 @@ describe('buildMdNetwork', () => {
     expect(extra.findings.map((f) => f.where)).toEqual(['docs/']);
   });
 
+  it('never orphans a folder note (CLAUDE.md, AGENTS.md, CLAUDE.local.md at any depth): the tool loads it in its folder', () => {
+    const r = buildMdNetwork({
+      files: [
+        doc('AGENTS.md', '# Map'),
+        doc('CLAUDE.md', '@AGENTS.md'),
+        doc('src/AGENTS.md', '# src notes'),
+        doc('src/CLAUDE.md', '@AGENTS.md'),
+        doc('web/deep/CLAUDE.local.md', 'local notes'),
+        doc('docs/x.md', 'nobody links here'),
+      ],
+    });
+    expect(r.ok).toBe(true);
+    expect(r.root).toBe('AGENTS.md');
+    expect(r.findings.map((f) => [f.type, f.where, f.paths])).toEqual([['orphan', 'docs/', ['docs/x.md']]]);
+  });
+
   it('never walks history or record docs: links into them are edges, but their own links pull nothing in', () => {
     const files = [
       doc('CLAUDE.md', '[past](history/2026-01-01.md) [rec](log/a.md)'),

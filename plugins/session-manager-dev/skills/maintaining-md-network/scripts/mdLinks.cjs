@@ -325,4 +325,16 @@ function backtickPaths(text) {
   return out;
 }
 
-module.exports = { linksOf, rawLinksOf, followLink, visibleText, visibleLine, importsOf, backtickPaths, toRepoPath };
+/**
+ * True when the doc's first non-blank line is the `@AGENTS.md` (or `@./AGENTS.md`) import —
+ * a CLAUDE.md stub that hands its folder's notes to the AGENTS.md beside it.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isAgentsStub(text) {
+  if (typeof text !== 'string') return false;
+  const first = text.split(/\r?\n/).find((l) => l.trim() !== '');
+  return first !== undefined && /^@(\.\/)?AGENTS\.md$/.test(first.trim());
+}
+
+module.exports = { linksOf, rawLinksOf, followLink, visibleText, visibleLine, importsOf, backtickPaths, toRepoPath, isAgentsStub };

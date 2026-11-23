@@ -15,7 +15,8 @@
  *   — pure graph builder over in-memory docs. Beside an AGENTS.md root, a root
  *   CLAUDE.md (the stub that imports it) is part of the map: an edge from the
  *   hub reaches it at depth 1. Docs a tool loads by name
- *   (LOADED_BY_TOOLS, any `/skills/` folder, the GitHub root files, plus
+ *   (LOADED_BY_TOOLS, any `/skills/` folder, the GitHub root files, folder notes
+ *   — CLAUDE.md / AGENTS.md / CLAUDE.local.md at any depth — plus
  *   `loadedByTools` prefixes) are entry points, never orphans. `history`
  *   prefixes and `records` docs are never walked: a link into one is an edge
  *   and the doc a leaf node, but its own links pull nothing in; they are never
@@ -94,6 +95,11 @@ const CHECK_IGNORE_BATCH = 100;
 const LOADED_BY_TOOLS = Object.freeze(['.claude/', '.github/', 'plugins/', 'src/seed/']);
 /** Root files GitHub (or a contributor) opens by name. */
 const LOADED_BY_TOOLS_ROOT_FILES = new Set(['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'SECURITY.md', 'CHANGELOG.md']);
+/**
+ * Folder notes: the agent CLI loads one by name when it works in that folder (a CLAUDE.md is
+ * often just the `@AGENTS.md` stub — mdLinks isAgentsStub), so at any depth each is an entry point.
+ */
+const FOLDER_NOTE_NAMES = new Set(['CLAUDE.md', 'AGENTS.md', 'CLAUDE.local.md']);
 
 const MD_RE = /\.md$/i;
 
@@ -211,9 +217,9 @@ function hasPrefix(p, prefixes) {
   return prefixes.some((pre) => p.startsWith(pre));
 }
 
-/** A doc a tool loads by name. @param {string} p @param {readonly string[]} extra */
+/** A doc a tool loads by name (incl. a folder note at any depth). @param {string} p @param {readonly string[]} extra */
 function isLoadedByTools(p, extra) {
-  return LOADED_BY_TOOLS_ROOT_FILES.has(p) || p.startsWith('skills/') || p.includes('/skills/') || hasPrefix(p, LOADED_BY_TOOLS) || hasPrefix(p, extra);
+  return LOADED_BY_TOOLS_ROOT_FILES.has(p) || FOLDER_NOTE_NAMES.has(path.posix.basename(p)) || p.startsWith('skills/') || p.includes('/skills/') || hasPrefix(p, LOADED_BY_TOOLS) || hasPrefix(p, extra);
 }
 
 /** @param {string} id @param {number} depth @returns {MdNetworkNodeType} */

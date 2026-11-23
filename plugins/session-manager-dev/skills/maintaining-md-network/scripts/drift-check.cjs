@@ -24,7 +24,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 // The link convention (links, imports, backticked paths; code and comments skipped) is written
 // once, in the sibling mdLinks.cjs — same folder, so this script stays dependency-free.
-const { linksOf, rawLinksOf, visibleLine, importsOf, backtickPaths, toRepoPath } = require('./mdLinks.cjs');
+const { linksOf, rawLinksOf, visibleLine, importsOf, backtickPaths, toRepoPath, isAgentsStub } = require('./mdLinks.cjs');
 const { findDuplicates, normalize } = require('./mdDuplicates.cjs');
 
 const ALL_CHECKS = ['links', 'paths', 'limits', 'contents', 'pairs', 'orphans', 'duplicates'];
@@ -242,12 +242,6 @@ function hasPathsFrontmatter(text) {
   return !!m && /^paths\s*:/m.test(m[1]);
 }
 
-/** True when the doc's first non-blank line is the `@AGENTS.md` import (a CLAUDE.md stub). */
-function importsAgentsFirst(text) {
-  const first = text.split(/\r?\n/).find((l) => l.trim() !== '');
-  return first !== undefined && /^@(\.\/)?AGENTS\.md$/.test(first.trim());
-}
-
 /**
  * Comparable lines of a doc: { line, text, key } for every non-blank, non-heading line outside
  * code fences, keyed by mdDuplicates.normalize (the duplicate check's normalization).
@@ -285,7 +279,7 @@ function pairFindings(root, docs) {
       const claudeText = read(rel);
       const agentsText = read(agentsFile);
       if (claudeText === null || agentsText === null) continue;
-      if (!importsAgentsFirst(claudeText)) out.push({ kind: 'claude-md-stub-missing-import', file: rel });
+      if (!isAgentsStub(claudeText)) out.push({ kind: 'claude-md-stub-missing-import', file: rel });
       const agentsByKey = new Map();
       for (const l of comparableLines(agentsText)) if (!agentsByKey.has(l.key)) agentsByKey.set(l.key, l.line);
       const seen = new Set();
@@ -334,7 +328,7 @@ function runDriftCheck(options) {
     // A root CLAUDE.md that is a stub (`@AGENTS.md` first) hands the map role to the root AGENTS.md.
     const rootAgents = path.join(root, 'AGENTS.md');
     let stubbed = false;
-    try { stubbed = fs.existsSync(rootAgents) && importsAgentsFirst(fs.readFileSync(path.join(root, ROOT_DOC), 'utf8')); } catch { /* no root CLAUDE.md */ }
+    try { stubbed = fs.existsSync(rootAgents) && isAgentsStub(fs.readFileSync(path.join(root, ROOT_DOC), 'utf8')); } catch { /* no root CLAUDE.md */ }
     if (stubbed) rootFiles.sort((a, b) => (a === rootAgents ? -1 : b === rootAgents ? 1 : 0));
     const candidates = [...rootFiles];
     for (const p of rootFiles) {

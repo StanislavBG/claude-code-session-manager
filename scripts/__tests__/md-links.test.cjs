@@ -14,7 +14,7 @@ const mdLinks = require(path.resolve(
   __dirname,
   '../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs',
 ));
-const { linksOf, rawLinksOf, followLink, visibleText, visibleLine, importsOf, backtickPaths, toRepoPath } = mdLinks;
+const { linksOf, rawLinksOf, followLink, visibleText, visibleLine, importsOf, backtickPaths, toRepoPath, isAgentsStub } = mdLinks;
 const census = require('../../src/main/lib/mdDocCensus.cjs');
 const docRefs = require('../../src/main/lib/mdDocRefs.cjs');
 
@@ -22,9 +22,9 @@ const docRefs = require('../../src/main/lib/mdDocRefs.cjs');
 const targets = (text, p = 'docs/a.md') => linksOf({ path: p, text }).map((l) => l.to);
 
 describe('exports', () => {
-  test('exports exactly the eight convention functions', () => {
+  test('exports exactly the nine convention functions', () => {
     expect(Object.keys(mdLinks).sort()).toEqual(
-      ['backtickPaths', 'followLink', 'importsOf', 'linksOf', 'rawLinksOf', 'toRepoPath', 'visibleLine', 'visibleText'],
+      ['backtickPaths', 'followLink', 'importsOf', 'isAgentsStub', 'linksOf', 'rawLinksOf', 'toRepoPath', 'visibleLine', 'visibleText'],
     );
   });
 
@@ -178,5 +178,21 @@ describe('backtickPaths', () => {
   test('matches mdDocRefs backtickPaths (shared stripComments)', () => {
     expect(backtickPaths(text)).toEqual(docRefs.backtickPaths(text));
     expect(backtickPaths('')).toEqual([]);
+  });
+});
+
+describe('isAgentsStub', () => {
+  test('true when the first non-blank line is @AGENTS.md or @./AGENTS.md', () => {
+    expect(isAgentsStub('@AGENTS.md\n')).toBe(true);
+    expect(isAgentsStub('@./AGENTS.md')).toBe(true);
+    expect(isAgentsStub('\n  \r\n   @AGENTS.md  \n# more')).toBe(true);
+  });
+
+  test('false for any other first line, an empty doc or a nested path', () => {
+    expect(isAgentsStub('# Map\n@AGENTS.md')).toBe(false);
+    expect(isAgentsStub('')).toBe(false);
+    expect(isAgentsStub('\n\n')).toBe(false);
+    expect(isAgentsStub('@src/AGENTS.md')).toBe(false);
+    expect(isAgentsStub('See @AGENTS.md')).toBe(false);
   });
 });

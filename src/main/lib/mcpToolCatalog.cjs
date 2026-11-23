@@ -114,6 +114,9 @@ const MCP_TOOL_CATALOG = [
       + 'no path may contain "..". '
       + '`riskTools` (optional, up to 20) names the tool-risk rules this PRD is cleared to call although they are '
       + 'marked irreversible, money or public in a tool-risk.json, in the same syntax as the marks. '
+      + '`preflight` (optional, at most 500 characters) is a read-only, shell-free command in gate syntax, '
+      + 'at most 60 s, that must exit 0 before the PRD runs; the scheduler holds the PRD and re-checks it on a '
+      + 'backoff while it fails. '
       + 'A bare slug already used by a PRD in ANOTHER Epic is refused as a cross-Epic duplicate (the error names '
       + 'the exact NN slugs); add them to dependsOn, or call again with allowDuplicateOf: [those NN slugs] for a '
       + 'deliberate duplicate. '
@@ -162,7 +165,10 @@ const MCP_TOOL_CATALOG = [
       + 'next reconcile pass. All entries must resolve to the same project and Epic; top-level cwd, sourcePromptId '
       + 'and origin fields are forwarded the same way as scheduler_create_prd. An entry whose bare slug already '
       + 'exists in another Epic fails the batch as a cross-Epic duplicate; give that entry dependsOn on the named NN '
-      + 'slugs, or allowDuplicateOf: [those NN slugs] for a deliberate duplicate, and call again.',
+      + 'slugs, or allowDuplicateOf: [those NN slugs] for a deliberate duplicate, and call again. '
+      + 'Each entry also takes `preflight` (optional, at most 500 characters): a read-only, shell-free command in gate syntax, '
+      + 'at most 60 s, that must exit 0 before the PRD runs; the scheduler holds the PRD and re-checks it on a '
+      + 'backoff while it fails.',
     summary: 'Queue a whole plan of PRDs in one all-or-nothing call.',
     whenToUse: 'Use to queue a whole plan at once, validate PRD included: dependsOn may name other entries of the same call by bare slug (earlier or later), so a chain needs no ordering of calls.',
     whenNotToUse: 'Do not use for a single PRD — use scheduler_create_prd. Not callable from inside a headless scheduled job (same refusal as scheduler_create_prd). If the app is not running, stop and ask the human to start it; never hand-write PRD files.',
@@ -218,7 +224,10 @@ const MCP_TOOL_CATALOG = [
       + 'sourcePromptId, sourceTabId, tag, dependsOn) may be patched; unrecognized keys round-trip unchanged. '
       + 'Patching dependsOn to a non-empty array replaces it wholesale (validated against existing PRD slugs, '
       + 'same resolver scheduler_create_prd uses); patching it to an explicit empty array CLEARS the dependency — '
-      + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents).',
+      + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents). '
+      + '`preflight` (optional, at most 500 characters) is patchable too: a read-only, shell-free command in gate syntax, '
+      + 'at most 60 s, that must exit 0 before the PRD runs; the scheduler holds the PRD and re-checks it on a '
+      + 'backoff while it fails.',
     summary: 'Edit a PRD that has not run yet or has stopped.',
     whenToUse: 'Use to fix a PRD\'s spec before it runs, or to fix a parked (needs_review or failed) or skipped PRD before you reset it with scheduler_reset_job.',
     whenNotToUse: 'Do not use on a running or completed job. Do not reset first and edit second: the reset job can start before the edit lands.',

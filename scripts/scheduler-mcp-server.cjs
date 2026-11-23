@@ -418,6 +418,10 @@ const CREATE_PRD_ITEM_SCHEMA = {
       type: 'array', items: { type: 'string' }, maxItems: 20,
       description: 'Optional: the tool-risk rules this PRD is cleared to call although they are marked irreversible, money or public in ~/.claude/tool-risk.json or <project>/.claude/tool-risk.json. Same syntax as the marks (mcp__server__tool, mcp__server__*, Bash(prefix:*)). At most 20.',
     },
+    preflight: {
+      type: 'string', maxLength: 500,
+      description: 'Optional: a read-only, shell-free command in gate syntax, at most 60 s, that must exit 0 before the PRD runs; the scheduler holds the PRD and re-checks it on a backoff while it fails.',
+    },
     quietMachine: {
       type: 'boolean',
       description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',
@@ -604,6 +608,7 @@ const TOOLS = [
             dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: replaces the dependsOn list; an explicit empty array CLEARS it — see scheduler_create_prd' },
             disposition: { type: 'string', enum: ['append', 'new-head'], description: 'Optional: patches the recorded wave-authoring decision — see scheduler_create_prd' },
             riskTools: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Optional: replaces the PRD\'s riskTools — the tool-risk rules it is cleared to call although marked in tool-risk.json. Same rule syntax as scheduler_create_prd\'s riskTools (mcp__server__tool, mcp__server__*, Bash(prefix:*)). At most 20; an explicit empty array clears it.' },
+            preflight: { type: 'string', maxLength: 500, description: 'Optional: replaces the PRD\'s preflight — a read-only, shell-free command in gate syntax, at most 60 s, that must exit 0 before the PRD runs; the scheduler holds the PRD and re-checks it on a backoff while it fails.' },
           },
         },
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter). Cannot be combined with gate/files/acceptanceCriteria.' },

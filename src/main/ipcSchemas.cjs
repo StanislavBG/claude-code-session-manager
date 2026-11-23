@@ -440,6 +440,10 @@ const MAX_DEPENDS_ON = 100;
 // The rule grammar (toolRiskMarks.parseRule), de-dup and cap are re-checked by
 // prdCreate.cjs's normalizeRiskTools on both paths.
 const RiskToolsSchema = z.array(z.string().min(1).max(200)).max(20);
+// A PRD's optional preflight command — shared by schedulerCreatePrd (hence
+// every adminCreatePrds entry) and adminPrdFrontmatterPatch. One gate-syntax
+// command; its grammar is re-checked by the PRD library, not here.
+const PreflightSchema = z.string().max(500);
 // Wave-authoring decision (scheduler wave-disposition PRD), shared between
 // schedulerCreatePrd (authoring time) and adminPrdFrontmatterPatch (the
 // after-the-fact change path) so both can never disagree on what a valid
@@ -489,6 +493,10 @@ const schedulerCreatePrd = z.object({
   // Tool-risk rule strings this PRD is cleared to call (toolRiskMarks.parseRule
   // grammar, re-checked + de-duplicated in prdCreate.cjs; written as `riskTools`).
   riskTools: RiskToolsSchema.optional(),
+  // Read-only, shell-free precondition command in gate syntax (PRD
+  // preflight-api-schemas). Passed through unchanged; prdCreate.cjs owns the
+  // grammar check and writes it as `preflight` frontmatter.
+  preflight: PreflightSchema.optional(),
   // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
   // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
   // sessions key literally equals this value; the renderer only ever sends
@@ -717,6 +725,8 @@ const adminPrdFrontmatterPatch = z.object({
   // re-checks a non-empty list with normalizeRiskTools; an explicit `[]`
   // removes the key from the PRD file.
   riskTools: RiskToolsSchema.optional(),
+  // Patchable after creation too, same shape as create (see PreflightSchema).
+  preflight: PreflightSchema.optional(),
 });
 
 const adminUpdatePrd = z.object({

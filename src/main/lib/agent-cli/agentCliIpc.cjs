@@ -17,6 +17,7 @@ const { validated } = require('../../ipcSchemas.cjs');
 const registry = require('./agentCliRegistry.cjs');
 const { readNativeSession } = require('./agentCliSessionStore.cjs');
 const { findEpicByClaudeSessionId } = require('../claude/agentModelResolve.cjs');
+const { ensureGeminiSystemDefaults } = require('./geminiContextDefaults.cjs');
 
 const detectSchema = z.object({ refresh: z.boolean().optional() }).strict();
 const terminalCommandSchema = z.object({
@@ -37,6 +38,8 @@ function withDefaults(deps) {
     readNativeSession: d.readNativeSession || readNativeSession,
     adapterFor: d.adapterFor || registry.adapterFor,
     detectAgentClis: d.detectAgentClis || registry.detectAgentClis,
+    ensureGeminiSystemDefaults: d.ensureGeminiSystemDefaults || ensureGeminiSystemDefaults,
+    platform: typeof d.platform === 'string' ? d.platform : process.platform,
   };
 }
 
@@ -89,8 +92,21 @@ async function buildTerminalCommand({ cwd, claudeSessionId }, deps) {
   } catch (e) {
     return { ok: false, message: `Could not build the ${entry.label} command: ${e && e.message ? e.message : String(e)}` };
   }
-  const command = [binPath, ...(Array.isArray(args) ? args : [])].map(shellQuote).join(' ');
-  return { ok: true, command };
+  const base = [binPath, ...(Array.isArray(args) ? args : [])].map(shellQuote).join(' ');
+  return { ok: true, command: geminiEnvPrefix(cli, d) + base };
+}
+
+/**
+ * Gemini only: `GEMINI_CLI_SYSTEM_DEFAULTS_PATH='<file>' ` so the Terminal view
+ * loads the same AGENTS.md map as chat turns. POSIX `VAR=value cmd` syntax, so
+ * win32 gets no prefix; a null/throwing defaults helper also yields ''.
+ */
+function geminiEnvPrefix(cli, d) {
+  if (cli !== 'gemini' || d.platform === 'win32') return '';
+  let res = null;
+  try { res = d.ensureGeminiSystemDefaults({ platform: d.platform }); } catch { res = null; }
+  if (!res || typeof res.path !== 'string' || !res.path) return '';
+  return `GEMINI_CLI_SYSTEM_DEFAULTS_PATH=${shellQuote(res.path)} `;
 }
 
 /**

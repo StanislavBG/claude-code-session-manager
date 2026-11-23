@@ -122,3 +122,86 @@ test('flags a nested CLAUDE.md over the 4000-byte cap, excludes node_modules, an
   expect(overBudget).toHaveLength(1);
   expect(overBudget[0].file).toBe(path.join('plugins', 'CLAUDE.md'));
 });
+
+test('reads root AGENTS.md as the declared architecture when CLAUDE.md is an @AGENTS.md stub', () => {
+  const cwd = newProjectCwd();
+  writeNamespace(cwd, 'scheduler', { readme: '# Scheduler\n' });
+  // The stub never mentions `scheduler` — if the sweep still read CLAUDE.md,
+  // the namespace would report UNDOCUMENTED.
+  fs.writeFileSync(path.join(cwd, 'CLAUDE.md'), '@AGENTS.md\n', 'utf8');
+  fs.writeFileSync(
+    path.join(cwd, 'AGENTS.md'),
+    '# Root\n\n> SIZE BUDGET — 100 chars\n\n`scheduler` is OWNERS-governed.\n' + 'x'.repeat(200),
+    'utf8',
+  );
+
+  const report = runSweep(cwd);
+
+  expect(report.declaredArchitecturePath).toBe('AGENTS.md');
+  expect(report.ownershipDocPath).toBe('AGENTS.md');
+  expect(report.findings.map((f) => f.type)).not.toContain('UNDOCUMENTED');
+  // The SIZE BUDGET header lives in AGENTS.md now, so the budget check reads it.
+  expect(report.claudeMdSize.budget).toBe(100);
+  expect(report.findings.map((f) => f.type)).toContain('CLAUDE_MD_OVER_BUDGET');
+});
+
+test('reads root AGENTS.md when no CLAUDE.md exists at all', () => {
+  const cwd = newProjectCwd();
+  writeNamespace(cwd, 'scheduler', { readme: '# Scheduler\n' });
+  fs.writeFileSync(path.join(cwd, 'AGENTS.md'), '# Root\n\n`scheduler` is OWNERS-governed.\n', 'utf8');
+
+  const report = runSweep(cwd);
+
+  expect(report.declaredArchitecturePath).toBe('AGENTS.md');
+  expect(report.ownershipDocPath).toBe('AGENTS.md');
+  expect(report.findings.map((f) => f.type)).not.toContain('UNDOCUMENTED');
+});
+
+test('keeps reading root CLAUDE.md when no AGENTS.md exists', () => {
+  const cwd = newProjectCwd();
+  writeNamespace(cwd, 'scheduler', { readme: '# Scheduler\n' });
+  fs.writeFileSync(path.join(cwd, 'CLAUDE.md'), '# Root\n\n`scheduler` is OWNERS-governed.\n', 'utf8');
+
+  const report = runSweep(cwd);
+
+  expect(report.declaredArchitecturePath).toBe('CLAUDE.md');
+  expect(report.ownershipDocPath).toBe('CLAUDE.md');
+});
+
+test('NESTED_CLAUDE_MD_OVER_BUDGET counts a nested CLAUDE.md + AGENTS.md pair together and flags a nested AGENTS.md alone', () => {
+  const cwd = newProjectCwd();
+  writeNamespace(cwd, 'scheduler', { readme: '# Scheduler\n' });
+  // Root pair is exempt even when oversized.
+  fs.writeFileSync(path.join(cwd, 'CLAUDE.md'), '@AGENTS.md\n', 'utf8');
+  fs.writeFileSync(path.join(cwd, 'AGENTS.md'), '#'.repeat(5000), 'utf8');
+
+  // Pair: each under the cap alone, over it together — must be flagged once.
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'src', 'CLAUDE.md'), '#'.repeat(2500), 'utf8');
+  fs.writeFileSync(path.join(cwd, 'src', 'AGENTS.md'), '#'.repeat(2500), 'utf8');
+
+  // Nested AGENTS.md alone over the cap — must be flagged.
+  fs.mkdirSync(path.join(cwd, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'web', 'AGENTS.md'), '#'.repeat(4500), 'utf8');
+
+  // Small stub + small AGENTS.md — must not be flagged.
+  fs.mkdirSync(path.join(cwd, 'plugins'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'plugins', 'CLAUDE.md'), '@AGENTS.md\n', 'utf8');
+  fs.writeFileSync(path.join(cwd, 'plugins', 'AGENTS.md'), '# small\n', 'utf8');
+
+  // Oversized AGENTS.md inside node_modules — excluded.
+  fs.mkdirSync(path.join(cwd, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'node_modules', 'pkg', 'AGENTS.md'), '#'.repeat(4500), 'utf8');
+
+  const report = runSweep(cwd);
+
+  const overBudget = report.findings.filter((f) => f.type === 'NESTED_CLAUDE_MD_OVER_BUDGET');
+  expect(overBudget).toHaveLength(2);
+  const pair = overBudget.find((f) => f.file === path.join('src', 'CLAUDE.md'));
+  expect(pair).toBeDefined();
+  expect(pair.files).toEqual([path.join('src', 'CLAUDE.md'), path.join('src', 'AGENTS.md')]);
+  expect(pair.bytes).toBe(5000);
+  const alone = overBudget.find((f) => f.file === path.join('web', 'AGENTS.md'));
+  expect(alone).toBeDefined();
+  expect(alone.bytes).toBe(4500);
+});

@@ -9,7 +9,10 @@
  * session-manager's own OWNERS vocabulary), this script does not assume any
  * particular namespace list. It re-derives the source-of-truth hierarchy for
  * the TARGET project from what's actually on disk there:
- *   1. That project's own CLAUDE.md (if present) — the declared architecture.
+ *   1. That project's own root AGENTS.md if present, else its root CLAUDE.md —
+ *      the declared architecture. Projects migrating to AGENTS.md keep the text
+ *      there and leave CLAUDE.md as a one-line `@AGENTS.md` import stub, so
+ *      reading CLAUDE.md alone would see only the import line.
  *   2. Each namespace's own README.md under its ops root.
  *   3. On-disk content — folder names, and archived/processed subfolders.
  *
@@ -24,8 +27,9 @@
  *   - NO_RETENTION_POLICY    — namespace has an archived/processed subfolder with
  *                              files but no retention/prune/expire language in its
  *                              README (or no README at all)
- *   - NESTED_CLAUDE_MD_OVER_BUDGET — any CLAUDE.md strictly below the repo root
- *                              (excluding node_modules) exceeds 4000 bytes. Nested
+ *   - NESTED_CLAUDE_MD_OVER_BUDGET — any folder strictly below the repo root
+ *                              (excluding node_modules) whose CLAUDE.md + AGENTS.md
+ *                              bytes, counted together, exceed 4000. Nested
  *                              CLAUDE.md files are scoped-context notes, not the
  *                              root law file, so they get a fixed 4000-byte cap
  *                              rather than the root's self-declared SIZE BUDGET.
@@ -34,11 +38,12 @@
  * feed CONTRADICTION): the single-writer OWNERS enumeration used to live only in
  * the target project's root CLAUDE.md. It can now instead live in a scoped
  * `session-manager-operations/CLAUDE.md`, so these checks read
- * `<targetCwd>/session-manager-operations/CLAUDE.md` when that file exists and
- * fall back to `<targetCwd>/CLAUDE.md` otherwise — so a project that hasn't
- * split its ops docs out yet keeps working unchanged. The root CLAUDE.md's own
- * CLAUDE_MD_OVER_BUDGET check (against its self-declared SIZE BUDGET header) is
- * unaffected by this fallback and always reads the root file.
+ * `<targetCwd>/session-manager-operations/AGENTS.md` or `CLAUDE.md` (AGENTS.md
+ * first) when one exists and fall back to the root declared-architecture doc
+ * (root AGENTS.md, else root CLAUDE.md) otherwise — so a project that hasn't
+ * split its ops docs out yet keeps working unchanged. The CLAUDE_MD_OVER_BUDGET
+ * check (against the self-declared SIZE BUDGET header) is unaffected by this
+ * fallback and always reads the root declared-architecture doc.
  *
  * Never deletes/migrates/archives anything and never files Epics itself — it
  * only prints a JSON report. Routing findings into proposed Epics is the
@@ -61,7 +66,13 @@ if (!targetCwd) {
 
 const OPS_ROOT = path.join(targetCwd, 'session-manager-operations');
 const CLAUDE_MD_PATH = path.join(targetCwd, 'CLAUDE.md');
+const AGENTS_MD_PATH = path.join(targetCwd, 'AGENTS.md');
+// Root declared architecture: AGENTS.md when present (CLAUDE.md is then a
+// `@AGENTS.md` stub or absent), else CLAUDE.md as before.
+const ROOT_DOC_PATH = fs.existsSync(AGENTS_MD_PATH) ? AGENTS_MD_PATH : CLAUDE_MD_PATH;
+const OPS_AGENTS_MD_PATH = path.join(OPS_ROOT, 'AGENTS.md');
 const OPS_CLAUDE_MD_PATH = path.join(OPS_ROOT, 'CLAUDE.md');
+const NESTED_DOC_NAMES = ['CLAUDE.md', 'AGENTS.md'];
 const NESTED_CLAUDE_MD_BUDGET_BYTES = 4000;
 
 // computeClaudeMdSize(claudeMdText) -> { chars, budget, withinBudget } | null
@@ -162,7 +173,9 @@ if (!fs.existsSync(OPS_ROOT) || !fs.statSync(OPS_ROOT).isDirectory()) {
     opsRoot: OPS_ROOT,
     error: 'no session-manager-operations/ folder found at target cwd',
     hasClaudeMd: fs.existsSync(CLAUDE_MD_PATH),
-    claudeMdSize: computeClaudeMdSize(readText(CLAUDE_MD_PATH)),
+    hasAgentsMd: fs.existsSync(AGENTS_MD_PATH),
+    declaredArchitecturePath: path.relative(targetCwd, ROOT_DOC_PATH),
+    claudeMdSize: computeClaudeMdSize(readText(ROOT_DOC_PATH)),
     namespaces: [],
     findings: [],
   }, null, 2) + '\n');
@@ -170,12 +183,13 @@ if (!fs.existsSync(OPS_ROOT) || !fs.statSync(OPS_ROOT).isDirectory()) {
 }
 
 const claudeMd = readText(CLAUDE_MD_PATH);
-const claudeMdSize = computeClaudeMdSize(claudeMd);
+const rootDoc = ROOT_DOC_PATH === CLAUDE_MD_PATH ? claudeMd : readText(ROOT_DOC_PATH);
+const claudeMdSize = computeClaudeMdSize(rootDoc);
 // The OWNERS enumeration may now live in a scoped session-manager-operations/
 // CLAUDE.md instead of the root one — see the header comment. Namespace-level
 // UNDOCUMENTED/retired/owner-signal checks read that file when it exists.
-const ownershipDocPath = fs.existsSync(OPS_CLAUDE_MD_PATH) ? OPS_CLAUDE_MD_PATH : CLAUDE_MD_PATH;
-const ownershipDoc = ownershipDocPath === CLAUDE_MD_PATH ? claudeMd : readText(ownershipDocPath);
+const ownershipDocPath = [OPS_AGENTS_MD_PATH, OPS_CLAUDE_MD_PATH].find((p) => fs.existsSync(p)) || ROOT_DOC_PATH;
+const ownershipDoc = ownershipDocPath === ROOT_DOC_PATH ? rootDoc : readText(ownershipDocPath);
 const namespaceDirs = listDirEntries(OPS_ROOT).filter((e) => e.isDirectory());
 
 const namespaces = [];
@@ -196,7 +210,7 @@ if (epicIndexDrift.orphan_rows > 0) {
 if (claudeMdSize && !claudeMdSize.withinBudget) {
   findings.push({
     type: 'CLAUDE_MD_OVER_BUDGET',
-    detail: `CLAUDE.md is ${claudeMdSize.chars} chars, over its ${claudeMdSize.budget}-char budget by ${claudeMdSize.chars - claudeMdSize.budget}`,
+    detail: `${path.relative(targetCwd, ROOT_DOC_PATH)} is ${claudeMdSize.chars} chars, over its ${claudeMdSize.budget}-char budget by ${claudeMdSize.chars - claudeMdSize.budget}`,
   });
 }
 
@@ -302,14 +316,17 @@ for (const v of opsPathLint.violations) {
   });
 }
 
-// Nested-CLAUDE.md budget lint: every CLAUDE.md strictly below the repo root
-// (excluding node_modules and .git) gets a fixed 4000-byte cap — these are
-// scoped-context notes (house style: H1 + "What's here"/"Who consumes
-// this"/"What must NOT be assumed"), not the root law file, so they don't
-// carry a self-declared SIZE BUDGET header the way root CLAUDE.md does.
+// Nested-CLAUDE.md budget lint: every folder strictly below the repo root
+// (excluding node_modules and .git) gets a fixed 4000-byte cap on its
+// CLAUDE.md + AGENTS.md bytes counted together — a migrated folder keeps its
+// text in AGENTS.md behind a CLAUDE.md `@AGENTS.md` stub, and both load into
+// context, so the pair is one budget. These are scoped-context notes (house
+// style: H1 + "What's here"/"Who consumes this"/"What must NOT be assumed"),
+// not the root law file, so they don't carry a self-declared SIZE BUDGET
+// header the way the root doc does.
 const NESTED_CLAUDE_MD_EXCLUDE_DIRS = new Set(['node_modules', '.git']);
 function findNestedClaudeMdFiles(root) {
-  const rootClaudeMdPath = path.join(root, 'CLAUDE.md');
+  const rootDir = path.resolve(root);
   const found = [];
   const walk = (dir) => {
     let entries;
@@ -318,20 +335,31 @@ function findNestedClaudeMdFiles(root) {
       if (NESTED_CLAUDE_MD_EXCLUDE_DIRS.has(e.name)) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) { walk(full); continue; }
-      if (e.name === 'CLAUDE.md' && full !== rootClaudeMdPath) found.push(full);
+      if (NESTED_DOC_NAMES.includes(e.name) && path.resolve(dir) !== rootDir) found.push(full);
     }
   };
   walk(root);
   return found;
 }
 const nestedClaudeMdFiles = findNestedClaudeMdFiles(targetCwd);
+const nestedDocsByDir = new Map();
 for (const p of nestedClaudeMdFiles) {
-  const bytes = Buffer.byteLength(fs.readFileSync(p, 'utf8'), 'utf8');
+  const dir = path.dirname(p);
+  if (!nestedDocsByDir.has(dir)) nestedDocsByDir.set(dir, []);
+  nestedDocsByDir.get(dir).push(p);
+}
+for (const files of nestedDocsByDir.values()) {
+  // CLAUDE.md first so a pair's finding keeps pointing at the CLAUDE.md path.
+  files.sort((a, b) => NESTED_DOC_NAMES.indexOf(path.basename(a)) - NESTED_DOC_NAMES.indexOf(path.basename(b)));
+  const bytes = files.reduce((sum, p) => sum + fs.statSync(p).size, 0);
   if (bytes > NESTED_CLAUDE_MD_BUDGET_BYTES) {
+    const rel = files.map((p) => path.relative(targetCwd, p));
     findings.push({
       type: 'NESTED_CLAUDE_MD_OVER_BUDGET',
-      file: path.relative(targetCwd, p),
-      detail: `${path.relative(targetCwd, p)} is ${bytes} bytes, over the ${NESTED_CLAUDE_MD_BUDGET_BYTES}-byte nested-CLAUDE.md cap by ${bytes - NESTED_CLAUDE_MD_BUDGET_BYTES}`,
+      file: rel[0],
+      files: rel,
+      bytes,
+      detail: `${rel.join(' + ')} ${rel.length > 1 ? 'are' : 'is'} ${bytes} bytes, over the ${NESTED_CLAUDE_MD_BUDGET_BYTES}-byte nested-CLAUDE.md cap by ${bytes - NESTED_CLAUDE_MD_BUDGET_BYTES}`,
     });
   }
 }
@@ -340,6 +368,8 @@ process.stdout.write(JSON.stringify({
   targetCwd,
   opsRoot: OPS_ROOT,
   hasClaudeMd: !!claudeMd,
+  hasAgentsMd: fs.existsSync(AGENTS_MD_PATH),
+  declaredArchitecturePath: path.relative(targetCwd, ROOT_DOC_PATH),
   claudeMdSize,
   ownershipDocPath: path.relative(targetCwd, ownershipDocPath),
   opsPathLint,

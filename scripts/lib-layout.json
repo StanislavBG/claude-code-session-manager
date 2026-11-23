@@ -125,6 +125,7 @@
   "prdAgentType": "prd",
   "prdAuthoringSeed": "prd",
   "prdCreate": "prd",
+  "prdCriteria": "prd",
   "prdDeclaredPaths": "prd",
   "prdDisposition": "prd",
   "prdFrontmatter": "prd",

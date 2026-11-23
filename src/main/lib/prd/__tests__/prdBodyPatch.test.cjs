@@ -9,6 +9,7 @@
 const assert = require('node:assert/strict');
 const { applyStructuredPrdPatch } = require('../prdBodyPatch.cjs');
 const { buildPrdBody } = require('../prdCreate.cjs');
+const { splitFrontmatter, parsePrdFile } = require('../prdFrontmatter.cjs');
 const { resolveGate, parseChain } = require('../../scheduler/definitionOfDone.cjs');
 
 function makeBody() {
@@ -58,10 +59,37 @@ describe('applyStructuredPrdPatch', () => {
   });
 
   it('acceptanceCriteria-only patch replaces the criteria', () => {
-    const r = applyStructuredPrdPatch(makeBody(), { acceptanceCriteria: ['only one'] });
+    // scheduler.updatePrd passes the body after the frontmatter.
+    const r = applyStructuredPrdPatch(splitFrontmatter(makeBody()).body, { acceptanceCriteria: ['only one'] });
     assert.equal(r.ok, true);
-    assert.match(r.body, /# Acceptance criteria\n\n- \[ \] only one\n\n# Files/);
+    assert.match(r.body, /# Acceptance criteria\n\n- \[ \] ac-1: only one\n\n# Files/);
     assert.ok(!r.body.includes('first works'));
+    assert.deepEqual(r.criteria, [{ id: 'ac-1', statement: 'only one', check: { kind: 'manual' } }]);
+  });
+
+  it('acceptanceCriteria patch keeps ids stable for unchanged statements', () => {
+    const previousCriteria = parsePrdFile(makeBody()).frontmatter.criteria;
+    assert.deepEqual(previousCriteria.map((c) => c.id), ['ac-1', 'ac-2']);
+    const r = applyStructuredPrdPatch(splitFrontmatter(makeBody()).body, {
+      acceptanceCriteria: ['new first', 'second works', 'first works'],
+      previousCriteria,
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.criteria.map((c) => [c.id, c.statement]), [['ac-3', 'new first'], ['ac-2', 'second works'], ['ac-1', 'first works']]);
+    assert.match(r.body, /- \[ \] ac-3: new first\n- \[ \] ac-2: second works\n- \[ \] ac-1: first works\n/);
+  });
+
+  it('acceptanceCriteria patch accepts structured entries and refuses a bad one with its index', () => {
+    const ok = applyStructuredPrdPatch(makeBody(), {
+      acceptanceCriteria: [{ id: 'up', statement: 'Server up', check: { kind: 'http', spec: 'http://127.0.0.1:3000/' } }],
+    });
+    assert.equal(ok.ok, true);
+    assert.deepEqual(ok.criteria[0].check, { kind: 'http', spec: { url: 'http://127.0.0.1:3000/', status: 200 } });
+    const bad = applyStructuredPrdPatch(makeBody(), {
+      acceptanceCriteria: ['a', { statement: 'x', check: { kind: 'http', spec: 'http://example.com/' } }],
+    });
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /criteria entry 2: http check url must be loopback only/);
   });
 
   it('rejects a gate with a shell metacharacter and leaves the body unchanged', { repeats: 20 }, () => {

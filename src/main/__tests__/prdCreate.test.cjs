@@ -76,8 +76,8 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
   // sections must appear in Goal -> AC -> Implementation notes -> Out of scope -> Engineering standards order
   expect(goalIdx > 0 && goalIdx < acIdx && acIdx < implIdx && implIdx < oosIdx && oosIdx < standardsIdx).toBeTruthy();
 
-  expect(body).toMatch(/- \[ \] thing exists/);
-  expect(body).toMatch(/- \[ \] tests pass/);
+  expect(body).toMatch(/- \[ \] ac-1: thing exists/);
+  expect(body).toMatch(/- \[ \] ac-2: tests pass/);
   expect(body).toMatch(/- not this/);
   // must point at STANDARDS_PATH rather than inline the standards.md content
   expect(body.includes(STANDARDS_PATH)).toBeTruthy();
@@ -287,7 +287,7 @@ test('POST /admin/scheduler/create-prd with a valid payload writes a file with f
     expect(written).toMatch(/estimateMinutes: 15/);
     expect(written).toMatch(/# Goal/);
     expect(written).toMatch(/# Acceptance criteria/);
-    expect(written).toMatch(/- \[ \] widget frobnicates on click/);
+    expect(written).toMatch(/- \[ \] ac-1: widget frobnicates on click/);
     expect(written).toMatch(/# Implementation notes/);
     expect(written).toMatch(/# Out of scope/);
     expect(written).toMatch(/## Engineering standards/);

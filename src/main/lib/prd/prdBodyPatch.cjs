@@ -8,6 +8,7 @@
 
 const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
+const { validateCriteria, renderCriteriaLines } = require('./prdCriteria.cjs');
 
 const H_AC = '# Acceptance criteria';
 const H_FILES = '# Files';
@@ -58,8 +59,11 @@ function gateSignature(body) {
 
 /**
  * @param {string} body
- * @param {{gate?: string[], files?: string[], acceptanceCriteria?: string[]}} patch
- * @returns {{ok:true, body:string, warnings:string[]}|{ok:false, error:string}}
+ * @param {{gate?: string[], files?: string[], acceptanceCriteria?: unknown[], previousCriteria?: unknown}} patch
+ *   acceptanceCriteria entries are strings or structured criteria (prdCriteria.cjs);
+ *   previousCriteria (the PRD's frontmatter `criteria`) keeps ids stable.
+ * @returns {{ok:true, body:string, warnings:string[], criteria?: object[]}|{ok:false, error:string}}
+ *   `criteria` (when acceptanceCriteria was patched) is what the caller writes to frontmatter.
  */
 function applyStructuredPrdPatch(body, patch) {
   if (typeof body !== 'string') return { ok: false, error: 'body must be a string.' };
@@ -87,21 +91,12 @@ function applyStructuredPrdPatch(body, patch) {
     if (!f.ok) return { ok: false, error: f.error };
     filesList = f.files;
   }
+  let criteria = null;
   if (hasAc) {
-    const ac = patch.acceptanceCriteria;
-    if (!Array.isArray(ac) || ac.length === 0) {
-      return { ok: false, error: 'acceptanceCriteria must be a non-empty array of strings.' };
-    }
-    acLines = [];
-    for (let i = 0; i < ac.length; i++) {
-      if (typeof ac[i] !== 'string' || ac[i].trim() === '') {
-        return { ok: false, error: `acceptanceCriteria entry ${i + 1}: must be a non-empty string.` };
-      }
-      if (/[\r\n]/.test(ac[i])) {
-        return { ok: false, error: `acceptanceCriteria entry ${i + 1}: must not contain a newline.` };
-      }
-      acLines.push(`- [ ] ${ac[i].trim()}`);
-    }
+    const cv = validateCriteria(patch.acceptanceCriteria, { previous: patch.previousCriteria });
+    if (!cv.ok) return { ok: false, error: `acceptanceCriteria: ${cv.error}` };
+    criteria = cv.criteria;
+    acLines = renderCriteriaLines(criteria);
   }
 
   const lines = body.split('\n');
@@ -132,7 +127,7 @@ function applyStructuredPrdPatch(body, patch) {
     return { ok: false, error: 'The patch would change how the scheduler reads the PRD gate (stray gate fence in the new text).' };
   }
 
-  return { ok: true, body: next, warnings };
+  return criteria ? { ok: true, body: next, warnings, criteria } : { ok: true, body: next, warnings };
 }
 
 module.exports = { applyStructuredPrdPatch };

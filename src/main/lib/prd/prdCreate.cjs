@@ -82,6 +82,7 @@ const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
 const { isSweepValidatorSlug } = require('../epic/epicSweepValidator.cjs');
 const { validateGate, validateFiles, renderFilesSection, renderGateSection, parseFilesSection } = require('./prdGateFiles.cjs');
+const { normalizeCriteria, validateCriteria, serializeCriteria, renderCriteriaLines } = require('./prdCriteria.cjs');
 const { filesOverlap } = require('../scheduler/schedulerBatch.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
 const { MISS_KINDS } = require('../scheduler/validatorVerdictSchema.cjs');
@@ -137,6 +138,10 @@ function buildPrdBody(input) {
     implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, riskTools, preflight,
     gate, files, budgetExempt, fixes,
   } = input;
+  // Structured criteria (prdCriteria.cjs): createPrd() normalizes once and
+  // passes `criteria`; a direct caller with only string criteria gets the
+  // same normalization here, so every PRD carries ids.
+  const criteria = Array.isArray(input.criteria) ? input.criteria : normalizeCriteria(acceptanceCriteria);
 
   // No `parallelGroup` frontmatter key (PRD_AUTHORING.md §5) — the NN-
   // filename prefix is the single source of truth for grouping; adding a
@@ -202,9 +207,11 @@ function buildPrdBody(input) {
   // Budget exemption is for a sweep validator that cannot be split further;
   // every other caller's budgetExempt is ignored.
   if (budgetExempt === true && agentType === 'validator' && isSweepValidatorSlug(input.slug)) fmLines.push('budgetExempt: true');
+  // Normalized criteria as one-line JSON — [{ id, statement, check: { kind, spec? } }].
+  fmLines.push(`criteria: ${serializeCriteria(criteria)}`);
   fmLines.push('---', '');
 
-  const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');
+  const acLines = renderCriteriaLines(criteria).join('\n');
   const oosSource = outOfScope && outOfScope.length ? outOfScope : ['(none)'];
   const oosLines = oosSource.map((line) => `- ${line}`).join('\n');
 
@@ -683,6 +690,16 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     const pf = normalizePreflightField(input.preflight);
     if (!pf.ok) return { ok: false, applied: false, status: 400, error: pf.error };
     input = { ...input, preflight: pf.value || undefined };
+  }
+
+  // Structured criteria (prdCriteria.cjs): strings become manual ac-<n>
+  // criteria; objects are checked per kind. Refused before NN allocation.
+  // acceptanceCriteria is rewritten to the plain statements so every
+  // string-only consumer below (heading guard, sizing, worktree reach) works.
+  {
+    const cv = validateCriteria(input.acceptanceCriteria);
+    if (!cv.ok) return { ok: false, applied: false, status: 400, error: `acceptance ${cv.error}` };
+    input = { ...input, criteria: cv.criteria, acceptanceCriteria: cv.criteria.map((c) => c.statement) };
   }
 
   // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied

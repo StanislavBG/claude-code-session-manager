@@ -449,6 +449,19 @@ const PreflightSchema = z.string().max(500);
 // after-the-fact change path) so both can never disagree on what a valid
 // disposition value is.
 const PrdDispositionSchema = z.enum(['append', 'new-head']);
+// String, or a structured criterion { id?, statement, check?: { kind, spec } }.
+// Per-kind shape rules live in prd/prdCriteria.cjs (createPrd / prdBodyPatch run them).
+const AcceptanceCriteriaSchema = z.array(z.union([
+  z.string().min(1).max(2000),
+  z.object({
+    id: z.string().min(1).max(60).optional(),
+    statement: z.string().min(1).max(2000),
+    check: z.object({
+      kind: z.enum(['command', 'file', 'http', 'manual']),
+      spec: z.unknown().optional(),
+    }).strict().optional(),
+  }).strict(),
+])).min(1).max(100);
 const schedulerCreatePrd = z.object({
   title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines'),
   // Optional (PRD: worktree-cwd Epic-lookup hazard) — when omitted, prdCreate.cjs's
@@ -459,7 +472,7 @@ const schedulerCreatePrd = z.object({
   cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   estimateMinutes: z.number().int().min(1).max(100000).optional(),
   goal: z.string().min(1).max(20000),
-  acceptanceCriteria: z.array(z.string().min(1).max(2000)).min(1).max(100),
+  acceptanceCriteria: AcceptanceCriteriaSchema,
   implementationNotes: z.string().min(1).max(20000),
   outOfScope: z.array(z.string().min(1).max(2000)).max(100).optional(),
   slug: z.string().min(1).max(60).regex(PRD_CREATE_SLUG_RE).optional(),
@@ -741,7 +754,7 @@ const adminUpdatePrd = z.object({
   // re-rendered). Mutually exclusive with `body` (enforced in updatePrd too).
   gate: z.array(z.string().min(1).max(2000)).min(1).max(50).optional(),
   files: z.array(z.string().min(1).max(1000)).min(1).max(200).optional(),
-  acceptanceCriteria: z.array(z.string().min(1).max(2000)).min(1).max(100).optional(),
+  acceptanceCriteria: AcceptanceCriteriaSchema.optional(),
 }).strict().refine(
   (it) => (it.frontmatter && Object.keys(it.frontmatter).length > 0) || it.body !== undefined
     || it.gate !== undefined || it.files !== undefined || it.acceptanceCriteria !== undefined,

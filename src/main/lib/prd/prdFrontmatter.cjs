@@ -78,10 +78,13 @@ function splitFrontmatter(raw) {
  *
  * `fixes` (the earlier PRDs this one repairs) is a one-line JSON array of
  * { prd, missKind, reason } — see parseFixes.
+ *
+ * `criteria` (structured acceptance criteria, prdCriteria.cjs) is a one-line
+ * JSON array of { id, statement, check: { kind, spec? } } — see parseCriteria.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight', 'criteria']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight', 'criteria'];
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -211,6 +214,26 @@ function parseFixes(raw) {
   return out;
 }
 
+/**
+ * Parse the `criteria` value — a one-line JSON array of { id, statement,
+ * check: { kind, spec? } } (the sole form prdCreate.cjs writes; shape rules
+ * live in prdCriteria.cjs, not required here because definitionOfDone.cjs ->
+ * this file would cycle). Returns null for anything malformed.
+ */
+function parseCriteria(raw) {
+  const v = String(raw ?? '').trim();
+  if (!v.startsWith('[')) return null;
+  let arr;
+  try { arr = JSON.parse(v); } catch { return null; }
+  if (!Array.isArray(arr)) return null;
+  for (const e of arr) {
+    if (e == null || typeof e !== 'object' || Array.isArray(e)) return null;
+    if (typeof e.id !== 'string' || typeof e.statement !== 'string') return null;
+    if (e.check == null || typeof e.check !== 'object' || typeof e.check.kind !== 'string') return null;
+  }
+  return arr;
+}
+
 function arraysEqual(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -265,6 +288,11 @@ function applyKey(fm, key, after) {
     case 'fixes': {
       const list = parseFixes(after);
       if (list && list.length) fm.fixes = list;
+      return;
+    }
+    case 'criteria': {
+      const list = parseCriteria(after);
+      if (list && list.length) fm.criteria = list;
       return;
     }
     case 'quietMachine':
@@ -364,7 +392,7 @@ function parsePrdFile(text) {
 
     if (RECOGNIZED_KEYS.has(key)) {
       applyKey(fm, key, after);
-      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes' || key === 'riskTools' || key === 'preflight') {
+      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes' || key === 'riskTools' || key === 'preflight' || key === 'criteria') {
         if (fm[key]) {
           if (!fm._raw) fm._raw = {};
           fm._raw[key] = { line, parsed: fm[key] };
@@ -413,6 +441,11 @@ function serializePrdFile(fm, body) {
     // dependency — never emitted, same as an absent key.
     if (Array.isArray(v) && v.length === 0) continue;
     const cached = fm._raw?.[key];
+    if (key === 'criteria') {
+      const line = `criteria: ${JSON.stringify(v)}`;
+      out.push(cached && cached.line.trim() === line ? cached.line : line);
+      continue;
+    }
     if (key === 'fixes') {
       const line = `fixes: ${JSON.stringify(v.map((f) => ({ prd: f.prd, missKind: f.missKind, reason: f.reason })))}`;
       out.push(cached && cached.line.trim() === line ? cached.line : line);
@@ -461,6 +494,7 @@ module.exports = {
   parseQuotedInlineList,
   formatQuotedInlineList,
   parseFixes,
+  parseCriteria,
   isArtifactOnlyDeclaration,
   RECOGNIZED_KEYS,
   PRD_EFFORT_LEVELS,

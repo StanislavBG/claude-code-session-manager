@@ -408,6 +408,36 @@ async function fetchReadiness() {
 
 const PRD_BATCH_MAX = 40; // mirrors prdCreate.cjs / ipcSchemas.cjs (the server enforces it)
 
+// One acceptance criterion: a plain string (manual, id ac-<n>) or a structured
+// criterion. Per-kind rules are enforced server-side by src/main/lib/prd/prdCriteria.cjs.
+const ACCEPTANCE_CRITERION_ITEM_SCHEMA = {
+  oneOf: [
+    { type: 'string', description: 'One verifiable checklist line (a manual criterion, id ac-<n>).' },
+    {
+      type: 'object',
+      description: 'A criterion that can be checked mechanically.',
+      properties: {
+        id: { type: 'string', description: 'Optional unique kebab-case id; defaults to ac-<n>.' },
+        statement: { type: 'string', description: 'One verifiable checklist line.' },
+        check: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['command', 'file', 'http', 'manual'] },
+            spec: {
+              description: 'command: one gate-syntax command string. file: repo-relative path, or { path, contains? }. '
+                + 'http: loopback URL (localhost/127.0.0.1/[::1]), or { url, status? } (status defaults to 200). manual: optional guidance string.',
+            },
+          },
+          required: ['kind'],
+          additionalProperties: false,
+        },
+      },
+      required: ['statement'],
+      additionalProperties: false,
+    },
+  ],
+};
+
 const CREATE_PRD_ITEM_SCHEMA = {
   type: 'object',
   properties: {
@@ -416,8 +446,9 @@ const CREATE_PRD_ITEM_SCHEMA = {
     estimateMinutes: { type: 'number', description: 'Optional; normally omit. An omitted estimate falls back to the executing persona\'s defaultEstimateMinutes, then to the 45-minute kill-budget floor. Pass one only for work that legitimately needs longer (budget = 3x the estimate, capped at 180 minutes).' },
     goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
     acceptanceCriteria: {
-      type: 'array', items: { type: 'string' },
-      description: 'Each entry is one verifiable checklist line',
+      type: 'array',
+      items: ACCEPTANCE_CRITERION_ITEM_SCHEMA,
+      description: 'Each entry is one verifiable checklist line: a string, or { id?, statement, check: { kind, spec } } for a mechanically checkable criterion.',
     },
     implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
     gate: {
@@ -662,7 +693,7 @@ const TOOLS = [
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter). Cannot be combined with gate/files/acceptanceCriteria.' },
         gate: { type: 'array', items: { type: 'string' }, description: 'Optional: replaces the # Gate section with these commands (validated and re-rendered like scheduler_create_prd). Not with body.' },
         files: { type: 'array', items: { type: 'string' }, description: 'Optional: replaces the # Files section with these paths (validated and re-rendered). Not with body.' },
-        acceptanceCriteria: { type: 'array', items: { type: 'string' }, description: 'Optional: replaces the # Acceptance criteria checklist; one string per criterion. Not with body.' },
+        acceptanceCriteria: { type: 'array', items: ACCEPTANCE_CRITERION_ITEM_SCHEMA, description: 'Optional: replaces the # Acceptance criteria checklist; one string or { id?, statement, check } per criterion (unchanged statements keep their ids). Not with body.' },
       },
       required: ['slug'],
     },

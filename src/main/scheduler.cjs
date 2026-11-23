@@ -13274,9 +13274,11 @@ const remote = {
     let newBody = body !== undefined ? body : origBody;
     let patchWarnings = [];
     if (hasStructured) {
-      const patched = applyStructuredPrdPatch(origBody, structured);
+      const patched = applyStructuredPrdPatch(origBody, { ...structured, previousCriteria: fm.criteria });
       if (!patched.ok) return { ok: false, error: patched.error };
       newBody = patched.body;
+      // Structured criteria (prdCriteria.cjs): frontmatter `criteria` follows the re-rendered list.
+      if (patched.criteria) fm.criteria = patched.criteria;
       patchWarnings = patched.warnings || [];
     }
     const newRaw = serializePrdFile(fm, newBody);

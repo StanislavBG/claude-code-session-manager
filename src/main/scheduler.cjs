@@ -163,6 +163,7 @@ const queueOps = require('./queueOps.cjs');
 const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath, isSafeEpicId } = require('./lib/prd/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epic/epicMint.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured } = require('./lib/scheduler/validatorVerdictSchema.cjs');
@@ -5201,6 +5202,61 @@ function ensureTimeoutShimOnce() {
 }
 
 /**
+ * Resolve the persona a job spawns as, via its AgentSnapshot.
+ * Stamped row (job.agentSnapshotId) → readAgentSnapshot; null (missing or
+ * tampered) → refusal agent_snapshot_missing. Unstamped → buildAgentSnapshot
+ * (persona refusals pass through unchanged), writeAgentSnapshot, and stamp
+ * job.agentSnapshotId in memory (spawnJob's onPid mutate persists it).
+ * A store write failure is logged and the job spawns unpinned. Never throws.
+ * @param {any} job
+ * @param {string} cwd
+ * @param {string[]|undefined} packs
+ * @returns {Promise<{ refusal: null|{ code: string, detail: string }, systemPrompt?: string|null, model?: string, tools?: string[]|null, personaPath?: string|null, agentSnapshotId?: string|null, pinned?: boolean }>}
+ */
+async function resolveJobAgentSnapshot(job, cwd, packs) {
+  if (typeof job.agentSnapshotId === 'string' && job.agentSnapshotId) {
+    const snap = await agentSnapshot.readAgentSnapshot(cwd, job.agentSnapshotId);
+    if (!snap) {
+      return { refusal: { code: 'agent_snapshot_missing', detail: `pinned agent snapshot ${job.agentSnapshotId} is missing or does not match its id` } };
+    }
+    return {
+      refusal: null,
+      systemPrompt: snap.body || null,
+      model: snap.model || agentModelResolve.FALLBACK_MODEL,
+      tools: Array.isArray(snap.tools) ? snap.tools : null,
+      personaPath: null,
+      agentSnapshotId: job.agentSnapshotId,
+      pinned: true,
+    };
+  }
+  let built;
+  try {
+    built = await agentSnapshot.buildAgentSnapshot({ cwd, agentType: job.agentType, packs });
+  } catch (err) {
+    console.error(`[scheduler] agent snapshot build failed for ${job.slug}: ${err?.message ?? err}`);
+    return { refusal: { code: 'persona_invalid', detail: `agent snapshot build failed: ${err?.message ?? err}` } };
+  }
+  if (built.refusal) return { refusal: built.refusal };
+  const snap = built.snapshot;
+  let id = null;
+  try {
+    id = (await agentSnapshot.writeAgentSnapshot(cwd, snap)).id;
+    job.agentSnapshotId = id;
+  } catch (err) {
+    console.error(`[scheduler] agent snapshot write failed for ${job.slug} (spawning unpinned): ${err?.message ?? err}`);
+  }
+  return {
+    refusal: null,
+    systemPrompt: snap.body || null,
+    model: snap.model || agentModelResolve.FALLBACK_MODEL,
+    tools: snap.tools,
+    personaPath: null,
+    agentSnapshotId: id,
+    pinned: false,
+  };
+}
+
+/**
  * Parks one queue row whose persona was refused at dispatch (agentModelResolve.cjs's
  * resolvePrdPersonaForSpawn `refusal`) — needs_review via transitionJob with
  * reason '<code>: <detail>'. The job never spawned, so there is no verify
@@ -5510,7 +5566,19 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // An absent agentType resolves as 'dev-lead'; a persona that is missing,
   // unreadable or fails its frontmatter schema is a REFUSAL — the job is
   // never spawned, and the caller parks it needs_review with the reason.
-  const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
+  // AgentSnapshot pin (ma-agent-snapshot-pin-dispatch): the persona body,
+  // model and tools come from an immutable, content-addressed snapshot
+  // (agentSnapshot.cjs). A row already stamped with agentSnapshotId (a
+  // resume, or any later dispatch of the same row) re-runs exactly that
+  // snapshot — never the live persona file, which may have been edited since.
+  // An unstamped row builds one (same persona resolution + refusal as
+  // before), writes it once, and stamps job.agentSnapshotId (persisted on the
+  // queue row by spawnJob's onPid mutate). A pinned snapshot that is missing
+  // or tampered (readAgentSnapshot → null) parks agent_snapshot_missing.
+  const packEpicId = job.epicId || job.sourcePromptId;
+  let packEpic = null;
+  try { packEpic = packEpicId ? agentModelResolve.findEpicById(cwd, packEpicId) : null; } catch { packEpic = null; }
+  const personaResolution = await resolveJobAgentSnapshot(job, cwd, packEpic?.packs);
   if (personaResolution.refusal) {
     const { code, detail } = personaResolution.refusal;
     const refusalError = `${code}: ${detail}`;
@@ -5550,8 +5618,6 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // resume spawns alike; no Epic / no packs / an error = today's argv.
   let packArgs = { pluginDirArgs: [], laws: '' };
   try {
-    const packEpicId = job.epicId || job.sourcePromptId;
-    const packEpic = packEpicId ? agentModelResolve.findEpicById(cwd, packEpicId) : null;
     const composed = packSpawnArgs.composePackSpawnArgs({ packIds: packEpic?.packs });
     if (composed && Array.isArray(composed.pluginDirArgs)) {
       packArgs = { pluginDirArgs: composed.pluginDirArgs, laws: typeof composed.laws === 'string' ? composed.laws : '' };
@@ -5562,7 +5628,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const jobSystemPrompt = packArgs.laws
     ? (personaResolution.systemPrompt ? `${personaResolution.systemPrompt}\n\n${packArgs.laws}` : packArgs.laws)
     : personaResolution.systemPrompt;
-  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}${effortResolution.source === 'prd' ? ' (prd)' : ''}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
+  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} agentSnapshot=${personaResolution.agentSnapshotId || '(unpinned)'}${personaResolution.pinned ? ' (pinned)' : ''} persona=${personaResolution.personaPath || '(from snapshot)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}${effortResolution.source === 'prd' ? ' (prd)' : ''}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
 
   // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
   // called below via withChildAndLog) sees a resolved --permission-prompts
@@ -5827,7 +5893,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       const errMsg = `argv too large: ${oversized.flag} is ${oversized.bytes} bytes, over the ${launchFailure.MAX_ARG_BYTES}-byte per-argument limit; not spawned`;
       safeLog(`[scheduler] ${errMsg}\n`);
       closeFd();
-      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta });
+      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta, agentSnapshotId: personaResolution.agentSnapshotId || null });
       removeSandboxTmp();
       resolve({ exitCode: -1, durationMs: 0, error: errMsg, launchError: 'argv_too_large', sessionId });
       return;
@@ -5880,7 +5946,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           sl(`\n[scheduler] ${errMsg}\n`);
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
-          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied });
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied, agentSnapshotId: personaResolution.agentSnapshotId || null });
           removeSandboxTmp();
           resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId,
             ...(launchFailure.isArgvTooLargeSpawnError(error?.message) ? { launchError: 'argv_too_large' } : {}) });
@@ -5947,6 +6013,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           sandbox: sandboxMeta,
           ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
+          agentSnapshotId: personaResolution.agentSnapshotId || null,
         });
         removeSandboxTmp();
         resolve({
@@ -7532,6 +7599,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           const idx = s.jobs.findIndex((x) => x.slug === job.slug);
           if (idx >= 0) {
             s.jobs[idx].sessionId = sessionId;
+            if (job.agentSnapshotId) s.jobs[idx].agentSnapshotId = job.agentSnapshotId;
             s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
             s.jobs[idx].dispatchPhase = 'spawned';
             s.jobs[idx].dispatchPhaseAt = new Date().toISOString();

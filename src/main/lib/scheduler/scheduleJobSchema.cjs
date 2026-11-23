@@ -147,6 +147,9 @@ const ScheduleJobSchema = z
     // at entry, deleted at resolution).
     needsReviewEntryRunId: z.string().nullable().optional(),
     needsReviewEnteredAt: z.string().nullable().optional(),
+    // Content id of the AgentSnapshot (agentSnapshot.cjs) the job's first
+    // dispatch pinned; every later dispatch (resume) re-runs that snapshot.
+    agentSnapshotId: z.string().optional(),
   })
   .passthrough();
 

@@ -28,6 +28,7 @@ let createAdminHttp;
 let parsePrdFile;
 let auditLogPath;
 let activeIndexPath;
+let isCancelledRow;
 
 const EPIC = 'test-fixture-epic';
 const OTHER_EPIC = 'other-fixture-epic';
@@ -46,6 +47,7 @@ beforeAll(() => {
   ({ parsePrdFile } = require('../lib/prd/prdFrontmatter.cjs'));
   ({ auditLogPath } = require('../lib/scheduler/schedulerPaths.cjs'));
   ({ activeIndexPath } = require('../lib/epic/epicMint.cjs'));
+  ({ isCancelledRow } = require('../lib/scheduler/cancelledRow.cjs'));
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) throw new Error('PRDS_DIR not under temp HOME');
   const projDir = path.join(tmpHome, '.claude', 'projects', 'fake-project-slug');
   fs.mkdirSync(projDir, { recursive: true });
@@ -92,6 +94,7 @@ async function seed(rows) {
         status: r.cancelled ? 'failed' : (r.status ?? 'pending'), dependsOn: r.dependsOn ?? [],
       };
       if (r.cancelled) { row.cancelledAt = CANCELLED_AT; row.error = 'cancelled via admin API'; row.finishedAt = CANCELLED_AT; }
+      if (r.row) Object.assign(row, r.row);
       return row;
     }),
     config: {},
@@ -224,7 +227,7 @@ test('dismiss with cascade cancels pending dependents transitively, then dismiss
     const j = await jobOf(slug);
     expect(j.status).toBe('failed');
     expect(typeof j.cancelledAt).toBe('string');
-    expect(queueOps.isCancelledRow(j)).toBe(true);
+    expect(isCancelledRow(j)).toBe(true);
   }
   expect((await jobOf('13-keep')).status).toBe('pending');
   expect(auditRows('job_dismiss_cancelled').at(-1)).toMatchObject({ slug: '10-dead', action: 'cascade', dependents: ['11-a', '12-b'] });
@@ -393,4 +396,76 @@ test('admin route POST /admin/scheduler/dismiss-cancelled: 409 refusals, 200 wit
   } finally {
     await admin.stop();
   }
+});
+
+// PRD 3824 — queueOps uses the shared predicate, so the needs_review shape
+// remote.cancelJob writes when a killed run's commit landed is cancelled too.
+const NR_CANCELLED = {
+  status: 'needs_review', cancelledAt: CANCELLED_AT, finishedAt: CANCELLED_AT,
+  statusHistory: [{ from: 'running', to: 'needs_review', at: CANCELLED_AT, reason: 'cancelled via admin API', source: 'remote:cancelJob' }],
+};
+const LEGACY_CANCELLED = {
+  status: 'failed', error: 'killed',
+  statusHistory: [{ from: 'running', to: 'failed', at: CANCELLED_AT, reason: 'cancelled via admin API', source: 'remote:cancelJob' }],
+};
+const REAL_PARK = {
+  status: 'needs_review', error: 'gate red',
+  statusHistory: [{ from: 'running', to: 'needs_review', at: CANCELLED_AT, reason: 'gate red', source: 'scheduler:finish' }],
+};
+
+test('queueOps no longer exports its own isCancelledRow', () => {
+  expect(queueOps.isCancelledRow).toBeUndefined();
+});
+
+test('auto-dismiss moves a needs_review+cancelledAt row of a completed (archived) Epic', async () => {
+  const cwd = await seed([{ slug: '10-nr', row: NR_CANCELLED }, { slug: '20-live', epic: 'open-epic' }]);
+  writeEpicStatuses({ 'open-epic': 'active' });
+  writeArchivedEpic(EPIC);
+  const state = { jobs: await jobs() };
+  const res = await queueOps.autoDismissCancelled(state);
+  expect(res.dismissed).toEqual(['10-nr']);
+  expect(state.jobs.map((j) => j.slug)).toEqual(['20-live']);
+  expect(cancelledFiles()).toEqual(['10-nr.md']);
+  expect(fs.existsSync(path.join(prdsDir(), '10-nr.md'))).toBe(false);
+  const rows = auditRows('job_dismiss_cancelled').filter((r) => r.source === 'auto' && r.slug === '10-nr');
+  expect(rows.at(-1)).toMatchObject({ cwd, epicId: EPIC, epicStatus: 'completed' });
+});
+
+test('auto-dismiss keeps a needs_review+cancelledAt row a pending row depends on', async () => {
+  await seed([{ slug: '10-nr', row: NR_CANCELLED }, { slug: '11-wait', dependsOn: ['nr'], epic: OTHER_EPIC }]);
+  writeEpicStatuses({ [OTHER_EPIC]: 'active' });
+  writeArchivedEpic(EPIC);
+  const state = { jobs: await jobs() };
+  expect((await queueOps.autoDismissCancelled(state)).dismissed).toEqual([]);
+  expect(state.jobs.map((j) => j.slug).sort()).toEqual(['10-nr', '11-wait']);
+});
+
+test('dismiss accepts a needs_review+cancelledAt row and a legacy statusHistory-only failed row; refuses a real park', async () => {
+  const cwd = await seed([
+    { slug: '10-nr', row: NR_CANCELLED },
+    { slug: '11-legacy', row: LEGACY_CANCELLED },
+    { slug: '12-park', row: REAL_PARK },
+  ]);
+  const nr = await queueOps.dismissCancelled('10-nr', cwd);
+  expect(nr).toMatchObject({ ok: true, removed: true });
+  const legacy = await queueOps.dismissCancelled('11-legacy', cwd);
+  expect(legacy).toMatchObject({ ok: true, removed: true });
+  const park = await queueOps.dismissCancelled('12-park', cwd);
+  expect(park.ok).toBe(false);
+  expect(park.notCancelled).toBe(true);
+  expect(await jobOf('10-nr')).toBeUndefined();
+  expect(await jobOf('11-legacy')).toBeUndefined();
+  expect((await jobOf('12-park')).status).toBe('needs_review');
+  expect(cancelledFiles().sort()).toEqual(['10-nr.md', '11-legacy.md']);
+});
+
+test('archiveMany refuses a needs_review+cancelledAt row with the dismiss warning', async () => {
+  const cwd = await seed([{ slug: '10-nr', row: NR_CANCELLED }]);
+  const res = await queueOps.archiveMany(['10-nr'], cwd);
+  expect(res.archived).toBe(0);
+  expect(res.warnings).toHaveLength(1);
+  expect(res.warnings[0]).toMatch(/dismiss/i);
+  expect(res.results[0]).toMatchObject({ ok: false, slug: '10-nr', cancelled: true });
+  expect(fs.existsSync(path.join(prdsDir(), '10-nr.md'))).toBe(true);
+  expect(fs.existsSync(path.join(epicDir(), 'prds-archived'))).toBe(false);
 });

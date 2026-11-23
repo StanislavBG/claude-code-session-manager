@@ -40,6 +40,8 @@ const config = require('./config.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
 const { HISTORY_RETENTION_MS } = require('./lib/scheduler/schedulerConfig.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
+// The one cancelled-row rule (failed OR needs_review + a cancel marker).
+const { isCancelledRow } = require('./lib/scheduler/cancelledRow.cjs');
 
 // Lazy: resolved via lib/scheduler/schedulerPaths.cjs at each use (SM_SCHEDULER_HOME).
 const prdsArchiveDir = () => path.join(schedulerPaths.scheduledPlansRoot(), 'prds-archived');
@@ -355,15 +357,6 @@ async function archiveOne(slug, ts, cwd) {
 let retireCompletedSlugsFn = async () => {};
 
 const DISMISS_ROUTE = 'POST /admin/scheduler/dismiss-cancelled';
-
-/**
- * A cancelled row is a 'failed' row carrying the cancel marker remote.cancelJob
- * stamps (`cancelledAt`). JOB_STATUSES is closed, so the marker — not a status —
- * is what tells a cancel apart from a real failure.
- */
-function isCancelledRow(j) {
-  return !!j && j.status === 'failed' && typeof j.cancelledAt === 'string' && j.cancelledAt.length > 0;
-}
 
 function cancelledSlugsIn(jobs, cwd) {
   const out = new Set();
@@ -911,7 +904,6 @@ module.exports = {
   lintOneAsync,
   archiveMany,
   bindQueueAccess,
-  isCancelledRow,
   dismissCancelled,
   autoDismissCancelled,
   selectAutoArchivable,

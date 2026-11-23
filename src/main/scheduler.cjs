@@ -115,7 +115,7 @@ const prdPaths = require('./scheduler/prdPaths.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
-const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/scheduler/reviewNotice.cjs');
+const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv, buildPreflightHoldNotice, preflightHoldNoticeKey } = require('./lib/scheduler/reviewNotice.cjs');
 const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
@@ -1178,8 +1178,9 @@ function heartbeatTick(deps = {}) {
           projects: toAlert, total: summary.total, byProject: summary.byProject, heldByDependency,
         });
         if (mainWindow && !mainWindow.isDestroyed()) {
+          const rootPhrases = toAlert.map((cwd) => rootBlockerPhrase(starveRootFor(projectRowsFor(s.jobs, cwd)).root)).join('');
           sendIfAlive(mainWindow, 'schedule:stall', {
-            message: `Scheduler stall in ${toAlert.length} project(s): ${toAlert.join(', ')}. Check the Scheduler tab.`,
+            message: `Scheduler stall in ${toAlert.length} project(s): ${toAlert.join(', ')}.${rootPhrases} Check the Scheduler tab.`,
             projects: toAlert,
             total: summary.total,
             byProject: summary.byProject,
@@ -6955,14 +6956,80 @@ async function runPreflightGate(job, defaultCwd, { now = Date.now } = {}) {
   }
   const heldAt = now();
   let hold = null;
+  let projectRows = [];
   await mutate((s) => {
     const row = s.jobs.find((x) => x.slug === job.slug);
     hold = armPreflightHoldOnRow(row, prevHold, result, command, heldAt, `make \`${command}\` exit 0`);
+    projectRows = snapshotProjectRows(s.jobs, row || job);
   });
   job.preflightHold = hold;
   auditPreflightHold(job.slug, command, result, hold);
   await broadcast({ flush: true });
+  await sendPreflightHoldNotice(job, hold, projectRows);
   return 'held';
+}
+
+/** Shallow copies of `job`'s project rows (for heldSlugs) — safe outside mutate(). */
+function snapshotProjectRows(jobs, job) {
+  const cwd = job?.cwd || DEFAULT_PROJECT_CWD;
+  return projectRowsFor(jobs, cwd).map((j) => ({ ...j }));
+}
+
+// Preflight hold notices already sent this process, by preflightHoldNoticeKey.
+const preflightHoldNoticesSent = new Set();
+let preflightHoldNoticeSender = null;
+function _setPreflightHoldNoticeSenderForTests(fn) { preflightHoldNoticeSender = fn || null; }
+function _resetPreflightHoldNoticesForTests() { preflightHoldNoticesSent.clear(); }
+
+/**
+ * sendPreflightHoldNotice(job, hold, projectRows) → Promise<boolean>
+ *
+ * The ONE informational Epic notice for a preflight hold, sent the moment it
+ * first arms (hold.attempts === 1) — not behind SM_REVIEW_NOTICE_HOLD_MINUTES.
+ * Same Epic delivery as the grouped needs_review notice
+ * (appendResponseEventWithReason, allowInactive), tagged notice:
+ * 'preflight-hold' with no outcome, so it never asks for input. Deduped by
+ * preflightHoldNoticeKey(slug, hold.since); a re-check failure (attempts > 1)
+ * sends nothing. heldSlugs = the row itself plus every pending row whose root
+ * blocker it is. Never throws.
+ */
+async function sendPreflightHoldNotice(job, hold, projectRows = []) {
+  try {
+    if (!job || !hold || hold.attempts !== 1) return false;
+    const key = preflightHoldNoticeKey(job.slug, hold.since);
+    if (preflightHoldNoticesSent.has(key)) return false;
+    preflightHoldNoticesSent.add(key);
+    const cwd = job.cwd || DEFAULT_PROJECT_CWD;
+    const epicId = job.sourcePromptId || job.epicId || null;
+    if (!epicId || !cwd) {
+      console.log(`[scheduler] ${job.slug}: preflight hold notice — no authoring Epic, report only`);
+      return false;
+    }
+    const roots = starvation.rootBlockersForProject(Array.isArray(projectRows) ? projectRows : []);
+    const mine = roots.find((r) => r.slug === job.slug);
+    const heldSlugs = [job.slug, ...(mine ? mine.heldSlugs.filter((x) => x !== job.slug) : [])];
+    const text = buildPreflightHoldNotice({
+      slug: job.slug,
+      failText: hold.failText,
+      preflight: typeof job.preflight === 'string' ? job.preflight.trim() : '',
+      heldSlugs,
+      nextAt: hold.nextAt,
+    });
+    const send = preflightHoldNoticeSender || appendResponseEventWithReason;
+    const result = await send(cwd, epicId, text, {
+      prdSlug: job.slug,
+      validation: 'unvalidated',
+      notice: 'preflight-hold',
+      digestKey: key,
+      allowInactive: true,
+    });
+    const ok = typeof result === 'boolean' ? result : !!result?.ok;
+    if (!ok) console.warn(`[scheduler] ${job.slug}: preflight hold notice not delivered (${result?.reason ?? 'refused'})`);
+    return ok;
+  } catch (e) {
+    console.error('[scheduler] sendPreflightHoldNotice error', job?.slug, e);
+    return false;
+  }
 }
 
 /**
@@ -7943,6 +8010,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }
     }
     let preflightRerouteHold = null;
+    let preflightRerouteRows = [];
 
     let actuallyFailed = false;
     let failedJobSnapshot = null;
@@ -8136,6 +8204,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             if (jobLandedCommitThisRun) row.landedCommit = jobLandedCommitThisRun;
             if (resetJobFields(row, `preflight red after SCHEDULER_VERDICT: FAIL — ${failText}`, { source: 'scheduler:preflight-hold' })) {
               preflightRerouteHold = armPreflightHoldOnRow(row, null, preflightRerouteResult, preflightRerouteCmd, Date.now(), failText);
+              preflightRerouteRows = snapshotProjectRows(s.jobs, row);
               return; // row is pending + held; no park, no ladder
             }
           }
@@ -8399,6 +8468,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     }
     if (preflightRerouteHold) auditPreflightHold(job.slug, preflightRerouteCmd, preflightRerouteResult, preflightRerouteHold, { after: 'sentinel_fail' });
     await broadcast({ flush: true });
+    if (preflightRerouteHold) await sendPreflightHoldNotice(job, preflightRerouteHold, preflightRerouteRows);
 
     // Per-run outcome sidecar (issue #11 list B5): turns/tokens/verdict in one
     // small JSON next to the log so fleet health never needs a transcript parse.
@@ -9283,12 +9353,85 @@ const starveEscalated = new Set();
  * gate. Exported for direct unit testing (attach a fake window via
  * attachWindow() first to assert the toast send).
  */
+function projectRowsFor(jobs, cwd) {
+  return (Array.isArray(jobs) ? jobs : []).filter((j) => j && (j.cwd || DEFAULT_PROJECT_CWD) === cwd);
+}
+
+/**
+ * starveRootFor(projectRows, oldestPendingSlug) → { root, knownWait }
+ *
+ * `root`: the root blocker (starvation.rootBlockersForProject) holding the
+ * oldest pending row, else the first one found, else null. `knownWait`: every
+ * pending row is either itself preflight-held or waits on a preflight-held
+ * root — the scheduler re-checks those on its own backoff, so the project is
+ * waiting on a precondition, not starved.
+ */
+function starveRootFor(projectRows, oldestPendingSlug = null) {
+  const roots = starvation.rootBlockersForProject(projectRows);
+  const root = roots.find((r) => r.heldSlugs.includes(oldestPendingSlug)) ?? roots[0] ?? null;
+  let knownWait = false;
+  if (roots.length > 0 && roots.every((r) => r.preflightHeld)) {
+    const waiting = new Set(roots.flatMap((r) => r.heldSlugs));
+    for (const r of roots) waiting.add(r.slug);
+    knownWait = projectRows.every((j) => j.status !== 'pending' || waiting.has(j.slug) || (j.preflightHold && typeof j.preflightHold === 'object'));
+  }
+  return { root, knownWait };
+}
+
+function rootBlockingFields(root) {
+  return {
+    rootBlockingSlug: root?.slug ?? null,
+    rootBlockingStatus: root?.status ?? null,
+    rootBlockingReason: root?.reason ?? null,
+  };
+}
+
+/** Toast/log phrase naming the root blocker, or '' when there is none. */
+function rootBlockerPhrase(root) {
+  if (!root) return '';
+  return ` Waiting on ${root.slug} (${root.status}${root.reason ? `: ${root.reason}` : ''}).`;
+}
+
+/**
+ * reportStarvedProjects(starvedProjects, jobs, launchBlocks) — the per-sweep
+ * project_starved WARN + audit (each naming the root blocker), then the
+ * bounded escalation. A known wait (starveRootFor) is skipped by both.
+ */
+function reportStarvedProjects(starvedProjects, jobs = [], launchBlocks = {}) {
+  for (const sp of starvedProjects) {
+    const { root, knownWait } = starveRootFor(projectRowsFor(jobs, sp.cwd), sp.oldestPendingSlug);
+    if (knownWait) continue;
+    console.warn(
+      `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
+      + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
+      + `while other projects are running${root ? ` — root blocker ${root.slug} (${root.status}${root.reason ? `: ${root.reason}` : ''})` : ' — check the cross-project fairness rule in pickNextBatch'}`,
+    );
+    appendAuditEvent('project_starved', {
+      cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs, ...rootBlockingFields(root),
+    });
+  }
+  // Bounded, automated consequence for a starve that outlives the WARN
+  // above (PRD: the 2026-09-12 19h Bilko starve had ~115 identical
+  // project_starved rows and zero consequence). STARVE_ESCALATION_MS is
+  // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
+  // a subset of the rows already reported above — same verdict, no
+  // re-derivation.
+  runStarveEscalationSweep(starvedProjects, jobs, launchBlocks);
+}
+
 function runStarveEscalationSweep(starvedProjects, jobs = [], launchBlocks = {}) {
-  const { toEscalate, toClear } = starvation.selectStarveEscalations(starvedProjects, starveEscalated, STARVE_ESCALATION_MS);
+  const rootByCwd = new Map();
+  const reportable = starvedProjects.filter((sp) => {
+    const r = starveRootFor(projectRowsFor(jobs, sp.cwd), sp.oldestPendingSlug);
+    rootByCwd.set(sp.cwd, r.root);
+    return !r.knownWait;
+  });
+  const { toEscalate, toClear } = starvation.selectStarveEscalations(reportable, starveEscalated, STARVE_ESCALATION_MS);
   for (const cwd of toClear) starveEscalated.delete(cwd);
   for (const sp of toEscalate) {
     starveEscalated.add(sp.cwd);
-    const projectRows = (Array.isArray(jobs) ? jobs : []).filter((j) => j && (j.cwd || DEFAULT_PROJECT_CWD) === sp.cwd);
+    const projectRows = projectRowsFor(jobs, sp.cwd);
+    const root = rootByCwd.get(sp.cwd) ?? null;
     const holdReason = starvation.describeStarveHold({ projectRows, launchBlocks, lastTick, lastHoldTick });
     const mins = Math.round(sp.ageMs / 60_000);
     console.error(
@@ -9297,11 +9440,11 @@ function runStarveEscalationSweep(starvedProjects, jobs = [], launchBlocks = {})
       + 'a bounded escalation only; nothing was auto-reset, cancelled, or dispatched',
     );
     appendAuditEvent('project_starve_escalated', {
-      cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs, holdReason,
+      cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs, holdReason, ...rootBlockingFields(root),
     });
     sendIfAlive(mainWindow, 'schedule:stall', {
       message: `Project starved: ${sp.cwd} has ${sp.pendingCount} pending PRD(s), no dispatch for ~${mins}m `
-        + `(hold reason: ${holdReason}) — check the Scheduler tab.`,
+        + `(hold reason: ${holdReason}).${rootBlockerPhrase(root)} Check the Scheduler tab.`,
       total: sp.pendingCount,
       byProject: { [sp.cwd]: { starved: sp.pendingCount } },
     });
@@ -12024,21 +12167,8 @@ function rescheduleIntervalTick() {
   // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
   // Escalation only, same shape as the quarantine/overrun warnings above.
   const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS, s.lastDispatchAtByCwd);
-  for (const sp of starvedProjects) {
-    console.warn(
-      `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
-      + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
-      + `while other projects are running — check the cross-project fairness rule in pickNextBatch`,
-    );
-    appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
-  }
-  // Bounded, automated consequence for a starve that outlives the WARN
-  // above (PRD: the 2026-09-12 19h Bilko starve had ~115 identical
-  // project_starved rows and zero consequence). STARVE_ESCALATION_MS is
-  // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
-  // a subset of the rows already reported above — same verdict, no
-  // re-derivation.
-  runStarveEscalationSweep(starvedProjects, s.jobs, s.launchBlocks);
+  // Each event names the root blocker; a known preflight wait is skipped.
+  reportStarvedProjects(starvedProjects, s.jobs, s.launchBlocks);
 
   // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
   // escalation now narrowed to only the rows that auto-reset gave up on.
@@ -12430,7 +12560,11 @@ async function init() {
 // archivedStatus); `fields=full` restores them.
 function toCompactPrdEntry(entry) {
   const { slug, title, cwd, mtimeMs, archived, status, agentType } = entry;
-  return { slug, title, cwd, mtimeMs, archived, status, agentType };
+  const out = { slug, title, cwd, mtimeMs, archived, status, agentType };
+  // Only when set, so the compact page stays small.
+  if (entry.heldReason) out.heldReason = entry.heldReason;
+  if (entry.waitingOn) out.waitingOn = entry.waitingOn;
+  return out;
 }
 
 /**
@@ -12549,6 +12683,29 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
     queueHistory.historyTerminalBySlug().catch(() => new Map()),
   ]);
   const liveStatusBySlug = new Map(state.jobs.map((j) => [j.slug, j.status]));
+  // heldReason (the live row's own) + waitingOn (the root blocker slug of a
+  // dependency-blocked pending row, starvation.rootBlockersForProject).
+  const liveRowBySlug = new Map(state.jobs.map((j) => [j.slug, j]));
+  const waitingOnBySlug = new Map();
+  const jobsByCwd = new Map();
+  for (const j of state.jobs) {
+    if (!j) continue;
+    const key = j.cwd || DEFAULT_PROJECT_CWD;
+    if (!jobsByCwd.has(key)) jobsByCwd.set(key, []);
+    jobsByCwd.get(key).push(j);
+  }
+  for (const rows of jobsByCwd.values()) {
+    if (!rows.some((j) => j.status === 'pending' && Array.isArray(j.dependsOn) && j.dependsOn.length > 0)) continue;
+    for (const r of starvation.rootBlockersForProject(rows)) {
+      for (const held of r.heldSlugs) waitingOnBySlug.set(held, r.slug);
+    }
+  }
+  for (let i = 0; i < archivedStart; i++) {
+    const entry = out[i];
+    const live = liveRowBySlug.get(entry.slug);
+    entry.heldReason = live && typeof live.heldReason === 'string' && live.heldReason ? flatString(live.heldReason) : null;
+    entry.waitingOn = waitingOnBySlug.get(entry.slug) ?? null;
+  }
   for (let i = 0; i < out.length; i++) {
     const entry = out[i];
     // `entry` is a freshly-synthesized PRD-listing row, not a persisted
@@ -13291,6 +13448,10 @@ module.exports = {
   rescheduleIntervalTick,
   runQueueStarvationWatchdog,
   runStarveEscalationSweep,
+  reportStarvedProjects,
+  sendPreflightHoldNotice,
+  _setPreflightHoldNoticeSenderForTests,
+  _resetPreflightHoldNoticesForTests,
   runJobLeftoverSweep,
   stripAppOwnedChurn,
   BUDGET_WARNING_FRACTION,

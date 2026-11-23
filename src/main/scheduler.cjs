@@ -12937,6 +12937,16 @@ const remote = {
     }));
   },
 
+  // Full queue rows for computeEpicOutsideState (lib/epic/epicOutsideState.cjs
+  // reads cancelledAt, statusHistory, error, finishedAt, reviewNotice). GET
+  // /admin/epic(s) and the tick watcher (runEpicStateWatchForTick, full
+  // state.jobs) must read the same rows, or a cancelled row paints an Epic
+  // 'blocked'. Deep copy, never the live objects — and never project here.
+  async listJobRows() {
+    const state = await readQueue();
+    return JSON.parse(JSON.stringify(Array.isArray(state?.jobs) ? state.jobs : []));
+  },
+
   // Single queue row lookup, used by cancelJob/updatePrd's status guards and
   // the admin GET /admin/scheduler/prds?slug= route (PRD 1024).
   async getJob(slug) {

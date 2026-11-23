@@ -124,7 +124,7 @@ require('./lib/telemetry/eventsAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Outside-facing Epic records for scripts/other projects (read-only).
 require('./lib/epic/epicAdminRoutes.cjs').registerAdminRoute(adminHttp, {
   isTabBusy: chatRunner.isTabBusy,
-  listJobs: () => scheduler.remote.listJobs(),
+  listJobs: () => scheduler.remote.listJobRows(),
 });
 // Validator quality numbers per project for outside callers (read-only).
 require('./validationQualityHandlers.cjs').registerAdminRoute(adminHttp);

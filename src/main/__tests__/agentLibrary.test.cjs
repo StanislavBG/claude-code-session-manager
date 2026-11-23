@@ -186,7 +186,7 @@ test('savePersona with originalName renames — writes the new file and removes 
     originalName: 'old-name',
     description: '',
     tools: [],
-    model: 'inherit',
+    model: 'opus',
     color: '',
     body: 'Body.',
     globalDir,
@@ -204,7 +204,7 @@ test('savePersona without a seedVersion argument carries over an existing stamp'
     name: 'stamped-agent',
     description: 'Edited via the UI.',
     tools: [],
-    model: 'inherit',
+    model: 'opus',
     color: '',
     body: 'New body.',
     globalDir,
@@ -218,7 +218,7 @@ test('savePersona without a seedVersion argument carries over an existing stamp'
   expect(text).toContain('New body.');
 });
 
-const base = { tools: [], model: 'inherit', color: '', validatePath: identityValidatePath, writeTextAtomic: fakeWriteTextAtomic };
+const base = { tools: [], model: 'opus', color: '', validatePath: identityValidatePath, writeTextAtomic: fakeWriteTextAtomic };
 
 test('savePersona re-save without title/projects/action/actionLabel keeps the existing values', async () => {
   const globalDir = await mkTmp('sm-agent-library-carry-');
@@ -248,7 +248,7 @@ test('savePersona for a brand-new persona writes no seedVersion line', async () 
     name: 'fresh-agent',
     description: 'A new persona.',
     tools: [],
-    model: 'inherit',
+    model: 'opus',
     color: '',
     body: 'Body.',
     globalDir,
@@ -317,7 +317,7 @@ test('projects/action/actionLabel round-trip through savePersona -> listPersonas
     name: 'builder',
     description: 'Drives the next publish.',
     tools: ['Bash'],
-    model: 'inherit',
+    model: 'opus',
     color: '',
     tags: ['build'],
     projects: ['/home/bilko/Projects/alpha', '/home/bilko/Projects/beta'],

@@ -20,18 +20,15 @@ const UNMANAGED = [
   '  - beta',
 ].join('\n');
 
-test('save keeps unmanaged frontmatter keys byte-for-byte', async () => {
+test('global save refuses a persona whose on-disk frontmatter carries unmanaged keys, leaving the file untouched', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'al-preserve-'));
   try {
     const file = path.join(dir, 'p.md');
-    await fsp.writeFile(file, `---\nname: p\ndescription: old\nmodel: opus\n${UNMANAGED}\n---\nbody\n`);
-    await savePersona({ name: 'p', description: 'new', model: 'inherit', body: 'body', globalDir: dir, validatePath: idPath, writeTextAtomic: write });
-    const out = await fsp.readFile(file, 'utf8');
-    expect(out).toContain(UNMANAGED);
-    expect(out).toContain('description: new');
-    expect(out).not.toContain('model:');
-    expect(out.match(/^name:/gm)).toHaveLength(1);
-    expect(out.match(/^description:/gm)).toHaveLength(1);
+    const original = `---\nname: p\ndescription: old\nmodel: opus\n${UNMANAGED}\n---\nbody\n`;
+    await fsp.writeFile(file, original);
+    await expect(savePersona({ name: 'p', description: 'new', model: 'opus', body: 'body', globalDir: dir, validatePath: idPath, writeTextAtomic: write }))
+      .rejects.toThrow(/unknown frontmatter key\(s\): defaultEstimateMinutes, hooks, skills/);
+    expect(await fsp.readFile(file, 'utf8')).toBe(original);
   } finally { await fsp.rm(dir, { recursive: true, force: true }); }
 });
 

@@ -197,6 +197,31 @@ async function saveOverlay({ name, projectCwd, model, effort, loadSessions, vali
 }
 
 /**
+ * Throws (before anything is written) when the persona text about to be
+ * written fails validatePersonaFrontmatter, naming every failing key. The
+ * checked object is the frontmatter as it will land on disk — managed keys
+ * re-parsed from the serialized text, plus every preserved unmanaged key
+ * (an unmanaged key is by definition unknown to the schema, so it fails).
+ * Required lazily: personaFrontmatterSchema.cjs imports MANAGED_PERSONA_KEYS
+ * from this module.
+ * @param {string} name
+ * @param {string} text
+ * @param {string[]} preservedLines
+ */
+function assertValidPersonaText(name, text, preservedLines) {
+  const { validatePersonaFrontmatter } = require('./lib/persona-macro/personaFrontmatterSchema.cjs');
+  const fm = { ...splitFrontmatter(text).fm };
+  for (const line of preservedLines) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:/);
+    if (m && !(m[1] in fm)) fm[m[1]] = '';
+  }
+  const result = validatePersonaFrontmatter(fm);
+  if (!result.ok) {
+    throw new Error(`invalid persona frontmatter for ${name}: ${result.errors.join('; ')}`);
+  }
+}
+
+/**
  * Writes a global persona `.md` file — `~/.claude/agents/<name>.md`. Pass
  * `originalName` when renaming an existing persona so the old file is
  * removed once the new one is written (no-op if names match). Pass
@@ -277,6 +302,7 @@ async function savePersona({
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
   const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, body, preservedLines });
+  assertValidPersonaText(name, text, preservedLines);
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));

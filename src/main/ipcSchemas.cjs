@@ -881,6 +881,8 @@ const macrosDispatchJob = z.object({
     .refine((o) => Object.keys(o).length <= 20, 'at most 20 input values')
     .optional(),
   effort: z.enum(/** @type {[string, ...string[]]} */ ([...PRD_EFFORT_LEVELS])).optional(),
+  // A Demo Video press asking for the review stage before the final save.
+  reviewStage: z.boolean().optional(),
 });
 const macrosJobStatus = z.object({ cwd: z.string().min(1).max(4096) });
 // Dashboard "Needs you" (lib/feedback-remote/needsYouIpc.cjs): list takes no payload; answer
@@ -1129,13 +1131,21 @@ const projectVideoReportFields = {
     detail: z.string().max(300),
   }).strict()).max(60),
 };
+// One list for every saved-video kind, so the meta and the admin write body cannot drift.
+const PROJECT_VIDEO_KINDS = /** @type {const} */ (['project-demo', 'blog-post', 'feature', 'episode', 'tiktok', 'marketing']);
+const projectVideoKind = z.enum(PROJECT_VIDEO_KINDS);
 const projectVideoMeta = z.object({
   id: entryId,
   title: z.string().min(1).max(120),
-  kind: z.enum(['project-demo', 'blog-post', 'feature', 'episode']),
+  kind: projectVideoKind,
   target: z.string().max(300).optional(),
   // From the document's sm-demo-aspect tag; absent on older entries (treat as '16:9').
   aspect: z.enum(['16:9', '9:16']).optional(),
+  // TikTok post copy; absent on every other kind and on older entries.
+  post: z.object({
+    caption: z.string().min(1).max(150),
+    audience: z.string().min(1).max(200),
+  }).strict().optional(),
   style: z.string().max(40),
   lengthS: z.number().int().min(5).max(60),
   createdAt: z.string().datetime(),
@@ -1182,12 +1192,17 @@ const projectVideoAdminWriteBody = z.object({
   cwd: z.string().min(1).max(4096).optional(),
   videoId: entryId,
   title: z.string().min(1).max(120),
-  kind: z.enum(['project-demo', 'blog-post', 'feature', 'episode']),
+  kind: projectVideoKind,
   lengthS: z.number().int().min(5).max(60),
   html: z.string(),
   meta: projectVideoMeta.omit({ id: true, createdAt: true }).extend({
     report: z.object(projectVideoReportFields).strict(),
   }),
+  // Optional MP4 + poster export, base64-encoded; top level, never inside meta.
+  exports: z.object({
+    mp4Base64: z.string().min(1),
+    posterBase64: z.string().min(1),
+  }).strict().optional(),
 }).strict();
 
 const projectBriefSetPin = z.object({

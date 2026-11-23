@@ -389,6 +389,9 @@ export interface MacroJobDispatchInput {
   effort?: string;
   /** The press's {{name}} input values; a project Video tool renders its prompt with them. */
   inputValues?: Record<string, string>;
+  /** A Demo Video press asking for the review stage: the job stops for a human review before the final save.
+   *  Omitted or false = straight to the final save. */
+  reviewStage?: boolean;
 }
 
 export type MacroJobDispatchResult =
@@ -1869,7 +1872,9 @@ export interface ProjectPageMeta {
 export interface ProjectVideoMeta {
   id: string;
   title: string;
-  kind: 'project-demo' | 'blog-post' | 'feature' | 'episode';
+  kind: 'project-demo' | 'blog-post' | 'feature' | 'episode' | 'tiktok' | 'marketing';
+  /** TikTok post copy (caption 1-150 chars, audience 1-200 chars); absent on other kinds and older entries. */
+  post?: { caption: string; audience: string };
   /** Frame shape from the document's sm-demo-aspect tag; absent on older entries (treat as '16:9'). */
   aspect?: '16:9' | '9:16';
   /** The `Video target:` text the video was built for (a post path or URL, or a feature name); absent for a Project demo. */

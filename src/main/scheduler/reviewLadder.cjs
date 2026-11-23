@@ -14,6 +14,8 @@ const { COMPLETED_EQUIVALENT_VERDICTS } = require('../lib/scheduler/terminalRunO
 const { resolveIsFixPlan } = require('../lib/scheduler/fixPlanSlug.cjs');
 const { GATE_AUTHORITY_VERDICTS } = require('../lib/scheduler/gateAuthority.cjs');
 const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
+// Every automated selector skips a human-cancelled row (incident 2026-10-19 git-viewer: cancelled rows re-queued and merged).
+const { isCancelledRow } = require('../lib/scheduler/cancelledRow.cjs');
 
 /**
  * Resume-first recovery (PRD 1111). A job parked in needs_review with verdict
@@ -217,7 +219,7 @@ function isFinishReviewKillHealEligible(job) {
   if (typeof job.landedCommit !== 'string' || job.landedCommit.length === 0) return false;
   if (job.finishReviewHealAttemptedAt) return false;
   if (job.integrationFailureKind) return false;
-  if (isCancelledJob(job) || isRefireCapped(job)) return false;
+  if (isCancelledRow(job) || isRefireCapped(job)) return false;
   return true;
 }
 
@@ -596,23 +598,6 @@ function healRefusalReason(job, verdict, committedDuringRun) {
  * gate or a real non-zero-exit error) is excluded — that failure is
  * evidence, not silence, and must never become a heal candidate (PRD 1102).
  */
-// A human cancelled this row (scheduler_cancel_job). Incident 2026-10-19
-// (git-viewer): cancelled jobs were parked as 'failed' (source
-// 'remote:cancelJob'), then selectFailedAutoResetTargets re-queued them 10
-// minutes later and they ran and merged unwanted commits. Marker is
-// `cancelledAt`; the statusHistory source is the fallback for rows cancelled
-// before the marker existed. Every automated selector must skip these; only a
-// human scheduler_reset_job revives one.
-function isCancelledJob(job) {
-  if (!job) return false;
-  if (typeof job.cancelledAt === 'string' && job.cancelledAt) return true;
-  const history = Array.isArray(job.statusHistory) ? job.statusHistory : [];
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i] && history[i].to === job.status) return history[i].source === 'remote:cancelJob';
-  }
-  return false;
-}
-
 function isFailedUnverifiedShaped(job) {
   if (!job || job.status !== 'failed') return false;
   if (job.verifierVerdict && RESCANNABLE_VERDICTS.has(job.verifierVerdict)) return true;
@@ -623,7 +608,7 @@ function isFailedUnverifiedShaped(job) {
 }
 
 function isRescanCandidate(job) {
-  if (!job || isCancelledJob(job) || isRefireCapped(job)) return false;
+  if (!job || isCancelledRow(job) || isRefireCapped(job)) return false;
   // Default-ELIGIBLE: every needs_review row is a heal candidate unless its
   // verdict is in RESCAN_EXCLUDED_VERDICTS. No runId requirement here — a row
   // without one still gets the evidence rung and the unresolvable annotation.
@@ -655,7 +640,7 @@ function isTranscriptRescannable(job) {
 function selectEvidenceScanTargets(jobs, now = Date.now()) {
   const due = [];
   for (const j of jobs ?? []) {
-    if (isCancelledJob(j)) continue;
+    if (isCancelledRow(j)) continue;
     if (j.status !== 'needs_review' || !isRescanCandidate(j)) continue;
     if (isTranscriptRescannable(j)) continue;
     if (j.looksDone) continue;
@@ -785,7 +770,7 @@ function failedAutoResetDisabled() {
 function selectFailedAutoResetTargets(jobs, now, thresholdMs) {
   const targets = [];
   for (const j of jobs ?? []) {
-    if (isCancelledJob(j)) continue;
+    if (isCancelledRow(j)) continue;
     if (j.status !== 'failed') continue;
     const attempts = j.failedAutoResetAttempts ?? 0;
     if (attempts >= FAILED_AUTORESET_CAP) continue;
@@ -837,7 +822,7 @@ function selectFailedAutoResetTargets(jobs, now, thresholdMs) {
 function findStuckFailedJobs(jobs, now, thresholdMs) {
   const stuck = [];
   for (const j of jobs ?? []) {
-    if (isCancelledJob(j)) continue;
+    if (isCancelledRow(j)) continue;
     if (j.status !== 'failed') continue;
     if (j.stuckFailedNotified === true) continue;
     if (!isRescanCandidate(j)) continue;
@@ -906,7 +891,7 @@ function needsReviewAutoResolveDisabled() {
 function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
   const targets = [];
   for (const j of jobs ?? []) {
-    if (isCancelledJob(j)) continue;
+    if (isCancelledRow(j)) continue;
     if (j.status !== 'needs_review') continue;
     if (!isEligibleForNeedsReviewAutoResolve(j, jobs)) continue;
     if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
@@ -949,7 +934,7 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
 function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRunId }) {
   const slugsInQueue = new Set(jobs.map((j) => j.slug));
   return jobs.filter((job) => {
-    if (isCancelledJob(job)) return false;
+    if (isCancelledRow(job)) return false;
     if (isRefireCapped(job)) return false;
     if (job.status !== 'needs_review') return false;
     // A job parked here because it was blocked by a sibling's foreign WIP
@@ -1117,7 +1102,6 @@ function selectResumeRecoveryBatch(jobs, { saturated = false } = {}) {
 module.exports = {
   selectResumeRecoveryBatch,
   isRefireCapped,
-  isCancelledJob,
   selectResumeRecoveryTarget,
   MECHANICALLY_RESOLVABLE_VERDICTS,
   isMechanicalRecoveryFutile,

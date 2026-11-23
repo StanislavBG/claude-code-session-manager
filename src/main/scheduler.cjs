@@ -108,6 +108,7 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const reviewLadder = require('./scheduler/reviewLadder.cjs');
+const { isCancelledRow } = require('./lib/scheduler/cancelledRow.cjs');
 const starvation = require('./scheduler/starvation.cjs');
 const budget = require('./scheduler/budget.cjs');
 const { validatorEstimateMinutes } = require('./lib/epic/epicSweepValidator.cjs');
@@ -3204,7 +3205,7 @@ function resetJobFields(job, errorMsg, opts = {}) {
   if ((job.status === 'completed' || job.status === 'skipped') && opts.force !== true) return false;
   // Durable cancel (2026-10-19 git-viewer incident): a human-cancelled row is
   // revived only by an explicit human reset, never by an automated pass.
-  if (reviewLadder.isCancelledJob(job) && opts.source !== 'remote:resetJob' && opts.source !== 'ipc:schedule:reset-job') return false;
+  if (isCancelledRow(job) && opts.source !== 'remote:resetJob' && opts.source !== 'ipc:schedule:reset-job') return false;
   // Reset means "re-check the precondition now": the hold is dropped even
   // when the row is already pending (pending→pending is not a transition).
   delete job.preflightHold;
@@ -6408,7 +6409,7 @@ function isPromotableOriginal(status) {
  */
 function healTargetForFix(fixSlug, jobs) {
   const originalSlug = fixSlug.replace(/^(\d+)-fix-/, '$1-');
-  return jobs.find((x) => x.slug === originalSlug && isPromotableOriginal(x.status) && !reviewLadder.isCancelledJob(x)) || null;
+  return jobs.find((x) => x.slug === originalSlug && isPromotableOriginal(x.status) && !isCancelledRow(x)) || null;
 }
 
 /**
@@ -6803,7 +6804,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === failedJob.slug);
     if (!j) return;
-    const statusEligible = (j.status === 'needs_review' || j.status === 'failed') && !reviewLadder.isCancelledJob(j) && !reviewLadder.hasActivePreflightHold(j);
+    const statusEligible = (j.status === 'needs_review' || j.status === 'failed') && !isCancelledRow(j) && !reviewLadder.hasActivePreflightHold(j);
     const transitioned = statusEligible && transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
     liveCheck = { ok: statusEligible && transitioned, status: j.status };
   });
@@ -11164,7 +11165,7 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
  * guard-parked row was never "exhausted auto-fix" and must never claim to be.
  */
 function applyNeedsReviewAutoResolve(j, jobsInProject = []) {
-  if (!j || j.status !== 'needs_review' || reviewLadder.isCancelledJob(j) || !reviewLadder.isEligibleForNeedsReviewAutoResolve(j, jobsInProject)) return null;
+  if (!j || j.status !== 'needs_review' || isCancelledRow(j) || !reviewLadder.isEligibleForNeedsReviewAutoResolve(j, jobsInProject)) return null;
   if ((j.exhaustedResolveAttempts ?? 0) > reviewLadder.NEEDS_REVIEW_RESOLVE_CAP) return null;
   const originIsGuardParked = !reviewLadder.isExhaustedAutoFix(j) && reviewLadder.isGuardParkedWithoutAutoFix(j);
 
@@ -11215,7 +11216,7 @@ function applyNeedsReviewAutoResolve(j, jobsInProject = []) {
  * 'skipped', or null when the race guard rejects it.
  */
 function applyStuckFailedAutoSkip(j, ageMs = 0) {
-  if (!j || j.status !== 'failed' || reviewLadder.isCancelledJob(j)) return null;
+  if (!j || j.status !== 'failed' || isCancelledRow(j)) return null;
   if ((j.failedAutoResetAttempts ?? 0) < reviewLadder.FAILED_AUTORESET_CAP) return null;
   const cap = reviewLadder.FAILED_AUTORESET_CAP;
   j.needsReviewAutoResolvedSkip = true;
@@ -12795,7 +12796,7 @@ function rescheduleIntervalTick() {
     mutate(async (ms) => {
       for (const target of autoResetTargets) {
         const j = ms.jobs.find((x) => x.slug === target.slug);
-        if (!j || j.status !== 'failed' || reviewLadder.isCancelledJob(j) || (j.failedAutoResetAttempts ?? 0) >= reviewLadder.FAILED_AUTORESET_CAP) continue; // race guard
+        if (!j || j.status !== 'failed' || isCancelledRow(j) || (j.failedAutoResetAttempts ?? 0) >= reviewLadder.FAILED_AUTORESET_CAP) continue; // race guard
         const attempt = (j.failedAutoResetAttempts ?? 0) + 1;
         j.failedAutoResetAttempts = attempt;
         const reason = `auto-reset after ${Math.round(reviewLadder.FAILED_AUTORESET_MS / 60_000)}m failed (attempt ${attempt}/${reviewLadder.FAILED_AUTORESET_CAP})`;

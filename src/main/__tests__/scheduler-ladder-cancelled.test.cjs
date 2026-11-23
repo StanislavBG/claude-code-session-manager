@@ -17,8 +17,9 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-cancelled-test-'));
 process.env.HOME = tmpHome;
 
+const { isCancelledRow } = require('../lib/scheduler/cancelledRow.cjs');
+const reviewLadder = require('../scheduler/reviewLadder.cjs');
 const {
-  isCancelledJob,
   selectFailedAutoResetTargets,
   findStuckFailedJobs,
   selectExhaustedNeedsReviewTargets,
@@ -39,22 +40,22 @@ const failedRow = (extra = {}) => ({
 const cancelledByHistory = () =>
   failedRow({ statusHistory: [{ to: 'failed', at, source: 'remote:cancelJob' }] });
 
-test('isCancelledJob: cancelledAt marker', () => {
-  assert.equal(isCancelledJob(failedRow({ cancelledAt: new Date().toISOString() })), true);
+test('isCancelledRow: cancelledAt marker', () => {
+  assert.equal(isCancelledRow(failedRow({ cancelledAt: new Date().toISOString() })), true);
 });
 
-test('isCancelledJob: statusHistory source fallback', () => {
-  assert.equal(isCancelledJob(cancelledByHistory()), true);
+test('isCancelledRow: statusHistory source fallback', () => {
+  assert.equal(isCancelledRow(cancelledByHistory()), true);
 });
 
-test('isCancelledJob: false for ordinary, empty and nullish rows', () => {
-  assert.equal(isCancelledJob(failedRow()), false);
-  assert.equal(isCancelledJob(failedRow({ cancelledAt: '' })), false);
-  assert.equal(isCancelledJob(null), false);
-  assert.equal(isCancelledJob(undefined), false);
+test('isCancelledRow: false for ordinary, empty and nullish rows', () => {
+  assert.equal(isCancelledRow(failedRow()), false);
+  assert.equal(isCancelledRow(failedRow({ cancelledAt: '' })), false);
+  assert.equal(isCancelledRow(null), false);
+  assert.equal(isCancelledRow(undefined), false);
 });
 
-test('isCancelledJob: only the newest entry for the current status counts', () => {
+test('isCancelledRow: only the newest entry for the current status counts', () => {
   const j = failedRow({
     statusHistory: [
       { to: 'failed', at, source: 'remote:cancelJob' },
@@ -62,7 +63,7 @@ test('isCancelledJob: only the newest entry for the current status counts', () =
       { to: 'failed', at, source: 'spawnJob:fail' },
     ],
   });
-  assert.equal(isCancelledJob(j), false);
+  assert.equal(isCancelledRow(j), false);
 });
 
 test('selectFailedAutoResetTargets skips a cancelled row, selects an identical ordinary one', () => {
@@ -70,6 +71,17 @@ test('selectFailedAutoResetTargets skips a cancelled row, selects an identical o
   const cancelled = failedRow({ slug: 'c', cancelledAt: new Date().toISOString() });
   const byHistory = { ...cancelledByHistory(), slug: 'h' };
   const out = selectFailedAutoResetTargets([ok, cancelled, byHistory], now, THRESHOLD_MS);
+  assert.deepEqual(out.map((t) => t.slug), ['ok']);
+});
+
+test('reviewLadder no longer exports isCancelledJob', () => {
+  assert.equal('isCancelledJob' in reviewLadder, false);
+});
+
+test('selectFailedAutoResetTargets skips an error-only legacy cancelled row', () => {
+  const ok = failedRow({ slug: 'ok' });
+  const legacy = { slug: 'legacy', status: 'failed', verifierVerdict: 'no_result', error: 'cancelled via admin API', statusHistory: [{ to: 'failed', at, source: 'spawnJob:fail' }] };
+  const out = selectFailedAutoResetTargets([ok, legacy], now, THRESHOLD_MS);
   assert.deepEqual(out.map((t) => t.slug), ['ok']);
 });
 

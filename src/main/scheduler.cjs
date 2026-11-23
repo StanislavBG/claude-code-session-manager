@@ -13155,6 +13155,9 @@ function toCompactPrdEntry(entry) {
   // Only when set, so the compact page stays small.
   if (entry.heldReason) out.heldReason = entry.heldReason;
   if (entry.waitingOn) out.waitingOn = entry.waitingOn;
+  // A human-cancelled row keeps status failed/needs_review; the marker is
+  // what tells it apart from a real failure (lib/scheduler/cancelledRow.cjs).
+  if (entry.cancelled === true) out.cancelled = true;
   return out;
 }
 
@@ -13310,6 +13313,9 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
       entry.archivedStatus = flatString(prdPaths.resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug));
       entry.status = entry.archivedStatus;
     }
+    // Cancelled marker from the shared predicate — only when true, so a real
+    // failure carries no cancelled key at all. No new status.
+    if (isCancelledRow(liveRowBySlug.get(entry.slug))) entry.cancelled = true;
   }
 
   out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
@@ -13526,6 +13532,7 @@ const remote = {
       epicId: j.epicId ?? null,
       sourcePromptId: j.sourcePromptId ?? null,
       phase: phaseOfJob(j),
+      ...(isCancelledRow(j) ? { cancelled: true } : {}),
     }));
   },
 

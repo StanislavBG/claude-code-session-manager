@@ -1300,7 +1300,7 @@ function getDispatchMap() {
       const all = await require('./scheduler.cjs').listPrdsInternal();
       const prds = all
         .filter((e) => e && e.epicId === parsed.epicId)
-        .map((e) => ({ slug: e.slug, title: e.title, status: e.status ?? null, archived: !!e.archived }))
+        .map((e) => ({ slug: e.slug, title: e.title, status: e.status ?? null, archived: !!e.archived, ...(e.cancelled === true ? { cancelled: true } : {}) }))
         .sort((a, b) => Number(a.archived) - Number(b.archived) || String(a.slug).localeCompare(String(b.slug)))
         .slice(0, 50);
       return { prds };

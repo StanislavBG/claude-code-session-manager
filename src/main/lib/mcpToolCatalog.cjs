@@ -77,7 +77,8 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'scheduler_list_jobs',
     group: 'scheduler',
-    purpose: "List scheduler jobs via the session-manager app's admin API.",
+    purpose: "List scheduler jobs via the session-manager app's admin API. "
+      + 'A human-cancelled row keeps status failed or needs_review and carries cancelled: true; a real failure has no cancelled field.',
     summary: 'List queued, running and finished jobs on this machine.',
     whenToUse: 'Use for a quick overview of live queue-row status (pending/running/completed/failed/needs_review) across the machine.',
     whenNotToUse: 'For PRD content (frontmatter/body) rather than just job status, or for filtering by cwd/Epic, use scheduler_list_prds instead.',
@@ -196,7 +197,8 @@ const MCP_TOOL_CATALOG = [
       + 'queued/reconciled). Optionally filter by project cwd, Epic id, and/or status. Results are paginated (default '
       + 'limit 100, max 500) sorted by slug ascending — check `hasMore`/`total` in the response before assuming you '
       + "received every PRD; page further with `offset`. Default fields are compact (no parallelGroup/estimateMinutes/"
-      + 'sourcePromptId/epicId/archivedStatus) — pass fields:"full" to restore them.',
+      + 'sourcePromptId/epicId/archivedStatus) — pass fields:"full" to restore them. '
+      + 'A human-cancelled row keeps status failed or needs_review and carries cancelled: true; a real failure has no cancelled field.',
     summary: 'List PRDs and their job status, by project, Epic or status.',
     whenToUse: 'Use to survey PRDs by project/Epic/status before deciding which one to read, update, reset, or archive.',
     whenNotToUse: 'Do not assume a page without `hasMore` is the full result set without checking `total` — page further with `offset` first.',

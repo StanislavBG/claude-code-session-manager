@@ -407,6 +407,13 @@ describe('ProjectPagesSection', () => {
       expect(byTestId('project-home-open-session', el)).not.toBeNull()
     })
 
+    it("passes the library's persona name to the video composer", async () => {
+      mount(<ProjectPagesSection {...props({ videos: [NEW_V], tab: 'videos', personaName: 'Pip' })} />)
+      await flush()
+      act(() => generateBtn()!.click())
+      expect(byTestId('composer-character')?.textContent).toBe('Persona: Pip')
+    })
+
     it('without the builtin-demo-video macro Generate video stays disabled', async () => {
       mount(<ProjectPagesSection {...props({ videos: [NEW_V], macros: [HOME_MACRO], tab: 'videos' })} />)
       await flush()

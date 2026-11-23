@@ -772,12 +772,41 @@ describe('VideosPane episodes and 9:16', () => {
     expect(col(rows()[1], 'kind')).toBe('project-demo')
   })
 
+  it("labels kind 'tiktok' as 'TikTok' and 'marketing' as 'Marketing' on rows and in the title-bar sub", () => {
+    const TT = video('tt-1', 'Quick tour', HOUR, { kind: 'tiktok', aspect: '9:16', lengthS: 15 })
+    const MK = video('mk-1', 'Launch spot', 2 * HOUR, { kind: 'marketing', lengthS: 60 })
+    mount({ entries: [TT, MK, NOTES] })
+    expect(col(rows()[0], 'kind')).toBe('TikTok')
+    expect(tid('project-home-video-sub')?.textContent).toBe('TikTok · 15s · auto · 1h ago')
+    expect(col(rows()[1], 'kind')).toBe('Marketing')
+    expect(col(rows()[2], 'kind')).toBe('blog-post')
+    click(rows()[1])
+    expect(tid('project-home-video-sub')?.textContent).toBe('Marketing · 60s · auto · 2h ago')
+  })
+
   it("passes a 9:16 entry's aspect to the player; a 16:9-less entry keeps the 16:9 box", () => {
     mount({ entries: [EP, WIDE] })
     const box = () => tid('video-player-frame', tid('project-home-content')!)!.parentElement!
     expect(box().getAttribute('data-aspect')).toBe('9:16')
     click(rows()[1])
     expect(box().getAttribute('data-aspect')).toBe('16:9')
+  })
+})
+
+describe('VideosPane persona', () => {
+  it("passes personaName to the composer's Character toggle on Generate and Regenerate", () => {
+    mount({ personaName: 'Pip' })
+    click(tid('project-home-generate'))
+    expect(tid('composer-character')?.textContent).toBe('Persona: Pip')
+    click(tid('composer-cancel'))
+    click(tid('project-home-regenerate'))
+    expect(tid('composer-character')?.textContent).toBe('Persona: Pip')
+  })
+
+  it('keeps the mascot label without a persona', () => {
+    mount()
+    click(tid('project-home-generate'))
+    expect(tid('composer-character')?.textContent).toBe('Use the project’s mascot')
   })
 })
 
@@ -1001,6 +1030,64 @@ describe('VideosPane tool entries: review panel, badges and Regenerate', () => {
     expect(onLaunch).toHaveBeenCalledTimes(1)
     expect(onLaunch).toHaveBeenCalledWith(TOOL, 'Replace entry: moles-ep', { topic: 'Moles' })
     expect(onLaunched).toHaveBeenCalledWith('burrow-episode', expect.objectContaining({ replaceEntryId: 'moles-ep' }))
+  })
+
+  /** A Demo Video entry that went through the review stage: its record names builtin-demo-video. */
+  function demoReview(entryId: string, status: VideoReview['status'], slug = `slug-${entryId}`): VideoReview {
+    const r = review(entryId, status, slug)
+    return { ...r, dispatch: { ...r.dispatch!, macroId: 'builtin-demo-video', inputValues: {} } }
+  }
+  const TT = video('tt-1', 'Quick tour', HOUR, { kind: 'tiktok', aspect: '9:16', lengthS: 15, style: 'Kinetic typography' })
+
+  it('badges a reviewed Demo Video entry from the Demo Video job: Building, Waiting for review, Failed: <reason>, Done', async () => {
+    reviewList.mockResolvedValue([
+      demoReview('tt-1', 'approved', 'slug-final'),
+      demoReview('wait-tt', 'waiting'),
+      demoReview('fail-tt', 'building', 'slug-fail'),
+    ])
+    await mountLoaded({
+      entries: [TT, TOUR],
+      tools: [TOOL],
+      jobStatus: status({ slug: 'slug-fail', entryId: 'fail-tt', state: 'failed', status: 'failed', reason: 'audio too loud' }),
+    })
+    expect(badgeOf(rowOf('tt-1'))).toBe('Done')
+    expect(badgeOf(rowOf('product-tour'))).toBeNull()
+    expect(badgeOf(tid('video-tool-entry-wait-tt'))).toBe('Waiting for review')
+    expect(tid('video-tool-entry-wait-tt')?.textContent).toContain('Demo Video')
+    expect(badgeOf(tid('video-tool-entry-fail-tt'))).toBe('Failed: audio too loud')
+    expect(tid('video-review-panel')?.textContent).toContain('Waiting for your OK')
+  })
+
+  it('a reviewed Demo Video entry reads Building while its Demo Video job runs, with no tools at all', async () => {
+    reviewList.mockResolvedValue([demoReview('tt-1', 'approved', 'slug-final')])
+    await mountLoaded({ entries: [TT], jobStatus: status({ slug: 'slug-final', entryId: 'tt-1', state: 'running', status: 'running' }) })
+    expect(badgeOf(rowOf('tt-1'))).toBe('Building')
+  })
+
+  it("reloads the review list when the Demo Video job's status changes", async () => {
+    await mountLoaded({ entries: [TT], jobStatus: status({ state: 'running', status: 'running' }) })
+    expect(reviewList).toHaveBeenCalledTimes(1)
+    rerender({ entries: [TT], jobStatus: status({ state: 'done', status: 'awaiting_review' }) })
+    await flush()
+    expect(reviewList).toHaveBeenCalledTimes(2)
+  })
+
+  it('Regenerate on a reviewed Demo Video entry opens the Demo Video composer pre-filled from its meta', async () => {
+    reviewList.mockResolvedValue([demoReview('tt-1', 'approved')])
+    const onLaunch = vi.fn()
+    await mountLoaded({ entries: [TT, TOUR], tools: [TOOL], onLaunch })
+    const regen = tid('project-home-regenerate') as HTMLButtonElement
+    expect(regen.disabled).toBe(false)
+    click(regen)
+    expect(tid('composer-generate')).not.toBeNull()
+    expect(onLaunch).not.toHaveBeenCalled()
+    click(tid('composer-generate'))
+    expect(onLaunch).toHaveBeenCalledTimes(1)
+    const [m, extra] = onLaunch.mock.calls[0]
+    expect(m).toBe(DEMO)
+    expect(extra).toContain('Video style: Kinetic typography')
+    expect(extra).toContain('Video length: 15')
+    expect(extra.split('\n').at(-1)).toBe('Replace entry: tt-1')
   })
 
   it("a tool entry's Regenerate is disabled while that tool builds; a Demo Video entry keeps the composer Regenerate", async () => {

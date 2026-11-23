@@ -5,7 +5,8 @@
  * HTML never crosses IPC; load it via smfile://). Subscribes to the main
  * process's per-cwd watcher ('project-pages:changed') so a fresh write
  * updates live. A cwd the main process can't watch resolves `{ok:false}` —
- * silently no-op.
+ * silently no-op. `personaName` is the saved project persona's name (videos/_character), null
+ * when there is none.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
@@ -24,6 +25,11 @@ const NO_VIDEOS: ProjectVideoEntry[] = []
 
 export type ProjectPagesDemoVideo = { path: string; mtimeMs: number } | null
 
+function personaNameOf(res: ProjectPagesGetResult): string | null {
+  const name = res.persona?.name
+  return typeof name === 'string' && name.trim() !== '' ? name : null
+}
+
 function toOutput(res: ProjectPagesGetResult): ProjectPagesOutput | null {
   return res.html === null ? null : { html: res.html, mtimeMs: res.mtimeMs }
 }
@@ -35,6 +41,7 @@ export function useProjectPagesOutput(
   demoVideo: ProjectPagesDemoVideo
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
+  personaName: string | null
   loaded: boolean
   error: string | null
   reload: () => void
@@ -43,6 +50,7 @@ export function useProjectPagesOutput(
   const [demoVideo, setDemoVideo] = useState<ProjectPagesDemoVideo>(null)
   const [knowledge, setKnowledge] = useState<ProjectKnowledgeEntry[]>(NO_KNOWLEDGE)
   const [videos, setVideos] = useState<ProjectVideoEntry[]>(NO_VIDEOS)
+  const [personaName, setPersonaName] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
@@ -61,6 +69,7 @@ export function useProjectPagesOutput(
         setDemoVideo(res.demoVideo)
         setKnowledge(Array.isArray(res.knowledge) ? res.knowledge : NO_KNOWLEDGE)
         setVideos(Array.isArray(res.videos) ? res.videos : NO_VIDEOS)
+        setPersonaName(personaNameOf(res))
         setError(null)
         setLoaded(true)
       })
@@ -85,6 +94,7 @@ export function useProjectPagesOutput(
       setDemoVideo(payload.demoVideo)
       setKnowledge(Array.isArray(payload.knowledge) ? payload.knowledge : NO_KNOWLEDGE)
       setVideos(Array.isArray(payload.videos) ? payload.videos : NO_VIDEOS)
+      setPersonaName(personaNameOf(payload))
       setError(null)
       setLoaded(true)
     })
@@ -94,5 +104,5 @@ export function useProjectPagesOutput(
     }
   }, [cwd])
 
-  return { output, demoVideo, knowledge, videos, loaded, error, reload }
+  return { output, demoVideo, knowledge, videos, personaName, loaded, error, reload }
 }

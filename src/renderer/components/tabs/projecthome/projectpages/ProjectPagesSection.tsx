@@ -49,6 +49,7 @@ export function ProjectPagesSection({
   cwd,
   knowledge,
   videos,
+  personaName,
   loaded,
   error,
   onRetry,
@@ -67,6 +68,8 @@ export function ProjectPagesSection({
   cwd?: string | null
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
+  /** The project's saved persona name (the library read's `persona.name`), for the video composer. */
+  personaName?: string | null
   loaded: boolean
   error?: string | null
   onRetry?: () => void
@@ -169,6 +172,7 @@ export function ProjectPagesSection({
           tools={videoTools}
           toolJobStatus={toolJobStatus}
           toolLaunches={toolLaunches}
+          personaName={personaName ?? undefined}
         />
       )}
     </div>

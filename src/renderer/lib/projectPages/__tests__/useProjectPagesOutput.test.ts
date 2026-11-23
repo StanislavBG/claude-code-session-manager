@@ -38,6 +38,17 @@ describe('useProjectPagesOutput', () => {
     expect(latest.knowledge).toHaveLength(1)
   })
 
+  it("exposes the saved persona's name, null when the read has none", async () => {
+    get.mockResolvedValueOnce({ ...res(), persona: { name: 'Pip' } })
+    render('/p')
+    await flush()
+    expect(latest.personaName).toBe('Pip')
+    get.mockResolvedValueOnce({ ...res(), persona: null })
+    render('/q')
+    await flush()
+    expect(latest.personaName).toBeNull()
+  })
+
   it('reject sets error and loaded; reload refetches and clears error', async () => {
     get.mockRejectedValueOnce(new Error('slow')).mockResolvedValueOnce(res())
     render('/p')

@@ -39,6 +39,10 @@
  * `Waiting for review`, `Failed: <reason>` (the tool's failed job for that entry) or `Done`. Tool
  * entries not yet in the library list under it with the same badge. Regenerate… on a tool entry
  * re-runs that tool (never Demo Video) with its recorded input values and `Replace entry: <id>`.
+ * A review record naming `builtin-demo-video` (a TikTok / Marketing Demo Video that went through the
+ * review stage) is badged from the Demo Video job (`jobStatus`), and its Regenerate… opens the Demo
+ * Video composer pre-filled from its meta, like any Demo Video entry. `personaName` (the library
+ * read's saved persona) reaches the composer.
  *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
@@ -158,9 +162,15 @@ function videoBuildSub(lines: readonly string[] | undefined): string {
     .join(' · ')
 }
 
-/** A video kind as the library shows it: 'episode' reads 'Episode'; the others keep their slug. */
-function kindLabel(kind: ProjectVideoMeta['kind']): string {
-  return kind === 'episode' ? 'Episode' : kind
+const KIND_LABELS: Partial<Record<ProjectVideoMeta['kind'], string>> = {
+  episode: 'Episode',
+  tiktok: 'TikTok',
+  marketing: 'Marketing',
+}
+
+/** A video kind as the library shows it: 'episode' / 'tiktok' / 'marketing' read 'Episode' / 'TikTok' / 'Marketing'; the others keep their slug. */
+export function kindLabel(kind: ProjectVideoMeta['kind']): string {
+  return KIND_LABELS[kind] ?? kind
 }
 
 /**
@@ -393,6 +403,9 @@ function ToolBadgeChip({ badge }: { badge: ToolBadge }) {
 
 const NO_REVIEWS: VideoReview[] = []
 
+/** The Demo Video macro; a review record naming it is a Demo Video entry, regenerated through the composer. */
+const DEMO_VIDEO_ID = 'builtin-demo-video'
+
 export interface VideosPaneProps {
   cwd?: string | null
   /** Videos, newest first (ProjectHome's `useProjectPagesOutput`). */
@@ -419,6 +432,8 @@ export interface VideosPaneProps {
   toolJobStatus?: Record<string, MacroJobStatus | undefined>
   /** This window's last launch of each tool by macro id. */
   toolLaunches?: Record<string, BuildLaunch | undefined>
+  /** The project's saved persona name (the library read's `persona.name`), passed to GenerateComposer. */
+  personaName?: string
 }
 
 const TOOL_CLASS =
@@ -478,6 +493,7 @@ export function VideosPane({
   tools,
   toolJobStatus,
   toolLaunches,
+  personaName,
 }: VideosPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
   // The tool whose inputs form is open.
@@ -487,17 +503,22 @@ export function VideosPane({
   const [composer, setComposer] = useState<{ regen?: ComposerRegen; tplId?: string } | null>(null)
   // VideoReviewPanel's last loaded list (every status).
   const [reviews, setReviews] = useState<VideoReview[]>(NO_REVIEWS)
-  // Any tool job change reloads the review list.
+  // Badge job status by macro id: each tool's job plus Demo Video's own (its reviewed entries).
+  const badgeJobStatus = useMemo(
+    (): Record<string, MacroJobStatus | undefined> => ({ ...toolJobStatus, [DEMO_VIDEO_ID]: jobStatus }),
+    [toolJobStatus, jobStatus],
+  )
+  // Any tool (or Demo Video) job change reloads the review list.
   const reviewReloadKey = useMemo(
     () =>
-      Object.keys(toolJobStatus ?? {})
+      Object.keys(badgeJobStatus)
         .sort()
         .map((id) => {
-          const s = toolJobStatus?.[id]
+          const s = badgeJobStatus[id]
           return `${id}:${s?.slug ?? ''}:${s?.state ?? ''}:${s?.status ?? ''}:${s?.entryId ?? ''}`
         })
         .join('|'),
-    [toolJobStatus],
+    [badgeJobStatus],
   )
   const reviewById = useMemo(() => new Map(reviews.map((r) => [r.entryId, r])), [reviews])
   const select = onSelect ?? setOwnId
@@ -537,11 +558,11 @@ export function VideosPane({
     onLaunch(macro, extra)
   }
 
-  /** The project tool an entry's review record names (undefined for Demo Video entries). */
+  /** The project tool an entry's review record names (null for Demo Video entries, reviewed or not). */
   const toolFor = (entry: ProjectVideoEntry): { review: VideoReview; tool: Macro | undefined } | null => {
     const review = reviewById.get(entry.id)
     const macroId = review?.dispatch?.macroId
-    if (!review || !macroId) return null
+    if (!review || !macroId || macroId === DEMO_VIDEO_ID) return null
     return { review, tool: tools?.find((t) => t.id === macroId) }
   }
 
@@ -574,6 +595,7 @@ export function VideosPane({
       initialTplId={composer.tplId}
       onClose={() => setComposer(null)}
       onGenerate={launch}
+      personaName={personaName}
     />
   )
   const generateButton = (
@@ -629,15 +651,15 @@ export function VideosPane({
       }
     }
     const review = reviewById.get(e.id)
-    return videoRow(e, review ? toolEntryBadge(review, toolJobStatus) : null)
+    return videoRow(e, review ? toolEntryBadge(review, badgeJobStatus) : null)
   })
   // Tool entries with a review record but no saved library entry yet (still building, waiting or failed).
   const pendingToolEntries = reviews.filter((r) => r.dispatch?.macroId && !entries.some((e) => e.id === r.entryId))
   const pendingNode = pendingToolEntries.length > 0 && (
     <ul data-testid="video-tool-entries" aria-label="Tool entries" className="m-0 flex flex-none list-none flex-col gap-1.5 p-0">
       {pendingToolEntries.map((r) => {
-        const badge = toolEntryBadge(r, toolJobStatus)
-        const tool = tools?.find((t) => t.id === r.dispatch?.macroId)
+        const badge = toolEntryBadge(r, badgeJobStatus)
+        const tool = r.dispatch?.macroId === DEMO_VIDEO_ID ? macro : tools?.find((t) => t.id === r.dispatch?.macroId)
         return (
           <li
             key={r.entryId}

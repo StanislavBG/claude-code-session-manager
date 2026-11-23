@@ -1737,7 +1737,21 @@ app.whenReady().then(async () => {
   // the external watchdog's finalize pass (src/main/lib/scheduler/watchdogHelpers.cjs)
   // so the two never interleave writes to the rollup; a contended lock just
   // means this tick's refresh is skipped (harmless — the next tick retries).
-  const intradayTimer = setInterval(runIntradayRefresh, schedulerConfig.HISTORY_INTRADAY_REFRESH_MS);
+  // The same tick drives webhook delivery (webhookDelivery.cjs) — no timer of
+  // its own. Project cwds come from the scheduler queue's jobs (never the
+  // ~/.claude/projects scan, banned on timer paths); a project with no
+  // subscriptions is a no-op.
+  const runWebhookDelivery = () => {
+    scheduler.readQueue()
+      .then((q) => require('./lib/telemetry/webhookDelivery.cjs').runDeliveryPass({
+        cwds: (Array.isArray(q?.jobs) ? q.jobs : []).map((j) => j && j.cwd).filter((c) => typeof c === 'string' && c),
+        logs,
+      }))
+      .catch((e) => {
+        logs.writeLine({ scope: 'webhooks', level: 'error', message: 'webhook delivery tick failed', meta: { error: e?.message } });
+      });
+  };
+  const intradayTimer = setInterval(() => { runIntradayRefresh(); runWebhookDelivery(); }, schedulerConfig.HISTORY_INTRADAY_REFRESH_MS);
   if (intradayTimer.unref) intradayTimer.unref();
   // Keep the machine awake while the app is open. The scheduler polls billing
   // usage every 2 min and runs `claude -p` jobs that must survive an idle

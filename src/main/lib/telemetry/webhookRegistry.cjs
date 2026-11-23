@@ -23,8 +23,14 @@
  *
  * The secret (32 random bytes, hex) is returned once by addSubscription;
  * listSubscriptions omits it unless { includeSecrets: true } (for an in-process
- * deliverer). Delivery is not implemented here. The bilko.run relay
- * (webRemote.cjs) is unrelated and untouched.
+ * deliverer). Delivery lives in webhookDelivery.cjs; its per-subscriber
+ * cursors + backoff persist in webhooks/delivery-state.json (mode 0600), also
+ * written only here (readDeliveryState / updateDeliveryState):
+ *
+ *   { version: 1, cursors: { <subId>: { <epicId>: seq } },
+ *     backoff: { <subId>: { failures, nextAttemptAt } } }
+ *
+ * The bilko.run relay (webRemote.cjs) is unrelated and untouched.
  */
 
 const crypto = require('node:crypto');
@@ -34,6 +40,7 @@ const { writeJsonAtomic, readJsonOr } = require('../util/atomicFs.cjs');
 const WRITER = 'webhooks';
 const NS = 'webhooks';
 const FILE_NAME = 'subscriptions.json';
+const STATE_FILE_NAME = 'delivery-state.json';
 const MAX_SUBSCRIPTIONS = 100;
 const MAX_URL_CHARS = 2048;
 const ID_RE = /^wh_[0-9a-f]{16}$/;
@@ -200,8 +207,69 @@ async function removeSubscription({ cwd, id } = /** @type {any} */ ({})) {
   });
 }
 
+function stateFile(cwd) {
+  return opsPath(cwd, NS, STATE_FILE_NAME);
+}
+
+/** @param {any} raw */
+function normalizeState(raw) {
+  const isObj = (/** @type {unknown} */ v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  /** @type {{ cursors: Record<string, Record<string, number>>, backoff: Record<string, { failures: number, nextAttemptAt: number }> }} */
+  const out = { cursors: {}, backoff: {} };
+  if (!isObj(raw)) return out;
+  if (isObj(raw.cursors)) {
+    for (const [subId, perEpic] of Object.entries(raw.cursors)) {
+      if (!isObj(perEpic)) continue;
+      /** @type {Record<string, number>} */
+      const m = {};
+      for (const [epicId, seq] of Object.entries(perEpic)) if (Number.isInteger(seq) && seq > 0) m[epicId] = seq;
+      out.cursors[subId] = m;
+    }
+  }
+  if (isObj(raw.backoff)) {
+    for (const [subId, b] of Object.entries(raw.backoff)) {
+      if (isObj(b) && Number.isInteger(b.failures) && b.failures > 0 && Number.isFinite(b.nextAttemptAt)) {
+        out.backoff[subId] = { failures: b.failures, nextAttemptAt: b.nextAttemptAt };
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * readDeliveryState({ cwd }) → Promise<{ cursors, backoff }> (empty when absent).
+ * @param {{ cwd: string }} opts
+ */
+async function readDeliveryState({ cwd } = /** @type {any} */ ({})) {
+  return normalizeState(await readJsonOr(stateFile(cwd), null));
+}
+
+/**
+ * updateDeliveryState({ cwd, mutate }) — serialized read-modify-write of the
+ * delivery state; `mutate(state)` edits in place. Entries for subscriptions
+ * that no longer exist are pruned on every write.
+ * @param {{ cwd: string, mutate: (state: { cursors: Record<string, Record<string, number>>, backoff: Record<string, { failures: number, nextAttemptAt: number }> }) => void }} opts
+ */
+async function updateDeliveryState({ cwd, mutate } = /** @type {any} */ ({})) {
+  const file = stateFile(cwd);
+  return serialized(file, async () => {
+    const state = normalizeState(await readJsonOr(file, null));
+    mutate(state);
+    const live = new Set((await readStore(storeFile(cwd))).map((s) => s.id));
+    for (const key of ['cursors', 'backoff']) {
+      const m = /** @type {Record<string, unknown>} */ (state[/** @type {'cursors'|'backoff'} */ (key)]);
+      for (const id of Object.keys(m)) if (!live.has(id)) delete m[id];
+    }
+    assertOpsWrite(file, WRITER);
+    await writeJsonAtomic(file, { version: 1, ...state }, { mode: 0o600 });
+    return state;
+  });
+}
+
 module.exports = {
   addSubscription,
+  readDeliveryState,
+  updateDeliveryState,
   listSubscriptions,
   removeSubscription,
   assertLoopbackUrl,

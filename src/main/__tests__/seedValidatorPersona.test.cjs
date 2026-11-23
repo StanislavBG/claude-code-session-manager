@@ -106,16 +106,27 @@ test('a homedir whose marker already lists the first three receives validator.md
   expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());
 });
 
-test('the seeded validator body is under AGENT_BODY_CHAR_CAP and contains both required sentinel lines', () => {
+// Validator jobs always run under `--json-schema` (scheduler.cjs passes
+// VALIDATOR_VERDICT_SCHEMA when isValidator), so the body must teach the
+// checked-JSON verdict contract, not the legacy sentinel lines.
+test('the seeded validator body is under AGENT_BODY_CHAR_CAP and states the JSON verdict contract', () => {
   const { AGENT_BODY_CHAR_CAP } = require('../lib/claude/agentModelResolve.cjs');
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { MISS_KINDS } = require('../lib/scheduler/validatorVerdictSchema.cjs');
   const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
   const { body } = splitFrontmatter(raw);
   const trimmed = body.trim();
 
   expect(trimmed.length).toBeLessThan(AGENT_BODY_CHAR_CAP);
-  expect(trimmed).toContain('VALIDATION: <slug> VERIFIED');
-  expect(trimmed).toContain('SCHEDULER_VERDICT: PASS');
+  expect(trimmed).toContain('matches the verdict schema');
+  expect(trimmed).toContain('print no sentinel lines');
+  for (const key of ['`verdicts`', '`prd`', '`verdict`', '`reason`', '`criteria`', '`findings`', '`missKind`', '`schedulerVerdict`', '`failReason`']) {
+    expect(trimmed).toContain(key);
+  }
+  expect(trimmed).toContain('`VERIFIED` or `REFUTED`');
+  expect(trimmed).toContain('`schedulerVerdict`: `PASS`');
+  for (const kind of MISS_KINDS) expect(trimmed).toContain(`\`${kind}\``);
+  expect(trimmed).not.toContain('VALIDATION: <slug> VERIFIED');
   expect(trimmed).not.toContain('Do not touch:');
   expect(trimmed).not.toContain('Report explicitly:');
   expect(trimmed.endsWith('report them.')).toBe(true);

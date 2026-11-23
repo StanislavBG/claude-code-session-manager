@@ -39,7 +39,7 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { spawn } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
+const { cleanChildEnv, pathWithUserBins, assertNoCredentials } = require('./lib/process/cleanEnv.cjs');
 const { recordExchange, formatAskedResult } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
 const { extractJson } = require('./lib/util/extractJson.cjs');
@@ -839,6 +839,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
           target = { ...target, command: wrapped.command, args: wrapped.args, argv0: undefined };
         }
       }
+      assertNoCredentials(agentPlan ? agentEnv : childEnv, { site: agentPlan ? 'chat-agent' : 'chat' });
       if (agentPlan) agentPlan.transcript.userPrompt(fullPrompt);
       thisChild = spawn(target.command, target.args || chatArgs, {
         ...(target.argv0 ? { argv0: target.argv0 } : {}),

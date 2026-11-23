@@ -25,7 +25,7 @@ const { resolveClaudeBin, claudeSpawnTarget } = require('../claude/claudeBin.cjs
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('../claude/claudeCliCaps.cjs');
 const { detectRateLimitInText } = require('../claude/rateLimitDetect.cjs');
 const { feedChildStdin } = require('../process/childStdin.cjs');
-const { withProcRole } = require('../process/cleanEnv.cjs');
+const { withProcRole, stripCredentials, assertNoCredentials } = require('../process/cleanEnv.cjs');
 const { killTree, detachedSpawnOpts } = require('../process/killTree.cjs');
 const memoryScope = require('../process/memoryScope.cjs');
 const { writeToolRiskGuardSettingsFile } = require('../epic/guardSpawnSettings.cjs');
@@ -114,12 +114,13 @@ function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers 
 }
 
 /**
- * baseEnv + the three Task markers. No other caller env is ever added.
+ * baseEnv (secret-shaped keys stripped) + the three Task markers. No other
+ * caller env is ever added.
  * @param {Record<string, any>} runtime
  * @param {Record<string, string|undefined>} baseEnv
  */
 function buildTaskEnv(runtime, baseEnv) {
-  const env = withProcRole({ ...(baseEnv || {}), SM_KG_INTERNAL: '1' }, PROC_ROLE);
+  const env = withProcRole({ ...stripCredentials(baseEnv), SM_KG_INTERNAL: '1' }, PROC_ROLE);
   if (runtime && runtime.disableAutoMemory === true) env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
   return env;
 }
@@ -243,6 +244,7 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
     };
 
     try {
+      assertNoCredentials(env, { site: 'task' });
       const bin = resolveClaudeBin();
       let target = claudeSpawnTarget(PROC_ROLE, PROC_DETAIL, bin, args);
       let spawnArgs = target.args || args;

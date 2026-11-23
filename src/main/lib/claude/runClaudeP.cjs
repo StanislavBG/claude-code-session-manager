@@ -21,7 +21,7 @@ const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./claudeCliCaps.cjs');
 const { buildJobSandboxSettings } = require('./jobSandboxPolicy.cjs');
 const { feedChildStdin } = require('../process/childStdin.cjs');
-const { withProcRole } = require('../process/cleanEnv.cjs');
+const { withProcRole, assertNoCredentials } = require('../process/cleanEnv.cjs');
 
 const MAX_OUT_BYTES = 8 * 1024 * 1024;
 
@@ -44,7 +44,9 @@ async function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, syste
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
     const target = claudeSpawnTarget('aux', 'runclaudep', bin);
-    const child = spawn(target.command, args, { env: withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux'), stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+    const childEnv = withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux');
+    assertNoCredentials(childEnv, { site: 'runClaudeP' }); // named exception: CREDENTIAL_EXCEPTIONS
+    const child = spawn(target.command, args, { env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     feedChildStdin(child, prompt);
     let out = '';
     let err = '';

@@ -102,4 +102,55 @@ function cleanChildEnv(extra = {}) {
   return env;
 }
 
-module.exports = { cleanChildEnv, withProcRole, inferProcRole, PROC_ROLE_ENV, userBinDirs, pathWithUserBins };
+/**
+ * The ONLY spawn sites allowed to hand a headless child an env that still
+ * carries secret-shaped keys. Both are internal one-shot `claude -p` helpers
+ * that deliberately inherit process.env verbatim (withProcRole, not
+ * cleanChildEnv). Adding an entry is a deliberate security decision.
+ */
+const CREDENTIAL_EXCEPTIONS = Object.freeze([
+  Object.freeze({ site: 'runClaudeP', reason: 'internal one-shot aux claude -p (no tools beyond its sandbox, --strict-mcp-config); inherits process.env so the CLI auth env it was launched with keeps working' }),
+  Object.freeze({ site: 'docEdit', reason: 'internal one-shot aux claude -p that rewrites a doc the user asked to edit; inherits process.env for the same CLI-auth reason as runClaudeP' }),
+]);
+
+/** Spawn sites that must pass a credential-free env. */
+const CREDENTIAL_CHECKED_SITES = Object.freeze(['scheduler-job', 'task', 'chat', 'chat-agent']);
+
+/** Secret-shaped keys (SECRET_KEY_RE) present in env with a non-empty value. */
+function credentialKeys(env) {
+  return Object.keys(env || {}).filter((k) => SECRET_KEY_RE.test(k) && env[k] !== undefined && env[k] !== null && env[k] !== '');
+}
+
+/**
+ * Spawn-time assertion: throw if `env` carries any key matching
+ * SECRET_KEY_RE. The error names each offending key, never its value.
+ * `site` must be a known spawn site: an exception site passes unchecked, a
+ * checked site is scanned, and an unknown site is refused outright.
+ * @param {Record<string, any>} env
+ * @param {{ site: string }} opts
+ */
+function assertNoCredentials(env, opts) {
+  const site = opts && typeof opts.site === 'string' ? opts.site : '';
+  if (CREDENTIAL_EXCEPTIONS.some((e) => e.site === site)) return;
+  if (!CREDENTIAL_CHECKED_SITES.includes(site)) {
+    const err = /** @type {Error & { code?: string }} */ (new Error(`assertNoCredentials: unknown spawn site ${JSON.stringify(site)} — refused`));
+    err.code = 'credential_site_unknown';
+    throw err;
+  }
+  const keys = credentialKeys(env);
+  if (keys.length) {
+    const err = /** @type {Error & { code?: string, keys?: string[] }} */ (new Error(`assertNoCredentials: ${site} env carries credential keys: ${keys.join(', ')} — refused`));
+    err.code = 'credentials_in_env';
+    err.keys = keys;
+    throw err;
+  }
+}
+
+/** Copy of env with every SECRET_KEY_RE key removed. */
+function stripCredentials(env) {
+  const out = { ...(env || {}) };
+  for (const k of Object.keys(out)) if (SECRET_KEY_RE.test(k)) delete out[k];
+  return out;
+}
+
+module.exports = { cleanChildEnv, assertNoCredentials, stripCredentials, CREDENTIAL_EXCEPTIONS, CREDENTIAL_CHECKED_SITES, SECRET_KEY_RE, withProcRole, inferProcRole, PROC_ROLE_ENV, userBinDirs, pathWithUserBins };

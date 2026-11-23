@@ -56,7 +56,7 @@ const { buildJobSandboxSettings, sandboxDependencies, sandboxChildEnv, jobEnviro
 const { loadEnvironment } = require('./lib/claude/environmentProfiles.cjs');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
+const { cleanChildEnv, pathWithUserBins, assertNoCredentials } = require('./lib/process/cleanEnv.cjs');
 const { ensureTimeoutShim, withTimeoutShimOnPath } = require('./lib/process/timeoutShim.cjs');
 const supervisor = require('./supervisor.cjs');
 const { processGroupRssMb } = require('./lib/process/procGroupRss.cjs');
@@ -6117,6 +6117,20 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       riskGuardSettingsPath,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
+
+    // Spawn-time credential assertion: the FINAL env (after every
+    // Object.assign above) must carry no SECRET_KEY_RE key. Refuse, never spawn.
+    try {
+      assertNoCredentials(childEnv, { site: 'scheduler-job' });
+    } catch (credErr) {
+      const errMsg = String((credErr && credErr.message) || credErr);
+      safeLog(`[scheduler] ${errMsg}\n`);
+      closeFd();
+      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, sandbox: sandboxMeta, ...SCHEDULER_META_IDENTITY, ...setupMeta, agentSnapshotId: personaResolution.agentSnapshotId || null });
+      removeSandboxTmp();
+      resolve({ exitCode: -1, durationMs: 0, error: errMsg, launchError: 'credentials_in_env', sessionId });
+      return;
+    }
 
     // Pre-spawn argv guard: one oversized argument makes spawn throw E2BIG.
     const oversized = launchFailure.findOversizedArg(jobSpawn.args || jobArgs);

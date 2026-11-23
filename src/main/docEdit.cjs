@@ -23,7 +23,7 @@ const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
 const { buildJobSandboxSettings } = require('./lib/claude/jobSandboxPolicy.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
-const { withProcRole } = require('./lib/process/cleanEnv.cjs');
+const { withProcRole, assertNoCredentials } = require('./lib/process/cleanEnv.cjs');
 const { extractJson } = require('./lib/util/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
@@ -113,7 +113,9 @@ async function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemP
     // otherwise blocks waiting on it and returns empty. SM_KG_INTERNAL=1 tells the
     // prompt-logging hook to skip this invocation.
     const target = claudeSpawnTarget('aux', 'docedit', bin);
-    const child = spawn(target.command, args, { env: withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux'), stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+    const childEnv = withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux');
+    assertNoCredentials(childEnv, { site: 'docEdit' }); // named exception: CREDENTIAL_EXCEPTIONS
+    const child = spawn(target.command, args, { env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     feedChildStdin(child, prompt);
     let out = '';
     let err = '';

@@ -649,7 +649,7 @@ export function EpicQueue({
             per project · edits apply on every project
           </span>
         </div>
-        <SessionActionsBar onNew={onNew} onSelect={onSelect} />
+        <SessionActionsBar onNew={onNew} onSelect={onSelect} epicId={selectedId} />
       </div>
 
       {/* ── Section 2 · THE SESSIONS WIDGET ───────────────────────────────

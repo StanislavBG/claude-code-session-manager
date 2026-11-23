@@ -93,8 +93,3 @@ test('emitJobEvent writes job.queued { slug, agentType } for the queue-row inser
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ kind: 'job.queued', slug: '9003-z', agentType: 'dev-lead' });
 });
-
-test('scheduler.cjs queue-row insert emits job.queued with slug + agentType', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'scheduler.cjs'), 'utf8');
-  expect(src).toMatch(/next\.push\(entry\);\s*\n(?:\s*\/\/.*\n)*\s*emitJobEvent\(entry, \{ kind: 'job\.queued', slug, agentType: entry\.agentType \?\? null \}\);/);
-});

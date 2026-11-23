@@ -17,7 +17,8 @@
  * creation path.
  */
 import { useState } from 'react'
-import { toast } from '../../state/toast'
+import { toast, useToast } from '../../state/toast'
+import { usePromptSessions } from '../../state/promptSessions'
 import { useAgentPersonas } from '../../lib/useAgentPersonas'
 import { useMacros, macrosForProject } from '../../lib/useMacros'
 import { useMacroLaunch } from '../../lib/useMacroLaunch'
@@ -129,9 +130,11 @@ function ManagePanel({
 export interface SessionActionsBarProps {
   onNew: () => void
   onSelect: (id: string) => void
+  /** The selected Epic — target of "Update agent" (re-pins its persona snapshot). */
+  epicId?: string | null
 }
 
-export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
+export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionActionsBarProps) {
   const personas = useAgentPersonas()
   const { launch, launching, cwd } = useMacroLaunch(onSelect, personas)
   const { macros: all, loaded } = useMacros()
@@ -141,6 +144,31 @@ export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
   const [editor, setEditor] = useState<{ macro: Macro | null } | null>(null)
   const [managing, setManaging] = useState(false)
   const [pending, setPending] = useState<Macro | null>(null)
+  const epicCwd = usePromptSessions((s) => (epicId ? s.sessions[epicId]?.cwd ?? null : null))
+  const [refreshing, setRefreshing] = useState(false)
+
+  // The one human action that moves an existing Epic onto the current persona
+  // version (lib/epic/epicAgentRefresh.cjs re-snapshots + audits main-side).
+  const refreshAgent = async () => {
+    if (!epicId || !epicCwd) return
+    const show = useToast.getState().show
+    setRefreshing(true)
+    try {
+      const r = await window.api.promptSessions.refreshAgentSnapshot({ cwd: epicCwd, epicId })
+      if (!r.ok) {
+        show('error', r.message)
+        return
+      }
+      usePromptSessions.setState((st) => ({
+        sessions: { ...st.sessions, [epicId]: r.session as unknown as (typeof st.sessions)[string] },
+      }))
+      show('info', r.changed ? 'Agent updated to the current persona version.' : 'Agent is already on the current persona version.')
+    } catch (err) {
+      show('error', err instanceof Error ? err.message : String(err))
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-2" data-testid="session-actions-bar">
@@ -185,6 +213,19 @@ export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
         >
           New Macro
         </button>
+
+        {epicId && (
+          <button
+            type="button"
+            onClick={() => void refreshAgent()}
+            disabled={!epicCwd || refreshing}
+            title="Move this session onto its agent's current persona version"
+            data-testid="epic-refresh-agent"
+            className={SECONDARY}
+          >
+            {refreshing ? 'Updating…' : 'Update agent'}
+          </button>
+        )}
 
         {library.length > 0 && (
           <button

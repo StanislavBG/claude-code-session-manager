@@ -81,6 +81,10 @@ const OWNERS = Object.freeze({
   // scheduler copies them out of job worktrees and prunes them after the Epic
   // completes. See plan-records/README.md.
   'plan-records': 'scheduler',
+  // The per-Epic durable event log: events/<epicId>/events.jsonl, closed
+  // {domain}.{action} kinds, summaries only. lib/epic/epicEventLog.cjs is the
+  // ONLY writer. Keep forever. See session-manager-operations/AGENTS.md.
+  'events': 'event-log',
 });
 
 /**
@@ -92,7 +96,7 @@ const OWNERS = Object.freeze({
  */
 const RUNTIME_NAMESPACES = Object.freeze([
   'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
-  'plan-records',
+  'plan-records', 'events',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

@@ -15,6 +15,7 @@
   "include": [
     "src/main/lib/promptSessionSchema.cjs",
     "src/main/lib/persona-macro/agentPersonaSchema.cjs",
+    "src/main/lib/persona-macro/personaFrontmatterSchema.cjs",
     "src/main/lib/scheduler/scheduleJobSchema.cjs",
     "src/main/lib/feedback-remote/customerFeedbackAdminRoutes.cjs",
     "src/main/lib/feedback-remote/customerFeedbackClient.cjs",

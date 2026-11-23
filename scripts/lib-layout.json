@@ -2,6 +2,7 @@
   "demoVideoKitChecks": "demo-video-kit",
   "activeIndexMerge": "epic",
   "activeIndexRebuild": "epic",
+  "epicEventLog": "epic",
   "adoptedRunSupervisor": "scheduler",
   "agentAdminRoutes": "persona-macro",
   "agentEffortResolve": "claude",

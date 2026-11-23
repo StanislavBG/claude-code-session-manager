@@ -84,7 +84,7 @@ test('round trip: start + end fold into one ok Task; summary carries hashes, nev
   const day = opsPath(cwd, 'tasks', `${localDate(s.startedAt)}.jsonl`);
   const raw = fs.readFileSync(day, 'utf8');
   const lines = raw.trim().split('\n').map((l) => JSON.parse(l));
-  expect(lines.map((l) => l.kind)).toEqual(['start', 'end']);
+  expect(lines.map((l) => l.kind)).toEqual(['task.started', 'task.status_changed']);
   expect(lines[0]).toMatchObject({ v: 1, source: 'sm', promptSha256: sha(s.prompt), promptBytes: s.prompt.length });
   expect(lines[1]).toMatchObject({ v: 1, outputSha256: sha('output for t1'), outputBytes: 'output for t1'.length });
   expect(raw).not.toContain('prompt for t1');
@@ -255,7 +255,7 @@ test('sessionId + persisted default to null/false on start, end and imported lin
   await ledger.appendImported(cwd, { ...startRow('d2'), ...endRow('d2', s.startedAt), importId: 'imp-d2' });
   const day = opsPath(cwd, 'tasks', `${localDate(s.startedAt)}.jsonl`);
   const lines = fs.readFileSync(day, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  expect(lines.map((l) => l.kind)).toEqual(['start', 'end', 'imported']);
+  expect(lines.map((l) => l.kind)).toEqual(['task.started', 'task.status_changed', 'task.status_changed']);
   for (const l of lines) expect(l).toMatchObject({ sessionId: null, persisted: false });
   const { tasks } = await ledger.listTasks(cwd);
   for (const t of tasks) expect(t).toMatchObject({ sessionId: null, persisted: false });
@@ -267,7 +267,7 @@ test('a persisted start keeps sessionId + persisted through its end; listTasks a
   await ledger.appendTaskEnd(cwd, endRow('p1', s.startedAt));
   const day = opsPath(cwd, 'tasks', `${localDate(s.startedAt)}.jsonl`);
   const lines = fs.readFileSync(day, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  expect(lines[0]).toMatchObject({ kind: 'start', sessionId: 'sess-p1', persisted: true });
+  expect(lines[0]).toMatchObject({ kind: 'task.started', sessionId: 'sess-p1', persisted: true });
   const { tasks } = await ledger.listTasks(cwd);
   expect(tasks[0]).toMatchObject({ taskId: 'p1', sessionId: 'sess-p1', persisted: true, status: 'ok' });
   expect(await ledger.getTask(cwd, 'p1')).toMatchObject({ sessionId: 'sess-p1', persisted: true });

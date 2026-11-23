@@ -13,16 +13,32 @@ state: git-ignored except this README.
 ```
 session-manager-operations/tasks/
   <YYYY-MM-DD>.jsonl        — summary lines, one file per local date of the Task's startedAt.
-                              kind 'start' | 'end' | 'imported'; carries promptSha256/promptBytes
-                              and outputSha256/outputBytes, NEVER the prompt or output text.
+                              Event-log kinds 'task.started' | 'task.status_changed', each with
+                              from/to; carries promptSha256/promptBytes and
+                              outputSha256/outputBytes, NEVER the prompt or output text.
   bodies/<taskId>.json      — prompt + output text (each capped at 1 MiB, with
                               promptTruncated/outputTruncated flags), stderr tail, envelope.
                               Written atomically (util/atomicFs.cjs).
   .gitignore                — `*`, written by ensureRuntimeIgnores.
 ```
 
-A `start` with no `end` reads as `running` until `startedAt + timeoutSec + 120 s` passes, then
-`interrupted`. Malformed lines are skipped and counted (`skippedLines`), never thrown.
+## Status lines and legality
+
+- `task.started` — `from: null`, `to: 'running'`, written before the claude process spawns.
+- `task.status_changed` — an end (`from: 'running'`, `to`/`status` = the outcome), or a whole
+  imported Task (`from: null`, carries `importId`, `source: 'direct'`).
+- Legacy `start` / `end` / `imported` lines still within retention are read as those kinds.
+
+Every edge goes through `transitionTask(from, to)` against `TASK_LEGAL_TRANSITIONS`
+(`taskLedger.cjs`): `null → running | terminal`, `running → terminal`, terminal → nothing
+(terminal = `ok`, `error`, `rate_limited`, `timeout`, `spawn_failed`, `caller_gone`,
+`slot_timeout`, `too_many_waiting`, `interrupted`). The end's `from` is the body's `status`.
+An illegal edge (e.g. a second end) throws under vitest; in prod it is refused — no line is
+written, the append resolves `null` — and a `task_transition_refused` record goes to
+`~/.claude/session-manager/audit-log.jsonl`.
+
+A `task.started` with no end reads as `running` until `startedAt + timeoutSec + 120 s` passes, then
+`interrupted` — a read-side `running → interrupted` edge that also goes through the table. Malformed lines are skipped and counted (`skippedLines`), never thrown.
 
 ## Retention
 

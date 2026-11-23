@@ -9,7 +9,12 @@
  *
  * Layout (all paths via opsPath(cwd, 'tasks', ...)):
  *   tasks/<YYYY-MM-DD>.jsonl   summary lines, local date of the Task's startedAt.
- *                              kind 'start' | 'end' | 'imported'. Hashes + byte
+ *                              Event-log shaped {domain}.{action} kinds:
+ *                              'task.started' (from null → to 'running') and
+ *                              'task.status_changed' (from → to; an end, or a
+ *                              whole imported Task with importId, from null).
+ *                              Legacy 'start' | 'end' | 'imported' lines still
+ *                              on disk are read as those two kinds. Hashes + byte
  *                              counts only — never prompt/output text. Every
  *                              line carries sessionId (claude session id or
  *                              null) and persisted (true when the run kept its
@@ -17,6 +22,13 @@
  *   tasks/bodies/<taskId>.json prompt/output text (each capped at 1 MiB, with
  *                              promptTruncated/outputTruncated), stderrTail,
  *                              envelope. Written via atomicFs.writeJsonAtomic.
+ *
+ * Status legality: every status line goes through transitionTask(from, to)
+ * against TASK_LEGAL_TRANSITIONS — refuse-plus-audit, like
+ * scheduler/scheduleJobTransitions.cjs. An illegal edge throws under vitest
+ * and, in prod, is refused (no line written, the call resolves null) with a
+ * `task_transition_refused` audit record. The read-side timeout derivation
+ * (running → interrupted) goes through the same table.
  *
  * Retention: opsRetentionSettings.read().tasksDays (default 30). pruneOld runs
  * once per local day per project, on the first append of that day.
@@ -41,7 +53,66 @@ const MAX_LIMIT = 200;
 const DAY_MS = 86400000;
 const DAY_FILE_RE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
-const KINDS = new Set(['start', 'end', 'imported']);
+const KIND_STARTED = 'task.started';
+const KIND_STATUS_CHANGED = 'task.status_changed';
+const KINDS = new Set([KIND_STARTED, KIND_STATUS_CHANGED]);
+/** Pre-event-log kinds still on disk (≤ tasksDays old) → their current kind. */
+const LEGACY_KINDS = { start: KIND_STARTED, end: KIND_STATUS_CHANGED, imported: KIND_STATUS_CHANGED };
+
+/** Terminal Task statuses (taskRun.cjs + taskAdminRoutes.cjs + read-side 'interrupted'). */
+const TERMINAL_STATUSES = Object.freeze([
+  'ok', 'error', 'rate_limited', 'timeout', 'spawn_failed', 'caller_gone', 'slot_timeout',
+  'too_many_waiting', 'interrupted',
+]);
+
+/**
+ * Explicit from → to edges. The key 'null' is "no prior status": a Task's
+ * start (→ running), an imported whole Task, or an end whose start body is
+ * gone (→ any terminal). running → any terminal, including the timeout-derived
+ * 'interrupted'. Terminal statuses have no exits — a second end is refused.
+ */
+const TASK_LEGAL_TRANSITIONS = {
+  null: ['running', ...TERMINAL_STATUSES],
+  running: [...TERMINAL_STATUSES],
+};
+for (const s of TERMINAL_STATUSES) TASK_LEGAL_TRANSITIONS[s] = [];
+
+let refusedTransitionCount = 0;
+
+function isUnderTest() {
+  return !!process.env.VITEST;
+}
+
+/**
+ * transitionTask(from, to, { taskId, cwd, source, reason }) → boolean.
+ * true when `from → to` is in TASK_LEGAL_TRANSITIONS. An illegal edge throws
+ * under vitest; in prod it logs, counts, writes a `task_transition_refused`
+ * audit record and returns false (the caller then refuses the write).
+ */
+function transitionTask(from, to, ctx = {}) {
+  const key = from == null ? 'null' : String(from);
+  const edges = Object.prototype.hasOwnProperty.call(TASK_LEGAL_TRANSITIONS, key) ? TASK_LEGAL_TRANSITIONS[key] : null;
+  if (Array.isArray(edges) && edges.includes(to)) return true;
+  const detail = {
+    taskId: ctx.taskId ?? null,
+    from: from ?? null,
+    to: to ?? null,
+    source: ctx.source ?? null,
+    reason: ctx.reason ?? null,
+    cwd: ctx.cwd ?? null,
+  };
+  if (isUnderTest()) {
+    throw new Error(`taskLedger: illegal task transition ${detail.from} -> ${detail.to} (taskId=${detail.taskId})`);
+  }
+  refusedTransitionCount += 1;
+  console.error(`[taskLedger] illegal transition refused: taskId=${detail.taskId} from=${detail.from} to=${detail.to} source=${detail.source}`);
+  try {
+    require('../telemetry/auditLog.cjs').appendAuditEvent('task_transition_refused', detail);
+  } catch { /* auditing must never be the thing that fails */ }
+  return false;
+}
+
+function getRefusedTransitionCount() { return refusedTransitionCount; }
 // Text-bearing input fields: they go to the body file, never the summary line.
 const TEXT_FIELDS = ['prompt', 'output', 'stderrTail', 'envelope'];
 const USAGE_KEYS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
@@ -158,12 +229,14 @@ function startedMsOf(row) {
 async function appendTaskStart(cwd, row) {
   assertTaskId(row && row.taskId);
   const startedMs = startedMsOf(row);
+  if (!transitionTask(null, 'running', { taskId: row.taskId, cwd, source: 'appendTaskStart' })) return null;
   await maybePrune(cwd);
   const p = capText(row.prompt);
   await writeBody(cwd, row.taskId, {
     v: 1,
     taskId: row.taskId,
     startedAt: row.startedAt,
+    status: 'running',
     prompt: p.text,
     promptTruncated: p.truncated,
   });
@@ -171,7 +244,9 @@ async function appendTaskStart(cwd, row) {
     ...stripText(row),
     ...sessionFields(row),
     v: 1,
-    kind: 'start',
+    kind: KIND_STARTED,
+    from: null,
+    to: 'running',
     source: 'sm',
     promptSha256: p.sha256,
     promptBytes: p.bytes,
@@ -183,12 +258,17 @@ async function appendTaskStart(cwd, row) {
 /**
  * appendTaskEnd(cwd, { ...endRow, output, stderrTail, envelope }) — rewrites
  * the body adding output fields and appends a kind 'end' line to the day file
- * of the Task's startedAt (taken from the row, else from the body).
+ * of the Task's startedAt (taken from the row, else from the body). The edge
+ * is body.status (a body without one = 'running'; no body = null) → row.status;
+ * an illegal edge (e.g. a second end) is refused and resolves null.
  */
 async function appendTaskEnd(cwd, row) {
   assertTaskId(row && row.taskId);
+  const body = await readBody(cwd, row.taskId);
+  const from = body ? (typeof body.status === 'string' && body.status ? body.status : 'running') : null;
+  if (!transitionTask(from, row.status, { taskId: row.taskId, cwd, source: 'appendTaskEnd' })) return null;
   await maybePrune(cwd);
-  const prior = (await readBody(cwd, row.taskId)) || { v: 1, taskId: row.taskId };
+  const prior = body || { v: 1, taskId: row.taskId };
   const startedAt = row.startedAt || prior.startedAt || row.endedAt || new Date().toISOString();
   const startedMs = toMs(startedAt) ?? Date.now();
   const o = capText(row.output);
@@ -196,6 +276,7 @@ async function appendTaskEnd(cwd, row) {
   await writeBody(cwd, row.taskId, {
     ...prior,
     startedAt,
+    status: row.status,
     output: o.text,
     outputTruncated: o.truncated,
     stderrTail: stderr.text,
@@ -205,7 +286,9 @@ async function appendTaskEnd(cwd, row) {
     ...stripText(row),
     ...sessionFields(row),
     v: 1,
-    kind: 'end',
+    kind: KIND_STATUS_CHANGED,
+    from,
+    to: row.status,
     startedAt,
     outputSha256: o.sha256,
     outputBytes: o.bytes,
@@ -222,6 +305,7 @@ async function appendImported(cwd, row) {
   assertTaskId(row && row.taskId);
   if (typeof row.importId !== 'string' || !row.importId) throw new Error('taskLedger: importId is required');
   const startedMs = startedMsOf(row);
+  if (!transitionTask(null, row.status, { taskId: row.taskId, cwd, source: 'appendImported' })) return null;
   await maybePrune(cwd);
   const p = capText(row.prompt);
   const o = capText(row.output);
@@ -230,6 +314,7 @@ async function appendImported(cwd, row) {
     v: 1,
     taskId: row.taskId,
     startedAt: row.startedAt,
+    status: row.status,
     prompt: p.text,
     promptTruncated: p.truncated,
     output: o.text,
@@ -241,7 +326,9 @@ async function appendImported(cwd, row) {
     ...stripText(row),
     ...sessionFields(row),
     v: 1,
-    kind: 'imported',
+    kind: KIND_STATUS_CHANGED,
+    from: null,
+    to: row.status,
     source: 'direct',
     promptSha256: p.sha256,
     promptBytes: p.bytes,
@@ -289,6 +376,10 @@ async function readRows(cwd, range) {
       if (!line.trim()) continue;
       let row;
       try { row = JSON.parse(line); } catch { skippedLines += 1; continue; }
+      if (row && typeof row === 'object' && !Array.isArray(row)
+        && Object.prototype.hasOwnProperty.call(LEGACY_KINDS, row.kind)) {
+        row = { ...row, kind: LEGACY_KINDS[row.kind] };
+      }
       if (!row || typeof row !== 'object' || Array.isArray(row)
         || !KINDS.has(row.kind) || typeof row.taskId !== 'string' || !row.taskId) {
         skippedLines += 1;
@@ -300,11 +391,19 @@ async function readRows(cwd, range) {
   return { rows, skippedLines };
 }
 
+/**
+ * A Task's status: its end/imported status, else 'running' — or, once
+ * startedAt + timeoutSec + grace has passed, the timeout-derived
+ * 'interrupted', taken only when TASK_LEGAL_TRANSITIONS allows running → it.
+ */
 function foldedStatus(t, now) {
   if (t.status) return t.status;
   const startedMs = toMs(t.startedAt);
   const timeoutMs = (Number(t.timeoutSec) || 0) * 1000;
-  if (startedMs != null && now > startedMs + timeoutMs + INTERRUPT_GRACE_MS) return 'interrupted';
+  if (startedMs != null && now > startedMs + timeoutMs + INTERRUPT_GRACE_MS
+    && transitionTask('running', 'interrupted', { taskId: t.taskId, source: 'foldedStatus:timeout' })) {
+    return 'interrupted';
+  }
   return 'running';
 }
 
@@ -312,9 +411,11 @@ function foldedStatus(t, now) {
 function fold(rows, now) {
   const byId = new Map();
   for (const row of rows) {
-    const { kind, ...fields } = row;
+    const { kind, from: _from, to: _to, ...fields } = row;
     const cur = byId.get(row.taskId);
-    if (kind === 'end') {
+    if (kind === KIND_STATUS_CHANGED && typeof fields.importId === 'string' && fields.importId) {
+      byId.set(row.taskId, { ...(cur || {}), ...fields });
+    } else if (kind === KIND_STATUS_CHANGED) {
       // An end never erases start fields it doesn't carry — nor the start's
       // sessionId/persisted with its own null/false defaults.
       byId.set(row.taskId, {
@@ -324,10 +425,8 @@ function fold(rows, now) {
         sessionId: fields.sessionId || (cur && cur.sessionId) || null,
         persisted: fields.persisted === true || (cur && cur.persisted === true) || false,
       });
-    } else if (kind === 'start') {
-      byId.set(row.taskId, cur ? { ...fields, ...cur } : { ...fields });
     } else {
-      byId.set(row.taskId, { ...(cur || {}), ...fields });
+      byId.set(row.taskId, cur ? { ...fields, ...cur } : { ...fields });
     }
   }
   const tasks = [];
@@ -390,7 +489,7 @@ async function getTask(cwd, taskId, opts = {}) {
 async function hasImport(cwd, importId) {
   if (typeof importId !== 'string' || !importId) return false;
   const { rows } = await readRows(cwd);
-  return rows.some((r) => r.kind === 'imported' && r.importId === importId);
+  return rows.some((r) => r.kind === KIND_STATUS_CHANGED && r.importId === importId);
 }
 
 /**
@@ -430,8 +529,8 @@ async function readTaskUsageDays(cwd, { sinceDate, untilDate } = {}) {
 }
 
 /**
- * listPersistedSessionIds(cwd) → Set of sessionId from every retained 'start'
- * or 'imported' line with persisted === true. A start line is written before
+ * listPersistedSessionIds(cwd) → Set of sessionId from every retained
+ * 'task.started' line or imported (importId-carrying) 'task.status_changed' line with persisted === true. A start line is written before
  * the claude process spawns, so its id is here before its transcript exists.
  * Malformed lines are skipped; a missing tasks/ folder yields an empty Set.
  */
@@ -439,7 +538,8 @@ async function listPersistedSessionIds(cwd) {
   const { rows } = await readRows(cwd);
   const ids = new Set();
   for (const r of rows) {
-    if ((r.kind === 'start' || r.kind === 'imported') && r.persisted === true
+    const isImport = r.kind === KIND_STATUS_CHANGED && typeof r.importId === 'string' && r.importId;
+    if ((r.kind === KIND_STARTED || isImport) && r.persisted === true
       && typeof r.sessionId === 'string' && r.sessionId) ids.add(r.sessionId);
   }
   return ids;
@@ -485,6 +585,7 @@ async function pruneOld(cwd, { now = Date.now(), maxAgeDays } = {}) {
 function _resetForTests() {
   chains.clear();
   prunedOn.clear();
+  refusedTransitionCount = 0;
 }
 
 module.exports = {
@@ -497,6 +598,10 @@ module.exports = {
   readTaskUsageDays,
   listPersistedSessionIds,
   pruneOld,
+  transitionTask,
+  getRefusedTransitionCount,
+  TASK_LEGAL_TRANSITIONS,
+  TERMINAL_STATUSES,
   BODY_CAP_BYTES,
   _resetForTests,
 };

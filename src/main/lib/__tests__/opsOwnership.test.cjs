@@ -114,6 +114,15 @@ test("events/ is owned by 'event-log' (epicEventLog.cjs) and is a runtime namesp
   assert.equal(checkOpsWrite(`${P}/events/.gitignore`, 'runtime-ignore').ok, true);
 });
 
+test("agents/ is owned by 'agents' (agentSnapshot.cjs) and is a runtime namespace", () => {
+  const { RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+  assert.equal(OWNERS.agents, 'agents');
+  assert.ok(RUNTIME_NAMESPACES.includes('agents'));
+  assert.equal(checkOpsWrite(`${P}/agents/snapshots/${'a'.repeat(64)}.json`, 'agents').ok, true);
+  assert.equal(checkOpsWrite(`${P}/agents/snapshots/${'a'.repeat(64)}.json`, 'scheduler').ok, false);
+  assert.equal(checkOpsWrite(`${P}/agents/.gitignore`, 'runtime-ignore').ok, true);
+});
+
 // The root .gitignore mirrors RUNTIME_NAMESPACES: each namespace's contents are
 // ignored with its README kept tracked (feedback/ is retired: whole dir ignored).
 test('root .gitignore mirrors every runtime namespace', () => {

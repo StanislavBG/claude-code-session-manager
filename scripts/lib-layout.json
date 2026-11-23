@@ -7,6 +7,7 @@
   "agentAdminRoutes": "persona-macro",
   "agentEffortResolve": "claude",
   "agentModelResolve": "claude",
+  "agentSnapshot": "claude",
   "agentPersonaSchema": "persona-macro",
   "atomicFs": "util",
   "taskLedger": "tasks",

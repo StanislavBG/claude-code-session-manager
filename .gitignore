@@ -62,6 +62,8 @@ session-manager-operations/plan-records/*
 !session-manager-operations/plan-records/README.md
 session-manager-operations/events/*
 !session-manager-operations/events/README.md
+session-manager-operations/agents/*
+!session-manager-operations/agents/README.md
 
 # electron-builder staging + installer output (scripts/package/stage.cjs)
 release/

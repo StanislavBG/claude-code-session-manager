@@ -28,6 +28,7 @@
  *   - lib/scheduler/queueStore.cjs    (raw fs tmp+rename)
  *   - lib/telemetry/opsErrorLog.cjs   (raw fs append, JSONL error log)
  *   - lib/tasks/taskLedger.cjs        (raw fs append + atomicFs bodies)
+ *   - lib/claude/agentSnapshot.cjs    (atomicFs, write-once snapshots)
  * Renderer callers declare their writer id through the IPC payload.
  */
 
@@ -85,6 +86,10 @@ const OWNERS = Object.freeze({
   // {domain}.{action} kinds, summaries only. lib/epic/epicEventLog.cjs is the
   // ONLY writer. Keep forever. See session-manager-operations/AGENTS.md.
   'events': 'event-log',
+  // Immutable, content-addressed AgentSnapshots: agents/snapshots/<sha256>.json,
+  // written once each. lib/claude/agentSnapshot.cjs is the ONLY writer. Keep
+  // forever. See session-manager-operations/AGENTS.md.
+  'agents': 'agents',
 });
 
 /**
@@ -96,7 +101,7 @@ const OWNERS = Object.freeze({
  */
 const RUNTIME_NAMESPACES = Object.freeze([
   'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
-  'plan-records', 'events',
+  'plan-records', 'events', 'agents',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

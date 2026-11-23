@@ -5,19 +5,16 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-16 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+17 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
-- **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` →
-  epics · `scheduler` → scheduler · `project-brief` → project-home ·
-  `logs` → logs · `memory-clusters` → memory-clusters · `ui-prefs` → ui-prefs · `tasks` → tasks · `plan-records` → scheduler · `events` → event-log · `project-pages` → project-home
-  (admin render route only; a Builder Epic's own authoring stays ungoverned
-  — see [`project-pages/README.md`](project-pages/README.md)).
+- **Owned** (in `OWNERS`, app-owned state): each `OWNERS →` row below;
+  `project-pages` covers the admin render route only (a Builder Epic's own
+  authoring stays ungoverned — see [`project-pages/README.md`](project-pages/README.md)).
 - **Deliberately NOT owned** (skill-authored docs/artifacts, no write
   hazard): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`,
   `reviews`. `feedback` **retired** (2026-08-02).
-- **Any new top-level folder must land in the table below or in `OWNERS`
-  in the same PR** — `scripts/ops-sweep.cjs` flags an unlisted namespace
-  as `UNDOCUMENTED`.
+- **A new top-level folder lands in the table below or `OWNERS` in the
+  same PR** — `scripts/ops-sweep.cjs` flags it `UNDOCUMENTED` otherwise.
 
 The bare root has no owner — `opsOwnership.cjs` refuses a write there.
 
@@ -27,10 +24,11 @@ Epic lifecycle is specified exactly once, at
 
 | Namespace | Governance | Purpose | Retention | README |
 | --- | --- | --- | --- | --- |
+| `agents` | OWNERS → agents | write-once AgentSnapshots `snapshots/<id>.json`; runtime, self-ignored | keep forever | none |
 | `architecture` | not owned | reference docs | keep | none |
 | `design-mocks` | not owned | design mock artifacts | keep | [link](design-mocks/README.md) |
 | `events` | OWNERS → event-log | per-Epic event log `<epic-id>/events.jsonl`; runtime, self-ignored | keep forever | none |
-| `feedback` | retired 2026-08-02 | former feedback intake | n/a | none |
+| `feedback` | retired 2026-08-02 | former intake | n/a | none |
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the free Field Manual | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
@@ -46,9 +44,8 @@ Epic lifecycle is specified exactly once, at
 
 ## Who consumes this
 
-This app's main process (owned namespaces, via `opsPath()`) and skills/humans
-writing the unowned ones directly. Each namespace's README is
-the storage-layout contract; this table only says who owns it.
+The main process (owned namespaces, via `opsPath()`); skills/humans write
+the unowned ones. Each README is the layout contract; the table says who owns it.
 
 ## What must NOT be assumed
 

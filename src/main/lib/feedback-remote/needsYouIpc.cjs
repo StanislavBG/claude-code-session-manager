@@ -6,6 +6,11 @@
  * over needsYouStore.cjs:
  *   needsYou:list   (no payload)          -> { ok: true, items }   (open items only)
  *   needsYou:answer { app, id, answer }   -> { ok: true, item } | { ok: false, error }
+ *   scheduler:confirm-tool { tool, argsDigest, approved }
+ *                                         -> { ok: true, item } | { ok: false, error }
+ *     answers the tool-risk confirmation item for (tool, argsDigest) with
+ *     Approve / Deny; the scheduler's next tick applies it to the asking jobs
+ *     via toolClearance.answerConfirmation (resume the same session, or park).
  *
  * A successful answer appends one `needs_you_answered` audit row (app, id,
  * answer, and the item's externalRef when it has one) so the outside app that
@@ -42,6 +47,18 @@ function registerNeedsYouIpc(deps = {}) {
     const row = { app: item.app, id: item.id, answer: item.answer };
     if (item.externalRef) row.externalRef = item.externalRef;
     appendAuditEvent('needs_you_answered', row);
+    if (onChanged) onChanged();
+    return { ok: true, item };
+  }));
+
+  ipcMain.handle('scheduler:confirm-tool', v(s.schedulerConfirmTool, async ({ tool, argsDigest, approved }) => {
+    const id = needsYouStore.confirmationItemId(tool, argsDigest);
+    const answer = approved ? 'Approve' : 'Deny';
+    const item = await needsYouStore.answerNeedsYou({ app: needsYouStore.CONFIRM_APP, id, answer });
+    if (!item) {
+      return { ok: false, error: `There is no open confirmation for ${tool} with that argument digest. It may already be answered.` };
+    }
+    appendAuditEvent('needs_you_answered', { app: item.app, id: item.id, answer: item.answer, tool, argsDigest });
     if (onChanged) onChanged();
     return { ok: true, item };
   }));

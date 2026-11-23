@@ -575,6 +575,24 @@ export function NeedsYouSection({
       .finally(() => { setBusyId(null); setOpenId(null) })
   }
 
+  // Tool-risk 'confirm' items answer through the clearance IPC (scheduler:confirm-tool),
+  // keyed by the refused call's tool + args digest — never the generic option path.
+  const answerConfirm = (row: NeedsYouRow, approved: boolean) => {
+    const c = row.confirm
+    if (!c || busyId) return
+    setBusyId(row.id)
+    window.api.needsYou
+      .confirmTool({ tool: c.tool, argsDigest: c.argsDigest, approved })
+      .then((r) => {
+        if (!r.ok) toast.error(r.error || 'Could not send the answer.')
+        else toast.info(approved
+          ? `Approved ${c.tool} — the job resumes its same session and may run this exact call once.`
+          : `Denied ${c.tool} — the job stays parked.`)
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+      .finally(() => { setBusyId(null); setOpenId(null) })
+  }
+
   const openOutsideLink = (row: NeedsYouRow) => {
     if (!row.link) return
     window.api.shell
@@ -620,6 +638,12 @@ export function NeedsYouSection({
               {open && (
                 <div className="border-t border-line px-[13px] pt-[11px] pb-3 grid gap-2.5">
                   <div className="text-[12.5px] text-fg-dim leading-relaxed">{row.meta}</div>
+                  {row.confirm && (
+                    <div className="grid gap-1 text-[12px]" data-testid="confirm-details">
+                      <div><span className="text-fg-faint">Tool </span><code className="font-mono text-fg" data-testid="confirm-tool">{row.confirm.tool}</code></div>
+                      <div className="min-w-0"><span className="text-fg-faint">Args </span><span className="font-mono text-fg-dim break-all" data-testid="confirm-args">{row.confirm.summary || '(no summary recorded)'}</span></div>
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     {row.kind === 'proposed-epic' && (
                       <>
@@ -642,7 +666,13 @@ export function NeedsYouSection({
                         <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
                       </>
                     )}
-                    {row.kind === 'outside-item' && (
+                    {row.kind === 'outside-item' && row.confirm && (
+                      <>
+                        <NeedsButton testId="confirm-approve" onClick={() => answerConfirm(row, true)} disabled={busyId === row.id}>Approve</NeedsButton>
+                        <NeedsButton testId="confirm-deny" quiet onClick={() => answerConfirm(row, false)} disabled={busyId === row.id}>Deny</NeedsButton>
+                      </>
+                    )}
+                    {row.kind === 'outside-item' && !row.confirm && (
                       <>
                         {(row.options ?? []).map((opt) => (
                           <NeedsButton key={opt} onClick={() => answerOutside(row, opt)} disabled={busyId === row.id}>{opt}</NeedsButton>
@@ -676,14 +706,17 @@ function NeedsButton({
   onClick,
   disabled,
   quiet,
+  testId,
 }: {
   children: ReactNode
   onClick: () => void
   disabled?: boolean
   quiet?: boolean
+  testId?: string
 }) {
   return (
     <button
+      data-testid={testId}
       onClick={onClick}
       disabled={disabled}
       className={

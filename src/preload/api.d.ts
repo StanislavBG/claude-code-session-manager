@@ -2763,6 +2763,8 @@ export interface SessionManagerAPI {
     list: () => Promise<{ ok: true; items: NeedsYouItem[] }>;
     /** Answer one open item with one of its options; `ok: false` + error in words when no such open item/option. */
     answer: (payload: { app: string; id: string; answer: string }) => Promise<{ ok: true; item: NeedsYouItem } | { ok: false; error: string }>;
+    /** IPC 'scheduler:confirm-tool': answer a tool-risk 'confirm' item (app 'tool-risk') by tool + sha256 args digest. Approve resumes the asking job's same session with a single-use clearance; Deny parks it (confirmation_denied). Applied on the scheduler's next tick. */
+    confirmTool: (payload: { tool: string; argsDigest: string; approved: boolean }) => Promise<{ ok: true; item: NeedsYouItem } | { ok: false; error: string }>;
     /** Fires after any post/withdraw/answer — re-fetch list(). */
     onChanged: (handler: () => void) => () => void;
   };

@@ -91,6 +91,38 @@ export interface NeedsYouRow {
   link?: string | null
   /** 'outside-item' only — the answer choices; null = informational, no buttons. */
   options?: string[] | null
+  /** 'outside-item' from the tool-risk guard only — the refused call, answered via window.api.needsYou.confirmTool. */
+  confirm?: ToolConfirmation
+}
+
+/** A tool-risk 'confirm' request, read back from its Needs-you item. */
+export interface ToolConfirmation {
+  tool: string
+  /** Readable one-line args summary ('' when the guard recorded none). */
+  summary: string
+  /** sha256 hex digest of the call's arguments — the clearance key. */
+  argsDigest: string
+}
+
+/** needsYouStore.cjs CONFIRM_APP — the app tool-risk confirmation items are posted under. */
+export const TOOL_CONFIRM_APP = 'tool-risk'
+
+/**
+ * Reads tool, args summary and args digest out of a tool-risk confirmation
+ * item (needsYouStore.cjs postConfirmationRequest writes them into `why` as
+ * "… tried `<tool>[: <summary>]`, … Args digest: <hex>."). Null for any other
+ * item, or when the digest is missing — then no Approve / Deny is offered.
+ */
+export function parseToolConfirmation(item: Pick<OutsideItemLite, 'app' | 'why' | 'title'>): ToolConfirmation | null {
+  if (item.app !== TOOL_CONFIRM_APP) return null
+  const digest = /Args digest: ([0-9a-f]{64})\b/.exec(item.why)
+  if (!digest) return null
+  const tried = /tried `([^`]+)`/.exec(item.why)
+  const what = tried ? tried[1] : item.title.replace(/^Confirm /, '')
+  const sep = what.indexOf(': ')
+  const tool = (sep === -1 ? what : what.slice(0, sep)).trim()
+  if (!tool) return null
+  return { tool, summary: sep === -1 ? '' : what.slice(sep + 2).trim(), argsDigest: digest[1] }
 }
 
 /** Finds the recorded quarantine timestamp, if any — see ScheduleJobLite.statusHistory. */
@@ -215,6 +247,7 @@ export function buildNeedsYouRows(
     .filter((it) => it.status === 'open')
     .sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0))
   for (const it of open) {
+    const confirm = parseToolConfirmation(it)
     rows.push({
       id: `outside:${it.app}:${it.id}`,
       kind: 'outside-item',
@@ -228,6 +261,7 @@ export function buildNeedsYouRows(
       itemId: it.id,
       link: it.link,
       options: it.options,
+      ...(confirm ? { confirm } : {}),
     })
   }
 

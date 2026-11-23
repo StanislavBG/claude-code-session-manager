@@ -168,6 +168,8 @@ contextBridge.exposeInMainWorld('api', {
   needsYou: {
     list: () => ipcRenderer.invoke('needsYou:list'),
     answer: (payload) => ipcRenderer.invoke('needsYou:answer', payload),
+    // Tool-risk 'confirm' item: Approve / Deny by tool + args digest (needsYouIpc.cjs).
+    confirmTool: (payload) => ipcRenderer.invoke('scheduler:confirm-tool', payload),
     // Fired after any post/withdraw/answer so every subscriber re-fetches list().
     onChanged: (handler) => {
       const listener = () => handler();

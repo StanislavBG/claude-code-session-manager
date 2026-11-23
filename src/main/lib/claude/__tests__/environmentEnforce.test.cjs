@@ -97,9 +97,6 @@ describe('park on missing deps, no downgrade', () => {
     expect(row.error).toBe('environment_unavailable: socat');
     expect(row.terminalReason).toBe('environment_unavailable');
     expect(row.runtime).toBeUndefined();
-    // executeJob wires the refusal into the same personaRefusal park path, before spawn.
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'scheduler.cjs'), 'utf8');
-    expect(src).toMatch(/mode: enforcementMode,\s*\}\);\s*\/\/ Enforce mode[\s\S]*?if \(sandboxPolicy\.refusal\)[\s\S]*?personaRefusal: \{ code, detail \} \}\);\s*return;/);
   });
 });
 

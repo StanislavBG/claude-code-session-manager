@@ -908,6 +908,13 @@ const needsYouAnswer = z.object({
   id: z.string().min(1).max(200),
   answer: z.string().min(1).max(80),
 }).strict();
+// Tool-risk 'confirm' answer (needsYouIpc.cjs 'scheduler:confirm-tool'): the tool + sha256 args
+// digest name the Needs-you item; approved picks Approve / Deny (toolClearance.answerConfirmation).
+const schedulerConfirmTool = z.object({
+  tool: z.string().min(1).max(300),
+  argsDigest: z.string().regex(/^[0-9a-f]{64}$/, 'argsDigest must be a sha256 hex digest'),
+  approved: z.boolean(),
+}).strict();
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
@@ -1902,6 +1909,7 @@ module.exports = {
     projectVideosReviewRetry,
     needsYouList,
     needsYouAnswer,
+    schedulerConfirmTool,
     agentsGetPersonaBody,
     agentsResolveModelInfo,
     modelsCatalog,

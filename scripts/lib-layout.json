@@ -184,6 +184,7 @@
   "validationSentinels": "scheduler",
   "validatorVerdictSchema": "scheduler",
   "watchdogHelpers": "scheduler",
+  "webhookRegistry": "telemetry",
   "winSpawn": "process",
   "competitiveMatrix": "project-pages",
   "matrixHtml": "project-pages",

@@ -64,6 +64,8 @@ session-manager-operations/events/*
 !session-manager-operations/events/README.md
 session-manager-operations/agents/*
 !session-manager-operations/agents/README.md
+session-manager-operations/webhooks/*
+!session-manager-operations/webhooks/README.md
 
 # electron-builder staging + installer output (scripts/package/stage.cjs)
 release/

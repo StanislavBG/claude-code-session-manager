@@ -123,6 +123,15 @@ test("agents/ is owned by 'agents' (agentSnapshot.cjs) and is a runtime namespac
   assert.equal(checkOpsWrite(`${P}/agents/.gitignore`, 'runtime-ignore').ok, true);
 });
 
+test("webhooks/ is owned by 'webhooks' (webhookRegistry.cjs) and is a runtime namespace", () => {
+  const { RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+  assert.equal(OWNERS.webhooks, 'webhooks');
+  assert.ok(RUNTIME_NAMESPACES.includes('webhooks'));
+  assert.equal(checkOpsWrite(`${P}/webhooks/subscriptions.json`, 'webhooks').ok, true);
+  assert.equal(checkOpsWrite(`${P}/webhooks/subscriptions.json`, 'event-log').ok, false);
+  assert.equal(checkOpsWrite(`${P}/webhooks/.gitignore`, 'runtime-ignore').ok, true);
+});
+
 // The root .gitignore mirrors RUNTIME_NAMESPACES: each namespace's contents are
 // ignored with its README kept tracked (feedback/ is retired: whole dir ignored).
 test('root .gitignore mirrors every runtime namespace', () => {

@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-17 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+18 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
 - **Owned** (in `OWNERS`, app-owned state): each `OWNERS →` row below;
   `project-pages` covers the admin render route only (a Builder Epic's own
@@ -41,6 +41,7 @@ Epic lifecycle is specified exactly once, at
 | `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep | [link](scheduler/README.md) |
 | `tasks` | OWNERS → tasks | runtime Task ledger (headless `claude -p` runs) | `tasksDays`, opsRetentionSettings (default 30d) | [link](tasks/README.md) |
 | `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep | [link](ui-prefs/README.md) |
+| `webhooks` | OWNERS → webhooks | loopback-only webhook subscriptions `subscriptions.json` (0600, holds HMAC secrets); runtime, self-ignored | until removed | none |
 
 ## Who consumes this
 

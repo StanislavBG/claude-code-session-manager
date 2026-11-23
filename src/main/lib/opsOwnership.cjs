@@ -29,6 +29,7 @@
  *   - lib/telemetry/opsErrorLog.cjs   (raw fs append, JSONL error log)
  *   - lib/tasks/taskLedger.cjs        (raw fs append + atomicFs bodies)
  *   - lib/claude/agentSnapshot.cjs    (atomicFs, write-once snapshots)
+ *   - lib/telemetry/webhookRegistry.cjs (atomicFs, 0600 subscriptions file)
  * Renderer callers declare their writer id through the IPC payload.
  */
 
@@ -90,6 +91,10 @@ const OWNERS = Object.freeze({
   // written once each. lib/claude/agentSnapshot.cjs is the ONLY writer. Keep
   // forever. See session-manager-operations/AGENTS.md.
   'agents': 'agents',
+  // Local webhook subscriptions (loopback URL, kinds filter, HMAC secret):
+  // webhooks/subscriptions.json, mode 0600. lib/telemetry/webhookRegistry.cjs
+  // is the ONLY writer. Runtime (holds secrets — never committed).
+  'webhooks': 'webhooks',
 });
 
 /**
@@ -101,7 +106,7 @@ const OWNERS = Object.freeze({
  */
 const RUNTIME_NAMESPACES = Object.freeze([
   'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
-  'plan-records', 'events', 'agents',
+  'plan-records', 'events', 'agents', 'webhooks',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

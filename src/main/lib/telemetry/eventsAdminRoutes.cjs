@@ -24,14 +24,21 @@
  *   rows come from every registered project's epic.status_changed events
  *   (auditEvents.cjs), so deps.projectRoots also scopes them.
  *
- * Writes no file and no audit row. Auth/loopback binding are the injected
+ *   POST   /admin/webhooks  body { cwd, url, kinds } → 200 { ok: true, id, secret }
+ *   GET    /admin/webhooks?cwd=<abs>              → 200 { ok: true, subscriptions } (no secrets)
+ *   DELETE /admin/webhooks?cwd=<abs>&id=<wh_…>     → 200 { ok: true, removed: true }
+ *     Thin wrappers over webhookRegistry.cjs (the webhooks/ namespace's only
+ *     writer). A refused URL or invalid kinds → 400 { ok: false, error: <code>,
+ *     details }; an unknown id → 404; a bad cwd → 400 'invalid query'.
+ *
+ * The /admin/events routes write no file and no audit row. Auth/loopback binding are the injected
  * localAdminHttp.cjs transport's job (see index.cjs).
  */
 'use strict';
 
 const path = require('node:path');
 const { schemas } = require('../../ipcSchemas.cjs');
-const { sendJson } = require('../feedback-remote/localAdminHttp.cjs');
+const { sendJson, readBody } = require('../feedback-remote/localAdminHttp.cjs');
 const { readEventsAfter, INVALID_AUDIT_CURSOR } = require('./auditEvents.cjs');
 
 const EPIC_MAX_LIMIT = 500;
@@ -145,6 +152,85 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     const { events, next, more, gap } = result;
     sendJson(res, 200, { ok: true, events, next, more, gap });
+  });
+  registerWebhookRoutes(adminHttp);
+}
+
+/** @param {unknown} cwd */
+function validCwd(cwd) {
+  return typeof cwd === 'string' && cwd.length <= 4096 && path.isAbsolute(cwd);
+}
+
+/**
+ * Map a webhookRegistry error to an HTTP response; rethrows anything else.
+ * @param {any} res @param {unknown} e
+ */
+function sendWebhookError(res, e) {
+  const code = e instanceof Error ? /** @type {Error & { code?: unknown }} */ (e).code : undefined;
+  const details = e instanceof Error ? e.message : String(e);
+  if (code === 'webhook_url_refused' || code === 'webhook_kinds_invalid') {
+    sendJson(res, 400, { ok: false, error: code, details });
+    return;
+  }
+  if (code === 'webhook_not_found') {
+    sendJson(res, 404, { ok: false, error: code, details });
+    return;
+  }
+  if (e instanceof Error && /resolveProjectRoot|refusing to write/.test(e.message)) {
+    sendJson(res, 400, { ok: false, error: 'invalid query', details });
+    return;
+  }
+  throw e;
+}
+
+/** @param {{ registerRoute: Function }} adminHttp */
+function registerWebhookRoutes(adminHttp) {
+  const registry = require('./webhookRegistry.cjs');
+  adminHttp.registerRoute('POST', '/admin/webhooks', async (/** @type {any} */ req, /** @type {any} */ res) => {
+    let body;
+    try {
+      const raw = await readBody(req);
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body) || !validCwd(body.cwd)) {
+      sendJson(res, 400, { ok: false, error: 'invalid query', details: 'cwd must be an absolute path' });
+      return;
+    }
+    try {
+      const { id, secret } = await registry.addSubscription({ cwd: body.cwd, url: body.url, kinds: body.kinds });
+      sendJson(res, 200, { ok: true, id, secret });
+    } catch (e) {
+      sendWebhookError(res, e);
+    }
+  });
+  adminHttp.registerRoute('GET', '/admin/webhooks', async (/** @type {any} */ _req, /** @type {any} */ res, /** @type {URLSearchParams} */ query) => {
+    const cwd = query?.get('cwd');
+    if (!validCwd(cwd)) {
+      sendJson(res, 400, { ok: false, error: 'invalid query', details: 'cwd must be an absolute path' });
+      return;
+    }
+    try {
+      const subscriptions = await registry.listSubscriptions({ cwd: /** @type {string} */ (cwd) });
+      sendJson(res, 200, { ok: true, subscriptions });
+    } catch (e) {
+      sendWebhookError(res, e);
+    }
+  });
+  adminHttp.registerRoute('DELETE', '/admin/webhooks', async (/** @type {any} */ _req, /** @type {any} */ res, /** @type {URLSearchParams} */ query) => {
+    const cwd = query?.get('cwd');
+    if (!validCwd(cwd)) {
+      sendJson(res, 400, { ok: false, error: 'invalid query', details: 'cwd must be an absolute path' });
+      return;
+    }
+    try {
+      const out = await registry.removeSubscription({ cwd: /** @type {string} */ (cwd), id: query.get('id') });
+      sendJson(res, 200, { ok: true, ...out });
+    } catch (e) {
+      sendWebhookError(res, e);
+    }
   });
 }
 

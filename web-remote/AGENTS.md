@@ -1,0 +1,30 @@
+# web-remote/ — scoped context
+
+Part of the **WEB PRESENCE** partition — see
+[`project-partition.md`](../session-manager-operations/architecture/project-partition.md).
+
+## What's here
+
+- The phone-remote PWA (**LIVE SOURCE** of the bundle published to
+  `bilko.run/projects/session-manager/`) moved to [`web/remote-app/`](../web/remote-app/) —
+  it is still part of the WEB PRESENCE partition, just no longer nested under this directory.
+- `relay/` — **DEAD.** Superseded by a diverged port at `~/Projects/Bilko/server/sm-relay/router.ts`,
+  whose own file header literally says `Ported from session-manager web-remote/relay/src/router.ts`.
+  Changes here do not reach production. Do not delete it in the course of unrelated work — that's a
+  separate decision the human hasn't made yet.
+  It still carries an installed `node_modules/` and a `render.yaml` that reads as a live deploy but
+  is historical — do not redeploy it against the live bilko.run relay that root `AGENTS.md`
+  protects. `relay/dist/` was removed as stale output (2026-09).
+
+## What must NOT be assumed
+
+- Do **not** assume editing `web/remote-app/` requires a separate deploy step you need to
+  trigger — check how `~/Projects/Bilko` currently pulls/builds this bundle before assuming
+  it's automatic or manual.
+- Do **not** edit `relay/` expecting it to affect the live relay. The live relay is
+  `~/Projects/Bilko/server/sm-relay/router.ts`, a different, diverged file.
+- Do **not** decommission, delete, or route around **the bilko.run relay itself** (the deployed
+  service, not this dead folder) — root `AGENTS.md`'s relay law covers it; nothing in this
+  folder affects it.
+- Do not assume `~/Projects/Bilko` is in scope for changes made while working in this repo — it's
+  a separate repo; cross-project work goes through `/send-feedback`.

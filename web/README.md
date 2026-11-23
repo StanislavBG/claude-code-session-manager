@@ -14,7 +14,7 @@ repo. This directory only holds the tooling that *produces* what Bilko serves:
   STATE, unmoved); output lands in `~/Projects/Bilko/data/manual/releases/`.
 - `remote-app/` — the phone-remote PWA, the live source of the bundle published at
   `bilko.run/projects/session-manager/`. A **separate npm project** with its own install/test/build
-  that root test runners ignore; see [`remote-app/CLAUDE.md`](remote-app/CLAUDE.md).
+  that root test runners ignore; see [`remote-app/AGENTS.md`](remote-app/AGENTS.md).
 
 `web/manual/build.mjs` and `web/manual/capture-figures.mjs` are the only manual builders.
 

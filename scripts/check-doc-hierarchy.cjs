@@ -15,8 +15,9 @@
 //     CLAUDE.md / AGENTS.md (tree-DAG), except files under EXEMPT_PREFIXES.
 //
 // The MAP is root AGENTS.md when it exists (so Codex and other CLIs read the
-// same file), else root CLAUDE.md. A listed CLAUDE.md junction is also met by
-// an AGENTS.md in the same folder.
+// same file), else root CLAUDE.md. A listed junction of the CLAUDE.md /
+// AGENTS.md pair is met by either file in that folder (a folder not yet migrated
+// keeps only its CLAUDE.md).
 //
 // Root dir: first CLI argument or SM_DOC_ROOT (tests point it at a scratch
 // tree); defaults to the repo. Complexity: O(files x links), all small.
@@ -51,17 +52,17 @@ const EXEMPT_PREFIXES = [
 ]
 
 const JUNCTIONS = [
-  'CLAUDE.md',
+  'AGENTS.md',
   'README.md',
-  'src/CLAUDE.md',
-  'src/renderer/CLAUDE.md',
+  'src/AGENTS.md',
+  'src/renderer/AGENTS.md',
   'scripts/README.md',
   'tests/README.md',
   'web/README.md',
-  'web/remote-app/CLAUDE.md',
-  'web-remote/CLAUDE.md',
-  'plugins/CLAUDE.md',
-  `${OPS}/CLAUDE.md`,
+  'web/remote-app/AGENTS.md',
+  'web-remote/AGENTS.md',
+  'plugins/AGENTS.md',
+  `${OPS}/AGENTS.md`,
   `${OPS}/architecture/README.md`,
 ]
 
@@ -102,9 +103,11 @@ function mapFile() {
   return exists('AGENTS.md') ? 'AGENTS.md' : 'CLAUDE.md'
 }
 
-/** A listed CLAUDE.md junction's sibling AGENTS.md, else null. */
-function agentsSibling(f) {
-  return path.posix.basename(f) === 'CLAUDE.md' ? path.posix.join(path.posix.dirname(f), 'AGENTS.md') : null
+/** The other file of a folder's CLAUDE.md / AGENTS.md pair, else null. */
+function pairSibling(f) {
+  const base = path.posix.basename(f)
+  const other = base === 'CLAUDE.md' ? 'AGENTS.md' : base === 'AGENTS.md' ? 'CLAUDE.md' : null
+  return other ? path.posix.join(path.posix.dirname(f), other) : null
 }
 
 // (1) manifest
@@ -112,7 +115,7 @@ const manifest = [...JUNCTIONS]
 for (const ns of listDirs(path.join(ROOT, OPS)).sort()) manifest.push(`${OPS}/${ns}/README.md`)
 for (const f of manifest) {
   if (exists(f)) continue
-  const sib = agentsSibling(f)
+  const sib = pairSibling(f)
   if (sib && exists(sib)) continue
   fail(`missing junction: ${f}`)
 }
@@ -138,7 +141,7 @@ for (const dir of findMapFolders(ROOT, []).sort()) {
 // (3)+(4) links
 const linted = new Set(manifest.filter((f) => exists(f)))
 for (const f of manifest) {
-  const sib = agentsSibling(f)
+  const sib = pairSibling(f)
   if (sib && exists(sib)) linted.add(sib)
 }
 const archDir = path.join(ROOT, OPS, 'architecture')
@@ -218,8 +221,9 @@ if (roots.length) {
   const queue = [...roots]
   while (queue.length) {
     const f = queue.shift()
-    // A reached CLAUDE.md imports its sibling AGENTS.md (@AGENTS.md stub rule, check 2).
-    const sib = agentsSibling(f)
+    // A reached pair file reaches its sibling: CLAUDE.md imports AGENTS.md (@AGENTS.md
+    // stub rule, check 2), and a linked AGENTS.md is loaded through its CLAUDE.md stub.
+    const sib = pairSibling(f)
     if (sib && exists(sib) && !reached.has(sib)) { reached.add(sib); queue.push(sib) }
     const abs = path.join(ROOT, f)
     for (const link of linksOf({ path: f, text: fs.readFileSync(abs, 'utf8') })) {

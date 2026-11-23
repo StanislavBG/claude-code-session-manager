@@ -1,6 +1,6 @@
 # web/remote-app/ — relay + E2E rules
 
-Linked from [`CLAUDE.md`](CLAUDE.md). Read before touching the relay path or remote commands.
+Linked from [`AGENTS.md`](AGENTS.md). Read before touching the relay path or remote commands.
 
 - Desktop `src/main/webRemote.cjs` is outbound-only (dials the relay, never listens). New commands keep the
   READ/MUTATE tiering (`MUTATE_COMMANDS` gated by default-off `remoteControlEnabled`) and the pair-time pubkey pin.

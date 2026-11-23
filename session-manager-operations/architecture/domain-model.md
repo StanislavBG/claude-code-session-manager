@@ -14,7 +14,7 @@ under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
   project are Epics.
 - **`<TAB cwd>/session-manager-operations/`** is the per-project operations root, created when a tab first
   opens on that cwd. The app owns its contents; the namespace enumeration is in
-  [`../CLAUDE.md`](../CLAUDE.md).
+  [`../AGENTS.md`](../AGENTS.md).
 - **EPIC = one small unit of work within the Main Project**, implemented as `PromptSession`
   (`state/promptSessions.ts`). It carries an optional `agentType`, an optional `tag` and its `goalText`. The tag also sets how
   eagerly `/develop` fires inside the Epic's session (the `session-manager-dev:develop` skill's "Tag-aware
@@ -362,7 +362,7 @@ under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
 
 Each `session-manager-operations/<namespace>/` is written by one owner alone and read by everyone else,
 enforced fail-closed in `src/main/lib/opsOwnership.cjs`: an undeclared writer, or a namespace with no owner,
-throws. The `OWNERS` map in that file and [`../CLAUDE.md`](../CLAUDE.md) are the only enumerations of
+throws. The `OWNERS` map in that file and [`../AGENTS.md`](../AGENTS.md) are the only enumerations of
 namespaces, owners, and retention; adding a namespace or writer is a deliberate edit to that file, with each
 owned namespace's README documenting its on-disk shape.
 Build every ops path only via its `opsPath()` / `resolveOpsRoot()` — never by string concatenation or a

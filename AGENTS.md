@@ -12,15 +12,15 @@ before changing anything in that area.** Every reference doc is in the [architec
 > one — rewrite at the same length, move the "why" to the doc. (Hit 65,768 chars by 2026-08-24;
 > 0 of 359 PRDs pruned it. This paragraph is the only reaper.)
 
-## Scoped MDs — auto-load when you edit there; read first
+## Scoped MDs — Claude Code auto-loads each AGENTS.md via its CLAUDE.md stub; other agents read them first
 
 | Path | Scope |
 | --- | --- |
-| [`src/CLAUDE.md`](src/CLAUDE.md) (+ `main/lib`, `main/scheduler`), [`src/renderer/CLAUDE.md`](src/renderer/CLAUDE.md) | main/preload, renderer |
+| [`src/AGENTS.md`](src/AGENTS.md) (+ `main/lib`, `main/scheduler`), [`src/renderer/AGENTS.md`](src/renderer/AGENTS.md) | main/preload, renderer |
 | [`scripts/README.md`](scripts/README.md), [`tests/README.md`](tests/README.md) | scripts, tests |
-| [`web/README.md`](web/README.md), [`web/remote-app/CLAUDE.md`](web/remote-app/CLAUDE.md), [`web-remote/CLAUDE.md`](web-remote/CLAUDE.md) | web presence, remote app, relay |
-| [`plugins/CLAUDE.md`](plugins/CLAUDE.md) | plugins |
-| [`session-manager-operations/CLAUDE.md`](session-manager-operations/CLAUDE.md), [`architecture/README.md`](session-manager-operations/architecture/README.md) | ops root, architecture |
+| [`web/README.md`](web/README.md), [`web/remote-app/AGENTS.md`](web/remote-app/AGENTS.md), [`web-remote/AGENTS.md`](web-remote/AGENTS.md) | web presence, remote app, relay |
+| [`plugins/AGENTS.md`](plugins/AGENTS.md) | plugins |
+| [`session-manager-operations/AGENTS.md`](session-manager-operations/AGENTS.md), [`architecture/README.md`](session-manager-operations/architecture/README.md) | ops root, architecture |
 
 ## Stack
 
@@ -81,7 +81,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   `session-manager-operations/<namespace>/` has exactly ONE owning writer; everyone else reads. Fail-closed —
   an undeclared writer throws. New namespace/writer = deliberate edit there. Build ops
   paths only via its `opsPath()`. Enumeration, owners, retention:
-  [session-manager-operations/CLAUDE.md](session-manager-operations/CLAUDE.md).
+  [session-manager-operations/AGENTS.md](session-manager-operations/AGENTS.md).
 - **Open-core: the APP and the Field Manual are both free, and stay free.** No license check,
   entitlement gate, trial limit, nag, "pro" tier, or paywalled feature/chapter.
 - **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. Never

@@ -35,7 +35,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `.claude-plugin/` | AGENT LAYER | Marketplace manifest for the `session-manager-dev` plugin. |
 | `.mcp.json` | AGENT LAYER | Empty today. The scheduler MCP server (`scripts/scheduler-mcp-server.cjs`) is registered at user scope in `~/.claude.json` (installed by `scripts/install-scheduler-mcp-user-scope.sh`), not here. |
 | `web/` | WEB PRESENCE | Physical home of the partition's producers (`project-pages/`, `manual/`, `remote-app/`) — see [`web/README.md`](../../web/README.md). |
-| `web-remote/` | WEB PRESENCE | app/ moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
+| `web-remote/` | WEB PRESENCE | app/ moved to `web/remote-app/` (PRD 1184). See [web-remote/AGENTS.md](../../web-remote/AGENTS.md) — only `relay/` (dead) remains here. |
 | `bilko.listing.json` | WEB PRESENCE | bilko.run card listing (full `listing` object, incl. `shareImage` → `web/remote-app/public/og.png`); synced into the Bilko registry on every `publish_static_project`. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
 | `README.md` | DESKTOP HARNESS | Also shipped in the npm `files` array as the agent-first npm landing page; its generated regions and reading level are checked by `npm run lint:readme`. |
@@ -98,7 +98,7 @@ All 13 namespaces (`architecture`, `design-mocks`, `feedback` [retired],
 `HUMAN_LEARN`, `logs`, `manual`, `memory-clusters`, `project-brief`, `project-pages`,
 `prompt-sessions`, `reviews`, `scheduler`, `ui-prefs`) are **OPERATIONS STATE** — that partition
 *is* `session-manager-operations/`. Which
-of them has an app-owned single writer vs. is skill-authored is [CLAUDE.md](../../CLAUDE.md)'s
+of them has an app-owned single writer vs. is skill-authored is [AGENTS.md](../../AGENTS.md)'s
 `OWNERS` enumeration under Domain model — not restated here.
 
 **Ambiguous case, resolved:** `manual/` is operations state (a skill-authored artifact folder,

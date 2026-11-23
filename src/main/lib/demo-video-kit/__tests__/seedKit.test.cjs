@@ -30,7 +30,7 @@ test('fresh install copies all kit files and the stamp', async () => {
   const { srcDir, destDir } = setup();
   const r = await seedDemoVideoKit({ logger: quiet, srcDir, destDir, kitVersion: '1' });
   expect(r).toEqual({ seeded: true, reason: 'fresh' });
-  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs']);
+  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs']);
   for (const f of KIT_FILES) expect(fs.readFileSync(path.join(destDir, f), 'utf8')).toBe(`// ${f} v1\n`);
   expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe('1');
 });
@@ -79,8 +79,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 4 (TikTok checks must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('4');
+test('KIT_VERSION is bumped to 5 (export.cjs must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('5');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {
@@ -104,7 +104,7 @@ test('kitDigest is sha256 over sorted relative path + NUL + bytes, and changes w
   expect(kitDigest(srcDir)).not.toBe(expected);
 });
 
-test('a stamp-2 install with a stale checks.cjs is refreshed to the real source and stamped 4', async () => {
+test('a stamp-2 install with a stale checks.cjs is refreshed to the real source and stamped 5', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-v2-'));
   tmp.push(root);
   const destDir = path.join(root, 'kit');

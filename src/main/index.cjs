@@ -1631,7 +1631,13 @@ app.whenReady().then(async () => {
     scheduler.init().catch((e) => {
       logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
     });
-    adminHttp.start().catch((e) => {
+    adminHttp.start().then(() => {
+      // Weekly memory keep/move/drop Task per project with 'Scripts may run Tasks' on (lib/tasks/memoryConsolidation.cjs).
+      require('./lib/tasks/memoryConsolidation.cjs').startConsolidationTimer({
+        adminHttp,
+        log: (message, meta) => logs.writeLine({ scope: 'memory-consolidation', level: 'info', message, meta }),
+      });
+    }).catch((e) => {
       logs.writeLine({ scope: 'admin-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
     });
   } else {

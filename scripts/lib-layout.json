@@ -15,6 +15,7 @@
   "taskRun": "tasks",
   "taskIpc": "tasks",
   "taskAdminRoutes": "tasks",
+  "memoryConsolidation": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

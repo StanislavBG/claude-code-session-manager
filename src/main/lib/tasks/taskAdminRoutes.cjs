@@ -6,7 +6,9 @@
  *     cap, recorded in that project's Task ledger. Order:
  *       1. strict body schema (400 invalid_request), sessionId+resume /
  *          resume+persistSession:false / missing mcpConfig file (400);
- *       2. the human switch 'Scripts may run Tasks' (403 tasks_disabled);
+ *       2. the held interactive slot is re-synced from the switch file
+ *          (taskSwitch.syncInteractiveReserve; a throw is ignored), then the
+ *          human switch 'Scripts may run Tasks' (403 tasks_disabled);
  *       3. persona → model + effort with the SPAWN-time resolvers
  *          (agentModelResolve.cjs / agentEffortResolve.cjs — never
  *          FALLBACK_MODEL, never effectiveModelInfo.cjs): 404 unknown_agent,
@@ -31,7 +33,8 @@
  *     (and the truncation flags) from the body file; 404 unknown_task.
  *   POST /admin/tasks/import  (body ≤ 8 MiB)
  *     { cwd, records: 1-100 } — direct `claude -p` calls a caller made while
- *     Session Manager was down. 403 tasks_disabled when the switch is off.
+ *     Session Manager was down. Re-syncs the held interactive slot from the
+ *     switch file, then 403 tasks_disabled when the switch is off.
  *     Each record is validated on its own and recorded with
  *     taskLedger.appendImported (source 'direct'); a known (cwd, importId) is
  *     skipped. costUsd is recomputed with costOfUsage when usage is present
@@ -241,7 +244,8 @@ function costFor(model, run, costOfUsage) {
  * @param {{ registerRoute: Function }} adminHttp
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
  *   buildTaskArgs?: Function, buildTaskEnv?: Function, ledger?: any, costOfUsage?: Function,
- *   now?: () => number, randomUUID?: () => string, resolveProjectRoot?: Function }} [deps]
+ *   now?: () => number, randomUUID?: () => string, resolveProjectRoot?: Function,
+ *   syncInteractiveReserve?: () => any }} [deps]
  */
 function registerAdminRoute(adminHttp, deps = {}) {
   // Lazy defaults: agentLibrary / slots / spawn pull in heavy modules.
@@ -257,6 +261,13 @@ function registerAdminRoute(adminHttp, deps = {}) {
   const now = deps.now || Date.now;
   const newId = deps.randomUUID || (() => crypto.randomUUID());
   const projectRoot = deps.resolveProjectRoot || resolveProjectRoot;
+  // The switch file can change outside the renderer IPC (e.g. a direct module
+  // call); re-sync the held interactive slot from it on every switch check.
+  // setInteractiveReserve is a no-op when unchanged, so this is cheap.
+  const syncReserve = deps.syncInteractiveReserve || (() => require('./taskSwitch.cjs').syncInteractiveReserve());
+  const safeSync = () => {
+    try { syncReserve(); } catch { /* a failed sync never changes the response */ }
+  };
 
   /** sessionId → taskId for every Task currently between its start line and its end line. */
   const busySessions = new Map();
@@ -319,6 +330,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       }
     }
 
+    safeSync();
     if (!taskSwitch().isTaskSwitchOn(cwd)) {
       reply(403, { ok: false, error: 'tasks_disabled', hint: SWITCH_HINT });
       return;
@@ -569,6 +581,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       sendJson(res, 400, { ok: false, error: 'invalid_request', details: e instanceof Error ? e.message : String(e) });
       return;
     }
+    safeSync();
     if (!taskSwitch().isTaskSwitchOn(cwd)) {
       sendJson(res, 403, { ok: false, error: 'tasks_disabled', hint: SWITCH_HINT });
       return;

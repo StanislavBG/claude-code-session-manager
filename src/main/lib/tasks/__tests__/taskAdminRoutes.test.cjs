@@ -52,10 +52,11 @@ function okRun(over = {}) {
 }
 
 function setup(over = {}) {
-  const calls = { starts: [], ends: [], waits: [], runs: [], args: [], released: [], stamped: [] };
+  const calls = { order: [], starts: [], ends: [], waits: [], runs: [], args: [], released: [], stamped: [] };
   const deps = {
     resolveProjectRoot: (c) => c,
-    taskSwitch: { isTaskSwitchOn: () => true },
+    syncInteractiveReserve: () => { calls.order.push('sync'); return false; },
+    taskSwitch: { isTaskSwitchOn: () => { calls.order.push('switch'); return true; } },
     resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'claude-haiku-4-5', personaEffort: 'low' }),
     sessionSlots: {
       waitForSlot: async (owner, opts) => { calls.waits.push({ owner, ...opts }); return 'tok'; },
@@ -73,13 +74,18 @@ function setup(over = {}) {
     randomUUID: () => 'task-1',
     ...over,
   };
-  let handler;
-  registerAdminRoute({ registerRoute: (m, u, h) => { if (`${m} ${u}` === 'POST /admin/tasks') handler = h; } }, deps);
+  const handlers = new Map();
+  registerAdminRoute({ registerRoute: (m, u, h) => { handlers.set(`${m} ${u}`, h); } }, deps);
+  const handler = handlers.get('POST /admin/tasks');
   const call = async (body, { res = fakeRes(), req = fakeReq(body) } = {}) => {
     await handler(req, res);
     return res;
   };
-  return { calls, call, deps };
+  const callImport = async (body, { res = fakeRes(), req = fakeReq(body) } = {}) => {
+    await handlers.get('POST /admin/tasks/import')(req, res);
+    return res;
+  };
+  return { calls, call, callImport, deps };
 }
 
 const base = (over = {}) => ({ cwd: PROJ, agent: 'dev-lead', missionId: 'm-1', prompt: 'hello', ...over });
@@ -282,5 +288,90 @@ describe('POST /admin/tasks', () => {
     await p;
     expect(s.calls.runs).toHaveLength(0);
     expect(s.calls.ends[0].status).toBe('caller_gone');
+  });
+});
+
+describe('held interactive slot re-sync from the switch file', () => {
+  test('POST /admin/tasks syncs once, before the switch check', async () => {
+    const s = setup();
+    const res = await s.call(base());
+    expect(res.status).toBe(200);
+    expect(s.calls.order).toEqual(['sync', 'switch']);
+  });
+
+  test('syncs before a 403 tasks_disabled too', async () => {
+    const order = [];
+    const s = setup({
+      syncInteractiveReserve: () => { order.push('sync'); return false; },
+      taskSwitch: { isTaskSwitchOn: () => { order.push('switch'); return false; } },
+    });
+    const res = await s.call(base());
+    expect(res.status).toBe(403);
+    expect(order).toEqual(['sync', 'switch']);
+  });
+
+  test('a 400 body never reaches the sync', async () => {
+    const s = setup();
+    const res = await s.call(base({ prompt: '' }));
+    expect(res.status).toBe(400);
+    expect(s.calls.order).toEqual([]);
+  });
+
+  test('a throwing sync still yields the normal response', async () => {
+    const s = setup({ syncInteractiveReserve: () => { throw new Error('boom'); } });
+    const res = await s.call(base());
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const s2 = setup({
+      syncInteractiveReserve: () => { throw new Error('boom'); },
+      taskSwitch: { isTaskSwitchOn: () => false },
+    });
+    const res2 = await s2.call(base());
+    expect(res2.status).toBe(403);
+    expect(res2.body.error).toBe('tasks_disabled');
+  });
+
+  test('POST /admin/tasks/import syncs once before the switch check, also before a 403', async () => {
+    const order = [];
+    const s = setup({
+      syncInteractiveReserve: () => { order.push('sync'); return false; },
+      taskSwitch: { isTaskSwitchOn: () => { order.push('switch'); return false; } },
+    });
+    const res = await s.callImport({ cwd: PROJ, records: [] });
+    // records: [] fails the schema (1-100) → never reaches the sync
+    expect(res.status).toBe(400);
+    expect(order).toEqual([]);
+    const res2 = await s.callImport({ cwd: PROJ, records: [{}] });
+    if (res2.status === 400) throw new Error('import body unexpectedly invalid: ' + JSON.stringify(res2.body));
+    expect(res2.status).toBe(403);
+    expect(order).toEqual(['sync', 'switch']);
+  });
+
+  test('import: a throwing sync still yields the normal 403', async () => {
+    const s = setup({
+      syncInteractiveReserve: () => { throw new Error('boom'); },
+      taskSwitch: { isTaskSwitchOn: () => false },
+    });
+    const res = await s.callImport({ cwd: PROJ, records: [{}] });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('tasks_disabled');
+  });
+
+  test('real sync: switch file on → reserve on after one POST; file off → reserve off even on a 403', async () => {
+    const slots = require('../../scheduler/sessionSlots.cjs');
+    slots.__resetForTests();
+    let fileOn = true;
+    const fakeSwitch = { isTaskSwitchOn: () => fileOn, anyTaskSwitchOn: () => fileOn };
+    // Same body as taskSwitch.syncInteractiveReserve, over a fake switch store.
+    const sync = () => slots.setInteractiveReserve(fakeSwitch.anyTaskSwitchOn()) === true;
+    const s = setup({ taskSwitch: fakeSwitch, syncInteractiveReserve: sync });
+    expect(slots.snapshot().reserve).toBe(0);
+    expect((await s.call(base())).status).toBe(200);
+    expect(slots.snapshot().reserve).toBe(1);
+    fileOn = false;
+    const res = await s.call(base());
+    expect(res.status).toBe(403);
+    expect(slots.snapshot().reserve).toBe(0);
+    slots.__resetForTests();
   });
 });

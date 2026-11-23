@@ -147,3 +147,17 @@ test('expireDead: a mid-launch reservation (claimed after the pass began) surviv
   assert.deepEqual(out, []);
   assert.equal(slots.inUse(), 1);
 });
+
+test('setInteractiveReserve is a no-op (no listener call) when the value does not change', () => {
+  let notified = 0;
+  const unsub = slots.subscribe(() => { notified += 1; });
+  assert.equal(slots.setInteractiveReserve(false), false);
+  assert.equal(notified, 0, 'unchanged off → no notify');
+  assert.equal(slots.setInteractiveReserve(true), true);
+  assert.equal(notified, 1, 'real change notifies');
+  assert.equal(slots.setInteractiveReserve(1), true);
+  assert.equal(notified, 1, 'unchanged on (truthy) → no notify');
+  assert.equal(slots.setInteractiveReserve(false), false);
+  assert.equal(notified, 2, 'turning off notifies');
+  unsub();
+});

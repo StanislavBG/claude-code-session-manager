@@ -167,8 +167,12 @@ function notify() {
   }
 }
 
-/** Turn the held interactive slot on/off (default off). Grants any waiter it unblocks. */
+/**
+ * Turn the held interactive slot on/off (default off). Grants any waiter it unblocks.
+ * An unchanged value is a no-op (no grants, no listener calls), so callers may re-sync per request.
+ */
 function setInteractiveReserve(on) {
+  if (!!on === reserveOn) return reserveOn;
   reserveOn = !!on;
   notify();
   return reserveOn;

@@ -18,7 +18,13 @@
  * - recordCollectionDocs(census) — every doc inside a record collection, linked
  *   or not, except the root and README/CLAUDE/AGENTS/index docs.
  *
- * Roles, by precedence: map (the root + its transitive imports, depth <= 5)
+ * - rootMapDoc(has) — the root map doc: AGENTS.md when `has('AGENTS.md')`, else
+ *   CLAUDE.md. Beside a root AGENTS.md, a root CLAUDE.md (the stub that imports
+ *   it) is part of the map too.
+ *
+ * Roles, by precedence: map (the root map doc — root AGENTS.md, else root
+ * CLAUDE.md — plus a root CLAUDE.md beside an AGENTS.md root, and their
+ * transitive imports, depth <= 5)
  * > scoped (any other CLAUDE.md / AGENTS.md / CLAUDE.local.md) > agent
  * (.claude/, skills/<x>/, plugins/<x>/agents|commands/) > record (in a record
  * collection, unreachable, not a README/CLAUDE/AGENTS/index) > doc.
@@ -29,7 +35,8 @@
 // importsOf is the shared link convention's; re-exported so consumers keep requiring it from here.
 const { importsOf } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 
-const ROOT_DOC = 'CLAUDE.md';
+const AGENTS_DOC = 'AGENTS.md';
+const CLAUDE_DOC = 'CLAUDE.md';
 const MAX_IMPORT_DEPTH = 5;
 const COLLECTION_MIN_DOCS = 20;
 const COLLECTION_MAX_LINKED_SHARE = 0.05;
@@ -44,6 +51,24 @@ const SCOPED_NAMES = new Set(['CLAUDE.md', 'AGENTS.md', 'CLAUDE.local.md']);
 const NEVER_RECORD_NAMES = new Set(['README.md', 'CLAUDE.md', 'AGENTS.md', 'index.md']);
 
 /**
+ * The root map doc: root AGENTS.md when it exists, else root CLAUDE.md.
+ * @param {(relPath: string) => boolean} has whether a repo-relative doc exists
+ * @returns {string}
+ */
+function rootMapDoc(has) {
+  return has(AGENTS_DOC) ? AGENTS_DOC : CLAUDE_DOC;
+}
+
+/**
+ * The root docs of the map: `root`, plus a root CLAUDE.md beside an AGENTS.md root.
+ * @param {string} root @param {(relPath: string) => boolean} has @returns {string[]}
+ */
+function mapRoots(root, has) {
+  if (!has(root)) return [];
+  return root === AGENTS_DOC && has(CLAUDE_DOC) ? [root, CLAUDE_DOC] : [root];
+}
+
+/**
  * @typedef {'map' | 'scoped' | 'agent' | 'record' | 'doc'} MdDocRole
  * @typedef {{ path: string, ms: number }} MdChangedSince
  * @typedef {{ path: string, role: MdDocRole, depth: number | null, lines: number | null, bytes: number | null, lastCommitMs: number | null, commits: number, linkedFrom: number, codeRefs: number, codeRefFiles: string[], deadRefs: string[], ambiguousRefs: string[], changedSince: MdChangedSince[], collection: string | null }} MdDoc
@@ -54,7 +79,7 @@ const NEVER_RECORD_NAMES = new Set(['README.md', 'CLAUDE.md', 'AGENTS.md', 'inde
  * @typedef {{ ms: number, files: string[] }} GitLogEntry
  * @typedef {{ deadRefs: string[], ambiguousRefs: string[], changedSince: MdChangedSince[] }} MdDocRefs
  * @typedef {object} CensusInput
- * @property {string} [root] the root doc (default CLAUDE.md)
+ * @property {string} [root] the root map doc (default: rootMapDoc over `docs`)
  * @property {MdCensusDocInput[]} docs every tracked .md, repo-relative POSIX
  * @property {Map<string, { depth: number, linkedFrom: number }>} reachable docs links reach from the root
  * @property {GitLogEntry[]} [log] newest first
@@ -133,7 +158,7 @@ function changedSinceList(list) {
  */
 function censusMdDocs(input) {
   const {
-    root = ROOT_DOC,
+    root: rootInput,
     docs = [],
     reachable = new Map(),
     log = [],
@@ -186,10 +211,14 @@ function censusMdDocs(input) {
   // Map: root + transitive @-imports.
   /** @type {Map<string, string | null | undefined>} */
   const textOf = new Map(list.map((d) => [d.path, d.text]));
+  /** @param {string} p */
+  const hasDoc = (p) => textOf.has(p);
+  const root = rootInput === undefined ? rootMapDoc(hasDoc) : rootInput;
   const mapSet = new Set();
-  if (typeof root === 'string' && textOf.has(root)) {
-    mapSet.add(root);
-    let frontier = [root];
+  const roots = typeof root === 'string' ? mapRoots(root, hasDoc) : [];
+  if (roots.length > 0) {
+    for (const r of roots) mapSet.add(r);
+    let frontier = roots;
     for (let depth = 1; depth <= MAX_IMPORT_DEPTH && frontier.length > 0; depth += 1) {
       /** @type {string[]} */
       const next = [];
@@ -313,4 +342,4 @@ function recordCollectionDocs(census) {
     .map((d) => d.path);
 }
 
-module.exports = { censusMdDocs, parseGitLog, importsOf, recordCollectionDocs };
+module.exports = { censusMdDocs, parseGitLog, importsOf, recordCollectionDocs, rootMapDoc, mapRoots };

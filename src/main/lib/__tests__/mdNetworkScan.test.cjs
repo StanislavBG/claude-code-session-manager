@@ -263,6 +263,46 @@ describe('buildMdNetwork', () => {
     ]);
   });
 
+  it('makes a root AGENTS.md the hub, reaching a root CLAUDE.md stub from it; without AGENTS.md CLAUDE.md stays the hub', () => {
+    const files = [
+      doc('AGENTS.md', '# Map', '- [guide](docs/guide.md)'),
+      doc('CLAUDE.md', '@AGENTS.md', '- [claude notes](docs/claude.md)'),
+      doc('docs/guide.md', 'leaf'),
+      doc('docs/claude.md', 'leaf'),
+    ];
+    const r = buildMdNetwork({ files });
+    expect(r.ok).toBe(true);
+    expect(r.root).toBe('AGENTS.md');
+    expect(r.nodes.map((n) => [n.id, n.depth, n.type])).toEqual([
+      ['AGENTS.md', 0, 'hub'],
+      ['CLAUDE.md', 1, 'owner'],
+      ['docs/guide.md', 1, 'doc'],
+      ['docs/claude.md', 2, 'doc'],
+    ]);
+    expect(r.edges).toEqual([
+      { from: 'AGENTS.md', to: 'CLAUDE.md' },
+      { from: 'AGENTS.md', to: 'docs/guide.md' },
+      { from: 'CLAUDE.md', to: 'docs/claude.md' },
+      { from: 'CLAUDE.md', to: 'AGENTS.md' },
+    ]);
+    expect(r.findings).toEqual([]);
+    const linkedBack = buildMdNetwork({ files: [doc('AGENTS.md', '[stub](CLAUDE.md)'), doc('CLAUDE.md', '@AGENTS.md')] });
+    expect(linkedBack.edges).toEqual([
+      { from: 'AGENTS.md', to: 'CLAUDE.md' },
+      { from: 'CLAUDE.md', to: 'AGENTS.md' },
+    ]);
+    expect(linkedBack.nodes.map((n) => [n.id, n.linksOut, n.linkedFrom])).toEqual([
+      ['AGENTS.md', 1, 1],
+      ['CLAUDE.md', 1, 1],
+    ]);
+    const claudeOnly = buildMdNetwork({ files: [doc('CLAUDE.md', '[guide](docs/guide.md)'), doc('docs/guide.md', 'leaf')] });
+    expect(claudeOnly.root).toBe('CLAUDE.md');
+    expect(claudeOnly.nodes.map((n) => [n.id, n.type])).toEqual([
+      ['CLAUDE.md', 'hub'],
+      ['docs/guide.md', 'doc'],
+    ]);
+  });
+
   it('returns { ok: false, error } for a missing root or bad input', () => {
     expect(buildMdNetwork({ files: [doc('README.md', '')] })).toEqual({ ok: false, error: 'no CLAUDE.md at the project root' });
     const bad = buildMdNetwork({ files: null });
@@ -653,6 +693,29 @@ describe('scanMdNetwork on a scratch git repo (real git and fs)', () => {
       ['notes/orphan.md', null],
     ]);
     expect(r.census.warnings).toEqual([expect.stringMatching(/^git history unavailable: /)]);
+  });
+
+  it('maps from a root AGENTS.md with a CLAUDE.md stub: AGENTS.md is the hub, both root files and its imports are map', async () => {
+    write('AGENTS.md', '# Map\n@docs/rules.md\n[guide](docs/guide.md)\n');
+    write('CLAUDE.md', '@AGENTS.md\n');
+    write('docs/rules.md', '@deep.md\n');
+    write('docs/deep.md', 'leaf\n');
+    write('docs/guide.md', 'leaf\n');
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'pipe' });
+    execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'pipe' });
+    const r = await scanMdNetwork(root);
+    expect(r).toMatchObject({ ok: true, root: 'AGENTS.md' });
+    expect(r.nodes.find((n) => n.id === 'AGENTS.md')).toMatchObject({ depth: 0, type: 'hub' });
+    expect(r.nodes.find((n) => n.id === 'CLAUDE.md')).toMatchObject({ depth: 1 });
+    expect(r.edges).toContainEqual({ from: 'AGENTS.md', to: 'CLAUDE.md' });
+    expect(r.findings).toEqual([]);
+    expect(Object.fromEntries(r.census.docs.map((d) => [d.path, d.role]))).toEqual({
+      'AGENTS.md': 'map',
+      'CLAUDE.md': 'map',
+      'docs/rules.md': 'map',
+      'docs/deep.md': 'map',
+      'docs/guide.md': 'doc',
+    });
   });
 
   it('dates docs from real git history and finds code files naming them', async () => {

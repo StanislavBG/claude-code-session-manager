@@ -3,7 +3,7 @@
 
 /**
  * mdNetworkScan.cjs — a project's markdown link network, mapped from its root
- * CLAUDE.md, for Project Home's Tools > Review MD network (link map + findings).
+ * map doc (root AGENTS.md, else root CLAUDE.md — mdDocCensus rootMapDoc), for Project Home's Tools > Review MD network (link map + findings).
  * No LLM, read-only, bounded.
  *
  * Top-level in lib/ because no subfolder fits: it reads the project's own docs,
@@ -12,7 +12,9 @@
  * beside memoryMdNetwork.cjs, the other reader of the same docs network.
  *
  * - buildMdNetwork({ files, root, exists, localOnly, records, loadedByTools, history })
- *   — pure graph builder over in-memory docs. Docs a tool loads by name
+ *   — pure graph builder over in-memory docs. Beside an AGENTS.md root, a root
+ *   CLAUDE.md (the stub that imports it) is part of the map: an edge from the
+ *   hub reaches it at depth 1. Docs a tool loads by name
  *   (LOADED_BY_TOOLS, any `/skills/` folder, the GitHub root files, plus
  *   `loadedByTools` prefixes) are entry points, never orphans. `history`
  *   prefixes and `records` docs are never walked: a link into one is an edge
@@ -58,14 +60,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execGit } = require('./git/gitExec.cjs');
-const { censusMdDocs, parseGitLog, recordCollectionDocs } = require('./mdDocCensus.cjs');
+const { censusMdDocs, parseGitLog, recordCollectionDocs, rootMapDoc, mapRoots } = require('./mdDocCensus.cjs');
 const { assessRefs, suffixIndex, mentionPatterns, parseMentions } = require('./mdDocRefs.cjs');
 // The link convention (links, imports, backticked paths) is written once, in the skill's mdLinks.cjs.
 const { linksOf, importsOf, backtickPaths, toRepoPath } = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdLinks.cjs');
 // Called through the module object (mdDuplicates.findDuplicates), so a test can stub it.
 const mdDuplicates = require('../../../plugins/session-manager-dev/skills/maintaining-md-network/scripts/mdDuplicates.cjs');
 
-const ROOT_DOC = 'CLAUDE.md';
 const MAX_DOCS = 2000;
 const MAX_DOC_BYTES = 256 * 1024;
 const READ_BATCH = 32;
@@ -76,6 +77,7 @@ const LOG_MAX_BUFFER = 64 * 1024 * 1024;
 const GREP_MAX_BUFFER = 16 * 1024 * 1024;
 /** On-disk probes for backticked paths git does not vouch for, per scan. */
 const MAX_REF_PROBES = 500;
+const CLAUDE_DOC = 'CLAUDE.md';
 const OWNER_NAMES = new Set(['CLAUDE.md', 'README.md', 'AGENTS.md']);
 const MISSING_CODES = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
 const DETAIL_MISSING = 'The link target doesn’t exist.';
@@ -244,14 +246,14 @@ function missingRoot(root) {
  * @param {{ files?: MdFile[], root?: string, exists?: (relPath: string) => boolean, localOnly?: (relPath: string) => boolean, records?: ReadonlySet<string>, loadedByTools?: string[], history?: string[] }} [input]
  * @returns {MdLinkNetworkResult}
  */
-function buildMdNetwork({ files = [], root = ROOT_DOC, exists, localOnly, records, loadedByTools, history } = {}) {
+function buildMdNetwork({ files = [], root, exists, localOnly, records, loadedByTools, history } = {}) {
   try {
-    const rootPath = toRepoPath(root);
     /** @type {Map<string, MdFile>} */
     const docs = new Map();
     for (const file of files) {
       if (file && typeof file.path === 'string' && typeof file.text === 'string') docs.set(toRepoPath(file.path), file);
     }
+    const rootPath = toRepoPath(root ?? rootMapDoc((p) => docs.has(p)));
     if (!docs.has(rootPath)) return missingRoot(rootPath);
     const folders = foldersOf(docs.keys());
     /** @param {string} p */
@@ -276,6 +278,16 @@ function buildMdNetwork({ files = [], root = ROOT_DOC, exists, localOnly, record
     const linksOut = new Map();
     /** @type {Map<string, number>} */
     const linkedFrom = new Map();
+
+    // A root CLAUDE.md beside an AGENTS.md root is part of the map: the hub reaches it.
+    for (const stub of mapRoots(rootPath, (p) => docs.has(p)).slice(1)) {
+      edgeKeys.add(`${rootPath}\0${stub}`);
+      edges.push({ from: rootPath, to: stub });
+      linksOut.set(rootPath, 1);
+      linkedFrom.set(stub, 1);
+      depth.set(stub, 1);
+      order.push(stub);
+    }
 
     for (let i = 0; i < order.length; i += 1) {
       const from = order[i];
@@ -450,7 +462,7 @@ async function scanMdNetwork(cwd, deps = {}) {
         return { path: rel, text: typeof text === 'string' ? text.slice(0, MAX_DOC_BYTES) : '' };
       } catch (err) {
         if (MISSING_CODES.has(String(errorField(err, 'code')))) gone.add(rel);
-        else if (rel === ROOT_DOC) throw err;
+        else if (rel === rootDoc) throw err;
         return null; // an unreadable doc is skipped; links to it still count as present
       }
     };
@@ -466,23 +478,34 @@ async function scanMdNetwork(cwd, deps = {}) {
       return read;
     };
 
-    // The root is read straight from disk, so an untracked CLAUDE.md still counts.
-    const rootFile = await readOne(ROOT_DOC);
-    if (!rootFile) return missingRoot(ROOT_DOC);
+    // The root map doc is a tracked AGENTS.md, else CLAUDE.md read straight from
+    // disk (so an untracked CLAUDE.md still counts). Beside an AGENTS.md root the
+    // CLAUDE.md stub is read too: it is part of the map.
+    let rootDoc = rootMapDoc((p) => trackedSet.has(p));
+    let rootFile = await readOne(rootDoc);
+    if (!rootFile && rootDoc !== CLAUDE_DOC) {
+      rootDoc = CLAUDE_DOC;
+      rootFile = await readOne(rootDoc);
+    }
+    if (!rootFile) return missingRoot(rootDoc);
+    const stubFile = rootDoc === CLAUDE_DOC ? null : await readOne(CLAUDE_DOC);
+    const mapFiles = stubFile ? [rootFile, stubFile] : [rootFile];
+    /** @param {string} p a root doc of the map (never pruned as history or a record) */
+    const isMapRoot = (p) => mapFiles.some((f) => f.path === p);
 
     // Breadth-first along links, so the cap never drops a reachable doc for an
     // unreachable one; collect targets git does not vouch for along the way.
-    const files = [rootFile];
-    const queued = new Set([ROOT_DOC]);
+    const files = [...mapFiles];
+    const queued = new Set(mapFiles.map((f) => f.path));
     /** @type {Set<string>} */
     const unvouched = new Set();
     /** @param {string} p */
     const isDocPath = (p) => docSet.has(p);
-    for (let wave = [rootFile]; wave.length > 0; ) {
+    for (let wave = mapFiles; wave.length > 0; ) {
       /** @type {string[]} */
       const next = [];
       for (const file of wave) {
-        if (file.path !== ROOT_DOC && hasPrefix(file.path, history)) continue; // history docs are never walked
+        if (!isMapRoot(file.path) && hasPrefix(file.path, history)) continue; // history docs are never walked
         for (const link of refsOf(file, isDocPath)) {
           if (link.escapes || queued.has(link.to)) continue;
           if (docSet.has(link.to)) {
@@ -599,7 +622,7 @@ async function scanMdNetwork(cwd, deps = {}) {
     const present = (p) => vouched(p);
     /** @param {string} p */
     const localOnly = (p) => onDisk.has(p) || ignored.has(p);
-    const networkInput = { files, root: ROOT_DOC, exists: present, localOnly, loadedByTools, history };
+    const networkInput = { files, root: rootDoc, exists: present, localOnly, loadedByTools, history };
     const network = buildMdNetwork(networkInput);
     if (!network.ok) return network;
 
@@ -681,7 +704,7 @@ async function scanMdNetwork(cwd, deps = {}) {
       return { path: p, text, lines: text === '' ? 0 : text.split('\n').length, bytes: Buffer.byteLength(text) };
     });
     const census = censusMdDocs({
-      root: ROOT_DOC,
+      root: rootDoc,
       docs,
       reachable,
       log,
@@ -697,7 +720,7 @@ async function scanMdNetwork(cwd, deps = {}) {
     /** @type {MdDuplicatePair[]} */
     let duplicates = [];
     try {
-      const living = files.filter((f) => f.path === ROOT_DOC || (!records.has(f.path) && !hasPrefix(f.path, history)));
+      const living = files.filter((f) => isMapRoot(f.path) || (!records.has(f.path) && !hasPrefix(f.path, history)));
       duplicates = mdDuplicates.findDuplicates(living);
     } catch (err) {
       census.warnings.push(`duplicates unavailable: ${errorText(err)}`);

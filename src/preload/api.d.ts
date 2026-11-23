@@ -2016,10 +2016,10 @@ export type VideoReviewRetryResult =
 // Mirrors the JSDoc typedefs of the same names in src/main/lib/mdNetworkScan.cjs.
 // Every path is repo-relative POSIX.
 
-/** 'hub' = the root CLAUDE.md; 'owner' = a CLAUDE.md / README.md / AGENTS.md one link from it; 'doc' = any other doc. */
+/** 'hub' = the root map doc: root AGENTS.md, else root CLAUDE.md (a root CLAUDE.md beside AGENTS.md is reached from it); 'owner' = a CLAUDE.md / README.md / AGENTS.md one link from it; 'doc' = any other doc. */
 export type MdNetworkNodeType = 'hub' | 'owner' | 'doc';
 
-/** One doc reachable by links from the root CLAUDE.md. */
+/** One doc reachable by links from the root map doc (root AGENTS.md, else root CLAUDE.md). */
 export interface MdNetworkNode {
   /** Same as `path`. */
   id: string;
@@ -2086,13 +2086,13 @@ export interface MdDuplicatePair {
 }
 
 /**
- * A project's markdown link network, mapped from its root CLAUDE.md, plus a per-doc
+ * A project's markdown link network, mapped from its root AGENTS.md, else root CLAUDE.md, plus a per-doc
  * census of every tracked .md (role, size, git recency, dead/stale refs, code mentions).
  * Orphan findings leave out docs the census puts in a record collection.
  */
 export interface MdNetwork {
   ok: true;
-  /** The root doc, 'CLAUDE.md'. */
+  /** The root doc: 'AGENTS.md' when the root has one, else 'CLAUDE.md'. */
   root: string;
   /** Breadth-first from the root. */
   nodes: MdNetworkNode[];
@@ -2110,7 +2110,7 @@ export interface MdNetwork {
   duplicates?: MdDuplicatePair[];
 }
 
-/** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root CLAUDE.md, an ephemeral cwd). */
+/** `{ ok: false, error }` when there is nothing to map or the scan failed (not a git repo, no root AGENTS.md or CLAUDE.md, an ephemeral cwd). */
 export type MdNetworkResult = MdNetwork | { ok: false; error: string };
 
 // ────────────────────────────────────────────── Project Pages: Review MD network record
@@ -2159,7 +2159,7 @@ export type MdReviewResult = MdReviewOk | { ok: false; error: string };
 // Mirrors the JSDoc typedefs in src/main/lib/mdDocCensus.cjs.
 // Every path is repo-relative POSIX; folder strings end with '/'.
 
-/** How agents meet a doc: 'map' = the root + its @-imports; 'scoped' = another CLAUDE.md / AGENTS.md / CLAUDE.local.md; 'agent' = .claude/, skills/, plugin agents/commands; 'record' = in a record collection and unreachable; 'doc' = anything else. */
+/** How agents meet a doc: 'map' = the root map doc (root AGENTS.md, else root CLAUDE.md), a root CLAUDE.md beside AGENTS.md, and their @-imports; 'scoped' = another CLAUDE.md / AGENTS.md / CLAUDE.local.md; 'agent' = .claude/, skills/, plugin agents/commands; 'record' = in a record collection and unreachable; 'doc' = anything else. */
 export type MdDocRole = 'map' | 'scoped' | 'agent' | 'record' | 'doc';
 
 export interface MdDoc { path: string; role: MdDocRole; depth: number | null; lines: number | null; bytes: number | null; lastCommitMs: number | null; commits: number; linkedFrom: number; codeRefs: number; codeRefFiles: string[]; deadRefs: string[]; ambiguousRefs: string[]; changedSince: { path: string; ms: number }[]; collection: string | null; }

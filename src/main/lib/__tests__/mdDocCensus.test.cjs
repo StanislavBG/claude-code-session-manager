@@ -145,6 +145,39 @@ describe('censusMdDocs refs', () => {
     expect(d.changedSince).toEqual(changed.slice(0, 20));
   });
 
+  it('treats a root AGENTS.md as the map, with a root CLAUDE.md stub and both files\' imports; CLAUDE.md alone is unchanged', () => {
+    const docs = [
+      { path: 'AGENTS.md', text: '# Map\n@docs/rules.md' },
+      { path: 'CLAUDE.md', text: '@AGENTS.md\n@docs/claude-only.md' },
+      { path: 'docs/rules.md', text: '@deep.md' },
+      { path: 'docs/deep.md', text: 'leaf' },
+      { path: 'docs/claude-only.md', text: 'leaf' },
+      { path: 'src/CLAUDE.md', text: '' },
+      { path: 'guide.md', text: '' },
+    ];
+    const roles = (c) => Object.fromEntries(c.docs.map((d) => [d.path, d.role]));
+    const expected = {
+      'AGENTS.md': 'map',
+      'CLAUDE.md': 'map',
+      'docs/rules.md': 'map',
+      'docs/deep.md': 'map',
+      'docs/claude-only.md': 'map',
+      'src/CLAUDE.md': 'scoped',
+      'guide.md': 'doc',
+    };
+    expect(roles(censusMdDocs({ docs, reachable: reach([['AGENTS.md', 0], ['CLAUDE.md', 1]]) }))).toEqual(expected);
+    expect(roles(censusMdDocs({ root: 'AGENTS.md', docs, reachable: new Map() }))).toEqual(expected);
+    const withoutAgents = censusMdDocs({ docs: docs.filter((d) => d.path !== 'AGENTS.md'), reachable: new Map() });
+    expect(roles(withoutAgents)).toEqual({
+      'CLAUDE.md': 'map',
+      'docs/rules.md': 'doc',
+      'docs/deep.md': 'doc',
+      'docs/claude-only.md': 'map',
+      'src/CLAUDE.md': 'scoped',
+      'guide.md': 'doc',
+    });
+  });
+
   it('never throws on malformed input', () => {
     const c = censusMdDocs({
       docs: [null, { path: 5 }, { path: 'a.md', lines: 'x' }, { path: 'a.md' }],

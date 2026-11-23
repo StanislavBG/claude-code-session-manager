@@ -113,6 +113,7 @@ test('executeJob: the issue-#11 400 is a launch failure with the API message, an
 test('executeJob: a run that took real turns and failed is NOT a launch failure; architect persona may queue', async () => {
   const { mainCwd, slug, runDir } = mkProject();
   process.env.SM_CLAUDE_BIN = writeStub({ mode: 'real-failure' });
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'agents', 'architect.md'), '---\nname: architect\nmodel: opus\n---\n');
   const job = { slug, cwd: mainCwd, agentType: 'architect' };
 
   const res = await executeJob(job, runDir, mainCwd, () => Promise.resolve());

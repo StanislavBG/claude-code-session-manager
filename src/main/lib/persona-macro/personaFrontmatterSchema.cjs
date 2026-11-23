@@ -12,7 +12,8 @@
  *   unpinned headless run drifts to the CLI default model.
  *
  * Distinct from agentPersonaSchema.cjs, which validates the structured IPC
- * save payload. This module is not wired into save or dispatch here.
+ * save payload. Dispatch (agentModelResolve.cjs's resolvePrdPersonaForSpawn)
+ * refuses a persona that fails it.
  */
 'use strict';
 
@@ -33,6 +34,10 @@ const ModelSchema = z
 const shape = {};
 for (const key of MANAGED_PERSONA_KEYS) shape[key] = FmValue.optional();
 shape.model = ModelSchema;
+// Not a MANAGED_PERSONA_KEYS entry (the save path preserves it as an
+// unmanaged line), but prdAgentType.cjs's readPersonaDefaultEstimateMinutes
+// reads it at dispatch, so a dispatch-time validation must admit it.
+shape.defaultEstimateMinutes = FmValue.optional();
 
 const PersonaFrontmatterSchema = z.object(shape).strict();
 

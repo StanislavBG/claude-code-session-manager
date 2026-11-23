@@ -160,23 +160,27 @@ test('resolvePrdPersonaForSpawn returns the persona body and its own model, over
   expect(result.personaPath).toBe('/home/user/.claude/agents/dev-lead.md');
 });
 
-test("resolvePrdPersonaForSpawn falls back to the fallback model when the persona's model is 'inherit'", async () => {
+test("resolvePrdPersonaForSpawn refuses (persona_invalid) a persona whose model is 'inherit' — no fallback model", async () => {
   const result = await resolvePrdPersonaForSpawn({
     cwd: '/irrelevant',
     agentType: 'dev-lead',
     deps: { getPersonaBody: async () => ({ path: '/x/dev-lead.md', text: '---\nmodel: inherit\n---\nBody text.' }) },
   });
-  expect(result.model).toBe(FALLBACK_MODEL);
+  expect(result.model).toBeNull();
+  expect(result.refusal.code).toBe('persona_invalid');
 });
 
-test('resolvePrdPersonaForSpawn falls back without throwing when agentType no longer resolves to a persona file, and logs it once', async () => {
+test('resolvePrdPersonaForSpawn refuses (persona_missing) without throwing when agentType no longer resolves to a persona file, and logs it once', async () => {
   const cwd = await mkTmpDir('sm-agentmodel-cwd-');
   const call = () => resolvePrdPersonaForSpawn({
     cwd,
     agentType: 'ghost-persona',
     deps: { getPersonaBody: async () => null },
   });
-  await expect(call()).resolves.toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null, tools: null });
+  await expect(call()).resolves.toEqual({
+    model: null, systemPrompt: null, personaPath: null, tools: null,
+    refusal: { code: 'persona_missing', detail: expect.stringContaining("'ghost-persona'") },
+  });
   await call(); // second call must not log a second line (dedup)
 
   const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
@@ -186,11 +190,12 @@ test('resolvePrdPersonaForSpawn falls back without throwing when agentType no lo
   expect(matches[0].level).toBe('warn');
 });
 
-test('resolvePrdPersonaForSpawn returns the fallback (no persona applied) when agentType is absent, without touching getPersonaBody', async () => {
-  const getPersonaBody = async () => { throw new Error('must not be called'); };
+test("resolvePrdPersonaForSpawn resolves an absent agentType as 'dev-lead' (no silent fallback)", async () => {
+  const names = [];
+  const getPersonaBody = async ({ name }) => { names.push(name); return { path: '/x/dev-lead.md', text: '---\nmodel: opus\n---\nLead.' }; };
   const result = await resolvePrdPersonaForSpawn({ cwd: '/irrelevant', agentType: null, deps: { getPersonaBody } });
-  expect(result).toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null, tools: null });
-  expect(result.tools).toBeNull();
+  expect(names).toEqual(['dev-lead']);
+  expect(result).toEqual({ model: 'opus', systemPrompt: 'Lead.', personaPath: '/x/dev-lead.md', tools: null, refusal: null });
 });
 
 test('resolvePrdPersonaForSpawn returns the persona tools frontmatter as a parsed list, MCP names unchanged', async () => {
@@ -200,7 +205,7 @@ test('resolvePrdPersonaForSpawn returns the persona tools frontmatter as a parse
     deps: {
       getPersonaBody: async () => ({
         path: '/x/blender-artist.md',
-        text: '---\ntools: Read, Bash, mcp__blender__execute_blender_code_for_cli\n---\nBody.',
+        text: '---\nmodel: opus\ntools: Read, Bash, mcp__blender__execute_blender_code_for_cli\n---\nBody.',
       }),
     },
   });
@@ -310,7 +315,7 @@ test('resolvePrdPersonaForSpawn caps the persona body at 6000 characters with a 
   const result = await resolvePrdPersonaForSpawn({
     cwd: '/irrelevant',
     agentType: 'dev-lead',
-    deps: { getPersonaBody: async () => ({ path: '/home/user/.claude/agents/dev-lead.md', text: longBody }) },
+    deps: { getPersonaBody: async () => ({ path: '/home/user/.claude/agents/dev-lead.md', text: `---\nmodel: opus\n---\n${longBody}` }) },
   });
   expect(result.systemPrompt.startsWith('x'.repeat(6000))).toBe(true);
   expect(result.systemPrompt.length).toBeLessThan(longBody.length);
@@ -362,7 +367,7 @@ test('a shipped body plus one appended line is capped with the notice', async ()
 });
 
 test('a 7000-char persona with no manifest entry stays capped', async () => {
-  const result = await spawnWith('not-shipped-persona', 'y'.repeat(7000));
+  const result = await spawnWith('not-shipped-persona', `---\nmodel: opus\n---\n${'y'.repeat(7000)}`);
   expect(result.systemPrompt).toContain('Truncated —');
 });
 

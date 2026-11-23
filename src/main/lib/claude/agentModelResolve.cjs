@@ -236,47 +236,69 @@ function buildPersonaBodyText(rawBody, personaPath, { uncapped = false } = {}) {
   return `${truncated}\n\n[Truncated — ${pathLabel} exceeds ${AGENT_BODY_CHAR_CAP} characters; see the file for the full body.]`;
 }
 
+/** The persona a PRD with no `agentType` runs as — same default prdAgentType.cjs documents. */
+const DEFAULT_PRD_AGENT_TYPE = 'dev-lead';
+
 /**
  * Resolves the persona system-prompt + model a scheduled PRD's `agentType`
- * should launch its headless `claude -p` spawn with. Never throws — a
- * missing agentType, or one that no longer resolves to a readable persona
- * file (renamed/deleted), falls back to `{ systemPrompt: null, model:
- * fallbackModel, personaPath: null }` and logs once via prdAgentType.cjs's
- * reportDanglingAgentTypeOnce (the PRD-frontmatter FK's own dangling-read
- * convention) — a dangling persona must never park or fail the job.
+ * should launch its headless `claude -p` spawn with. A null/absent agentType
+ * resolves as 'dev-lead'.
+ *
+ * REFUSAL, not fallback (Managed Agents C-rule "an agent definition is
+ * validated"): when the persona is missing, unreadable, or its frontmatter
+ * fails personaFrontmatterSchema.cjs's validatePersonaFrontmatter, this
+ * returns `{ refusal: { code: 'persona_missing'|'persona_invalid', detail },
+ * model: null, systemPrompt: null, personaPath, tools: null }` — the scheduler
+ * parks the job instead of spawning it as "no persona + sonnet". A dangling
+ * agentType is still logged once via prdAgentType.cjs's
+ * reportDanglingAgentTypeOnce (the read-time log). Never throws.
  *
  * Reuses agentLibrary.cjs's getPersonaBody (project-overlay-then-global
- * read, same precedence resolvePersonaPaths documents) rather than a second
- * persona-file reader, and this module's own frontmatter-stripped-body cap
- * (mirroring epicIntake.ts's Epic-path treatment) so the PRD path gets the
- * same runaway-file protection.
+ * read) and this module's frontmatter-stripped-body cap.
  *
- * @param {{ cwd: string, agentType: string|null, fallbackModel?: string, deps?: object }} opts
- * @returns {Promise<{ model: string, systemPrompt: string|null, personaPath: string|null, tools: string[]|null }>}
+ * @param {{ cwd: string, agentType: string|null, deps?: object }} opts
+ * @returns {Promise<{ model: string|null, systemPrompt: string|null, personaPath: string|null, tools: string[]|null, refusal: null|{ code: 'persona_missing'|'persona_invalid', detail: string } }>}
  */
-async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLBACK_MODEL, deps = {} } = {}) {
-  const miss = { model: fallbackModel, systemPrompt: null, personaPath: null, tools: null };
-  if (!agentType) return miss;
+async function resolvePrdPersonaForSpawn({ cwd, agentType, deps = {} } = {}) {
+  const name = agentType || DEFAULT_PRD_AGENT_TYPE;
+  const refuse = (code, detail, personaPath = null) => ({
+    model: null, systemPrompt: null, personaPath, tools: null, refusal: { code, detail },
+  });
+  let persona;
   try {
     const getBody = deps.getPersonaBody || require('../../agentLibrary.cjs').getPersonaBody;
-    const persona = await getBody({ cwd, name: agentType });
-    if (!persona) {
+    persona = await getBody({ cwd, name });
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    return refuse('persona_missing', `agentType '${name}' persona could not be read: ${msg}`);
+  }
+  if (!persona) {
+    try {
       const reportOnce = deps.reportDanglingAgentTypeOnce || require('../prd/prdAgentType.cjs').reportDanglingAgentTypeOnce;
-      reportOnce(cwd, agentType, deps);
-      return miss;
-    }
+      reportOnce(cwd, name, deps);
+    } catch { /* the read-time log must never change the result */ }
+    return refuse('persona_missing', `agentType '${name}' does not resolve to a readable persona file`);
+  }
+  try {
     // getPersonaBody returns the MERGED persona (fm + body); a bare `{ path, text }`
     // (older injected reader) is parsed here.
     const { fm, body } = persona.fm ? persona : splitFrontmatter(persona.text);
-    const model = fm.model && fm.model !== 'inherit' ? fm.model : fallbackModel;
+    const validate = deps.validatePersonaFrontmatter
+      || require('../persona-macro/personaFrontmatterSchema.cjs').validatePersonaFrontmatter;
+    const check = validate(fm);
+    if (!check.ok) {
+      return refuse('persona_invalid', `agentType '${name}' persona ${persona.path || '(unknown path)'} frontmatter is invalid: ${check.errors.join('; ')}`, persona.path || null);
+    }
+    const model = String(fm.model).trim();
     const digest = shippedBodyHash(body);
-    const uncapped = (SHIPPED_PERSONA_SEEDS[agentType] || []).some((e) => e.bodySha256 === digest);
+    const uncapped = (SHIPPED_PERSONA_SEEDS[name] || []).some((e) => e.bodySha256 === digest);
     const systemPrompt = buildPersonaBodyText(body, persona.path, { uncapped });
     const parseTools = deps.parseTools || require('../../agentLibrary.cjs').parseTools;
     const list = parseTools(typeof fm.tools === 'string' ? fm.tools : '');
-    return { model, systemPrompt, personaPath: persona.path, tools: list.length ? list : null };
-  } catch {
-    return miss;
+    return { model, systemPrompt, personaPath: persona.path, tools: list.length ? list : null, refusal: null };
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    return refuse('persona_invalid', `agentType '${name}' persona ${persona.path || '(unknown path)'} could not be parsed: ${msg}`, persona.path || null);
   }
 }
 
@@ -293,4 +315,5 @@ module.exports = {
   readOverlayAwarePersona,
   isProjectOverlayPersonaPath,
   resolvePrdPersonaForSpawn,
+  DEFAULT_PRD_AGENT_TYPE,
 };

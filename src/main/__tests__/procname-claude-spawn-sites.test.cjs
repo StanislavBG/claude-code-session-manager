@@ -35,6 +35,9 @@ beforeAll(() => {
   realClaudeBin = process.env.SM_CLAUDE_BIN;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pn02-'));
   process.env.HOME = tmpHome;
+  // A job with no agentType runs as 'dev-lead'; an unresolvable persona is refused before spawn.
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'agents', 'dev-lead.md'), '---\nname: dev-lead\nmodel: sonnet\n---\n');
   for (const m of ['process/procName', 'claude/claudeBin']) {
     delete require.cache[require.resolve(`../lib/${m}.cjs`)];
   }

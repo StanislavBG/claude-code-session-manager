@@ -48,7 +48,7 @@ function writeStub() {
 function writePersona(name, toolsLine) {
   fs.writeFileSync(
     path.join(tmpHome, '.claude', 'agents', `${name}.md`),
-    `---\nname: ${name}\ndescription: test persona\n${toolsLine}---\n\nBody.\n`,
+    `---\nname: ${name}\ndescription: test persona\nmodel: sonnet\n${toolsLine}---\n\nBody.\n`,
     'utf8',
   );
 }

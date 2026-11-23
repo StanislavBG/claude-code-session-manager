@@ -33,7 +33,26 @@ function stubDir() {
   return dir;
 }
 
-function writeClaudeStub({ body = DEFAULT_BODY, allowCommitUnder } = {}) {
+/**
+ * A stub `claude` stands in for a real install, which always has a `dev-lead`
+ * persona: a PRD job with no agentType resolves as 'dev-lead', and a persona
+ * that does not resolve is refused before spawn (agentModelResolve.cjs's
+ * persona_missing). Seeds a minimal one under the current HOME when absent;
+ * a test's own dev-lead file is never overwritten.
+ */
+function seedDefaultDevLeadPersona() {
+  const home = process.env.HOME;
+  if (!home) return;
+  const file = path.join(home, '.claude', 'agents', 'dev-lead.md');
+  if (fs.existsSync(file)) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '---\nname: dev-lead\nmodel: sonnet\n---\n', 'utf8');
+  } catch { /* a read-only HOME leaves the job to be refused, as in production */ }
+}
+
+function writeClaudeStub({ body = DEFAULT_BODY, allowCommitUnder, seedPersona = true } = {}) {
+  if (seedPersona) seedDefaultDevLeadPersona();
   const stubPath = path.join(stubDir(), `stub-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
   const allow = allowCommitUnder ? path.resolve(allowCommitUnder) : null;
   const prelude = `

@@ -19,7 +19,7 @@ function depsFor({ exists = true, tools = null } = {}) {
         throw new Error(`agentType '${name}' does not resolve to a readable persona file — checked ${cwd}/.claude/agents/${name}.md and ~/.claude/agents/${name}.md. Available personas: demo-video-builder, dev-lead`);
       }
     },
-    resolvePrdPersonaForSpawn: async () => ({ model: 'x', systemPrompt: 's', personaPath: '/p.md', tools }),
+    resolvePrdPersonaForSpawn: async () => ({ model: 'x', systemPrompt: 's', personaPath: '/p.md', tools, refusal: null }),
   };
 }
 
@@ -42,6 +42,21 @@ describe('checkProjectVideoToolRunnable', () => {
     expect(r.error.startsWith('A Project Video tool runs as a scheduled job, so its persona must be a file in <cwd>/.claude/agents/ or ~/.claude/agents/:')).toBe(true);
     expect(r.error).toContain("agentType 'claude' does not resolve");
     expect(r.error).toContain('Available personas: demo-video-builder, dev-lead');
+  });
+
+  it('reports a persona refusal (persona_invalid) from the resolver instead of crashing', async () => {
+    const deps = {
+      ...depsFor(),
+      resolvePrdPersonaForSpawn: async () => ({
+        model: null, systemPrompt: null, personaPath: '/p.md', tools: null,
+        refusal: { code: 'persona_invalid', detail: "agentType 'v' persona /p.md frontmatter is invalid: model: model is required" },
+      }),
+    };
+    const r = await checkProjectVideoToolRunnable({ cwd: CWD, agentName: 'v', job: {} }, deps);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/^A Project Video tool runs as a scheduled job/);
+    expect(r.error).toContain('persona_invalid: ');
+    expect(r.error).toContain('model is required');
   });
 
   it('rejects a missing agentName as an unresolved persona', async () => {

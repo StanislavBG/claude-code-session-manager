@@ -5201,6 +5201,35 @@ function ensureTimeoutShimOnce() {
 }
 
 /**
+ * Parks one queue row whose persona was refused at dispatch (agentModelResolve.cjs's
+ * resolvePrdPersonaForSpawn `refusal`) — needs_review via transitionJob with
+ * reason '<code>: <detail>'. The job never spawned, so there is no verify
+ * pass, commit guard or transcript. Returns transitionJob's result.
+ * @param {any} row
+ * @param {{ code: string, detail: string }} refusal
+ * @returns {boolean}
+ */
+function applyPersonaRefusalPark(row, refusal) {
+  const reason = `${refusal.code}: ${refusal.detail}`;
+  if (!transitionJob(row, 'needs_review', { reason, source: 'executeJob:persona-refusal' })) return false;
+  row.finishedAt = new Date().toISOString();
+  row.exitCode = -1;
+  row.error = reason;
+  row.terminalReason = refusal.code;
+  delete row.runtime;
+  return true;
+}
+
+/** Persists applyPersonaRefusalPark for `job`'s queue row, then broadcasts. */
+async function parkPersonaRefusal(job, refusal) {
+  await mutate((s) => {
+    const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+    if (idx >= 0) applyPersonaRefusalPark(s.jobs[idx], refusal);
+  });
+  await broadcast({ flush: true });
+}
+
+/**
  * Execute a single PRD job. Writes stdout/stderr to a log file and a meta
  * JSON sidecar. Accepts an optional onPid(pid) callback called synchronously
  * after spawn so callers can persist the pid before the job finishes, and an
@@ -5477,10 +5506,19 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // PRD agentType → persona + model (PRD 1115): resolved for both fresh and
   // resume dispatches, keyed off job.agentType (persisted on the queue row
   // by reconcile()) rather than re-reading the PRD file — a resumed session
-  // must keep launching as the SAME persona it started as. Never throws;
-  // a dangling/absent agentType falls back to no persona + FALLBACK_MODEL
-  // and is logged once by resolvePrdPersonaForSpawn itself.
+  // must keep launching as the SAME persona it started as. Never throws.
+  // An absent agentType resolves as 'dev-lead'; a persona that is missing,
+  // unreadable or fails its frontmatter schema is a REFUSAL — the job is
+  // never spawned, and the caller parks it needs_review with the reason.
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
+  if (personaResolution.refusal) {
+    const { code, detail } = personaResolution.refusal;
+    const refusalError = `${code}: ${detail}`;
+    safeLog(`[scheduler] persona refused for ${job.slug} — not spawned: ${refusalError}\n`);
+    closeFd();
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: refusalError, personaRefusal: { code, detail }, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
+    return { exitCode: -1, durationMs: 0, error: refusalError, sessionId, personaRefusal: { code, detail } };
+  }
   if (resumeTarget) {
     try {
       const dir = await prdPaths.findPrdDirForJob(job);
@@ -7578,6 +7616,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // a sibling); an in-place run on the baseline delta.
     const jobDirt = worktree.ok ? stripAppOwnedChurn(worktreeLeftoverDirty) : newlyDirtyAll;
 
+    // Persona refusal (persona_missing / persona_invalid): executeJob never
+    // spawned. Park needs_review with '<code>: <detail>' — running ->
+    // needs_review is a legal edge — instead of the old silent
+    // 'no persona + sonnet' fallback.
+    if (res.personaRefusal) {
+      await parkPersonaRefusal(job, res.personaRefusal);
+      return;
+    }
     if (res.launchFailure) {
       await handleLaunchFailure({ job, res, runId, runDir, launchKey, launchEnv, claudeVersion: claudeVersionNow });
       return;
@@ -13560,6 +13606,7 @@ module.exports = {
   resetJobFields,
   resetRefusalMessage,
   executeJob,
+  applyPersonaRefusalPark,
   killOrphanClaudePid,
   prdArchivedSkipResult,
   spawnJob,

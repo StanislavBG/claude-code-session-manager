@@ -5,8 +5,8 @@
  * persona's own model), not just sit in the prompt as prose the executor may
  * or may not obey. Covers buildClaudeSpawnArgs' pure argv shape plus a real
  * executeJob spawn (stub `claude` binary) proving the resolved persona
- * actually reaches the child process, and that a dangling agentType still
- * runs the job to completion (never parks or fails it).
+ * actually reaches the child process, and that a dangling agentType or an
+ * invalid persona is refused before spawn (persona_missing / persona_invalid).
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-prd-persona-spawn.test.cjs
  */
@@ -144,22 +144,51 @@ test('executeJob: a resolvable agentType reaches the spawned child as --append-s
   expect(argv[modelIdx + 1]).toBe('opus');
 });
 
-test('executeJob: a dangling agentType (no resolvable persona file) still runs the job to completion, falling back to sonnet with no --append-system-prompt', async () => {
-  const { result, argv } = await runJobWithAgentType({ agentType: 'renamed-or-deleted-persona' });
+async function runRefusedJob(agentType) {
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-prd-persona-refuse-'));
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-prd-persona-refuserun-'));
+  const slug = `3773-test-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  const prdsDir = path.join(mainCwd, 'session-manager-operations', 'scheduler', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do the thing.', 'utf8');
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    const result = await executeJob({ slug, cwd: mainCwd, agentType }, runDir, mainCwd, () => Promise.resolve());
+    const spawned = fs.existsSync(path.join(mainCwd, 'argv.marker'));
+    const metaFile = fs.readdirSync(runDir).find((f) => f.endsWith('.meta.json'));
+    const meta = metaFile ? JSON.parse(fs.readFileSync(path.join(runDir, metaFile), 'utf8')) : null;
+    return { result, spawned, meta };
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+}
 
-  expect(result.exitCode).toBe(0);
-  expect(argv).not.toContain('--append-system-prompt');
-  const modelIdx = argv.indexOf('--model');
-  expect(argv[modelIdx + 1]).toBe('sonnet');
+test('executeJob: a dangling agentType (no resolvable persona file) is refused persona_missing and never spawned', async () => {
+  const { result, spawned, meta } = await runRefusedJob('renamed-or-deleted-persona');
+  expect(spawned).toBe(false);
+  expect(result.exitCode).toBe(-1);
+  expect(result.personaRefusal.code).toBe('persona_missing');
+  expect(result.error).toMatch(/^persona_missing: /);
+  expect(meta.personaRefusal.code).toBe('persona_missing');
 });
 
-test('executeJob: a job with no agentType at all runs unaffected (no persona, sonnet fallback)', async () => {
+test('executeJob: a persona whose frontmatter fails the schema (no model) is refused persona_invalid and never spawned', async () => {
+  writePersona(path.join(tmpHome, '.claude', 'agents'), 'no-model-persona', ['tools: Read'], 'body');
+  const { result, spawned } = await runRefusedJob('no-model-persona');
+  expect(spawned).toBe(false);
+  expect(result.personaRefusal.code).toBe('persona_invalid');
+  expect(result.error).toMatch(/^persona_invalid: .*model/);
+});
+
+test("executeJob: a job with no agentType runs as 'dev-lead' with the headless lockdown", async () => {
+  writePersona(path.join(tmpHome, '.claude', 'agents'), 'dev-lead', ['model: opus'], 'You are dev-lead. Ship it.');
   const { result, argv } = await runJobWithAgentType({ agentType: null });
 
   expect(result.exitCode).toBe(0);
-  expect(argv).not.toContain('--append-system-prompt');
-  const modelIdx = argv.indexOf('--model');
-  expect(argv[modelIdx + 1]).toBe('sonnet');
+  expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe('You are dev-lead. Ship it.');
+  expect(argv[argv.indexOf('--model') + 1]).toBe('opus');
   // The headless lockdown applies to every job, not just persona-driven ones.
   const dtIdx = argv.indexOf('--disallowedTools');
   expect(dtIdx).toBeGreaterThanOrEqual(0);

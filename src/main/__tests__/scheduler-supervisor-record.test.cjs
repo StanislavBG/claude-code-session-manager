@@ -20,6 +20,9 @@ beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-supervisor-rec-'));
   process.env.HOME = tmpHome;
+  // A job with no agentType runs as 'dev-lead'; an unresolvable persona is refused before spawn.
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(tmpHome, '.claude', 'agents', 'dev-lead.md'), '---\nname: dev-lead\nmodel: sonnet\n---\n');
   ({ executeJob } = require('../scheduler.cjs'));
 });
 afterAll(() => {

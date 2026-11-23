@@ -68,6 +68,9 @@ async function checkProjectVideoToolRunnable({ cwd, agentName, job } = /** @type
     const msg = err && /** @type {Error} */ (err).message ? /** @type {Error} */ (err).message : String(err);
     return { ok: false, error: `${PERSONA_PREFIX} ${msg}` };
   }
+  if (persona && persona.refusal) {
+    return { ok: false, error: `${PERSONA_PREFIX} ${persona.refusal.code}: ${persona.refusal.detail}` };
+  }
   if (!persona || !persona.personaPath) {
     return { ok: false, error: `${PERSONA_PREFIX} persona '${agentName}' could not be read.` };
   }

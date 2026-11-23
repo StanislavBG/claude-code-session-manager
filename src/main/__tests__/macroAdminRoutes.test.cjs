@@ -1189,7 +1189,7 @@ function writePersona(cwd, name, tools) {
   const dir = path.join(cwd, '.claude', 'agents');
   fs.mkdirSync(dir, { recursive: true });
   const toolsLine = tools ? `tools: ${tools}\n` : '';
-  fs.writeFileSync(path.join(dir, `${name}.md`), `---\nname: ${name}\ndescription: test persona\n${toolsLine}---\nBody.\n`);
+  fs.writeFileSync(path.join(dir, `${name}.md`), `---\nname: ${name}\ndescription: test persona\nmodel: sonnet\n${toolsLine}---\nBody.\n`);
 }
 
 async function pvSave(adminHttp, cwd, origin, extra) {

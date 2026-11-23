@@ -20,14 +20,16 @@ const UNMANAGED = [
   '  - beta',
 ].join('\n');
 
-test('global save refuses a persona whose on-disk frontmatter carries unmanaged keys, leaving the file untouched', async () => {
+// defaultEstimateMinutes is admitted by personaFrontmatterSchema (the scheduler
+// reads it at dispatch, PRD 3773), so only hooks/skills are unknown here.
+test('global save refuses a persona whose on-disk frontmatter carries unknown keys, leaving the file untouched', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'al-preserve-'));
   try {
     const file = path.join(dir, 'p.md');
     const original = `---\nname: p\ndescription: old\nmodel: opus\n${UNMANAGED}\n---\nbody\n`;
     await fsp.writeFile(file, original);
     await expect(savePersona({ name: 'p', description: 'new', model: 'opus', body: 'body', globalDir: dir, validatePath: idPath, writeTextAtomic: write }))
-      .rejects.toThrow(/unknown frontmatter key\(s\): defaultEstimateMinutes, hooks, skills/);
+      .rejects.toThrow(/unknown frontmatter key\(s\): hooks, skills/);
     expect(await fsp.readFile(file, 'utf8')).toBe(original);
   } finally { await fsp.rm(dir, { recursive: true, force: true }); }
 });

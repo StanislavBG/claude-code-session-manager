@@ -124,8 +124,10 @@ test('an overlay with no global counterpart works standalone', () => {
 test("overlay `model: inherit` defers to the settings default — it does NOT fall back to the global model", async () => {
   const { cwd, deps } = setup({ global: GLOBAL, overlay: { fm: ['model: inherit'], body: '' } });
   expect(readOverlayAwarePersonaModel('dev-lead', { ...deps, cwd })).toBe('inherit');
-  const r = await resolvePrdPersonaForSpawn({ cwd, agentType: 'dev-lead', fallbackModel: 'sonnet-fallback', deps: { getPersonaBody: (a) => getPersonaBody({ ...a, ...deps }) } });
-  expect(r.model).toBe('sonnet-fallback');
+  // A headless PRD spawn refuses an unpinned (`inherit`) merged model instead of falling back.
+  const r = await resolvePrdPersonaForSpawn({ cwd, agentType: 'dev-lead', deps: { getPersonaBody: (a) => getPersonaBody({ ...a, ...deps }) } });
+  expect(r.model).toBeNull();
+  expect(r.refusal.code).toBe('persona_invalid');
 });
 
 test('resolvePrdPersonaForSpawn hands the executor the merged model AND the global body for a frontmatter-only overlay', async () => {

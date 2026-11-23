@@ -136,7 +136,7 @@ test('executeJob: an Epic with packs adds --plugin-dir and appends laws after th
   expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe(`You are dev-lead.\n\n${LAWS}`);
 });
 
-test('executeJob: Epic found via sourcePromptId; laws alone when there is no persona', async () => {
+test("executeJob: Epic found via sourcePromptId; a job with no agentType runs as 'dev-lead' with the laws after its body", async () => {
   stubCatalog([]);
   const mainEpic = { id: 'epic-src', packs: ['test-pack'] };
   const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-packs-src-'));
@@ -154,7 +154,7 @@ test('executeJob: Epic found via sourcePromptId; laws alone when there is no per
     const argv = JSON.parse(fs.readFileSync(path.join(mainCwd, 'argv.marker'), 'utf8'));
     expect(result.exitCode).toBe(0);
     expect(pluginDirs(argv)).toEqual(['/abs/packs/test-pack']);
-    expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe(LAWS);
+    expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe(`You are dev-lead.\n\n${LAWS}`);
   } finally {
     fs.rmSync(mainCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });

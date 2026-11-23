@@ -326,7 +326,7 @@ async function postConfirmationRequest(input) {
   const why = [
     `A headless job${req.jobSlug ? ` (${req.jobSlug})` : ''} tried \`${oneLine(what, 400)}\`, which is marked 'confirm'${req.rule ? ` by rule \`${req.rule}\`` : ''}, and was refused.`,
     `Args digest: ${req.argsDigest}.`,
-    'To let it run, re-queue the PRD with that rule in riskTools; otherwise withdraw this item.',
+    'Approve resumes that same job session and lets this exact call (same arguments) run once; Deny keeps the job parked (confirmation_denied).',
   ].join(' ');
   const existing = (await listNeedsYou({ app: CONFIRM_APP })).find((it) => it.id === id);
   if (existing) return { item: existing, created: false, changed: false };
@@ -335,6 +335,7 @@ async function postConfirmationRequest(input) {
     id,
     title: oneLine(`Confirm ${what}`, 200),
     why: why.slice(0, 1000),
+    options: ['Approve', 'Deny'],
     ...(linked ? { epicId: req.epicId, cwd: req.cwd } : {}),
   }, (item) => ({
     kind: 'job.confirmation_requested',

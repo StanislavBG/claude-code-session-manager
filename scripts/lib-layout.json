@@ -122,6 +122,7 @@
   "personaToolScope": "claude",
   "toolRiskMarks": "claude",
   "toolRiskIpc": "claude",
+  "toolClearance": "scheduler",
   "pidAlive": "process",
   "planRecordHarvest": "scheduler",
   "prdOutcomeRecord": "scheduler",

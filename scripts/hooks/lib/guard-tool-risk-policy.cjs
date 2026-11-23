@@ -145,7 +145,7 @@ function confirmReason(call, hit, digest, recorded) {
   return [
     `Blocked, pending confirmation: \`${shown(call)}\` is marked 'confirm' by rule \`${hit.rule}\` in the ${layer} tool-risk file ${hit.file || '(unknown file)'}.`,
     recorded
-      ? `A confirmation request (args digest ${digest}) was sent to the owner's Needs you list; the owner decides whether a PRD naming "${hit.rule}" in riskTools runs it.`
+      ? `A confirmation request (args digest ${digest}) was sent to the owner's Needs you list; if the owner approves, this same session is resumed and this exact call (same arguments) may run once.`
       : `No confirmation request could be sent from this run (args digest ${digest}); a headless job may run it only when its PRD names "${hit.rule}" in riskTools.`,
     'Do not retry it and do not work around this refusal (no other tool, wrapper, script or alias for the same effect); finish the rest of the work and report that this step is pending confirmation.',
   ].join(' ');
@@ -157,9 +157,25 @@ function confirmReason(call, hit, digest, recorded) {
  * one: it names the job and Epic the answer belongs to. Never throws.
  * @returns {boolean} whether the record was written
  */
-function recordConfirmationRequest(call, hit, digest, env, deps) {
+function recordConfirmationRequest(call, hit, digest, env, deps, payload = {}) {
   const jobSlug = env.SM_SCHEDULER_JOB_SLUG || null;
   if (!jobSlug) return false;
+  // The pending record names the session to resume once the owner approves.
+  const sessionId = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : null;
+  try {
+    (deps.toolClearance || require('../../../src/main/lib/scheduler/toolClearance.cjs')).recordPendingConfirmation({
+      tool: call.tool,
+      argsDigest: digest,
+      jobSlug,
+      sessionId,
+      epicId: env.SM_SCHEDULER_JOB_EPIC_ID || null,
+      cwd: env.SM_PROJECT_ROOT || null,
+      rule: hit.rule,
+      summary: shown(call),
+    });
+  } catch (e) {
+    console.error(`${TAG} pending confirmation not recorded: ${e?.message}`);
+  }
   try {
     const file = deps.confirmationRequestsFile
       || confirmationRequestsPath(require('../../../src/main/lib/scheduler/schedulerPaths.cjs').schedulerHome());
@@ -179,6 +195,25 @@ function recordConfirmationRequest(call, hit, digest, env, deps) {
     return true;
   } catch (e) {
     console.error(`${TAG} confirmation request not recorded: ${e?.message}`);
+    return false;
+  }
+}
+
+/**
+ * Consume a live single-use clearance for this job's exact call. Only a
+ * scheduler job (named by SM_SCHEDULER_JOB_SLUG) can hold one. Never throws.
+ * @returns {boolean} whether a clearance was consumed
+ */
+function consumeConfirmClearance(call, digest, env, deps) {
+  const jobSlug = env.SM_SCHEDULER_JOB_SLUG || null;
+  if (!jobSlug) return false;
+  try {
+    const lib = deps.toolClearance || require('../../../src/main/lib/scheduler/toolClearance.cjs');
+    const r = lib.consumeClearance({ cwd: env.SM_PROJECT_ROOT || null, jobSlug, tool: call.tool, argsDigest: digest });
+    if (!r.ok && r.reason !== 'none') console.error(`${TAG} clearance for ${call.tool} refused: ${r.reason}`);
+    return r.ok === true;
+  } catch (e) {
+    console.error(`${TAG} clearance check failed, refusing: ${e?.message}`);
     return false;
   }
 }
@@ -313,7 +348,10 @@ function decide(payload, env = process.env, deps = {}) {
       // Interactive Terminal: the CLI's own approval prompt IS the confirmation.
       if (!headless) return refuse(`Confirm: \`${shown(call)}\` is marked 'confirm' by rule \`${hit.rule}\`.`);
       const digest = argsDigest(payload.tool_input);
-      const recorded = recordConfirmationRequest(call, hit, digest, env, deps);
+      // An owner-approved clearance for this exact call (same job, tool and
+      // args digest) lets ONE call through; it is consumed atomically here.
+      if (consumeConfirmClearance(call, digest, env, deps)) return buildAllow();
+      const recorded = recordConfirmationRequest(call, hit, digest, env, deps, payload);
       return buildDeny(confirmReason(call, hit, digest, recorded));
     }
     return refuse(blockReason(call, hit, headless));

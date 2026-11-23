@@ -217,6 +217,7 @@ const { resolveDepSlug, findNearMatches, bareSlug } = require('./lib/prd/depSlug
 const { writeJsonAtomic, readJsonOrSync, readJsonOr } = require('./lib/util/atomicFs.cjs');
 const { writeToolRiskGuardSettingsFile } = require('./lib/epic/guardSpawnSettings.cjs');
 const toolRiskMarks = require('./lib/claude/toolRiskMarks.cjs');
+const toolClearance = require('./lib/scheduler/toolClearance.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
 const cancelDependents = require('./scheduler/cancelDependents.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -4732,6 +4733,19 @@ async function requeueForeignWipBlockedJobs(jobs, { getDirtyPaths = gitTreeGuard
  * exact paths recorded on the parked job row so the resumed run can verify
  * them on disk before trusting them, rather than re-deriving them itself.
  */
+/**
+ * Prompt for a session resumed after the owner approved a tool-risk 'confirm'
+ * request (toolClearance.cjs). The session already holds its PRD; this only
+ * says that ONE exact call (same arguments) is now cleared, once.
+ */
+function buildConfirmationResumePreamble({ tool, summary }) {
+  const what = summary && summary !== tool ? `${tool}: ${summary}` : tool;
+  return `CONFIRMATION APPROVED: the owner approved the call your previous run in this same session was refused as 'pending confirmation' — \`${what}\`. This is a continuation of that same session, not a new task.
+
+Run that call again now with EXACTLY the same arguments: it is cleared for ONE use only. A call with any different argument is refused again, and a second use is refused too. Then finish the rest of the work and follow the SCHEDULER FINISH PROTOCOL from your original prompt (verify, commit your own paths, end with the SCHEDULER_VERDICT line).
+`;
+}
+
 function buildResumeRecoveryPreamble({ dirtyPaths, salvagePatch }) {
   const pathList = dirtyPaths.map((p) => `- ${p}`).join('\n');
   const salvageLine = salvagePatch
@@ -5529,7 +5543,9 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // session already has that in its own conversation history via
     // --resume, and re-embedding it here would just contradict whatever
     // state the session actually left on disk.
-    prompt = buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
+    prompt = resumeTarget.confirmation
+      ? buildConfirmationResumePreamble(resumeTarget.confirmation)
+      : buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
   } else {
   // Read full PRD body fresh from disk (queue stored only the preview).
   // Resolve through findPrdDirForJob's full candidate search (legacy flat
@@ -9143,6 +9159,113 @@ async function spawnResumeRecovery(job, resumeTarget) {
   await spawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget, siblingJobs);
 }
 
+const CONFIRM_APPROVE = 'Approve';
+const CONFIRM_BUSY = new Set(['running', 'investigating']);
+
+/**
+ * Apply answered tool-risk confirmation items (needsYouStore app 'tool-risk')
+ * to the jobs that asked, via toolClearance.answerConfirmation:
+ *  - Approve → human.tool_confirmation { approved: true }, one clearance bound
+ *    to the args digest, and the job is re-dispatched with
+ *    `--resume <the same session id>` (in place, like resume recovery).
+ *  - Deny (or a withdrawn item) → human.tool_confirmation { approved: false },
+ *    the row is parked needs_review with verifierVerdict 'confirmation_denied'.
+ * A record whose job is still running is left for a later tick; a request
+ * recorded after the item was answered is never auto-applied (it waits for a
+ * fresh item). Never throws.
+ * @param {{ jobs?: any[] }} state
+ */
+async function processToolConfirmationAnswers(state) {
+  try {
+    const pending = toolClearance.listPendingConfirmations();
+    if (!pending.length) return;
+    toolClearance.pruneExpired();
+    const items = await needsYouStore.listNeedsYou({ app: needsYouStore.CONFIRM_APP });
+    const rowOf = (slug) => (state.jobs || []).find((j) => j.slug === slug) || null;
+    for (const rec of pending) {
+      const item = items.find((it) => it.id === needsYouStore.confirmationItemId(rec.tool, rec.argsDigest));
+      if (!item || item.status === 'open') continue;
+      const answeredAtMs = Date.parse(item.answeredAt || item.updatedAt || '') || 0;
+      if (rec.requests.some((r) => CONFIRM_BUSY.has(rowOf(r.jobSlug)?.status) || runningSet.has(r.jobSlug))) continue;
+      const approved = item.status === 'answered' && item.answer === CONFIRM_APPROVE;
+      if (approved && rec.requests.some((r) => (r.requestedAt || 0) <= answeredAtMs) && sessionSlots.availableFor('job') < 1) continue;
+      const taken = toolClearance.takePendingConfirmation(rec.key);
+      if (!taken) continue;
+      for (const request of taken.requests) {
+        if ((request.requestedAt || 0) > answeredAtMs) {
+          console.warn(`[scheduler] ${request.jobSlug}: confirmation request for ${request.tool} postdates the answer — not applied`);
+          continue;
+        }
+        await applyToolConfirmationAnswer(request, approved, rowOf(request.jobSlug));
+      }
+    }
+  } catch (e) {
+    console.warn('[scheduler] tool confirmation answers failed', e?.message);
+  }
+}
+
+/** One job's answer: emit, then resume (approve) or park (deny). */
+async function applyToolConfirmationAnswer(request, approved, row) {
+  if (!row) {
+    console.warn(`[scheduler] ${request.jobSlug}: confirmation answered but the job row is gone`);
+    return;
+  }
+  const req = { ...request, sessionId: request.sessionId || row.sessionId || null };
+  const eventTarget = { slug: row.slug, epicId: row.epicId || row.sourcePromptId || req.epicId, cwd: row.cwd || req.cwd };
+  let resume = null;
+  let park = null;
+  toolClearance.answerConfirmation({ request: req, approved }, {
+    emit: (event) => {
+      emitJobEvent(eventTarget, event);
+      appendAuditEvent('tool_confirmation_answered', { slug: row.slug, tool: event.tool, argsDigest: event.argsDigest, approved: event.approved });
+    },
+    resume: (r) => { resume = r; },
+    park: (p) => { park = p; },
+  });
+  if (park) {
+    await mutate((s) => {
+      const j = (s.jobs || []).find((x) => x.slug === row.slug);
+      if (!j) return;
+      j.confirmationDenied = { tool: req.tool, argsDigest: req.argsDigest, at: new Date().toISOString(), reason: park.reason };
+      if (j.status === 'failed' || j.status === 'needs_review') {
+        transitionJob(j, 'needs_review', { reason: park.reason, source: 'processToolConfirmationAnswers' });
+        j.verifierVerdict = park.reason;
+      }
+    });
+    await broadcast({ flush: true });
+    return;
+  }
+  if (!resume) return;
+  const priorStatus = row.status;
+  // needs_review and pending dispatch straight to 'running'; a finished row
+  // takes the legal edge back to 'pending' first.
+  if (priorStatus === 'completed' || priorStatus === 'failed' || priorStatus === 'skipped') {
+    await mutate((s) => {
+      const j = (s.jobs || []).find((x) => x.slug === row.slug);
+      if (j) transitionJob(j, 'pending', { reason: 'tool confirmation approved: resuming the same session', source: 'processToolConfirmationAnswers' });
+    });
+  }
+  const target = { sessionId: resume.sessionId, confirmation: { tool: req.tool, summary: req.summary || null, argsDigest: req.argsDigest } };
+  const { runId, dir: runDir } = pickRunDir();
+  const siblingJobs = (await readQueue().catch(() => ({ jobs: [] }))).jobs || [];
+  const fresh = siblingJobs.find((x) => x.slug === row.slug) || row;
+  // Not awaited: spawnJob runs the whole job. Its synchronous prefix takes
+  // the session slot and adds the slug to runningSet before returning.
+  spawnJob(fresh, runId, runDir, fresh.cwd || DEFAULT_PROJECT_CWD, target, siblingJobs)
+    .catch((e) => reportSchedulerError('tool confirmation resume failed', row.slug, e));
+  if (!runningSet.has(row.slug)) {
+    // No slot after all: restore the row and keep the request for a later tick.
+    if (priorStatus === 'completed' || priorStatus === 'failed' || priorStatus === 'skipped') {
+      const back = priorStatus;
+      await mutate((s) => {
+        const j = (s.jobs || []).find((x) => x.slug === row.slug);
+        if (j && j.status === 'pending') transitionJob(j, back, { reason: 'tool confirmation resume deferred: no session slot', source: 'processToolConfirmationAnswers' });
+      });
+    }
+    toolClearance.recordPendingConfirmation(request, { now: request.requestedAt || 0 });
+  }
+}
+
 // Serialized ticker: prevents two concurrent tickQueue() calls from racing
 // on the same pending jobs. A simple promise tail suffices since pickNextBatch
 // is synchronous and spawnJob is fire-and-forget.
@@ -9283,6 +9406,12 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
     reclaimTerminalJobOrphansThrottled(state).catch((e) => {
       console.warn('[scheduler] terminal job-worktree orphan reclaim failed', e?.message);
     });
+    // Owner answers to tool-risk 'confirm' requests: approve resumes the SAME
+    // session with a single-use clearance, deny parks confirmation_denied.
+    // Awaited (not fire-and-forget) so a resumed row is in runningSet before
+    // the picker below runs; never throws.
+    await processToolConfirmationAnswers(state);
+    if (stale()) return STALE_TICK;
     // Session-Manager's machine-wide slot pool is the ONLY concurrency limit
     // the picker answers to (plus the memory gate below). The scheduler used
     // to also carry a private `concurrencyCap` of 3 — the exact per-consumer

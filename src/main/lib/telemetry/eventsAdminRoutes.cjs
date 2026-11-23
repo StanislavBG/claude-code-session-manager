@@ -20,7 +20,9 @@
  *       several → 409 { ok: false, error: 'ambiguous epic id', cwds }.
  *     → 400 { ok: false, error: 'invalid query', details } for a malformed
  *       epicId, cursor, kind, limit or cwd.
- *   Calls without epicId take the audit-log path above, unchanged.
+ *   Calls without epicId take the audit-log path above; its epic_state_changed
+ *   rows come from every registered project's epic.status_changed events
+ *   (auditEvents.cjs), so deps.projectRoots also scopes them.
  *
  * Writes no file and no audit row. Auth/loopback binding are the injected
  * localAdminHttp.cjs transport's job (see index.cjs).
@@ -130,7 +132,10 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     let result;
     try {
-      result = readEventsAfter({ after: input.after, kinds: input.kinds, limit: input.limit });
+      /** @type {Parameters<typeof readEventsAfter>[0]} */
+      const opts = { after: input.after, kinds: input.kinds, limit: input.limit };
+      if (typeof deps.projectRoots === 'function') opts.projectRoots = deps.projectRoots;
+      result = readEventsAfter(opts);
     } catch (e) {
       if (e instanceof Error && /** @type {Error & { code?: unknown }} */ (e).code === INVALID_AUDIT_CURSOR) {
         sendJson(res, 400, { ok: false, error: 'invalid query', details: e.message });

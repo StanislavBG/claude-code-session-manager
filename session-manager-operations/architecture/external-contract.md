@@ -377,25 +377,26 @@ Errors: a missing or relative `cwd`, or one with no `session-manager-operations/
 
 ## 4. Events — following state changes
 
-Code: `src/main/lib/epic/epicStateWatcher.cjs` (writes), `src/main/lib/telemetry/auditEvents.cjs` (cursor
-reader), `src/main/lib/telemetry/eventsAdminRoutes.cjs` (route).
+Code: `src/main/lib/epic/epicTransitions.cjs` (writes `epic.status_changed` to the Epic's event log at
+the transition), `src/main/lib/telemetry/auditEvents.cjs` (cursor reader; turns each `epic.status_changed`
+into an `epic_state_changed` row), `src/main/lib/telemetry/eventsAdminRoutes.cjs` (route).
 
 ### The `epic_state_changed` row
 
-The scheduler tick runs the watcher about once a minute, and only **while the app runs**. It compares each
-open Epic's `state` (and `blocked.kind`) with its last snapshot and writes one audit row per change. While
-the app is closed nothing is written; changes made in that time show up as one row on the next tick. The
-very first run only takes a snapshot and writes no rows.
+One row per lifecycle transition (`proposed`→`active`, →`completed`, `completed`→`active`), read from the
+per-Epic event logs of every registered project and merged into the audit-log cursor by `at`. Rows are
+written at the transition itself, so nothing depends on the app ticking. Legacy rows written by the old
+snapshot watcher stay readable.
 
 | Field | Meaning |
 | --- | --- |
-| `at` | ISO time the row was written. |
+| `at` | ISO time of the transition. |
 | `kind` | `"epic_state_changed"`. |
 | `cwd` | The project. |
 | `epicId` | The Epic. |
-| `from` | The old state, or `null` for an Epic seen for the first time. |
-| `to` | The new state. Besides the eight states it can be `"gone"`: the Epic left the open list and is not completed. |
-| `blockedKind` | Present only when the new state is `blocked`. |
+| `from` | The old state: `"awaiting_approval"` (proposed), `"open"` (active), `"closed"` (completed), or `null`. |
+| `to` | The new state, same words. Fine-grained states (`working`, `blocked`, …) come from `GET /admin/epic`. |
+| `blockedKind` | Legacy watcher rows only. |
 | `externalRef` | Present only when the Epic has one. |
 
 ### `GET /admin/events`

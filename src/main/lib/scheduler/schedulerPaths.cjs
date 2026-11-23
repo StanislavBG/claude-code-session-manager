@@ -113,8 +113,6 @@ function taskSwitchesPath() { return assertNotLiveRoot(path.join(schedulerHome()
 function externalRefIndexPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'external-refs.json'), 'externalRefIndexPath'); }
 /** Machine-level "Needs you" items posted by outside apps (feedback-remote/needsYouStore.cjs). */
 function needsYouPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'needs-you.json'), 'needsYouPath'); }
-/** Last-seen outside-facing state of every open Epic (epic/epicStateWatcher.cjs). */
-function epicStateSnapshotPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'epic-state-snapshot.json'), 'epicStateSnapshotPath'); }
 function watchdogLogsDir() { return assertNotLiveRoot(path.join(schedulerHome(), 'logs'), 'watchdogLogsDir'); }
 function restartRequestPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'restart-request.json'), 'restartRequestPath'); }
 function restartingMarkerPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'restarting.json'), 'restartingMarkerPath'); }
@@ -209,7 +207,6 @@ module.exports = {
   taskSwitchesPath,
   externalRefIndexPath,
   needsYouPath,
-  epicStateSnapshotPath,
   adminTokenPath,
   machineStateLogCwd,
   worktreeBase,

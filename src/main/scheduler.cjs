@@ -1548,28 +1548,6 @@ function quarantinedCwdSet(state) {
 }
 
 /**
- * Best-effort epic_state_changed emission for the tick (lib/epic/epicStateWatcher.cjs).
- * Watches every known project cwd except quarantined shards. Never rejects:
- * any failure is logged as a warning so it can never hold up dispatch.
- * SM_EPIC_STATE_WATCH_DISABLE=1 turns it off. `deps` is a test seam.
- * @param {any} state
- * @param {{ watch?: (o: { cwds: string[], jobs: any }) => Promise<unknown>, listCwds?: () => string[] }} [deps]
- * @returns {Promise<void>}
- */
-async function runEpicStateWatchForTick(state, deps = {}) {
-  if (process.env.SM_EPIC_STATE_WATCH_DISABLE === '1') return;
-  try {
-    const watch = deps.watch ?? require('./lib/epic/epicStateWatcher.cjs').runEpicStateWatch;
-    const listCwds = deps.listCwds ?? allProjectCwds;
-    const quarantined = quarantinedCwdSet(state);
-    const cwds = listCwds().filter((c) => !quarantined.has(c));
-    await watch({ cwds, jobs: state?.jobs });
-  } catch (e) {
-    console.warn('[scheduler] epic state watch failed', /** @type {any} */ (e)?.message);
-  }
-}
-
-/**
  * Atomically mint a brand-new parallel-group NN for a PRD about to be
  * authored under the given project's own PRDs dir (falls back to
  * DEFAULT_PROJECT_CWD's dir when no cwd is supplied). See
@@ -9211,12 +9189,6 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
     reclaimTerminalJobOrphansThrottled(state).catch((e) => {
       console.warn('[scheduler] terminal job-worktree orphan reclaim failed', e?.message);
     });
-    // Emit epic_state_changed audit rows for Epics whose outside-facing state
-    // moved since the last tick. Best-effort and fire-and-forget: never awaited,
-    // must never hold up dispatch.
-    runEpicStateWatchForTick(state).catch((e) => {
-      console.warn('[scheduler] epic state watch failed', e?.message);
-    });
     // Session-Manager's machine-wide slot pool is the ONLY concurrency limit
     // the picker answers to (plus the memory gate below). The scheduler used
     // to also carry a private `concurrencyCap` of 3 — the exact per-consumer
@@ -13263,8 +13235,7 @@ const remote = {
 
   // Full queue rows for computeEpicOutsideState (lib/epic/epicOutsideState.cjs
   // reads cancelledAt, statusHistory, error, finishedAt, reviewNotice). GET
-  // /admin/epic(s) and the tick watcher (runEpicStateWatchForTick, full
-  // state.jobs) must read the same rows, or a cancelled row paints an Epic
+  // /admin/epic(s) must read the same rows as the tick (full state.jobs), or a cancelled row paints an Epic
   // 'blocked'. Deep copy, never the live objects — and never project here.
   async listJobRows() {
     const state = await readQueue();
@@ -13821,7 +13792,6 @@ module.exports = {
   pickForProject,
   reapDeadRunningJobs,
   runBranchSweep,
-  runEpicStateWatchForTick,
   pollRecoveryClearSource,
   memoryLimitedBatchSize,
   availableForJobs,

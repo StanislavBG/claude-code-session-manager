@@ -187,35 +187,24 @@ test('record and receipt field names equal the keys getEpicRecord builds with re
   expect(Object.keys(rec.receipt)).toEqual([...CONTRACT.receiptFields]);
 });
 
-// ── epic_state_changed keys from a real watcher row read back by readEventsAfter ──
+// ── epic_state_changed keys from a real epic.status_changed event read back by readEventsAfter ──
 
-test('an epic_state_changed event from the watcher carries only listed keys and always the core ones', async () => {
-  const { configureEpicStateWatcher, runEpicStateWatch } = require('../lib/epic/epicStateWatcher.cjs');
+test('an epic_state_changed event from the event log carries only listed keys and always the core ones', async () => {
+  const { transitionEpic } = require('../lib/epic/epicTransitions.cjs');
   const { readEventsAfter } = require('../lib/telemetry/auditEvents.cjs');
-  const cwd = await mkTmp('sm-contract-watch-cwd-');
+  const cwd = fs.realpathSync(await mkTmp('sm-contract-epicstate-cwd-'));
   const ps = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
   fs.mkdirSync(ps, { recursive: true });
-  const session = (id, extra = {}) => ({
-    id, cwd, goalText: `Title ${id}`, claudeSessionId: `sess-${id}`, status: 'active',
-    tag: 'feature', agentType: 'architect', createdAt: '2026-11-01T00:00:00.000Z', ...extra,
-  });
-  const writeIndex = (list) => fs.writeFileSync(path.join(ps, 'active-index.json'), JSON.stringify({
-    sessions: Object.fromEntries(list.map((s) => [s.id, s])), events: {},
+  fs.writeFileSync(path.join(ps, 'active-index.json'), JSON.stringify({
+    sessions: { 'e-1': { id: 'e-1', cwd, status: 'active', source: { externalRef: 'ref-1' } } }, events: {},
   }));
-  configureEpicStateWatcher({ isTabBusy: () => false, projectRoots: () => [cwd] });
-  try {
-    writeIndex([session('e-1', { source: { externalRef: 'ref-1' } }), session('e-gone')]);
-    await runEpicStateWatch({ cwds: [cwd], jobs: [] }); // seeds silently
-    writeIndex([session('e-1', { source: { externalRef: 'ref-1' } }), session('e-new', { createdAt: '2026-11-03T00:00:00.000Z' })]);
-    const failed = { epicId: 'e-1', slug: '0001-x', status: 'failed', finishedAt: '2026-11-02T00:00:00.000Z' };
-    const changes = await runEpicStateWatch({ cwds: [cwd], jobs: [failed] });
-    expect(changes.length).toBe(3);
-  } finally {
-    configureEpicStateWatcher({ isTabBusy: () => false });
-  }
-
-  const { events } = readEventsAfter({ after: 'start', kinds: ['epic_state_changed'] });
-  expect(events).toHaveLength(3);
+  transitionEpic({ id: 'e-1', cwd, status: 'proposed' }, 'active', { reason: 'approve', source: 'test' });
+  transitionEpic({ id: 'e-2', cwd, status: 'proposed' }, 'active', { reason: 'approve', source: 'test' });
+  // transitionEpic appends fire-and-forget; wait for both rows to land.
+  const read = () => readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], projectRoots: () => [cwd] });
+  for (let i = 0; i < 200 && read().events.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+  const { events } = read();
+  expect(events).toHaveLength(2);
   const allowed = new Set(CONTRACT.epicStateChangedFields);
   const seen = new Set();
   for (const ev of events) {
@@ -223,8 +212,8 @@ test('an epic_state_changed event from the watcher carries only listed keys and 
     for (const k of ['at', 'kind', 'cwd', 'epicId', 'to']) expect(ev, `required key ${k}`).toHaveProperty(k);
     expect(ev.kind).toBe('epic_state_changed');
   }
-  // The rows exercised every listed key at least once.
-  expect([...seen].sort()).toEqual([...CONTRACT.epicStateChangedFields].sort());
+  // Every listed key but blockedKind (legacy watcher rows only) is exercised.
+  expect([...seen].sort()).toEqual(CONTRACT.epicStateChangedFields.filter((k) => k !== 'blockedKind').sort());
 });
 
 // ── epic_cross_project_reply keys from a real event-mode reply read back by readEventsAfter ──

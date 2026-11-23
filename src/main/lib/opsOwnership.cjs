@@ -30,6 +30,9 @@
  *   - lib/tasks/taskLedger.cjs        (raw fs append + atomicFs bodies)
  *   - lib/claude/agentSnapshot.cjs    (atomicFs, write-once snapshots)
  *   - lib/telemetry/webhookRegistry.cjs (atomicFs, 0600 subscriptions file)
+ *   - lib/epic/epicPurge.cjs          (human-only Epic purge: deletes each
+ *     namespace's files AS that namespace's owner — the one exception to
+ *     keep-forever retention; it never borrows another owner's id)
  * Renderer callers declare their writer id through the IPC payload.
  */
 

@@ -3,7 +3,7 @@
  * (size `full`), over one `window.api.projectPages.mdNetwork` scan the caller already holds.
  * Header: the scan's counts, a search box, an optional Map | Docs toggle and Close. Body: the
  * canvas (MdMapGraph over `layoutMdNetwork(network, { expanded, minRowGap: 22 })`) with a
- * Zoom in / Zoom out / Fit toolbar, beside a 420px inspector column.
+ * Zoom in / Zoom out / Fit toolbar (top-left) and the shared MdMapLegend (top-right), beside a 420px inspector column.
  *
  * Canvas: wheel zooms around the pointer (scale 0.4..4), dragging the background pans, Fit
  * scales the whole layout into the canvas. Clicking a folder node expands or folds it; any
@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { Modal } from '../../../ui/Modal'
 import { fixListCount } from './MdFixList'
-import { MdMapGraph, layoutMdNetwork, type MdMapEdge, type MdMapNode } from './MdLinkMap'
+import { MdMapGraph, MdMapLegend, layoutMdNetwork, type MdMapEdge, type MdMapNode } from './MdLinkMap'
 import type { MdNetwork } from '../../../../../preload/api'
 
 export interface MdNetworkExplorerProps {
@@ -312,6 +312,13 @@ export function MdNetworkExplorer({ network, initialPath = null, onClose, render
                 <button type="button" data-testid="md-explorer-fit" onClick={fit} className={toolButton}>
                   Fit
                 </button>
+              </div>
+              <div
+                data-testid="md-explorer-legend"
+                aria-label="Legend"
+                className="pointer-events-none absolute right-3 top-3 flex max-w-[calc(100%-10rem)] flex-wrap justify-end gap-x-3.5 gap-y-1 rounded border border-rule-inner bg-bg-hi px-2.5 py-1.5"
+              >
+                <MdMapLegend layout={layout} />
               </div>
               <svg role="img" aria-label="Markdown link map" className="block h-full w-full">
                 <rect

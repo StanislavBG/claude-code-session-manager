@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { MdMapGraph, MdNetworkCards, layoutMdNetwork, type MdLinkMapLayout, type MdMapNode } from '../MdLinkMap'
+import { MdMapGraph, MdMapLegend, MdNetworkCards, layoutMdNetwork, type MdLinkMapLayout, type MdMapNode } from '../MdLinkMap'
 import { useToast } from '../../../../../state/toast'
 import type { MdDoc, MdDocRole, MdNetwork, MdNetworkEdge, MdNetworkFinding, MdNetworkNode } from '../../../../../../preload/api'
 
@@ -323,6 +323,20 @@ describe('MdNetworkCards LINK MAP', () => {
     ])
     act(() => root!.render(<MdNetworkCards cwd={CWD} network={withCensus(network([doc('CLAUDE.md', 0, 1, 0), doc('README.md', 1)], [{ from: 'CLAUDE.md', to: 'README.md' }]), { 'CLAUDE.md': 'map', 'README.md': 'doc' })} />))
     expect(all('md-link-map-legend').map((l) => l.textContent)).toEqual(['Map', 'Topic doc'])
+  })
+
+  it('the card renders the shared MdMapLegend: same entries as MdMapLegend over the same layout', () => {
+    mount()
+    const header = q('md-link-map-legend')!.parentElement!
+    const card = all('md-link-map-legend').map((l) => l.outerHTML)
+    const solo = document.createElement('div')
+    document.body.appendChild(solo)
+    const soloRoot = createRoot(solo)
+    act(() => soloRoot.render(<MdMapLegend layout={layoutMdNetwork(NET)} />))
+    expect(Array.from(solo.querySelectorAll('[data-testid="md-link-map-legend"]')).map((l) => l.outerHTML)).toEqual(card)
+    expect(header.querySelectorAll('[data-testid="md-link-map-legend"]').length).toBe(card.length)
+    act(() => soloRoot.unmount())
+    solo.remove()
   })
 
   it('draws broken links as dashed accent edges and missing targets as dashed accent nodes', () => {

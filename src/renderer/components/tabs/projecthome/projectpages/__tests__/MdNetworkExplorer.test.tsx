@@ -187,6 +187,23 @@ describe('MdNetworkExplorer', () => {
     expect(q('docs-table')).toBeNull()
   })
 
+  it('the Graph view shows the shared legend top-right in the canvas; List view has none', () => {
+    render({ renderDocs: () => <div data-testid="docs-table">docs</div> })
+    const legend = q('md-explorer-legend')
+    expect(legend).not.toBeNull()
+    expect(legend!.parentElement).toBe(q('md-explorer-canvas'))
+    expect(legend!.className).toContain('right-3')
+    expect(legend!.className).toContain('top-3')
+    expect(q('md-explorer-zoom-in')!.parentElement!.className).toContain('left-3')
+    const labels = () => Array.from(legend!.querySelectorAll('[data-testid="md-link-map-legend"]')).map((l) => l.textContent)
+    expect(labels()).toEqual(['Map', 'Folder note', 'Topic doc', 'Finding', 'Missing'])
+    click(q('md-explorer-view-docs'))
+    expect(q('md-explorer-legend')).toBeNull()
+    expect(document.body.querySelector('[data-testid="md-link-map-legend"]')).toBeNull()
+    click(q('md-explorer-view-map'))
+    expect(q('md-explorer-legend')).not.toBeNull()
+  })
+
   it('zoom buttons change the transform and Fit resets it', () => {
     render()
     const viewport = () => q('md-explorer-viewport')?.getAttribute('transform')

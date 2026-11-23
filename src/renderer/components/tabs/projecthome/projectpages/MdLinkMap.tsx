@@ -478,6 +478,20 @@ export function MdMapGraph({ layout, focus, hoveredId, selectedId = null, onHove
   )
 }
 
+/** The legend entries for the kinds drawn in `layout` — the LINK MAP card and the explorer's Graph view both render this. */
+export function MdMapLegend({ layout }: { layout: MdLinkMapLayout }) {
+  return (
+    <>
+      {LEGEND.filter((l) => layout.nodes.some(l.shown)).map((l) => (
+        <span key={l.label} data-testid="md-link-map-legend" className="flex items-center gap-1.5 text-[11.5px] text-fg-faint">
+          <span className={`flex-none rounded-full ${l.swatch}`} />
+          {l.label}
+        </span>
+      ))}
+    </>
+  )
+}
+
 /** The LINK MAP card: legend, SVG and hover caption. */
 export function MdLinkMap({
   layout,
@@ -511,12 +525,7 @@ export function MdLinkMap({
       <div className="flex flex-wrap items-center gap-3.5 border-b border-rule-inner px-4 py-3">
         <span className="font-mono text-[10.5px] tracking-[.1em] text-fg-faint">LINK MAP</span>
         <span className="flex-1" />
-        {LEGEND.filter((l) => layout.nodes.some(l.shown)).map((l) => (
-          <span key={l.label} data-testid="md-link-map-legend" className="flex items-center gap-1.5 text-[11.5px] text-fg-faint">
-            <span className={`flex-none rounded-full ${l.swatch}`} />
-            {l.label}
-          </span>
-        ))}
+        <MdMapLegend layout={layout} />
         {onExplore && (
           <button
             type="button"

@@ -2,5 +2,6 @@
   "registry": "npm",
   "packageName": "claude-code-session-manager",
   "versionBumpPolicy": "conventional-commits",
-  "gates": ["typecheck", "test:unit"]
+  "gates": ["typecheck", "test:unit"],
+  "gateTimeoutSeconds": { "test:unit": 900 }
 }

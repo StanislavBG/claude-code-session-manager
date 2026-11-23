@@ -39,7 +39,8 @@ to walk back once published.
 
 ## 3. Gate and publish preflight
 
-Run each name in `build-target.json`'s `gates` as `timeout 300 npm run <gate>`, in order,
+Run each name in `build-target.json`'s `gates` as `timeout <gateTimeoutSeconds[gate] or 300> npm run <gate>`
+(default 300 when `gateTimeoutSeconds` has no entry for that gate), in order,
 against `HEAD`, with no `--skip` flags. With no `gates` entry, run the pre-commit checks the
 project's `CLAUDE.md` or README requires; with none documented, say so in the report. Any
 failure → stop: report the command and its real output, and that no bump, tag or publish
@@ -94,7 +95,8 @@ have no `release.yml`) always use steps 5-11:
 5. `mkdir -p "$HOME/.cache/sm-publish" && git worktree add "$HOME/.cache/sm-publish/v<version>" v<version>`
    — never under `/tmp` or `os.tmpdir()`: some test suites (this repo's included) treat those
    paths as fixtures and fail there.
-6. In the worktree: `npm ci`, then the gates again (step 3), then the project's build. Check
+6. In the worktree: `npm ci`, then the gates again (step 3: `timeout <gateTimeoutSeconds[gate] or 300>
+   npm run <gate>`, default 300 when a gate has no entry), then the project's build. Check
    every `files` entry in `package.json` exists before publishing; stop on any failure.
    A cold `test:unit` in a fresh publish worktree can time out under load; rerun the failed files, then the full suite, before calling the gate red — never publish on the partial rerun.
 7. `npm publish` from inside the worktree, so `prepublishOnly` builds there too.

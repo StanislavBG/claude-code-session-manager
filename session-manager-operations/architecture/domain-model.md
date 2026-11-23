@@ -343,7 +343,15 @@ under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
 - **A Task never mints an Epic.** The single-creator law is unchanged: nothing about a Task touches
   `epicMint.cjs` or `MINT_AUTHORITIES`.
 - **Only a script starts one**, via `POST /admin/tasks`, and only while a human has **'Scripts may run Tasks'**
-  on for that project (Scheduler → Tasks pill; `lib/tasks/taskSwitch.cjs`). Switch off = the route refuses.
+  on for that project (`lib/tasks/taskSwitch.cjs`). Switch off = the route refuses. The switch has **exactly two
+  writers** (owner decision, 2026-11-23): a human clicking the Scheduler → Tasks pill, or an agent in a human's
+  chat session calling `task_switch_set` (`POST /admin/tasks/switch`) on the human's verified words. The agent
+  write is accepted only when the quote is found in `humanPromptLedger` for that session, names the switch, is
+  newer than the switch's last change, and the target is the session's own project or one the quote names.
+  Scripts, scheduled jobs and Tasks are refused — their prompts are never in the ledger, and the switch is the
+  human's consent to scripts, so a script must not grant it to itself. Any other write (a direct
+  `setTaskSwitch` call, a hand edit) is outside the law and shows as "Changed outside Session Manager".
+  Contract and the one such write so far: [tasks.md § the human switch](tasks.md#the-human-switch).
 - **The call is the caller's, not ours.** `--model` and `--effort` come from the named persona; the prompt is
   passed unchanged and no persona body is appended. `--no-session-persistence` applies unless the caller asks
   to persist or resume a session; a persisted Task's transcript is skipped by History, so its cost is counted

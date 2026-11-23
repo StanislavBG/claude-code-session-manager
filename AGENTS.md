@@ -61,7 +61,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   `epicMint.cjs`: `MINT_AUTHORITIES` = New Epic IPC + `crossProjectFeedback.cjs`; a third = domain-model change.
   **No agent proposal channel** — an agent needing work runs `/develop` in its own Epic; PRDs join an Epic, never conjure one.
 - **A TASK is one headless `claude -p` run for a project** (no worktree/git/Epic/PRD), script-started only behind
-  the human 'Scripts may run Tasks' switch ([why](session-manager-operations/architecture/domain-model.md#tasks)).
+  'Scripts may run Tasks', set by a human or an agent quoting the human ([why](session-manager-operations/architecture/domain-model.md#tasks)).
 - **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`feedback_open_session`);
   a thread reply lands in the asking Epic (`feedback_reply`). Auto-approved only on a verified
   human quote or macro. Same-cwd → `/develop`.

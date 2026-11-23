@@ -22,9 +22,94 @@ app boot, so read the file again after a connection error or a `401`.
 ## The human switch
 
 To run or import a Task, a human must turn on **'Scripts may run Tasks'** for the project. The switch is the
-Scheduler → Tasks pill, and `lib/tasks/taskSwitch.cjs` reads it. No route, MCP tool or script can change it.
-While the switch is off, `POST /admin/tasks` and `POST /admin/tasks/import` answer `403 tasks_disabled` with a
-`hint`. The two read routes work whether the switch is on or off.
+Scheduler → Tasks pill, and `lib/tasks/taskSwitch.cjs` reads it. It has exactly two writers: the human's click
+(`tasks:set-switch` IPC), and an agent in a human's chat session carrying the human's verified words through
+[`POST /admin/tasks/switch`](#post-admintasksswitch--set-the-switch-on-the-humans-words) (MCP `task_switch_set`).
+A script, a scheduled job or a Task cannot change it. Why: [domain-model.md#tasks](domain-model.md#tasks).
+
+While the switch is off, `POST /admin/tasks` and `POST /admin/tasks/import` answer `403 tasks_disabled` with
+this `hint` (`SWITCH_HINT` in `lib/tasks/taskAdminRoutes.cjs`), word for word:
+
+> Turn on 'Scripts may run Tasks' for this project: a human flips it on the Scheduler → Tasks page, or an agent in a Session Manager chat calls task_switch_set with the human's own words asking for it.
+
+The two read routes work whether the switch is on or off. Before the switch check, both write routes re-sync
+the held interactive slot from the switch file (`taskSwitch.syncInteractiveReserve`; a failure is ignored), so
+a switch file changed outside the IPC still moves the held slot at the next Task call.
+
+### Who changed it: `by`
+
+Each project entry in the machine-level `task-switches.json` (`schedulerPaths.taskSwitchesPath()`) is
+`{ enabled, changedAt, by }`. `by` records the last writer:
+
+| `by` | Writer |
+| --- | --- |
+| `{ via: 'ui' }` | A human click on the Scheduler → Tasks pill |
+| `{ via: 'agent', claudeSessionId, quote, promptAt }` | `POST /admin/tasks/switch`; `promptAt` is when the human typed the quoted prompt |
+| `{ via: 'unknown' }` | Read for an entry with no well-formed `by` (written before attribution, by a direct module call or by hand). Reads never rewrite the file; the Tasks page shows "Changed outside Session Manager". |
+
+### The one outside write so far (2026-11-23)
+
+Burrow's entry, `changedAt` `2026-11-23T19:04:59.848Z`, was written by a direct `setTaskSwitch` call from
+Burrow's architect on the owner's instruction, before the agent path existed. The owner authorized it, so it
+is **kept**. It reads as `by: { via: 'unknown' }` until the switch is set again. Because it bypassed both
+writers, it left no `task_switch_changed` audit event, and the running app's held interactive slot stayed
+unsynced until the app restarted (the Task routes now re-sync it on every call, see above).
+
+## `POST /admin/tasks/switch` — set the switch on the human's words
+
+The route behind the MCP tool `task_switch_set({ enabled, humanRequestQuote, cwd? })`
+(`lib/tasks/taskSwitchRoute.cjs`). The tool fills `originClaudeSessionId` from `SM_CHAT_SESSION_ID` and
+`originProjectRoot` from `SM_PROJECT_ROOT`, never from the caller's arguments, and refuses outright in a
+scheduled job or a Task.
+
+Body (strict, at most **64 KiB**):
+
+```json
+{
+  "enabled": true,
+  "humanRequestQuote": "turn on Scripts may run Tasks for this project",
+  "originClaudeSessionId": "<the chat session's claudeSessionId>",
+  "cwd": "/abs/project/root",
+  "originProjectRoot": "/abs/project/root"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `enabled` | boolean, required |
+| `humanRequestQuote` | 1–2000 chars, required; verbatim from a prompt the human typed in that session |
+| `originClaudeSessionId` | 1–128 chars, required |
+| `cwd` | optional; must be a project root. Absent = the calling session's own project |
+| `originProjectRoot` | optional hint for resolving the calling session's project |
+
+Checks run in order; every refusal writes and audits nothing. On success the route writes the switch with
+`by: { via: 'agent', claudeSessionId, quote, promptAt }`, appends one `task_switch_changed` audit event,
+re-syncs the held interactive slot, and answers `200`:
+
+```json
+{
+  "ok": true,
+  "cwd": "/abs/project/root",
+  "enabled": true,
+  "changedAt": "2026-11-23T20:00:00.000Z",
+  "by": { "via": "agent", "claudeSessionId": "…", "quote": "…", "promptAt": "…" },
+  "previous": { "enabled": false, "by": { "via": "ui" } }
+}
+```
+
+`previous.by` is `null` when the project had no entry. Setting the value the switch already has still
+re-stamps `changedAt` and `by`.
+
+Errors (`{ ok: false, error, reason }`; `400` carries `details` instead of `reason`):
+
+| HTTP | `error` | Meaning |
+| --- | --- | --- |
+| 400 | `invalid_request` | Body unreadable or over 64 KiB, invalid JSON, schema failure, `cwd` not a project root, or no target (no `cwd` and the calling session's project cannot be resolved) |
+| 403 | `human_request_unverified` | The quote is not in a prompt the human typed in `originClaudeSessionId` (`humanPromptLedger` is the only proof) |
+| 403 | `quote_does_not_name_switch` | The quote does not say 'Scripts may run Tasks' (case, quote-mark and hyphen variants allowed) |
+| 403 | `quote_does_not_name_project` | The target is not the calling session's project and the quote does not name it |
+| 409 | `request_older_than_switch` | The quoted prompt is not newer than the switch's last change: one instruction authorizes one write and never undoes a later click. Ask the human again. |
+| 500 | `switch_write_failed` | Writing the switch file threw (`details`) |
 
 ## `POST /admin/tasks` — run one Task
 

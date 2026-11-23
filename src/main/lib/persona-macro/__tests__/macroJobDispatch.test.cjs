@@ -326,3 +326,52 @@ test('built-in press input is unchanged and the result adds entryId/stage', asyn
   const m = mk();
   expect(await dispatchMacroJob({ ...base, macroId: 'builtin-competitor-matrix', extraInstructions: 'Competitors: Foo' }, m)).toMatchObject({ entryId: null, stage: null });
 });
+
+test('built-in Demo Video with reviewStage runs the review stage on material.json', async () => {
+  const d = mk();
+  const r = await dispatchMacroJob({ ...base, reviewStage: true, extraInstructions: 'Replace entry: vid-b1' }, d);
+  expect(r).toMatchObject({ ok: true, entryId: 'vid-b1', stage: 'review' });
+  const i = d.createPrd.mock.calls[0][0];
+  expect(i.title).toBe('Demo Video: review material');
+  expect(i.deliverable).toBe('artifact');
+  expect(i.artifactPaths).toEqual([MAT('vid-b1')]);
+  expect(i.files).toEqual([MAT('vid-b1')]);
+  expect(i.gate).toHaveLength(1);
+  expect(i.gate[0]).toContain(`/tmp/proj/${MAT('vid-b1')}`);
+  expect(i.goal).toContain('Review stage: save the review material for entry vid-b1 with one project_video_review_write call (images and short text), then end; do not build or save the video in this run.');
+  expect(i.acceptanceCriteria[0]).toContain('the project_video_review_write tool');
+});
+
+test('built-in Demo Video: approved review is final, changes review is review', async () => {
+  const a = mk();
+  const ra = await dispatchMacroJob({ ...base, reviewStage: true, extraInstructions: 'Replace entry: vid-b1', review: { decision: 'approved', at: '2026-11-23T10:00:00Z' } }, a);
+  expect(ra).toMatchObject({ ok: true, entryId: 'vid-b1', stage: 'final' });
+  const ia = a.createPrd.mock.calls[0][0];
+  expect(ia.title).toBe('Demo Video: background build');
+  expect(ia.artifactPaths).toEqual([VID('vid-b1')]);
+  expect(ia.goal).toContain('Review: approved by the owner at 2026-11-23T10:00:00Z');
+  expect(ia.goal).not.toContain('Review stage:');
+  const c = mk();
+  const rc = await dispatchMacroJob({ ...base, extraInstructions: 'Replace entry: vid-b1', review: { decision: 'changes', note: 'more cats' } }, c);
+  expect(rc.stage).toBe('review');
+  const ic = c.createPrd.mock.calls[0][0];
+  expect(ic.artifactPaths).toEqual([MAT('vid-b1')]);
+  expect(ic.goal).toContain('Review: changes requested: more cats');
+  expect(ic.goal).toContain('Review stage:');
+  const f = mk();
+  expect((await dispatchMacroJob({ ...base, extraInstructions: 'Review: approved by the owner at x' }, f)).stage).toBe(null);
+  expect((await dispatchMacroJob({ ...base, reviewStage: 'yes' }, mk())).stage).toBe(null);
+});
+
+test('a non-reviewable built-in ignores reviewStage and review', async () => {
+  for (const [macroId, extraInstructions] of [['builtin-project-home', 'Page: FAQ'], ['builtin-competitor-matrix', 'Competitors: Foo']]) {
+    const plain = mk(); const asked = mk();
+    await dispatchMacroJob({ ...base, macroId, extraInstructions }, plain);
+    const r = await dispatchMacroJob({ ...base, macroId, extraInstructions, reviewStage: true, review: { decision: 'changes', note: 'x' } }, asked);
+    expect(r.stage).toBe(null);
+    const [p, q] = [plain, asked].map((d) => d.createPrd.mock.calls[0][0]);
+    expect(q.artifactPaths).toEqual(p.artifactPaths);
+    expect(q.title).toBe(p.title);
+    expect(q.goal).not.toContain('Review stage:');
+  }
+});

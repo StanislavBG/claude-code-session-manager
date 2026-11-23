@@ -56,6 +56,8 @@ const BUILTIN_MACROS = Object.freeze([
       estimateMinutes: 60,
       entryKind: 'video',
       artifactPaths: Object.freeze(['session-manager-operations/project-pages/videos/{id}/index.html']),
+      // A press may opt into the review stage (reviewStage: true); see macroJobDispatch.cjs.
+      reviewable: true,
     }),
     priorPrompts: Object.freeze([
       'Generate a 30-second demo video for this project as one self-contained HTML/JavaScript animation that presents its main goals and key features, grounded only in what you read in the repository. Save it with a single project_demo_video_write call.',

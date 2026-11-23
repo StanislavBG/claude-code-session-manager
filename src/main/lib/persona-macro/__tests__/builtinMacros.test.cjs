@@ -139,7 +139,9 @@ test('built-in macros declare a frozen background job', () => {
     estimateMinutes: 60,
     entryKind: 'video',
     artifactPaths: ['session-manager-operations/project-pages/videos/{id}/index.html'],
+    reviewable: true,
   });
+  for (const m of BUILTIN_MACROS) if (m.id !== 'builtin-demo-video') expect(m.job?.reviewable).toBeUndefined();
   expect(home.job).toEqual({
     estimateMinutes: 20,
     entryKind: 'knowledge',
@@ -232,7 +234,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
-  expect(sha('builtin-demo-video')).toBe('41ddc08d55b1319720efb1857910a9542f739a0ff1124cf180ad200f2b4adf39');
+  expect(sha('builtin-demo-video')).toBe('e805a63d2c034933a141d89d412f7208402b586b6660db4f72604f89795e252d');
   expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');

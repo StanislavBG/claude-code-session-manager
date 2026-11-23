@@ -9,6 +9,8 @@
  * A project's own Video tool (library macro, surface 'project-video', projects
  * [cwd], with a job) dispatches the same way: artifact-only, or a committing PRD
  * when job.repoPaths is set, with an optional review stage when job.review is set.
+ * A built-in whose job.reviewable is true (Demo Video) runs that same review
+ * stage when the press passes reviewStage: true or a review decision.
  *
  * Plain Node, no Electron imports; all I/O is injected.
  */
@@ -91,8 +93,19 @@ function resolveProjectTool(macros, macroId, cwd) {
   return m;
 }
 
+// Review stage: a project tool with job.review always reviews first; a built-in
+// with job.reviewable reviews only when the press opts in (reviewStage === true)
+// or a 'changes' decision sends it back. An approved review is the final build.
+function stageFor(tool, builtin, review, reviewStage) {
+  const decision = review && typeof review === 'object' ? review.decision : undefined;
+  if (tool) return tool.job.review ? (decision === 'approved' ? 'final' : 'review') : null;
+  if (!builtin || builtin.job.reviewable !== true) return null;
+  if (decision === 'approved') return 'final';
+  return reviewStage === true || decision === 'changes' ? 'review' : null;
+}
+
 async function dispatchMacroJob(
-  { cwd, macroId, epicId, extraInstructions, effort, inputValues, review } = {},
+  { cwd, macroId, epicId, extraInstructions, effort, inputValues, review, reviewStage } = {},
   { createPrd, listRows, archivePrd, builtins = BUILTIN_MACROS, macros = [], now = Date.now } = {},
 ) {
   const builtin = (builtins || []).find((m) => m && m.id === macroId);
@@ -115,9 +128,9 @@ async function dispatchMacroJob(
   const extra = [stripReviewLines(typeof extraInstructions === 'string' ? extraInstructions : ''), rLine].filter(Boolean).join('\n');
   const entryKind = tool ? 'video' : macro.job.entryKind;
   const entryId = entryKind ? entryIdFor(entryKind, extra, t) : null;
-  const stage = tool && tool.job.review ? (review && review.decision === 'approved' ? 'final' : 'review') : null;
+  const stage = stageFor(tool, builtin, review, reviewStage);
   const repoPaths = tool && Array.isArray(tool.job.repoPaths) && tool.job.repoPaths.length ? tool.job.repoPaths.slice() : null;
-  const artifactPaths = tool
+  const artifactPaths = tool || stage === 'review'
     ? [(stage === 'review' ? REVIEW_MATERIAL_REL : VIDEO_INDEX_REL).split('{id}').join(entryId)]
     : macro.job.artifactPaths.map((p) => (entryId ? p.split('{id}').join(entryId) : p));
   const absPaths = artifactPaths.map((p) => path.join(cwd, p));

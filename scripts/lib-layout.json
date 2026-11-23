@@ -48,6 +48,7 @@
   "dodDrainHook": "scheduler",
   "developLoopSpawn": "epic",
   "effectiveModelInfo": "claude",
+  "environmentProfiles": "claude",
   "encodeCwd": "util",
   "epicAttachments": "epic",
   "epicContextDigest": "epic",

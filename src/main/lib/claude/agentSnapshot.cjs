@@ -5,7 +5,7 @@
  * agent), stored locally and content-addressed.
  *
  * A snapshot freezes exactly the agent definition a run used:
- *   { name, bodySha256, body, model, effort, tools, mcpServers, packs, seedVersion }
+ *   { name, bodySha256, body, model, effort, tools, mcpServers, packs, seedVersion, environment }
  * Its id is the sha256 of its canonical JSON (keys sorted at every depth), so
  * equal definitions share one id and any edit (body, model, tools, ...) mints
  * a new one. A resume can therefore re-run precisely the definition it pinned.
@@ -23,6 +23,11 @@
  *
  * mcpServers = the server names named by the persona's mcp__<server>__<tool>
  * tools (personaToolScope.cjs's naming rule) until personas declare servers.
+ *
+ * environment = { id, hash } of the persona's `environment:` profile
+ * (environmentProfiles.cjs's loadEnvironment; absent = headless-default), so
+ * an edit to the profile file mints a new snapshot. An unknown or invalid
+ * profile is refused ({ code: 'environment_unknown'|'environment_invalid' }).
  *
  * Not wired into dispatch here (ma-agent-snapshot-pin-dispatch does that).
  */
@@ -88,7 +93,19 @@ async function buildAgentSnapshot({ cwd, agentType, packs, deps = {} } = {}) {
 
   const { effort } = resolveEffort({ cwd, agentType: name, deps });
   let seedVersion = null;
-  try { seedVersion = seedVersionOf((readPersona(name, { ...deps, cwd }) || {}).fm); } catch { /* stays null */ }
+  let fm = null;
+  try { fm = (readPersona(name, { ...deps, cwd }) || {}).fm || null; } catch { /* stays null */ }
+  seedVersion = seedVersionOf(fm);
+
+  const loadEnvironment = deps.loadEnvironment || require('./environmentProfiles.cjs').loadEnvironment;
+  const envName = fm && typeof fm.environment === 'string' && fm.environment.trim() ? fm.environment.trim() : null;
+  const env = loadEnvironment({ cwd, name: envName });
+  if (env.code) {
+    const detail = env.code === 'environment_invalid'
+      ? `environment "${env.name}" is invalid (${env.file}): ${(env.errors || []).join('; ')}`
+      : `environment "${env.name}" is not declared (no project, global or built-in profile)`;
+    return { id: null, snapshot: null, refusal: { code: env.code, detail } };
+  }
 
   const body = resolved.systemPrompt || '';
   const tools = Array.isArray(resolved.tools) ? resolved.tools.map(String) : null;
@@ -102,6 +119,7 @@ async function buildAgentSnapshot({ cwd, agentType, packs, deps = {} } = {}) {
     mcpServers: mcpServersFromTools(tools),
     packs: Array.isArray(packs) ? packs.map(String) : [],
     seedVersion,
+    environment: { id: env.id, hash: env.hash },
   };
   return { id: snapshotId(snapshot), snapshot, refusal: null };
 }

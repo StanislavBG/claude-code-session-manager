@@ -46,7 +46,7 @@ test('builds the frozen definition from the persona resolvers', async () => {
   const { id, snapshot, refusal } = await snap.buildAgentSnapshot({ cwd, agentType: NAME, packs: ['p1'] });
   expect(refusal).toBeNull();
   expect(Object.keys(snapshot).sort()).toEqual(
-    ['body', 'bodySha256', 'effort', 'mcpServers', 'model', 'name', 'packs', 'seedVersion', 'tools'],
+    ['body', 'bodySha256', 'effort', 'environment', 'mcpServers', 'model', 'name', 'packs', 'seedVersion', 'tools'],
   );
   expect(snapshot.name).toBe(NAME);
   expect(snapshot.body).toBe('You are the snapshot tester.');

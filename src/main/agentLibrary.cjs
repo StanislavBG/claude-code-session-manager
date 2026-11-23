@@ -99,8 +99,12 @@ function decodeLine(s) {
  * this persona loads (personaToolScope.cjs passes them under
  * --strict-mcp-config; an unknown name parks the job). The Agent Library form
  * has no field for them, so savePersona carries the file's values over.
+ *
+ * `environment` names the persona's declared environment profile
+ * (lib/claude/environmentProfiles.cjs; absent = headless-default). Same
+ * carry-over rule as mcpServers/packs.
  */
-const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly', 'agentCli', 'agentCliModel', 'mcpServers', 'packs']);
+const MANAGED_PERSONA_KEYS = new Set(['name', 'description', 'tools', 'model', 'effort', 'color', 'tags', 'projects', 'action', 'actionLabel', 'title', 'seedVersion', 'executorOnly', 'agentCli', 'agentCliModel', 'mcpServers', 'packs', 'environment']);
 
 /**
  * Raw text lines of every top-level frontmatter key block in `raw` whose key
@@ -121,7 +125,7 @@ function extractUnmanagedLines(raw, managed) {
   return out;
 }
 
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, mcpServers, packs, body, preservedLines }) {
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, mcpServers, packs, environment, body, preservedLines }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
@@ -142,6 +146,7 @@ function serializePersona({ name, description, tools, model, effort, color, tags
   if (executorOnly === true) lines.push('executorOnly: true');
   if (Array.isArray(mcpServers) && mcpServers.length) lines.push(`mcpServers: ${mcpServers.join(', ')}`);
   if (Array.isArray(packs) && packs.length) lines.push(`packs: ${packs.join(', ')}`);
+  if (typeof environment === 'string' && environment.trim()) lines.push(`environment: ${environment.trim()}`);
   if (Array.isArray(preservedLines) && preservedLines.length) lines.push(...preservedLines);
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
@@ -277,6 +282,7 @@ async function savePersona({
   agentCliModel,
   mcpServers,
   packs,
+  environment,
   body,
   projectCwd,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -308,11 +314,12 @@ async function savePersona({
   let resolvedAgentCliModel = agentCliModel;
   let resolvedMcpServers = mcpServers;
   let resolvedPacks = packs;
+  let resolvedEnvironment = environment;
   let preservedLines = [];
   try {
     preservedLines = extractUnmanagedLines(fsSync.readFileSync(target, 'utf8'), MANAGED_PERSONA_KEYS);
   } catch { /* no existing file — nothing to preserve */ }
-  if ([seedVersion, title, projects, action, actionLabel, executorOnly, agentCli, mcpServers, packs].some((v) => v === undefined)) {
+  if ([seedVersion, title, projects, action, actionLabel, executorOnly, agentCli, mcpServers, packs, environment].some((v) => v === undefined)) {
     try {
       const { fm } = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
       if (resolvedSeedVersion === undefined) {
@@ -331,9 +338,10 @@ async function savePersona({
       if (resolvedActionLabel === undefined && fm.actionLabel) resolvedActionLabel = decodeLine(fm.actionLabel);
       if (resolvedMcpServers === undefined && fm.mcpServers) resolvedMcpServers = parseCapabilityList(fm.mcpServers);
       if (resolvedPacks === undefined && fm.packs) resolvedPacks = parseCapabilityList(fm.packs);
+      if (resolvedEnvironment === undefined && typeof fm.environment === 'string' && fm.environment.trim()) resolvedEnvironment = fm.environment.trim();
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, mcpServers: resolvedMcpServers, packs: resolvedPacks, body, preservedLines });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, mcpServers: resolvedMcpServers, packs: resolvedPacks, environment: resolvedEnvironment, body, preservedLines });
   assertValidPersonaText(name, text, preservedLines);
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {

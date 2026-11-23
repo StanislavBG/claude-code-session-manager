@@ -10,6 +10,8 @@
  * - `mcpServers` / `packs` are string lists (or a comma string): the exact
  *   MCP servers and context packs a scheduler job running as this persona
  *   loads under --strict-mcp-config.
+ * - `environment` names a declared environment profile
+ *   (lib/claude/environmentProfiles.cjs); absent = headless-default.
  * - `model` is required and must be concrete (not `inherit`): every persona
  *   can be a PRD `agentType`, so every persona is headless-capable, and an
  *   unpinned headless run drifts to the CLI default model.
@@ -46,6 +48,14 @@ const CapabilityList = z.union([
 ]);
 shape.mcpServers = CapabilityList.optional();
 shape.packs = CapabilityList.optional();
+// The declared environment profile (lib/claude/environmentProfiles.cjs) a
+// headless run as this persona uses; absent = headless-default. Same name rule
+// as an environment file name. Existence is checked at load, not here.
+shape.environment = z
+  .string()
+  .trim()
+  .regex(/^[a-z0-9][a-z0-9-]*$/, 'environment must be a lowercase, hyphenated profile name (e.g. headless-default)')
+  .optional();
 // Not a MANAGED_PERSONA_KEYS entry (the save path preserves it as an
 // unmanaged line), but prdAgentType.cjs's readPersonaDefaultEstimateMinutes
 // reads it at dispatch, so a dispatch-time validation must admit it.

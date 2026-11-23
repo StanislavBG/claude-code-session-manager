@@ -147,3 +147,69 @@ describe('demo-video-kit audio speech check', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120000);
 });
+
+describe('demo-video-kit TikTok checks', () => {
+  const frame = (t, lumaMean, lumaStdDev, textBoxes = []) => ({ t, lumaMean, lumaStdDev, lumaStddev: lumaStdDev, textBoxes });
+  it('TIKTOK_CHECK_IDS is frozen and ordered', () => {
+    expect(c.TIKTOK_CHECK_IDS).toEqual(['tiktok-hook', 'tiktok-cadence', 'tiktok-payoff', 'tiktok-loop', 'tiktok-safe-zone', 'tiktok-post-caption']);
+    expect(Object.isFrozen(c.TIKTOK_CHECK_IDS)).toBe(true);
+  });
+  it('hook: passes at 3.0 s, fails at 3.1 s and when missing', () => {
+    const r = c.checkHookBy(3);
+    expect(r).toMatchObject({ id: 'tiktok-hook', ok: true });
+    expect(typeof r.detail).toBe('string');
+    expect(c.checkHookBy(3.1).ok).toBe(false);
+    expect(c.checkHookBy(undefined).ok).toBe(false);
+  });
+  it('cadence: passes with gaps <= 3 s, fails with a 3.5 s gap (incl. edges at 0 and lengthS)', () => {
+    expect(c.checkCutCadence([3, 6, 9, 12, 15], 18)).toMatchObject({ id: 'tiktok-cadence', ok: true });
+    expect(c.checkCutCadence([3, 6.5, 9], 12).ok).toBe(false);
+    expect(c.checkCutCadence([3, 6], 9.5).ok).toBe(false); // last gap 6 -> 9.5
+    expect(c.checkCutCadence([], 10).ok).toBe(false);
+  });
+  it('payoff: passes inside the last 5 s, fails before it', () => {
+    expect(c.checkPayoff(25, 30)).toMatchObject({ id: 'tiktok-payoff', ok: true });
+    expect(c.checkPayoff(24.9, 30).ok).toBe(false);
+    expect(c.checkPayoff(null, 30).ok).toBe(false);
+  });
+  it('loop: needs a late loop beat and a last frame within tolerance of the first', () => {
+    const tol = c.LOOP_LUMA_TOLERANCE;
+    const ok = [frame(0, 100, 40), frame(1, 30, 5), frame(30, 100 + tol, 40 - tol)];
+    expect(c.checkLoopEnding(28, 30, ok)).toMatchObject({ id: 'tiktok-loop', ok: true });
+    expect(c.checkLoopEnding(27.9, 30, ok).ok).toBe(false);
+    expect(c.checkLoopEnding(29, 30, [frame(0, 100, 40), frame(30, 100 + tol + 0.5, 40)]).ok).toBe(false);
+    expect(c.checkLoopEnding(29, 30, [frame(0, 100, 40), frame(30, 100, 40 + tol + 0.5)]).ok).toBe(false);
+    expect(c.checkLoopEnding(29, 30, [frame(0, 100, 40)]).ok).toBe(false);
+  });
+  it('safe zone: passes inside, fails below 80% height or right of 85% width and names frame + text', () => {
+    const inside = [frame(0, 1, 1, [{ text: 'Hi', x: 0.1, y: 0.1, w: 0.75, h: 0.7 }])];
+    expect(c.checkSafeZone(inside)).toMatchObject({ id: 'tiktok-safe-zone', ok: true });
+    const low = [frame(0, 1, 1, []), frame(1.5, 1, 1, [{ text: 'Low line', x: 0.1, y: 0.7, w: 0.3, h: 0.15 }])];
+    const r = c.checkSafeZone(low);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/1\.5s/);
+    expect(r.detail).toMatch(/Low line/);
+    expect(c.checkSafeZone([frame(0, 1, 1, [{ text: 'Wide', x: 0.5, y: 0.1, w: 0.4, h: 0.1 }])]).ok).toBe(false);
+  });
+  it('post caption: passes a short question with 2 hashtags and 1 emoji', () => {
+    expect(c.checkPostCaption('Ever lost a whole day to one 🐛 bug? #coding #dev')).toMatchObject({ id: 'tiktok-post-caption', ok: true });
+    expect(c.checkPostCaption('Would you try this?').ok).toBe(true);
+  });
+  it('post caption: fails 3 hashtags, ending in ".", over 150 chars, URL, 2 emoji, empty', () => {
+    expect(c.checkPostCaption('Would you try this? #a #b #c').ok).toBe(false);
+    expect(c.checkPostCaption('This is how I fix bugs. #coding').ok).toBe(false);
+    expect(c.checkPostCaption(`${'a'.repeat(150)}?`).ok).toBe(false);
+    expect(c.checkPostCaption('See https://example.com for more?').ok).toBe(false);
+    expect(c.checkPostCaption('Would you? 🐛🔥').ok).toBe(false);
+    expect(c.checkPostCaption('').ok).toBe(false);
+  });
+  it('runChecks runs all six with input.tiktok, and is unchanged without it', () => {
+    const base = { captions: ['short one'], lengthS: 12, frames: [frame(0, 100, 40), frame(12, 100, 40)] };
+    const without = c.runChecks(base);
+    expect(without.map((x) => x.id)).toEqual(['captions', 'blankFrames']);
+    const withT = c.runChecks({ ...base, tiktok: { beats: { hook: 1, payoff: 9, loop: 11 }, cuts: [3, 6, 9], postCaption: 'Would you try it? #a' } });
+    expect(withT.slice(0, 2)).toEqual(without);
+    expect(withT.slice(2).map((x) => x.id)).toEqual([...c.TIKTOK_CHECK_IDS]);
+    expect(withT.every((x) => x.ok)).toBe(true);
+  });
+});

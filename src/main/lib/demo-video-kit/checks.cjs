@@ -216,7 +216,124 @@ function checkAudioHasSpeech({ html } = {}) {
   }
 }
 
-// input: {captions, narration (string|string[]), closing, lines, speechS, lengthS, frames, blankThreshold, html, bytes}
+// ---- TikTok checks (run by runChecks only when input.tiktok is present) -------------------
+const TIKTOK_CHECK_IDS = Object.freeze(['tiktok-hook', 'tiktok-cadence', 'tiktok-payoff', 'tiktok-loop', 'tiktok-safe-zone', 'tiktok-post-caption']);
+const HOOK_BY_S = 3.0;
+const MAX_CUT_GAP_S = 3.0;
+const PAYOFF_WINDOW_S = 5;
+const LOOP_WINDOW_S = 2;
+// Max allowed |last - first| for both luma mean and luma stddev (0..255 scale) for a seamless loop.
+const LOOP_LUMA_TOLERANCE = 12;
+const SAFE_MAX_BOTTOM = 0.8;
+const SAFE_MAX_RIGHT = 0.85;
+const MAX_POST_CAPTION_CHARS = 150;
+const MAX_POST_HASHTAGS = 2;
+const MAX_POST_EMOJI = 1;
+
+const num = (v) => (v == null || v === '' ? NaN : Number(v));
+
+function checkHookBy(hook) {
+  const h = num(hook);
+  const ok = Number.isFinite(h) && h >= 0 && h <= HOOK_BY_S;
+  return result('tiktok-hook', ok, Number.isFinite(h) ? `hook beat at ${h}s (max ${HOOK_BY_S}s)` : 'hook beat missing');
+}
+
+function checkCutCadence(cuts, lengthS) {
+  const total = num(lengthS);
+  if (!(total > 0)) return result('tiktok-cadence', false, 'lengthS > 0 is required');
+  const list = (Array.isArray(cuts) ? cuts : []).map(Number).filter(Number.isFinite);
+  const pts = [0, ...list.filter((c) => c > 0 && c < total), total].sort((a, b) => a - b);
+  let worst = { gap: 0, from: 0, to: 0 };
+  for (let i = 1; i < pts.length; i++) {
+    const gap = pts[i] - pts[i - 1];
+    if (gap > worst.gap) worst = { gap, from: pts[i - 1], to: pts[i] };
+  }
+  const ok = worst.gap <= MAX_CUT_GAP_S + 1e-9;
+  return result('tiktok-cadence', ok,
+    ok ? `${list.length} cut(s), longest gap ${worst.gap.toFixed(2)}s (max ${MAX_CUT_GAP_S}s)`
+      : `gap ${worst.gap.toFixed(2)}s from ${worst.from}s to ${worst.to}s exceeds ${MAX_CUT_GAP_S}s`);
+}
+
+function checkPayoff(payoff, lengthS) {
+  const p = num(payoff); const total = num(lengthS);
+  if (!Number.isFinite(p)) return result('tiktok-payoff', false, 'payoff beat missing');
+  if (!(total > 0)) return result('tiktok-payoff', false, 'lengthS > 0 is required');
+  const ok = p >= total - PAYOFF_WINDOW_S && p <= total;
+  return result('tiktok-payoff', ok, `payoff beat at ${p}s (must be within the last ${PAYOFF_WINDOW_S}s of ${total}s)`);
+}
+
+const frameMean = (f) => num(f && (f.lumaMean != null ? f.lumaMean : f.mean));
+const frameStd = (f) => num(f && (f.lumaStdDev != null ? f.lumaStdDev : f.lumaStddev));
+
+// frames: [{t, lumaMean, lumaStdDev}] from frames.cjs sampleFrames.
+function checkLoopEnding(loop, lengthS, frames) {
+  const id = 'tiktok-loop';
+  const l = num(loop); const total = num(lengthS);
+  if (!Number.isFinite(l)) return result(id, false, 'loop beat missing');
+  if (!(total > 0)) return result(id, false, 'lengthS > 0 is required');
+  if (l < total - LOOP_WINDOW_S) return result(id, false, `loop beat at ${l}s is before ${total - LOOP_WINDOW_S}s`);
+  const list = (Array.isArray(frames) ? frames : []).filter((f) => f && Number.isFinite(num(f.t)));
+  if (list.length < 2) return result(id, false, 'need at least 2 sampled frames to compare first and last');
+  const sorted = [...list].sort((a, b) => num(a.t) - num(b.t));
+  const first = sorted[0]; const last = sorted[sorted.length - 1];
+  const dm = Math.abs(frameMean(last) - frameMean(first));
+  const ds = Math.abs(frameStd(last) - frameStd(first));
+  if (!Number.isFinite(dm) || !Number.isFinite(ds)) return result(id, false, 'first/last frame luma stats missing (lumaMean, lumaStdDev)');
+  const ok = dm <= LOOP_LUMA_TOLERANCE && ds <= LOOP_LUMA_TOLERANCE;
+  return result(id, ok,
+    `loop beat at ${l}s; last frame (${last.t}s) vs first (${first.t}s): luma mean diff ${dm.toFixed(2)}, stddev diff ${ds.toFixed(2)} (max ${LOOP_LUMA_TOLERANCE})`);
+}
+
+// frames: [{t, textBoxes:[{text, x, y, w, h}]}] with box coords as 0..1 fractions of the viewport.
+function checkSafeZone(frames) {
+  const list = Array.isArray(frames) ? frames : [];
+  let boxes = 0;
+  for (const f of list) {
+    for (const b of (f && Array.isArray(f.textBoxes) ? f.textBoxes : [])) {
+      boxes++;
+      const bottom = num(b.y) + num(b.h); const right = num(b.x) + num(b.w);
+      if (bottom > SAFE_MAX_BOTTOM + 1e-9 || right > SAFE_MAX_RIGHT + 1e-9) {
+        const where = bottom > SAFE_MAX_BOTTOM + 1e-9 ? `reaches ${(bottom * 100).toFixed(1)}% of height (max ${SAFE_MAX_BOTTOM * 100}%)`
+          : `reaches ${(right * 100).toFixed(1)}% of width (max ${SAFE_MAX_RIGHT * 100}%)`;
+        return result('tiktok-safe-zone', false, `frame ${f.t}s: text "${String(b.text || '')}" ${where}`);
+      }
+    }
+  }
+  return result('tiktok-safe-zone', true, `${boxes} text box(es) in ${list.length} frame(s) inside the safe zone`);
+}
+
+const EMOJI_RE = /\p{Extended_Pictographic}/gu;
+const URL_RE = /(https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(com|net|org|io|run|app|dev|co|ly|me|tv|ai)\b/i;
+function checkPostCaption(postCaption) {
+  const t = String(postCaption == null ? '' : postCaption).trim();
+  const problems = [];
+  const len = [...t].length;
+  if (len < 1 || len > MAX_POST_CAPTION_CHARS) problems.push(`${len} chars (must be 1-${MAX_POST_CAPTION_CHARS})`);
+  const tags = t.match(/#[\p{L}\p{N}_]+/gu) || [];
+  if (tags.length > MAX_POST_HASHTAGS) problems.push(`${tags.length} hashtags (max ${MAX_POST_HASHTAGS})`);
+  const emoji = (t.replace(/[\u{1F3FB}-\u{1F3FF}]/gu, '').match(EMOJI_RE) || []).length;
+  if (emoji > MAX_POST_EMOJI) problems.push(`${emoji} emoji (max ${MAX_POST_EMOJI})`);
+  if (URL_RE.test(t)) problems.push('contains a URL');
+  const body = t.replace(/(?:\s*#[\p{L}\p{N}_]+)+\s*$/u, '').trim();
+  if (len >= 1 && !/\?$/.test(body)) problems.push('text before trailing hashtags must end with "?"');
+  return result('tiktok-post-caption', problems.length === 0,
+    problems.length ? problems.join('; ') : `${len} chars, ${tags.length} hashtag(s), ${emoji} emoji, ends with a question`);
+}
+
+function runTiktokChecks(tiktok, lengthS, frames) {
+  const beats = (tiktok && tiktok.beats) || {};
+  return [
+    checkHookBy(beats.hook),
+    checkCutCadence(tiktok.cuts, lengthS),
+    checkPayoff(beats.payoff, lengthS),
+    checkLoopEnding(beats.loop, lengthS, frames),
+    checkSafeZone(frames),
+    checkPostCaption(tiktok.postCaption),
+  ];
+}
+
+// input: {captions, narration (string|string[]), closing, lines, speechS, lengthS, frames, blankThreshold, html, bytes,
+//         tiktok?: {beats: {hook, payoff, loop}, cuts: number[], postCaption}}
 function runChecks(input = {}) {
   const out = [];
   if (input.captions) out.push(checkCaptions(input.captions));
@@ -227,12 +344,14 @@ function runChecks(input = {}) {
   if (input.frames) out.push(checkBlankFrames(input.frames, input.blankThreshold));
   if (input.html != null) out.push(checkHtmlLimits({ html: input.html, bytes: input.bytes, lengthS: input.lengthS }));
   if (typeof input.html === 'string') out.push(checkAudioHasSpeech({ html: input.html }));
+  if (input.tiktok && typeof input.tiktok === 'object') out.push(...runTiktokChecks(input.tiktok, input.lengthS, input.frames));
   return out;
 }
 
 module.exports = {
   BANNED_WORDS, countSyllables, checkCaptions, lintLanguage, checkClosing, checkVoiceFit,
   checkSpeechCoverage, checkBlankFrames, checkHtmlLimits, speechModulationShare, checkAudioHasSpeech, runChecks,
+  TIKTOK_CHECK_IDS, LOOP_LUMA_TOLERANCE, checkHookBy, checkCutCadence, checkPayoff, checkLoopEnding, checkSafeZone, checkPostCaption,
 };
 
 if (require.main === module) {

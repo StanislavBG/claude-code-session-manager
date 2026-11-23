@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { sampleFrames, decodePng, encodePng, lumaStats, MAX_FRAMES } = require('../frames.cjs');
+const { sampleFrames, decodePng, encodePng, lumaStats, MAX_FRAMES, viewportForHtml } = require('../frames.cjs');
 const { checkBlankFrames } = require('../checks.cjs');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'frames-'));
@@ -58,5 +58,75 @@ describe('sampleFrames', () => {
     expect(decodePng(fs.readFileSync(r.contactSheet)).width).toBeGreaterThan(0);
     expect(r.frames[0].lumaStdDev).toBeGreaterThan(10);
     expect(checkBlankFrames(r.frames).ok).toBe(false);
+  }, 120000);
+});
+
+// Fake Playwright: answers each page.evaluate by the function it is handed.
+function fakePlaywright({ boxes, smDemo }) {
+  const calls = { viewport: null, seeks: [] };
+  const png = encodePng(4, 4, solid(4, 4, [200, 100, 50]));
+  const page = {
+    setDefaultTimeout() {},
+    async goto() {},
+    async screenshot() { return png; },
+    async evaluate(fn, arg) {
+      if (fn.name === 'collectTextBoxes') { expect(arg).toBe(60); return boxes; }
+      const src = String(fn);
+      if (src.includes('d.beats')) return { beats: smDemo.beats ?? null, cuts: smDemo.cuts ?? null };
+      if (src.includes('d.seek')) calls.seeks.push(arg);
+      return undefined;
+    },
+  };
+  const pw = { chromium: { async launch() { return { async newPage(o) { calls.viewport = o.viewport; return page; }, async close() {} }; } } };
+  return { pw, calls };
+}
+
+describe('sampleFrames textBoxes + beats/cuts (injected playwright)', () => {
+  it('returns normalized textBoxes per frame and window.smDemo beats/cuts; 9:16 -> 1080x1920', async () => {
+    const dir = tmp();
+    const html = path.join(dir, 'v.html');
+    fs.writeFileSync(html, '<meta name="sm-demo-aspect" content="9:16"><p>x</p>');
+    const long = 'y'.repeat(80);
+    const { pw, calls } = fakePlaywright({
+      boxes: [{ text: long, x: 0.1, y: 0.2, w: 0.5, h: 0.05 }],
+      smDemo: { beats: { hook: 1, payoff: 8, loop: 9.5 }, cuts: [2, 4, 6] },
+    });
+    const r = await sampleFrames({ htmlPath: html, lengthS: 1, stepS: 0.5, outDir: dir, loadPlaywright: () => pw });
+    expect(calls.viewport).toEqual({ width: 1080, height: 1920 });
+    expect(calls.seeks).toEqual([0, 0.5, 1]);
+    expect(r.frames).toHaveLength(3);
+    expect(r.frames[0].textBoxes).toEqual([{ text: 'y'.repeat(60), x: 0.1, y: 0.2, w: 0.5, h: 0.05 }]);
+    expect(r.frames[0].lumaMean).toBeGreaterThan(0);
+    expect(r.beats).toEqual({ hook: 1, payoff: 8, loop: 9.5 });
+    expect(r.cuts).toEqual([2, 4, 6]);
+  });
+  it('beats/cuts are null when absent and a non-9:16 document keeps 1280x720', async () => {
+    const dir = tmp();
+    const html = path.join(dir, 'v.html');
+    fs.writeFileSync(html, '<meta name="sm-demo-aspect" content="16:9"><p>x</p>');
+    const { pw, calls } = fakePlaywright({ boxes: [], smDemo: {} });
+    const r = await sampleFrames({ htmlPath: html, lengthS: 0.5, stepS: 0.5, outDir: dir, loadPlaywright: () => pw });
+    expect(calls.viewport).toEqual({ width: 1280, height: 720 });
+    expect(r.beats).toBeNull();
+    expect(r.cuts).toBeNull();
+    expect(r.frames[0].textBoxes).toEqual([]);
+  });
+  it('viewportForHtml reads either meta attribute order', () => {
+    expect(viewportForHtml('<meta content="9:16" name="sm-demo-aspect">')).toEqual({ width: 1080, height: 1920 });
+    expect(viewportForHtml('<p>none</p>')).toEqual({ width: 1280, height: 720 });
+  });
+  it.skipIf(!havePlaywright())('real chromium: collects visible text boxes only', async () => {
+    const dir = tmp();
+    const html = path.join(dir, 'v.html');
+    fs.writeFileSync(html, `<!doctype html><meta name="sm-demo-aspect" content="9:16"><body style="margin:0">
+<div style="position:absolute;left:108px;top:192px;width:540px;height:96px">Hello there</div>
+<div style="display:none">Gone</div><div style="visibility:hidden">Hidden</div><div style="opacity:0">Clear</div>
+<script>window.smDemo={scenes:[],beats:{hook:1},cuts:[1],pause(){},seek(){}};</script>`);
+    const r = await sampleFrames({ htmlPath: html, lengthS: 0.5, stepS: 0.5, outDir: dir });
+    if (r.skipped) return;
+    expect(r.frames[0].textBoxes.map((b) => b.text)).toEqual(['Hello there']);
+    expect(r.frames[0].textBoxes[0]).toMatchObject({ x: 0.1, y: 0.1, w: 0.5, h: 0.05 });
+    expect(r.beats).toEqual({ hook: 1 });
+    expect(r.cuts).toEqual([1]);
   }, 120000);
 });

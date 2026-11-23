@@ -11,6 +11,8 @@ const { pathToFileURL } = require('url');
 
 const MAX_FRAMES = 120;
 const VIEWPORT = { width: 1280, height: 720 };
+const VIEWPORT_9_16 = { width: 1080, height: 1920 };
+const MAX_BOX_TEXT = 60;
 const TILE_W = 160;
 const SHEET_COLS = 8;
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -130,10 +132,56 @@ function buildContactSheet(images) {
   return encodePng(W, H, out);
 }
 
+/** Viewport for a document: sm-demo-aspect 9:16 -> 1080x1920, anything else -> the default 1280x720. */
+function viewportForHtml(html) {
+  const h = String(html || '');
+  const m = h.match(/<meta[^>]*name=["']sm-demo-aspect["'][^>]*content=["']([^"']*)["']/i)
+    || h.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']sm-demo-aspect["']/i);
+  return m && m[1].replace(/\s+/g, '') === '9:16' ? { ...VIEWPORT_9_16 } : { ...VIEWPORT };
+}
+
+// Runs in the page: rects of visible elements that directly own non-whitespace text,
+// normalized to the viewport (0..1). Skips display:none, visibility:hidden, opacity 0 (self
+// or ancestor) and zero-size boxes.
+function collectTextBoxes(maxText) {
+  const vw = window.innerWidth || 1; const vh = window.innerHeight || 1;
+  const hidden = (el) => {
+    for (let e = el; e && e.nodeType === 1; e = e.parentElement) {
+      const cs = getComputedStyle(e);
+      if (cs.display === 'none' || Number(cs.opacity) === 0) return true;
+      if (e === el && (cs.visibility === 'hidden' || cs.visibility === 'collapse')) return true;
+    }
+    return false;
+  };
+  const out = [];
+  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
+    if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(el.tagName)) continue;
+    let text = '';
+    for (const n of el.childNodes) if (n.nodeType === 3) text += n.nodeValue;
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) continue;
+    if (hidden(el)) continue;
+    out.push({ text: text.slice(0, maxText), x: r.left / vw, y: r.top / vh, w: r.width / vw, h: r.height / vh });
+  }
+  return out;
+}
+
+const round4 = (v) => Math.round(v * 10000) / 10000;
+function normalizeBoxes(list) {
+  return (Array.isArray(list) ? list : []).map((b) => ({
+    text: String((b && b.text) || '').slice(0, MAX_BOX_TEXT),
+    x: round4(Number(b && b.x) || 0), y: round4(Number(b && b.y) || 0),
+    w: round4(Number(b && b.w) || 0), h: round4(Number(b && b.h) || 0),
+  }));
+}
+
 /**
- * Seek the video document every stepS seconds and report per-frame luma spread.
- * Returns {frames:[{t, lumaStdDev, lumaStddev}], contactSheet} | {skipped} | {error}.
- * `lumaStddev` mirrors `lumaStdDev` because checkBlankFrames reads that spelling.
+ * Seek the video document every stepS seconds and report per-frame luma stats and text boxes.
+ * Returns {frames:[{t, lumaMean, lumaStdDev, lumaStddev, textBoxes}], beats, cuts, viewport, contactSheet}
+ * | {skipped} | {error}. `lumaStddev` mirrors `lumaStdDev` because checkBlankFrames reads that spelling.
+ * beats/cuts are window.smDemo.beats / window.smDemo.cuts (null when absent).
  */
 async function sampleFrames({ htmlPath, lengthS, stepS = 0.5, outDir, loadPlaywright } = {}) {
   const length = Number(lengthS); const step = Number(stepS);
@@ -145,23 +193,35 @@ async function sampleFrames({ htmlPath, lengthS, stepS = 0.5, outDir, loadPlaywr
   const chromium = resolved && resolved.chromium;
   if (!chromium) return { skipped: 'no-playwright' };
 
+  let html = '';
+  try { html = fs.readFileSync(path.resolve(htmlPath), 'utf8'); } catch { /* page load reports it */ }
+  const viewport = viewportForHtml(html);
   fs.mkdirSync(outDir, { recursive: true });
   const frames = []; const images = [];
+  let beats = null; let cuts = null;
   let browser;
   try { browser = await chromium.launch({ headless: true }); } catch { return { skipped: 'no-playwright' }; } // package without a browser binary
   try {
-    const page = await browser.newPage({ viewport: VIEWPORT });
+    const page = await browser.newPage({ viewport });
     page.setDefaultTimeout(30000);
     await page.goto(pathToFileURL(path.resolve(htmlPath)).href, { timeout: 30000, waitUntil: 'load' });
     await page.evaluate(() => { const d = window.smDemo; if (d && typeof d.pause === 'function') d.pause(); });
+    const meta = await page.evaluate(() => {
+      const d = window.smDemo;
+      const plain = (v) => { try { return v == null ? null : JSON.parse(JSON.stringify(v)); } catch { return null; } };
+      return { beats: plain(d && d.beats), cuts: plain(d && d.cuts) };
+    });
+    beats = (meta && meta.beats) ?? null;
+    cuts = (meta && meta.cuts) ?? null;
     for (let i = 0; i < count; i++) {
       const t = Math.round(i * step * 1000) / 1000;
       await page.evaluate((s) => { const d = window.smDemo; if (d && typeof d.seek === 'function') d.seek(s); }, t);
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const textBoxes = normalizeBoxes(await page.evaluate(collectTextBoxes, MAX_BOX_TEXT));
       const img = decodePng(await page.screenshot({ type: 'png' }));
-      const { stdDev } = lumaStats(img);
+      const { mean, stdDev } = lumaStats(img);
       const v = Math.round(stdDev * 100) / 100;
-      frames.push({ t, lumaStdDev: v, lumaStddev: v });
+      frames.push({ t, lumaMean: Math.round(mean * 100) / 100, lumaStdDev: v, lumaStddev: v, textBoxes });
       images.push(img);
     }
   } finally {
@@ -169,7 +229,7 @@ async function sampleFrames({ htmlPath, lengthS, stepS = 0.5, outDir, loadPlaywr
   }
   const contactSheet = path.join(outDir, 'contact-sheet.png');
   fs.writeFileSync(contactSheet, buildContactSheet(images));
-  return { frames, contactSheet };
+  return { frames, beats, cuts, viewport, contactSheet };
 }
 
-module.exports = { MAX_FRAMES, sampleFrames, decodePng, encodePng, lumaStats, buildContactSheet };
+module.exports = { MAX_FRAMES, VIEWPORT_9_16, sampleFrames, viewportForHtml, collectTextBoxes, decodePng, encodePng, lumaStats, buildContactSheet };

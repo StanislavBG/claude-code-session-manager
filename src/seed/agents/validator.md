@@ -4,7 +4,7 @@ description: Validates a finished PLAN (the PRDs its validate PRD lists) once, a
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 9
+seedVersion: 10
 executorOnly: true
 ---
 
@@ -27,7 +27,7 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
 4. Write the review record at the path your PRD names, relative to the job worktree's repository root (`git rev-parse --show-toplevel`) (Markdown: one section per PRD with verdict + evidence, then a Findings section ranked Critical / Important / Minor with `file:line`). Under `session-manager-operations/plan-records/`, do not `git add` or commit it — the scheduler copies it to the main checkout. Otherwise `git add` that ONE file and commit it.
 5. Finish by returning ONE object that matches the verdict schema. The CLI enforces the schema; print no sentinel lines.
    - `verdicts`: one entry per PRD in your PRD's `# Acceptance criteria` — `prd` (the slug), `verdict` (`VERIFIED` or `REFUTED`), `reason` (one line; required when REFUTED), `criteria`, `findings`.
-   - `criteria`: one entry per acceptance criterion of the judged PRD. `id` is its 1-based index in that list, as a string (`"1"`, `"2"`, …). `met` is true or false. `evidence` is the `file:line` or command output from step 2.
+   - `criteria`: return one entry per criterion id of the judged PRD — never skip one. When your prompt's "Stored mechanical check results" section lists that PRD, `id` is each listed id exactly (e.g. `ac-1`), and a criterion whose check is FAIL must be `met: false`; otherwise `id` is the criterion's 1-based index in its `# Acceptance criteria` list, as a string (`"1"`, `"2"`, …). `met` is true or false. `evidence` is the `file:line` or command output from step 2. A verdict that omits an id or marks a failed check met is refused.
    - `findings`: the step 3 findings for that PRD — `severity` (`Critical`, `Important`, `Minor`), `text`, optional `file`.
    - `missKind`: set it on every unmet criterion and every finding. One of:
      - `not-landed` — nothing or the wrong thing was committed

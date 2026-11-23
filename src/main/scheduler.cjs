@@ -168,7 +168,7 @@ const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
-const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured } = require('./lib/scheduler/validatorVerdictSchema.cjs');
+const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured, expectedFromCriteria, formatCriteriaChecksSection } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
@@ -211,7 +211,7 @@ const { splitFrontmatter, parsePrdFile, serializePrdFile, isArtifactOnlyDeclarat
 const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
 const { resolvePersonaDefaultEstimate, DEFAULT_PRD_AGENT_TYPE } = require('./lib/prd/prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches, bareSlug } = require('./lib/prd/depSlugResolve.cjs');
-const { writeJsonAtomic, readJsonOrSync } = require('./lib/util/atomicFs.cjs');
+const { writeJsonAtomic, readJsonOrSync, readJsonOr } = require('./lib/util/atomicFs.cjs');
 const { writeToolRiskGuardSettingsFile } = require('./lib/epic/guardSpawnSettings.cjs');
 const toolRiskMarks = require('./lib/claude/toolRiskMarks.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
@@ -3716,6 +3716,64 @@ async function resolveValidatorEstimate(job, { readGateMs = readValidatorGateMs 
   }
 }
 
+/**
+ * Stored mechanical check results of one judged PRD: the `checks` of its
+ * outcome record (prdOutcomeRecord.cjs), exact slug first, then a bare-slug
+ * match in the Epic's outcomes/ folder. [] when none. Never rejects.
+ */
+async function readStoredCriteriaChecks(cwd, epicId, slug) {
+  try {
+    const exact = await readJsonOr(prdOutcomeRecord.outcomeRecordPath(cwd, epicId, slug), null);
+    if (exact && Array.isArray(exact.checks)) return exact.checks;
+    const dir = path.dirname(prdOutcomeRecord.outcomeRecordPath(cwd, epicId, slug));
+    const want = bareSlug(slug);
+    const names = (await fsp.readdir(dir).catch(() => [])).filter((n) => n.endsWith('.json')).sort().reverse();
+    for (const n of names) {
+      const s = n.slice(0, -'.json'.length);
+      if (s === slug || bareSlug(s) !== want) continue;
+      const rec = await readJsonOr(path.join(dir, n), null);
+      if (rec && Array.isArray(rec.checks)) return rec.checks;
+    }
+  } catch { /* unsafe id / unreadable → no stored checks */ }
+  return [];
+}
+
+/**
+ * loadValidatorCriteriaContext(job) → { expected, section } for a validator
+ * job: per judged PRD (job.dependsOn) with frontmatter `criteria`, the
+ * { ids, failedIds } parseValidatorVerdict cross-checks against, and the
+ * prompt section listing each criterion's stored check result. Empty when
+ * nothing is structured. Never rejects.
+ * @param {any} job
+ * @returns {Promise<{ expected: Record<string, { ids: string[], failedIds: string[] }>, section: string }>}
+ */
+async function loadValidatorCriteriaContext(job) {
+  /** @type {Record<string, { ids: string[], failedIds: string[] }>} */
+  const expected = {};
+  try {
+    if (!job || job.agentType !== 'validator' || !Array.isArray(job.dependsOn) || !job.dependsOn.length) return { expected, section: '' };
+    const epicId = job.epicId || job.sourcePromptId;
+    if (!job.cwd || !isSafeEpicId(epicId)) return { expected, section: '' };
+    const texts = await prdPaths.readEpicPrdTexts(job.cwd, epicId, job.dependsOn);
+    const prds = [];
+    for (const slug of job.dependsOn) {
+      const text = texts.get(slug);
+      if (typeof text !== 'string') continue;
+      let criteria = null;
+      try { criteria = parsePrdFile(text).frontmatter.criteria; } catch { criteria = null; }
+      if (!Array.isArray(criteria) || !criteria.length) continue;
+      const checks = await readStoredCriteriaChecks(job.cwd, epicId, slug);
+      const exp = expectedFromCriteria(criteria, checks);
+      if (exp) expected[slug] = exp;
+      prds.push({ slug, criteria, checks });
+    }
+    return { expected, section: formatCriteriaChecksSection(prds) };
+  } catch (e) {
+    console.error('[scheduler] loadValidatorCriteriaContext error', job && job.slug, e && e.message ? e.message : e);
+    return { expected, section: '' };
+  }
+}
+
 function defaultScheduleSettle({ cwd, epicId }) {
   const deps = {
     loadJobs: async () => (await readQueue()).jobs || [],
@@ -3916,6 +3974,7 @@ async function notifyOriginatingTab(job, {
   readStructuredFromLog = extractStructuredOutputFromLog,
   writeVerdictsFile = writeJsonAtomic,
   scheduleSettle = defaultScheduleSettle,
+  loadValidatorCriteria = loadValidatorCriteriaContext,
 } = {}) {
   try {
     const prd = await resolveNotifyPrd(job, parsePrdRaw);
@@ -4010,7 +4069,17 @@ async function notifyOriginatingTab(job, {
       } catch (e) {
         console.error('[scheduler] notifyOriginatingTab readStructuredFromLog error', job?.slug, e);
       }
-      const checked = parseValidatorVerdict(structured);
+      // Cross-check per-criterion entries against the judged PRDs' frontmatter
+      // criteria + stored check results: a missing id or met-on-failed-check
+      // refuses the whole verdict.
+      let expected = null;
+      try {
+        const ctx = await loadValidatorCriteria(job);
+        if (ctx && ctx.expected && Object.keys(ctx.expected).length) expected = ctx.expected;
+      } catch (e) {
+        console.error('[scheduler] notifyOriginatingTab loadValidatorCriteria error', job?.slug, e);
+      }
+      const checked = parseValidatorVerdict(structured, { expected });
       if (checked.ok) {
         checkedVerdict = checked.value;
         verdicts = verdictRowsFromStructured(checked.value);
@@ -5570,6 +5639,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     } catch {
       isArtifactOnly = false;
     }
+  }
+  // Validator: list each judged PRD's structured criteria with their stored
+  // mechanical check results, so its per-criterion verdict entries use the
+  // same ids and never mark a failed check met (parseValidatorVerdict refuses that).
+  if (job.agentType === 'validator') {
+    const { section } = await loadValidatorCriteriaContext({ ...job, cwd: job.cwd || cwd });
+    if (section) prompt = `${prompt}\n\n${section}`;
   }
   prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly, isValidator: job.agentType === 'validator' }) });
 
@@ -13626,6 +13702,7 @@ module.exports = {
   _resetDepHoldNoticesForTests,
   readValidatorGateMs,
   resolveValidatorEstimate,
+  loadValidatorCriteriaContext,
   planJobScope,
   finalizeJobScope,
   sampleJobScope,

@@ -6,7 +6,7 @@ Per-project state: `<cwd>/session-manager-operations/`.
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
 before changing anything in that area.** Every reference doc is in the [architecture index](session-manager-operations/architecture/README.md).
 
-> **SIZE BUDGET — 12,000 chars**, checked with `wc -c CLAUDE.md` before every commit. This file is
+> **SIZE BUDGET — 12,000 chars**, checked with `wc -c AGENTS.md CLAUDE.md` (both files together, total ≤ 12,000) before every commit. This file is
 > read on every turn of every session. A new law is ONE line here; its rationale goes in the linked
 > doc. Over budget means **split, don't append**. Correcting a wrong line does not license a longer
 > one — rewrite at the same length, move the "why" to the doc. (Hit 65,768 chars by 2026-08-24;
@@ -123,6 +123,7 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **`--model` must be pinned explicitly** on every `claude -p` / `--print` call site — unpinned drift costs.
 - **The owner's real name and personal email never enter a tracked file or commit** — [why](session-manager-operations/architecture/identity-boundary.md).
 - **Every doc follows the five doc kinds** — one topic, one topic doc, others link to it — [kinds](plugins/session-manager-dev/skills/maintaining-md-network/placement.md#doc-kinds).
+- **AGENTS.md holds the map; CLAUDE.md is the `@AGENTS.md` stub** — [pair rule](plugins/session-manager-dev/skills/maintaining-md-network/placement.md#agentsmd-and-claudemd).
 
 ## Avoid
 

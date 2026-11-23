@@ -16,12 +16,7 @@ Part of the **OPERATIONS STATE** partition — see
 - **A new top-level folder lands in the table below or `OWNERS` in the
   same PR** — `scripts/ops-sweep.cjs` flags it `UNDOCUMENTED` otherwise.
 
-The bare root has no owner — `opsOwnership.cjs` refuses a write there.
-
-**Purge exception to every retention below:** a human-only purge (`src/main/lib/epic/epicPurge.cjs`,
-purge IPC handler only, refused while a job runs) deletes one Epic's files in `prompt-sessions`,
-`scheduler`, `plan-records`, `events`, `agents` (unreferenced snapshot), its CLI JSONL and run logs,
-each as that namespace's owner, then writes one content-free `epic_purged` audit record. Keep-forever stays the default.
+Bare root: no owner, writes refused. Retention exception: human-only purge (`lib/epic/epicPurge.cjs`).
 
 Epic lifecycle is specified exactly once, at
 [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.md#lifecycle)

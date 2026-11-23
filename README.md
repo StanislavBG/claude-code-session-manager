@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->37<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->38<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -29,7 +29,7 @@
 
 ## Features
 
-A few words first. A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind of work. A **persona** is an agent's role file. A **worktree** is a separate copy of the repo on its own git branch. A **PRD** is a written work order that the scheduler runs.
+A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind of work. A **persona** is an agent's role file. A **worktree** is a separate copy of the repo on its own git branch. A **PRD** is a written work order that the scheduler runs.
 
 ### Sessions
 
@@ -180,6 +180,7 @@ Tools:
 | `project_demo_video_write` | project-home | one of `html` / `htmlPath` | Save a 30-second or 1-minute demo video (same as project_video_write). |
 | `project_character_write` | project-home | `json`, one of `js` / `jsPath` | Save the reusable character used in this project's videos. |
 | `project_video_review_write` | project-home | `videoId`, `text`, `imagePaths` | Save a script and images for a human to review a video. |
+| `project_video_outcome_write` | project-home | `videoId`, `outcome`, `text` | Record that a video run ended with no video on purpose. |
 | `customer_feedback_list` | customer-feedback | — | List feedback that users sent to the owner's inbox. |
 | `customer_feedback_set_status` | customer-feedback | `id`, `status` | Set the status of one feedback item, with an optional note. |
 | `customer_feedback_submit` | customer-feedback | `goal`, `description`, `tag` | Send feedback about Session Manager to its maintainers. |
@@ -375,7 +376,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Read [CONTRIBUTING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CONTRIBUTING.md) before you open a PR. Report security bugs as told in [SECURITY.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/SECURITY.md), not in a public issue. See also [CODE_OF_CONDUCT.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CODE_OF_CONDUCT.md). Read [PRD_AUTHORING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/src/main/templates/PRD_AUTHORING.md) before you write a PRD.
+Read [CONTRIBUTING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CONTRIBUTING.md) before you open a PR. Report security bugs as told in [SECURITY.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/SECURITY.md), not in a public issue. Read [PRD_AUTHORING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/src/main/templates/PRD_AUTHORING.md) before you write a PRD.
 
 Run `npm run readme:build` after you change MCP tools, skills, packs, personas or `engines`. `npm run lint` fails if this page is out of date.
 

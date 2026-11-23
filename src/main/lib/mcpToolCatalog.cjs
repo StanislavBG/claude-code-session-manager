@@ -546,6 +546,26 @@ const MCP_TOOL_CATALOG = [
       + 'The images are read from disk and base64-encoded by the MCP server before the save.',
   },
   {
+    name: 'project_video_outcome_write',
+    group: 'project-home',
+    purpose: "Save an outcome instead of a video for one Project Video entry, via the session-manager app's admin API: it writes "
+      + "the entry's outcome.json {id, outcome, text, at}. The only outcome is 'season-complete'.",
+    summary: 'Record that a video run ended with no video on purpose.',
+    whenToUse: 'Use ONLY for a run that ends without a video by design — a finished TikTok series with no episode left to make. '
+      + "Pass the `videoId` the run was started for, outcome 'season-complete', and one line of `text` (up to 300 characters) "
+      + 'telling the human why there is no video. Then stop.',
+    whenNotToUse: 'Never use it to hide a failed build: a run that could not make its video must fail instead. Do not use for a video — '
+      + 'use project_video_write. The call is refused for an invalid videoId, any other outcome, empty or multi-line text or text '
+      + 'over 300 characters, unknown keys, and an entry that already has its video (index.html).',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      videoId: 'ep-13',
+      outcome: 'season-complete',
+      text: 'The series is complete: all 12 episodes are out, so there is no episode 13.',
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
+  },
+  {
     name: 'customer_feedback_list',
     group: 'customer-feedback',
     purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "

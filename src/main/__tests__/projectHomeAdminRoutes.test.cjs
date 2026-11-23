@@ -93,6 +93,7 @@ test('registers the library routes, the aliases, the character route, the matrix
     'POST /admin/project-home/pages/write',
     'POST /admin/project-home/videos/write',
     'POST /admin/project-home/videos/review/write',
+    'POST /admin/project-home/videos/outcome/write',
     'POST /admin/project-home/write',
   ].sort());
 });
@@ -799,4 +800,72 @@ test('videos/review/write: rejects bad images, a missing cwd and an oversized bo
   const big = await adminHttp.call('POST', REVIEW_URL, { rawBody: `{"cwd":"${cwd}","pad":"${'a'.repeat(REVIEW_WRITE_BODY_MAX)}"}` });
   expect(big.status).toBe(413);
   expect(big.body.ok).toBe(false);
+});
+
+// ── POST /admin/project-home/videos/outcome/write ────────────────────────────
+const OUTCOME_URL = '/admin/project-home/videos/outcome/write';
+const outcomePath = (cwd, videoId) => path.join(pagesRoot(cwd), 'videos', videoId, 'outcome.json');
+
+async function outcomeSetup() {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  return { cwd, adminHttp };
+}
+
+test('videos/outcome/write: saves {id, outcome, text, at} for the entry', async () => {
+  const { cwd, adminHttp } = await outcomeSetup();
+  const text = 'The series is complete: all 12 episodes are out.';
+  const { status, body } = await adminHttp.call('POST', OUTCOME_URL, {
+    body: { cwd, videoId: 'ep-13', outcome: 'season-complete', text },
+  });
+  expect(status).toBe(200);
+  expect(body.ok).toBe(true);
+  expect(body.entryId).toBe('ep-13');
+  expect(body.path).toBe(outcomePath(cwd, 'ep-13'));
+  const saved = JSON.parse(fs.readFileSync(outcomePath(cwd, 'ep-13'), 'utf8'));
+  expect(Object.keys(saved).sort()).toEqual(['at', 'id', 'outcome', 'text']);
+  expect(saved).toMatchObject({ id: 'ep-13', outcome: 'season-complete', text });
+  expect(Number.isNaN(Date.parse(saved.at))).toBe(false);
+  // a 300-char text is accepted
+  const max = await adminHttp.call('POST', OUTCOME_URL, { body: { cwd, videoId: 'ep-14', outcome: 'season-complete', text: 'a'.repeat(300) } });
+  expect(max.status).toBe(200);
+});
+
+test.each([
+  ['an invalid videoId', { videoId: '../x' }, 'videoId'],
+  ['a missing videoId', { videoId: undefined }, 'videoId'],
+  ['another outcome', { outcome: 'failed' }, 'season-complete'],
+  ['an empty text', { text: '' }, 'text'],
+  ['a whitespace-only text', { text: '   ' }, 'text'],
+  ['a multi-line text', { text: 'line one\nline two' }, 'one line'],
+  ['a text over 300 chars', { text: 'a'.repeat(301) }, '300'],
+  ['an unknown key', { status: 'done' }, 'status'],
+])('videos/outcome/write: refuses %s with 400 and a reason', async (_label, patch, reason) => {
+  const { cwd, adminHttp } = await outcomeSetup();
+  const body = { cwd, videoId: 'ep-13', outcome: 'season-complete', text: 'Series finished.', ...patch };
+  const r = await adminHttp.call('POST', OUTCOME_URL, { body });
+  expect(r.status).toBe(400);
+  expect(r.body.ok).toBe(false);
+  expect(r.body.error).toContain(reason);
+  expect(fs.existsSync(path.join(pagesRoot(cwd), 'videos'))).toBe(false);
+});
+
+test('videos/outcome/write: refuses an entry whose index.html already exists', async () => {
+  const { cwd, adminHttp } = await outcomeSetup();
+  const dir = path.join(pagesRoot(cwd), 'videos', 'ep-1');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'index.html'), '<html></html>');
+  const r = await adminHttp.call('POST', OUTCOME_URL, { body: { cwd, videoId: 'ep-1', outcome: 'season-complete', text: 'Done.' } });
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain('already has a video');
+  expect(fs.existsSync(path.join(dir, 'outcome.json'))).toBe(false);
+});
+
+test('videos/outcome/write: refuses a missing cwd and invalid JSON', async () => {
+  const { adminHttp } = await outcomeSetup();
+  const noCwd = await adminHttp.call('POST', OUTCOME_URL, { body: { videoId: 'ep-1', outcome: 'season-complete', text: 'Done.' } });
+  expect(noCwd.status).toBe(400);
+  const badJson = await adminHttp.call('POST', OUTCOME_URL, { rawBody: '{nope' });
+  expect(badJson.status).toBe(400);
 });

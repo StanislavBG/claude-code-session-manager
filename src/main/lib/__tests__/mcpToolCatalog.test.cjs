@@ -82,6 +82,7 @@ test('project-home group lists the page/video tools and the two aliases', () => 
   expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
     'project_home_write', 'project_page_write', 'project_matrix_read', 'project_matrix_write',
     'project_video_write', 'project_demo_video_write', 'project_character_write', 'project_video_review_write',
+    'project_video_outcome_write',
   ]);
 });
 
@@ -324,8 +325,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 37 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(37);
+test('catalog has 38 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(38);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -418,6 +419,56 @@ test('project_video_review_write: inputSchema states the text max and the image 
   expect(tool.inputSchema.properties.text.maxLength).toBe(REVIEW_TEXT_MAX);
   expect(tool.inputSchema.properties.text.description).toContain(String(REVIEW_TEXT_MAX));
   expect(tool.inputSchema.properties.imagePaths.maxItems).toBe(REVIEW_IMAGES_MAX);
+});
+
+// ── project_video_outcome_write (a run that ends without a video by design) ──
+test('project_video_outcome_write: catalog entry says it is only for a run that ends without a video', () => {
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'project_video_outcome_write');
+  expect(entry.group).toBe('project-home');
+  const text = composeDescription(entry);
+  for (const s of ['season-complete', 'ends without a video by design', 'finished TikTok series', '300 characters', 'index.html']) {
+    expect(text).toContain(s);
+  }
+});
+
+test('project_video_outcome_write: inputSchema names the four args and pins the outcome', () => {
+  const tool = TOOLS.find((t) => t.name === 'project_video_outcome_write');
+  expect(tool.inputSchema.required).toEqual(['videoId', 'outcome', 'text']);
+  expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['cwd', 'outcome', 'text', 'videoId']);
+  expect(tool.inputSchema.properties.outcome.enum).toEqual(['season-complete']);
+  expect(tool.inputSchema.properties.text.maxLength).toBe(300);
+});
+
+describe('project_video_outcome_write handler', () => {
+  const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
+  const call = (args) => handleCallTool({ params: { name: 'project_video_outcome_write', arguments: args } });
+  let savedScope;
+  beforeEach(() => {
+    savedScope = process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+    delete process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  });
+  afterEach(() => {
+    if (savedScope !== undefined) process.env.SM_SCHEDULER_JOB_MCP_TOOLS = savedScope;
+    vi.unstubAllGlobals();
+  });
+
+  test('refuses bad args as tool errors before any admin call', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const cases = [
+      [{ outcome: 'season-complete', text: 'x' }, 'videoId'],
+      [{ videoId: 'ep-1', outcome: 'failed', text: 'x' }, 'season-complete'],
+      [{ videoId: 'ep-1', outcome: 'season-complete', text: '' }, 'text'],
+      [{ videoId: 'ep-1', outcome: 'season-complete', text: 'a\nb' }, 'text'],
+      [{ videoId: 'ep-1', outcome: 'season-complete', text: 'a'.repeat(301) }, 'text'],
+    ];
+    for (const [args, msg] of cases) {
+      const r = await call(args);
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toContain(msg);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 test('no catalog tool name contains approve, decide or retry', () => {

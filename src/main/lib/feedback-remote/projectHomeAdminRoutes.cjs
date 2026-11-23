@@ -10,6 +10,8 @@
  *   POST /admin/project-home/videos/review/write {cwd, videoId, text, images:[{base64}]} -> videoReview.writeMaterial
  *     (review material only; there is deliberately no route that decides, approves or retries —
  *     only the human buttons in the app record a decision)
+ *   POST /admin/project-home/videos/outcome/write {cwd, videoId, outcome, text} -> videos/<videoId>/outcome.json
+ *     (a run that ends without a video by design, e.g. a finished TikTok series: outcome 'season-complete')
  * all owned by writer 'project-home' (see opsOwnership.cjs). Registered
  * against the same injected localAdminHttp.cjs transport as
  * prdAdminRoutes.cjs.
@@ -55,6 +57,11 @@ const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 const REVIEW_WRITE_BODY_MAX = 18 * 1024 * 1024;
 const REVIEW_DECISION_KEYS = Object.freeze(['decision', 'status', 'approved', 'approvedAt']);
 const REVIEW_DECISION_REFUSAL = 'review decisions are made only by a human in the app';
+/** Outcomes a run may record instead of a video, the outcome text cap, and the only body keys accepted. */
+const VIDEO_OUTCOMES = ['season-complete'];
+const OUTCOME_TEXT_MAX = 300;
+const OUTCOME_BODY_KEYS = ['cwd', 'videoId', 'outcome', 'text'];
+const OUTCOME_WRITE_BODY_MAX = 64 * 1024;
 
 // Each detector is a linear regex scan; the input is capped first.
 const REMOTE_REFERENCE_CHECKS = [
@@ -446,6 +453,9 @@ function registerAdminRoute(adminHttp) {
   // POST /admin/project-home/videos/review/write {cwd, videoId, text, images:[{base64}]} -> review/material.json
   adminHttp.registerRoute('POST', '/admin/project-home/videos/review/write', reviewWriteHandler);
 
+  // POST /admin/project-home/videos/outcome/write {cwd, videoId, outcome, text} -> videos/<videoId>/outcome.json
+  adminHttp.registerRoute('POST', '/admin/project-home/videos/outcome/write', outcomeWriteHandler);
+
   // POST /admin/project-home/character/write {cwd, json, js, replace?} -> videos/_character/
   adminHttp.registerRoute('POST', '/admin/project-home/character/write', characterWriteHandler);
 
@@ -565,6 +575,71 @@ async function reviewWriteHandler(req, res) {
   }
 }
 
+/** Returns a refusal reason for an outcome body, or null when it is valid. */
+function validateOutcomeBody(body) {
+  const unknown = Object.keys(body).filter((k) => !OUTCOME_BODY_KEYS.includes(k));
+  if (unknown.length) return `unknown body keys: ${unknown.join(', ')} (allowed: ${OUTCOME_BODY_KEYS.join(', ')})`;
+  if (typeof body.videoId !== 'string' || !ENTRY_ID_RE.test(body.videoId)) return 'invalid videoId';
+  if (!VIDEO_OUTCOMES.includes(body.outcome)) return `outcome must be one of: ${VIDEO_OUTCOMES.join(', ')}`;
+  const { text } = body;
+  if (typeof text !== 'string' || !text.trim()) return 'text must be a non-empty string';
+  if (/[\r\n]/.test(text)) return 'text must be one line';
+  if (text.length > OUTCOME_TEXT_MAX) return `text must be at most ${OUTCOME_TEXT_MAX} characters`;
+  return null;
+}
+
+/**
+ * Records that a video entry ended without a video by design (a finished
+ * TikTok series): writes videos/<videoId>/outcome.json = {id, outcome, text, at}.
+ * Refused when the entry already has its video (index.html).
+ */
+async function outcomeWriteHandler(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req, OUTCOME_WRITE_BODY_MAX);
+  } catch (e) {
+    sendJson(res, 413, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'} (limit is ${OUTCOME_WRITE_BODY_MAX} bytes)` });
+    return;
+  }
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+    return;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    sendJson(res, 400, { ok: false, error: 'invalid payload' });
+    return;
+  }
+  const invalid = validateOutcomeBody(body);
+  if (invalid) {
+    sendJson(res, 400, { ok: false, error: invalid });
+    return;
+  }
+  const resolved = resolveCwd(body.cwd);
+  if (!resolved.ok) {
+    sendJson(res, resolved.status, { ok: false, error: resolved.error });
+    return;
+  }
+  const { videoId, outcome, text } = body;
+  const dir = opsPath(resolved.cwd, 'project-pages', 'videos', videoId);
+  if (fs.existsSync(path.join(dir, 'index.html'))) {
+    sendJson(res, 400, { ok: false, error: `entry ${videoId} already has a video (index.html) — an outcome is only for a run that ends without one` });
+    return;
+  }
+  config.addAllowedRoot(resolved.cwd);
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    const abs = opsPath(resolved.cwd, 'project-pages', 'videos', videoId, 'outcome.json');
+    const record = { id: videoId, outcome, text, at: new Date().toISOString() };
+    await config.writeTextAtomic(abs, JSON.stringify(record, null, 2) + '\n', { writer: 'project-home' });
+    sendJson(res, 200, { ok: true, entryId: videoId, path: abs });
+  } catch (e) {
+    sendJson(res, 500, { ok: false, error: e?.message ?? 'outcome write failed' });
+  }
+}
+
 async function characterWriteHandler(req, res) {
   let raw;
   try {
@@ -630,5 +705,7 @@ module.exports = {
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,
   REVIEW_WRITE_BODY_MAX,
+  VIDEO_OUTCOMES,
+  OUTCOME_TEXT_MAX,
   resolveCwd,
 };

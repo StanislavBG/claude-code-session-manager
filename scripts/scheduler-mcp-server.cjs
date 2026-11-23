@@ -20,6 +20,7 @@
  *   project_character_write({ cwd?, json, js? | jsPath?, replace? }) -> POST /admin/project-home/character/write
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta?, mp4Path?, posterPath? }) -> POST /admin/project-home/videos/write
  *   project_video_review_write({ cwd?, videoId, text, imagePaths }) -> POST /admin/project-home/videos/review/write
+ *   project_video_outcome_write({ cwd?, videoId, outcome, text }) -> POST /admin/project-home/videos/outcome/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
  *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, job?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
@@ -1013,6 +1014,20 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_video_outcome_write',
+    description: descriptionFor('project_video_outcome_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        videoId: { type: 'string', description: 'Id of the video entry this run was started for. Refused when that entry already has its video (index.html).' },
+        outcome: { type: 'string', enum: ['season-complete'], description: "Why the run ends without a video. Only 'season-complete' (a finished TikTok series with no episode left)." },
+        text: { type: 'string', minLength: 1, maxLength: 300, description: 'One line (1-300 characters, no line breaks) the human reads, saying why there is no video.' },
+      },
+      required: ['videoId', 'outcome', 'text'],
+    },
+  },
+  {
     name: 'macro_list',
     description: descriptionFor('macro_list'),
     inputSchema: {
@@ -1688,6 +1703,19 @@ async function handleCallTool(request) {
         cwd, videoId: args.videoId, text: args.text, images: loaded.images,
       });
       if (result?.ok === false) return errorResult(result.error ?? 'project_video_review_write failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_video_outcome_write') {
+      if (!args || typeof args.videoId !== 'string' || !args.videoId) return errorResult('missing required argument: videoId');
+      if (args.outcome !== 'season-complete') return errorResult("outcome must be 'season-complete'");
+      if (typeof args.text !== 'string' || !args.text.trim() || /[\r\n]/.test(args.text) || args.text.length > 300) {
+        return errorResult('text must be one line of 1-300 characters');
+      }
+      const cwd = resolveCwdArg(args);
+      const result = await adminRequest('POST', '/admin/project-home/videos/outcome/write', {
+        cwd, videoId: args.videoId, outcome: args.outcome, text: args.text,
+      });
+      if (result?.ok === false) return errorResult(result.error ?? 'project_video_outcome_write failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_list') {

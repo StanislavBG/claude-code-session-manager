@@ -514,7 +514,19 @@ function isFixPlanDead(job, jobsInProject) {
   const fixSlug = fixSlugFor(job);
   const child = (jobsInProject || []).find((j) => j.slug === fixSlug);
   if (!child) return false;
+  // A child waiting on its own red preflight is not dead: the precondition,
+  // not the plan, is the blocker — reopening it would spend a probe for nothing.
+  if (hasActivePreflightHold(child)) return false;
   return DEAD_FIX_CHILD_STATUSES.has(child.status);
+}
+
+/**
+ * Pure predicate: the row is waiting on its own red `preflight` (a
+ * preflightHold is armed). Such a row spends nothing on the model ladder —
+ * no investigation probe, no dead-fix-plan reopen. Exported for tests.
+ */
+function hasActivePreflightHold(job) {
+  return !!(job && job.preflightHold && typeof job.preflightHold === 'object');
 }
 
 /**
@@ -1131,6 +1143,7 @@ module.exports = {
   isPlanUnqueued,
   DEAD_FIX_CHILD_STATUSES,
   isFixPlanDead,
+  hasActivePreflightHold,
   NO_ATTRIBUTABLE_COMMIT_VERDICTS,
   healRefusalReason,
   isFailedUnverifiedShaped,

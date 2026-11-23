@@ -6220,6 +6220,12 @@ function readRunOutcomeSidecars(runDir, slug) {
 const INVESTIGATION_LAUNCH_KEY = 'investigation';
 
 async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) {
+  // A row waiting on its own red preflight spends nothing on the model
+  // ladder: the precondition is the cause, not the work.
+  if (reviewLadder.hasActivePreflightHold(failedJob)) {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} is held on its preflight`);
+    return { deferred: false };
+  }
   // The probe launches with the same CLI as the job it diagnoses. While
   // that CLI cannot launch at all (launch circuit breaker, issue #11 list
   // B1: probes e4f82da2/d374e6bf died on the same HTTP 400 as the runs
@@ -6397,7 +6403,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === failedJob.slug);
     if (!j) return;
-    const statusEligible = (j.status === 'needs_review' || j.status === 'failed') && !reviewLadder.isCancelledJob(j);
+    const statusEligible = (j.status === 'needs_review' || j.status === 'failed') && !reviewLadder.isCancelledJob(j) && !reviewLadder.hasActivePreflightHold(j);
     const transitioned = statusEligible && transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
     liveCheck = { ok: statusEligible && transitioned, status: j.status };
   });
@@ -6541,7 +6547,9 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
           // status here) is otherwise reset-refused by design.
           if (deadChild) {
             const child = s.jobs.find((x) => x.slug === deadChild.slug);
-            if (child) {
+            // A child held on its own red preflight is left alone — the
+            // reset would drop the hold and re-fire it into the same wall.
+            if (child && !reviewLadder.hasActivePreflightHold(child)) {
               resetJobFields(child, 'reset by dead-fix-plan reopen: parent investigation authored a new plan', {
                 force: true, source: 'spawnInvestigation:dead-fix-plan-reopen',
               });
@@ -6945,24 +6953,41 @@ async function runPreflightGate(job, defaultCwd, { now = Date.now } = {}) {
     try { appendAuditEvent('preflight_pass', { slug: job.slug, attempts }); } catch { /* audit must not break dispatch */ }
     return 'pass';
   }
-  const code = result.exitCode ?? (result.timedOut ? 'timeout' : 'null');
   const heldAt = now();
   let hold = null;
   await mutate((s) => {
     const row = s.jobs.find((x) => x.slug === job.slug);
-    const base = row ? (row.preflightHold || null) : prevHold;
-    hold = preflightCheck.armPreflightHold(base, result, heldAt, `make \`${command}\` exit 0`);
-    if (!row) return;
-    row.preflightHold = hold;
-    row.heldReason = `waiting on precondition: ${command} exited ${code} — re-check at ${hold.nextAt}`;
+    hold = armPreflightHoldOnRow(row, prevHold, result, command, heldAt, `make \`${command}\` exit 0`);
   });
   job.preflightHold = hold;
-  console.log(`[scheduler] ${job.slug}: preflight hold — ${command} exited ${code}; re-check at ${hold.nextAt}`);
-  try {
-    appendAuditEvent('preflight_hold', { slug: job.slug, attempts: hold.attempts, nextAt: hold.nextAt, exitCode: result.exitCode });
-  } catch { /* audit must not break dispatch */ }
+  auditPreflightHold(job.slug, command, result, hold);
   await broadcast({ flush: true });
   return 'held';
+}
+
+/**
+ * Arm (or climb) the preflight hold on a queue row from a red runPreflight
+ * result. Sync — call inside mutate(). Shared by the dispatch gate and the
+ * sentinel_fail park reroute so both write the same hold + heldReason shape.
+ * Returns the hold (also when `row` is null, from `prevHold`).
+ */
+function armPreflightHoldOnRow(row, prevHold, result, command, heldAt, failText) {
+  const code = result.exitCode ?? (result.timedOut ? 'timeout' : 'null');
+  const base = row ? (row.preflightHold || null) : (prevHold || null);
+  const hold = preflightCheck.armPreflightHold(base, result, heldAt, failText);
+  if (row) {
+    row.preflightHold = hold;
+    row.heldReason = `waiting on precondition: ${command} exited ${code} — re-check at ${hold.nextAt}`;
+  }
+  return hold;
+}
+
+function auditPreflightHold(slug, command, result, hold, extra = {}) {
+  const code = result.exitCode ?? (result.timedOut ? 'timeout' : 'null');
+  console.log(`[scheduler] ${slug}: preflight hold — ${command} exited ${code}; re-check at ${hold.nextAt}`);
+  try {
+    appendAuditEvent('preflight_hold', { slug, attempts: hold.attempts, nextAt: hold.nextAt, exitCode: result.exitCode, ...extra });
+  } catch { /* audit must not break dispatch */ }
 }
 
 async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, siblingJobs = null) {
@@ -7901,6 +7926,24 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }
     }
 
+    // Preflight park reroute: a run with a `preflight` that ended in an
+    // executor SCHEDULER_VERDICT: FAIL re-checks its precondition once. Red →
+    // the precondition is the cause; the row goes back to pending with a
+    // preflightHold (below, inside mutate) and spends nothing on the model
+    // ladder. Green or check error → the ordinary park runs unchanged.
+    // I/O here, outside mutate(), like every other pre-finalize check.
+    let preflightRerouteResult = null;
+    const preflightRerouteCmd = typeof job.preflight === 'string' ? job.preflight.trim() : '';
+    if (preflightRerouteCmd && res.exitCode === 0 && !res.rateLimited && verifyResult?.verdict === 'sentinel_fail') {
+      try {
+        const r = await preflightCheck.runPreflight({ command: preflightRerouteCmd, cwd: job.cwd || defaultCwd });
+        if (r && r.ok === false) preflightRerouteResult = r;
+      } catch (e) {
+        reportSchedulerError('preflight park re-check failed', job.slug, e);
+      }
+    }
+    let preflightRerouteHold = null;
+
     let actuallyFailed = false;
     let failedJobSnapshot = null;
     let needsInvestigationNow = false;
@@ -8079,6 +8122,22 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           } else {
             // transcript_errors or verify_unavailable: escalate to needs_review.
             effectiveStatus = 'needs_review';
+          }
+
+          if (
+            preflightRerouteResult
+            && effectiveStatus === 'needs_review'
+            && !sigtermOverrideReason
+            && !capParkVerdict
+            && verifyResult?.verdict === 'sentinel_fail'
+          ) {
+            const row = s.jobs[i2];
+            const failText = String(verifyResult.reason || '').replace(/^executor reported\s+/, '') || 'SCHEDULER_VERDICT: FAIL';
+            if (jobLandedCommitThisRun) row.landedCommit = jobLandedCommitThisRun;
+            if (resetJobFields(row, `preflight red after SCHEDULER_VERDICT: FAIL — ${failText}`, { source: 'scheduler:preflight-hold' })) {
+              preflightRerouteHold = armPreflightHoldOnRow(row, null, preflightRerouteResult, preflightRerouteCmd, Date.now(), failText);
+              return; // row is pending + held; no park, no ladder
+            }
           }
 
           // already_satisfied_on_main names the satisfying sha in its own
@@ -8338,6 +8397,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     for (const { slug, cwd } of newlyCompletedPrds) {
       await prdPaths.archiveCompletedPrd(slug, cwd);
     }
+    if (preflightRerouteHold) auditPreflightHold(job.slug, preflightRerouteCmd, preflightRerouteResult, preflightRerouteHold, { after: 'sentinel_fail' });
     await broadcast({ flush: true });
 
     // Per-run outcome sidecar (issue #11 list B5): turns/tokens/verdict in one

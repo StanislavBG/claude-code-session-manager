@@ -42,7 +42,7 @@
  *     "hooks": {
  *       "PreToolUse": [
  *         {
- *           "matcher": "Bash|mcp__.*|Write|Edit|MultiEdit|NotebookEdit",
+ *           "matcher": "Bash|mcp__.*|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch",
  *           "hooks": [
  *             { "type": "command", "command": "node ~/.claude/session-manager/hooks/guard-tool-risk.cjs" }
  *           ]

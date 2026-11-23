@@ -207,7 +207,7 @@ if (mode === 'argv') {
     const file = seen.argv[i + 1];
     expect(file.startsWith(path.join(dir, '.claude', 'session-manager', 'spawn-settings'))).toBe(true);
     const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
-    expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash|Write|Edit|NotebookEdit|mcp__.*');
+    expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash|Write|Edit|NotebookEdit|WebFetch|WebSearch|mcp__.*');
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('guard-tool-risk.cjs');
     expect(seen.headless).toBe('1');
   });

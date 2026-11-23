@@ -23,6 +23,7 @@ const {
   readMarksLayer,
   resolveMark,
 } = require('../../../src/main/lib/claude/toolRiskMarks.cjs');
+const { webToolWouldBlock, wouldBlockRecord } = require('../../../src/main/lib/claude/jobSandboxPolicy.cjs');
 
 const TAG = '[guard-tool-risk]';
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
@@ -154,6 +155,45 @@ function protectedTarget(payload, homeDir, projectRoot) {
   return guarded.some((g) => path.resolve(g) === resolved) ? resolved : null;
 }
 
+function parseJobEnvironment(env) {
+  const raw = env.SM_JOB_ENVIRONMENT;
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch (e) {
+    console.error(`${TAG} SM_JOB_ENVIRONMENT is not a JSON object, ignoring it: ${e?.message}`);
+    return null;
+  }
+}
+
+/**
+ * Report-only environment check: a headless job's WebFetch/WebSearch call
+ * that its environment (env SM_JOB_ENVIRONMENT, set by the scheduler)
+ * disallows — tool not allowed, or host off the allow-list — appends one
+ * 'environment_would_block' audit record. Never changes the decision.
+ */
+function reportEnvironmentWouldBlock(payload, env, deps) {
+  try {
+    const toolName = payload.tool_name;
+    if (toolName !== 'WebFetch' && toolName !== 'WebSearch') return;
+    const jobEnv = parseJobEnvironment(env);
+    const hit = webToolWouldBlock(jobEnv, toolName, payload.tool_input);
+    if (!hit) return;
+    const append = deps.appendAuditEvent || require('../../../src/main/lib/telemetry/auditLog.cjs').appendAuditEvent;
+    append('environment_would_block', wouldBlockRecord({
+      slug: env.SM_SCHEDULER_JOB_SLUG || null,
+      persona: env.SM_JOB_PERSONA || null,
+      environment: jobEnv && typeof jobEnv.id === 'string' ? jobEnv.id : null,
+      what: hit.what,
+      detail: hit.detail,
+      mode: env.SM_JOB_ENVIRONMENT_MODE === 'enforce' ? 'enforce' : 'report',
+    }));
+  } catch (e) {
+    console.error(`${TAG} environment report failed: ${e?.message}`);
+  }
+}
+
 /**
  * PreToolUse payload in, hook-response object out. No stdin/stdout and no
  * process.exit. `env` defaults to process.env; `deps.homeDir` to os.homedir().
@@ -164,6 +204,7 @@ function decide(payload, env = process.env, deps = {}) {
     const projectRoot = env.SM_PROJECT_ROOT || null;
     const headless = Boolean(env.SM_SCHEDULER_JOB_SLUG) || env.SM_TOOL_RISK_HEADLESS === '1';
     const toolName = payload.tool_name;
+    if (headless) reportEnvironmentWouldBlock(payload, env, deps);
 
     const system = readMarksLayer(systemMarksPath(homeDir));
     const project = projectRoot

@@ -40,10 +40,11 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
-const { sandboxDependencies, buildJobSandboxSettings, sandboxChildEnv, SANDBOX_PROFILES } = require('../src/main/lib/claude/jobSandboxPolicy.cjs');
+const { sandboxDependencies, buildJobSandboxSettings, sandboxChildEnv, LEGACY_PERSONA_ENVIRONMENTS } = require('../src/main/lib/claude/jobSandboxPolicy.cjs');
+const { loadEnvironment } = require('../src/main/lib/claude/environmentProfiles.cjs');
 
 const RUN_TIMEOUT_MS = 240_000;
-const PROFILES = /** @type {Array<keyof typeof SANDBOX_PROFILES>} */ (Object.keys(SANDBOX_PROFILES));
+const PROFILES = /** @type {Array<keyof typeof LEGACY_PERSONA_ENVIRONMENTS>} */ (Object.keys(LEGACY_PERSONA_ENVIRONMENTS));
 
 /**
  * @param {{ canary: string, output: string, outsideEntries: string[], homeOutsideEntries?: string[], tmpOutsideEntries?: string[], netBytes: number, insideExists: boolean, profile?: string }} run
@@ -122,8 +123,11 @@ function makeRoot(root) {
  * @param {string} tmpDir private per-job temp dir (/tmp/smj-*), as the scheduler makes
  */
 function buildProfile(profile, dirs, deps, tmpDir) {
+  const name = /** @type {Record<string, string>} */ (LEGACY_PERSONA_ENVIRONMENTS)[profile];
+  const env = name ? loadEnvironment({ name }) : null;
   return buildJobSandboxSettings({
     agentType: profile,
+    environment: env && 'profile' in env ? { id: env.id, profile: /** @type {any} */ (env.profile) } : null,
     homeDir: dirs.home,
     worktreeDir: dirs.work,
     projectRoot: dirs.work,

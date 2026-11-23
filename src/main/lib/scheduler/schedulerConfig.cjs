@@ -181,7 +181,22 @@ module.exports = {
   // SM_QUIET_MACHINE_WAIT_MINUTES (integer minutes, clamped to [1, 1440]).
   DEFAULT_QUIET_MACHINE_WAIT_MS: 30 * 60_000,
   quietMachineWaitMs,
+
+  // Environment enforcement (jobSandboxPolicy.cjs + guard-tool-risk): what a
+  // job's environment profile would block — OS sandbox required but
+  // unavailable, WebFetch/WebSearch not allowed, host off the allow-list.
+  // 'report' (default) appends an 'environment_would_block' audit record and
+  // blocks nothing; 'enforce' is the future refusing mode. Override with
+  // SM_ENVIRONMENT_ENFORCEMENT=report|enforce (anything else → 'report').
+  DEFAULT_ENVIRONMENT_ENFORCEMENT: 'report',
+  environmentEnforcement,
 };
+
+/** @returns {'report'|'enforce'} */
+function environmentEnforcement() {
+  const raw = String(process.env.SM_ENVIRONMENT_ENFORCEMENT || '').trim().toLowerCase();
+  return raw === 'enforce' ? 'enforce' : 'report';
+}
 
 function quietMachineWaitMs() {
   const raw = process.env.SM_QUIET_MACHINE_WAIT_MINUTES;

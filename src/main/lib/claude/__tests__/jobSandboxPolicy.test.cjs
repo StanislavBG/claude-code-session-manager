@@ -6,11 +6,24 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const {
   SANDBOX_SECRET_PATHS,
-  SANDBOX_PROFILES,
+  LEGACY_PERSONA_ENVIRONMENTS,
+  jobEnvironmentName,
   sandboxDependencies,
   buildJobSandboxSettings,
   sandboxChildEnv,
 } = require('../jobSandboxPolicy.cjs');
+const { BUILTIN_ENVIRONMENTS } = require('../environmentProfiles.cjs');
+
+// The sandbox settings validator and dev-lead had under the retired SANDBOX_PROFILES.
+const LEGACY = Object.freeze({
+  validator: { permissionMode: 'default', network: [] },
+  'dev-lead': { permissionMode: 'acceptEdits', network: ['registry.npmjs.org'] },
+});
+/** @param {string|undefined} agentType */
+function envFor(agentType) {
+  const id = jobEnvironmentName({ agentType });
+  return id ? { id, profile: BUILTIN_ENVIRONMENTS[id] } : null;
+}
 
 const BASE = Object.freeze({
   worktreeDir: '/home/u/wt/job-1',
@@ -35,15 +48,8 @@ describe('module shape', () => {
     assert.ok(SANDBOX_SECRET_PATHS.includes('.npmrc'));
     assert.ok(SANDBOX_SECRET_PATHS.includes('.ssh'));
     assert.ok(SANDBOX_SECRET_PATHS.includes('Self/secrets'));
-    assert.ok(Object.isFrozen(SANDBOX_PROFILES));
-    assert.ok(Object.isFrozen(SANDBOX_PROFILES.validator));
-    assert.ok(Object.isFrozen(SANDBOX_PROFILES.validator.network));
-    assert.ok(Object.isFrozen(SANDBOX_PROFILES['dev-lead'].network));
-    assert.deepEqual(SANDBOX_PROFILES.validator, { permissionMode: 'default', network: [] });
-    assert.deepEqual(SANDBOX_PROFILES['dev-lead'], {
-      permissionMode: 'acceptEdits',
-      network: ['registry.npmjs.org'],
-    });
+    assert.ok(Object.isFrozen(LEGACY_PERSONA_ENVIRONMENTS));
+    assert.deepEqual(LEGACY_PERSONA_ENVIRONMENTS, { validator: 'validator-readonly', 'dev-lead': 'headless-default' });
   });
 });
 
@@ -64,8 +70,8 @@ describe('deny rules', () => {
 describe('os-sandbox profiles', () => {
   for (const agentType of ['validator', 'dev-lead']) {
     it(`${agentType} gets the OS sandbox`, () => {
-      const profile = SANDBOX_PROFILES[agentType];
-      const r = buildJobSandboxSettings({ ...BASE, agentType, deps: OK_DEPS });
+      const profile = LEGACY[agentType];
+      const r = buildJobSandboxSettings({ ...BASE, agentType, environment: envFor(agentType), deps: OK_DEPS });
       assert.equal(r.level, 'os-sandbox');
       assert.equal(r.argv.length, 4);
       assert.deepEqual(r.argv.slice(0, 3), ['--permission-mode', profile.permissionMode, '--settings']);
@@ -79,7 +85,6 @@ describe('os-sandbox profiles', () => {
       assert.equal(sb.autoAllowBashIfSandboxed, true);
       assert.equal(sb.network.strictAllowlist, true);
       assert.deepEqual(sb.network.allowedDomains, [...profile.network]);
-      assert.notEqual(sb.network.allowedDomains, profile.network);
 
       const secretAbs = SANDBOX_SECRET_PATHS.map((p) => path.join('/home/u', p));
       assert.deepEqual(sb.filesystem.denyRead, secretAbs);
@@ -102,9 +107,11 @@ describe('os-sandbox profiles', () => {
       assert.deepEqual(r.summary, {
         level: 'os-sandbox',
         profile: agentType,
+        environment: LEGACY_PERSONA_ENVIRONMENTS[agentType],
         network: [...profile.network],
         reason: null,
       });
+      assert.deepEqual(r.wouldBlock, []);
     });
   }
 });
@@ -121,7 +128,7 @@ describe('tool-rules fallback', () => {
     assert.deepEqual(r.settings.permissions.deny, expectedDeny());
     assert.equal(r.summary.level, 'tool-rules');
     assert.equal(r.summary.network, null);
-    assert.match(r.summary.reason, /no sandbox profile/);
+    assert.match(r.summary.reason, /no environment profile/);
     assert.match(r.summary.reason, /architect/);
   });
 
@@ -129,13 +136,14 @@ describe('tool-rules fallback', () => {
     const r = buildJobSandboxSettings({ ...BASE, deps: OK_DEPS });
     assert.equal(r.level, 'tool-rules');
     assert.equal(r.summary.profile, null);
-    assert.match(r.summary.reason, /no sandbox profile/);
+    assert.match(r.summary.reason, /no environment profile/);
   });
 
   it('missing dependencies downgrade a profiled persona and name them', () => {
     const r = buildJobSandboxSettings({
       ...BASE,
       agentType: 'dev-lead',
+      environment: envFor('dev-lead'),
       deps: { available: false, missing: ['socat'] },
     });
     assert.equal(r.level, 'tool-rules');
@@ -146,7 +154,7 @@ describe('tool-rules fallback', () => {
   });
 
   it('absent deps is treated as unavailable', () => {
-    const r = buildJobSandboxSettings({ ...BASE, agentType: 'validator' });
+    const r = buildJobSandboxSettings({ ...BASE, agentType: 'validator', environment: envFor('validator') });
     assert.equal(r.level, 'tool-rules');
     assert.equal(typeof r.summary.reason, 'string');
   });
@@ -205,7 +213,7 @@ describe('argument validation', () => {
 
 describe('sandboxChildEnv', () => {
   it('points TMPDIR, TMP and TEMP at the private dir for os-sandbox', () => {
-    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', deps: OK_DEPS });
+    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', environment: envFor('dev-lead'), deps: OK_DEPS });
     assert.equal(p.level, 'os-sandbox');
     assert.deepEqual(sandboxChildEnv(p, '/tmp/smj-abc123'), {
       TMPDIR: '/tmp/smj-abc123',
@@ -215,7 +223,7 @@ describe('sandboxChildEnv', () => {
   });
 
   it('returns {} for tool-rules', () => {
-    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', deps: { available: false, missing: ['socat'] } });
+    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', environment: envFor('dev-lead'), deps: { available: false, missing: ['socat'] } });
     assert.equal(p.level, 'tool-rules');
     assert.deepEqual(sandboxChildEnv(p, '/tmp/smj-abc123'), {});
     assert.deepEqual(sandboxChildEnv(null, '/tmp/smj-abc123'), {});

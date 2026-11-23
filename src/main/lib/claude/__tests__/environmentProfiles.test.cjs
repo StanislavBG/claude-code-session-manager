@@ -13,7 +13,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const env = require('../environmentProfiles.cjs');
-const { SANDBOX_PROFILES, SANDBOX_SECRET_PATHS } = require('../jobSandboxPolicy.cjs');
+const { SANDBOX_SECRET_PATHS } = require('../jobSandboxPolicy.cjs');
+
+// The sandbox settings validator and dev-lead had under the retired SANDBOX_PROFILES.
+const SANDBOX_PROFILES = Object.freeze({
+  validator: { permissionMode: 'default', network: [] },
+  'dev-lead': { permissionMode: 'acceptEdits', network: ['registry.npmjs.org'] },
+});
 const { validatePersonaFrontmatter } = require('../../persona-macro/personaFrontmatterSchema.cjs');
 const { MANAGED_PERSONA_KEYS } = require('../../../agentLibrary.cjs');
 

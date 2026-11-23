@@ -17,6 +17,19 @@ let tmpHome;
 let originalHome;
 let buildClaudeSpawnArgs;
 let buildJobSandboxSettings;
+let legacyEnvironment;
+
+/** The environment profile the scheduler resolves for a persona with no `environment:` frontmatter. */
+function makeLegacyEnvironment() {
+  const { jobEnvironmentName } = require('../lib/claude/jobSandboxPolicy.cjs');
+  const { BUILTIN_ENVIRONMENTS } = require('../lib/claude/environmentProfiles.cjs');
+  return {
+    legacyEnvironment(agentType) {
+      const id = jobEnvironmentName({ agentType });
+      return id ? { id, profile: BUILTIN_ENVIRONMENTS[id] } : null;
+    },
+  };
+}
 
 const BASE = { model: 'opus', effort: null, sessionId: 'sess-1', resume: false, systemPrompt: 'You are dev-lead.', toolScope: null };
 
@@ -26,6 +39,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   ({ buildClaudeSpawnArgs } = require('../scheduler.cjs'));
   ({ buildJobSandboxSettings } = require('../lib/claude/jobSandboxPolicy.cjs'));
+  ({ legacyEnvironment } = makeLegacyEnvironment());
 });
 
 afterAll(() => {
@@ -36,6 +50,7 @@ afterAll(() => {
 function policy(agentType, deps = { available: true, missing: [] }) {
   return buildJobSandboxSettings({
     agentType,
+    environment: legacyEnvironment(agentType),
     worktreeDir: path.join(tmpHome, 'wt'),
     projectRoot: path.join(tmpHome, 'proj'),
     homeDir: tmpHome,
@@ -87,6 +102,7 @@ test('an os-sandbox policy with a private tmpDir declares that dir, not os.tmpdi
   const privateTmp = path.join(os.tmpdir(), 'smj-test01');
   const p = buildJobSandboxSettings({
     agentType: 'dev-lead',
+    environment: legacyEnvironment('dev-lead'),
     worktreeDir: path.join(tmpHome, 'wt'),
     projectRoot: path.join(tmpHome, 'proj'),
     homeDir: tmpHome,

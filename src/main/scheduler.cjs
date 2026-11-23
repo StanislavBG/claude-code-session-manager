@@ -52,7 +52,8 @@ const { startDispatchLoop } = require('./lib/scheduler/dispatchLoop.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 const { randomUUID } = require('node:crypto');
 const { execFile, execFileSync, spawnSync } = require('node:child_process');
-const { buildJobSandboxSettings, sandboxDependencies, sandboxChildEnv, SANDBOX_PROFILES } = require('./lib/claude/jobSandboxPolicy.cjs');
+const { buildJobSandboxSettings, sandboxDependencies, sandboxChildEnv, jobEnvironmentName, environmentHookEnv, wouldBlockRecord } = require('./lib/claude/jobSandboxPolicy.cjs');
+const { loadEnvironment } = require('./lib/claude/environmentProfiles.cjs');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
@@ -145,6 +146,7 @@ const {
   INVESTIGATION_MAX_MS,
   STARVATION_ESCALATE_MS,
   STARVE_ESCALATION_MS,
+  environmentEnforcement,
 } = require('./lib/scheduler/schedulerConfig.cjs');
 // A running job past this fraction of its own budget gets a durable
 // `budgetWarning` stamp on its row (see the budget watchdog below) so the
@@ -5379,6 +5381,40 @@ function readPersonaDeclaredCapabilities(cwd, agentType) {
 }
 
 /**
+ * The environment profile a job's sandbox is derived from: the persona's
+ * declared `environment:` frontmatter, else jobSandboxPolicy's legacy
+ * persona default (validator → validator-readonly, dev-lead →
+ * headless-default), else null (tool rules). A declared name that does not
+ * resolve is logged and falls back to null — the unpinned snapshot build
+ * already refuses it, so this only matters for pinned rows. Never throws.
+ * @param {string} cwd
+ * @param {string} agentType
+ * @param {(line: string) => void} [log]
+ * @returns {{ id: string, profile: any }|null}
+ */
+function resolveJobEnvironment(cwd, agentType, log) {
+  let declared = null;
+  try {
+    const persona = agentModelResolve.readOverlayAwarePersona(agentType || agentModelResolve.DEFAULT_PRD_AGENT_TYPE, { cwd });
+    const fm = (persona && persona.fm) || {};
+    if (typeof fm.environment === 'string' && fm.environment.trim()) declared = fm.environment.trim();
+  } catch { /* no persona file → legacy default */ }
+  const name = jobEnvironmentName({ agentType, declared });
+  if (!name) return null;
+  try {
+    const env = loadEnvironment({ cwd, name });
+    if ('code' in env) {
+      if (log) log(`[scheduler] environment ${name}: ${env.code}; sandbox falls back to tool rules\n`);
+      return null;
+    }
+    return { id: env.id, profile: env.profile };
+  } catch (e) {
+    if (log) log(`[scheduler] environment ${name} load failed (${(e && e.message) || e}); tool rules\n`);
+    return null;
+  }
+}
+
+/**
  * Parks one queue row whose persona was refused at dispatch (agentModelResolve.cjs's
  * resolvePrdPersonaForSpawn `refusal`) — needs_review via transitionJob with
  * reason '<code>: <detail>'. The job never spawned, so there is no verify
@@ -6002,9 +6038,11 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // never move it under the run directory.
     const sandboxDeps = resolveJobSandboxDeps();
     const sandboxAgentType = job.agentType || 'dev-lead';
+    const jobEnvironment = resolveJobEnvironment(cwd, sandboxAgentType, safeLog);
+    const enforcementMode = environmentEnforcement();
     /** @type {string|null} */
     let sandboxTmpDir = null;
-    if (sandboxDeps.available && Object.prototype.hasOwnProperty.call(SANDBOX_PROFILES, sandboxAgentType)) {
+    if (sandboxDeps.available && jobEnvironment && jobEnvironment.profile.osSandboxRequired) {
       try {
         sandboxTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smj-'));
       } catch (e) {
@@ -6018,6 +6056,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     };
     const sandboxPolicy = buildJobSandboxSettings({
       agentType: sandboxAgentType,
+      environment: jobEnvironment,
       worktreeDir: spawnCwd,
       projectRoot: cwd,
       homeDir: os.homedir(),
@@ -6026,8 +6065,20 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     });
     // childEnv was built (and cleanChildEnv already ran) above.
     Object.assign(childEnv, sandboxChildEnv(sandboxPolicy, sandboxTmpDir || os.tmpdir()));
-    const sandboxMeta = { ...sandboxPolicy.summary, tmpDir: sandboxTmpDir };
-    safeLog(`[scheduler] sandbox: level=${sandboxMeta.level} profile=${sandboxMeta.profile ?? 'none'} ` +
+    // guard-tool-risk reads these to report WebFetch/WebSearch calls the
+    // environment would block (never blocks them — report mode).
+    Object.assign(childEnv, environmentHookEnv({ environment: jobEnvironment, mode: enforcementMode, agentType: sandboxAgentType }));
+    for (const wb of sandboxPolicy.wouldBlock) {
+      try {
+        appendAuditEvent('environment_would_block', wouldBlockRecord({
+          slug: job.slug, persona: sandboxAgentType, environment: jobEnvironment ? jobEnvironment.id : null,
+          what: wb.what, detail: wb.detail, mode: enforcementMode,
+        }));
+      } catch { /* audit must not break dispatch */ }
+      safeLog(`[scheduler] environment would block (${enforcementMode} mode, not blocked): ${wb.what} — ${wb.detail}\n`);
+    }
+    const sandboxMeta = { ...sandboxPolicy.summary, tmpDir: sandboxTmpDir, enforcement: enforcementMode };
+    safeLog(`[scheduler] sandbox: level=${sandboxMeta.level} environment=${sandboxMeta.environment ?? 'none'} profile=${sandboxMeta.profile ?? 'none'} ` +
       `network=${sandboxMeta.network ? (sandboxMeta.network.join(',') || 'none') : 'unrestricted'} reason=${sandboxMeta.reason ?? 'none'} ` +
       `tmp=${sandboxTmpDir ?? 'none'}\n`);
     const jobArgs = buildClaudeSpawnArgs({

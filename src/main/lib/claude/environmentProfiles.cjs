@@ -22,9 +22,10 @@
  * A name found nowhere is refused as 'environment_unknown'.
  *
  * Personas reference one by `environment:` frontmatter; absent = DEFAULT_ENVIRONMENT.
- * The built-ins reproduce jobSandboxPolicy.cjs's SANDBOX_PROFILES (validator →
- * validator-readonly, dev-lead → headless-default); toSandboxProfile maps a
- * profile back onto that { permissionMode, network } shape.
+ * The built-ins carry the sandbox settings jobSandboxPolicy.cjs applies by
+ * default (validator → validator-readonly, dev-lead → headless-default, via
+ * its LEGACY_PERSONA_ENVIRONMENTS); toSandboxProfile maps a profile onto a
+ * { permissionMode, network } shape.
  *
  * hash = sha256 of the profile's canonical JSON (agentSnapshot.cjs's canonicalJson),
  * so key order is irrelevant and any edit changes it.
@@ -37,7 +38,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { z } = require('zod');
-const { SANDBOX_SECRET_PATHS, SANDBOX_PROFILES } = require('./jobSandboxPolicy.cjs');
+const { SANDBOX_SECRET_PATHS } = require('./jobSandboxPolicy.cjs');
 const { canonicalJson } = require('./agentSnapshot.cjs');
 
 const DEFAULT_ENVIRONMENT = 'headless-default';
@@ -95,9 +96,9 @@ const BUILTIN_ENVIRONMENTS = deepFreeze({
   'headless-default': {
     description: 'OS sandbox + network allow-list (dev-lead today).',
     osSandboxRequired: true,
-    permissionMode: SANDBOX_PROFILES['dev-lead'].permissionMode,
+    permissionMode: 'acceptEdits',
     writeRoots: [...JOB_WRITE_ROOTS],
-    network: { mode: 'allowlist', hosts: [...SANDBOX_PROFILES['dev-lead'].network] },
+    network: { mode: 'allowlist', hosts: ['registry.npmjs.org'] },
     secretDenyPaths: [...SANDBOX_SECRET_PATHS],
     webFetch: false,
     webSearch: false,
@@ -105,7 +106,7 @@ const BUILTIN_ENVIRONMENTS = deepFreeze({
   'validator-readonly': {
     description: 'OS sandbox, no network, default permission mode (validator today).',
     osSandboxRequired: true,
-    permissionMode: SANDBOX_PROFILES.validator.permissionMode,
+    permissionMode: 'default',
     writeRoots: [...JOB_WRITE_ROOTS],
     network: { mode: 'none' },
     secretDenyPaths: [...SANDBOX_SECRET_PATHS],
@@ -185,7 +186,7 @@ function loadEnvironment({ cwd, name, homeDir } = {}) {
 }
 
 /**
- * A profile in jobSandboxPolicy.cjs's SANDBOX_PROFILES shape. network: the
+ * A profile as { permissionMode, network }. network: the
  * allow-list hosts ([] for 'none'), or null for 'open' (no allow-list).
  * @returns {{ permissionMode: string, network: string[]|null }}
  */

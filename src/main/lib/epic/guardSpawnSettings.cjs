@@ -73,8 +73,9 @@ async function writeGuardSpawnSettingsFile({ spawnCwd, homeDir = os.homedir(), d
   }
 }
 
-/** Every tool class guard-tool-risk.cjs can mark: Bash rules, file writes, MCP calls. */
-const TOOL_RISK_MATCHER = 'Bash|Write|Edit|NotebookEdit|mcp__.*';
+/** Every tool class guard-tool-risk.cjs can mark (Bash rules, file writes, MCP calls), plus
+ * WebFetch/WebSearch, which it only observes for environment would-block reports. */
+const TOOL_RISK_MATCHER = 'Bash|Write|Edit|NotebookEdit|WebFetch|WebSearch|mcp__.*';
 
 /**
  * Settings carrying ONLY the guard-tool-risk PreToolUse hook, for headless

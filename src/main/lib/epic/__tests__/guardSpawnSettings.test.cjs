@@ -94,12 +94,12 @@ test('writeToolRiskGuardSettingsFile: content-addressed file with only the tool-
   expect(s).toEqual({
     hooks: {
       PreToolUse: [{
-        matcher: 'Bash|Write|Edit|NotebookEdit|mcp__.*',
+        matcher: 'Bash|Write|Edit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
         hooks: [{ type: 'command', command: nodeShellCommand(shimPath('guard-tool-risk.cjs', home)) }],
       }],
     },
   });
-  expect(TOOL_RISK_MATCHER).toBe('Bash|Write|Edit|NotebookEdit|mcp__.*');
+  expect(TOOL_RISK_MATCHER).toBe('Bash|Write|Edit|NotebookEdit|WebFetch|WebSearch|mcp__.*');
   // shims were ensured first
   expect(fs.existsSync(shimPath('guard-tool-risk.cjs', home))).toBe(true);
   const past = new Date(Date.now() - 100000);

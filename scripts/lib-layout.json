@@ -116,6 +116,7 @@
   "pidAlive": "process",
   "planRecordHarvest": "scheduler",
   "planRecordRetention": "scheduler",
+  "preflightCheck": "scheduler",
   "planValidator": "prd",
   "prdAdminRoutes": "prd",
   "prdAgentType": "prd",

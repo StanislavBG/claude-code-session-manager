@@ -54,6 +54,7 @@ const crypto = require('node:crypto');
 const { z } = require('zod');
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { resolveProjectRoot } = require('../opsOwnership.cjs');
+const { phaseOfTask } = require('../phaseProjection.cjs');
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_IMPORT_BODY_BYTES = 8 * 1024 * 1024;
@@ -113,7 +114,7 @@ const TASK_FIELDS = Object.freeze([
   'taskId', 'source', 'importId', 'importedAt', 'agent', 'missionId', 'model', 'effort', 'priority', 'caller',
   'outputFormat', 'timeoutSec', 'slotWaitSec', 'sessionId', 'persisted', 'startedAt', 'endedAt', 'status',
   'exitCode', 'signal', 'durationMs', 'slotWaitMs', 'usage', 'costUsd', 'cliCostUsd', 'numTurns', 'quota',
-  'promptBytes', 'promptSha256', 'outputBytes', 'outputSha256',
+  'promptBytes', 'promptSha256', 'outputBytes', 'outputSha256', 'phase',
 ]);
 
 /** @param {Record<string, any>} t a folded ledger Task → exactly TASK_FIELDS (missing → null). */
@@ -124,6 +125,7 @@ function publicTask(t) {
   if (!out.source) out.source = 'sm';
   if (out.caller == null) out.caller = {};
   out.persisted = t.persisted === true;
+  out.phase = phaseOfTask(t); // phaseProjection.cjs — never stored, derived from status
   return out;
 }
 

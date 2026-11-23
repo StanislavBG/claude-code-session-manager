@@ -220,6 +220,7 @@ function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
     agentType: str(session.agentType),
     status: str(session.status),
     state: computed.state,
+    phase: computed.phase,
     blocked: computed.blocked,
     prds: computed.prds,
     verified: computed.verified,

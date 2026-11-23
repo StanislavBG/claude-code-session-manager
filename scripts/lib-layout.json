@@ -102,6 +102,7 @@
   "macroLibrary": "persona-macro",
   "mainHeapSnapshot": "telemetry",
   "externalContract": ".",
+  "phaseProjection": ".",
   "mcpToolsProbe": ".",
   "mdDocCensus": ".",
   "mdDocRefs": ".",

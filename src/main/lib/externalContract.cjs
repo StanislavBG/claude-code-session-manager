@@ -71,7 +71,7 @@ const CONTRACT = deepFreeze({
   },
   epicStates: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open'],
   epicRecordFields: [
-    'epicId', 'cwd', 'title', 'goal', 'tag', 'agentType', 'status', 'state', 'blocked', 'prds',
+    'epicId', 'cwd', 'title', 'goal', 'tag', 'agentType', 'status', 'state', 'phase', 'blocked', 'prds',
     'verified', 'refuted', 'unvalidated', 'externalRef', 'source', 'createdAt', 'completedAt', 'verdicts',
   ],
   receiptFields: ['jobs', 'chat'],
@@ -98,7 +98,7 @@ const CONTRACT = deepFreeze({
     'taskId', 'source', 'importId', 'importedAt', 'agent', 'missionId', 'model', 'effort', 'priority', 'caller',
     'outputFormat', 'timeoutSec', 'slotWaitSec', 'sessionId', 'persisted', 'startedAt', 'endedAt', 'status',
     'exitCode', 'signal', 'durationMs', 'slotWaitMs', 'usage', 'costUsd', 'cliCostUsd', 'numTurns', 'quota',
-    'promptBytes', 'promptSha256', 'outputBytes', 'outputSha256',
+    'promptBytes', 'promptSha256', 'outputBytes', 'outputSha256', 'phase',
   ],
   eventKinds: ['epic_state_changed', 'job_transition', 'epic_cross_project_reply', 'needs_you_answered'],
   adminApiFields: ['port', 'token', 'appVersion', 'contractVersion'],
@@ -128,11 +128,13 @@ function contractFingerprint() {
 const CONTRACT_FINGERPRINTS = Object.freeze({
   // v1 was unreleased when the manifest was completed (at/kind, epic_get requiredOneOf, then epic_cross_project_reply + feedback_reply + replyEventFields, then GET /admin/agents + agent_list + agentFields, then the Needs you routes + needsYouItemFields + needsYouAnsweredFields + needs_you_answered, then POST /admin/tasks, then GET /admin/tasks + GET /admin/task + POST /admin/tasks/import + taskFields, then task_list + task_get), so its first fingerprint was replaced, not appended.
   // Additive since: epicRecordFields + 'verdicts' (checked validator verdicts from plan-records/*.verdicts.json),
-  // then GET /admin/validation-quality (validationQualityHandlers.cjs).
+  // then GET /admin/validation-quality (validationQualityHandlers.cjs),
+  // then 'phase' on epicRecordFields + taskFields (phaseProjection.cjs).
   1: Object.freeze([
     '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
     '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',
     'b8af6788f3c5022346278194a8113455c47f3ab7a565e51d47c5e79c7f36fbd7',
+    '2ddfa9e96382e6d2d8db6849361aeb89a62d86c237ad99d149ccb01c6b57db6a',
   ]),
 });
 

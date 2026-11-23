@@ -73,8 +73,8 @@ test('remote.listJobs rows carry epicId + sourcePromptId (null when absent)', as
   });
   const rows = await scheduler.remote.listJobs();
   expect(rows).toEqual([
-    { slug: '1-a', title: 'A', status: 'pending', cwd: '/p', agentType: null, epicId: 'e-1', sourcePromptId: 'e-1' },
-    { slug: '2-b', title: 'B', status: 'pending', cwd: '/p', agentType: null, epicId: null, sourcePromptId: null },
+    { slug: '1-a', title: 'A', status: 'pending', cwd: '/p', agentType: null, epicId: 'e-1', sourcePromptId: 'e-1', phase: 'idle' },
+    { slug: '2-b', title: 'B', status: 'pending', cwd: '/p', agentType: null, epicId: null, sourcePromptId: null, phase: 'idle' },
   ]);
 });
 
@@ -161,7 +161,7 @@ test('remote.listJobRows returns full deep-copied rows; listJobs projection is u
   expect(rows[0]).not.toBe(raw[0]);
   expect(rows[0].statusHistory).not.toBe(raw[0].statusHistory);
   const projected = await scheduler.remote.listJobs();
-  expect(Object.keys(projected[0]).sort()).toEqual(['agentType', 'cwd', 'epicId', 'slug', 'sourcePromptId', 'status', 'title']);
+  expect(Object.keys(projected[0]).sort()).toEqual(['agentType', 'cwd', 'epicId', 'phase', 'slug', 'sourcePromptId', 'status', 'title']);
 });
 
 test('a cancelled failed row does not block an otherwise verified Epic (listJobRows)', async () => {

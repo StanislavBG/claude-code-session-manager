@@ -117,6 +117,7 @@ const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
 const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv, buildPreflightHoldNotice, preflightHoldNoticeKey } = require('./lib/scheduler/reviewNotice.cjs');
+const { phaseOfJob } = require('./lib/phaseProjection.cjs');
 const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
@@ -13281,6 +13282,7 @@ const remote = {
       agentType: j.agentType ?? null,
       epicId: j.epicId ?? null,
       sourcePromptId: j.sourcePromptId ?? null,
+      phase: phaseOfJob(j),
     }));
   },
 

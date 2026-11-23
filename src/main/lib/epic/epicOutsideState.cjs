@@ -16,6 +16,7 @@
 
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
 const { isCancelledRow } = require('./epicSettle.cjs');
+const { phaseOfJob, phaseOfEpic } = require('../phaseProjection.cjs');
 
 // Mirrors epicSettle's (unexported) isValidatorCheckin.
 const isValidatorCheckin = (e, bare) =>
@@ -134,6 +135,7 @@ function reviewReason(row) {
  * @param {{ session?: any, events?: any[], jobs?: any[], needsInput?: boolean, chatBusy?: boolean }} [args]
  * @returns {{
  *   state: string,
+ *   phase: string,
  *   blocked: null | { kind: 'refuted'|'failed'|'needs_review'|'quarantined', prds: { slug: string, reason: string }[] },
  *   prds: { total: number, pending: number, running: number, completed: number, failed: number, needsReview: number, quarantined: number, skipped: number, cancelled: number },
  *   verified: string[],
@@ -210,7 +212,17 @@ function computeEpicOutsideState(args) {
     .map((k) => ({ slug: k.bare, reason: cut(reasonOf(k)) }))
     .sort(bySlug);
 
-  const result = (state, blocked = null) => ({ state, blocked, prds, verified, refuted, unvalidated });
+  // phaseProjection.cjs: one outside phase across Epics, jobs and Tasks. A
+  // row-less PRD (known only from its check-in) is projected from its outcome.
+  const phase = phaseOfEpic({
+    status: session.status,
+    needsInput,
+    chatBusy,
+    refuted: refuted.length,
+    jobPhases: known.map((k) => phaseOfJob(k.row || { status: k.status })),
+  });
+
+  const result = (state, blocked = null) => ({ state, phase, blocked, prds, verified, refuted, unvalidated });
 
   if (session.status === 'completed') return result('closed');
   if (session.status === 'proposed') return result('awaiting_approval');

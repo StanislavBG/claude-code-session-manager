@@ -146,6 +146,12 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
   const [pending, setPending] = useState<Macro | null>(null)
   const epicCwd = usePromptSessions((s) => (epicId ? s.sessions[epicId]?.cwd ?? null : null))
   const [refreshing, setRefreshing] = useState(false)
+  const epicCompleted = usePromptSessions((s) => (epicId ? s.sessions[epicId]?.status === 'completed' : false))
+  // Purge confirm: the id this confirm was opened for (so switching Epics resets it) + the typed text.
+  const [purgeFor, setPurgeFor] = useState<string | null>(null)
+  const [purgeTyped, setPurgeTyped] = useState('')
+  const [purging, setPurging] = useState(false)
+  const purgeOpen = purgeFor !== null && purgeFor === epicId
 
   // The one human action that moves an existing Epic onto the current persona
   // version (lib/epic/epicAgentRefresh.cjs re-snapshots + audits main-side).
@@ -167,6 +173,36 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
       show('error', err instanceof Error ? err.message : String(err))
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  // The one human action that deletes a completed Epic's data (lib/epic/epicPurge.cjs
+  // via epic:purge). Gated on typing the Epic id; never reachable from a script.
+  const purge = async () => {
+    if (!epicId || !epicCwd || purgeTyped !== epicId) return
+    const show = useToast.getState().show
+    setPurging(true)
+    try {
+      const r = await window.api.promptSessions.purge({ cwd: epicCwd, epicId })
+      if (!r.ok) {
+        show('error', r.error)
+        return
+      }
+      // Main already rewrote active-index.json (row gone, tombstone kept) — drop it in memory only.
+      usePromptSessions.setState((st) => {
+        const sessions = { ...st.sessions }
+        const events = { ...st.events }
+        delete sessions[epicId]
+        delete events[epicId]
+        return { sessions, events }
+      })
+      setPurgeFor(null)
+      setPurgeTyped('')
+      show('info', `Session ${epicId} purged.`)
+    } catch (err) {
+      show('error', err instanceof Error ? err.message : String(err))
+    } finally {
+      setPurging(false)
     }
   }
 
@@ -227,6 +263,22 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
           </button>
         )}
 
+        {epicId && epicCompleted && (
+          <button
+            type="button"
+            onClick={() => {
+              setPurgeFor(epicId)
+              setPurgeTyped('')
+            }}
+            disabled={!epicCwd || purging || purgeOpen}
+            title="Permanently delete this completed session's transcripts, logs, PRDs and history"
+            data-testid="epic-purge"
+            className={`${SECONDARY} hover:text-red-500`}
+          >
+            Purge
+          </button>
+        )}
+
         {library.length > 0 && (
           <button
             type="button"
@@ -241,6 +293,48 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
           </button>
         )}
       </div>
+
+      {epicId && epicCompleted && purgeOpen && (
+        <div data-testid="epic-purge-confirm-panel" className="flex flex-col gap-1.5 rounded-lg border border-red-500/40 bg-bg-hi p-2 text-[11.5px]">
+          <span className="text-fg-dim">
+            This permanently deletes the session&apos;s transcripts, run logs, PRDs, events and history. Type{' '}
+            <code className="font-mono text-fg">{epicId}</code> to confirm.
+          </span>
+          <input
+            type="text"
+            data-testid="epic-purge-input"
+            value={purgeTyped}
+            onChange={(e) => setPurgeTyped(e.target.value)}
+            aria-label="Type the session id to confirm purge"
+            autoComplete="off"
+            spellCheck={false}
+            className="rounded-md border border-line bg-bg px-2 py-1 font-mono text-[11.5px] text-fg"
+          />
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="epic-purge-confirm"
+              onClick={() => void purge()}
+              disabled={purgeTyped !== epicId || purging}
+              className={`${BTN} bg-red-600 text-white border-transparent`}
+            >
+              {purging ? 'Purging…' : 'Purge forever'}
+            </button>
+            <button
+              type="button"
+              data-testid="epic-purge-cancel"
+              onClick={() => {
+                setPurgeFor(null)
+                setPurgeTyped('')
+              }}
+              disabled={purging}
+              className={SECONDARY}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {pending && (
         <MacroInputsForm

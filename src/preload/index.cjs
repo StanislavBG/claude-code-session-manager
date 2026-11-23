@@ -678,6 +678,8 @@ contextBridge.exposeInMainWorld('api', {
     reopen: (payload) => ipcRenderer.invoke('promptSessions:reopen', payload),
     /** Re-snapshots an Epic's persona and re-stamps its agentSnapshotId (audited); same id = no-op. */
     refreshAgentSnapshot: (payload) => ipcRenderer.invoke('epic:refresh-agent-snapshot', payload),
+    /** Human-only purge of a completed Epic's data (lib/epic/epicPurge.cjs); the Purge button is its only caller. */
+    purge: (payload) => ipcRenderer.invoke('epic:purge', payload),
     /** Read-tier (remote-safe) Sessions reads — see main/promptSessionsIpc.cjs. */
     loadActiveIndex: (payload) => ipcRenderer.invoke('promptSessions:load-active-index', payload),
     listArchived: (payload) => ipcRenderer.invoke('promptSessions:list-archived', payload),

@@ -1145,6 +1145,15 @@ require('./lib/epic/epicChanges.cjs').registerEpicChangesHandlers();
 registerAppPreviewHandlers(ipcMain, { getWindow: () => mainWindow });
 require('./lib/epic/epicReopen.cjs').registerEpicReopenHandlers();
 require('./lib/epic/epicAgentRefresh.cjs').registerEpicAgentRefreshHandlers();
+// epic:purge — the ONLY caller of purgeEpic (a human pressing Purge + typing the Epic id).
+// Never wire purgeEpic into a script, MCP tool or admin route.
+{
+  const { purgeEpic, PURGE_AUTHORITY_IPC } = require('./lib/epic/epicPurge.cjs');
+  ipcMain.handle('epic:purge', validated(schemas.epicPurge, async ({ cwd, epicId }) => {
+    require('./config.cjs').validatePath(cwd);
+    return purgeEpic({ cwd, epicId, authority: PURGE_AUTHORITY_IPC });
+  }));
+}
 epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();

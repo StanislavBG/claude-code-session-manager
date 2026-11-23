@@ -3339,11 +3339,19 @@ export interface SessionManagerAPI {
     /** Re-snapshots the Epic's persona and re-stamps its agentSnapshotId — the only way a live
      *  persona edit reaches an existing Epic (lib/epic/epicAgentRefresh.cjs). Audited; same id = no-op. */
     refreshAgentSnapshot: (payload: EpicRefreshAgentSnapshotPayload) => Promise<EpicRefreshAgentSnapshotResult>;
+    /** epic:purge — deletes a completed Epic's transcripts, run logs, history rows, PRDs, events and
+     *  JSON, leaving a content-free tombstone + one audit record (lib/epic/epicPurge.cjs). Human-only:
+     *  the Purge button (typed-id confirm) is its only caller. */
+    purge: (payload: EpicPurgePayload) => Promise<EpicPurgeResult>;
   };
 }
 
 export interface PromptSessionsReopenPayload { cwd: string; epicId: string }
 export interface EpicRefreshAgentSnapshotPayload { cwd: string; epicId: string }
+export interface EpicPurgePayload { cwd: string; epicId: string }
+export type EpicPurgeResult =
+  | { ok: true; removed: string[] }
+  | { ok: false; code: 'not_human' | 'invalid_epic_id' | 'invalid_cwd' | 'epic_running' | string; error: string };
 export type EpicRefreshAgentSnapshotResult =
   | { ok: true; changed: boolean; from: string | null; to: string; session: PromptSession }
   | { ok: false; code: string; message: string };

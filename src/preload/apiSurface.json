@@ -2267,6 +2267,13 @@
  },
  {
   "ns": "promptSessions",
+  "method": "purge",
+  "channel": "epic:purge",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "promptSessions",
   "method": "loadActiveIndex",
   "channel": "promptSessions:load-active-index",
   "kind": "invoke",

@@ -286,6 +286,9 @@ const promptSessionsReadSessionTranscript = z.object({ cwd: z.string().min(1).ma
 const promptSessionsReopen = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
 // epic:refresh-agent-snapshot (lib/epic/epicAgentRefresh.cjs) — re-pin an Epic's persona snapshot.
 const epicRefreshAgentSnapshot = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
+// epic:purge (lib/epic/epicPurge.cjs) — the human-only purge of a completed Epic's data.
+// Its ONLY caller is the Purge button (typed-id confirm); never exposed to scripts, MCP or admin routes.
+const epicPurge = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
 
 // Renderer entry point for folding an Epic's isolated git worktree branch
 // back into its owning project's main tree (lib/epic/epicWorktreeMerge.cjs) — PRD
@@ -1862,6 +1865,7 @@ module.exports = {
     promptSessionsCreateWorktree,
     promptSessionsReopen,
     epicRefreshAgentSnapshot,
+    epicPurge,
     promptSessionsCwd,
     promptSessionsReadArchived,
     promptSessionsReadSessionTranscript,

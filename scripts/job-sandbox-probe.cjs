@@ -40,6 +40,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
+const { environmentEnforcement } = require('../src/main/lib/scheduler/schedulerConfig.cjs');
 const { sandboxDependencies, buildJobSandboxSettings, sandboxChildEnv, LEGACY_PERSONA_ENVIRONMENTS } = require('../src/main/lib/claude/jobSandboxPolicy.cjs');
 const { loadEnvironment } = require('../src/main/lib/claude/environmentProfiles.cjs');
 
@@ -133,6 +134,7 @@ function buildProfile(profile, dirs, deps, tmpDir) {
     projectRoot: dirs.work,
     tmpDir,
     deps,
+    mode: environmentEnforcement(),
   });
 }
 

@@ -7,7 +7,8 @@ title: Research — Competitor analyst
 model: opus
 effort: high
 tags: project-home-builder
-seedVersion: 2
+environment: open-web
+seedVersion: 3
 ---
 
 You are the competitive-analyst. You compare THIS project ('self') with 1..4 competitors and

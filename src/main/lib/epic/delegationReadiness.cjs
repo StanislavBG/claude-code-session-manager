@@ -26,6 +26,8 @@ const { shimPath: guardShimPath, resolveShimTarget, ensureGuardShimsOrError } = 
 const { resolveProjectRoot } = require('../opsOwnership.cjs');
 const { nodeShellCommand } = require('../appRuntime.cjs');
 const { readJsonOrSync } = require('../util/atomicFs.cjs');
+const { sandboxDependencies, sandboxInstallHint } = require('../claude/jobSandboxPolicy.cjs');
+const { environmentEnforcement } = require('../scheduler/schedulerConfig.cjs');
 
 const SCHEDULER_MCP_NAME = 'session-manager-scheduler';
 const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
@@ -445,6 +447,51 @@ function checkAgentPersonas({ cwd, homeDir }) {
   };
 }
 
+/** First executable `name` on PATH, or null. */
+function whichOnPath(name) {
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch { /* next */ }
+  }
+  return null;
+}
+
+/**
+ * Can headless jobs get the OS sandbox their environment requires? Under
+ * 'enforce' (the default) a job whose environment needs it (dev-lead,
+ * validator) parks 'environment_unavailable: <missing>' when bwrap/socat
+ * (linux) or sandbox-exec (macOS) is missing — so the banner names the
+ * packages to install. Under 'report' mode it is never a failure.
+ * `sandboxDeps` / `platform` / `mode` are injectable for tests.
+ * @param {{ sandboxDeps?: { available: boolean, missing?: string[] }|null, platform?: string, mode?: string }} [opts]
+ */
+function checkJobSandbox({ sandboxDeps = null, platform = process.platform, mode } = {}) {
+  const base = { id: 'job-sandbox', label: 'OS sandbox packages installed for headless jobs' };
+  let deps = sandboxDeps;
+  if (!deps) {
+    try { deps = sandboxDependencies({ platform, which: whichOnPath }); } catch (e) {
+      deps = { available: false, missing: [`sandbox dependency probe failed: ${(e && e.message) || e}`] };
+    }
+  }
+  const effectiveMode = mode === 'report' || mode === 'enforce' ? mode : environmentEnforcement();
+  if (deps.available) return { ...base, ok: true, detail: 'OS sandbox dependencies present', fix: null };
+  const missing = Array.isArray(deps.missing) && deps.missing.length ? deps.missing : ['unknown'];
+  const hint = sandboxInstallHint({ platform, missing });
+  const fix = hint.packages.length
+    ? `Install ${hint.packages.join(', ')}${hint.command ? ` (${hint.command})` : ''}, then restart Session Manager`
+    : `Run Session Manager on Linux (bubblewrap + socat) or macOS (sandbox-exec)`;
+  if (effectiveMode === 'report') {
+    return { ...base, ok: true, warn: true, detail: `missing: ${missing.join(', ')} — report mode: jobs fall back to tool rules`, fix };
+  }
+  return {
+    ...base,
+    ok: false,
+    detail: `missing: ${missing.join(', ')} — dev-lead and validator jobs park with environment_unavailable until installed`,
+    fix,
+  };
+}
+
 /**
  * Pull a guard script's path out of a hook `command` string.
  *
@@ -717,7 +764,7 @@ async function installSelfScheduleGuard({ cwd, homeDir = os.homedir(), skipShimE
 }
 
 /**
- * Runs all eight delegation-readiness checks for `cwd`. Every filesystem read
+ * Runs all ten delegation-readiness checks for `cwd`. Every filesystem read
  * is wrapped (readJsonOrSync / try-catch) so a missing or unparseable file
  * yields ok:false with a detail, never a thrown exception. Async because
  * scheduler-mcp-live genuinely spawns a process and waits on it (bounded by
@@ -725,7 +772,7 @@ async function installSelfScheduleGuard({ cwd, homeDir = os.homedir(), skipShimE
  * callers — the New Epic banner, session_manager_help — don't each pay for
  * a fresh spawn).
  */
-async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
+async function checkDelegationReadiness({ cwd, homeDir = os.homedir(), sandboxDeps = null, sandboxPlatform, environmentMode }) {
   const schedulerMcpCheck = checkSchedulerMcp({ cwd, homeDir });
   const schedulerMcpLiveCheck = await checkSchedulerMcpLive({ cwd, homeDir, schedulerMcpCheck });
 
@@ -742,6 +789,7 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
     checkDestructiveGitGuard({ cwd, homeDir }),
     checkInlineImplementationGuard({ cwd, homeDir }),
     checkSelfScheduleGuard({ cwd, homeDir }),
+    checkJobSandbox({ sandboxDeps, platform: sandboxPlatform, mode: environmentMode }),
   ].map((c) => ({ fixAction: null, warn: false, ...c }));
 
   return {
@@ -895,6 +943,7 @@ module.exports = {
   checkDevPlugin,
   DEV_PLUGIN_REINSTALL_FIX,
   checkDelegationReadiness,
+  checkJobSandbox,
   ensureGuardsInstalled,
   logAutoInstallEvent,
   clearGuardsInstalledCache,

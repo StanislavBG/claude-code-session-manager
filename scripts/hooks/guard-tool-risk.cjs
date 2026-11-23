@@ -30,6 +30,10 @@
  *   then a blocking mark is denied in a Chat turn (SM_CHAT_SESSION_ID set —
  *   a -p turn has no approval surface, and the CLI turns 'ask' into a generic
  *   auto-deny) and answered with 'ask' in a Terminal session.
+ * - Headless WebFetch/WebSearch: denied when the job's environment
+ *   (SM_JOB_ENVIRONMENT) disallows it — tool not allowed or host off the
+ *   allow-list — naming the environment; SM_JOB_ENVIRONMENT_MODE=report only
+ *   records it ('environment_would_block' audit row).
  * - Any other internal error fails open with a stderr line, like
  *   guard-self-schedule.cjs.
  *

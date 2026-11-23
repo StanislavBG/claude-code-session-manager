@@ -28,6 +28,9 @@ const {
   INLINE_IMPLEMENTATION_GUARD_SCRIPT,
   SELF_SCHEDULE_GUARD_SCRIPT,
 } = require('../delegationReadiness.cjs');
+
+/** Host-independent: these tests are about the other checks, not this machine's bwrap/socat. */
+const SANDBOX_OK = Object.freeze({ available: true, missing: [] });
 const { todayFile: opsErrorLogTodayFile } = require('../../telemetry/opsErrorLog.cjs');
 const {
   writeGuardShims,
@@ -108,12 +111,12 @@ async function makeGreenFixtures() {
   return { homeDir, cwd, scriptPath };
 }
 
-test('all nine checks pass on a fully-configured project', async () => {
+test('all ten checks pass on a fully-configured project', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
 
   expect(result.ok).toBe(true);
-  expect(result.checks).toHaveLength(9);
+  expect(result.checks).toHaveLength(10);
   expect(result.checks.every((c) => c.ok)).toBe(true);
   expect(result.checks.map((c) => c.id)).toEqual([
     'scheduler-mcp',
@@ -125,6 +128,7 @@ test('all nine checks pass on a fully-configured project', async () => {
     'destructive-git-guard',
     'inline-implementation-guard',
     'self-schedule-guard',
+    'job-sandbox',
   ]);
 }, 15_000);
 
@@ -135,7 +139,7 @@ test('scheduler-mcp: passes via project-scope .mcp.json even without user scope'
     mcpServers: { 'session-manager-scheduler': { command: 'node', args: [] } },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp');
   expect(check.ok).toBe(true);
 }, 15_000);
@@ -144,7 +148,7 @@ test('scheduler-mcp: fails with a runnable fix when absent from both scopes', as
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(homeDir, '.claude.json'), { mcpServers: {} });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
@@ -158,7 +162,7 @@ test('scheduler-mcp: fails when the user-scope script path is RELATIVE', async (
     mcpServers: { 'session-manager-scheduler': { command: 'node', args: ['scripts/scheduler-mcp-server.cjs'] } },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp');
   expect(check.ok).toBe(false);
   expect(check.detail).toMatch(/non-absolute/);
@@ -173,7 +177,7 @@ test('scheduler-mcp: fails when the user-scope script path is absolute but MISSI
     mcpServers: { 'session-manager-scheduler': { command: 'node', args: [path.join(homeDir, 'does-not-exist.cjs')] } },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp');
   expect(check.ok).toBe(false);
   expect(check.detail).toMatch(/no longer exists/);
@@ -183,7 +187,7 @@ test('dev-plugin: fails independently when enabledPlugins is missing the key', a
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(homeDir, '.claude', 'settings.json'), { enabledPlugins: {} });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'dev-plugin');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
@@ -201,7 +205,7 @@ test('dev-plugin fails when the loaded copy SKILL.md is missing', async () => {
   expect(check.ok).toBe(false);
   expect(check.detail).toContain(skillFile);
   expect(check.fix).toBe(DEV_PLUGIN_REINSTALL_FIX);
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(result.checks.find((c) => c.id === 'dev-plugin').ok).toBe(false);
 }, 15_000);
 
@@ -271,7 +275,7 @@ test('agent-personas: fails independently when ~/.claude/agents has no personas'
   const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.rm(path.join(homeDir, '.claude', 'agents', 'dev-lead.md'));
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'agent-personas');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
@@ -283,7 +287,7 @@ test('agent-personas: passes via project-scope .claude/agents/ even without glob
   await fsp.mkdir(path.join(cwd, '.claude', 'agents'), { recursive: true });
   await fsp.writeFile(path.join(cwd, '.claude', 'agents', 'builder.md'), '# builder', 'utf8');
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'agent-personas');
   expect(check.ok).toBe(true);
 }, 15_000);
@@ -292,7 +296,7 @@ test('prd-write-guard: fails independently when the hook is missing', async () =
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), { hooks: { PreToolUse: [] } });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'prd-write-guard');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
@@ -304,8 +308,8 @@ test('unparseable JSON files yield ok:false with a detail, never a throw', async
   await fs.promises.writeFile(path.join(homeDir, '.claude', 'settings.json'), '{ not valid json', 'utf8');
   await fs.promises.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
 
-  await expect(checkDelegationReadiness({ cwd, homeDir })).resolves.toBeTruthy();
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  await expect(checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK })).resolves.toBeTruthy();
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
 
   const scheduler = result.checks.find((c) => c.id === 'scheduler-mcp');
   const devPlugin = result.checks.find((c) => c.id === 'dev-plugin');
@@ -327,7 +331,7 @@ test('scheduler-mcp-project-duplicate: warns when both scopes register the serve
     mcpServers: { 'session-manager-scheduler': { command: 'node', args: ['scripts/scheduler-mcp-server.cjs'] } },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp-project-duplicate');
   expect(check.ok).toBe(true);
   expect(check.warn).toBe(true);
@@ -339,7 +343,7 @@ test('scheduler-mcp-project-duplicate: warns when both scopes register the serve
 test('scheduler-mcp-project-duplicate: no warning when only user scope is registered', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp-project-duplicate');
   expect(check.ok).toBe(true);
   expect(check.warn).toBe(false);
@@ -382,7 +386,7 @@ test('scheduler-mcp-live: is skipped, not failed, when scheduler-mcp already fai
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(homeDir, '.claude.json'), { mcpServers: {} });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const live = result.checks.find((c) => c.id === 'scheduler-mcp-live');
   expect(live.ok).toBe(true);
   expect(live.skipped).toBe(true);
@@ -400,8 +404,8 @@ test('scheduler-mcp-live: memoizes the probe per registration signature within t
     mcpServers: { 'session-manager-scheduler': { type: 'stdio', command: 'node', args: [scriptPath] } },
   });
 
-  await checkDelegationReadiness({ cwd, homeDir });
-  await checkDelegationReadiness({ cwd, homeDir });
+  await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
+  await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
 
   const spawnCount = (await fsp.readFile(countFile, 'utf8')).trim().split('\n').filter(Boolean).length;
   expect(spawnCount).toBe(1);
@@ -425,7 +429,7 @@ test('installPrdWriteGuard: writes the canonical STABLE-SHIM-path entry and turn
   expect(written.hooks.PreToolUse).toEqual([
     { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: shimCommand }] },
   ]);
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
 
@@ -463,7 +467,7 @@ test('installPrdWriteGuard: repairs a hook pointing at a dead ephemeral _npx cac
     hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${deadNpxPath}` }] }] },
   });
 
-  const before = await checkDelegationReadiness({ cwd, homeDir });
+  const before = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(before.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(false);
 
   const r = await installPrdWriteGuard({ cwd, homeDir });
@@ -477,7 +481,7 @@ test('installPrdWriteGuard: repairs a hook pointing at a dead ephemeral _npx cac
   expect(writeMatchers).toHaveLength(1);
   expect(writeMatchers[0].hooks).toEqual([{ type: 'command', command: shimCommand }]);
 
-  const after = await checkDelegationReadiness({ cwd, homeDir });
+  const after = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(after.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
 
@@ -491,14 +495,14 @@ test('checkPrdWriteGuard: reports red — not a false green — when an installe
   const r = await installPrdWriteGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
   expect(r.command).toBe(`node "${guardShimPath('guard-prd-writes.cjs', homeDir)}"`);
-  const healthy = await checkDelegationReadiness({ cwd, homeDir });
+  const healthy = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(healthy.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 
   // Corrupt ONLY the pointer — the shim FILE at the hook's command path never
   // moves, which is exactly why checking just its existence isn't enough.
   await writeJson(guardPointerPath(homeDir), { appRoot: path.join(homeDir, 'deleted-app-root') });
 
-  const decayed = await checkDelegationReadiness({ cwd, homeDir });
+  const decayed = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = decayed.checks.find((c) => c.id === 'prd-write-guard');
   expect(check.ok).toBe(false);
   expect(check.detail).toMatch(/pointer has decayed/);
@@ -506,7 +510,7 @@ test('checkPrdWriteGuard: reports red — not a false green — when an installe
 
 test('checkPrdWriteGuard: accepts BOTH a direct app-root path and the stable shim path as healthy', async () => {
   const { homeDir, cwd } = await makeGreenFixtures(); // direct app-root path, already healthy
-  const directResult = await checkDelegationReadiness({ cwd, homeDir });
+  const directResult = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(directResult.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 
   const shimResult = await writeGuardShims({ homeDir });
@@ -514,7 +518,7 @@ test('checkPrdWriteGuard: accepts BOTH a direct app-root path and the stable shi
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
     hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${guardShimPath('guard-prd-writes.cjs', homeDir)}"` }] }] },
   });
-  const viaShim = await checkDelegationReadiness({ cwd, homeDir });
+  const viaShim = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(viaShim.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
 
@@ -574,7 +578,7 @@ test('destructive-git-guard: fails independently when the hook is missing', asyn
     },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'destructive-git-guard');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
@@ -599,7 +603,7 @@ test('destructive-git-guard: fails when the hook names a script that does not ex
     },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'destructive-git-guard');
   expect(check.ok).toBe(false);
   expect(check.detail).toMatch(/does not exist/);
@@ -634,7 +638,7 @@ test('installDestructiveGitGuard: writes the canonical STABLE-SHIM-path entry an
     { matcher: 'Bash', hooks: [{ type: 'command', command: shimCommand }] },
   );
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(result.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
   expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
@@ -654,7 +658,7 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
     },
   });
 
-  const before = await checkDelegationReadiness({ cwd, homeDir });
+  const before = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(before.checks.find((c) => c.id === 'destructive-git-guard')).toMatchObject({
     ok: false,
     fixAction: 'install-destructive-git-guard',
@@ -674,7 +678,7 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
   expect(DESTRUCTIVE_GIT_GUARD_SCRIPT.startsWith(cwd + path.sep)).toBe(false);
   expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
 
-  const after = await checkDelegationReadiness({ cwd, homeDir });
+  const after = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(after.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
   expect(after.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 
@@ -773,7 +777,7 @@ test('inline-implementation-guard: fails independently when the hook is missing 
     },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'inline-implementation-guard');
   expect(check.ok).toBe(false);
   expect(check.fixAction).toBe('install-inline-implementation-guard');
@@ -803,7 +807,7 @@ test('inline-implementation-guard: fails with the "would silently guard nothing"
     },
   });
 
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'inline-implementation-guard');
   expect(check.ok).toBe(false);
   expect(check.detail).toBe(`guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`);
@@ -811,7 +815,7 @@ test('inline-implementation-guard: fails with the "would silently guard nothing"
 
 test('inline-implementation-guard: ok when the hook resolves to an existing script file', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = result.checks.find((c) => c.id === 'inline-implementation-guard');
   expect(check.ok).toBe(true);
   expect(check.fixAction).toBeNull();
@@ -837,7 +841,7 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
   };
   await writeJson(settingsPath, seeded);
 
-  const before = await checkDelegationReadiness({ cwd, homeDir });
+  const before = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(before.checks.find((c) => c.id === 'inline-implementation-guard')).toMatchObject({
     ok: false,
     fixAction: 'install-inline-implementation-guard',
@@ -861,7 +865,7 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
   );
   expect(written.someUnrelatedTopLevelKey).toEqual(seeded.someUnrelatedTopLevelKey);
 
-  const after = await checkDelegationReadiness({ cwd, homeDir });
+  const after = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(after.checks.find((c) => c.id === 'inline-implementation-guard').ok).toBe(true);
   expect(after.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
   expect(after.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
@@ -1090,7 +1094,7 @@ test('ensureGuardsInstalled: installs all four guards into a fresh project with 
   expect(result.guards['inline-implementation-guard'].action).toBe('installed');
   expect(result.guards['self-schedule-guard'].action).toBe('installed');
 
-  const readiness = await checkDelegationReadiness({ cwd, homeDir });
+  const readiness = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(readiness.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
   expect(readiness.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
   expect(readiness.checks.find((c) => c.id === 'inline-implementation-guard').ok).toBe(true);
@@ -1125,7 +1129,7 @@ test('ensureGuardsInstalled: malformed settings.json does not throw and leaves t
   // never silently discarded the human's unparseable file
   expect(fs.readFileSync(settingsPath, 'utf8')).toBe('{ not valid json');
 
-  const readiness = await checkDelegationReadiness({ cwd, homeDir });
+  const readiness = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   const check = readiness.checks.find((c) => c.id === 'prd-write-guard');
   expect(check.ok).toBe(false);
   expect(check.fixAction).toBe('install-prd-write-guard');
@@ -1186,7 +1190,7 @@ test('ensureGuardsInstalled: a worktree cwd installs into the MAIN tree root, ne
   expect(fs.existsSync(path.join(main, '.claude', 'settings.json'))).toBe(true);
   expect(fs.existsSync(path.join(worktree, '.claude', 'settings.json'))).toBe(false);
 
-  const readiness = await checkDelegationReadiness({ cwd: main, homeDir });
+  const readiness = await checkDelegationReadiness({ cwd: main, homeDir, sandboxDeps: SANDBOX_OK });
   expect(readiness.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
 
@@ -1252,7 +1256,7 @@ test('guard: legacy `node <shim>` and packaged ELECTRON_RUN_AS_NODE forms are bo
     await writeJson(path.join(cwd, '.claude', 'settings.json'), {
       hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command }] }] },
     });
-    const result = await checkDelegationReadiness({ cwd, homeDir });
+    const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
     expect(result.checks.find((c) => c.id === 'prd-write-guard').ok, command).toBe(true);
   }
 }, 15_000);
@@ -1267,7 +1271,7 @@ test('packaged mode: installed guard command and scheduler-mcp fix use the app r
     expect(res.command).toBe(`ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${shim}"`);
 
     await fsp.rm(path.join(homeDir, '.claude.json'));
-    const result = await checkDelegationReadiness({ cwd, homeDir });
+    const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
     const fix = result.checks.find((c) => c.id === 'scheduler-mcp').fix;
     expect(fix).toContain('-e ELECTRON_RUN_AS_NODE=1 --');
     expect(fix).toContain(`"${process.execPath}"`);
@@ -1285,6 +1289,6 @@ test('scheduler-mcp: accepts a registration using execPath + ELECTRON_RUN_AS_NOD
       },
     },
   });
-  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(result.checks.find((c) => c.id === 'scheduler-mcp').ok).toBe(true);
 }, 15_000);

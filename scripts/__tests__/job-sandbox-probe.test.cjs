@@ -119,7 +119,8 @@ test('--dry-run prints parseable settings JSON for both profiles and exits 0', (
   expect(out.deps).toHaveProperty('available');
   expect(Object.keys(out.profiles).sort()).toEqual(['dev-lead', 'validator']);
   for (const p of Object.values(out.profiles)) {
-    expect(['os-sandbox', 'tool-rules']).toContain(p.level);
+    // 'refused': enforce mode (the default) without the OS sandbox deps.
+    expect(['os-sandbox', 'tool-rules', 'refused']).toContain(p.level);
     expect(Array.isArray(p.argv)).toBe(true);
     expect(path.dirname(p.tmpDir)).toBe(os.tmpdir());
     expect(path.basename(p.tmpDir)).toMatch(/^smj-/);

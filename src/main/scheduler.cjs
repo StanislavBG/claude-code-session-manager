@@ -6063,11 +6063,32 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       homeDir: os.homedir(),
       tmpDir: sandboxTmpDir || os.tmpdir(),
       deps: sandboxDeps,
+      mode: enforcementMode,
     });
+    // Enforce mode: an environment that needs the OS sandbox and cannot get it
+    // is never downgraded to tool rules — the job is not spawned and
+    // spawnJob parks it needs_review 'environment_unavailable: <missing deps>'
+    // through the personaRefusal path (parkPersonaRefusal → transitionJob).
+    if (sandboxPolicy.refusal) {
+      const { code, detail } = sandboxPolicy.refusal;
+      const refusalError = `${code}: ${detail}`;
+      try {
+        appendAuditEvent('environment_would_block', wouldBlockRecord({
+          slug: job.slug, persona: sandboxAgentType, environment: jobEnvironment ? jobEnvironment.id : null,
+          what: 'os_sandbox_unavailable', detail: sandboxPolicy.summary.reason, mode: enforcementMode,
+        }));
+      } catch { /* audit must not break dispatch */ }
+      safeLog(`[scheduler] environment ${jobEnvironment ? jobEnvironment.id : '(none)'} refused for ${job.slug} — not spawned: ${refusalError}\n`);
+      closeFd();
+      removeSandboxTmp();
+      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: refusalError, personaRefusal: { code, detail }, startedAt, finishedAt: Date.now(), durationMs: 0, sandbox: { ...sandboxPolicy.summary, tmpDir: null, enforcement: enforcementMode }, ...SCHEDULER_META_IDENTITY, ...setupMeta, agentSnapshotId: personaResolution.agentSnapshotId || null });
+      resolve({ exitCode: -1, durationMs: 0, error: refusalError, sessionId, personaRefusal: { code, detail } });
+      return;
+    }
     // childEnv was built (and cleanChildEnv already ran) above.
     Object.assign(childEnv, sandboxChildEnv(sandboxPolicy, sandboxTmpDir || os.tmpdir()));
-    // guard-tool-risk reads these to report WebFetch/WebSearch calls the
-    // environment would block (never blocks them — report mode).
+    // guard-tool-risk reads these to deny (enforce) or report (report mode)
+    // the WebFetch/WebSearch calls the environment disallows.
     Object.assign(childEnv, environmentHookEnv({ environment: jobEnvironment, mode: enforcementMode, agentType: sandboxAgentType }));
     for (const wb of sandboxPolicy.wouldBlock) {
       try {
@@ -6076,7 +6097,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           what: wb.what, detail: wb.detail, mode: enforcementMode,
         }));
       } catch { /* audit must not break dispatch */ }
-      safeLog(`[scheduler] environment would block (${enforcementMode} mode, not blocked): ${wb.what} — ${wb.detail}\n`);
+      safeLog(`[scheduler] environment would block (report mode, not blocked): ${wb.what} — ${wb.detail}\n`);
     }
     const sandboxMeta = { ...sandboxPolicy.summary, tmpDir: sandboxTmpDir, enforcement: enforcementMode };
     safeLog(`[scheduler] sandbox: level=${sandboxMeta.level} environment=${sandboxMeta.environment ?? 'none'} profile=${sandboxMeta.profile ?? 'none'} ` +

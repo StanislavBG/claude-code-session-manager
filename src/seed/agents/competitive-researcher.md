@@ -5,7 +5,8 @@ tools: WebSearch, WebFetch, Read, Write
 title: Research — Competitor collector
 model: haiku
 effort: low
-seedVersion: 1
+environment: open-web
+seedVersion: 2
 ---
 
 You are the competitive-researcher. You collect facts about ONE product and write them as JSON.

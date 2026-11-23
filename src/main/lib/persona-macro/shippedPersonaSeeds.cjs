@@ -699,6 +699,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "low",
       },
     },
+    {
+      commit: "seed-v2",
+      bodySha256: "4c6df5cb5a6486ea507fd6f985f324c9bd2557f1aed50ebd30dd666662267fda",
+      fm: {
+        description: "The Haiku collector for the Competitor matrix — run as a subagent by competitive-analyst, it researches ONE product's official announcements, dev blogs, changelogs and docs plus what users rave about or ask for, and writes cited JSON findings to the path it is given.",
+        tools: "WebSearch, WebFetch, Read, Write",
+        title: "Research — Competitor collector",
+        model: "haiku",
+        effort: "low",
+        environment: "open-web",
+      },
+    },
   ],
   "competitive-analyst": [
     {
@@ -724,6 +736,20 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         model: "opus",
         effort: "high",
         tags: "project-home-builder",
+      },
+    },
+    {
+      commit: "seed-v3",
+      bodySha256: "8e72237e9b743bb8c26cc701d3ebd6c65212ebf777de37f9eb5f40aeaf224fae",
+      fm: {
+        description: "The Opus analyst and executor of the Competitor matrix macro — warm-starts from the saved matrix, settles 1..4 competitors, inventories this project's real features, fans out Haiku competitive-researcher subagents, then merges everything into a grouped feature matrix with sentiment and prioritized recommendations and saves it once with project_matrix_write.",
+        tools: "Read, Grep, Glob, Bash, Write, WebSearch, WebFetch, Agent, mcp__session-manager-scheduler__project_matrix_read, mcp__session-manager-scheduler__project_matrix_write",
+        mcpServers: "session-manager-scheduler",
+        title: "Research — Competitor analyst",
+        model: "opus",
+        effort: "high",
+        tags: "project-home-builder",
+        environment: "open-web",
       },
     },
   ],

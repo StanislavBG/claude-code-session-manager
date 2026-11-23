@@ -56,6 +56,8 @@ function policy(agentType, deps = { available: true, missing: [] }) {
     homeDir: tmpHome,
     tmpDir: os.tmpdir(),
     deps,
+    // These tests pin the report-mode argv (missing deps → tool rules); enforce refuses instead.
+    mode: 'report',
   });
 }
 

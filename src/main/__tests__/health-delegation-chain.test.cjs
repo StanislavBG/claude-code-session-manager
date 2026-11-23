@@ -92,21 +92,26 @@ test('end-to-end: check() reports delegation_chain ok with the chain installed i
   const path = require('node:path');
   const sandboxHome = process.env.HOME;
   const sandboxSchedulerHome = process.env.SM_SCHEDULER_HOME;
+  const prevEnforcement = process.env.SM_ENVIRONMENT_ENFORCEMENT;
   const fixtureHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-health-delegation-home-'));
   let status;
   try {
     await seedDelegationHome(fixtureHome);
     process.env.HOME = fixtureHome;
+    // Host-independent: report mode never fails the job-sandbox check on a machine without bwrap/socat.
+    process.env.SM_ENVIRONMENT_ENFORCEMENT = 'report';
     if (sandboxSchedulerHome !== undefined) process.env.SM_SCHEDULER_HOME = sandboxSchedulerHome;
     // skipTypecheck: this test asserts on delegation_chain only; the tsc shell-out was
     // ~15s of the ~16s idle runtime and starved to the 90s budget under CPU load.
     status = await check({ skipTypecheck: true });
   } finally {
     process.env.HOME = sandboxHome;
+    if (prevEnforcement === undefined) delete process.env.SM_ENVIRONMENT_ENFORCEMENT;
+    else process.env.SM_ENVIRONMENT_ENFORCEMENT = prevEnforcement;
     fs.rmSync(fixtureHome, { recursive: true, force: true });
   }
   expect(status.components.delegation_chain).toBeDefined();
-  expect(status.components.delegation_chain.checks).toHaveLength(9);
+  expect(status.components.delegation_chain.checks).toHaveLength(10);
   const ids = status.components.delegation_chain.checks.map((c) => c.id);
   expect(ids).toEqual([
     'scheduler-mcp',
@@ -118,6 +123,7 @@ test('end-to-end: check() reports delegation_chain ok with the chain installed i
     'destructive-git-guard',
     'inline-implementation-guard',
     'self-schedule-guard',
+    'job-sandbox',
   ]);
   const checks = status.components.delegation_chain.checks;
   expect(checks.filter((c) => !c.ok).map((c) => c.id)).toEqual([]);

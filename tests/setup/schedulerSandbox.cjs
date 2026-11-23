@@ -23,6 +23,11 @@ for (const k of ['SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MCP_TOOLS', 'SM_SCHE
 // Memory cap off by default in tests: no real systemd-run scopes on the host, argv stays unwrapped.
 process.env.SM_JOB_MEMORY_MAX_MB = '0';
 
+// Environment enforcement defaults to 'enforce' (PRD 3805), which parks every dev-lead/validator
+// executeJob on a host without bwrap/socat. Tests run in 'report' so their outcome never depends on
+// the host's packages; tests of enforcement pass mode explicitly or set/delete this var themselves.
+process.env.SM_ENVIRONMENT_ENFORCEMENT = 'report';
+
 const env = inject('schedulerSandbox');
 if (env) {
   Object.assign(process.env, env);

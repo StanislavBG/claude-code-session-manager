@@ -125,25 +125,25 @@ describe('profile-driven argv', () => {
 });
 
 describe('report-mode would-block records', () => {
-  it('scheduler config reads the mode: report by default, enforce when set', () => {
+  it('scheduler config reads the mode: enforce by default, report only when set', () => {
     const prev = process.env.SM_ENVIRONMENT_ENFORCEMENT;
     try {
       delete process.env.SM_ENVIRONMENT_ENFORCEMENT;
-      expect(schedulerConfig.DEFAULT_ENVIRONMENT_ENFORCEMENT).toBe('report');
-      expect(schedulerConfig.environmentEnforcement()).toBe('report');
-      process.env.SM_ENVIRONMENT_ENFORCEMENT = 'enforce';
+      expect(schedulerConfig.DEFAULT_ENVIRONMENT_ENFORCEMENT).toBe('enforce');
       expect(schedulerConfig.environmentEnforcement()).toBe('enforce');
-      process.env.SM_ENVIRONMENT_ENFORCEMENT = 'bogus';
+      process.env.SM_ENVIRONMENT_ENFORCEMENT = 'report';
       expect(schedulerConfig.environmentEnforcement()).toBe('report');
+      process.env.SM_ENVIRONMENT_ENFORCEMENT = 'bogus';
+      expect(schedulerConfig.environmentEnforcement()).toBe('enforce');
     } finally {
       if (prev === undefined) delete process.env.SM_ENVIRONMENT_ENFORCEMENT;
       else process.env.SM_ENVIRONMENT_ENFORCEMENT = prev;
     }
   });
 
-  it('sandbox required but unavailable → tool rules (not blocked) + one would-block entry', () => {
+  it('report mode: sandbox required but unavailable → tool rules (not blocked) + one would-block entry', () => {
     const r = buildJobSandboxSettings({
-      ...BASE, agentType: 'dev-lead', environment: builtin('headless-default'), deps: { available: false, missing: ['socat'] },
+      ...BASE, agentType: 'dev-lead', environment: builtin('headless-default'), deps: { available: false, missing: ['socat'] }, mode: 'report',
     });
     expect(r.level).toBe('tool-rules');
     expect(r.wouldBlock).toHaveLength(1);

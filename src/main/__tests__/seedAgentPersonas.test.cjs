@@ -633,7 +633,8 @@ test('competitive-researcher: seeded file parses with model haiku and the collec
   expect(fm.name).toBe('competitive-researcher');
   expect(fm.model).toBe('haiku');
   expect(fm.effort).toBe('low');
-  expect(fm.seedVersion).toBe('1');
+  expect(fm.seedVersion).toBe('2');
+  expect(fm.environment).toBe('open-web');
   expect(fm.title).toBe('Research — Competitor collector');
   expect(fm.tools).toBe('WebSearch, WebFetch, Read, Write');
   expect(fm.description).toContain('competitive-analyst');
@@ -679,7 +680,8 @@ test('competitive-analyst: seeded file parses with model opus and the analyst co
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('high');
   expect(fm.tags).toBe('project-home-builder');
-  expect(fm.seedVersion).toBe('2');
+  expect(fm.seedVersion).toBe('3');
+  expect(fm.environment).toBe('open-web');
   expect(fm.mcpServers).toBe('session-manager-scheduler');
   expect(fm.tools).toBe(ANALYST_TOOLS);
   const trimmed = body.trim();

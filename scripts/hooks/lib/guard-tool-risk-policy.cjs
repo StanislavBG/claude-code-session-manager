@@ -168,29 +168,48 @@ function parseJobEnvironment(env) {
 }
 
 /**
- * Report-only environment check: a headless job's WebFetch/WebSearch call
- * that its environment (env SM_JOB_ENVIRONMENT, set by the scheduler)
- * disallows — tool not allowed, or host off the allow-list — appends one
- * 'environment_would_block' audit record. Never changes the decision.
+ * Environment check for a headless job's WebFetch/WebSearch call that its
+ * environment (env SM_JOB_ENVIRONMENT, set by the scheduler) disallows — tool
+ * not allowed, or host off the allow-list. Appends one
+ * 'environment_would_block' audit record and returns the deny reason when the
+ * mode (SM_JOB_ENVIRONMENT_MODE) is 'enforce' — the default; returns null in
+ * 'report' mode, when nothing applies, or on an internal error.
+ * @returns {string|null}
  */
-function reportEnvironmentWouldBlock(payload, env, deps) {
+function environmentWebToolDenial(payload, env, deps) {
   try {
     const toolName = payload.tool_name;
-    if (toolName !== 'WebFetch' && toolName !== 'WebSearch') return;
+    if (toolName !== 'WebFetch' && toolName !== 'WebSearch') return null;
     const jobEnv = parseJobEnvironment(env);
     const hit = webToolWouldBlock(jobEnv, toolName, payload.tool_input);
-    if (!hit) return;
-    const append = deps.appendAuditEvent || require('../../../src/main/lib/telemetry/auditLog.cjs').appendAuditEvent;
-    append('environment_would_block', wouldBlockRecord({
-      slug: env.SM_SCHEDULER_JOB_SLUG || null,
-      persona: env.SM_JOB_PERSONA || null,
-      environment: jobEnv && typeof jobEnv.id === 'string' ? jobEnv.id : null,
-      what: hit.what,
-      detail: hit.detail,
-      mode: env.SM_JOB_ENVIRONMENT_MODE === 'enforce' ? 'enforce' : 'report',
-    }));
+    if (!hit) return null;
+    const mode = env.SM_JOB_ENVIRONMENT_MODE === 'report' ? 'report' : 'enforce';
+    const envId = jobEnv && typeof jobEnv.id === 'string' ? jobEnv.id : '(unnamed)';
+    try {
+      const append = deps.appendAuditEvent || require('../../../src/main/lib/telemetry/auditLog.cjs').appendAuditEvent;
+      append('environment_would_block', wouldBlockRecord({
+        slug: env.SM_SCHEDULER_JOB_SLUG || null,
+        persona: env.SM_JOB_PERSONA || null,
+        environment: envId,
+        what: hit.what,
+        detail: hit.detail,
+        mode,
+      }));
+    } catch (e) {
+      console.error(`${TAG} environment audit failed: ${e?.message}`);
+    }
+    if (mode !== 'enforce') return null;
+    const why = hit.what === 'host_off_allowlist'
+      ? `host ${hit.detail} is outside environment '${envId}'s network allow-list`
+      : `environment '${envId}' does not allow ${toolName}`;
+    return [
+      `Blocked: ${toolName} — ${why}.`,
+      `A persona that needs the open web declares \`environment: open-web\` in its frontmatter.`,
+      'Do not work around this refusal (no curl, wget or other tool for the same fetch); stop and report that this step needs the open web.',
+    ].join(' ');
   } catch (e) {
-    console.error(`${TAG} environment report failed: ${e?.message}`);
+    console.error(`${TAG} environment check failed: ${e?.message}`);
+    return null;
   }
 }
 
@@ -204,7 +223,10 @@ function decide(payload, env = process.env, deps = {}) {
     const projectRoot = env.SM_PROJECT_ROOT || null;
     const headless = Boolean(env.SM_SCHEDULER_JOB_SLUG) || env.SM_TOOL_RISK_HEADLESS === '1';
     const toolName = payload.tool_name;
-    if (headless) reportEnvironmentWouldBlock(payload, env, deps);
+    if (headless) {
+      const envDenial = environmentWebToolDenial(payload, env, deps);
+      if (envDenial) return buildDeny(envDenial);
+    }
 
     const system = readMarksLayer(systemMarksPath(homeDir));
     const project = projectRoot

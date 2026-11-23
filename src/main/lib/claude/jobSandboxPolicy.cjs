@@ -4,8 +4,11 @@
 /**
  * jobSandboxPolicy.cjs — turns a headless PRD job's resolved environment
  * profile (environmentProfiles.cjs) and paths into the claude CLI flags that
- * confine it, and names what that environment would block (report mode:
- * recorded, never refused — schedulerConfig.environmentEnforcement).
+ * confine it, or refuses it. Enforcement (schedulerConfig.environmentEnforcement,
+ * default 'enforce'): an environment that requires the OS sandbox when its
+ * dependencies are missing is REFUSED (level 'refused', refusal
+ * environment_unavailable) — never downgraded to tool rules. The opt-out
+ * 'report' mode keeps the old downgrade and records a would-block entry.
  *
  * Two levels:
  *  - 'tool-rules' (every persona): keeps --dangerously-skip-permissions but
@@ -58,6 +61,38 @@ const LEGACY_PERSONA_ENVIRONMENTS = Object.freeze({
 
 /** Environment enforcement modes (schedulerConfig.environmentEnforcement). */
 const ENFORCEMENT_MODES = Object.freeze(['report', 'enforce']);
+
+/**
+ * OS packages that provide each sandbox dependency, per platform — what the
+ * readiness banner tells the human to install.
+ * @type {Readonly<Record<string, Readonly<Record<string, string>>>>}
+ */
+const SANDBOX_DEP_PACKAGES = Object.freeze({
+  linux: Object.freeze({ bwrap: 'bubblewrap', socat: 'socat' }),
+  darwin: Object.freeze({ 'sandbox-exec': 'sandbox-exec (ships with macOS)' }),
+});
+
+/**
+ * The install hint for missing sandbox dependencies: the package names, and
+ * on linux an apt line. Pure.
+ * @param {{ platform: string, missing: string[] }} args
+ * @returns {{ packages: string[], command: string|null }}
+ */
+function sandboxInstallHint({ platform, missing }) {
+  const map = Object.prototype.hasOwnProperty.call(SANDBOX_DEP_PACKAGES, platform) ? SANDBOX_DEP_PACKAGES[platform] : null;
+  const bins = (missing || []).filter((m) => map && Object.prototype.hasOwnProperty.call(map, m));
+  const packages = [...new Set(bins.map((b) => /** @type {Record<string, string>} */ (map)[b]))];
+  const command = platform === 'linux' && packages.length ? `sudo apt install ${packages.join(' ')}` : null;
+  return { packages, command };
+}
+
+/**
+ * @param {unknown} mode
+ * @returns {'report'|'enforce'}
+ */
+function normalizeMode(mode) {
+  return mode === 'report' ? 'report' : 'enforce';
+}
 
 /**
  * The environment name a job runs under: the persona's declared
@@ -147,12 +182,14 @@ function requireAbs(args, field) {
 
 /**
  * @typedef {{ what: 'os_sandbox_unavailable', detail: string }} WouldBlock
+ * @typedef {{ code: 'environment_unavailable', detail: string, missing: string[] }} EnvironmentRefusal
  * @typedef {{
- *   level: 'os-sandbox'|'tool-rules',
+ *   level: 'os-sandbox'|'tool-rules'|'refused',
  *   argv: string[],
  *   settings: Record<string, unknown>,
- *   summary: { level: 'os-sandbox'|'tool-rules', profile: string|null, environment: string|null, network: string[]|null, reason: string|null },
+ *   summary: { level: 'os-sandbox'|'tool-rules'|'refused', profile: string|null, environment: string|null, network: string[]|null, reason: string|null },
  *   wouldBlock: WouldBlock[],
+ *   refusal: EnvironmentRefusal|null,
  * }} JobSandboxResult
  */
 
@@ -160,8 +197,10 @@ function requireAbs(args, field) {
  * Sandbox flags for one job, derived from its resolved environment profile.
  * `environment` null → tool rules (no profile applies to this job). A profile
  * with osSandboxRequired false → tool rules. A profile that requires the OS
- * sandbox when deps are missing → tool rules plus a `wouldBlock` entry (the
- * caller records it; nothing is refused here).
+ * sandbox when deps are missing → in 'enforce' mode (the default) level
+ * 'refused' with `refusal` { code: 'environment_unavailable', detail: the
+ * missing deps } and no argv — the caller parks the job, never spawns it; in
+ * 'report' mode tool rules plus a `wouldBlock` entry.
  *
  * @param {{
  *   agentType?: string|null,
@@ -171,6 +210,7 @@ function requireAbs(args, field) {
  *   homeDir: string,
  *   tmpDir: string,
  *   deps?: { available: boolean, missing?: string[] }|null,
+ *   mode?: 'report'|'enforce'|string|null,
  * }} args
  * @returns {JobSandboxResult}
  */
@@ -182,6 +222,7 @@ function buildJobSandboxSettings(args) {
   const tmpDir = requireAbs(raw, 'tmpDir');
   const agentType = typeof args.agentType === 'string' && args.agentType ? args.agentType : null;
   const deps = args.deps;
+  const mode = normalizeMode(args.mode);
   const env = args.environment && args.environment.profile ? args.environment : null;
   const envId = env ? String(env.id) : null;
   const profile = env ? env.profile : null;
@@ -201,6 +242,16 @@ function buildJobSandboxSettings(args) {
   } else if (!deps || deps.available !== true) {
     const missing = deps && Array.isArray(deps.missing) && deps.missing.length ? deps.missing : ['unknown'];
     reason = `OS sandbox unavailable, missing: ${missing.join(', ')}`;
+    if (mode === 'enforce') {
+      return {
+        level: 'refused',
+        argv: [],
+        settings: {},
+        summary: { level: 'refused', profile: agentType, environment: envId, network: null, reason },
+        wouldBlock: [],
+        refusal: { code: 'environment_unavailable', detail: missing.join(', '), missing: [...missing] },
+      };
+    }
     wouldBlock.push({ what: 'os_sandbox_unavailable', detail: reason });
   }
 
@@ -212,6 +263,7 @@ function buildJobSandboxSettings(args) {
       settings,
       summary: { level: 'tool-rules', profile: agentType, environment: envId, network: null, reason },
       wouldBlock,
+      refusal: null,
     };
   }
 
@@ -245,13 +297,14 @@ function buildJobSandboxSettings(args) {
     settings,
     summary: { level: 'os-sandbox', profile: agentType, environment: envId, network: hosts ? [...hosts] : null, reason: null },
     wouldBlock,
+    refusal: null,
   };
 }
 
 /**
- * The env vars the job's PreToolUse hook (guard-tool-risk) reads to report
- * the WebFetch/WebSearch calls the job's environment would block. Empty when
- * no environment applies.
+ * The env vars the job's PreToolUse hook (guard-tool-risk) reads to deny
+ * ('enforce', the default) or only report ('report') the WebFetch/WebSearch
+ * calls the job's environment disallows. Empty when no environment applies.
  * @param {{ environment?: ResolvedEnvironment|null, mode: string, agentType?: string|null }} args
  * @returns {Record<string, string>}
  */
@@ -260,7 +313,7 @@ function environmentHookEnv({ environment, mode, agentType }) {
   const p = environment.profile;
   return {
     SM_JOB_ENVIRONMENT: JSON.stringify({ id: environment.id, webFetch: !!p.webFetch, webSearch: !!p.webSearch, network: p.network }),
-    SM_JOB_ENVIRONMENT_MODE: ENFORCEMENT_MODES.includes(mode) ? mode : 'report',
+    SM_JOB_ENVIRONMENT_MODE: normalizeMode(mode),
     SM_JOB_PERSONA: agentType || '',
   };
 }
@@ -318,7 +371,7 @@ function wouldBlockRecord({ slug, persona, environment, what, detail, mode }) {
     environment: environment || null,
     what,
     detail: detail ?? null,
-    mode: mode || 'report',
+    mode: normalizeMode(mode),
   };
 }
 
@@ -340,6 +393,8 @@ module.exports = {
   SANDBOX_SECRET_PATHS,
   LEGACY_PERSONA_ENVIRONMENTS,
   ENFORCEMENT_MODES,
+  SANDBOX_DEP_PACKAGES,
+  sandboxInstallHint,
   jobEnvironmentName,
   sandboxDependencies,
   buildJobSandboxSettings,

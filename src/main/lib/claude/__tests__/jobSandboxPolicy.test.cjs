@@ -139,12 +139,13 @@ describe('tool-rules fallback', () => {
     assert.match(r.summary.reason, /no environment profile/);
   });
 
-  it('missing dependencies downgrade a profiled persona and name them', () => {
+  it("report mode: missing dependencies downgrade a profiled persona and name them", () => {
     const r = buildJobSandboxSettings({
       ...BASE,
       agentType: 'dev-lead',
       environment: envFor('dev-lead'),
       deps: { available: false, missing: ['socat'] },
+      mode: 'report',
     });
     assert.equal(r.level, 'tool-rules');
     assert.equal(r.argv[0], '--dangerously-skip-permissions');
@@ -153,9 +154,10 @@ describe('tool-rules fallback', () => {
     assert.match(r.summary.reason, /socat/);
   });
 
-  it('absent deps is treated as unavailable', () => {
-    const r = buildJobSandboxSettings({ ...BASE, agentType: 'validator', environment: envFor('validator') });
+  it('absent deps is treated as unavailable (report mode → tool rules; enforce → refused)', () => {
+    const r = buildJobSandboxSettings({ ...BASE, agentType: 'validator', environment: envFor('validator'), mode: 'report' });
     assert.equal(r.level, 'tool-rules');
+    assert.equal(buildJobSandboxSettings({ ...BASE, agentType: 'validator', environment: envFor('validator') }).level, 'refused');
     assert.equal(typeof r.summary.reason, 'string');
   });
 });
@@ -223,7 +225,7 @@ describe('sandboxChildEnv', () => {
   });
 
   it('returns {} for tool-rules', () => {
-    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', environment: envFor('dev-lead'), deps: { available: false, missing: ['socat'] } });
+    const p = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', environment: envFor('dev-lead'), deps: { available: false, missing: ['socat'] }, mode: 'report' });
     assert.equal(p.level, 'tool-rules');
     assert.deepEqual(sandboxChildEnv(p, '/tmp/smj-abc123'), {});
     assert.deepEqual(sandboxChildEnv(null, '/tmp/smj-abc123'), {});

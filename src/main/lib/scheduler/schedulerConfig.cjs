@@ -185,17 +185,21 @@ module.exports = {
   // Environment enforcement (jobSandboxPolicy.cjs + guard-tool-risk): what a
   // job's environment profile would block — OS sandbox required but
   // unavailable, WebFetch/WebSearch not allowed, host off the allow-list.
-  // 'report' (default) appends an 'environment_would_block' audit record and
-  // blocks nothing; 'enforce' is the future refusing mode. Override with
-  // SM_ENVIRONMENT_ENFORCEMENT=report|enforce (anything else → 'report').
-  DEFAULT_ENVIRONMENT_ENFORCEMENT: 'report',
+  // 'enforce' (default since the report-only week ended, PRD 3805): a job
+  // whose environment needs the OS sandbox and cannot get it parks
+  // needs_review 'environment_unavailable: <missing deps>', and the hook
+  // denies WebFetch/WebSearch the environment disallows. 'report' is the
+  // opt-out: appends an 'environment_would_block' audit record and blocks
+  // nothing. Override with SM_ENVIRONMENT_ENFORCEMENT=report|enforce
+  // (anything else → 'enforce').
+  DEFAULT_ENVIRONMENT_ENFORCEMENT: 'enforce',
   environmentEnforcement,
 };
 
 /** @returns {'report'|'enforce'} */
 function environmentEnforcement() {
   const raw = String(process.env.SM_ENVIRONMENT_ENFORCEMENT || '').trim().toLowerCase();
-  return raw === 'enforce' ? 'enforce' : 'report';
+  return raw === 'report' ? 'report' : 'enforce';
 }
 
 function quietMachineWaitMs() {

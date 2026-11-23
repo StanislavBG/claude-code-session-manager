@@ -108,6 +108,26 @@ function writeEpicStatuses(map) {
   fs.writeFileSync(file, JSON.stringify({ sessions, events: {}, tombstones: {} }));
 }
 
+/**
+ * The real completed-Epic shape: the Epic is gone from active-index.json
+ * (a tombstone is left) and lives in prompt-sessions/<id>.json. Keeps any
+ * sessions already in the index (a reopened Epic stays there).
+ */
+const ARCHIVED_AT = '2026-11-22T01:44:54.768Z';
+function writeArchivedEpic(id) {
+  const file = activeIndexPath(cwdOf());
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  let index = { sessions: {}, events: {}, tombstones: {} };
+  try { index = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* fresh index */ }
+  index.tombstones = { ...(index.tombstones || {}), [id]: '2026-11-22T01:44:54.803Z' };
+  fs.writeFileSync(file, JSON.stringify(index));
+  const archive = path.join(cwdOf(), 'session-manager-operations', 'prompt-sessions', `${id}.json`);
+  fs.writeFileSync(archive, JSON.stringify({
+    session: { id, status: 'completed', completedAt: ARCHIVED_AT },
+    events: [], archivedAt: ARCHIVED_AT, status: 'completed', cwd: cwdOf(),
+  }));
+}
+
 async function jobs() {
   const queuePath = path.join(cwdOf(), 'session-manager-operations', 'scheduler', 'state', 'queue.json');
   return JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
@@ -281,6 +301,36 @@ test('reconcile auto-dismisses cancelled rows of completed/archived Epics, with 
   const rows = auditRows('job_dismiss_cancelled').filter((r) => r.source === 'auto');
   expect(rows.map((r) => r.slug)).toEqual(expect.arrayContaining(['10-closed', '20-archived']));
   expect(rows.find((r) => r.slug === '10-closed')).toMatchObject({ cwd, epicStatus: 'completed' });
+});
+
+test('auto-dismiss reads the archive of a completed Epic that left active-index.json', async () => {
+  const cwd = await seed([
+    { slug: '10-gone', cancelled: true },
+    { slug: '11-gone', cancelled: true },
+    { slug: '20-live', epic: 'open-epic' },
+  ]);
+  writeEpicStatuses({ 'open-epic': 'active' });
+  writeArchivedEpic(EPIC);
+  const state = { jobs: await jobs() };
+  const res = await queueOps.autoDismissCancelled(state);
+  expect(res.dismissed.sort()).toEqual(['10-gone', '11-gone']);
+  expect(state.jobs.map((j) => j.slug)).toEqual(['20-live']);
+  expect(cancelledFiles().sort()).toEqual(['10-gone.md', '11-gone.md']);
+  expect(fs.existsSync(path.join(prdsDir(), '10-gone.md'))).toBe(false);
+  expect(fs.existsSync(path.join(epicDir(), 'prds-archived'))).toBe(false);
+  const rows = auditRows('job_dismiss_cancelled').filter((r) => r.source === 'auto' && r.slug === '10-gone');
+  expect(rows.at(-1)).toMatchObject({ cwd, epicId: EPIC, epicStatus: 'completed' });
+});
+
+test('auto-dismiss keeps the cancelled row of a reopened Epic (archive file + active index entry)', async () => {
+  await seed([{ slug: '10-reopened', cancelled: true }]);
+  writeEpicStatuses({ [EPIC]: 'active' });
+  writeArchivedEpic(EPIC);
+  const state = { jobs: await jobs() };
+  const res = await queueOps.autoDismissCancelled(state);
+  expect(res.dismissed).toEqual([]);
+  expect(state.jobs.map((j) => j.slug)).toEqual(['10-reopened']);
+  expect(fs.existsSync(path.join(prdsDir(), '10-reopened.md'))).toBe(true);
 });
 
 test('auto-dismiss skips a cancelled row that a pending row in another Epic depends on', async () => {

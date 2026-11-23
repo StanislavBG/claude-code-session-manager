@@ -129,7 +129,9 @@ const INTERACTIVE_AC_PATTERNS = [
 const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
 const {
   resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, deriveEpicIdFromPrdPath, deriveProjectCwdFromPrdPath,
+  isSafeEpicId,
 } = require('./lib/prd/prdLocations.cjs');
+const { readJsonOrSync } = require('./lib/util/atomicFs.cjs');
 const { opsPath, assertOpsWrite } = require('./lib/opsOwnership.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
 const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
@@ -547,6 +549,23 @@ function bindQueueAccess(access) {
 
 const CLOSED_EPIC_STATUSES = new Set(['completed', 'archived']);
 
+/**
+ * A completed Epic leaves active-index.json (tombstoned) and lives in
+ * prompt-sessions/<id>.json. Returns 'completed' only when that archive reads
+ * as closed (non-empty archivedAt + session.status 'completed'); an unsafe id
+ * or a missing/corrupt file is not closed.
+ */
+function archivedEpicStatus(cwd, epicId) {
+  if (!isSafeEpicId(epicId)) return null;
+  let file;
+  try { file = opsPath(cwd, 'prompt-sessions', `${epicId}.json`); } catch { return null; }
+  const data = readJsonOrSync(file, null);
+  if (!data || typeof data !== 'object') return null;
+  const closed = typeof data.archivedAt === 'string' && data.archivedAt !== ''
+    && data.session && typeof data.session === 'object' && data.session.status === 'completed';
+  return closed ? 'completed' : null;
+}
+
 function cancelledDirForSource(srcDir, ts) {
   const parent = path.dirname(srcDir);
   const epicId = deriveEpicIdFromPrdPath(path.join(srcDir, 'x.md'));
@@ -696,10 +715,16 @@ async function autoDismissCancelled(state) {
   const candidates = jobs.filter((j) => isCancelledRow(j) && j.epicId && j.cwd);
   if (candidates.length === 0) return { dismissed: [] };
   const indexByCwd = new Map();
+  const archiveStatus = new Map();
+  // An index entry always wins (a reopened Epic stays open); otherwise the
+  // archive file decides, read at most once per (cwd, epicId) per call.
   const epicStatus = (cwd, epicId) => {
     if (!indexByCwd.has(cwd)) indexByCwd.set(cwd, readActiveIndex(cwd).sessions);
     const sessions = indexByCwd.get(cwd);
-    return Object.prototype.hasOwnProperty.call(sessions, epicId) ? sessions[epicId]?.status ?? null : null;
+    if (Object.prototype.hasOwnProperty.call(sessions, epicId)) return sessions[epicId]?.status ?? null;
+    const key = `${cwd}\0${epicId}`;
+    if (!archiveStatus.has(key)) archiveStatus.set(key, archivedEpicStatus(cwd, epicId));
+    return archiveStatus.get(key);
   };
   const ts = newTs();
   const dismissed = [];

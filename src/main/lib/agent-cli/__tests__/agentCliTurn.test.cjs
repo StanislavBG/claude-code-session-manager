@@ -102,3 +102,37 @@ test('codex Epic: plan cwd is the Epic worktree passed in, argv carries the CLAU
   expect(transcriptCwds).toEqual([WORKTREE]);
   expect(r.args.slice(0, 3)).toEqual(['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]', 'exec']);
 });
+
+test('gemini Epic: envExtra carries GEMINI_CLI_SYSTEM_DEFAULTS_PATH from ensureGeminiSystemDefaults beside auth keys', () => {
+  const { d } = deps({ env: { GEMINI_API_KEY: 'k', HOME: '/h' } });
+  const seen = [];
+  d.ensureGeminiSystemDefaults = (o) => { seen.push(o); return { path: '/state/agent-cli/gemini-system-defaults.json' }; };
+  const r = planAgentCliTurn({ epic: { agentCli: 'gemini' }, claudeSessionId: SID, cwd: '/w', prompt: 'p', deps: d });
+  expect(r.ok).toBe(true);
+  expect(r.envExtra).toEqual({
+    GEMINI_API_KEY: 'k',
+    GEMINI_CLI_SYSTEM_DEFAULTS_PATH: '/state/agent-cli/gemini-system-defaults.json',
+  });
+  expect(seen).toEqual([{ env: d.env }]);
+});
+
+test('gemini Epic: null or throwing ensureGeminiSystemDefaults → envExtra exactly as before', () => {
+  for (const impl of [() => null, () => { throw new Error('EACCES'); }, () => ({ path: '' })]) {
+    const { d } = deps({ env: { GEMINI_API_KEY: 'k' } });
+    d.ensureGeminiSystemDefaults = impl;
+    const r = planAgentCliTurn({ epic: { agentCli: 'gemini' }, claudeSessionId: SID, cwd: '/w', prompt: 'p', deps: d });
+    expect(r.ok).toBe(true);
+    expect(r.envExtra).toEqual({ GEMINI_API_KEY: 'k' });
+  }
+});
+
+test('non-gemini Epics never call ensureGeminiSystemDefaults; codex envExtra unchanged', () => {
+  const { d } = deps({ env: { OPENAI_API_KEY: 'o', GEMINI_API_KEY: 'g' } });
+  let calls = 0;
+  d.ensureGeminiSystemDefaults = () => { calls += 1; return { path: '/x.json' }; };
+  d.adapterFor = (id) => (id === 'codex' ? codex : null);
+  const r = planAgentCliTurn({ epic: { agentCli: 'codex' }, claudeSessionId: SID, cwd: '/w', prompt: 'p', deps: d });
+  expect(r.ok).toBe(true);
+  expect(r.envExtra).toEqual({ OPENAI_API_KEY: 'o' });
+  expect(calls).toBe(0);
+});

@@ -11,6 +11,7 @@
 
 const registry = require('./agentCliRegistry.cjs');
 const sessionStore = require('./agentCliSessionStore.cjs');
+const geminiContextDefaults = require('./geminiContextDefaults.cjs');
 
 const NOOP_TRANSCRIPT = Object.freeze({ userPrompt() {}, event() {}, close() {} });
 
@@ -22,6 +23,7 @@ function withDefaults(deps) {
     catalog: d.catalog || registry.AGENT_CLI_CATALOG,
     readNativeSession: d.readNativeSession || sessionStore.readNativeSession,
     createTranscriptWriter: d.createTranscriptWriter || sessionStore.createTranscriptWriter,
+    ensureGeminiSystemDefaults: d.ensureGeminiSystemDefaults || geminiContextDefaults.ensureGeminiSystemDefaults,
     env: d.env || process.env,
   };
 }
@@ -35,6 +37,19 @@ function pickAuthEnv(entry, env) {
     if (typeof v === 'string' && v !== '') out[k] = v;
   }
   return out;
+}
+
+/**
+ * Gemini only: point GEMINI_CLI_SYSTEM_DEFAULTS_PATH at the SM-owned defaults
+ * file that adds AGENTS.md to context.fileName. Null / throw → no key, the
+ * turn runs exactly as before.
+ */
+function geminiContextEnv(d) {
+  try {
+    const res = d.ensureGeminiSystemDefaults({ env: d.env });
+    if (res && typeof res.path === 'string' && res.path) return { GEMINI_CLI_SYSTEM_DEFAULTS_PATH: res.path };
+  } catch { /* best effort: no AGENTS.md map, turn still runs */ }
+  return {};
 }
 
 /**
@@ -92,7 +107,7 @@ function planAgentCliTurn({ epic, claudeSessionId, cwd, prompt, deps } = {}) {
     cwd,
     args: Array.isArray(spawnPlan.args) ? spawnPlan.args : [],
     stdin: typeof spawnPlan.stdin === 'string' ? spawnPlan.stdin : '',
-    envExtra: pickAuthEnv(entry, d.env),
+    envExtra: cli === 'gemini' ? { ...pickAuthEnv(entry, d.env), ...geminiContextEnv(d) } : pickAuthEnv(entry, d.env),
     parser: adapter.createParser(),
     transcript,
     cli,

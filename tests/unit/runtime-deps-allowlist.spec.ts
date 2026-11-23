@@ -24,14 +24,22 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-/** The published package's "Dependencies" count stays at 4. */
+/** The published package's runtime dependency list is a deliberate, reviewed set. */
 describe('runtime dependency allowlist', () => {
-  it('ships exactly chokidar, electron, electron-updater, node-pty, ws, zod', () => {
+  it('ships exactly chokidar, electron, electron-updater, marked, node-pty, ws, zod', () => {
     expect(
       Object.keys(pkg.dependencies).sort(),
       'Adding a runtime dependency is a deliberate decision: it ships to every user. ' +
         'Dev deps are bundled by Vite and do not ship — put it in devDependencies unless shipped main/preload/bin code requires it at runtime.',
-    ).toEqual(['chokidar', 'electron', 'electron-updater', 'node-pty', 'ws', 'zod'])
+    ).toEqual([
+      'chokidar',
+      'electron',
+      'electron-updater',
+      'marked', // required at runtime by src/main/lib/persona-macro/personaImportHealth.cjs
+      'node-pty',
+      'ws',
+      'zod',
+    ])
   })
 
   it('no shipped code requires a removed package', () => {

@@ -1,0 +1,26 @@
+/**
+ * kindPlaybooks.test.cjs — the per-kind playbooks ship in the seeded kit and stay project-neutral.
+ * Run: timeout 120 npx vitest run src/main/lib/demo-video-kit/__tests__/kindPlaybooks.test.cjs
+ */
+'use strict';
+
+import { test, expect } from 'vitest';
+const fs = require('node:fs');
+const path = require('node:path');
+const { kitFiles } = require('../seedKit.cjs');
+
+const KIT_DIR = path.join(__dirname, '..');
+const TIKTOK_MD = path.join(KIT_DIR, 'kind-tiktok.md');
+const readTiktok = () => fs.readFileSync(TIKTOK_MD, 'utf8');
+
+test('kind-tiktok.md is seeded and states the TikTok format, contract and rules', () => {
+  expect(kitFiles()).toContain('kind-tiktok.md');
+  const md = readTiktok();
+  for (const s of ['1080x1920', 'sm-demo-aspect', 'Season complete', 'smDemo.beats', '150 characters']) {
+    expect(md).toContain(s);
+  }
+});
+
+test('kind-tiktok.md holds no other project\'s own content', () => {
+  expect(readTiktok()).not.toMatch(/burrow|bilko|veggie|garden/i);
+});

@@ -30,7 +30,7 @@ test('fresh install copies all kit files and the stamp', async () => {
   const { srcDir, destDir } = setup();
   const r = await seedDemoVideoKit({ logger: quiet, srcDir, destDir, kitVersion: '1' });
   expect(r).toEqual({ seeded: true, reason: 'fresh' });
-  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs']);
+  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md']);
   for (const f of KIT_FILES) expect(fs.readFileSync(path.join(destDir, f), 'utf8')).toBe(`// ${f} v1\n`);
   expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe('1');
 });
@@ -67,6 +67,14 @@ test('the real kit files exist beside the seeder', () => {
   for (const f of KIT_FILES) expect(fs.existsSync(path.join(__dirname, '..', f))).toBe(true);
 });
 
+test('a fresh install copies the kind playbooks with the modules', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-md-'));
+  tmp.push(root);
+  const destDir = path.join(root, 'kit');
+  await seedDemoVideoKit({ logger: quiet, destDir });
+  expect(fs.readFileSync(path.join(destDir, 'kind-tiktok.md'))).toEqual(fs.readFileSync(path.join(__dirname, '..', 'kind-tiktok.md')));
+});
+
 test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   const prev = process.env.SM_SCHEDULER_HOME;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-home-'));
@@ -79,8 +87,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 6 (character speakLines + personality must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('6');
+test('KIT_VERSION is bumped to 7 (the kind-tiktok.md playbook must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('7');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {
@@ -119,7 +127,7 @@ test('a stamp-2 install with a stale checks.cjs is refreshed to the real source 
   expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe(KIT_VERSION);
 });
 
-test('every seeded kit file loads standalone from a copied kit folder', async () => {
+test('every seeded kit module loads standalone from a copied kit folder (playbooks are markdown, not required)', async () => {
   const { spawnSync } = require('node:child_process');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-real-'));
   tmp.push(root);
@@ -127,7 +135,7 @@ test('every seeded kit file loads standalone from a copied kit folder', async ()
   const r = await seedDemoVideoKit({ logger: quiet, destDir });
   expect(r.seeded).toBe(true);
   const failures = [];
-  for (const f of KIT_FILES) {
+  for (const f of KIT_FILES.filter((k) => k.endsWith('.cjs'))) {
     const file = path.join(destDir, f);
     const out = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(file)})`], { cwd: os.tmpdir(), encoding: 'utf8', timeout: 30000 });
     if (out.status !== 0) failures.push(`${f}: exit ${out.status}\n${(out.stderr || '').split('\n').slice(0, 6).join('\n')}`);

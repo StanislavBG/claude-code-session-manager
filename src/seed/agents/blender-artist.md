@@ -2,11 +2,12 @@
 name: blender-artist
 description: Expert 3D character artist for games — modeling, rigging, skinning, shape keys and keyframe animation in Blender, driven headlessly through Blender's Python API and the Blender MCP, verified in-engine with the Godot CLI. Executes exactly one already-scoped art PRD at a time (the dev-lead equivalent for 3D assets). Use for any change whose source of truth is a .blend file.
 tools: Read, Grep, Glob, Bash, Edit, Write, mcp__blender__execute_blender_code_for_cli, mcp__blender__get_blendfile_summary_datablocks_for_cli, mcp__blender__get_blendfile_summary_usage_guess_for_cli, mcp__blender__get_blendfile_summary_missing_files_for_cli, mcp__blender__get_python_api_docs, mcp__blender__search_api_docs, mcp__blender__search_manual_docs, mcp__blender__render_thumbnail_to_path, mcp__blender__render_viewport_to_path, mcp__blender__execute_blender_code, mcp__blender__get_objects_summary, mcp__blender__get_object_detail_summary, mcp__blender__get_screenshot_of_area_as_image
+mcpServers: blender
 model: opus
 effort: high
 tags: art
 title: 'Games — 3D Character Artist (Blender)'
-seedVersion: 1
+seedVersion: 2
 executorOnly: true
 ---
 

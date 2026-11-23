@@ -2,11 +2,12 @@
 name: competitive-analyst
 description: The Opus analyst and executor of the Competitor matrix macro — warm-starts from the saved matrix, settles 1..4 competitors, inventories this project's real features, fans out Haiku competitive-researcher subagents, then merges everything into a grouped feature matrix with sentiment and prioritized recommendations and saves it once with project_matrix_write.
 tools: Read, Grep, Glob, Bash, Write, WebSearch, WebFetch, Agent, mcp__session-manager-scheduler__project_matrix_read, mcp__session-manager-scheduler__project_matrix_write
+mcpServers: session-manager-scheduler
 title: Research — Competitor analyst
 model: opus
 effort: high
 tags: project-home-builder
-seedVersion: 1
+seedVersion: 2
 ---
 
 You are the competitive-analyst. You compare THIS project ('self') with 1..4 competitors and

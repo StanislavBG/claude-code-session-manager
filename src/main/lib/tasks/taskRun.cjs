@@ -30,6 +30,7 @@ const { killTree, detachedSpawnOpts } = require('../process/killTree.cjs');
 const memoryScope = require('../process/memoryScope.cjs');
 const { writeToolRiskGuardSettingsFile } = require('../epic/guardSpawnSettings.cjs');
 const { buildJobSandboxSettings } = require('../claude/jobSandboxPolicy.cjs');
+const { personaToolScopeArgs } = require('../claude/personaToolScope.cjs');
 
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 16 * 1024;
@@ -45,10 +46,19 @@ function nonEmptyString(v) {
  * Build the claude argv for a Task. Pure (reads only the cached CLI-caps probe
  * via headlessPermissionArgs()). Never includes the prompt.
  *
- * @param {{ model: string, effort: string, runtime?: Record<string, any>, projectCwd?: string }} o
+ * MCP is always strict: --strict-mcp-config is pushed unconditionally (the
+ * CLI then ignores the user/project MCP config), and the only servers loaded
+ * inline are the persona's declared `mcpServers:` (`declaredMcpServers`),
+ * each resolved in `knownMcpServers` via personaToolScopeArgs. A declared
+ * name that resolves nowhere throws { code: 'capability_unknown' } — it never
+ * widens to every server. The caller's explicit `runtime.mcpConfig` files are
+ * still appended to the same --mcp-config list.
+ *
+ * @param {{ model: string, effort: string, runtime?: Record<string, any>, projectCwd?: string,
+ *   declaredMcpServers?: readonly string[], knownMcpServers?: Record<string, object> }} o
  * @returns {string[]}
  */
-function buildTaskArgs({ model, effort, runtime, projectCwd } = /** @type {any} */ ({})) {
+function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers = [], knownMcpServers = {} } = /** @type {any} */ ({})) {
   if (!nonEmptyString(model)) throw new Error('buildTaskArgs: model is required');
   if (!nonEmptyString(effort)) throw new Error('buildTaskArgs: effort is required');
   const rt = runtime && typeof runtime === 'object' ? runtime : {};
@@ -59,7 +69,7 @@ function buildTaskArgs({ model, effort, runtime, projectCwd } = /** @type {any} 
   if (nonEmptyString(rt.resume)) args.push('--resume', rt.resume);
   if (!(rt.persistSession === true || nonEmptyString(rt.resume))) args.push('--no-session-persistence');
   if (typeof rt.settingSources === 'string') args.push('--setting-sources', rt.settingSources);
-  if (rt.strictMcpConfig === true) args.push('--strict-mcp-config');
+  args.push('--strict-mcp-config');
   if (rt.maxTurns !== undefined && rt.maxTurns !== null) args.push('--max-turns', String(rt.maxTurns));
   if (typeof rt.systemPrompt === 'string') args.push('--system-prompt', rt.systemPrompt);
   if (rt.dangerouslySkipPermissions === true) {
@@ -74,10 +84,19 @@ function buildTaskArgs({ model, effort, runtime, projectCwd } = /** @type {any} 
   }
 
   // Variadic flags last-but-one: a following flag (--output-format) always ends their list.
+  const strict = personaToolScopeArgs(null, { mcpServers: knownMcpServers || {}, declaredServers: declaredMcpServers || [] });
+  if (strict.refusal) {
+    const err = /** @type {Error & { code?: string }} */ (new Error(`buildTaskArgs: declared MCP server '${strict.refusal.name}' is not a known server`));
+    err.code = strict.refusal.code;
+    throw err;
+  }
+  const at = strict.args.indexOf('--mcp-config');
+  const declaredInline = at === -1 ? [] : [strict.args[at + 1]];
   const mcp = rt.mcpConfig === undefined || rt.mcpConfig === null
-    ? null
+    ? []
     : (Array.isArray(rt.mcpConfig) ? rt.mcpConfig : [rt.mcpConfig]);
-  if (mcp && mcp.length) args.push('--mcp-config', ...mcp.map((p) => path.resolve(base, String(p))));
+  const mcpList = [...declaredInline, ...mcp.map((p) => path.resolve(base, String(p)))];
+  if (mcpList.length) args.push('--mcp-config', ...mcpList);
   if (Array.isArray(rt.allowedTools)) args.push('--allowedTools', rt.allowedTools.join(','));
   if (Array.isArray(rt.tools)) args.push('--tools', rt.tools.join(','));
 

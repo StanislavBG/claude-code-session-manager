@@ -199,19 +199,27 @@ function issueText(/** @type {any} */ error) {
  * discarded here); model = persona `model` (overlay-aware) else the Settings
  * model — never agentModelResolve's FALLBACK_MODEL.
  * @param {{ cwd: string, agent: string }} a
- * @returns {Promise<{ personaFound: boolean, resolvedModelId: string|null, personaEffort: string|null }>}
+ * declaredMcpServers = the persona's `mcpServers:` (overlay-aware), the only
+ * MCP servers the strict Task spawn loads.
+ * @returns {Promise<{ personaFound: boolean, resolvedModelId: string|null, personaEffort: string|null, declaredMcpServers: string[] }>}
  */
 async function defaultResolveInfo({ cwd, agent }) {
-  const { getPersonaBody } = require('../../agentLibrary.cjs');
+  const { getPersonaBody, parseCapabilityList } = require('../../agentLibrary.cjs');
   const persona = await getPersonaBody({ cwd, name: agent });
-  if (!persona) return { personaFound: false, resolvedModelId: null, personaEffort: null };
+  if (!persona) return { personaFound: false, resolvedModelId: null, personaEffort: null, declaredMcpServers: [] };
   const { readOverlayAwarePersonaModel } = require('../claude/agentModelResolve.cjs');
   const { resolveEpicEffort } = require('../claude/agentEffortResolve.cjs');
   const { readSettingsModel } = require('../claude/modelCatalog.cjs');
   let model = readOverlayAwarePersonaModel(agent, { cwd });
   if (!model || model === 'inherit') model = readSettingsModel(cwd);
   const { effort } = resolveEpicEffort({ cwd, agentType: agent });
-  return { personaFound: true, resolvedModelId: model || null, personaEffort: effort || null };
+  let declaredMcpServers = [];
+  try {
+    const { readOverlayAwarePersona } = require('../claude/agentModelResolve.cjs');
+    const p = readOverlayAwarePersona(agent, { cwd });
+    declaredMcpServers = parseCapabilityList(p && p.fm ? p.fm.mcpServers : undefined);
+  } catch { /* unreadable frontmatter → no declared servers (strict mode loads none) */ }
+  return { personaFound: true, resolvedModelId: model || null, personaEffort: effort || null, declaredMcpServers };
 }
 
 /** A real `--model` value: a non-empty string that is not the 'inherit' sentinel. */
@@ -245,7 +253,7 @@ function costFor(model, run, costOfUsage) {
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
  *   buildTaskArgs?: Function, buildTaskEnv?: Function, ledger?: any, costOfUsage?: Function,
  *   now?: () => number, randomUUID?: () => string, resolveProjectRoot?: Function,
- *   syncInteractiveReserve?: () => any }} [deps]
+ *   syncInteractiveReserve?: () => any, knownMcpServers?: () => Record<string, object> }} [deps]
  */
 function registerAdminRoute(adminHttp, deps = {}) {
   // Lazy defaults: agentLibrary / slots / spawn pull in heavy modules.
@@ -257,6 +265,11 @@ function registerAdminRoute(adminHttp, deps = {}) {
   const buildArgs = (/** @type {any} */ o) => (deps.buildTaskArgs || taskRun().buildTaskArgs)(o);
   const buildEnv = (/** @type {any} */ rt, /** @type {any} */ env) => (deps.buildTaskEnv || taskRun().buildTaskEnv)(rt, env);
   const ledger = () => deps.ledger || require('./taskLedger.cjs');
+  // The servers a declared `mcpServers:` name may resolve to — the scheduler's own set.
+  const knownMcpServers = deps.knownMcpServers || (() => {
+    const seed = require('../../seedSchedulerMcp.cjs');
+    return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
+  });
   const costOfUsage = (/** @type {any} */ m, /** @type {any} */ b) => (deps.costOfUsage || require('../claude/modelPricing.cjs').costOfUsage)(m, b);
   const now = deps.now || Date.now;
   const newId = deps.randomUUID || (() => crypto.randomUUID());
@@ -370,7 +383,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
 
     let args;
     try {
-      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd });
+      const declaredMcpServers = Array.isArray(info.declaredMcpServers) ? info.declaredMcpServers : [];
+      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: knownMcpServers() });
     } catch (e) {
       reply(400, { ok: false, error: (e && /** @type {any} */ (e).code) || 'invalid_request', details: e instanceof Error ? e.message : String(e) });
       return;

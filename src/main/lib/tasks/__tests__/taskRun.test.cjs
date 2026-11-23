@@ -27,6 +27,7 @@ describe('buildTaskArgs', () => {
       '--session-id', 'sid-1',
       '--no-session-persistence',
       '--setting-sources', '',
+      '--strict-mcp-config',
       '--allowedTools', '',
       '--output-format', 'json',
     ]);
@@ -74,7 +75,7 @@ describe('buildTaskArgs', () => {
   test('no dangerouslySkipPermissions: no bypass flag, no --settings', () => {
     for (const runtime of [{}, { dangerouslySkipPermissions: 'yes' }, { dangerouslySkipPermissions: false }]) {
       const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime });
-      expect(args).toEqual(['-p', '--model', 'm', '--effort', 'e', '--no-session-persistence', '--output-format', 'json']);
+      expect(args).toEqual(['-p', '--model', 'm', '--effort', 'e', '--no-session-persistence', '--strict-mcp-config', '--output-format', 'json']);
     }
   });
 
@@ -85,12 +86,12 @@ describe('buildTaskArgs', () => {
 
   test('first resumable call: persistSession drops --no-session-persistence', () => {
     const args = buildTaskArgs({ model: 'sonnet', effort: 'high', runtime: { sessionId: 's2', persistSession: true } });
-    expect(args).toEqual(['-p', '--model', 'sonnet', '--effort', 'high', '--session-id', 's2', '--output-format', 'json']);
+    expect(args).toEqual(['-p', '--model', 'sonnet', '--effort', 'high', '--session-id', 's2', '--strict-mcp-config', '--output-format', 'json']);
   });
 
   test('resume call', () => {
     const args = buildTaskArgs({ model: 'sonnet', effort: 'high', runtime: { resume: 's2' } });
-    expect(args).toEqual(['-p', '--model', 'sonnet', '--effort', 'high', '--resume', 's2', '--output-format', 'json']);
+    expect(args).toEqual(['-p', '--model', 'sonnet', '--effort', 'high', '--resume', 's2', '--strict-mcp-config', '--output-format', 'json']);
   });
 
   test('tools [] vs absent', () => {

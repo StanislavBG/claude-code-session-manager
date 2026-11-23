@@ -294,6 +294,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "medium",
       },
     },
+    {
+      commit: "seed-v7",
+      bodySha256: "69890c9b83fb8f2f3a10ab2e0b6a932c3f86be9d7c1d40276113d08fc4d5ba28",
+      fm: {
+        description: "Reads a project and writes ONE Knowledge Page (Overview by default, or How it works, FAQ, or a custom topic) for its Project Home tab, then saves it with a single project_page_write call.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write, mcp__session-manager-scheduler__project_page_write",
+        mcpServers: "session-manager-scheduler",
+        title: "Project Home — Builder",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
   "validator": [
     {
@@ -633,6 +645,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         "tools": "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write"
       }
     },
+    {
+      commit: "seed-v17",
+      bodySha256: "a8e9aaeef7efa62c9efaa3b0338b593516bd75e139058db5dd5cf0082c9e4c12",
+      fm: {
+        description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write",
+        mcpServers: "session-manager-scheduler",
+        title: "Project Home — Demo Video",
+        model: "opus",
+        effort: "max",
+      },
+    },
   ],
   "blender-artist": [
     {
@@ -645,6 +669,20 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         model: "opus",
         effort: "high",
         tags: "art",
+        executorOnly: "true",
+      },
+    },
+    {
+      commit: "seed-v2",
+      bodySha256: "9cc52c7a1e35f81a158cccfd6b05974ed7a95e23cb98666c8f68dab54c9a6b5a",
+      fm: {
+        description: "Expert 3D character artist for games — modeling, rigging, skinning, shape keys and keyframe animation in Blender, driven headlessly through Blender's Python API and the Blender MCP, verified in-engine with the Godot CLI. Executes exactly one already-scoped art PRD at a time (the dev-lead equivalent for 3D assets). Use for any change whose source of truth is a .blend file.",
+        tools: "Read, Grep, Glob, Bash, Edit, Write, mcp__blender__execute_blender_code_for_cli, mcp__blender__get_blendfile_summary_datablocks_for_cli, mcp__blender__get_blendfile_summary_usage_guess_for_cli, mcp__blender__get_blendfile_summary_missing_files_for_cli, mcp__blender__get_python_api_docs, mcp__blender__search_api_docs, mcp__blender__search_manual_docs, mcp__blender__render_thumbnail_to_path, mcp__blender__render_viewport_to_path, mcp__blender__execute_blender_code, mcp__blender__get_objects_summary, mcp__blender__get_object_detail_summary, mcp__blender__get_screenshot_of_area_as_image",
+        mcpServers: "blender",
+        model: "opus",
+        effort: "high",
+        tags: "art",
+        title: "Games — 3D Character Artist (Blender)",
         executorOnly: "true",
       },
     },
@@ -669,6 +707,19 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       fm: {
         description: "The Opus analyst and executor of the Competitor matrix macro — warm-starts from the saved matrix, settles 1..4 competitors, inventories this project's real features, fans out Haiku competitive-researcher subagents, then merges everything into a grouped feature matrix with sentiment and prioritized recommendations and saves it once with project_matrix_write.",
         tools: "Read, Grep, Glob, Bash, Write, WebSearch, WebFetch, Agent, mcp__session-manager-scheduler__project_matrix_read, mcp__session-manager-scheduler__project_matrix_write",
+        title: "Research — Competitor analyst",
+        model: "opus",
+        effort: "high",
+        tags: "project-home-builder",
+      },
+    },
+    {
+      commit: "seed-v2",
+      bodySha256: "8e72237e9b743bb8c26cc701d3ebd6c65212ebf777de37f9eb5f40aeaf224fae",
+      fm: {
+        description: "The Opus analyst and executor of the Competitor matrix macro — warm-starts from the saved matrix, settles 1..4 competitors, inventories this project's real features, fans out Haiku competitive-researcher subagents, then merges everything into a grouped feature matrix with sentiment and prioritized recommendations and saves it once with project_matrix_write.",
+        tools: "Read, Grep, Glob, Bash, Write, WebSearch, WebFetch, Agent, mcp__session-manager-scheduler__project_matrix_read, mcp__session-manager-scheduler__project_matrix_write",
+        mcpServers: "session-manager-scheduler",
         title: "Research — Competitor analyst",
         model: "opus",
         effort: "high",

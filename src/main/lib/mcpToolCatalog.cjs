@@ -763,6 +763,26 @@ const MCP_TOOL_CATALOG = [
     notes: 'Returns { ok: true, task }.',
   },
   {
+    name: 'task_switch_set',
+    group: 'tasks',
+    purpose: "Turn one project's 'Scripts may run Tasks' switch on or off via the session-manager app's admin API "
+      + '(POST /admin/tasks/switch), on behalf of the human in this chat. Runs only in a Session Manager chat or '
+      + 'terminal session; a scheduled job, a Task or any other internal headless run is refused before any '
+      + 'request. The caller identity is taken from this session, never from arguments. `cwd` is optional and '
+      + "defaults to this session's project.",
+    summary: 'Turn Scripts may run Tasks on or off when the human asks.',
+    whenToUse: 'Use only when the human asked in this chat to turn the switch on or off, and pass their words '
+      + 'verbatim as `humanRequestQuote` — the route checks the quote against this session\'s transcript and '
+      + 'that it names the switch and the project.',
+    whenNotToUse: 'Never on your own initiative, never from a job or script, and never to get past a 403 '
+      + "tasks_disabled without the human's words. Do not use it to run a Task.",
+    exampleArgs: { enabled: true, humanRequestQuote: "turn on 'Scripts may run Tasks' for burrow" },
+    notes: 'One instruction allows one change: do not reuse a quote to flip the switch again. Returns '
+      + '{ ok: true, cwd, enabled, changedAt, by, previous }. A refusal (400 invalid_request, 403 '
+      + 'human_request_unverified / quote_does_not_name_switch / quote_does_not_name_project, 409 '
+      + 'request_older_than_switch) carries error and reason; show the reason to the human.',
+  },
+  {
     name: 'session_manager_help',
     group: 'help',
     purpose: 'THE ENTRY POINT — call this tool FIRST whenever you are unsure which session-manager-scheduler '

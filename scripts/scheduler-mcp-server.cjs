@@ -35,6 +35,7 @@
  *
  *   task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? }) -> GET /admin/tasks?cwd=<encoded>&...
  *   task_get({ cwd, id }) -> GET /admin/task?cwd=<encoded>&id=<encoded>
+ *   task_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/tasks/switch
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -638,6 +639,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'task_switch_set',
+    description: descriptionFor('task_switch_set'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: "true turns 'Scripts may run Tasks' on, false turns it off" },
+        humanRequestQuote: { type: 'string', description: "The human's words from this chat asking for the change, verbatim" },
+        cwd: { type: 'string', description: "Optional: absolute project root whose switch to set; defaults to this session's project" },
+      },
+      required: ['enabled', 'humanRequestQuote'],
+    },
+  },
+  {
     name: 'epic_get',
     description: descriptionFor('epic_get'),
     inputSchema: {
@@ -1172,6 +1186,15 @@ function customerFeedbackSubmitRefusal() {
   );
 }
 
+// The Tasks switch is a human's choice: a scheduled job, a Task or any other
+// internal headless run (SM_KG_INTERNAL=1) is refused before any request.
+function taskSwitchSetRefusal() {
+  const message = 'refused: task_switch_set runs only in a Session Manager chat or terminal session where the human asked for it; '
+    + 'say in your final result what the human should switch on Scheduler → Tasks.';
+  if (process.env.SM_KG_INTERNAL === '1') return errorResult(message);
+  return humanSessionRefusal(message);
+}
+
 // Named + exported (see module.exports below) so mcpToolCatalog.test.cjs's
 // sibling can exercise session_manager_help's argument handling directly —
 // mocking node:fs/promises + global.fetch to drive adminRequest — without
@@ -1297,6 +1320,29 @@ async function handleCallTool(request) {
       if (args?.cwd) qs.set('cwd', args.cwd);
       qs.set('id', args.id);
       const result = await adminRequest('GET', `/admin/task?${qs.toString()}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'task_switch_set') {
+      const refusal = taskSwitchSetRefusal();
+      if (refusal) return refusal;
+      if (typeof args?.enabled !== 'boolean') return errorResult('missing or invalid required argument: enabled (boolean)');
+      if (typeof args?.humanRequestQuote !== 'string' || args.humanRequestQuote.trim() === '') {
+        return errorResult('missing or invalid required argument: humanRequestQuote (the human\'s words, verbatim)');
+      }
+      // Identity comes from this process's env only; caller-supplied
+      // originClaudeSessionId / originProjectRoot are never read.
+      const payload = {
+        enabled: args.enabled,
+        humanRequestQuote: args.humanRequestQuote,
+        originClaudeSessionId: process.env.SM_CHAT_SESSION_ID,
+      };
+      if (process.env.SM_PROJECT_ROOT) payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
+      if (typeof args.cwd === 'string') payload.cwd = args.cwd;
+      const result = await adminRequest('POST', '/admin/tasks/switch', payload);
+      if (result?.ok === false) {
+        const error = result.error ?? 'task_switch_set failed';
+        return errorResult(result.reason ? `${error}: ${result.reason}` : error);
+      }
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'epic_get') {

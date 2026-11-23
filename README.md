@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->36<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->37<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -14,7 +14,7 @@
 | MCP server | `session-manager-scheduler`. It uses stdio. The app adds it for you. It needs the app to be running. |
 | Plugin | `session-manager-dev@session-manager` |
 | Agent CLIs | Claude Code is the default. Codex, Gemini CLI, Antigravity CLI, Cursor Agent and OpenCode work in Chat and Terminal only. |
-| Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `~/.local/state/session-manager/`, or `$XDG_STATE_HOME/session-manager/` when `XDG_STATE_HOME` is set. |
+| Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `${XDG_STATE_HOME:-~/.local/state}/session-manager/`. |
 | Telemetry | Anonymous and on by default. Turn it off with `SM_TELEMETRY=0`. |
 | License | MIT |
 
@@ -139,11 +139,7 @@ Two ways it can fail:
 - A tool returns an error that says the app is not running. Start the app, then try again.
 - The tools are not in your tool list. The server is not added. Delete `~/.claude/session-manager/.scheduler-mcp-seeded` and restart the app.
 
-Start with `session_manager_help`:
-
-- No args: it lists every tool.
-- `tool`: it explains one tool, with example args.
-- `topic`: it shows one recipe.
+Start with `session_manager_help`. No args lists every tool. `tool` explains one tool. `topic` shows one recipe.
 
 Recipes:
 
@@ -195,6 +191,7 @@ Tools:
 | `agent_list` | agents | — | List the agents you can launch and the model each one runs on. |
 | `task_list` | tasks | `cwd` | List a project's Tasks with their status, model and cost. |
 | `task_get` | tasks | `cwd`, `id` | Read one Task in full, with its prompt and output. |
+| `task_switch_set` | tasks | `enabled`, `humanRequestQuote` | Turn Scripts may run Tasks on or off when the human asks. |
 | `session_manager_help` | help | — | Start here: list every tool, or explain one tool or recipe. |
 <!-- /gen:mcp-tools -->
 
@@ -218,7 +215,7 @@ A script can start a macro with `POST /admin/macros/run`. It works only for a ma
 
 ### Plugin session-manager-dev
 
-On first launch, the app installs this plugin with no network. It comes from the bundled `session-manager` marketplace. The app keeps it up to date. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
+On first launch, the app installs this plugin offline from the bundled `session-manager` marketplace, and keeps it up to date. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
 
 ```bash
 claude plugin marketplace add StanislavBG/claude-code-session-manager
@@ -292,7 +289,7 @@ The app copies these into `~/.claude/agents/` on first launch.
 
 Off by default. Turn it on in App Settings, Startup.
 
-An npx install starts through `npx claude-code-session-manager@latest`, so each login fetches the newest release; if that fails within two minutes, it retries with the cached copy. The script is `~/.claude/session-manager/start-at-login.sh`, run by a desktop entry in `~/.config/autostart/` (Linux) or a launch agent in `~/Library/LaunchAgents/` (macOS).
+An npx install runs `npx claude-code-session-manager@latest`, so each login gets the newest release, or the cached copy if that fails within two minutes. The script is `~/.claude/session-manager/start-at-login.sh`, run by a desktop entry in `~/.config/autostart/` (Linux) or a launch agent in `~/Library/LaunchAgents/` (macOS).
 
 A packaged build starts the installed app: a login item on macOS and Windows, the autostart folder for a Linux AppImage.
 

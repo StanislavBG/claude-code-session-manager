@@ -14,7 +14,36 @@ const OPS_ROOT_DIR = 'session-manager-operations';
 
 const MAX_JS_BYTES = 300 * 1024;
 const MAX_JSON_BYTES = 16 * 1024;
-const COMMAND_TIMEOUT_MS = 120000;
+// Per narration line: slow CPU voices can take minutes for one sentence.
+const COMMAND_TIMEOUT_MS = 900000;
+const STDERR_TAIL = 500;
+const WAV_HEADER_BYTES = 44;
+
+const PERSONALITY_TEXT = Object.freeze({ who: 400, speech: 400, readingLevel: 40 });
+const NEVER_SAY_MAX_ITEMS = 40;
+const NEVER_SAY_MAX_CHARS = 40;
+
+/** -> null when `p` is a valid personality object, else a reason string. */
+function validatePersonality(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return 'personality must be an object';
+  for (const k of Object.keys(p)) {
+    if (k === 'neverSay') continue;
+    const max = PERSONALITY_TEXT[k];
+    if (!max) return `personality.${k} is not a known key (who, speech, readingLevel, neverSay)`;
+    const v = p[k];
+    if (typeof v !== 'string' || v.length < 1 || v.length > max) return `personality.${k} must be a 1-${max} char string`;
+  }
+  if ('neverSay' in p) {
+    const n = p.neverSay;
+    if (!Array.isArray(n) || n.length > NEVER_SAY_MAX_ITEMS) {
+      return `personality.neverSay must be an array of at most ${NEVER_SAY_MAX_ITEMS} strings`;
+    }
+    if (!n.every((w) => typeof w === 'string' && w.length >= 1 && w.length <= NEVER_SAY_MAX_CHARS)) {
+      return `personality.neverSay items must be 1-${NEVER_SAY_MAX_CHARS} char strings`;
+    }
+  }
+  return null;
+}
 
 /** -> null when `c` is a valid character.json object, else a reason string. */
 function validateCharacterJson(c) {
@@ -22,6 +51,10 @@ function validateCharacterJson(c) {
   if (typeof c.name !== 'string' || !c.name.trim()) return 'name must be a non-empty string';
   if (!Array.isArray(c.palette) || c.palette.length === 0 || !c.palette.every((p) => typeof p === 'string' && p)) {
     return 'palette must be a non-empty array of strings';
+  }
+  if ('personality' in c) {
+    const pErr = validatePersonality(c.personality);
+    if (pErr) return pErr;
   }
   const v = c.voice;
   if (!v || typeof v !== 'object') return 'voice is required';
@@ -62,14 +95,18 @@ function validateCharacterJs(js, networkChecks = []) {
  * caller's writer-checked writeTextAtomic (assertOpsWrite).
  */
 function characterDir(projectRoot) {
-  if (!projectRoot || typeof projectRoot !== 'string') throw new Error('characterDir: projectRoot is required');
+  return path.join(projectRootOf(projectRoot, 'characterDir'), OPS_ROOT_DIR, 'project-pages', 'videos', '_character');
+}
+
+/** The project root for `projectRoot` (absolute), with any ops-root suffix stripped. */
+function projectRootOf(projectRoot, who = 'projectRootOf') {
+  if (!projectRoot || typeof projectRoot !== 'string') throw new Error(`${who}: projectRoot is required`);
   if (!path.isAbsolute(projectRoot)) {
-    throw new Error(`characterDir: projectRoot must be an absolute path, got "${projectRoot}"`);
+    throw new Error(`${who}: projectRoot must be an absolute path, got "${projectRoot}"`);
   }
   const segs = path.resolve(projectRoot).split(path.sep);
   const idx = segs.indexOf(OPS_ROOT_DIR);
-  const root = idx === -1 ? segs.join(path.sep) : (segs.slice(0, idx).join(path.sep) || path.sep);
-  return path.join(root, OPS_ROOT_DIR, 'project-pages', 'videos', '_character');
+  return idx === -1 ? segs.join(path.sep) : (segs.slice(0, idx).join(path.sep) || path.sep);
 }
 
 /** -> {json, js} | null (absent or invalid). */
@@ -93,23 +130,116 @@ function buildCommandArgv(voice, text, out) {
   return voice.command.map((a) => a.split('{text}').join(text).split('{out}').join(out));
 }
 
-/** Run the voice command (no shell). -> {ok, status, error?} */
-function speakWithCommand(voice, text, out) {
+/** True when `file` exists, is larger than a bare WAV header and starts with 'RIFF'. */
+function isWav(file) {
+  let fd;
+  try {
+    if (fs.statSync(file).size <= WAV_HEADER_BYTES) return false;
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(4);
+    fs.readSync(fd, head, 0, 4, 0);
+    return head.toString('latin1') === 'RIFF';
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
+ * Run the voice command (no shell). -> {ok, status, error?}
+ * ok only when the command exited 0 AND wrote a WAV to `out`; the error carries
+ * the last STDERR_TAIL chars of the command's stderr.
+ */
+function speakWithCommand(voice, text, out, { cwd } = {}) {
   if (!voice || voice.engine !== 'command' || validateCharacterJson({ name: 'x', palette: ['x'], voice })) {
     return { ok: false, status: null, error: 'not a valid command voice' };
   }
-  const [bin, ...args] = buildCommandArgv(voice, String(text), String(out));
-  const r = spawnSync(bin, args, { shell: false, stdio: 'ignore', timeout: COMMAND_TIMEOUT_MS });
-  if (r.error) return { ok: false, status: r.status, error: r.error.message };
-  return { ok: r.status === 0, status: r.status, ...(r.status === 0 ? {} : { error: `exit ${r.status}` }) };
+  const outStr = String(out);
+  const [bin, ...args] = buildCommandArgv(voice, String(text), outStr);
+  const r = spawnSync(bin, args, {
+    shell: false,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    timeout: COMMAND_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
+    ...(cwd ? { cwd } : {}),
+  });
+  const stderr = r.stderr ? r.stderr.toString('utf8').trim().slice(-STDERR_TAIL) : '';
+  const withStderr = (msg) => (stderr ? `${msg}: ${stderr}` : msg);
+  if (r.error) return { ok: false, status: r.status, error: withStderr(r.error.message) };
+  if (r.status !== 0) {
+    const why = r.signal ? `killed by ${r.signal}` : `exit ${r.status}`;
+    return { ok: false, status: r.status, error: withStderr(`voice command failed (${why})`) };
+  }
+  const outAbs = path.resolve(cwd || process.cwd(), outStr);
+  if (!isWav(outAbs)) {
+    return { ok: false, status: r.status, error: withStderr(`the voice command wrote no WAV to ${outAbs}`) };
+  }
+  return { ok: true, status: r.status };
+}
+
+/**
+ * Speak every narration line with the saved character's command voice, in
+ * order, cwd = the project root. No fallback voice: the first failure stops
+ * the run. -> {ok: true, outs} | {ok: false, line?, error}
+ */
+function speakLines(projectRoot, lines) {
+  let root;
+  try {
+    root = projectRootOf(projectRoot, 'speakLines');
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+  if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: 'lines must be a non-empty array of { text, out }' };
+  const ch = readCharacter(root);
+  if (!ch) return { ok: false, error: `no valid saved character in ${characterDir(root)}` };
+  const voice = ch.json.voice;
+  if (voice.engine !== 'command') {
+    return { ok: false, error: `the saved character's voice.engine is '${voice.engine}', not 'command'` };
+  }
+  const outs = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l || typeof l.text !== 'string' || !l.text || typeof l.out !== 'string' || !l.out) {
+      return { ok: false, line: i, error: `line ${i} must be { text, out } with non-empty strings` };
+    }
+    const r = speakWithCommand(voice, l.text, l.out, { cwd: root });
+    if (!r.ok) return { ok: false, line: i, error: r.error };
+    outs.push(l.out);
+  }
+  return { ok: true, outs };
 }
 
 module.exports = {
   readCharacter,
   speakWithCommand,
+  speakLines,
   buildCommandArgv,
   validateCharacterJson,
   validateCharacterJs,
+  validatePersonality,
   characterDir,
   MAX_JS_BYTES,
+  COMMAND_TIMEOUT_MS,
 };
+
+// CLI: node character.cjs speak spec.json   (spec { projectRoot, lines })
+if (require.main === module) {
+  const [cmdName, specPath] = process.argv.slice(2);
+  let result;
+  if (cmdName !== 'speak' || !specPath) {
+    result = { ok: false, error: 'usage: node character.cjs speak spec.json' };
+  } else {
+    try {
+      const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
+      result = speakLines(spec && spec.projectRoot, spec && spec.lines);
+    } catch (e) {
+      result = { ok: false, error: `cannot read spec ${specPath}: ${e.message}` };
+    }
+  }
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (!result.ok) {
+    process.stderr.write(`${result.error}\n`);
+    process.exitCode = 1;
+  }
+}

@@ -79,8 +79,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 5 (export.cjs must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('5');
+test('KIT_VERSION is bumped to 6 (character speakLines + personality must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('6');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

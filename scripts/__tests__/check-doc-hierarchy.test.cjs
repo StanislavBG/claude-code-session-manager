@@ -30,6 +30,7 @@ const run = () => spawnSync(process.execPath, [SCRIPT, root], { encoding: 'utf8'
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-hier-'));
   for (const f of FILES) write(f, '# doc\n');
+  write('.session-manager.json', JSON.stringify({ mdNetwork: { history: [] } }));
   write('CLAUDE.md', '> **SIZE BUDGET — 12,000 chars**\n\n## Scoped MDs\n\n| Path | Scope |\n| --- | --- |\n| [`src/CLAUDE.md`](src/CLAUDE.md) | main |\n' + FILES.filter((f) => f !== 'src/CLAUDE.md').map((f) => `[${f}](${f})\n`).join(''));
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -178,4 +179,37 @@ test('reachability starts from both root files: linked only from AGENTS.md is no
   write('AGENTS.md', fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8') + '[x](docs/only-agents.md)\n');
   r = run();
   expect(r.status, r.stderr).toBe(0);
+});
+
+test('history prefixes come from .session-manager.json mdNetwork.history', () => {
+  write('old/notes/x.md', '# historical\n');
+  let r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('old/notes/x.md: orphan markdown');
+  write('.session-manager.json', JSON.stringify({ mdNetwork: { history: ['old/'] } }));
+  r = run();
+  expect(r.status, r.stderr).toBe(0);
+});
+
+test('missing .session-manager.json fails with one diagnostic line', () => {
+  fs.rmSync(path.join(root, '.session-manager.json'));
+  const r = run();
+  expect(r.status).toBe(1);
+  const lines = r.stderr.trim().split('\n');
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain('.session-manager.json');
+  expect(lines[0]).toContain('mdNetwork.history');
+});
+
+test('invalid .session-manager.json fails with one diagnostic line', () => {
+  write('.session-manager.json', '{ not json');
+  let r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr.trim().split('\n')).toHaveLength(1);
+  expect(r.stderr).toContain('.session-manager.json');
+  write('.session-manager.json', JSON.stringify({ mdNetwork: { history: 'old/' } }));
+  r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr.trim().split('\n')).toHaveLength(1);
+  expect(r.stderr).toContain('mdNetwork.history');
 });

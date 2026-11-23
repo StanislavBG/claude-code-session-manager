@@ -12,7 +12,8 @@
 //  4. no file:// link in those files;
 //  5. every path in the map's "Scoped MDs" table resolves;
 //  6. every tracked *.md is reachable by relative links from the root
-//     CLAUDE.md / AGENTS.md (tree-DAG), except files under EXEMPT_PREFIXES.
+//     CLAUDE.md / AGENTS.md (tree-DAG), except files under EXEMPT_PREFIXES
+//     (historical ones from .session-manager.json mdNetwork.history).
 //
 // The MAP is root AGENTS.md when it exists (so Codex and other CLIs read the
 // same file), else root CLAUDE.md. A listed junction of the CLAUDE.md /
@@ -33,16 +34,30 @@ const ROOT = path.resolve(process.argv[2] || process.env.SM_DOC_ROOT || path.joi
 const OPS = 'session-manager-operations'
 const NESTED_CLAUDE_MD_MAX_BYTES = 4000
 
+// Historical folders are declared once, in the tracked .session-manager.json's
+// mdNetwork.history (the app's MD network scan reads the same list).
+const CONFIG_FILE = '.session-manager.json'
+function readHistoryPrefixes() {
+  const bad = (why) => {
+    console.error(`doc-hierarchy: FAIL ${CONFIG_FILE}: ${why} (it must declare mdNetwork.history as a string array)`)
+    process.exit(1)
+  }
+  let text
+  try { text = fs.readFileSync(path.join(ROOT, CONFIG_FILE), 'utf8') } catch (err) { return bad(`unreadable: ${err.code || err.message}`) }
+  let parsed
+  try { parsed = JSON.parse(text) } catch (err) { return bad(`invalid JSON: ${err.message}`) }
+  const history = parsed && typeof parsed === 'object' && parsed.mdNetwork && typeof parsed.mdNetwork === 'object' ? parsed.mdNetwork.history : undefined
+  if (!Array.isArray(history) || !history.every((p) => typeof p === 'string')) return bad('mdNetwork.history is not a string array')
+  return history
+}
+
 // Markdown the reachability check (6) does not require a link to.
 const EXEMPT_PREFIXES = [
-  'session-manager-operations/reviews/', // historical
-  'session-manager-operations/design-mocks/', // historical
-  'session-manager-operations/HUMAN_LEARN/', // historical
+  ...readHistoryPrefixes(), // historical
   'src/seed/', // seeded
   'plugins/session-manager-dev/skills/', // tool-loaded
   'plugins/packs/', // tool-loaded (context packs, --plugin-dir)
   '.claude/agents/', // tool-loaded
-  'web/promo-video/', // historical
   'src/main/templates/', // seeded
   '.github/', // github
   'README.md', // github (repo landing page)

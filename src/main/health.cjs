@@ -321,6 +321,73 @@ function evaluateRootClaudeMdBudget(rootDir) {
   return evaluateClaudeMdBudget(m.chars, m.budget, m.label, m.mapName);
 }
 
+// Auto-memory index budget. Claude Code loads only the first 200 lines / 25 KB
+// of a project's MEMORY.md (see memoryIndex.cjs), so anything past that is
+// invisible. Defaults mirror that cap; override with opts.memoryBudget
+// ({ maxBytes, maxLines }) or SM_MEMORY_BUDGET_BYTES / SM_MEMORY_BUDGET_LINES.
+const MEMORY_BUDGET_DEFAULTS = Object.freeze({ maxBytes: 25600, maxLines: 200 });
+
+function positiveInt(v) {
+  const n = typeof v === 'string' ? Number(v.trim()) : v;
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function resolveMemoryBudget(override = {}, env = process.env) {
+  const o = override || {};
+  return {
+    maxBytes: positiveInt(o.maxBytes) ?? positiveInt(env.SM_MEMORY_BUDGET_BYTES) ?? MEMORY_BUDGET_DEFAULTS.maxBytes,
+    maxLines: positiveInt(o.maxLines) ?? positiveInt(env.SM_MEMORY_BUDGET_LINES) ?? MEMORY_BUDGET_DEFAULTS.maxLines,
+  };
+}
+
+// Resolve one project's native auto-memory dir (memoryDirResolve.cjs, same
+// settings layers as the Memory tab) and measure its MEMORY.md. Returns null
+// when auto-memory is disabled or no index exists. IO injectable for tests.
+function measureProjectMemory(cwd, deps = {}) {
+  const home = deps.home || os.homedir();
+  const fsImpl = deps.fs || fs;
+  const { resolveWorkspaceMemoryDir, autoMemoryEnabled, gitRepoRoot } = require('./lib/memoryDirResolve.cjs');
+  const { effectiveSettings } = require('./lib/effectiveSettings.cjs');
+  const { indexHealth } = require('./lib/memoryIndex.cjs');
+  const repoRoot = deps.repoRoot !== undefined ? deps.repoRoot : gitRepoRoot(cwd, deps.execFileSync || execFileSync);
+  const settings = deps.settings || effectiveSettings({ home, cwd: repoRoot || cwd, fs: fsImpl }).layers;
+  if (!autoMemoryEnabled(settings)) return null;
+  const { dir } = resolveWorkspaceMemoryDir({ home, cwd, settings, repoRoot });
+  let text;
+  try {
+    text = fsImpl.readFileSync(path.join(dir, 'MEMORY.md'), 'utf8');
+  } catch {
+    return null;
+  }
+  const { lines, bytes } = indexHealth({ indexText: text, files: [] });
+  return { cwd, dir, bytes, lines };
+}
+
+// Pure: measurements (from measureProjectMemory) vs budget. At budget is ok;
+// only strictly over flags. One entry per memory dir (worktrees share one).
+function evaluateMemoryBudget(measurements, budget = MEMORY_BUDGET_DEFAULTS) {
+  const byDir = new Map();
+  for (const m of measurements || []) if (m && !byDir.has(m.dir)) byDir.set(m.dir, m);
+  const projects = [...byDir.values()].map((m) => ({
+    ...m,
+    overBudget: m.bytes > budget.maxBytes || m.lines > budget.maxLines,
+  }));
+  const over = projects.filter((p) => p.overBudget);
+  const issues = over.map((p) =>
+    `Auto-memory index over budget for ${p.cwd}: ${p.bytes} bytes / ${p.lines} lines (budget ${budget.maxBytes} bytes / ${budget.maxLines} lines) at ${path.join(p.dir, 'MEMORY.md')}`);
+  return {
+    component: {
+      ok: over.length === 0,
+      maxBytes: budget.maxBytes,
+      maxLines: budget.maxLines,
+      checked: projects.length,
+      overBudget: over.map(({ cwd, dir, bytes, lines }) => ({ cwd, dir, bytes, lines })),
+      projects: projects.map(({ cwd, bytes, lines, overBudget }) => ({ cwd, bytes, lines, overBudget })),
+    },
+    issues,
+  };
+}
+
 // Pure evaluator over migratePrds()'s { moved, skipped, unresolved } result —
 // kept separate from the fs-touching check() call site so it's directly
 // unit-testable, matching evaluateTickLiveness's pattern.
@@ -1321,6 +1388,26 @@ async function check(opts = {}) {
     status.issues.push(`Epic index health check failed: ${e.message}`);
   }
 
+  // 6.655. Auto-memory budget per known project (allProjectCwds, the same set
+  // the Epic index check reads — never a wholesale ~/.claude/projects walk).
+  // Over budget flags this component non-GREEN; not in criticalComponents, so
+  // it never reddens the app rollup.
+  try {
+    const cwds = [...new Set(allProjectCwds())].slice(0, 100).filter((cwd) => fs.existsSync(cwd));
+    const measurements = [];
+    for (const cwd of cwds) {
+      try {
+        const m = measureProjectMemory(cwd);
+        if (m) measurements.push(m);
+      } catch { /* one unreadable project never hides the rest */ }
+    }
+    const { component, issues } = evaluateMemoryBudget(measurements, resolveMemoryBudget(opts.memoryBudget));
+    status.components.memory_budget = component;
+    status.issues.push(...issues);
+  } catch (e) {
+    status.components.memory_budget = { ok: true, error: e.message };
+  }
+
   // 6.66. Epic transcript location (NON-fatal warning): a mislocated/duplicated
   // transcript is read correctly by epicTranscriptPath, so it never reddens the
   // rollup (not in criticalComponents). See scripts/check-epic-transcripts.cjs.
@@ -1496,6 +1583,10 @@ module.exports = {
   evaluateClaudeMdBudget,
   measureRootClaudeMdPair,
   evaluateRootClaudeMdBudget,
+  MEMORY_BUDGET_DEFAULTS,
+  resolveMemoryBudget,
+  measureProjectMemory,
+  evaluateMemoryBudget,
   evaluateUsagePollerHealth,
   loadUsagePollerState,
   evaluateQueueDispatchHealth,

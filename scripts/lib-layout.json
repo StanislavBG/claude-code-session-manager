@@ -16,6 +16,7 @@
   "taskIpc": "tasks",
   "taskAdminRoutes": "tasks",
   "memoryConsolidation": "tasks",
+  "mitigationReview": "tasks",
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",

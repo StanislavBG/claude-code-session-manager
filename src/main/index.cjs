@@ -1637,6 +1637,11 @@ app.whenReady().then(async () => {
         adminHttp,
         log: (message, meta) => logs.writeLine({ scope: 'memory-consolidation', level: 'info', message, meta }),
       });
+      // Model-mitigations review Task when the default executor model id changes (lib/tasks/mitigationReview.cjs).
+      require('./lib/tasks/mitigationReview.cjs').startMitigationReviewTimer({
+        adminHttp,
+        log: (message, meta) => logs.writeLine({ scope: 'mitigation-review', level: 'info', message, meta }),
+      });
     }).catch((e) => {
       logs.writeLine({ scope: 'admin-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
     });

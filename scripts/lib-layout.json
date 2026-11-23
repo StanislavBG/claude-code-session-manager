@@ -4,6 +4,7 @@
   "activeIndexRebuild": "epic",
   "epicEventLog": "epic",
   "adoptedRunSupervisor": "scheduler",
+  "cancelledRow": "scheduler",
   "agentAdminRoutes": "persona-macro",
   "agentEffortResolve": "claude",
   "agentModelResolve": "claude",

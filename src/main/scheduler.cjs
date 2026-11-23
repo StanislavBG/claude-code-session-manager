@@ -5862,6 +5862,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
       ...personaToolScopeEnv(personaToolScope),
       SM_SCHEDULER_JOB_RISK_TOOLS: JSON.stringify(jobRiskTools),
+      // Names the Epic a tool-risk 'confirm' request belongs to (guard-tool-risk-policy.cjs).
+      ...((job.epicId || job.sourcePromptId) ? { SM_SCHEDULER_JOB_EPIC_ID: job.epicId || job.sourcePromptId } : {}),
       BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
@@ -6219,6 +6221,11 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         }
         sl(`\n[scheduler] exit code=${effectiveCode} (raw code=${exitCode} signal=${signal}) ` +
           `duration=${Math.round(durationMs / 1000)}s\n`);
+        // Post any tool-risk 'confirm' requests the guard recorded (this job's, and
+        // any a crashed run left behind) as Needs-you items. Fire-and-forget: never throws.
+        needsYouStore.drainConfirmationRequests().then((r) => {
+          if (r.created > 0 && mainWindow) sendIfAlive(mainWindow, 'needsYou:changed', {});
+        }, () => {});
         const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
         const networkError = effectiveCode !== 0 && !rateLimited && detectNetworkErrorInLog(logPath);
         // Non-run detection (issue #11 lists A1–A3): the harness's `result`

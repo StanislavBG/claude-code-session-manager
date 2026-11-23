@@ -30,16 +30,16 @@
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { adminPosterFor, extractProposal } = require('./memoryConsolidation.cjs');
+const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 
 const PIPELINE = 'mitigation-review';
 const MISSION_ID = 'mitigation-review';
 const AGENT = 'dev-lead';
 const NEEDS_YOU_APP = 'mitigation-review';
-const REGISTRY_REL = path.join('session-manager-operations', 'architecture', 'model-mitigations.md');
+const REGISTRY_REL = path.join(OPS_ROOT_DIR, 'architecture', 'model-mitigations.md');
 const STATE_FILE = 'mitigation-review.json';
 const TICK_MS = 60 * 60 * 1000;
 const FIRST_TICK_MS = 10 * 60 * 1000;
@@ -141,7 +141,7 @@ function buildReviewPrompt({ cwd, from, to, rows }) {
 }
 
 function stateFile() {
-  return path.join(os.homedir(), '.claude', 'session-manager', STATE_FILE);
+  return path.join(require('../scheduler/schedulerPaths.cjs').schedulerHome(), STATE_FILE);
 }
 
 function defaultDeps() {

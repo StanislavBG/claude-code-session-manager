@@ -7,7 +7,7 @@ import { useToast } from '../../state/toast'
 import type { ToolRiskMark } from '../../../preload/api'
 
 /** The closed mark set main's toolRiskMarks.cjs accepts — in display order. */
-export const TOOL_RISK_MARKS: readonly ToolRiskMark[] = ['read', 'write', 'irreversible', 'money', 'public']
+export const TOOL_RISK_MARKS: readonly ToolRiskMark[] = ['read', 'write', 'confirm', 'irreversible', 'money', 'public']
 
 export type ToolRiskScope = 'user' | 'project'
 

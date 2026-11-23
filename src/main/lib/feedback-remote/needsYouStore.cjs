@@ -10,6 +10,10 @@
  * A missing or corrupt file reads as empty; a corrupt file is set aside as
  * `needs-you.json.corrupt-<ms>` at the next write. Answered or withdrawn items
  * older than 14 days are dropped at the next write.
+ *
+ * Also posts tool-risk 'confirm' requests (app 'tool-risk'): the guard hook
+ * appends them to a JSONL and drainConfirmationRequests turns each into one
+ * item + one job.confirmation_requested Epic event, deduped by tool + digest.
  */
 
 const fsp = require('node:fs/promises');
@@ -211,6 +215,17 @@ function callerKey(item) {
  * @returns {Promise<{ item: NeedsYouItem, created: boolean, changed: boolean }>}
  */
 async function postNeedsYou(input) {
+  return postItem(input, (item) => ({
+    kind: 'job.needs_input',
+    app: item.app,
+    id: item.id,
+    title: item.title,
+    ...(item.options ? { options: item.options } : {}),
+  }));
+}
+
+/** postNeedsYou with the Epic event a NEW item appends built by `createdEvent`. */
+async function postItem(input, createdEvent) {
   const data = NeedsYouPostSchema.parse(input);
   const filePath = needsYouPath();
   const result = await serialize(async () => {
@@ -257,16 +272,126 @@ async function postNeedsYou(input) {
     await writeStore(filePath, items);
     return { item, created: true, changed: true };
   });
-  if (result.created) {
-    await emitItemEvent(result.item, {
-      kind: 'job.needs_input',
-      app: result.item.app,
-      id: result.item.id,
-      title: result.item.title,
-      ...(result.item.options ? { options: result.item.options } : {}),
-    });
-  }
+  if (result.created) await emitItemEvent(result.item, createdEvent(result.item));
   return result;
+}
+
+// --- tool-risk confirmation requests -------------------------------------------
+
+const CONFIRM_APP = 'tool-risk';
+const DIGEST_RE = /^[0-9a-f]{64}$/;
+const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/**
+ * One request line written by scripts/hooks/lib/guard-tool-risk-policy.cjs.
+ * epicId / cwd are optional: without both, the item is posted unlinked.
+ */
+const ConfirmationRequestSchema = z.object({
+  tool: z.string().min(1).max(300),
+  argsDigest: z.string().regex(DIGEST_RE, 'argsDigest must be a sha256 hex digest'),
+  jobSlug: z.string().min(1).max(300).nullable().optional(),
+  epicId: z.string().nullable().optional(),
+  cwd: z.string().nullable().optional(),
+  rule: z.string().max(500).optional(),
+  summary: z.string().max(500).optional(),
+});
+
+/**
+ * Needs-you id of a request: one item per (tool, argsDigest). The digest alone
+ * is not enough — every argument-less MCP call shares the digest of `{}`.
+ */
+function confirmationItemId(tool, digest) {
+  const key = require('node:crypto').createHash('sha256').update(`${tool}\u0000${digest}`).digest('hex');
+  return `confirm-${key.slice(0, 40)}`;
+}
+
+function oneLine(s, max) {
+  const t = String(s).replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+/**
+ * Post one confirmation request: one Needs-you item, and — only when the item
+ * is new — one job.confirmation_requested event on the Epic's log. A repeat
+ * request for the same tool + args digest (from any job) changes nothing.
+ * @param {unknown} input
+ * @returns {Promise<{ item: NeedsYouItem, created: boolean, changed: boolean }>}
+ */
+async function postConfirmationRequest(input) {
+  const req = ConfirmationRequestSchema.parse(input);
+  const id = confirmationItemId(req.tool, req.argsDigest);
+  const linked = typeof req.epicId === 'string' && SAFE_ID_RE.test(req.epicId)
+    && typeof req.cwd === 'string' && path.isAbsolute(req.cwd);
+  const what = req.summary && req.summary !== req.tool ? `${req.tool}: ${req.summary}` : req.tool;
+  const why = [
+    `A headless job${req.jobSlug ? ` (${req.jobSlug})` : ''} tried \`${oneLine(what, 400)}\`, which is marked 'confirm'${req.rule ? ` by rule \`${req.rule}\`` : ''}, and was refused.`,
+    `Args digest: ${req.argsDigest}.`,
+    'To let it run, re-queue the PRD with that rule in riskTools; otherwise withdraw this item.',
+  ].join(' ');
+  const existing = (await listNeedsYou({ app: CONFIRM_APP })).find((it) => it.id === id);
+  if (existing) return { item: existing, created: false, changed: false };
+  return postItem({
+    app: CONFIRM_APP,
+    id,
+    title: oneLine(`Confirm ${what}`, 200),
+    why: why.slice(0, 1000),
+    ...(linked ? { epicId: req.epicId, cwd: req.cwd } : {}),
+  }, (item) => ({
+    kind: 'job.confirmation_requested',
+    app: item.app,
+    id: item.id,
+    tool: req.tool,
+    argsDigest: req.argsDigest,
+    ...(req.jobSlug ? { jobSlug: req.jobSlug } : {}),
+    ...(req.rule ? { rule: req.rule } : {}),
+  }));
+}
+
+/**
+ * Drain the guard's confirmation-requests JSONL: the file is renamed aside
+ * first (so a guard appending meanwhile starts a fresh file), every valid line
+ * is posted via postConfirmationRequest, and the drained copy is removed.
+ * A missing file is a no-op. Never throws; a bad line or a failed post is logged.
+ * @param {{ file?: string }} [opts] default: schedulerHome()/tool-confirmation-requests.jsonl
+ * @returns {Promise<{ read: number, posted: number, created: number }>}
+ */
+async function drainConfirmationRequests(opts = {}) {
+  const out = { read: 0, posted: 0, created: 0 };
+  let file;
+  try {
+    const { confirmationRequestsPath } = require('../claude/toolRiskMarks.cjs');
+    file = opts.file || confirmationRequestsPath(require('../scheduler/schedulerPaths.cjs').schedulerHome());
+  } catch (err) {
+    console.error('[needsYouStore] confirmation requests path unavailable', err && err.message);
+    return out;
+  }
+  const draining = `${file}.draining-${process.pid}-${Date.now()}`;
+  try {
+    await fsp.rename(file, draining);
+  } catch (err) {
+    if (!err || err.code !== 'ENOENT') console.error('[needsYouStore] cannot drain', file, err && err.message);
+    return out;
+  }
+  let text = '';
+  try {
+    text = await fsp.readFile(draining, 'utf8');
+  } catch (err) {
+    console.error('[needsYouStore] cannot read', draining, err && err.message);
+    return out;
+  }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    out.read++;
+    try {
+      const r = await postConfirmationRequest(JSON.parse(line));
+      out.posted++;
+      if (r.created) out.created++;
+    } catch (err) {
+      console.error('[needsYouStore] confirmation request dropped:', err && err.message ? err.message : err);
+    }
+  }
+  await fsp.rm(draining, { force: true }).catch(() => {});
+  return out;
 }
 
 /** Apply `mutate` to the open item app+id; returns it, or null when none / mutate refuses. */
@@ -320,6 +445,10 @@ module.exports = {
   postNeedsYou,
   withdrawNeedsYou,
   answerNeedsYou,
+  postConfirmationRequest,
+  drainConfirmationRequests,
+  confirmationItemId,
+  CONFIRM_APP,
   MAX_OPEN_PER_APP,
   MAX_OPEN_TOTAL,
   RETENTION_MS,

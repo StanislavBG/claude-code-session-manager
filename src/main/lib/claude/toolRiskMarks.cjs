@@ -20,6 +20,10 @@
  * longer prefix > shorter prefix). A compound Bash command resolves each
  * simple command and returns a blocking result if any one blocks.
  *
+ * Marks: see MARKS. 'irreversible' / 'money' / 'public' block; 'confirm'
+ * refuses in a job and asks the owner through Needs you (argsDigest names
+ * the exact call).
+ *
  * Pure apart from readMarksLayer / writeMarksLayer. No side effects at
  * require time. readMarksLayer and resolveMark never throw.
  *
@@ -30,11 +34,21 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { writeJsonAtomic, readJsonOrSync } = require('../util/atomicFs.cjs');
 
-const MARKS = Object.freeze(['read', 'write', 'irreversible', 'money', 'public']);
+// Order = riskiness (a compound Bash line resolves to its riskiest mark), so
+// 'confirm' sits below the blocking marks: a line holding both is refused for
+// the blocking one first.
+const MARKS = Object.freeze(['read', 'write', 'confirm', 'irreversible', 'money', 'public']);
 const BLOCKING_MARKS = new Set(['irreversible', 'money', 'public']);
+// 'confirm' = refuse in a headless job, but ask the owner (Needs you) instead
+// of a silent deny. Not a BLOCKING_MARK: the guard handles it on its own path.
+const CONFIRM_MARK = 'confirm';
 const MARK_SET = new Set(MARKS);
+// Machine-level JSONL (under schedulerHome) the guard appends one
+// confirmation request to; the main process drains it into Needs you.
+const CONFIRMATION_REQUESTS_FILE = 'tool-confirmation-requests.jsonl';
 
 const FILE_NAME = 'tool-risk.json';
 const FORMAT_VERSION = 1;
@@ -57,6 +71,27 @@ function projectMarksPath(projectRoot) {
 
 function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** schedulerHome-relative path of the confirmation-requests JSONL. */
+function confirmationRequestsPath(schedulerHomeDir) {
+  return path.join(schedulerHomeDir, CONFIRMATION_REQUESTS_FILE);
+}
+
+/** JSON with object keys sorted at every depth; undefined values dropped like JSON.stringify. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? 'null' : canonicalJson(v))).join(',')}]`;
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).filter((k) => value[k] !== undefined && typeof value[k] !== 'function').sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  const out = JSON.stringify(value);
+  return out === undefined ? 'null' : out;
+}
+
+/** sha256 hex of the canonical JSON of a call's tool_input (absent input = {}). */
+function argsDigest(toolInput) {
+  return crypto.createHash('sha256').update(canonicalJson(toolInput === undefined ? {} : toolInput)).digest('hex');
 }
 
 // ── Bash parsing ────────────────────────────────────────────────────────────
@@ -362,6 +397,11 @@ function resolveMark(call, layersIn) {
 module.exports = {
   MARKS,
   BLOCKING_MARKS,
+  CONFIRM_MARK,
+  CONFIRMATION_REQUESTS_FILE,
+  confirmationRequestsPath,
+  canonicalJson,
+  argsDigest,
   systemMarksPath,
   projectMarksPath,
   parseRule,

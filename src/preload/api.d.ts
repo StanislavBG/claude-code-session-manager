@@ -475,7 +475,7 @@ export interface ToolRiskReadInput {
   /** Required (absolute) for scope 'project'. */
   cwd?: string | null;
 }
-export type ToolRiskMark = 'read' | 'write' | 'irreversible' | 'money' | 'public';
+export type ToolRiskMark = 'read' | 'write' | 'confirm' | 'irreversible' | 'money' | 'public';
 export interface ToolRiskReadResult {
   ok: boolean;
   path: string | null;

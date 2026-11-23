@@ -120,7 +120,7 @@ describe('SettingsToolRisk', () => {
     installApi({ marks: { mcp__a__b: 'read' } })
     const el = await mount(createElement(SettingsToolRisk, { scope: 'user', cwd: null }))
     const options = Array.from(qa<HTMLSelectElement>(el, 'tool-risk-mark')[0].options).map((o) => o.value)
-    expect(options).toEqual(['read', 'write', 'irreversible', 'money', 'public'])
+    expect(options).toEqual(['read', 'write', 'confirm', 'irreversible', 'money', 'public'])
     expect([...TOOL_RISK_MARKS]).toEqual(options)
   })
 

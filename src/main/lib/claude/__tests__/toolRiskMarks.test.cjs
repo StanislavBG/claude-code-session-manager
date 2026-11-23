@@ -30,7 +30,7 @@ const layer = (marks, file) => ({ ok: true, exists: true, marks, interactive: fa
 
 describe('exports', () => {
   it('MARKS and BLOCKING_MARKS', () => {
-    assert.deepEqual([...MARKS], ['read', 'write', 'irreversible', 'money', 'public']);
+    assert.deepEqual([...MARKS], ['read', 'write', 'confirm', 'irreversible', 'money', 'public']);
     assert.ok(BLOCKING_MARKS instanceof Set);
     assert.deepEqual([...BLOCKING_MARKS].sort(), ['irreversible', 'money', 'public']);
   });

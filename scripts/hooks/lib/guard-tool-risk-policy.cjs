@@ -12,10 +12,14 @@
  */
 'use strict';
 
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
   BLOCKING_MARKS,
+  CONFIRM_MARK,
+  confirmationRequestsPath,
+  argsDigest,
   systemMarksPath,
   projectMarksPath,
   parseRule,
@@ -29,6 +33,8 @@ const TAG = '[guard-tool-risk]';
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const MAX_SHOWN = 200;
 const LAYER_LABEL = { system: 'System', project: 'Project' };
+// Marks the guard refuses unless cleared: the blocking marks plus 'confirm'.
+const GUARDED_MARKS = new Set([...BLOCKING_MARKS, CONFIRM_MARK]);
 
 function buildAllow() {
   return { continue: true };
@@ -116,7 +122,7 @@ function findBlocking(call, layers, clearance) {
   };
   for (let i = 0; i < 64; i++) {
     const hit = resolveMark(call, work);
-    if (!hit || !BLOCKING_MARKS.has(hit.mark)) return null;
+    if (!hit || !GUARDED_MARKS.has(hit.mark)) return null;
     if (!isCleared(clearance, call, hit)) return hit;
     work[hit.layer].marks[hit.rule] = 'read';
   }
@@ -132,6 +138,49 @@ function blockReason(call, hit, headless) {
       : `This project enforces tool-risk marks in interactive sessions (interactive: true); to run it from a job, name it in riskTools in the PRD.`,
     'Do not work around this refusal (no other tool, wrapper, script or alias for the same effect); stop and report that this step needs clearance.',
   ].join(' ');
+}
+
+function confirmReason(call, hit, digest, recorded) {
+  const layer = LAYER_LABEL[hit.layer] || hit.layer;
+  return [
+    `Blocked, pending confirmation: \`${shown(call)}\` is marked 'confirm' by rule \`${hit.rule}\` in the ${layer} tool-risk file ${hit.file || '(unknown file)'}.`,
+    recorded
+      ? `A confirmation request (args digest ${digest}) was sent to the owner's Needs you list; the owner decides whether a PRD naming "${hit.rule}" in riskTools runs it.`
+      : `No confirmation request could be sent from this run (args digest ${digest}); a headless job may run it only when its PRD names "${hit.rule}" in riskTools.`,
+    'Do not retry it and do not work around this refusal (no other tool, wrapper, script or alias for the same effect); finish the rest of the work and report that this step is pending confirmation.',
+  ].join(' ');
+}
+
+/**
+ * Append one confirmation request for the main process to post (Needs you +
+ * the Epic's job.confirmation_requested event). Only a scheduler job records
+ * one: it names the job and Epic the answer belongs to. Never throws.
+ * @returns {boolean} whether the record was written
+ */
+function recordConfirmationRequest(call, hit, digest, env, deps) {
+  const jobSlug = env.SM_SCHEDULER_JOB_SLUG || null;
+  if (!jobSlug) return false;
+  try {
+    const file = deps.confirmationRequestsFile
+      || confirmationRequestsPath(require('../../../src/main/lib/scheduler/schedulerPaths.cjs').schedulerHome());
+    const record = {
+      time: new Date().toISOString(),
+      tool: call.tool,
+      argsDigest: digest,
+      jobSlug,
+      epicId: env.SM_SCHEDULER_JOB_EPIC_ID || null,
+      cwd: env.SM_PROJECT_ROOT || null,
+      rule: hit.rule,
+      layer: hit.layer,
+      summary: shown(call),
+    };
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+    return true;
+  } catch (e) {
+    console.error(`${TAG} confirmation request not recorded: ${e?.message}`);
+    return false;
+  }
 }
 
 function unreadableReason(layerObj, which) {
@@ -260,6 +309,13 @@ function decide(payload, env = process.env, deps = {}) {
     const clearance = headless ? parseClearance(env) : [];
     const hit = findBlocking(call, { system, project }, clearance);
     if (!hit) return buildAllow();
+    if (hit.mark === CONFIRM_MARK) {
+      // Interactive Terminal: the CLI's own approval prompt IS the confirmation.
+      if (!headless) return refuse(`Confirm: \`${shown(call)}\` is marked 'confirm' by rule \`${hit.rule}\`.`);
+      const digest = argsDigest(payload.tool_input);
+      const recorded = recordConfirmationRequest(call, hit, digest, env, deps);
+      return buildDeny(confirmReason(call, hit, digest, recorded));
+    }
     return refuse(blockReason(call, hit, headless));
   } catch (e) {
     console.error(`${TAG} internal error, failing open: ${e?.message}`);

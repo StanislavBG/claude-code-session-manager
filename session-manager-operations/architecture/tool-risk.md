@@ -9,12 +9,15 @@ Code owns the details. Mark parsing, matching and precedence live in
 Owners edit marks in **Settings ▸ Tool risk** (`SettingsToolRisk.tsx`, through `toolRisk:read` / `toolRisk:write`
 in `src/main/lib/claude/toolRiskIpc.cjs`).
 
-## The five marks
+## The six marks
 
-`read` · `write` · `irreversible` · `money` · `public` (`MARKS` in `toolRiskMarks.cjs`).
+`read` · `write` · `confirm` · `irreversible` · `money` · `public` (`MARKS` in `toolRiskMarks.cjs`, in order of
+riskiness — a compound Bash line resolves to its riskiest mark).
 
 - `read` and `write` never block.
 - `irreversible`, `money` and `public` are the **blocking marks** (`BLOCKING_MARKS`).
+- `confirm` is refused in a job like a blocking mark, but the refusal asks the owner instead of failing
+  silently — see [Confirm: ask the owner](#confirm-ask-the-owner).
 - An unmarked tool is allowed.
 
 ## Where marks live
@@ -87,6 +90,31 @@ For a Bash line, a clearance must cover the rule that matched. Every blocking si
 needs its own clearance, so clearing `git status` never clears `npm publish` in the same line.
 
 Name only the tools the PRD's work truly needs. Clearance is per PRD: a later PRD has to name the tool again.
+
+## Confirm: ask the owner
+
+A `confirm`-marked call that the job's clearance does not cover is denied with a reason that starts
+`Blocked, pending confirmation:` and names the rule and the call's **args digest** — the sha256 of the canonical
+JSON (keys sorted at every depth) of its `tool_input` (`argsDigest` in `toolRiskMarks.cjs`).
+
+1. **The guard records the request.** In a scheduler job it appends one line
+   `{ time, tool, argsDigest, jobSlug, epicId, cwd, rule, layer, summary }` to
+   `<schedulerHome>/tool-confirmation-requests.jsonl` (`confirmationRequestsPath`). `epicId` comes from
+   `SM_SCHEDULER_JOB_EPIC_ID`, `cwd` from `SM_PROJECT_ROOT`. A Task run has no job slug: it is denied, nothing is
+   recorded.
+2. **The main process posts it.** At each job exit the scheduler calls `drainConfirmationRequests` in
+   `needsYouStore.cjs`. It renames the file aside, then posts each line as one Needs-you item (app `tool-risk`)
+   linked to the Epic and appends one `job.confirmation_requested` event (`tool`, `argsDigest`, `jobSlug`, `rule`)
+   to the Epic's event log.
+3. **Deduped by tool + digest.** The item id is derived from `(tool, argsDigest)` — the digest alone is not
+   enough, since every argument-less MCP call shares the digest of `{}`. A repeat request, from any job, posts
+   nothing and appends no event while the item is kept (open, or closed within the 14-day retention).
+4. **The owner decides.** To let the call run, re-queue the PRD with the rule in `riskTools`; otherwise withdraw the
+   item. Clearance works as for blocking marks.
+
+A blocking mark in the same compound line wins: the line is refused for it first and no request is recorded.
+In an opted-in interactive Terminal session a `confirm` call gets the CLI's approval prompt (`ask`); a Chat turn
+is denied.
 
 ## Interactive sessions: opt-in
 

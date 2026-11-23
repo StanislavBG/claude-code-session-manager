@@ -76,12 +76,21 @@ test('corrupt settings file falls back to 6 / 100', async () => {
 test('planRecordsDays reaches the plan-records sweep with an epicStatus function', () => {
   const { runPlanRecordSweep } = require('../scheduler/runLogRetention.cjs');
   writeRaw(JSON.stringify({ planRecordsDays: 5 }));
+  // Readable active-index fixture: the sweep fails closed (epicStatus throws) when the
+  // index is unreadable — including a missing tmpdir cwd, which opsPath refuses as ephemeral.
+  const proj = path.join(home, 'p');
+  const sessionsDir = path.join(proj, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, 'active-index.json'), JSON.stringify({
+    sessions: { live: { status: 'active', completedAt: null } },
+  }));
   const calls = [];
-  runPlanRecordSweep({ cwds: [path.join(home, 'p')], prune: (o) => { calls.push(o); return { removed: [], kept: 0 }; } });
+  runPlanRecordSweep({ cwds: [proj], prune: (o) => { calls.push(o); return { removed: [], kept: 0 }; } });
   expect(calls).toHaveLength(1);
   expect(calls[0].days).toBe(5);
   expect(typeof calls[0].epicStatus).toBe('function');
   expect(calls[0].epicStatus('nope')).toBeNull();
+  expect(calls[0].epicStatus('live')).toEqual({ status: 'active', completedAt: null });
 });
 
 test('planRecordsDays defaults to 14 on a corrupt settings file', () => {

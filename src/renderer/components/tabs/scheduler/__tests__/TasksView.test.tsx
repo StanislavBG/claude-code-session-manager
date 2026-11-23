@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { TasksView } from '../TasksView'
+import { TasksView, formatTaskStart } from '../TasksView'
 import { useToast } from '../../../../state/toast'
 import type { TaskSummary } from '../../../../../preload/api'
 
@@ -190,5 +190,67 @@ describe('TasksView', () => {
     await act(async () => { sw.click() })
     expect(api.tasks.setSwitch).toHaveBeenCalledWith({ cwd: '/p', enabled: true })
     expect((q('[data-testid="tasks-switch"]') as HTMLInputElement).checked).toBe(true)
+  })
+
+  describe('switch attribution line', () => {
+    const AT = '2026-11-23T18:30:00.000Z'
+    const byLine = () => q('[data-testid="tasks-switch-by"]') as HTMLElement | null
+
+    it('reads "Changed in Session Manager" for a ui write, under the switch in the header', async () => {
+      api.tasks.getSwitch.mockResolvedValue({ ok: true, enabled: true, changedAt: AT, by: { via: 'ui' } })
+      await render('/p')
+      const el = byLine()!
+      expect(el).not.toBeNull()
+      expect(q('[data-testid="tasks-header"]')!.contains(el)).toBe(true)
+      expect(el.textContent).toBe(`Changed in Session Manager · ${formatTaskStart(AT)}`)
+    })
+
+    it('names an agent write with the quote cut to 140 chars and the full quote in title', async () => {
+      const quote = 'x'.repeat(130) + 'yyyyyyyyyyZZZZZ'
+      api.tasks.getSwitch.mockResolvedValue({
+        ok: true, enabled: true, changedAt: AT,
+        by: { via: 'agent', claudeSessionId: 's1', quote, promptAt: AT },
+      })
+      await render('/p')
+      const el = byLine()!
+      expect(el.textContent).toBe(`Turned on by an agent · ${formatTaskStart(AT)} · on your words: “${quote.slice(0, 140)}…”`)
+      expect(el.textContent).not.toContain('ZZZZZ')
+      expect(el.getAttribute('title')).toBe(quote)
+    })
+
+    it('says "Turned off by an agent" when the agent turned it off, short quote uncut', async () => {
+      api.tasks.getSwitch.mockResolvedValue({
+        ok: true, enabled: false, changedAt: AT,
+        by: { via: 'agent', claudeSessionId: 's1', quote: 'turn it off', promptAt: AT },
+      })
+      await render('/p')
+      expect(byLine()!.textContent).toBe(`Turned off by an agent · ${formatTaskStart(AT)} · on your words: “turn it off”`)
+    })
+
+    it('reads "Changed outside Session Manager" for an unknown writer', async () => {
+      api.tasks.getSwitch.mockResolvedValue({ ok: true, enabled: true, changedAt: AT, by: { via: 'unknown' } })
+      await render('/p')
+      expect(byLine()!.textContent).toBe(`Changed outside Session Manager · ${formatTaskStart(AT)} — who changed it was not recorded`)
+    })
+
+    it('renders nothing when by is null or absent', async () => {
+      api.tasks.getSwitch.mockResolvedValue({ ok: true, enabled: false, changedAt: null, by: null })
+      await render('/p')
+      expect(byLine()).toBeNull()
+      act(() => root.unmount())
+      root = createRoot(host)
+      api.tasks.getSwitch.mockResolvedValue({ ok: true, enabled: false })
+      await render('/p')
+      expect(byLine()).toBeNull()
+    })
+
+    it('shows the ui line with setSwitch changedAt after a toggle, without re-reading', async () => {
+      api.tasks.getSwitch.mockResolvedValue({ ok: true, enabled: false, changedAt: AT, by: { via: 'unknown' } })
+      await render('/p')
+      expect(byLine()!.textContent).toContain('Changed outside Session Manager')
+      await act(async () => { (q('[data-testid="tasks-switch"]') as HTMLInputElement).click() })
+      expect(byLine()!.textContent).toBe(`Changed in Session Manager · ${formatTaskStart('2026-11-22T00:00:00Z')}`)
+      expect(api.tasks.getSwitch).toHaveBeenCalledTimes(1)
+    })
   })
 })

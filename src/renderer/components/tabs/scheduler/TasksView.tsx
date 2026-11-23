@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { TaskSummary, TaskListQuery } from '../../../../preload/api.d'
+import type { TaskSummary, TaskListQuery, TaskSwitchBy } from '../../../../preload/api.d'
 import { useToast } from '../../../state/toast'
 import { usd } from '../../../lib/analyticsFormat'
 import { TaskDetail } from './TaskDetail'
@@ -54,6 +54,24 @@ export function formatTaskDuration(ms?: number): string {
   const m = Math.floor((totalSec % 3600) / 60)
   const s = totalSec % 60
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(s).padStart(2, '0')}s`
+}
+
+const QUOTE_MAX = 140
+
+/**
+ * One line naming who last changed the 'Scripts may run Tasks' switch, or
+ * null when the store recorded no writer. `enabled` is the switch's current
+ * state — the value that last write set.
+ */
+export function describeSwitchBy(by: TaskSwitchBy | null | undefined, changedAt: string | null | undefined, enabled: boolean): string | null {
+  if (!by) return null
+  const at = formatTaskStart(changedAt ?? undefined)
+  if (by.via === 'ui') return `Changed in Session Manager · ${at}`
+  if (by.via === 'agent') {
+    const q = by.quote.length > QUOTE_MAX ? `${by.quote.slice(0, QUOTE_MAX)}…` : by.quote
+    return `Turned ${enabled ? 'on' : 'off'} by an agent · ${at} · on your words: “${q}”`
+  }
+  return `Changed outside Session Manager · ${at} — who changed it was not recorded`
 }
 
 /** Group rows by pipeline → runId; groups, runs and rows all newest first. */
@@ -125,6 +143,7 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
   // does not shrink its own dropdown to the one selected value.
   const [seen, setSeen] = useState<Record<FilterKey, string[]>>({ pipeline: [], step: [], agent: [], status: [] })
   const [switchOn, setSwitchOn] = useState<boolean | null>(null)
+  const [switchMeta, setSwitchMeta] = useState<{ changedAt: string | null; by: TaskSwitchBy | null }>({ changedAt: null, by: null })
 
   const load = useCallback(async (cwd: string, f: Filters, isLive: () => boolean) => {
     const q: TaskListQuery = { cwd }
@@ -169,8 +188,10 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
     let live = true
     window.api.tasks.getSwitch({ cwd: scopeCwd }).then((res) => {
       if (!live) return
-      if (res.ok) setSwitchOn(res.enabled)
-      else show('error', `Tasks switch: ${res.error}`)
+      if (res.ok) {
+        setSwitchOn(res.enabled)
+        setSwitchMeta({ changedAt: res.changedAt ?? null, by: res.by ?? null })
+      } else show('error', `Tasks switch: ${res.error}`)
     }).catch((e: unknown) => {
       if (live) show('error', `Tasks switch: ${e instanceof Error ? e.message : String(e)}`)
     })
@@ -181,8 +202,10 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
     if (!scopeCwd) return
     try {
       const res = await window.api.tasks.setSwitch({ cwd: scopeCwd, enabled })
-      if (res.ok) setSwitchOn(res.enabled)
-      else show('error', `Tasks switch: ${res.error}`)
+      if (res.ok) {
+        setSwitchOn(res.enabled)
+        setSwitchMeta({ changedAt: res.changedAt, by: { via: 'ui' } })
+      } else show('error', `Tasks switch: ${res.error}`)
     } catch (e) {
       show('error', `Tasks switch: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -209,6 +232,8 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
     return groupTasks(visible)
   }, [rows, filters])
 
+  const switchByText = describeSwitchBy(switchMeta.by, switchMeta.changedAt, switchOn === true)
+
   if (!scopeCwd) {
     return (
       <div className="h-full flex items-center justify-center text-[13px] text-fg-faint" data-testid="tasks-view">
@@ -220,7 +245,7 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
   return (
     <div className="h-full flex min-h-0" data-testid="tasks-view">
     <div className="flex-1 min-w-0 h-full overflow-y-auto px-9 py-4" data-testid="tasks-list">
-      <div className="flex items-center mb-2" data-testid="tasks-header">
+      <div className="flex flex-col items-start mb-2" data-testid="tasks-header">
         <label className="flex items-center gap-2 text-[12px] text-fg-dim" title="While off, scripts that call the Tasks endpoint get HTTP 403.">
           <input
             type="checkbox"
@@ -233,6 +258,15 @@ export function TasksView({ scopeCwd }: TasksViewProps) {
           <span className="text-fg">Scripts may run Tasks</span>
           <span className="text-fg-faint">— while off, scripts get 403.</span>
         </label>
+        {switchByText && (
+          <div
+            className="text-[11px] text-fg-faint mt-0.5"
+            data-testid="tasks-switch-by"
+            title={switchMeta.by?.via === 'agent' ? switchMeta.by.quote : undefined}
+          >
+            {switchByText}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 flex-wrap mb-3" data-testid="tasks-filters">
         {FILTER_KEYS.map((k) => (

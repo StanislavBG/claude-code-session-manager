@@ -34,6 +34,10 @@ const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const queueHistory = require('./queueHistory.cjs');
 const { buildNeedsReviewEntryLine, buildNeedsReviewResolutionLine } = require('./needsReviewLedger.cjs');
+// Module objects (not destructured) so the per-Epic event emit below can be
+// stubbed in tests and so a load-order cycle can never capture a stale ref.
+const epicEventLog = require('../epic/epicEventLog.cjs');
+const opsErrorLog = require('../telemetry/opsErrorLog.cjs');
 
 // A run genuinely finished when it leaves 'running' for one of these —
 // distinct from every other legal edge in LEGAL_TRANSITIONS (retries,
@@ -126,6 +130,39 @@ const LEGAL_TRANSITIONS = {
 
 let refusedTransitionCount = 0;
 
+/**
+ * emitJobEvent(job, event) → void. Appends one summary-only event to the
+ * job's Epic event log (lib/epic/epicEventLog.cjs) when the job carries both
+ * an epicId and a cwd; a job without either appends nothing. Fire-and-forget:
+ * a sync throw or async rejection is logged via opsErrorLog and never
+ * propagates — an event-log failure must never block a transition or a
+ * queue insert.
+ */
+function emitJobEvent(job, event) {
+  if (!job || typeof job !== 'object') return;
+  const epicId = job.epicId;
+  const cwd = job.cwd;
+  if (typeof epicId !== 'string' || !epicId || typeof cwd !== 'string' || !cwd) return;
+  const onError = (err) => {
+    try {
+      opsErrorLog.appendError({
+        cwd,
+        scope: 'scheduler',
+        level: 'error',
+        epicId,
+        message: `epic event append failed (${event?.kind ?? 'unknown'}) for ${job.slug ?? '(unknown)'}: ${err?.message ?? String(err)}`,
+        meta: { slug: job.slug ?? null, kind: event?.kind ?? null },
+      });
+    } catch { /* logging must never be the thing that fails */ }
+  };
+  try {
+    const p = epicEventLog.appendEpicEvent(cwd, epicId, event);
+    if (p && typeof p.catch === 'function') p.catch(onError);
+  } catch (err) {
+    onError(err);
+  }
+}
+
 function isLegalTransition(from, to) {
   if (from === to) return true;
   const edges = LEGAL_TRANSITIONS[from];
@@ -192,6 +229,15 @@ function transitionJob(job, toStatus, { reason, source, allowAnyFrom = false } =
     reason: reason ?? null,
     source: source ?? null,
     cwd: job.cwd ?? null,
+  });
+
+  emitJobEvent(job, {
+    kind: 'job.status_changed',
+    slug: job.slug ?? null,
+    from: from ?? null,
+    to: toStatus,
+    reason: reason ?? null,
+    source: source ?? null,
   });
 
   if (from === 'running' && FINISH_STATUSES.has(toStatus)) {
@@ -270,6 +316,7 @@ function _resetRefusedTransitionCountForTests() {
 
 module.exports = {
   transitionJob,
+  emitJobEvent,
   LEGAL_TRANSITIONS,
   STATUS_HISTORY_CAP,
   getRefusedTransitionCount,

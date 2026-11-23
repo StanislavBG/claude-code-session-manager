@@ -168,7 +168,7 @@ const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv } = require('./lib/claude/personaToolScope.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
-const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
+const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
@@ -2345,6 +2345,9 @@ async function reconcilePass(state) {
       }
     } catch { /* stat is best-effort reporting only */ }
     next.push(entry);
+    // The Epic's event log records every queue-row insert (summary only);
+    // fire-and-forget — a failed append is logged, never blocks reconcile.
+    emitJobEvent(entry, { kind: 'job.queued', slug, agentType: entry.agentType ?? null });
   }
   if (uncovered.size > 0) {
     queueStore.bustCwdCache();

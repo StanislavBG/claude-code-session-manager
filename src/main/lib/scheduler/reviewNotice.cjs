@@ -306,10 +306,49 @@ function holdMsFromEnv(env = process.env) {
   return minutes * 60000;
 }
 
+/**
+ * buildPreflightHoldNotice({ slug, failText, preflight, heldSlugs, nextAt })
+ * → plain-text body for the ONE informational notice an Epic gets the moment
+ * a PRD is held on a failing preflight. It states what is missing (failText,
+ * quoted verbatim), the preflight command, which PRDs it holds, when the next
+ * re-check runs, and that the hold clears on its own. Pure, no I/O. It never
+ * asks a question and never carries SM_NEEDS_INPUT — nothing waits on a reply.
+ * (failText is quoted as-is; the builder's own wording has no '?'.)
+ */
+function buildPreflightHoldNotice({ slug, failText, preflight, heldSlugs, nextAt } = {}) {
+  const name = (typeof slug === 'string' && slug.trim()) || 'this PRD';
+  const cmd = oneLine(preflight);
+  const cmdLabel = cmd ? `\`${cmd}\`` : 'the preflight';
+  const missing = typeof failText === 'string' && failText.trim()
+    ? `Missing: "${failText}"`
+    : `Missing: the preflight exited non-zero with no output.`;
+  const held = Array.isArray(heldSlugs) ? heldSlugs.filter((x) => typeof x === 'string' && x) : [];
+  const heldList = held.length ? held : [name];
+  const when = typeof nextAt === 'string' && nextAt ? nextAt : 'the next scheduler pass';
+  return [
+    `PRECONDITION HOLD: ${name} is waiting on its preflight.`,
+    missing,
+    `Preflight: ${cmdLabel}`,
+    `Held: ${heldList.join(', ')}`,
+    `Next re-check: ${when}.`,
+    `The scheduler re-checks on its own and resumes the chain when ${cmdLabel} exits 0. Reset on ${name} re-checks at once.`,
+  ].join('\n');
+}
+
+/**
+ * preflightHoldNoticeKey(slug, since) → dedup key for one preflight hold.
+ * Same slug + same hold start = same key, so each hold sends one notice.
+ */
+function preflightHoldNoticeKey(slug, since) {
+  return `preflight-hold\u0000${slug ?? ''}\u0000${since ?? ''}`;
+}
+
 module.exports = {
   DEFAULT_HOLD_MINUTES,
   buildReviewNotice,
   selectDueReviewNotices,
   formatReviewNotice,
   holdMsFromEnv,
+  buildPreflightHoldNotice,
+  preflightHoldNoticeKey,
 };

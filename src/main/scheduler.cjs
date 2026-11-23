@@ -3209,9 +3209,12 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // when the row is already pending (pending→pending is not a transition).
   delete job.preflightHold;
   if (job.status === 'pending' && typeof job.heldReason === 'string' && job.heldReason.startsWith('waiting on precondition:')) delete job.heldReason;
+  if (job.interrupted && typeof job.heldReason === 'string' && job.heldReason.startsWith('interrupted by a human')) delete job.heldReason;
   if (!transitionJob(job, 'pending', { reason: errorMsg ?? 'reset to pending', source: opts.source ?? 'resetJobFields' })) return false;
   delete job.cancelledAt;
   delete job.cancelledRunId;
+  // A reset restarts from scratch: an interrupted session is not resumed.
+  delete job.interrupted;
   job.runId = null;
   job.startedAt = null;
   job.finishedAt = null;
@@ -4746,6 +4749,27 @@ Run that call again now with EXACTLY the same arguments: it is cleared for ONE u
 `;
 }
 
+/**
+ * Prompt for a session continued after a human interrupt (remote.interruptJob
+ * → remote.continueJob). The session already holds its PRD and everything it
+ * did before the stop; this only says it was paused, not failed.
+ * @param {{ dirtyPaths?: string[], salvagePatch?: string | null, message?: string | null }} args
+ */
+function buildInterruptContinuePreamble({ dirtyPaths, salvagePatch, message } = {}) {
+  const paths = Array.isArray(dirtyPaths) ? dirtyPaths : [];
+  const pathBlock = paths.length
+    ? `\nThese path(s) were uncommitted when the run stopped:\n${paths.map((p) => `- ${p}`).join('\n')}\n`
+    : '';
+  const salvageLine = salvagePatch
+    ? `A patch of that uncommitted work was saved at: ${salvagePatch} — apply it if any of those paths are missing from the working tree.\n`
+    : '';
+  const note = typeof message === 'string' && message.trim() ? `\nThe owner adds: ${message.trim()}\n` : '';
+  return `CONTINUE AFTER INTERRUPT: the owner stopped your previous run in this same session and has now asked you to continue. This is the same session and the same task, not a new one — do not restart from scratch.
+${pathBlock}${salvageLine}${note}
+Run \`git status\` first and check what is already on disk, then finish the remaining work and follow the SCHEDULER FINISH PROTOCOL from your original prompt (verify, commit your own paths, end with the SCHEDULER_VERDICT line).
+`;
+}
+
 function buildResumeRecoveryPreamble({ dirtyPaths, salvagePatch }) {
   const pathList = dirtyPaths.map((p) => `- ${p}`).join('\n');
   const salvageLine = salvagePatch
@@ -5545,7 +5569,9 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // state the session actually left on disk.
     prompt = resumeTarget.confirmation
       ? buildConfirmationResumePreamble(resumeTarget.confirmation)
-      : buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
+      : resumeTarget.interrupt
+        ? buildInterruptContinuePreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch, message: resumeTarget.message })
+        : buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
   } else {
   // Read full PRD body fresh from disk (queue stored only the preview).
   // Resolve through findPrdDirForJob's full candidate search (legacy flat
@@ -7197,6 +7223,9 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
       appendAuditEvent('job_cancel_integration_skipped', { slug: job.slug, runId, branch: worktree.branch });
       await pinUnlanded();
       await cleanup({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+      // An interrupted run is continued later in the same session: record
+      // what it left uncommitted so the continue prompt can name it.
+      await recordInterruptLeftovers(job.slug, runId, { dirtyPaths: worktreeLeftoverDirty, salvagePatch });
       return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: true, worktreeHead, uncommittedSnapshot };
     }
     if (worktreeHead.action === 'diverged') {
@@ -7252,7 +7281,12 @@ async function isRunCancelled(slug, runId) {
   try {
     const state = await readQueue();
     const row = state.jobs.find((j) => j.slug === slug);
-    return !!(row && row.cancelledAt && (row.cancelledRunId ?? null) === (runId ?? null));
+    if (!row) return false;
+    if (row.cancelledAt && (row.cancelledRunId ?? null) === (runId ?? null)) return true;
+    // A human interrupt (remote.interruptJob) stops the run without ending
+    // the job: its work stays on the job branch, never integrated, until
+    // remote.continueJob resumes the same session.
+    return !!(row.interrupted && (row.interrupted.runId ?? null) === (runId ?? null));
   } catch {
     return false;
   }
@@ -7291,6 +7325,42 @@ function guardedTick(fn, label) {
  * (and they never shadow a pickable sibling) while a dependent of a held
  * row still sees it as a blocking dep.
  */
+/**
+ * Pending rows stopped by a human interrupt (remote.interruptJob) → Map<slug,
+ * heldReason>. They wait for remote.continueJob and are never auto-dispatched
+ * (a fresh dispatch would mint a new session instead of resuming).
+ * @param {any[]} jobs
+ * @returns {Map<string, string>}
+ */
+function computeInterruptHolds(jobs) {
+  const held = new Map();
+  for (const j of jobs || []) {
+    if (!j || j.status !== 'pending' || !j.interrupted) continue;
+    held.set(j.slug, j.heldReason || 'interrupted by a human — waiting for continue');
+  }
+  return held;
+}
+
+/**
+ * Stamps an interrupted run's leftovers onto its row's `interrupted` record.
+ * Only for the same run that was interrupted; never throws.
+ * @param {string} slug
+ * @param {string | null} runId
+ * @param {{ dirtyPaths?: string[], salvagePatch?: string | null }} leftovers
+ */
+async function recordInterruptLeftovers(slug, runId, { dirtyPaths, salvagePatch }) {
+  try {
+    await mutate((s) => {
+      const row = s.jobs.find((x) => x.slug === slug);
+      if (!row || !row.interrupted || (row.interrupted.runId ?? null) !== (runId ?? null)) return;
+      row.interrupted.dirtyPaths = Array.isArray(dirtyPaths) ? dirtyPaths.slice(0, 200) : [];
+      row.interrupted.salvagePatch = salvagePatch || null;
+    });
+  } catch (e) {
+    console.warn(`[scheduler] ${slug}: could not record interrupt leftovers`, e?.message);
+  }
+}
+
 function computePreflightHolds(jobs, now = Date.now()) {
   const held = new Map();
   for (const j of jobs || []) {
@@ -9428,6 +9498,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
       : sessionSlots.availableFor('job');
     const heldSlugs = await computeLaunchHolds(state);
     for (const [slug, why] of computePreflightHolds(state.jobs)) if (!heldSlugs.has(slug)) heldSlugs.set(slug, why);
+    for (const [slug, why] of computeInterruptHolds(state.jobs)) if (!heldSlugs.has(slug)) heldSlugs.set(slug, why);
     if (stale()) return STALE_TICK;
     const satisfiedSlugsByCwd = await budget.computeDepHistorySatisfaction(state);
     lastSatisfiedSlugsByCwd = satisfiedSlugsByCwd;
@@ -13755,6 +13826,9 @@ const remote = {
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review' || job.status === 'skipped') {
       return { ok: false, error: `job already terminal (status: "${job.status}") — nothing to cancel` };
     }
+    // `interrupt: true` asks for a stop that keeps the session resumable
+    // (human.interrupt) instead of a terminal cancel.
+    if (opts.interrupt === true && job.status === 'running') return this.interruptJob(slug, opts);
     // Dependents choice (PRD 3499): cancelling a row that pending PRDs depend
     // on would strand them behind a dead row (Self stall, 2026-11-22). Refuse
     // unless the caller says what happens to them; apply that choice BEFORE
@@ -13846,6 +13920,8 @@ const remote = {
       j.error = cancelReason;
       j.cancelledAt = cancelledAt;
       if (wasRunning) j.cancelledRunId = job.runId ?? null;
+      // A cancel ends an interrupted row for good: it is no longer continuable.
+      delete j.interrupted;
       j.finishedAt = new Date().toISOString();
       j.exitCode = j.exitCode ?? null;
       if (confirmedLandedCommit) j.verifierVerdict = 'cancelled_with_landed_commit';
@@ -13886,6 +13962,93 @@ const remote = {
       });
     }
     return result;
+  },
+
+  // Human interrupt (Managed Agents `human.interrupt`): stops a RUNNING job's
+  // process but does not end the job. The row goes back to 'pending' (phase
+  // idle) with an `interrupted` record holding the run's own CLI session id
+  // (row.sessionId — not row.claudeSessionId, which is the ORIGIN Epic's
+  // session), and is held off the picker (computeInterruptHolds) until
+  // continueJob resumes that same session with `--resume <id>`. The run's
+  // worktree work stays on its job branch, never integrated (isRunCancelled).
+  async interruptJob(slug, opts = {}) {
+    if (!SCHEDULE_SLUG_RE.test(slug)) return { ok: false, error: 'invalid slug' };
+    const state = await readQueue();
+    const job = state.jobs.find((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
+    if (!job) return { ok: false, error: `unknown slug "${slug}": no queued job with that name${opts.cwd ? ` in cwd ${opts.cwd}` : ''}` };
+    if (job.status !== 'running') {
+      return { ok: false, error: `job status is "${job.status}" — only a running job can be interrupted (use scheduler_cancel_job to drop a queued one)` };
+    }
+    const sessionId = job.runtime?.sessionId || job.sessionId || null;
+    if (!sessionId) return { ok: false, error: 'job has no session id yet (still launching) — try again in a moment, or cancel it' };
+    const pid = job.runtime?.pid;
+    const runId = job.runId ?? null;
+    const interruptedAt = new Date().toISOString();
+    const reason = 'interrupted by a human — waiting for continue';
+    let applied = false;
+    await mutate((s) => {
+      const j = s.jobs.find((x) => x.slug === slug && x.cwd === job.cwd);
+      if (!j || j.status !== 'running' || (j.runId ?? null) !== runId) return;
+      if (!transitionJob(j, 'pending', { reason, source: 'remote:interruptJob' })) return;
+      j.sessionId = sessionId;
+      j.interrupted = { at: interruptedAt, runId, sessionId };
+      j.heldReason = reason;
+      delete j.runtime;
+      applied = true;
+    });
+    if (!applied) return { ok: false, error: 'job changed state while interrupting — re-read it and try again' };
+    // Stamped before SIGTERM so finalizeJobWorktree (run on executor exit)
+    // keeps the work on the job branch instead of integrating it.
+    if (pid) killOrphanClaudePid(pid);
+    emitJobEvent({ ...job, epicId: job.epicId || job.sourcePromptId }, {
+      kind: 'human.interrupt',
+      slug,
+      runId,
+      sessionId,
+      source: typeof opts.source === 'string' ? opts.source : 'scheduler',
+    });
+    appendAuditEvent('job_interrupted', { slug, cwd: job.cwd ?? null, runId, sessionId });
+    await broadcast({ flush: true });
+    return { ok: true, slug, status: 'pending', phase: 'idle', sessionId, interruptedAt, cwd: job.cwd ?? null };
+  },
+
+  // Continue an interrupted job: dispatch the SAME session via
+  // `--resume <interrupted.sessionId>` (spawnJob with a resumeTarget, like
+  // resume recovery and tool-confirmation resumes). Refused while the old
+  // process is still exiting, or when no session slot is free.
+  async continueJob(slug, opts = {}) {
+    if (!SCHEDULE_SLUG_RE.test(slug)) return { ok: false, error: 'invalid slug' };
+    const state = await readQueue();
+    const job = state.jobs.find((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
+    if (!job) return { ok: false, error: `unknown slug "${slug}": no queued job with that name${opts.cwd ? ` in cwd ${opts.cwd}` : ''}` };
+    if (job.status !== 'pending' || !job.interrupted) {
+      return { ok: false, error: `job is not interrupted (status: "${job.status}") — nothing to continue` };
+    }
+    const sessionId = job.interrupted.sessionId || job.sessionId || null;
+    if (!sessionId) return { ok: false, error: 'interrupted job has no session id to resume' };
+    if (runningSet.has(slug)) return { ok: false, error: 'the interrupted run is still shutting down — try again in a moment' };
+    if (sessionSlots.availableFor('job') < 1) return { ok: false, error: 'no session slot free right now — try again when a job finishes' };
+    const target = {
+      sessionId,
+      interrupt: true,
+      dirtyPaths: Array.isArray(job.interrupted.dirtyPaths) ? job.interrupted.dirtyPaths : [],
+      salvagePatch: job.interrupted.salvagePatch || null,
+      message: typeof opts.message === 'string' ? opts.message : null,
+    };
+    await mutate((s) => {
+      const j = s.jobs.find((x) => x.slug === slug && x.cwd === job.cwd);
+      if (!j) return;
+      delete j.interrupted;
+      delete j.heldReason;
+    });
+    appendAuditEvent('job_continued', { slug, cwd: job.cwd ?? null, sessionId });
+    const { runId, dir: runDir } = pickRunDir();
+    const siblingJobs = (await readQueue().catch(() => ({ jobs: [] }))).jobs || [];
+    const fresh = siblingJobs.find((x) => x.slug === slug && x.cwd === job.cwd) || job;
+    // Not awaited: spawnJob runs the whole job (same as tool-confirmation resumes).
+    Promise.resolve(dispatchSpawnJob(fresh, runId, runDir, fresh.cwd || DEFAULT_PROJECT_CWD, target, siblingJobs))
+      .catch((e) => reportSchedulerError('continue after interrupt failed', slug, e));
+    return { ok: true, slug, sessionId, resume: true };
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that
@@ -13948,6 +14111,29 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
     const result = await remoteObj.resetJob(slug, { force, cwd });
     sendJson(res, 200, result);
   });
+
+  // Interrupt / continue (human.interrupt): stop a running job keeping its
+  // session, then resume that same session with --resume.
+  for (const [route, method] of [['/admin/scheduler/interrupt-job', 'interruptJob'], ['/admin/scheduler/continue-job', 'continueJob']]) {
+    adminHttp.registerRoute('POST', route, async (req, res) => {
+      const raw = await readBody(req);
+      let parsed;
+      try {
+        parsed = raw ? JSON.parse(raw) : {};
+      } catch {
+        sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+        return;
+      }
+      const slug = parsed && typeof parsed.slug === 'string' ? parsed.slug : null;
+      if (!slug) {
+        sendJson(res, 400, { ok: false, error: 'missing slug' });
+        return;
+      }
+      const cwd = typeof parsed.cwd === 'string' ? parsed.cwd : undefined;
+      const message = typeof parsed.message === 'string' ? parsed.message : undefined;
+      sendJson(res, 200, await remoteObj[method](slug, { cwd, message, source: 'admin-api' }));
+    });
+  }
 }
 
 // queueOps.dismissCancelled needs the serialized queue writer; queueOps
@@ -14107,6 +14293,8 @@ module.exports = {
   spawnInvestigation,
   computeLaunchHolds,
   computePreflightHolds,
+  computeInterruptHolds,
+  buildInterruptContinuePreamble,
   runPreflightGate,
   handleLaunchFailure,
   applyLaunchFailure,

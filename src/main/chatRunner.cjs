@@ -19,6 +19,8 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
  *                                                                    — pure parser for `/context`
  *   STOP_SENTINEL: string                                           — exported for tests
  *   __setExecutor(fn): void                                         — test seam
+ *   recordNeedsInput / recordAnswerIfOpen                           — Epic event log: job.needs_input
+ *                                                                    on a stop-signal turn, human.answer on the reply
  *
  * IPC events broadcast to the renderer:
  *   chat:run:queued     { tabId, sessionId, position }   — waiting behind a busy lane
@@ -63,6 +65,8 @@ const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
 const { isNonClaudeAgentCli } = require('./lib/agent-cli/agentCliEvents.cjs');
 const { planAgentCliTurn } = require('./lib/agent-cli/agentCliTurn.cjs');
 const { writeNativeSession } = require('./lib/agent-cli/agentCliSessionStore.cjs');
+// Module object (not destructured) so tests can stub the append.
+const epicEventLog = require('./lib/epic/epicEventLog.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
 const STDERR_TAIL_MAX = 64 * 1024;
@@ -382,6 +386,66 @@ function releaseOrphanSession(sessionId) { orphanSessions.delete(sessionId); pum
 // flight (tabId → opts). Counted by run()'s tabBusy; cancel() can drop them.
 const pendingStart = new Map();
 
+// ─── Epic event log: questions and answers ────────────────────────────────
+// An Epic chat's sessionId IS its Epic id (EPIC : CLI session = 1:1). A run
+// that ends on the stop signal appends job.needs_input (Epic-level: no slug)
+// with the parsed questions; the next human-sent prompt on that session is
+// the answer and appends human.answer. Fire-and-forget: an event-log failure
+// never breaks a chat turn.
+
+/** sessionId → { cwd, questions } for a question still waiting on a human. */
+const openQuestions = new Map();
+
+function appendChatEpicEvent(cwd, epicId, event) {
+  if (typeof cwd !== 'string' || !cwd || typeof epicId !== 'string' || !epicId) return Promise.resolve(null);
+  let p;
+  try {
+    p = epicEventLog.appendEpicEvent(cwd, epicId, event);
+  } catch (err) {
+    p = Promise.reject(err);
+  }
+  return Promise.resolve(p).catch((err) => {
+    console.error('[chatRunner] epic event append failed', event?.kind, err?.message ?? err);
+    return null;
+  });
+}
+
+/**
+ * Append job.needs_input for an Epic chat turn that asked questions and
+ * remember them so the next human prompt is recorded as the answer.
+ * @param {{ cwd: string, sessionId: string, questions: string[], answerBody?: string }} args
+ */
+function recordNeedsInput({ cwd, sessionId, questions, answerBody }) {
+  const qs = Array.isArray(questions) ? questions.filter((q) => typeof q === 'string') : [];
+  openQuestions.set(sessionId, { cwd, questions: qs });
+  return appendChatEpicEvent(cwd, sessionId, {
+    kind: 'job.needs_input',
+    source: 'chat',
+    sessionId,
+    questions: qs,
+    ...(typeof answerBody === 'string' && answerBody ? { answerBody } : {}),
+  });
+}
+
+/**
+ * Append human.answer when a human-sent prompt answers this session's open
+ * questions. Scheduler-originated prompts are not answers (the question stays
+ * open). Returns the append promise, or null when nothing was open.
+ * @param {{ cwd?: string, sessionId: string, prompt: string, origin?: string }} args
+ */
+function recordAnswerIfOpen({ cwd, sessionId, prompt, origin }) {
+  const open = openQuestions.get(sessionId);
+  if (!open || origin === 'scheduler') return null;
+  openQuestions.delete(sessionId);
+  return appendChatEpicEvent(cwd || open.cwd, sessionId, {
+    kind: 'human.answer',
+    source: 'chat',
+    sessionId,
+    questions: open.questions,
+    answer: typeof prompt === 'string' ? prompt : '',
+  });
+}
+
 // Indirection so tests can stub the spawn without launching claude.
 let executor = executeRun;
 function __setExecutor(fn) { executor = fn || executeRun; }
@@ -399,6 +463,7 @@ function __resetQueueForTests() {
   orphanSessions.clear();
   waiting.length = 0;
   pendingStart.clear();
+  openQuestions.clear();
   sessionSlots.__resetForTests();
 }
 
@@ -453,6 +518,8 @@ function run(opts) {
     // still dropped, since queueing one would delay real work to no benefit.
     return { accepted: false, reason: 'tab-busy-silent' };
   }
+  // A human prompt sent after a needs-input turn is that question's answer.
+  if (!opts.silent) recordAnswerIfOpen(opts);
 
   // A New Epic's turn 1 races the fire-and-forget worktree mint: only when a mint is
   // actually in flight for this Epic, hold the submission (<=90s, never rejects) so the
@@ -937,6 +1004,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
                 answerBody: signal.answerBody,
                 raw: text,
               });
+              recordNeedsInput({ cwd, sessionId, questions: signal.questions, answerBody: signal.answerBody });
               // Record durable exchange off the hot path — UI must not wait on Haiku
               recordExchange({
                 sessionId,
@@ -1366,6 +1434,8 @@ module.exports = {
   shouldFollowUp,
   parseStopSignal,
   splitStopSignal,
+  recordNeedsInput,
+  recordAnswerIfOpen,
   parseContextUsageMarkdown,
   STOP_SENTINEL,
   // Both instruction blocks are exported so the renderer's preamble splitter

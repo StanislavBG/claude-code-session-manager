@@ -11,7 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // ProjectPagesSection) on its Tools tab with Review MD network selected, through
 // project-home-entry.tsx (`?tab=tools`), whose stub window.api.projectPages.mdNetwork returns a
 // scan with 2 duplicate pairs, 1 localOnly broken link and 1 orphan group. Writes the pane in
-// light + dark and the explorer in Graph view to the Playwright output folder (gitignored).
+// light + dark, the LINK MAP card alone in light + dark (at a 1280px window, with a label-size
+// check), and the explorer in Graph view to the Playwright output folder (gitignored).
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation plus
 // an inverted render of the same page (as project-home-library-shots.spec.ts does). The Graph shot
 // has one doc node selected so the inspector shows that doc's path, links and a realistic body,
@@ -65,6 +66,26 @@ test('Review MD network screenshots: pane light + dark, explorer Graph view', as
       await page.screenshot({ path: pane, fullPage: true })
       shots.push(pane)
 
+      // LINK MAP card on its own: the app's inner scroller (not the page) scrolls, so a page shot
+      // crops the map mid-graph. At the 1280px-wide window, bring the card into the scroller's view
+      // and assert the 10.5-unit labels render at >= 10px (rendered width / viewBox width * 10.5).
+      await page.setViewportSize({ width: 1280, height: 1100 })
+      const mapCard = page.locator('[data-testid="md-link-map"]')
+      await mapCard.scrollIntoViewIfNeeded()
+      await expect(mapCard).toBeInViewport()
+      const svg = page.getByTestId('md-link-map-svg')
+      const { renderedWidth, viewBoxWidth } = await svg.evaluate((el) => ({
+        renderedWidth: el.getBoundingClientRect().width,
+        viewBoxWidth: (el as SVGSVGElement).viewBox.baseVal.width,
+      }))
+      expect(viewBoxWidth).toBe(760)
+      expect((renderedWidth / viewBoxWidth) * 10.5).toBeGreaterThanOrEqual(10)
+      await page.waitForTimeout(300)
+      const mapShot = testInfo.outputPath(`review-md-network-map-${scheme}.png`)
+      await mapCard.screenshot({ path: mapShot })
+      shots.push(mapShot)
+      await page.setViewportSize({ width: 1440, height: 1100 })
+
       if (scheme === 'light') {
         await page.getByTestId('md-link-map-expand').click()
         await expect(page.getByTestId('md-explorer')).toBeVisible()
@@ -111,5 +132,6 @@ test('Review MD network screenshots: pane light + dark, explorer Graph view', as
   for (const p of shots) expect(fs.statSync(p).size).toBeGreaterThan(10_000)
   expect(shots.map((p) => path.basename(p)).sort()).toEqual([
     'review-md-network-dark.png', 'review-md-network-explorer-graph.png', 'review-md-network-light.png',
+    'review-md-network-map-dark.png', 'review-md-network-map-light.png',
   ])
 })

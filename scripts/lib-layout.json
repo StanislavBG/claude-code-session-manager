@@ -184,6 +184,7 @@
   "upgradeDrain": "scheduler",
   "usageCircuit": "claude",
   "validationQuality": "scheduler",
+  "vaultRefs": "claude",
   "validationSentinels": "scheduler",
   "validatorVerdictSchema": "scheduler",
   "watchdogHelpers": "scheduler",

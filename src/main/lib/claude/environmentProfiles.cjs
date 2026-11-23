@@ -12,6 +12,9 @@
  *   - network:           { mode: 'none' } | { mode: 'allowlist', hosts } | { mode: 'open' }
  *   - secretDenyPaths:   home-relative paths no tool may read or write
  *   - webFetch / webSearch: whether those tools are allowed
+ *   - credentials (optional): [{ ref, server, envVar }] local vault refs
+ *                        (vaultRefs.cjs) resolved only into that MCP server's
+ *                        spawn env, never the job env
  *
  * Resolution for a name (first hit wins, whole-file replace, no merging):
  *   <project>/.claude/environments/<name>.json
@@ -40,6 +43,7 @@ const crypto = require('node:crypto');
 const { z } = require('zod');
 const { SANDBOX_SECRET_PATHS } = require('./jobSandboxPolicy.cjs');
 const { canonicalJson } = require('./agentSnapshot.cjs');
+const { isVaultRef } = require('./vaultRefs.cjs');
 
 const DEFAULT_ENVIRONMENT = 'headless-default';
 const ENV_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -63,6 +67,19 @@ const SecretPathSchema = z
   .min(1)
   .refine((v) => !path.isAbsolute(v) && !v.split('/').includes('..'), 'secret deny path must be home-relative');
 
+/**
+ * One local vault credential (vaultRefs.cjs): `ref` resolves only into the
+ * spawn env of MCP server `server` (which must run outside the job, checked at
+ * spawn by assertRefTargetsServer) as `envVar` — never into the job env.
+ */
+const CredentialSchema = z
+  .object({
+    ref: z.string().min(1).refine(isVaultRef, 'ref must be keyring:<service>/<account> or file:<path under a vault root>[#KEY]'),
+    server: z.string().trim().min(1),
+    envVar: z.string().regex(/^[A-Z_][A-Z0-9_]*$/, 'envVar must look like API_TOKEN'),
+  })
+  .strict();
+
 const EnvironmentProfileSchema = z
   .object({
     description: z.string().optional(),
@@ -73,6 +90,7 @@ const EnvironmentProfileSchema = z
     secretDenyPaths: z.array(SecretPathSchema),
     webFetch: z.boolean(),
     webSearch: z.boolean(),
+    credentials: z.array(CredentialSchema).optional(),
   })
   .strict();
 
@@ -215,6 +233,7 @@ module.exports = {
   DEFAULT_ENVIRONMENT,
   BUILTIN_ENVIRONMENTS,
   EnvironmentProfileSchema,
+  CredentialSchema,
   ENV_NAME_RE,
   loadEnvironment,
   environmentHash,

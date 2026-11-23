@@ -31,6 +31,7 @@
  */
 
 const path = require('node:path');
+const { VAULT_FILE_ROOTS, credentialFilePaths } = require('./vaultRefs.cjs');
 
 /** Home-relative paths whose contents no job tool may read or write. */
 const SANDBOX_SECRET_PATHS = Object.freeze([
@@ -38,13 +39,14 @@ const SANDBOX_SECRET_PATHS = Object.freeze([
   '.netrc',
   '.ssh',
   '.gnupg',
-  'Self/secrets',
   '.claude/.credentials.json',
   '.config/gh',
   '.google_workspace_mcp',
   '.config/google-workspace-mcp',
   '.aws',
   '.docker/config.json',
+  // Every file: vault root (vaultRefs.cjs) — vault values reach only out-of-job servers.
+  ...VAULT_FILE_ROOTS,
 ]);
 
 /**
@@ -227,7 +229,10 @@ function buildJobSandboxSettings(args) {
   const envId = env ? String(env.id) : null;
   const profile = env ? env.profile : null;
 
-  const secretRel = profile && Array.isArray(profile.secretDenyPaths) ? profile.secretDenyPaths : SANDBOX_SECRET_PATHS;
+  const baseRel = profile && Array.isArray(profile.secretDenyPaths) ? profile.secretDenyPaths : SANDBOX_SECRET_PATHS;
+  // Each file: credential path is denied whatever the profile lists (the
+  // built-ins already deny every VAULT_FILE_ROOTS entry via SANDBOX_SECRET_PATHS).
+  const secretRel = [...new Set([...baseRel, ...credentialFilePaths(profile)])];
   const secretAbs = secretRel.map((p) => path.join(homeDir, p));
   const deny = secretAbs.flatMap(denyRulesFor);
 

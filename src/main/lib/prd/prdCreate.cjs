@@ -34,9 +34,24 @@ const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 const { splitFrontmatter, PRD_EFFORT_LEVELS, formatQuotedInlineList } = require('./prdFrontmatter.cjs');
 const { parseRule: parseToolRiskRule } = require('../claude/toolRiskMarks.cjs');
+const { normalizePreflight } = require('../scheduler/preflightCheck.cjs');
 
 // Cap on riskTools entries — mirrors ipcSchemas.cjs RiskToolsSchema.
 const RISK_TOOLS_MAX = 20;
+
+/**
+ * Validate + normalize a `preflight` value — wraps preflightCheck's
+ * normalizePreflight (which throws) into the { ok, value | error } shape the
+ * other field checks return, so createPrd and the update path share one check.
+ * value is null when the input is empty/absent (no frontmatter key).
+ */
+function normalizePreflightField(value) {
+  try {
+    return { ok: true, value: normalizePreflight(value) };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
 
 /**
  * Validate + normalize a `riskTools` value — the ONE check shared by
@@ -119,7 +134,7 @@ function isValidMacroId(id) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, riskTools,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, riskTools, preflight,
     gate, files, budgetExempt, fixes,
   } = input;
 
@@ -180,6 +195,9 @@ function buildPrdBody(input) {
   if (PRD_EFFORT_LEVELS.includes(effort)) fmLines.push(`effort: ${effort}`);
   // Risky tools this PRD is cleared to call — validated + de-duplicated by createPrd().
   if (Array.isArray(riskTools) && riskTools.length) fmLines.push(`riskTools: ${formatQuotedInlineList(riskTools)}`);
+  // Precondition command — validated by createPrd() via normalizePreflightField.
+  // JSON-string form, matching prdFrontmatter.cjs's serializer.
+  if (typeof preflight === 'string' && preflight) fmLines.push(`preflight: ${JSON.stringify(preflight)}`);
   if (quietMachine === true) fmLines.push('quietMachine: true');
   // Budget exemption is for a sweep validator that cannot be split further;
   // every other caller's budgetExempt is ignored.
@@ -658,6 +676,13 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     const rt = normalizeRiskTools(input.riskTools);
     if (!rt.ok) return { ok: false, applied: false, status: 400, error: rt.error };
     input = { ...input, riskTools: rt.value };
+  }
+  // preflight: one-line precondition command (preflightCheck.normalizePreflight).
+  // Refused before NN allocation; an empty value writes no key.
+  if (input.preflight !== undefined) {
+    const pf = normalizePreflightField(input.preflight);
+    if (!pf.ok) return { ok: false, applied: false, status: 400, error: pf.error };
+    input = { ...input, preflight: pf.value || undefined };
   }
 
   // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied
@@ -1317,6 +1342,7 @@ module.exports = {
   createPrd,
   createPrdBatch,
   normalizeRiskTools,
+  normalizePreflightField,
   RISK_TOOLS_MAX,
   findCrossEpicDuplicates,
   validateFixesShape,

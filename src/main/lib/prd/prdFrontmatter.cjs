@@ -80,8 +80,8 @@ function splitFrontmatter(raw) {
  * { prd, missKind, reason } — see parseFixes.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight'];
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -309,7 +309,27 @@ function applyKey(fm, key, after) {
       if (list) fm.riskTools = list;
       return;
     }
+    case 'preflight': {
+      // One-line precondition command (preflightCheck.cjs). Written as a JSON
+      // string so quotes/`#` inside a command survive; a bare hand-written
+      // value is read as-is.
+      const s = parsePreflightValue(after);
+      if (s) fm.preflight = s;
+      return;
+    }
   }
+}
+
+function parsePreflightValue(raw) {
+  const t = String(raw ?? '').trim();
+  if (t.startsWith('"')) {
+    try {
+      const j = JSON.parse(t);
+      if (typeof j === 'string') return j.trim() || null;
+    } catch { /* fall through to the bare form */ }
+  }
+  const s = t.length >= 2 && t.startsWith("'") && t.endsWith("'") ? t.slice(1, -1) : t;
+  return s.trim() || null;
 }
 
 /** Parse a full PRD file into { frontmatter, body }, same shape as the TS module. */
@@ -344,7 +364,7 @@ function parsePrdFile(text) {
 
     if (RECOGNIZED_KEYS.has(key)) {
       applyKey(fm, key, after);
-      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes' || key === 'riskTools') {
+      if (key === 'dependsOn' || key === 'artifactPaths' || key === 'fixes' || key === 'riskTools' || key === 'preflight') {
         if (fm[key]) {
           if (!fm._raw) fm._raw = {};
           fm._raw[key] = { line, parsed: fm[key] };
@@ -408,6 +428,10 @@ function serializePrdFile(fm, body) {
     }
     if (key === 'riskTools') {
       out.push(`${key}: ${formatQuotedInlineList(v)}`);
+      continue;
+    }
+    if (key === 'preflight') {
+      out.push(`${key}: ${JSON.stringify(String(v))}`);
       continue;
     }
     if (Array.isArray(v)) {

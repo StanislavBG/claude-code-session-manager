@@ -442,12 +442,28 @@ function isStrandedAutoFixPark(job, jobsInProject) {
 }
 
 /**
+ * Pure predicate, no I/O: a needs_review row that is itself a fix plan
+ * (resolveIsFixPlan — persisted isFixPlan stamp, else the slug heuristic)
+ * and never went through auto-fix. selectAutoFixTargets excludes fix plans
+ * (no recursion), so autoFixAttempted is never set and none of the other
+ * doors admit it — rung 6 never runs and its dependsOn chain waits forever
+ * (starry-night-2 852-fix-ios-asc-profile, sentinel_fail, 2026-11-22).
+ * Exported for tests.
+ */
+function isFixPlanParkWithoutAutoFix(job) {
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.autoFixAttempted === true) return false;
+  return resolveIsFixPlan(job.slug, job.isFixPlan);
+}
+
+/**
  * Pure predicate, no I/O: is this needs_review row eligible for the bounded
  * auto-resolve ladder at all — either because its auto-fix path is genuinely
  * spent (isExhaustedAutoFix), because it was parked by a GUARD verdict that
  * never entered auto-fix in the first place (isGuardParkedWithoutAutoFix),
- * or because its auto-fix investigation ran but was stranded before
- * recording any outcome (isStrandedAutoFixPark). All three classes share ONE
+ * because its auto-fix investigation ran but was stranded before
+ * recording any outcome (isStrandedAutoFixPark), or because it is a fix plan
+ * that auto-fix never admits (isFixPlanParkWithoutAutoFix). All four classes share ONE
  * ladder (applyNeedsReviewAutoResolve) rather than a duplicated one — the
  * ladder itself doesn't care which door a row came through, only whether it
  * now carries completion evidence (job.looksDone). `jobsInProject` is only
@@ -457,7 +473,10 @@ function isStrandedAutoFixPark(job, jobsInProject) {
  */
 function isEligibleForNeedsReviewAutoResolve(job, jobsInProject = []) {
   if (isRefireCapped(job)) return false;
-  return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job) || isStrandedAutoFixPark(job, jobsInProject);
+  return isExhaustedAutoFix(job)
+    || isGuardParkedWithoutAutoFix(job)
+    || isStrandedAutoFixPark(job, jobsInProject)
+    || isFixPlanParkWithoutAutoFix(job);
 }
 
 /**
@@ -1107,6 +1126,7 @@ module.exports = {
   GUARD_VERDICT_EVIDENCE_ELIGIBLE,
   isGuardParkedWithoutAutoFix,
   isStrandedAutoFixPark,
+  isFixPlanParkWithoutAutoFix,
   isEligibleForNeedsReviewAutoResolve,
   isPlanUnqueued,
   DEAD_FIX_CHILD_STATUSES,

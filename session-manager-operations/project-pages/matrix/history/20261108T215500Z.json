@@ -1,0 +1,1127 @@
+{
+  "schemaVersion": 1,
+  "product": {
+    "id": "self",
+    "name": "Claude Code Session Manager",
+    "summary": "Electron desktop cockpit for the Claude Code CLI: per-project tabs, Epics in their own git worktrees, a PRD scheduler for headless claude -p jobs, config/hooks/MCP/plugins editors, local voice dictation, usage history, and a phone remote via bilko.run. Free, MIT, Linux and macOS."
+  },
+  "competitors": [
+    {
+      "id": "claude-desktop",
+      "name": "Claude Code Desktop (Claude app)",
+      "url": "https://code.claude.com/docs/en/desktop",
+      "category": "Claude Code GUI",
+      "chosenBy": "auto",
+      "why": "Anthropic's own first-party GUI for Claude Code — the default alternative for every user of this product; rebuilt around parallel sessions in April 2026 (rtenews). No public user counts found."
+    },
+    {
+      "id": "opcode",
+      "name": "opcode",
+      "url": "https://github.com/winfunc/opcode",
+      "category": "Claude Code GUI",
+      "chosenBy": "auto",
+      "why": "Most-starred open-source Claude Code desktop GUI found: about 22.4k GitHub stars, 1.7k forks (github.com/winfunc/opcode, ecosyste.ms). Last tagged release v0.2.0 on 2025-08-31."
+    },
+    {
+      "id": "vibe-kanban",
+      "name": "Vibe Kanban",
+      "url": "https://www.vibekanban.com",
+      "category": "Agent orchestrator",
+      "chosenBy": "auto",
+      "why": "About 28.6k GitHub stars, 3.1k forks (github.com/BloopAI/vibe-kanban). Note: Bloop announced shutdown 2026-04-10; continues as community open source."
+    },
+    {
+      "id": "conductor",
+      "name": "Conductor",
+      "url": "https://conductor.build",
+      "category": "Agent orchestrator",
+      "chosenBy": "auto",
+      "why": "Leading Mac app for parallel Claude Code agents; 5.0 rating from 24 Product Hunt reviews; changelog 0.93.0 'Conductor is joining Meta' (Nov 4, 2026), reported as a Meta acquisition by implicator.ai."
+    }
+  ],
+  "groups": [
+    {
+      "id": "sessions",
+      "title": "Sessions & parallel work",
+      "description": "Running several sessions at once, isolating them, and organising the work."
+    },
+    {
+      "id": "automation",
+      "title": "Automation & scheduling",
+      "description": "Work that runs without someone at the keyboard."
+    },
+    {
+      "id": "agents",
+      "title": "Agents, tools & configuration",
+      "description": "Custom agents, MCP, plugins and config editing."
+    },
+    {
+      "id": "review",
+      "title": "Code review & landing",
+      "description": "Seeing, commenting on and landing what a session changed."
+    },
+    {
+      "id": "remote",
+      "title": "Remote & mobile",
+      "description": "Steering sessions from another device."
+    },
+    {
+      "id": "cost",
+      "title": "Cost & usage",
+      "description": "Plan usage, tokens and spend."
+    },
+    {
+      "id": "ux",
+      "title": "UX & platform",
+      "description": "Input modes, agent coverage and operating systems."
+    }
+  ],
+  "features": [
+    {
+      "id": "parallel-sessions",
+      "groupId": "sessions",
+      "title": "Parallel sessions",
+      "description": "Run several Claude Code sessions at once, each on its own task, and switch between them without losing state. Users of this category treat it as the core reason to use a GUI over a single CLI.",
+      "sentiment": {
+        "signal": "requested",
+        "summary": "Users want parallel sessions grouped into workspaces by project; Conductor users say they run multiple agents daily. Quote: \"people want sessions grouped into workspaces by project\".",
+        "sourceIds": [
+          "prompthackers-co-ai-news-claude-code-desktop-parallel-sessio",
+          "producthunt-com-posts-conductor-b15c0e1e-ebd2-441d-a8e2-1700"
+        ]
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Epics run side by side per project TAB; machine-wide cap in src/main/lib/scheduler/sessionSlots.cjs; README 'run multiple sessions at once'.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Sidebar of sessions, split view, separate windows; April 2026 redesign built around parallel sessions.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop",
+            "rtenews-vercel-app-2026-04-15-anthropic-rebuilds-claude-code"
+          ]
+        },
+        "opcode": {
+          "status": "partial",
+          "note": "Session forking side by side; independent concurrent sessions not confirmed.",
+          "sourceIds": [
+            "github-com-winfunc-opcode",
+            "blog-brightcoding-dev-2025-12-12-opcode-revolutionizing-clau"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "yes",
+          "note": "'Run local coding agents in parallel', each in its own workspace.",
+          "sourceIds": [
+            "vibekanban-com",
+            "aicoolies-com-reviews-vibe-kanban-review"
+          ]
+        },
+        "conductor": {
+          "status": "yes",
+          "note": "Runs Claude Code, Codex, Cursor agents in parallel in isolated workspaces.",
+          "sourceIds": [
+            "conductor-build",
+            "conductor-build-docs"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Self already ships this and groups sessions under a project TAB, which matches the request.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "worktree-isolation",
+      "groupId": "sessions",
+      "title": "Git worktree isolation per session",
+      "description": "Each session works in its own git worktree and branch so parallel edits never collide, then lands back on the main branch.",
+      "sentiment": {
+        "signal": "complained",
+        "summary": "Isolation is valued, but users complain each Desktop session leaves a full repo copy on disk with no exit moment: \"You close the tab and the session is still in the sidebar, folder and all.\"",
+        "sourceIds": [
+          "wmedia-es-en-tips-claude-code-worktrees-desktop-disk"
+        ]
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Active Epics run in their own worktree (branch sm-epic/<id>); src/main/lib/git/gitWorktree.cjs, jobWorktree.cjs; Settings > Epic isolation (SettingsEpicIsolation.tsx).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Opt-in Worktree toggle; stored under <project>/.claude/worktrees/.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop"
+          ]
+        },
+        "opcode": {
+          "status": "unknown",
+          "note": "No fetched source mentions worktrees.",
+          "sourceIds": []
+        },
+        "vibe-kanban": {
+          "status": "yes",
+          "note": "Automates git worktrees + setup scripts per workspace.",
+          "sourceIds": [
+            "vibekanban-com",
+            "github-com-bloopai-vibe-kanban"
+          ]
+        },
+        "conductor": {
+          "status": "yes",
+          "note": "Each task gets its own workspace and branch.",
+          "sourceIds": [
+            "conductor-build-docs",
+            "producthunt-com-posts-conductor-b15c0e1e-ebd2-441d-a8e2-1700"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "P2",
+        "rationale": "Self has isolation; the competitor complaint is disk leftovers. Self sweeps job worktrees (branchSweep.cjs) but a visible disk-usage + cleanup view would turn a rival's pain point into a selling point.",
+        "sessionGoal": "Add a worktree disk-usage panel: list every Epic and job worktree under ~/.local/state/session-manager with size, age and Epic status, and a one-click remove for completed ones. Why: users complain Claude Desktop leaves a full repo copy per session (wmedia.es). Acceptance: sizes shown, remove refuses active Epics, uses existing git helpers. Likely files: src/main/lib/git/gitWorktree.cjs, branchSweep.cjs, src/renderer/components/tabs/SettingsEpicIsolation.tsx."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "task-queue-board",
+      "groupId": "sessions",
+      "title": "Task queue / work board",
+      "description": "A board or queue of planned work items that agents pick up, with status that follows the work from planned to merged.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Sessions queue (proposed/active/completed Epics) plus PRD queue per Epic under scheduler/epics/<id>/prds; SchedulePanel.tsx.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "unknown",
+          "note": "No board/queue found in fetched docs.",
+          "sourceIds": []
+        },
+        "opcode": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "vibe-kanban": {
+          "status": "yes",
+          "note": "Kanban board with issues, sub-issues; status syncs with PRs.",
+          "sourceIds": [
+            "vibekanban-com",
+            "vibekanban-com-shutdown"
+          ]
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Self has the queue; Vibe Kanban's board is its headline but the company has shut down (vibekanban.com/shutdown).",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "scheduled-runs",
+      "groupId": "automation",
+      "title": "Scheduled and unattended runs",
+      "description": "Run agent work on a schedule or unattended in the background, with results waiting when the user returns.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Scheduler runs PRDs as headless claude -p jobs (src/main/lib/scheduler); macros dispatch jobs (persona-macro/macroJobDispatch.cjs).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Local cron-style scheduled tasks plus cloud scheduled tasks.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop-scheduled-tasks",
+            "code-claude-com-docs-en-desktop"
+          ]
+        },
+        "opcode": {
+          "status": "partial",
+          "note": "Background agent runs; no cron scheduling found.",
+          "sourceIds": [
+            "github-com-winfunc-opcode",
+            "github-com-winfunc-opcode-releases"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No scheduling found in homepage, README or release notes.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "partial",
+          "note": "Changelog titles 'background tasks' (0.77.0) and 'routines' (0.85.0); scope unconfirmed.",
+          "sourceIds": [
+            "conductor-build-changelog"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "P3",
+        "rationale": "Self's PRD scheduler is deeper than a cron list; Claude Desktop's simple time-based schedule is the closest rival. A plain 'run this macro daily at 9' trigger is a small add if users ask.",
+        "sessionGoal": "Let a saved macro run on a time schedule (hourly/daily/weekdays/custom cron) through the existing mint authority and scheduler, shown on the HOT KEYS strip with next-run time. Why: Claude Desktop ships local cron scheduled tasks (code.claude.com/docs/en/desktop-scheduled-tasks). Acceptance: schedule persists in macros.json, respects sessionSlots cap, never mints without the macro's grant. Likely files: src/main/lib/persona-macro/macroJobDispatch.cjs, builtinMacros.cjs, macroLibrary.cjs."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "custom-agents",
+      "groupId": "agents",
+      "title": "Custom agents and subagents",
+      "description": "Define reusable agents with their own system prompts and tools, and let sessions delegate to them.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Agent Library page (src/renderer/components/tabs/AgentLibrary.tsx); persona schema src/main/lib/persona-macro/agentPersonaSchema.cjs; Epic = agentType + tag.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "partial",
+          "note": "Agents arrive as a plugin component; no dedicated agent manager found.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop"
+          ]
+        },
+        "opcode": {
+          "status": "yes",
+          "note": "CC Agents: custom prompts, library, background runs, history.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Self ships a full persona library tied to Epic creation.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "mcp-management",
+      "groupId": "agents",
+      "title": "MCP server management",
+      "description": "Add, edit and test MCP servers from the UI instead of editing JSON by hand.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "McpServers.tsx; five transports with reserved-name linter (README).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Connectors with graphical setup under Customize.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop"
+          ]
+        },
+        "opcode": {
+          "status": "yes",
+          "note": "Central MCP UI: add, test, import Claude Desktop configs.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "partial",
+          "note": "Only an MCP connection host/port setting; board exposed over MCP.",
+          "sourceIds": [
+            "github-com-bloopai-vibe-kanban",
+            "aicoolies-com-reviews-vibe-kanban-review"
+          ]
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "Changelog 'Conductor MCP' does not confirm third-party server management.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Parity with the leaders.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "plugins-skills",
+      "groupId": "agents",
+      "title": "Plugins and skills",
+      "description": "Install and browse plugins and skills that bundle commands, agents, hooks and MCP servers.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Plugins.tsx manifest inspector + Discover panel with one-click install (README); Extensions page.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Add plugins from + menu; / browses skills.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop",
+            "rtenews-vercel-app-2026-04-15-anthropic-rebuilds-claude-code"
+          ]
+        },
+        "opcode": {
+          "status": "unknown",
+          "note": "Plugin system only on a Dec 2025 roadmap.",
+          "sourceIds": []
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Parity with Claude Desktop.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "config-editor",
+      "groupId": "agents",
+      "title": "Config, hooks and CLAUDE.md editing",
+      "description": "Edit every configuration file Claude Code reads — settings scopes, hooks, memory and CLAUDE.md — in the app.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Hooks.tsx (29 events + test-fire), Memory.tsx, 4-scope settings drift (README).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "unknown",
+          "note": "Not covered by fetched docs.",
+          "sourceIds": []
+        },
+        "opcode": {
+          "status": "yes",
+          "note": "CLAUDE.md editor with live preview and project scanning.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Self covers more config surface than any rival found.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "diff-review",
+      "groupId": "review",
+      "title": "Diff review with inline comments",
+      "description": "See what a session changed as a diff, comment on lines, and send the comments back to the agent for another pass.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "no",
+          "note": "No diff-review component found in src/renderer (grep for DiffView/diff-view found none).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Changes view; click + on a line to comment; comments produce a new diff; /code-review findings inline.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop",
+            "rtenews-vercel-app-2026-04-15-anthropic-rebuilds-claude-code"
+          ]
+        },
+        "opcode": {
+          "status": "yes",
+          "note": "Diff viewer between checkpoints.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "yes",
+          "note": "Review diffs, inline comments sent to the agent.",
+          "sourceIds": [
+            "github-com-bloopai-vibe-kanban",
+            "vibekanban-com"
+          ]
+        },
+        "conductor": {
+          "status": "yes",
+          "note": "Diff viewer before PR; edit files in diffs (0.84.0).",
+          "sourceIds": [
+            "conductor-build-docs",
+            "conductor-build-changelog"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "P1",
+        "rationale": "Every competitor ships it and self does not. With worktree-per-Epic already in place, the diff of sm-epic/<id> against main is cheap to compute; this is the clearest gap.",
+        "sessionGoal": "Add a Changes view to an Epic: show the diff of its worktree branch sm-epic/<id> against its base, file by file, with line comments that are sent to the Epic's session as one follow-up message. Why: Claude Desktop, opcode, Vibe Kanban and Conductor all ship diff review with inline comments. Acceptance: diff reads through a single main-process API, works for active and completed Epics, comments arrive as one chat message, no new LeftNav tab (lives inside the Epic). Likely files: src/main/lib/git/gitExec.cjs, gitWorktree.cjs, src/renderer/components/epics/."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "checkpoints",
+      "groupId": "review",
+      "title": "Checkpoints and session timeline",
+      "description": "Save checkpoints inside a session, browse a branching timeline, and restore or fork from any point.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "no",
+          "note": "No checkpoint/rewind UI found in src/renderer.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "opcode": {
+          "status": "yes",
+          "note": "Checkpoints, branching timeline, restore, fork.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "P3",
+        "rationale": "Only opcode ships it and its last release was 2025-08-31; low pull.",
+        "sessionGoal": "Add an Epic timeline that lists each turn with its commit in the Epic worktree and lets the user fork a new Epic from a chosen turn. Why: opcode ships checkpoints and forking (github.com/winfunc/opcode). Acceptance: fork mints through the New Epic authority, never rewrites the original Epic. Likely files: src/main/lib/epic/, src/renderer/components/epics/."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "pr-flow",
+      "groupId": "review",
+      "title": "Pull request and merge flow",
+      "description": "Open a pull request, merge, and archive a session's workspace from the app once work is done.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "partial",
+          "note": "Epic and job branches land on main via integrate paths (src/main/lib/git); no GitHub PR creation found.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "opcode": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "vibe-kanban": {
+          "status": "yes",
+          "note": "Agent status syncs when PRs are created or merged.",
+          "sourceIds": [
+            "vibekanban-com"
+          ]
+        },
+        "conductor": {
+          "status": "yes",
+          "note": "Open PR, merge and archive; PR page (0.73.0).",
+          "sourceIds": [
+            "conductor-build-docs",
+            "conductor-build-changelog"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "P3",
+        "rationale": "Self lands locally by design (single-author); a PR button matters only for team users.",
+        "sessionGoal": "Add 'Open PR' to a completed Epic: push sm-epic/<id> and run gh pr create with the Epic title and objective as body. Why: Conductor and Vibe Kanban ship PR/merge flows. Acceptance: only when an origin remote and gh exist; errors surface as a toast. Likely files: src/main/lib/git/gitExec.cjs, src/renderer/components/epics/."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "remote-mobile",
+      "groupId": "remote",
+      "title": "Remote and mobile control",
+      "description": "Watch and steer running sessions from a phone or another device, including answering approval prompts away from the desk.",
+      "sentiment": {
+        "signal": "requested",
+        "summary": "Users asked for a phone companion to answer prompts while away: \"I am away from the computer (shopping, kitchen, etc.) and Claude Code asks me to confirm or check something.\" opcode users ask for a web UI.",
+        "sourceIds": [
+          "github-com-anthropics-claude-code-issues-18189",
+          "github-com-winfunc-opcode-issues"
+        ]
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "bilko.run phone remote over E2E relay, bridge src/main/webRemote.cjs; App Settings > Phone remote.",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "yes",
+          "note": "Cloud sessions on claude.ai/code and mobile app; Remote Control for local sessions.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop",
+            "claude-com-claude-code"
+          ]
+        },
+        "opcode": {
+          "status": "unknown",
+          "note": "Mobile companion only on a roadmap; users ask for a web UI.",
+          "sourceIds": []
+        },
+        "vibe-kanban": {
+          "status": "partial",
+          "note": "Hosted remote services ended after the April 2026 shutdown.",
+          "sourceIds": [
+            "vibekanban-com-shutdown",
+            "github-com-bloopai-vibe-kanban"
+          ]
+        },
+        "conductor": {
+          "status": "yes",
+          "note": "'Conductor for iOS' (0.90.0) and 'Remote control' (0.92.0); details unconfirmed.",
+          "sourceIds": [
+            "conductor-build-changelog"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Self already ships a phone remote; keep it as a differentiator.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "usage-cost",
+      "groupId": "cost",
+      "title": "Usage and cost visibility",
+      "description": "Show plan usage, token spend and cost by session, project and time so parallel work does not silently burn the quota.",
+      "sentiment": {
+        "signal": "complained",
+        "summary": "Users say parallel sessions drain plan limits fast and rate-limit errors are unclear: \"Max 20x effectively equivalent to Max 5x for parallel-workflow users.\"",
+        "sourceIds": [
+          "github-com-anthropics-claude-code-issues-53922",
+          "mindstudio-ai-blog-claude-code-usage-limits-parallel-session"
+        ]
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "History tab = analytics/cost/charts (HistoryDashboard.tsx, lib/usageWindow.ts, usageCsv.ts).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "partial",
+          "note": "Usage ring and /context; no dollar cost view.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop"
+          ]
+        },
+        "opcode": {
+          "status": "yes",
+          "note": "Usage dashboard by model/project/time with export.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "P2",
+        "rationale": "Self has the data; the loudest category complaint is limits draining under parallel load, so a forward-looking 'at this pace you hit the limit at X' signal would answer it directly.",
+        "sessionGoal": "Add a burn-rate forecast to History and the session strip: from usage-window data, project when the current 5-hour and weekly limits will be hit at the present pace across all running sessions, and warn before starting another parallel session would cross it. Why: users complain parallel sessions burn Max limits unexpectedly (github.com/anthropics/claude-code/issues/53922, mindstudio.ai). Acceptance: forecast uses the existing usage window, no new polling loop. Likely files: src/renderer/lib/usageWindow.ts, src/renderer/components/tabs/HistoryDashboard.tsx."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "voice-input",
+      "groupId": "ux",
+      "title": "Voice input",
+      "description": "Dictate prompts by speech, ideally on-device.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "yes",
+          "note": "Local Moonshine ASR + Silero VAD, push-to-talk, barge-in (README; VoiceButton.tsx).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "unknown",
+          "note": "Not found in fetched docs (fetch truncated).",
+          "sourceIds": []
+        },
+        "opcode": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Self differentiator; no rival confirmed.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "multi-agent-cli",
+      "groupId": "ux",
+      "title": "Multiple agent CLIs",
+      "description": "Drive other coding-agent CLIs (Codex, Gemini CLI, Cursor, OpenCode) from the same app.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "no",
+          "note": "Claude Code CLI only, by product scope (README).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "no",
+          "note": "Claude Code only.",
+          "sourceIds": [
+            "code-claude-com-docs-en-desktop"
+          ]
+        },
+        "opcode": {
+          "status": "no",
+          "note": "Claude Code GUI only.",
+          "sourceIds": [
+            "github-com-winfunc-opcode"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "yes",
+          "note": "Switch between 10+ coding agents.",
+          "sourceIds": [
+            "github-com-bloopai-vibe-kanban",
+            "vibekanban-com"
+          ]
+        },
+        "conductor": {
+          "status": "yes",
+          "note": "Claude Code, Codex, Cursor; docs add OpenCode.",
+          "sourceIds": [
+            "conductor-build",
+            "conductor-build-docs"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "none",
+        "rationale": "Out of scope: the product is a cockpit for the Claude Code CLI.",
+        "sessionGoal": ""
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    },
+    {
+      "id": "platform-support",
+      "groupId": "ux",
+      "title": "Platform support",
+      "description": "Which desktop operating systems the app runs on.",
+      "sentiment": {
+        "signal": "none",
+        "summary": "",
+        "sourceIds": []
+      },
+      "support": {
+        "self": {
+          "status": "partial",
+          "note": "Linux and macOS only (README).",
+          "sourceIds": []
+        },
+        "claude-desktop": {
+          "status": "unknown",
+          "note": "Not confirmed in fetched pages.",
+          "sourceIds": []
+        },
+        "opcode": {
+          "status": "partial",
+          "note": "Users request Windows builds.",
+          "sourceIds": [
+            "github-com-winfunc-opcode-issues"
+          ]
+        },
+        "vibe-kanban": {
+          "status": "unknown",
+          "note": "No fetched source covers this.",
+          "sourceIds": []
+        },
+        "conductor": {
+          "status": "partial",
+          "note": "'Run parallel coding agents on your Mac.'",
+          "sourceIds": [
+            "conductor-build"
+          ]
+        }
+      },
+      "recommendation": {
+        "priority": "P3",
+        "rationale": "Linux support already beats Mac-only Conductor; Windows is a large but costly market.",
+        "sessionGoal": "Assess a Windows build: list every Linux/macOS-only dependency (node-pty, Moonshine, systemd watchdog, shell paths) and what breaks, with a go/no-go estimate. Why: opcode users request Windows builds; Conductor is Mac-only. Acceptance: written assessment only, no code. Likely files: package.json, src/main/, scripts/."
+      },
+      "firstSeenAt": "2026-11-08T21:55:00Z",
+      "updatedAt": "2026-11-08T21:55:00Z"
+    }
+  ],
+  "sources": [
+    {
+      "id": "github-com-anthropics-claude-code-issues-53922",
+      "url": "https://github.com/anthropics/claude-code/issues/53922",
+      "title": "[BUG] Parallel Claude Code sessions started right after 5-hour limit resets",
+      "publisher": "GitHub (anthropics/claude-code)",
+      "publishedAt": "2026-04-27",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "repo"
+    },
+    {
+      "id": "github-com-anthropics-claude-code-issues-18189",
+      "url": "https://github.com/anthropics/claude-code/issues/18189",
+      "title": "[FEATURE] Claude Code Mobile Companion App #18189",
+      "publisher": "GitHub (anthropics/claude-code)",
+      "publishedAt": "2026-01-14",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "repo"
+    },
+    {
+      "id": "wmedia-es-en-tips-claude-code-worktrees-desktop-disk",
+      "url": "https://wmedia.es/en/tips/claude-code-worktrees-desktop-disk",
+      "title": "Claude Code worktrees on Desktop: every session leaves a full copy of your repo on disk",
+      "publisher": "wmedia.es",
+      "publishedAt": "2026-09-06",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    },
+    {
+      "id": "mindstudio-ai-blog-claude-code-usage-limits-parallel-session",
+      "url": "https://www.mindstudio.ai/blog/claude-code-usage-limits-parallel-sessions",
+      "title": "Claude Code Parallel Sessions Are Great. They Will Also Burn Your Quota Fast",
+      "publisher": "MindStudio",
+      "publishedAt": "2026-10-16",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    },
+    {
+      "id": "prompthackers-co-ai-news-claude-code-desktop-parallel-sessio",
+      "url": "https://www.prompthackers.co/ai-news/claude-code-desktop-parallel-sessions",
+      "title": "Claude Code Desktop Update: Nested Sessions, Environments and /btw",
+      "publisher": "Prompt Hackers",
+      "publishedAt": "2026-10-15",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    },
+    {
+      "id": "vibekanban-com",
+      "url": "https://www.vibekanban.com",
+      "title": "Vibe Kanban homepage",
+      "publisher": "Vibe Kanban (BloopAI)",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "announcement"
+    },
+    {
+      "id": "vibekanban-com-shutdown",
+      "url": "https://vibekanban.com/shutdown",
+      "title": "Vibe Kanban shutdown announcement",
+      "publisher": "Bloop / Vibe Kanban",
+      "publishedAt": "2026-04-10",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "announcement"
+    },
+    {
+      "id": "github-com-bloopai-vibe-kanban",
+      "url": "https://github.com/BloopAI/vibe-kanban",
+      "title": "BloopAI/vibe-kanban repository and README",
+      "publisher": "GitHub",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "repo"
+    },
+    {
+      "id": "aicoolies-com-reviews-vibe-kanban-review",
+      "url": "https://aicoolies.com/reviews/vibe-kanban-review",
+      "title": "Vibe Kanban review",
+      "publisher": "aicoolies",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    },
+    {
+      "id": "github-com-winfunc-opcode",
+      "url": "https://github.com/winfunc/opcode",
+      "title": "winfunc/opcode README and repo page (getAsterisk/opcode redirects here)",
+      "publisher": "GitHub",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "repo"
+    },
+    {
+      "id": "github-com-winfunc-opcode-releases",
+      "url": "https://github.com/winfunc/opcode/releases",
+      "title": "opcode releases (v0.2.0, v0.1.0)",
+      "publisher": "GitHub",
+      "publishedAt": "2025-08-31",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "changelog"
+    },
+    {
+      "id": "github-com-winfunc-opcode-issues",
+      "url": "https://github.com/winfunc/opcode/issues",
+      "title": "opcode issues list",
+      "publisher": "GitHub",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "forum"
+    },
+    {
+      "id": "blog-brightcoding-dev-2025-12-12-opcode-revolutionizing-clau",
+      "url": "https://blog.brightcoding.dev/2025/12/12/opcode-revolutionizing-claude-code-with-a-powerful-gui-toolkit",
+      "title": "opcode: Revolutionizing Claude Code with a Powerful GUI & Toolkit",
+      "publisher": "BrightCoding blog",
+      "publishedAt": "2025-12-12",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    },
+    {
+      "id": "code-claude-com-docs-en-desktop",
+      "url": "https://code.claude.com/docs/en/desktop",
+      "title": "Use Claude Code Desktop",
+      "publisher": "Anthropic",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "docs"
+    },
+    {
+      "id": "code-claude-com-docs-en-desktop-scheduled-tasks",
+      "url": "https://code.claude.com/docs/en/desktop-scheduled-tasks",
+      "title": "Schedule recurring tasks in Claude Code Desktop",
+      "publisher": "Anthropic",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "docs"
+    },
+    {
+      "id": "claude-com-claude-code",
+      "url": "https://claude.com/claude-code",
+      "title": "Claude Code (product page)",
+      "publisher": "Anthropic",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "announcement"
+    },
+    {
+      "id": "rtenews-vercel-app-2026-04-15-anthropic-rebuilds-claude-code",
+      "url": "https://rtenews.vercel.app/2026/04/15/anthropic-rebuilds-claude-code-desktop-app/",
+      "title": "Anthropic Rebuilds Claude Code Desktop App Around Parallel Sessions",
+      "publisher": "rtenews (Tim Hardwick)",
+      "publishedAt": "2026-04-15",
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    },
+    {
+      "id": "conductor-build",
+      "url": "https://conductor.build",
+      "title": "Conductor homepage",
+      "publisher": "Conductor (Melty Labs)",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "announcement"
+    },
+    {
+      "id": "conductor-build-docs",
+      "url": "https://www.conductor.build/docs/",
+      "title": "Conductor docs (Introduction)",
+      "publisher": "Conductor (Melty Labs)",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "docs"
+    },
+    {
+      "id": "conductor-build-changelog",
+      "url": "https://www.conductor.build/changelog",
+      "title": "Conductor changelog",
+      "publisher": "Conductor (Melty Labs)",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "changelog"
+    },
+    {
+      "id": "producthunt-com-posts-conductor-b15c0e1e-ebd2-441d-a8e2-1700",
+      "url": "https://www.producthunt.com/posts/conductor-b15c0e1e-ebd2-441d-a8e2-17003b39744a",
+      "title": "Conductor on Product Hunt",
+      "publisher": "Product Hunt",
+      "publishedAt": null,
+      "retrievedAt": "2026-11-08T21:55:00Z",
+      "kind": "review"
+    }
+  ],
+  "runs": [
+    {
+      "at": "2026-11-08T21:55:00Z",
+      "model": "claude-opus-5-5",
+      "competitors": [
+        "Claude Code Desktop (Claude app)",
+        "opcode",
+        "Vibe Kanban",
+        "Conductor"
+      ],
+      "added": [
+        "parallel-sessions",
+        "worktree-isolation",
+        "task-queue-board",
+        "scheduled-runs",
+        "custom-agents",
+        "mcp-management",
+        "plugins-skills",
+        "config-editor",
+        "diff-review",
+        "checkpoints",
+        "pr-flow",
+        "remote-mobile",
+        "usage-cost",
+        "voice-input",
+        "multi-agent-cli",
+        "platform-support"
+      ],
+      "changed": [],
+      "notes": "Cold start, 4 auto picks. Researchers capped at 12 fetches each. Gaps: Reddit/HN not reached; Claude Desktop popularity numbers not found; Conductor and Vibe Kanban details partly from changelog titles; quotes from summarized fetches should be spot-checked. Self 'no' for diff review/checkpoints is from a renderer grep, not a full audit."
+    }
+  ],
+  "updatedAt": "2026-11-08T21:55:00Z"
+}

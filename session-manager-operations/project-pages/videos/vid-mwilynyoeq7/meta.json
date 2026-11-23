@@ -1,0 +1,139 @@
+{
+  "id": "vid-mwilynyoeq7",
+  "title": "Session Manager — a 1-minute whiteboard tour",
+  "kind": "project-demo",
+  "style": "Animated whiteboard",
+  "lengthS": 60,
+  "createdAt": "2026-11-16T03:01:45.717Z",
+  "character": null,
+  "sources": [
+    {
+      "claim": "Claude Code is an AI helper that writes code, and it usually lives in a plain text window.",
+      "source": "Claude Code is a command-line tool from Anthropic. You give it a goal in plain English, and it plans the steps, uses tools, and works through them until the goal is done. You'll usually meet it inside a terminal — a plain text window where you type a request and read the reply.",
+      "ref": "session-manager-operations/manual/chapters/welcome.html"
+    },
+    {
+      "claim": "Session Manager is a free desktop app that gives Claude Code a friendly home.",
+      "source": "Session Manager is a free desktop app. It gives Claude Code a friendly home to live in, and it lets you run a small team of these agents at once, instead of just one.",
+      "ref": "session-manager-operations/manual/chapters/welcome.html"
+    },
+    {
+      "claim": "You say what you want. One helper plans it. Others build it. One more checks it.",
+      "source": "You describe what you want. One agent plans it. Other agents build the pieces. One more checks the result.",
+      "ref": "session-manager-operations/manual/chapters/meet-your-agency.html"
+    },
+    {
+      "claim": "It keeps working while you are away.",
+      "source": "a work calendar called the Scheduler lines it all up and runs it, even while you're away from your keyboard.",
+      "ref": "session-manager-operations/manual/chapters/welcome.html"
+    },
+    {
+      "claim": "If you run low on usage, it waits, then picks back up.",
+      "source": "When you're close to that limit, the Scheduler pauses on its own rather than firing work orders that would fail — and picks back up by itself once your usage window resets. (README: Auto-pauses if a job hits a rate limit, auto-resumes at the next reset.)",
+      "ref": "session-manager-operations/manual/chapters/plans-and-scheduler.html; README.md#scheduler--prd-workflow"
+    },
+    {
+      "claim": "Queue diagram: work waits, runs, then is done; a pause never stops work that is already running.",
+      "source": "Pending: Waiting its turn. Running: A dev-lead is working on it right now. Completed: Done. Pause stops new work orders from starting. Anything already running keeps running — Pause never kills work mid-flight.",
+      "ref": "session-manager-operations/manual/chapters/plans-and-scheduler.html"
+    },
+    {
+      "claim": "Each project gets its own tab.",
+      "source": "Session Manager works on one project folder at a time, and it keeps a separate tab for each one you open.",
+      "ref": "session-manager-operations/manual/chapters/first-session.html; CLAUDE.md (TAB = cwd = Main Project)"
+    },
+    {
+      "claim": "One page shows all your work.",
+      "source": "Home is the Dashboard — a one-page overview of every project and every Session on your machine.",
+      "ref": "session-manager-operations/manual/chapters/cockpit-tour.html"
+    },
+    {
+      "claim": "Just talk: your voice turns into text on your own computer.",
+      "source": "Voice lets you talk to your agents with your microphone instead of typing. Your speech is transcribed on your own machine and turned into text. (README Voice: Nothing leaves the machine.)",
+      "ref": "session-manager-operations/manual/chapters/cockpit-tour.html; README.md#features-tour"
+    },
+    {
+      "claim": "A red bar shows whenever the mic is on.",
+      "source": "Whenever your microphone is capturing audio, a red bar appears at the very top of the window and says so in plain words.",
+      "ref": "session-manager-operations/manual/chapters/cockpit-tour.html"
+    },
+    {
+      "claim": "Check on your work from your phone or any browser; only you can read it.",
+      "source": "You can work with Session Manager from a phone or any browser ... Everything travels through the bilko.run relay, scrambled so that only your browser and your computer can read it.",
+      "ref": "session-manager-operations/manual/chapters/cockpit-tour.html"
+    },
+    {
+      "claim": "You get a small team, and you stay in charge.",
+      "source": "instead of one assistant, you get a small team (welcome). The agency does the typing; you stay the director. (meet-your-agency)",
+      "ref": "session-manager-operations/manual/chapters/welcome.html; session-manager-operations/manual/chapters/meet-your-agency.html"
+    },
+    {
+      "claim": "Free app. Free guide.",
+      "source": "Open-core: the APP and the Field Manual are both free, and stay free. (bilko.listing.json: pricing free; Ships with a free Field Manual.)",
+      "ref": "CLAUDE.md; bilko.listing.json"
+    },
+    {
+      "claim": "Try Session Manager free at bilko.run/products/session-manager.",
+      "source": "Session Manager itself is free. Download the installer for your computer from https://bilko.run/products/session-manager .",
+      "ref": "session-manager-operations/manual/chapters/welcome.html; session-manager-operations/manual/chapters/first-session.html"
+    },
+    {
+      "claim": "The reveal shows the real product page, not a drawn screen.",
+      "source": "Real screenshot of https://bilko.run/products/session-manager taken with the demo-video kit's capture.cjs on 2026-11-15 (page live, HTTP 200).",
+      "ref": "demo-video-kit capture.cjs shot-01.jpg"
+    }
+  ],
+  "report": {
+    "lufs": -14.5,
+    "truePeakDb": 0,
+    "speechS": 32.08,
+    "readingGrade": 1.3,
+    "checks": [
+      {
+        "id": "captions",
+        "ok": true,
+        "detail": "16 caption(s) within 12 words"
+      },
+      {
+        "id": "language",
+        "ok": true,
+        "detail": "grade 1.3, sentences <= 14 words, no banned words"
+      },
+      {
+        "id": "closing",
+        "ok": true,
+        "detail": "closing has no shell command"
+      },
+      {
+        "id": "voiceFit",
+        "ok": true,
+        "detail": "10 line(s) fit within 1.2x"
+      },
+      {
+        "id": "speechCoverage",
+        "ok": true,
+        "detail": "speech covers 53% of 60s (min 40%)"
+      },
+      {
+        "id": "blankFrames",
+        "ok": true,
+        "detail": "118 frame(s) non-blank"
+      },
+      {
+        "id": "htmlLimits",
+        "ok": true,
+        "detail": "816960 bytes within cap 4194304"
+      },
+      {
+        "id": "audio-speech",
+        "ok": true,
+        "detail": "speech-band (2-8 Hz) modulation share 0.46 (min 0.2)"
+      }
+    ],
+    "bytes": 820741
+  },
+  "macroVersion": 8,
+  "seedVersion": 11,
+  "model": "claude-opus-5-5",
+  "effort": "max"
+}

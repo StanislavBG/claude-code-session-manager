@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude Code Session Manager — Project Home</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--line:#272c37;--fg:#e6e8ee;--mut:#9aa3b2;--acc:#7aa2ff}
+@media(prefers-color-scheme:light){:root{--bg:#f6f7fa;--card:#fff;--line:#dde1e9;--fg:#171a21;--mut:#5b6474;--acc:#2f5de0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:36px 20px 60px}
+h1{font-size:28px;margin:0 0 6px}h2{font-size:17px;margin:34px 0 12px;color:var(--acc);text-transform:uppercase;letter-spacing:.06em}
+p{margin:0 0 10px}.lead{color:var(--mut);font-size:16px}
+.badges span{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:2px 10px;margin:8px 6px 0 0;font-size:12px;color:var(--mut)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card b{display:block;margin-bottom:4px}.card p{color:var(--mut);margin:0;font-size:14px}
+code,pre{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto}
+code{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+td,th{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:top}
+th{color:var(--mut);font-weight:600}tr:last-child td{border-bottom:0}
+</style></head><body><main>
+<h1>Claude Code Session Manager</h1>
+<p class="lead">A local Electron cockpit for the Claude Code CLI: multi-tab terminal, full configuration surface, scheduler, voice dictation and live observability in one window.</p>
+<div class="badges"><span>v0.127.0</span><span>MIT</span><span>Electron 42</span><span>React 18 + Vite</span><span>npm: claude-code-session-manager</span></div>
+
+<h2>Who it's for</h2>
+<p>People who already use the <code>claude</code> CLI and want to run several sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, dictate by voice, and watch transcripts live. Described in the README as a single-author project; free and open-core (the app and its Field Manual stay free).</p>
+
+<h2>Key features</h2>
+<div class="grid">
+<div class="card"><b>Dormant tabs + chat box</b><p>New tabs start as a chat box with no PTY and no <code>claude</code> process until the first message; the headless chat runner uses <code>claude -p</code> with stream-json and session resume. Hydrate to a full terminal any time.</p></div>
+<div class="card"><b>Scheduler / PRD queue</b><p>PRDs under <code>session-manager-operations/scheduler/epics/&lt;epic-id&gt;/prds/</code> run as headless <code>claude -p</code> jobs, authored through the <code>scheduler_create_prd</code> MCP tool. Includes a queue-health linter.</p></div>
+<div class="card"><b>Epics (Sessions)</b><p>One Epic = one unit of work = one claude session, run in its own git worktree. Created from an Agent (who) plus a Tag (what); the opening prompt is composed as Actor, Input, Mission.</p></div>
+<div class="card"><b>Config surface</b><p>Hooks (all 29 events with a test-fire runner), plugins, MCP servers (five transports), skills, permissions, settings with 4-scope drift display, and a Memory tab.</p></div>
+<div class="card"><b>Voice</b><p>Local Moonshine ASR and Silero VAD: push-to-talk, continuous listening, auto-submit, barge-in. Nothing leaves the machine.</p></div>
+<div class="card"><b>Command palette &amp; modes</b><p>Cmd/Ctrl-K palette with banded commands; <code>--simple</code> launches a single-terminal, chrome-free cockpit. Toasts surface non-fatal errors.</p></div>
+<div class="card"><b>Phone remote</b><p>A web remote bridged through the bilko.run relay (<code>src/main/webRemote.cjs</code>; source in <code>web-remote/</code> and <code>web/remote-app/</code>).</p></div>
+</div>
+
+<h2>Domain model</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>TAB</td><td>One per project (cwd = Main Project); per-project state lives in <code>&lt;cwd&gt;/session-manager-operations/</code>.</td></tr>
+<tr><td>EPIC</td><td>One unit of work, 1:1 with a claude session; lifecycle <code>proposed</code> → <code>active</code> → <code>completed</code>, always born <code>proposed</code>, created only by a human pressing New Epic.</td></tr>
+<tr><td>PRD</td><td>A scheduled, scoped task that joins an existing Epic and runs headless.</td></tr>
+</table>
+
+<h2>Structure</h2>
+<table>
+<tr><th>Path</th><th>What's there</th></tr>
+<tr><td><code>src/main/</code></td><td>Electron main process (CommonJS <code>.cjs</code>): scheduler, chatRunner, pty, webRemote, config, health, IPC.</td></tr>
+<tr><td><code>src/preload/</code></td><td>Preload bridge.</td></tr>
+<tr><td><code>src/renderer/</code></td><td>React + Tailwind + zustand UI (xterm terminal).</td></tr>
+<tr><td><code>src/seed/</code></td><td>Seeded agent personas (architect, dev-lead, validator, project-home-builder…).</td></tr>
+<tr><td><code>bin/</code></td><td>CLI entry (<code>cli.cjs</code>), supervisor, Node-version floor.</td></tr>
+<tr><td><code>scripts/</code></td><td>Lint checks, scheduler MCP server and watchdog, packaging, build-info.</td></tr>
+<tr><td><code>tests/</code></td><td>Unit (vitest), e2e (Playwright Electron), smoke, bench, quality.</td></tr>
+<tr><td><code>web/</code>, <code>web-remote/</code></td><td>Product/manual web presence, remote app and relay client.</td></tr>
+<tr><td><code>plugins/</code></td><td>First-party plugin <code>session-manager-dev</code>.</td></tr>
+<tr><td><code>session-manager-operations/</code></td><td>Architecture docs, scheduler state, prompt sessions, manual, project pages.</td></tr>
+</table>
+
+<h2>Run it</h2>
+<pre>npx claude-code-session-manager@latest        # needs Node 22.12+ and Claude Code signed in
+npx claude-code-session-manager@latest --simple</pre>
+<p>Installers (dmg, exe, AppImage) are on GitHub Releases. From a checkout:</p>
+<pre>npm install
+npm run dev        # Vite + Electron with HMR (SM_DEV=1)</pre>
+
+<h2>Key commands</h2>
+<table>
+<tr><th>Command</th><th>Purpose</th></tr>
+<tr><td><code>npm run build</code></td><td>Build renderer into <code>dist/</code> (plus web build and check).</td></tr>
+<tr><td><code>npm run typecheck</code></td><td><code>tsc --noEmit</code> for renderer and main; must pass before commits.</td></tr>
+<tr><td><code>npm run test:unit</code></td><td><code>vitest run</code> (single file: <code>npx vitest run &lt;path&gt;</code>).</td></tr>
+<tr><td><code>npm run test:e2e</code></td><td>Playwright Electron under <code>xvfb-run</code>.</td></tr>
+<tr><td><code>npm run lint</code></td><td>Unstable selectors, conditional hooks, doc hierarchy.</td></tr>
+<tr><td><code>npm run health</code></td><td><code>src/main/health.cjs</code>; exit 0 = green.</td></tr>
+<tr><td><code>npm run dist:linux|mac|win</code></td><td>Stage and package installers with electron-builder.</td></tr>
+</table>
+
+<h2>Working conventions</h2>
+<p>Laws live in <code>CLAUDE.md</code> with rationale in <code>session-manager-operations/architecture/</code> (domain-model, code-map, conventions, scheduler-operations). Notable: no ES modules in main, no CommonJS in renderer, <code>--model</code> pinned on every <code>claude -p</code> call, telemetry anonymous and opt-out (<code>SM_TELEMETRY=0</code>).</p>
+<p style="color:var(--mut);font-size:13px;margin-top:30px">Recent work (git log): web-UI Sessions made operable remotely, validator budget sizing, 0.127.0 release.</p>
+</main></body></html>

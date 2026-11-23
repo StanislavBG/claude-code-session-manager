@@ -8,6 +8,8 @@ const ev = require('../agentCliEvents.cjs');
 const FIXTURE = path.join(__dirname, 'fixtures', 'codex-exec.jsonl');
 const THREAD = '0199a213-81c0-7800-8aa1-bbab2a035a53';
 const FLAGS = ['--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'];
+// Codex reads CLAUDE.md in any folder that has no AGENTS.md (root-level -c config override).
+const FALLBACK = ['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]'];
 
 function run(lines, exitCode = 0) {
   const p = codex.createParser();
@@ -26,26 +28,35 @@ test('exports the adapter shape', () => {
 test('headlessSpawn fresh: exec argv, prompt on stdin only', () => {
   const prompt = 'do the thing --secret';
   const r = codex.headlessSpawn({ prompt, claudeSessionId: 'c-1' });
-  expect(r).toEqual({ args: ['exec', ...FLAGS, '-'], stdin: prompt });
+  expect(r).toEqual({
+    args: ['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]', 'exec',
+      '--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '-'],
+    stdin: prompt,
+  });
   const m = codex.headlessSpawn({ prompt, claudeSessionId: 'c-1', model: 'gpt-5-codex' });
-  expect(m.args).toEqual(['exec', ...FLAGS, '-m', 'gpt-5-codex', '-']);
+  expect(m.args).toEqual([...FALLBACK, 'exec', ...FLAGS, '-m', 'gpt-5-codex', '-']);
   expect(m.args).not.toContain(prompt);
 });
 
 test('headlessSpawn resume: exec resume <id>', () => {
   const r = codex.headlessSpawn({ prompt: 'p', nativeSessionId: THREAD, claudeSessionId: 'c', model: 'o3' });
-  expect(r).toEqual({ args: ['exec', 'resume', THREAD, ...FLAGS, '-m', 'o3', '-'], stdin: 'p' });
+  expect(r).toEqual({
+    args: ['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]', 'exec', 'resume', THREAD,
+      '--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '-m', 'o3', '-'],
+    stdin: 'p',
+  });
   expect(codex.headlessSpawn({ prompt: 'p', nativeSessionId: THREAD }).args)
-    .toEqual(['exec', 'resume', THREAD, ...FLAGS, '-']);
+    .toEqual([...FALLBACK, 'exec', 'resume', THREAD, ...FLAGS, '-']);
 });
 
 test('interactiveArgs fresh and resume', () => {
-  expect(codex.interactiveArgs({})).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
-  expect(codex.interactiveArgs({ model: 'o3' })).toEqual(['--dangerously-bypass-approvals-and-sandbox', '-m', 'o3']);
-  expect(codex.interactiveArgs({ nativeSessionId: THREAD, model: 'o3' }))
-    .toEqual(['resume', THREAD, '--dangerously-bypass-approvals-and-sandbox', '-m', 'o3']);
+  expect(codex.interactiveArgs({})).toEqual(
+    ['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]', '--dangerously-bypass-approvals-and-sandbox']);
+  expect(codex.interactiveArgs({ model: 'o3' })).toEqual([...FALLBACK, '--dangerously-bypass-approvals-and-sandbox', '-m', 'o3']);
+  expect(codex.interactiveArgs({ nativeSessionId: THREAD, model: 'o3' })).toEqual(
+    ['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]', 'resume', THREAD, '--dangerously-bypass-approvals-and-sandbox', '-m', 'o3']);
   expect(codex.interactiveArgs({ nativeSessionId: THREAD }))
-    .toEqual(['resume', THREAD, '--dangerously-bypass-approvals-and-sandbox']);
+    .toEqual([...FALLBACK, 'resume', THREAD, '--dangerously-bypass-approvals-and-sandbox']);
 });
 
 test('fixture run translates to the expected event sequence', () => {

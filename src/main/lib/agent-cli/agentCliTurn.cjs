@@ -39,7 +39,7 @@ function pickAuthEnv(entry, env) {
 
 /**
  * @param {{ epic: object, claudeSessionId: string, cwd: string, prompt: string, deps?: object }} opts
- * @returns {{ ok: true, command: string, args: string[], stdin: string, envExtra: Record<string,string>,
+ * @returns {{ ok: true, command: string, args: string[], cwd: string, stdin: string, envExtra: Record<string,string>,
  *   parser: { push(line: string): object[], end(o: { exitCode: number|null }): object[] },
  *   transcript: { userPrompt(t: string): void, event(e: object): void, close(): void }, cli: string }
  *   | { ok: false, code: string, message: string }}
@@ -87,6 +87,9 @@ function planAgentCliTurn({ epic, claudeSessionId, cwd, prompt, deps } = {}) {
   return {
     ok: true,
     command,
+    // The spawn cwd is the one passed in (chatRunner passes the Epic worktree's execCwd) —
+    // Codex starts its AGENTS.md / CLAUDE.md walk there.
+    cwd,
     args: Array.isArray(spawnPlan.args) ? spawnPlan.args : [],
     stdin: typeof spawnPlan.stdin === 'string' ? spawnPlan.stdin : '',
     envExtra: pickAuthEnv(entry, d.env),

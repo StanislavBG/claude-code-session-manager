@@ -5,6 +5,7 @@ import { test, expect } from 'vitest';
 
 const { planAgentCliTurn } = require('../agentCliTurn.cjs');
 const { AGENT_CLI_CATALOG } = require('../agentCliRegistry.cjs');
+const codex = require('../adapters/codex.cjs');
 
 const SID = '11111111-2222-4333-8444-555555555555';
 
@@ -84,4 +85,20 @@ test('no stored native id → first turn without one', () => {
   const r = planAgentCliTurn({ epic: { agentCli: 'opencode' }, claudeSessionId: SID, cwd: '/w', prompt: 'p', deps: d });
   expect(adapter.calls[0].nativeSessionId).toBeUndefined();
   expect(r.args).toEqual(['run']);
+});
+
+test('codex Epic: plan cwd is the Epic worktree passed in, argv carries the CLAUDE.md fallback', () => {
+  // Codex walks AGENTS.md (then project_doc_fallback_filenames) from the git root down to its
+  // spawn cwd, so the turn must spawn in the Epic worktree, never the main checkout.
+  const WORKTREE = '/home/u/proj/.sm-worktrees/epic-abc';
+  const transcriptCwds = [];
+  const { d } = deps();
+  d.adapterFor = (id) => (id === 'codex' ? codex : null);
+  d.createTranscriptWriter = ({ cwd }) => { transcriptCwds.push(cwd); return { userPrompt() {}, event() {}, close() {} }; };
+  const r = planAgentCliTurn({ epic: { agentCli: 'codex' }, claudeSessionId: SID, cwd: WORKTREE, prompt: 'p', deps: d });
+  expect(r.ok).toBe(true);
+  expect(r.cwd).toBe(WORKTREE);
+  expect(r.cwd).not.toBe('/home/u/proj');
+  expect(transcriptCwds).toEqual([WORKTREE]);
+  expect(r.args.slice(0, 3)).toEqual(['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]', 'exec']);
 });

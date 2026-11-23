@@ -8,6 +8,9 @@ const {
 } = require('../agentCliEvents.cjs');
 
 const BYPASS = '--dangerously-bypass-approvals-and-sandbox';
+// Root-level config override: in a folder with no AGENTS.md, Codex reads CLAUDE.md instead.
+// Must precede the subcommand head (spawn argv, no shell — the quotes are part of the TOML value).
+const FALLBACK = ['-c', 'project_doc_fallback_filenames=["CLAUDE.md"]'];
 
 function modelArgs(model) {
   return typeof model === 'string' && model ? ['-m', model] : [];
@@ -20,14 +23,14 @@ function hasId(id) {
 function headlessSpawn({ prompt, nativeSessionId, model } = {}) {
   const head = hasId(nativeSessionId) ? ['exec', 'resume', nativeSessionId] : ['exec'];
   return {
-    args: [...head, '--json', BYPASS, '--skip-git-repo-check', ...modelArgs(model), '-'],
+    args: [...FALLBACK, ...head, '--json', BYPASS, '--skip-git-repo-check', ...modelArgs(model), '-'],
     stdin: prompt,
   };
 }
 
 function interactiveArgs({ nativeSessionId, model } = {}) {
   const head = hasId(nativeSessionId) ? ['resume', nativeSessionId] : [];
-  return [...head, BYPASS, ...modelArgs(model)];
+  return [...FALLBACK, ...head, BYPASS, ...modelArgs(model)];
 }
 
 const str = (v) => (typeof v === 'string' ? v : undefined);

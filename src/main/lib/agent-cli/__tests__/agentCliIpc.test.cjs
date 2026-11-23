@@ -52,7 +52,7 @@ test('codex Epic with a stored native id yields a quoted resume line', async () 
   const expected = ["/opt/it's/codex", ...codex.interactiveArgs({ nativeSessionId: 'thread-abc', claudeSessionId: SID_CODEX, model: 'gpt-5' })]
     .map(shellQuote).join(' ');
   expect(r).toEqual({ ok: true, command: expected });
-  expect(r.command.startsWith("'/opt/it'\\''s/codex' 'resume' 'thread-abc'")).toBe(true);
+  expect(r.command.startsWith(`'/opt/it'\\''s/codex' '-c' 'project_doc_fallback_filenames=["CLAUDE.md"]' 'resume' 'thread-abc'`)).toBe(true);
   expect(r.command).toContain("'gpt-5'");
   expect(r.command).not.toMatch(/[\r\n]$/);
 });

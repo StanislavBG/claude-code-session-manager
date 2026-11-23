@@ -108,6 +108,21 @@ A command you personally trust is not the same as a command your whole team shou
 about. Keep personal convenience rules at User or Local scope, and save Project scope for rules
 the whole team has actually agreed on.</aside>
 
+<h3>Tool risk: a brake for work that runs while you're away</h3>
+
+<p>Permissions decide what an agent may do while you're watching. Work the Scheduler runs in the
+background has no one to ask, so Settings has one more row, <strong>Tool risk</strong>. There you
+give a tool, or a command such as <code>npm publish</code>, one of five marks:
+<code>read</code>, <code>write</code>, <code>irreversible</code>, <code>money</code>, or
+<code>public</code>.</p>
+
+<p>The last three are the brakes. A background job may not use a tool marked
+<code>irreversible</code>, <code>money</code>, or <code>public</code> unless its work order names
+that tool as cleared. An unmarked tool is allowed. On Home, Tool risk edits the marks for your whole
+machine; in a project's Claude config, it edits that project's marks, which win. A project can
+also switch on <strong>Also guard interactive sessions in this project</strong> to apply the
+same marks while you're chatting.</p>
+
 <h2>The rule of thumb: Settings is for everyone, Agents and Missions are for one job</h2>
 
 <p>Every file this chapter covers is read fresh by Claude Code before each Session starts, and

@@ -188,7 +188,10 @@ written here. A term that couldn't be verified against real source was dropped, 
 | Scheduler | The agency's work calendar — lines up work orders and runs them, including while you're away. | Scheduler |
 | Work order (PRD) | One scheduled piece of work the Scheduler runs on its own, with everything it needs to finish written down. | PRD |
 | Queue | The list of work orders that are waiting, running, or finished. | — |
-| Needs review | A work order that stopped because it has a question only you can answer. | Needs review |
+| Needs review | A work order whose run ended but didn't check out; the Scheduler repairs it itself, so nothing is needed from you. | Needs review |
+| Being fixed | The Scheduler's count of Needs review work orders it is repairing. | Being fixed |
+| Needs you | Things that really want your attention: an open question from the architect, a Session to approve, a failed work order. | Needs you |
+| Tool risk | One risk mark per tool; background work may not use an irreversible, money or public tool its work order doesn't clear. | Tool risk |
 | House rules | This manual's word for the standing instructions, settings, and permissions you give every Session. | — |
 | System Prompt | The house rules every Session reads before anything else — your standing instructions file. | CLAUDE.md |
 | Settings | Claude Code's own settings file: permissions, hooks, environment variables, the default model. | Settings |

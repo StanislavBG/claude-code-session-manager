@@ -1,9 +1,9 @@
 {
-  "version": "2.5.0",
+  "version": "2.6.0",
   "title": "The Session Manager Field Manual",
   "summary": "A warm, plain-English guide to AI agents — and to running your own small agency of them with Claude Code and Session Manager. No experience needed.",
-  "documentsAppVersion": "0.139.0",
-  "releasedAt": "2026-11-08",
+  "documentsAppVersion": "0.140.0",
+  "releasedAt": "2026-11-22",
   "chapters": [
     {
       "slug": "welcome",
@@ -56,7 +56,7 @@
     {
       "slug": "checking-the-work",
       "title": "Trust, but verify — how the work gets checked",
-      "blurb": "Checklists, tests and a dedicated checker agent — plus what to do when a job stops to ask you a question.",
+      "blurb": "Checklists, tests and a dedicated checker agent — plus how the Scheduler repairs a job that doesn't check out.",
       "part": "Meet your agency",
       "free": true,
       "file": "checking-the-work.html"

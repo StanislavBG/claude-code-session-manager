@@ -49,21 +49,28 @@ promised.</p>
 what was promised, or refuted, meaning it doesn't — with a plain reason why. Those verdicts go to
 the architect, the one who keeps track of the whole plan and decides what happens next.</p>
 
-<h2>When a work order stops to ask you something</h2>
+<h2>When a finished work order doesn't check out</h2>
 
-<p>Sometimes a dev-lead hits a fork it genuinely can't choose for you — the work order was
-unclear, or it found something that changes the plan. Rather than guess, it stops and marks the
-work order Needs review. That's a question, not a failure, and it waits for you in the Scheduler.</p>
+<p>A dev-lead never stops halfway to ask you a question. Everything a work order needs is written
+down before it starts. A step only a person can do, like a live payment, is kept out of work orders
+on purpose. If a dev-lead meets one anyway, it ends the job and reports exactly what's
+missing, instead of sitting there waiting for you.</p>
 
-<ol class="manual-steps">
-  <li>Open the work order's card and read what it's asking. The Review button takes you straight
-  to the Session that wrote it, where the question is waiting.</li>
-  <li>Answer it there — clear up what was unclear, or point out what changed — then press Retry to
-  send the work order back into the queue with your answer in hand.</li>
-  <li>Or set it aside. If you leave it, your agency won't wait on you forever: it will eventually
-  skip that one work order on its own, so anything else in the queue that isn't waiting on it can
-  keep moving.</li>
+<p>Sometimes a run ends that way, or the final checks don't agree with the dev-lead's report. Then the
+Scheduler marks the work order Needs review. That is not a question for you. It is the Scheduler's
+own repair state, and it works through the fix itself:</p>
+
+<ol class="manual-flow">
+  <li><strong>The Scheduler</strong> retries the fold-in, or asks the same dev-lead to finish its
+  work.</li>
+  <li><strong>A fresh agent</strong> looks for the cause and writes a small fix work order.</li>
+  <li><strong>Still stuck?</strong> The work order goes back in the queue up to two more times.</li>
+  <li><strong>Out of tries,</strong> it is skipped, and its Session gets one short message.</li>
 </ol>
+
+<p>Want to look anyway? In the Scheduler, the Review button under the work order opens the
+Session that wrote it. Questions that really need you come from the architect, in that Session's
+chat. Those questions show up in the Needs you list on Home.</p>
 
 <aside class="manual-warning"><strong>Watch out:</strong> "the tests pass" is not the same as
 "done." Tests only check what someone thought to write a test for. A work order can pass every
@@ -91,8 +98,8 @@ deciding the job is actually done.</p>
     written to catch.</li>
     <li>The validator reviews a whole plan once it's finished, re-running each checklist itself
     and handing back a verified or refuted verdict per work order.</li>
-    <li>Needs review is a question, not a failure — read it, fix and retry, or set it aside and let
-    your agency move on. Either way, you're the one who decides a job is truly done.</li>
+    <li>Needs review is the Scheduler repairing its own work, not a question for you. Real questions
+    come from the architect in chat — and you're still the one who decides a job is truly done.</li>
   </ul>
 </div>
 

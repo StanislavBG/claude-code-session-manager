@@ -265,6 +265,9 @@ Rules:
       to decide. Why: a second miss on the same criterion means the plan is wrong, and another
       wave would repeat it. A Not validated list means validate exactly those PRDs here. All
       `VERIFIED` with nothing open means Done: write the final report.
+   3. **A `PRECONDITION HOLD` notice** is not a park and not a fix-wave trigger. Do nothing — no
+      reset, no edit, no fix PRD; the scheduler re-checks the preflight on its own. State the
+      missing precondition in the report. Why: only a person can supply it.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, including each PRD an earlier
    validator refuted, no Critical or Important finding is open, and its record exists in the main checkout's
    `session-manager-operations/plan-records/<epic-id>/`.

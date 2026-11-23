@@ -234,6 +234,17 @@ recorded at `gateShadow.baseline`. Kill switch `SM_BASELINE_GATE_AUTHORITY_DISAB
 
 **No `needs_human` verdict.** It no longer exists (a legacy `NEEDS_HUMAN` line reads as FAIL); every park goes through the same ladder.
 
+## 4b. Preflight holds — waiting on a person, not a park
+
+A PRD's optional `preflight` (authoring rules: [`PRD_AUTHORING.md` §6](../../src/main/templates/PRD_AUTHORING.md#preflight); runner: `lib/scheduler/preflightCheck.cjs`) names an external precondition a person controls.
+
+- **Dispatch hold.** Before launch, `runPreflightGate` (`scheduler.cjs`) runs it (no shell, 60 s cap). Red → the row stays `pending` with a `preflightHold` (`since`, `attempts`, `nextAt`, `lastExit`, `lastOutputTail`, `failText`) and `heldReason` `waiting on precondition: <cmd> exited <code> — re-check at <nextAt>`; `computePreflightHolds` keeps the picker off it, and dependents see it as a blocking dep. Audit `preflight_hold`; green clears both fields, audit `preflight_pass`.
+- **Backoff.** Re-checks at 10, 20, 40, 60 min, then hourly (`preflightDelayMs`). No model call while held.
+- **Reroute.** A run that ends `SCHEDULER_VERDICT: FAIL` re-checks its preflight once. Red → back to `pending` with a fresh hold (source `scheduler:preflight-hold`, audit `preflight_hold` with `after: 'sentinel_fail'`) instead of a `needs_review` park, so the [§4 ladder](#4-the-needs_review-recovery-ladder) and auto-fix never run on it. Green or a check error → the ordinary park.
+- **Reset = re-check now.** `resetJobFields` drops `preflightHold` and a `waiting on precondition:` `heldReason`, so the next tick re-runs the preflight.
+- **One immediate notice.** Each hold (keyed by slug + `since`) sends one informational Epic message, `notice: 'preflight-hold'`, starting `PRECONDITION HOLD:` — what is missing, the command, the held PRDs, the next re-check. It asks nothing and is not a grouped needs_review notice.
+- **Starvation naming and suppression.** `project_starved` warnings, audits and escalations name the root blocker (`rootBlockingSlug`/`rootBlockingStatus`/`rootBlockingReason`, from `starvation.rootBlockersForProject`). When every pending row is preflight-held or waits on a preflight-held root (`starveRootFor` → `knownWait`), the project is waiting, not starved: no warning, audit or escalation.
+
 ## 4a. Validation messaging into the Epic
 
 The scheduler never prompts the planning session per finished PRD. Instead:

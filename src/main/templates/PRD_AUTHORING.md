@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v23 -->
+<!-- PRD_AUTHORING.md v24 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -115,6 +115,13 @@ Both fields are required in every `scheduler_create_prd` call.
 1. 1–50 repo-relative paths. A folder ends with `/`.
 2. No absolute paths, no `~` at the start, no `..` or `.` segments, no `*` or `?`, no `\` or backticks, no leading `-`. Use `/` between folders.
 3. The scheduler never runs two PRDs with overlapping files at once (held as `files-overlap`); `dependsOn` is for real output or order dependencies only.
+
+### preflight
+
+Optional. One read-only command in gate syntax (every §6 gate rule applies; one line, at most 500 chars, never `none`), run without a shell for at most 60 s. Exit 0 = the precondition holds.
+Rule: declare it on a PRD whose work needs an external state a person controls — a store agreement, billing, DNS, OAuth consent, a device. While it exits non-zero the scheduler holds the PRD `pending` and re-checks on its own; the hold is described in Session Manager's `session-manager-operations/architecture/scheduler-operations.md` §4b.
+Rule: the executor still ends `SCHEDULER_VERDICT: FAIL` naming what is missing when it meets the missing state; a red preflight at that point reroutes the run to the hold instead of a park.
+Why: a human-only blocker used to park `needs_review` and spend the recovery ladder on work no model can do.
 
 ### What the API writes
 
@@ -240,6 +247,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§11 End green:** the gate runs last; any intentional failure runs early and is captured.
 - [ ] **Gate baseline:** every gate command ran green once at HEAD in the main checkout; a red suite is scoped to the PRD's own test files and the PRD notes say why. Why: a gate already red on base parks as `sentinel_fail`.
 - [ ] **No human-only gates:** no gate or criterion needs a human or the passage of time (cron install, live post wait, live payment, dashboard action); keep them out of the PRD at authoring time; an executor that meets one ends `SCHEDULER_VERDICT: FAIL` naming what is missing. Why: no executor can pass them.
+- [ ] **§6 Preflight:** a PRD whose work needs an external state a person controls declares a read-only `preflight` (exit 0 = precondition holds); every other PRD omits it.
 - [ ] **No interactive AC:** no criterion asks to launch the app, click through, capture a screenshot, run under xvfb or open a browser. Why: a headless run stalls on a rendered frame and is SIGTERM'd uncommitted; recommend manual visual confirmation in the report instead.
 - [ ] **Contract consumers gated:** a PRD that changes a return shape, IPC payload or remote contract greps `tests/` (and `src/**/__tests__`) for every spec using it and puts each in its gate and files. Why: scoped gates let other specs go red unseen until the release gate.
 - [ ] **Gate purity:** a gate command must not create or modify tracked files; outputs go to the per-gate TMPDIR or a gitignored path. Why: a dirtied tree fails the clean-tree check.

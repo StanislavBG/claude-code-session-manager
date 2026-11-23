@@ -115,6 +115,12 @@ const PromptSessionSchema = z.object({
   // Unknown ids are kept (bounded strings, never an enum) so dropInvalidSessions (ipcSchemas.cjs)
   // never drops a row for a pack id a newer build ships and this one does not know.
   packs: z.array(z.string().min(1).max(64)).max(16).optional(),
+  // Content id (sha256 hex) of the AgentSnapshot (claude/agentSnapshot.cjs) frozen at mint:
+  // every chat turn builds its persona body + model from it, so a later persona edit reaches
+  // only new Epics. Absent on Epics minted before pinning (they keep the live persona read)
+  // and on non-Claude / agentType-less Epics. A bounded string, not a hex regex, so
+  // dropInvalidSessions (ipcSchemas.cjs) never drops a whole row over it.
+  agentSnapshotId: z.string().min(1).max(128).optional(),
   // true = this Epic adopted an existing CLI session as its claudeSessionId
   // (ensureEpic's restoreSessionId) instead of a fresh one; absent otherwise.
   // Only true is ever written: a false would fail here, and dropInvalidSessions

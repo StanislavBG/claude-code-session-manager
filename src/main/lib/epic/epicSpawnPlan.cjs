@@ -23,6 +23,14 @@
  * breaker: once a session is found unreachable, later requests are refused after ONE stat (is the
  * worktree dir still missing?) without re-running the restore git commands.
  *
+ * Persona pin: an ok plan also carries `persona` — the body + `--model` this turn runs with. An
+ * Epic with `agentSnapshotId` (stamped at mint, epicMint.cjs) builds them from that immutable
+ * AgentSnapshot (claude/agentSnapshot.cjs), so a persona edit after mint never reaches it; an Epic
+ * without one (minted before pinning, agentType-less, or whose snapshot file is gone/tampered)
+ * keeps today's live read (agentModelResolve.cjs's resolveEpicModel, no per-turn body). Model
+ * precedence with a snapshot: the Epic's own `model` override, then the snapshot's model, then
+ * Settings / 'sonnet' — never left unpinned. Non-Claude agent CLIs get `persona: null`.
+ *
  * Ops-root hazard (epicSpawnCwd.cjs): `execCwd` returned here is for the spawn cwd option ONLY;
  * ops reads/writes keep using the project `cwd` (projectRootOf / resolveProjectRoot).
  */
@@ -36,6 +44,51 @@ const { readActiveIndex } = require('./epicMint.cjs');
 const { resolveEpicSpawnCwd } = require('./epicSpawnCwd.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 const { isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
+
+/**
+ * The persona (body + model) this turn runs with — see the header's "Persona pin".
+ * @returns {{ source: 'snapshot'|'live', agentSnapshotId: string|null, body: string|null, model: string, snapshotMissing?: true } | null}
+ */
+function resolveTurnPersona(cwd, claudeSessionId, epic, deps) {
+  if (epic && isNonClaudeAgentCli(epic.agentCli)) return null;
+  const modelResolve = require('../claude/agentModelResolve.cjs');
+  const live = () => (deps.resolveEpicModel || modelResolve.resolveEpicModel)({ cwd, claudeSessionId, deps });
+  const id = epic && typeof epic.agentSnapshotId === 'string' && epic.agentSnapshotId ? epic.agentSnapshotId : null;
+  if (!id) return { source: 'live', agentSnapshotId: null, body: null, model: live() };
+  const readSnap = deps.readAgentSnapshotSync || require('../claude/agentSnapshot.cjs').readAgentSnapshotSync;
+  let snap = null;
+  try { snap = readSnap(cwd, id); } catch { snap = null; }
+  if (!snap) return { source: 'live', agentSnapshotId: id, body: null, model: live(), snapshotMissing: true };
+  const override = modelResolve.epicOverrideValue(epic, 'model');
+  let model = override && override !== 'inherit' ? override : null;
+  if (!model && typeof snap.model === 'string' && snap.model && snap.model !== 'inherit') model = snap.model;
+  if (!model) {
+    try { model = require('../claude/modelCatalog.cjs').readSettingsModel(cwd, deps) || null; } catch { model = null; }
+  }
+  return {
+    source: 'snapshot',
+    agentSnapshotId: id,
+    body: typeof snap.body === 'string' && snap.body ? snap.body : null,
+    model: model || modelResolve.FALLBACK_MODEL,
+  };
+}
+
+/**
+ * The `--model` an Epic turn launches with — the ONE resolver both views call (Chat:
+ * chatRunner.cjs; Terminal: agents:resolve-epic-model in agentsIpc.cjs), so a pinned Epic's two
+ * views agree. Pinned snapshot when present, else agentModelResolve.cjs's live resolveEpicModel.
+ * Never throws; never returns an empty model.
+ * @param {{ cwd: string, claudeSessionId: string, deps?: object }} opts
+ * @returns {string}
+ */
+function resolveEpicTurnModel({ cwd, claudeSessionId, deps = {} } = /** @type {any} */ ({})) {
+  const modelResolve = require('../claude/agentModelResolve.cjs');
+  try {
+    const persona = resolveTurnPersona(cwd, claudeSessionId, findEpic(cwd, claudeSessionId, deps), deps);
+    if (persona && persona.model) return persona.model;
+  } catch { /* fall through to the live read */ }
+  return modelResolve.resolveEpicModel({ cwd, claudeSessionId, deps });
+}
 
 /** Map<sessionId, { dir, message }> — sessions found unreachable; valid while `dir` stays missing. */
 const unreachable = new Map();
@@ -75,7 +128,7 @@ function findEpic(cwd, claudeSessionId, deps) {
 
 /**
  * @param {{ cwd: string, claudeSessionId: string, fallbackResume?: boolean, deps?: object }} opts
- * @returns {{ ok: true, execCwd: string, useResume: boolean, transcriptPath: string|null }
+ * @returns {{ ok: true, execCwd: string, useResume: boolean, transcriptPath: string|null, persona: ReturnType<typeof resolveTurnPersona> }
  *   | { ok: false, code: 'epic_closed'|'session_unreachable'|'spawn_cwd_missing', message: string }}
  */
 function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, worktreeDirHint, deps = {} } = {}) {
@@ -104,7 +157,7 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, worktreeD
 
   // Turn-1 hint: no transcript anywhere yet and the freshly minted worktree exists → spawn there.
   if ((!resolved || !resolved.existsAnywhere) && typeof worktreeDirHint === 'string' && worktreeDirHint && isDir(worktreeDirHint, statSync)) {
-    return { ok: true, execCwd: worktreeDirHint, useResume: false, transcriptPath: null };
+    return { ok: true, execCwd: worktreeDirHint, useResume: false, transcriptPath: null, persona: resolveTurnPersona(cwd, claudeSessionId, epic, deps) };
   }
 
   let execCwd = (deps.resolveSpawnCwd || resolveEpicSpawnCwd)({ cwd, claudeSessionId, deps: { restore: true, readActiveIndex: deps.readActiveIndex, statSync: deps.statSync, restoreWorktree: deps.restoreWorktree } });
@@ -167,7 +220,7 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, worktreeD
     };
   }
 
-  return { ok: true, execCwd, useResume, transcriptPath: resolved?.path ?? null };
+  return { ok: true, execCwd, useResume, transcriptPath: resolved?.path ?? null, persona: resolveTurnPersona(cwd, claudeSessionId, epic, deps) };
 }
 
-module.exports = { planEpicSpawn, __resetForTests };
+module.exports = { planEpicSpawn, resolveTurnPersona, resolveEpicTurnModel, __resetForTests };

@@ -326,17 +326,24 @@ test('minting with a valid (globally-resolvable) agentType succeeds via an injec
   const minted = await mint(cwd, {
     goalText: 'good persona ref',
     agentType: 'architect',
-  }, { personaExists: () => true });
+  }, {
+    personaExists: () => true,
+    // The mint also pins an AgentSnapshot; feed it the same "globally-resolvable" persona.
+    snapshotDeps: { getPersonaBody: async () => ({ path: '/global/architect.md', fm: { name: 'architect', model: 'opus' }, body: 'Architect body' }) },
+  });
 
   expect(minted.created).toBe(true);
   expect(readActiveIndex(cwd).sessions[minted.epicId].agentType).toBe('architect');
+  expect(readActiveIndex(cwd).sessions[minted.epicId].agentSnapshotId).toMatch(/^[0-9a-f]{64}$/);
 });
 
 test('minting with a project-overlay-only persona succeeds', async () => {
   const cwd = await mkCwd();
   const overlayDir = path.join(cwd, '.claude', 'agents');
   fs.mkdirSync(overlayDir, { recursive: true });
-  fs.writeFileSync(path.join(overlayDir, 'overlay-only.md'), '---\nname: overlay-only\n---\nbody\n');
+  fs.writeFileSync(path.join(overlayDir, 'overlay-only.md'), '---\nname: overlay-only\nmodel: sonnet\n---\nbody\n');
+  // Opened as a TAB in the app — makes the overlay readable to the snapshot's persona read.
+  require('../config.cjs').addAllowedRoot(cwd);
 
   const minted = await mint(cwd, { goalText: 'overlay persona ref', agentType: 'overlay-only' });
 

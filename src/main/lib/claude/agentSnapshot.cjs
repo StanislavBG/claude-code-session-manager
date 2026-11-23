@@ -141,10 +141,27 @@ async function readAgentSnapshot(cwd, id) {
   return snapshotId(parsed) === id ? parsed : null;
 }
 
+/**
+ * Sync twin of readAgentSnapshot, same rules (missing/unparsable/tampered → null).
+ * For epicSpawnPlan.cjs's planEpicSpawn, which must stay synchronous (chatRunner.cjs
+ * registers its cancel handle in the same tick — see agentModelResolve.cjs's
+ * readOverlayAwarePersona note).
+ * @returns {object|null}
+ */
+function readAgentSnapshotSync(cwd, id) {
+  let file;
+  try { file = snapshotFile(cwd, id); } catch { return null; }
+  let parsed;
+  try { parsed = JSON.parse(require('node:fs').readFileSync(file, 'utf8')); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return snapshotId(parsed) === id ? parsed : null;
+}
+
 module.exports = {
   buildAgentSnapshot,
   writeAgentSnapshot,
   readAgentSnapshot,
+  readAgentSnapshotSync,
   snapshotId,
   canonicalJson,
   mcpServersFromTools,

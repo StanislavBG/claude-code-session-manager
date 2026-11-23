@@ -63,9 +63,10 @@ function registerAgentsHandlers({ ipcMain, getWindow }) {
   // (agentModelResolve.cjs's resolveEpicModel), reached here so Terminal's
   // launch (EpicTerminalPane.tsx, a renderer module with no fs access) agrees
   // with Chat by calling the identical function rather than a second one that
-  // is merely supposed to. Never throws (resolveEpicModel's own contract).
+  // is merely supposed to. Pinned Epics (agentSnapshotId) read the model from
+  // their AgentSnapshot (epicSpawnPlan.cjs's resolveEpicTurnModel). Never throws.
   ipcMain.handle('agents:resolve-epic-model', validated(schemas.agentsResolveEpicModel, (payload) =>
-    agentModelResolve.resolveEpicModel(payload)));
+    require('./lib/epic/epicSpawnPlan.cjs').resolveEpicTurnModel(payload)));
   // Effort twin of the above (agentEffortResolve.cjs): Terminal appends
   // `--effort <level>` only when `effort` is non-null. Never throws.
   ipcMain.handle('agents:resolve-epic-effort', validated(schemas.agentsResolveEpicEffort, (payload) =>

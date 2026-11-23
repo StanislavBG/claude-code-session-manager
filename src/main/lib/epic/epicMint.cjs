@@ -319,7 +319,7 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
   // against the tab's absolute path, so a relative value silently produces an
   // Epic that exists on disk but never renders in any project's queue.
   cwd = path.resolve(cwd);
-  return withPathLock(activeIndexPath(cwd), () => {
+  return withPathLock(activeIndexPath(cwd), async () => {
     // Agent-CLI rules run first — a bad id or combination throws before
     // anything (index, mirror, audit, PRD dir) is written.
     const cliFields = agentCliMintFields(agentCli, agentCliModel, restoreSessionId, packs);
@@ -404,6 +404,26 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       }
     }
 
+    // AGENT SNAPSHOT PIN (Managed Agents' versioned agent): freeze the persona this Epic runs
+    // as — body, model, effort, tools, packs — so every later chat turn builds from it
+    // (epicSpawnPlan.cjs) and a persona edit reaches only NEW Epics. Claude Code Epics with an
+    // agentType only: an agentType-less Epic has no persona to pin, and a non-Claude agent CLI
+    // never loads a persona. A refusal (persona_missing / persona_invalid) fails the mint.
+    let pinned = null;
+    if (agentType && !cliFields.agentCli) {
+      const build = deps.buildAgentSnapshot || require('../claude/agentSnapshot.cjs').buildAgentSnapshot;
+      const built = await build({ cwd, agentType, packs: cliFields.packs || [], deps: deps.snapshotDeps || {} });
+      if (built.refusal) {
+        const reason = `agentType '${agentType}' cannot be pinned as an AgentSnapshot `
+          + `(${built.refusal.code}): ${built.refusal.detail}`;
+        appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason, code: built.refusal.code });
+        const err = new Error(`ensureEpic: ${reason}`);
+        /** @type {any} */ (err).code = built.refusal.code;
+        throw err;
+      }
+      pinned = built;
+    }
+
     const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
     const session = {
@@ -445,6 +465,8 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       ...(developLoop === false ? { developLoop: false } : {}),
       // Agent-CLI fields: agentCli/agentCliModel (non-Claude only) or packs (Claude only); absent = legacy shape.
       ...cliFields,
+      // The pinned AgentSnapshot's content id (see AGENT SNAPSHOT PIN above); absent = live read.
+      ...(pinned ? { agentSnapshotId: pinned.id } : {}),
     };
 
     // Validate the constructed record against the canonical PromptSession
@@ -462,6 +484,13 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
         reason: `constructed session object failed PromptSession schema validation: ${err.message}`,
       });
       throw err;
+    }
+
+    // Write the snapshot only once the record validated — a refused mint leaves no file.
+    // Write-once and content-addressed, so an identical persona shares one file.
+    if (pinned) {
+      const write = deps.writeAgentSnapshot || require('../claude/agentSnapshot.cjs').writeAgentSnapshot;
+      await write(cwd, pinned.snapshot);
     }
 
     const firstEvent = {

@@ -59,7 +59,7 @@ async function mkProject({ managed = true } = {}) {
   // hermetic instead of depending on the host's ~/.claude/agents/.
   const agentsDir = path.join(cwd, '.claude', 'agents');
   fs.mkdirSync(agentsDir, { recursive: true });
-  fs.writeFileSync(path.join(agentsDir, 'architect.md'), '---\nname: architect\n---\nFixture persona for tests.\n');
+  fs.writeFileSync(path.join(agentsDir, 'architect.md'), '---\nname: architect\nmodel: sonnet\n---\nFixture persona for tests.\n');
   return fs.realpathSync(cwd);
 }
 
@@ -506,7 +506,7 @@ test('denies auto-start when only the wider prompt (not the quote) names the tar
   const to = path.join(root, 'Burrow');
   fs.mkdirSync(path.join(to, 'session-manager-operations'), { recursive: true });
   fs.mkdirSync(path.join(to, '.claude', 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(to, '.claude', 'agents', 'architect.md'), '---\nname: architect\n---\nFixture persona for tests.\n');
+  fs.writeFileSync(path.join(to, '.claude', 'agents', 'architect.md'), '---\nname: architect\nmodel: sonnet\n---\nFixture persona for tests.\n');
   config.addAllowedRoot(to);
   const from = await mkProject();
   humanPromptLedger._resetForTests();

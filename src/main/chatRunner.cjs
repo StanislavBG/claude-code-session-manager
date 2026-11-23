@@ -53,7 +53,7 @@ const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs'
 // Called through the module object (not destructured) so tests can inject a catalog.
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
-const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
+const { planEpicSpawn, resolveEpicTurnModel } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const logs = require('./logs.cjs');
 const chatInflight = require('./lib/chatInflight.cjs');
@@ -639,7 +639,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // throws; falls back to the hardcoded 'sonnet' literal when there's no
     // Epic, no agentType, or the persona has no model/'inherit' — --model
     // must never be left unpinned (CLAUDE.md model-pinning rule).
-    const model = isAgentCli ? null : agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
+    // A pinned Epic (agentSnapshotId, epicSpawnPlan.cjs's resolveEpicTurnModel) takes its model
+    // from the AgentSnapshot frozen at mint, so a later persona edit never reaches it.
+    const model = isAgentCli ? null : resolveEpicTurnModel({ cwd, claudeSessionId: sessionId });
     // Persona `effort:` (same overlay-aware persona, agentEffortResolve.cjs);
     // effortArgs() yields NO tokens for inherit/absent/dangling.
     const effortFlags = isAgentCli ? [] : effortArgs(resolveEpicEffort({ cwd, claudeSessionId: sessionId }).effort);

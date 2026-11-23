@@ -37,7 +37,7 @@ async function mkProject(prefix) {
   fs.mkdirSync(path.join(cwd, 'session-manager-operations'), { recursive: true });
   // ensureEpic checks the persona file exists; the fallback mints as 'architect'.
   fs.mkdirSync(path.join(cwd, '.claude', 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(cwd, '.claude', 'agents', 'architect.md'), '---\nname: architect\n---\nFixture persona.\n');
+  fs.writeFileSync(path.join(cwd, '.claude', 'agents', 'architect.md'), '---\nname: architect\nmodel: sonnet\n---\nFixture persona.\n');
   return fs.realpathSync(cwd);
 }
 

@@ -199,7 +199,7 @@ test('worktreeDirHint: turn 1 (no transcript) spawns in the hinted worktree, no 
   const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-hint-'));
   try {
     const plan = planEpicSpawn({ cwd: PROJECT, claudeSessionId: SID, worktreeDirHint: wt, deps: { homeDir: home, readActiveIndex: () => ({ sessions: {} }) } });
-    expect(plan).toEqual({ ok: true, execCwd: wt, useResume: false, transcriptPath: null });
+    expect(plan).toMatchObject({ ok: true, execCwd: wt, useResume: false, transcriptPath: null, persona: { source: 'live', agentSnapshotId: null, body: null } });
   } finally { fs.rmSync(wt, { recursive: true, force: true }); }
 });
 

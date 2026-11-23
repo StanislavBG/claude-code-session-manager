@@ -47,6 +47,8 @@ const CONTRACT = deepFreeze({
     { method: 'POST', path: '/admin/macros/run' },
     { method: 'GET', path: '/admin/epics' },
     { method: 'GET', path: '/admin/epic' },
+    // GET /admin/events: no epicId → audit-log rows { events, next, more, gap } (eventKinds below);
+    // ?epicId=<id>[&cwd][&after=<seq>][&kinds][&limit≤500] → that Epic's event-log replay { events, cursor, hasMore }.
     { method: 'GET', path: '/admin/events' },
     { method: 'GET', path: '/admin/agents' },
     { method: 'POST', path: '/admin/needs-you' },

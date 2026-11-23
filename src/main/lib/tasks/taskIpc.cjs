@@ -5,29 +5,24 @@
  *
  *   tasks:list        { cwd, ...listTasks filters } → { ok, tasks, total, hasMore, skippedLines }
  *   tasks:get         { cwd, id }                   → { ok, task }   (task null when absent)
- *   tasks:get-switch  { cwd }                       → { ok, enabled }
+ *   tasks:get-switch  { cwd }                       → { ok, enabled, changedAt, by }
  *   tasks:set-switch  { cwd, enabled }              → { ok, enabled, changedAt }
  *
- * tasks:set-switch is the ONLY caller of taskSwitch.setTaskSwitch — the switch
- * is a human decision made in the renderer (see taskSwitch.cjs). After every
- * write, and once at registration, the held interactive slot in sessionSlots
- * is set to anyTaskSwitchOn(), so it is held exactly while some project has
- * Tasks on. Payloads are validated by strict zod schemas (ipcSchemas.cjs);
+ * tasks:set-switch is the human-click writer of taskSwitch.setTaskSwitch and
+ * records by { via: 'ui' } (the other sanctioned writer is the agent route —
+ * see taskSwitch.cjs). After every write, and once at registration,
+ * taskSwitch.syncInteractiveReserve() holds the interactive slot exactly while
+ * some project has Tasks on. Payloads are validated by strict zod schemas (ipcSchemas.cjs);
  * an invalid payload rejects the invoke.
  */
 
 const { schemas, validated } = require('../../ipcSchemas.cjs');
 const taskLedger = require('./taskLedger.cjs');
 const taskSwitch = require('./taskSwitch.cjs');
-const sessionSlots = require('../scheduler/sessionSlots.cjs');
 const auditLog = require('../telemetry/auditLog.cjs');
 
 function errMsg(err) {
   return err && err.message ? err.message : String(err);
-}
-
-function syncInteractiveReserve() {
-  return sessionSlots.setInteractiveReserve(taskSwitch.anyTaskSwitchOn());
 }
 
 /**
@@ -56,7 +51,9 @@ function registerTaskIpc(opts = {}) {
 
   ipcMain.handle('tasks:get-switch', validated(schemas.TaskSwitchQuery, async ({ cwd }) => {
     try {
-      return { ok: true, enabled: taskSwitch.isTaskSwitchOn(cwd) };
+      const entry = taskSwitch.getTaskSwitch(cwd);
+      if (!entry) return { ok: false, error: 'tasks:get-switch: invalid cwd' };
+      return { ok: true, enabled: entry.enabled, changedAt: entry.changedAt, by: entry.by };
     } catch (err) {
       return { ok: false, error: errMsg(err) };
     }
@@ -64,17 +61,17 @@ function registerTaskIpc(opts = {}) {
 
   ipcMain.handle('tasks:set-switch', validated(schemas.TaskSwitchSet, async ({ cwd, enabled }) => {
     try {
-      const saved = taskSwitch.setTaskSwitch(cwd, enabled);
-      auditLog.appendAuditEvent('task_switch_changed', { cwd: saved.cwd, enabled: saved.enabled });
+      const saved = taskSwitch.setTaskSwitch(cwd, enabled, { via: 'ui' });
+      auditLog.appendAuditEvent('task_switch_changed', { cwd: saved.cwd, enabled: saved.enabled, via: 'ui' });
       return { ok: true, enabled: saved.enabled, changedAt: saved.changedAt };
     } catch (err) {
       return { ok: false, error: errMsg(err) };
     } finally {
-      syncInteractiveReserve();
+      taskSwitch.syncInteractiveReserve();
     }
   }));
 
-  syncInteractiveReserve();
+  taskSwitch.syncInteractiveReserve();
 }
 
 module.exports = { registerTaskIpc };

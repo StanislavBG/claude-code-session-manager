@@ -85,10 +85,19 @@ test('tasks:get returns the task, or task:null when absent', async () => {
   expect(await invoke('tasks:get', { cwd, id: 'nope' })).toEqual({ ok: true, task: null });
 });
 
-test('tasks:get-switch reads the switch', async () => {
-  expect(await invoke('tasks:get-switch', { cwd })).toEqual({ ok: true, enabled: false });
-  taskSwitch.setTaskSwitch(cwd, true);
-  expect(await invoke('tasks:get-switch', { cwd })).toEqual({ ok: true, enabled: true });
+test('tasks:get-switch reads the switch with changedAt + by', async () => {
+  expect(await invoke('tasks:get-switch', { cwd })).toEqual({ ok: true, enabled: false, changedAt: null, by: null });
+  const saved = taskSwitch.setTaskSwitch(cwd, true, { via: 'ui' });
+  expect(await invoke('tasks:get-switch', { cwd })).toEqual({ ok: true, enabled: true, changedAt: saved.changedAt, by: { via: 'ui' } });
+  const agentBy = { via: 'agent', claudeSessionId: 's-1', quote: 'turn it on', promptAt: '2026-11-23T10:00:00.000Z' };
+  const saved2 = taskSwitch.setTaskSwitch(cwd, false, agentBy);
+  expect(await invoke('tasks:get-switch', { cwd })).toEqual({ ok: true, enabled: false, changedAt: saved2.changedAt, by: agentBy });
+});
+
+test('tasks:get-switch reads a legacy entry without by as unknown', async () => {
+  const { taskSwitchesPath } = require('../../scheduler/schedulerPaths.cjs');
+  fs.writeFileSync(taskSwitchesPath(), JSON.stringify({ v: 1, projects: { [path.resolve(cwd)]: { enabled: true, changedAt: '2026-11-20T00:00:00.000Z' } } }));
+  expect(await invoke('tasks:get-switch', { cwd })).toEqual({ ok: true, enabled: true, changedAt: '2026-11-20T00:00:00.000Z', by: { via: 'unknown' } });
 });
 
 test('tasks:set-switch writes, audits, and updates the reserve after every call', async () => {
@@ -96,13 +105,14 @@ test('tasks:set-switch writes, audits, and updates the reserve after every call'
   expect(on.ok).toBe(true);
   expect(on.enabled).toBe(true);
   expect(taskSwitch.isTaskSwitchOn(cwd)).toBe(true);
-  expect(auditSpy).toHaveBeenLastCalledWith('task_switch_changed', { cwd: path.resolve(cwd), enabled: true });
+  expect(taskSwitch.getTaskSwitch(cwd).by).toEqual({ via: 'ui' });
+  expect(auditSpy).toHaveBeenLastCalledWith('task_switch_changed', { cwd: path.resolve(cwd), enabled: true, via: 'ui' });
   expect(reserveSpy).toHaveBeenCalledTimes(2);
   expect(reserveSpy).toHaveBeenLastCalledWith(true);
 
   const off = await invoke('tasks:set-switch', { cwd, enabled: false });
   expect(off.enabled).toBe(false);
-  expect(auditSpy).toHaveBeenLastCalledWith('task_switch_changed', { cwd: path.resolve(cwd), enabled: false });
+  expect(auditSpy).toHaveBeenLastCalledWith('task_switch_changed', { cwd: path.resolve(cwd), enabled: false, via: 'ui' });
   expect(auditSpy).toHaveBeenCalledTimes(2);
   expect(reserveSpy).toHaveBeenCalledTimes(3);
   expect(reserveSpy).toHaveBeenLastCalledWith(false);

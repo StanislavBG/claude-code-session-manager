@@ -1553,8 +1553,14 @@ export type TaskGetResult =
   | { ok: true; task: TaskDetail | null }
   | { ok: false; error: string };
 
+/** Who made the last change to a project's 'Scripts may run Tasks' switch (taskSwitch.cjs). */
+export type TaskSwitchBy =
+  | { via: 'ui' }
+  | { via: 'agent'; claudeSessionId: string; quote: string; promptAt: string }
+  | { via: 'unknown' };
+
 export type TaskGetSwitchResult =
-  | { ok: true; enabled: boolean }
+  | { ok: true; enabled: boolean; changedAt?: string | null; by?: TaskSwitchBy | null }
   | { ok: false; error: string };
 
 export type TaskSetSwitchResult =

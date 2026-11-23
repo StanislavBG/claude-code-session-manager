@@ -276,6 +276,52 @@ describe('runToolJob', () => {
   });
 });
 
+describe('runToolJob — Demo Video review stage', () => {
+  it('a reviewStage press for builtin-demo-video creates a review-stage PRD and records dispatch.json', async () => {
+    const recordDispatch = vi.fn(async () => ({ ok: true }));
+    const createPrd = vi.fn(async () => ({ ok: true }));
+    const { handlers } = setup({ createPrd, videoReview: { recordDispatch } });
+    const r = await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1', extraInstructions: 'Video kind: Feature', reviewStage: true });
+    expect(r).toMatchObject({ ok: true, stage: 'review' });
+    expect(createPrd).toHaveBeenCalledTimes(1);
+    const input = createPrd.mock.calls[0][0];
+    expect(input.goal).toContain('Review stage:');
+    expect(input.artifactPaths).toEqual([videoReview.REVIEW_MATERIAL_REL.split('{id}').join(r.entryId)]);
+    expect(recordDispatch).toHaveBeenCalledTimes(1);
+    expect(recordDispatch).toHaveBeenCalledWith('/p', r.entryId, {
+      macroId: 'builtin-demo-video', epicId: 'e1', slug: r.slug, stage: 'review',
+      inputValues: {}, extraInstructions: 'Video kind: Feature',
+    });
+  });
+
+  it('forwards reviewStage to dispatchMacroJob', async () => {
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { handlers } = setup({ dispatchMacroJob });
+    await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1', reviewStage: true });
+    expect(dispatchMacroJob.mock.calls[0][0].reviewStage).toBe(true);
+  });
+
+  it('a plain Demo Video press (stage null) records nothing', async () => {
+    const recordDispatch = vi.fn(async () => ({ ok: true }));
+    const createPrd = vi.fn(async () => ({ ok: true }));
+    const { handlers } = setup({ createPrd, videoReview: { recordDispatch } });
+    for (const extra of [{}, { reviewStage: false }]) {
+      const r = await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1', ...extra });
+      expect(r).toMatchObject({ ok: true, stage: null });
+    }
+    expect(createPrd).toHaveBeenCalledTimes(2);
+    expect(recordDispatch).not.toHaveBeenCalled();
+  });
+
+  it('an approved review of builtin-demo-video records the final stage', async () => {
+    const recordDispatch = vi.fn(async () => ({ ok: true }));
+    const { deps } = setup({ videoReview: { recordDispatch } });
+    const r = await runToolJob(deps, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1', extraInstructions: 'Replace entry: vid-abc', review: { decision: 'approved', at: '2026-11-23 10:00 PST' } });
+    expect(r).toMatchObject({ ok: true, stage: 'final', entryId: 'vid-abc' });
+    expect(recordDispatch).toHaveBeenCalledWith('/p', 'vid-abc', expect.objectContaining({ macroId: 'builtin-demo-video', stage: 'final' }));
+  });
+});
+
 describe('macros:job-status — library macros', () => {
   it('passes macros from listMacros and an injected listReviews', async () => {
     const macros = [tool()];

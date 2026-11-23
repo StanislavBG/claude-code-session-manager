@@ -13,9 +13,12 @@
  *         checkProjectVideoToolRunnable? (default projectVideoToolCheck.cjs) }
  *
  * runToolJob is the one dispatch path: macros:dispatch-job calls it without a
- * review decision; the review-decision IPC calls it with one. After an ok
- * dispatch of a project Video tool it records the entry's review dispatch
- * (dispatch.json), so every tool entry links to its tool, run and inputs.
+ * review decision (but with the press's reviewStage opt-in); the
+ * review-decision IPC calls it with one. After an ok dispatch of a project
+ * Video tool — or of builtin-demo-video when the result has a stage ('review'
+ * or 'final') — it records the entry's review dispatch (dispatch.json), so the
+ * review card, Approve, Ask for changes and Retry can re-dispatch it. A plain
+ * Demo Video press (stage null) records nothing.
  * Before dispatching a library 'project-video' tool with a job it runs
  * checkProjectVideoToolRunnable; a refusal returns { ok: false, error } with
  * no PRD written and the job-not-queued notice. Built-ins are never checked.
@@ -36,6 +39,8 @@ const { BUILTIN_MACROS } = require('./builtinMacros.cjs');
 const macroLibrary = require('./macroLibrary.cjs');
 
 const JOB_NOT_QUEUED_NOTICE = 'job-not-queued';
+/** The one built-in whose review-stage runs are recorded for the review card. */
+const DEMO_VIDEO_ID = 'builtin-demo-video';
 
 function noticeText(label, error) {
   return `${label} background build was not queued: ${error} — press it again in Project Home ▸ Tools to retry.`;
@@ -74,10 +79,10 @@ async function listLibraryMacros(deps) {
 }
 
 /**
- * runToolJob(deps, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review })
+ * runToolJob(deps, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review, reviewStage })
  * `cwd` must already be validated. Returns dispatchMacroJob's result.
  */
-async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review } = {}) {
+async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review, reviewStage } = {}) {
   const dispatch = deps.dispatchMacroJob || realDispatch;
   const index = deps.readActiveIndex(cwd);
   const sessions = index && index.sessions ? index.sessions : {};
@@ -101,6 +106,7 @@ async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, 
     const args = { cwd, macroId, epicId, extraInstructions, effort };
     if (inputValues !== undefined) args.inputValues = inputValues;
     if (review !== undefined) args.review = review;
+    if (reviewStage !== undefined) args.reviewStage = reviewStage;
     const dispatchDeps = {
       createPrd: deps.createPrd,
       listRows: async () => deps.loadJobs(),
@@ -119,7 +125,8 @@ async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, 
   if (result && result.ok === true && result.entryId) {
     const isBuiltin = !!findById(deps.builtins || BUILTIN_MACROS, macroId);
     const tool = isBuiltin ? null : findById(macros, macroId);
-    if (tool && !tool.builtin && macroLibrary.isProjectVideoTool(tool, cwd)) {
+    const reviewedBuiltin = isBuiltin && macroId === DEMO_VIDEO_ID && (result.stage === 'review' || result.stage === 'final');
+    if (reviewedBuiltin || (tool && !tool.builtin && macroLibrary.isProjectVideoTool(tool, cwd))) {
       await recordToolDispatch(deps, cwd, result, { macroId, epicId, inputValues, extraInstructions });
     }
   }
@@ -170,6 +177,7 @@ function registerMacroJobIpc(ipcMain, deps = {}) {
       extraInstructions: payload.extraInstructions,
       inputValues: payload.inputValues,
       effort: payload.effort,
+      reviewStage: payload.reviewStage,
     });
   });
 

@@ -3,8 +3,9 @@
 /**
  * videoReviewIpc.cjs — IPC handlers `project-videos:review-list`,
  * `project-videos:review-decide` and `project-videos:review-retry`: the human
- * review step of a project Video
- * tool entry. Renderer IPC only — no admin route or MCP tool reaches a
+ * review step of a project Video tool entry or a built-in Demo Video entry
+ * (dispatch.macroId 'builtin-demo-video') — decide/retry re-dispatch whatever
+ * macroId dispatch.json recorded, with no tool lookup of their own. Renderer IPC only — no admin route or MCP tool reaches a
  * decision, and nothing here mints an Epic.
  *
  *   approve  — starts the tool's final run in the Epic that built the entry

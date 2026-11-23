@@ -38,10 +38,10 @@ const tool = (cwd) => ({
   job: { estimateMinutes: 10, review: true },
 });
 
-async function setup({ epicStatus = 'active', createPrd, ...over } = {}) {
+async function setup({ epicStatus = 'active', createPrd, macroId = 'tool-v', ...over } = {}) {
   const cwd = await mkTmpCwd();
   expect((await videoReview.recordDispatch(cwd, ENTRY, {
-    macroId: 'tool-v', epicId: 'e1', slug: 'short-video-build-1', stage: 'review',
+    macroId, epicId: 'e1', slug: 'short-video-build-1', stage: 'review',
     inputValues: { topic: 'cats' }, extraInstructions: 'keep it short\nReplace entry: vid-old',
   })).ok).toBe(true);
   expect((await videoReview.writeMaterial(cwd, ENTRY, { text: 'script', images: [{ bytes: PNG }] })).ok).toBe(true);
@@ -308,4 +308,59 @@ test('retry schema is strict; entryId matches ENTRY_ID_RE', () => {
   expect(schemas.projectVideosReviewRetry.parse(ok)).toEqual(ok);
   expect(schemas.projectVideosReviewRetry.safeParse({ ...ok, x: 1 }).success).toBe(false);
   expect(schemas.projectVideosReviewRetry.safeParse({ ...ok, entryId: '_character' }).success).toBe(false);
+});
+
+test('builtin-demo-video entry: approve dispatches the final stage with the recorded extraInstructions and records it', async () => {
+  const { cwd, deps, decide } = await setup({ macroId: 'builtin-demo-video' });
+  const r = await decide({ decision: 'approve' });
+  expect(r).toMatchObject({ ok: true, stage: 'final' });
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+  const input = deps.createPrd.mock.calls[0][0];
+  expect(input.goal).toContain('keep it short');
+  expect(input.goal).toContain(`Replace entry: ${ENTRY}`);
+  expect(input.goal).not.toContain('vid-old');
+  expect(input.goal).toMatch(/Review: approved by the owner at /);
+  expect(input.goal).not.toContain('Review stage:');
+  expect(input.artifactPaths).toEqual([`session-manager-operations/project-pages/videos/${ENTRY}/index.html`]);
+  const rev = await videoReview.readReview(cwd, ENTRY);
+  expect(rev.status).toBe('approved');
+  expect(rev.dispatch).toMatchObject({ macroId: 'builtin-demo-video', stage: 'final', slug: r.slug });
+});
+
+test('builtin-demo-video entry: changes re-runs the review stage with the note', async () => {
+  const { cwd, deps, decide } = await setup({ macroId: 'builtin-demo-video' });
+  const r = await decide({ decision: 'changes', note: 'slower pace' });
+  expect(r).toMatchObject({ ok: true, stage: 'review' });
+  const goal = deps.createPrd.mock.calls[0][0].goal;
+  expect(goal).toContain('Review: changes requested: slower pace');
+  expect(goal).toContain('Review stage:');
+  const rev = await videoReview.readReview(cwd, ENTRY);
+  expect(rev.status).toBe('changes-requested');
+  expect(rev.dispatch).toMatchObject({ macroId: 'builtin-demo-video', stage: 'review', slug: r.slug });
+});
+
+test('builtin-demo-video entry: retry of a failed final run dispatches the final stage again', async () => {
+  const { cwd, deps, retry, finalSlug } = await approvedWithJob('failed', { macroId: 'builtin-demo-video' });
+  const r = await retry();
+  expect(r).toMatchObject({ ok: true, stage: 'final' });
+  expect(r.slug).not.toBe(finalSlug);
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+  expect(deps.createPrd.mock.calls[0][0].goal).toContain(`Replace entry: ${ENTRY}`);
+  expect(deps.archivePrd).toHaveBeenCalledWith(finalSlug, cwd);
+  expect((await videoReview.readReview(cwd, ENTRY)).dispatch).toMatchObject({ macroId: 'builtin-demo-video', stage: 'final', slug: r.slug });
+});
+
+test('builtin-demo-video entry: inactive-Epic and in-flight refusals are unchanged', async () => {
+  const a = await setup({ macroId: 'builtin-demo-video', epicStatus: 'completed' });
+  expect(await a.decide({ decision: 'approve' })).toEqual({ ok: false, error: INACTIVE_ERROR });
+  expect(a.deps.createPrd).not.toHaveBeenCalled();
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const createPrd = vi.fn(async () => { await gate; return { ok: true }; });
+  const b = await setup({ macroId: 'builtin-demo-video', createPrd });
+  const first = b.decide({ decision: 'approve' });
+  expect((await b.decide({ decision: 'approve' })).error).toBe('a decision or retry for this entry is already in progress');
+  release();
+  expect((await first).ok).toBe(true);
+  expect(createPrd).toHaveBeenCalledTimes(1);
 });

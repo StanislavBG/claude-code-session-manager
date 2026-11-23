@@ -108,6 +108,34 @@ function registerPromptSessionsRoot(p) {
   addAllowedRoot(abs.slice(0, idx));
 }
 
+/**
+ * markCompleted's status edge, main side. The renderer's markCompleted lands
+ * the completion durably by writing the Epic's archive
+ * (`prompt-sessions/<epicId>.json`, `session.status === 'completed'`) through
+ * config:write-json. That write IS the active/proposed -> completed edge, so
+ * it goes through lib/epic/epicTransitions.cjs's transitionEpic (prior status
+ * read from the mirror the archive is about to overwrite). An illegal edge
+ * throws, so the archive write is refused. A non-archive write, or any other
+ * path, passes through untouched. Required lazily: epicTransitions pulls in
+ * the audit + event logs, which config.cjs's own load must not depend on.
+ */
+function transitionEpicArchiveWrite(p, data) {
+  if (!p || typeof p !== 'string' || !data || typeof data !== 'object') return;
+  const sess = data.session;
+  if (!sess || typeof sess !== 'object' || sess.status !== 'completed') return;
+  const { parseEpicMirrorPath, readEpicMirrorStatus } = require('./lib/epic/epicStatusMirror.cjs');
+  let parsed;
+  try { parsed = parseEpicMirrorPath(expandHome(p)); } catch { parsed = null; }
+  if (!parsed) return;
+  const { transitionEpic } = require('./lib/epic/epicTransitions.cjs');
+  const prior = readEpicMirrorStatus(parsed.cwd, parsed.epicId);
+  const epic = { id: parsed.epicId, cwd: parsed.cwd, status: prior };
+  const ok = prior
+    ? transitionEpic(epic, 'completed', { reason: 'markCompleted', source: 'config:write-json:archive' })
+    : transitionEpic(epic, 'completed', { reason: 'markCompleted', source: 'config:write-json:archive-no-prior-mirror', allowAnyFrom: true });
+  if (!ok) throw new Error(`Epic ${parsed.epicId}: illegal status transition ${prior} -> completed`);
+}
+
 function validatePath(abs) {
   const real = realResolve(abs);
   for (const root of allowedRoots) {
@@ -629,6 +657,7 @@ function registerConfigHandlers() {
   // (lib/opsOwnership.cjs). Ignored outside the ops root; required inside it.
   ipcMain.handle('config:write-json', v(s.configWriteJson, ({ path: p, data, writer }) => {
     registerPromptSessionsRoot(p);
+    transitionEpicArchiveWrite(p, data);
     return writeJson(p, data, { writer });
   }));
   ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text, writer, importedBy }) => writeRendererText(p, text, { writer, importedBy })));
@@ -672,6 +701,7 @@ module.exports = {
   addAllowedRoot,
   getAllowedRoots,
   registerPromptSessionsRoot,
+  transitionEpicArchiveWrite,
   validatePath,
   validateWrite,
   realResolve,

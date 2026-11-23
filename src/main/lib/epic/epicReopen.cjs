@@ -16,6 +16,7 @@ const atomicFs = require('../util/atomicFs.cjs');
 const { hasTranscriptSource, ensureEpicTranscriptReachable } = require('./epicTranscriptRestore.cjs');
 const { restoreEpicWorktree } = require('./epicSpawnCwd.cjs');
 const { isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
+const { transitionEpic } = require('./epicTransitions.cjs');
 
 const inFlight = new Map();
 
@@ -116,7 +117,10 @@ async function doReopen({ cwd, epicId, deps }) {
     await withPathLock(indexFile, async () => {
       const index = readActiveIndex(cwd);
       delete index.tombstones[epicId];
-      reopened = { ...arch, status: 'active', completedAt: null };
+      reopened = { ...arch, id: epicId, cwd, status: 'completed', completedAt: null };
+      if (!transitionEpic(reopened, 'active', { reason: 'reopen', source: 'epicReopen' })) {
+        throw new Error('illegal status transition completed -> active');
+      }
       if (worktree) reopened.worktree = worktree;
       events = Array.isArray(archive.events) ? archive.events : [];
       index.sessions[epicId] = reopened;
@@ -129,7 +133,6 @@ async function doReopen({ cwd, epicId, deps }) {
       ...reopened,
       id: epicId,
       cwd,
-      status: 'active',
       archivedAt: null,
       indexedAt: new Date().toISOString(),
     });

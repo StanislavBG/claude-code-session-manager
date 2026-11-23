@@ -26,6 +26,7 @@
  */
 
 const fs = require('node:fs');
+const path = require('node:path');
 const { assertOpsWrite, opsPath } = require('../opsOwnership.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
 
@@ -79,6 +80,38 @@ function mirrorEpicStatus(cwd, epicId, { session = null, status = null, archived
 }
 
 /**
+ * readEpicMirrorStatus(cwd, epicId) → the status recorded in the Epic's
+ * mirror/archive file (top-level `status`, else `session.status`), or null
+ * when the file is missing, unreadable, or carries none.
+ */
+function readEpicMirrorStatus(cwd, epicId) {
+  if (!cwd || !epicId) return null;
+  let file;
+  try { file = epicMirrorPath(cwd, epicId); } catch { return null; }
+  const existing = readExistingMirror(file);
+  const st = existing.status || (existing.session && existing.session.status) || null;
+  return typeof st === 'string' ? st : null;
+}
+
+const MIRROR_MARKER = `${path.sep}session-manager-operations${path.sep}prompt-sessions${path.sep}`;
+
+/**
+ * parseEpicMirrorPath(abs) → { cwd, epicId } when `abs` is exactly an Epic's
+ * `prompt-sessions/<epicId>.json` file (no deeper subpath), else null.
+ */
+function parseEpicMirrorPath(abs) {
+  if (typeof abs !== 'string' || !abs) return null;
+  const resolved = path.resolve(abs);
+  const idx = resolved.lastIndexOf(MIRROR_MARKER);
+  if (idx === -1) return null;
+  const rest = resolved.slice(idx + MIRROR_MARKER.length);
+  if (!rest.endsWith('.json') || rest.includes(path.sep)) return null;
+  const epicId = rest.slice(0, -'.json'.length);
+  if (!epicId || epicId === 'active-index') return null;
+  return { cwd: resolved.slice(0, idx), epicId };
+}
+
+/**
  * removeEpicMirror(cwd, epicId) — best-effort delete of the mirror file, used
  * only by epicMint.cjs's removeEpic() rollback (undoing a mint whose caller
  * failed to complete its own work). Never throws — a missing file is a no-op.
@@ -90,4 +123,4 @@ function removeEpicMirror(cwd, epicId) {
   } catch { /* never existed, or already gone */ }
 }
 
-module.exports = { mirrorEpicStatus, removeEpicMirror, epicMirrorPath };
+module.exports = { mirrorEpicStatus, removeEpicMirror, epicMirrorPath, readEpicMirrorStatus, parseEpicMirrorPath };

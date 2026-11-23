@@ -130,6 +130,7 @@ const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPa
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
 const { harvestPlanRecords, saveValidatorVerdicts } = require('./lib/scheduler/planRecordHarvest.cjs');
+const prdOutcomeRecord = require('./lib/scheduler/prdOutcomeRecord.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/feedback-remote/localAdminHttp.cjs');
@@ -3501,6 +3502,31 @@ function applyOrphanOutcomeInner(job, outcome, killNote, confirmedLandedCommit, 
       job.finishedAt = now;
       delete job.runtime;
     }
+  }
+}
+
+/**
+ * Write the structured outcome record for a just-finalized job and append its
+ * outcome.recorded Epic event (lib/scheduler/prdOutcomeRecord.cjs). Commits =
+ * the landed commit plus any stranded worktree commits; files = the union of
+ * files those commits touch. No Epic id → nothing to record. Never throws.
+ * @param {any} row the finalized job row snapshot
+ * @param {{ verifyResult?: any, landedCommit?: string|null, strandedCommits?: string[], fallbackCwd?: string }} run
+ */
+async function writeJobOutcomeRecord(row, { verifyResult = null, landedCommit = null, strandedCommits = [], fallbackCwd = DEFAULT_PROJECT_CWD } = {}) {
+  const epicId = row && (row.epicId || row.sourcePromptId);
+  if (!epicId) return;
+  try {
+    const cwd = row.cwd || fallbackCwd;
+    const commits = [...new Set([landedCommit, ...strandedCommits].filter((x) => typeof x === 'string' && x))];
+    const files = await prdOutcomeRecord.listCommitFiles(cwd, commits);
+    const built = prdOutcomeRecord.buildOutcomeFromJob({ job: row, verifyResult, commits, files });
+    await prdOutcomeRecord.writeOutcomeRecord({
+      cwd, epicId, slug: row.slug, ...built,
+      extra: { runId: row.runId ?? null, exitCode: row.exitCode ?? null, terminalReason: row.terminalReason ?? null, finishedAt: row.finishedAt ?? null },
+    });
+  } catch (e) {
+    console.error('[scheduler] outcome record write failed', row && row.slug, e && e.message ? e.message : e);
   }
 }
 
@@ -8141,6 +8167,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     let investigationJobSnapshot = null;
     let investigationDeadChildSnapshot = null;
     let needsReviewRcaSnapshot = null;
+    let outcomeRecordSnapshot = null; // every completed/failed/needs_review finalize (prdOutcomeRecord.cjs)
     let resumeRecoveryJob = null;
     let resumeRecoveryTarget = null;
     let quarantineJob = null;
@@ -8474,6 +8501,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // attribute" via its Array.isArray guard, same as an empty array.
           applyLeftoverFields(s.jobs[i2], newlyDirtyAll);
 
+          if (effectiveStatus === 'completed' || effectiveStatus === 'failed' || effectiveStatus === 'needs_review') {
+            outcomeRecordSnapshot = { ...s.jobs[i2] };
+          }
           if (isNotifiableTerminalStatus(effectiveStatus)) {
             terminalNotifySnapshot = { ...s.jobs[i2] };
           }
@@ -8613,6 +8643,17 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       worktreeHeadAction: worktreeHead?.action ?? null,
       strandedCommits: (worktreeHead?.stranded || []).map((c) => c.sha),
     });
+
+    // Structured per-PRD outcome record + outcome.recorded Epic event
+    // (prdOutcomeRecord.cjs). Never blocks or fails the finalize.
+    if (outcomeRecordSnapshot) {
+      await writeJobOutcomeRecord(outcomeRecordSnapshot, {
+        verifyResult,
+        landedCommit: jobLandedCommitThisRun ?? null,
+        strandedCommits: (worktreeHead?.stranded || []).map((c) => c.sha),
+        fallbackCwd: defaultCwd,
+      });
+    }
 
     if (terminalNotifySnapshot) {
       notifyOriginatingTab(terminalNotifySnapshot).catch((e) => {

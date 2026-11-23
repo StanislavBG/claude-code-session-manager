@@ -119,6 +119,7 @@
   "toolRiskIpc": "claude",
   "pidAlive": "process",
   "planRecordHarvest": "scheduler",
+  "prdOutcomeRecord": "scheduler",
   "planRecordRetention": "scheduler",
   "preflightCheck": "scheduler",
   "planValidator": "prd",

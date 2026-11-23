@@ -9,8 +9,9 @@
 
 import { describe, it, expect } from 'vitest';
 const {
-  computeStallSummary, isCancelledRow, isNonProblemRow, classifyPendingHolds, findDependencyStalledProjects,
+  computeStallSummary, isNonProblemRow, classifyPendingHolds, findDependencyStalledProjects,
 } = require('../budget.cjs');
+const { isCancelledRow } = require('../../lib/scheduler/cancelledRow.cjs');
 
 const CWD = '/proj/self';
 const EPIC = 'epic-self';
@@ -30,6 +31,15 @@ describe('computeStallSummary: cancelled + completed rows are not problems', () 
     expect(isNonProblemRow({ status: 'failed', error: 'cancelled via admin API' })).toBe(true);
     expect(isNonProblemRow({ status: 'completed' })).toBe(true);
     expect(isNonProblemRow({ status: 'failed', error: 'exit 1' })).toBe(false);
+  });
+
+  it('a needs_review cancel is a non-problem; a plain needs_review row is not', () => {
+    expect(isNonProblemRow({ status: 'needs_review', cancelledAt: '2026-11-23T19:00:00.000Z' })).toBe(true);
+    expect(isNonProblemRow({ status: 'needs_review' })).toBe(false);
+  });
+
+  it('budget no longer re-exports isCancelledRow', () => {
+    expect(require('../budget.cjs').isCancelledRow).toBeUndefined();
   });
 
   it('a project holding only cancelled (and completed) rows is NOT stalled', () => {

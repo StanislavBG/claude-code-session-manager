@@ -16,6 +16,8 @@
  * record and Epic ordering on top of the same bare-name rule.
  */
 
+const { isCancelledRow } = require('../scheduler/cancelledRow.cjs');
+
 /** Strip one leading `NN-` prefix, if present. */
 function bareSlug(slug) {
   return String(slug ?? '').replace(/^\d+-/, '');
@@ -86,17 +88,6 @@ function findNearMatches(depSlug, candidateSlugs, limit = 3) {
     .map((entry) => entry.slug);
 }
 
-/**
- * Was this row cancelled by a human (admin API cancel), rather than failing on
- * its own? scheduler.cjs's cancel handler stamps `cancelledAt` and an error
- * starting 'cancelled via admin API'; either marker counts.
- */
-function isCancelledRow(row) {
-  if (!row) return false;
-  if (typeof row.cancelledAt === 'string' ? row.cancelledAt.length > 0 : row.cancelledAt != null) return true;
-  return typeof row.error === 'string' && row.error.startsWith('cancelled via admin API');
-}
-
 /** The Epic a queue row belongs to: `epicId`, else its `sourcePromptId`. */
 function epicOf(job) {
   return job?.epicId ?? job?.sourcePromptId ?? null;
@@ -125,7 +116,7 @@ function isPrefixedSlug(slug) {
  *      dependent's Epic                               → 'row'
  *   5. bare dep: a satisfied record with that bare name → 'satisfied'
  *   6.                                                 → 'unresolved'
- * In steps 3-4 a cancelled row (isCancelledRow) is dropped when a satisfied
+ * In steps 3-4 a cancelled row (isCancelledRow, lib/scheduler/cancelledRow.cjs) is dropped when a satisfied
  * record shares its bare name — a human-cancelled duplicate must never freeze
  * the dependents of the PRD that genuinely finished (Self, 2026-11-22: the
  * cancelled 1056-sm-contract-client froze 16 dependents of the completed
@@ -183,5 +174,5 @@ function makeDepResolver(projectJobs, satisfiedSlugs = new Set(), opts = {}) {
 }
 
 module.exports = {
-  bareSlug, resolveDepSlug, findNearMatches, isSatisfiedDepRow, isCancelledRow, epicOf, makeDepResolver,
+  bareSlug, resolveDepSlug, findNearMatches, isSatisfiedDepRow, epicOf, makeDepResolver,
 };

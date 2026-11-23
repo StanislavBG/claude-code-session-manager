@@ -16,7 +16,8 @@ const { LEGAL_TRANSITIONS } = require('../lib/scheduler/scheduleJobTransitions.c
 const {
   DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN, enqueueTimestamp, findBlockingDep,
 } = require('../lib/scheduler/schedulerBatch.cjs');
-const { makeDepResolver, isCancelledRow, isSatisfiedDepRow } = require('../lib/prd/depSlugResolve.cjs');
+const { makeDepResolver, isSatisfiedDepRow } = require('../lib/prd/depSlugResolve.cjs');
+const { isCancelledRow } = require('../lib/scheduler/cancelledRow.cjs');
 const {
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
@@ -45,15 +46,16 @@ const JOB_BUDGET_CEILING_MS = numEnvOverride('SM_JOB_BUDGET_CEILING_MINUTES', 60
 
 /**
  * isNonProblemRow(row) — a row that is NOT waiting on anyone: completed,
- * skipped, or a `failed` row a human cancelled (isCancelledRow — `cancelledAt`
- * or an error starting 'cancelled via admin API'). A cancel is a decision,
+ * skipped, or any row a human cancelled (isCancelledRow, the shared rule in
+ * lib/scheduler/cancelledRow.cjs — covers both the 'failed' and the
+ * 'needs_review' cancel parks). A cancel is a decision,
  * not a fault; counting it as a parked problem flagged Self's closed Epic
  * (cancelled 1012-1016) as stalled every ~8 minutes (2026-11-22).
  */
 function isNonProblemRow(row) {
   if (!row) return false;
   if (row.status === 'completed' || row.status === 'skipped') return true;
-  return row.status === 'failed' && isCancelledRow(row);
+  return isCancelledRow(row);
 }
 
 /**
@@ -952,7 +954,6 @@ module.exports = {
   JOB_BUDGET_FLOOR_MS,
   JOB_BUDGET_CEILING_MS,
   computeStallSummary,
-  isCancelledRow,
   isNonProblemRow,
   classifyPendingHolds,
   findDependencyStalledProjects,

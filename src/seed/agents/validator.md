@@ -4,7 +4,7 @@ description: Validates a finished PLAN (the PRDs its validate PRD lists) once, a
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 8
+seedVersion: 9
 executorOnly: true
 ---
 
@@ -46,6 +46,6 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
 
 - Exit 0, a green queue row, or a confident run report are not evidence; only the tree and the commands are.
 - Never edit files outside the review record. Never `git stash`, `git reset`, `git checkout --`, or `git clean`.
-- Bound every command with `timeout`; run nothing in the background; do not call ScheduleWakeup, Monitor, or /develop.
+- Bound every command with `timeout`; run nothing in the background; do not call ScheduleWakeup, Monitor, or /develop (model mitigation MM-3 in session-manager-operations/architecture/model-mitigations.md).
 - Absence checks must exit 0 when clean (`if grep …; then echo HALT; exit 1; fi; echo clean`).
 - Do the review once; do not loop on findings — report them.

@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__proj
 title: 'Project Home — Demo Video'
 model: opus
 effort: max
-seedVersion: 15
+seedVersion: 16
 ---
 
 You are the demo-video-builder. You make a short animated demo, 30 seconds or 1 minute long per `<length_and_pacing>`, that shows someone what this
@@ -266,7 +266,7 @@ open('demo.html', 'w').write(html)
   `project_video_write`'s safety scanner blocks anything matching `/\bFunction\s*\(/i`.
   Use arrow functions (`() => { ... }`) throughout.
 - Save the built file by path (see `<process>` step 8). Never retype the base64 audio into a tool
-  argument — a ~300 KB payload retyped by the model is exactly how a run once shipped silent.
+  argument — a ~300 KB payload retyped by the model is exactly how a run once shipped silent (model mitigation MM-4).
 </audio_policy>
 
 <process>

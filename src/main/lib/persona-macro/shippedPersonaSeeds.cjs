@@ -195,6 +195,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      "commit": "mm-registry",
+      "bodySha256": "049f6a9a8578638dd426defd430ba481e1aea9073241ff0ee2b0e094924e3086",
+      "fm": {
+        "description": "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        "effort": "medium",
+        "executorOnly": "true",
+        "model": "sonnet",
+        "title": "Engineering — Software Engineer",
+        "tools": "Read, Grep, Glob, Bash, Edit, Write"
+      }
+    },
   ],
   "project-home-builder": [
     // Not from src/seed git history: this body was written to ~/.claude/agents by this repo's own
@@ -387,6 +399,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         title: "Engineering — Plan Validator",
         tools: "Read, Grep, Glob, Bash",
       },
+    },
+    {
+      "commit": "mm-registry",
+      "bodySha256": "85760d6b48408f97271c21b7eb5bee51a866265a34a2f4ea8578fa99b2fcd533",
+      "fm": {
+        "description": "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD as checked JSON (the CLI enforces the schema). Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
+        "executorOnly": "true",
+        "model": "sonnet",
+        "title": "Engineering — Plan Validator",
+        "tools": "Read, Grep, Glob, Bash"
+      }
     },
   ],
   "demo-video-builder": [
@@ -587,6 +610,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         model: "opus",
         effort: "max",
       },
+    },
+    {
+      "commit": "mm-registry",
+      "bodySha256": "a8e9aaeef7efa62c9efaa3b0338b593516bd75e139058db5dd5cf0082c9e4c12",
+      "fm": {
+        "description": "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        "effort": "max",
+        "model": "opus",
+        "title": "Project Home — Demo Video",
+        "tools": "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write"
+      }
     },
   ],
   "blender-artist": [

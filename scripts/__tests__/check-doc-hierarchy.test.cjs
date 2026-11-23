@@ -213,3 +213,41 @@ test('invalid .session-manager.json fails with one diagnostic line', () => {
   expect(r.stderr.trim().split('\n')).toHaveLength(1);
   expect(r.stderr).toContain('mdNetwork.history');
 });
+
+// Model-mitigations registry: each row's needle must still be quoted verbatim at its location.
+const MM = `${OPS}/architecture/model-mitigations.md`;
+const mmDoc = (rows) => '# Model mitigations\n\n| id | behavior | model | observed | location | needle |\n| --- | --- | --- | --- | --- | --- |\n' +
+  rows.map((r) => `| ${r.id} | b | m | 2026-11-23 | \`${r.location}\` | \`${r.needle}\` |\n`).join('');
+const withRegistry = (rows) => {
+  write(`${OPS}/architecture/README.md`, '# doc\n\n[mm](model-mitigations.md)\n');
+  write(MM, mmDoc(rows));
+};
+
+test('model mitigations: a row whose needle is present passes', () => {
+  write('src/seed/agents/x.md', 'Never start background work, ever.\n');
+  withRegistry([{ id: 'MM-1', location: 'src/seed/agents/x.md', needle: 'Never start background work' }]);
+  const r = run();
+  expect(r.status, r.stderr).toBe(0);
+});
+
+test('model mitigations: a stale row (needle gone) fails naming the row id', () => {
+  write('src/seed/agents/x.md', 'This rule was rewritten.\n');
+  withRegistry([{ id: 'MM-7', location: 'src/seed/agents/x.md', needle: 'Never start background work' }]);
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain(`${MM}: MM-7: needle not found in src/seed/agents/x.md`);
+});
+
+test('model mitigations: a row whose location file is missing fails naming the row id', () => {
+  withRegistry([{ id: 'MM-3', location: 'src/seed/agents/gone.md', needle: 'anything' }]);
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain(`${MM}: MM-3: location file missing: src/seed/agents/gone.md`);
+});
+
+test('model mitigations: a registry with no rows fails', () => {
+  withRegistry([]);
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain(`${MM}: no mitigation rows found`);
+});

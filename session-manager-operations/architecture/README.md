@@ -23,6 +23,7 @@ Classes: **LAW-RATIONALE** (the why behind a root `CLAUDE.md` law) · **REFERENC
 | [page-stewards.md](page-stewards.md) | per-page steward subagents and the six page principles | REFERENCE |
 | [customer-feedback.md](customer-feedback.md) | Feedback button customer feedback: three stores, bilko.run wire contract, lifecycle | REFERENCE |
 | [tool-risk.md](tool-risk.md) | tool risk marks: files, lookup order, refusal text, `riskTools`, why a hook beats native rules | REFERENCE |
+| [model-mitigations.md](model-mitigations.md) | registry of model-behavior workarounds: behavior, model, date, location + needle (lint:docs-checked) | REFERENCE |
 | [tasks.md](tasks.md) | Task admin contract for outside callers: routes, errors, statuses, argv, env, fallback | REFERENCE |
 | [external-contract.md](external-contract.md) | what outside apps may rely on: discovery, handoff, Epic reads, events, version rule | REFERENCE |
 | [application-menu.md](application-menu.md) | Electron application menu structure | REFERENCE |

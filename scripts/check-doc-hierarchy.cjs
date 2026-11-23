@@ -13,7 +13,9 @@
 //  5. every path in the map's "Scoped MDs" table resolves;
 //  6. every tracked *.md is reachable by relative links from the root
 //     CLAUDE.md / AGENTS.md (tree-DAG), except files under EXEMPT_PREFIXES
-//     (historical ones from .session-manager.json mdNetwork.history).
+//     (historical ones from .session-manager.json mdNetwork.history);
+//  7. every row of architecture/model-mitigations.md (when present) names a
+//     location file that exists and still contains the row's needle verbatim.
 //
 // The MAP is root AGENTS.md when it exists (so Codex and other CLIs read the
 // same file), else root CLAUDE.md. A listed junction of the CLAUDE.md /
@@ -253,6 +255,29 @@ if (roots.length) {
     if (reached.has(f) || EXEMPT_PREFIXES.some((x) => f.startsWith(x))) continue
     fail(`${f}: orphan markdown, not reachable by links from ${roots.join(' / ')}`)
   }
+}
+
+// (7) model-mitigations registry: a workaround whose quoted text moved or vanished is stale.
+// Row shape: | MM-<n> | behavior | model | observed | `location` | `needle` |
+const MITIGATIONS = `${OPS}/architecture/model-mitigations.md`
+if (exists(MITIGATIONS)) {
+  const unquote = (cell) => cell.trim().replace(/^`(.*)`$/, '$1')
+  let rows = 0
+  for (const line of fs.readFileSync(path.join(ROOT, MITIGATIONS), 'utf8').split(/\r?\n/)) {
+    if (!line.startsWith('|')) continue
+    const cells = line.split('|').slice(1, -1)
+    const id = (cells[0] || '').trim()
+    if (!/^MM-\d+$/.test(id)) continue
+    rows++
+    if (cells.length !== 6) { fail(`${MITIGATIONS}: ${id}: row has ${cells.length} cells, expected 6 (id, behavior, model, observed, location, needle)`); continue }
+    const location = unquote(cells[4])
+    const needle = unquote(cells[5])
+    if (!location || !needle) { fail(`${MITIGATIONS}: ${id}: empty location or needle`); continue }
+    const abs = path.resolve(ROOT, location)
+    if (!abs.startsWith(ROOT + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) { fail(`${MITIGATIONS}: ${id}: location file missing: ${location}`); continue }
+    if (!fs.readFileSync(abs, 'utf8').includes(needle)) fail(`${MITIGATIONS}: ${id}: needle not found in ${location}: ${needle}`)
+  }
+  if (!rows) fail(`${MITIGATIONS}: no mitigation rows found (expected | MM-<n> | ... | rows)`)
 }
 
 if (failures.length) {

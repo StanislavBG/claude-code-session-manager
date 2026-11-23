@@ -155,6 +155,73 @@ function describeStarveHold({ projectRows = [], launchBlocks = {}, lastTick = nu
   return lastHoldTick?.reason ?? 'dispatching-elsewhere';
 }
 
+/** Max dependency links findRootBlocker follows before giving up on a chain. */
+const ROOT_BLOCKER_MAX_DEPTH = 50;
+
+/** Root row's human reason: heldReason, else its last statusHistory reason, else null. */
+function rootBlockerReason(row) {
+  if (typeof row.heldReason === 'string' && row.heldReason) return row.heldReason;
+  const h = Array.isArray(row.statusHistory) ? row.statusHistory : [];
+  const last = h[h.length - 1];
+  return last && typeof last.reason === 'string' && last.reason ? last.reason : null;
+}
+
+function rootBlockerRow(job, rows, resolver) {
+  const visited = new Set([job.slug]);
+  let cur = job;
+  for (let depth = 0; depth < ROOT_BLOCKER_MAX_DEPTH; depth++) {
+    const depSlug = findBlockingDep(cur, rows, DEP_HISTORY_FAIL_OPEN, resolver);
+    if (!depSlug) return cur === job ? null : cur;
+    const next = resolver.rowsForDep(depSlug, cur).find((r) => !isSatisfiedDepRow(r));
+    if (!next || visited.has(next.slug)) return cur === job ? null : cur; // cycle: stop at last new row
+    visited.add(next.slug);
+    cur = next;
+  }
+  return cur === job ? null : cur;
+}
+
+/**
+ * findRootBlocker(job, rows) → null | { slug, status, reason, preflightHeld }
+ *
+ * Pure. Walks findBlockingDep (fail-open history, as describeStarveHold does)
+ * transitively to the first row that is not itself waiting on a dependency —
+ * the row a starved chain actually waits on. Cycle-safe; stops at depth 50
+ * and reports the deepest row reached. null when `job` has no blocking dep.
+ */
+function findRootBlocker(job, rows, resolver = null) {
+  if (!job) return null;
+  const list = (Array.isArray(rows) ? rows : []).filter(Boolean);
+  const res = resolver ?? makeDepResolver(list, new Set(), { failOpen: true });
+  const root = rootBlockerRow(job, list, res);
+  if (!root) return null;
+  return {
+    slug: root.slug,
+    status: root.status,
+    reason: rootBlockerReason(root),
+    preflightHeld: !!root.preflightHold && typeof root.preflightHold === 'object',
+  };
+}
+
+/**
+ * rootBlockersForProject(projectRows) → [{ slug, status, reason, preflightHeld, heldSlugs }]
+ *
+ * Pure. Distinct root blockers over every dependency-blocked pending row,
+ * in first-seen order; `heldSlugs` lists the pending rows each one holds.
+ */
+function rootBlockersForProject(projectRows) {
+  const rows = (Array.isArray(projectRows) ? projectRows : []).filter(Boolean);
+  const resolver = makeDepResolver(rows, new Set(), { failOpen: true });
+  const bySlug = new Map();
+  for (const j of rows) {
+    if (j.status !== 'pending') continue;
+    const root = findRootBlocker(j, rows, resolver);
+    if (!root) continue;
+    if (!bySlug.has(root.slug)) bySlug.set(root.slug, { ...root, heldSlugs: [] });
+    bySlug.get(root.slug).heldSlugs.push(j.slug);
+  }
+  return [...bySlug.values()];
+}
+
 /**
  * classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now, thresholdMs })
  *   → null | { kind: 'starved' | 'blocked', pending, dispatchable, blockedChains, idleMs }
@@ -407,6 +474,8 @@ module.exports = {
   dispatchIdleMs,
   launchBlockedSlugs,
   describeStarveHold,
+  findRootBlocker,
+  rootBlockersForProject,
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
   classifyQueueHealth,

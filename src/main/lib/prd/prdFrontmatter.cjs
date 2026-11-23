@@ -454,6 +454,7 @@ function serializePrdFile(fm, body) {
 
 module.exports = {
   splitFrontmatter,
+  parsePreflightValue,
   parsePrdFile,
   serializePrdFile,
   parseInlineList,

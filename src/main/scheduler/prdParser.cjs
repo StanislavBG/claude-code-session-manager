@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { splitFrontmatter, parseInlineList, parseFixes, PRD_EFFORT_LEVELS } = require('../lib/prd/prdFrontmatter.cjs');
+const { splitFrontmatter, parseInlineList, parseFixes, parsePreflightValue, PRD_EFFORT_LEVELS } = require('../lib/prd/prdFrontmatter.cjs');
 const { deriveEpicIdFromPrdPath } = require('../lib/prd/prdLocations.cjs');
 const { parseFilesSection } = require('../lib/prd/prdGateFiles.cjs');
 const { reportDanglingAgentTypeOnce } = require('../lib/prd/prdAgentType.cjs');
@@ -153,6 +153,9 @@ async function parsePrdRaw(filePath) {
     deliverable: (typeof fm.deliverable === 'string' && fm.deliverable.trim() === 'artifact') ? 'artifact' : null,
     artifactPaths: parseArtifactPaths(fm.artifactPaths),
     effort: (typeof fm.effort === 'string' && PRD_EFFORT_LEVELS.includes(fm.effort.trim())) ? fm.effort.trim() : null,
+    // Optional precondition command (preflightCheck.cjs); reconcile copies it
+    // onto the queue row so spawnJob can hold the job while it exits non-zero.
+    preflight: typeof fm.preflight === 'string' ? parsePreflightValue(rawFrontmatterValue(text, 'preflight')) : null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.
@@ -164,6 +167,18 @@ async function parsePrdRaw(filePath) {
     budgetExempt: fm.budgetExempt === 'true',
     body: body.trim(),
   };
+}
+
+/**
+ * The unstripped value of one frontmatter key. splitFrontmatter strips a
+ * value's outer quotes, which breaks a JSON-string `preflight` with escaped
+ * inner quotes; parsePreflightValue needs the raw form.
+ */
+function rawFrontmatterValue(text, key) {
+  const end = text.indexOf('\n---', 4);
+  const block = end === -1 ? '' : text.slice(4, end);
+  const m = block.match(new RegExp(`^${key}\\s*:\\s*(.*?)\\s*$`, 'm'));
+  return m ? m[1] : '';
 }
 
 /** `[a, b]` / `a, b` / `a` → ['a','b']; anything else → []. */

@@ -171,6 +171,7 @@ const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+const preflightCheck = require('./lib/scheduler/preflightCheck.cjs');
 const needsYouStore = require('./lib/feedback-remote/needsYouStore.cjs');
 const { withTimeout } = require('./lib/util/withTimeout.cjs');
 
@@ -1969,6 +1970,7 @@ async function reconcilePass(state) {
       deliverable: p.deliverable ?? job.deliverable ?? null,
       artifactPaths: p.artifactPaths ?? job.artifactPaths ?? null,
       effort: p.effort ?? job.effort ?? null,
+      preflight: p.preflight ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
     // discovered) whose PRD file now carries a stamp — written via the
@@ -2096,6 +2098,7 @@ async function reconcilePass(state) {
       deliverable: p.deliverable ?? inv.row?.deliverable ?? null,
       artifactPaths: p.artifactPaths ?? inv.row?.artifactPaths ?? null,
       effort: p.effort ?? inv.row?.effort ?? null,
+      preflight: p.preflight ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
     // A repair is not a lifecycle transition — the corrupted `status` was
@@ -2251,6 +2254,7 @@ async function reconcilePass(state) {
       deliverable: p.deliverable ?? null,
       artifactPaths: p.artifactPaths ?? null,
       effort: p.effort ?? null,
+      preflight: p.preflight ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
       // the starvation escalation both need a provable age for a pending row;
@@ -3212,6 +3216,10 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // Durable cancel (2026-10-19 git-viewer incident): a human-cancelled row is
   // revived only by an explicit human reset, never by an automated pass.
   if (reviewLadder.isCancelledJob(job) && opts.source !== 'remote:resetJob' && opts.source !== 'ipc:schedule:reset-job') return false;
+  // Reset means "re-check the precondition now": the hold is dropped even
+  // when the row is already pending (pending→pending is not a transition).
+  delete job.preflightHold;
+  if (job.status === 'pending' && typeof job.heldReason === 'string' && job.heldReason.startsWith('waiting on precondition:')) delete job.heldReason;
   if (!transitionJob(job, 'pending', { reason: errorMsg ?? 'reset to pending', source: opts.source ?? 'resetJobFields' })) return false;
   delete job.cancelledAt;
   delete job.cancelledRunId;
@@ -6895,6 +6903,68 @@ function guardedTick(fn, label) {
   }
 }
 
+/**
+ * Pending rows whose preflight hold is not yet due → Map<slug, heldReason>,
+ * in the same shape computeLaunchHolds returns, so the picker skips them
+ * (and they never shadow a pickable sibling) while a dependent of a held
+ * row still sees it as a blocking dep.
+ */
+function computePreflightHolds(jobs, now = Date.now()) {
+  const held = new Map();
+  for (const j of jobs || []) {
+    if (!j || j.status !== 'pending' || !j.preflightHold) continue;
+    const next = Date.parse(j.preflightHold.nextAt ?? '');
+    if (Number.isFinite(next) && next > now) {
+      held.set(j.slug, j.heldReason || `waiting on precondition: ${j.preflight} — re-check at ${j.preflightHold.nextAt}`);
+    }
+  }
+  return held;
+}
+
+/**
+ * Run job.preflight (cwd = the job's project cwd, no shell) and record the
+ * outcome on the queue row. Returns 'held' when the job must not launch
+ * (check failed, or the hold is not yet due), else 'pass'.
+ */
+async function runPreflightGate(job, defaultCwd, { now = Date.now } = {}) {
+  const command = job.preflight.trim();
+  const prevHold = job.preflightHold || null;
+  const dueAt = prevHold ? Date.parse(prevHold.nextAt ?? '') : NaN;
+  if (Number.isFinite(dueAt) && dueAt > now()) return 'held';
+  const result = await preflightCheck.runPreflight({ command, cwd: job.cwd || defaultCwd });
+  if (result.ok) {
+    const attempts = prevHold && Number.isFinite(prevHold.attempts) ? prevHold.attempts : 0;
+    await mutate((s) => {
+      const row = s.jobs.find((x) => x.slug === job.slug);
+      if (!row) return;
+      delete row.preflightHold;
+      delete row.heldReason;
+    });
+    delete job.preflightHold;
+    delete job.heldReason;
+    try { appendAuditEvent('preflight_pass', { slug: job.slug, attempts }); } catch { /* audit must not break dispatch */ }
+    return 'pass';
+  }
+  const code = result.exitCode ?? (result.timedOut ? 'timeout' : 'null');
+  const heldAt = now();
+  let hold = null;
+  await mutate((s) => {
+    const row = s.jobs.find((x) => x.slug === job.slug);
+    const base = row ? (row.preflightHold || null) : prevHold;
+    hold = preflightCheck.armPreflightHold(base, result, heldAt, `make \`${command}\` exit 0`);
+    if (!row) return;
+    row.preflightHold = hold;
+    row.heldReason = `waiting on precondition: ${command} exited ${code} — re-check at ${hold.nextAt}`;
+  });
+  job.preflightHold = hold;
+  console.log(`[scheduler] ${job.slug}: preflight hold — ${command} exited ${code}; re-check at ${hold.nextAt}`);
+  try {
+    appendAuditEvent('preflight_hold', { slug: job.slug, attempts: hold.attempts, nextAt: hold.nextAt, exitCode: result.exitCode });
+  } catch { /* audit must not break dispatch */ }
+  await broadcast({ flush: true });
+  return 'held';
+}
+
 async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, siblingJobs = null) {
   // PRD 1408: the queue rows in scope at dispatch (tickQueue's own
   // state.jobs, threaded straight down — never re-read here or inside
@@ -6924,6 +6994,17 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
   // silently.
   const quietLeaseAcquired = job.quietMachine === true && quietMachineLease.acquire(job.slug);
   try {
+    // Preflight hold (preflightCheck.cjs): a PRD whose work needs an external
+    // precondition a person controls declares one cheap command. Checked
+    // BEFORE the worktree is created and before the 'running' transition, so
+    // a red precondition costs no claude -p run and no checkout — the row
+    // stays 'pending' with a preflightHold and is re-checked on the
+    // 10/20/40/60-min-then-hourly backoff. Exit 0 clears the hold and
+    // dispatch continues unchanged, so dependents flow with no manual reset.
+    if (!resumeTarget && typeof job.preflight === 'string' && job.preflight.trim()) {
+      const gate = await runPreflightGate(job, defaultCwd);
+      if (gate === 'held') return;
+    }
     // Worktree isolation cap check (PRD 1112) — probed BEFORE the job is
     // marked 'running', so a job that can't get isolation right now is a
     // DEFERRAL, not a fallback: it stays 'pending' and is retried on the
@@ -8712,6 +8793,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
       ? Math.max(0, Math.min(sessionSlots.availableFor('job'), degradedConcurrencyCapValue - runningSet.size))
       : sessionSlots.availableFor('job');
     const heldSlugs = await computeLaunchHolds(state);
+    for (const [slug, why] of computePreflightHolds(state.jobs)) if (!heldSlugs.has(slug)) heldSlugs.set(slug, why);
     if (stale()) return STALE_TICK;
     const satisfiedSlugsByCwd = await budget.computeDepHistorySatisfaction(state);
     lastSatisfiedSlugsByCwd = satisfiedSlugsByCwd;
@@ -13271,6 +13353,8 @@ module.exports = {
   performLeftoverQuarantine,
   spawnInvestigation,
   computeLaunchHolds,
+  computePreflightHolds,
+  runPreflightGate,
   handleLaunchFailure,
   applyLaunchFailure,
   setPaused,

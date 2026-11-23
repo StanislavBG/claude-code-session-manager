@@ -333,7 +333,7 @@ test('the Task routes are registered and a Task from GET /admin/tasks has exactl
   const cwd = await mkTmp('sm-contract-tasks-cwd-');
   registerAdminRoute({ registerRoute: (m, p, h) => { handlers.set(`${m} ${p}`, h); } }, { resolveProjectRoot: (c) => c });
   const listed = CONTRACT.routes.filter((r) => r.path.startsWith('/admin/task')).map((r) => `${r.method} ${r.path}`);
-  expect(listed.sort()).toEqual(['GET /admin/task', 'GET /admin/tasks', 'POST /admin/tasks', 'POST /admin/tasks/import']);
+  expect(listed.sort()).toEqual(['GET /admin/task', 'GET /admin/tasks', 'POST /admin/tasks', 'POST /admin/tasks/import', 'POST /admin/tasks/switch']);
   for (const r of listed) expect(handlers.has(r), r).toBe(true);
   expect([...TASK_FIELDS]).toEqual([...CONTRACT.taskFields]);
 

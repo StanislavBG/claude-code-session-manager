@@ -41,6 +41,9 @@
  *     (the caller's figure is kept as cliCostUsd).
  *     → { ok, imported, alreadyImported, rejected: [{ index, error }] }.
  *   Read and import routes take a cwd that must be a project root (400).
+ *   POST /admin/tasks/switch  (taskSwitchRoute.cjs, registered from here)
+ *     The agent path for the switch: sets one project's switch only on a
+ *     verified verbatim quote of the human's own chat prompt naming it.
  *
  * No caller environment variable ever reaches the child (buildTaskEnv adds
  * only the Task markers to process.env). Auth/loopback binding are the
@@ -55,12 +58,13 @@ const { z } = require('zod');
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { resolveProjectRoot } = require('../opsOwnership.cjs');
 const { phaseOfTask } = require('../phaseProjection.cjs');
+const { registerTaskSwitchRoute } = require('./taskSwitchRoute.cjs');
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_IMPORT_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT_RECORDS = 100;
 const MAX_SYSTEM_PROMPT_BYTES = 100 * 1024;
-const SWITCH_HINT = "Turn on 'Scripts may run Tasks' for this project on the Scheduler → Tasks page (a human-only switch).";
+const SWITCH_HINT = "Turn on 'Scripts may run Tasks' for this project: a human flips it on the Scheduler → Tasks page, or an agent in a Session Manager chat calls task_switch_set with the human's own words asking for it.";
 
 function isAbsoluteDir(p) {
   if (typeof p !== 'string' || !path.isAbsolute(p)) return false;
@@ -255,9 +259,11 @@ function costFor(model, run, costOfUsage) {
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
  *   buildTaskArgs?: Function, buildTaskEnv?: Function, ledger?: any, costOfUsage?: Function,
  *   now?: () => number, randomUUID?: () => string, resolveProjectRoot?: Function,
- *   syncInteractiveReserve?: () => any, knownMcpServers?: () => Record<string, object> }} [deps]
+ *   syncInteractiveReserve?: () => any, knownMcpServers?: () => Record<string, object>,
+ *   switchRouteDeps?: Record<string, any> }} [deps]
  */
 function registerAdminRoute(adminHttp, deps = {}) {
+  registerTaskSwitchRoute(adminHttp, deps.switchRouteDeps || {});
   // Lazy defaults: agentLibrary / slots / spawn pull in heavy modules.
   const taskSwitch = () => deps.taskSwitch || require('./taskSwitch.cjs');
   const resolveInfo = deps.resolveInfo || defaultResolveInfo;

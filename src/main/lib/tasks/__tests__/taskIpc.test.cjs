@@ -131,7 +131,7 @@ test('invalid payloads are rejected before any write', async () => {
   expect(reserveSpy).toHaveBeenCalledTimes(1);
 });
 
-test('set-switch is the only setTaskSwitch caller in src/main outside taskSwitch.cjs', () => {
+test('set-switch and the agent route are the only setTaskSwitch callers in src/main outside taskSwitch.cjs', () => {
   const root = path.resolve(__dirname, '../../../');
   const hits = [];
   const walk = (dir) => {
@@ -143,5 +143,5 @@ test('set-switch is the only setTaskSwitch caller in src/main outside taskSwitch
     }
   };
   walk(root);
-  expect(hits.sort()).toEqual(['lib/tasks/taskIpc.cjs', 'lib/tasks/taskSwitch.cjs'].map((p) => p.split('/').join(path.sep)));
+  expect(hits.sort()).toEqual(['lib/tasks/taskIpc.cjs', 'lib/tasks/taskSwitch.cjs', 'lib/tasks/taskSwitchRoute.cjs'].map((p) => p.split('/').join(path.sep)));
 });

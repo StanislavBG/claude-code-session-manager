@@ -15,6 +15,7 @@
   "taskRun": "tasks",
   "taskIpc": "tasks",
   "taskAdminRoutes": "tasks",
+  "taskSwitchRoute": "tasks",
   "memoryConsolidation": "tasks",
   "mitigationReview": "tasks",
   "auditLog": "telemetry",

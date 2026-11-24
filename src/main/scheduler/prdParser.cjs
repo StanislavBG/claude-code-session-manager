@@ -21,6 +21,7 @@ const { splitFrontmatter, parseInlineList, parseFixes, parsePreflightValue, PRD_
 const { deriveEpicIdFromPrdPath } = require('../lib/prd/prdLocations.cjs');
 const { parseFilesSection } = require('../lib/prd/prdGateFiles.cjs');
 const { reportDanglingAgentTypeOnce } = require('../lib/prd/prdAgentType.cjs');
+const { VOICE_ID_RE } = require('../lib/demo-video-kit/voiceLibrary.cjs');
 
 /**
  * Expand a PRD `cwd` value to an absolute path.
@@ -153,8 +154,8 @@ async function parsePrdRaw(filePath) {
     deliverable: (typeof fm.deliverable === 'string' && fm.deliverable.trim() === 'artifact') ? 'artifact' : null,
     artifactPaths: parseArtifactPaths(fm.artifactPaths),
     effort: (typeof fm.effort === 'string' && PRD_EFFORT_LEVELS.includes(fm.effort.trim())) ? fm.effort.trim() : null,
-    // In-process-only library voice (prdFrontmatter.cjs VOICE_ID_RE); executeJob hands it to the job as SM_VOICE_ID.
-    voiceId: (typeof fm.voiceId === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(fm.voiceId.trim())) ? fm.voiceId.trim() : null,
+    // In-process-only library voice (voiceLibrary.cjs VOICE_ID_RE); executeJob hands it to the job as SM_VOICE_ID.
+    voiceId: (typeof fm.voiceId === 'string' && VOICE_ID_RE.test(fm.voiceId.trim())) ? fm.voiceId.trim() : null,
     // Optional precondition command (preflightCheck.cjs); reconcile copies it
     // onto the queue row so spawnJob can hold the job while it exits non-zero.
     preflight: typeof fm.preflight === 'string' ? parsePreflightValue(rawFrontmatterValue(text, 'preflight')) : null,

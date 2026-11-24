@@ -88,8 +88,8 @@ const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourceP
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
-// Voice-library id (in-process only, like effort); same pattern as prdCreate.cjs.
-const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// Voice-library id (in-process only, like effort); the one owner is voiceLibrary.cjs.
+const { VOICE_ID_RE } = require('../demo-video-kit/voiceLibrary.cjs');
 const MACRO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 

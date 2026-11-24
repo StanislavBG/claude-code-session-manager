@@ -128,8 +128,8 @@ function deriveSlugFromTitle(title) {
  * Engineering standards, in order.
  */
 const MACRO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-// Voice-library id (in-process only); mirrors prdFrontmatter.cjs's VOICE_ID_RE.
-const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// Voice-library id pattern: the one owner is voiceLibrary.cjs.
+const { VOICE_ID_RE } = require('../demo-video-kit/voiceLibrary.cjs');
 function isValidMacroId(id) {
   return typeof id === 'string' && MACRO_ID_RE.test(id);
 }
@@ -683,7 +683,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // voiceId (in-process callers only, like effort — the schedulerCreatePrd
   // schema has no voiceId, so the HTTP/MCP path strips a caller-supplied one).
   if (input.voiceId != null && !(typeof input.voiceId === 'string' && VOICE_ID_RE.test(input.voiceId))) {
-    return { ok: false, applied: false, status: 400, error: 'voiceId must match /^[a-z0-9][a-z0-9_-]{0,63}$/ when given' };
+    return { ok: false, applied: false, status: 400, error: `voiceId must match /${VOICE_ID_RE.source}/ when given` };
   }
   // riskTools: tool-risk rule strings (toolRiskMarks.parseRule grammar) this PRD
   // is cleared to call. Refused before NN allocation; de-duplicated in order.

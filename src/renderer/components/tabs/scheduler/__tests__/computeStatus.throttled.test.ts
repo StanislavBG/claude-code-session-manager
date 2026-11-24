@@ -8,6 +8,7 @@ function snap(over: Record<string, unknown>) {
     jobs: [{ slug: 'a', status: 'pending' }],
     paused: null,
     utilization: 91,
+    utilizationHold: null,
     ...over,
   } as never
 }
@@ -26,6 +27,9 @@ describe('computeStatus auto-throttled', () => {
     const r = run({ utilizationHold: { window: 'session', percent: 91, threshold: 90, resetsAt: '2026-09-21T14:00:00Z' } })
     expect(r.line2).toContain('5-hour')
     expect(r.line2).not.toContain('long hold')
+  })
+  it('no utilizationHold means not throttled (auto-soon)', () => {
+    expect(run({ utilization: 96, utilizationHold: null }).kind).toBe('auto-soon')
   })
   it('unknown reset is treated as long', () => {
     const r = run({ utilizationHold: { window: 'weekly_all', percent: 91, threshold: 90, resetsAt: null } })

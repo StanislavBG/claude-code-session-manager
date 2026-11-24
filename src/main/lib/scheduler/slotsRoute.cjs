@@ -18,8 +18,11 @@
  *          taskSwitchRoute.cjs (humanPromptLedger.findHumanPromptContaining);
  *          headless jobs and Tasks never record prompts there, so they fail here
  *          too;
- *       4. 403 quote_does_not_name_slots — the quote does not name the limit
- *          (limit / slots / sessions / parallel / concurrent) AND the new number.
+ *       4. 403 quote_does_not_name_slots — the quote is not a change request:
+ *          a change verb (set / raise / bump / lower / make …), a limit word
+ *          (limit / cap / slots / sessions / parallel / concurrent) AND the new
+ *          number given as the target ("to 14", "= 14", "at 14", "14 parallel
+ *          sessions"). Naming a limit and a number in passing is not enough.
  *     Success: sessionSlots.setCap(cap) (persists + wakes waiters), one
  *     slot_cap_changed audit event { from, to, epicId, quote, promptAt },
  *     200 { ok, from, to }.
@@ -41,7 +44,10 @@ const slotsBodySchema = z.object({
   callerJobSlug: z.string().max(256).optional(),
 }).strict();
 
-const LIMIT_RE = /(^|[^a-z0-9])(limit|limits|slot|slots|session|sessions|parallel|parallelism|concurrent|concurrency)($|[^a-z0-9])/;
+const LIMIT_WORDS = '(?:limit|limits|cap|caps|slot|slots|session|sessions|parallel|parallelism|concurrent|concurrency)';
+const CHANGE_VERBS = '(?:set|raise|increase|bump|lift|lower|reduce|drop|change|move|make)';
+const NEGATION = '(?:not|never|no|dont|don t|won t|wont|can t|cant|shouldn t|shouldnt)';
+const TARGET = '(?:to|=|at)';
 
 const NUMBER_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
@@ -49,9 +55,15 @@ const NUMBER_WORDS = [
   'nineteen', 'twenty',
 ];
 const TENS = { 20: 'twenty', 30: 'thirty' };
+const ANY_NUMBER = `(?:\\d+|${[...NUMBER_WORDS, 'thirty', 'forty', 'fifty'].join('|')})`;
+// One filler word: letters only, never a number word, so a gap can never
+// swallow half of "thirty two" or step over a different number.
+const WORD = `(?!${ANY_NUMBER}(?: |$))[a-z]+`;
+const gap = (/** @type {number} */ n) => `(?: ${WORD}){0,${n}}`;
 
 /** @param {number} n */
 function wordsFor(n) {
+  if (n < 0) return [];
   if (n <= 20) return [NUMBER_WORDS[n]];
   const tens = Math.floor(n / 10) * 10;
   const unit = n % 10;
@@ -60,19 +72,49 @@ function wordsFor(n) {
   return unit === 0 ? [t] : [`${t} ${NUMBER_WORDS[unit]}`];
 }
 
+/** @param {unknown} quote */
+function normalizeQuote(quote) {
+  return String(quote)
+    .toLowerCase()
+    .replace(/\d+[.,]\d+/g, ' # ') // a decimal is never a cap; never let "14.5" read as 14
+    .replace(/=/g, ' = ')
+    .replace(/[.!?;:()[\]{}]/g, ' . ') // a clause boundary: no gap word crosses it
+    .replace(/[^a-z0-9=.# ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
- * True when the quote names the slot limit and the number `cap`
- * (as digits, or as an English word up to thirty-two).
+ * The anchored change-request patterns for `cap`:
+ *   A. verb … limit word … to|=|at <cap>   ("raise the limit to 14")
+ *   B. verb … [to|=|at] <cap> … limit word  ("make it 16 parallel sessions")
+ * The verb must be the base form and not negated; the number must stand alone.
+ * @param {number} cap
+ */
+function changeRequestPatterns(cap) {
+  const num = `(?:${[String(cap), ...wordsFor(cap)].join('|')})`;
+  const numEnd = `(?= |$)(?! ${ANY_NUMBER}(?: |$))`;
+  const verb = `(?<!${NEGATION}${gap(2)} )(?<=^| )${CHANGE_VERBS}`;
+  const verbAtStart = `(?:^| )${verb}`;
+  return [
+    new RegExp(`${verbAtStart}${gap(4)} ${LIMIT_WORDS}${gap(3)} ${TARGET} ${num}${numEnd}`),
+    new RegExp(`${verbAtStart}${gap(4)}(?: ${TARGET})? ${num}${numEnd}${gap(2)} ${LIMIT_WORDS}(?= |$)`),
+  ];
+}
+
+/**
+ * True only when the quote is a request to CHANGE the session limit to `cap`:
+ * a change verb, a limit word, and `cap` (digits, or English words up to
+ * thirty-nine) given as the new target. Mentioning a limit and a number is not
+ * enough — "lets see first 10 sessions chugging and then we will move the
+ * limit via the mcp" authorizes nothing. Refuses on doubt.
  * @param {unknown} quote
  * @param {number} cap
  */
 function quoteNamesSlots(quote, cap) {
-  if (typeof quote !== 'string' || !Number.isInteger(cap)) return false;
-  const q = quote.toLowerCase().replace(/[-_'"‘’‚‛“”„‟′″`]/g, ' ').replace(/\s+/g, ' ');
-  if (!LIMIT_RE.test(q)) return false;
-  const digits = q.match(/\d+/g) || [];
-  if (digits.some((d) => Number(d) === cap)) return true;
-  return wordsFor(cap).some((w) => new RegExp(`(^|[^a-z])${w}($|[^a-z])`).test(q));
+  if (typeof quote !== 'string' || !Number.isInteger(cap) || cap < 0) return false;
+  const q = normalizeQuote(quote);
+  return changeRequestPatterns(cap).some((re) => re.test(q));
 }
 
 /**
@@ -141,7 +183,7 @@ function registerSlotsRoute(adminHttp, deps = {}) {
       return;
     }
     if (!quoteNamesSlots(quote, cap)) {
-      refuse(403, 'quote_does_not_name_slots', `the human's quote does not name the session limit and the number ${cap}`);
+      refuse(403, 'quote_does_not_name_slots', `the human's quote does not ask to change the session limit to ${cap}`);
       return;
     }
 

@@ -1377,13 +1377,23 @@ function slotsErrorText(result, fallback) {
   return extra ? `${error}: ${extra}` : error;
 }
 
-// The Tasks switch is a human's choice: a scheduled job, a Task or any other
-// internal headless run (SM_KG_INTERNAL=1) is refused before any request.
-function taskSwitchSetRefusal() {
-  const message = 'refused: task_switch_set runs only in a Session Manager chat or terminal session where the human asked for it; '
-    + 'say in your final result what the human should switch on Scheduler → Tasks.';
+// A switch only the human flips (the Tasks switch, the session slot limit): a
+// scheduled job, a Task or any other internal headless run (SM_KG_INTERNAL=1),
+// or a process outside a chat session, is refused before any request. One
+// helper so task_switch_set and scheduler_slots_set can never drift apart.
+function humanSwitchRefusal(message) {
   if (process.env.SM_KG_INTERNAL === '1') return errorResult(message);
   return humanSessionRefusal(message);
+}
+
+function taskSwitchSetRefusal() {
+  return humanSwitchRefusal('refused: task_switch_set runs only in a Session Manager chat or terminal session where the human asked for it; '
+    + 'say in your final result what the human should switch on Scheduler → Tasks.');
+}
+
+function slotsSetRefusal() {
+  return humanSwitchRefusal('refused: scheduler_slots_set runs only in a Session Manager chat or terminal session where the human asked for the new limit; '
+    + 'say in your final result what limit the human should set.');
 }
 
 // Named + exported (see module.exports below) so mcpToolCatalog.test.cjs's
@@ -1587,21 +1597,18 @@ async function handleCallTool(request) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_slots_set') {
-      if (!process.env.SM_CHAT_SESSION_ID) {
-        return errorResult('refused: scheduler_slots_set runs only in a Session Manager chat or terminal session where the human asked for the new limit; '
-          + 'say in your final result what limit the human should set.');
-      }
+      const refusal = slotsSetRefusal();
+      if (refusal) return refusal;
       if (!Number.isInteger(args?.cap)) return errorResult('missing or invalid required argument: cap (integer)');
       if (typeof args?.quote !== 'string' || args.quote.trim() === '') {
         return errorResult('missing or invalid required argument: quote (the human\'s words, verbatim)');
       }
       // Identity comes from this process's env only; caller-supplied
-      // originClaudeSessionId / originProjectRoot / callerJobSlug are never read.
-      // A scheduled job's slug is forwarded so the route refuses it (403
-      // called_from_headless_job) with its own reason.
+      // originClaudeSessionId / originProjectRoot / callerJobSlug are never
+      // read. A scheduled job never gets here (slotsSetRefusal); the route
+      // still refuses a callerJobSlug on its own.
       const payload = { cap: args.cap, quote: args.quote, originClaudeSessionId: process.env.SM_CHAT_SESSION_ID };
       if (process.env.SM_PROJECT_ROOT) payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
-      if (process.env.SM_SCHEDULER_JOB_SLUG) payload.callerJobSlug = process.env.SM_SCHEDULER_JOB_SLUG;
       const result = await adminRequest('POST', '/admin/scheduler/slots', payload);
       if (result?.ok === false) return errorResult(slotsErrorText(result, 'scheduler_slots_set failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };

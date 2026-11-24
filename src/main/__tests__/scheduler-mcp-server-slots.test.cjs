@@ -135,17 +135,41 @@ test('scheduler_slots_set forwards cap + quote with identity from env, dropping 
   expect(JSON.parse(r.content[0].text)).toEqual({ ok: true, from: 8, to: 14 });
 });
 
-test('scheduler_slots_set inside a scheduled job forwards callerJobSlug so the route refuses it', async () => {
-  const { handleCallTool, requests } = await setup(
-    { SM_CHAT_SESSION_ID: 'real-sess', SM_SCHEDULER_JOB_SLUG: '42-job' },
-    { status: 403, body: { ok: false, error: 'called_from_headless_job', reason: 'a headless scheduled job never changes the slot limit' } },
-  );
-  const r = await call(handleCallTool, 'scheduler_slots_set', { cap: 14, quote: QUOTE });
-  expect(requests).toHaveLength(1);
-  expect(requests[0].body).toEqual({ cap: 14, quote: QUOTE, originClaudeSessionId: 'real-sess', callerJobSlug: '42-job' });
-  expect(r.isError).toBe(true);
-  expect(r.content[0].text).toContain('called_from_headless_job');
-  expect(r.content[0].text).toContain('never changes the slot limit');
+// Refusal parity with task_switch_set: both tools go through one local helper
+// (humanSessionRefusal + the SM_KG_INTERNAL check), so each env below refuses
+// BOTH tools, before any request reaches the admin API.
+const REFUSING_ENVS = [
+  ['outside a chat session', {}],
+  ['inside a scheduled job', { SM_CHAT_SESSION_ID: 'real-sess', SM_SCHEDULER_JOB_SLUG: '42-job' }],
+  ['inside a scheduled job with no chat session', { SM_SCHEDULER_JOB_SLUG: '42-job' }],
+  ['inside an internal headless run', { SM_CHAT_SESSION_ID: 'real-sess', SM_KG_INTERNAL: '1' }],
+];
+
+test.each(REFUSING_ENVS)('scheduler_slots_set and task_switch_set both refuse locally %s', async (_label, env) => {
+  const { handleCallTool, requests } = await setup(env, { body: { ok: true } });
+  const slots = await call(handleCallTool, 'scheduler_slots_set', { cap: 14, quote: QUOTE });
+  const tasks = await call(handleCallTool, 'task_switch_set', { enabled: true, humanRequestQuote: 'turn on tasks' });
+  expect(slots.isError).toBe(true);
+  expect(tasks.isError).toBe(true);
+  expect(slots.content[0].text).toMatch(/^refused: scheduler_slots_set runs only in a Session Manager chat or terminal session/);
+  expect(tasks.content[0].text).toMatch(/^refused: task_switch_set runs only in a Session Manager chat or terminal session/);
+  expect(requests).toHaveLength(0);
+});
+
+test('scheduler_slots_set and task_switch_set both reach the route in a human chat session', async () => {
+  const { handleCallTool, requests } = await setup({ SM_CHAT_SESSION_ID: 'real-sess', SM_KG_INTERNAL: '0' }, { body: { ok: true } });
+  const slots = await call(handleCallTool, 'scheduler_slots_set', { cap: 14, quote: QUOTE });
+  const tasks = await call(handleCallTool, 'task_switch_set', { enabled: true, humanRequestQuote: 'turn on tasks' });
+  expect(slots.isError).toBeFalsy();
+  expect(tasks.isError).toBeFalsy();
+  expect(requests.map((r) => r.url)).toEqual(['/admin/scheduler/slots', '/admin/tasks/switch']);
+});
+
+test('scheduler_slots_set refuses bad arguments only after the session refusal', async () => {
+  const { handleCallTool, requests } = await setup({ SM_SCHEDULER_JOB_SLUG: '42-job', SM_CHAT_SESSION_ID: 's' });
+  const r = await call(handleCallTool, 'scheduler_slots_set', undefined);
+  expect(r.content[0].text).toMatch(/^refused: scheduler_slots_set/);
+  expect(requests).toHaveLength(0);
 });
 
 test.each([

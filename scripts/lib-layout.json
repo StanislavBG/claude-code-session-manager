@@ -177,6 +177,7 @@
   "serviceMcpTools": "feedback-remote",
   "serviceMcpSession": "feedback-remote",
   "serviceClient": "feedback-remote",
+  "serviceStdioBridge": "feedback-remote",
   "reservationExpiry": "scheduler",
   "reviewNotice": "scheduler",
   "runClaudeP": "claude",

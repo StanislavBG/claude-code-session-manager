@@ -3,6 +3,17 @@
  * npx launcher for claude-code-session-manager.
  * Spawns the Electron binary on the package root so main: src/main/index.cjs boots.
  */
+// `service ...` is the headless service CLI (pair / stdio MCP bridge): route it before any
+// Electron code loads — it must run on a machine with no Electron binary.
+if (process.argv[2] === 'service') {
+  const { runServiceCli } = require('../src/main/lib/feedback-remote/serviceStdioBridge.cjs');
+  runServiceCli(process.argv.slice(3)).then(
+    (code) => process.exit(code),
+    (err) => { console.error(`service: ${err && err.message ? err.message : String(err)}`); process.exit(1); },
+  );
+  return;
+}
+
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const { nodeFloor, isBelow } = require('./node-floor.cjs');

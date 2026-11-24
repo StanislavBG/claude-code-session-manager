@@ -19,10 +19,10 @@ const path = require('node:path');
 const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const { writeTextAtomic } = require('../util/atomicFs.cjs');
 
-const KIT_VERSION = '20';
+const KIT_VERSION = '21';
 // sha256 of kitDigest(__dirname). Update together with a KIT_VERSION bump.
-const KIT_DIGEST = 'c62459965c5456b1487f22b87c8f10f453dfc0a7467848cec67c6f900dfbf251';
-const KIT_FILES = Object.freeze(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'resumableRun.cjs']);
+const KIT_DIGEST = 'c1a3c2d0f43f795f819e7b4c2629afbe151e6434924ca5ae2bea2b621ad7ff3b';
+const KIT_FILES = Object.freeze(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'resumableRun.cjs', 'voiceLibrary.cjs']);
 const STAMP_FILE = 'KIT_VERSION';
 
 /** The single list of kit files (paths relative to the kit dir) the seeder copies. */

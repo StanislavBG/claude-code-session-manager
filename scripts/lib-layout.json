@@ -1,5 +1,6 @@
 {
   "demoVideoKitChecks": "demo-video-kit",
+  "voiceLibrary": "demo-video-kit",
   "activeIndexMerge": "epic",
   "activeIndexRebuild": "epic",
   "epicEventLog": "epic",

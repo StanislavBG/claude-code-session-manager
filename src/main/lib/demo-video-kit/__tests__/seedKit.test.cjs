@@ -30,7 +30,7 @@ test('fresh install copies all kit files and the stamp', async () => {
   const { srcDir, destDir } = setup();
   const r = await seedDemoVideoKit({ logger: quiet, srcDir, destDir, kitVersion: '1' });
   expect(r).toEqual({ seeded: true, reason: 'fresh' });
-  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'resumableRun.cjs', 'voiceLibrary.cjs']);
+  expect(KIT_FILES).toEqual(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'resumableRun.cjs', 'voiceLibrary.cjs', 'voiceLane.cjs']);
   for (const f of KIT_FILES) expect(fs.readFileSync(path.join(destDir, f), 'utf8')).toBe(`// ${f} v1\n`);
   expect(fs.readFileSync(path.join(destDir, 'KIT_VERSION'), 'utf8').trim()).toBe('1');
 });
@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 21 (voiceLibrary.cjs: the library voice resolver)', () => {
-  expect(KIT_VERSION).toBe('21');
+test('KIT_VERSION is bumped to 22 (voiceLane.cjs: the machine-wide voice lane)', () => {
+  expect(KIT_VERSION).toBe('22');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

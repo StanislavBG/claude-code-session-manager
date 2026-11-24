@@ -16,7 +16,7 @@
     "@fastify/cookie": "^11.0.1",
     "@fastify/cors": "^10.0.1",
     "@fastify/session": "^10.5.0",
-    "fastify": "^5.2.1",
+    "fastify": "^5.12.6",
     "google-auth-library": "^9.15.1",
     "ws": "^8.18.0",
     "zod": "^3.24.1"

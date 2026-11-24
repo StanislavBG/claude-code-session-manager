@@ -44,6 +44,11 @@
  * Video composer pre-filled from its meta, like any Demo Video entry. `personaName` (the library
  * read's saved persona) reaches the composer.
  *
+ * Outcomes (`outcomes`, the library read's videos/<id>/outcome.json with no index.html): a run that
+ * ended without a video by design shows above the library as a neutral notice
+ * (`video-outcome-<id>`: 'Season complete' + its saved text), and a review entry with an outcome
+ * gets the badge 'Season complete' instead of Building / Failed.
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
@@ -77,7 +82,7 @@ import {
   type BuildLaunch,
 } from './BuildingPanel'
 import type { ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
-import type { Macro, MacroJobStatus, ProjectVideoMeta, VideoReview } from '../../../../../preload/api'
+import type { Macro, MacroJobStatus, ProjectVideoMeta, ProjectVideoOutcome, VideoReview } from '../../../../../preload/api'
 
 const GENERATE_CLASS =
   'flex h-[38px] flex-none items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-semibold text-bg-hi cursor-pointer enabled:hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
@@ -363,7 +368,11 @@ function QualityCard({ report }: { report: ProjectVideoMeta['report'] }) {
   )
 }
 
-type ToolBadge = { kind: 'building' | 'waiting' | 'failed' | 'done'; text: string }
+type ToolBadge = { kind: 'building' | 'waiting' | 'failed' | 'done' | 'outcome'; text: string }
+
+/** The label a 'season-complete' outcome reads in its notice and badge. */
+const OUTCOME_LABEL = 'Season complete'
+const OUTCOME_BADGE: ToolBadge = { kind: 'outcome', text: OUTCOME_LABEL }
 
 /** The tool's job when it belongs to this review's entry (by entryId, else the dispatched slug). */
 function jobForReview(review: VideoReview, status: MacroJobStatus | undefined): MacroJobStatus | undefined {
@@ -391,6 +400,27 @@ const BADGE_CLASS: Record<ToolBadge['kind'], string> = {
   waiting: 'self-start rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-accent',
   failed: 'self-start break-words rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-red-400',
   done: 'self-start rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-sage-dark',
+  outcome: 'self-start rounded-full bg-bg-elev px-2 py-px font-mono text-[10px] text-fg-dim',
+}
+
+/** One neutral notice per saved outcome — a run that ended without a video on purpose. */
+function VideoOutcomeNotices({ outcomes }: { outcomes: ProjectVideoOutcome[] }) {
+  if (outcomes.length === 0) return null
+  return (
+    <ul data-testid="video-outcomes" aria-label="Video outcomes" className="m-0 flex flex-none list-none flex-col gap-1.5 p-0">
+      {outcomes.map((o) => (
+        <li
+          key={o.id}
+          data-testid={`video-outcome-${o.id}`}
+          role="status"
+          className="flex flex-col gap-0.5 rounded-[9px] border border-rule-structural bg-bg-hi px-3 py-2"
+        >
+          <span className="text-[12.5px] font-semibold text-fg">{OUTCOME_LABEL}</span>
+          <span className="break-words text-[12px] text-fg-dim">{o.text}</span>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 function ToolBadgeChip({ badge }: { badge: ToolBadge }) {
@@ -402,6 +432,7 @@ function ToolBadgeChip({ badge }: { badge: ToolBadge }) {
 }
 
 const NO_REVIEWS: VideoReview[] = []
+const NO_OUTCOMES: ProjectVideoOutcome[] = []
 
 /** The Demo Video macro; a review record naming it is a Demo Video entry, regenerated through the composer. */
 const DEMO_VIDEO_ID = 'builtin-demo-video'
@@ -434,6 +465,8 @@ export interface VideosPaneProps {
   toolLaunches?: Record<string, BuildLaunch | undefined>
   /** The project's saved persona name (the library read's `persona.name`), passed to GenerateComposer. */
   personaName?: string
+  /** Video runs that ended without a video by design (the library read's `outcomes`), newest first. */
+  outcomes?: ProjectVideoOutcome[]
 }
 
 const TOOL_CLASS =
@@ -494,6 +527,7 @@ export function VideosPane({
   toolJobStatus,
   toolLaunches,
   personaName,
+  outcomes = NO_OUTCOMES,
 }: VideosPaneProps) {
   const [ownId, setOwnId] = useState<string | null>(null)
   // The tool whose inputs form is open.
@@ -642,6 +676,10 @@ export function VideosPane({
     </div>
   )
 
+  // A review entry with a saved outcome reads 'Season complete', never Building / Failed.
+  const outcomeIds = new Set(outcomes.map((o) => o.id))
+  const reviewBadge = (r: VideoReview): ToolBadge | null =>
+    outcomeIds.has(r.entryId) ? OUTCOME_BADGE : toolEntryBadge(r, badgeJobStatus)
   const rows: LibraryRow[] = entries.map((e) => {
     if (build && e.id === replacingId) {
       return {
@@ -651,14 +689,14 @@ export function VideosPane({
       }
     }
     const review = reviewById.get(e.id)
-    return videoRow(e, review ? toolEntryBadge(review, badgeJobStatus) : null)
+    return videoRow(e, review ? reviewBadge(review) : null)
   })
   // Tool entries with a review record but no saved library entry yet (still building, waiting or failed).
   const pendingToolEntries = reviews.filter((r) => r.dispatch?.macroId && !entries.some((e) => e.id === r.entryId))
   const pendingNode = pendingToolEntries.length > 0 && (
     <ul data-testid="video-tool-entries" aria-label="Tool entries" className="m-0 flex flex-none list-none flex-col gap-1.5 p-0">
       {pendingToolEntries.map((r) => {
-        const badge = toolEntryBadge(r, badgeJobStatus)
+        const badge = reviewBadge(r)
         const tool = r.dispatch?.macroId === DEMO_VIDEO_ID ? macro : tools?.find((t) => t.id === r.dispatch?.macroId)
         return (
           <li
@@ -690,6 +728,7 @@ export function VideosPane({
   return (
     <>
       {reviewPanel}
+      <VideoOutcomeNotices outcomes={outcomes} />
       {shownId !== null ? (
         <div
           data-testid="project-home-library"

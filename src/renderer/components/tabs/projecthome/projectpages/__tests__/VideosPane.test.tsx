@@ -1106,4 +1106,39 @@ describe('VideosPane tool entries: review panel, badges and Regenerate', () => {
     click(tid('composer-generate'))
     expect(onLaunch).toHaveBeenCalledWith(DEMO, `${TOUR_LINES}\nReplace entry: product-tour`)
   })
+
+  describe('season-complete outcomes', () => {
+    const OUTCOME = { id: 'tt-season', outcome: 'season-complete' as const, text: 'All 8 episodes are out.', at: isoAgo(HOUR) }
+
+    it('shows each outcome above the library as a neutral notice with "Season complete" and its text', async () => {
+      await mountLoaded({ entries: [TOUR], outcomes: [OUTCOME] })
+      const notice = tid('video-outcome-tt-season')!
+      expect(notice.textContent).toContain('Season complete')
+      expect(notice.textContent).toContain('All 8 episodes are out.')
+      expect(notice.className).not.toMatch(/red/)
+      expect(follows(notice, tid('project-home-library')!)).toBe(true)
+    })
+
+    it('shows the notice on the empty state too, and none without outcomes', async () => {
+      await mountLoaded({ entries: [], outcomes: [OUTCOME] })
+      expect(tid('video-outcome-tt-season')).not.toBeNull()
+      act(() => root!.unmount())
+      await mountLoaded({ entries: [TOUR] })
+      expect(tid('video-outcomes')).toBeNull()
+    })
+
+    it('a review entry with an outcome badges "Season complete" instead of Building or Failed', async () => {
+      reviewList.mockResolvedValue([review('tt-season', 'building', 'slug-tt'), review('other-ep', 'building')])
+      await mountLoaded({
+        entries: [TOUR],
+        tools: [TOOL],
+        outcomes: [OUTCOME],
+        toolJobStatus: {
+          'burrow-episode': toolStatus({ slug: 'slug-tt', entryId: 'tt-season', state: 'failed', status: 'failed', reason: 'no video' }),
+        },
+      })
+      expect(badgeOf(tid('video-tool-entry-tt-season'))).toBe('Season complete')
+      expect(badgeOf(tid('video-tool-entry-other-ep'))).toBe('Building')
+    })
+  })
 })

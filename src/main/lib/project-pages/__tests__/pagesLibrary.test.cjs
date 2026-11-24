@@ -51,7 +51,7 @@ function putEntry(cwd, kind, id, meta, html = '<p>x</p>') {
 
 test('empty project lists nothing', async () => {
   const cwd = await mkTmpCwd();
-  expect(await listLibrary(cwd)).toEqual({ knowledge: [], videos: [], persona: null });
+  expect(await listLibrary(cwd)).toEqual({ knowledge: [], videos: [], persona: null, outcomes: [] });
 });
 
 test('sorts newest first by createdAt, falling back to mtime', async () => {
@@ -218,4 +218,55 @@ test('video entries carry exports paths when video.mp4 / poster.png exist', asyn
   expect(path.isAbsolute(byId.with.exports.mp4)).toBe(true);
   expect(byId.half.exports).toEqual({ mp4: null, poster: path.join(vdir('half'), 'poster.png') });
   expect(byId.without.exports).toEqual({ mp4: null, poster: null });
+});
+
+function putOutcome(cwd, id, rec) {
+  const d = path.join(pagesDir(cwd), 'videos', id);
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, 'outcome.json'), typeof rec === 'string' ? rec : JSON.stringify(rec));
+}
+
+test('a video folder with a valid outcome.json and no index.html lists as an outcome, not an entry', async () => {
+  const cwd = await mkTmpCwd();
+  putOutcome(cwd, 'tt-old', { id: 'tt-old', outcome: 'season-complete', text: 'Old season done.', at: '2026-01-01T00:00:00.000Z' });
+  putOutcome(cwd, 'tt-new', { id: 'tt-new', outcome: 'season-complete', text: 'All 8 episodes are out.', at: '2026-03-01T00:00:00.000Z' });
+  const lib = await listLibrary(cwd);
+  expect(lib.videos).toEqual([]);
+  expect(lib.outcomes).toEqual([
+    { id: 'tt-new', outcome: 'season-complete', text: 'All 8 episodes are out.', at: '2026-03-01T00:00:00.000Z' },
+    { id: 'tt-old', outcome: 'season-complete', text: 'Old season done.', at: '2026-01-01T00:00:00.000Z' },
+  ]);
+});
+
+test('invalid or unreadable outcome.json is skipped and never throws', async () => {
+  const cwd = await mkTmpCwd();
+  const at = '2026-01-01T00:00:00.000Z';
+  putOutcome(cwd, 'garbled', '{not json');
+  putOutcome(cwd, 'wrong-outcome', { id: 'wrong-outcome', outcome: 'cancelled', text: 't', at });
+  putOutcome(cwd, 'wrong-id', { id: 'other', outcome: 'season-complete', text: 't', at });
+  putOutcome(cwd, 'empty-text', { id: 'empty-text', outcome: 'season-complete', text: '  ', at });
+  putOutcome(cwd, 'bad-at', { id: 'bad-at', outcome: 'season-complete', text: 't', at: 'yesterday' });
+  putOutcome(cwd, 'array', '[]');
+  // outcome.json as a directory: readFile fails with EISDIR.
+  fs.mkdirSync(path.join(pagesDir(cwd), 'videos', 'dir-outcome', 'outcome.json'), { recursive: true });
+  const lib = await listLibrary(cwd);
+  expect(lib.outcomes).toEqual([]);
+  expect(lib.videos).toEqual([]);
+});
+
+test('a folder with both a video (index.html) and outcome.json is a video entry, not an outcome', async () => {
+  const cwd = await mkTmpCwd();
+  putEntry(cwd, 'videos', 'both', videoMeta('both', '2026-01-01T00:00:00.000Z'));
+  putOutcome(cwd, 'both', { id: 'both', outcome: 'season-complete', text: 't', at: '2026-01-01T00:00:00.000Z' });
+  const lib = await listLibrary(cwd);
+  expect(lib.videos.map((e) => e.id)).toEqual(['both']);
+  expect(lib.outcomes).toEqual([]);
+});
+
+test('outcome.json under knowledge/ is ignored', async () => {
+  const cwd = await mkTmpCwd();
+  const d = path.join(pagesDir(cwd), 'knowledge', 'k');
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, 'outcome.json'), JSON.stringify({ id: 'k', outcome: 'season-complete', text: 't', at: '2026-01-01T00:00:00.000Z' }));
+  expect((await listLibrary(cwd)).outcomes).toEqual([]);
 });

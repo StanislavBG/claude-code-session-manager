@@ -74,7 +74,7 @@ async function get({ cwd }) {
   const { ephemeral } = tryProjectRoot(realCwd);
   if (ephemeral) return EMPTY();
   await migrateLegacy(realCwd);
-  const { knowledge, videos } = await listLibrary(realCwd);
+  const { knowledge, videos, persona, outcomes } = await listLibrary(realCwd);
   const overview = knowledge.find((k) => k.id === 'overview');
   let html = null;
   if (overview) {
@@ -91,6 +91,8 @@ async function get({ cwd }) {
     html,
     mtimeMs: html === null ? null : overview.mtimeMs,
     demoVideo: newest ? { path: newest.path, mtimeMs: newest.mtimeMs } : null,
+    ...(persona ? { persona } : {}),
+    ...(outcomes.length ? { outcomes } : {}),
   };
 }
 

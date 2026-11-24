@@ -31,7 +31,7 @@ import { ToolsPane, type FindingsCountFn, type LaunchFn } from './ToolsPane'
 import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
 import type { BuildLaunch } from './BuildingPanel'
 import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
-import type { Macro, MacroJobStatus } from '../../../../../preload/api'
+import type { Macro, MacroJobStatus, ProjectVideoOutcome } from '../../../../../preload/api'
 
 const NO_MACROS: Macro[] = []
 
@@ -50,6 +50,7 @@ export function ProjectPagesSection({
   knowledge,
   videos,
   personaName,
+  outcomes,
   loaded,
   error,
   onRetry,
@@ -70,6 +71,8 @@ export function ProjectPagesSection({
   videos: ProjectVideoEntry[]
   /** The project's saved persona name (the library read's `persona.name`), for the video composer. */
   personaName?: string | null
+  /** Video runs that ended without a video by design (the library read's `outcomes`). */
+  outcomes?: ProjectVideoOutcome[]
   loaded: boolean
   error?: string | null
   onRetry?: () => void
@@ -173,6 +176,7 @@ export function ProjectPagesSection({
           toolJobStatus={toolJobStatus}
           toolLaunches={toolLaunches}
           personaName={personaName ?? undefined}
+          outcomes={outcomes}
         />
       )}
     </div>

@@ -6,11 +6,17 @@
  * process's per-cwd watcher ('project-pages:changed') so a fresh write
  * updates live. A cwd the main process can't watch resolves `{ok:false}` —
  * silently no-op. `personaName` is the saved project persona's name (videos/_character), null
- * when there is none.
+ * when there is none; `outcomes` are the library read's video outcomes (empty when none).
  */
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
-import type { ProjectPagesGetResult, ProjectLibraryEntry, ProjectPageMeta, ProjectVideoMeta } from '../../../preload/api'
+import type {
+  ProjectPagesGetResult,
+  ProjectLibraryEntry,
+  ProjectPageMeta,
+  ProjectVideoMeta,
+  ProjectVideoOutcome,
+} from '../../../preload/api'
 
 export interface ProjectPagesOutput {
   html: string
@@ -22,6 +28,7 @@ export type ProjectVideoEntry = ProjectLibraryEntry<ProjectVideoMeta>
 
 const NO_KNOWLEDGE: ProjectKnowledgeEntry[] = []
 const NO_VIDEOS: ProjectVideoEntry[] = []
+const NO_OUTCOMES: ProjectVideoOutcome[] = []
 
 export type ProjectPagesDemoVideo = { path: string; mtimeMs: number } | null
 
@@ -42,6 +49,8 @@ export function useProjectPagesOutput(
   knowledge: ProjectKnowledgeEntry[]
   videos: ProjectVideoEntry[]
   personaName: string | null
+  /** Video runs that ended without a video by design (season-complete), newest first. */
+  outcomes: ProjectVideoOutcome[]
   loaded: boolean
   error: string | null
   reload: () => void
@@ -51,6 +60,7 @@ export function useProjectPagesOutput(
   const [knowledge, setKnowledge] = useState<ProjectKnowledgeEntry[]>(NO_KNOWLEDGE)
   const [videos, setVideos] = useState<ProjectVideoEntry[]>(NO_VIDEOS)
   const [personaName, setPersonaName] = useState<string | null>(null)
+  const [outcomes, setOutcomes] = useState<ProjectVideoOutcome[]>(NO_OUTCOMES)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
@@ -70,6 +80,7 @@ export function useProjectPagesOutput(
         setKnowledge(Array.isArray(res.knowledge) ? res.knowledge : NO_KNOWLEDGE)
         setVideos(Array.isArray(res.videos) ? res.videos : NO_VIDEOS)
         setPersonaName(personaNameOf(res))
+        setOutcomes(Array.isArray(res.outcomes) ? res.outcomes : NO_OUTCOMES)
         setError(null)
         setLoaded(true)
       })
@@ -95,6 +106,7 @@ export function useProjectPagesOutput(
       setKnowledge(Array.isArray(payload.knowledge) ? payload.knowledge : NO_KNOWLEDGE)
       setVideos(Array.isArray(payload.videos) ? payload.videos : NO_VIDEOS)
       setPersonaName(personaNameOf(payload))
+      setOutcomes(Array.isArray(payload.outcomes) ? payload.outcomes : NO_OUTCOMES)
       setError(null)
       setLoaded(true)
     })
@@ -104,5 +116,5 @@ export function useProjectPagesOutput(
     }
   }, [cwd])
 
-  return { output, demoVideo, knowledge, videos, personaName, loaded, error, reload }
+  return { output, demoVideo, knowledge, videos, personaName, outcomes, loaded, error, reload }
 }

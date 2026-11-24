@@ -91,7 +91,29 @@ function readPersona(realCwd) {
   }
 }
 
-async function listKind(realCwd, kind) {
+/** The only outcome a run may record instead of a video (projectHomeAdminRoutes.cjs VIDEO_OUTCOMES). */
+const VIDEO_OUTCOMES = new Set(['season-complete']);
+
+/**
+ * -> { id, outcome, text, at } from videos/<id>/outcome.json (written by
+ * project_video_outcome_write), or null when absent, unreadable or invalid. Never throws.
+ */
+async function readOutcome(dir, id) {
+  let rec;
+  try {
+    rec = JSON.parse(await fsp.readFile(path.join(dir, 'outcome.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null;
+  const { outcome, text, at } = rec;
+  if (rec.id !== id || !VIDEO_OUTCOMES.has(outcome)) return null;
+  if (typeof text !== 'string' || !text.trim() || typeof at !== 'string' || !Number.isFinite(Date.parse(at))) return null;
+  return { id, outcome, text, at };
+}
+
+/** Lists one kind's entries; for videos, folders with no index.html but a valid outcome.json go to `outcomes`. */
+async function listKind(realCwd, kind, outcomes = []) {
   const root = pagesPath(realCwd, kind);
   if (!root) return [];
   let dirents;
@@ -102,7 +124,15 @@ async function listKind(realCwd, kind) {
     throw e;
   }
   const dirs = dirents.filter((d) => d.isDirectory() && !SKIP_DIRS.has(d.name)).slice(0, MAX_ENTRIES);
-  const entries = (await Promise.all(dirs.map((d) => readEntry(kind, path.join(root, d.name), d.name)))).filter(Boolean);
+  const read = await Promise.all(dirs.map((d) => readEntry(kind, path.join(root, d.name), d.name)));
+  if (kind === 'videos') {
+    const found = await Promise.all(
+      dirs.map((d, i) => (read[i] ? null : readOutcome(path.join(root, d.name), d.name))),
+    );
+    for (const o of found) if (o) outcomes.push(o);
+    outcomes.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  }
+  const entries = read.filter(Boolean);
   const stamp = (e) => {
     const t = e.meta ? Date.parse(e.meta.createdAt) : NaN;
     return Number.isFinite(t) ? t : e.mtimeMs;
@@ -110,11 +140,15 @@ async function listKind(realCwd, kind) {
   return entries.sort((a, b) => stamp(b) - stamp(a));
 }
 
-/** -> { knowledge: Entry[], videos: Entry[] (with exports), persona: {name}|null }, newest first. */
+/**
+ * -> { knowledge: Entry[], videos: Entry[] (with exports), persona: {name}|null,
+ *      outcomes: {id, outcome, text, at}[] (video folders with an outcome and no index.html) }, newest first.
+ */
 async function listLibrary(realCwd) {
-  const [knowledge, videos] = await Promise.all(KINDS.map((k) => listKind(realCwd, k)));
+  const outcomes = [];
+  const [knowledge, videos] = await Promise.all(KINDS.map((k) => listKind(realCwd, k, outcomes)));
   const persona = pagesPath(realCwd) ? readPersona(realCwd) : null;
-  return { knowledge, videos, persona };
+  return { knowledge, videos, persona, outcomes };
 }
 
 /** Write `outBuf` into `destDir/index.html` + meta; true only after a byte-equal verified write. */

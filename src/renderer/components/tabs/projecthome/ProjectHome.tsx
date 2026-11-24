@@ -50,7 +50,7 @@ function ProjectHomeComponent() {
   const cwd = activeTab?.cwd ?? null
 
   // One fetch of session-manager-operations/project-pages/home.html (+ demo video).
-  const { knowledge, videos, personaName, loaded, error, reload } = useProjectPagesOutput(cwd)
+  const { knowledge, videos, personaName, outcomes, loaded, error, reload } = useProjectPagesOutput(cwd)
   const jobStatus = useMacroJobStatus(cwd)
   const { macros: library } = useMacros()
   const macros = useMemo(() => macrosForProject(library, cwd, 'project-home'), [library, cwd])
@@ -118,6 +118,7 @@ function ProjectHomeComponent() {
         knowledge={knowledge}
         videos={videos}
         personaName={personaName}
+        outcomes={outcomes}
         loaded={loaded}
         error={error}
         onRetry={reload}

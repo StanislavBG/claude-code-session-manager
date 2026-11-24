@@ -1918,7 +1918,19 @@ export interface ProjectLibraryEntry<M> {
   exports?: { mp4: string | null; poster: string | null };
 }
 
+/** A video run that ended without a video by design (videos/<id>/outcome.json, no index.html). */
+export interface ProjectVideoOutcome {
+  id: string;
+  outcome: 'season-complete';
+  /** The one-line text the run saved. */
+  text: string;
+  /** ISO time the outcome was recorded. */
+  at: string;
+}
+
 export interface ProjectPagesGetResult {
+  /** Video outcomes, newest first; absent when there are none. */
+  outcomes?: ProjectVideoOutcome[];
   /** The project's saved persona (videos/_character), or null when none/invalid. */
   persona?: { name: string } | null;
   /** Knowledge pages, newest first. */

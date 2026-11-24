@@ -59,10 +59,15 @@ function nonEmptyString(v) {
  *
  * runtime.appendSystemPrompt → '--append-system-prompt', <text> right after the
  * --system-prompt pair (single-valued, so never in the variadic block).
- * runtime.disallowedTools (non-empty) → '--disallowedTools' then each rule as
- * its OWN argv element, after --tools: the CLI splits one element on commas and
- * spaces outside parentheses, so joining rules would let one bad rule swallow
- * the rest. The route has already refused unbalanced rules.
+ * runtime.disallowedTools (non-empty) → one '--disallowedTools=<rule>' argv
+ * element per rule, in order, after --tools. The '=' form is required: after a
+ * bare variadic '--disallowedTools' the CLI takes only the first value
+ * literally and parses any later value starting with '-' as a NEW flag, so
+ * ['X', '--mcp-config', '/x.json'] would inject a flag and drop the deny.
+ * Repeated '=' elements accumulate. Rules are never joined: the CLI splits one
+ * element on commas and spaces outside parentheses, so one bad rule could
+ * swallow the rest. The route has already refused unbalanced rules and rules
+ * not starting with a letter.
  *
  * @param {{ model: string, effort: string, runtime?: Record<string, any>, projectCwd?: string,
  *   declaredMcpServers?: readonly string[], knownMcpServers?: Record<string, object> }} o
@@ -110,7 +115,9 @@ function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers 
   if (mcpList.length) args.push('--mcp-config', ...mcpList);
   if (Array.isArray(rt.allowedTools)) args.push('--allowedTools', rt.allowedTools.join(','));
   if (Array.isArray(rt.tools)) args.push('--tools', rt.tools.join(','));
-  if (Array.isArray(rt.disallowedTools) && rt.disallowedTools.length) args.push('--disallowedTools', ...rt.disallowedTools.map(String));
+  if (Array.isArray(rt.disallowedTools) && rt.disallowedTools.length) {
+    for (const rule of rt.disallowedTools) args.push('--disallowedTools=' + String(rule));
+  }
 
   if (rt.outputFormat === 'stream-json') args.push('--output-format', 'stream-json', '--verbose');
   else args.push('--output-format', 'json');

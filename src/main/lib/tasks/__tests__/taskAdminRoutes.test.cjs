@@ -131,6 +131,10 @@ describe('POST /admin/tasks', () => {
       base({ runtime: { disallowedTools: ['x'.repeat(501)] } }),
       base({ runtime: { disallowedTools: Array.from({ length: 51 }, (_, i) => `Tool${i}`) } }),
       base({ runtime: { disallowedTools: 'Bash' } }),
+      base({ runtime: { disallowedTools: ['--mcp-config', '/x.json'] } }),
+      base({ runtime: { disallowedTools: ['WebFetch(domain:localhost)', '--settings'] } }),
+      base({ runtime: { disallowedTools: [' -x'] } }),
+      base({ runtime: { disallowedTools: ['-p'] } }),
       base({ runtime: { appendSystemPrompt: 'x'.repeat(100 * 1024 + 1) } }),
     ]) {
       const res = await s.call(body);
@@ -245,6 +249,24 @@ describe('POST /admin/tasks', () => {
     expect(s.calls.starts).toHaveLength(0);
     expect(s.calls.args).toHaveLength(0);
     expect(s.calls.runs).toHaveLength(0);
+  });
+
+  test("a deny rule not starting with a letter answers 400 with no ledger start line (flag injection)", async () => {
+    for (const disallowedTools of [['--mcp-config', '/x.json'], ['WebFetch(domain:localhost)', '--settings'], [' -x'], ['-p']]) {
+      const res = await s.call(base({ runtime: { disallowedTools } }));
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('invalid_request');
+    }
+    expect(s.calls.starts).toHaveLength(0);
+    expect(s.calls.args).toHaveLength(0);
+    expect(s.calls.runs).toHaveLength(0);
+  });
+
+  test("Kiln's localhost deny rules still reach buildTaskArgs unchanged", async () => {
+    const disallowedTools = ['WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)'];
+    const res = await s.call(base({ runtime: { disallowedTools } }));
+    expect(res.status).toBe(200);
+    expect(s.calls.args[0].runtime.disallowedTools).toEqual(disallowedTools);
   });
 
   test('persistSession without a sessionId records persisted true with sessionId = taskId', async () => {

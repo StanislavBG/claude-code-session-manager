@@ -103,11 +103,14 @@ const MAX_TOOL_RULE_CHARS = 500;
  * trimmed-non-empty, <= 500 chars, no control characters, and when it has '('
  * a tool name before it, a trailing ')' and balanced parentheses. An unbalanced
  * '(' would make the CLI swallow later text into one broken rule — a deny that
- * silently never applies — so it is refused, never passed on.
+ * silently never applies — so it is refused, never passed on. The first
+ * character must be an ASCII letter (tool names and mcp__ rules all are), so a
+ * '-'-leading or space-leading value can never be read as a CLI flag.
  * @param {unknown} s
  */
 function isValidToolRule(s) {
   if (typeof s !== 'string') return false;
+  if (!/^[A-Za-z]/.test(s)) return false;
   if (s.trim() === '' || s.length > MAX_TOOL_RULE_CHARS) return false;
   if (/[\u0000-\u001f\u007f]/.test(s)) return false;
   if (!s.includes('(') && !s.includes(')')) return true;
@@ -136,7 +139,9 @@ const runtimeSchema = z.object({
   appendSystemPrompt: z.string()
     .refine((s) => Buffer.byteLength(s, 'utf8') <= MAX_SYSTEM_PROMPT_BYTES, { message: `appendSystemPrompt exceeds ${MAX_SYSTEM_PROMPT_BYTES} bytes` })
     .optional(),
-  // Permission deny rules ('WebFetch(domain:localhost)'); each reaches the CLI as its own argv element.
+  // Permission deny rules ('WebFetch(domain:localhost)'); each reaches the CLI as one
+  // '--disallowedTools=<rule>' element — after a bare variadic flag a '-'-leading value
+  // is parsed as a new flag, so the '=' form plus the leading-letter check stop injection.
   disallowedTools: z.array(z.string().refine(isValidToolRule, { message: 'invalid tool rule' })).max(MAX_TOOL_RULES).optional(),
   skipPermissions: z.boolean().optional(),
   disableAutoMemory: z.boolean().optional(),

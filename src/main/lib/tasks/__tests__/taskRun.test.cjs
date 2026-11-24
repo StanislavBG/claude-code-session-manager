@@ -62,7 +62,7 @@ describe('buildTaskArgs', () => {
     expect(env).toEqual({ A: '1', SM_KG_INTERNAL: '1', SM_PROC_ROLE: 'aux', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });
   });
 
-  test('disallowedTools: each rule its own argv element, after --tools, before --output-format', () => {
+  test('disallowedTools: each rule one --disallowedTools=<rule> element, after --tools, before --output-format', () => {
     const args = buildTaskArgs({
       model: 'm', effort: 'e', projectCwd: PROJ,
       runtime: { tools: ['WebFetch', 'Read'], disallowedTools: ['WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)', 'Bash'] },
@@ -72,14 +72,33 @@ describe('buildTaskArgs', () => {
       '--no-session-persistence',
       '--strict-mcp-config',
       '--tools', 'WebFetch,Read',
-      '--disallowedTools', 'WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)', 'Bash',
+      '--disallowedTools=WebFetch(domain:localhost)', '--disallowedTools=WebFetch(domain:127.0.0.1)', '--disallowedTools=Bash',
       '--output-format', 'json',
     ]);
+    expect(args).not.toContain('--disallowedTools');
+  });
+
+  test("disallowedTools: Kiln's rules sit right before --output-format in '=' form", () => {
+    const args = buildTaskArgs({
+      model: 'm', effort: 'e', projectCwd: PROJ,
+      runtime: { disallowedTools: ['WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)'] },
+    });
+    const at = args.indexOf('--output-format');
+    expect(args.slice(at - 2, at)).toEqual(['--disallowedTools=WebFetch(domain:localhost)', '--disallowedTools=WebFetch(domain:127.0.0.1)']);
+    expect(args).not.toContain('--disallowedTools');
+  });
+
+  test("disallowedTools: a '-'-leading rule never becomes its own flag", () => {
+    const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime: { disallowedTools: ['-x', '--version'] } });
+    expect(args.filter((a) => a.includes('disallowedTools'))).toEqual(['--disallowedTools=-x', '--disallowedTools=--version']);
+    expect(args).not.toContain('-x');
+    expect(args).not.toContain('--version');
+    expect(args).not.toContain('--disallowedTools');
   });
 
   test('disallowedTools: an empty array sends no flag', () => {
     const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime: { disallowedTools: [] } });
-    expect(args).not.toContain('--disallowedTools');
+    expect(args.some((a) => a.startsWith('--disallowedTools'))).toBe(false);
   });
 
   test('appendSystemPrompt alone sits where --system-prompt would', () => {
@@ -112,7 +131,7 @@ describe('buildTaskArgs', () => {
       '--strict-mcp-config',
       '--system-prompt', 'SYS',
       '--append-system-prompt', 'APP',
-      '--disallowedTools', 'Bash(rm:*)',
+      '--disallowedTools=Bash(rm:*)',
       '--output-format', 'json',
     ]);
   });

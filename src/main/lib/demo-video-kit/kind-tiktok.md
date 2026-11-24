@@ -62,7 +62,9 @@ Run the kit from `~/.claude/session-manager/demo-video-kit/` exactly as the pers
   post-caption checks must all pass before you save.
 - sound.cjs: mix the narration over the music bed; the bed is ducked under speech and the mix is
   normalised to -14 LUFS. When the project has a saved character with a command voice, speak its
-  lines with `node character.cjs speak spec.json` first.
+  lines with `node character.cjs speak spec.json` first. Pass `projectRoot` (`$SM_PROJECT_ROOT`) in
+  its spec: a cue or the spec's `bed` may name one of the persona's own `sounds`, and an unknown name
+  fails the run; never swap in another sound.
 - export.cjs: `node export.cjs spec.json` with `{ htmlPath, lengthS, audioPath, outDir }` writes
   `video.mp4` (1080x1920, H.264/AAC) and `poster.png` in `outDir`. It must exit 0.
 
@@ -89,6 +91,8 @@ When the `Video target:` line names a series brief file:
 1. Read the brief, then every season, canon and ledger file it names.
 2. Make the next episode exactly as they say: its premise, cast, topic and beats. Follow the
    brief's topic; never invent a premise, never pick an episode the files do not schedule.
+   Keep its sound too: every sound cue at its time and its music as the sound.cjs `bed`,
+   by the names the files use.
 3. Use the project persona for the host and voice; never borrow another project's characters.
 4. When the files have no next episode left, in the review stage or the final stage alike,
    call `project_video_outcome_write` once with `{ videoId: <the Entry id>, outcome:

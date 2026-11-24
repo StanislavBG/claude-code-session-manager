@@ -22,9 +22,16 @@ test('cast.md states the speaker, voice, voiceless, look and Character: off rule
   }
 });
 
+test('cast.md states the sfx and project sounds rules', () => {
+  const md = fs.readFileSync(CAST_MD, 'utf8');
+  for (const s of ['`sfx`', '`sounds`', '`beds`', 'Never swap in another sound']) {
+    expect(md).toContain(s);
+  }
+});
+
 test('cast.md is project-neutral and at most 3,000 bytes', () => {
   const md = fs.readFileSync(CAST_MD, 'utf8');
-  expect(md).not.toMatch(/burrow|bilko|zora|pesho/i);
+  expect(md).not.toMatch(/burrow|bilko|zora|pesho|veggie|garden/i);
   expect(Buffer.byteLength(md, 'utf8')).toBeLessThanOrEqual(3000);
 });
 
@@ -55,5 +62,5 @@ test('project-home-html.md states the Epic, sandboxed-frame and one-document rul
   for (const s of ['Session Manager Epic', 'sandboxed frame', 'Project Home', 'exactly one complete HTML document', '<style>', '@import', 'url(http', 'external fonts']) {
     expect(md).toContain(s);
   }
-  expect(md).not.toMatch(/burrow|bilko|zora|pesho/i);
+  expect(md).not.toMatch(/burrow|bilko|zora|pesho|veggie|garden/i);
 });

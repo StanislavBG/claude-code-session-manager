@@ -30,8 +30,14 @@ test('kind-tiktok.md series rule saves a season-complete outcome', () => {
   expect(md).toContain('end PASS');
 });
 
+test('kind-tiktok.md passes projectRoot to sound.cjs and keeps a series episode\'s sounds', () => {
+  const md = readTiktok();
+  expect(md).toContain('projectRoot');
+  expect(md).toContain('by the names the files use');
+});
+
 test('kind-tiktok.md holds no other project\'s own content', () => {
-  expect(readTiktok()).not.toMatch(/burrow|bilko|veggie|garden/i);
+  expect(readTiktok()).not.toMatch(/burrow|bilko|zora|pesho|veggie|garden/i);
 });
 
 const MARKETING_MD = path.join(KIT_DIR, 'kind-marketing.md');
@@ -60,5 +66,5 @@ test('kind-marketing.md says how to request, embed and seek real product clips',
 });
 
 test('kind-marketing.md holds no other project\'s own content', () => {
-  expect(readMarketing()).not.toMatch(/burrow|bilko|veggie|garden/i);
+  expect(readMarketing()).not.toMatch(/burrow|bilko|zora|pesho|veggie|garden/i);
 });

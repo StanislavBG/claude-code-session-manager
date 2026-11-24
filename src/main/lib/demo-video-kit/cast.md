@@ -24,7 +24,16 @@ persona still holds.
 ## A member without a voice
 
 - A member without `voice` never speaks. Give it no lines.
-- It gets sound effects only: sound.cjs cues on its moments, never words.
+- It is heard only through sound effects on its moments, never words: cue one of its `sfx` with
+  sound.cjs, or a built-in effect that fits its `note` when it has no `sfx`.
+
+## Sounds
+
+- A member's `sfx` names its signature sounds: built-in effects or the persona's own.
+- character.json `sounds` lists the project's own effects (`sfx`) and music beds (`beds`) by
+  `name`, each with a `note` on what it is. Use them by name: a sound.cjs cue for an effect, the
+  spec's `bed` for a music bed. They are mixed like the built-in ones.
+- An unknown sound name fails the run with sound.cjs's error. Never swap in another sound.
 
 ## Captions
 

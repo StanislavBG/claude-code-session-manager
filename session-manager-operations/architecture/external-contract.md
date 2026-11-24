@@ -307,9 +307,10 @@ record), `src/main/lib/epic/epicOutsideState.cjs` (the state). Reads write no fi
 Read from the scheduler's `plan-records/<epicId>/*.verdicts.json` files (`src/main/lib/epic/epicOutsideRead.cjs`,
 `readVerdictFiles`). A file that fails the verdict check is skipped. So `verdicts` holds only validations
 saved as checked JSON (Session Manager 0.140.0 and later) whose plan-record files still exist. Plan records
-are pruned `planRecordsDays` (default 14) days after the Epic completes, so `verdicts` can be `[]` for an Epic
-that has verdicts. For the complete sets read `verified` and `refuted`: those come from the Epic's event
-history and also cover older text verdicts.
+are pruned `planRecordsDays` (default 14) days after the Epic completes, or, for a folder with no Epic
+record, once its newest file is that old, so `verdicts` can be `[]` for an Epic that has verdicts. For the
+complete sets read `verified` and `refuted`: those come from the Epic's event history and also cover older
+text verdicts.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

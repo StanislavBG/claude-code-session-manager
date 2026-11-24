@@ -1,17 +1,17 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->50<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->50<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
 | Key | Value |
 | --- | --- |
-| Kind | Desktop app built on Electron. It is not a library. It has no JS API. |
+| Kind | Desktop app built on Electron. It has no JS API. |
 | Run | `npx claude-code-session-manager@latest` |
 | Installers | Mac `.dmg` and `.zip` (`arm64`, `x64`). Windows `.exe` (`x64`, `arm64`). Linux `AppImage` (`x64`). Get them from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest). |
 | Needs | The Claude Code CLI, installed and signed in with your own account. `git`. Node <!-- gen:node-floor -->22.12.0<!-- /gen:node-floor --> or newer, for `npx` only. |
 | npx platforms | Linux and macOS. On Windows, use the installer. |
-| MCP server | `session-manager-scheduler`. It uses stdio. The app adds it for you. It needs the app to be running. |
+| MCP server | `session-manager-scheduler`. It uses stdio. The app adds it for you. It needs the app running. |
 | Plugin | `session-manager-dev@session-manager` |
 | Agent CLIs | Claude Code is the default. Codex, Gemini CLI, Antigravity CLI, Cursor Agent and OpenCode work in Chat and Terminal only. |
 | Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `${XDG_STATE_HOME:-~/.local/state}/session-manager/`. |
@@ -20,16 +20,16 @@
 
 ## Not
 
-- It is not a hosted or cloud service. It is a desktop app. Your sessions and files stay on your machine.
-- It is not made, backed or supported by Anthropic. One person builds it as an open-source project.
-- It does not give you Claude access or replace a Claude plan. You need Claude Code, signed in with your own account.
+- It is not a hosted or cloud service. Your sessions and files stay on your machine.
+- It is not made or backed by Anthropic. One person builds it as open source.
+- It does not replace a Claude plan. You need Claude Code, signed in with your own account.
 - It has no paid, pro or trial tier. The app and the Field Manual are both free.
-- It is not a team or business product. It has no support deal and no uptime promise.
+- It is not a team product. It has no support deal or uptime promise.
 - It is not a library. You cannot `import` it.
 
 ## Features
 
-A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind of work. A **persona** is an agent's role file. A **worktree** is a separate copy of the repo on its own git branch. A **PRD** is a written work order that the scheduler runs.
+A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind of work. A **persona** is an agent's role file. A **worktree** is a copy of the repo on its own git branch. A **PRD** is a written work order that the scheduler runs.
 
 ### Sessions
 
@@ -43,14 +43,14 @@ A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind 
 | Chat and Terminal | These are two views of one CLI session. | Switch views and keep the same chat. | Session view |
 | Idle tabs | A tab starts no process until you send the first message. | Many open tabs cost almost nothing. | Sessions |
 | Changes | Shows what the session changed. | You can review the work before you merge it. | Session, Changes tab |
-| App preview | Runs one `npm` script per session on a free port. It opens the first local URL in your browser. | You can see the app from that session's copy. | Session view |
+| App preview | Runs one `npm` script per session on a free port. It opens its first local URL. | You can see the app from that session's copy. | Session view |
 
 ### Scheduler
 
 | Feature | What it does | Why it helps | Where |
 | --- | --- | --- | --- |
 | Headless jobs | Runs each PRD as a `claude -p` job with a pinned `--model`. | Work goes on while you do other things. | Scheduler |
-| Run modes | `when-available` runs jobs while usage is under a set limit. `manual` runs a job only when you press Run. | Work fits inside your plan's limits. | Scheduler |
+| Run modes | `when-available` runs jobs while usage is under a set limit. `manual` runs a job when you press Run. | Work fits inside your plan's limits. | Scheduler |
 | Order | A PRD waits for the PRDs named in its `dependsOn`. | Steps run in the right order. | PRD fields |
 | No clashes | Two PRDs that touch the same file never run at once. | Jobs do not break each other's edits. | Scheduler |
 | One slot pool | One pool of slots for the whole machine, plus a free-memory check. | The machine does not run out of memory. | Scheduler |
@@ -210,7 +210,7 @@ Tools:
 
 Rules the server enforces:
 
-- A new PRD must join a session that a person already approved. The server never creates a session.
+- A new PRD must join a session a person approved. The server never creates one.
 - A new PRD must have a `gate` and a `files` list.
 - Only a session a person is in, or a job run as `architect`, can queue PRDs.
 - A job with `SM_SCHEDULER_JOB_MCP_TOOLS` set can call only the tools in that list.
@@ -235,7 +235,7 @@ claude plugin marketplace add StanislavBG/claude-code-session-manager
 claude plugin install session-manager-dev@session-manager
 ```
 
-`/develop` and `/send-feedback` call the MCP server. So the app must be running for them.
+`/develop` and `/send-feedback` call the MCP server, so the app must run.
 
 <!-- list:skills -->
 | Skill | Use it to |
@@ -248,7 +248,7 @@ claude plugin install session-manager-dev@session-manager
 
 ### Context packs
 
-You pick packs for each session. A pack adds its skills and rules to that session only.
+A pack adds its skills and rules to one session only.
 
 <!-- list:packs -->
 | Pack | What it adds | Skills |
@@ -281,7 +281,7 @@ The app copies these into `~/.claude/agents/` on first launch.
 | Path | How | Needs | Platforms |
 | --- | --- | --- | --- |
 | Installer | Download from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest). | Nothing else. The app helps you set up `git` and Claude Code. | macOS, Windows, Linux |
-| npx | `npx claude-code-session-manager@latest` | The Node version in [Facts](#facts), `git`, Claude Code | Linux, macOS |
+| npx | `npx claude-code-session-manager@latest` | Node per [Facts](#facts), `git`, Claude Code | Linux, macOS |
 | From source | `git clone`, `npm install`, `npm run dev` | Node, `git`, Claude Code | Linux, macOS |
 
 ### What the first launch changes
@@ -306,7 +306,7 @@ An npx install runs `npx claude-code-session-manager@latest` at each login, or t
 
 A packaged build uses a login item (macOS, Windows) or the autostart folder (Linux AppImage).
 
-To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). For a packaged macOS or Windows build, remove it from login items.
+To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). On a packaged macOS or Windows build, use login items.
 
 It is not offered for an npx install on Windows, or in a dev run.
 
@@ -352,14 +352,14 @@ Then have an agent call `session_manager_help` with no args.
 
 ### Network
 
-Your prompts go only to the agent CLI you chose. The app never sends them anywhere else. The app itself talks to:
+Your prompts go only to the agent CLI you chose. The app itself talks to:
 
 | Host | Why |
 | --- | --- |
 | `api.anthropic.com` | Reads your usage, for the meters and the scheduler. |
 | `registry.npmjs.org` | Checks for a new app version. |
 | `json.schemastore.org`, `www.schemastore.org` | Checks JSON files as you edit them. |
-| bilko.run | Telemetry and the Web remote relay (phone and paired services). |
+| bilko.run | Telemetry and the Web remote relay. |
 
 ### Keyboard
 
@@ -406,4 +406,4 @@ Run `npm run readme:build` after you change MCP tools, skills, packs, personas o
 
 ## License
 
-MIT. The app and the Field Manual are free. There is no paid tier.
+MIT. The app and the Field Manual are free.

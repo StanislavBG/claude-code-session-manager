@@ -132,6 +132,15 @@ describe('quoteNamesSlots', () => {
     ['do not set the slots to 12', 12, false],
     ['never make it 16 parallel sessions', 16, false],
     ['we raised the limit to 14', 14, false],
+    // refused: a question is not a request
+    ['I asked whether to raise the limit to 14?', 14, false],
+    ['should we raise the limit to 14', 14, false],
+    ['could you set the slots to 12', 12, false],
+    ['raise the limit to 14?', 14, false],
+    // refused: a percentage is not a slot count
+    ['raise the limit to 14 percent', 14, false],
+    ['raise the limit to 14%', 14, false],
+    ['make it 16% parallel sessions', 16, false],
     // refused: the target crosses a sentence boundary
     ['raise the limit. to 14 we go', 14, false],
     // refused: not a string / not an integer

@@ -22,7 +22,8 @@
  *          a change verb (set / raise / bump / lower / make …), a limit word
  *          (limit / cap / slots / sessions / parallel / concurrent) AND the new
  *          number given as the target ("to 14", "= 14", "at 14", "14 parallel
- *          sessions"). Naming a limit and a number in passing is not enough.
+ *          sessions"). Naming a limit and a number in passing is not enough;
+ *          a question or a percentage target is refused too.
  *     Success: sessionSlots.setCap(cap) (persists + wakes waiters), one
  *     slot_cap_changed audit event { from, to, epicId, quote, promptAt },
  *     200 { ok, from, to }.
@@ -48,6 +49,10 @@ const LIMIT_WORDS = '(?:limit|limits|cap|caps|slot|slots|session|sessions|parall
 const CHANGE_VERBS = '(?:set|raise|increase|bump|lift|lower|reduce|drop|change|move|make)';
 const NEGATION = '(?:not|never|no|dont|don t|won t|wont|can t|cant|shouldn t|shouldnt)';
 const TARGET = '(?:to|=|at)';
+const QUESTION_WORDS = '(?:whether|should|could|would|can|shall)';
+// A question word before the change verb, in the same clause, makes the quote
+// a question ("should we raise the limit to 14"), never a request.
+const QUESTION_BEFORE_VERB = new RegExp(`(?:^| )${QUESTION_WORDS} (?:[^.]* )?${CHANGE_VERBS}(?= |$)`);
 
 const NUMBER_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
@@ -77,6 +82,7 @@ function normalizeQuote(quote) {
   return String(quote)
     .toLowerCase()
     .replace(/\d+[.,]\d+/g, ' # ') // a decimal is never a cap; never let "14.5" read as 14
+    .replace(/%/g, ' percent ') // "14%" reads as "14 percent": a percentage, never a cap
     .replace(/=/g, ' = ')
     .replace(/[.!?;:()[\]{}]/g, ' . ') // a clause boundary: no gap word crosses it
     .replace(/[^a-z0-9=.# ]/g, ' ')
@@ -93,7 +99,8 @@ function normalizeQuote(quote) {
  */
 function changeRequestPatterns(cap) {
   const num = `(?:${[String(cap), ...wordsFor(cap)].join('|')})`;
-  const numEnd = `(?= |$)(?! ${ANY_NUMBER}(?: |$))`;
+  // The number must stand alone and not be a percentage ("14 percent", "14%").
+  const numEnd = `(?= |$)(?! ${ANY_NUMBER}(?: |$))(?! per ?cent(?: |$))`;
   const verb = `(?<!${NEGATION}${gap(2)} )(?<=^| )${CHANGE_VERBS}`;
   const verbAtStart = `(?:^| )${verb}`;
   return [
@@ -107,13 +114,18 @@ function changeRequestPatterns(cap) {
  * a change verb, a limit word, and `cap` (digits, or English words up to
  * thirty-nine) given as the new target. Mentioning a limit and a number is not
  * enough — "lets see first 10 sessions chugging and then we will move the
- * limit via the mcp" authorizes nothing. Refuses on doubt.
+ * limit via the mcp" authorizes nothing. A question (ends with '?', or a
+ * question word such as whether/should/could/would/can/shall before the change
+ * verb) and a percentage target ("14 percent", "14%") authorize nothing either.
+ * Refuses on doubt.
  * @param {unknown} quote
  * @param {number} cap
  */
 function quoteNamesSlots(quote, cap) {
   if (typeof quote !== 'string' || !Number.isInteger(cap) || cap < 0) return false;
+  if (/\?\s*$/.test(quote)) return false; // a question is not a request
   const q = normalizeQuote(quote);
+  if (QUESTION_BEFORE_VERB.test(q)) return false;
   return changeRequestPatterns(cap).some((re) => re.test(q));
 }
 

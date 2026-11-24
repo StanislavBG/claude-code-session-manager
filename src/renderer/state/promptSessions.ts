@@ -429,7 +429,7 @@ function mintId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${seq}`
 }
 
-export type AuditEventKind =
+type AuditEventKind =
   | 'epic_create'
   | 'epic_approve'
   | 'epic_complete'
@@ -437,13 +437,12 @@ export type AuditEventKind =
   | 'epic_resume'
   | 'epic_duplicate'
   | 'epic_draft_update'
-  | 'epic_continue'
 
 /** Fire-and-forget: an IPC failure logs a console warning and never blocks or
  *  rejects the store mutation it accompanies. `source` traces which renderer
  *  surface initiated the transition (NewEpicCard, SessionActionsBar macro launches, the
  *  approve bar, etc) — see auditLog.cjs's doc comment for why this exists. */
-export function emitAuditEvent(kind: AuditEventKind, fields: { cwd: string; epicId: string; source: string; fromEpicId?: string }): void {
+function emitAuditEvent(kind: AuditEventKind, fields: { cwd: string; epicId: string; source: string }): void {
   if (typeof window === 'undefined' || !window.api?.auditLog?.append) return
   window.api.auditLog.append(kind, fields).catch((err: unknown) => {
     console.warn(`[auditLog] failed to append ${kind}`, err)

@@ -21,9 +21,15 @@ function fakeReq(body) {
   const req = new EventEmitter();
   req.setTimeout = () => {};
   req.destroy = () => {};
-  setImmediate(() => {
-    req.emit('data', Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)));
-    req.emit('end');
+  // Deliver the body once the reader has attached its 'end' listener — no timer.
+  let sent = false;
+  req.on('newListener', (event) => {
+    if (event !== 'end' || sent) return;
+    sent = true;
+    queueMicrotask(() => {
+      req.emit('data', Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)));
+      req.emit('end');
+    });
   });
   return req;
 }
@@ -51,6 +57,8 @@ let n;
 /** Test-controlled slot grant + run (POST /admin/tasks harness for the live registry). */
 let slotGate;
 let runImpl;
+/** Resolves when the route calls waitForSlot — after the ledger start line and live-registry insert. */
+let slotWaited;
 
 beforeEach(() => {
   cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskread-'));
@@ -61,6 +69,7 @@ beforeEach(() => {
   n = 0;
   handlers = new Map();
   slotGate = Promise.resolve('tok');
+  slotWaited = deferred();
   runImpl = async () => okRun();
   registerAdminRoute({ registerRoute: (m, u, h) => { handlers.set(`${m} ${u}`, h); } }, liveDeps({
     resolveProjectRoot: (c) => (c.startsWith(cwd) ? cwd : c),
@@ -81,7 +90,7 @@ function okRun(over = {}) {
 function liveDeps(over) {
   return {
     resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'claude-haiku-4-5', personaEffort: 'low' }),
-    sessionSlots: { waitForSlot: () => slotGate, stampPid: () => {}, release: () => {} },
+    sessionSlots: { waitForSlot: () => { slotWaited.resolve(); return slotGate; }, stampPid: () => {}, release: () => {} },
     runTask: (o) => runImpl(o),
     buildTaskArgs: () => ['-p'],
     buildTaskEnv: () => ({}),
@@ -267,7 +276,7 @@ describe('GET /admin/task — live output of a Task this app is running', () => 
     const slot = deferred();
     slotGate = slot.promise;
     const run = startLive();
-    await new Promise((r) => setTimeout(r, 20));
+    await slotWaited.promise;
     const res = await get('/admin/task', { cwd, id: 't-1' });
     expect(res.status).toBe(200);
     expect(res.body.task).toMatchObject({

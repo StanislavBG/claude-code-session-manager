@@ -95,9 +95,8 @@ test('KIT_VERSION is bumped to 35 (project-home-html.md restores two lost phrase
 test('the playbook path both personas name is where the kit installs it by default', () => {
   const POINTER = '~/.claude/session-manager/demo-video-kit/project-home-html.md';
   const agentsDir = path.join(__dirname, '..', '..', '..', '..', 'seed', 'agents');
-  for (const persona of ['demo-video-builder.md', 'project-home-builder.md']) {
-    expect(fs.readFileSync(path.join(agentsDir, persona), 'utf8'), persona).toContain(POINTER);
-  }
+  expect(fs.readFileSync(path.join(agentsDir, 'demo-video-builder.md'), 'utf8')).toContain(POINTER);
+  expect(fs.readFileSync(path.join(agentsDir, 'project-home-builder.md'), 'utf8')).toContain(POINTER);
   expect(kitFiles()).toContain('project-home-html.md');
   // Default destination: SM_SCHEDULER_HOME unset. HOME points at a temp dir so the
   // live-root guard (schedulerPaths.cjs) allows the resolve under vitest.
@@ -110,7 +109,6 @@ test('the playbook path both personas name is where the kit installs it by defau
   try {
     expect(os.homedir()).toBe(fakeHome);
     const dest = kitDestDir();
-    expect(dest).toBe(path.join(os.homedir(), '.claude', 'session-manager', 'demo-video-kit'));
     expect(path.join(dest, 'project-home-html.md')).toBe(path.join(os.homedir(), POINTER.slice(2)));
   } finally {
     if (prevSched === undefined) delete process.env.SM_SCHEDULER_HOME; else process.env.SM_SCHEDULER_HOME = prevSched;

@@ -307,6 +307,7 @@ function renderGateSection(commandsOrNone) {
 }
 
 module.exports = {
+  NONE_GATE_WARNING,
   validateGate,
   validateFiles,
   renderFilesSection,

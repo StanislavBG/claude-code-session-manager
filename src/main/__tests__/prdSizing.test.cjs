@@ -94,3 +94,35 @@ test('does not warn when the combined body is exactly at the character limit', (
   const warnings = sizingWarnings({ estimateMinutes: 10, acceptanceCriteria: [], goal, implementationNotes: '' });
   expect(warnings.some((w) => /exceeding the \d+-character sizing limit/.test(w))).toBe(false);
 });
+
+// ──────────────────────────────────────────── validator exemption (PRD 3864)
+
+test('validator PRD skips only the acceptanceCriteria line-count warning', () => {
+  const ac = Array.from({ length: SIZING_LIMITS.acLines + 1 }, (_, i) => `criterion ${i}`);
+  const warnings = sizingWarnings(compliantInput({ agentType: 'validator', acceptanceCriteria: ac }));
+  expect(warnings.some((w) => /acceptanceCriteria has/.test(w))).toBe(false);
+});
+
+test('validator PRD still gets the line-length, open-ended, multi-timeout and body-size warnings', () => {
+  const warnings = sizingWarnings(compliantInput({
+    agentType: 'validator',
+    goal: 'g'.repeat(SIZING_LIMITS.bodyChars + 1),
+    acceptanceCriteria: [
+      'x'.repeat(SIZING_LIMITS.acLineChars + 1),
+      'grep the codebase for X and update every call site',
+      'timeout 120 npm run typecheck && timeout 300 npm run test:unit both pass',
+    ],
+  }));
+  expect(warnings.some((w) => /exceed \d+ characters/.test(w))).toBe(true);
+  expect(warnings.some((w) => /open-ended search-and-fix/.test(w))).toBe(true);
+  expect(warnings.some((w) => /two or more `timeout/.test(w))).toBe(true);
+  expect(warnings.some((w) => /exceeding the \d+-character sizing limit/.test(w))).toBe(true);
+});
+
+test('dev-lead or absent agentType still gets the line-count warning for 9 criteria', () => {
+  const ac = Array.from({ length: 9 }, (_, i) => `criterion ${i}`);
+  for (const overrides of [{ agentType: 'dev-lead' }, {}]) {
+    const warnings = sizingWarnings(compliantInput({ ...overrides, acceptanceCriteria: ac }));
+    expect(warnings.some((w) => /acceptanceCriteria has 9 lines/.test(w))).toBe(true);
+  }
+});

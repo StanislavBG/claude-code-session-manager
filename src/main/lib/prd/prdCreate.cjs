@@ -81,7 +81,7 @@ const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
 const { isSweepValidatorSlug } = require('../epic/epicSweepValidator.cjs');
-const { validateGate, validateFiles, renderFilesSection, renderGateSection, parseFilesSection } = require('./prdGateFiles.cjs');
+const { NONE_GATE_WARNING, validateGate, validateFiles, renderFilesSection, renderGateSection, parseFilesSection } = require('./prdGateFiles.cjs');
 const { normalizeCriteria, validateCriteria, serializeCriteria, renderCriteriaLines } = require('./prdCriteria.cjs');
 const { filesOverlap } = require('../scheduler/schedulerBatch.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
@@ -748,7 +748,11 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
       return { ok: false, applied: false, status: 400, error: gateValidation.error };
     }
     gateCommands = gateValidation.commands;
-    extraWarnings.push(...gateValidation.warnings);
+    // A validator PRD's gate is always none (it re-runs the plan's gates itself),
+    // so the none-gate warning is expected noise for it — drop only that one.
+    extraWarnings.push(...gateValidation.warnings.filter(
+      (w) => !(input.agentType === 'validator' && w === NONE_GATE_WARNING),
+    ));
   } else {
     extraWarnings.push('No gate: the scheduler cannot re-check this PRD.');
   }

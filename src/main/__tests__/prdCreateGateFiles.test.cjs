@@ -489,6 +489,46 @@ test('createPrd with gate: ["none"] writes the none-variant Gate section and rep
   expect(resolved.source).toBe('none');
 });
 
+const NONE_GATE_RE = /^Gate is none: the scheduler cannot re-check this PRD\./;
+
+// Seeds project-overlay persona files so assertAgentTypeWritable resolves the
+// agentType without depending on the machine's ~/.claude/agents.
+async function seedPersonas(prdsDir, names) {
+  const root = path.dirname(path.dirname(prdsDir));
+  const agentsDir = path.join(root, '.claude', 'agents');
+  await fsp.mkdir(agentsDir, { recursive: true });
+  for (const name of names) {
+    await fsp.writeFile(path.join(agentsDir, `${name}.md`), `---\nname: ${name}\n---\nTest persona.\n`);
+  }
+  return root;
+}
+
+test('createPrd returns no none-gate warning for a validator PRD with gate ["none"]', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const cwd = await seedPersonas(prdsDir, ['validator']);
+  const result = await createPrd(validCreateBody({
+    cwd, slug: 'validate-plan', agentType: 'validator', gate: ['none'], files: ['README.md'],
+  }), remote);
+  expect(result.error).toBeUndefined();
+  expect(result.ok).toBe(true);
+  expect(result.warnings.some((w) => NONE_GATE_RE.test(w))).toBe(false);
+});
+
+test('createPrd still returns the none-gate warning for dev-lead or absent agentType with gate ["none"]', async () => {
+  for (const extra of [{ agentType: 'dev-lead' }, {}]) {
+    const prdsDir = await mkTmpPrdsDir();
+    const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+    const cwd = await seedPersonas(prdsDir, ['dev-lead']);
+    const result = await createPrd(validCreateBody({
+      cwd, slug: 'docs-only-change', gate: ['none'], files: ['README.md'], ...extra,
+    }), remote);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => NONE_GATE_RE.test(w))).toBe(true);
+  }
+});
+
 test('createPrd rejects when a stray ```gate fence elsewhere in the body would make the scheduler read the wrong gate', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);

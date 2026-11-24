@@ -35,7 +35,9 @@ function sizingWarnings(input) {
 
   const warnings = [];
 
-  if (acceptanceCriteria.length > SIZING_LIMITS.acLines) {
+  // A validator PRD's criteria list one check per PRD in its plan, so a long
+  // list is expected; every other sizing rule still applies to it.
+  if (input?.agentType !== 'validator' && acceptanceCriteria.length > SIZING_LIMITS.acLines) {
     warnings.push(
       `acceptanceCriteria has ${acceptanceCriteria.length} lines, exceeding the ${SIZING_LIMITS.acLines}-line sizing limit — split into smaller, single-purpose PRDs.`,
     );

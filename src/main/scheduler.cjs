@@ -9430,6 +9430,9 @@ async function spawnResumeRecovery(job, resumeTarget) {
 
 const CONFIRM_APPROVE = 'Approve';
 const CONFIRM_BUSY = new Set(['running', 'investigating']);
+// record key -> hold key under which its 'tool_confirmation_resume_held'
+// audit event was already appended (one event per record per hold).
+const toolConfirmationHeldKeys = new Map();
 
 /**
  * Apply answered tool-risk confirmation items (needsYouStore app 'tool-risk')
@@ -9442,12 +9445,20 @@ const CONFIRM_BUSY = new Set(['running', 'investigating']);
  * A record whose job is still running is left for a later tick; a request
  * recorded after the item was answered is never auto-applied (it waits for a
  * fresh item). Never throws.
- * @param {{ jobs?: any[] }} state
+ * Under the auto-dispatch hold (automatic ticks only) an approval is left
+ * pending — one 'tool_confirmation_resume_held' audit event per record per hold.
+ * @param {{ jobs?: any[], config?: any }} state
+ * @param {{ human?: boolean }} [opts] the running tick's `human` flag
  */
-async function processToolConfirmationAnswers(state) {
+async function processToolConfirmationAnswers(state, { human = false } = {}) {
   try {
     const pending = toolClearance.listPendingConfirmations();
     if (!pending.length) return;
+    // Same hold decision as the tick running this pass: an approval starts a
+    // `claude -p --resume`, so an automatic tick under the hold leaves it
+    // pending for a later tick. A denial starts nothing and is applied anyway.
+    const hold = human ? null : currentAutoDispatchHold(state.config);
+    const holdKey = hold ? `${hold.reason}|${hold.window ?? ''}|${String(hold.percent)}` : null;
     toolClearance.pruneExpired();
     const items = await needsYouStore.listNeedsYou({ app: needsYouStore.CONFIRM_APP });
     const rowOf = (slug) => (state.jobs || []).find((j) => j.slug === slug) || null;
@@ -9457,9 +9468,17 @@ async function processToolConfirmationAnswers(state) {
       const answeredAtMs = Date.parse(item.answeredAt || item.updatedAt || '') || 0;
       if (rec.requests.some((r) => CONFIRM_BUSY.has(rowOf(r.jobSlug)?.status) || runningSet.has(r.jobSlug))) continue;
       const approved = item.status === 'answered' && item.answer === CONFIRM_APPROVE;
+      if (approved && hold) {
+        if (toolConfirmationHeldKeys.get(rec.key) !== holdKey) {
+          toolConfirmationHeldKeys.set(rec.key, holdKey);
+          for (const r of rec.requests) appendAuditEvent('tool_confirmation_resume_held', { slug: r.jobSlug, reason: hold.reason });
+        }
+        continue;
+      }
       if (approved && rec.requests.some((r) => (r.requestedAt || 0) <= answeredAtMs) && sessionSlots.availableFor('job') < 1) continue;
       const taken = toolClearance.takePendingConfirmation(rec.key);
       if (!taken) continue;
+      toolConfirmationHeldKeys.delete(rec.key);
       for (const request of taken.requests) {
         if ((request.requestedAt || 0) > answeredAtMs) {
           console.warn(`[scheduler] ${request.jobSlug}: confirmation request for ${request.tool} postdates the answer — not applied`);
@@ -9520,7 +9539,7 @@ async function applyToolConfirmationAnswer(request, approved, row) {
   const fresh = siblingJobs.find((x) => x.slug === row.slug) || row;
   // Not awaited: spawnJob runs the whole job. Its synchronous prefix takes
   // the session slot and adds the slug to runningSet before returning.
-  spawnJob(fresh, runId, runDir, fresh.cwd || DEFAULT_PROJECT_CWD, target, siblingJobs)
+  Promise.resolve(dispatchSpawnJob(fresh, runId, runDir, fresh.cwd || DEFAULT_PROJECT_CWD, target, siblingJobs))
     .catch((e) => reportSchedulerError('tool confirmation resume failed', row.slug, e));
   if (!runningSet.has(row.slug)) {
     // No slot after all: restore the row and keep the request for a later tick.
@@ -9685,7 +9704,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
     // session with a single-use clearance, deny parks confirmation_denied.
     // Awaited (not fire-and-forget) so a resumed row is in runningSet before
     // the picker below runs; never throws.
-    await processToolConfirmationAnswers(state);
+    await processToolConfirmationAnswers(state, { human });
     if (stale()) return STALE_TICK;
     // Session-Manager's machine-wide slot pool is the ONLY concurrency limit
     // the picker answers to (plus the memory gate below). The scheduler used

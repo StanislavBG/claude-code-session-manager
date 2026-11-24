@@ -25,7 +25,7 @@ interface StatusInfo {
 export function computeStatus({
   snap, now, avgDurationMs, runningJobs,
 }: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number; runningJobs: ScheduleJob[] }): StatusInfo {
-  const { config, jobs, paused, nextReset, utilization, utilizationWindow, effectiveConcurrency } = snap
+  const { config, jobs, paused, utilization, utilizationHold, effectiveConcurrency } = snap
   let pendingCount = 0
   let completedCount = 0
   for (const j of jobs) {
@@ -99,22 +99,16 @@ export function computeStatus({
     }
   }
 
-  // when-available
-  const thresh = config.utilizationThreshold ?? 90
-  if (utilization === null || utilization === undefined) {
-    return {
-      kind: 'auto-soon',
-      line1: `Auto · ${pendingCount} pending`,
-      line2: 'checking token availability…',
-    }
-  }
-  if (utilization >= thresh) {
-    const wait = nextReset ? Date.parse(nextReset) - now : null
-    const win = utilizationWindow ? windowLabel(utilizationWindow) : null
+  // when-available. Throttled is read from the scheduler's own hold, never
+  // re-derived from utilization >= threshold (that drifted from what dispatch did).
+  if (utilizationHold) {
+    const { percent, threshold, window: holdWindow, resetsAt } = utilizationHold
+    const wait = resetsAt ? Date.parse(resetsAt) - now : null
+    const win = holdWindow ? windowLabel(holdWindow) : null
     // Unknown reset horizon is treated as the LONG case, never the benign one.
     const long = wait === null || Number.isNaN(wait) || wait > LONG_HOLD_MS
     const resetPart = wait && wait > 0
-      ? `resets ${formatClock(Date.parse(nextReset!))} (in ${formatRelative(wait)})`
+      ? `resets ${formatClock(Date.parse(resetsAt!))} (in ${formatRelative(wait)})`
       : null
     let line2: string
     if (long) {
@@ -126,8 +120,15 @@ export function computeStatus({
     }
     return {
       kind: 'auto-throttled',
-      line1: `Auto · throttled (util ${utilization.toFixed(0)}% ≥ ${thresh}%)`,
+      line1: `Auto · throttled (util ${percent.toFixed(0)}% ≥ ${threshold}%)`,
       line2,
+    }
+  }
+  if (utilization === null || utilization === undefined) {
+    return {
+      kind: 'auto-soon',
+      line1: `Auto · ${pendingCount} pending`,
+      line2: 'checking token availability…',
     }
   }
   return {

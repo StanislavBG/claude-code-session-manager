@@ -35,6 +35,13 @@ describe('queueConstraintLabel', () => {
     expect(queueConstraintLabel(tick({ reason: 'held', detail: 'why' }), 2, 5)).toBe('why')
     expect(queueConstraintLabel(tick({ reason: 'held' }), 2, 5)).toBe('held')
   })
+  it('utilization-held uses detail, with fallback', () => {
+    expect(queueConstraintLabel(tick({ reason: 'utilization-held', detail: 'weekly 96% ≥ 90%' }), 2, 5)).toBe('weekly 96% ≥ 90%')
+    expect(queueConstraintLabel(tick({ reason: 'utilization-held' }), 2, 5)).toBe('usage hold')
+  })
+  it('manual-fire-policy', () => {
+    expect(queueConstraintLabel(tick({ reason: 'manual-fire-policy' }), 2, 5)).toBe('fire policy is manual — press Run now to dispatch')
+  })
   it('paused and unknown', () => {
     expect(queueConstraintLabel(tick({ reason: 'paused' }), 2, 5)).toBe('scheduler paused')
     expect(queueConstraintLabel(tick({ reason: 'drained' }), 2, 5)).toBeNull()

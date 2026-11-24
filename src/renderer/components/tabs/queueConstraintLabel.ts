@@ -23,6 +23,10 @@ export function queueConstraintLabel(
         ? `${n} pending held behind dependencies`
         : (lastTick.detail ?? 'held')
     }
+    case 'utilization-held':
+      return lastTick.detail ?? 'usage hold'
+    case 'manual-fire-policy':
+      return 'fire policy is manual — press Run now to dispatch'
     case 'paused':
       return 'scheduler paused'
     default:

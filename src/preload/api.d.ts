@@ -1188,7 +1188,7 @@ export interface ScheduleLaunchMitigation {
  *  Every field is computed by tickQueue; nothing here is derived in the UI. */
 export interface ScheduleLastTick {
   fired: boolean;
-  reason: 'held' | 'slots-exhausted' | 'memory-deferred' | 'already-running' | 'drained' | 'paused' | string;
+  reason: 'held' | 'slots-exhausted' | 'memory-deferred' | 'already-running' | 'drained' | 'paused' | 'utilization-held' | 'manual-fire-policy' | 'usage-meter-degraded' | 'load-deferred' | string;
   /** Human-readable one-liner for the binding constraint, when there is one. */
   detail?: string;
   deferredCount?: number;

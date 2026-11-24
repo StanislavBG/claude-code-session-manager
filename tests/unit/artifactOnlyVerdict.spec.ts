@@ -81,8 +81,27 @@ describe('artifact-only verdict', () => {
     expect(artifactsVerifiedOnDisk({ ...base, paths: [] })).toBe(false);
     expect(artifactsVerifiedOnDisk({ ...base, paths: ['../x'] })).toBe(false);
     expect(artifactsVerifiedOnDisk({ ...base, paths: ['/etc/passwd'] })).toBe(false);
-    expect(artifactsVerifiedOnDisk({ ...base, paths: ['review-records'] })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: [''] })).toBe(false);
+    // Outside the job worktree: a directory holding a fresh, non-empty file
+    // still fails whether named absolutely, via '..', or as the root itself.
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'leak.md'), 'z');
+    writeArt('root-file.md', 'r');
+    expect(artifactsVerifiedOnDisk({ ...base, paths: [outside] })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: [path.join(outside, 'leak.md')] })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['../outside/'] })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['review-records/../../outside'] })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['.'] })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['./'] })).toBe(false);
+    // A directory INSIDE the worktree verifies via a fresh direct child (d29a8bfd);
+    // one with no fresh non-empty child does not.
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['review-records'] })).toBe(true);
+    writeArt('stale-dir/old.md', 'o', new Date(Date.now() - 3_600_000));
+    writeArt('stale-dir/empty.md', '');
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['stale-dir/'] })).toBe(false);
     expect(artifactsVerifiedOnDisk({ ...base, paths: [ART], fsImpl: { statSync() { throw new Error('boom'); } } })).toBe(false);
+    expect(artifactsVerifiedOnDisk({ ...base, paths: ['review-records'], fsImpl: { statSync: fs.statSync, readdirSync() { throw new Error('boom'); } } })).toBe(false);
     expect(artifactsVerifiedOnDisk({ ...base, paths: [ART] })).toBe(true);
   });
   it('(f) commit guard stands down only on a clean tree', () => {

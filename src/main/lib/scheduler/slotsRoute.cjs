@@ -49,10 +49,16 @@ const LIMIT_WORDS = '(?:limit|limits|cap|caps|slot|slots|session|sessions|parall
 const CHANGE_VERBS = '(?:set|raise|increase|bump|lift|lower|reduce|drop|change|move|make)';
 const NEGATION = '(?:not|never|no|dont|don t|won t|wont|can t|cant|shouldn t|shouldnt)';
 const TARGET = '(?:to|=|at)';
-const QUESTION_WORDS = '(?:whether|should|could|would|can|shall)';
-// A question word before the change verb, in the same clause, makes the quote
-// a question ("should we raise the limit to 14"), never a request.
-const QUESTION_BEFORE_VERB = new RegExp(`(?:^| )${QUESTION_WORDS} (?:[^.]* )?${CHANGE_VERBS}(?= |$)`);
+const QUESTION_WORDS = '(?:will|would|do|does|did|may|might|are|is|can|could|should|shall|whether|want to)';
+// A question word (or a '?') before the change verb, in the same clause, makes
+// the quote a question ("will you raise the limit to 14"), never a request.
+// A clause ends at , ; . ! or a line break (all normalized to ' . ').
+const QUESTION_BEFORE_VERB = new RegExp(`(?:^| )(?:${QUESTION_WORDS}|\\?)(?: [^.]*)? ${CHANGE_VERBS}(?= |$)`);
+// Any '?' after a change verb, anywhere later in the quote, makes it a question.
+const QUESTION_AFTER_VERB = new RegExp(`(?:^| )${CHANGE_VERBS} (?:.* )?\\?`);
+const PERCENT_WORDS = '(?:percent|per cent|pct|percentage)';
+// Closing quotes and brackets a human (or a copy-paste) leaves after a '?'.
+const TRAILING_CLOSERS = /[\s"'`\u201d\u2019\u00bb)\]}>]+$/;
 
 const NUMBER_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
@@ -84,8 +90,10 @@ function normalizeQuote(quote) {
     .replace(/\d+[.,]\d+/g, ' # ') // a decimal is never a cap; never let "14.5" read as 14
     .replace(/%/g, ' percent ') // "14%" reads as "14 percent": a percentage, never a cap
     .replace(/=/g, ' = ')
-    .replace(/[.!?;:()[\]{}]/g, ' . ') // a clause boundary: no gap word crosses it
-    .replace(/[^a-z0-9=.# ]/g, ' ')
+    .replace(/[.!;,\r\n]/g, ' . ') // a clause boundary: no gap word or question scan crosses it
+    .replace(/\?/g, ' ? ') // a question mark: no gap word crosses it
+    .replace(/[:()[\]{}]/g, ' | ') // a phrase break: no gap word crosses it, the question scan does
+    .replace(/[^a-z0-9=.#?| ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -100,7 +108,7 @@ function normalizeQuote(quote) {
 function changeRequestPatterns(cap) {
   const num = `(?:${[String(cap), ...wordsFor(cap)].join('|')})`;
   // The number must stand alone and not be a percentage ("14 percent", "14%").
-  const numEnd = `(?= |$)(?! ${ANY_NUMBER}(?: |$))(?! per ?cent(?: |$))`;
+  const numEnd = `(?= |$)(?! ${ANY_NUMBER}(?: |$))(?! ${PERCENT_WORDS}(?: |$))`;
   const verb = `(?<!${NEGATION}${gap(2)} )(?<=^| )${CHANGE_VERBS}`;
   const verbAtStart = `(?:^| )${verb}`;
   return [
@@ -115,16 +123,19 @@ function changeRequestPatterns(cap) {
  * thirty-nine) given as the new target. Mentioning a limit and a number is not
  * enough — "lets see first 10 sessions chugging and then we will move the
  * limit via the mcp" authorizes nothing. A question (ends with '?', or a
- * question word such as whether/should/could/would/can/shall before the change
- * verb) and a percentage target ("14 percent", "14%") authorize nothing either.
+ * '?' anywhere after the change verb, or a question word — will, would, do,
+ * does, did, may, might, are, is, can, could, should, shall, whether, want to —
+ * before the verb in its clause) and a percentage target ("14%", "14 percent",
+ * "14 per cent", "14 pct", "14 percentage") authorize nothing either.
  * Refuses on doubt.
  * @param {unknown} quote
  * @param {number} cap
  */
 function quoteNamesSlots(quote, cap) {
   if (typeof quote !== 'string' || !Number.isInteger(cap) || cap < 0) return false;
-  if (/\?\s*$/.test(quote)) return false; // a question is not a request
+  if (/\?$/.test(quote.replace(TRAILING_CLOSERS, ''))) return false; // a question is not a request
   const q = normalizeQuote(quote);
+  if (QUESTION_AFTER_VERB.test(q)) return false;
   if (QUESTION_BEFORE_VERB.test(q)) return false;
   return changeRequestPatterns(cap).some((re) => re.test(q));
 }

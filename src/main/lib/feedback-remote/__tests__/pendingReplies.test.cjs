@@ -182,3 +182,15 @@ test('a given-up entry no longer counts toward the thread pending count (frees i
   expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(ledger.listPendingForThread('/p/b', 'epic-y').length);
   expect(ledger.listPendingForThread('/p/b', 'epic-y').map((x) => x.id)).toEqual([b.id]);
 });
+
+test('add keeps release commits lowercased and de-duplicated; invalid hashes dropped', () => {
+  const e = ledger.addPendingReply(entry({ commits: ['ABC1234', 'abc1234', 'not-hex', 42, 'DEF5678abc'] }));
+  expect(e.commits).toEqual(['abc1234', 'def5678abc']);
+  expect(ledger.listDueReplies('0.142.0')[0].commits).toEqual(['abc1234', 'def5678abc']);
+});
+
+test('add omits the commits key when none are given or none are valid', () => {
+  expect('commits' in ledger.addPendingReply(entry())).toBe(false);
+  expect('commits' in ledger.addPendingReply(entry({ commits: [] }))).toBe(false);
+  expect('commits' in ledger.addPendingReply(entry({ commits: ['zz'] }))).toBe(false);
+});

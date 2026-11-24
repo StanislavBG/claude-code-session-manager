@@ -11,6 +11,8 @@
  * admin-api.json; honors SM_SCHEDULER_HOME) = { version: 1, entries }.
  * An entry is due once appVersionAbove < running appVersion (strictly, via
  * seedDevPlugin.cjs compareSemver — an equal version is not due).
+ * An entry with `commits` (release.commits) is further gated by the
+ * deliverer on tag v<running version> containing every commit.
  * A missing or unreadable file reads as empty. Writes go through
  * util/atomicFs.cjs.
  *
@@ -26,6 +28,7 @@ const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const STORE_VERSION = 1;
 const FILE_NAME = 'pending-replies.json';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const COMMIT_RE = /^[0-9a-f]{7,40}$/;
 /** Failed delivery attempts (one per hourly pass) before an entry gives up for good. */
 const MAX_DELIVERY_ATTEMPTS = 24;
 
@@ -79,12 +82,26 @@ function normalizeYSource(v) {
   try { return JSON.parse(JSON.stringify(v)); } catch { return null; }
 }
 
+/** Lowercased, de-duplicated commit hashes (7-40 hex); [] when none are valid. */
+function normalizeCommits(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const c of v) {
+    if (typeof c !== 'string') continue;
+    const lc = c.toLowerCase();
+    if (COMMIT_RE.test(lc) && !out.includes(lc)) out.push(lc);
+  }
+  return out;
+}
+
 /** Pure: build a full ledger entry from caller input. Throws on a bad appVersionAbove. */
 function buildEntry(input, now = new Date()) {
   const e = input && typeof input === 'object' ? input : {};
   if (!isSemver(e.appVersionAbove)) {
     throw new Error(`pendingReplies: appVersionAbove must be x.y.z, got ${JSON.stringify(e.appVersionAbove)}`);
   }
+  // release.commits the reply claims: delivery waits until tag v<running> holds every one.
+  const commits = normalizeCommits(e.commits);
   return {
     id: crypto.randomUUID(),
     createdAt: now.toISOString(),
@@ -97,6 +114,7 @@ function buildEntry(input, now = new Date()) {
     message: str(e.message),
     referencePaths: Array.isArray(e.referencePaths) ? e.referencePaths.filter((p) => typeof p === 'string') : [],
     appVersionAbove: e.appVersionAbove,
+    ...(commits.length ? { commits } : {}),
     // What delivery needs once the scheduling Epic has closed: its source
     // (externalRef / proposal / replyTo) and the cap count this reply took.
     ySource: normalizeYSource(e.ySource),

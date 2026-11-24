@@ -1051,12 +1051,12 @@ test('replyPassLogMeta: a skipped pass is marked skipped: true; a run pass skipp
     const p1 = deliverDueReplies({ appVersion: '0.142.0' }, d);
     await new Promise((res) => setImmediate(res));
     const second = await deliverDueReplies({ appVersion: '0.142.0' }, d);
-    expect(replyPassLogMeta(second, '0.142.0')).toEqual({ appVersion: '0.142.0', due: 0, delivered: 0, failed: 0, skipped: true });
+    expect(replyPassLogMeta(second, '0.142.0')).toEqual({ appVersion: '0.142.0', due: 0, delivered: 0, failed: 0, waiting: 0, skipped: true });
     release();
     const first = await p1;
-    expect(replyPassLogMeta(first, '0.142.0')).toEqual({ appVersion: '0.142.0', due: 1, delivered: 1, failed: 0, skipped: false });
+    expect(replyPassLogMeta(first, '0.142.0')).toEqual({ appVersion: '0.142.0', due: 1, delivered: 1, failed: 0, waiting: 0, skipped: false });
   });
-  expect(replyPassLogMeta({ due: 0, delivered: 0, failed: 0, error: 'boom' }, '1.0.0')).toEqual({ appVersion: '1.0.0', due: 0, delivered: 0, failed: 0, skipped: false, error: 'boom' });
+  expect(replyPassLogMeta({ due: 0, delivered: 0, failed: 0, error: 'boom' }, '1.0.0')).toEqual({ appVersion: '1.0.0', due: 0, delivered: 0, failed: 0, waiting: 0, skipped: false, error: 'boom' });
 });
 
 // ---------------------------------------------------------------------------
@@ -1191,4 +1191,84 @@ test('release: a verified release fills {version}, delivers, and records release
   const crypto = require('node:crypto');
   expect(receipt.reply.hash).toBe(crypto.createHash('sha256')
     .update('done\nLive in Session Manager 0.143.0 (v0.143.0).').digest('hex'));
+});
+
+// ---------------------------------------------------------------------------
+// Held release replies: commits gate + placeholder guard on delivery
+// ---------------------------------------------------------------------------
+
+test('held release: commits are stored; a tag lacking a commit waits (no attempt), a tag holding it delivers', async () => {
+  await withSchedulerHome(async (home) => {
+    const { a, b } = await setup();
+    fs.writeFileSync(path.join(b, 'package.json'), SM_PKG);
+    const d = deps('sent');
+    const held = await sendFeedbackReply(input(b, {
+      message: 'Live in Session Manager {version}.',
+      deliverWhen: { appVersionAbove: '0.141.0' },
+      release: { commits: ['ABC1234'] },
+    }), d);
+    expect(held).toMatchObject({ ok: true, delivery: 'scheduled' });
+    expect(readLedger(home)[0].commits).toEqual(['abc1234']);
+
+    // 0.142.0 ships without the commit: the entry waits, spends no attempt.
+    const old = fakeGit([], { tag: 'v0.142.0' });
+    const r1 = await deliverDueReplies({ appVersion: '0.142.0' }, { ...d, runGit: old.runGit });
+    expect(r1).toMatchObject({ due: 1, delivered: 0, failed: 0, waiting: 1 });
+    expect(r1.results).toEqual([{
+      id: readLedger(home)[0].id, ok: false, waiting: 'release tag v0.142.0 does not contain commit abc1234',
+    }]);
+    expect(old.calls.every((c) => c.cwd === b)).toBe(true);
+    expect(d.calls).toHaveLength(0);
+    expect(readLedger(home)[0]).toMatchObject({ attempts: 0, deliveredAt: null, lastError: null });
+
+    // 0.143.0 contains it: delivered, receipt records the release.
+    const now = fakeGit(['abc1234'], { tag: 'v0.143.0' });
+    const r2 = await deliverDueReplies({ appVersion: '0.143.0' }, { ...d, runGit: now.runGit });
+    expect(r2).toMatchObject({ due: 1, delivered: 1, failed: 0, waiting: 0 });
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0][1]).toContain('Live in Session Manager 0.143.0.');
+    expect(events(a, 'psess-x').at(-1)).toMatchObject({ notice: 'cross-project-reply' });
+    const receipt = events(b, 'psess-y').at(-1);
+    expect(receipt.notice).toBe('cross-project-reply-sent');
+    expect(receipt.reply.release).toEqual({ version: '0.143.0', commits: ['abc1234'] });
+    expect(readLedger(home)[0]).toMatchObject({ deliveredVersion: '0.143.0', attempts: 0 });
+  });
+});
+
+test('held reply: a placeholder still left after {version} is filled blocks delivery', async () => {
+  await withSchedulerHome(async (home) => {
+    const { a, b } = await setup();
+    const d = deps('sent');
+    const pendingReplies = require('../pendingReplies.cjs');
+    // Written straight to the ledger: the route would refuse this message.
+    pendingReplies.addPendingReply({
+      replierCwd: b, yId: 'psess-y', goalText: 'g',
+      thread: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x', legacy: false, mode: null },
+      targetCwd: a, outcome: 'done',
+      message: 'Live in {version}, see {{release}}.', appVersionAbove: '0.141.0',
+    });
+    const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+    expect(r).toMatchObject({ due: 1, delivered: 0, failed: 1, waiting: 0 });
+    expect(r.results[0].error).toContain('{{release}}');
+    expect(d.calls).toHaveLength(0);
+    const [entry] = readLedger(home);
+    expect(entry).toMatchObject({ attempts: 1, deliveredAt: null });
+    expect(entry.lastError).toContain('{{release}}');
+  });
+});
+
+test('held reply without commits: stored without a commits key, never runs git, receipt has no release', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps('sent');
+    await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    expect('commits' in readLedger(home)[0]).toBe(false);
+    const git = fakeGit([]);
+    const r = await deliverDueReplies({ appVersion: '0.142.0' }, { ...d, runGit: git.runGit });
+    expect(r).toMatchObject({ due: 1, delivered: 1, waiting: 0 });
+    expect(git.calls).toHaveLength(0);
+    const receipt = events(b, 'psess-y').at(-1);
+    expect(receipt.notice).toBe('cross-project-reply-sent');
+    expect(receipt.reply.release).toBeUndefined();
+  });
 });

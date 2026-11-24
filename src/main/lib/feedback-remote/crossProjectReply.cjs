@@ -390,6 +390,7 @@ async function sendFeedbackReply(input, deps = {}) {
         message,
         referencePaths,
         appVersionAbove: deliverWhen.appVersionAbove,
+        commits: release ? release.commits : undefined,
         hash,
         ySource: y.source || {},
         sentAtScheduling: used + 1,
@@ -748,7 +749,11 @@ function resolveThread(src) {
 }
 
 /**
- * deliverDueReplies({ appVersion }, deps) → Promise<{ due, delivered, failed, results }>.
+ * deliverDueReplies({ appVersion }, deps) → Promise<{ due, delivered, failed, waiting, results }>.
+ * An entry carrying release commits is sent only once tag v<appVersion>
+ * contains every one (replyClaims.checkReleaseContains); until then it
+ * counts as waiting and spends no attempt. A message that still holds a
+ * placeholder after {version} is filled is never sent (a failed attempt).
  * Sends every pending-reply ledger entry whose appVersionAbove is now below
  * appVersion: `{version}` in its message becomes appVersion, then it goes
  * through deliverAuthorizedReply (same path + fallback as a live reply) under
@@ -767,7 +772,7 @@ function resolveThread(src) {
 let dueRepliesPassRunning = false;
 
 async function deliverDueReplies(opts = {}, deps = {}) {
-  if (dueRepliesPassRunning) return { due: 0, delivered: 0, failed: 0, results: [], skipped: true };
+  if (dueRepliesPassRunning) return { due: 0, delivered: 0, failed: 0, waiting: 0, results: [], skipped: true };
   dueRepliesPassRunning = true;
   try {
     return await runDueRepliesPass(opts, deps);
@@ -787,13 +792,14 @@ function replyPassLogMeta(r, appVersion) {
     due: r.due,
     delivered: r.delivered,
     failed: r.failed,
+    waiting: Number.isInteger(r.waiting) ? r.waiting : 0,
     skipped: r.skipped === true,
     ...(r.error ? { error: r.error } : {}),
   };
 }
 
 async function runDueRepliesPass({ appVersion } = {}, deps = {}) {
-  const summary = { due: 0, delivered: 0, failed: 0, results: [] };
+  const summary = { due: 0, delivered: 0, failed: 0, waiting: 0, results: [] };
   const listDue = deps.listDueReplies || pendingReplies.listDueReplies;
   const markDelivered = deps.markReplyDelivered || pendingReplies.markReplyDelivered;
   const audit = deps.appendAudit || appendAuditEvent;
@@ -809,6 +815,23 @@ async function runDueRepliesPass({ appVersion } = {}, deps = {}) {
   const version = String(appVersion);
 
   for (const entry of due) {
+    // A release claim waits — no attempt spent — until tag v<version> holds every commit.
+    if (entry && Array.isArray(entry.commits) && entry.commits.length) {
+      let checked;
+      try {
+        checked = await replyClaims.checkReleaseContains(
+          { repoCwd: entry.replierCwd, version, commits: entry.commits },
+          { runGit: deps.runGit },
+        );
+      } catch (e) {
+        checked = { ok: false, error: e && e.message ? e.message : String(e) };
+      }
+      if (!checked || !checked.ok) {
+        summary.waiting += 1;
+        summary.results.push({ id: entry.id, ok: false, waiting: (checked && checked.error) || 'release check failed' });
+        continue;
+      }
+    }
     let result;
     try {
       result = await deliverOneDueReply(entry, version, deps);
@@ -874,6 +897,11 @@ async function deliverOneDueReply(entry, version, deps) {
   const eventMode = thread.mode === 'event';
   if (!eventMode && !nonEmpty(thread.epicId)) return { ok: false, error: 'ledger entry has no asking Epic' };
   const message = String(entry.message ?? '').split('{version}').join(version);
+  const unfilled = replyClaims.findUnfilledPlaceholders(message);
+  if (unfilled.length) {
+    return { ok: false, error: `message still holds unfilled placeholder ${unfilled.join(', ')} — not sent` };
+  }
+  const commits = Array.isArray(entry.commits) && entry.commits.length ? entry.commits.slice() : null;
   const outcome = entry.outcome;
   const referencePaths = Array.isArray(entry.referencePaths) ? entry.referencePaths : [];
   const legacy = thread.legacy === true;
@@ -902,6 +930,7 @@ async function deliverOneDueReply(entry, version, deps) {
       threadField: legacy ? { thread: 'legacy' } : {},
       targetCwd, message, outcome, referencePaths,
       hash: replyHash(outcome, message), sent,
+      ...(commits ? { release: { version, commits } } : {}),
     }, { ...deps, appendEvent });
   });
 }

@@ -24,7 +24,7 @@ Epic lifecycle: only at [`prompt-sessions/README.md#lifecycle`](prompt-sessions/
 | --- | --- | --- | --- | --- |
 | `agents` | OWNERS → agents | write-once AgentSnapshots `snapshots/<id>.json`; runtime, self-ignored | keep forever | none |
 | `architecture` | not owned | reference docs | keep | none |
-| `artifacts` | OWNERS → artifacts | review files `<epic-id>/` + `index.json`; runtime, self-ignored | `artifactsDays` after Epic completes | none |
+| `artifacts` | OWNERS → artifacts | review files `<epic-id>/`; runtime, self-ignored | `artifactsDays` after Epic completes | [link](artifacts/README.md) |
 | `design-mocks` | not owned | design mock artifacts | keep | [link](design-mocks/README.md) |
 | `events` | OWNERS → event-log | per-Epic event log `<epic-id>/events.jsonl`; runtime, self-ignored | keep forever | none |
 | `feedback` | retired 2026-08-02 | former intake | n/a | none |

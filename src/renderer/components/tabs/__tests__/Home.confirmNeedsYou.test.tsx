@@ -118,3 +118,71 @@ describe('NeedsYouSection tool confirmation rows', () => {
     expect(err).toHaveBeenCalledWith('Already answered.')
   })
 })
+
+// View-only Dashboard step 2: Needs you keeps only what answers a question,
+// and links every other row to the page that owns its action.
+describe('NeedsYouSection row kinds — answers and links only', () => {
+  const REMOVED = ['Approve & start', 'Discard', 'Retry now', 'Adopt PRD']
+
+  async function mountRows(rows: ReturnType<typeof buildNeedsYouRows>, onNavigate = vi.fn()) {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root!.render(createElement(NeedsYouSection, { rows, onNavigate, onAnswer: answerMock }))
+      await Promise.resolve()
+    })
+    await click(container.querySelector('button')!)
+    return container
+  }
+  const labels = (el: HTMLElement) => Array.from(el.querySelectorAll('button')).map((b) => b.textContent ?? '')
+  const expectNoRemoved = (el: HTMLElement) => {
+    for (const t of REMOVED) expect(labels(el)).not.toContain(t)
+  }
+
+  it('a proposed Epic row offers only Open session, which opens that session', async () => {
+    const onNavigate = vi.fn()
+    const rows = buildNeedsYouRows({ e1: { id: 'e1', cwd: '/p/a', goalText: 'Do a thing' } }, {}, [], 0)
+    const el = await mountRows(rows, onNavigate)
+    expectNoRemoved(el)
+    const open = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Open session')
+    expect(open).toBeTruthy()
+    await click(open!)
+    expect(onNavigate).toHaveBeenCalledWith('terminal')
+  })
+
+  it('a needs-input row keeps Open session', async () => {
+    const rows = buildNeedsYouRows({}, { e2: { ticketHistory: [{ id: 't', tabId: 'e2', cwd: '/p/a', status: 'needs-input', text: 'Which one?' }] } }, [], 0)
+    const el = await mountRows(rows)
+    expectNoRemoved(el)
+    expect(labels(el)).toContain('Open session')
+  })
+
+  it('failed and quarantined rows keep only View in Scheduler', async () => {
+    for (const status of ['failed', 'quarantined']) {
+      const onNavigate = vi.fn()
+      const rows = buildNeedsYouRows({}, {}, [{ slug: `j-${status}`, title: 'Job', cwd: '/p/a', status, error: 'boom' }], 0)
+      const el = await mountRows(rows, onNavigate)
+      expectNoRemoved(el)
+      const view = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'View in Scheduler')
+      expect(view).toBeTruthy()
+      await click(view!)
+      expect(onNavigate).toHaveBeenCalledWith('scheduler')
+      act(() => root?.unmount())
+      container?.remove()
+    }
+  })
+
+  it('tool-confirmation rows keep Approve / Deny', async () => {
+    const el = await mountRows(buildNeedsYouRows({}, {}, [], 0, [confirmItem()]))
+    expectNoRemoved(el)
+    expect(el.querySelector('[data-testid="confirm-approve"]')).toBeTruthy()
+    expect(el.querySelector('[data-testid="confirm-deny"]')).toBeTruthy()
+  })
+
+  it("outside apps' question rows keep their answer buttons", async () => {
+    const el = await mountRows(buildNeedsYouRows({}, {}, [], 0, [confirmItem({ app: 'Portfolio', id: 'q1', title: 'Ship it?', why: 'Green.', options: ['Ship', 'Hold'] })]))
+    expectNoRemoved(el)
+    expect(labels(el)).toEqual(expect.arrayContaining(['Ship', 'Hold']))
+  })
+})

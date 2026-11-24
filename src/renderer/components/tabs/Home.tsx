@@ -9,9 +9,10 @@
  *   2. Grid — 5h billing window card + Projects card + Queued (pending
  *      scheduler jobs) card.
  *   3. Needs you — real signals only (see lib/homeNeedsYou.ts): a `proposed`
- *      Epic awaiting Approve/Discard, a chat stopped on `needs-input`, or a
+ *      Epic awaiting approval, a chat stopped on `needs-input`, or a
  *      scheduler job the queue itself flagged `failed`/`needs_review`. Each
- *      row expands inline with its real actions — nothing here is mocked.
+ *      row expands inline: answers to a question (tool confirmations, outside
+ *      apps' questions) or a link to the page that owns the action.
  *   4. Active sessions — the machine session-slot pool's ≤3 holders, joined
  *      against running scheduler jobs / chat runs for context.
  *   5. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
@@ -42,7 +43,6 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
 import { useLayout } from '../../state/layout'
 import { usePromptSessions } from '../../state/promptSessions'
-import { useChat } from '../../state/chat'
 import { useChatSignals } from '../../lib/useChatSignals'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath, useKnownProjects, type RecentRow } from '../../lib/useKnownProjects'
@@ -317,67 +317,10 @@ export function NeedsYouSection({
   const paged = usePagedList(rows, 4)
   const changePage = (p: number) => { setOpenId(null); paged.setPage(p) }
 
-  const approve = (row: NeedsYouRow) => {
-    if (!row.epicId || busyId) return
-    setBusyId(row.id)
-    try {
-      const approved = usePromptSessions.getState().approveProposed(row.epicId, 'Home needs-you')
-      if (!approved) {
-        toast.error('This session is no longer awaiting approval.')
-        return
-      }
-      useChat.getState().send({
-        tabId: approved.id,
-        sessionId: approved.claudeSessionId,
-        cwd: approved.cwd,
-        prompt: approved.openingPrompt || approved.goalText,
-      })
-      toast.info('Session approved and started.')
-    } finally {
-      setBusyId(null)
-      setOpenId(null)
-    }
-  }
-
-  const discard = (row: NeedsYouRow) => {
-    if (!row.epicId || busyId) return
-    setBusyId(row.id)
-    // markCompleted toasts and rolls its own state back on a rejected write.
-    void usePromptSessions
-      .getState()
-      .markCompleted(row.epicId, 'Home needs-you discard')
-      .catch(() => {})
-      .finally(() => { setBusyId(null); setOpenId(null) })
-  }
-
   const openChat = (row: NeedsYouRow) => {
     if (!row.epicId) return
     setPendingPromptSessionId(row.epicId)
     onNavigate?.('terminal')
-  }
-
-  const retryJob = (row: NeedsYouRow) => {
-    if (!row.jobSlug || busyId) return
-    setBusyId(row.id)
-    window.api.schedule
-      .resetJob(row.jobSlug)
-      .then((r) => { if (!r.ok) toast.error(r.error ?? 'Could not reset job.'); else toast.info(`${row.jobSlug} reset to pending.`) })
-      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
-      .finally(() => { setBusyId(null); setOpenId(null) })
-  }
-
-  // Deliberately NOT a Retry: a quarantined PRD has unproven provenance
-  // (no createdVia stamp) and re-running it is exactly what quarantine
-  // exists to prevent. The only correct actions are adopt (stamp it) or
-  // archive from the Scheduler tab's Quarantined filter.
-  const adoptJob = (row: NeedsYouRow) => {
-    if (!row.jobSlug || busyId) return
-    setBusyId(row.id)
-    window.api.schedule
-      .adoptPrd(row.jobSlug)
-      .then((r) => { if (!r.ok) toast.error(r.message ?? 'Could not adopt PRD.'); else toast.info(`${row.jobSlug} adopted — will run on the next tick.`) })
-      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
-      .finally(() => { setBusyId(null); setOpenId(null) })
   }
 
   const answerOutside = (row: NeedsYouRow, value: string) => {
@@ -459,26 +402,13 @@ export function NeedsYouSection({
                     </div>
                   )}
                   <div className="flex gap-2">
-                    {row.kind === 'proposed-epic' && (
-                      <>
-                        <NeedsButton onClick={() => approve(row)} disabled={busyId === row.id}>Approve &amp; start</NeedsButton>
-                        <NeedsButton quiet onClick={() => discard(row)} disabled={busyId === row.id}>Discard</NeedsButton>
-                      </>
-                    )}
-                    {row.kind === 'needs-input' && (
+                    {/* Proposed Epics are approved in their own session's action bar;
+                        failed / quarantined jobs are acted on in the Scheduler. */}
+                    {(row.kind === 'proposed-epic' || row.kind === 'needs-input') && (
                       <NeedsButton onClick={() => openChat(row)}>Open session</NeedsButton>
                     )}
-                    {row.kind === 'job-failed' && (
-                      <>
-                        <NeedsButton onClick={() => retryJob(row)} disabled={busyId === row.id}>Retry now</NeedsButton>
-                        <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
-                      </>
-                    )}
-                    {row.kind === 'job-quarantined' && (
-                      <>
-                        <NeedsButton onClick={() => adoptJob(row)} disabled={busyId === row.id}>Adopt PRD</NeedsButton>
-                        <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
-                      </>
+                    {(row.kind === 'job-failed' || row.kind === 'job-quarantined') && (
+                      <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
                     )}
                     {row.kind === 'outside-item' && row.confirm && (
                       <>

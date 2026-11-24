@@ -586,6 +586,12 @@ function speak(spec, ...flags) {
   return { status: r.status, stderr: r.stderr, result: JSON.parse(r.stdout) };
 }
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** The runner exits just after writing its result, so the CLI can print before it is gone: poll a bounded while. */
+async function runnerExited(pid, withinMs = 5000) {
+  const until = Date.now() + withinMs;
+  while (pidAlive(pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+  return !pidAlive(pid);
+}
 function makeGate(root, text) {
   const gate = path.join(root, `gate.${text}`);
   const { spawnSync } = require('node:child_process');
@@ -611,6 +617,7 @@ for (const [kind, lines] of [['batch', ['one', 'two']], ['perLine', ['one']]]) {
     expect(second.status).toBe(0);
     expect(second.result).toEqual({ ok: true, outs });
     expect(calls(root)).toEqual([{ texts: lines }]);
+    expect(await runnerExited(first.result.pid)).toBe(true);
   });
 }
 

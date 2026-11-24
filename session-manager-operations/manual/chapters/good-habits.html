@@ -65,6 +65,23 @@ your project</a>, and making that safe copy depends on your project already bein
 in your project instead of a protected copy. Git also gives you a plain undo button: it can show
 you exactly what changed and step you back to before it happened.</p>
 
+<h3>What the app already does for you: the job sandbox</h3>
+<p>A sandbox is a fenced-in space a program can't step out of. Every background job the
+Scheduler runs is refused your secret files. That covers your npm token, your SSH and GPG keys,
+your GitHub and cloud logins, and your Claude Code login file. The job's tools for reading and
+editing files are blocked from them.</p>
+<p>That first fence is a rule about tools, not a locked room. A job that writes a small script
+could still get around it. So two roles get a stronger fence: the validator and the dev-leads.
+They run inside an OS sandbox, a wall built by your computer's own operating system.</p>
+<p>Inside that wall, a job can only write to its own copy of your project, your project's git
+history, its own temp folder, and a few cache folders. The validator can't reach the internet
+at all. A dev-lead can reach only the npm registry, where code packages come from.</p>
+<p>The OS sandbox needs helper tools. On Linux, that's bubblewrap and socat; on a Mac, it's the
+built-in sandbox-exec. If one is missing, those jobs fall back to the first fence. Your own chat
+Sessions aren't covered by either fence. To turn the OS sandbox off, start the app with
+<code>SM_JOB_SANDBOX=0</code> in its environment. Every job then gets the first fence only, and
+your secret files stay blocked.</p>
+
 <h2>When an agent goes in circles</h2>
 
 <p>Sometimes a Session keeps retrying the same fix, or drifts further from what you meant with

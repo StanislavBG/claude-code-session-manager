@@ -167,3 +167,13 @@ test('preflight Rule lines: no shell / --env-file, TMPDIR, and marker path names
   expect(sec).toMatch(/The PRECONDITION HOLD notice prints the command, so that path is what tells the person what to do/);
   expect(sec).not.toMatch(/names that one action/);
 });
+
+test('step 5 puts the Field Manual chapter inside the plan as a sibling doc PRD', () => {
+  const s = flat(skill());
+  const step5 = s.slice(s.indexOf("5. **Tests and security go inside the feature's own PRD**"), s.indexOf('6. **Pick a shape.**'));
+  expect(step5).toMatch(/When the project has a Field Manual \(`session-manager-operations\/manual\/manual\.json` exists\)/);
+  expect(step5).toMatch(/a plan that ships or changes a user-visible surface includes one sibling `doc` PRD that writes or revises its chapter under `session-manager-operations\/manual\/chapters\/`/);
+  expect(step5).toMatch(/covered by the plan's `validate` PRD/);
+  expect(step5).toMatch(/Skip it when the project has no `manual\.json`\./);
+  expect(step5).toMatch(/a release never finds a gap/);
+});

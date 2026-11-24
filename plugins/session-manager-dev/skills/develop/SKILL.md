@@ -117,6 +117,11 @@ three failure modes have different fixes:
    touches input, auth or data), never as follow-ups. Why: TDD needs the test with the code;
    security is decided while writing it. Also check quality (performance, error handling).
    Deeper edge cases, hardening and docs may be sibling PRDs.
+   When the project has a Field Manual (`session-manager-operations/manual/manual.json`
+   exists), a plan that ships or changes a user-visible surface includes one sibling `doc`
+   PRD that writes or revises its chapter under `session-manager-operations/manual/chapters/`,
+   in the same plan and covered by the plan's `validate` PRD. Skip it when the project has no
+   `manual.json`. Why: a release never finds a gap it can only report.
 6. **Pick a shape.** Most asks are an independent set. Chain 3–5 PRDs only for truly
    sequential work: each link `dependsOn` the previous one; its notes name what that link
    delivers and say to read the landed code first. Never chain past 5; redo the completeness

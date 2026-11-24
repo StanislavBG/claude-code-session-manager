@@ -18,6 +18,15 @@
  * processes — they carry no `--type=` flag — so they stay in the net figure.
  * /proc/stat and /proc/<pid>/stat are both in USER_HZ clock ticks, so the
  * deltas subtract directly. Off Linux the own reading is null and net = raw.
+ *
+ * Idle-priority exclusion (PRD 4021): 2026-11-23 6:20 PM PST the gate held all
+ * 163 pending jobs with 0 running while two local voice renders used ~13.5 of
+ * 14 cores; one ran at nice 19. A nice-19 process yields to anything at a
+ * higher priority, jobs included, so it is not load the gate should defend.
+ * The same bounded /proc scan that finds the own tree also collects every
+ * process at nice 19 (field 19 of /proc/<pid>/stat) that is not an own
+ * process; its ticks are subtracted from the net figure and reported as
+ * idleNiceShare. Nice 12 and below still count as busy.
  */
 
 const fs = require('node:fs');
@@ -30,6 +39,12 @@ const DEFAULT_WINDOW_MS = 60_000;
 const MIN_WINDOW_MS = 20_000;
 const MAX_WINDOW_MS = 180_000;
 const MIN_SPACING_MS = 5_000;
+// One /proc scan reads at most this many pids, so a pid-storm host cannot turn
+// a sample into thousands of file reads every tick.
+const MAX_PROC_SCAN = 4096;
+// The lowest scheduling priority Linux offers: such a process only gets CPU
+// time no one else wants.
+const IDLE_NICE = 19;
 
 /**
  * Parse the aggregate `cpu ` line of /proc/stat into { busy, iowait, total }.
@@ -91,24 +106,36 @@ function readCpuTimes({
 }
 
 /**
- * Parse one /proc/<pid>/stat line → { pid, ppid, ticks: utime+stime }.
+ * Parse one /proc/<pid>/stat line → { pid, ppid, ticks: utime+stime, nice }.
  * comm (field 2) may contain spaces and parens, so split after the LAST ')'.
+ * nice is null when the line is too short to carry field 19.
  * @param {string} text
- * @returns {{ pid: number, ppid: number, ticks: number } | null}
+ * @returns {{ pid: number, ppid: number, ticks: number, nice: number | null } | null}
  */
-function parsePidStat(text) {
+function parsePidStatFields(text) {
   if (typeof text !== 'string' || !text) return null;
   const close = text.lastIndexOf(')');
   const open = text.indexOf('(');
   if (close < 0 || open < 0) return null;
   const pid = Number(text.slice(0, open).trim());
-  // After ')': state(3) ppid(4) ... utime(14) stime(15) → indices 0,1,...,11,12.
+  // After ')': state(3) ppid(4) ... utime(14) stime(15) ... nice(19) → indices 0,1,...,11,12,...,16.
   const rest = text.slice(close + 1).trim().split(/\s+/);
   const ppid = Number(rest[1]);
   const utime = Number(rest[11]);
   const stime = Number(rest[12]);
   if (![pid, ppid, utime, stime].every(Number.isFinite)) return null;
-  return { pid, ppid, ticks: utime + stime };
+  const nice = rest.length > 16 && rest[16] !== '' ? Number(rest[16]) : NaN;
+  return { pid, ppid, ticks: utime + stime, nice: Number.isFinite(nice) ? nice : null };
+}
+
+/**
+ * Parse one /proc/<pid>/stat line → { pid, ppid, ticks: utime+stime }.
+ * @param {string} text
+ * @returns {{ pid: number, ppid: number, ticks: number } | null}
+ */
+function parsePidStat(text) {
+  const f = parsePidStatFields(text);
+  return f ? { pid: f.pid, ppid: f.ppid, ticks: f.ticks } : null;
 }
 
 /**
@@ -123,61 +150,85 @@ function isElectronHelperCmdline(cmd) {
 }
 
 /**
- * The app's own process tree as Map<pid, cumulative utime+stime ticks>: the
- * root (Electron main) plus every descendant reached only through processes
- * whose cmdline carries an Electron `--type=` flag. Linux only; null elsewhere
- * or when /proc cannot be listed. Never throws.
- * A helper must also run the same executable as the root (when /proc/<pid>/exe
- * is readable), so a job whose prompt text happens to contain "--type=" never
- * counts as own.
+ * One bounded /proc scan (at most maxPids pids) → { own, idleNice }.
+ * - own: the app's own process tree as Map<pid, cumulative utime+stime ticks>:
+ *   the root (Electron main) plus every descendant reached only through
+ *   processes whose cmdline carries an Electron `--type=` flag. A helper must
+ *   also run the same executable as the root (when /proc/<pid>/exe is
+ *   readable), so a job whose prompt text happens to contain "--type=" never
+ *   counts as own. null when the root is not in the scan.
+ * - idleNice: Map<pid, ticks> of every process at nice 19 that is not own
+ *   (own ticks are already subtracted, so they never count twice).
+ * Linux only; both null elsewhere or when /proc cannot be listed. Never throws.
  * @param {{ rootPid?: number, platform?: string, readdir?: (p: string) => string[],
- *   readFile?: (p: string) => string, readlink?: (p: string) => string }} [deps]
- * @returns {Map<number, number> | null}
+ *   readFile?: (p: string) => string, readlink?: (p: string) => string, maxPids?: number }} [deps]
+ * @returns {{ own: Map<number, number> | null, idleNice: Map<number, number> | null }}
  */
-function readOwnProcessTicks({
+function readProcessTicks({
   rootPid = process.pid,
   platform = process.platform,
   readdir = (p) => fs.readdirSync(p),
   readFile = (p) => fs.readFileSync(p, 'utf8'),
   readlink = (p) => fs.readlinkSync(p),
+  maxPids = MAX_PROC_SCAN,
 } = {}) {
-  if (platform !== 'linux') return null;
+  if (platform !== 'linux') return { own: null, idleNice: null };
   try {
-    /** @type {Map<number, { ppid: number, ticks: number }>} */
+    /** @type {Map<number, { ppid: number, ticks: number, nice: number | null }>} */
     const procs = new Map();
     /** @type {Map<number, number[]>} */
     const children = new Map();
+    let scanned = 0;
     for (const name of readdir('/proc')) {
       if (!/^\d+$/.test(name)) continue;
+      if (scanned >= maxPids) break;
+      scanned += 1;
       let st;
-      try { st = parsePidStat(readFile(`/proc/${name}/stat`)); } catch { continue; }
+      try { st = parsePidStatFields(readFile(`/proc/${name}/stat`)); } catch { continue; }
       if (!st) continue;
-      procs.set(st.pid, { ppid: st.ppid, ticks: st.ticks });
+      procs.set(st.pid, { ppid: st.ppid, ticks: st.ticks, nice: st.nice });
       const list = children.get(st.ppid);
       if (list) list.push(st.pid); else children.set(st.ppid, [st.pid]);
     }
+    /** @type {Map<number, number> | null} */
+    let own = null;
     const root = procs.get(rootPid);
-    if (!root) return null;
-    const exeOf = (/** @type {number} */ pid) => { try { return readlink(`/proc/${pid}/exe`); } catch { return null; } };
-    const rootExe = exeOf(rootPid);
-    /** @type {Map<number, number>} */
-    const own = new Map([[rootPid, root.ticks]]);
-    const queue = [rootPid];
-    while (queue.length) {
-      const parent = /** @type {number} */ (queue.shift());
-      for (const child of children.get(parent) || []) {
-        let cmd = '';
-        try { cmd = readFile(`/proc/${child}/cmdline`); } catch { continue; }
-        if (!isElectronHelperCmdline(cmd)) continue;
-        if (rootExe !== null && exeOf(child) !== rootExe) continue;
-        own.set(child, /** @type {{ticks:number}} */ (procs.get(child)).ticks);
-        queue.push(child);
+    if (root) {
+      const exeOf = (/** @type {number} */ pid) => { try { return readlink(`/proc/${pid}/exe`); } catch { return null; } };
+      const rootExe = exeOf(rootPid);
+      own = new Map([[rootPid, root.ticks]]);
+      const queue = [rootPid];
+      while (queue.length) {
+        const parent = /** @type {number} */ (queue.shift());
+        for (const child of children.get(parent) || []) {
+          let cmd = '';
+          try { cmd = readFile(`/proc/${child}/cmdline`); } catch { continue; }
+          if (!isElectronHelperCmdline(cmd)) continue;
+          if (rootExe !== null && exeOf(child) !== rootExe) continue;
+          own.set(child, /** @type {{ticks:number}} */ (procs.get(child)).ticks);
+          queue.push(child);
+        }
       }
     }
-    return own;
+    /** @type {Map<number, number>} */
+    const idleNice = new Map();
+    for (const [pid, p] of procs) {
+      if (p.nice === IDLE_NICE && !(own && own.has(pid))) idleNice.set(pid, p.ticks);
+    }
+    return { own, idleNice };
   } catch {
-    return null;
+    return { own: null, idleNice: null };
   }
+}
+
+/**
+ * The app's own process tree (see readProcessTicks). Linux only; null
+ * elsewhere, when /proc cannot be listed, or when the root is not found.
+ * @param {Parameters<typeof readProcessTicks>[0]} [deps]
+ * @returns {Map<number, number> | null}
+ */
+function readOwnProcessTicks(deps) {
+  return readProcessTicks(deps).own;
 }
 
 /**
@@ -199,20 +250,49 @@ function ownTicksDelta(before, after) {
 }
 
 /**
+ * Nice-19 ticks consumed between two readings, counting only pids at nice 19
+ * in BOTH. Unlike own processes, a pid absent from `before` may have run the
+ * whole window at a higher priority and only now been reniced (its cumulative
+ * ticks would then wipe out real load), so it waits for the next window. Erring
+ * that way keeps the gate holding rather than launching onto a busy CPU.
+ * @param {Map<number, number> | null} before
+ * @param {Map<number, number> | null} after
+ * @returns {number | null}
+ */
+function idleNiceTicksDelta(before, after) {
+  if (!before || !after) return null;
+  let d = 0;
+  for (const [pid, ticks] of after) {
+    const prev = before.get(pid);
+    if (prev !== undefined) d += Math.max(0, ticks - prev);
+  }
+  return d;
+}
+
+/**
+ * `readProcs` returns { own, idleNice } from one /proc scan (default
+ * readProcessTicks). Injecting `readOwn` and/or `readIdleNice` instead builds
+ * it from those (a missing one reads null).
  * @param {{ read?: () => ({busy:number,iowait?:number,total:number}|null),
- *   readOwn?: () => (Map<number, number>|null), now?: () => number,
+ *   readProcs?: () => ({ own: Map<number, number>|null, idleNice: Map<number, number>|null }),
+ *   readOwn?: () => (Map<number, number>|null), readIdleNice?: () => (Map<number, number>|null),
+ *   now?: () => number,
  *   windowMs?: number, minWindowMs?: number, maxWindowMs?: number, minSpacingMs?: number }} [opts]
  */
 function createCpuSampler({
   read = readCpuTimes,
-  readOwn = () => readOwnProcessTicks(),
+  readOwn,
+  readIdleNice,
+  readProcs = (readOwn || readIdleNice)
+    ? () => ({ own: readOwn ? readOwn() : null, idleNice: readIdleNice ? readIdleNice() : null })
+    : () => readProcessTicks(),
   now = () => Date.now(),
   windowMs = DEFAULT_WINDOW_MS,
   minWindowMs = MIN_WINDOW_MS,
   maxWindowMs = MAX_WINDOW_MS,
   minSpacingMs = MIN_SPACING_MS,
 } = {}) {
-  /** @type {{ at: number, busy: number, iowait: number, total: number, own: Map<number, number> | null }[]} */
+  /** @type {{ at: number, busy: number, iowait: number, total: number, own: Map<number, number> | null, idleNice: Map<number, number> | null }[]} */
   let entries = [];
 
   function observe() {
@@ -221,7 +301,8 @@ function createCpuSampler({
     if (!r) return;
     const newest = entries[entries.length - 1];
     if (newest && t - newest.at < minSpacingMs) return;
-    entries.push({ at: t, busy: r.busy, iowait: r.iowait ?? 0, total: r.total, own: readOwn() });
+    const p = readProcs() || { own: null, idleNice: null };
+    entries.push({ at: t, busy: r.busy, iowait: r.iowait ?? 0, total: r.total, own: p.own ?? null, idleNice: p.idleNice ?? null });
     entries = entries.filter((e) => t - e.at <= maxWindowMs);
   }
 
@@ -246,12 +327,17 @@ function createCpuSampler({
     const dIowait = (r.iowait ?? 0) - best.iowait;
     // Per-CPU idle and iowait counters can step backwards.
     if (dTotal <= 0 || dBusy < 0) return null;
-    const dOwnRaw = ownTicksDelta(best.own, readOwn());
+    const p = readProcs() || { own: null, idleNice: null };
+    const dOwnRaw = ownTicksDelta(best.own, p.own ?? null);
     const dOwn = dOwnRaw === null ? null : Math.min(dBusy, dOwnRaw);
+    // Clamped so net never drops below 0.
+    const dIdleRaw = idleNiceTicksDelta(best.idleNice, p.idleNice ?? null);
+    const dIdle = dIdleRaw === null ? null : Math.min(dBusy - (dOwn ?? 0), dIdleRaw);
     return {
       busyFraction: Math.min(1, dBusy / dTotal),
       ownFraction: dOwn === null ? null : dOwn / dTotal,
-      netBusyFraction: Math.min(1, (dBusy - (dOwn ?? 0)) / dTotal),
+      idleNiceShare: dIdle === null ? null : dIdle / dTotal,
+      netBusyFraction: Math.min(1, (dBusy - (dOwn ?? 0) - (dIdle ?? 0)) / dTotal),
       iowaitFraction: Math.min(1, Math.max(0, dIowait / dTotal)),
       windowMs: t - best.at,
     };
@@ -263,12 +349,17 @@ function createCpuSampler({
 module.exports = {
   parseProcStat,
   parsePidStat,
+  parsePidStatFields,
+  readProcessTicks,
   readOwnProcessTicks,
   ownTicksDelta,
+  idleNiceTicksDelta,
   readCpuTimes,
   createCpuSampler,
   DEFAULT_WINDOW_MS,
   MIN_WINDOW_MS,
   MAX_WINDOW_MS,
   MIN_SPACING_MS,
+  MAX_PROC_SCAN,
+  IDLE_NICE,
 };

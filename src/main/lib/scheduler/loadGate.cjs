@@ -49,7 +49,9 @@ const SATURATED_BUSY = 0.85;
 
 // The busy fraction every band above judges is NET of this app's own process
 // tree (PRD 3495; cpuSample.cjs readOwnProcessTicks) — the app must not gate on
-// its own renderer/main load. Raw and own shares are still reported. A sampler
+// its own renderer/main load — and of every process at nice 19 (PRD 4021): those
+// yield to jobs, so they are not load to defend. Raw, own and idle-priority
+// shares are still reported. A sampler
 // without a net figure (non-Linux, legacy injection) falls back to raw.
 function busyOf(sample) {
   if (!sample) return null;
@@ -186,6 +188,7 @@ function createLoadGate({
         cpuBusyRaw: null,
         cpuBusyNet: null,
         cpuOwnBusy: null,
+        cpuIdleNice: null,
         cpuIowait: null,
         cpuWindowMs: null,
         standDown: false,
@@ -244,6 +247,7 @@ function createLoadGate({
       cpuBusyRaw: sample ? round3(sample.busyFraction) : null,
       cpuBusyNet: round3(busy),
       cpuOwnBusy: sample && Number.isFinite(sample.ownFraction) ? round3(sample.ownFraction) : null,
+      cpuIdleNice: sample && Number.isFinite(sample.idleNiceShare) ? round3(sample.idleNiceShare) : null,
       cpuIowait: sample ? Number(sample.iowaitFraction.toFixed(3)) : null,
       cpuWindowMs: sample ? sample.windowMs : null,
       standDown,
@@ -282,4 +286,22 @@ function createLoadGate({
   return { evaluate, observe, snapshot, endHold, isSaturated };
 }
 
-module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY, SATURATED_BUSY };
+/**
+ * Human-readable explanation for a `reason: 'load-deferred'` tick, surfaced
+ * to the renderer via lastTick.detail (scheduler.cjs). Names the gate, the
+ * measured ratio, the threshold, the net CPU sample, the idle-priority (nice 19)
+ * share left out of it when above 0, and how long this gate itself has held a
+ * batch that slots and memory admitted (heldMs). Pure.
+ */
+function formatLoadGateDetail(load) {
+  const heldMinutes = Math.round(load.heldMs / 60_000);
+  let cpu = load.cpuBusy == null
+    ? 'no CPU sample yet'
+    : `CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`;
+  if (load.cpuBusy != null && load.cpuIdleNice > 0) {
+    cpu += ` (excl. ${Math.round(load.cpuIdleNice * 100)}% at nice 19)`;
+  }
+  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held ${heldMinutes}m with slots and memory free`;
+}
+
+module.exports = { formatLoadGateDetail, isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY, SATURATED_BUSY };

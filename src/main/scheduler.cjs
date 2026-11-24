@@ -104,7 +104,7 @@ const { isResetFresh, bindingWindow, usageWindows, degradedBudget, meterFailureB
 // `utilizationHold` snapshot variable below).
 const autoDispatchHold = require('./scheduler/utilizationHold.cjs');
 const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
-const { createLoadGate, topCpuConsumers } = require('./lib/scheduler/loadGate.cjs');
+const { createLoadGate, topCpuConsumers, formatLoadGateDetail } = require('./lib/scheduler/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -2936,26 +2936,15 @@ function applyPauseCleared(wasPaused, token) {
   return token;
 }
 
-/**
- * Human-readable explanation for a `reason: 'load-deferred'` tick, surfaced
- * to the renderer via lastTick.detail. Names the gate, the measured ratio,
- * the threshold and how long this gate itself has held a batch that slots and
- * memory admitted (heldMs). Pure so it's unit-testable without driving tickQueue's full
- * fs/worktree machinery.
- */
-function formatLoadGateDetail(load) {
-  const heldMinutes = Math.round(load.heldMs / 60_000);
-  const cpu = load.cpuBusy == null
-    ? 'no CPU sample yet'
-    : `CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`;
-  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held ${heldMinutes}m with slots and memory free`;
-}
+// formatLoadGateDetail (the load-deferred tick's lastTick.detail) lives in
+// lib/scheduler/loadGate.cjs beside the fields it reads.
 
 function loadGateAuditFields(load) {
   return {
     loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
-    // cpuBusy is the decision value: net of the app's own process tree (PRD 3495).
+    // cpuBusy is the decision value: net of the app's own process tree (PRD 3495) and nice-19 processes (PRD 4021).
     cpuBusy: load.cpuBusy, cpuBusyRaw: load.cpuBusyRaw, cpuBusyNet: load.cpuBusyNet, cpuOwnBusy: load.cpuOwnBusy,
+    cpuIdleNice: load.cpuIdleNice,
     cpuIowait: load.cpuIowait, cpuWindowMs: load.cpuWindowMs, heldMs: load.heldMs,
   };
 }

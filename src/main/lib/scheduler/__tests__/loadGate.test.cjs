@@ -461,3 +461,21 @@ test('isSaturated: true at 0.95, false at 0.6 / no sample / threshold 0 / win32;
   g.isSaturated();
   assert.equal(g.snapshot().heldMs, before);
 });
+
+// ─── idle-priority share (PRD 4021) ────────────────────────────────────────
+
+test('the gate judges the net busy figure and reports the nice-19 share as cpuIdleNice', () => {
+  const cpu = { observe() {}, sample: () => ({ busyFraction: 0.94, netBusyFraction: 0.376, ownFraction: 0, idleNiceShare: 0.564, iowaitFraction: 0, windowMs: 55_000 }) };
+  const r = gateWith({ l1: 23.77, cpu }).g.evaluate();
+  assert.equal(r.cpuBusy, 0.376);
+  assert.equal(r.cpuIdleNice, 0.564);
+  assert.equal(r.saturated, false);
+  assert.equal(r.standDown, true); // net 37.6% < 0.5: mostly idle once nice 19 is left out
+  assert.equal(r.gated, false);
+});
+
+test('cpuIdleNice is null with no share in the sample, with no sample, and on win32', () => {
+  assert.equal(gateWith({ cpu: cpuAt(0.9) }).g.evaluate().cpuIdleNice, null);
+  assert.equal(gateWith({}).g.evaluate().cpuIdleNice, null);
+  assert.equal(createLoadGate({ platform: 'win32', cores: () => 4 }).evaluate().cpuIdleNice, null);
+});

@@ -6,10 +6,10 @@
  * real PRD files in a temp HOME + SM_SCHEDULER_HOME and checks the row.
  *
  * Sites covered (scheduler.cjs, `voiceId:` next to `effort:`):
- *   - reconcile() fresh-discovery entry      (~line 2410, `voiceId: p.voiceId ?? null`)
- *   - reconcile() existing-row refresh       (~line 2124, `voiceId: p.voiceId ?? job.voiceId ?? null`)
- *   - reconcile() invalid-row repair pass    (~line 2253, `voiceId: p.voiceId ?? inv.row?.voiceId ?? null`)
- *   - listPrdsInternal() PRD list entry      (~line 13666, `voiceId: parsed.voiceId ?? null`)
+ *   - reconcile() fresh-discovery entry      `voiceId: p.voiceId ?? null`
+ *   - reconcile() existing-row refresh       `voiceId: p.voiceId ?? job.voiceId ?? null`
+ *   - reconcile() invalid-row repair pass    `voiceId: p.voiceId ?? inv.row?.voiceId ?? null`
+ *   - listPrdsInternal() PRD list entry      `voiceId: parsed.voiceId ?? null`
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reconcile-voice-id.test.cjs
  */
@@ -69,7 +69,7 @@ describe('reconcile copies voiceId onto the queue row', () => {
     return { cwd, slug };
   }
 
-  // Covers the fresh-discovery entry (~line 2410).
+  // Covers the fresh-discovery entry (`voiceId: p.voiceId ?? null`).
   test('a freshly discovered PRD with voiceId: bilko yields a row with voiceId bilko', async () => {
     const { slug } = writePrd(['voiceId: bilko']);
     const state = { jobs: [] };
@@ -80,7 +80,7 @@ describe('reconcile copies voiceId onto the queue row', () => {
     expect(row.voiceId).toBe('bilko');
   });
 
-  // Covers the fresh-discovery entry (~line 2410), no-voice case.
+  // Covers the fresh-discovery entry (`voiceId: p.voiceId ?? null`), no-voice case.
   test('a freshly discovered PRD without voiceId yields a null/absent voiceId', async () => {
     const { slug } = writePrd([]);
     const state = { jobs: [] };
@@ -90,7 +90,7 @@ describe('reconcile copies voiceId onto the queue row', () => {
     expect(row.voiceId ?? null).toBeNull();
   });
 
-  // Covers the existing-row refresh (~line 2124): the PRD's voiceId wins
+  // Covers the existing-row refresh (`voiceId: p.voiceId ?? job.voiceId ?? null`): the PRD's voiceId wins
   // over the row's stale one.
   test('refreshing an existing row takes voiceId from the PRD', async () => {
     const { cwd, slug } = writePrd(['voiceId: bilko']);
@@ -102,7 +102,7 @@ describe('reconcile copies voiceId onto the queue row', () => {
     expect(row.voiceId).toBe('bilko');
   });
 
-  // Covers the existing-row refresh (~line 2124), no-voice case.
+  // Covers the existing-row refresh (`voiceId: p.voiceId ?? job.voiceId ?? null`), no-voice case.
   test('refreshing an existing row for a PRD without voiceId leaves voiceId null', async () => {
     const { cwd, slug } = writePrd([]);
     const state = { jobs: [{ slug, title: 'x', cwd, status: 'pending' }] };
@@ -112,7 +112,7 @@ describe('reconcile copies voiceId onto the queue row', () => {
     expect(row.voiceId ?? null).toBeNull();
   });
 
-  // Covers the invalid-row repair pass (~line 2253), driven through the real
+  // Covers the invalid-row repair pass (`voiceId: p.voiceId ?? inv.row?.voiceId ?? null`), driven through the real
   // queueStore.shapeJobs quarantine gate.
   test('repairing a quarantined invalid row takes voiceId from the PRD', async () => {
     const { cwd, slug } = writePrd(['voiceId: bilko']);
@@ -133,7 +133,7 @@ describe('reconcile copies voiceId onto the queue row', () => {
     expect(row.voiceId).toBe('bilko');
   });
 
-  // Covers listPrdsInternal's list entry (~line 13666).
+  // Covers listPrdsInternal's list entry (`voiceId: parsed.voiceId ?? null`).
   test('listPrdsInternal reports voiceId from the PRD file, null without it', async () => {
     const voiced = writePrd(['voiceId: bilko']);
     const plain = writePrd([]);

@@ -56,6 +56,9 @@
  * after the link succeeds. Ineligible packages are not reported as skipped. pnpm projects skip this — their
  * offline install already builds every workspace node_modules per worktree.
  *
+ * syncNodeModulesLinks refreshes those per-entry links on a reused Epic worktree (the
+ * links are a snapshot; the old whole-folder link saw packages added to main later).
+ *
  * Never throws; failures land in `skipped` (nested entries as `<rel> (<reason>)`);
  * a failed node_modules build is removed again (links only, never their targets).
  */
@@ -85,6 +88,29 @@ function isLinkedModulesEntry(name) {
 }
 
 /**
+ * Link every linked entry of `src` (a main-checkout node_modules) that `dest` (a real
+ * worktree node_modules folder) lacks. Existing dest entries — links or real — are never
+ * touched. `strict` rethrows a symlink failure (initial build); otherwise failures are
+ * skipped per entry. Returns the count of links made.
+ */
+function linkMissingModulesEntries(src, dest, strict) {
+  let added = 0;
+  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+    if (!isLinkedModulesEntry(e.name)) continue;
+    const link = path.join(dest, e.name);
+    if (exists(link)) continue;
+    const target = path.join(src, e.name);
+    try {
+      fs.symlinkSync(target, link, isDir(target) ? 'dir' : 'file');
+      added++;
+    } catch (err) {
+      if (strict) throw err;
+    }
+  }
+  return added;
+}
+
+/**
  * Create `dest` as a real directory holding one symlink per linked entry of `src` (a
  * node_modules folder). Throws on failure after removing whatever it created at `dest`;
  * removal unlinks links only — it never follows them into `src`.
@@ -92,11 +118,7 @@ function isLinkedModulesEntry(name) {
 function linkModulesEntries(src, dest) {
   fs.mkdirSync(dest);
   try {
-    for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-      if (!isLinkedModulesEntry(e.name)) continue;
-      const target = path.join(src, e.name);
-      fs.symlinkSync(target, path.join(dest, e.name), isDir(target) ? 'dir' : 'file');
-    }
+    linkMissingModulesEntries(src, dest, true);
   } catch (err) {
     try { fs.rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ }
     throw err;
@@ -350,4 +372,48 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
   return { linked, skipped, installed, setup };
 }
 
-module.exports = { linkDependencyDirs, isPnpmProject, isUvProject, DEFAULT_DEP_DIRS, NESTED_MAX_PACKAGES };
+/**
+ * Refresh one worktree node_modules (`rel`) against the main checkout's: link entries main
+ * gained since the snapshot, unlink worktree links whose target is gone. Skips unless the
+ * worktree folder is a real directory (a whole-folder symlink is left alone). Reads main
+ * only. Never throws.
+ */
+function syncModulesDir(mainCwd, worktreeCwd, rel, counts) {
+  try {
+    const dest = path.join(worktreeCwd, rel);
+    const st = fs.lstatSync(dest);
+    if (st.isSymbolicLink() || !st.isDirectory()) return;
+    const src = path.join(mainCwd, rel);
+    if (isDir(src)) counts.added += linkMissingModulesEntries(src, dest, false);
+    for (const name of fs.readdirSync(dest)) {
+      const link = path.join(dest, name);
+      try {
+        if (!fs.lstatSync(link).isSymbolicLink() || fs.existsSync(link)) continue;
+        fs.unlinkSync(link); // removes the dangling link itself, never a target
+        counts.removed++;
+      } catch { /* best-effort per entry */ }
+    }
+  } catch { /* absent or unreadable */ }
+}
+
+/**
+ * Bring a reused (long-lived Epic) worktree's per-entry node_modules links up to date with
+ * the main checkout — root plus each nested npm package (same set linkNestedNodeModules
+ * considers). pnpm projects are skipped (their worktree node_modules is a real install).
+ * No-op under SM_WORKTREE_DEP_LINK_DISABLE=1. Never throws.
+ * @param {{ mainCwd: string, worktreeCwd: string }} opts
+ * @returns {Promise<{ added: number, removed: number }>}
+ */
+async function syncNodeModulesLinks({ mainCwd, worktreeCwd }) {
+  const counts = { added: 0, removed: 0 };
+  try {
+    if (process.env.SM_WORKTREE_DEP_LINK_DISABLE === '1') return counts;
+    if (!mainCwd || !worktreeCwd || isPnpmProject(mainCwd)) return counts;
+    const rels = ['node_modules'];
+    for (const dir of await nestedPackageDirs(worktreeCwd)) rels.push(`${dir}/node_modules`);
+    for (const rel of rels) syncModulesDir(mainCwd, worktreeCwd, rel, counts);
+  } catch { /* best-effort */ }
+  return counts;
+}
+
+module.exports = { linkDependencyDirs, syncNodeModulesLinks, isPnpmProject, isUvProject, DEFAULT_DEP_DIRS, NESTED_MAX_PACKAGES };

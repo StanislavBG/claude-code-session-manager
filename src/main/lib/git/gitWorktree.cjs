@@ -980,6 +980,14 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
     const epicDir = worktreeDirFor(kind, cwd, key);
     const epicBranch = branchNameFor(kind, key);
     if (fs.existsSync(epicDir) && await isRegisteredWorktreeOnBranch(cwd, epicDir, epicBranch)) {
+      // node_modules links are a snapshot from mint time: pick up packages main gained
+      // since (and drop links main lost). Best-effort — never fails the reuse.
+      try {
+        const sync = await require('./worktreeDeps.cjs').syncNodeModulesLinks({ mainCwd: cwd, worktreeCwd: epicDir });
+        if (sync && (sync.added || sync.removed)) console.log(`[gitWorktree] synced dep links: +${sync.added} -${sync.removed} -> ${epicDir}`);
+      } catch (err) {
+        console.warn(`[gitWorktree] dep link sync failed for ${epicDir}: ${(err && err.message) || err}`);
+      }
       return { ok: true, dir: epicDir, branch: epicBranch, baseCwd: cwd, reused: true };
     }
   }

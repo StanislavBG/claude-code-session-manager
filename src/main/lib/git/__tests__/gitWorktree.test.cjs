@@ -949,6 +949,29 @@ test('[epic] a second createEpicWorktree for the same epic reuses the live workt
   await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: first.dir, branch: first.branch });
 });
 
+test('[epic] reuse refreshes node_modules links once and still reuses when the sync throws', async () => {
+  const deps = require('../worktreeDeps.cjs');
+  const epicId = 'epic-reuse-sync';
+  const first = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  expect(first.ok).toBe(true);
+  const spy = vi.spyOn(deps, 'syncNodeModulesLinks').mockResolvedValue({ added: 1, removed: 0 });
+  try {
+    const second = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+    expect(second.reused).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ mainCwd: repoCwd, worktreeCwd: first.dir });
+    spy.mockImplementation(() => { throw new Error('boom'); });
+    const third = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+    expect(third.ok).toBe(true);
+    expect(third.reused).toBe(true);
+    expect(third.dir).toBe(first.dir);
+    expect(spy).toHaveBeenCalledTimes(2);
+  } finally {
+    spy.mockRestore();
+    await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: first.dir, branch: first.branch });
+  }
+});
+
 test('[epic] a leftover dir that is not a registered worktree is still replaced', async () => {
   const epicId = 'epic-leftover';
   const probe = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });

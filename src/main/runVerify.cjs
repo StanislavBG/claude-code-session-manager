@@ -653,7 +653,7 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
  */
 function captureArtifactEvidence({ prdPath, roots, startedAt, fsImpl = fs } = {}) {
   try {
-    const text = fs.readFileSync(prdPath, 'utf8');
+    const text = fsImpl.readFileSync(prdPath, 'utf8');
     const fm = parsePrdFile(text).frontmatter;
     if (!isArtifactOnlyDeclaration(fm)) return null;
     const check = artifactsCheck({ cwd: roots, paths: fm.artifactPaths, startedAt, finishedAt: null, fsImpl });

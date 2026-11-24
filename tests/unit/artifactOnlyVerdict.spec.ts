@@ -147,6 +147,25 @@ describe('artifact-only verdict', () => {
     expect(captureArtifactEvidence({ prdPath: path.join(tmp, 'nope.md'), roots: [cwd], startedAt: started })).toBeNull();
     expect(captureArtifactEvidence({ prdPath: undefined, roots: [cwd], startedAt: started })).toBeNull();
   });
+  it('(l) captureArtifactEvidence reads the PRD through the injected fsImpl', () => {
+    const prdPath = path.join(tmp, 'not-on-disk.md');
+    expect(fs.existsSync(prdPath)).toBe(false);
+    const stat = () => ({ isFile: () => true, isDirectory: () => false, size: 5, mtimeMs: Date.now() });
+    const fakeFs = {
+      readFileSync: (p: string) => {
+        if (p !== prdPath) throw new Error(`unexpected read ${p}`);
+        return '---\ntitle: t\ndeliverable: artifact\nartifactPaths: [logs/a.txt]\n---\n\n# Goal\n\nnothing\n';
+      },
+      statSync: stat,
+      readdirSync: () => [],
+    };
+    const ev = captureArtifactEvidence({ prdPath, roots: [cwd], startedAt: started, fsImpl: fakeFs });
+    expect(ev?.ok).toBe(true);
+    expect(ev?.paths).toEqual(['logs/a.txt']);
+    const throwingFs = { ...fakeFs, readFileSync: () => { throw new Error('boom'); } };
+    expect(() => captureArtifactEvidence({ prdPath, roots: [cwd], startedAt: started, fsImpl: throwingFs })).not.toThrow();
+    expect(captureArtifactEvidence({ prdPath, roots: [cwd], startedAt: started, fsImpl: throwingFs })).toBeNull();
+  });
   it('(f) commit guard stands down only on a clean tree', () => {
     const base = { siblingRunning: false, ranInWorktree: true, jobSelfCommitted: false, legitimateNoOp: false, isFixPlanJob: false, artifactVerified: true, verifyResult: { verdict: 'pass_no_commit_artifact_verified' } };
     expect(commitGuardVerdict({ ...base, newlyDirty: ['src/x.ts'] })?.verdict).toBe('uncommitted_changes');

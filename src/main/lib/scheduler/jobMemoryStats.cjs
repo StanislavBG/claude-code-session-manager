@@ -57,6 +57,16 @@ function normalizeSample(s) {
   return out;
 }
 
+/**
+ * Re-append identity of a stored sample, independent of its key order (never JSON.stringify).
+ * With runId + unit: (runId, unit, at). Without either: every field (agentType, peakMb, at,
+ * runId, unit), so a legacy or provenance-less peak never collides with another on `at` alone.
+ */
+function sampleKey(x) {
+  if (x.runId && x.unit) return `p\0${x.runId}\0${x.unit}\0${x.at}`;
+  return `f\0${x.agentType}\0${x.peakMb}\0${x.at}\0${x.runId || ''}\0${x.unit || ''}`;
+}
+
 function defaultStorePath() {
   return path.join(require('./schedulerPaths.cjs').schedulerHome(), STORE_FILE);
 }
@@ -269,8 +279,6 @@ function createJobMemoryStats(deps = {}) {
         liveDuringWrite = null;
         if (landed.length && samples && samples.length) {
           const stored = readSamplesUncached(file);
-          // Identity = (runId, unit, at), never JSON.stringify of the whole sample (key-order dependent).
-          const sampleKey = (x) => `${x.runId || ''}\0${x.unit || ''}\0${x.at}`;
           const have = new Set(stored.map(sampleKey));
           const missing = landed.filter((x) => !have.has(sampleKey(x)));
           if (missing.length) writeSamples(file, [...stored, ...missing]);
@@ -305,6 +313,7 @@ module.exports = {
   backfillFromRunLogs: defaultInstance.backfillFromRunLogs,
   createJobMemoryStats,
   quantile,
+  sampleKey,
   STORE_FILE,
   MAX_SAMPLES,
   RECENT_PER_TYPE,

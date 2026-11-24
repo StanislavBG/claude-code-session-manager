@@ -266,30 +266,42 @@ test('cancelMemoryBackfill settles the pending scheduled pass with 0 and the pas
 
 test('init() schedules the memory backfill (deferred) and never runs it on the boot path', async () => {
   // Runs the real init() inside the vitest scheduler sandbox (SM_SCHEDULER_HOME, HOME and
-  // SM_WORKTREE_ROOT are throwaway dirs). Injected: the run-log reader (jobMemoryStats'
-  // backfillFromRunLogs, looked up at call time) and an observing setTimeout.
+  // SM_WORKTREE_ROOT are throwaway dirs). vi.spyOn is used because init() takes no deps:
+  // scheduler.cjs looks up jobMemoryStats.backfillFromRunLogs, setTimeout and clearTimeout
+  // at call time, so spying on them is the only way to observe init() without changing it.
   const jobMemoryStats = require('../lib/scheduler/jobMemoryStats.cjs');
   const reader = vi.spyOn(jobMemoryStats, 'backfillFromRunLogs').mockResolvedValue(0);
   const timers = vi.spyOn(globalThis, 'setTimeout');
+  const clears = vi.spyOn(globalThis, 'clearTimeout');
   scheduler._setPeriodicReverifyEnabledForTests(false);
   scheduler.cancelMemoryBackfill();
   try {
     await scheduler.init();
-    // A timer was set with the deferral delay (other boot timers may share 60 s)...
-    const delayCalls = () => timers.mock.calls.filter((c) => c[1] === scheduler.MEMORY_BACKFILL_DELAY_MS).length;
-    const afterInit = delayCalls();
-    expect(afterInit).toBeGreaterThanOrEqual(1);
-    // ...and it is the backfill's: init() left a pass pending, so scheduling again joins
-    // it (same promise) and sets no new timer.
+    // Every timer handle init() set with the deferral delay (other boot timers may share 60 s).
+    const initHandles = timers.mock.calls
+      .map((c, i) => (c[1] === scheduler.MEMORY_BACKFILL_DELAY_MS ? timers.mock.results[i].value : undefined))
+      .filter((h) => h !== undefined);
+    // init() left a pass pending: scheduling again joins it and sets no timer of its own.
+    const callsBefore = timers.mock.calls.length;
     const pending = scheduler.scheduleMemoryBackfill({ backfillFromRunLogs: reader });
     expect(scheduler.scheduleMemoryBackfill()).toBe(pending);
-    expect(delayCalls()).toBe(afterInit);
+    expect(timers.mock.calls.length).toBe(callsBefore);
+    // Identity: the timer cancelMemoryBackfill() clears is the backfill's own, and it is one
+    // init() set with the deferral delay; the pending promise settles with 0 on cancel.
+    clears.mockClear();
+    scheduler.cancelMemoryBackfill();
+    expect(clears).toHaveBeenCalledTimes(1);
+    const backfillTimer = clears.mock.calls[0][0];
+    expect(backfillTimer).toBeDefined();
+    expect(initHandles).toContain(backfillTimer);
+    expect(await pending).toBe(0);
     // ...and boot itself never read a run log.
     expect(reader).not.toHaveBeenCalled();
   } finally {
     scheduler.stop();
     scheduler.cancelMemoryBackfill();
     scheduler._setPeriodicReverifyEnabledForTests(true);
+    clears.mockRestore();
     timers.mockRestore();
     reader.mockRestore();
   }

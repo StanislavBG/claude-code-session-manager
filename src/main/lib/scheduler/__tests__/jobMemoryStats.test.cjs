@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createJobMemoryStats, quantile, MAX_SAMPLES, CACHE_MS, STORE_FILE, BACKFILL_BATCH } = require('../jobMemoryStats.cjs');
+const { createJobMemoryStats, quantile, sampleKey, MAX_SAMPLES, CACHE_MS, STORE_FILE, BACKFILL_BATCH } = require('../jobMemoryStats.cjs');
 
 let tmp;
 let clock;
@@ -323,6 +323,27 @@ describe('backfillFromRunLogs', () => {
     assert.equal(lines.filter((l) => l.runId === 'live-run' && l.unit === 'sm-job-live' && l.at === 9).length, 1);
   });
 
+  it('a live peak without runId or unit that shares `at` with a stored legacy sample survives the re-append', async () => {
+    seedRuns(2);
+    writeStore([{ agentType: 'dev-lead', peakMb: 500, at: 9 }]); // legacy: no runId, no unit
+    let s;
+    s = createJobMemoryStats({
+      storePath: path.join(tmp, STORE_FILE),
+      now: () => clock,
+      writeTextAtomic: async (f, text) => {
+        // Same `at` as the legacy sample, no provenance; our rename then replaces the file.
+        s.recordPeak({ agentType: 'validator', peakMb: 777, at: 9 });
+        await new Promise((r) => setImmediate(r));
+        fs.writeFileSync(f, text);
+      },
+    });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 2);
+    const lines = storeLines();
+    assert.equal(lines.length, 4, JSON.stringify(lines));
+    assert.equal(lines.filter((l) => l.agentType === 'dev-lead' && l.peakMb === 500 && l.at === 9).length, 1);
+    assert.equal(lines.filter((l) => l.agentType === 'validator' && l.peakMb === 777 && l.at === 9).length, 1);
+  });
+
   it('a live peak replaced by the async write is re-appended exactly once', async () => {
     seedRuns(2);
     let s;
@@ -402,6 +423,36 @@ describe('backfillFromRunLogs', () => {
     const s = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => clock, fs: guarded });
     assert.equal(await s.backfillFromRunLogs(RUNS()), 3);
     assert.deepEqual(sync, []);
+  });
+});
+
+describe('sampleKey (re-append identity)', () => {
+  // Raw objects, never passed through normalizeSample, so key order is whatever the writer used.
+  it('is independent of key order', () => {
+    assert.equal(
+      sampleKey({ unit: 'u', at: 9, runId: 'r', peakMb: 777, agentType: 'validator' }),
+      sampleKey({ agentType: 'validator', peakMb: 777, at: 9, runId: 'r', unit: 'u' }),
+    );
+    assert.equal(
+      sampleKey({ at: 9, peakMb: 500, agentType: 'dev-lead' }),
+      sampleKey({ agentType: 'dev-lead', peakMb: 500, at: 9 }),
+    );
+  });
+
+  it('keys a sample with runId + unit by (runId, unit, at)', () => {
+    assert.equal(
+      sampleKey({ agentType: 'unknown', peakMb: 1, at: 9, runId: 'r', unit: 'u' }),
+      sampleKey({ agentType: 'dev-lead', peakMb: 2, at: 9, runId: 'r', unit: 'u' }),
+    );
+    assert.notEqual(sampleKey({ at: 9, runId: 'r', unit: 'u' }), sampleKey({ at: 9, runId: 'r', unit: 'v' }));
+  });
+
+  it('keys a sample without runId or unit by all its fields, never by `at` alone', () => {
+    const legacy = { agentType: 'dev-lead', peakMb: 500, at: 9 };
+    assert.notEqual(sampleKey(legacy), sampleKey({ agentType: 'validator', peakMb: 500, at: 9 }));
+    assert.notEqual(sampleKey(legacy), sampleKey({ agentType: 'dev-lead', peakMb: 501, at: 9 }));
+    assert.notEqual(sampleKey(legacy), sampleKey({ agentType: 'dev-lead', peakMb: 500, at: 10 }));
+    assert.notEqual(sampleKey({ ...legacy, runId: 'r' }), sampleKey({ ...legacy, unit: 'r' }));
   });
 });
 

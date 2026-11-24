@@ -34,11 +34,12 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
-const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
+const { opsPath, OPS_ROOT_DIR, assertOpsWrite } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
 const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
 const { validateCharacterJson, validateCharacterJs, voiceIdRefsOf, inspectCharacter, characterDir, MAX_JSON_BYTES: MAX_CHARACTER_JSON_BYTES, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
 const voiceLibrary = require('../demo-video-kit/voiceLibrary.cjs');
+const projectSounds = require('../demo-video-kit/projectSounds.cjs');
 const { checkHtmlLimits, checkPostCaption, TIKTOK_CHECK_IDS } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 const { readMatrix, matrixJsonSchema, MAX_MATRIX_BYTES } = require('../project-pages/competitiveMatrix.cjs');
@@ -63,6 +64,8 @@ const VIDEO_OUTCOMES = ['season-complete'];
 const OUTCOME_TEXT_MAX = 300;
 const OUTCOME_BODY_KEYS = ['cwd', 'videoId', 'outcome', 'text'];
 const OUTCOME_WRITE_BODY_MAX = 64 * 1024;
+/** Character write body cap: js + json, every project sound WAV as base64, and 128 KiB of overhead. */
+const CHARACTER_WRITE_BODY_MAX = MAX_CHARACTER_JS_BYTES * 2 + base64LengthFor(projectSounds.MAX_SOUNDS_TOTAL_BYTES) + 128 * 1024;
 
 // Each detector is a linear regex scan; the input is capped first.
 const REMOTE_REFERENCE_CHECKS = [
@@ -457,7 +460,9 @@ function registerAdminRoute(adminHttp) {
   // POST /admin/project-home/videos/outcome/write {cwd, videoId, outcome, text} -> videos/<videoId>/outcome.json
   adminHttp.registerRoute('POST', '/admin/project-home/videos/outcome/write', outcomeWriteHandler);
 
-  // POST /admin/project-home/character/write {cwd, json, js, replace?} -> videos/_character/
+  // POST /admin/project-home/character/write {cwd, json, js, replace?, sounds?} -> videos/_character/
+  // (sounds = { <name>: <base64 WAV> } for every file-backed sound, written to sounds/<name>.wav;
+  // answers {ok, path, bytes, sounds: <names written>})
   adminHttp.registerRoute('POST', '/admin/project-home/character/write', characterWriteHandler);
 
   // POST /admin/project-home/matrix/read {cwd?} -> {ok, matrix|null, error, path, schema}
@@ -641,10 +646,78 @@ async function outcomeWriteHandler(req, res) {
   }
 }
 
+/**
+ * Checks a character write's `sounds` payload ({ <name>: <base64 WAV> }) against the
+ * file-backed sounds `jsonObj` declares: exactly one entry per name, valid base64, each
+ * WAV within its kind's cap and readable, and the total within MAX_SOUNDS_TOTAL_BYTES.
+ * -> {files: [{name, buffer}]} | {error}. Errors never echo the payload.
+ */
+function checkSoundPayload(jsonObj, sounds) {
+  const payload = sounds === undefined || sounds === null ? {} : sounds;
+  if (typeof payload !== 'object' || Array.isArray(payload)) {
+    return { error: 'sounds payload must be an object of { name: base64 WAV }' };
+  }
+  const names = projectSounds.fileBackedSoundNames(jsonObj);
+  for (const name of names) {
+    if (!Object.prototype.hasOwnProperty.call(payload, name)) {
+      return { error: `sound '${name}' has no WAV: send it as sounds.${name} (project_character_write soundPaths.${name})` };
+    }
+  }
+  for (const key of Object.keys(payload)) {
+    if (!names.includes(key)) return { error: `sound '${key}' was sent but character.json declares no file-backed sound by that name` };
+  }
+  const files = [];
+  let total = 0;
+  for (const name of names) {
+    const b64 = payload[name];
+    if (typeof b64 !== 'string' || b64.length % 4 !== 0 || !BASE64_RE.test(b64)) {
+      return { error: `sound '${name}' is not valid base64` };
+    }
+    const kind = projectSounds.findProjectSound(jsonObj, name).kind;
+    const cap = kind === 'sfx' ? projectSounds.MAX_SFX_WAV_BYTES : projectSounds.MAX_BED_WAV_BYTES;
+    const label = `sound '${name}'`;
+    if (b64.length > base64LengthFor(cap)) {
+      return { error: `${label} is over the ${cap}-byte limit for a ${kind === 'sfx' ? 'sound effect' : 'music bed'}` };
+    }
+    const buffer = Buffer.from(b64, 'base64');
+    const wavErr = projectSounds.checkSoundWav(buffer, label, kind);
+    if (wavErr) return { error: wavErr };
+    total += buffer.length;
+    files.push({ name, buffer });
+  }
+  if (total > projectSounds.MAX_SOUNDS_TOTAL_BYTES) {
+    return { error: `sounds total ${total} bytes exceed the ${projectSounds.MAX_SOUNDS_TOTAL_BYTES}-byte limit` };
+  }
+  return { files };
+}
+
+/** Removes every entry of soundsDir(cwd) that is not a declared <name>.wav; removes the folder when nothing is declared. */
+async function pruneSounds(cwd, names) {
+  const dir = projectSounds.soundsDir(cwd);
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dir);
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return;
+    throw e;
+  }
+  const keep = new Set(names.map((n) => `${n}.wav`));
+  for (const entry of entries) {
+    if (keep.has(entry)) continue;
+    const abs = path.join(dir, entry);
+    assertOpsWrite(abs, 'project-home');
+    await fs.promises.rm(abs, { recursive: true, force: true });
+  }
+  if (names.length === 0) {
+    assertOpsWrite(dir, 'project-home');
+    await fs.promises.rmdir(dir);
+  }
+}
+
 async function characterWriteHandler(req, res) {
   let raw;
   try {
-    raw = await readBody(req, MAX_CHARACTER_JS_BYTES * 2 + 64 * 1024);
+    raw = await readBody(req, CHARACTER_WRITE_BODY_MAX);
   } catch (e) {
     sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'}` });
     return;
@@ -687,6 +760,11 @@ async function characterWriteHandler(req, res) {
     sendJson(res, 400, { ok: false, error: `character.json exceeds the ${MAX_CHARACTER_JSON_BYTES}-byte limit (${jsonBytes} bytes as saved)` });
     return;
   }
+  const soundPayload = checkSoundPayload(jsonObj, body.sounds);
+  if (soundPayload.error) {
+    sendJson(res, 400, { ok: false, error: `character.json invalid: ${soundPayload.error}` });
+    return;
+  }
   const jsErr = validateCharacterJs(body.js, [...REMOTE_REFERENCE_CHECKS, ...NETWORK_CHECKS]);
   if (jsErr) {
     sendJson(res, 400, { ok: false, error: jsErr });
@@ -707,10 +785,14 @@ async function characterWriteHandler(req, res) {
   try {
     const dir = characterDir(resolved.cwd);
     await fs.promises.mkdir(dir, { recursive: true });
+    for (const f of soundPayload.files) {
+      await config.writeBinaryAtomic(projectSounds.soundFile(resolved.cwd, f.name), f.buffer, { writer: 'project-home' });
+    }
     const jsPath = path.join(dir, 'character.js');
     await config.writeTextAtomic(jsPath, body.js, { writer: 'project-home' });
     await config.writeTextAtomic(path.join(dir, 'character.json'), jsonText, { writer: 'project-home' });
-    sendJson(res, 200, { ok: true, path: dir, bytes: Buffer.byteLength(body.js, 'utf8') });
+    await pruneSounds(resolved.cwd, soundPayload.files.map((f) => f.name));
+    sendJson(res, 200, { ok: true, path: dir, bytes: Buffer.byteLength(body.js, 'utf8'), sounds: soundPayload.files.map((f) => f.name) });
   } catch (e) {
     sendJson(res, 500, { ok: false, error: e?.message ?? 'write failed' });
   }

@@ -1057,3 +1057,127 @@ test('character/write: an approved {voiceId} changed since approval is refused b
     expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
   });
 });
+
+// ---- character/write: project sound WAVs (body.sounds) ----
+
+const { MAX_SFX_WAV_BYTES, MAX_SOUNDS_TOTAL_BYTES } = require('../lib/demo-video-kit/projectSounds.cjs');
+
+/** A 16-bit mono 22050 Hz PCM WAV: 44-byte header + `frames` zero frames (`fill` marks the bytes). */
+function wavBuf(frames = 8, fill = 0) {
+  const dataBytes = frames * 2;
+  const b = Buffer.alloc(44 + dataBytes, fill);
+  b.write('RIFF', 0, 'ascii');
+  b.writeUInt32LE(36 + dataBytes, 4);
+  b.write('WAVE', 8, 'ascii');
+  b.write('fmt ', 12, 'ascii');
+  b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20);
+  b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(22050, 24);
+  b.writeUInt32LE(44100, 28);
+  b.writeUInt16LE(2, 32);
+  b.writeUInt16LE(16, 34);
+  b.write('data', 36, 'ascii');
+  b.writeUInt32LE(dataBytes, 40);
+  return b;
+}
+
+const SOUND_JSON = {
+  ...GOOD_CHARACTER.json,
+  sounds: {
+    sfx: [{ name: 'bark', note: 'Pesho barks' }, { name: 'ding' }],
+    beds: [{ name: 'garden' }, { name: 'synth', command: ['bin/bed', '{lengthS}', '{out}'] }],
+  },
+  cast: [{ name: 'Pesho', sfx: ['bark', 'pop'] }],
+};
+
+function soundWavs() {
+  return { bark: wavBuf(8, 1), ding: wavBuf(16, 2), garden: wavBuf(32, 3) };
+}
+
+function toB64(wavs) {
+  return Object.fromEntries(Object.entries(wavs).map(([k, v]) => [k, v.toString('base64')]));
+}
+
+test('character/write: saves 2 effects, a file bed and a cast sfx; no WAV for the command bed', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const wavs = soundWavs();
+  const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: SOUND_JSON, sounds: toB64(wavs) } });
+  expect(r.status).toBe(200);
+  expect(r.body.sounds).toEqual(['bark', 'ding', 'garden']);
+  for (const [name, buf] of Object.entries(wavs)) {
+    expect(fs.readFileSync(path.join(dir, 'sounds', `${name}.wav`)).equals(buf)).toBe(true);
+  }
+  expect(fs.existsSync(path.join(dir, 'sounds', 'synth.wav'))).toBe(false);
+  expect(fs.readdirSync(path.join(dir, 'sounds')).sort()).toEqual(['bark.wav', 'ding.wav', 'garden.wav']);
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).sounds).toEqual(SOUND_JSON.sounds);
+});
+
+test('character/write: a write without sounds answers sounds: [] and makes no sounds/ folder', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER } });
+  expect(r.status).toBe(200);
+  expect(r.body).toEqual({ ok: true, path: dir, bytes: Buffer.byteLength(GOOD_CHARACTER.js, 'utf8'), sounds: [] });
+  expect(fs.readdirSync(dir).sort()).toEqual(['character.js', 'character.json']);
+});
+
+test('character/write: every sounds refusal is character.json invalid and writes nothing', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const good = toB64(soundWavs());
+  const { garden: _g, ...missing } = good;
+  const bigSfx = Buffer.alloc(MAX_SFX_WAV_BYTES + 3).toString('base64');
+  const notWav = Buffer.from('not a wav file at all').toString('base64');
+  // 3 beds pass the per-bed cap but together exceed the 32 MiB total by ~120 KiB (still under the body cap)
+  const bedFrames = Math.floor((MAX_SOUNDS_TOTAL_BYTES + 120 * 1024) / 3 / 2);
+  const bigBeds = { a: wavBuf(bedFrames), b: wavBuf(bedFrames), c: wavBuf(bedFrames) };
+  const bigBedsJson = { ...GOOD_CHARACTER.json, sounds: { beds: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] } };
+  expect(Object.values(bigBeds).reduce((n, b) => n + b.length, 0)).toBeGreaterThan(MAX_SOUNDS_TOTAL_BYTES);
+  const cases = [
+    [SOUND_JSON, missing, /sound 'garden' has no WAV: send it as sounds\.garden \(project_character_write soundPaths\.garden\)/],
+    [SOUND_JSON, { ...good, extra: good.bark }, /sound 'extra' was sent but character\.json declares no file-backed sound by that name/],
+    [SOUND_JSON, { ...good, synth: good.bark }, /sound 'synth' was sent/],
+    [SOUND_JSON, [good.bark], /sounds payload must be an object/],
+    [SOUND_JSON, 'bark', /sounds payload must be an object/],
+    [SOUND_JSON, { ...good, bark: 42 }, /sound 'bark' is not valid base64/],
+    [SOUND_JSON, { ...good, bark: 'abc!' }, /sound 'bark' is not valid base64/],
+    [SOUND_JSON, { ...good, bark: 'abcde' }, /sound 'bark' is not valid base64/],
+    [SOUND_JSON, { ...good, bark: bigSfx }, /sound 'bark' is over the 1048576-byte limit for a sound effect/],
+    [SOUND_JSON, { ...good, ding: notWav }, /sound 'ding' is not a RIFF WAV/],
+    [bigBedsJson, toB64(bigBeds), /sounds total \d+ bytes exceed the 33554432-byte limit/],
+    [{ ...GOOD_CHARACTER.json, sounds: { sfx: [{ name: 'bark' }], beds: [{ name: 'bark' }] } }, {}, /duplicates/],
+    [{ ...GOOD_CHARACTER.json, sounds: { sfx: [{ name: 'pop' }] } }, { pop: good.bark }, /built-in sound/],
+  ];
+  for (const [json, sounds, reason] of cases) {
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json, sounds } });
+    expect(r.status).toBe(400);
+    expect(r.body.error.startsWith('character.json invalid: ')).toBe(true);
+    expect(r.body.error).toMatch(reason);
+    expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'character.js'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'sounds'))).toBe(false);
+  }
+}, 60000);
+
+test('character/write: the 409 rule still holds for a write with sounds', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  expect((await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER } })).status).toBe(200);
+  const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: SOUND_JSON, sounds: toB64(soundWavs()) } });
+  expect(r.status).toBe(409);
+  expect(fs.existsSync(path.join(dir, 'sounds'))).toBe(false);
+});
+
+test('character/write: a replace dropping a sound removes its WAV; dropping all removes sounds/', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const wavs = soundWavs();
+  expect((await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: SOUND_JSON, sounds: toB64(wavs) } })).status).toBe(200);
+  fs.writeFileSync(path.join(dir, 'sounds', 'stray.txt'), 'x');
+  const fewer = { ...SOUND_JSON, sounds: { sfx: [{ name: 'bark' }], beds: SOUND_JSON.sounds.beds } };
+  const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: fewer, sounds: toB64({ bark: wavs.bark, garden: wavs.garden }), replace: true } });
+  expect(r.status).toBe(200);
+  expect(r.body.sounds).toEqual(['bark', 'garden']);
+  expect(fs.readdirSync(path.join(dir, 'sounds')).sort()).toEqual(['bark.wav', 'garden.wav']);
+  const none = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, replace: true } });
+  expect(none.status).toBe(200);
+  expect(none.body.sounds).toEqual([]);
+  expect(fs.existsSync(path.join(dir, 'sounds'))).toBe(false);
+});

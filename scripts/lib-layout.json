@@ -39,6 +39,7 @@
   "feedbackEnvelope": "feedback-remote",
   "feedbackReport": "feedback-remote",
   "feedbackSeal": "feedback-remote",
+  "feedbackBoxKeys": "feedback-remote",
   "needsYouStore": "feedback-remote",
   "needsYouAdminRoutes": "feedback-remote",
   "needsYouIpc": "feedback-remote",

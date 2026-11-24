@@ -11,6 +11,9 @@
  * when job.repoPaths is set, with an optional review stage when job.review is set.
  * A built-in whose job.reviewable is true (Demo Video) runs that same review
  * stage when the press passes reviewStage: true or a review decision.
+ * A project Video tool's job env gets SM_VOICE_ID = the press's voiceId, else the
+ * tool's default voiceId, else nothing; handed to createPrd as `env` and named
+ * in the job's implementation notes.
  *
  * Plain Node, no Electron imports; all I/O is injected.
  */
@@ -19,7 +22,7 @@ const path = require('node:path');
 const { BUILTIN_MACROS } = require('./builtinMacros.cjs');
 const { kebabCase } = require('../util/kebabCase.cjs');
 const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
-const { renderMacroPrompt } = require('./macroLibrary.cjs');
+const { renderMacroPrompt, VOICE_ID_RE } = require('./macroLibrary.cjs');
 
 const ACTIVE = new Set(['pending', 'held', 'running']);
 const RETRYABLE = new Set(['needs_review', 'failed']);
@@ -116,7 +119,7 @@ function stageFor(tool, builtin, review, reviewStage) {
 }
 
 async function dispatchMacroJob(
-  { cwd, macroId, epicId, extraInstructions, effort, inputValues, review, reviewStage } = {},
+  { cwd, macroId, epicId, extraInstructions, effort, inputValues, review, reviewStage, voiceId } = {},
   { createPrd, listRows, archivePrd, builtins = BUILTIN_MACROS, macros = [], now = Date.now } = {},
 ) {
   const builtin = (builtins || []).find((m) => m && m.id === macroId);
@@ -125,6 +128,9 @@ async function dispatchMacroJob(
   if (!macro || !macro.job) return { ok: false, error: `macro ${macroId} has no background job declaration` };
   if (typeof epicId !== 'string' || !epicId.trim()) return { ok: false, error: 'epicId is required — a background build joins an existing Epic' };
   if (typeof cwd !== 'string' || !cwd) return { ok: false, error: 'cwd is required' };
+  if (voiceId != null && (typeof voiceId !== 'string' || !VOICE_ID_RE.test(voiceId))) {
+    return { ok: false, error: 'voiceId must match /^[a-z0-9][a-z0-9_-]{0,63}$/ when given' };
+  }
   if (typeof createPrd !== 'function') return { ok: false, error: 'createPrd is not available' };
 
   let prompt = macro.prompt;
@@ -219,6 +225,14 @@ async function dispatchMacroJob(
     });
   }
   if (typeof effort === 'string' && PRD_EFFORT_LEVELS.includes(effort)) input.effort = effort;
+  // Press pick beats the tool default; only a project Video tool's job carries a voice.
+  const jobVoiceId = tool
+    ? (voiceId || (typeof tool.voiceId === 'string' && VOICE_ID_RE.test(tool.voiceId) ? tool.voiceId : null))
+    : null;
+  if (jobVoiceId) {
+    input.env = { SM_VOICE_ID: jobVoiceId };
+    input.implementationNotes += ` SM_VOICE_ID=${jobVoiceId}: speak every narration line with this library voice.`;
+  }
 
   let res;
   try {

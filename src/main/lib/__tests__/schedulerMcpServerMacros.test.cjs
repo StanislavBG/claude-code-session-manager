@@ -469,6 +469,18 @@ test('macro_save forwards job: null and drops a non-object job', async () => {
   expect(Object.prototype.hasOwnProperty.call(requests[1].body, 'job')).toBe(false);
 });
 
+test('macro_save forwards voiceId (string or null) and drops any other type', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, requests } = await deleteHarness({ ok: true, macro: { id: 'm1' } });
+  await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, id: 'm1', surface: 'project-video', voiceId: 'narrator-1', humanRequestQuote: 'q' });
+  await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, id: 'm1', surface: 'project-video', voiceId: null, humanRequestQuote: 'q' });
+  await callTool(handleCallTool, 'macro_save', { ...SAVE_ARGS, id: 'm1', surface: 'project-video', voiceId: 7, humanRequestQuote: 'q' });
+  expect(requests).toHaveLength(3);
+  expect(requests[0].body.voiceId).toBe('narrator-1');
+  expect(requests[1].body.voiceId).toBeNull();
+  expect(Object.prototype.hasOwnProperty.call(requests[2].body, 'voiceId')).toBe(false);
+});
+
 test('macro_save with surface project-video refuses in a job or outside a session, without HTTP', async () => {
   const { handleCallTool, requests } = await deleteHarness({ ok: true });
   setDeleteEnv({ chat: 'chat-123', slug: 'some-job' });

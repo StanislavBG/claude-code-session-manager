@@ -480,3 +480,34 @@ test('the persona carries the outcome stop rule and the outcome tool', () => {
   expect(persona).toContain('when a kind playbook says to stop with an outcome');
   expect(persona).toContain('save no video\n   or review material, and end PASS');
 });
+
+test('project tool voice: SM_VOICE_ID = press voiceId, else the tool default, else unset', async () => {
+  const press = await runTool(tool({}, { voiceId: 'tool-voice' }), { voiceId: 'press-voice' });
+  expect(press.r.ok).toBe(true);
+  expect(press.i.env).toEqual({ SM_VOICE_ID: 'press-voice' });
+  expect(press.i.implementationNotes).toContain('SM_VOICE_ID=press-voice');
+
+  const fallback = await runTool(tool({}, { voiceId: 'tool-voice' }));
+  expect(fallback.i.env).toEqual({ SM_VOICE_ID: 'tool-voice' });
+
+  const pressOnly = await runTool(tool(), { voiceId: 'press-voice' });
+  expect(pressOnly.i.env).toEqual({ SM_VOICE_ID: 'press-voice' });
+
+  const none = await runTool(tool());
+  expect(none.i.env).toBeUndefined();
+  expect(none.i.implementationNotes).not.toContain('SM_VOICE_ID');
+
+  const committing = await runTool(tool({ repoPaths: ['videos'] }, { voiceId: 'tool-voice' }));
+  expect(committing.i.env).toEqual({ SM_VOICE_ID: 'tool-voice' });
+
+  const bad = await runTool(tool(), { voiceId: 'Bad Voice' });
+  expect(bad.r).toMatchObject({ ok: false, error: expect.stringContaining('voiceId') });
+  expect(bad.d.createPrd).not.toHaveBeenCalled();
+});
+
+test('built-in press: a voiceId never becomes job env', async () => {
+  const d = mk();
+  const r = await dispatchMacroJob({ ...base, voiceId: 'press-voice' }, d);
+  expect(r.ok).toBe(true);
+  expect(d.createPrd.mock.calls[0][0].env).toBeUndefined();
+});

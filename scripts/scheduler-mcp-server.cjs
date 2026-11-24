@@ -23,7 +23,7 @@
  *   project_video_outcome_write({ cwd?, videoId, outcome, text }) -> POST /admin/project-home/videos/outcome/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
- *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, job?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
+ *   macro_save({ cwd?, id?, label, agentName, tag, prompt, inputs?, surface?, job?, voiceId?, projects?, humanRequestQuote? }) -> POST /admin/macros/save
  *   macro_delete({ id }) -> POST /admin/macros/delete
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
@@ -1060,6 +1060,7 @@ const TOOLS = [
           },
           required: ['estimateMinutes'],
         },
+        voiceId: { type: ['string', 'null'], description: "Optional, only with surface 'project-home' or 'project-video': the tool's default library voice id (e.g. \"narrator-1\", /^[a-z0-9][a-z0-9_-]{0,63}$/), so one character sounds the same in every video tool. A Project Video job gets it as SM_VOICE_ID unless the press picks another voice. Omit on update to keep it; pass null to remove it." },
         projects: { type: 'array', items: { type: 'string' }, description: 'Optional: only ["*"] is accepted, to show the macro in every project. Needs humanRequestQuote and a Session Manager chat session.' },
         humanRequestQuote: { type: 'string', description: "With projects [\"*\"] or surface 'project-home' / 'project-video': the exact words the human typed in this chat asking for every project or naming Project Home." },
         inputs: {
@@ -1757,6 +1758,7 @@ async function handleCallTool(request) {
       if (Array.isArray(args.inputs)) payload.inputs = args.inputs;
       if (typeof args.surface === 'string') payload.surface = args.surface;
       if (Array.isArray(args.projects)) payload.projects = args.projects;
+      if (args.voiceId === null || typeof args.voiceId === 'string') payload.voiceId = args.voiceId;
       if (args.job === null || (args.job && typeof args.job === 'object' && !Array.isArray(args.job))) payload.job = args.job;
       if (typeof args.humanRequestQuote === 'string') payload.humanRequestQuote = args.humanRequestQuote;
       payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;

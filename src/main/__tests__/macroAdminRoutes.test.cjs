@@ -1082,6 +1082,24 @@ test('run+externalRef: a record that fails twice still answers 200 with external
 
 const VIDEO_JOB = { estimateMinutes: 20, repoPaths: ['web/videos'], review: true };
 
+test('project-video save stores voiceId; a sessions save with voiceId is refused 400', async () => {
+  humanLedger._resetForTests();
+  const { cwd, adminHttp } = await setupDelete();
+  const origin = 'sess-pv-voice';
+  humanLedger.recordHumanPrompt(origin, PH_TEXT);
+  const res = await adminHttp.call('POST', '/admin/macros/save', {
+    body: {
+      cwd, ...MAC, label: 'Voiced video', surface: 'project-video', job: VIDEO_JOB, voiceId: 'narrator-1',
+      humanRequestQuote: PH_QUOTE, originClaudeSessionId: origin,
+    },
+  });
+  expect(res.status).toBe(200);
+  expect(res.body.macro.voiceId).toBe('narrator-1');
+  const bad = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'Plain', voiceId: 'narrator-1' } });
+  expect(bad.status).toBe(400);
+  expect(bad.body.error).toContain('voiceId is allowed only');
+});
+
 test('project-video create with a verified quote stores projects [cwd] and job; a caller projects value is ignored', async () => {
   humanLedger._resetForTests();
   const { cwd, adminHttp, getChangedCount } = await setupDelete();

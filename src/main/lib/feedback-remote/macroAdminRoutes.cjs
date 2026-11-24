@@ -3,7 +3,7 @@
  * the scheduler MCP) can list, create/update and delete a HOT KEYS macro
  * for its own project, through the existing macroLibrary.cjs store:
  *   GET  /admin/macros?cwd=…                          -> { ok, macros }
- *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt, inputs?, surface?, job?}
+ *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt, inputs?, surface?, job?, voiceId?}
  *   POST /admin/macros/delete {cwd, id, originClaudeSessionId?}
  *                                                     -> { ok, deleted, macro }
  * delete removes the macro from THIS project through
@@ -180,6 +180,7 @@ function saveHandler(onChanged, libOpts, deps = {}) {
         inputs: body.inputs,
         surface: body.surface,
         job: body.job,
+        voiceId: body.voiceId,
       });
     } catch (e) {
       sendJson(res, 400, { ok: false, error: e?.issues?.[0]?.message ?? e?.message ?? 'invalid payload' });

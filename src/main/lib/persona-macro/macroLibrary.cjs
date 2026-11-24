@@ -42,6 +42,12 @@
  * refuses `job` on every other surface and on built-ins; a read drops such a
  * stale key (a built-in's job is read live from BUILTIN_MACROS by withBuiltinJobs).
  *
+ * A non-built-in 'project-home' or 'project-video' macro may carry `voiceId`, the
+ * tool's default library voice (VOICE_ID_RE); a project-video job gets it as
+ * SM_VOICE_ID unless the press picks another (macroJobDispatch.cjs). saveMacro
+ * refuses it on a 'sessions' macro (VOICE_SURFACE_ONLY) and on a built-in
+ * (VOICE_NOT_ON_BUILTIN); a read drops such a stale key.
+ *
  * Plain Node, no Electron imports.
  */
 
@@ -74,6 +80,11 @@ const MacroSurfaceSchema = z.enum(['sessions', 'project-home', 'project-video'])
 const PROJECT_VIDEO_ONE_PROJECT = 'a Project Video tool belongs to exactly one project';
 const JOB_SURFACE_ONLY = 'job is allowed only on a Project Video tool';
 const JOB_NOT_ON_BUILTIN = 'a built-in macro job cannot be set';
+const VOICE_SURFACE_ONLY = 'voiceId is allowed only on a Project Home or Project Video tool';
+const VOICE_NOT_ON_BUILTIN = 'a built-in macro voiceId cannot be set';
+const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const MacroVoiceIdSchema = z.string().regex(VOICE_ID_RE, 'invalid voiceId');
+const VOICE_SURFACES = new Set(['project-home', 'project-video']);
 
 /** Repo-relative path a Project Video job may write: '/'-separated, inside the repo, outside ops/git state. */
 const JobRepoPathSchema = z.string().min(1).max(200).superRefine((v, ctx) => {
@@ -190,10 +201,17 @@ function renderMacroPrompt(prompt, inputs, values) {
  * refuses such a job outright; reads stay tolerant.
  */
 function stripForeignJob(entry) {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !('job' in entry)) return entry;
-  if (entry.surface === 'project-video' && !entry.builtin) return entry;
-  const { job: _stale, ...rest } = entry;
-  return rest;
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  let out = entry;
+  if ('job' in out && !(out.surface === 'project-video' && !out.builtin)) {
+    const { job: _stale, ...rest } = out;
+    out = rest;
+  }
+  if ('voiceId' in out && !(VOICE_SURFACES.has(out.surface) && !out.builtin)) {
+    const { voiceId: _staleVoice, ...rest } = out;
+    out = rest;
+  }
+  return out;
 }
 
 const MacroObjectSchema = z.object({
@@ -215,10 +233,16 @@ const MacroObjectSchema = z.object({
   scriptStart: z.boolean().optional(),
   // Background job declaration; only on a non-built-in 'project-video' macro.
   job: MacroJobSchema.optional(),
+  // Default library voice; only on a non-built-in 'project-home' / 'project-video' macro.
+  voiceId: MacroVoiceIdSchema.optional(),
 }).superRefine((value, ctx) => {
   refineInputs(value, ctx);
   if (value.surface === 'project-video' && !isSingleProject(value.projects)) {
     ctx.addIssue({ code: 'custom', path: ['projects'], message: PROJECT_VIDEO_ONE_PROJECT });
+  }
+  if (value.voiceId !== undefined) {
+    if (value.builtin) ctx.addIssue({ code: 'custom', path: ['voiceId'], message: VOICE_NOT_ON_BUILTIN });
+    else if (!VOICE_SURFACES.has(value.surface)) ctx.addIssue({ code: 'custom', path: ['voiceId'], message: VOICE_SURFACE_ONLY });
   }
 });
 const MacroSchema = z.preprocess(stripForeignJob, MacroObjectSchema);
@@ -242,6 +266,8 @@ const MacroSaveSchema = z.object({
   scriptStart: z.boolean().optional(),
   // Omitted keeps the stored job on update; `null` removes it. Only on a 'project-video' macro.
   job: MacroJobSchema.nullable().optional(),
+  // Omitted keeps the stored voiceId on update; `null` removes it. Only on a 'project-home' / 'project-video' macro.
+  voiceId: MacroVoiceIdSchema.nullable().optional(),
 }).superRefine(refineInputs);
 
 const MacroDeleteSchema = z.object({ id: MacroIdSchema });
@@ -610,7 +636,7 @@ function isProjectVideoTool(macro, cwd) {
 }
 
 /** Throws unless the merged save's surface/projects/job combination is allowed. */
-function assertSurfaceRules(saved, parsedJob) {
+function assertSurfaceRules(saved, parsedJob, parsedVoiceId) {
   if (saved.surface === 'project-video' && !isSingleProject(saved.projects)) {
     throw new Error(PROJECT_VIDEO_ONE_PROJECT);
   }
@@ -618,6 +644,17 @@ function assertSurfaceRules(saved, parsedJob) {
     if (saved.builtin) throw new Error(JOB_NOT_ON_BUILTIN);
     if (saved.surface !== 'project-video') throw new Error(JOB_SURFACE_ONLY);
   }
+  if (parsedVoiceId !== undefined && parsedVoiceId !== null) {
+    if (saved.builtin) throw new Error(VOICE_NOT_ON_BUILTIN);
+    if (!VOICE_SURFACES.has(saved.surface)) throw new Error(VOICE_SURFACE_ONLY);
+  }
+}
+
+/** Apply the save's `voiceId` (omitted = keep, null = remove) and drop any voiceId the surface cannot carry. */
+function applyVoiceId(saved, parsedVoiceId) {
+  if (parsedVoiceId === null) delete saved.voiceId;
+  else if (parsedVoiceId !== undefined) saved.voiceId = parsedVoiceId;
+  if (!VOICE_SURFACES.has(saved.surface) || saved.builtin) delete saved.voiceId;
 }
 
 /** Apply the save's `job` (omitted = keep, null = remove) and drop any job the surface cannot carry. */
@@ -705,8 +742,9 @@ async function saveMacro(input, opts = {}) {
       }
       if (parsed.scriptStart === true) saved.scriptStart = true;
       else if (parsed.scriptStart === false) delete saved.scriptStart;
-      assertSurfaceRules(saved, parsed.job);
+      assertSurfaceRules(saved, parsed.job, parsed.voiceId);
       applyJob(saved, parsed.job);
+      applyVoiceId(saved, parsed.voiceId);
       assertPlaceholdersDeclared(saved);
       macros[idx] = saved;
     } else {
@@ -730,8 +768,9 @@ async function saveMacro(input, opts = {}) {
         saved.autoStartTargets = normalizeProjects(parsed.autoStartTargets);
       }
       if (parsed.scriptStart === true) saved.scriptStart = true;
-      assertSurfaceRules(saved, parsed.job);
+      assertSurfaceRules(saved, parsed.job, parsed.voiceId);
       applyJob(saved, parsed.job);
+      applyVoiceId(saved, parsed.voiceId);
       assertPlaceholdersDeclared(saved);
       macros.push(saved);
     }
@@ -822,6 +861,9 @@ async function removeMacroFromProject(input, opts = {}) {
 
 module.exports = {
   ALL_PROJECTS,
+  VOICE_ID_RE,
+  VOICE_SURFACE_ONLY,
+  VOICE_NOT_ON_BUILTIN,
   MACRO_INPUT_MAX_LEN,
   MACRO_PLACEHOLDER_RE,
   MacroInputSchema,

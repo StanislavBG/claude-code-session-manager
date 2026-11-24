@@ -203,6 +203,16 @@ test('project video tool persona requirements: macro_save purpose and the recipe
   expect(saveStep).toBeGreaterThan(0);
 });
 
+test('macro_save takes voiceId, documented as the tool\'s default library voice', () => {
+  const save = MCP_TOOL_CATALOG.find((e) => e.name === 'macro_save');
+  expect(save.notes).toContain('`voiceId`');
+  expect(save.notes).toMatch(/default library voice/);
+  expect(save.notes).toContain('SM_VOICE_ID');
+  const tool = TOOLS.find((t) => t.name === 'macro_save');
+  expect(tool.inputSchema.properties.voiceId).toBeTruthy();
+  expect(tool.inputSchema.properties.voiceId.description).toMatch(/default library voice/);
+});
+
 test.each(MCP_TOOL_CATALOG)('$name exampleArgs satisfies its own inputSchema required fields', (entry) => {
   const tool = TOOLS.find((t) => t.name === entry.name);
   expect(tool).toBeTruthy();

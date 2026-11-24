@@ -693,7 +693,11 @@ const MCP_TOOL_CATALOG = [
       + "Without `projects`, a 'sessions' macro stays scoped to this project. "
       + '`inputs` is an optional array of { name, label, default, required, options } fields the human fills in '
       + 'when pressing the macro; reference each in the prompt as {{name}}. Omitting `inputs` on update keeps '
-      + 'the existing inputs; `[]` clears them.',
+      + 'the existing inputs; `[]` clears them. '
+      + "`voiceId` is optional and only on surface 'project-home' or 'project-video': the tool's default library voice "
+      + '(a voice library id matching /^[a-z0-9][a-z0-9_-]{0,63}$/), so one character sounds the same in every video tool. '
+      + 'A Project Video job gets it as SM_VOICE_ID unless the press picks another voice. Refused on a \'sessions\' macro '
+      + 'and on built-ins; omit it on update to keep it, pass null to remove it.',
   },
   {
     name: 'macro_delete',

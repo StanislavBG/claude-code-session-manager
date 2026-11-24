@@ -1179,3 +1179,70 @@ test('isProjectVideoTool is true only for project-video, projects [cwd] and a jo
   expect(lib.isProjectVideoTool(null, PV_CWD)).toBe(false);
   expect(m.projects).toEqual([PV_CWD]); // pure
 });
+
+// --- voiceId: a Project Home / Project Video tool's default library voice ----
+
+test('voiceId: accepted and round-tripped on project-home and project-video tools', async () => {
+  const home = await lib.saveMacro(base({ surface: 'project-home', voiceId: 'narrator-1' }), opts);
+  expect(home.voiceId).toBe('narrator-1');
+  const vid = await lib.saveMacro(pv({ voiceId: 'am_michael' }), opts);
+  expect(vid.voiceId).toBe('am_michael');
+  const listed = await lib.listMacros(opts);
+  expect(listed.find((m) => m.id === home.id).voiceId).toBe('narrator-1');
+  expect(listed.find((m) => m.id === vid.id).voiceId).toBe('am_michael');
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')).macros;
+  expect(onDisk.find((m) => m.id === vid.id).voiceId).toBe('am_michael');
+  expect(lib.MacroSchema.safeParse(vid).success).toBe(true);
+});
+
+test('voiceId on update: omitted keeps it, null removes it, a new one replaces it', async () => {
+  const saved = await lib.saveMacro(pv({ voiceId: 'v-one' }), opts);
+  const kept = await lib.saveMacro(pv({ id: saved.id, label: 'Renamed' }), opts);
+  expect(kept.voiceId).toBe('v-one');
+  const replaced = await lib.saveMacro(pv({ id: saved.id, voiceId: 'v-two' }), opts);
+  expect(replaced.voiceId).toBe('v-two');
+  const removed = await lib.saveMacro(pv({ id: saved.id, voiceId: null }), opts);
+  expect('voiceId' in removed).toBe(false);
+  expect('voiceId' in (await lib.listMacros(opts)).find((m) => m.id === saved.id)).toBe(false);
+});
+
+test('voiceId: refused on a sessions macro with a named error, never written', async () => {
+  await expect(lib.saveMacro(base({ voiceId: 'narrator-1' }), opts)).rejects.toThrow(lib.VOICE_SURFACE_ONLY);
+  const created = await lib.saveMacro(base(), opts);
+  await expect(lib.saveMacro(base({ id: created.id, voiceId: 'narrator-1' }), opts)).rejects.toThrow(lib.VOICE_SURFACE_ONLY);
+  expect('voiceId' in (await lib.saveMacro(base({ id: created.id, voiceId: null }), opts))).toBe(false);
+  // Moving a voiced tool to the sessions surface drops its voice.
+  const home = await lib.saveMacro(base({ surface: 'project-home', voiceId: 'narrator-1' }), opts);
+  const moved = await lib.saveMacro(base({ id: home.id, surface: 'sessions', projects: ['/work/a'] }), opts);
+  expect('voiceId' in moved).toBe(false);
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')).macros;
+  expect(onDisk.some((m) => 'voiceId' in m)).toBe(false);
+});
+
+test('voiceId: refused on a built-in with a named error', async () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  const optsB = { filePath, listPersonas: async () => [] };
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  await lib.listMacros(optsB);
+  await expect(lib.saveMacro({
+    id: demo.id, label: demo.label, agentName: demo.agentName, tag: demo.tag, prompt: demo.prompt, voiceId: 'narrator-1',
+  }, optsB)).rejects.toThrow(lib.VOICE_NOT_ON_BUILTIN);
+});
+
+test('voiceId: a bad id is refused; a stale stored voiceId on a sessions macro or built-in is dropped on read', async () => {
+  for (const bad of ['Narrator', '-x', 'a'.repeat(65), 'a b', 'a/b']) {
+    await expect(lib.saveMacro(pv({ voiceId: bad }), opts)).rejects.toThrow();
+  }
+  const stamp = '2026-01-01T00:00:00.000Z';
+  const sessions = { ...base(), id: 'sess-one', surface: 'sessions', createdAt: stamp, updatedAt: stamp, voiceId: 'narrator-1' };
+  const builtin = { ...base(), id: 'builtin-x', surface: 'project-home', projects: ['*'], builtin: true, createdAt: stamp, updatedAt: stamp, voiceId: 'narrator-1' };
+  const ok = { ...pv(), id: 'pv-one', createdAt: stamp, updatedAt: stamp, voiceId: 'narrator-1' };
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [sessions, builtin, ok] }));
+  const list = await lib.listMacros(opts);
+  expect('voiceId' in list.find((m) => m.id === 'sess-one')).toBe(false);
+  const b = list.find((m) => m.id === 'builtin-x');
+  if (b) expect('voiceId' in b).toBe(false);
+  expect(list.find((m) => m.id === 'pv-one').voiceId).toBe('narrator-1');
+  expect(lib.MacroSchema.safeParse({ ...sessions }).success).toBe(true);
+  expect(lib.MacroSchema.parse(sessions).voiceId).toBeUndefined();
+});

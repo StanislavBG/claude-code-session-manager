@@ -1,0 +1,144 @@
+'use strict';
+
+/**
+ * pendingReplies.cjs — machine-wide ledger of cross-project replies that are
+ * OWED but not yet sendable: an "it's live" reply must wait until Session
+ * Manager runs a version above the one the fix landed after, and the Epic
+ * that owes it is often closed by then, so without a ledger the reply is
+ * never sent (six were lost on 11-22/23).
+ *
+ * File: schedulerHome()/pending-replies.json (the folder that holds
+ * admin-api.json; honors SM_SCHEDULER_HOME) = { version: 1, entries }.
+ * An entry is due once appVersionAbove < running appVersion (strictly, via
+ * seedDevPlugin.cjs compareSemver — an equal version is not due).
+ * A missing or unreadable file reads as empty. Writes go through
+ * util/atomicFs.cjs.
+ *
+ * Single writer: crossProjectReply.cjs is the ONLY caller of addPendingReply
+ * and markReplyDelivered; everything else reads.
+ */
+
+const crypto = require('node:crypto');
+const path = require('node:path');
+const { writeJsonAtomicSync, readJsonOrSync } = require('../util/atomicFs.cjs');
+const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
+
+const STORE_VERSION = 1;
+const FILE_NAME = 'pending-replies.json';
+const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+
+/** seedDevPlugin.cjs pulls electron-side modules; load its comparator only when needed. */
+function compareSemver(a, b) {
+  return require('../../seedDevPlugin.cjs').compareSemver(a, b);
+}
+
+function ledgerPath() {
+  return path.join(schedulerHome(), FILE_NAME);
+}
+
+/** @returns {any[]} entries; [] for a missing/corrupt/ill-shaped file. */
+function readEntries() {
+  const doc = readJsonOrSync(ledgerPath(), null);
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.entries)) return [];
+  return doc.entries.filter((e) => e && typeof e === 'object' && typeof e.id === 'string');
+}
+
+function writeEntries(entries) {
+  writeJsonAtomicSync(ledgerPath(), { version: STORE_VERSION, entries });
+}
+
+function isSemver(v) {
+  return typeof v === 'string' && SEMVER_RE.test(v);
+}
+
+function str(v) {
+  return typeof v === 'string' ? v : null;
+}
+
+function normalizeThread(t) {
+  const o = t && typeof t === 'object' ? t : {};
+  return {
+    cwd: str(o.cwd),
+    epicId: str(o.epicId),
+    claudeSessionId: str(o.claudeSessionId),
+    legacy: o.legacy === true,
+    mode: str(o.mode),
+  };
+}
+
+/** Pure: build a full ledger entry from caller input. Throws on a bad appVersionAbove. */
+function buildEntry(input, now = new Date()) {
+  const e = input && typeof input === 'object' ? input : {};
+  if (!isSemver(e.appVersionAbove)) {
+    throw new Error(`pendingReplies: appVersionAbove must be x.y.z, got ${JSON.stringify(e.appVersionAbove)}`);
+  }
+  return {
+    id: crypto.randomUUID(),
+    createdAt: now.toISOString(),
+    replierCwd: str(e.replierCwd),
+    yId: str(e.yId),
+    goalText: str(e.goalText),
+    thread: normalizeThread(e.thread),
+    targetCwd: str(e.targetCwd),
+    outcome: str(e.outcome),
+    message: str(e.message),
+    referencePaths: Array.isArray(e.referencePaths) ? e.referencePaths.filter((p) => typeof p === 'string') : [],
+    appVersionAbove: e.appVersionAbove,
+    deliveredAt: null,
+    deliveredVersion: null,
+    lastError: null,
+  };
+}
+
+/** Pure: undelivered entries whose appVersionAbove is strictly below appVersion. */
+function selectDue(entries, appVersion) {
+  if (!isSemver(String(appVersion ?? '').split('-')[0])) return [];
+  return entries.filter((e) => !e.deliveredAt && isSemver(e.appVersionAbove)
+    && compareSemver(e.appVersionAbove, appVersion) < 0);
+}
+
+function addPendingReply(entry) {
+  const built = buildEntry(entry);
+  const entries = readEntries();
+  entries.push(built);
+  writeEntries(entries);
+  return built;
+}
+
+function listDueReplies(appVersion) {
+  return selectDue(readEntries(), appVersion);
+}
+
+function countPendingForThread(replierCwd, yId) {
+  return readEntries().filter((e) => !e.deliveredAt && e.replierCwd === replierCwd && e.yId === yId).length;
+}
+
+/**
+ * Record a delivery attempt. result.ok !== false = delivered (deliveredAt +
+ * deliveredVersion stamped, lastError cleared); otherwise lastError is set and
+ * the entry stays due. Returns the updated entry, or null for an unknown id.
+ */
+function markReplyDelivered(id, { version, result } = {}) {
+  const entries = readEntries();
+  const idx = entries.findIndex((e) => e.id === id);
+  if (idx < 0) return null;
+  const ok = !(result && typeof result === 'object' && result.ok === false);
+  const prev = entries[idx];
+  const next = ok
+    ? { ...prev, deliveredAt: new Date().toISOString(), deliveredVersion: str(version), lastError: null }
+    : { ...prev, lastError: str(result.error) || str(result.reason) || 'delivery failed' };
+  entries[idx] = next;
+  writeEntries(entries);
+  return next;
+}
+
+module.exports = {
+  addPendingReply,
+  listDueReplies,
+  countPendingForThread,
+  markReplyDelivered,
+  ledgerPath,
+  buildEntry,
+  selectDue,
+  STORE_VERSION,
+};

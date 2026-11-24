@@ -1,0 +1,131 @@
+/**
+ * pendingReplies.test.cjs — the machine-wide ledger of 'it's live' replies owed
+ * once Session Manager runs a version above a given one
+ * (lib/feedback-remote/pendingReplies.cjs).
+ *
+ * Run: timeout 180 npx vitest run src/main/lib/feedback-remote/__tests__/pendingReplies.test.cjs
+ */
+
+'use strict';
+
+import { test, expect, beforeEach, afterEach } from 'vitest';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const ledger = require('../pendingReplies.cjs');
+
+let tmp;
+let prevHome;
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pending-replies-'));
+  prevHome = process.env.SM_SCHEDULER_HOME;
+  process.env.SM_SCHEDULER_HOME = tmp;
+});
+afterEach(() => {
+  if (prevHome === undefined) delete process.env.SM_SCHEDULER_HOME;
+  else process.env.SM_SCHEDULER_HOME = prevHome;
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+function entry(over = {}) {
+  return {
+    replierCwd: '/p/b',
+    yId: 'epic-y',
+    goalText: 'Ship the fix',
+    thread: { cwd: '/p/a', epicId: 'epic-x', claudeSessionId: 'sess-x', legacy: false, mode: 'chat' },
+    targetCwd: '/p/a',
+    outcome: 'done',
+    message: 'It is live.',
+    referencePaths: ['src/a.cjs'],
+    appVersionAbove: '0.141.0',
+    ...over,
+  };
+}
+
+test('ledger file is pending-replies.json in SM_SCHEDULER_HOME', () => {
+  expect(ledger.ledgerPath()).toBe(path.join(tmp, 'pending-replies.json'));
+});
+
+test('add stores every field and persists to disk', () => {
+  const e = ledger.addPendingReply(entry());
+  expect(typeof e.id).toBe('string');
+  expect(e.id.length).toBeGreaterThan(10);
+  expect(typeof e.createdAt).toBe('string');
+  expect(e).toMatchObject({
+    replierCwd: '/p/b', yId: 'epic-y', goalText: 'Ship the fix',
+    thread: { cwd: '/p/a', epicId: 'epic-x', claudeSessionId: 'sess-x', legacy: false, mode: 'chat' },
+    targetCwd: '/p/a', outcome: 'done', message: 'It is live.', referencePaths: ['src/a.cjs'],
+    appVersionAbove: '0.141.0', deliveredAt: null, deliveredVersion: null, lastError: null,
+  });
+  const onDisk = JSON.parse(fs.readFileSync(path.join(tmp, 'pending-replies.json'), 'utf8'));
+  expect(onDisk.entries).toHaveLength(1);
+  expect(onDisk.entries[0].id).toBe(e.id);
+});
+
+test('add refuses an appVersionAbove that is not x.y.z', () => {
+  for (const bad of ['0.141', 'v0.141.0', '0.141.0-beta', '', undefined, 141]) {
+    expect(() => ledger.addPendingReply(entry({ appVersionAbove: bad }))).toThrow(/appVersionAbove/);
+  }
+  expect(fs.existsSync(path.join(tmp, 'pending-replies.json'))).toBe(false);
+});
+
+test('due = undelivered and appVersionAbove strictly lower than appVersion', () => {
+  const a = ledger.addPendingReply(entry({ appVersionAbove: '0.141.0' }));
+  const b = ledger.addPendingReply(entry({ appVersionAbove: '0.142.0' }));
+  expect(ledger.listDueReplies('0.141.0')).toEqual([]);
+  expect(ledger.listDueReplies('0.141.1').map((e) => e.id)).toEqual([a.id]);
+  expect(ledger.listDueReplies('0.142.0').map((e) => e.id)).toEqual([a.id]);
+  expect(ledger.listDueReplies('0.143.0').map((e) => e.id).sort()).toEqual([a.id, b.id].sort());
+});
+
+test('an equal version is not due', () => {
+  ledger.addPendingReply(entry({ appVersionAbove: '1.2.3' }));
+  expect(ledger.listDueReplies('1.2.3')).toEqual([]);
+  expect(ledger.listDueReplies('1.2.2')).toEqual([]);
+});
+
+test('markReplyDelivered stamps deliveredAt + version and leaves the due list', () => {
+  const a = ledger.addPendingReply(entry());
+  const updated = ledger.markReplyDelivered(a.id, { version: '0.142.0', result: { ok: true } });
+  expect(updated.deliveredVersion).toBe('0.142.0');
+  expect(typeof updated.deliveredAt).toBe('string');
+  expect(updated.lastError).toBeNull();
+  expect(ledger.listDueReplies('0.150.0')).toEqual([]);
+});
+
+test('markReplyDelivered with a failed result records lastError and stays due', () => {
+  const a = ledger.addPendingReply(entry());
+  const updated = ledger.markReplyDelivered(a.id, { version: '0.142.0', result: { ok: false, error: 'target closed' } });
+  expect(updated.deliveredAt).toBeNull();
+  expect(updated.lastError).toBe('target closed');
+  expect(ledger.listDueReplies('0.142.0').map((e) => e.id)).toEqual([a.id]);
+});
+
+test('markReplyDelivered on an unknown id returns null', () => {
+  expect(ledger.markReplyDelivered('nope', { version: '1.0.0', result: { ok: true } })).toBeNull();
+});
+
+test('countPendingForThread counts undelivered entries for (replierCwd, yId)', () => {
+  const a = ledger.addPendingReply(entry());
+  ledger.addPendingReply(entry());
+  ledger.addPendingReply(entry({ yId: 'other' }));
+  ledger.addPendingReply(entry({ replierCwd: '/p/c' }));
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(2);
+  ledger.markReplyDelivered(a.id, { version: '0.142.0', result: { ok: true } });
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(1);
+  expect(ledger.countPendingForThread('/p/none', 'epic-y')).toBe(0);
+});
+
+test('missing or corrupt ledger reads as empty without throwing', () => {
+  expect(ledger.listDueReplies('9.9.9')).toEqual([]);
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(0);
+  fs.writeFileSync(path.join(tmp, 'pending-replies.json'), '{not json');
+  expect(() => ledger.listDueReplies('9.9.9')).not.toThrow();
+  expect(ledger.listDueReplies('9.9.9')).toEqual([]);
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(0);
+  fs.writeFileSync(path.join(tmp, 'pending-replies.json'), JSON.stringify({ entries: 'nope' }));
+  expect(ledger.listDueReplies('9.9.9')).toEqual([]);
+  const a = ledger.addPendingReply(entry());
+  expect(ledger.listDueReplies('9.9.9').map((e) => e.id)).toEqual([a.id]);
+});

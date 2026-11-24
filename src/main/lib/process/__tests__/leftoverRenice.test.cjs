@@ -40,6 +40,7 @@ function spyOpts(extra = {}) {
       getPriority: () => 12,
       log: (m) => logs.push(m),
       seen: new Set(),
+      appClaudePid: null,
       ...extra,
     },
   };
@@ -142,4 +143,15 @@ test('reniceLeftovers never sends a signal', () => {
 test('parseEnviron reads only the two keys', () => {
   assert.deepStrictEqual(parseEnviron('A=1\0SM_PROC_ROLE=chat\0CLAUDE_PID=42\0B=2'), { role: 'chat', claudePid: 42 });
   assert.deepStrictEqual(parseEnviron('CLAUDE_PID=abc'), { role: null, claudePid: null });
+});
+
+test('a process carrying the app\'s own inherited CLAUDE_PID is never touched', () => {
+  // App started from inside a claude session (CLAUDE_PID 111, since gone):
+  // every chat process inherits 111, so 111 says nothing about the turn.
+  proc(1100, { env: { SM_PROC_ROLE: 'chat', CLAUDE_PID: '111' } });
+  proc(1101, { env: { SM_PROC_ROLE: 'chat', CLAUDE_PID: '222' } });
+  const s = spyOpts({ appClaudePid: 111 });
+  assert.deepStrictEqual(findLeftovers({ procRoot: root, uid: UID, selfPid: 1, appClaudePid: 111 }).map((l) => l.pid), [1101]);
+  assert.deepStrictEqual(reniceLeftovers(s.opts), [1101]);
+  assert.deepStrictEqual(s.calls, [[1101, 19]]);
 });

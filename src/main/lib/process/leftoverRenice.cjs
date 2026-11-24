@@ -18,6 +18,9 @@
  * - A process with no CLAUDE_PID (e.g. the chat's own `claude`) is never a
  *   leftover: there is no turn to judge it by.
  * - Raising one's own process niceness needs no privileges; lowering it would.
+ * - A process whose CLAUDE_PID equals the one the app itself inherited at
+ *   startup (app launched from inside a claude session) is never a leftover:
+ *   every chat process carries that value, so it says nothing about the turn.
  * - Only /proc/<pid>/status (Uid) and /proc/<pid>/environ are read; from
  *   environ only SM_PROC_ROLE and CLAUDE_PID are kept.
  * - A scan reads at most MAX_SCAN pids, skips unreadable entries, never throws,
@@ -32,6 +35,9 @@ const { pidAlive } = require('./pidAlive.cjs');
 const MAX_SCAN = 4000;
 const IDLE_NICE = 19;
 const LEFTOVER_ROLES = new Set(['chat', 'aux']);
+
+/** CLAUDE_PID the app main process inherited, read once at module load. */
+const APP_CLAUDE_PID = parseEnviron(`CLAUDE_PID=${process.env.CLAUDE_PID ?? ''}`).claudePid;
 
 /**
  * Pick SM_PROC_ROLE and CLAUDE_PID out of NUL-separated environ text.
@@ -71,7 +77,8 @@ function currentUid() {
  * Leftover processes (see header). Never throws; [] off Linux-like hosts.
  * @param {{ procRoot?: string, uid?: number | null, maxPids?: number,
  *   readdir?: (p: string) => string[], readFile?: (p: string) => string,
- *   isAlive?: (pid: number) => boolean, selfPid?: number }} [opts]
+ *   isAlive?: (pid: number) => boolean, selfPid?: number,
+ *   appClaudePid?: number | null }} [opts]
  * @returns {{ pid: number, role: string, claudePid: number }[]}
  */
 function findLeftovers({
@@ -82,6 +89,7 @@ function findLeftovers({
   readFile = (p) => fs.readFileSync(p, 'latin1'),
   isAlive,
   selfPid = process.pid,
+  appClaudePid = APP_CLAUDE_PID,
 } = {}) {
   if (uid === null || uid === undefined) return [];
   // Under an injected tree a pid is alive when its directory exists there.
@@ -107,6 +115,7 @@ function findLeftovers({
       const { role, claudePid } = parseEnviron(readFile(path.join(procRoot, name, 'environ')));
       if (!role || !LEFTOVER_ROLES.has(role)) continue;
       if (claudePid === null || claudePid <= 1) continue;
+      if (appClaudePid !== null && appClaudePid !== undefined && claudePid === appClaudePid) continue;
       if (alive(claudePid)) continue;
       out.push({ pid, role, claudePid });
     } catch {
@@ -166,4 +175,4 @@ function reniceLeftovers(opts = {}) {
   return done;
 }
 
-module.exports = { findLeftovers, reniceLeftovers, parseEnviron, parseStatusUid, MAX_SCAN, IDLE_NICE };
+module.exports = { findLeftovers, APP_CLAUDE_PID, reniceLeftovers, parseEnviron, parseStatusUid, MAX_SCAN, IDLE_NICE };

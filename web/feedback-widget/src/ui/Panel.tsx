@@ -3,8 +3,8 @@
 // with upload progress). Visibility from §2 (machine.panelVisible); the Send/Esc/⌘↵ semantics
 // stay in the machine — this component only dispatches.
 //
-// The "Marks on screenshot" and "Attached automatically" sections are rendered by the caller
-// through `children` (they slot in below Details).
+// The "Marks on screenshot" and "Attached automatically" sections live in PanelContext.tsx;
+// the caller renders <PanelContext> as `children` (it slots in below Details).
 //
 // Strict-CSP rule (tokens.ts): every static style lives in one constructed stylesheet adopted on
 // the panel's own root; the only per-render style write is the progress bar width, through the
@@ -177,10 +177,10 @@ export function panelSheet(): CSSStyleSheet | null {
   return sheetCache;
 }
 
-function adoptInto(node: Node): void {
+/** Adopts `sheet` (default: the panel's) on the node's root, once. Shared with PanelContext. */
+export function adoptInto(node: Node, sheet: CSSStyleSheet | null = panelSheet()): void {
   const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
   if (!root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  const sheet = panelSheet();
   if (!sheet || root.adoptedStyleSheets.includes(sheet)) return;
   try {
     root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];

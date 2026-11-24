@@ -311,6 +311,11 @@ contextBridge.exposeInMainWorld('api', {
     inboxRemove: (p) => ipcRenderer.invoke('siteFeedback:inbox-remove', p),
     drainNow: () => ipcRenderer.invoke('siteFeedback:drain-now'),
   },
+  // File Explorer reads (lib/epic/artifactIpc.cjs): the Artifacts store and unmerged Epic worktrees.
+  artifacts: {
+    list: (p) => ipcRenderer.invoke('artifacts:list', p),
+    worktrees: (p) => ipcRenderer.invoke('artifacts:worktrees', p),
+  },
   // Diagnostic only — no handler is registered unless the main process was
   // launched with SM_HEAP_SNAPSHOT=1, so this rejects by default.
   diagnostics: {

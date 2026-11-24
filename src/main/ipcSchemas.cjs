@@ -1739,6 +1739,11 @@ const siteFeedbackInboxLinkEpic = z.object({
 }).strict();
 const siteFeedbackDrainNow = z.object({}).strict().optional();
 
+// ──────────────────────────────────────────── Artifacts store + Epic worktrees (lib/epic/artifactIpc.cjs)
+// Read-only; .strict() so nothing but the project cwd crosses the bridge.
+const artifactsList = z.object({ cwd: z.string().min(1).max(4096) }).strict();
+const artifactsWorktrees = z.object({ cwd: z.string().min(1).max(4096) }).strict();
+
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
  * parses the payload before calling the original. On invalid payload throws
@@ -2024,6 +2029,8 @@ module.exports = {
     siteFeedbackInboxSetStatus,
     siteFeedbackInboxLinkEpic,
     siteFeedbackDrainNow,
+    artifactsList,
+    artifactsWorktrees,
   },
   validated,
 };

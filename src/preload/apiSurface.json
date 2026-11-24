@@ -1138,6 +1138,20 @@
   "remote": "mutate"
  },
  {
+  "ns": "artifacts",
+  "method": "list",
+  "channel": "artifacts:list",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "artifacts",
+  "method": "worktrees",
+  "channel": "artifacts:worktrees",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
   "ns": "diagnostics",
   "method": "takeHeapSnapshot",
   "channel": "diagnostics:heap-snapshot",

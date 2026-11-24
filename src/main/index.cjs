@@ -79,6 +79,7 @@ const activeIndexMerge = require('./lib/epic/activeIndexMerge.cjs');
 const promptSessionsCreateEpic = require('./lib/epic/promptSessionsCreateEpic.cjs');
 const customerFeedbackIpc = require('./lib/feedback-remote/customerFeedbackIpc.cjs');
 const siteFeedbackIpc = require('./lib/feedback-remote/siteFeedbackIpc.cjs');
+const artifactIpc = require('./lib/epic/artifactIpc.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const epicWorktreeMerge = require('./lib/epic/epicWorktreeMerge.cjs');
 const { registerAppPreviewHandlers, getAppPreviewManager } = require('./lib/app-preview/appPreviewIpc.cjs');
@@ -1157,6 +1158,8 @@ promptSessionsCreateEpic.registerPromptSessionsCreateEpicHandlers();
 require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();
 siteFeedbackIpc.registerSiteFeedbackHandlers();
+// File Explorer: the project's Artifacts store + unmerged active-Epic worktrees (read-only).
+artifactIpc.registerArtifactHandlers();
 // Website-feedback widgets: drain sealed reports from bilko.run into project inboxes once ready.
 app.whenReady().then(() => {
   try { require('./lib/feedback-remote/siteFeedbackService.cjs').startDrainLoop(); }

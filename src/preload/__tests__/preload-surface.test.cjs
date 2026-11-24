@@ -93,7 +93,7 @@ test('customerFeedback exposes ten methods wired to customerFeedback:* channels'
   assert.deepStrictEqual(invokeCalls[0].payload, { title: 't', body: 'b', tag: 'bug' });
 });
 
-test('siteFeedback exposes eleven methods wired to siteFeedback:* channels', async () => {
+test('siteFeedback exposes twelve methods wired to siteFeedback:* channels', async () => {
   const expected = {
     widgetCreate: 'siteFeedback:widget-create',
     widgetList: 'siteFeedback:widget-list',
@@ -105,6 +105,7 @@ test('siteFeedback exposes eleven methods wired to siteFeedback:* channels', asy
     inboxImage: 'siteFeedback:inbox-image',
     inboxSetStatus: 'siteFeedback:inbox-set-status',
     inboxLinkEpic: 'siteFeedback:inbox-link-epic',
+    inboxRemove: 'siteFeedback:inbox-remove',
     drainNow: 'siteFeedback:drain-now',
   };
   assert.deepStrictEqual(Object.keys(exposedApi.siteFeedback).sort(), Object.keys(expected).sort());
@@ -116,6 +117,17 @@ test('siteFeedback exposes eleven methods wired to siteFeedback:* channels', asy
     assert.strictEqual(invokeCalls[0].channel, channel);
     if (method === 'drainNow') assert.strictEqual(invokeCalls[0].payload, undefined);
     else assert.deepStrictEqual(invokeCalls[0].payload, payload);
+  }
+});
+
+test('artifacts exposes list + worktrees wired to artifacts:* channels', async () => {
+  assert.deepStrictEqual(Object.keys(exposedApi.artifacts).sort(), ['list', 'worktrees']);
+  for (const [method, channel] of [['list', 'artifacts:list'], ['worktrees', 'artifacts:worktrees']]) {
+    invokeCalls.length = 0;
+    await exposedApi.artifacts[method]({ cwd: '/tmp/proj' });
+    assert.strictEqual(invokeCalls.length, 1);
+    assert.strictEqual(invokeCalls[0].channel, channel);
+    assert.deepStrictEqual(invokeCalls[0].payload, { cwd: '/tmp/proj' });
   }
 });
 

@@ -30,6 +30,7 @@ const RESERVATION_CLAMP = [800, 4000];
 const TYPICAL_CLAMP = [300, 2500];
 const SPIKE_CLAMP = [500, 3000];
 const DEFAULT_MAX_FILES = 2000;
+const BACKFILL_BATCH = 50; // run-log files read concurrently per batch
 const PEAK_LINE_RE = /\[scheduler\] memory scope (\S+): peak=(\d+)MB/g;
 
 function clamp(v, [lo, hi]) { return Math.min(hi, Math.max(lo, v)); }
@@ -146,21 +147,26 @@ function createJobMemoryStats(deps = {}) {
     return loadSamples().length >= MIN_SAMPLES;
   }
 
-  /** Directory entry names under dir, or [] when unreadable. */
-  function listDir(dir) {
-    try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  /** Directory entries under dir (async), or [] when unreadable. */
+  async function listDir(dir) {
+    try { return await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return []; }
   }
+
+  /** Yields the event loop once (between read batches). */
+  const yieldTurn = () => new Promise((resolve) => setImmediate(resolve));
 
   /**
    * Seeds the store from run logs' 'memory scope <unit>: peak=<N>MB' lines
    * (agentType 'unknown', at = log mtime) while it holds fewer than MIN_SAMPLES.
    * `runsDir` is the scheduler runs folder (<runId>/<slug>.log); run folders are
    * walked by name, newest first (names are timestamps), and the walk stops once
-   * maxFiles logs are read — only read logs are stat'd. A sample whose run folder
-   * + unit (or, for a live-recorded peak, unit) is already stored is skipped.
-   * Never throws. Returns the number of samples added.
+   * maxFiles logs are picked — only picked logs are read and stat'd. All run-log
+   * I/O is fs.promises, in batches of at most BACKFILL_BATCH files with an event
+   * loop yield between batches, so it never blocks the Electron main thread.
+   * A sample whose run folder + unit (or, for a live-recorded peak, unit) is
+   * already stored is skipped. Never rejects. Resolves to the number added.
    */
-  function backfillFromRunLogs(runsDir, { maxFiles = DEFAULT_MAX_FILES } = {}) {
+  async function backfillFromRunLogs(runsDir, { maxFiles = DEFAULT_MAX_FILES } = {}) {
     try {
       if (typeof runsDir !== 'string' || !runsDir) return 0;
       const file = resolveStorePath();
@@ -173,34 +179,49 @@ function createJobMemoryStats(deps = {}) {
         if (s.runId) seen.add(`${s.runId}\0${s.unit}`);
       }
       const budget = Math.max(0, Math.floor(Number(maxFiles) || 0));
-      const runIds = listDir(runsDir).filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse();
-      const perRun = []; // newest run first
-      let read = 0;
+      if (!budget) return 0;
+      const runIds = (await listDir(runsDir)).filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse();
+      // Pick the newest `budget` logs: [{ runId, p }], newest run first.
+      const picked = [];
       for (const runId of runIds) {
-        if (read >= budget) break;
+        if (picked.length >= budget) break;
         const dir = path.join(runsDir, runId);
-        const logs = listDir(dir).filter((e) => e.isFile() && e.name.endsWith('.log')).map((e) => e.name).sort();
-        const found = [];
+        const logs = (await listDir(dir)).filter((e) => e.isFile() && e.name.endsWith('.log')).map((e) => e.name).sort();
         for (const name of logs) {
-          if (read >= budget) break;
-          read++;
-          const p = path.join(dir, name);
-          let text;
-          try { text = fs.readFileSync(p, 'utf8'); } catch { continue; }
-          let mtimeMs = 0;
-          try { mtimeMs = fs.statSync(p).mtimeMs; } catch { /* keep 0 */ }
-          for (const m of String(text).matchAll(PEAK_LINE_RE)) {
+          if (picked.length >= budget) break;
+          picked.push({ runId, p: path.join(dir, name) });
+        }
+      }
+      const readOne = async ({ runId, p }) => {
+        let text;
+        try { text = await fs.promises.readFile(p, 'utf8'); } catch { return null; }
+        let mtimeMs = 0;
+        try { mtimeMs = (await fs.promises.stat(p)).mtimeMs; } catch { /* keep 0 */ }
+        return { runId, text: String(text), mtimeMs };
+      };
+      const perRun = new Map(); // runId → samples, insertion order = newest run first
+      for (let i = 0; i < picked.length; i += BACKFILL_BATCH) {
+        if (i > 0) await yieldTurn();
+        const results = await Promise.all(picked.slice(i, i + BACKFILL_BATCH).map(readOne));
+        for (const r of results) {
+          if (!r) continue;
+          if (!perRun.has(r.runId)) perRun.set(r.runId, []);
+          const found = perRun.get(r.runId);
+          for (const m of r.text.matchAll(PEAK_LINE_RE)) {
             const unit = m[1];
-            if (seen.has(`${runId}\0${unit}`) || seen.has(`unit\0${unit}`)) continue;
-            seen.add(`${runId}\0${unit}`);
-            found.push({ agentType: 'unknown', peakMb: Number(m[2]), at: Math.round(mtimeMs), runId, unit });
+            if (seen.has(`${r.runId}\0${unit}`) || seen.has(`unit\0${unit}`)) continue;
+            seen.add(`${r.runId}\0${unit}`);
+            found.push({ agentType: 'unknown', peakMb: Number(m[2]), at: Math.round(r.mtimeMs), runId: r.runId, unit });
           }
         }
-        perRun.push(found);
       }
-      const samples = perRun.reverse().flat(); // oldest first, like the live store
+      // Re-read the store: a live recordPeak may have landed while the logs were read.
+      const current = readSamplesUncached(file);
+      const liveUnits = new Set(current.map((s) => s.unit).filter(Boolean));
+      const samples = [...perRun.values()].reverse().flat() // oldest first, like the live store
+        .filter((s) => !liveUnits.has(s.unit));
       if (!samples.length) return 0;
-      appendSamples(samples);
+      writeSamples(file, [...current, ...samples]);
       return Math.min(samples.length, MAX_SAMPLES);
     } catch {
       return 0;
@@ -236,4 +257,5 @@ module.exports = {
   MIN_SAMPLES,
   CACHE_MS,
   DEFAULT_RESERVATION_MB,
+  BACKFILL_BATCH,
 };

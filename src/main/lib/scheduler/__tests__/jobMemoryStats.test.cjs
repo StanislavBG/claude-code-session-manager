@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createJobMemoryStats, quantile, MAX_SAMPLES, CACHE_MS, STORE_FILE } = require('../jobMemoryStats.cjs');
+const { createJobMemoryStats, quantile, MAX_SAMPLES, CACHE_MS, STORE_FILE, BACKFILL_BATCH } = require('../jobMemoryStats.cjs');
 
 let tmp;
 let clock;
@@ -161,85 +161,207 @@ describe('backfillFromRunLogs', () => {
     fs.writeFileSync(path.join(RUNS(), 'queue-cleanup.log'), peakLine('top-level-file', 9999));
   }
 
-  it('parses memory-scope peak lines as agentType unknown, tagged with run folder + unit', () => {
+  it('parses memory-scope peak lines as agentType unknown, tagged with run folder + unit', async () => {
     writeLog('run-1/a.log', 'noise\n[scheduler] memory scope sm-job-a.scope: peak=1269MB oom_kill=0\n', 1000);
     writeLog('run-2/b.log', '[scheduler] memory scope sm-job-b.scope: peak=n/a oom_kill=0\n[scheduler] memory scope sm-job-c.scope: peak=670MB oom_kill=n/a\n', 2000);
     writeLog('run-2/b.meta.json', '[scheduler] memory scope x: peak=9999MB', 3000); // not a .log
     const s = make();
-    assert.equal(s.backfillFromRunLogs(RUNS()), 2);
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 2);
     assert.deepEqual(storeLines(), [
       { agentType: 'unknown', peakMb: 1269, at: 1_000_000, runId: 'run-1', unit: 'sm-job-a.scope' },
       { agentType: 'unknown', peakMb: 670, at: 2_000_000, runId: 'run-2', unit: 'sm-job-c.scope' },
     ]);
   });
 
-  it('a missing runs folder or bad input adds nothing and never throws', () => {
+  it('a missing runs folder or bad input adds nothing and never throws', async () => {
     const s = make();
-    assert.equal(s.backfillFromRunLogs(path.join(tmp, 'missing')), 0);
-    assert.equal(s.backfillFromRunLogs(null), 0);
-    assert.equal(s.backfillFromRunLogs(42), 0);
-    assert.equal(s.backfillFromRunLogs(''), 0);
+    assert.equal(await s.backfillFromRunLogs(path.join(tmp, 'missing')), 0);
+    assert.equal(await s.backfillFromRunLogs(null), 0);
+    assert.equal(await s.backfillFromRunLogs(42), 0);
+    assert.equal(await s.backfillFromRunLogs(''), 0);
   });
 
-  it('walks run folders newest first by name and stops at maxFiles logs, with bounded fs reads', () => {
+  it('walks run folders newest first by name and stops at maxFiles logs, with bounded fs reads', async () => {
     seedRuns(20);
-    const calls = { readdirSync: 0, readFileSync: 0, statSync: 0 };
+    const calls = { readdir: 0, readFile: 0, stat: 0 };
     const counted = {
       ...fs,
-      readdirSync: (...a) => { calls.readdirSync++; return fs.readdirSync(...a); },
-      readFileSync: (f, ...a) => { if (String(f).endsWith('.log')) calls.readFileSync++; return fs.readFileSync(f, ...a); },
-      statSync: (...a) => { calls.statSync++; return fs.statSync(...a); },
+      promises: {
+        ...fs.promises,
+        readdir: (...a) => { calls.readdir++; return fs.promises.readdir(...a); },
+        readFile: (f, ...a) => { if (String(f).endsWith('.log')) calls.readFile++; return fs.promises.readFile(f, ...a); },
+        stat: (...a) => { calls.stat++; return fs.promises.stat(...a); },
+      },
     };
     const s = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => clock, fs: counted });
-    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 3 }), 3);
+    assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 3 }), 3);
     // newest three folders (by name), stored oldest first like the live store
     assert.deepEqual(storeLines().map((l) => l.peakMb), [117, 118, 119]);
     assert.ok(!storeLines().some((l) => l.peakMb === 9999), 'non-log and top-level files are ignored');
     // 1 runs listing + 3 folder listings; 3 log reads; ≤ 3 stats (one per read log)
-    assert.ok(calls.readdirSync <= 4, `readdirSync=${calls.readdirSync}`);
-    assert.equal(calls.readFileSync, 3, `readFileSync=${calls.readFileSync}`);
-    assert.ok(calls.statSync <= 3, `statSync=${calls.statSync}`);
+    assert.ok(calls.readdir <= 4, `readdir=${calls.readdir}`);
+    assert.equal(calls.readFile, 3, `readFile=${calls.readFile}`);
+    assert.ok(calls.stat <= 3, `stat=${calls.stat}`);
   });
 
-  it('a store under 30 samples re-seeds and never duplicates a recorded run folder + unit', () => {
+  it('a store under 30 samples re-seeds and never duplicates a recorded run folder + unit', async () => {
     seedRuns(20);
     writeStore(seq(5, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));
     const s = make();
-    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 10 }), 10);
+    assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 10 }), 10);
     assert.equal(storeLines().length, 15);
     // next boot: still under 30 → runs again, but the same 10 logs add nothing
-    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 10 }), 0);
+    assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 10 }), 0);
     assert.equal(storeLines().length, 15);
     // a wider walk adds only the unseen ones
-    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 12 }), 2);
+    assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 12 }), 2);
     assert.equal(storeLines().length, 17);
   });
 
-  it('a live-recorded peak with the same unit is not re-added from its log', () => {
+  it('a live-recorded peak with the same unit is not re-added from its log', async () => {
     seedRuns(2);
     const s = make();
     s.recordPeak({ agentType: 'dev-lead', peakMb: 101, at: 5, unit: 'sm-job-job-1-1' });
-    assert.equal(s.backfillFromRunLogs(RUNS()), 1);
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 1);
     assert.deepEqual(storeLines().map((l) => [l.agentType, l.peakMb]), [['dev-lead', 101], ['unknown', 100]]);
   });
 
-  it('a store holding 30 samples is left alone', () => {
+  it('a store holding 30 samples is left alone', async () => {
     seedRuns(5);
     writeStore(seq(30, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));
     const s = make();
-    assert.equal(s.backfillFromRunLogs(RUNS()), 0);
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 0);
     assert.equal(storeLines().length, 30);
   });
 
-  it('never throws on unreadable files', () => {
+  it('never throws on unreadable files', async () => {
     const p = writeLog('r1/a.log', '[scheduler] memory scope u1: peak=100MB\n', 1000);
     writeLog('r1/b.log', '[scheduler] memory scope u2: peak=200MB\n', 2000);
-    const realRead = fs.readFileSync;
     const s = createJobMemoryStats({
       storePath: path.join(tmp, STORE_FILE),
       now: () => clock,
-      fs: { ...fs, readFileSync: (f, ...a) => { if (f === p) throw new Error('EACCES'); return realRead(f, ...a); } },
+      fs: { ...fs, promises: { ...fs.promises, readFile: (f, ...a) => (f === p ? Promise.reject(new Error('EACCES')) : fs.promises.readFile(f, ...a)) } },
     });
-    assert.equal(s.backfillFromRunLogs(RUNS()), 1);
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 1);
+  });
+
+  it('reads at most 50 logs per batch and yields the event loop between batches', async () => {
+    for (let i = 0; i < 120; i++) writeLog(`run-${String(i).padStart(3, '0')}/a.log`, peakLine(`u${i}`, 100 + i), 1000 + i);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let immediates = 0;
+    const batchMax = [];
+    const counted = {
+      ...fs,
+      promises: {
+        ...fs.promises,
+        readFile: async (f, ...a) => {
+          inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+          try { return await fs.promises.readFile(f, ...a); } finally { inFlight--; }
+        },
+      },
+    };
+    const realSetImmediate = global.setImmediate;
+    global.setImmediate = (fn, ...a) => { immediates++; batchMax.push(maxInFlight); maxInFlight = 0; return realSetImmediate(fn, ...a); };
+    try {
+      const s = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => clock, fs: counted });
+      assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 120 }), 120);
+    } finally {
+      global.setImmediate = realSetImmediate;
+    }
+    batchMax.push(maxInFlight);
+    assert.ok(Math.max(...batchMax) <= BACKFILL_BATCH, `max in flight ${Math.max(...batchMax)}`);
+    assert.ok(immediates >= 2, `yields=${immediates}`); // 120 files → 3 batches → 2 yields
+    assert.equal(storeLines()[0].peakMb, 100); // oldest first
+  });
+
+  it('never uses a synchronous fs call to read run logs', async () => {
+    seedRuns(3);
+    const sync = [];
+    const guarded = {
+      ...fs,
+      readdirSync: (...a) => { sync.push(['readdirSync', a[0]]); return fs.readdirSync(...a); },
+      statSync: (...a) => { sync.push(['statSync', a[0]]); return fs.statSync(...a); },
+      readFileSync: (f, ...a) => { if (String(f).endsWith('.log')) sync.push(['readFileSync', f]); return fs.readFileSync(f, ...a); },
+    };
+    const s = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => clock, fs: guarded });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 3);
+    assert.deepEqual(sync, []);
+  });
+});
+
+describe('deferred scheduler backfill (scheduleMemoryBackfill)', () => {
+  const scheduler = require('../../../scheduler.cjs');
+  const RUNS = () => path.join(tmp, 'runs');
+  const storeFile = () => path.join(tmp, STORE_FILE);
+  function seedRuns(n) {
+    for (let i = 0; i < n; i++) {
+      const p = path.join(RUNS(), `2026-11-${String(10 + i).padStart(2, '0')}T00-00-00-000Z`, `job-${i}.log`);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, `[scheduler] memory scope sm-job-${i}: peak=${100 + i}MB oom_kill=0\n`);
+    }
+  }
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+  afterEach(() => { scheduler.cancelMemoryBackfill(); vi.useRealTimers(); });
+
+  it('boot does no backfill; the pass runs once ~60 s later on an unref\'d timer and seeds the store', async () => {
+    seedRuns(5);
+    const stats = make();
+    const backfillFromRunLogs = vi.fn(stats.backfillFromRunLogs);
+    const done = scheduler.scheduleMemoryBackfill({ runsDir: RUNS(), backfillFromRunLogs });
+    assert.equal(scheduler.MEMORY_BACKFILL_DELAY_MS, 60_000);
+    // A second schedule while pending is the same pass.
+    assert.equal(scheduler.scheduleMemoryBackfill({ runsDir: RUNS(), backfillFromRunLogs }), done);
+    assert.equal(backfillFromRunLogs.mock.calls.length, 0);
+    assert.equal(fs.existsSync(storeFile()), false);
+    vi.advanceTimersByTime(59_999);
+    assert.equal(backfillFromRunLogs.mock.calls.length, 0);
+    assert.equal(fs.existsSync(storeFile()), false);
+    vi.advanceTimersByTime(1);
+    assert.equal(await done, 5);
+    assert.equal(backfillFromRunLogs.mock.calls.length, 1);
+    assert.deepEqual(backfillFromRunLogs.mock.calls[0][1], { maxFiles: 500 });
+    stats._resetCache();
+    assert.deepEqual(stats.loadSamples().map((s) => s.peakMb), [100, 101, 102, 103, 104]);
+  });
+
+  it('the timer is unref\'d so it never holds the process open', () => {
+    const realSetTimeout = setTimeout;
+    let unrefd = false;
+    const spy = vi.spyOn(global, 'setTimeout').mockImplementation((fn, ms) => {
+      const t = realSetTimeout(fn, ms);
+      const orig = t.unref?.bind(t);
+      t.unref = () => { unrefd = true; return orig ? orig() : t; };
+      return t;
+    });
+    try {
+      scheduler.scheduleMemoryBackfill({ runsDir: RUNS(), backfillFromRunLogs: async () => 0 });
+    } finally { spy.mockRestore(); }
+    assert.equal(unrefd, true);
+  });
+
+  it('a second pass with 30 or more samples does nothing', async () => {
+    seedRuns(5);
+    writeStore(seq(30, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));
+    const before = fs.readFileSync(storeFile(), 'utf8');
+    const stats = make();
+    const done = scheduler.scheduleMemoryBackfill({ runsDir: RUNS(), backfillFromRunLogs: stats.backfillFromRunLogs });
+    vi.advanceTimersByTime(60_000);
+    assert.equal(await done, 0);
+    assert.equal(fs.readFileSync(storeFile(), 'utf8'), before);
+  });
+
+  it('a seeded store reaching 30 makes the next pass a no-op', async () => {
+    seedRuns(30);
+    const stats = make();
+    let done = scheduler.scheduleMemoryBackfill({ runsDir: RUNS(), backfillFromRunLogs: stats.backfillFromRunLogs });
+    vi.advanceTimersByTime(60_000);
+    assert.equal(await done, 30);
+    const before = fs.readFileSync(storeFile(), 'utf8');
+    seedRuns(31); // a new run appears
+    done = scheduler.scheduleMemoryBackfill({ runsDir: RUNS(), backfillFromRunLogs: stats.backfillFromRunLogs });
+    vi.advanceTimersByTime(60_000);
+    assert.equal(await done, 0);
+    assert.equal(fs.readFileSync(storeFile(), 'utf8'), before);
   });
 });

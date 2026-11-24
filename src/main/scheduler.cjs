@@ -809,16 +809,45 @@ function heartbeatMemGate(g) {
 }
 
 /**
- * Seeds the job-memory store at boot from the scheduler runs folder itself
+ * Seeds the job-memory store from the scheduler runs folder itself
  * (schedulerPaths.runsDir(): <runId>/<slug>.log). jobMemoryStats.backfillFromRunLogs
- * walks the newest MEMORY_BACKFILL_MAX_FILES logs, runs only while the store holds
- * fewer than 30 samples, dedupes by run folder + unit, and never throws.
+ * walks the newest MEMORY_BACKFILL_MAX_FILES logs with async reads in bounded
+ * batches, runs only while the store holds fewer than 30 samples, dedupes by run
+ * folder + unit, and never rejects. Resolves to the number of samples added.
  */
-function backfillMemoryStatsAtBoot(deps = {}) {
+async function backfillMemoryStats(deps = {}) {
   const runsDir = deps.runsDir || schedulerPaths.runsDir();
-  const added = (deps.backfillFromRunLogs || jobMemoryStats.backfillFromRunLogs)(runsDir, { maxFiles: MEMORY_BACKFILL_MAX_FILES });
+  const added = await (deps.backfillFromRunLogs || jobMemoryStats.backfillFromRunLogs)(runsDir, { maxFiles: MEMORY_BACKFILL_MAX_FILES });
   if (added > 0) console.log(`[scheduler] memory stats: backfilled ${added} job peak(s) from ${runsDir}`);
   return added;
+}
+
+// Delay after scheduler start before the one memory backfill pass (keeps it off the boot path).
+const MEMORY_BACKFILL_DELAY_MS = 60_000;
+let memoryBackfillTimer = null;
+let memoryBackfillPending = null;
+
+/**
+ * Schedules ONE backfillMemoryStats pass MEMORY_BACKFILL_DELAY_MS from now on an
+ * unref'd timer, so boot itself never reads run logs. A second call while a pass
+ * is pending returns the same promise. Resolves to the samples added (0 on error).
+ */
+function scheduleMemoryBackfill(deps = {}) {
+  if (memoryBackfillPending) return memoryBackfillPending;
+  const delayMs = deps.delayMs ?? MEMORY_BACKFILL_DELAY_MS;
+  memoryBackfillPending = new Promise((resolve) => {
+    memoryBackfillTimer = setTimeout(() => {
+      memoryBackfillTimer = null;
+      backfillMemoryStats(deps).catch(() => 0).then(resolve);
+    }, delayMs);
+    if (memoryBackfillTimer.unref) memoryBackfillTimer.unref();
+  }).finally(() => { memoryBackfillPending = null; });
+  return memoryBackfillPending;
+}
+
+function cancelMemoryBackfill() {
+  if (memoryBackfillTimer) { clearTimeout(memoryBackfillTimer); memoryBackfillTimer = null; }
+  memoryBackfillPending = null;
 }
 
 /** Starts the unref'd 30 s sampler once cgroupDir is known; finalizeJobScope clears it. */
@@ -13032,6 +13061,7 @@ function stopDispatchLoop() {
 /** Shutdown path: stop the timers this module owns. */
 function stop() {
   stopDispatchLoop();
+  cancelMemoryBackfill();
 }
 
 // Body of the 10-minute maintenance interval (self-heal, escalations, restores).
@@ -13281,8 +13311,9 @@ async function init() {
     // Hydrate cached state from the sidecar before any scheduling decisions.
     loadSchedulerState();
     bootedAt = Date.now();
-    // Seed the measured memory reservations from the runs folder (no-op at ≥ 30 samples).
-    try { backfillMemoryStatsAtBoot(); } catch { /* best-effort */ }
+    // Seed the measured memory reservations from the runs folder ~60 s after start,
+    // off the boot path (async batched reads; no-op at ≥ 30 samples).
+    scheduleMemoryBackfill();
 
     // Boot reconciliation: finalize any job that was 'running' when the app died.
     // Check the run log first — a job that emitted result/success before the crash
@@ -14566,7 +14597,10 @@ module.exports = {
   loadValidatorCriteriaContext,
   planJobScope,
   finalizeJobScope,
-  backfillMemoryStatsAtBoot,
+  backfillMemoryStats,
+  scheduleMemoryBackfill,
+  cancelMemoryBackfill,
+  MEMORY_BACKFILL_DELAY_MS,
   heartbeatMemGate,
   memoryCapFailureReason,
   sampleJobScope,

@@ -189,16 +189,16 @@ test('a throwing recordPeak never skips stopping the scope', () => {
   expect(stopScope).toHaveBeenCalledWith('u9');
 });
 
-test('boot backfill passes the runs folder itself, bounded', () => {
-  const backfillFromRunLogs = vi.fn(() => 3);
-  expect(scheduler.backfillMemoryStatsAtBoot({ runsDir: '/runs', backfillFromRunLogs })).toBe(3);
+test('memory backfill passes the runs folder itself, bounded', async () => {
+  const backfillFromRunLogs = vi.fn(async () => 3);
+  expect(await scheduler.backfillMemoryStats({ runsDir: '/runs', backfillFromRunLogs })).toBe(3);
   expect(backfillFromRunLogs).toHaveBeenCalledTimes(1);
   const [dir, opts] = backfillFromRunLogs.mock.calls[0];
   expect(dir).toBe('/runs');
   expect(opts.maxFiles).toBe(500);
 });
 
-test('boot backfill end to end: seeds the store from a run log peak line', () => {
+test('memory backfill end to end: seeds the store from a run log peak line', async () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -208,13 +208,13 @@ test('boot backfill end to end: seeds the store from a run log peak line', () =>
     fs.mkdirSync(path.join(tmp, 'runs', 'r1'), { recursive: true });
     fs.writeFileSync(path.join(tmp, 'runs', 'r1', 'a.log'), '[scheduler] memory scope sm-job-a-1: peak=1234MB oom_kill=0\n');
     const stats = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => 1 });
-    const boot = () => scheduler.backfillMemoryStatsAtBoot({ runsDir: path.join(tmp, 'runs'), backfillFromRunLogs: stats.backfillFromRunLogs });
-    expect(boot()).toBe(1);
+    const boot = () => scheduler.backfillMemoryStats({ runsDir: path.join(tmp, 'runs'), backfillFromRunLogs: stats.backfillFromRunLogs });
+    expect(await boot()).toBe(1);
     expect(stats.loadSamples().map((s) => s.peakMb)).toEqual([1234]);
-    // Store still under 30: the next boot runs again; a new run is added, the old one is not repeated.
+    // Store still under 30: the next pass runs again; a new run is added, the old one is not repeated.
     fs.mkdirSync(path.join(tmp, 'runs', 'r2'), { recursive: true });
     fs.writeFileSync(path.join(tmp, 'runs', 'r2', 'b.log'), '[scheduler] memory scope sm-job-b-2: peak=800MB oom_kill=0\n');
-    expect(boot()).toBe(1);
+    expect(await boot()).toBe(1);
     stats._resetCache();
     expect(stats.loadSamples().map((s) => s.peakMb)).toEqual([1234, 800]);
   } finally {

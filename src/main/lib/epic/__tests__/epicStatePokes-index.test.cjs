@@ -20,6 +20,7 @@ const log = require('../epicEventLog.cjs');
 const { activeIndexPath } = require('../epicMint.cjs');
 const { appendResponseEventWithReason } = require('../../../promptSessionEvents.cjs');
 const { mergeActiveIndex } = require('../activeIndexMerge.cjs');
+const { readEventsAfter, _resetEpicStateCacheForTests } = require('../../telemetry/auditEvents.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -147,4 +148,16 @@ test('end to end: a verified verdict appended to the chain yields epic.state_cha
 
   const rows = (await log.readEpicEvents(cwd, id, { kinds: ['epic.state_changed'], limit: 100 })).events;
   expect(rows.map((r) => r.to)).toEqual(['verified']);
+
+  // …and the same row reads back through the outside-event reader.
+  const appended = JSON.parse(fs.readFileSync(activeIndexPath(cwd), 'utf8')).events[id].at(-1);
+  expect(appended.kind).toBe('response');
+  const auditLog = path.join(cwd, 'audit-log.jsonl');
+  fs.writeFileSync(auditLog, '');
+  _resetEpicStateCacheForTests();
+  const out = readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], target: auditLog, projectRoots: () => [cwd] });
+  const mine = out.events.filter((e) => e.epicId === id);
+  expect(mine).toHaveLength(1);
+  expect(mine[0]).toMatchObject({ kind: 'epic_state_changed', to: 'verified', cwd: path.resolve(cwd), epicId: id });
+  expect(Math.abs(Date.parse(mine[0].at) - Date.parse(appended.at))).toBeLessThanOrEqual(60_000);
 });

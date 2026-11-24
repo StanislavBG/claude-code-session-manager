@@ -1054,6 +1054,83 @@
   "remote": "read"
  },
  {
+  "ns": "siteFeedback",
+  "method": "widgetCreate",
+  "channel": "siteFeedback:widget-create",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "widgetList",
+  "channel": "siteFeedback:widget-list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "widgetUpdate",
+  "channel": "siteFeedback:widget-update",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "widgetDelete",
+  "channel": "siteFeedback:widget-delete",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "widgetSnippet",
+  "channel": "siteFeedback:widget-snippet",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "inboxList",
+  "channel": "siteFeedback:inbox-list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "inboxGet",
+  "channel": "siteFeedback:inbox-get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "inboxImage",
+  "channel": "siteFeedback:inbox-image",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "inboxSetStatus",
+  "channel": "siteFeedback:inbox-set-status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "inboxLinkEpic",
+  "channel": "siteFeedback:inbox-link-epic",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "siteFeedback",
+  "method": "drainNow",
+  "channel": "siteFeedback:drain-now",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
   "ns": "diagnostics",
   "method": "takeHeapSnapshot",
   "channel": "diagnostics:heap-snapshot",

@@ -1662,6 +1662,35 @@ const customerFeedbackInboxSetStatus = z.object({
 const customerFeedbackInboxLinkEpic = z.object({ id: z.string().max(200), epicId: z.string().max(200) });
 const customerFeedbackInboxImage = z.object({ id: z.string().min(1).max(200), index: z.number().int().min(0).max(4) }).strict();
 
+// ──────────────────────────────────────────── Website-feedback widgets (siteFeedbackIpc.cjs)
+// Every object is .strict() so a renderer can never smuggle key material or paths through.
+// siteFeedbackService re-normalises label/origins; these bounds only refuse junk early.
+const sfCwd = z.string().min(1).max(4096);
+const sfBoxId = z.string().min(1).max(200);
+const sfHostId = z.string().regex(/^FB-[0-9A-Z]{5}$/);
+const sfLabel = z.string().min(1).max(80);
+const sfOrigins = z.array(z.string().min(1).max(2048)).min(1).max(10);
+const sfInboxStatus = z.enum(['open', 'in_progress', 'resolved', 'wontfix']);
+const siteFeedbackWidgetCreate = z.object({ cwd: sfCwd, label: sfLabel, allowedOrigins: sfOrigins }).strict();
+const siteFeedbackWidgetList = z.object({ cwd: sfCwd.optional() }).strict().default({});
+const siteFeedbackWidgetUpdate = z.object({
+  boxId: sfBoxId,
+  label: sfLabel.optional(),
+  allowedOrigins: sfOrigins.optional(),
+  state: z.enum(['open', 'paused']).optional(),
+}).strict();
+const siteFeedbackWidgetBox = z.object({ boxId: sfBoxId }).strict();
+const siteFeedbackInboxList = z.object({ cwd: sfCwd, status: sfInboxStatus.optional() }).strict();
+const siteFeedbackInboxGet = z.object({ cwd: sfCwd, hostId: sfHostId }).strict();
+const siteFeedbackInboxImage = z.object({ cwd: sfCwd, hostId: sfHostId, which: z.enum(['screenshot', 'annotated']).optional() }).strict();
+const siteFeedbackInboxSetStatus = z.object({
+  cwd: sfCwd, hostId: sfHostId, status: sfInboxStatus, note: z.string().max(500).nullable().optional(),
+}).strict();
+const siteFeedbackInboxLinkEpic = z.object({
+  cwd: sfCwd, hostId: sfHostId, epicId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
+}).strict();
+const siteFeedbackDrainNow = z.object({}).strict().optional();
+
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
  * parses the payload before calling the original. On invalid payload throws
@@ -1928,6 +1957,16 @@ module.exports = {
     customerFeedbackInboxSetStatus,
     customerFeedbackInboxLinkEpic,
     customerFeedbackInboxImage,
+    siteFeedbackWidgetCreate,
+    siteFeedbackWidgetList,
+    siteFeedbackWidgetUpdate,
+    siteFeedbackWidgetBox,
+    siteFeedbackInboxList,
+    siteFeedbackInboxGet,
+    siteFeedbackInboxImage,
+    siteFeedbackInboxSetStatus,
+    siteFeedbackInboxLinkEpic,
+    siteFeedbackDrainNow,
   },
   validated,
 };

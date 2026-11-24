@@ -295,6 +295,21 @@ contextBridge.exposeInMainWorld('api', {
     inboxLinkEpic: (p) => ipcRenderer.invoke('customerFeedback:inbox-link-epic', p),
     inboxImage: (p) => ipcRenderer.invoke('customerFeedback:inbox-image', p),
   },
+  // Website-feedback widgets + their decrypted inbox (siteFeedbackIpc.cjs). No method ever
+  // returns a box private key or the paired device token.
+  siteFeedback: {
+    widgetCreate: (p) => ipcRenderer.invoke('siteFeedback:widget-create', p),
+    widgetList: (p) => ipcRenderer.invoke('siteFeedback:widget-list', p),
+    widgetUpdate: (p) => ipcRenderer.invoke('siteFeedback:widget-update', p),
+    widgetDelete: (p) => ipcRenderer.invoke('siteFeedback:widget-delete', p),
+    widgetSnippet: (p) => ipcRenderer.invoke('siteFeedback:widget-snippet', p),
+    inboxList: (p) => ipcRenderer.invoke('siteFeedback:inbox-list', p),
+    inboxGet: (p) => ipcRenderer.invoke('siteFeedback:inbox-get', p),
+    inboxImage: (p) => ipcRenderer.invoke('siteFeedback:inbox-image', p),
+    inboxSetStatus: (p) => ipcRenderer.invoke('siteFeedback:inbox-set-status', p),
+    inboxLinkEpic: (p) => ipcRenderer.invoke('siteFeedback:inbox-link-epic', p),
+    drainNow: () => ipcRenderer.invoke('siteFeedback:drain-now'),
+  },
   // Diagnostic only — no handler is registered unless the main process was
   // launched with SM_HEAP_SNAPSHOT=1, so this rejects by default.
   diagnostics: {

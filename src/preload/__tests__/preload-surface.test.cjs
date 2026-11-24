@@ -93,6 +93,32 @@ test('customerFeedback exposes ten methods wired to customerFeedback:* channels'
   assert.deepStrictEqual(invokeCalls[0].payload, { title: 't', body: 'b', tag: 'bug' });
 });
 
+test('siteFeedback exposes eleven methods wired to siteFeedback:* channels', async () => {
+  const expected = {
+    widgetCreate: 'siteFeedback:widget-create',
+    widgetList: 'siteFeedback:widget-list',
+    widgetUpdate: 'siteFeedback:widget-update',
+    widgetDelete: 'siteFeedback:widget-delete',
+    widgetSnippet: 'siteFeedback:widget-snippet',
+    inboxList: 'siteFeedback:inbox-list',
+    inboxGet: 'siteFeedback:inbox-get',
+    inboxImage: 'siteFeedback:inbox-image',
+    inboxSetStatus: 'siteFeedback:inbox-set-status',
+    inboxLinkEpic: 'siteFeedback:inbox-link-epic',
+    drainNow: 'siteFeedback:drain-now',
+  };
+  assert.deepStrictEqual(Object.keys(exposedApi.siteFeedback).sort(), Object.keys(expected).sort());
+  for (const [method, channel] of Object.entries(expected)) {
+    invokeCalls.length = 0;
+    const payload = { cwd: '/tmp/proj', probe: method };
+    await exposedApi.siteFeedback[method](payload);
+    assert.strictEqual(invokeCalls.length, 1);
+    assert.strictEqual(invokeCalls[0].channel, channel);
+    if (method === 'drainNow') assert.strictEqual(invokeCalls[0].payload, undefined);
+    else assert.deepStrictEqual(invokeCalls[0].payload, payload);
+  }
+});
+
 test('mcp.checkServer forwards the request unchanged to mcp:check-server', async () => {
   assert.strictEqual(typeof exposedApi.mcp.checkServer, 'function');
   const req = { source: 'project', name: 'github', cwd: '/tmp/proj' };

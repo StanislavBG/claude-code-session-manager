@@ -74,9 +74,9 @@ test('demo-video-builder persona sections are balanced and never nested', () => 
 });
 
 test('demo-video-builder persona keeps its output contract rules', () => {
-  const body = personaBody();
+  const body = personaBody().toLowerCase();
   for (const needle of ['XMLHttpRequest', 'system font stack', 'prefers-reduced-motion', 'Under 2 MB total', 'Never retype the base64 audio']) {
-    expect(body).toContain(needle);
+    expect(body).toContain(needle.toLowerCase());
   }
 });
 

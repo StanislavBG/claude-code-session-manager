@@ -260,3 +260,83 @@ test('a failing worktreeSetup still resolves with setup.ok false', async () => {
   expect(r.setup).toMatchObject({ ran: true, ok: false, reason: 'failed' });
   expect(r.linked).toContain('node_modules');
 });
+
+/** Commit a package.json at each `dir` in main, refresh the worktree to it, create main's `<dir>/node_modules`. */
+function addNestedPackages(dirs, { withMainModules = true } = {}) {
+  for (const d of dirs) {
+    fs.mkdirSync(path.join(main, d), { recursive: true });
+    fs.writeFileSync(path.join(main, d, 'package.json'), JSON.stringify({ name: d.replace(/\W/g, '-') }));
+    if (withMainModules) fs.mkdirSync(path.join(main, d, 'node_modules'), { recursive: true });
+  }
+  git(main, 'add', '.gitignore', ...dirs.map((d) => `${d}/package.json`));
+  git(main, 'commit', '-q', '-m', 'nested');
+  git(wt, 'reset', '-q', '--hard', 'main');
+}
+
+test('links a nested package node_modules and excludes it; status stays clean', async () => {
+  addNestedPackages(['web/remote-app', 'a/b/c']);
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.linked).toEqual(['node_modules', '.venv', 'a/b/c/node_modules', 'web/remote-app/node_modules']);
+  const dest = path.join(wt, 'web', 'remote-app', 'node_modules');
+  expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);
+  expect(fs.readlinkSync(dest)).toBe(path.join(main, 'web', 'remote-app', 'node_modules'));
+  const exclude = fs.readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8').split('\n');
+  expect(exclude).toContain('/web/remote-app/node_modules');
+  expect(exclude).toContain('/a/b/c/node_modules');
+  expect(git(wt, 'status', '--porcelain')).toBe('');
+  expect(fs.lstatSync(path.join(main, 'web', 'remote-app', 'node_modules')).isSymbolicLink()).toBe(false);
+});
+
+test('skips nested packages deeper than 3 segments, under node_modules, or missing in main', async () => {
+  fs.writeFileSync(path.join(main, '.gitignore'), '.venv/\n/node_modules/\nweb/node_modules/\n');
+  addNestedPackages(['a/b/c/d']);
+  addNestedPackages(['p'], { withMainModules: false });
+  // A tracked package.json under a node_modules segment (force-added).
+  fs.mkdirSync(path.join(main, 'vendor', 'node_modules', 'x'), { recursive: true });
+  fs.writeFileSync(path.join(main, 'vendor', 'node_modules', 'x', 'package.json'), '{}');
+  git(main, 'add', '-f', 'vendor/node_modules/x/package.json');
+  git(main, 'commit', '-q', '-m', 'vendored');
+  git(wt, 'reset', '-q', '--hard', 'main');
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.linked).toEqual(['node_modules', '.venv']);
+  expect(r.skipped).toContain('p/node_modules');
+  expect(r.skipped.some((s) => s.startsWith('a/b/c/d') || s.startsWith('vendor/'))).toBe(false);
+});
+
+test('skips a nested node_modules that is not gitignored', async () => {
+  fs.writeFileSync(path.join(main, '.gitignore'), '/node_modules/\n.venv/\n');
+  addNestedPackages(['web/remote-app']);
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.skipped).toContain('web/remote-app/node_modules');
+  expect(r.linked).not.toContain('web/remote-app/node_modules');
+  expect(fs.existsSync(path.join(wt, 'web', 'remote-app', 'node_modules'))).toBe(false);
+});
+
+test('leaves an existing worktree nested node_modules alone', async () => {
+  addNestedPackages(['web/remote-app']);
+  fs.mkdirSync(path.join(wt, 'web', 'remote-app', 'node_modules'));
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.skipped).toContain('web/remote-app/node_modules');
+  expect(fs.lstatSync(path.join(wt, 'web', 'remote-app', 'node_modules')).isSymbolicLink()).toBe(false);
+});
+
+test('pnpm projects skip nested linking', async () => {
+  addNestedPackages(['web/remote-app']);
+  fs.writeFileSync(path.join(main, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.linked).not.toContain('web/remote-app/node_modules');
+  expect(r.skipped).not.toContain('web/remote-app/node_modules');
+  expect(fs.existsSync(path.join(wt, 'web', 'remote-app', 'node_modules'))).toBe(false);
+}, 60_000);
+
+test('links at most 20 nested packages', async () => {
+  const dirs = Array.from({ length: 23 }, (_, i) => `pkgs/p${String(i).padStart(2, '0')}`);
+  addNestedPackages(dirs);
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  const nested = r.linked.filter((n) => n.startsWith('pkgs/'));
+  expect(nested).toHaveLength(20);
+  expect(nested).toEqual(dirs.slice(0, 20).map((d) => `${d}/node_modules`));
+  expect(r.skipped).toEqual(expect.arrayContaining(dirs.slice(20).map((d) => `${d}/node_modules`)));
+  expect(fs.existsSync(path.join(wt, 'pkgs', 'p22', 'node_modules'))).toBe(false);
+  expect(git(wt, 'status', '--porcelain')).toBe('');
+});

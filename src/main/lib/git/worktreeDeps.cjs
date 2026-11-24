@@ -36,6 +36,14 @@
  * linked. If that sync fails the name is skipped and the executor's own `uv`
  * call builds a worktree-local env — never the main one.
  *
+ * Nested npm packages (e.g. web/remote-app) get the same treatment for their
+ * node_modules: for each TRACKED package.json whose dir is at most
+ * NESTED_MAX_DEPTH segments deep (never under node_modules), at most
+ * NESTED_MAX_PACKAGES of them, `<dir>/node_modules` is linked from the main
+ * checkout when main has it, it is gitignored there, and the worktree has none;
+ * `/<dir>/node_modules` goes to info/exclude. pnpm projects skip this — their
+ * offline install already builds every workspace node_modules per worktree.
+ *
  * Never throws; failures land in `skipped`.
  */
 'use strict';
@@ -47,6 +55,8 @@ const { execGit } = require('./gitExec.cjs');
 const { runWorktreeSetup } = require('./worktreeSetup.cjs');
 
 const DEFAULT_DEP_DIRS = ['node_modules', '.venv', 'venv'];
+const NESTED_MAX_DEPTH = 3;
+const NESTED_MAX_PACKAGES = 20;
 
 function isDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
@@ -191,6 +201,53 @@ function addExcludes(mainCwd, names) {
 }
 
 /**
+ * Dirs (posix, relative) of tracked nested package.json files in worktreeCwd, at most
+ * NESTED_MAX_DEPTH segments deep and never under a node_modules segment. Sorted. Never throws.
+ */
+async function nestedPackageDirs(worktreeCwd) {
+  try {
+    const specs = [];
+    for (let d = 1; d <= NESTED_MAX_DEPTH; d++) specs.push(`:(glob)${'*/'.repeat(d)}package.json`);
+    const out = await execGit(worktreeCwd, ['ls-files', '-z', '--', ...specs], { timeout: 10_000 });
+    const dirs = new Set();
+    for (const f of out.split('\0')) {
+      if (!f) continue;
+      const segs = f.split('/').slice(0, -1);
+      if (!segs.length || segs.length > NESTED_MAX_DEPTH || segs.includes('node_modules')) continue;
+      dirs.add(segs.join('/'));
+    }
+    return [...dirs].sort();
+  } catch { return []; }
+}
+
+/** Link `<dir>/node_modules` for nested npm packages; pushes into linked/skipped. Never throws. */
+async function linkNestedNodeModules(mainCwd, worktreeCwd, linked, skipped) {
+  try {
+    if (isPnpmProject(mainCwd)) return;
+    const dirs = await nestedPackageDirs(worktreeCwd);
+    dirs.forEach((dir, i) => {
+      if (i >= NESTED_MAX_PACKAGES) skipped.push(`${dir}/node_modules`);
+    });
+    for (const dir of dirs.slice(0, NESTED_MAX_PACKAGES)) {
+      const rel = `${dir}/node_modules`;
+      try {
+        const src = path.join(mainCwd, rel);
+        const dest = path.join(worktreeCwd, rel);
+        if (!isDir(src) || exists(dest) || !isDir(path.dirname(dest)) || !(await isIgnored(mainCwd, rel))) {
+          skipped.push(rel);
+          continue;
+        }
+        await addExcludes(mainCwd, [rel]);
+        fs.symlinkSync(src, dest, 'dir');
+        linked.push(rel);
+      } catch {
+        skipped.push(rel);
+      }
+    }
+  } catch { /* best-effort */ }
+}
+
+/**
  * @param {{ mainCwd: string, worktreeCwd: string, names?: string[] }} opts
  * @returns {Promise<{ linked: string[], skipped: string[], installed: string[], setup: object }>}
  */
@@ -225,6 +282,7 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
       skipped.push(name);
     }
   }
+  if (names.includes('node_modules')) await linkNestedNodeModules(mainCwd, worktreeCwd, linked, skipped);
   // Project warm-up (.session-manager.json worktreeSetup) runs after linking so it sees node_modules.
   // Both createWorktree and the scheduler's verify scratch worktree come through here. mainCwd lets
   // same-project setups serialize and reports a config missing from the worktree; the outcome is
@@ -238,4 +296,4 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
   return { linked, skipped, installed, setup };
 }
 
-module.exports = { linkDependencyDirs, isPnpmProject, isUvProject, DEFAULT_DEP_DIRS };
+module.exports = { linkDependencyDirs, isPnpmProject, isUvProject, DEFAULT_DEP_DIRS, NESTED_MAX_PACKAGES };

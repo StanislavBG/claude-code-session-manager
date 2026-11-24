@@ -48,7 +48,11 @@ function normalizeSample(s) {
   if (!Number.isFinite(peakMb) || peakMb < 0) return null;
   const agentType = typeof s.agentType === 'string' && s.agentType ? s.agentType : 'unknown';
   const at = Number.isFinite(Number(s.at)) ? Number(s.at) : 0;
-  return { agentType, peakMb: Math.round(peakMb), at };
+  const out = { agentType, peakMb: Math.round(peakMb), at };
+  // Optional provenance: the run folder + scope unit, so the boot backfill never re-adds a peak.
+  if (typeof s.runId === 'string' && s.runId) out.runId = s.runId;
+  if (typeof s.unit === 'string' && s.unit) out.unit = s.unit;
+  return out;
 }
 
 function defaultStorePath() {
@@ -100,8 +104,8 @@ function createJobMemoryStats(deps = {}) {
   }
 
   /** Records one job's peak. Returns the stored sample, or null when the input is unusable. */
-  function recordPeak({ agentType, peakMb, at } = {}) {
-    const s = normalizeSample({ agentType, peakMb, at: at === undefined ? now() : at });
+  function recordPeak({ agentType, peakMb, at, runId, unit } = {}) {
+    const s = normalizeSample({ agentType, peakMb, at: at === undefined ? now() : at, runId, unit });
     if (!s) return null;
     appendSamples([s]);
     return s;
@@ -142,45 +146,59 @@ function createJobMemoryStats(deps = {}) {
     return loadSamples().length >= MIN_SAMPLES;
   }
 
-  function collectLogFiles(dir, depth, out) {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (depth > 0) collectLogFiles(p, depth - 1, out);
-      } else if (e.isFile() && e.name.endsWith('.log')) {
-        let mtimeMs = 0;
-        try { mtimeMs = fs.statSync(p).mtimeMs; } catch { continue; }
-        out.push({ p, mtimeMs });
-      }
-    }
+  /** Directory entry names under dir, or [] when unreadable. */
+  function listDir(dir) {
+    try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
   }
 
   /**
-   * Seeds an EMPTY store from run logs' 'memory scope <unit>: peak=<N>MB' lines
-   * (agentType 'unknown', at = log mtime). Scans `dirs` (each a scheduler runs/
-   * dir: <runId>/<slug>.log) and reads only the newest maxFiles logs. Never throws.
-   * Returns the number of samples added (0 when the store already had samples).
+   * Seeds the store from run logs' 'memory scope <unit>: peak=<N>MB' lines
+   * (agentType 'unknown', at = log mtime) while it holds fewer than MIN_SAMPLES.
+   * `runsDir` is the scheduler runs folder (<runId>/<slug>.log); run folders are
+   * walked by name, newest first (names are timestamps), and the walk stops once
+   * maxFiles logs are read — only read logs are stat'd. A sample whose run folder
+   * + unit (or, for a live-recorded peak, unit) is already stored is skipped.
+   * Never throws. Returns the number of samples added.
    */
-  function backfillFromRunLogs(dirs, { maxFiles = DEFAULT_MAX_FILES } = {}) {
+  function backfillFromRunLogs(runsDir, { maxFiles = DEFAULT_MAX_FILES } = {}) {
     try {
+      if (typeof runsDir !== 'string' || !runsDir) return 0;
       const file = resolveStorePath();
-      if (readSamplesUncached(file).length > 0) return 0;
-      const logs = [];
-      for (const d of Array.isArray(dirs) ? dirs : [dirs]) {
-        if (typeof d === 'string' && d) collectLogFiles(d, 2, logs);
+      const existing = readSamplesUncached(file);
+      if (existing.length >= MIN_SAMPLES) return 0;
+      const seen = new Set();
+      for (const s of existing) {
+        if (!s.unit) continue;
+        seen.add(`unit\0${s.unit}`);
+        if (s.runId) seen.add(`${s.runId}\0${s.unit}`);
       }
-      logs.sort((a, b) => b.mtimeMs - a.mtimeMs);
-      const picked = logs.slice(0, Math.max(0, maxFiles)).reverse(); // oldest first, like the live store
-      const samples = [];
-      for (const { p, mtimeMs } of picked) {
-        let text;
-        try { text = fs.readFileSync(p, 'utf8'); } catch { continue; }
-        for (const m of String(text).matchAll(PEAK_LINE_RE)) {
-          samples.push({ agentType: 'unknown', peakMb: Number(m[2]), at: Math.round(mtimeMs) });
+      const budget = Math.max(0, Math.floor(Number(maxFiles) || 0));
+      const runIds = listDir(runsDir).filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse();
+      const perRun = []; // newest run first
+      let read = 0;
+      for (const runId of runIds) {
+        if (read >= budget) break;
+        const dir = path.join(runsDir, runId);
+        const logs = listDir(dir).filter((e) => e.isFile() && e.name.endsWith('.log')).map((e) => e.name).sort();
+        const found = [];
+        for (const name of logs) {
+          if (read >= budget) break;
+          read++;
+          const p = path.join(dir, name);
+          let text;
+          try { text = fs.readFileSync(p, 'utf8'); } catch { continue; }
+          let mtimeMs = 0;
+          try { mtimeMs = fs.statSync(p).mtimeMs; } catch { /* keep 0 */ }
+          for (const m of String(text).matchAll(PEAK_LINE_RE)) {
+            const unit = m[1];
+            if (seen.has(`${runId}\0${unit}`) || seen.has(`unit\0${unit}`)) continue;
+            seen.add(`${runId}\0${unit}`);
+            found.push({ agentType: 'unknown', peakMb: Number(m[2]), at: Math.round(mtimeMs), runId, unit });
+          }
         }
+        perRun.push(found);
       }
+      const samples = perRun.reverse().flat(); // oldest first, like the live store
       if (!samples.length) return 0;
       appendSamples(samples);
       return Math.min(samples.length, MAX_SAMPLES);

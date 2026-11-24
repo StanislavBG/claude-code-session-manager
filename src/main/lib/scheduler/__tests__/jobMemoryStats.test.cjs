@@ -141,6 +141,7 @@ describe('store', () => {
 });
 
 describe('backfillFromRunLogs', () => {
+  const RUNS = () => path.join(tmp, 'runs');
   function writeLog(rel, text, mtimeSec) {
     const p = path.join(tmp, 'runs', rel);
     fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -148,39 +149,89 @@ describe('backfillFromRunLogs', () => {
     fs.utimesSync(p, mtimeSec, mtimeSec);
     return p;
   }
+  const peakLine = (unit, mb) => `[scheduler] memory scope ${unit}: peak=${mb}MB oom_kill=0\n`;
+  const storeLines = () => fs.readFileSync(path.join(tmp, STORE_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  // A real-looking runs folder: <ISO-timestamp runId>/<slug>.log, plus non-log siblings.
+  function seedRuns(n) {
+    for (let i = 0; i < n; i++) {
+      const runId = `2026-11-${String(10 + i).padStart(2, '0')}T05-48-50-604Z`;
+      writeLog(`${runId}/job-${i}.log`, `noise\n${peakLine(`sm-job-job-${i}-${i}`, 100 + i)}`, 1000 + i);
+      writeLog(`${runId}/job-${i}.supervisor.json`, peakLine('x', 9999), 1000 + i);
+    }
+    fs.writeFileSync(path.join(RUNS(), 'queue-cleanup.log'), peakLine('top-level-file', 9999));
+  }
 
-  it('parses memory-scope peak lines as agentType unknown', () => {
+  it('parses memory-scope peak lines as agentType unknown, tagged with run folder + unit', () => {
     writeLog('run-1/a.log', 'noise\n[scheduler] memory scope sm-job-a.scope: peak=1269MB oom_kill=0\n', 1000);
     writeLog('run-2/b.log', '[scheduler] memory scope sm-job-b.scope: peak=n/a oom_kill=0\n[scheduler] memory scope sm-job-c.scope: peak=670MB oom_kill=n/a\n', 2000);
     writeLog('run-2/b.meta.json', '[scheduler] memory scope x: peak=9999MB', 3000); // not a .log
     const s = make();
-    assert.equal(s.backfillFromRunLogs([path.join(tmp, 'runs'), path.join(tmp, 'missing')]), 2);
-    const lines = fs.readFileSync(path.join(tmp, STORE_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    assert.deepEqual(lines, [
-      { agentType: 'unknown', peakMb: 1269, at: 1_000_000 },
-      { agentType: 'unknown', peakMb: 670, at: 2_000_000 },
+    assert.equal(s.backfillFromRunLogs(RUNS()), 2);
+    assert.deepEqual(storeLines(), [
+      { agentType: 'unknown', peakMb: 1269, at: 1_000_000, runId: 'run-1', unit: 'sm-job-a.scope' },
+      { agentType: 'unknown', peakMb: 670, at: 2_000_000, runId: 'run-2', unit: 'sm-job-c.scope' },
     ]);
   });
 
-  it('reads only the newest maxFiles logs', () => {
-    writeLog('r1/old.log', '[scheduler] memory scope u1: peak=100MB\n', 1000);
-    writeLog('r2/mid.log', '[scheduler] memory scope u2: peak=200MB\n', 2000);
-    writeLog('r3/new.log', '[scheduler] memory scope u3: peak=300MB\n', 3000);
+  it('a missing runs folder or bad input adds nothing and never throws', () => {
     const s = make();
-    assert.equal(s.backfillFromRunLogs([path.join(tmp, 'runs')], { maxFiles: 2 }), 2);
-    const peaks = fs.readFileSync(path.join(tmp, STORE_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l).peakMb);
-    assert.deepEqual(peaks, [200, 300]);
+    assert.equal(s.backfillFromRunLogs(path.join(tmp, 'missing')), 0);
+    assert.equal(s.backfillFromRunLogs(null), 0);
+    assert.equal(s.backfillFromRunLogs(42), 0);
+    assert.equal(s.backfillFromRunLogs(''), 0);
   });
 
-  it('is a no-op when the store already has samples', () => {
-    writeStore([{ agentType: 'dev-lead', peakMb: 500, at: 1 }]);
-    writeLog('r1/a.log', '[scheduler] memory scope u1: peak=100MB\n', 1000);
-    const s = make();
-    assert.equal(s.backfillFromRunLogs([path.join(tmp, 'runs')]), 0);
-    assert.equal(fs.readFileSync(path.join(tmp, STORE_FILE), 'utf8').trim().split('\n').length, 1);
+  it('walks run folders newest first by name and stops at maxFiles logs, with bounded fs reads', () => {
+    seedRuns(20);
+    const calls = { readdirSync: 0, readFileSync: 0, statSync: 0 };
+    const counted = {
+      ...fs,
+      readdirSync: (...a) => { calls.readdirSync++; return fs.readdirSync(...a); },
+      readFileSync: (f, ...a) => { if (String(f).endsWith('.log')) calls.readFileSync++; return fs.readFileSync(f, ...a); },
+      statSync: (...a) => { calls.statSync++; return fs.statSync(...a); },
+    };
+    const s = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => clock, fs: counted });
+    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 3 }), 3);
+    // newest three folders (by name), stored oldest first like the live store
+    assert.deepEqual(storeLines().map((l) => l.peakMb), [117, 118, 119]);
+    assert.ok(!storeLines().some((l) => l.peakMb === 9999), 'non-log and top-level files are ignored');
+    // 1 runs listing + 3 folder listings; 3 log reads; ≤ 3 stats (one per read log)
+    assert.ok(calls.readdirSync <= 4, `readdirSync=${calls.readdirSync}`);
+    assert.equal(calls.readFileSync, 3, `readFileSync=${calls.readFileSync}`);
+    assert.ok(calls.statSync <= 3, `statSync=${calls.statSync}`);
   });
 
-  it('never throws on unreadable files or bad input', () => {
+  it('a store under 30 samples re-seeds and never duplicates a recorded run folder + unit', () => {
+    seedRuns(20);
+    writeStore(seq(5, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));
+    const s = make();
+    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 10 }), 10);
+    assert.equal(storeLines().length, 15);
+    // next boot: still under 30 → runs again, but the same 10 logs add nothing
+    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 10 }), 0);
+    assert.equal(storeLines().length, 15);
+    // a wider walk adds only the unseen ones
+    assert.equal(s.backfillFromRunLogs(RUNS(), { maxFiles: 12 }), 2);
+    assert.equal(storeLines().length, 17);
+  });
+
+  it('a live-recorded peak with the same unit is not re-added from its log', () => {
+    seedRuns(2);
+    const s = make();
+    s.recordPeak({ agentType: 'dev-lead', peakMb: 101, at: 5, unit: 'sm-job-job-1-1' });
+    assert.equal(s.backfillFromRunLogs(RUNS()), 1);
+    assert.deepEqual(storeLines().map((l) => [l.agentType, l.peakMb]), [['dev-lead', 101], ['unknown', 100]]);
+  });
+
+  it('a store holding 30 samples is left alone', () => {
+    seedRuns(5);
+    writeStore(seq(30, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));
+    const s = make();
+    assert.equal(s.backfillFromRunLogs(RUNS()), 0);
+    assert.equal(storeLines().length, 30);
+  });
+
+  it('never throws on unreadable files', () => {
     const p = writeLog('r1/a.log', '[scheduler] memory scope u1: peak=100MB\n', 1000);
     writeLog('r1/b.log', '[scheduler] memory scope u2: peak=200MB\n', 2000);
     const realRead = fs.readFileSync;
@@ -189,8 +240,6 @@ describe('backfillFromRunLogs', () => {
       now: () => clock,
       fs: { ...fs, readFileSync: (f, ...a) => { if (f === p) throw new Error('EACCES'); return realRead(f, ...a); } },
     });
-    assert.equal(s.backfillFromRunLogs([path.join(tmp, 'runs')]), 1);
-    assert.doesNotThrow(() => s.backfillFromRunLogs(null));
-    assert.doesNotThrow(() => make().backfillFromRunLogs([42, '']));
+    assert.equal(s.backfillFromRunLogs(RUNS()), 1);
   });
 });

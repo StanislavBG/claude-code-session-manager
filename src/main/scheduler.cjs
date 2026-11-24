@@ -634,23 +634,6 @@ function swapLimitedBatchSize(mem, runningCount, batchLen) {
 }
 
 /**
- * Pure helper: the old flat rule — clamp a batch so every running + new slot has
- * `minPerJob` headroom, less the running jobs' credited RSS. The live gate now uses
- * loadGate.measuredMemoryGate; this stays as the flat-rule reference for tests.
- */
-function memoryLimitedBatchSize(availableMb, minPerJob, runningCount, batchLen, consumedMb = 0) {
-  if (availableMb === Infinity) return batchLen;
-  // Credit is bounded by the running jobs' own reservations: never negative,
-  // never more permissive than a 0-running machine.
-  const credit = Math.min(Math.max(Number(consumedMb) || 0, 0), minPerJob * runningCount);
-  let allowed = batchLen;
-  while (allowed > 0 && availableMb < minPerJob * (runningCount + allowed) - credit) {
-    allowed--;
-  }
-  return allowed;
-}
-
-/**
  * Memory available to LAUNCH jobs with: MemAvailable minus the host reserve,
  * floored at 0. Keeping the host reserve out of the job budget is what stops the
  * gate from green-lighting a job into an OOM that kills Electron. Fails open
@@ -739,7 +722,7 @@ function sampleJobScope(state, fsImpl = fs) {
 
 const JOB_SCOPE_SAMPLE_MS = 30000;
 
-// Newest run logs the boot backfill reads at most (each is read whole, once ever).
+// Newest run logs the boot backfill reads at most (each read whole; repeats are deduped).
 const MEMORY_BACKFILL_MAX_FILES = 500;
 
 /** The heartbeat's view of the last memory-gate decision (deferred or clamped), or null. */
@@ -750,18 +733,15 @@ function heartbeatMemGate(g) {
 }
 
 /**
- * Run-log folders (<runsDir>/<runId>) of the queued jobs, deduped — the projects in
- * the queue. Fed once at boot to jobMemoryStats.backfillFromRunLogs, which only
- * seeds an EMPTY store and never throws. Bounded to MEMORY_BACKFILL_MAX_FILES logs.
+ * Seeds the job-memory store at boot from the scheduler runs folder itself
+ * (schedulerPaths.runsDir(): <runId>/<slug>.log). jobMemoryStats.backfillFromRunLogs
+ * walks the newest MEMORY_BACKFILL_MAX_FILES logs, runs only while the store holds
+ * fewer than 30 samples, dedupes by run folder + unit, and never throws.
  */
-function backfillMemoryStatsAtBoot(jobs, deps = {}) {
+function backfillMemoryStatsAtBoot(deps = {}) {
   const runsDir = deps.runsDir || schedulerPaths.runsDir();
-  const dirs = [...new Set((Array.isArray(jobs) ? jobs : [])
-    .map((j) => (j && typeof j.runId === 'string' && j.runId && !j.runId.includes('/') && !j.runId.includes('..') ? path.join(runsDir, j.runId) : null))
-    .filter(Boolean))];
-  if (!dirs.length) return 0;
-  const added = (deps.backfillFromRunLogs || jobMemoryStats.backfillFromRunLogs)(dirs, { maxFiles: MEMORY_BACKFILL_MAX_FILES });
-  if (added > 0) console.log(`[scheduler] memory stats: backfilled ${added} job peak(s) from ${dirs.length} run folder(s)`);
+  const added = (deps.backfillFromRunLogs || jobMemoryStats.backfillFromRunLogs)(runsDir, { maxFiles: MEMORY_BACKFILL_MAX_FILES });
+  if (added > 0) console.log(`[scheduler] memory stats: backfilled ${added} job peak(s) from ${runsDir}`);
   return added;
 }
 
@@ -794,7 +774,7 @@ function finalizeJobScope(state, safeLog, deps = {}) {
     }
     if (hasPeak) {
       const agentType = typeof state.agentType === 'string' && state.agentType ? state.agentType : 'dev-lead';
-      (deps.recordPeak || jobMemoryStats.recordPeak)({ agentType, peakMb: Math.round(state.peak / 1048576) });
+      (deps.recordPeak || jobMemoryStats.recordPeak)({ agentType, peakMb: Math.round(state.peak / 1048576), unit: state.unit });
     }
   } catch { /* stats are best-effort */ }
   (deps.stopScope || memoryScope.stopScope)(state.unit);
@@ -13175,8 +13155,8 @@ async function init() {
     // Hydrate cached state from the sidecar before any scheduling decisions.
     loadSchedulerState();
     bootedAt = Date.now();
-    // Seed the measured memory reservations once (no-op when the store has samples).
-    try { backfillMemoryStatsAtBoot(readQueueSync().jobs); } catch { /* best-effort */ }
+    // Seed the measured memory reservations from the runs folder (no-op at ≥ 30 samples).
+    try { backfillMemoryStatsAtBoot(); } catch { /* best-effort */ }
 
     // Boot reconciliation: finalize any job that was 'running' when the app died.
     // Check the run log first — a job that emitted result/success before the crash
@@ -14510,7 +14490,6 @@ module.exports = {
   reapDeadRunningJobs,
   runBranchSweep,
   pollRecoveryClearSource,
-  memoryLimitedBatchSize,
   availableForJobs,
   parseMemInfo,
   readMemInfo,

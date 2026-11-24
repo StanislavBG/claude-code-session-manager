@@ -7,7 +7,17 @@ const os = require('node:os');
 const path = require('node:path');
 const { measuredMemoryGate, formatMemoryGateDetail } = require('../loadGate.cjs');
 const { createJobMemoryStats, STORE_FILE } = require('../jobMemoryStats.cjs');
-const { memoryLimitedBatchSize, availableForJobs, heartbeatMemGate } = require('../../../scheduler.cjs');
+const { availableForJobs, heartbeatMemGate } = require('../../../scheduler.cjs');
+
+// The old flat rule, written out literally: the largest k ≤ batchLen with
+// available ≥ flat × (running + k) − credit, credit = min(consumed, flat × running).
+function flatRule(availableMb, flatMb, runningCount, batchLen, consumedMb) {
+  if (availableMb === Infinity) return batchLen;
+  const credit = Math.min(Math.max(consumedMb, 0), flatMb * runningCount);
+  let k = batchLen;
+  while (k > 0 && availableMb < flatMb * (runningCount + k) - credit) k--;
+  return k;
+}
 
 const RESERVED_HOST_MB = 3000;
 const FLAT_MB = 2500;
@@ -51,7 +61,7 @@ describe('measuredMemoryGate — the PRD scenario', () => {
 
   it('the flat 2,500 MB rule admitted none of them (needs 12.1 GB for a 4th job)', () => {
     const consumed = 3 * 300;
-    assert.equal(memoryLimitedBatchSize(availableForJobs(10_500, RESERVED_HOST_MB), FLAT_MB, 3, 1, consumed), 0);
+    assert.equal(flatRule(availableForJobs(10_500, RESERVED_HOST_MB), FLAT_MB, 3, 1, consumed), 0);
     assert.equal(RESERVED_HOST_MB + FLAT_MB * 4 - consumed, 12_100);
   });
 
@@ -94,7 +104,7 @@ describe('measuredMemoryGate — no samples equals the flat rule', () => {
   beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memgate-')); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-  it('an empty store reproduces memoryLimitedBatchSize over a grid', () => {
+  it('an empty store reproduces the flat 2,500 MB rule over a grid', () => {
     const stats = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => 1 });
     assert.equal(stats.isMeasured(), false);
     for (const free of [0, 2000, 5499, 5500, 8000, 10_500, 12_099, 12_100, 20_000]) {
@@ -109,7 +119,7 @@ describe('measuredMemoryGate — no samples equals the flat rule', () => {
               stats,
             });
             const consumed = Math.min(rss, FLAT_MB) * runningCount;
-            const flat = memoryLimitedBatchSize(availableForJobs(free, RESERVED_HOST_MB), FLAT_MB, runningCount, batchLen, consumed);
+            const flat = flatRule(availableForJobs(free, RESERVED_HOST_MB), FLAT_MB, runningCount, batchLen, consumed);
             assert.equal(g.allowed, flat, `free=${free} running=${runningCount} rss=${rss} batch=${batchLen}`);
             assert.equal(g.spikeBufferMb, 0);
             assert.equal(g.measured, false);

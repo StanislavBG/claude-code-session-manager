@@ -316,4 +316,7 @@ module.exports = {
   isProjectOverlayPersonaPath,
   resolvePrdPersonaForSpawn,
   DEFAULT_PRD_AGENT_TYPE,
+  // The frontmatter parser dispatch validates personas with — re-exported so
+  // tests parse tracked personas the same way (trackedPersonasValid.test.cjs).
+  splitFrontmatter,
 };

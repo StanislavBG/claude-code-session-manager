@@ -9,7 +9,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 import { describe, it, expect } from 'vitest';
 const { validatePersonaFrontmatter } = require('../personaFrontmatterSchema.cjs');
-const { splitFrontmatter } = require('../../prd/prdFrontmatter.cjs');
+// The same parser dispatch (resolvePrdPersonaForSpawn) uses, so the two can never disagree.
+const { splitFrontmatter } = require('../../claude/agentModelResolve.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const DIRS = ['.claude/agents', 'src/seed/agents'];

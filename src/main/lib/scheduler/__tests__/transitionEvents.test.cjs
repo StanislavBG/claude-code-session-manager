@@ -19,7 +19,9 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-// Deterministic wait: poll the epic event log until `kinds` events reach `n`.
+// Deterministic wait: poll the epic event log until it holds exactly `n` events.
+// `opts` is optional and passed straight to readEpicEvents (e.g. `{ kinds }` to
+// count only those event kinds); omit it to count every event.
 const waitForEvents = (epicId, n, opts) => vi.waitFor(async () => {
   const { events } = await epicEventLog.readEpicEvents(tmp, epicId, opts);
   expect(events).toHaveLength(n);

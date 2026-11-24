@@ -622,7 +622,6 @@ test('listRecentRestorableSessions skips a project whose read fails and never th
   expect(broken).toEqual({ sessions: [], projectsRead: 0, truncated: false });
 });
 
-
 for (const order of ['complete-first', 'incomplete-first']) {
   test(`two overlapping list calls of one cwd each act on their own claim scan (${order})`, async () => {
     const file = writeArchive('epic-a', uuid(1), T0);

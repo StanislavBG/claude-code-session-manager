@@ -25,12 +25,13 @@ const NEEDS_INPUT_SENTINEL = '<<<SM_NEEDS_INPUT>>>';
 
 // A label counts only when it is the WHOLE heading / bold label (optional trailing colon):
 // '## Remaining budget' or '**Deferred to PRD 4100 (queued)**' are not residue labels.
-const RESIDUE_LABEL_RE = /^(still open|open items|remaining|not covered|deferred|follow[- ]?ups?|left for later)\s*:?$/i;
+const RESIDUE_LABEL_RE = /^(still open|open items|remaining|not covered|deferred|follow[- ]?ups?|left for later|gaps?|what happens next)\s*:?$/i;
 const NEEDS_YOU_LABEL_RE = /^needs you\b/i;
 // Quoted spans skipped by the phrase match: a report quoting a phrase is analysing it, not handing work back.
 // A straight single quote opens only after a non-word char, so apostrophes (it's, haven't) never open one.
 const QUOTED_SPAN_RES = [/"[^"\n]*"/g, /“[^”\n]*”/g, /‘[^’\n]*’/g, /`[^`\n]*`/g, /(^|[^\w'])'[^'\n]*'(?![\w])/g];
-const RESIDUE_PHRASES = ['needs a new epic', 'say the word', "haven't queued", "didn't look into", 'follow-up for later'];
+const RESIDUE_PHRASES = ['needs a new epic', 'say the word', "haven't queued", "didn't look into", 'follow-up for later',
+  'one gap', 'left those to', 'i will add that', "i'll add that"];
 const EMPTY_ENTRY_RE = /^(?:[-*+]\s*)?(?:none|nothing|n\/a)\.?$/i;
 
 /** Lower-case and straighten curly apostrophes for phrase matching. */

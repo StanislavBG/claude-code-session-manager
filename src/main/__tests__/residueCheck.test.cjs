@@ -87,6 +87,64 @@ describe('findResidue — phrases', () => {
   });
 });
 
+describe('findResidue — gap and hand-off wording (real 2026-11-23 endings)', () => {
+  test('session 02: bold Gap label with a promise to add a PRD later', () => {
+    const line = "**Gap:** two of the event kinds, `job.tool_use` and `human.message`, have no PRD that writes them. I'll add that PRD alongside the wave 1 fixes.";
+    expect(findResidue(`Plan settled.\n\n${line}\n`)).toEqual([line]);
+  });
+  test('Gap / Gaps / What happens next as whole headings and bold labels', () => {
+    for (const label of ['Gap', 'Gaps', 'What happens next']) {
+      expect(findResidue(`## ${label}\n- the doc chapter\n`)).toEqual(['- the doc chapter']);
+      expect(findResidue(`## ${label}:\n- the doc chapter\n`)).toEqual(['- the doc chapter']);
+      expect(findResidue(`**${label}:**\n- the doc chapter\n`)).toEqual(['- the doc chapter']);
+    }
+    expect(findResidue('## Gap analysis\n- three rows checked\n')).toEqual([]);
+  });
+  test('session 07: "one gap" in prose', () => {
+    const line = '- **Manual:** I only set `documentsAppVersion` to 0.141.0 (`565456c7`, pushed). No chapter was revised: none describes the changed behaviour, the renderer is unchanged, and "Needs review" still means "being fixed". The manual stays at 2.6.0 with no new manual release. One gap: no chapter covers preflight holds; it would fit in `plans-and-scheduler.html`.';
+    expect(findResidue(`Released.\n\n${line}\n`)).toEqual([line]);
+  });
+  test('session 16: What happens next list of tasks for the owner', () => {
+    const text = [
+      '**Checks this turn:** all 51 related test files (1,446 tests) pass on current main `6682dfb1`.',
+      '',
+      '**What happens next:**',
+      '- **You:** publish a release that carries this work. I didn\'t, because main also holds other plans that are still in progress.',
+      '- **Burrow thread:** all 3 replies are still unused.',
+      '',
+    ].join('\n');
+    expect(findResidue(text)).toEqual([
+      '- **You:** publish a release that carries this work. I didn\'t, because main also holds other plans that are still in progress.',
+      '- **Burrow thread:** all 3 replies are still unused.',
+    ]);
+  });
+  test('session 17: "I left those to them"', () => {
+    const line = "For you: restart Session Manager so it runs 0.140.0 — Burrow can't register its tools until then. Several other Epics also owe their own post-release replies (to Self, and the Task-primitive reply to Burrow); I left those to them. Both memory notes now record 0.140.0 as live and Burrow's thread as closed.";
+    expect(findResidue(`Done.\n\n${line}\n`)).toEqual([line]);
+  });
+  test('"I will add that" and quoted / code / table forms', () => {
+    expect(findResidue('I will add that test next wave.\n')).toEqual(['I will add that test next wave.']);
+    expect(findResidue('The checker now matches "one gap" and `left those to`.\n')).toEqual([]);
+    expect(findResidue('| wording | one gap; I\'ll add that |\n')).toEqual([]);
+    expect(findResidue('```\nOne gap: x. I left those to them.\n```\n')).toEqual([]);
+  });
+  test('a clean Landed / Decided / Queued / Scheduled / Needs you report flags nothing', () => {
+    const text = [
+      '**Landed:** 4214-residue-label-whole-match (`a1b2c3d4`) — labels match only as a whole heading.',
+      '',
+      '**Decided:** the hook stays fail-open; revert = `git revert a1b2c3d4`.',
+      '',
+      '**Queued:** 4227-residue-check-gap-and-handoff-wording — adds the Gap and hand-off wording.',
+      '',
+      '**Scheduled:** 4228-validate runs after 4227 (dependsOn).',
+      '',
+      '**Needs you:** restart Session Manager after the next release so the hook loads.',
+      '',
+    ].join('\n');
+    expect(findResidue(text)).toEqual([]);
+  });
+});
+
 describe('findResidue — ignored regions', () => {
   test('code fences', () => {
     const text = '```\n## Still open\n- x\nsay the word\n```\nDone.\n';

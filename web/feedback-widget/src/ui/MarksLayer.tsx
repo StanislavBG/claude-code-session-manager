@@ -40,6 +40,7 @@ import {
   textColorOn,
 } from './marks';
 import { colors, fonts } from './tokens';
+import { Popover, isCommentMark } from './Popover';
 
 // ── Constants (§5.4) ────────────────────────────────────────────────────────
 
@@ -321,6 +322,19 @@ function MarkView({ m, h }: { m: Mark; h: Hot }) {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
+/** §5.5 comment popover hook-up: when given, the layer opens, renders and closes the popover. */
+export interface PopoverHookup {
+  /** Open (an id) or close (null) the popover; the owner stores it as `popoverId`. */
+  onChange(id: string | null): void;
+  onComment(id: string, value: string): void;
+  onDelete(id: string): void;
+  /** Skip the open after the next created mark (the first mark in flow `note`). */
+  skipOpenOnCreate?: boolean;
+  /** Capture-surface size; defaults to the window's inner size. */
+  W?: number;
+  H?: number;
+}
+
 export interface MarksLayerProps {
   marks: readonly Mark[];
   tool: Tool;
@@ -335,6 +349,8 @@ export interface MarksLayerProps {
   onCreate(mark: Mark): void;
   /** A pin or number badge was clicked (re-opens its comment popover, §5.5). */
   onOpen?(id: string): void;
+  /** Comment popover (§5.5); omit to leave opening/closing to the owner. */
+  popover?: PopoverHookup;
   onTextEdit?(on: boolean): void;
   onDrawing?(on: boolean): void;
   /** Mark id factory; defaults to a per-page counter. */
@@ -393,6 +409,13 @@ export function MarksLayer(props: MarksLayerProps) {
 
   const id = () => (live.current.newId ?? defaultId)();
 
+  /** Appends a finished mark; numbered marks open their comment popover (§5.5). */
+  const create = (mark: Mark) => {
+    live.current.onCreate(mark);
+    const pop = live.current.popover;
+    if (pop && isCommentMark(mark) && !pop.skipOpenOnCreate) pop.onChange(mark.id);
+  };
+
   const local = (e: { clientX: number; clientY: number }): Point => {
     const r = rootRef.current?.getBoundingClientRect();
     return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
@@ -416,11 +439,16 @@ export function MarksLayer(props: MarksLayerProps) {
       commitText();
       return;
     }
+    // §5.5: a click on the surface while the popover is open only closes it.
+    if (live.current.popover && live.current.popoverId != null) {
+      live.current.popover.onChange(null);
+      return;
+    }
     const p = local(e);
     const col = live.current.color;
     switch (live.current.tool) {
       case 'pin':
-        live.current.onCreate({ id: id(), kind: 'pin', color: col, x: p.x, y: p.y });
+        create({ id: id(), kind: 'pin', color: col, x: p.x, y: p.y });
         return;
       case 'text':
         setText({ x: p.x, y: p.y, color: col, value: '' });
@@ -479,7 +507,7 @@ export function MarksLayer(props: MarksLayerProps) {
     } else if (arrowCommits(d.x0, d.y0, d.x1, d.y1)) {
       mark = { id: id(), kind: 'arrow', color: d.color, x1: d.x0, y1: d.y0, x2: d.x1, y2: d.y1 };
     }
-    if (mark) live.current.onCreate(mark);
+    if (mark) create(mark);
   };
 
   const onTextKey = (e: KeyboardEvent) => {
@@ -496,8 +524,12 @@ export function MarksLayer(props: MarksLayerProps) {
 
   const hot: Hot = {
     hot: (mid) => mid === popoverId || mid === hoveredId,
-    onOpen: (mid) => live.current.onOpen?.(mid),
+    onOpen: (mid) => {
+      live.current.onOpen?.(mid);
+      live.current.popover?.onChange(mid);
+    },
   };
+  const popMark = props.popover && popoverId != null ? marks.find((m) => m.id === popoverId) : undefined;
 
   return (
     <div ref={rootRef} class="fw-marks" data-part="marks">
@@ -537,6 +569,19 @@ export function MarksLayer(props: MarksLayerProps) {
           onKeyDown={onTextKey}
           onBlur={commitText}
           onPointerDown={(e) => e.stopPropagation()}
+        />
+      )}
+      {props.popover && popMark && isCommentMark(popMark) && (
+        <Popover
+          mark={popMark}
+          W={props.popover.W ?? window.innerWidth}
+          H={props.popover.H ?? window.innerHeight}
+          onComment={props.popover.onComment}
+          onDelete={(mid) => {
+            props.popover?.onDelete(mid);
+            props.popover?.onChange(null);
+          }}
+          onClose={() => props.popover?.onChange(null)}
         />
       )}
     </div>

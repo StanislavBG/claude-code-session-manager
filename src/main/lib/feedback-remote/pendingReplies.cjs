@@ -26,6 +26,8 @@ const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const STORE_VERSION = 1;
 const FILE_NAME = 'pending-replies.json';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+/** Failed delivery attempts (one per hourly pass) before an entry gives up for good. */
+const MAX_DELIVERY_ATTEMPTS = 24;
 
 /** seedDevPlugin.cjs pulls electron-side modules; load its comparator only when needed. */
 function compareSemver(a, b) {
@@ -99,16 +101,20 @@ function buildEntry(input, now = new Date()) {
     // (externalRef / proposal / replyTo) and the cap count this reply took.
     ySource: normalizeYSource(e.ySource),
     sentAtScheduling: Number.isInteger(e.sentAtScheduling) && e.sentAtScheduling > 0 ? e.sentAtScheduling : null,
+    // replyHash(outcome, message) — an identical scheduled retry matches it.
+    hash: str(e.hash),
+    attempts: 0,
+    gaveUpAt: null,
     deliveredAt: null,
     deliveredVersion: null,
     lastError: null,
   };
 }
 
-/** Pure: undelivered entries whose appVersionAbove is strictly below appVersion. */
+/** Pure: undelivered, not-given-up entries whose appVersionAbove is strictly below appVersion. */
 function selectDue(entries, appVersion) {
   if (!isSemver(String(appVersion ?? '').split('-')[0])) return [];
-  return entries.filter((e) => !e.deliveredAt && isSemver(e.appVersionAbove)
+  return entries.filter((e) => !e.deliveredAt && !e.gaveUpAt && isSemver(e.appVersionAbove)
     && compareSemver(e.appVersionAbove, appVersion) < 0);
 }
 
@@ -128,11 +134,27 @@ function countPendingForThread(replierCwd, yId) {
   return readEntries().filter((e) => !e.deliveredAt && e.replierCwd === replierCwd && e.yId === yId).length;
 }
 
+/** Undelivered, not-given-up entries one thread (replierCwd + yId) still holds. */
+function listPendingForThread(replierCwd, yId) {
+  return readEntries().filter((e) => !e.deliveredAt && !e.gaveUpAt && e.replierCwd === replierCwd && e.yId === yId);
+}
+
 /**
  * Record a delivery attempt. result.ok !== false = delivered (deliveredAt +
  * deliveredVersion stamped, lastError cleared); otherwise lastError is set and
- * the entry stays due. Returns the updated entry, or null for an unknown id.
+ * attempts is incremented; the MAX_DELIVERY_ATTEMPTS-th failure stamps
+ * gaveUpAt and the entry is never due again. Returns the updated entry, or null for an unknown id.
  */
+function failedAttempt(prev, lastError) {
+  const attempts = (Number.isInteger(prev.attempts) && prev.attempts > 0 ? prev.attempts : 0) + 1;
+  return {
+    ...prev,
+    attempts,
+    lastError,
+    gaveUpAt: attempts >= MAX_DELIVERY_ATTEMPTS ? new Date().toISOString() : (prev.gaveUpAt || null),
+  };
+}
+
 function markReplyDelivered(id, { version, result } = {}) {
   const entries = readEntries();
   const idx = entries.findIndex((e) => e.id === id);
@@ -141,7 +163,7 @@ function markReplyDelivered(id, { version, result } = {}) {
   const prev = entries[idx];
   const next = ok
     ? { ...prev, deliveredAt: new Date().toISOString(), deliveredVersion: str(version), lastError: null }
-    : { ...prev, lastError: str(result.error) || str(result.reason) || 'delivery failed' };
+    : failedAttempt(prev, str(result.error) || str(result.reason) || 'delivery failed');
   entries[idx] = next;
   writeEntries(entries);
   return next;
@@ -151,7 +173,9 @@ module.exports = {
   addPendingReply,
   listDueReplies,
   countPendingForThread,
+  listPendingForThread,
   markReplyDelivered,
+  MAX_DELIVERY_ATTEMPTS,
   ledgerPath,
   buildEntry,
   selectDue,

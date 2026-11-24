@@ -968,3 +968,72 @@ test('deliverDueReplies: a stored entry without ySource / sentAtScheduling still
   expect(replyAudit.fields).not.toHaveProperty('externalRef');
   expect(marks[0].result).toMatchObject({ ok: true, repliesUsed: 1 });
 });
+
+// ---------------------------------------------------------------------------
+// Scheduled replies: identical-retry dedupe, give-up, no overlapping passes
+// ---------------------------------------------------------------------------
+
+test('deliverWhen: an identical scheduled retry returns the held entry without a new entry or cap slot', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps('sent');
+    const first = await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    expect(first).toMatchObject({ ok: true, delivery: 'scheduled', repliesUsed: 1 });
+    const [held] = readLedger(home);
+    const again = await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    expect(again).toMatchObject({
+      ok: true, delivery: 'scheduled', alreadyScheduled: true, id: held.id,
+      deliverWhen: { appVersionAbove: '0.141.0' },
+      repliesUsed: 1, repliesLeft: MAX_REPLIES_PER_THREAD - 1,
+    });
+    expect(readLedger(home)).toHaveLength(1);
+    expect(d.audits.filter((x) => x.kind === 'cross-project-reply-scheduled')).toHaveLength(1);
+    // A different message is a new reply and takes a new slot.
+    const other = await sendFeedbackReply(input(b, { message: 'Other.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    expect(other).toMatchObject({ ok: true, delivery: 'scheduled', repliesUsed: 2 });
+    expect(other.alreadyScheduled).toBeUndefined();
+    expect(readLedger(home)).toHaveLength(2);
+  });
+});
+
+test('deliverDueReplies: after 24 failed passes the entry gives up, is audited with its last error, and is never retried', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup({ xOverrides: { status: 'closed' } });
+    const d = deps('sent', { openFallback: null });
+    await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    d.audits.length = 0;
+    for (let i = 1; i <= 24; i++) {
+      const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+      expect(r).toMatchObject({ due: 1, delivered: 0, failed: 1 });
+      const gaveUp = d.audits.filter((x) => x.kind === 'cross-project-reply-scheduled-gave-up');
+      expect(gaveUp).toHaveLength(i === 24 ? 1 : 0);
+    }
+    const [entry] = readLedger(home);
+    expect(entry.attempts).toBe(24);
+    expect(entry.gaveUpAt).toEqual(expect.any(String));
+    const gaveUp = d.audits.find((x) => x.kind === 'cross-project-reply-scheduled-gave-up');
+    expect(gaveUp.fields).toMatchObject({ fromEpicId: 'psess-y', epicId: 'psess-x', attempts: 24, lastError: entry.lastError });
+    expect(typeof gaveUp.fields.lastError).toBe('string');
+    expect(await deliverDueReplies({ appVersion: '0.142.0' }, d)).toMatchObject({ due: 0, failed: 0 });
+  });
+});
+
+test('deliverDueReplies: a pass started while one is running is skipped and delivers nothing twice', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps('sent');
+    await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    let release;
+    const gate = new Promise((res) => { release = res; });
+    const realSend = d.sendPrompt;
+    d.sendPrompt = async (...args) => { await gate; return realSend(...args); };
+    const p1 = deliverDueReplies({ appVersion: '0.142.0' }, d);
+    await new Promise((res) => setImmediate(res));
+    const second = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+    expect(second).toMatchObject({ skipped: true, due: 0, delivered: 0 });
+    release();
+    expect(await p1).toMatchObject({ due: 1, delivered: 1 });
+    expect(d.calls).toHaveLength(1);
+    expect(readLedger(home)[0].deliveredAt).toEqual(expect.any(String));
+  });
+});

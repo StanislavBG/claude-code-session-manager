@@ -65,6 +65,7 @@ const AUDIT_MESSAGE_CHARS = 2000;
 const AUDIT_MAX_REFERENCES = 10;
 const SCHEDULED_AUDIT = 'cross-project-reply-scheduled';
 const DELIVERED_SCHEDULED_AUDIT = 'cross-project-reply-delivered-scheduled';
+const GAVE_UP_SCHEDULED_AUDIT = 'cross-project-reply-scheduled-gave-up';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 /** Per-Y promise chain: cap check → deliver → receipt run one at a time. */
@@ -302,6 +303,22 @@ async function sendFeedbackReply(input, deps = {}) {
       return earlierDelivery(latest, { targetCwd, rt, threadField, sent });
     }
     const used = sent + pending;
+    if (deliverWhen) {
+      // Identical scheduled retry: the reply this thread already holds, not a new one.
+      const held = pendingReplies.listPendingForThread(replierCwd, yId).find((e) => e.outcome === outcome
+        && (e.hash || replyHash(e.outcome, e.message)) === hash);
+      if (held) {
+        return {
+          ok: true,
+          delivery: 'scheduled',
+          alreadyScheduled: true,
+          id: held.id,
+          deliverWhen: { appVersionAbove: held.appVersionAbove },
+          repliesUsed: used,
+          repliesLeft: Math.max(0, MAX_REPLIES_PER_THREAD - used),
+        };
+      }
+    }
     if (used >= MAX_REPLIES_PER_THREAD) {
       return bad(429, `reply limit of ${MAX_REPLIES_PER_THREAD} reached for this thread`);
     }
@@ -320,6 +337,7 @@ async function sendFeedbackReply(input, deps = {}) {
         message,
         referencePaths,
         appVersionAbove: deliverWhen.appVersionAbove,
+        hash,
         ySource: y.source || {},
         sentAtScheduling: used + 1,
       });
@@ -679,12 +697,27 @@ function resolveThread(src) {
  * scheduled; the stored thread is the only target. The scheduling Epic Y may
  * have closed since — the reply still goes, and the receipt on Y is written
  * only while Y is still in its project's active index. A delivery that throws
- * or returns not-ok stays pending with lastError; the pass never throws.
+ * or returns not-ok stays pending with lastError (attempts + 1); the 24th
+ * failure gives up (gaveUpAt) and is audited GAVE_UP_SCHEDULED_AUDIT. A pass
+ * started while another is still running in this process returns
+ * { skipped: true } and sends nothing. The pass never throws.
  *
  * deps: deliverAuthorizedReply's deps plus { listDueReplies, markReplyDelivered }
  *       (default: pendingReplies.cjs).
  */
-async function deliverDueReplies({ appVersion } = {}, deps = {}) {
+let dueRepliesPassRunning = false;
+
+async function deliverDueReplies(opts = {}, deps = {}) {
+  if (dueRepliesPassRunning) return { due: 0, delivered: 0, failed: 0, results: [], skipped: true };
+  dueRepliesPassRunning = true;
+  try {
+    return await runDueRepliesPass(opts, deps);
+  } finally {
+    dueRepliesPassRunning = false;
+  }
+}
+
+async function runDueRepliesPass({ appVersion } = {}, deps = {}) {
   const summary = { due: 0, delivered: 0, failed: 0, results: [] };
   const listDue = deps.listDueReplies || pendingReplies.listDueReplies;
   const markDelivered = deps.markReplyDelivered || pendingReplies.markReplyDelivered;
@@ -727,10 +760,26 @@ async function deliverDueReplies({ appVersion } = {}, deps = {}) {
       summary.failed += 1;
     }
     try {
-      markDelivered(entry.id, {
+      const marked = markDelivered(entry.id, {
         version,
         result: ok ? result : { ...(result || {}), ok: false, error: (result && (result.error || result.reason)) || 'delivery failed' },
       });
+      if (!ok && marked && marked.gaveUpAt && !entry.gaveUpAt) {
+        try {
+          audit(GAVE_UP_SCHEDULED_AUDIT, {
+            cwd: entry.targetCwd || null,
+            epicId: (entry.thread && entry.thread.epicId) || null,
+            fromCwd: entry.replierCwd || null,
+            fromEpicId: entry.yId || null,
+            outcome: entry.outcome || null,
+            appVersionAbove: entry.appVersionAbove || null,
+            appVersion: version,
+            attempts: marked.attempts,
+            lastError: marked.lastError || null,
+            ...(entry.thread && entry.thread.legacy ? { thread: 'legacy' } : {}),
+          });
+        } catch { /* audit is best-effort */ }
+      }
     } catch (e) {
       // A failed ledger write leaves the entry due; a delivered one may resend next pass.
       summary.markError = e && e.message ? e.message : String(e);

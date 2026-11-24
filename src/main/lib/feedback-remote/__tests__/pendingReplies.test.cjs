@@ -145,3 +145,28 @@ test('ySource and sentAtScheduling are stored; a non-plain ySource or bad count 
   const onDisk = JSON.parse(fs.readFileSync(ledger.ledgerPath(), 'utf8')).entries[0];
   expect(onDisk).toMatchObject({ ySource: src, sentAtScheduling: 2 });
 });
+
+test('a failed attempt increments attempts; the 24th failure stamps gaveUpAt and the entry is never due again', () => {
+  const e = ledger.addPendingReply(entry({ hash: 'h1' }));
+  expect(e).toMatchObject({ attempts: 0, gaveUpAt: null, hash: 'h1' });
+  let last;
+  for (let i = 1; i < ledger.MAX_DELIVERY_ATTEMPTS; i++) {
+    last = ledger.markReplyDelivered(e.id, { version: '0.142.0', result: { ok: false, error: `fail ${i}` } });
+    expect(last).toMatchObject({ attempts: i, gaveUpAt: null, lastError: `fail ${i}` });
+    expect(ledger.listDueReplies('0.142.0').map((x) => x.id)).toEqual([e.id]);
+  }
+  last = ledger.markReplyDelivered(e.id, { version: '0.142.0', result: { ok: false, error: 'fail 24' } });
+  expect(ledger.MAX_DELIVERY_ATTEMPTS).toBe(24);
+  expect(last).toMatchObject({ attempts: 24, lastError: 'fail 24', deliveredAt: null });
+  expect(last.gaveUpAt).toEqual(expect.any(String));
+  expect(ledger.listDueReplies('0.142.0')).toEqual([]);
+  expect(ledger.listDueReplies('9.0.0')).toEqual([]);
+});
+
+test('listPendingForThread returns undelivered, not-given-up entries of that thread only', () => {
+  const a = ledger.addPendingReply(entry({ hash: 'ha' }));
+  const b = ledger.addPendingReply(entry({ hash: 'hb' }));
+  ledger.addPendingReply(entry({ yId: 'other', hash: 'ha' }));
+  ledger.markReplyDelivered(b.id, { version: '0.142.0', result: { ok: true } });
+  expect(ledger.listPendingForThread('/p/b', 'epic-y').map((x) => x.id)).toEqual([a.id]);
+});

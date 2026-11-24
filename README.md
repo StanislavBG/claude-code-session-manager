@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->40<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->46<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -66,57 +66,57 @@ A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind 
 
 ### Agents, Missions and macros
 
-| Feature | What it does | Why it helps | Where |
-| --- | --- | --- | --- |
-| Agents library | Lists the personas on this machine. You can edit them. | You see each agent's role in one place. | Agents |
-| Macros | A macro saves an agent, a Mission and a prompt. One press starts one new session. | You can repeat common work fast. | Sessions |
-| Context packs | A pack adds a plugin and rules to one session. | A session gets extra skills only when it needs them. | New session form |
+| Feature | What it does | Where |
+| --- | --- | --- |
+| Agents library | Lists the personas on this machine. You can edit them. | Agents |
+| Macros | A macro saves an agent, a Mission and a prompt. One press starts one new session. | Sessions |
+| Context packs | A pack adds a plugin and rules to one session. | New session form |
 
 ### Claude Code settings
 
-| Feature | What it does | Why it helps | Where |
-| --- | --- | --- | --- |
-| CLAUDE.md | Edits your `~/.claude/CLAUDE.md`. | You set rules for every session. | CLAUDE.md |
-| Claude config | Shows one project's `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, skills and memory folder. | You see what Claude loads for that repo. | Claude config |
-| Settings | Edits `settings.json` for each scope. It shows which scope wins. | You know which value is live. | Settings |
-| Hooks | Edits hooks. You can test-fire one. | You can check a hook before you rely on it. | Settings |
-| Extensions | Lists skills, MCP servers and plugins. | You see what is installed. | Extensions |
+| Feature | What it does | Where |
+| --- | --- | --- |
+| CLAUDE.md | Edits your `~/.claude/CLAUDE.md`. | CLAUDE.md |
+| Claude config | Shows one project's `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, skills and memory folder. | Claude config |
+| Settings | Edits `settings.json` for each scope. It shows which scope wins. | Settings |
+| Hooks | Edits hooks. You can test-fire one. | Settings |
+| Extensions | Lists skills, MCP servers and plugins. | Extensions |
 
 ### Project Home
 
-| Feature | What it does | Why it helps | Where |
-| --- | --- | --- | --- |
-| Pages | Shows pages about the project. | New people learn the project fast. | Project Home |
-| Videos | Shows short demo videos. | You can show what the project does. | Project Home |
-| Competitor matrix | Compares the project with others, feature by feature. | You see where you lead and where you lag. | Project Home |
-| Video character | A saved look for the people in demo videos. | Videos look the same over time. | Project Home |
-| Written by agents | Agents write all of these through MCP tools. | You do not have to write them by hand. | MCP tools |
+| Feature | What it does | Where |
+| --- | --- | --- |
+| Pages | Shows pages about the project. | Project Home |
+| Videos | Shows short demo videos. | Project Home |
+| Competitor matrix | Compares the project with others, feature by feature. | Project Home |
+| Video character | A saved look for the people in demo videos. | Project Home |
+| Written by agents | Agents write all of these through MCP tools. | MCP tools |
 
 ### Across projects
 
-| Feature | What it does | Why it helps | Where |
-| --- | --- | --- | --- |
-| Cross-project feedback | An agent sends a finding to another repo on this machine. It lands there as a `proposed` session. | A bug gets fixed in the repo that owns it. | `/send-feedback` |
-| Feedback to the maker | You send feedback about the app. | The maker hears what is wrong. | Feedback panel |
+| Feature | What it does | Where |
+| --- | --- | --- |
+| Cross-project feedback | An agent sends a finding to another repo on this machine. It lands there as a `proposed` session. | `/send-feedback` |
+| Feedback to the maker | You send feedback about the app. | Feedback panel |
 
 ### See what is going on
 
-| Feature | What it does | Why it helps | Where |
-| --- | --- | --- | --- |
-| Dashboard | Shows every project and every active session on this machine. | You see all work in one place. | Dashboard |
-| Usage meters | Show how much of your plan's limits you used. | You know when work will slow down. | Dashboard |
-| History | Shows spend, tokens and time across all projects. | You see where your usage goes. | History |
-| File Explorer | Browse and edit files. | You can fix a file without a second app. | File Explorer |
+| Feature | What it does | Where |
+| --- | --- | --- |
+| Dashboard | Shows every project and every active session on this machine. | Dashboard |
+| Usage meters | Show how much of your plan's limits you used. | Dashboard |
+| History | Shows spend, tokens and time across all projects. | History |
+| File Explorer | Browse and edit files. | File Explorer |
 
 ### Input and remote
 
-| Feature | What it does | Why it helps | Where |
-| --- | --- | --- | --- |
-| Voice input | Turns speech into text on your machine. Nothing leaves it. | You can talk instead of type. | App Settings |
-| Recording light | A light shows on top of every screen while the mic is on. | You always know when the mic is on. | Top of window |
-| Phone remote | Drive the app from your phone through the bilko.run relay. | You can check work when you are away. | App Settings |
-| Simple mode | `--simple` opens one plain terminal. | Use it when you want just a terminal. | Launch flag |
-| Command palette | `Cmd-K` or `Ctrl-K` opens a list of commands. | You can run any command from the keys. | Anywhere |
+| Feature | What it does | Where |
+| --- | --- | --- |
+| Voice input | Turns speech into text on your machine. Nothing leaves it. | App Settings |
+| Recording light | A light shows on top of every screen while the mic is on. | Top of window |
+| Phone remote | Drive the app from your phone through the bilko.run relay. | App Settings |
+| Simple mode | `--simple` opens one plain terminal. | Launch flag |
+| Command palette | `Cmd-K` or `Ctrl-K` opens a list of commands. | Anywhere |
 
 ## Headless surface (for agents)
 
@@ -183,7 +183,13 @@ Tools:
 | `project_video_outcome_write` | project-home | `videoId`, `outcome`, `text` | Record that a video run ended with no video on purpose. |
 | `customer_feedback_list` | customer-feedback | — | List feedback that users sent to the owner's inbox. |
 | `customer_feedback_set_status` | customer-feedback | `id`, `status` | Set the status of one feedback item, with an optional note. |
+| `customer_feedback_get` | customer-feedback | `id`, `source` | Read one website feedback report in full, with its image paths. |
 | `customer_feedback_submit` | customer-feedback | `goal`, `description`, `tag` | Send feedback about Session Manager to its maintainers. |
+| `feedback_widget_create` | feedback-widget | `label`, `allowedOrigins` | Make a feedback widget for a website and get its snippet. |
+| `feedback_widget_list` | feedback-widget | — | List this project's website feedback widgets. |
+| `feedback_widget_update` | feedback-widget | `boxId` | Change a feedback widget label, sites, or pause it. |
+| `feedback_widget_delete` | feedback-widget | `boxId` | Delete a website feedback widget for good. |
+| `feedback_widget_snippet` | feedback-widget | `boxId` | Get the one-line snippet for a feedback widget. |
 | `macro_list` | macros | — | List this project's saved one-click macros. |
 | `macro_save` | macros | `label`, `agentName`, `tag`, `prompt` | Create or change a saved one-click macro (agent, mission, prompt). |
 | `macro_delete` | macros | `id` | Delete one saved macro. |

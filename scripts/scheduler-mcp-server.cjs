@@ -1959,7 +1959,10 @@ async function handleCallTool(request) {
         const siteQs = new URLSearchParams({ cwd: resolveCwdArg(args) });
         const siteResult = await adminRequest('GET', `/admin/site-feedback/inbox?${siteQs.toString()}`);
         if (siteResult?.ok === false) return errorResult(siteResult.error ?? 'customer_feedback_list failed');
-        return { content: [{ type: 'text', text: JSON.stringify({ ...siteResult, source: 'site', label: SITE_FEEDBACK_LABEL }) }] };
+        const siteItems = Array.isArray(siteResult?.items)
+          ? siteResult.items.map((item) => (item && typeof item === 'object' ? { id: item.hostId, ...item } : item))
+          : siteResult?.items;
+        return { content: [{ type: 'text', text: JSON.stringify({ ...siteResult, items: siteItems, source: 'site', label: SITE_FEEDBACK_LABEL }) }] };
       }
       const qs = new URLSearchParams();
       if (!args || args.pull !== false) qs.set('pull', '1');

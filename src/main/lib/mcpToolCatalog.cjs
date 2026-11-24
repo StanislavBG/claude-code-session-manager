@@ -580,7 +580,7 @@ const MCP_TOOL_CATALOG = [
     whenToUse: 'Use to inspect what customers have submitted and each item\'s status. `source` picks the inbox: '
       + "'app' (the default) is feedback about Session Manager from the owner's inbox; `pull` defaults to true "
       + '(fetch new items first); pass `includeHidden: true` to include moderated-away items. '
-      + "`source: 'site'` lists this project's website-widget items (FB-XXXXX ids) instead; `cwd` picks the project "
+      + "`source: 'site'` lists this project's website-widget items instead (each item's `id`, FB-XXXXX, is what customer_feedback_get and customer_feedback_set_status take); `cwd` picks the project "
       + "and defaults to the session's own project root. Read one site item in full with customer_feedback_get.",
     whenNotToUse: 'WHEN NOT TO USE IT: it is read-only. The app inbox only works on the owner\'s machine (it needs the owner token). '
       + 'Turning an item into an Epic is done by the human via Open as Epic in the Feedback panel — there is no tool '

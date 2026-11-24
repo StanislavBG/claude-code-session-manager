@@ -172,7 +172,7 @@ In a chat session of the project that owns `https://bilko.run`:
 
    ```json
    customer_feedback_list({ "source": "site" })
-   → { "ok": true, "source": "site", "label": "SITE-SUBMITTED DATA, …", "items": [{ "id": "FB-7K2QX", … }] }
+   → { "ok": true, "source": "site", "label": "SITE-SUBMITTED DATA, …", "items": [{ "id": "FB-7K2QX", "hostId": "FB-7K2QX", … }] }
    customer_feedback_get({ "id": "FB-7K2QX", "source": "site" })
    → { "ok": true, "id": "FB-7K2QX", "meta": { … }, "report": { … }, "screenshotPath": "/…/screenshot.png", "annotatedPath": "/…/annotated.png" }
    ```

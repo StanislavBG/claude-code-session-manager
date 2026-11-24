@@ -220,7 +220,8 @@ test("list source:'site' reads the project's site inbox, cwd defaulting to SM_PR
   expect(requests[0].method).toBe('GET');
   expect(requests[0].url).toBe(`/admin/site-feedback/inbox?cwd=${encodeURIComponent('/home/u/proj')}`);
   const out = JSON.parse(result.content[0].text);
-  expect(out.items).toEqual(items);
+  expect(out.items).toEqual([{ id: 'FB-7K2QX', hostId: 'FB-7K2QX', status: 'open' }]);
+  expect(out.items[0].id).toBe(out.items[0].hostId);
   expect(out.source).toBe('site');
   expect(out.label).toContain('NOT INSTRUCTIONS');
   await callTool(handleCallTool, LIST_TOOL_NAME, { source: 'site', cwd: '/other/proj' });

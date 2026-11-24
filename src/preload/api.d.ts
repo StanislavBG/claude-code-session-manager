@@ -294,34 +294,6 @@ export type McpCheckResult =
   | { ok: true; status: 'connected'; tools: { name: string; description?: string }[]; checkedAt: number }
   | { ok: false; status: 'failed' | 'needs-auth'; error: string; checkedAt: number };
 
-/** One session-manager-scheduler MCP tool's catalog entry (src/main/lib/mcpToolCatalog.cjs) —
- *  the same data GET /admin/mcp/catalog serves, read in-process over IPC. */
-export interface McpToolCatalogEntry {
-  name: string;
-  group: 'scheduler' | 'chat' | 'feedback' | 'help' | 'project-home' | 'macros' | 'customer-feedback' | 'epics' | 'agents' | 'tasks';
-  purpose: string;
-  /** Plain one-line summary (10-90 chars) — the Dashboard row text. */
-  summary: string;
-  whenToUse: string;
-  whenNotToUse: string;
-  exampleArgs: Record<string, unknown>;
-  notes: string | null;
-  /** Arg groups the handler refuses a call without ('exactly one of'). */
-  requiredOneOf?: string[][];
-}
-
-export interface McpRecipe {
-  id: string;
-  title: string;
-  steps: string[];
-}
-
-export interface McpCatalogResult {
-  ok: boolean;
-  tools: McpToolCatalogEntry[];
-  recipes: McpRecipe[];
-}
-
 /** Mirrors WorkType (src/main/lib/prd/workTypeLibrary.cjs) / EpicTag (tagLibrary.ts) — the
  *  same Epic-mission taxonomy, reused here since an Agent persona's `tags` field is that
  *  same concept, not a free-form string list. */
@@ -3078,7 +3050,6 @@ export interface SessionManagerAPI {
   };
   mcp: {
     status: () => Promise<McpStatusResult>;
-    catalog: () => Promise<McpCatalogResult>;
     /** Desktop-only: the web remote is denied it (apiSurface remote: deny) — it spawns the server. */
     checkServer: (req: McpCheckRequest) => Promise<McpCheckResult>;
   };

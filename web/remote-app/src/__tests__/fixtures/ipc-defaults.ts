@@ -34,7 +34,6 @@ export function ipcDefaults(ctx: IpcDefaultsCtx): Record<string, unknown> {
     'app:git-branch': null, // string | null
     'app:home-self-check': { ok: true },
     'app:is-e2e': false,
-    'mcp:catalog': { ok: true, tools: [], recipes: [] },
     'voice:get-turn-detector': { enabled: false, mode: 'off', schemaVersion: 1 },
     'transcript:subscribe': { ok: true, path: null },
     'transcript:unsubscribe': { ok: true },

@@ -91,7 +91,6 @@ const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, i
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const upgradeDrain = require('./lib/scheduler/upgradeDrain.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
-const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const crossProjectFeedback = require('./lib/feedback-remote/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
@@ -644,11 +643,6 @@ ipcMain.handle('mcp:check-server', validated(schemas.mcpCheckServer, async (p) =
   if (p.source === 'project') configMgr.validatePath(p.cwd);
   return checkConfiguredMcpServer(p, { clientVersion: app.getVersion() });
 }));
-
-// The Dashboard's "Agent tools" section (HomeAgentTools): the same catalog data
-// GET /admin/mcp/catalog serves to external callers, read in-process here so
-// the renderer never makes a direct HTTP call. Static data, no cwd needed.
-ipcMain.handle('mcp:catalog', () => ({ ok: true, tools: MCP_TOOL_CATALOG, recipes: MCP_RECIPES }));
 
 // Macro library (macroLibrary.cjs): global machine-local one-click sidebar
 // macros (agent + tag + prompt). Store path is fixed in-module; the renderer

@@ -398,13 +398,6 @@
  },
  {
   "ns": "mcp",
-  "method": "catalog",
-  "channel": "mcp:catalog",
-  "kind": "invoke",
-  "remote": "mutate"
- },
- {
-  "ns": "mcp",
   "method": "checkServer",
   "channel": "mcp:check-server",
   "kind": "invoke",

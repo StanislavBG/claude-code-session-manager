@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v28 -->
+<!-- PRD_AUTHORING.md v29 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -253,4 +253,5 @@ Before queueing a new PRD, verify each of these:
 - [ ] **No interactive AC:** no criterion asks to launch the app, click through, capture a screenshot, run under xvfb or open a browser. Why: a headless run stalls on a rendered frame and is SIGTERM'd uncommitted; recommend manual visual confirmation in the report instead.
 - [ ] **Contract consumers gated:** a PRD that changes a return shape, IPC payload or remote contract greps `tests/` (and `src/**/__tests__`) for every spec using it and puts each in its gate and files. Why: scoped gates let other specs go red unseen until the release gate.
 - [ ] **Doc links gated:** a PRD that adds, moves or renames a markdown file runs the project's doc-link check in its gate when the project has one (in session-manager: `timeout 120 npm run lint:docs`). Why: PRD kit-cast-playbook added `src/main/lib/demo-video-kit/cast.md` with only the kit tests in its gate, so the orphan doc landed on 2026-11-23 and turned lint:docs red for the next PRD.
+- [ ] **Size budgets gated:** a PRD that edits a file the project caps by size runs that cap's check in its gate when the project has one (in session-manager: README.md gates `timeout 120 npm run lint:readme`). Why: PRD 4105-web-remote-label-leftovers edited README.md with only lint:docs and typecheck in its gate, so README.md reached 24,026 bytes on 2026-11-24, over its cap, and npm run lint turned red for every later PRD.
 - [ ] **Gate purity:** a gate command must not create or modify tracked files; outputs go to the per-gate TMPDIR or a gitignored path. Why: a dirtied tree fails the clean-tree check.

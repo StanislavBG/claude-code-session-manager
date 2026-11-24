@@ -707,7 +707,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const lastErrorId = lastTurn?.role === 'error' ? lastTurn.id : null
   useEffect(() => {
     if (!webRemote || !lastErrorId) return
-    toast.info('This message could not be sent from the web UI. Turn on remote control on the computer itself (Settings → Phone remote) to send messages and run sessions from here.')
+    toast.info('This message could not be sent from the web UI. Turn on remote control on the computer itself (Settings → Web remote) to send messages and run sessions from here.')
   }, [webRemote, lastErrorId])
   const setAttached = useEpicTerminal((s) => s.setAttached)
 

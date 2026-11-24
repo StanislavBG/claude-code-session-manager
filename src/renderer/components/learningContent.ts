@@ -412,7 +412,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'app-settings': {
     headline: 'App Settings — Session Manager\'s own preferences',
     intro:
-      'Everything here configures this app, not Claude Code: voice input, appearance, telemetry, phone remote, updates and retention, startup behavior, and a map of where the app stores its data. Claude Code\'s own settings.json lives on the Settings page.',
+      'Everything here configures this app, not Claude Code: voice input, appearance, telemetry, web remote, updates and retention, startup behavior, and a map of where the app stores its data. Claude Code\'s own settings.json lives on the Settings page.',
     sections: [
       {
         title: 'Tabs',

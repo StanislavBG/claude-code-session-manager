@@ -252,11 +252,15 @@ test.afterAll(async () => {
 
 test.use({ viewport: VIEWPORT, deviceScaleFactor: 1 });
 
-/** Screenshots until two consecutive frames match (timers and transitions settled), then saves. */
-async function settledShot(page: Page, out: string): Promise<void> {
+/**
+ * Screenshots until two consecutive frames match (timers and transitions settled), then saves.
+ * `animations: 'disabled'` (the default) fast-forwards finite CSS animations to their end; a scene
+ * that pins an animation mid-way itself (the toast countdown) passes 'allow'.
+ */
+async function settledShot(page: Page, out: string, animations: 'disabled' | 'allow' = 'disabled'): Promise<void> {
   let prev: Buffer | null = null;
   for (let i = 0; i < 20; i++) {
-    const buf = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+    const buf = await page.screenshot({ animations, caret: 'hide' });
     if (prev && prev.equals(buf)) {
       await mkdir(dirname(out), { recursive: true });
       await writeFile(out, buf);
@@ -453,6 +457,51 @@ async function send(page: Page): Promise<void> {
   await hostLocator(page).locator('[data-part="send"]').click();
 }
 
+/**
+ * The design's toast frame (1m) draws the countdown bar at 58% left, i.e. 42% of the 6 s countdown
+ * elapsed. The widget's bar is a CSS animation, so pin it at that same elapsed time.
+ */
+const TOAST_COUNTDOWN_MS = 6000; // TOAST_SEND_DELAY_MS in src/ui/Receipt.tsx (a .tsx the spec does not import)
+const TOAST_ELAPSED_MS = Math.round(TOAST_COUNTDOWN_MS * 0.42);
+
+/** Pauses the toast countdown animation at `ms` elapsed. */
+async function pinToastCountdown(page: Page, ms: number): Promise<void> {
+  await page.evaluate((t) => {
+    const fill = document.getElementById('feedback-widget-host')?.shadowRoot?.querySelector('[data-part="countdown"]');
+    const anims = fill?.getAnimations() ?? [];
+    if (anims.length === 0) throw new Error('toast countdown has no running animation');
+    for (const a of anims) {
+      a.pause();
+      a.currentTime = t;
+    }
+  }, ms);
+}
+
+/**
+ * The design's sending frames show the upload at 64%. The held-open request never reports real
+ * upload progress, so the widget's XHR reports 64 of 100 bytes as soon as it is sent.
+ */
+const SENDING_PROGRESS = 64;
+
+async function stubUploadProgress(page: Page, pct: number): Promise<void> {
+  await page.evaluate((p) => {
+    const send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
+      send.call(this, body);
+      const up = this.upload;
+      setTimeout(() => up.dispatchEvent(new ProgressEvent('progress', { lengthComputable: true, loaded: p, total: 100 })), 0);
+    };
+  }, pct);
+}
+
+/** Blurs whatever has focus inside the widget (a focused tool shows its tooltip). */
+async function blurWidget(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const el = document.getElementById('feedback-widget-host')?.shadowRoot?.activeElement;
+    if (el instanceof HTMLElement) el.blur();
+  });
+}
+
 const accept = (page: Page) =>
   page.route('**/host/submit', (route) =>
     route.fulfill({ status: 201, contentType: 'application/json', body: '{"id":"FB-1042"}' }),
@@ -476,7 +525,16 @@ const DRIVERS: Record<SceneId, (page: Page, cfg: Cfg) => Promise<string | null>>
     await launcher.hover();
     return null;
   },
-  'annotate-empty': async (page) => openAnnotate(page),
+  'annotate-empty': async (page, cfg) => {
+    const r = await openAnnotate(page);
+    if (r) return r;
+    // Docked opens with the armed tool focused, which shows its tooltip; the design frame (1f) has none.
+    if (cfg.flow === 'docked') {
+      await blurWidget(page);
+      await expect(toolbarOf(page).getByRole('tooltip')).toHaveCount(0);
+    }
+    return null;
+  },
   annotate: async (page, cfg) => {
     const r = await openAnnotate(page);
     if (r) return r;
@@ -518,8 +576,10 @@ const DRIVERS: Record<SceneId, (page: Page, cfg: Cfg) => Promise<string | null>>
     await page.route('**/host/submit', () => new Promise<void>(() => undefined));
     const r = await openDescribe(page, cfg);
     if (r) return r;
+    await stubUploadProgress(page, SENDING_PROGRESS);
     await send(page);
     await expect(hostLocator(page).locator('[data-part="progress"]')).toHaveCount(1);
+    await expect(hostLocator(page).locator('[data-part="send-label"]')).toHaveText(`Sending… ${SENDING_PROGRESS}%`);
     return null;
   },
   error: async (page, cfg) => {
@@ -567,7 +627,11 @@ if (!DESIGN_RUN) test.describe('widget shots (built widget on the stand-in host)
         ).toBeVisible({ timeout: 10_000 });
       }
       await waitForFonts(page);
-      await settledShot(page, join(shotsDir, 'widget', `${shot.id}.png`));
+      const toast = configOf(shot).success === 'toast' && shot.scene === 'sent';
+      if (toast) await pinToastCountdown(page, TOAST_ELAPSED_MS);
+      await settledShot(page, join(shotsDir, 'widget', `${shot.id}.png`), toast ? 'allow' : 'disabled');
+      // The shot must land inside the 6 s countdown, before the toast sends and dismisses itself.
+      if (toast) await expect(hostLocator(page).locator('[data-part="toast"]')).toBeVisible();
     });
   }
 });

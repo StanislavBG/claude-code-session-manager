@@ -43,6 +43,10 @@ Build the handoff's **defaults** first (launcher `corner`, flow `annotate`, tool
    2026-11-23). It is copied into `web/remote-app/dist/widget/v1/` at build time, and a widget release is
    published from a detached worktree at the last published phone commit plus the widget, so unreleased
    phone-remote features never ship with it.
+7. **Label contrast (WCAG AA).** The panel's `optional` label, the marks count and the `ALWAYS` labels
+   use ink-3 (`#5d5648`, 6.4:1 on paper) instead of the handoff's ink-4 (`#9c937f`): the axe-core scan
+   found ink-4 on paper at 2.68:1, below AA's 4.5:1 for text. Widget shots show these three labels
+   darker than the design PNGs; that is this change, not drift.
 
 ## First live site: Three Winds (`~/Projects/3PMahjong`)
 

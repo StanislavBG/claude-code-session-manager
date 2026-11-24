@@ -572,8 +572,8 @@ describe('EpicDetail (PRD 827)', () => {
   })
 
   it('renders no Continue-in-a-fresh-session button for an active or a completed Epic', async () => {
-    // Built by concatenation so the removed testid's literal stays out of the tree (repo-wide grep guard).
-    const removedTestId = ['epic', 'continue', 'fresh'].join('-')
+    // Pins the removal of the 'Continue in a fresh session' header button.
+    const removedTestId = 'epic-continue-fresh'
     installWindowApiMock()
     const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const active = usePromptSessions.getState().approveProposed(proposed.id)!

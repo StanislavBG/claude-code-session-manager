@@ -215,8 +215,7 @@ export interface EpicStats {
   contextLarge: boolean
 }
 
-/** Context size at which every further turn is costly enough that new work is
- *  cheaper in a fresh session. */
+/** Context size at which every further turn is costly enough that new work belongs in a New Session. */
 export const EPIC_CONTEXT_WARN_TOKENS = 200_000
 
 /**

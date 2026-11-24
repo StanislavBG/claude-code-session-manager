@@ -55,8 +55,8 @@ describe('auditLogAppend schema', () => {
     expect(schemas.auditLogAppend.safeParse({ ...valid, source: '' }).success).toBe(false)
   })
 
-  // Built by concatenation so the removed kind's literal stays out of the tree (repo-wide grep guard).
-  const removedContinueKind = ['epic', 'continue'].join('_')
+  // Pins the removal of the 'Continue in a fresh session' audit kind.
+  const removedContinueKind = 'epic_continue'
 
   it('rejects the removed Continue-in-a-fresh-session kind', () => {
     expect(schemas.auditLogAppend.safeParse({ ...valid, kind: removedContinueKind }).success).toBe(false)

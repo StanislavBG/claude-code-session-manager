@@ -1,0 +1,26 @@
+{
+  "name": "@session-manager/feedback-widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Embeddable feedback widget (feedback.js) — Preact inside a Shadow DOM, one IIFE file",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "modern-screenshot": "^4.7.0",
+    "preact": "^11.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3",
+    "vitest": "4.1.6"
+  }
+}

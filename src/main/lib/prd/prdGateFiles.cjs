@@ -146,6 +146,40 @@ function validateGate(gate) {
 }
 
 /**
+ * The one per-entry `files` rule set, shared by validateFiles (create time)
+ * and parseFilesSection (read back from any PRD body, including ones written
+ * raw outside the API). `entry` must already be trimmed and non-empty.
+ *
+ * @param {string} entry
+ * @returns {{ok:true, path:string}|{ok:false, reason:string}}
+ *   path has every leading `./` stripped.
+ */
+function isValidFilesEntry(entry) {
+  if (typeof entry !== 'string' || entry.length === 0) return { ok: false, reason: 'must not be empty.' };
+  if (entry.length > FILES_ENTRY_MAX_CHARS) return { ok: false, reason: `must be at most ${FILES_ENTRY_MAX_CHARS} chars.` };
+  if (/[\r\n]/.test(entry)) return { ok: false, reason: 'must not contain a newline.' };
+  if (FILES_FOREIGN_WHITESPACE_RE.test(entry)) {
+    return { ok: false, reason: 'has a character that is not a plain space (for example a tab, a no-break space, or a line break). Retype it.' };
+  }
+  if (entry.includes('\\')) return { ok: false, reason: 'use "/" between folders, not "\\".' };
+  if (entry.includes('`')) return { ok: false, reason: 'must not contain a backtick.' };
+  if (entry.startsWith('-')) return { ok: false, reason: 'must not start with "-".' };
+  if (entry.startsWith('/') || entry.startsWith('~') || /^[A-Za-z]:/.test(entry)) {
+    return { ok: false, reason: 'must be repo-relative — absolute paths are not allowed.' };
+  }
+  if (entry.includes('*') || entry.includes('?')) return { ok: false, reason: 'must not contain "*" or "?" (no globs).' };
+
+  let normalized = entry;
+  while (normalized.startsWith('./')) normalized = normalized.slice(2);
+  if (normalized.length === 0) return { ok: false, reason: 'is empty after removing "./".' };
+  const segments = normalized.split('/');
+  if (segments.includes('..')) return { ok: false, reason: 'must not contain a ".." path segment.' };
+  if (segments.includes('.')) return { ok: false, reason: 'must not contain a "." path segment.' };
+  if (normalized.includes('//')) return { ok: false, reason: 'must not contain an empty path segment ("//").' };
+  return { ok: true, path: normalized };
+}
+
+/**
  * Validate a PRD's `files` field.
  *
  * @param {unknown} files
@@ -173,50 +207,11 @@ function validateFiles(files) {
     if (entry.length === 0) {
       return { ok: false, error: `files entry ${idx}: must not be empty.` };
     }
-    if (entry.length > FILES_ENTRY_MAX_CHARS) {
-      return { ok: false, error: entryError('files', idx, entry, `must be at most ${FILES_ENTRY_MAX_CHARS} chars.`) };
+    const checked = isValidFilesEntry(entry);
+    if (!checked.ok) {
+      return { ok: false, error: entryError('files', idx, entry, checked.reason) };
     }
-    if (/[\r\n]/.test(entry)) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain a newline.') };
-    }
-    if (FILES_FOREIGN_WHITESPACE_RE.test(entry)) {
-      return {
-        ok: false,
-        error: entryError('files', idx, entry, 'has a character that is not a plain space (for example a tab, a no-break space, or a line break). Retype it.'),
-      };
-    }
-    if (entry.includes('\\')) {
-      return { ok: false, error: entryError('files', idx, entry, 'use "/" between folders, not "\\".') };
-    }
-    if (entry.includes('`')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain a backtick.') };
-    }
-    if (entry.startsWith('-')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not start with "-".') };
-    }
-    if (entry.startsWith('/') || entry.startsWith('~') || /^[A-Za-z]:/.test(entry)) {
-      return { ok: false, error: entryError('files', idx, entry, 'must be repo-relative — absolute paths are not allowed.') };
-    }
-    if (entry.includes('*') || entry.includes('?')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain "*" or "?" (no globs).') };
-    }
-
-    let normalized = entry;
-    while (normalized.startsWith('./')) normalized = normalized.slice(2);
-    if (normalized.length === 0) {
-      return { ok: false, error: entryError('files', idx, entry, 'is empty after removing "./".') };
-    }
-    const segments = normalized.split('/');
-    if (segments.includes('..')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain a ".." path segment.') };
-    }
-    if (segments.includes('.')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain a "." path segment.') };
-    }
-    if (normalized.includes('//')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain an empty path segment ("//").') };
-    }
-
+    const normalized = checked.path;
     if (!seen.has(normalized)) {
       seen.add(normalized);
       out.push(normalized);
@@ -247,8 +242,9 @@ function renderFilesSection(files) {
 /**
  * Inverse of renderFilesSection: read the bullet entries under the `# Files`
  * heading (up to the next top-level heading) back out of a PRD body. Returns
- * [] when there is no such section. Strips only the renderer's `- ` prefix
- * (plus tolerated wrapping backticks); prose lines are ignored.
+ * [] when there is no such section; never throws. Each bullet keeps only a
+ * path that passes isValidFilesEntry (see parseFilesEntry) — a trailing note
+ * is cut off, prose and invalid bullets are dropped, duplicates removed.
  *
  * @param {string} body
  * @returns {string[]}
@@ -266,12 +262,40 @@ function parseFilesSection(body) {
     if (!inFence && /^#\s/.test(line)) break;
     const m = line.match(/^[-*]\s+(.+?)\s*$/);
     if (!m) continue;
-    let entry = m[1];
-    const tick = entry.match(/^`([^`]+)`$/);
-    if (tick) entry = tick[1];
+    const entry = parseFilesEntry(m[1]);
     if (entry && !out.includes(entry)) out.push(entry);
   }
   return out;
+}
+
+const unwrapTicks = (s) => { const t = s.match(/^`([^`]+)`$/); return (t ? t[1] : s).trim(); };
+
+/**
+ * One `# Files` bullet's text -> its path, or null when it names no valid
+ * path. Order: a leading path followed by a note — "path (note)",
+ * "path - note", "path — note" (path optionally backticked) — keeps just the
+ * path; otherwise the whole (unwrapped) entry, when it passes
+ * isValidFilesEntry. A whole entry with a space must still look like a path
+ * (contain "/", not end in sentence punctuation) — the API allows spaced
+ * paths, but a spaced entry with neither is prose.
+ *
+ * @param {string} raw
+ * @returns {string|null}
+ */
+function parseFilesEntry(raw) {
+  const text = unwrapTicks(String(raw).trim());
+  const noted = text.match(/^(.+?)\s+(?:\(|[-—](?:\s|$))/);
+  if (noted) {
+    const lead = unwrapTicks(noted[1]);
+    const checked = lead ? isValidFilesEntry(lead) : null;
+    if (checked && checked.ok) return checked.path;
+  }
+  const whole = text;
+  if (!whole) return null;
+  const checked = isValidFilesEntry(whole);
+  if (!checked.ok) return null;
+  if (/\s/.test(checked.path) && (!checked.path.includes('/') || /[.,:;!?)]$/.test(checked.path))) return null;
+  return checked.path;
 }
 
 /**

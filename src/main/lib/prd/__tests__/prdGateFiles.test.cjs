@@ -9,7 +9,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { validateGate, validateFiles, renderGateSection } = require('../prdGateFiles.cjs');
+const { validateGate, validateFiles, renderGateSection, renderFilesSection, parseFilesSection } = require('../prdGateFiles.cjs');
 const { resolveGate, parseChain } = require('../../scheduler/definitionOfDone.cjs');
 
 // Brief's exact 8 "accepts, with no warning" gate strings.
@@ -135,4 +135,57 @@ test('round trip: renderGateSection + resolveGate reproduces parseChain for ever
     assert.equal(resolved.source, 'explicit', entry);
     assert.deepEqual(resolved.sequence, parseChain(entry), entry);
   }
+});
+
+// parseFilesSection keeps only entries that pass validateFiles' per-path
+// rules — a raw-written PRD (auto-fix investigator) must not turn a bullet's
+// trailing note or a prose bullet into a file name.
+function filesBody(bullets) {
+  return ['# Goal', '', 'x', '', '# Files', '', 'Change only these files.', '', ...bullets, '', '# Gate', '', '- not/a/file.cjs', ''].join('\n');
+}
+
+test('parseFilesSection keeps a plain path and a backticked path', () => {
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs', '- `src/b.cjs`'])), ['src/a.cjs', 'src/b.cjs']);
+});
+
+test('parseFilesSection keeps only the path from "path (note)", "path — note" and "path - note"', () => {
+  assert.deepEqual(
+    parseFilesSection(filesBody([
+      '- src/main/lib/epic/artifactIpc.cjs (JSDoc types only)',
+      '- src/c.cjs — the helper',
+      '- `src/d.cjs` - tests',
+      '- `src/e.cjs (note)`',
+    ])),
+    ['src/main/lib/epic/artifactIpc.cjs', 'src/c.cjs', 'src/d.cjs', 'src/e.cjs'],
+  );
+});
+
+test('parseFilesSection drops prose and invalid entries, never throws', () => {
+  assert.deepEqual(
+    parseFilesSection(filesBody([
+      '- Also update the docs if anything changes.',
+      '- none, docs only',
+      '- /abs/path.cjs',
+      '- ../outside.cjs',
+      '- src/*.cjs',
+      '- (see notes)',
+      '- — nothing',
+      '- src/ok.cjs',
+    ])),
+    ['src/ok.cjs'],
+  );
+  assert.doesNotThrow(() => parseFilesSection(filesBody(['- ', '-', '* `', '- ``'])));
+  assert.deepEqual(parseFilesSection(null), []);
+});
+
+test('parseFilesSection keeps a folder ending in "/" and removes duplicates', () => {
+  assert.deepEqual(
+    parseFilesSection(filesBody(['- src/main/', '- src/a.cjs', '- `src/a.cjs`', '- ./src/a.cjs', '- src/a.cjs (again)'])),
+    ['src/main/', 'src/a.cjs'],
+  );
+});
+
+test('parseFilesSection round-trips renderFilesSection output', () => {
+  const files = ['src/a.cjs', 'src/main/', 'docs/My Notes/readme.md'];
+  assert.deepEqual(parseFilesSection(renderFilesSection(files).join('\n')), files);
 });

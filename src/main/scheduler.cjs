@@ -9066,6 +9066,21 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           } else {
             delete s.jobs[i2].uncommittedSnapshot;
           }
+          // Persist this run's artifact evidence, bound to its runId, so the
+          // stale needs_review rescan (reverifyNeedsReview) can verify a
+          // worktree-only artifact after the worktree is gone. Cleared when
+          // this run captured none so an older run's evidence never leaks.
+          if (artifactEvidence) {
+            s.jobs[i2].artifactEvidence = {
+              runId,
+              ok: artifactEvidence.ok,
+              verified: artifactEvidence.verified,
+              paths: artifactEvidence.paths,
+              capturedAt: artifactEvidence.capturedAt,
+            };
+          } else {
+            delete s.jobs[i2].artifactEvidence;
+          }
           // Closed-set outcome taxonomy (issue #11 list A2) so a queue row
           // says WHY it ended without anyone opening the transcript.
           s.jobs[i2].terminalReason = launchFailure.deriveTerminalReason({
@@ -12255,6 +12270,24 @@ const PARK_ERRORS = Object.freeze({
   autofix_plan_unqueued: 'auto-fix investigation produced a fix plan that never reached the queue — parked',
 });
 
+/**
+ * The artifact evidence persisted on a job row by spawnJob's finalize, but only
+ * when it was captured for `runId` — the run the rescan is re-verifying.
+ * Never throws.
+ * @param {object} job
+ * @param {string} runId
+ * @returns {object|null}
+ */
+function rescanArtifactEvidence(job, runId) {
+  try {
+    const ev = job?.artifactEvidence;
+    if (!ev || typeof ev !== 'object' || Array.isArray(ev)) return null;
+    return ev.runId === runId ? ev : null;
+  } catch {
+    return null;
+  }
+}
+
 async function reverifyNeedsReview() {
   const snap = await readQueue();
   // isGuardParkedWithoutAutoFix rows are NOT isRescanCandidate (their
@@ -12321,7 +12354,8 @@ async function reverifyNeedsReview() {
       }
       continue;
     }
-    const runDir = path.join(schedulerPaths.runsDir(), job.runId || reviewLadder.resolveRunId(job));
+    const rescanRunId = job.runId || reviewLadder.resolveRunId(job);
+    const runDir = path.join(schedulerPaths.runsDir(), rescanRunId);
     const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
     // Derive committedDuringRun from the recorded run window. The live
     // commit-guard uses gitTreeGuard.gitHead() (before/after HEAD diff); here the run is
@@ -12344,6 +12378,9 @@ async function reverifyNeedsReview() {
         committedDuringRun,
         allowPreSentinelHeal: true,
         priorLandedCommit,
+        // Evidence captured before this run's worktree was removed — only
+        // when it belongs to the run being re-verified.
+        artifactEvidence: rescanArtifactEvidence(job, rescanRunId),
         // job.landedCommit is THIS row's own last-run attribution (stamped by
         // spawnJob's finalize, survives resetJobFields) — the same
         // ground-truth-outranks-heuristics evidence spawnJob passes live,
@@ -14644,6 +14681,7 @@ queueOps.bindQueueAccess({
 
 module.exports = {
   PARK_ERRORS,
+  rescanArtifactEvidence,
   harvestJobArtifacts,
   jobArtifactRunId,
   applyDepHoldNotices,

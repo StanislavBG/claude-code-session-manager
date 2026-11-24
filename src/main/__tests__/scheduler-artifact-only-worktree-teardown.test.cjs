@@ -98,7 +98,7 @@ async function runCase(declared) {
     const investigationLogExists = fs.existsSync(path.join(runDir, `${slug}.investigation.log`));
     const jobCwd = fs.existsSync(cwdRecordPath) ? fs.readFileSync(cwdRecordPath, 'utf8') : null;
     const jobCwdExists = jobCwd ? fs.existsSync(jobCwd) : null;
-    return { row, investigationLogExists, projectCwd: fs.realpathSync(projectCwd), jobCwd, jobCwdExists };
+    return { row, runId, investigationLogExists, projectCwd: fs.realpathSync(projectCwd), jobCwd, jobCwdExists };
   } finally {
     fs.rmSync(projectCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });
@@ -141,6 +141,8 @@ test('(a) declared artifact-only PASS with the artifact only in the worktree com
   expect(r.row.verifierVerdict).toBe('pass_no_commit_artifact_verified');
   expect(hasNeedsReview(r.row)).toBe(false);
   expect(r.investigationLogExists).toBe(false);
+  expect(r.row.artifactEvidence?.ok).toBe(true);
+  expect(r.row.artifactEvidence?.runId).toBe(r.runId);
 }, 90_000);
 
 test('(b) undeclared no-commit PASS in a worktree still parks needs_review', async () => {
@@ -148,4 +150,5 @@ test('(b) undeclared no-commit PASS in a worktree still parks needs_review', asy
   expectRanInWorktree(r);
   expect(hasNeedsReview(r.row)).toBe(true);
   expect(r.row.verifierVerdict).not.toBe('pass_no_commit_artifact_verified');
+  expect(r.row.artifactEvidence).toBeUndefined();
 }, 90_000);

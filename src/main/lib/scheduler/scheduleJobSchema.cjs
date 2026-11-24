@@ -117,6 +117,15 @@ const ScheduleJobSchema = z
     quietLeaseDegraded: z.boolean().optional(),
     // Salvaged uncommitted diff patch path (PRD 1098).
     salvagePatch: z.string().nullable().optional(),
+    // Artifact evidence captured before the job worktree was removed, bound
+    // to the run that captured it (reverifyNeedsReview reuses it for that run only).
+    artifactEvidence: z.object({
+      runId: z.string(),
+      ok: z.boolean(),
+      verified: z.array(z.any()),
+      paths: z.array(z.string()),
+      capturedAt: z.string(),
+    }).passthrough().nullable().optional(),
     // Pin of a dead run's uncommitted checkout work (refs/sm-uncommitted/...), PRD 2892.
     uncommittedSnapshot: z.object({ sha: z.string(), ref: z.string() }).optional(),
     // Leftover-attribution fields: the newly-dirty paths a terminal run left

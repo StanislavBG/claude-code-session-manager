@@ -1,6 +1,17 @@
 /**
- * worktreeDeps.cjs — symlink the main checkout's gitignored top-level
+ * worktreeDeps.cjs — link the main checkout's gitignored top-level
  * dependency dirs (node_modules, .venv, venv) into a fresh worktree.
+ *
+ * node_modules is never linked whole: the worktree gets a REAL node_modules
+ * folder holding one symlink per entry of the main checkout's node_modules
+ * (packages, scope folders such as @types linked whole, and .bin; other dot
+ * entries — .vite, .cache, .package-lock.json — are not linked, so caches and
+ * npm's hidden lockfile stay worktree-local). Why: npm ci reads node_modules'
+ * entries and removes each one; through a whole-folder link that deletes the
+ * main checkout's packages (2026-11-24: a widget gate's
+ * `npm --prefix web/feedback-widget ci` emptied the main checkout's
+ * web/feedback-widget/node_modules). With per-entry links an install removes
+ * only links. .venv/venv keep the whole-folder link.
  *
  * `git worktree add` checks out tracked files only, so a job worktree has no
  * dependencies and executors park needs_review. A gitignore pattern like
@@ -41,11 +52,12 @@
  * NESTED_MAX_DEPTH segments deep (never under node_modules), at most
  * NESTED_MAX_PACKAGES of the eligible ones (main has `<dir>/node_modules`, it is
  * gitignored there, the worktree has none — filtered before the cap), the dir is
- * linked from the main checkout and `/<dir>/node_modules` goes to info/exclude
+ * built from per-entry links to the main checkout's (as above) and `/<dir>/node_modules` goes to info/exclude
  * after the link succeeds. Ineligible packages are not reported as skipped. pnpm projects skip this — their
  * offline install already builds every workspace node_modules per worktree.
  *
- * Never throws; failures land in `skipped` (nested entries as `<rel> (<reason>)`).
+ * Never throws; failures land in `skipped` (nested entries as `<rel> (<reason>)`);
+ * a failed node_modules build is removed again (links only, never their targets).
  */
 'use strict';
 
@@ -65,6 +77,30 @@ function isDir(p) {
 
 function exists(p) {
   try { fs.lstatSync(p); return true; } catch { return false; }
+}
+
+/** True for a node_modules entry that gets a link: anything not dot-prefixed, plus `.bin`. */
+function isLinkedModulesEntry(name) {
+  return !name.startsWith('.') || name === '.bin';
+}
+
+/**
+ * Create `dest` as a real directory holding one symlink per linked entry of `src` (a
+ * node_modules folder). Throws on failure after removing whatever it created at `dest`;
+ * removal unlinks links only — it never follows them into `src`.
+ */
+function linkModulesEntries(src, dest) {
+  fs.mkdirSync(dest);
+  try {
+    for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+      if (!isLinkedModulesEntry(e.name)) continue;
+      const target = path.join(src, e.name);
+      fs.symlinkSync(target, path.join(dest, e.name), isDir(target) ? 'dir' : 'file');
+    }
+  } catch (err) {
+    try { fs.rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ }
+    throw err;
+  }
 }
 
 async function isIgnored(cwd, name) {
@@ -222,12 +258,12 @@ async function nestedPackageDirs(worktreeCwd) {
 }
 
 /**
- * Link `<dir>/node_modules` for nested npm packages; pushes into linked/skipped. Never throws.
+ * Build `<dir>/node_modules` (per-entry links) for nested npm packages; pushes into linked/skipped. Never throws.
  * Filter first (main has it, it is gitignored, the worktree has none), then cap at
  * NESTED_MAX_PACKAGES, so ineligible packages never take a slot and never appear in
  * `skipped`. `skipped` gets only eligible packages left unlinked, as `<rel> (<reason>)`.
- * The info/exclude line is written only after the symlink succeeds; if that write fails
- * the link is removed again so status stays clean.
+ * The info/exclude line is written only after the links succeed; if that write fails
+ * the folder of links is removed again so status stays clean.
  */
 async function linkNestedNodeModules(mainCwd, worktreeCwd, linked, skipped) {
   try {
@@ -248,7 +284,7 @@ async function linkNestedNodeModules(mainCwd, worktreeCwd, linked, skipped) {
       const src = path.join(mainCwd, rel);
       const dest = path.join(worktreeCwd, rel);
       try {
-        fs.symlinkSync(src, dest, 'dir');
+        linkModulesEntries(src, dest);
       } catch (err) {
         skipped.push(`${rel} (symlink failed: ${(err && err.code) || (err && err.message) || err})`);
         continue;
@@ -257,7 +293,7 @@ async function linkNestedNodeModules(mainCwd, worktreeCwd, linked, skipped) {
         await addExcludes(mainCwd, [rel]);
         linked.push(rel);
       } catch (err) {
-        try { fs.unlinkSync(dest); } catch { /* best-effort */ }
+        try { fs.rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ }
         skipped.push(`${rel} (exclude write failed: ${(err && err.code) || (err && err.message) || err})`);
       }
     }
@@ -293,7 +329,8 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
       }
       // Exclude first: a link without its exclude line would dirty status.
       await addExcludes(mainCwd, [name]);
-      fs.symlinkSync(src, dest, 'dir');
+      if (name === 'node_modules') linkModulesEntries(src, dest);
+      else fs.symlinkSync(src, dest, 'dir');
       linked.push(name);
     } catch {
       skipped.push(name);

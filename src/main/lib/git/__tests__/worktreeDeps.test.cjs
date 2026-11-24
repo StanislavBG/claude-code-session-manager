@@ -81,8 +81,9 @@ test('links ignored dir, skips non-ignored, status stays clean', async () => {
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
   expect(r.linked).toEqual(['node_modules', '.venv']);
   expect(r.skipped).toEqual(['venv']); // exists but not ignored
-  expect(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink()).toBe(true);
-  expect(fs.readlinkSync(path.join(wt, 'node_modules'))).toBe(path.join(main, 'node_modules'));
+  // node_modules is a real folder of per-entry links; .venv stays a whole-folder link.
+  expect(fs.lstatSync(path.join(wt, 'node_modules')).isDirectory()).toBe(true);
+  expect(fs.readlinkSync(path.join(wt, '.venv'))).toBe(path.join(main, '.venv'));
   expect(fs.existsSync(path.join(wt, 'venv'))).toBe(false);
   expect(git(wt, 'status', '--porcelain')).toBe('');
 });
@@ -278,8 +279,8 @@ test('links a nested package node_modules and excludes it; status stays clean', 
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
   expect(r.linked).toEqual(['node_modules', '.venv', 'a/b/c/node_modules', 'web/remote-app/node_modules']);
   const dest = path.join(wt, 'web', 'remote-app', 'node_modules');
-  expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);
-  expect(fs.readlinkSync(dest)).toBe(path.join(main, 'web', 'remote-app', 'node_modules'));
+  expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false);
+  expect(fs.lstatSync(dest).isDirectory()).toBe(true);
   const exclude = fs.readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8').split('\n');
   expect(exclude).toContain('/web/remote-app/node_modules');
   expect(exclude).toContain('/a/b/c/node_modules');
@@ -351,7 +352,7 @@ test('filters before capping: the last-sorting of 25 packages is linked when it 
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
   expect(r.linked.filter((n) => n.startsWith('pkgs/'))).toEqual([`${last}/node_modules`]);
   expect(r.skipped.filter((n) => n.startsWith('pkgs/'))).toEqual([]);
-  expect(fs.lstatSync(path.join(wt, last, 'node_modules')).isSymbolicLink()).toBe(true);
+  expect(fs.lstatSync(path.join(wt, last, 'node_modules')).isDirectory()).toBe(true);
   expect(git(wt, 'status', '--porcelain')).toBe('');
 });
 
@@ -372,3 +373,89 @@ test.skipIf(isRoot)('a failed nested symlink is skipped with a reason and leaves
   const exclude = fs.readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8').split('\n');
   expect(exclude).not.toContain('/web/remote-app/node_modules');
 });
+
+/**
+ * Fake installed node_modules at `dir`: a package with a bin, a scope folder, .bin, and dot
+ * entries that must not be linked.
+ */
+function fakeNodeModules(dir) {
+  fs.mkdirSync(path.join(dir, 'dummy-pkg'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'dummy-pkg', 'package.json'), JSON.stringify({ name: 'dummy-pkg', version: '1.0.0', main: 'index.js', bin: { dummy: 'cli.js' } }));
+  fs.writeFileSync(path.join(dir, 'dummy-pkg', 'index.js'), 'module.exports = 1;\n');
+  fs.writeFileSync(path.join(dir, 'dummy-pkg', 'cli.js'), '#!/usr/bin/env node\n');
+  fs.mkdirSync(path.join(dir, '@types', 'dummy'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '@types', 'dummy', 'package.json'), JSON.stringify({ name: '@types/dummy', version: '1.0.0' }));
+  fs.writeFileSync(path.join(dir, '@types', 'dummy', 'index.d.ts'), 'export {};\n');
+  fs.mkdirSync(path.join(dir, '.bin'), { recursive: true });
+  fs.symlinkSync('../dummy-pkg/cli.js', path.join(dir, '.bin', 'dummy'));
+  fs.mkdirSync(path.join(dir, '.vite'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.cache'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.package-lock.json'), '{}');
+}
+
+/** Every file/dir path under `dir` (lstat, links not followed), relative. */
+function tree(dir, rel = '') {
+  const out = [];
+  for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const r = path.join(rel, e.name);
+    out.push(r);
+    if (e.isDirectory()) out.push(...tree(dir, r));
+  }
+  return out.sort();
+}
+
+test('node_modules is a real worktree folder of per-entry links (root and nested)', async () => {
+  addNestedPackages(['web/feedback-widget']);
+  for (const rel of ['node_modules', 'web/feedback-widget/node_modules']) fakeNodeModules(path.join(main, rel));
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.linked).toEqual(['node_modules', '.venv', 'web/feedback-widget/node_modules']);
+  for (const rel of ['node_modules', 'web/feedback-widget/node_modules']) {
+    const dest = path.join(wt, rel);
+    const st = fs.lstatSync(dest);
+    expect(st.isSymbolicLink()).toBe(false);
+    expect(st.isDirectory()).toBe(true);
+    expect(fs.readdirSync(dest).sort()).toEqual(['.bin', '@types', 'dummy-pkg']);
+    for (const e of ['.bin', '@types', 'dummy-pkg']) {
+      expect(fs.lstatSync(path.join(dest, e)).isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(path.join(dest, e))).toBe(path.join(main, rel, e));
+    }
+  }
+  expect(git(wt, 'status', '--porcelain')).toBe('');
+});
+
+test('require.resolve and .bin scripts resolve from the worktree to the main checkout files', async () => {
+  addNestedPackages(['web/feedback-widget']);
+  for (const rel of ['node_modules', 'web/feedback-widget/node_modules']) fakeNodeModules(path.join(main, rel));
+  await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  for (const dir of ['', 'web/feedback-widget']) {
+    const fromWt = path.join(wt, dir);
+    const mainNm = path.join(main, dir, 'node_modules');
+    const resolved = execFileSync(process.execPath, ['-e', "process.stdout.write(require.resolve('dummy-pkg'))"], { cwd: fromWt, encoding: 'utf8' });
+    expect(resolved).toBe(path.join(mainNm, 'dummy-pkg', 'index.js'));
+    const typesPkg = execFileSync(process.execPath, ['-e', "process.stdout.write(require.resolve('@types/dummy/package.json'))"], { cwd: fromWt, encoding: 'utf8' });
+    expect(typesPkg).toBe(path.join(mainNm, '@types', 'dummy', 'package.json'));
+    expect(fs.realpathSync(path.join(fromWt, 'node_modules', '.bin', 'dummy'))).toBe(path.join(mainNm, 'dummy-pkg', 'cli.js'));
+  }
+});
+
+// 2026-11-24: a widget gate's `npm --prefix web/feedback-widget ci` in a job worktree emptied the
+// main checkout's web/feedback-widget/node_modules through a whole-folder symlink.
+test('npm ci in a worktree package removes only links, never the main checkout entries', async () => {
+  addNestedPackages(['web/feedback-widget']);
+  for (const rel of ['node_modules', 'web/feedback-widget/node_modules']) fakeNodeModules(path.join(main, rel));
+  const before = {
+    root: tree(path.join(main, 'node_modules')),
+    nested: tree(path.join(main, 'web', 'feedback-widget', 'node_modules')),
+  };
+  await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  const pkgDir = path.join(wt, 'web', 'feedback-widget');
+  const name = 'web-feedback-widget';
+  fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name, version: '1.0.0' }));
+  fs.writeFileSync(path.join(pkgDir, 'package-lock.json'), JSON.stringify({
+    name, version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name, version: '1.0.0' } },
+  }));
+  execFileSync('npm', ['ci', '--no-audit', '--no-fund', '--offline'], { cwd: pkgDir, stdio: 'pipe', timeout: 60_000 });
+  expect(tree(path.join(main, 'node_modules'))).toEqual(before.root);
+  expect(tree(path.join(main, 'web', 'feedback-widget', 'node_modules'))).toEqual(before.nested);
+  expect(before.nested).toEqual(expect.arrayContaining(['dummy-pkg', '@types', '.bin', path.join('@types', 'dummy', 'index.d.ts')]));
+}, 60_000);

@@ -154,3 +154,16 @@ test('step 12 names a warning only when a PRD changed because of it', () => {
   expect(step12).not.toMatch(/the warnings you kept/);
   expect(s).not.toMatch(/none-gate warning and its size warning \(8 or more criteria\) are expected/);
 });
+
+test('preflight Rule lines: no shell / --env-file, TMPDIR, and marker path names the step', () => {
+  const a = authoring();
+  const sec = flat(a.slice(a.indexOf('### preflight'), a.indexOf('### What the API writes')));
+  expect(sec).toMatch(/Rule: no shell runs it, so it cannot `source` a file/);
+  expect(sec).toMatch(/Node's `--env-file` expands no variables/);
+  expect(sec).toMatch(/put `NAME=value` words before `timeout`/);
+  expect(sec).toMatch(/The scheduler sets `TMPDIR` itself and drops a `TMPDIR=` word/);
+  expect(sec).toMatch(/check a marker file whose path names the step/);
+  expect(sec).toMatch(/`test -f \/abs\/path\/apple-paid-apps-agreement-accepted`/);
+  expect(sec).toMatch(/The PRECONDITION HOLD notice prints the command, so that path is what tells the person what to do/);
+  expect(sec).not.toMatch(/names that one action/);
+});

@@ -14,7 +14,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const sessionSlots = require('../sessionSlots.cjs');
 const humanPromptLedger = require('../../feedback-remote/humanPromptLedger.cjs');
-const { registerSlotsRoute, quoteNamesSlots } = require('../slotsRoute.cjs');
+const { registerSlotsRoute, quoteNamesSlots, promptSentenceNamesSlots } = require('../slotsRoute.cjs');
 
 const SID = 'chat-session-slots';
 // The owner's own sentence: it mentions sessions, the limit and 10, but asks
@@ -141,6 +141,29 @@ describe('quoteNamesSlots', () => {
   });
 });
 
+describe('promptSentenceNamesSlots', () => {
+  // [human prompt, quote, cap, accepted] — the whole prompt sentence around the quote must be the form.
+  test.each([
+    ['Thanks. Raise the limit to 14.', 'raise the limit to 14', 14, true],
+    ['raise the limit to 14', 'raise the limit to 14', 14, true],
+    ['thanks.\n  ok, RAISE   the limit to 14\nbye', 'ok, raise the limit to 14', 14, true],
+    ['hi. thanks. reduce the limit to 4', 'thanks. reduce the limit to 4', 4, true],
+    ["don't raise the limit to 14", 'raise the limit to 14', 14, false],
+    ['raise the limit to 14?', 'raise the limit to 14', 14, false],
+    ['will you raise the limit to 14', 'raise the limit to 14', 14, false],
+    ['raise the limit to 14 (pct)', 'raise the limit to 14', 14, false],
+    ['raise the limit to 14.5', 'raise the limit to 14', 14, false],
+    ['raise the limit to 14 please', 'raise the limit to 14', 14, false],
+    ['raise the limit to 14', 'raise the limit to 14', 12, false],
+    // a sentence the quote only partly overlaps never authorizes
+    ['raise the limit to 14. it is fine', 'limit to 14. it is fine', 14, false],
+    ['raise the limit to 14', 'not in the prompt at all', 14, false],
+    [null, 'raise the limit to 14', 14, false],
+  ])('%j / %j / %s → %s', (p, q, n, want) => {
+    expect(promptSentenceNamesSlots(p, q, n)).toBe(want);
+  });
+});
+
 describe('GET /admin/scheduler/slots', () => {
   test('returns cap, bounds, in-use and available from sessionSlots', async () => {
     const tok = sessionSlots.acquire('test:holder');
@@ -163,7 +186,7 @@ describe('GET /admin/scheduler/slots', () => {
 describe('POST /admin/scheduler/slots', () => {
   test('a verified quote changes the cap and writes one audit event', async () => {
     const at = clock - 5_000;
-    humanPromptLedger.recordHumanPrompt(SID, `ok: ${QUOTE}. thanks`, at);
+    humanPromptLedger.recordHumanPrompt(SID, `Thanks.\n${QUOTE}. thanks`, at);
     const setCap = vi.spyOn(sessionSlots, 'setCap');
     const res = await call('POST', { cap: 10, quote: QUOTE, originClaudeSessionId: SID });
     expect(res.status).toBe(200);
@@ -205,6 +228,30 @@ describe('POST /admin/scheduler/slots', () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('quote_does_not_name_slots');
     expectNoWrite();
+  });
+
+  test.each([
+    ["don't raise the limit to 14"],
+    ['raise the limit to 14?'],
+    ['will you raise the limit to 14'],
+    ['raise the limit to 14 (pct)'],
+  ])('403 quote_does_not_name_slots when the human prompt is %j, though the quote alone is the form', async (prompt) => {
+    humanPromptLedger.recordHumanPrompt(SID, prompt, clock - 1_000);
+    const res = await call('POST', { cap: 14, quote: 'raise the limit to 14', originClaudeSessionId: SID });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('quote_does_not_name_slots');
+    expect(res.body.reason).toContain('[please|ok|okay|so|now|then]');
+    expect(res.body.reason).toContain('a comma only right after the lead-in word');
+    expectNoWrite();
+  });
+
+  test('the quote authorizes 14 when the human prompt is "Thanks. Raise the limit to 14."', async () => {
+    humanPromptLedger.recordHumanPrompt(SID, 'Thanks. Raise the limit to 14.', clock - 1_000);
+    const res = await call('POST', { cap: 14, quote: 'raise the limit to 14', originClaudeSessionId: SID });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, from: sessionSlots.DEFAULT_SLOTS, to: 14 });
+    expect(sessionSlots.totalSlots()).toBe(14);
+    expect(audit).toHaveBeenCalledTimes(1);
   });
 
   test('403 quote_does_not_name_slots when the quote names a different number', async () => {

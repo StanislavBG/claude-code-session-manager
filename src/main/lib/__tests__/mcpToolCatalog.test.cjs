@@ -619,6 +619,8 @@ test('scheduler_slots_get / scheduler_slots_set sit in the scheduler group; set 
   expect(text).toMatch(/number/);
   expect(text).toContain('"raise the limit to 14"');
   expect(text).toContain('limit|cap|slots to');
+  expect(text).toContain('[please|ok|okay|so|now|then]');
+  expect(text).toContain('a comma only right after the lead-in word');
   expect(set.exampleArgs).toEqual({ cap: 14, quote: 'raise the limit to 14' });
   const tool = TOOLS.find((t) => t.name === 'scheduler_slots_set');
   expect(tool.inputSchema.required).toEqual(['cap', 'quote']);

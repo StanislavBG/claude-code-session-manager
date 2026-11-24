@@ -1004,8 +1004,10 @@ const MCP_TOOL_CATALOG = [
       + 'naming the limit and the number, quoted verbatim from this session, as `quote`, and `cap` set to that '
       + 'number. One sentence of the quote must be exactly this form: [please|ok|okay|so|now|then] '
       + 'set|raise|increase|bump|lower|reduce|change [the|our] [session|slot|parallel] limit|cap|slots to '
-      + '<number in digits> [sessions|slots] — nothing after it, no question mark; e.g. "raise the limit to 14". '
-      + 'Anything else is refused. The route checks the quote against what the human typed in this session; '
+      + '<number in digits> [sessions|slots] — nothing before or after it, a comma only right after the '
+      + 'lead-in word, no question mark; e.g. "raise the limit to 14". The whole sentence the human typed '
+      + 'around the quote must be that form too, so "don\'t raise the limit to 14" or "raise the limit to 14?" '
+      + 'is refused. Anything else is refused. The route checks the quote against what the human typed in this session; '
       + 'if the human said it another way, ask them to say it in that form.',
     whenNotToUse: 'Never on your own initiative, never from a job or script, and never with words you wrote or '
       + 'paraphrased. Do not use it just to read the limit — use scheduler_slots_get.',

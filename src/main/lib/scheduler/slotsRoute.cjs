@@ -19,8 +19,12 @@
  *          headless jobs and Tasks never record prompts there, so they fail here
  *          too;
  *       4. 403 quote_does_not_name_slots — no sentence of the quote is the
- *          one accepted form (see SLOT_COMMAND); the reason gives that form,
- *          e.g. say 'raise the limit to 14'.
+ *          one accepted form (see SLOT_COMMAND), or no whole sentence of the
+ *          matched human prompt that contains the quote (or that the quote
+ *          wholly covers) is that form — so "don't raise the limit to 14" or
+ *          "raise the limit to 14?" never authorize via the quote
+ *          'raise the limit to 14'. The reason gives the form, e.g. say
+ *          'raise the limit to 14'.
  *     Success: sessionSlots.setCap(cap) (persists + wakes waiters), one
  *     slot_cap_changed audit event { from, to, epicId, quote, promptAt },
  *     200 { ok, from, to }.
@@ -59,9 +63,82 @@ const SLOT_COMMAND = new RegExp(
 
 /** The accepted form, as the refusal states it. @param {number} cap */
 function acceptedFormHint(cap) {
-  return `say 'raise the limit to ${cap}' (one sentence: [please|ok|so|now|then] `
+  return `say 'raise the limit to ${cap}' (one sentence: [please|ok|okay|so|now|then] `
     + 'set|raise|increase|bump|lower|reduce|change [the|our] [session|slot|parallel] limit|cap|slots '
-    + 'to <number in digits> [sessions|slots], with nothing after it and no question mark)';
+    + 'to <number in digits> [sessions|slots], with nothing before or after it, a comma only right after '
+    + 'the lead-in word, and no question mark)';
+}
+
+/**
+ * Sentence spans of `text`: split on . ! ? ; and line breaks, the terminator
+ * kept with its sentence; a decimal ("14.5") is not split. Returns the
+ * lowercased, whitespace-collapsed body, its trimmed [start, end) in `text`,
+ * and the terminator ('' at the end of the text).
+ * @param {string} text
+ * @returns {Array<{ body: string, start: number, end: number, term: string }>}
+ */
+function splitSentences(text) {
+  // Same-length mask keeps indices aligned with `text`.
+  const masked = text.toLowerCase().replace(/(\d)[.,](?=\d)/g, '$1#');
+  const out = [];
+  const sentence = /([^.!?;\r\n]*)([.!?;\r\n]|$)/g;
+  let m;
+  while ((m = sentence.exec(masked)) !== null) {
+    const raw = m[1];
+    const lead = raw.length - raw.replace(/^\s+/, '').length;
+    const trail = raw.length - raw.replace(/\s+$/, '').length;
+    const start = m.index + lead;
+    const end = m.index + raw.length - trail;
+    if (end > start) out.push({ body: raw.replace(/\s+/g, ' ').trim(), start, end, term: m[2] });
+    if (m[2] === '') break; // end of the text
+  }
+  return out;
+}
+
+/** @param {string} body @param {string} term @param {number} cap */
+function sentenceNamesCap(body, term, cap) {
+  if (term === '?' || !body) return false;
+  const hit = SLOT_COMMAND.exec(body);
+  return !!hit && hit[1] === String(cap);
+}
+
+/**
+ * True only when the human prompt `promptText` (the text the ledger matched)
+ * has a whole sentence in the strict SLOT_COMMAND form naming `cap` that
+ * either contains an occurrence of `quote` or lies wholly inside one. The
+ * quote is located the way humanPromptLedger matches it (lowercased,
+ * whitespace collapsed). A sentence the quote only partly overlaps never
+ * authorizes. Refuses on doubt.
+ * @param {unknown} promptText
+ * @param {unknown} quote
+ * @param {number} cap
+ */
+function promptSentenceNamesSlots(promptText, quote, cap) {
+  if (typeof promptText !== 'string' || typeof quote !== 'string') return false;
+  if (!Number.isInteger(cap) || cap < 0) return false;
+  const q = quote.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!q) return false;
+  // Normalized prompt + map from each normalized char to its index in promptText.
+  const lower = promptText.toLowerCase();
+  let norm = '';
+  /** @type {number[]} */
+  const map = [];
+  for (let i = 0; i < lower.length; i++) {
+    if (/\s/.test(lower[i])) {
+      if (norm.length && norm[norm.length - 1] !== ' ') { norm += ' '; map.push(i); }
+    } else { norm += lower[i]; map.push(i); }
+  }
+  const sentences = splitSentences(promptText);
+  for (let at = norm.indexOf(q); at !== -1; at = norm.indexOf(q, at + 1)) {
+    const qs = map[at];
+    const qe = map[at + q.length - 1] + 1;
+    for (const s of sentences) {
+      const contains = s.start <= qs && qe <= s.end;
+      const covered = qs <= s.start && s.end <= qe;
+      if ((contains || covered) && sentenceNamesCap(s.body, s.term, cap)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -74,19 +151,7 @@ function acceptedFormHint(cap) {
  */
 function quoteNamesSlots(quote, cap) {
   if (typeof quote !== 'string' || !Number.isInteger(cap) || cap < 0) return false;
-  // Keep a decimal point inside its sentence so "14.5" fails the form.
-  const text = quote.toLowerCase().replace(/(\d)[.,](?=\d)/g, '$1#');
-  const sentence = /([^.!?;\r\n]*)([.!?;\r\n]|$)/g;
-  let m;
-  while ((m = sentence.exec(text)) !== null) {
-    const body = m[1].replace(/\s+/g, ' ').trim();
-    if (m[2] !== '?' && body) {
-      const hit = SLOT_COMMAND.exec(body);
-      if (hit && hit[1] === String(cap)) return true;
-    }
-    if (m[2] === '') break; // end of the quote
-  }
-  return false;
+  return splitSentences(quote).some((x) => sentenceNamesCap(x.body, x.term, cap));
 }
 
 /**
@@ -154,7 +219,7 @@ function registerSlotsRoute(adminHttp, deps = {}) {
       refuse(403, 'human_request_unverified', 'quote was not found in a prompt the human typed in this chat session');
       return;
     }
-    if (!quoteNamesSlots(quote, cap)) {
+    if (!quoteNamesSlots(quote, cap) || !promptSentenceNamesSlots(found.text, quote, cap)) {
       refuse(403, 'quote_does_not_name_slots', `the human's quote does not ask to change the session limit to ${cap} in the accepted form; ${acceptedFormHint(cap)}`);
       return;
     }
@@ -183,4 +248,4 @@ function registerSlotsRoute(adminHttp, deps = {}) {
   });
 }
 
-module.exports = { registerSlotsRoute, quoteNamesSlots, MAX_SLOTS_BODY_BYTES };
+module.exports = { registerSlotsRoute, quoteNamesSlots, promptSentenceNamesSlots, MAX_SLOTS_BODY_BYTES };

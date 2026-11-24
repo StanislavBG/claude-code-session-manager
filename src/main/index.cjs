@@ -1141,6 +1141,11 @@ require('./promptSessionsIpc.cjs').registerPromptSessionsReadHandlers();
 promptSessionsCreateEpic.registerPromptSessionsCreateEpicHandlers();
 require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();
+// Website-feedback widgets: drain sealed reports from bilko.run into project inboxes once ready.
+app.whenReady().then(() => {
+  try { require('./lib/feedback-remote/siteFeedbackService.cjs').startDrainLoop(); }
+  catch (e) { console.warn('[siteFeedback] drain loop did not start:', e && e.name ? e.name : 'error'); }
+});
 epicWorktreeMint.registerEpicWorktreeMintHandlers();
 epicWorktreeMerge.registerEpicWorktreeMergeHandlers();
 require('./lib/epic/epicChanges.cjs').registerEpicChangesHandlers();

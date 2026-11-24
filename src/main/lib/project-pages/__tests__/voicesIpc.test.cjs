@@ -155,8 +155,6 @@ test('voices:approve writes approvals.json with pinOf for project and machine vo
 });
 
 test('writer and reader agree: voicesIpc uses voiceLibrary\'s approvalKey and writes {pin, approvedAt}', async () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'voicesIpc.cjs'), 'utf8');
-  expect(src).not.toMatch(/function\s+approvalKey\s*\(/);
   expect(require('../voicesIpc.cjs').approvalKey).toBeUndefined();
   expect(typeof voiceLibrary.approvalKey).toBe('function');
   expect(typeof voiceLibrary.canonical).toBe('function');

@@ -153,10 +153,20 @@ test('a project voice key includes projectRoot; a built-in voice key is shared a
     .toBe(vp.previewKey({ voiceId: 'm', text: 'hi', voice: {}, pin: 'p', scope: 'machine', projectRoot: otherRoot }));
 });
 
-test('voicePreview uses voiceLibrary.canonical, not a copy of its own', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'voicePreview.cjs'), 'utf8');
-  expect(src).not.toMatch(/function canonical\(/);
-  expect(src).toMatch(/voiceLibrary\.canonical\(/);
+test('previewKey delegates to voiceLibrary.canonical, not a copy of its own', () => {
+  const vl = require('../../demo-video-kit/voiceLibrary.cjs');
+  const args = { voiceId: 'pip', text: 'hi', voice: { a: 1 }, pin: 'p', scope: 'project', projectRoot: project };
+  const before = vp.previewKey(args);
+  const spy = vi.spyOn(vl, 'canonical').mockReturnValue('stub-canonical');
+  try {
+    const stubbed = vp.previewKey(args);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(stubbed).not.toBe(before);
+    expect(vp.previewKey({ ...args, voiceId: 'other', text: 'bye' })).toBe(stubbed);
+  } finally {
+    spy.mockRestore();
+  }
+  expect(vp.previewKey(args)).toBe(before);
 });
 
 test('concurrent calls with the same key share one in-flight run', async () => {

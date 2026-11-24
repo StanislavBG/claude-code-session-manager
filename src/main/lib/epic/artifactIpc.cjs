@@ -22,6 +22,7 @@ const path = require('node:path');
 const GIT_TIMEOUT_MS = 10_000;
 
 /** goalText's first paragraph (an Epic's title), or null. */
+/** @param {{ goalText?: unknown } | null | undefined} record */
 function titleOf(record) {
   const goalText = record && typeof record.goalText === 'string' ? record.goalText : '';
   const m = /\r?\n[ \t]*\r?\n/.exec(goalText);
@@ -29,10 +30,12 @@ function titleOf(record) {
   return head || null;
 }
 
+/** @param {string} p */
 function realOrResolved(p) {
   try { return fs.realpathSync(p); } catch { return path.resolve(p); }
 }
 
+/** @param {string} p */
 function isDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
 }
@@ -57,11 +60,12 @@ function makeArtifactReaders(deps = {}) {
   });
 
   /** artifacts:list — listArtifacts entries joined with each owning Epic's title. */
+  /** @param {string} cwd */
   function listWithTitles(cwd) {
     const { sessions } = readActiveIndex(cwd);
     /** @type {Map<string, string|null>} */
     const titles = new Map();
-    const titleFor = (ownerId) => {
+    const titleFor = (/** @type {unknown} */ ownerId) => {
       if (typeof ownerId !== 'string' || ownerId.startsWith('_tasks/')) return null;
       if (titles.has(ownerId)) return titles.get(ownerId) ?? null;
       let t = Object.prototype.hasOwnProperty.call(sessions, ownerId) ? titleOf(sessions[ownerId]) : null;
@@ -77,6 +81,7 @@ function makeArtifactReaders(deps = {}) {
    * artifacts:worktrees — active Epics of `cwd` whose recorded worktree is on disk and
    * registered with git, with commits on the Epic branch not yet on the base.
    */
+  /** @param {string} cwd */
   async function listWorktrees(cwd) {
     const { sessions } = readActiveIndex(cwd);
     let registered;

@@ -191,7 +191,32 @@ test('audioSeconds comes from character.cjs wavSeconds on the clip path; a non-W
   const { routes } = makeDeps({ previewVoice: async () => ({ ok: true, cached: true, wavPath: bad, bytes: wav(3) }) });
   const res = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
   expect(res.body).toMatchObject({ status: 'ready', wavPath: bad, audioSeconds: null });
-  const src = fs.readFileSync(path.join(__dirname, '..', 'voiceAdminRoutes.cjs'), 'utf8');
-  expect(src).not.toMatch(/function wavSeconds\(/);
-  expect(src).toMatch(/require\('\.\.\/demo-video-kit\/character\.cjs'\)/);
+});
+
+test('audioSeconds delegates to the shared character.cjs wavSeconds (no private copy)', async () => {
+  const character = require('../../demo-video-kit/character.cjs');
+  const modPath = require.resolve('../voiceAdminRoutes.cjs');
+  const origWav = character.wavSeconds;
+  const origMod = require.cache[modPath];
+  const seen = [];
+  character.wavSeconds = (p) => { seen.push(p); return 4.3216; };
+  try {
+    delete require.cache[modPath];
+    const fresh = require('../voiceAdminRoutes.cjs');
+    const routes = new Map();
+    fresh.registerAdminRoute({ registerRoute: (m, u, h) => routes.set(`${m} ${u}`, h) }, {
+      resolveCwd: () => ({ ok: true, cwd: ROOT }),
+      voiceLibrary: { listVoices: () => ({ voices: [], errors: [] }), resolveVoiceId: () => ({ ok: true }) },
+      voiceLane: { laneSnapshot: () => ({ heavy: [], light: [] }) },
+      previewVoice: async () => ({ ok: true, cached: true, wavPath: '/nonexistent/stub.wav' }),
+      waitMs: 1000,
+    });
+    const res = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
+    expect(res.body).toMatchObject({ status: 'ready', audioSeconds: 4.322 });
+    expect(seen).toEqual(['/nonexistent/stub.wav']);
+  } finally {
+    character.wavSeconds = origWav;
+    delete require.cache[modPath];
+    if (origMod) require.cache[modPath] = origMod;
+  }
 });

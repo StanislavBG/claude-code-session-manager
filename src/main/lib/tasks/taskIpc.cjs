@@ -8,6 +8,11 @@
  *   tasks:get-switch  { cwd }                       → { ok, enabled, changedAt, by }
  *   tasks:set-switch  { cwd, enabled }              → { ok, enabled, changedAt }
  *
+ * tasks:list and tasks:get pass the in-process live registry's taskIds
+ * (taskAdminRoutes.liveTaskIdsFor) as liveTaskIds, so a Task this app is
+ * still running reads 'running' here exactly as it does on GET /admin/tasks
+ * and GET /admin/task — never 'interrupted' past its window.
+ *
  * tasks:set-switch is the human-click writer of taskSwitch.setTaskSwitch and
  * records by { via: 'ui' } (the other sanctioned writer is the agent route —
  * see taskSwitch.cjs). After every write, and once at registration,
@@ -33,7 +38,8 @@ function registerTaskIpc(opts = {}) {
 
   ipcMain.handle('tasks:list', validated(schemas.TaskListQuery, async ({ cwd, ...filters }) => {
     try {
-      const res = await taskLedger.listTasks(cwd, filters);
+      const { liveTaskIdsFor } = require('./taskAdminRoutes.cjs');
+      const res = await taskLedger.listTasks(cwd, { ...filters, liveTaskIds: liveTaskIdsFor(cwd) });
       return { ok: true, ...res };
     } catch (err) {
       return { ok: false, error: errMsg(err) };
@@ -42,7 +48,8 @@ function registerTaskIpc(opts = {}) {
 
   ipcMain.handle('tasks:get', validated(schemas.TaskGetQuery, async ({ cwd, id }) => {
     try {
-      const task = await taskLedger.getTask(cwd, id);
+      const { liveTaskIdsFor } = require('./taskAdminRoutes.cjs');
+      const task = await taskLedger.getTask(cwd, id, { liveTaskIds: liveTaskIdsFor(cwd) });
       return { ok: true, task };
     } catch (err) {
       return { ok: false, error: errMsg(err) };

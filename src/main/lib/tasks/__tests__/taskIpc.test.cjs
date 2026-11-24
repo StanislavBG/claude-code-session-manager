@@ -145,3 +145,69 @@ test('set-switch and the agent route are the only setTaskSwitch callers in src/m
   walk(root);
   expect(hits.sort()).toEqual(['lib/tasks/taskIpc.cjs', 'lib/tasks/taskSwitch.cjs', 'lib/tasks/taskSwitchRoute.cjs'].map((p) => p.split('/').join(path.sep)));
 });
+
+test('a Task held live by the registered POST /admin/tasks route reads running through tasks:list and tasks:get', async () => {
+  const { EventEmitter } = require('node:events');
+  const { registerAdminRoute } = require('../taskAdminRoutes.cjs');
+  const fakeReq = (body) => {
+    const req = new EventEmitter();
+    req.setTimeout = () => {};
+    req.destroy = () => {};
+    let sent = false;
+    req.on('newListener', (event) => {
+      if (event !== 'end' || sent) return;
+      sent = true;
+      queueMicrotask(() => { req.emit('data', Buffer.from(JSON.stringify(body))); req.emit('end'); });
+    });
+    return req;
+  };
+  const res = new EventEmitter();
+  Object.assign(res, {
+    writableEnded: false, destroyed: false, writableLength: 0, setTimeout: () => {},
+    writeHead: () => {}, write: () => true, end: () => { res.writableEnded = true; },
+  });
+  let startedResolve;
+  const started = new Promise((r) => { startedResolve = r; });
+  let gateResolve;
+  const gate = new Promise((r) => { gateResolve = r; });
+  const routes = new Map();
+  registerAdminRoute({ registerRoute: (m, u, fn) => { routes.set(`${m} ${u}`, fn); } }, {
+    resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'claude-haiku-4-5', personaEffort: 'low' }),
+    sessionSlots: { waitForSlot: async () => 'tok', stampPid: () => {}, release: () => {} },
+    runTask: async () => {
+      startedResolve();
+      await gate;
+      return {
+        status: 'ok', exitCode: 0, signal: null, stdout: 'final\n', stderrTail: '', envelope: null, usage: null,
+        modelUsage: null, cliCostUsd: null, numTurns: 1, sessionId: null, durationMs: 5, quota: null,
+      };
+    },
+    buildTaskArgs: () => ['-p'],
+    buildTaskEnv: () => ({}),
+    resolveProjectRoot: (c) => c,
+    taskSwitch: { isTaskSwitchOn: () => true },
+    // Stamp the start line two hours back: far past start + timeout + grace, so the bare fold says interrupted.
+    now: () => Date.now() - 2 * 3600 * 1000,
+    randomUUID: () => 't-live',
+    syncInteractiveReserve: () => {},
+  });
+  const done = routes.get('POST /admin/tasks')(fakeReq({ cwd, agent: 'dev-lead', missionId: 'm', prompt: 'p', timeoutSec: 60 }), res);
+  await started;
+
+  // Sanity: without the registry's ids the ledger alone says interrupted.
+  expect((await ledger.getTask(cwd, 't-live')).status).toBe('interrupted');
+
+  const all = await invoke('tasks:list', { cwd });
+  expect(all.ok).toBe(true);
+  expect(all.tasks.map((t) => [t.taskId, t.status])).toEqual([['t-live', 'running']]);
+  const running = await invoke('tasks:list', { cwd, status: 'running' });
+  expect(running.tasks.map((t) => [t.taskId, t.status])).toEqual([['t-live', 'running']]);
+  const one = await invoke('tasks:get', { cwd, id: 't-live' });
+  expect(one.task).toMatchObject({ taskId: 't-live', status: 'running' });
+
+  gateResolve();
+  await done;
+  expect((await invoke('tasks:get', { cwd, id: 't-live' })).task.status).toBe('ok');
+  const after = await invoke('tasks:list', { cwd });
+  expect(after.tasks.map((t) => [t.taskId, t.status])).toEqual([['t-live', 'ok']]);
+});

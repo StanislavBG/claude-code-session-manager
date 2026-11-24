@@ -402,6 +402,31 @@ function costFor(model, run, costOfUsage) {
 }
 
 /**
+ * The live registry (taskId → LiveTask) of the most recently registered
+ * POST /admin/tasks route. Production registers the route once; in tests the
+ * last registerAdminRoute call wins. null until a route is registered.
+ * @type {Map<string, { cwd: string }> | null}
+ */
+let activeLiveTasks = null;
+
+/**
+ * taskIds the most recently registered POST /admin/tasks route is running for
+ * project root `root` (path.resolve equality) — [] when none, or when no route
+ * is registered. The GET routes and the desktop Tasks IPC (taskIpc.cjs) pass
+ * these as liveTaskIds so every Task read folds a live run as running.
+ * Production registers the route once; in tests the last registration wins.
+ * @param {string} root
+ * @returns {string[]}
+ */
+function liveTaskIdsFor(root) {
+  const ids = [];
+  if (!activeLiveTasks) return ids;
+  const want = path.resolve(root);
+  for (const [id, lt] of activeLiveTasks) if (path.resolve(lt.cwd) === want) ids.push(id);
+  return ids;
+}
+
+/**
  * @param {{ registerRoute: Function }} adminHttp
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
  *   buildTaskArgs?: Function, buildTaskEnv?: Function, ledger?: any, costOfUsage?: Function,
@@ -452,12 +477,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
     const lt = liveTasks.get(id);
     return lt && path.resolve(lt.cwd) === path.resolve(root) ? lt : null;
   };
-  /** taskIds in the live registry whose run is under project root `root`. @param {string} root */
-  const liveIdsFor = (root) => {
-    const ids = [];
-    for (const [id, lt] of liveTasks) if (path.resolve(lt.cwd) === path.resolve(root)) ids.push(id);
-    return ids;
-  };
+  activeLiveTasks = liveTasks;
 
   adminHttp.registerRoute('POST', '/admin/tasks', async (/** @type {any} */ req, /** @type {any} */ res) => {
     try { if (typeof res.setTimeout === 'function') res.setTimeout(0); } catch { /* */ }
@@ -743,7 +763,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     try {
       // A Task this app is still running folds 'running' in the ledger, before its status filter and paging.
-      const r = await ledger().listTasks(cwd, { ...filters, now: now(), liveTaskIds: liveIdsFor(cwd) });
+      const r = await ledger().listTasks(cwd, { ...filters, now: now(), liveTaskIds: liveTaskIdsFor(cwd) });
       const tasks = r.tasks.map((/** @type {any} */ t) => publicTask(t));
       sendJson(res, 200, { ok: true, tasks, total: r.total, hasMore: r.hasMore });
     } catch (e) {
@@ -764,7 +784,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     let t;
     try {
-      t = await ledger().getTask(cwd, parsed.data.id, { now: now(), liveTaskIds: liveIdsFor(cwd) });
+      t = await ledger().getTask(cwd, parsed.data.id, { now: now(), liveTaskIds: liveTaskIdsFor(cwd) });
     } catch (e) {
       sendJson(res, 500, { ok: false, error: 'ledger_read_failed', details: e instanceof Error ? e.message : String(e) });
       return;
@@ -906,6 +926,6 @@ function registerAdminRoute(adminHttp, deps = {}) {
 }
 
 module.exports = {
-  registerAdminRoute, MAX_BODY_BYTES, MAX_IMPORT_BODY_BYTES, TASK_FIELDS, IMPORT_STATUSES,
+  registerAdminRoute, liveTaskIdsFor, MAX_BODY_BYTES, MAX_IMPORT_BODY_BYTES, TASK_FIELDS, IMPORT_STATUSES,
   TASK_BODY_KEYS, TASK_RUNTIME_KEYS, TASK_GET_KEYS,
 };

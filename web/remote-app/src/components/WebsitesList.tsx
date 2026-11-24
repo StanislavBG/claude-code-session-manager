@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { deviceLabel } from '../devices';
 import { getBoxes, patchBox, deleteBox, type FeedbackBox } from '../api';
@@ -6,38 +6,83 @@ import { keyFingerprint, snippetFor } from '../feedbackSnippet';
 
 /**
  * The signed-in account's feedback widgets ("websites"), shown in the device picker below the
- * paired computers. One collapsed row until opened; nothing at all when there are none.
+ * paired computers. One collapsed row until opened; nothing at all when there are none or the
+ * account is refused (401/403). Any other load failure is one collapsed retry row. Every expand
+ * reloads the list.
  * Creating a widget stays on the desktop — its private key is made there.
  */
 export default function WebsitesList() {
   const deviceMeta = useStore((s) => s.deviceMeta);
   const [boxes, setBoxes] = useState<FeedbackBox[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async () => {
+  /** Resolves true when the list loaded. 401/403 hides the section; other failures show the retry row. */
+  const load = useCallback(async (): Promise<boolean> => {
     try {
       const r = await getBoxes();
-      if (r.ok) setBoxes(r.data);
+      if (r.ok) {
+        setBoxes(r.data);
+        setLoadFailed(false);
+        return true;
+      }
+      setLoadFailed(r.status !== 401 && r.status !== 403);
     } catch {
-      // A failed list read just keeps the section hidden; there is nothing to manage.
+      setLoadFailed(true);
     }
+    return false;
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); }, []);
+
+  if (loadFailed) {
+    return (
+      <section data-testid="websites-list" className="mb-4 border-t border-edge pt-3">
+        <button
+          onClick={async () => { if (await load()) setOpen(true); }}
+          aria-expanded={false}
+          data-testid="websites-toggle"
+          data-track="websites-retry"
+          className="w-full flex items-center py-1.5 text-left text-sm font-semibold text-ink"
+        >
+          <span className="flex-1">Couldn't load websites — retry</span>
+          <span className="text-xs text-ink-mute">Show</span>
+        </button>
+      </section>
+    );
+  }
 
   if (boxes.length === 0) return null;
 
+  const expand = () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    void load();
+  };
+
   const copy = async (b: FeedbackBox) => {
+    if (copyingId) return;
     setErr(null);
+    setCopyingId(b.boxId);
     try {
       const fp = await keyFingerprint(b.publicKey);
       await navigator.clipboard.writeText(snippetFor(b.boxId, fp));
       setCopiedId(b.boxId);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => {
+        copiedTimer.current = null;
+        setCopiedId(null);
+      }, 2000);
     } catch (e: any) {
       setErr(e?.message ? `Copy failed: ${e.message}` : 'Copy failed');
+    } finally {
+      setCopyingId(null);
     }
   };
 
@@ -61,7 +106,7 @@ export default function WebsitesList() {
   return (
     <section data-testid="websites-list" className="mb-4 border-t border-edge pt-3">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={expand}
         aria-expanded={open}
         data-testid="websites-toggle"
         data-track="websites-toggle"
@@ -96,9 +141,10 @@ export default function WebsitesList() {
                 <div className="mt-2 flex gap-2">
                   <button
                     onClick={() => copy(b)}
+                    disabled={copyingId !== null}
                     data-testid={`website-copy-${b.boxId}`}
                     data-track="websites-copy-snippet"
-                    className="px-2 py-1.5 rounded-lg text-xs text-ink-soft hover:text-ink border border-edge"
+                    className="px-2 py-1.5 rounded-lg text-xs text-ink-soft hover:text-ink border border-edge disabled:opacity-50"
                   >
                     {copiedId === b.boxId ? 'Copied' : 'Copy snippet'}
                   </button>

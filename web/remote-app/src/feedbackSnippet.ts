@@ -29,6 +29,12 @@ export async function keyFingerprint(publicKey: string): Promise<string> {
   return b64uEncode(digest).slice(0, 22);
 }
 
+const BOX_ID_RE = /^[0-9A-Z]{8}$/;
+const FINGERPRINT_RE = /^[A-Za-z0-9_-]{22}$/;
+
+/** The embed line. Both parts are interpolated into HTML, so each must match its exact shape. */
 export function snippetFor(boxId: string, fingerprint: string): string {
+  if (!BOX_ID_RE.test(boxId)) throw new Error('invalid boxId');
+  if (!FINGERPRINT_RE.test(fingerprint)) throw new Error('invalid key fingerprint');
   return `<script src="${WIDGET_SRC}" data-key="fbk1_${boxId}.${fingerprint}" async></script>`;
 }

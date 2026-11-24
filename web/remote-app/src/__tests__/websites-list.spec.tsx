@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 vi.mock('../components/PairCode', () => ({ default: () => <div>pair-code-stub</div> }));
 vi.mock('../api', () => ({
@@ -58,11 +58,54 @@ describe('WebsitesList in DevicePicker', () => {
     expect(screen.queryByText(/Websites/)).toBeNull();
   });
 
-  it('renders nothing when the list read fails', async () => {
-    vi.mocked(getBoxes).mockResolvedValue({ ok: false, status: 401, error: 'unauthorized' });
+  it.each([401, 403])('renders nothing when the list read is refused (%i)', async (status) => {
+    vi.mocked(getBoxes).mockResolvedValue({ ok: false, status, error: 'unauthorized' });
     renderPicker();
     await waitFor(() => expect(getBoxes).toHaveBeenCalled());
     expect(screen.queryByTestId('websites-list')).toBeNull();
+  });
+
+  it('shows one collapsed retry row on a non-auth failure, and reloads when expanded', async () => {
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: false, status: 500, error: 'http_500' });
+    renderPicker();
+    const toggle = await screen.findByTestId('websites-toggle');
+    expect(toggle).toHaveTextContent("Couldn't load websites — retry");
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('websites-body')).toBeNull();
+    expect(getBoxes).toHaveBeenCalledTimes(1);
+
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: true, data: [box()] });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(getBoxes).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('website-row-box1')).toHaveTextContent('Marketing site');
+    expect(screen.getByTestId('websites-toggle')).toHaveTextContent('Websites (1)');
+  });
+
+  it('treats a thrown list read as a non-auth failure', async () => {
+    vi.mocked(getBoxes).mockRejectedValueOnce(new Error('network down'));
+    renderPicker();
+    expect(await screen.findByTestId('websites-toggle')).toHaveTextContent("Couldn't load websites — retry");
+  });
+
+  it('stays on the retry row when the reload fails again', async () => {
+    vi.mocked(getBoxes).mockResolvedValue({ ok: false, status: 503, error: 'http_503' });
+    renderPicker();
+    fireEvent.click(await screen.findByTestId('websites-toggle'));
+    await waitFor(() => expect(getBoxes).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('websites-toggle')).toHaveTextContent("Couldn't load websites — retry");
+    expect(screen.getByTestId('websites-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('websites-body')).toBeNull();
+  });
+
+  it('reloads the list each time it is expanded', async () => {
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: true, data: [box()] });
+    renderPicker();
+    const toggle = await screen.findByTestId('websites-toggle');
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: true, data: [box(), box({ boxId: 'box2', label: 'Docs' })] });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(getBoxes).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('website-row-box2')).toBeInTheDocument();
+    expect(screen.getByTestId('websites-toggle')).toHaveTextContent('Websites (2)');
   });
 
   it('is one collapsed Websites (n) row by default, below the devices list', async () => {
@@ -99,6 +142,40 @@ describe('WebsitesList in DevicePicker', () => {
     fireEvent.click(screen.getByTestId('website-copy-box1'));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('<script data-key="fbk1_box1.FP22charsFP22charsFP22"></script>'));
     expect(await screen.findByText('Copied')).toBeInTheDocument();
+  });
+
+  it('disables Copy while copying', async () => {
+    vi.mocked(getBoxes).mockResolvedValue({ ok: true, data: [box()] });
+    let release: () => void = () => {};
+    writeText.mockImplementationOnce(() => new Promise<undefined>((r) => { release = () => r(undefined); }));
+    renderPicker();
+    fireEvent.click(await screen.findByTestId('websites-toggle'));
+    const btn = screen.getByTestId('website-copy-box1');
+    fireEvent.click(btn);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    release();
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    expect(btn).toHaveTextContent('Copied');
+  });
+
+  it("resets 'Copied' after 2 s", async () => {
+    vi.mocked(getBoxes).mockResolvedValue({ ok: true, data: [box()] });
+    renderPicker();
+    fireEvent.click(await screen.findByTestId('websites-toggle'));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByTestId('website-copy-box1'));
+      await waitFor(() => expect(screen.getByTestId('website-copy-box1')).toHaveTextContent('Copied'));
+      await act(async () => { vi.advanceTimersByTime(1900); });
+      expect(screen.getByTestId('website-copy-box1')).toHaveTextContent('Copied');
+      await act(async () => { vi.advanceTimersByTime(200); });
+      expect(screen.getByTestId('website-copy-box1')).toHaveTextContent('Copy snippet');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('pauses and resumes through patchBox', async () => {

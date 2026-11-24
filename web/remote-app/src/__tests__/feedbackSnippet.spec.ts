@@ -25,9 +25,35 @@ describe('keyFingerprint', () => {
 
 describe('snippetFor', () => {
   it('returns the exact one-line embed', () => {
-    expect(snippetFor('box_vector_1', 'pTlNIcwgfyw8DJGDhHkyOd')).toBe(
-      '<script src="https://bilko.run/projects/session-manager/widget/v1/feedback.js" data-key="fbk1_box_vector_1.pTlNIcwgfyw8DJGDhHkyOd" async></script>',
+    expect(snippetFor('MA47K7HE', 'pTlNIcwgfyw8DJGDhHkyOd')).toBe(
+      '<script src="https://bilko.run/projects/session-manager/widget/v1/feedback.js" data-key="fbk1_MA47K7HE.pTlNIcwgfyw8DJGDhHkyOd" async></script>',
     );
+  });
+
+  it('accepts a fingerprint using - and _', () => {
+    expect(snippetFor('01234567', 'a-b_c-d_e-f_g-h_i-j_kl')).toContain('fbk1_01234567.a-b_c-d_e-f_g-h_i-j_kl');
+  });
+
+  it.each([
+    ['lowercase', 'ma47k7he'],
+    ['too short', 'MA47K7H'],
+    ['too long', 'MA47K7HEX'],
+    ['underscore', 'box_vect'],
+    ['html injection', 'A"><b>1'],
+    ['empty', ''],
+  ])('throws on a boxId that is %s', (_why, boxId) => {
+    expect(() => snippetFor(boxId, 'pTlNIcwgfyw8DJGDhHkyOd')).toThrow(/boxId/);
+  });
+
+  it.each([
+    ['too short', 'pTlNIcwgfyw8DJGDhHkyO'],
+    ['too long', 'pTlNIcwgfyw8DJGDhHkyOdX'],
+    ['a quote', 'pTlNIcwgfyw8DJGDhHky"d'],
+    ['padding', 'pTlNIcwgfyw8DJGDhHkyO='],
+    ['plus', 'pTlNIcwgfyw8DJGDhHkyO+'],
+    ['empty', ''],
+  ])('throws on a fingerprint with %s', (_why, fp) => {
+    expect(() => snippetFor('MA47K7HE', fp)).toThrow(/fingerprint/);
   });
 });
 

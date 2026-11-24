@@ -8034,14 +8034,16 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           source: 'spawnJob:dispatch',
         });
         delete s.jobs[idx].heldReason;
-        // A fresh dispatch means any gateShadow, looksDone, or
-        // evidenceScannedAt on this row was computed for an earlier
-        // runId/startedAt — never let any of them linger and read as this
-        // run's result (looksDone stale here would let rung 6 complete this
-        // run on the PREVIOUS run's evidence).
+        // A fresh dispatch means any gateShadow, looksDone,
+        // evidenceScannedAt, or artifactEvidence on this row was computed for
+        // an earlier runId/startedAt — never let any of them linger and read
+        // as this run's result (looksDone stale here would let rung 6
+        // complete this run on the PREVIOUS run's evidence; a running row
+        // must never carry another run's artifactEvidence).
         delete s.jobs[idx].gateShadow;
         delete s.jobs[idx].looksDone;
         delete s.jobs[idx].evidenceScannedAt;
+        delete s.jobs[idx].artifactEvidence;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
         // Dispatch-phase breadcrumb (PRD: dispatch-region diagnostic

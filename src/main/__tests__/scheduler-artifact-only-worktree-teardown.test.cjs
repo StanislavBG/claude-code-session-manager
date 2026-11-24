@@ -152,3 +152,42 @@ test('(b) undeclared no-commit PASS in a worktree still parks needs_review', asy
   expect(r.row.verifierVerdict).not.toBe('pass_no_commit_artifact_verified');
   expect(r.row.artifactEvidence).toBeUndefined();
 }, 90_000);
+
+test('(c) dispatch clears a stale artifactEvidence from another run before the job runs', async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-artwt-project-'));
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+  const slug = `4379-artwt-stale-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`),
+    `---\ntitle: t\ndeliverable: artifact\nartifactPaths: [out/report.txt]\n---\n\n# Goal\n\n${MARKER}\n`, 'utf8');
+  const queuePath = writeProjectQueue(projectCwd, [{
+    slug,
+    status: 'pending',
+    cwd: projectCwd,
+    artifactEvidence: { runId: 'old-run', ok: true, verified: [], paths: ['out/report.txt'], capturedAt: new Date().toISOString() },
+  }]);
+  const recordPath = path.join(tmpHome, `evidence-${slug}.json`);
+  process.env.SM_CLAUDE_BIN = claudeStub.writeClaudeStub({ body: `
+    const fs = require('fs');
+    const q = JSON.parse(fs.readFileSync(${JSON.stringify(queuePath)}, 'utf8'));
+    const row = (q.jobs || []).find((j) => j.slug === ${JSON.stringify(slug)});
+    fs.writeFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ found: !!row, status: row && row.status, hasEvidence: !!(row && row.artifactEvidence) }), 'utf8');
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done\\nSCHEDULER_VERDICT: PASS' }) + '\\n');
+    process.exit(0);
+  ` });
+  const runId = `run-${slug}`;
+  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  try {
+    await spawnJob({ slug, cwd: projectCwd }, runId, runDir, projectCwd);
+    const seen = JSON.parse(fs.readFileSync(recordPath, 'utf8'));
+    expect(seen.found).toBe(true);
+    expect(seen.status).toBe('running');
+    expect(seen.hasEvidence).toBe(false);
+  } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+}, 90_000);

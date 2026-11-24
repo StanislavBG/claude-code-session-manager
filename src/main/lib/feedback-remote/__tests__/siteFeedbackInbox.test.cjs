@@ -404,3 +404,23 @@ test('writeItem and updateMeta read the keystore box list once per call, never a
   await inbox.remove(cwd, 'FB-ONCE2');
   expect(spy).toHaveBeenCalledTimes(1);
 });
+
+test('resolveKnownProject returns the canonical project path or null (the one shared check)', async () => {
+  const cwd = await mkTmpCwd();
+  const linkDir = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-site-inbox-rkp-')));
+  tmpDirs.push(linkDir);
+  const link = path.join(linkDir, 'proj');
+  fs.symlinkSync(cwd, link);
+  const homeLink = path.join(linkDir, 'home');
+  fs.symlinkSync(os.homedir(), homeLink);
+  const boxes = [{ projectCwd: link }, { projectCwd: os.homedir() }, { projectCwd: path.parse(cwd).root }, {}, null];
+  expect(inbox.resolveKnownProject(cwd, boxes)).toBe(cwd);
+  expect(inbox.resolveKnownProject(link, boxes)).toBe(cwd);
+  expect(inbox.resolveKnownProject(os.homedir(), boxes)).toBeNull();
+  expect(inbox.resolveKnownProject(homeLink, boxes)).toBeNull();
+  expect(inbox.resolveKnownProject(path.parse(cwd).root, boxes)).toBeNull();
+  expect(inbox.resolveKnownProject(path.join(linkDir, 'missing'), boxes)).toBeNull();
+  expect(inbox.resolveKnownProject(linkDir, boxes)).toBeNull();
+  expect(inbox.resolveKnownProject(cwd, [])).toBeNull();
+  expect(inbox.resolveKnownProject(/** @type {any} */ (42), boxes)).toBeNull();
+});

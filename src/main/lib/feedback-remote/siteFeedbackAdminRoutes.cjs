@@ -24,16 +24,16 @@
  * The three /admin/site-feedback/* routes answer 404 `unknown_project` for a cwd that is not the
  * projectCwd of a widget box (feedbackBoxKeys.listBoxes), compared as fs.realpathSync canonical
  * paths (a symlink to a known project is known; a path that does not resolve, the home directory
- * and the filesystem root never are), before any inbox call — so an admin
+ * and the filesystem root never are — siteFeedbackInbox.resolveKnownProject, the one check the
+ * inbox's own write boundary uses too), before any inbox call — so an admin
  * call can never point the inbox (and its write-boundary widening) at an arbitrary directory.
  * Deliberately NO route that mints an Epic (SINGLE-CREATOR LAW, epicMint.cjs).
  */
 'use strict';
 
-const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
+const { resolveKnownProject } = require('./siteFeedbackInbox.cjs');
 
 const HOST_ID_RE = /^FB-[0-9A-Z]{5}$/;
 const BOX_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
@@ -203,16 +203,6 @@ function route(fn) {
   };
 }
 
-/**
- * fs.realpathSync-canonical path, or null when it does not resolve (fail-closed: a path that
- * does not resolve is never a known project).
- * @param {string} p
- * @returns {string | null}
- */
-function realOrNull(p) {
-  try { return fs.realpathSync(p); } catch { return null; }
-}
-
 /** Failure for a cwd with no widget box (HTTP 404). */
 const UNKNOWN_PROJECT = Object.freeze({ ok: false, error: 'unknown_project', message: 'no feedback widget is set up for this project' });
 
@@ -224,14 +214,7 @@ function registerAdminRoute(adminHttp, opts = {}) {
   const svc = () => getService(opts.service);
   const boxKeys = () => opts.boxKeys || require('./feedbackBoxKeys.cjs');
   /** @param {string} cwd */
-  const knownProject = async (cwd) => {
-    const abs = realOrNull(cwd);
-    if (!abs) return false;
-    const home = realOrNull(os.homedir()) || path.resolve(os.homedir());
-    if (abs === home || abs === path.resolve(os.homedir()) || abs === path.parse(abs).root) return false;
-    const boxes = await boxKeys().listBoxes();
-    return boxes.some((/** @type {any} */ b) => b && typeof b.projectCwd === 'string' && realOrNull(b.projectCwd) === abs);
-  };
+  const knownProject = async (cwd) => resolveKnownProject(cwd, await boxKeys().listBoxes()) !== null;
 
   adminHttp.registerRoute('POST', '/admin/feedback-widget/create', route(async (req) => {
     const b = await readJsonBody(req);

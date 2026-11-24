@@ -169,6 +169,40 @@ function realOrNull(p) {
 }
 
 /**
+ * The one candidate check: cwd's fs.realpathSync canonical path, or null when it does not
+ * resolve or is the home directory or the filesystem root (never a feedback project).
+ * @param {unknown} cwd
+ * @returns {string | null}
+ */
+function canonicalCandidate(cwd) {
+  if (typeof cwd !== 'string' || !cwd) return null;
+  const abs = realOrNull(cwd);
+  if (!abs) return null;
+  const home = realOrNull(os.homedir()) || path.resolve(os.homedir());
+  if (abs === home || abs === path.resolve(os.homedir()) || abs === path.parse(abs).root) return null;
+  return abs;
+}
+
+/**
+ * The shared known-project check (this module's registerRoot and siteFeedbackAdminRoutes.cjs):
+ * cwd's canonical path when it resolves, is not the home directory or the filesystem root, and
+ * equals the canonical projectCwd of one of `boxes` (a box projectCwd that does not resolve
+ * matches nothing); otherwise null.
+ * @param {unknown} cwd
+ * @param {ReadonlyArray<unknown>} boxes feedbackBoxKeys.listBoxes() entries
+ * @returns {string | null}
+ */
+function resolveKnownProject(cwd, boxes) {
+  const abs = canonicalCandidate(cwd);
+  if (!abs || !Array.isArray(boxes)) return null;
+  const known = boxes.some((b) => {
+    const pc = b && typeof b === 'object' ? /** @type {any} */ (b).projectCwd : undefined;
+    return typeof pc === 'string' && realOrNull(pc) === abs;
+  });
+  return known ? abs : null;
+}
+
+/**
  * One operation's keystore view: the box list is read at most once per scope and never cached
  * across calls (a fresh scope per writeItem/updateMeta/... call).
  * @typedef {{ boxes: () => Promise<Array<{ projectCwd?: unknown }>> }} RootScope
@@ -199,21 +233,18 @@ async function registerRoot(cwd, scope = rootScope()) {
     throw new Error('siteFeedbackInbox: cwd must be an absolute path');
   }
   if (!isDirSync(cwd)) throw new Error('siteFeedbackInbox: cwd does not exist or is not a directory');
-  const abs = realOrNull(cwd);
-  if (!abs) throw unknownProject('cwd does not resolve to a real path');
-  const home = realOrNull(os.homedir()) || path.resolve(os.homedir());
-  if (abs === home || abs === path.resolve(os.homedir()) || abs === path.parse(abs).root) {
-    throw unknownProject('the home directory or filesystem root is never a feedback project');
-  }
+  const abs = canonicalCandidate(cwd);
+  if (!abs) throw unknownProject('cwd does not resolve, or is the home directory or filesystem root');
   const boxes = await scope.boxes();
-  /** @type {string[]} */
-  const projects = [];
-  for (const b of boxes) {
-    const real = b && typeof b.projectCwd === 'string' ? realOrNull(b.projectCwd) : null;
-    if (real) projects.push(real);
-  }
-  let known = projects.includes(abs);
-  if (!known && !projects.some((p) => isStrictAncestor(abs, p))) {
+  let known = resolveKnownProject(abs, boxes) !== null;
+  if (!known) {
+    /** @type {string[]} */
+    const projects = [];
+    for (const b of boxes) {
+      const real = b && typeof b.projectCwd === 'string' ? realOrNull(b.projectCwd) : null;
+      if (real) projects.push(real);
+    }
+    if (projects.some((p) => isStrictAncestor(abs, p))) throw unknownProject('cwd is not a project with a feedback widget');
     let ns = '';
     try { ns = nsRoot(abs); } catch { /* not a resolvable project root */ }
     known = !!ns && isDirSync(ns);
@@ -551,6 +582,7 @@ async function prune(cwd, days, opts = {}) {
 }
 
 module.exports = {
+  resolveKnownProject,
   writeItem,
   appendRejected,
   list,

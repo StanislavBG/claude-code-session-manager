@@ -5,23 +5,24 @@ import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { libraryShotsOutDir } from './shotsOutDir.ts'
+import { outDirFor, LIBRARY_SHOTS } from './shotsOutDir.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url)
 
 // Real Chromium (never Electron). Renders the real Project Home document (the
 // ProjectHomeKeyButtons + ProjectPagesSection shell, whose Pages tab is PagesPane and Videos tab is VideosPane) with CSS from the built web renderer (dist-web/app.css) and a stub
-// window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs to test-results/project-home-library/
-// (gitignored) by default, so a normal run never dirties the tree.
-// To refresh the committed evidence under session-manager-operations/reviews/validation/
-// project-home-as-a-player-knowledge-pages-video-p-4afa65b6/screens/, run with SM_UPDATE_SHOTS=1:
+// window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs. Output folder (./shotsOutDir.ts,
+// unit-tested by tests/unit/library-shots-out-dir.spec.ts), the same convention as every screenshot spec:
+//   default              test-results/project-home-library/ (gitignored), so a normal run never dirties the tree
+//   SM_UPDATE_SHOTS=1    the committed evidence under session-manager-operations/reviews/validation/
+//                        project-home-as-a-player-knowledge-pages-video-p-4afa65b6/screens/
+//   SM_SHOTS_OUT=<path>  that folder instead (wins over SM_UPDATE_SHOTS)
 //   SM_UPDATE_SHOTS=1 xvfb-run -a npx playwright test -c tests/web-ui/playwright.config.ts project-home-library-shots
-// The path choice lives in ./shotsOutDir.ts (unit-tested by tests/unit/library-shots-out-dir.spec.ts).
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation
 // plus an inverted render of the same page.
 const root = path.resolve(__dirname, '../..')
-const OUT = libraryShotsOutDir(root)
+const OUT = outDirFor(root, LIBRARY_SHOTS)
 const { PLAYER_BRIDGE_SCRIPT } = createRequire(__filename)(path.join(root, 'src/main/lib/project-pages/playerBridge.cjs')) as { PLAYER_BRIDGE_SCRIPT: string }
 
 const videoHtml = (title: string) => `<!doctype html><html><body style="margin:0;background:#1d2733;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><h1 style="font-size:48px">${title}</h1><script>

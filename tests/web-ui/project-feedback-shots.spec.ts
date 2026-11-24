@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { outDirFor, FEEDBACK_SHOTS } from './shotsOutDir.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -15,10 +16,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 //   inbox-list     — one widget + 4 inbox items (bug / feature / other, mixed statuses)
 //   report-detail  — the newest item opened: annotated screenshot, marks, page, console, network
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation plus an
-// inverted render (as project-home-library-shots). Output goes to test-results/project-feedback/
-// (gitignored); set SM_SHOTS_OUT=<dir> to write the evidence somewhere else.
+// inverted render (as project-home-library-shots). Output folder (./shotsOutDir.ts, unit-tested by
+// tests/unit/library-shots-out-dir.spec.ts), the same convention as every screenshot spec:
+//   default              test-results/project-feedback/ (gitignored), so a normal run never dirties the tree
+//   SM_UPDATE_SHOTS=1    the tracked evidence folder
+//                        session-manager-operations/reviews/validation/project-home-feedback-tab/screens/
+//   SM_SHOTS_OUT=<path>  that folder instead (wins over SM_UPDATE_SHOTS)
 const root = path.resolve(__dirname, '../..')
-const OUT = process.env.SM_SHOTS_OUT ? path.resolve(process.env.SM_SHOTS_OUT) : path.join(root, 'test-results/project-feedback')
+const OUT = outDirFor(root, FEEDBACK_SHOTS)
 const VIEWPORT = { width: 1280, height: 900 }
 // The opened report is long (screenshot, marks, page, console, network): give it a taller frame.
 const DETAIL_VIEWPORT = { width: 1280, height: 1600 }

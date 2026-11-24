@@ -95,9 +95,9 @@ async function readJsonOr(file, fallback) {
   }
 }
 
-function readJsonOrSync(file, fallback) {
+function readJsonOrSync(file, fallback, fsImpl = fs) {
   try {
-    const raw = fs.readFileSync(file, 'utf8');
+    const raw = fsImpl.readFileSync(file, 'utf8');
     if (raw.trim() === '') return fallback;
     return JSON.parse(raw);
   } catch {

@@ -253,3 +253,20 @@ test('listArtifacts returns every owner\'s entries newest first; empty store →
     ['epic-b', 'new.txt'], ['_tasks/t9', 'task.txt'], ['epic-a', 'mid.txt'], ['epic-a', 'old.txt'],
   ]);
 });
+
+test('listArtifacts reads the ledger through the injected fsImpl, not the real disk', () => {
+  const nsDir = ns();
+  const epicDir = path.join(nsDir, 'epic-fake');
+  const ledger = path.join(epicDir, 'index.json');
+  const dirent = (name) => ({ name, isDirectory: () => true });
+  const fake = {
+    ...fs,
+    readdirSync: (dir) => (dir === nsDir ? [dirent('epic-fake')] : []),
+    readFileSync: (file, enc) => {
+      if (file === ledger) return JSON.stringify({ version: 1, entries: [{ name: 'ghost.txt', createdAt: '2026-11-20T00:00:00.000Z' }] });
+      return fs.readFileSync(file, enc);
+    },
+  };
+  expect(fs.existsSync(ledger)).toBe(false);
+  expect(store.listArtifacts(root, { fsImpl: fake }).map((e) => [e.ownerId, e.name])).toEqual([['epic-fake', 'ghost.txt']]);
+});

@@ -77,6 +77,22 @@ describe('atomicFs', () => {
     expect(atomicFs.readJsonOrSync(file, { safe: true })).toEqual({ safe: true });
   });
 
+  it('readJsonOrSync reads through an injected fs, keeping the empty and parse-error fallbacks', () => {
+    const files = { '/fake/ok.json': '{"from":"fake"}', '/fake/empty.json': '  \n', '/fake/bad.json': '{nope' };
+    const fakeFs = {
+      readFileSync: (file, enc) => {
+        expect(enc).toBe('utf8');
+        if (!(file in files)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return files[file];
+      },
+    };
+    expect(fs.existsSync('/fake/ok.json')).toBe(false);
+    expect(atomicFs.readJsonOrSync('/fake/ok.json', 'fb', fakeFs)).toEqual({ from: 'fake' });
+    expect(atomicFs.readJsonOrSync('/fake/empty.json', 'fb', fakeFs)).toBe('fb');
+    expect(atomicFs.readJsonOrSync('/fake/bad.json', 'fb', fakeFs)).toBe('fb');
+    expect(atomicFs.readJsonOrSync('/fake/missing.json', 'fb', fakeFs)).toBe('fb');
+  });
+
   it('cleans up the tmp file when the rename target directory is invalid', async () => {
     // Pass a file path whose directory cannot be created (parent is a file).
     const blocker = path.join(dir, 'blocker');

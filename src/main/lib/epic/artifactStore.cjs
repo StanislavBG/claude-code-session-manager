@@ -127,11 +127,10 @@ function ownerOf(epicId, taskId) {
 }
 
 /**
- * Read a ledger's entries; missing, empty, corrupt or entries-not-an-array → [].
- * Reads through readJsonOrSync (real fs), so it takes no fsImpl.
+ * Read a ledger's entries through fsImpl; missing, empty, corrupt or entries-not-an-array → [].
  */
-function readLedger(file) {
-  const parsed = readJsonOrSync(file, null);
+function readLedger(file, fsImpl) {
+  const parsed = readJsonOrSync(file, null, fsImpl);
   const entries = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.entries) ? parsed.entries : null;
   if (!entries) return [];
   return entries.filter((e) => e && typeof e === 'object' && typeof e.name === 'string');
@@ -233,7 +232,7 @@ async function publishArtifact({
         producer: cleanProducer(producer, epicId, taskId),
       };
       try {
-        const entries = readLedger(ledgerFile);
+        const entries = readLedger(ledgerFile, fsImpl);
         entries.push(entry);
         await writeJsonAtomic(ledgerFile, { version: 1, entries });
       } catch (e) {
@@ -355,7 +354,7 @@ function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
     }
   }
   for (const { ownerId, dir } of owners) {
-    for (const e of readLedger(path.join(dir, LEDGER))) out.push({ ...e, ownerId });
+    for (const e of readLedger(path.join(dir, LEDGER), fsImpl)) out.push({ ...e, ownerId });
   }
   const t = (e) => { const v = Date.parse(e.createdAt); return Number.isFinite(v) ? v : 0; };
   out.sort((a, b) => t(b) - t(a));

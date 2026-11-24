@@ -19,6 +19,7 @@ Runtime diagnosis (stuck queue, `needs_review`, reap gate) is NOT here — see
 | `needs_review` / auto-fix / auto-reset eligibility, verdict sets, thresholds | `reviewLadder.cjs` |
 | Git status/stash/HEAD helpers, shared-tree guard, commit-guard, finalize-drop predicates | `gitTreeGuard.cjs` |
 | Starvation / blocked-chain classifiers, dispatch-idle clock | `starvation.cjs` |
+| Automatic-dispatch hold rule (usage threshold, manual fire policy, which windows count) | `utilizationHold.cjs` |
 | Stall / stranded-row / overrun / wall-clock budget selectors, failure backoff, `dependsOn` history lookup | `budget.cjs` |
 | `spawnJob` / execution, `tickQueue`, dead-process reaper, poll loop, IPC handlers, admin routes, queue-mutating ladder rungs and watchdogs | `../scheduler.cjs` (by section banner) |
 

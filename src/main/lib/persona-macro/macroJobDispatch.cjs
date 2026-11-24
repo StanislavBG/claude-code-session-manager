@@ -24,10 +24,17 @@ const { renderMacroPrompt } = require('./macroLibrary.cjs');
 const ACTIVE = new Set(['pending', 'held', 'running']);
 const RETRYABLE = new Set(['needs_review', 'failed']);
 
-function buildGate(absPath, nowMs) {
+// One path keeps the original single-stat script. Alternatives (Demo Video:
+// the stage artifact OR outcome.json) pass when ANY is fresh (size > 0,
+// mtime after dispatch); a missing alternative counts as not fresh.
+function buildGate(absPaths, nowMs) {
+  const list = Array.isArray(absPaths) ? absPaths : [absPaths];
   // No shell: everything with shell characters sits inside single quotes, so
-  // the script itself uses double quotes only (JSON.stringify).
-  const script = `const s=require("fs").statSync(${JSON.stringify(absPath)});process.exit(s.size>0&&s.mtimeMs>${nowMs}?0:1)`;
+  // the script itself uses double quotes only (JSON.stringify) and never a
+  // single quote.
+  const script = list.length === 1
+    ? `const s=require("fs").statSync(${JSON.stringify(list[0])});process.exit(s.size>0&&s.mtimeMs>${nowMs}?0:1)`
+    : `const f=require("fs");process.exit(${JSON.stringify(list)}.some((p)=>{try{const s=f.statSync(p);return s.size>0&&s.mtimeMs>${nowMs}}catch{return false}})?0:1)`;
   return `timeout 60 node -e '${script}'`;
 }
 
@@ -64,6 +71,10 @@ function rawEntryIdFor(kind, extra, t) {
 const VIDEO_INDEX_REL = 'session-manager-operations/project-pages/videos/{id}/index.html';
 // Same string as video-review-store's REVIEW_MATERIAL_REL (asserted by the IPC wiring test).
 const REVIEW_MATERIAL_REL = 'session-manager-operations/project-pages/videos/{id}/review/material.json';
+// Written by project_video_outcome_write (projectHomeAdminRoutes.cjs): a run that
+// ends with a saved outcome (season-complete) and no video on purpose.
+const OUTCOME_REL = 'session-manager-operations/project-pages/videos/{id}/outcome.json';
+const OUTCOME_MACRO_ID = 'builtin-demo-video';
 
 const oneLine = (v) => String(v).replace(/[\r\n]+/g, ' ').trim();
 
@@ -134,7 +145,10 @@ async function dispatchMacroJob(
     ? [(stage === 'review' ? REVIEW_MATERIAL_REL : VIDEO_INDEX_REL).split('{id}').join(entryId)]
     : macro.job.artifactPaths.map((p) => (entryId ? p.split('{id}').join(entryId) : p));
   const absPaths = artifactPaths.map((p) => path.join(cwd, p));
-  for (const s of [cwd, ...absPaths]) {
+  // Built-in Demo Video only: a saved outcome is an alternative pass for every gate.
+  const outcomeRel = builtin && macroId === OUTCOME_MACRO_ID && entryId ? OUTCOME_REL.split('{id}').join(entryId) : null;
+  const outcomeAbs = outcomeRel ? path.join(cwd, outcomeRel) : null;
+  for (const s of [cwd, ...absPaths, ...(outcomeAbs ? [outcomeAbs] : [])]) {
     if (s.includes("'") || /[\r\n]/.test(s)) return { ok: false, error: "cwd or artifact path contains a character the gate cannot quote (single quote or newline)" };
   }
 
@@ -174,7 +188,7 @@ async function dispatchMacroJob(
     sourcePromptId: epicId,
     disposition: 'new-head',
     goal,
-    gate: absPaths.map((p) => buildGate(p, t)),
+    gate: absPaths.map((p) => buildGate(outcomeAbs ? [p, outcomeAbs] : [p], t)),
   };
   if (repoPaths) {
     Object.assign(input, {
@@ -196,6 +210,7 @@ async function dispatchMacroJob(
       acceptanceCriteria: [
         `${artifactPaths[0]} is written during this run by ${saveTool}, never by hand.`,
         'Nothing in the repository is committed. No commit is the expected result: once the gate is green, end with SCHEDULER_VERDICT: PASS, never FAIL for the missing commit.',
+        ...(outcomeRel ? [`A saved outcome is a passing result with no video: when a kind playbook says to stop with an outcome, ${outcomeRel} written during this run by project_video_outcome_write passes the gate in place of ${artifactPaths[0]}; save no video or review material and end with SCHEDULER_VERDICT: PASS.`] : []),
       ],
       implementationNotes:
         `Work as the ${macro.agentName} persona (your system prompt) end to end. This build was started from Project Home and no one is watching: never stop to ask. `

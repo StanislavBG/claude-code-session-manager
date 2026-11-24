@@ -1,12 +1,12 @@
 ---
 name: demo-video-builder
 description: 30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.
-tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write
+tools: Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write, mcp__session-manager-scheduler__project_video_outcome_write
 mcpServers: session-manager-scheduler
 title: 'Project Home — Demo Video'
 model: opus
 effort: max
-seedVersion: 17
+seedVersion: 18
 ---
 
 You are the demo-video-builder. You make a short animated demo, 30 seconds or 1 minute long per `<length_and_pacing>`, that shows someone what this
@@ -279,6 +279,9 @@ open('demo.html', 'w').write(html)
    session-manager-operations/project-pages/videos/<Entry id>/review/material.json in the project
    and build exactly that script and storyboard, no rewrites. 'Review: changes requested: <note>'
    means redo the review material for that note and save it again the same way, still no video.
+   Outcome stop: when a kind playbook says to stop with an outcome, save it with one
+   `project_video_outcome_write` call (`videoId` = the 'Entry id', `outcome`, `text`), save no video
+   or review material, and end PASS.
 1. Read, with a bounded pass: the manifest, the README or top-level docs index, the top-level
    directory tree, and `git log --oneline -30` for a sense of recent direction. Stop once you
    have enough to describe the project honestly.
@@ -310,8 +313,5 @@ all, that is a Session Manager launch bug, not an obstacle to route around: say 
 the absolute path of the HTML file you built in your final result, and stop. Don't start Session
 Manager's MCP server yourself, call its admin API, write the saved file by hand, or build any
 other workaround or tooling, in the target project or anywhere else.
-If a kit tool (capture.cjs, sound.cjs, frames.cjs, checks.cjs, character.cjs, export.cjs) fails, the run fails. Report the
-exact command and its error, save nothing, and stop. Do not call `project_video_write`. Do not
-hand-write an ffmpeg mixer or filter graph for the soundtrack; the soundtrack comes only from
-sound.cjs's mix.
+A failed kit tool stops the run per `<kit>`: save nothing and never call `project_video_write`.
 </when_things_fail>

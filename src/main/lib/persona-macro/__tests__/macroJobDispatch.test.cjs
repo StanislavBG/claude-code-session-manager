@@ -214,6 +214,7 @@ const runTool = async (t, params = {}) => {
   return { r, i: d.createPrd.mock.calls[0]?.[0], d };
 };
 const VID = (id) => `session-manager-operations/project-pages/videos/${id}/index.html`;
+const OUT = (id) => `session-manager-operations/project-pages/videos/${id}/outcome.json`;
 const MAT = (id) => `session-manager-operations/project-pages/videos/${id}/review/material.json`;
 
 test('project tool: inputs rendered, persona/tag/estimate from the tool, artifact-only', async () => {
@@ -316,12 +317,13 @@ test('built-in press input is unchanged and the result adds entryId/stage', asyn
     acceptanceCriteria: [
       `${p} is written during this run by the save tool your persona names, never by hand.`,
       'Nothing in the repository is committed. No commit is the expected result: once the gate is green, end with SCHEDULER_VERDICT: PASS, never FAIL for the missing commit.',
+      `A saved outcome is a passing result with no video: when a kind playbook says to stop with an outcome, ${OUT('vid-x1')} written during this run by project_video_outcome_write passes the gate in place of ${p}; save no video or review material and end with SCHEDULER_VERDICT: PASS.`,
     ],
     implementationNotes:
       `Work as the ${macro.agentName} persona (your system prompt) end to end. This build was started from Project Home and no one is watching: never stop to ask. `
       + 'Build outside the repository (mktemp -d under ~/.cache). SM_PROJECT_ROOT is the project main checkout; the save tool writes there, so omit its cwd. '
       + 'This build is artifact-only (deliverable: artifact) and lands no commit by design: a green gate with no commit means SCHEDULER_VERDICT: PASS.',
-    gate: [`timeout 60 node -e 'const s=require("fs").statSync(${JSON.stringify(path.join('/tmp/proj', p))});process.exit(s.size>0&&s.mtimeMs>1700000000000?0:1)'`],
+    gate: [`timeout 60 node -e 'const f=require("fs");process.exit(${JSON.stringify([path.join('/tmp/proj', p), path.join('/tmp/proj', OUT('vid-x1'))])}.some((p)=>{try{const s=f.statSync(p);return s.size>0&&s.mtimeMs>1700000000000}catch{return false}})?0:1)'`],
   });
   const m = mk();
   expect(await dispatchMacroJob({ ...base, macroId: 'builtin-competitor-matrix', extraInstructions: 'Competitors: Foo' }, m)).toMatchObject({ entryId: null, stage: null });
@@ -395,4 +397,86 @@ test('every review line the Demo Video dispatch writes is one the demo-video-bui
   for (const phrase of ["'Review stage:'", "'Review: approved by the owner at ...'", "'Review: changes requested: <note>'", 'project_video_review_write', 'review/material.json']) {
     expect(persona).toContain(phrase);
   }
+});
+
+// --- season-complete outcome: an alternative pass for the built-in Demo Video only ---
+
+const fsx = require('node:fs');
+const osx = require('node:os');
+const { execFileSync } = require('node:child_process');
+// Run a gate's node -e script without a shell, as the scheduler's no-shell runner would.
+const runGate = (cmd) => {
+  const m = /^timeout 60 node -e '([^']*)'$/.exec(cmd);
+  expect(m).not.toBeNull();
+  try { execFileSync(process.execPath, ['-e', m[1]], { stdio: 'ignore' }); return 0; } catch (e) { return e.status; }
+};
+
+test('built-in Demo Video: every gate passes on a fresh outcome.json, in both the review and the final stage', async () => {
+  const root = fsx.mkdtempSync(path.join(osx.tmpdir(), 'mjd-outcome-'));
+  try {
+    for (const extra of [{}, { reviewStage: true }]) {
+      const d = mk({ now: () => Date.now() - 5000 });
+      const r = await dispatchMacroJob({ ...base, ...extra, cwd: root, extraInstructions: 'Replace entry: vid-o1' }, d);
+      expect(r.ok).toBe(true);
+      const i = d.createPrd.mock.calls[0][0];
+      expect(i.gate).toHaveLength(1);
+      expect(i.acceptanceCriteria.join('\n')).toContain('project_video_outcome_write');
+      expect(i.acceptanceCriteria.join('\n')).toContain('passing result with no video');
+      const out = path.join(root, OUT('vid-o1'));
+      fsx.rmSync(path.dirname(out), { recursive: true, force: true });
+      expect(runGate(i.gate[0])).toBe(1); // nothing written yet
+      fsx.mkdirSync(path.dirname(out), { recursive: true });
+      fsx.writeFileSync(out, JSON.stringify({ id: 'vid-o1', outcome: 'season-complete', text: 'done', at: 'x' }));
+      expect(runGate(i.gate[0])).toBe(0);
+      // a stale outcome (mtime before dispatch) does not pass
+      const old = new Date(Date.now() - 60000);
+      fsx.utimesSync(out, old, old);
+      expect(runGate(i.gate[0])).toBe(1);
+    }
+    // the stage artifact alone still passes
+    const d = mk({ now: () => Date.now() - 5000 });
+    await dispatchMacroJob({ ...base, cwd: root, extraInstructions: 'Replace entry: vid-o2' }, d);
+    const art = path.join(root, 'session-manager-operations/project-pages/videos/vid-o2/index.html');
+    fsx.mkdirSync(path.dirname(art), { recursive: true });
+    fsx.writeFileSync(art, '<html></html>');
+    expect(runGate(d.createPrd.mock.calls[0][0].gate[0])).toBe(0);
+  } finally {
+    fsx.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a project Video tool keeps its single-path gate: outcome.json never passes it', async () => {
+  const root = fsx.mkdtempSync(path.join(osx.tmpdir(), 'mjd-tool-'));
+  try {
+    const t0 = Date.now() - 5000;
+    const d = mk({ macros: [tool({}, { projects: [root] })], now: () => t0 });
+    const r = await dispatchMacroJob({ ...tbase, cwd: root, extraInstructions: 'Replace entry: vid-t1' }, d);
+    expect(r.ok).toBe(true);
+    const i = d.createPrd.mock.calls[0][0];
+    const idx = path.join(root, 'session-manager-operations/project-pages/videos/vid-t1/index.html');
+    expect(i.gate).toEqual([`timeout 60 node -e 'const s=require("fs").statSync(${JSON.stringify(idx)});process.exit(s.size>0&&s.mtimeMs>${t0}?0:1)'`]);
+    expect(i.gate[0]).not.toContain('outcome.json');
+    expect(i.acceptanceCriteria.join('\n')).not.toContain('project_video_outcome_write');
+    const out = path.join(root, OUT('vid-t1'));
+    fsx.mkdirSync(path.dirname(out), { recursive: true });
+    fsx.writeFileSync(out, '{"outcome":"season-complete"}');
+    expect(runGate(i.gate[0])).not.toBe(0);
+  } finally {
+    fsx.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('other built-ins keep their gates: no outcome alternative', async () => {
+  const d = mk();
+  await dispatchMacroJob({ ...base, macroId: 'builtin-project-home' }, d);
+  const i = d.createPrd.mock.calls[0][0];
+  expect(i.gate.every((g) => !g.includes('outcome.json') && g.includes('statSync(') && !g.includes('.some('))).toBe(true);
+  expect(i.acceptanceCriteria.join('\n')).not.toContain('project_video_outcome_write');
+});
+
+test('the persona carries the outcome stop rule and the outcome tool', () => {
+  const persona = fsx.readFileSync(path.join(__dirname, '../../../../seed/agents/demo-video-builder.md'), 'utf8');
+  expect(persona).toContain('mcp__session-manager-scheduler__project_video_outcome_write');
+  expect(persona).toContain('when a kind playbook says to stop with an outcome');
+  expect(persona).toContain('save no video\n   or review material, and end PASS');
 });

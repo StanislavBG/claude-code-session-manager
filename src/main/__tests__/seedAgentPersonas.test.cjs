@@ -622,6 +622,18 @@ test('demo-video-builder: the bundled tools line carries the review save tool, a
   expect(SHIPPED_PERSONA_SEEDS['demo-video-builder'].map((e) => e.bodySha256)).toContain(personaBodyHash(raw));
 });
 
+test('demo-video-builder: the bundled persona carries the outcome tool and the outcome stop rule', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const raw = dvbBundled();
+  const { fm, body } = splitFrontmatter(raw);
+  expect(fm.tools.split(',').map((t) => t.trim())).toContain('mcp__session-manager-scheduler__project_video_outcome_write');
+  expect(Number(fm.seedVersion)).toBeGreaterThan(17);
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(27000);
+  const flat = body.replace(/\s+/g, ' ');
+  expect(flat).toContain('when a kind playbook says to stop with an outcome, save it with one `project_video_outcome_write` call');
+  expect(flat).toContain('save no video or review material, and end PASS');
+});
+
 // --- competitive-researcher (Haiku collector for the Competitor matrix macro) ---
 
 test('competitive-researcher: seeded file parses with model haiku and the collector contract', async () => {

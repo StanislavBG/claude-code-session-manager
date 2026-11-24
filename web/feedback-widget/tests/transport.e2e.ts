@@ -1,7 +1,7 @@
 // End-to-end: the widget transport (src/transport.ts) against the relay drop-box mock
 // (src/main/lib/feedback-remote/__tests__/helpers/relayBoxesMock.cjs), opened with the desktop's
 // own envelope opener (feedbackEnvelope.cjs). Proves a report sealed in a real browser arrives
-// intact, and covers key_mismatch, a disallowed origin and a paused box.
+// intact, and covers key_mismatch, a disallowed origin (retried, stores nothing) and a paused box.
 import { expect, test, type Page } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -262,13 +262,14 @@ test('a fingerprint that does not match the served key refuses to send', async (
   expect(mock.state.envelopes.get(boxId)).toHaveLength(0);
 });
 
-test('a page origin the box does not list is rejected', async ({ page }) => {
+test('a page origin the box does not list stays retryable and stores nothing', async ({ page }) => {
   const pair = generateBoxKeypair();
   const boxId = await createBox(pair.publicKey, [allowedOrigin]);
   const key = `fbk1_${boxId}.${keyFingerprint(pair.publicKey)}`;
 
   const sent = await sendFromPage(page, otherOrigin, key);
-  expect(sent.result).toEqual({ ok: false, kind: 'rejected', status: 403 });
+  // A CORS-refused POST is indistinguishable from offline (status 0): retried, bounded by the outbox's MAX_TRIES, never rejected.
+  expect(sent.result).toEqual({ ok: false, kind: 'retryable' });
   expect(mock.state.envelopes.get(boxId)).toHaveLength(0);
 });
 

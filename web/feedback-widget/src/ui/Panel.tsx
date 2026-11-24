@@ -200,9 +200,6 @@ export function panelSheet(): CSSStyleSheet | null {
   return sheetCache;
 }
 
-/** Re-exported for PanelContext until it imports './shared' directly (widget-shared-adopt). */
-export { adoptInto };
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export interface PanelProps {

@@ -13,7 +13,7 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ConsoleEntry, NetworkEntry } from '../buffers';
 import { NOTE_MAX } from '../report';
 import { isNumbered, textColorOn, type Mark } from './marks';
-import { adoptInto } from './Panel';
+import { adoptInto } from './shared';
 import { colors, fonts, motion } from './tokens';
 
 // ── Copy (§5.6) ───────────────────────────────────────────────────────────────

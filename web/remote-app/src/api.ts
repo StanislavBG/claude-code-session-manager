@@ -71,3 +71,71 @@ export async function revokeDevice(deviceId: string): Promise<void> {
 }
 
 export { ApiError };
+
+// ── Feedback boxes (site feedback widget) ────────────────────────────────────
+// GET/PATCH/DELETE /boxes accept the Clerk session (site-feedback.md host contract).
+// Creating a box stays on the desktop — its private key is made there.
+
+export type FeedbackBoxState = 'open' | 'paused';
+
+export interface FeedbackBox {
+  boxId: string;
+  label: string;
+  allowedOrigins: string[];
+  publicKey: string;
+  state: FeedbackBoxState;
+  pending: number;
+  pendingBytes: number;
+  createdAt: string;
+  lastReceivedAt: string | null;
+  deviceId: string;
+}
+
+export interface FeedbackBoxPatch {
+  label?: string;
+  allowedOrigins?: string[];
+  state?: FeedbackBoxState;
+}
+
+/** Success carries the data; failure carries the relay's `{ error }` code and HTTP status. */
+export type BoxResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; error: string };
+
+function relayErrorCode(e: unknown): { status: number; error: string } {
+  if (e instanceof ApiError) {
+    const b = e.body as { error?: unknown } | null;
+    const code = b && typeof b.error === 'string' ? b.error : `http_${e.status}`;
+    return { status: e.status, error: code };
+  }
+  return { status: 0, error: 'network_error' };
+}
+
+async function boxCall<T>(path: string, options?: RequestInit): Promise<BoxResult<T>> {
+  try {
+    return { ok: true, data: await apiFetch<T>(path, options) };
+  } catch (e) {
+    return { ok: false, ...relayErrorCode(e) };
+  }
+}
+
+export async function getBoxes(): Promise<BoxResult<FeedbackBox[]>> {
+  const r = await boxCall<{ boxes?: FeedbackBox[] }>('/boxes');
+  return r.ok ? { ok: true, data: Array.isArray(r.data?.boxes) ? r.data.boxes : [] } : r;
+}
+
+export async function patchBox(boxId: string, patch: FeedbackBoxPatch): Promise<BoxResult<FeedbackBox>> {
+  const body: FeedbackBoxPatch = {};
+  if (patch.label !== undefined) body.label = patch.label;
+  if (patch.allowedOrigins !== undefined) body.allowedOrigins = patch.allowedOrigins;
+  if (patch.state !== undefined) body.state = patch.state;
+  return boxCall<FeedbackBox>(`/boxes/${encodeURIComponent(boxId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteBox(boxId: string): Promise<BoxResult<null>> {
+  const r = await boxCall<unknown>(`/boxes/${encodeURIComponent(boxId)}`, { method: 'DELETE' });
+  return r.ok ? { ok: true, data: null } : r;
+}

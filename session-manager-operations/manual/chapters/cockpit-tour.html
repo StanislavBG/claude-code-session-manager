@@ -19,9 +19,8 @@ Everything else happens on its own page. To approve a Session, retry or adopt wo
 Scheduler, click the row's button: <strong>Open session</strong>, <strong>View in Scheduler</strong>, or
 <strong>Open</strong> for an outside app's link.</p>
 
-<p>Home re-reads everything each time you open it, at most once every 30 seconds. Press
-<strong>Refresh</strong> for a fresher look. A small stamp beside it says when it last updated, or
-names what failed to load.</p>
+<p>Home re-reads everything when you open it, at most every 30 seconds. Press
+<strong>Refresh</strong> for a fresher look; a stamp beside it says when it last updated.</p>
 
 <p>Think of Home as your front desk. You check it on your way in, so nothing waits for you
 unseen.</p>
@@ -29,17 +28,33 @@ unseen.</p>
 <h3>Project Home</h3>
 
 <p>Switch into a single project's tab, and its Home becomes Project Home instead: an
-auto-written overview of just that project, kept as two libraries. <strong>Knowledge Pages</strong>
-are written overviews; <strong>Video Pages</strong> are short demo videos. Each press of a button
-makes one new entry, and you can rename or delete any entry from its list. Press again later, and
-a fresh entry catches up with whatever changed.</p>
+auto-written overview of just that project. Four buttons switch the area below:
+<strong>Pages</strong> for written overviews, <strong>Videos</strong> for short demo videos,
+<strong>Tools</strong>, and <strong>Feedback</strong>. Each press makes one new entry you can
+rename or delete. Inside Videos, the <strong>Voices</strong> view lets you <strong>Play</strong>
+each narrator voice first.</p>
+
+<h3>Feedback from your website</h3>
+
+<p>The Feedback tab collects bug reports from visitors to your own website. Under
+<strong>Website widget</strong>, list your sites and press <strong>Create widget</strong>, then
+<strong>Copy snippet</strong> and paste that line into your site's HTML. Visitors mark up a
+screenshot and send a note, which lands in the <strong>Inbox</strong>. A report's <strong>Open as
+Epic</strong> button turns it into a Proposed Session (Epic is the app's code name for one).</p>
+
+<p>Reports travel through the bilko.run relay, so pair this computer under App Settings, then Web
+remote, first.</p>
 
 <h2>File Explorer</h2>
 
 <p>File Explorer is the built-in file browser and editor. Open it from Home, and it starts at your
-own computer's home folder. Open it from inside a project tab instead, and it starts right there.
-Browse the folder tree on one side, and open any file to read or edit it on the other — no
-separate app required.</p>
+home folder; open it inside a project tab, and it starts there. Pick a file in the tree to read or
+edit it.</p>
+
+<p>Inside a project, <strong>Artifacts</strong> lists files your agents saved for you to
+review, such as a video or a report. Video and audio play right in the pane. A menu above the tree
+also opens a Session's unmerged copy of your project, read-only; pick <strong>Project</strong> to
+go back.</p>
 
 <h2>Memory and the Clusters report</h2>
 
@@ -53,18 +68,17 @@ split by whether it belongs to the whole project or to one particular agent.</p>
 <h3>The Clusters report</h3>
 
 <p>A pile of separate notes is hard to skim. The Clusters tab groups a project's memory into a
-handful of named, related bundles, so you can see the shape of what your agents know at a glance
-instead of reading every note one by one. It's built from notes already saved on your machine, so
-opening it costs nothing — press Refresh only when you want it to look for new patterns.</p>
+few named bundles, so you see the shape of what your agents know at a glance. Opening it costs
+nothing; press Refresh only when you want it to look for new patterns.</p>
 
 <h2>Usage meters and History</h2>
 
 <h3>Usage meters</h3>
 
-<p>Claude Code's usage limits reset on a schedule, and the usage meters show you exactly where you
-stand against them: one meter for your rolling five-hour session window, and separate meters for
-your weekly limits — across all models, and broken out for Opus, Sonnet, and any connected app.
-Each meter shows a percentage used and a countdown to its next reset.</p>
+<p>Claude Code's usage limits reset on a schedule, and the usage meters show where you stand: one
+meter for your rolling five-hour window, and others for your weekly limits, across all models and
+broken out for Opus, Sonnet, and any connected app. Each shows a percentage and a countdown to its
+reset.</p>
 
 <aside class="manual-analogy"><strong>Think of it like this:</strong> a usage meter is a fuel
 gauge, not a speedometer. It won't slow you down — it just tells you how much room is left before
@@ -105,10 +119,9 @@ background.</p>
 
 <h3>Simple mode</h3>
 
-<p>Sometimes you don't want a cockpit at all — you just want one terminal. Launch with the
-<code>--simple</code> flag, and Session Manager boots straight into a single terminal in whatever
-folder you launched it from, with none of the navigation, tabs, or configuration screens around
-it. Just you and Claude Code.</p>
+<p>Want just one terminal? Launch with the <code>--simple</code> flag, and
+Session Manager boots straight into a single terminal in the folder you launched it from, with no
+tabs or screens around it.</p>
 
 <h3>Start at login</h3>
 
@@ -119,26 +132,23 @@ your system can't do this.</p>
 
 <h3>Anonymous telemetry</h3>
 
-<p>Session Manager reports anonymous usage data back to bilko.run by default — never your prompts,
-your files, or anything that could identify you, only things like which app version you're running
-and roughly how the app gets used. It's on so we can see whether the app is working well for
-people. It is never required for the app to work for you.</p>
+<p>Session Manager reports anonymous usage data back to bilko.run by default — never your prompts
+or files, only things like which app version you run. It helps us see whether the app works well.
+The app never needs it to work for you.</p>
 
 <aside class="manual-note"><strong>Good to know:</strong> nothing sent home carries your name,
 your email, your file paths, or anything from inside a Session — the whole point of this data is
 that it can't be traced back to you.</aside>
 
 <p>Turning it off takes one step. On Home, open App Settings and its Telemetry tab, and switch it
-off — or dismiss the first-run notice with its own "Turn off" button. Running Session Manager from a script
-or a scheduled job instead? Set the environment variable <code>SM_TELEMETRY=0</code>, and it
-overrides everything else, every time.</p>
+off — or press "Turn off" on the first-run notice. From a script, set the environment variable
+<code>SM_TELEMETRY=0</code>; it overrides everything else.</p>
 
 <h2>The web remote: drive all your computers</h2>
 
-<p>You can work with Session Manager from a phone or any browser, and you can pair several
-computers to it, such as your laptop and a Windows PC at home. Each computer is paired once. After
-that, you pick which one to drive from the header of the web app. Everything travels through the
-bilko.run relay, scrambled so that only your browser and your computer can read it.</p>
+<p>You can drive Session Manager from a phone or any browser, across several paired computers.
+Pair each computer once, then pick one from the web app's header. Everything travels through the
+bilko.run relay, scrambled so only your browser and your computer can read it.</p>
 
 <ol class="manual-steps">
   <li>On the computer, install and open Session Manager. Go to App Settings, then Web remote, and
@@ -155,16 +165,21 @@ bilko.run relay, scrambled so that only your browser and your computer can read 
   the web app header and pick an online computer.</li>
 </ol>
 
-<aside class="manual-note"><strong>Good to know:</strong> the 6-digit code check is what stops
-anyone in the middle from posing as your computer. A paired computer can be forgotten from the web
-app at any time, and its command-write switch can be turned off whenever you like.</aside>
+<aside class="manual-note"><strong>Good to know:</strong> the 6-digit code stops anyone in the
+middle from posing as your computer. You can forget a paired computer, or turn off its command
+writes, at any time.</aside>
+
+<p>Below that, <strong>Services</strong> lets another app, such as Kiln, start work in one
+project. Press <strong>Pair a service…</strong>, pick its project and tools, run the command it
+gives you, and confirm the matching code. You can revoke it at any time.</p>
 
 <div class="manual-takeaways">
   <h2>What you learned</h2>
   <ul>
     <li>Home is the Dashboard for your whole machine; Project Home is the same idea for one
-    project.</li>
-    <li>File Explorer browses and edits any file without leaving the cockpit.</li>
+    project, with Pages, Videos, Tools, and Feedback from your own website.</li>
+    <li>File Explorer browses and edits any file, and shows the Artifacts your agents saved for
+    review.</li>
     <li>Memory keeps what your agents have learned, and the Clusters report groups it into
     readable bundles.</li>
     <li>Usage meters track your five-hour and weekly limits; History tracks cost and usage over

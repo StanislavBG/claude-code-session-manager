@@ -10,7 +10,7 @@ rules and how agents share them, and the Settings and Permissions every Session 
 <p>On Home, the sidebar's <strong>CLAUDE.md</strong> row, under Claude Code, opens your System
 Prompt. It edits one real file: <code>~/.claude/CLAUDE.md</code>. Every Session that Claude Code
 starts, in every project on this machine, reads this file first. Saving here changes what every
-agent on your machine already knows before it reads your actual request.</p>
+agent knows before it reads your request.</p>
 
 <p>This page has no scope switcher, because the file has no scope to switch. If the file uses
 <code>@path/to/file.md</code>-style imports to pull in other files, a left-hand rail lists each
@@ -32,8 +32,8 @@ sidebar. It gathers the project's own Claude Code files in one place: Memory, CL
 MCP, and Skills each get a tab. On the CLAUDE.md tab, choose Project to edit <code>CLAUDE.md</code>,
 or Local to edit <code>CLAUDE.local.md</code>.</p>
 
-<p><code>CLAUDE.md</code> is meant to be checked into the project's own version control and shared
-with anyone who works on it; <code>CLAUDE.local.md</code> stays on your machine only.</p>
+<p><code>CLAUDE.md</code> is shared with everyone who works on the project;
+<code>CLAUDE.local.md</code> stays on your machine.</p>
 
 <aside class="manual-note"><strong>Good to know:</strong> your machine-wide file and a project's
 file share the name <code>CLAUDE.md</code>. The one you open from Home reaches every project. The
@@ -155,13 +155,15 @@ scope, and save Project scope for rules the team has agreed on.</aside>
 
 <p>Permissions decide what an agent may do while you're watching. Work the Scheduler runs in the
 background has no one to ask, so Settings has one more row, <strong>Tool risk</strong>. There you
-give a tool, or a command such as <code>npm publish</code>, one of five marks:
-<code>read</code>, <code>write</code>, <code>irreversible</code>, <code>money</code>, or
-<code>public</code>.</p>
+give a tool, or a command such as <code>npm publish</code>, one of six marks:
+<code>read</code>, <code>write</code>, <code>confirm</code>, <code>irreversible</code>,
+<code>money</code>, or <code>public</code>.</p>
 
 <p>The last three are the brakes. A background job may not use a tool marked
 <code>irreversible</code>, <code>money</code>, or <code>public</code> unless its work order names
-that tool as cleared. An unmarked tool is allowed. On Home, Tool risk edits the marks for your whole
+that tool as cleared. A tool marked <code>confirm</code> pauses the job and asks you in
+Needs you on Home. <strong>Approve</strong> lets it make that one call and carry on;
+<strong>Deny</strong> keeps it paused. An unmarked tool is allowed. On Home, Tool risk edits the marks for your whole
 machine; in a project's Claude config, it edits that project's marks, which win. A project can
 also switch on <strong>Also guard interactive sessions in this project</strong> to apply the
 same marks while you're chatting.</p>

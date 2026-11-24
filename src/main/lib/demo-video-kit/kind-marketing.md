@@ -45,9 +45,28 @@ proof moments. Never pad with invented claims; use longer holds instead.
 
 - Show the product only through real captures of the live product, made with capture.cjs. Never
   a drawn fake screen, a mock-up, or a hand-built imitation of the interface.
-- Use the short clips when capture.cjs returns them (`kind: 'clip'` items). Otherwise use its
-  screenshots with camera moves: a slow push in, a pan across, a pull out to the focus rect it
-  returned.
+- Ask capture.cjs for real clips for the reveal and for each proof moment: shots of
+  `{ kind: 'clip', durationS: 4 }`, with `durationS` from 2 to 6 (capture.cjs clamps to that
+  range). Use image shots for the rest, within the 6-shot limit.
+- A clip comes back as an `items` entry with `kind: 'clip'`, `mime: 'video/mp4'`, `file`, `bytes`,
+  `durationS` and `focus`. A clip capture.cjs could not make is listed in `dropped` with its
+  `reason`. For every dropped clip, use a screenshot of that moment with camera moves instead: a
+  slow push in, a pan across, a pull out to the focus rect it returned.
+
+### Embedding a clip
+
+- Read the clip's `file` and embed it inline as base64, never a file path or a URL (the write tool
+  rejects any http src):
+  `<video muted playsinline preload="auto" src="data:video/mp4;base64,..."></video>`.
+- No `controls`, no `autoplay`, no `loop`. The clip never plays on its own clock; `seek(t)` drives it.
+- Give each clip a start time `clipStart` on the timeline. In `smDemo.seek(t)`, while the clip is
+  on screen, set `video.currentTime = t - clipStart` and call `video.pause()`. Clamp to the clip's
+  `durationS`, and hold its last frame after that. Do the same when the document plays in real
+  time: its play loop calls `seek(t)`, so frames.cjs, checks.cjs and export.cjs see the exact frame
+  for every `t`. frames.cjs and export.cjs wait for each `<video>` to finish seeking.
+- Clips count toward the document size cap (2 MiB per started 30 s of length). Base64 adds about a
+  third to each clip's `bytes`. Add up every clip and image before you embed them; when the sum
+  would pass the cap, swap the lowest-value clip for a screenshot with camera moves.
 - View every capture before you use it. Drop any that shows an error, a blank page, a loading
   state or a sign-in screen.
 - When capture.cjs returns nothing usable, say so in the report and keep the product off screen:

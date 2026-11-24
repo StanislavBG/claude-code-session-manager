@@ -45,6 +45,18 @@ test('kind-marketing.md is seeded and states the Marketing format, grounding and
   }
 });
 
+test('kind-marketing.md says how to request, embed and seek real product clips', () => {
+  const md = readMarketing();
+  expect(md).toContain("kind: 'clip'");
+  expect(md).toContain('currentTime');
+  expect(md).toMatch(/durationS[^\n]*2 to 6/);
+  expect(md).toContain('<video muted playsinline preload="auto" src="data:video/mp4;base64,..."></video>');
+  expect(md).toContain('t - clipStart');
+  expect(md).toMatch(/No `controls`, no `autoplay`/);
+  expect(md).toContain('dropped');
+  expect(md).toMatch(/Clips count toward the document size cap/);
+});
+
 test('kind-marketing.md holds no other project\'s own content', () => {
   expect(readMarketing()).not.toMatch(/burrow|bilko|veggie|garden/i);
 });

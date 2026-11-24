@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 12 (embedded <video> seek waits must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('12');
+test('KIT_VERSION is bumped to 13 (the Marketing playbook clip rules must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('13');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

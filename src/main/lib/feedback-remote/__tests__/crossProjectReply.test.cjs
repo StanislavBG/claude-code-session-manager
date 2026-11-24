@@ -921,3 +921,50 @@ test('deliverDueReplies: a not-ok result is recorded as lastError, never thrown'
   expect(r).toMatchObject({ due: 1, delivered: 0, failed: 1 });
   expect(marks[0].result).toMatchObject({ ok: false, fallbackNeeded: true });
 });
+
+test('deliverDueReplies: event mode, scheduling Epic closed — audit keeps externalRef, counts come from scheduling time', async () => {
+  await withSchedulerHome(async (home) => {
+    const { a, b } = await setup();
+    setEventMode(a, b, { externalRef: 'portfolio:action-77' });
+    const d = deps('sent', { openFallback: failFallback });
+    // One live reply (a receipt), then the scheduled one: 2 used at scheduling time.
+    expect((await sendFeedbackReply(input(b, { message: 'live first' }), d)).ok).toBe(true);
+    const scheduled = await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    expect(scheduled).toMatchObject({ ok: true, delivery: 'scheduled', repliesUsed: 2 });
+    const [stored] = readLedger(home);
+    expect(stored.sentAtScheduling).toBe(2);
+    expect(stored.ySource).toMatchObject({ externalRef: 'portfolio:action-77', replyTo: { mode: 'event' } });
+    // Y closes: it leaves B's active index.
+    writeIndex(b, {});
+    d.audits.length = 0;
+    const marks = [];
+    const pr = require('../pendingReplies.cjs');
+    d.markReplyDelivered = (id, arg) => { marks.push(arg); return pr.markReplyDelivered(id, arg); };
+    const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+    expect(r).toMatchObject({ due: 1, delivered: 1, failed: 0 });
+    expect(d.calls).toHaveLength(0);
+    const replyAudit = d.audits.find((x) => x.kind === 'epic_cross_project_reply');
+    expect(replyAudit.fields).toMatchObject({ mode: 'event', externalRef: 'portfolio:action-77', message: 'Live in v0.142.0.' });
+    expect(marks[0].result).toMatchObject({ ok: true, delivery: 'event-only', repliesUsed: 2, repliesLeft: MAX_REPLIES_PER_THREAD - 2 });
+  });
+});
+
+test('deliverDueReplies: a stored entry without ySource / sentAtScheduling still delivers for a closed Epic', async () => {
+  const { a, b } = await setup();
+  writeIndex(b, {});
+  const marks = [];
+  const d = deps('sent', {
+    openFallback: failFallback,
+    listDueReplies: () => [{
+      id: 'old1', replierCwd: b, yId: 'psess-y', goalText: 'g',
+      thread: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x', legacy: false, mode: 'event' },
+      targetCwd: a, outcome: 'done', message: 'm', referencePaths: [], appVersionAbove: '0.1.0',
+    }],
+    markReplyDelivered: (id, arg) => { marks.push(arg); return {}; },
+  });
+  const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+  expect(r).toMatchObject({ due: 1, delivered: 1 });
+  const replyAudit = d.audits.find((x) => x.kind === 'epic_cross_project_reply');
+  expect(replyAudit.fields).not.toHaveProperty('externalRef');
+  expect(marks[0].result).toMatchObject({ ok: true, repliesUsed: 1 });
+});

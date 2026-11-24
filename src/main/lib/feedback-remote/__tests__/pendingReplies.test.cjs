@@ -129,3 +129,19 @@ test('missing or corrupt ledger reads as empty without throwing', () => {
   const a = ledger.addPendingReply(entry());
   expect(ledger.listDueReplies('9.9.9').map((e) => e.id)).toEqual([a.id]);
 });
+
+test('ySource and sentAtScheduling are stored; a non-plain ySource or bad count is dropped to null', () => {
+  const src = { producer: 'cross-project-feedback', externalRef: 'ext-9', proposal: { motivation: 'm' }, replyTo: { cwd: '/p/a', mode: 'event' } };
+  const kept = ledger.addPendingReply(entry({ ySource: src, sentAtScheduling: 2 }));
+  expect(kept.ySource).toEqual(src);
+  expect(kept.ySource).not.toBe(src);
+  expect(kept.sentAtScheduling).toBe(2);
+  for (const bad of [null, 'x', 5, [], new Date()]) {
+    expect(ledger.buildEntry(entry({ ySource: bad })).ySource).toBeNull();
+  }
+  for (const bad of [0, -1, 1.5, '2', undefined]) {
+    expect(ledger.buildEntry(entry({ sentAtScheduling: bad })).sentAtScheduling).toBeNull();
+  }
+  const onDisk = JSON.parse(fs.readFileSync(ledger.ledgerPath(), 'utf8')).entries[0];
+  expect(onDisk).toMatchObject({ ySource: src, sentAtScheduling: 2 });
+});

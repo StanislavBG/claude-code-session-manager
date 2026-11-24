@@ -66,6 +66,17 @@ function normalizeThread(t) {
   };
 }
 
+function isPlainObject(v) {
+  return !!v && typeof v === 'object' && !Array.isArray(v)
+    && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
+}
+
+/** A JSON-safe copy of the scheduling Epic's source (externalRef, proposal, replyTo, ...); null if not a plain object. */
+function normalizeYSource(v) {
+  if (!isPlainObject(v)) return null;
+  try { return JSON.parse(JSON.stringify(v)); } catch { return null; }
+}
+
 /** Pure: build a full ledger entry from caller input. Throws on a bad appVersionAbove. */
 function buildEntry(input, now = new Date()) {
   const e = input && typeof input === 'object' ? input : {};
@@ -84,6 +95,10 @@ function buildEntry(input, now = new Date()) {
     message: str(e.message),
     referencePaths: Array.isArray(e.referencePaths) ? e.referencePaths.filter((p) => typeof p === 'string') : [],
     appVersionAbove: e.appVersionAbove,
+    // What delivery needs once the scheduling Epic has closed: its source
+    // (externalRef / proposal / replyTo) and the cap count this reply took.
+    ySource: normalizeYSource(e.ySource),
+    sentAtScheduling: Number.isInteger(e.sentAtScheduling) && e.sentAtScheduling > 0 ? e.sentAtScheduling : null,
     deliveredAt: null,
     deliveredVersion: null,
     lastError: null,

@@ -320,6 +320,8 @@ async function sendFeedbackReply(input, deps = {}) {
         message,
         referencePaths,
         appVersionAbove: deliverWhen.appVersionAbove,
+        ySource: y.source || {},
+        sentAtScheduling: used + 1,
       });
       audit(SCHEDULED_AUDIT, {
         cwd: targetCwd,
@@ -756,8 +758,13 @@ async function deliverOneDueReply(entry, version, deps) {
   return withThreadLock(`${realOr(replierCwd)}\u0000${yId}`, async () => {
     let yLive = null;
     try { yLive = readActiveIndex(replierCwd).sessions[yId] || null; } catch { yLive = null; }
-    const y = yLive || { id: yId, goalText: entry.goalText || '' };
-    const sent = yLive ? readReceipts(replierCwd, yId).length : 0;
+    // A closed Y is rebuilt from what the ledger stored at scheduling time:
+    // its source (externalRef, proposal, replyTo) and the count this reply took.
+    const ySource = entry.ySource && typeof entry.ySource === 'object' && !Array.isArray(entry.ySource) ? entry.ySource : {};
+    const y = yLive || { id: yId, goalText: entry.goalText || '', source: ySource };
+    const atScheduling = Number.isInteger(entry.sentAtScheduling) && entry.sentAtScheduling > 0
+      ? entry.sentAtScheduling - 1 : 0;
+    const sent = yLive ? readReceipts(replierCwd, yId).length : atScheduling;
     const baseAppend = deps.appendEvent || defaultAppendEvent;
     // Receipt on Y only while Y is still in its project's active index.
     const appendEvent = (cwd, epicId, text, meta) => {

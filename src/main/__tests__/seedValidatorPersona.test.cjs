@@ -142,3 +142,20 @@ test('the seeded validator body resolves PRD files under SM_PROJECT_ROOT, not th
   expect(trimmed).toContain('prds-archived/');
   expect(trimmed).not.toContain('session-manager-operations/scheduler/epics/<epic>/prds/` while queued');
 });
+
+// The validator's tool list (Read, Grep, Glob, Bash) cannot load review
+// skills, and each PRD's own run already did them — step 3 is a self-review,
+// and step 4's record lists every finding so the architect gives each an outcome.
+test('the seeded validator body asks for a self-review only and lists every finding', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
+  const { body } = splitFrontmatter(raw);
+  const trimmed = body.trim();
+
+  expect(raw.length).toBeLessThan(6000);
+  expect(trimmed).not.toContain('/code-review');
+  expect(trimmed).not.toContain('/security-review');
+  expect(trimmed).toContain('Self-review it for correctness, unsafe input handling, secrets, path traversal, and duplication of an existing helper.');
+  expect(trimmed).toContain('never report their absence as a finding');
+  expect(trimmed).toContain('List every finding, Minor included: the architect gives each one an outcome');
+});

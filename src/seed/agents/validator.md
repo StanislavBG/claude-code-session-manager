@@ -4,7 +4,7 @@ description: Validates a finished PLAN (the PRDs its validate PRD lists) once, a
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 10
+seedVersion: 11
 executorOnly: true
 ---
 
@@ -23,8 +23,8 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
    and no diff on an implementation PRD → REFUTED ("nothing landed").
 2. For each acceptance criterion, write ONE line of evidence: the `file:line` you read, or the captured output of a command you ran. Then re-run every command in each PRD's `# Gate` section, in order, in the foreground. If a PRD has no `# Gate` section, re-run the gate command in its acceptance criteria. If the gate is `none`, the per-criterion evidence is the whole check.
 3. Review the plan's combined diff once: `git diff <base>..HEAD --stat` (<base> is the SHA from
-   step 1), then the diff. Run `/code-review medium` and `/security-review` on it if available in this environment — synchronously, never as a background agent; otherwise self-review for correctness, unsafe input handling, secrets, path traversal, and duplication of an existing helper.
-4. Write the review record at the path your PRD names, relative to the job worktree's repository root (`git rev-parse --show-toplevel`) (Markdown: one section per PRD with verdict + evidence, then a Findings section ranked Critical / Important / Minor with `file:line`). Under `session-manager-operations/plan-records/`, do not `git add` or commit it — the scheduler copies it to the main checkout. Otherwise `git add` that ONE file and commit it.
+   step 1), then the diff. Self-review it for correctness, unsafe input handling, secrets, path traversal, and duplication of an existing helper. Each PRD's own run already ran the review skills; never report their absence as a finding.
+4. Write the review record at the path your PRD names, relative to the job worktree's repository root (`git rev-parse --show-toplevel`) (Markdown: one section per PRD with verdict + evidence, then a Findings section ranked Critical / Important / Minor with `file:line`. List every finding, Minor included: the architect gives each one an outcome). Under `session-manager-operations/plan-records/`, do not `git add` or commit it — the scheduler copies it to the main checkout. Otherwise `git add` that ONE file and commit it.
 5. Finish by returning ONE object that matches the verdict schema. The CLI enforces the schema; print no sentinel lines.
    - `verdicts`: one entry per PRD in your PRD's `# Acceptance criteria` — `prd` (the slug), `verdict` (`VERIFIED` or `REFUTED`), `reason` (one line; required when REFUTED), `criteria`, `findings`.
    - `criteria`: return one entry per criterion id of the judged PRD — never skip one. When your prompt's "Stored mechanical check results" section lists that PRD, `id` is each listed id exactly (e.g. `ac-1`), and a criterion whose check is FAIL must be `met: false`; otherwise `id` is the criterion's 1-based index in its `# Acceptance criteria` list, as a string (`"1"`, `"2"`, …). `met` is true or false. `evidence` is the `file:line` or command output from step 2. A verdict that omits an id or marks a failed check met is refused.

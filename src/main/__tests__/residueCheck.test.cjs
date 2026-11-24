@@ -158,11 +158,24 @@ describe('findResidue — word bounds and outcome-carrying lines (4248)', () => 
   test('a line naming its own outcome (PRD number + outcome verb) does not count', () => {
     expect(findResidue('There was one gap and PRD 4300 closed it.\n')).toEqual([]);
     expect(findResidue('## Follow-ups\n- the doc chapter: queued 4301-doc-chapter\n')).toEqual([]);
-    expect(findResidue('**Gap:** the event writer — fixed by 4302.\n')).toEqual([]);
+    expect(findResidue('**Gap:** the event writer — fixed by PRD 4302.\n')).toEqual([]);
   });
   test('a PRD number alone, or an outcome verb alone, is not an outcome', () => {
     expect(findResidue('There was one gap near PRD 4300.\n')).toEqual(['There was one gap near PRD 4300.']);
     expect(findResidue('## Still open\n- the doc fix is not queued yet\n')).toEqual(['- the doc fix is not queued yet']);
+  });
+  test('strict outcome skip (4252): PRD reference must be "PRD <n>" or an NNNN-kebab-slug', () => {
+    expect(findResidue('There was one gap and PRD 4300 closed it.\n')).toEqual([]);
+    expect(findResidue('## Still open\n- 4300-fix-thing queued\n')).toEqual([]);
+    expect(findResidue('One gap, closed in 2026.\n')).toEqual(['One gap, closed in 2026.']);
+    expect(findResidue('One gap, closed on 2026-11-23.\n')).toEqual(['One gap, closed on 2026-11-23.']);
+    expect(findResidue('**Gap:** the event writer — fixed by 4302.\n')).toEqual(['**Gap:** the event writer — fixed by 4302.']);
+  });
+  test('strict outcome skip (4252): a negation before the outcome verb defeats the skip', () => {
+    expect(findResidue('## Still open\n- not queued yet: 4301 doc fix\n')).toEqual(['- not queued yet: 4301 doc fix']);
+    expect(findResidue('## Still open\n- 4301-doc-fix not queued yet\n')).toEqual(['- 4301-doc-fix not queued yet']);
+    expect(findResidue("## Still open\n- PRD 4301 hasn't been queued\n")).toEqual(["- PRD 4301 hasn't been queued"]);
+    expect(findResidue('## Still open\n- PRD 4301 is yet to be scheduled\n')).toEqual(['- PRD 4301 is yet to be scheduled']);
   });
   test("4227's four real hand-back endings are still flagged", () => {
     const s02 = "**Gap:** two of the event kinds, `job.tool_use` and `human.message`, have no PRD that writes them. I'll add that PRD alongside the wave 1 fixes.";

@@ -36,9 +36,13 @@ const RESIDUE_PHRASES = ['needs a new epic', 'say the word', "haven't queued", "
 // An apostrophe counts as a word char at the bounds so "haven't" never matches inside a longer contraction.
 const RESIDUE_PHRASE_RES = RESIDUE_PHRASES.map(
   (p) => new RegExp(`(?<![\\w'])${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w'])`, 'i'));
-// A line that names its own outcome (a four-digit PRD number + an outcome verb) is not residue (rule 6).
-const PRD_NUMBER_RE = /(?<![\w.,])\d{4}(?![\w.,]*\d)/;
-const OUTCOME_VERB_RE = /\b(queued|closed|fixed|decided|scheduled)\b/i;
+// A line that names its own outcome (a PRD reference + an un-negated outcome verb) is not residue (rule 6).
+// A PRD reference is 'PRD <n>' or an NNNN-kebab-slug (4300-fix-thing); a bare number, a year or a date
+// (2026-11-23: a digit after the dash) is not one.
+const PRD_REF_RES = [/\bPRD\s*#?\d+\b/i, /(?<![\w.-])\d{4}-[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?![\w-])/i];
+const OUTCOME_VERB_RE = /\b(queued|closed|fixed|decided|scheduled)\b/gi;
+// A negation anywhere before an outcome verb on the line ('not queued yet', "hasn't been fixed") voids the skip.
+const NEGATION_RE = /(?<![\w'])(not|no|never|without|yet to|has not|hasn't|isn't)(?![\w'])/i;
 const EMPTY_ENTRY_RE = /^(?:[-*+]\s*)?(?:none|nothing|n\/a)\.?$/i;
 
 /** Lower-case and straighten curly apostrophes for phrase matching. */
@@ -46,9 +50,15 @@ function normalize(s) {
   return s.replace(/[‘’ʼ]/g, "'").toLowerCase();
 }
 
-/** True when a line carries its own outcome: a four-digit PRD number and an outcome verb. */
+/** True when a line carries its own outcome: a PRD reference and an outcome verb with no negation before it. */
 function namesOwnOutcome(s) {
-  return PRD_NUMBER_RE.test(s) && OUTCOME_VERB_RE.test(s);
+  const line = normalize(s);
+  if (!PRD_REF_RES.some((re) => re.test(line))) return false;
+  const verbs = [...line.matchAll(OUTCOME_VERB_RE)];
+  if (!verbs.length) return false;
+  // Strict: a negation before ANY outcome verb (so before the last one) leaves the line counted.
+  const last = verbs[verbs.length - 1];
+  return !NEGATION_RE.test(line.slice(0, last.index));
 }
 
 /** Remove quoted spans (double, curly, single, backtick) from a line before the phrase match. */

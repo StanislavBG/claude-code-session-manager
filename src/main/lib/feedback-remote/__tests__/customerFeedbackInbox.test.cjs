@@ -331,3 +331,31 @@ test('readCachedImage refusals: bad index, unsafe id, missing file, no owner', a
   expect((await inbox.readCachedImage('z1', 0, d)).ok).toBe(false);
   expect(await inbox.readCachedImage('z1', 0, { ...d, env: {} })).toEqual({ ok: false, error: 'Feedback owner token not configured' });
 });
+
+test('stores wire context (<= 262144 bytes, else null) and keeps it across re-pulls', async () => {
+  const context = {
+    page: { url: 'https://x.test/a', title: 'A', viewport: { width: 1, height: 1, devicePixelRatio: 1, scrollX: 0, scrollY: 0 } },
+    marks: [{ kind: 'pin', n: 1, x: 1, y: 2, color: 'red', note: 'here' }],
+    console: [{ level: 'error', message: 'boom', timestamp: '2026-01-01T00:00:00Z', count: 1 }],
+    network: [{ method: 'GET', url: '/api', status: 500, durationMs: 3, timestamp: '2026-01-01T00:00:00Z' }],
+  };
+  const big = { console: [{ level: 'log', message: 'x'.repeat(262144), timestamp: 'T', count: 1 }] };
+  const f1 = mkFetch({ status: 200, json: { items: [
+    wire('c1', { context }), wire('c2', { context: big }), wire('c3'), wire('c4', { context: 'nope' }),
+  ], nextSince: 's1', nextModeratedSince: null } });
+  expect((await inbox.pull(deps(f1))).ok).toBe(true);
+  let items = (await inbox.list({}, deps(f1))).items;
+  expect(items.find((i) => i.id === 'c1').context).toEqual(context);
+  expect(items.find((i) => i.id === 'c2').context).toBeNull();
+  expect(items.find((i) => i.id === 'c3').context).toBeNull();
+  expect(items.find((i) => i.id === 'c4').context).toBeNull();
+
+  // Re-pull: the same item without a context field (status/moderation delta) keeps the stored one.
+  const f2 = mkFetch({ status: 200, json: { items: [wire('c1', { status: { value: 'resolved', at: 'T' } })], nextSince: 's2', nextModeratedSince: null } });
+  expect((await inbox.pull(deps(f2))).ok).toBe(true);
+  items = (await inbox.list({}, deps(f2))).items;
+  const c1 = items.find((i) => i.id === 'c1');
+  expect(c1.status).toBe('resolved');
+  expect(c1.context).toEqual(context);
+  expect(JSON.parse(fs.readFileSync(storeFile, 'utf8')).items.find((i) => i.id === 'c1').context).toEqual(context);
+});

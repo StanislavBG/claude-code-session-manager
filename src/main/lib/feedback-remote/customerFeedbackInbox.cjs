@@ -33,12 +33,15 @@ const MAX_DATA_URL_CHARS = 2000000;
 const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,/;
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+/** Host stores the widget context opaquely up to this many bytes of JSON (Bilko 76e88612). */
+const MAX_CONTEXT_BYTES = 262144;
 
 /**
  * @typedef {{ mime: string, bytes: number, path: string|null }} InboxImage
  * @typedef {{ id: string, receivedAt: string|number|null, tag: string, title: string, body: string,
  *   clientVersion: string|null, clientPlatform: string|null, moderation: string|null, status: string,
- *   statusNote: string|null, statusAt: string|number|null, epicId: string|null, images?: InboxImage[] }} InboxItem
+ *   statusNote: string|null, statusAt: string|number|null, epicId: string|null, images?: InboxImage[],
+ *   context?: Record<string, unknown>|null }} InboxItem
  * @typedef {{ items: InboxItem[], nextSince: string|null, nextModeratedSince: string|null }} Store
  * @typedef {{ fetchImpl?: typeof fetch, storeFile?: string, ownerFile?: string, imagesDir?: string,
  *   env?: Record<string, string|undefined>, now?: () => number }} Deps
@@ -163,7 +166,29 @@ function toItem(w, prev) {
     statusAt: st ? (st.at ?? null) : null,
     epicId: prev && prev.epicId ? prev.epicId : null,
     images: toImages(w.images, prev),
+    context: toContext(w, prev),
   };
+}
+
+/**
+ * The host's opaque widget context (page/marks/console/network). A wire item with no `context`
+ * key (e.g. a status/moderation delta) keeps the stored one; a non-object or one over
+ * MAX_CONTEXT_BYTES of JSON is stored as null.
+ * @param {any} w @param {InboxItem|undefined} prev @returns {Record<string, unknown>|null}
+ */
+function toContext(w, prev) {
+  if (!w || !Object.prototype.hasOwnProperty.call(w, 'context') || w.context === undefined) {
+    return prev && prev.context && typeof prev.context === 'object' ? prev.context : null;
+  }
+  const v = w.context;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  try {
+    const json = JSON.stringify(v);
+    if (typeof json !== 'string' || Buffer.byteLength(json, 'utf8') > MAX_CONTEXT_BYTES) return null;
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 /** @param {unknown} wireImages @param {InboxItem|undefined} prev @returns {InboxImage[]} */

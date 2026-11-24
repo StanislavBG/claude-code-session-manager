@@ -822,6 +822,8 @@ export interface CustomerFeedbackInboxItem {
   epicId: string | null;
   /** Screenshot metadata in submission order; `path` = local cache file, null until downloaded. */
   images: { mime: string; bytes: number; path: string | null }[];
+  /** Host's opaque widget context (page/marks/console/network), <= 262144 bytes of JSON; untrusted shape. */
+  context?: Record<string, unknown> | null;
 }
 
 export interface CustomerFeedbackOwnerInfo {

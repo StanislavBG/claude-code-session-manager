@@ -191,3 +191,52 @@ test('(d) a denied answer under the hold still parks the row needs_review and sp
   expect(row.confirmationDenied).toMatchObject({ tool: req.tool, argsDigest: req.argsDigest });
   expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(0);
 });
+
+test('(e) a pending record that vanishes without a take is audited again when re-recorded under the same hold', async () => {
+  const reading = weekly(96);
+  await goodReading(reading);
+  const req = await parkedRequest('Approve');
+  await scheduler.tickQueue();
+  expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(1);
+
+  // The record disappears without takePendingConfirmation (deleted file).
+  const schedulerHome = require('../lib/scheduler/schedulerPaths.cjs').schedulerHome();
+  fs.rmSync(path.join(schedulerHome, toolClearance.PENDING_DIR, `${req.key}.json`), { force: true });
+  expect(isPending(req)).toBe(false);
+  await scheduler.tickQueue();
+
+  // Re-recorded with the same tool and digest, held under the same reading.
+  expect(toolClearance.recordPendingConfirmation({ tool: req.tool, argsDigest: req.argsDigest, jobSlug: req.slug, sessionId: req.sessionId }, { now: Date.now() - 60_000 })).toBe(true);
+  expect(isPending(req)).toBe(true);
+  await goodReading(reading);
+  await scheduler.tickQueue();
+  expect(spawnsOf(req.slug)).toEqual([]);
+  expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(2);
+});
+
+test('(f) hold, a reading under 90, then the same hold again appends a second event', async () => {
+  const reading = weekly(96);
+  await goodReading(reading);
+  const req = await parkedRequest('Approve');
+  await scheduler.tickQueue();
+  await scheduler.tickQueue();
+  expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(1);
+
+  const queue = JSON.parse(fs.readFileSync(req.queueFile, 'utf8'));
+  // Keep the record pending while the hold is off: a busy row is skipped.
+  queue.jobs[0].status = 'running';
+  fs.writeFileSync(req.queueFile, JSON.stringify(queue));
+  queueStore.bustCwdCache();
+  await goodReading(weekly(40));
+  await scheduler.tickQueue();
+  expect(isPending(req)).toBe(true);
+
+  queue.jobs[0].status = 'needs_review';
+  fs.writeFileSync(req.queueFile, JSON.stringify(queue));
+  queueStore.bustCwdCache();
+  await goodReading(reading);
+  await scheduler.tickQueue();
+  expect(spawnsOf(req.slug)).toEqual([]);
+  expect(isPending(req)).toBe(true);
+  expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(2);
+});

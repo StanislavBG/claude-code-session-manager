@@ -9549,8 +9549,10 @@ async function spawnResumeRecovery(job, resumeTarget) {
 
 const CONFIRM_APPROVE = 'Approve';
 const CONFIRM_BUSY = new Set(['running', 'investigating']);
-// record key -> hold key under which its 'tool_confirmation_resume_held'
-// audit event was already appended (one event per record per hold).
+// record key -> hold key (autoDispatchHoldKey) under which its
+// 'tool_confirmation_resume_held' audit event was already appended (one event
+// per record per hold). Pruned to the pending records every pass and cleared
+// when no hold is in force (processToolConfirmationAnswers).
 const toolConfirmationHeldKeys = new Map();
 // slug -> hold key under which its 'investigation_held' / 'resume_recovery_held'
 // audit event was already appended (one event per row per hold). A row's key
@@ -9594,12 +9596,21 @@ function noteHeldOnce(keys, slug, hold) {
 async function processToolConfirmationAnswers(state, { human = false } = {}) {
   try {
     const pending = toolClearance.listPendingConfirmations();
+    // Bound the Map by construction: a record that vanished without a take
+    // (deleted, or unreadable so the list skips it) drops its key here.
+    const liveKeys = new Set(pending.map((rec) => rec.key));
+    for (const key of toolConfirmationHeldKeys.keys()) {
+      if (!liveKeys.has(key)) toolConfirmationHeldKeys.delete(key);
+    }
+    // No hold in force: a later hold audits every record once again. A human
+    // tick that bypasses a hold in force does not count as the hold clearing.
+    const rawHold = currentAutoDispatchHold(state.config);
+    if (!rawHold) toolConfirmationHeldKeys.clear();
     if (!pending.length) return;
     // Same hold decision as the tick running this pass: an approval starts a
     // `claude -p --resume`, so an automatic tick under the hold leaves it
     // pending for a later tick. A denial starts nothing and is applied anyway.
-    const hold = human ? null : currentAutoDispatchHold(state.config);
-    const holdKey = hold ? `${hold.reason}|${hold.window ?? ''}|${String(hold.percent)}` : null;
+    const hold = human ? null : rawHold;
     toolClearance.pruneExpired();
     const items = await needsYouStore.listNeedsYou({ app: needsYouStore.CONFIRM_APP });
     const rowOf = (slug) => (state.jobs || []).find((j) => j.slug === slug) || null;
@@ -9610,8 +9621,7 @@ async function processToolConfirmationAnswers(state, { human = false } = {}) {
       if (rec.requests.some((r) => CONFIRM_BUSY.has(rowOf(r.jobSlug)?.status) || runningSet.has(r.jobSlug))) continue;
       const approved = item.status === 'answered' && item.answer === CONFIRM_APPROVE;
       if (approved && hold) {
-        if (toolConfirmationHeldKeys.get(rec.key) !== holdKey) {
-          toolConfirmationHeldKeys.set(rec.key, holdKey);
+        if (noteHeldOnce(toolConfirmationHeldKeys, rec.key, hold)) {
           for (const r of rec.requests) appendAuditEvent('tool_confirmation_resume_held', { slug: r.jobSlug, reason: hold.reason });
         }
         continue;

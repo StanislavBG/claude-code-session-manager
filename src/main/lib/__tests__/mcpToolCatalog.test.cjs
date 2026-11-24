@@ -621,6 +621,8 @@ test('scheduler_slots_get / scheduler_slots_set sit in the scheduler group; set 
   expect(text).toContain('limit|cap|slots to');
   expect(text).toContain('[please|ok|okay|so|now|then]');
   expect(text).toContain('a comma only right after the lead-in word');
+  expect(text).toContain('nothing else in the sentence');
+  expect(text).not.toContain('nothing before or after it');
   expect(set.exampleArgs).toEqual({ cap: 14, quote: 'raise the limit to 14' });
   const tool = TOOLS.find((t) => t.name === 'scheduler_slots_set');
   expect(tool.inputSchema.required).toEqual(['cap', 'quote']);

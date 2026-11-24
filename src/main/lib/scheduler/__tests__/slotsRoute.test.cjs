@@ -254,6 +254,27 @@ describe('POST /admin/scheduler/slots', () => {
     expect(audit).toHaveBeenCalledTimes(1);
   });
 
+  test('the latest matching human prompt decides: a later "don\'t raise the limit to 14" refuses', async () => {
+    humanPromptLedger.recordHumanPrompt(SID, 'raise the limit to 14', clock - 2_000);
+    humanPromptLedger.recordHumanPrompt(SID, "don't raise the limit to 14", clock - 1_000);
+    const res = await call('POST', { cap: 14, quote: 'raise the limit to 14', originClaudeSessionId: SID });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('quote_does_not_name_slots');
+    expect(res.body.reason).toContain('nothing else in the sentence');
+    expect(res.body.reason).not.toContain('nothing before or after it');
+    expectNoWrite();
+  });
+
+  test('the latest matching human prompt decides: a later "raise the limit to 14" authorizes 14', async () => {
+    humanPromptLedger.recordHumanPrompt(SID, "don't raise the limit to 14", clock - 2_000);
+    humanPromptLedger.recordHumanPrompt(SID, 'raise the limit to 14', clock - 1_000);
+    const res = await call('POST', { cap: 14, quote: 'raise the limit to 14', originClaudeSessionId: SID });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, from: sessionSlots.DEFAULT_SLOTS, to: 14 });
+    expect(sessionSlots.totalSlots()).toBe(14);
+    expect(audit).toHaveBeenCalledTimes(1);
+  });
+
   test('403 quote_does_not_name_slots when the quote names a different number', async () => {
     humanPromptLedger.recordHumanPrompt(SID, QUOTE, clock - 1_000);
     const res = await call('POST', { cap: 20, quote: QUOTE, originClaudeSessionId: SID });

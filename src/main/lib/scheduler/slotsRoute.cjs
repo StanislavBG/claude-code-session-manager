@@ -50,7 +50,7 @@ const slotsBodySchema = z.object({
 // lowercasing and collapsing spaces:
 //   [please|ok|okay|so|now|then[,]] set|raise|increase|bump|lower|reduce|change
 //   [the|our] [session|slot|parallel] limit|cap|slots to <digits> [sessions|slots]
-// Nothing else may come before or after it in that sentence. Anything else —
+// Nothing else may be in that sentence. Anything else —
 // questions, negations, percentages, number words, extra words — is refused.
 const SLOT_COMMAND = new RegExp(
   '^(?:(?:please|ok|okay|so|now|then),? )?'
@@ -65,7 +65,7 @@ const SLOT_COMMAND = new RegExp(
 function acceptedFormHint(cap) {
   return `say 'raise the limit to ${cap}' (one sentence: [please|ok|okay|so|now|then] `
     + 'set|raise|increase|bump|lower|reduce|change [the|our] [session|slot|parallel] limit|cap|slots '
-    + 'to <number in digits> [sessions|slots], with nothing before or after it, a comma only right after '
+    + 'to <number in digits> [sessions|slots], with nothing else in the sentence, a comma only right after '
     + 'the lead-in word, and no question mark)';
 }
 

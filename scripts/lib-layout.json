@@ -175,6 +175,7 @@
   "remoteFrameAssembler": "feedback-remote",
   "servicePairings": "feedback-remote",
   "serviceMcpTools": "feedback-remote",
+  "serviceMcpSession": "feedback-remote",
   "reservationExpiry": "scheduler",
   "reviewNotice": "scheduler",
   "runClaudeP": "claude",

@@ -140,6 +140,7 @@ const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPa
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
 const { harvestPlanRecords, saveValidatorVerdicts } = require('./lib/scheduler/planRecordHarvest.cjs');
+const artifactStore = require('./lib/epic/artifactStore.cjs');
 const prdOutcomeRecord = require('./lib/scheduler/prdOutcomeRecord.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
@@ -434,6 +435,77 @@ function harvestJobPlanRecords(job, worktreeDir, projectRoot) {
     for (const sk of skipped) console.warn(`[scheduler] ${job.slug}: plan record not harvested: ${sk.path} — ${sk.reason}`);
   } catch (e) {
     console.error(`[scheduler] ${job.slug}: plan record harvest failed`, e);
+  }
+}
+
+const ARTIFACT_PLAN_RECORDS_PREFIX = 'session-manager-operations/plan-records/';
+
+/**
+ * jobArtifactRunId(job, runId) — the staging-folder key for ONE job run. The
+ * batch runId (pickRunDir) is shared by every job in a tick, so the job slug
+ * is appended; an id the store would refuse falls back to a stable hash.
+ */
+function jobArtifactRunId(job, runId) {
+  const slug = job && typeof job.slug === 'string' ? job.slug : '';
+  const base = [runId, slug].filter((v) => typeof v === 'string' && v).join('-');
+  if (base && artifactStore.RUN_ID_RE.test(base)) return base;
+  return `job-${require('node:crypto').createHash('sha256').update(base || 'unknown').digest('hex').slice(0, 32)}`;
+}
+
+/**
+ * harvestJobArtifacts(job, worktreeDir, projectRoot, { runId }) — copy this
+ * job's declared artifactPaths (regular files under worktreeDir; plan records
+ * excluded — harvestJobPlanRecords owns them) and its SM_ARTIFACTS_DIR staging
+ * folder into the project's Artifacts store (artifacts/<epic-id>/, producer
+ * prdSlug) before the worktree is removed. Logs, never throws.
+ */
+async function harvestJobArtifacts(job, worktreeDir, projectRoot, { runId = job && job.runId } = {}) {
+  const slug = job && job.slug;
+  try {
+    const epicId = job.epicId || job.sourcePromptId;
+    if (!epicId || !worktreeDir || !projectRoot) return;
+    if (!fs.existsSync(worktreeDir)) {
+      console.warn(`[scheduler] ${slug}: artifact harvest skipped — worktree missing: ${worktreeDir}`);
+      return;
+    }
+    const producer = { epicId, prdSlug: slug || null, sessionId: job.sessionId || null };
+    const wtBase = path.resolve(worktreeDir);
+    let published = 0;
+    const declared = Array.isArray(job.artifactPaths) ? job.artifactPaths : [];
+    for (const p of declared) {
+      if (typeof p !== 'string' || !p || p.includes('\0')) continue;
+      const norm = path.posix.normalize(p.replace(/\\/g, '/'));
+      if (norm.startsWith(ARTIFACT_PLAN_RECORDS_PREFIX)) continue;
+      const abs = path.resolve(wtBase, p);
+      const rel = path.relative(wtBase, abs);
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+        console.warn(`[scheduler] ${slug}: artifact not harvested: ${p} — outside the worktree`);
+        continue;
+      }
+      let st;
+      try { st = fs.lstatSync(abs); } catch { console.warn(`[scheduler] ${slug}: artifact not harvested: ${p} — missing`); continue; }
+      if (!st.isFile()) { console.warn(`[scheduler] ${slug}: artifact not harvested: ${p} — not a regular file`); continue; }
+      const res = await artifactStore.publishArtifact({
+        projectRoot, epicId, srcPath: abs, producer, allowedRoots: [wtBase],
+      });
+      if (res.ok) published += 1;
+      else console.warn(`[scheduler] ${slug}: artifact not harvested: ${p} — ${res.error}`);
+    }
+    if (runId) {
+      let stagingDir = null;
+      try { stagingDir = artifactStore.stagingDirFor({ runId: jobArtifactRunId(job, runId) }); } catch (e) {
+        console.warn(`[scheduler] ${slug}: artifact staging folder unavailable — ${e && e.message ? e.message : e}`);
+      }
+      if (stagingDir) {
+        const { published: pub, skipped } = await artifactStore.ingestDir({ projectRoot, epicId, srcDir: stagingDir, producer });
+        published += pub.length;
+        for (const sk of skipped) console.warn(`[scheduler] ${slug}: staged artifact not harvested: ${sk.path} — ${sk.reason}`);
+        try { fs.rmdirSync(stagingDir); } catch { /* not empty (skipped files) or already gone */ }
+      }
+    }
+    if (published) console.log(`[scheduler] ${slug}: harvested ${published} artifact(s) into ${projectRoot}`);
+  } catch (e) {
+    console.error(`[scheduler] ${slug}: artifact harvest failed`, e);
   }
 }
 
@@ -6054,6 +6126,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // it starts has nothing to report back to — same stall as a tool that
     // waits for one.
     childEnv.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
+    // This run's artifact staging folder; harvestJobArtifacts ingests it
+    // into the Artifacts store before the worktree is removed.
+    try {
+      childEnv.SM_ARTIFACTS_DIR = artifactStore.stagingDirFor({ runId: jobArtifactRunId(job, path.basename(runDir)) });
+    } catch (e) {
+      safeLog(`[scheduler] ${job.slug}: SM_ARTIFACTS_DIR not set — ${e && e.message ? e.message : e}\n`);
+    }
     if (launchEnv && Object.keys(launchEnv).length) {
       safeLog(`[scheduler] launch mitigation env applied: ${Object.entries(launchEnv).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
     }
@@ -8122,6 +8201,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         // them to the main checkout before verify and before the checkout is
         // removed. Never throws (planRecordHarvest.cjs).
         harvestJobPlanRecords(job, worktree.dir, job.cwd || defaultCwd);
+        // Same point for the Artifacts store: declared artifactPaths + the
+        // job's SM_ARTIFACTS_DIR staging folder. Never throws.
+        await harvestJobArtifacts(job, worktree.dir, job.cwd || defaultCwd, { runId });
         ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, worktreeHead, uncommittedSnapshot } =
           await finalizeJobWorktree({ job, runId, runDir, worktree, guardCwd, carriedPaths }));
       } else {
@@ -14434,6 +14516,8 @@ queueOps.bindQueueAccess({
 
 module.exports = {
   PARK_ERRORS,
+  harvestJobArtifacts,
+  jobArtifactRunId,
   applyDepHoldNotices,
   _resetDepHoldNoticesForTests,
   readValidatorGateMs,

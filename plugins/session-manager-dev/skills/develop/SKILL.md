@@ -61,6 +61,10 @@ One goal = one validate PRD = one plan card on the Scheduler. Why: the Scheduler
 card as the validate PRD plus everything it transitively depends on.
 The validate PRD's title is the card title, so write it as `Validate: <plain-language goal>`.
 Keep one goal per validate PRD; a second goal is a second plan, with its own validate PRD.
+A defect you find in this project outside the Epic's goal is such a second plan, queued in this
+Epic (a side plan with its own `Validate: <goal>` PRD); the Epic's title and objective stay
+unchanged. Never hand it back as needing a new Epic. A defect in another project goes to
+`/send-feedback`.
 Prefer wide over deep: PRDs that share no files run in parallel; only chain two PRDs on a real
 file or output dependency, never to express reading order alone.
 A follow-up or fix PRD for the same goal depends on that plan's open PRDs instead of starting
@@ -89,6 +93,12 @@ three failure modes have different fixes:
 
 1. **Clarify only what a wrong guess would cost rework on.** Ask 2–4 plain-text questions in
    one message, once, and wait. Never use AskUserQuestion. Why: Chat view turns run headless.
+   Decide instead of asking when the human's own words, the project laws or memory, or the code
+   already settle the choice, or when git can revert a wrong guess; report it under Decided
+   (rule 6). Ask only about what is irreversible outside git (data loss, a public publish,
+   money, contacting people) or what the project laws reserve for the human. Never repeat an
+   unanswered question in a later turn: take the option you recommended, unless the choice is
+   reserved.
 2. **Explore broadly.** Find the absolute path, helpers and patterns to reuse, the test
    command, constraints, and exact paths and signatures. Read look-alike siblings to confirm
    the shape. Check existing tests, and `scheduler_list_prds` for an open PRD on the same
@@ -111,7 +121,10 @@ three failure modes have different fixes:
    delivers and say to read the landed code first. Never chain past 5; redo the completeness
    pass. Each goal's first sentence names its type, in chain order: `primitive` (new helper
    and its test), `wire` (adopt it at named call sites), `behavior` (one function's logic and
-   its test), `migration` (mechanical change), `doc`, `validate`.
+   its test), `migration` (mechanical change), `doc`, `validate`. A gap you leave out of the
+   first plan is queued in the same turn as a later wave that `dependsOn` the PRDs it builds
+   on, or held by `preflight` or a date when it must wait for something. Never list it as "not
+   covered" or "stage 2".
 7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. Test files edited or added in lockstep with
    the PRD's own code do not count toward the 3-edited / 1-new file limit. The validate PRD is
    exempt: it has one criterion per PRD, plus the record. A new helper and its first caller are
@@ -137,9 +150,9 @@ three failure modes have different fixes:
     gate or files warning shows a real mistake, fix it with `scheduler_update_prd`: its `gate`,
     `files` and `acceptanceCriteria` fields are validated and re-rendered. Why: a full body
     replacement is for prose only and is not re-checked. Never
-    change a PRD only to silence a warning. The validate PRD's none-gate warning and its size
-    warning (8 or more criteria) are expected. Then post one short message: each PRD's number and slug, the validate slug, the
-    warnings you kept, and that no per-PRD check will come from this session.
+    change a PRD only to silence a warning. Then post one short message: each PRD's number and
+    slug, the validate slug, and that no per-PRD check will come from this session. Name a
+    warning only if you changed a PRD because of it.
 13. **Never stop for review after queueing.** Why: the validator is the review.
 
 ### PRD fields

@@ -109,3 +109,48 @@ test('Final report has exactly Landed, Decided, Queued, Scheduled, Needs you', (
   expect(sec).not.toMatch(/Minor findings deferred|Anything still open|Any warning kept/);
   expect(flat(sec)).toMatch(/Expected API warnings and skipped optional steps are not reported\./);
 });
+
+test('step 1 decides instead of asking and never repeats an unanswered question', () => {
+  const s = flat(skill());
+  const step1 = s.slice(s.indexOf('1. **Clarify only what a wrong guess'), s.indexOf('2. **Explore broadly.**'));
+  expect(step1).toMatch(/Clarify only what a wrong guess would cost rework on\./);
+  expect(step1).toMatch(/Never use AskUserQuestion\./);
+  expect(step1).toMatch(
+    /Decide instead of asking when the human's own words, the project laws or memory, or the code already settle the choice, or when git can revert a wrong guess; report it under Decided \(rule 6\)\./
+  );
+  expect(step1).toMatch(
+    /Ask only about what is irreversible outside git \(data loss, a public publish, money, contacting people\) or what the project laws reserve for the human\./
+  );
+  expect(step1).toMatch(
+    /Never repeat an unanswered question in a later turn: take the option you recommended, unless the choice is reserved\./
+  );
+});
+
+test('Plan objective queues off-goal defects as side plans in this Epic', () => {
+  const s = flat(skill());
+  const obj = s.slice(s.indexOf('### Plan objective'), s.indexOf('### Preflight'));
+  expect(obj).toMatch(
+    /A defect you find in this project outside the Epic's goal is such a second plan, queued in this Epic \(a side plan with its own `Validate: <goal>` PRD\); the Epic's title and objective stay unchanged\./
+  );
+  expect(obj).toMatch(/Never hand it back as needing a new Epic\./);
+  expect(obj).toMatch(/A defect in another project goes to `\/send-feedback`\./);
+});
+
+test('step 6 queues left-out gaps as later waves or holds, never "stage 2"', () => {
+  const s = flat(skill());
+  const step6 = s.slice(s.indexOf('6. **Pick a shape.**'), s.indexOf('7. **Keep each PRD small**'));
+  expect(step6).toMatch(
+    /A gap you leave out of the first plan is queued in the same turn as a later wave that `dependsOn` the PRDs it builds on, or held by `preflight` or a date when it must wait for something\./
+  );
+  expect(step6).toMatch(/Never list it as "not covered" or "stage 2"\./);
+});
+
+test('step 12 names a warning only when a PRD changed because of it', () => {
+  const s = flat(skill());
+  const step12 = s.slice(s.indexOf('12. **Read the warnings'), s.indexOf('13. **Never stop for review'));
+  expect(step12).toMatch(
+    /Then post one short message: each PRD's number and slug, the validate slug, and that no per-PRD check will come from this session\. Name a warning only if you changed a PRD because of it\./
+  );
+  expect(step12).not.toMatch(/the warnings you kept/);
+  expect(s).not.toMatch(/none-gate warning and its size warning \(8 or more criteria\) are expected/);
+});

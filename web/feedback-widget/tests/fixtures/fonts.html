@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>feedback-widget font capture fixture</title>
+<!--
+  fonts.e2e.ts fixture. ?mode= picks how the test font reaches the page:
+    stylesheet    readable <style> @font-face (control)
+    api           FontFace API faces, added + loaded before capture.js is injected (Three Winds)
+    api-sliced    FontFace API, JetBrains Mono latin + latin-ext slices with unicode-range
+    cross-origin  <link> to the PORT+1 host's sheet, no crossorigin attribute (unreadable)
+    adopted       document.adoptedStyleSheets @font-face
+    data-url      FontFace from a data: URL (no fetchable source; capture must warn)
+  ?family= overrides the family the text is drawn with (the test's undeclared-name control).
+  window.__fontsReady = true once fonts are loaded, document.fonts.ready resolved and
+  capture.js (window.__capture) is loaded.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; color: #111111; }
+  body { padding: 40px; }
+  #signin {
+    appearance: none;
+    display: block;
+    width: 320px;
+    height: 80px;
+    margin: 0 0 32px;
+    padding: 0;
+    border: 2px solid #111111;
+    border-radius: 0;
+    background: #ffffff;
+    color: #111111;
+    font-size: 48px;
+    line-height: 76px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  #para {
+    width: 720px;
+    margin: 0;
+    font-size: 44px;
+    line-height: 60px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+</style>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var mode = params.get('mode') || 'stylesheet';
+  var crossPort = Number(location.port) + 1;
+  var crossOrigin = location.protocol + '//' + location.hostname + ':' + crossPort;
+  var SERIF = '/fonts/source-serif-4-latin-400-normal.woff2';
+  var MONO_LATIN = '/fonts/jetbrains-mono-latin-400-normal.woff2';
+  var MONO_LATIN_EXT = '/fonts/jetbrains-mono-latin-ext-400-normal.woff2';
+  var LATIN_RANGE =
+    'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD';
+  var LATIN_EXT_RANGE =
+    'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF';
+
+  var family = mode === 'api-sliced' ? 'FW Test Mono' : mode === 'data-url' ? 'FW Test Data' : 'FW Test Serif';
+  // Fallback generic differs from the test font, so a missed font is visible.
+  var generic = mode === 'api-sliced' ? 'serif' : 'monospace';
+  var drawn = params.get('family') || family;
+  window.__fontMode = mode;
+  window.__fontFamily = family;
+
+  var css = document.createElement('style');
+  css.textContent = '#signin, #para { font-family: "' + drawn + '", ' + generic + '; }';
+  document.head.appendChild(css);
+
+  function faceRule(fam, url) {
+    return "@font-face { font-family: '" + fam + "'; font-style: normal; font-weight: 400; src: url('" + url + "') format('woff2'); }";
+  }
+
+  function loadFaces(faces) {
+    return Promise.all(
+      faces.map(function (f) {
+        document.fonts.add(f);
+        return f.load();
+      }),
+    );
+  }
+
+  function toDataUrl(buf) {
+    var bytes = new Uint8Array(buf);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return 'data:font/woff2;base64,' + btoa(bin);
+  }
+
+  function setup() {
+    if (mode === 'stylesheet') {
+      var s = document.createElement('style');
+      s.textContent = faceRule('FW Test Serif', SERIF);
+      document.head.appendChild(s);
+      return document.fonts.load('32px "FW Test Serif"');
+    }
+    if (mode === 'cross-origin') {
+      return new Promise(function (resolve, reject) {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = crossOrigin + '/fonts/fw-test-serif.css';
+        link.onload = resolve;
+        link.onerror = function () { reject(new Error('cross-origin sheet failed')); };
+        document.head.appendChild(link);
+      }).then(function () { return document.fonts.load('32px "FW Test Serif"'); });
+    }
+    if (mode === 'adopted') {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(faceRule('FW Test Serif', SERIF));
+      document.adoptedStyleSheets = [sheet];
+      return document.fonts.load('32px "FW Test Serif"');
+    }
+    if (mode === 'api') {
+      return loadFaces([new FontFace('FW Test Serif', 'url(' + SERIF + ')', { weight: '400', style: 'normal' })]);
+    }
+    if (mode === 'api-sliced') {
+      return loadFaces([
+        new FontFace('FW Test Mono', 'url(' + MONO_LATIN + ')', { weight: '400', unicodeRange: LATIN_RANGE }),
+        new FontFace('FW Test Mono', 'url(' + MONO_LATIN_EXT + ')', { weight: '400', unicodeRange: LATIN_EXT_RANGE }),
+      ]);
+    }
+    if (mode === 'data-url') {
+      return fetch(SERIF)
+        .then(function (r) { return r.arrayBuffer(); })
+        .then(function (buf) {
+          // Drop the fetch from Resource Timing: the face's only source is the data: URL.
+          performance.clearResourceTimings();
+          return loadFaces([new FontFace('FW Test Data', 'url(' + toDataUrl(buf) + ')', { weight: '400' })]);
+        });
+    }
+    return Promise.reject(new Error('unknown mode ' + mode));
+  }
+
+  function injectCapture() {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = '/capture.js';
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('capture.js failed')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  setup()
+    .then(function () { return document.fonts.ready; })
+    .then(injectCapture)
+    .then(function () { window.__fontsReady = true; })
+    .catch(function (err) { window.__fontsError = String(err); });
+})();
+</script>
+</head>
+<body>
+  <button id="signin" type="button">SIGN IN</button>
+  <p id="para">Quartz glyph Wavy — Łódź</p>
+</body>
+</html>

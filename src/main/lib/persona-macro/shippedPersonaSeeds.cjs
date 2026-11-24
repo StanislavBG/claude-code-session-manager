@@ -330,6 +330,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "medium",
       },
     },
+    {
+      commit: "seed-v8",
+      bodySha256: "05dce94b324b8df98e74121fd1156d7b35dad78e92261275d81ba7bf5ee890c0",
+      fm: {
+        description: "Reads a project and writes ONE Knowledge Page (Overview by default, or How it works, FAQ, or a custom topic) for its Project Home tab, then saves it with a single project_page_write call.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_home_write, mcp__session-manager-scheduler__project_page_write",
+        mcpServers: "session-manager-scheduler",
+        title: "Project Home — Builder",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
   "validator": [
     {
@@ -754,6 +766,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
     {
       commit: "seed-v22",
       bodySha256: "5401a01bcc363cae894655faa613119193e432e28641f8bf4004be3b6b7a8c49",
+      fm: {
+        description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write, mcp__session-manager-scheduler__project_video_outcome_write",
+        mcpServers: "session-manager-scheduler",
+        title: "Project Home — Demo Video",
+        model: "opus",
+        effort: "max",
+      },
+    },
+    {
+      commit: "seed-v23",
+      bodySha256: "a2a8606a00002f7836fcf680206d37153dd2c31dd7528389402485d0b4e02fb0",
       fm: {
         description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
         tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write, mcp__session-manager-scheduler__project_video_outcome_write",

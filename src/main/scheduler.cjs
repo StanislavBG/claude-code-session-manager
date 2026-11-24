@@ -104,7 +104,8 @@ const { isResetFresh, bindingWindow, usageWindows, degradedBudget, meterFailureB
 // `utilizationHold` snapshot variable below).
 const autoDispatchHold = require('./scheduler/utilizationHold.cjs');
 const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
-const { createLoadGate, topCpuConsumers, formatLoadGateDetail } = require('./lib/scheduler/loadGate.cjs');
+const { createLoadGate, topCpuConsumers, formatLoadGateDetail, measuredMemoryGate, formatMemoryGateDetail } = require('./lib/scheduler/loadGate.cjs');
+const jobMemoryStats = require('./lib/scheduler/jobMemoryStats.cjs');
 const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -533,14 +534,11 @@ const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 // DEFAULT_PROJECT_CWD imported from lib/scheduler/schedulerBatch.cjs (single source of truth).
 
-// Each headless claude -p job can shell out to tsc/vite/pytest and grow well
-// past 1 GB at peak; reserve 2.5 GB of PEAK headroom per running+pending slot.
-// A running job's already-resident memory is credited back (consumedMb in
-// memoryLimitedBatchSize) because MemAvailable is already net of it. Raised from 1.5 GB
-// after the 2026-06-16 OOM: 3 concurrent cross-project jobs + their build
-// subprocesses pushed a 24 GB host ~10 GB into swap and the OOM killer took
-// Electron — every pty got SIGHUP (code=0 signal=1).
-const MIN_FREE_MB_PER_JOB = 2500;
+// Per-job memory reservations are MEASURED (lib/scheduler/jobMemoryStats.cjs: p75 for
+// a new job, p50 growth for a running one, one shared spike buffer) and applied by
+// loadGate.measuredMemoryGate in tickBody. The flat 2.5 GB/job rule (raised from 1.5 GB
+// after the 2026-06-16 OOM: 3 concurrent jobs pushed a 24 GB host ~10 GB into swap and
+// the OOM killer took Electron) survives only as jobMemoryStats' too-few-samples fallback.
 
 // Absolute headroom kept free for the Electron host (main + renderer + GPU) and
 // the OS — NEVER lent to jobs. Without it the gate green-lights a job whenever
@@ -633,9 +631,9 @@ function swapLimitedBatchSize(mem, runningCount, batchLen) {
 }
 
 /**
- * Pure helper: clamp a batch down so launching `toLaunch` more jobs doesn't
- * drop available memory below MIN_FREE_MB_PER_JOB per active slot.
- * Exported for unit tests.
+ * Pure helper: the old flat rule — clamp a batch so every running + new slot has
+ * `minPerJob` headroom, less the running jobs' credited RSS. The live gate now uses
+ * loadGate.measuredMemoryGate; this stays as the flat-rule reference for tests.
  */
 function memoryLimitedBatchSize(availableMb, minPerJob, runningCount, batchLen, consumedMb = 0) {
   if (availableMb === Infinity) return batchLen;
@@ -738,6 +736,32 @@ function sampleJobScope(state, fsImpl = fs) {
 
 const JOB_SCOPE_SAMPLE_MS = 30000;
 
+// Newest run logs the boot backfill reads at most (each is read whole, once ever).
+const MEMORY_BACKFILL_MAX_FILES = 500;
+
+/** The heartbeat's view of the last memory-gate decision (deferred or clamped), or null. */
+function heartbeatMemGate(g) {
+  if (!g) return null;
+  const pick = ['availableMb', 'threshold', 'reservationMb', 'spikeBufferMb', 'runningGrowthMb', 'consumedMb', 'measured', 'deferred', 'clamped', 'at'];
+  return Object.fromEntries(pick.filter((k) => g[k] !== undefined).map((k) => [k, g[k]]));
+}
+
+/**
+ * Run-log folders (<runsDir>/<runId>) of the queued jobs, deduped — the projects in
+ * the queue. Fed once at boot to jobMemoryStats.backfillFromRunLogs, which only
+ * seeds an EMPTY store and never throws. Bounded to MEMORY_BACKFILL_MAX_FILES logs.
+ */
+function backfillMemoryStatsAtBoot(jobs, deps = {}) {
+  const runsDir = deps.runsDir || schedulerPaths.runsDir();
+  const dirs = [...new Set((Array.isArray(jobs) ? jobs : [])
+    .map((j) => (j && typeof j.runId === 'string' && j.runId && !j.runId.includes('/') && !j.runId.includes('..') ? path.join(runsDir, j.runId) : null))
+    .filter(Boolean))];
+  if (!dirs.length) return 0;
+  const added = (deps.backfillFromRunLogs || jobMemoryStats.backfillFromRunLogs)(dirs, { maxFiles: MEMORY_BACKFILL_MAX_FILES });
+  if (added > 0) console.log(`[scheduler] memory stats: backfilled ${added} job peak(s) from ${dirs.length} run folder(s)`);
+  return added;
+}
+
 /** Starts the unref'd 30 s sampler once cgroupDir is known; finalizeJobScope clears it. */
 function startJobScopeSampling(state, fsImpl = fs) {
   if (!state || !state.cgroupDir || state.finalized || state.sampler) return;
@@ -746,7 +770,11 @@ function startJobScopeSampling(state, fsImpl = fs) {
   if (state.sampler.unref) state.sampler.unref();
 }
 
-/** Logs the last sampled memory.peak + oom_kill to the run log, then stops the scope exactly once. */
+/**
+ * Logs the last sampled memory.peak + oom_kill to the run log, records the peak with
+ * the job's agentType ('dev-lead' when absent) through jobMemoryStats.recordPeak (the
+ * memory gate's measured reservations), then stops the scope exactly once.
+ */
 function finalizeJobScope(state, safeLog, deps = {}) {
   if (!state || !state.unit || state.finalized) return;
   state.finalized = true;
@@ -760,6 +788,10 @@ function finalizeJobScope(state, safeLog, deps = {}) {
     if (hasPeak || hasOom) {
       safeLog(`\n[scheduler] memory scope ${state.unit}: peak=${hasPeak ? `${Math.round(state.peak / 1048576)}MB` : 'n/a'} ` +
         `oom_kill=${hasOom ? state.oomKills : 'n/a'}\n`);
+    }
+    if (hasPeak) {
+      const agentType = typeof state.agentType === 'string' && state.agentType ? state.agentType : 'dev-lead';
+      (deps.recordPeak || jobMemoryStats.recordPeak)({ agentType, peakMb: Math.round(state.peak / 1048576) });
     }
   } catch { /* stats are best-effort */ }
   (deps.stopScope || memoryScope.stopScope)(state.unit);
@@ -1282,6 +1314,9 @@ function heartbeatTick(deps = {}) {
         utilizationWindow: cachedBindingWindowName,
         utilizationHold,
         consecutiveFailures,
+        // Why a memory-held tick held (PRD 4019): the new job's reservation, the
+        // shared spike buffer and the running jobs' growth term. null = not gated.
+        memGate: heartbeatMemGate(lastMemGate),
         // State/consecutiveFailures/degraded-budget snapshot of the shared
         // usage-meter breaker, so a human reading only the heartbeat log can
         // see the meter's own health apart from the queue's.
@@ -6299,7 +6334,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     }
 
     const scopePlan = planJobScope({ jobSpawn, jobArgs, slug: job.slug, startedAt });
-    const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false, memoryMaxMb: scopePlan.memoryMaxMb };
+    const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false, memoryMaxMb: scopePlan.memoryMaxMb, agentType: job.agentType || 'dev-lead' };
     const launchSpawn = scopePlan.spawn;
 
     const { child } = withChildAndLog({
@@ -9748,28 +9783,39 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
     const jobBudgetMb = availableForJobs(availableMb, RESERVED_HOST_MB);
     // The slot pool already bounded `batch` (it was passed as freeSlots to
     // pickNextBatch above), so only the memory gate can narrow it further.
-    // Credit each running job's already-resident RSS (capped at its reservation)
-    // — MemAvailable is already net of it. Unknown pid / 0 MB read = no credit.
-    let consumedMb = 0;
+    // Measured reservations (PRD 4019, loadGate.measuredMemoryGate): each running
+    // job keeps only max(0, its agentType's p50 peak − its current RSS) — its RSS
+    // is already out of MemAvailable — each new job reserves its agentType's p75,
+    // plus one shared spike buffer. Too few samples = the old flat 2.5 GB/job rule.
+    // Unknown pid / 0 MB read = no RSS credit.
+    const runningForGate = [];
     if (availableMb !== Infinity) {
       for (const j of state.jobs) {
         if (!runningSet.has(j.slug)) continue;
         const pid = j.runtime?.pid ?? j.pid;
-        if (!Number.isInteger(pid) || pid <= 0) continue;
-        consumedMb += Math.min(processGroupRssMb(pid), MIN_FREE_MB_PER_JOB);
+        const rssMb = Number.isInteger(pid) && pid > 0 ? processGroupRssMb(pid) : 0;
+        runningForGate.push({ agentType: j.agentType, rssMb });
       }
-      consumedMb = Math.min(consumedMb, MIN_FREE_MB_PER_JOB * runningSet.size);
+      // A running slug without a queue row still holds memory: count it at 0 RSS.
+      for (let k = runningForGate.length; k < runningSet.size; k++) runningForGate.push({ agentType: null, rssMb: 0 });
     }
-    const allowed = memoryLimitedBatchSize(
-      jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length, consumedMb,
-    );
+    const memGate = measuredMemoryGate({ jobBudgetMb, running: runningForGate, batch, stats: jobMemoryStats });
+    const allowed = memGate.allowed;
+    const consumedMb = memGate.consumedMb;
+    const memGateTerms = {
+      reservationMb: memGate.reservationMb,
+      spikeBufferMb: memGate.spikeBufferMb,
+      runningGrowthMb: memGate.growthMb,
+      measured: memGate.measured,
+    };
     if (allowed === 0) {
-      const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1) - consumedMb;
-      console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1} - consumed=${consumedMb} MB) — deferring ${batch.length} job(s)`);
-      lastMemGate = { availableMb, threshold, consumedMb, deferred: true, at: new Date().toISOString() };
+      const threshold = RESERVED_HOST_MB + memGate.needMb;
+      const detail = formatMemoryGateDetail({ availableMb, threshold, reservedHostMb: RESERVED_HOST_MB, gate: memGate });
+      console.log(`[scheduler] ${detail} — deferring ${batch.length} job(s) (${runningSet.size} running)`);
+      lastMemGate = { availableMb, threshold, consumedMb, ...memGateTerms, deferred: true, at: new Date().toISOString() };
       return recordTick(
-        { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold, consumedMb },
-        { detail: `memory gate: ${availableMb} MB free, need ${threshold} MB (consumed=${consumedMb} MB credited)`, holds },
+        { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold, consumedMb, ...memGateTerms },
+        { detail, holds },
       );
     }
     const swapAllowed = swapLimitedBatchSize(memInfo, runningSet.size, allowed);
@@ -9789,8 +9835,9 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
     }
     const gatedBatch = batch.slice(0, swapAllowed);
     if (gatedBatch.length < batch.length) {
-      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length} (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job, consumed=${consumedMb} MB)`);
-      lastMemGate = { availableMb, threshold: RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length) - consumedMb, consumedMb, deferred: false, clamped: true, at: new Date().toISOString() };
+      const threshold = RESERVED_HOST_MB + memGate.needMb;
+      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length} (${formatMemoryGateDetail({ availableMb, threshold, reservedHostMb: RESERVED_HOST_MB, gate: memGate })})`);
+      lastMemGate = { availableMb, threshold, consumedMb, ...memGateTerms, deferred: false, clamped: true, at: new Date().toISOString() };
     } else {
       // Ungated full batch: clear stale gate snapshot so status doesn't show
       // a stale deferral from a previous tick.
@@ -13089,6 +13136,8 @@ async function init() {
     // Hydrate cached state from the sidecar before any scheduling decisions.
     loadSchedulerState();
     bootedAt = Date.now();
+    // Seed the measured memory reservations once (no-op when the store has samples).
+    try { backfillMemoryStatsAtBoot(readQueueSync().jobs); } catch { /* best-effort */ }
 
     // Boot reconciliation: finalize any job that was 'running' when the app died.
     // Check the run log first — a job that emitted result/success before the crash
@@ -14355,6 +14404,8 @@ module.exports = {
   loadValidatorCriteriaContext,
   planJobScope,
   finalizeJobScope,
+  backfillMemoryStatsAtBoot,
+  heartbeatMemGate,
   memoryCapFailureReason,
   sampleJobScope,
   readJobCgroupDir,

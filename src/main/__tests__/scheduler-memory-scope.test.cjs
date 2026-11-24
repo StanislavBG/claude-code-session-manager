@@ -162,3 +162,62 @@ realTest('real scope: sampling a running sleep gives peak > 0 and no oom kills',
     memoryScope.stopScope(unit);
   }
 }, 10000);
+
+test('finalize records the peak with the job agentType through recordPeak', () => {
+  const fsImpl = { readFileSync: (p) => { if (p === '/cg/memory.peak') return String(1500 * 1048576); throw new Error('ENOENT'); } };
+  const recordPeak = vi.fn();
+  scheduler.finalizeJobScope({ unit: 'u6', pid: null, cgroupDir: '/cg', finalized: false, agentType: 'validator' }, vi.fn(), { fs: fsImpl, stopScope: vi.fn(), recordPeak });
+  expect(recordPeak).toHaveBeenCalledTimes(1);
+  expect(recordPeak).toHaveBeenCalledWith({ agentType: 'validator', peakMb: 1500 });
+});
+
+test('finalize defaults the agentType to dev-lead and records nothing without a peak', () => {
+  const recordPeak = vi.fn();
+  const peakFs = { readFileSync: (p) => { if (p === '/cg/memory.peak') return String(700 * 1048576); throw new Error('ENOENT'); } };
+  scheduler.finalizeJobScope({ unit: 'u7', pid: null, cgroupDir: '/cg', finalized: false }, vi.fn(), { fs: peakFs, stopScope: vi.fn(), recordPeak });
+  expect(recordPeak).toHaveBeenCalledWith({ agentType: 'dev-lead', peakMb: 700 });
+  recordPeak.mockClear();
+  const noFs = { readFileSync: () => { throw new Error('ENOENT'); } };
+  scheduler.finalizeJobScope({ unit: 'u8', pid: null, cgroupDir: '/cg', finalized: false }, vi.fn(), { fs: noFs, stopScope: vi.fn(), recordPeak });
+  expect(recordPeak).not.toHaveBeenCalled();
+});
+
+test('a throwing recordPeak never skips stopping the scope', () => {
+  const stopScope = vi.fn();
+  const fsImpl = { readFileSync: (p) => { if (p === '/cg/memory.peak') return '1048576'; throw new Error('ENOENT'); } };
+  scheduler.finalizeJobScope({ unit: 'u9', pid: null, cgroupDir: '/cg', finalized: false }, vi.fn(), { fs: fsImpl, stopScope, recordPeak: () => { throw new Error('disk'); } });
+  expect(stopScope).toHaveBeenCalledWith('u9');
+});
+
+test('boot backfill passes the queued jobs\' run folders, deduped and bounded', () => {
+  const backfillFromRunLogs = vi.fn(() => 3);
+  const jobs = [
+    { slug: 'a', runId: 'r1' }, { slug: 'b', runId: 'r1' }, { slug: 'c', runId: 'r2' },
+    { slug: 'd' }, { slug: 'e', runId: '../evil' },
+  ];
+  expect(scheduler.backfillMemoryStatsAtBoot(jobs, { runsDir: '/runs', backfillFromRunLogs })).toBe(3);
+  expect(backfillFromRunLogs).toHaveBeenCalledTimes(1);
+  const [dirs, opts] = backfillFromRunLogs.mock.calls[0];
+  expect(dirs).toEqual(['/runs/r1', '/runs/r2']);
+  expect(opts.maxFiles).toBeGreaterThan(0);
+  expect(scheduler.backfillMemoryStatsAtBoot([], { runsDir: '/runs', backfillFromRunLogs })).toBe(0);
+  expect(backfillFromRunLogs).toHaveBeenCalledTimes(1);
+});
+
+test('boot backfill end to end: seeds the store from a run log peak line', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { createJobMemoryStats, STORE_FILE } = require('../lib/scheduler/jobMemoryStats.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memfill-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'runs', 'r1'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'runs', 'r1', 'a.log'), '[scheduler] memory scope sm-job-a-1: peak=1234MB oom_kill=0\n');
+    const stats = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => 1 });
+    const added = scheduler.backfillMemoryStatsAtBoot([{ slug: 'a', runId: 'r1' }], { runsDir: path.join(tmp, 'runs'), backfillFromRunLogs: stats.backfillFromRunLogs });
+    expect(added).toBe(1);
+    expect(stats.loadSamples().map((s) => s.peakMb)).toEqual([1234]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

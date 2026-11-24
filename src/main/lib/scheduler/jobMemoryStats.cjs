@@ -137,6 +137,11 @@ function createJobMemoryStats(deps = {}) {
     return clamp(quantile(all, 0.95) - quantile(all, 0.75), SPIKE_CLAMP);
   }
 
+  /** True once the store holds ≥ MIN_SAMPLES peaks, i.e. the quantiles above are measured, not fallbacks. */
+  function isMeasured() {
+    return loadSamples().length >= MIN_SAMPLES;
+  }
+
   function collectLogFiles(dir, depth, out) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -189,6 +194,7 @@ function createJobMemoryStats(deps = {}) {
     reservationMb,
     typicalPeakMb,
     spikeBufferMb,
+    isMeasured,
     backfillFromRunLogs,
     loadSamples,
     _resetCache() { cache = null; },
@@ -202,6 +208,7 @@ module.exports = {
   reservationMb: defaultInstance.reservationMb,
   typicalPeakMb: defaultInstance.typicalPeakMb,
   spikeBufferMb: defaultInstance.spikeBufferMb,
+  isMeasured: defaultInstance.isMeasured,
   backfillFromRunLogs: defaultInstance.backfillFromRunLogs,
   createJobMemoryStats,
   quantile,
@@ -210,4 +217,5 @@ module.exports = {
   RECENT_PER_TYPE,
   MIN_SAMPLES,
   CACHE_MS,
+  DEFAULT_RESERVATION_MB,
 };

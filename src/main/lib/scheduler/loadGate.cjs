@@ -304,4 +304,60 @@ function formatLoadGateDetail(load) {
   return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held ${heldMinutes}m with slots and memory free`;
 }
 
-module.exports = { formatLoadGateDetail, isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY, SATURATED_BUSY };
+/**
+ * measuredMemoryGate({ jobBudgetMb, running, batch, stats }) → decision
+ *
+ * The memory gate's math (PRD 4019). `jobBudgetMb` is MemAvailable minus the host
+ * reserve (scheduler.cjs availableForJobs). Admitting the first k jobs of `batch`
+ * needs
+ *   spikeBufferMb() (one, shared)
+ *   + Σ running max(0, typicalPeakMb(agentType) − rssMb)   (growth still to come)
+ *   + Σ first k batch jobs reservationMb(agentType)        (p75; RSS 0 at launch)
+ * Running jobs' resident memory is already out of MemAvailable, so each keeps only
+ * its typical growth; its RSS credit is capped at that typical peak.
+ *
+ * With too few samples (`stats.isMeasured()` false) the typical peak IS the
+ * reservation (2,500 MB fallback) and there is no spike buffer — exactly the old
+ * flat MIN_FREE_MB_PER_JOB rule. Infinity budget (non-Linux) admits everything.
+ *
+ * running: [{ agentType, rssMb }]; batch: [{ agentType }]; stats: jobMemoryStats.
+ * Returns { allowed, measured, needMb, reservationMb, spikeBufferMb, growthMb,
+ * consumedMb } where needMb/reservationMb are for the first job NOT admitted
+ * (or the last admitted when the whole batch fits). Pure.
+ */
+function measuredMemoryGate({ jobBudgetMb, running = [], batch = [], stats }) {
+  const typeOf = (j) => (j && typeof j.agentType === 'string' && j.agentType) || 'dev-lead';
+  const measured = Boolean(stats.isMeasured && stats.isMeasured());
+  const spikeBufferMb = measured ? stats.spikeBufferMb() : 0;
+  let growthMb = 0;
+  let consumedMb = 0;
+  for (const r of running) {
+    const t = typeOf(r);
+    const typical = measured ? stats.typicalPeakMb(t) : stats.reservationMb(t);
+    const rss = Math.max(0, Number(r && r.rssMb) || 0);
+    const credit = Math.min(rss, typical);
+    consumedMb += credit;
+    growthMb += typical - credit;
+  }
+  let needMb = spikeBufferMb + growthMb;
+  let reservationMb = 0;
+  let allowed = 0;
+  for (const j of batch) {
+    reservationMb = stats.reservationMb(typeOf(j));
+    const next = needMb + reservationMb;
+    if (jobBudgetMb !== Infinity && !(jobBudgetMb >= next)) { needMb = next; break; }
+    needMb = next;
+    allowed++;
+  }
+  return { allowed, measured, needMb, reservationMb, spikeBufferMb, growthMb, consumedMb };
+}
+
+/** Human-readable breakdown of a memory-gate decision for the tick detail + heartbeat. Pure. */
+function formatMemoryGateDetail({ availableMb, threshold, reservedHostMb, gate }) {
+  const basis = gate.measured ? 'measured' : 'fallback, too few samples';
+  return `memory gate: ${availableMb} MB free, need ${threshold} MB = host ${reservedHostMb}` +
+    ` + new job ${gate.reservationMb} + spike buffer ${gate.spikeBufferMb}` +
+    ` + running growth ${gate.growthMb} (consumed=${gate.consumedMb} MB credited; ${basis})`;
+}
+
+module.exports = { measuredMemoryGate, formatMemoryGateDetail, formatLoadGateDetail, isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY, SATURATED_BUSY };

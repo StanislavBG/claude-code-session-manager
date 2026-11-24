@@ -622,11 +622,6 @@ test('listRecentRestorableSessions skips a project whose read fails and never th
   expect(broken).toEqual({ sessions: [], projectsRead: 0, truncated: false });
 });
 
-/** Yield to the event loop until `cond()` holds (bounded). */
-async function until(cond) {
-  for (let i = 0; i < 500 && !cond(); i++) await new Promise((r) => setImmediate(r));
-  expect(cond()).toBe(true);
-}
 
 for (const order of ['complete-first', 'incomplete-first']) {
   test(`two overlapping list calls of one cwd each act on their own claim scan (${order})`, async () => {
@@ -637,17 +632,37 @@ for (const order of ['complete-first', 'incomplete-first']) {
     const content = fs.readFileSync(file, 'utf8');
     /** @type {{ resolve: (v: string) => void, reject: (e: Error) => void }[]} */
     const pending = [];
+    // Each archive read announces itself on `nthRead[n]`, so the test waits
+    // for the exact read it orders on — no timer or event-loop yield count
+    // (both raced the real readdir/stat thread-pool work in full-suite runs).
+    /** @type {{ promise: Promise<void>, resolve: () => void }[]} */
+    const nthRead = [1, 2, 3].map(() => {
+      /** @type {() => void} */
+      let resolve = () => {};
+      const promise = new Promise((r) => { resolve = () => r(undefined); });
+      return { promise, resolve };
+    });
     vi.spyOn(fs.promises, 'readFile').mockImplementation((p, ...rest) => {
       if (String(p) !== file) return realAsync.call(fs.promises, p, ...rest);
-      return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+      return new Promise((resolve, reject) => {
+        pending.push({ resolve, reject });
+        nthRead[pending.length - 1]?.resolve();
+      });
     });
+    const readStarted = (n) => nthRead[n - 1].promise;
 
+    // Start B only once A's archive read is pending: both scans walk real
+    // readdir/stat first, so starting them together let B's read land first
+    // and swap the roles of pending[0] and pending[1].
     const a = list(); // scan A: its archive read fails, then its retry fails
+    await readStarted(1);
     const b = list(); // scan B: its archive read succeeds
-    await until(() => pending.length === 2);
+    await readStarted(2);
+    expect(pending).toHaveLength(2);
     const [a1, b1] = pending;
     a1.reject(ioError());
-    await until(() => pending.length === 3);
+    await readStarted(3);
+    expect(pending).toHaveLength(3);
     const a2 = pending[2];
     if (order === 'complete-first') { b1.resolve(content); a2.reject(ioError()); }
     else { a2.reject(ioError()); b1.resolve(content); }

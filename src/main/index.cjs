@@ -72,6 +72,7 @@ const prdAdminRoutes = require('./lib/prd/prdAdminRoutes.cjs');
 const projectHomeAdminRoutes = require('./lib/feedback-remote/projectHomeAdminRoutes.cjs');
 const macroAdminRoutes = require('./lib/feedback-remote/macroAdminRoutes.cjs');
 const { smfileResponseHeaders, shouldBlockFrameNavigation, smfileUrlToPath } = require('./lib/smfileHeaders.cjs');
+const { buildMediaResponse } = require('./lib/util/smfileRange.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
@@ -1323,7 +1324,13 @@ const SMFILE_MIME = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
   '.txt': 'text/plain', '.csv': 'text/csv', '.xml': 'application/xml',
   '.pdf': 'application/pdf',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.m4v': 'video/x-m4v',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
 };
+// Audio/video stream with Range support (206) and no size cap so the Editor
+// can play and seek large rendered reels; everything else keeps the buffered
+// 25 MB path.
+const SMFILE_MEDIA_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v', '.mp3', '.wav', '.m4a', '.ogg', '.opus']);
 
 // Single-instance lock (PRD F1 v2 §requestSingleInstanceLock).
 // In dev mode we skip the lock so two-dev-instance workflows still work.
@@ -1534,10 +1541,13 @@ app.whenReady().then(async () => {
       const { realPath } = assertInsideHome(abs); // throws if outside home
       const st = await fs.promises.stat(realPath);
       if (st.isDirectory()) return new Response('Not a file', { status: 404 });
-      if (st.size > 25 * 1024 * 1024) return new Response('Too large', { status: 413 });
-      const buf = await fs.promises.readFile(realPath);
       const ext = path.extname(realPath).toLowerCase();
       const type = SMFILE_MIME[ext] || 'application/octet-stream';
+      if (SMFILE_MEDIA_EXTS.has(ext)) {
+        return buildMediaResponse(realPath, st, request.headers.get('range'), type);
+      }
+      if (st.size > 25 * 1024 * 1024) return new Response('Too large', { status: 413 });
+      const buf = await fs.promises.readFile(realPath);
       return new Response(buf, { headers: smfileResponseHeaders(realPath, type) });
     } catch (err) {
       return new Response(`smfile error: ${err && err.message}`, { status: 404 });

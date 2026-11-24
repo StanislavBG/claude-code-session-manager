@@ -130,7 +130,9 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
   }, [])
 
   const isRunning = job.status === 'running'
-  const isFailed = job.status === 'failed'
+  // A human-cancelled row (main stamps job.cancelled) is never a failure.
+  const isCancelled = job.cancelled === true
+  const isFailed = job.status === 'failed' && !isCancelled
 
   let trailingLabel: string | null = null
   if (isRunning && elapsedMs !== null) {
@@ -163,6 +165,7 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
         type="button"
         data-job-row
         data-job-status={job.status}
+        data-job-cancelled={isCancelled ? 'true' : undefined}
         data-job-index={listIndex}
         data-depth={backlog.depth}
         onClick={() => setOpen((v) => !v)}
@@ -170,10 +173,10 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
         style={backlog.depth > 0 ? { paddingLeft: 18 + backlog.depth * 20 } : undefined}
         className={`w-full text-left grid grid-cols-[116px_1fr_auto_auto] items-center gap-4 px-[18px] py-3.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${open ? 'bg-bg-elev/40' : ''}`}
         aria-expanded={open}
-        aria-label={`${prdNumber(job.slug) ? `PRD ${prdNumber(job.slug)}, ` : ''}${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
+        aria-label={`${prdNumber(job.slug) ? `PRD ${prdNumber(job.slug)}, ` : ''}${job.title}, ${isCancelled ? 'cancelled' : job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
         title={job.title}
       >
-        <SchBadge status={job.status} />
+        <SchBadge status={job.status} cancelled={isCancelled} />
         <div className="min-w-0">
           <div className="flex items-baseline gap-2 text-[14.5px] font-medium text-fg leading-snug">
             {prdNumber(job.slug) && <PrdNumberBadge n={prdNumber(job.slug)!} />}

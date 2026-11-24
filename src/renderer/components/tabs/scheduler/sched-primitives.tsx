@@ -46,7 +46,24 @@ const BADGE_MARKS: Partial<Record<ScheduleJobStatus, string>> = {
   quarantined:  '⚑',
 }
 
-export function SchBadge({ status }: { status: ScheduleJobStatus }) {
+// A human-cancelled row (ScheduleJob.cancelled, stamped by main) renders in
+// the neutral skipped tone — a cancel is a decision, never a red failure.
+const CANCELLED_BADGE_CLASSES = 'bg-fg-dim/10 text-fg-dim border border-line'
+const CANCELLED_BADGE_MARK = '⊘'
+
+export function SchBadge({ status, cancelled }: { status: ScheduleJobStatus; cancelled?: boolean }) {
+  if (cancelled) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 shrink-0 px-2.5 py-1 rounded-lg min-w-[104px] justify-center text-xs font-semibold tracking-wide ${CANCELLED_BADGE_CLASSES}`}
+        role="status"
+        aria-label="Status: cancelled"
+      >
+        <span aria-hidden="true">{CANCELLED_BADGE_MARK}</span>
+        cancelled
+      </span>
+    )
+  }
   const mark = BADGE_MARKS[status]
   return (
     <span
@@ -298,6 +315,9 @@ export const STATUS_TONE: Record<string, { bg: string; text: string; border: boo
   // spawned — deliberately neutral, never the green 'completed' tone, so an
   // unrun row can't masquerade as shipped work (see JOB_STATUSES header).
   skipped:      { bg: 'bg-fg-dim/10', text: 'text-fg-dim',   border: true,  label: 'skipped' },
+  // A human cancelled the row (ScheduleJob.cancelled, set by main) — same
+  // neutral tone as 'skipped': a cancel is a decision, never a red failure.
+  cancelled:    { bg: 'bg-fg-dim/10', text: 'text-fg-dim',   border: true,  label: 'cancelled' },
   failed:       { bg: 'bg-accent/15', text: 'text-accent',   border: false, label: 'failed' },
   needs_review: { bg: 'bg-butter/25', text: 'text-fg-dim',   border: false, label: 'needs review' },
   // A chat PromptTicket (PRD 750) that classified 'develop' and handed off to
@@ -366,10 +386,12 @@ export function resolveValidatedStatus(
  * `outcome` through as-is when `validation` is absent).
  */
 export function prdStatusFor(
-  job: { status: ScheduleJobStatus } | null | undefined,
+  job: { status: ScheduleJobStatus; cancelled?: boolean } | null | undefined,
   validation?: 'unvalidated' | 'validating' | 'verified' | 'refuted',
 ): PrdDisplayStatus {
   if (!job) return 'ready'
+  // A human cancel wins over every status and verdict fold (ScheduleJob.cancelled).
+  if (job.cancelled) return 'cancelled'
   const baseStatus = job.status === 'pending' ? 'queued' : job.status
   return resolveValidatedStatus(baseStatus, validation)
 }

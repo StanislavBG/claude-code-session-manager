@@ -62,7 +62,7 @@ Reads (and writes, through the same paths):
 - Settings is the canonical scoped-editor shape (`SaveBar`, `JsonEditor` in `src/renderer/components/ui/`) and is
   substrate, not per-Epic curation (root `CLAUDE.md`). Schema-aware editing uses the generated
   `src/renderer/data/claude-settings-schema.json` via `src/renderer/lib/settingsSchema.ts`
-  (`npm run sync:settings-schema`), never a hand-copied key list. App preferences (telemetry, phone remote,
+  (`npm run sync:settings-schema`), never a hand-copied key list. App preferences (telemetry, web remote,
   density) belong to App Settings, not here.
 - Lists (skills, servers, plugins, personas, memories) come from disk at read time and refresh on external change.
   MCP checks (`mcp:check-server` via `src/renderer/state/mcpChecks.ts`) run only on Check all / Check again —

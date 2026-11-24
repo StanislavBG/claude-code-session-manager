@@ -18,7 +18,7 @@ First read session-manager-operations/architecture/page-stewards.md, then run `n
 - Faces: Home
 - Entry: `src/renderer/components/tabs/AppSettings.tsx`
 
-Tabs: Voice, Appearance, Telemetry, Phone remote, Updates & retention, Startup, Storage map.
+Tabs: Voice, Appearance, Telemetry, Web remote, Updates & retention, Startup, Storage map.
 
 Reads and writes Session Manager's own files, never Claude Code's `settings.json`:
 - `~/.claude/session-manager/app-prefs.json`, `ui-chrome-prefs.json`, voice settings

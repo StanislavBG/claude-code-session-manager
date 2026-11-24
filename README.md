@@ -114,7 +114,7 @@ A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind 
 | --- | --- | --- |
 | Voice input | Turns speech into text on your machine. Nothing leaves it. | App Settings |
 | Recording light | A light shows on top of every screen while the mic is on. | Top of window |
-| Phone remote | Drive the app from your phone through the bilko.run relay. | App Settings |
+| Web remote | Drive the app from your phone, or let a paired service send work, through the bilko.run relay. | App Settings |
 | Simple mode | `--simple` opens one plain terminal. | Launch flag |
 | Command palette | `Cmd-K` or `Ctrl-K` opens a list of commands. | Anywhere |
 

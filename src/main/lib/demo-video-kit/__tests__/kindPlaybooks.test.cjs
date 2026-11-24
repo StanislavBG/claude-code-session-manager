@@ -54,6 +54,8 @@ test('kind-marketing.md says how to request, embed and seek real product clips',
   expect(md).toContain('t - clipStart');
   expect(md).toMatch(/No `controls`, no `autoplay`/);
   expect(md).toContain('dropped');
+  expect(md).toMatch(/`durationS` must be a number/);
+  expect(md).toContain('too-short');
   expect(md).toMatch(/Clips count toward the document size cap/);
 });
 

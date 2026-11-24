@@ -3,7 +3,14 @@ import { describe, it, expect } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { capture, IMAGE_BUDGET, CLIP_BUDGET, CLIP_STEPS } = require('../capture.cjs');
+const { capture: rawCapture, IMAGE_BUDGET, CLIP_BUDGET, CLIP_STEPS } = require('../capture.cjs');
+
+// ffprobe fake: logs its args and prints `seconds` (default: long enough for any clip).
+function fakeFfprobe(calls, seconds = '6.000') {
+  return (args) => { calls.push(args); return { status: 0, stdout: `${seconds}\n`, stderr: '' }; };
+}
+// Every test gets a passing ffprobe unless it injects its own.
+const capture = (o) => rawCapture({ ffprobe: fakeFfprobe([]), ...o });
 
 function fakePw(log = {}) {
   const page = {
@@ -15,7 +22,8 @@ function fakePw(log = {}) {
   return { chromium: { launch: async () => ({ newPage: async () => page, close: async () => { log.closed = true; } }) } };
 }
 // Playwright fake with a recordVideo-capable newContext; close() flushes a fake .webm into recordVideo.dir.
-// `clock.t` (ms) advances on goto by `clock.gotoMs` and on every waitForTimeout by its ms.
+// `clock.t` (ms) advances in newPage by `clock.newPageMs`, on goto by `clock.gotoMs` and on every
+// waitForTimeout by its ms.
 function fakeRecPw(log = {}, { failContext = false, clock = { t: 0 } } = {}) {
   const base = fakePw(log);
   const launch = base.chromium.launch;
@@ -33,7 +41,7 @@ function fakeRecPw(log = {}, { failContext = false, clock = { t: 0 } } = {}) {
         locator() { return { first: () => ({ boundingBox: async () => null, scrollIntoViewIfNeeded: async () => {} }) }; },
         video: () => ({ path: async () => webm }),
       };
-      return { newPage: async () => page, close: async () => { if (!fs.existsSync(webm)) fs.writeFileSync(webm, 'webm'); log.ctxClosed = true; log.ctxCloses = (log.ctxCloses || 0) + 1; } };
+      return { newPage: async () => { clock.t += clock.newPageMs || 0; return page; }, close: async () => { if (!fs.existsSync(webm)) fs.writeFileSync(webm, 'webm'); log.ctxClosed = true; log.ctxCloses = (log.ctxCloses || 0) + 1; } };
     };
     return b;
   };
@@ -137,11 +145,52 @@ describe('capture', () => {
     });
     expect(r.items[0].durationS).toBe(3);
     const a = calls.filter((x) => !x.includes('-version'))[0];
-    // lead-in = goto (1200 ms) + default settle wait (500 ms), measured from context creation
+    // lead-in = goto (1200 ms) + default settle wait (500 ms), measured from the page's video origin
     expect(argOf(a, '-ss')).toBe('1.700');
     expect(a.indexOf('-ss')).toBeLessThan(a.indexOf('-i')); // input seek, before -i
     expect(argOf(a, '-t')).toBe('3.000');
     expect(a.indexOf('-t')).toBeGreaterThan(a.indexOf('-i'));
+  });
+  it('measures the lead-in from right after newPage(), the page video origin', async () => {
+    const clock = { t: 0, newPageMs: 900, gotoMs: 1200 };
+    const calls = [];
+    await capture({
+      url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 3 }],
+      loadPlaywright: () => fakeRecPw({}, { clock }), ffmpeg: fakeFfmpeg(calls, () => 10), now: () => clock.t,
+    });
+    const a = calls.filter((x) => !x.includes('-version'))[0];
+    // the 900 ms spent creating the page precedes its video, so it is not trimmed
+    expect(argOf(a, '-ss')).toBe('1.700');
+  });
+  it('drops a clip that comes out shorter than durationS minus one frame as too-short, keeping image shots', async () => {
+    const probes = [];
+    const outDir = tmp();
+    const r = await rawCapture({
+      url: 'http://x', outDir, shots: [{ kind: 'clip', durationS: 3 }, {}],
+      loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg([], () => 10), ffprobe: fakeFfprobe(probes, '2.767'),
+    });
+    expect(r.items.map((i) => i.kind)).toEqual(['image']);
+    expect(r.dropped).toEqual([{ index: 0, kind: 'clip', reason: 'too-short' }]);
+    expect(probes).toHaveLength(1);
+    expect(probes[0][probes[0].length - 1]).toBe(path.join(outDir, 'shot-01.mp4'));
+    expect(probes[0]).toContain('format=duration');
+    expect(fs.existsSync(path.join(outDir, 'shot-01.mp4'))).toBe(false);
+  });
+  it('keeps an exact-length clip and one within a frame of durationS', async () => {
+    for (const secs of ['3.000', '2.980']) { // 30 fps: one frame = 0.0333 s
+      const r = await rawCapture({
+        url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 3 }],
+        loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg([], () => 10), ffprobe: fakeFfprobe([], secs),
+      });
+      expect(r.dropped).toEqual([]);
+      expect(r.items[0]).toMatchObject({ kind: 'clip', durationS: 3 });
+    }
+  });
+  it('drops a clip whose length ffprobe cannot read', async () => {
+    const ffprobe = () => ({ error: new Error('spawn ffprobe ENOENT') });
+    const r = await rawCapture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip' }], loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg([], () => 10), ffprobe });
+    expect(r.items).toEqual([]);
+    expect(r.dropped[0].reason).toMatch(/^probe-failed: spawn ffprobe ENOENT/);
   });
   it('closes the recording context exactly once', async () => {
     const log = {};

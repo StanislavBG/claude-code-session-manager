@@ -48,8 +48,10 @@ proof moments. Never pad with invented claims; use longer holds instead.
 - Ask capture.cjs for real clips for the reveal and for each proof moment: shots of
   `{ kind: 'clip', durationS: 4 }`, with `durationS` from 2 to 6. Use image shots for the rest,
   within the 6-shot limit.
-- A clip's `durationS` defaults to 4 s when missing or not a number, and capture.cjs clamps every
-  value to 2-6 s; the clip starts on the settled page (the load lead-in is trimmed off).
+- A clip's `durationS` must be a number: a string (`'3'`) or `null` becomes the 4 s default, as
+  does a missing value. capture.cjs clamps every value to 2-6 s; the clip starts on the settled page
+  (the load lead-in is trimmed off). A clip that comes out shorter than `durationS` minus one frame
+  (a page that redirects can do this) is dropped with the reason `too-short`.
 - A clip comes back as an `items` entry with `kind: 'clip'`, `mime: 'video/mp4'`, `file`, `bytes`,
   `durationS` and `focus`. A clip capture.cjs could not make is listed in `dropped` with its
   `reason`. For every dropped clip, use a screenshot of that moment with camera moves instead: a

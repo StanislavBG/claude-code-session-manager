@@ -372,6 +372,18 @@ describe('hidden launcher + coach toast — §5.1 Hidden', () => {
     expect(coach()).toBeNull();
   });
 
+  it('does not use up the hint while it is not visible', () => {
+    mount(initialState(), { variant: 'hidden', capturing: true });
+    expect(coach()).toBeNull();
+    expect(localStorage.getItem('fw:coachSeen')).toBeNull();
+    mount(run({ type: 'open' }), { variant: 'hidden' });
+    expect(coach()).toBeNull();
+    expect(localStorage.getItem('fw:coachSeen')).toBeNull();
+    mount(initialState(), { variant: 'hidden' });
+    expect(coach()).not.toBeNull();
+    expect(localStorage.getItem('fw:coachSeen')).not.toBeNull();
+  });
+
   it('is hidden while capturing or outside idle', () => {
     mount(initialState(), { variant: 'hidden', capturing: true });
     expect(coach()).toBeNull();

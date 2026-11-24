@@ -195,17 +195,18 @@ function Icon({ size, ping, full }: { size: 18 | 22; ping: boolean; full: boolea
 /** §5.1 Hidden: "Spotted a problem? Press [⇧] [F] to send feedback" + Got it, once per browser. */
 function Coach({ show }: { show: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Decided once per mount: unseen → show now and record it, so a reload never repeats it.
+  // Decided once per mount: unseen → eligible. It is recorded as seen only once it is actually
+  // on screen (idle, not capturing), so a hidden mount never uses up the one-time hint.
   const [open, setOpen] = useState(() => !coachSeen());
+  const visible = open && show;
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!visible) return undefined;
     markCoachSeen();
     const t = setTimeout(() => setOpen(false), COACH_MS);
     return () => clearTimeout(t);
-  }, [open]);
+  }, [visible]);
 
-  const visible = open && show;
   useLayoutEffect(() => {
     if (visible) adoptInto(ref.current, launcherSheet());
   }, [visible]);

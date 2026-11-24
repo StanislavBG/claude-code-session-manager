@@ -7,6 +7,7 @@
 
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import type { Event, State } from './machine';
+import { adoptInto } from './shared';
 import { colors, fonts, motion } from './tokens';
 
 export const DISCARD_TITLE = 'Discard this feedback?';
@@ -56,18 +57,6 @@ export function discardSheet(): CSSStyleSheet | null {
   return sheetCache;
 }
 
-function adoptOn(node: Node): void {
-  const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
-  const sheet = discardSheet();
-  if (!sheet || !root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  if (root.adoptedStyleSheets.includes(sheet)) return;
-  try {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  } catch {
-    // Sheet from another realm — leave the root unstyled rather than throw.
-  }
-}
-
 export interface DiscardDialogProps {
   state: State;
   dispatch: (e: Event) => void;
@@ -80,7 +69,7 @@ export function DiscardDialog({ state, dispatch }: DiscardDialogProps) {
 
   useLayoutEffect(() => {
     if (!open) return;
-    if (scrimRef.current) adoptOn(scrimRef.current);
+    adoptInto(scrimRef.current, discardSheet());
     keepRef.current?.focus();
   }, [open]);
 

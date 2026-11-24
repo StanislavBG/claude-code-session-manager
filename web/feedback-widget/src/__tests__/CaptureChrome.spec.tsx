@@ -306,6 +306,10 @@ describe('hint chip', () => {
   });
 
   it('uses top 16 for rail/corner toolbars and recentres on resize', () => {
+    mount({ state: opened(), toolbar: 'dock' });
+    expect(q('.fw-hint')!.style.top).toBe('80px');
+    mount({ state: opened(), toolbar: 'corner' });
+    expect(q('.fw-hint')!.style.top).toBe('16px');
     mount({ state: opened(), toolbar: 'rail' });
     expect(q('.fw-hint')!.style.top).toBe('16px');
     act(() => {

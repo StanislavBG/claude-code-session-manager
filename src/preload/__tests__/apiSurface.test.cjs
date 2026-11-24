@@ -226,3 +226,16 @@ test('config.writeText and config.canWrite forward importedBy', async () => {
     ['config:can-write', { path: '/h/CLAUDE.md', importedBy: undefined }],
   ]);
 });
+
+// Approving a risky tool and purging an Epic are human decisions on the desktop: the phone relay must never reach them.
+test('2026-11-23 rows: confirmTool and purge are desktop-only (deny); refreshAgentSnapshot is listed', () => {
+  const table = require('../apiSurface.cjs');
+  const pick = (ns, method) => {
+    const r = table.find((x) => x.ns === ns && x.method === method);
+    assert.ok(r, `${ns}.${method} missing from apiSurface`);
+    return [r.channel, r.kind, r.remote];
+  };
+  assert.deepStrictEqual(pick('needsYou', 'confirmTool'), ['scheduler:confirm-tool', 'invoke', 'deny']);
+  assert.deepStrictEqual(pick('promptSessions', 'purge'), ['epic:purge', 'invoke', 'deny']);
+  assert.deepStrictEqual(pick('promptSessions', 'refreshAgentSnapshot'), ['epic:refresh-agent-snapshot', 'invoke', 'mutate']);
+});

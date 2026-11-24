@@ -573,6 +573,13 @@
  },
  {
   "ns": "needsYou",
+  "method": "confirmTool",
+  "channel": "scheduler:confirm-tool",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "needsYou",
   "method": "onChanged",
   "channel": "needsYou:changed",
   "kind": "on",

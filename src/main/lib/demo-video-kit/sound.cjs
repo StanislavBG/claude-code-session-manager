@@ -261,21 +261,76 @@ function duckEnvelope(narr) {
   return { gain, speechS: active * 0.02 };
 }
 
+/** Decode any audio file to mono 44.1 kHz float samples (non-finite samples -> 0). */
+function decodeMono(file, dir, tag) {
+  const f32 = path.join(dir, `${tag}.f32.wav`);
+  runFfmpeg(['-hide_banner', '-nostats', '-y', '-i', file, '-vn', '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', f32]);
+  const x = decodeWavF32(fs.readFileSync(f32));
+  // A single NaN in the buffer handed to ffmpeg makes libmp3lame assert (0-byte mp3).
+  for (let i = 0; i < x.length; i++) if (!Number.isFinite(x[i])) x[i] = 0;
+  return x;
+}
+
+const BUILTIN_LIST = SFX_NAMES.join(', ');
+
+/**
+ * Resolve every cue name before any audio work: built-ins map to null, a persona
+ * sounds.sfx name to its WAV path. Throws a named reason for anything else.
+ * The persona is read only when some cue is not built-in.
+ */
+function resolveCueFiles(cues, projectRoot) {
+  const files = new Map();
+  let persona;
+  for (const cue of cues) {
+    const name = cue && cue.name;
+    if (SFX_NAMES.includes(name) || files.has(name)) continue;
+    if (projectRoot === undefined || projectRoot === null) {
+      throw new Error(`unknown sfx: ${name} (built-in: ${BUILTIN_LIST}; pass projectRoot to use the persona's own sounds)`);
+    }
+    const { inspectCharacter } = require('./character.cjs');
+    const { findProjectSound, soundFile, checkSoundWav } = require('./projectSounds.cjs');
+    if (persona === undefined) {
+      persona = inspectCharacter(projectRoot);
+      if (!persona.ok && persona.exists) throw new Error(`project persona unusable: ${persona.error}`);
+    }
+    const found = persona.ok ? findProjectSound(persona.json, name) : null;
+    if (!found || found.kind !== 'sfx') {
+      const s = persona.ok && persona.json.sounds && Array.isArray(persona.json.sounds.sfx) ? persona.json.sounds.sfx : [];
+      const names = s.map((e) => e && e.name).filter((n) => typeof n === 'string').join(', ');
+      throw new Error(`unknown sfx: ${name} (built-in: ${BUILTIN_LIST}; persona sounds.sfx: ${names || 'none'})`);
+    }
+    const file = soundFile(projectRoot, name);
+    if (!fs.existsSync(file)) {
+      throw new Error(`project sfx '${name}' has no WAV at ${file} (save the persona again with its sound files)`);
+    }
+    const reason = checkSoundWav(fs.readFileSync(file), `project sfx '${name}' (${file})`, 'sfx');
+    if (reason) throw new Error(reason);
+    files.set(name, file);
+  }
+  return files;
+}
+
 /**
  * Mix narration + ducked music bed + SFX cues, then loudnorm to -14 LUFS / -1.5 dBTP.
- * cues: [{name, t}] (t in seconds; `at` also accepted). Output length is the longer of
- * lengthS and the narration. Returns the measured {lufs, truePeakDb, speechS}.
+ * cues: [{name, t}] (t in seconds; `at` also accepted). A name that is not a built-in
+ * effect is read from the persona's sounds.sfx under projectRoot (absolute). Output
+ * length is the longer of lengthS and the narration. Returns {lufs, truePeakDb, speechS}.
  */
-function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1 }) {
+function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1, projectRoot }) {
+  if (projectRoot !== undefined && projectRoot !== null && (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot))) {
+    throw new Error('spec.projectRoot must be an absolute path');
+  }
+  const cueFiles = resolveCueFiles(cues, projectRoot);
   const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'dvk-sound-'));
   try {
-    const narrF32 = path.join(dir, 'narration.f32.wav');
-    runFfmpeg(['-hide_banner', '-nostats', '-y', '-i', narrationWav, '-vn', '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', narrF32]);
-    const narr = decodeWavF32(fs.readFileSync(narrF32));
+    const narr = decodeMono(narrationWav, dir, 'narration');
     const n = Math.max(narr.length, Math.round(Number(lengthS) * SR));
     const bed = bedSamples({ style, lengthS: n / SR, seed });
     // A single NaN in the buffer handed to ffmpeg makes libmp3lame assert (0-byte mp3).
     for (let i = 0; i < bed.length; i++) if (!Number.isFinite(bed[i])) bed[i] = 0;
+    const projectSfx = new Map();
+    let k = 0;
+    for (const [name, file] of cueFiles) projectSfx.set(name, decodeMono(file, dir, `sfx-${k++}`));
     const { gain, speechS } = duckEnvelope(narr);
     const bedGain = dbToGain(BED_BASE_DB);
     const mixed = new Float32Array(n);
@@ -286,7 +341,7 @@ function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1 }) {
     const sfxGain = dbToGain(-10);
     for (const cue of cues) {
       const at = Math.round(Number(cue.t ?? cue.at ?? 0) * SR);
-      const s = sfxSamples(cue.name);
+      const s = projectSfx.get(cue.name) || sfxSamples(cue.name);
       for (let i = 0; i < s.length && at + i < n; i++) if (at + i >= 0) mixed[at + i] += s[i] * sfxGain;
     }
     const pre = path.join(dir, 'premix.f32.wav');

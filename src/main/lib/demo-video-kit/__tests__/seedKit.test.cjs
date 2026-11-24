@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 31 (voiceLibrary.cjs exports approvalKey + canonical for the approvals writer)', () => {
-  expect(KIT_VERSION).toBe('31');
+test('KIT_VERSION is bumped to 32 (capture.cjs finds ffprobe beside SM_FFMPEG and falls back to ffmpeg for clip length)', () => {
+  expect(KIT_VERSION).toBe('32');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

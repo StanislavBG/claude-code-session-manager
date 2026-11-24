@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { capture: rawCapture, IMAGE_BUDGET, CLIP_BUDGET, CLIP_STEPS } = require('../capture.cjs');
+const { capture: rawCapture, IMAGE_BUDGET, CLIP_BUDGET, CLIP_STEPS, resolveFfprobeBin, parseFfmpegDuration } = require('../capture.cjs');
 
 // ffprobe fake: logs its args and prints `seconds` (default: long enough for any clip).
 function fakeFfprobe(calls, seconds = '6.000') {
@@ -52,6 +52,7 @@ function fakeFfmpeg(calls, sizeFor) {
   return (args) => {
     calls.push(args);
     if (args.includes('-version')) return { status: 0, stderr: '' };
+    if (args[args.length - 1] === '-') return { status: 0, stderr: '' }; // a null-muxer length read
     fs.writeFileSync(args[args.length - 1], Buffer.alloc(sizeFor(args)));
     return { status: 0, stderr: '' };
   };
@@ -186,11 +187,77 @@ describe('capture', () => {
       expect(r.items[0]).toMatchObject({ kind: 'clip', durationS: 3 });
     }
   });
-  it('drops a clip whose length ffprobe cannot read', async () => {
+  it('drops a clip as probe-failed only when neither ffprobe nor ffmpeg yields a length', async () => {
     const ffprobe = () => ({ error: new Error('spawn ffprobe ENOENT') });
-    const r = await rawCapture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip' }], loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg([], () => 10), ffprobe });
+    const calls = [];
+    const r = await rawCapture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip' }], loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg(calls, () => 10), ffprobe });
     expect(r.items).toEqual([]);
     expect(r.dropped[0].reason).toMatch(/^probe-failed: spawn ffprobe ENOENT/);
+    expect(r.dropped[0].reason).toMatch(/ffmpeg: no duration/);
+    expect(calls.some((a) => a[a.length - 1] === '-' && argOf(a, '-f') === 'null')).toBe(true);
+  });
+  it("falls back to ffmpeg's own duration output when no ffprobe is usable", async () => {
+    const ffprobe = () => ({ error: new Error('spawn ffprobe ENOENT') });
+    const outDir = tmp();
+    const reads = [];
+    const ffmpeg = (args) => {
+      if (args.includes('-version')) return { status: 0, stderr: '' };
+      if (args[args.length - 1] === '-') {
+        reads.push(args);
+        return { status: 0, stderr: '  Duration: 00:00:03.00, start: 0.000000, bitrate: 10 kb/s\nframe=   45 fps=0.0 q=-0.0 size=N/A time=00:00:01.50 bitrate=N/A\rframe=   89 fps=0.0 q=-0.0 Lsize=N/A time=00:00:02.967 bitrate=N/A speed= 50x\n' };
+      }
+      fs.writeFileSync(args[args.length - 1], Buffer.alloc(10));
+      return { status: 0, stderr: '' };
+    };
+    const r = await rawCapture({ url: 'http://x', outDir, shots: [{ kind: 'clip', durationS: 3 }], loadPlaywright: () => fakeRecPw(), ffmpeg, ffprobe });
+    expect(r.dropped).toEqual([]);
+    expect(r.items[0]).toMatchObject({ kind: 'clip', durationS: 3 });
+    expect(reads).toHaveLength(1);
+    expect(argOf(reads[0], '-i')).toBe(path.join(outDir, 'shot-01.mp4'));
+    expect(argOf(reads[0], '-f')).toBe('null');
+    // the too-short rule still applies to the fallback's length
+    const short = (args) => (args[args.length - 1] === '-' ? { status: 0, stderr: 'Duration: 00:00:03.00\ntime=00:00:02.500 bitrate=N/A\n' } : ffmpeg(args));
+    const r2 = await rawCapture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 3 }], loadPlaywright: () => fakeRecPw(), ffmpeg: short, ffprobe });
+    expect(r2.dropped).toEqual([{ index: 0, kind: 'clip', reason: 'too-short' }]);
+  });
+  it('reads the final time= line, else the Duration: line, from ffmpeg output', () => {
+    expect(parseFfmpegDuration('Duration: 00:00:04.00, start\ntime=00:00:01.00\rtime=00:00:03.967 bitrate')).toBeCloseTo(3.967);
+    expect(parseFfmpegDuration('Duration: 00:01:02.50, start: 0')).toBeCloseTo(62.5);
+    expect(parseFfmpegDuration('time=N/A Duration: N/A')).toBeNull();
+    expect(parseFfmpegDuration('')).toBeNull();
+  });
+  it('looks for ffprobe beside SM_FFMPEG when SM_FFPROBE is unset', () => {
+    const dir = tmp();
+    const ff = path.join(dir, 'ffmpeg');
+    const fp = path.join(dir, 'ffprobe');
+    fs.writeFileSync(ff, ''); fs.writeFileSync(fp, '');
+    expect(resolveFfprobeBin({ SM_FFMPEG: ff })).toBe(fp);
+    expect(resolveFfprobeBin({ SM_FFMPEG: ff, SM_FFPROBE: '/opt/x/ffprobe' })).toBe('/opt/x/ffprobe');
+    expect(resolveFfprobeBin({ SM_FFMPEG: path.join(tmp(), 'ffmpeg') })).toBe('ffprobe'); // none beside it
+    expect(resolveFfprobeBin({})).toBe('ffprobe');
+    const exe = tmp();
+    fs.writeFileSync(path.join(exe, 'ffmpeg-7.exe'), ''); fs.writeFileSync(path.join(exe, 'ffprobe-7.exe'), '');
+    expect(resolveFfprobeBin({ SM_FFMPEG: path.join(exe, 'ffmpeg-7.exe') })).toBe(path.join(exe, 'ffprobe-7.exe'));
+  });
+  it.skipIf(process.platform === 'win32')('runs the ffprobe found beside SM_FFMPEG for the clip length', async () => {
+    const dir = tmp();
+    const ff = path.join(dir, 'ffmpeg');
+    const fp = path.join(dir, 'ffprobe');
+    fs.writeFileSync(ff, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    fs.writeFileSync(fp, '#!/bin/sh\necho 2.000\n', { mode: 0o755 });
+    const saved = { SM_FFMPEG: process.env.SM_FFMPEG, SM_FFPROBE: process.env.SM_FFPROBE };
+    process.env.SM_FFMPEG = ff;
+    delete process.env.SM_FFPROBE;
+    try {
+      // the sibling ffprobe says 2.0 s, so a 3 s clip is too-short (proving that ffprobe ran)
+      const r = await rawCapture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 3 }], loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg([], () => 10) });
+      expect(r.dropped).toEqual([{ index: 0, kind: 'clip', reason: 'too-short' }]);
+      fs.writeFileSync(fp, '#!/bin/sh\necho 3.000\n', { mode: 0o755 });
+      const r2 = await rawCapture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 3 }], loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg([], () => 10) });
+      expect(r2.dropped).toEqual([]);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
   });
   it('closes the recording context exactly once', async () => {
     const log = {};

@@ -3,8 +3,10 @@
 // product at one URL. Playwright is resolved at runtime via playwrightLoader.cjs (cwd, global npm root,
 // npx cache, or an injected loader) and is never installed here. A clip shot with no injected encoder
 // is recorded with Playwright's recordVideo and transcoded by ffmpeg (no shell, bounded) to an
-// H.264/yuv420p/+faststart MP4 with no audio; ffprobe (no shell, bounded) then checks its length and a
-// clip shorter than durationS minus one frame is dropped as 'too-short'. Node builtins only.
+// H.264/yuv420p/+faststart MP4 with no audio; ffprobe (no shell, bounded; SM_FFPROBE, else the ffprobe
+// beside SM_FFMPEG, else PATH) then checks its length, falling back to ffmpeg's own decode output
+// (`-i clip -f null -`) when no ffprobe is usable. A clip is dropped as 'probe-failed' only when neither
+// yields a length, and one shorter than durationS minus one frame as 'too-short'. Node builtins only.
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -38,10 +40,69 @@ function defaultFfmpeg(args) {
   return spawnSync(bin, args, { encoding: 'utf8', timeout: FFMPEG_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, shell: false });
 }
 
+/**
+ * The ffprobe binary to run: SM_FFPROBE when set; else, when SM_FFMPEG is a path, the ffprobe beside it
+ * (its basename with 'ffmpeg' swapped for 'ffprobe', e.g. ffmpeg-7.exe -> ffprobe-7.exe, or plain
+ * ffprobe[.exe]) if that file exists; else 'ffprobe' from PATH.
+ */
+function resolveFfprobeBin(env = process.env) {
+  if (env.SM_FFPROBE) return env.SM_FFPROBE;
+  const ff = env.SM_FFMPEG;
+  if (ff && /[\\/]/.test(ff)) {
+    const dir = path.dirname(ff);
+    const base = path.basename(ff);
+    const ext = path.extname(base);
+    const names = [];
+    if (/ffmpeg/i.test(base)) names.push(base.replace(/ffmpeg/i, (m) => (m === 'FFMPEG' ? 'FFPROBE' : 'ffprobe')));
+    names.push(`ffprobe${ext}`);
+    for (const n of names) {
+      const cand = path.join(dir, n);
+      try { if (fs.statSync(cand).isFile()) return cand; } catch { /* not there */ }
+    }
+  }
+  return 'ffprobe';
+}
+
 /** Default ffprobe runner: no shell, bounded by a timeout. Returns spawnSync's result. */
 function defaultFfprobe(args) {
-  const bin = process.env.SM_FFPROBE || 'ffprobe';
-  return spawnSync(bin, args, { encoding: 'utf8', timeout: FFPROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024, shell: false });
+  return spawnSync(resolveFfprobeBin(), args, { encoding: 'utf8', timeout: FFPROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024, shell: false });
+}
+
+function hmsToSeconds(h, m, s) {
+  const v = Number(h) * 3600 + Number(m) * 60 + Number.parseFloat(s);
+  return Number.isFinite(v) ? v : null;
+}
+
+/** Seconds from ffmpeg's stderr: the final `time=HH:MM:SS.ss` progress value, else `Duration:`; or null. */
+function parseFfmpegDuration(text) {
+  const t = String(text || '');
+  let last = null;
+  for (const m of t.matchAll(/time=\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/g)) last = m;
+  if (last) return hmsToSeconds(last[1], last[2], last[3]);
+  const d = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(t);
+  return d ? hmsToSeconds(d[1], d[2], d[3]) : null;
+}
+
+/** A media file's duration in seconds from ffmpeg itself (decode to the null muxer): {seconds} or {reason}. */
+function ffmpegDuration(run, file) {
+  let r;
+  try {
+    r = run(['-hide_banner', '-nostdin', '-i', file, '-map', '0:v:0?', '-f', 'null', '-']);
+  } catch (e) { return { reason: e && e.message ? e.message : String(e) }; }
+  if (!r) return { reason: 'no result' };
+  if (r.error) return { reason: r.error.message || String(r.error) };
+  const seconds = parseFfmpegDuration(`${r.stderr || ''}\n${r.stdout || ''}`);
+  if (seconds === null) return { reason: r.status !== 0 ? `exit ${r.status}: no duration` : 'no duration' };
+  return { seconds };
+}
+
+/** Clip length via ffprobe, else via ffmpeg's own output; {reason: 'probe-failed: ...'} only when both fail. */
+function clipLength(probe, run, file) {
+  const viaProbe = probeDuration(probe, file);
+  if (!viaProbe.reason) return viaProbe;
+  const viaFfmpeg = ffmpegDuration(run, file);
+  if (!viaFfmpeg.reason) return viaFfmpeg;
+  return { reason: `${viaProbe.reason}; ffmpeg: ${viaFfmpeg.reason}` };
 }
 
 /** A media file's duration in seconds via ffprobe: {seconds} or {reason}. */
@@ -149,7 +210,8 @@ function scrollPx(shot) {
  * settle wait, so the time from right after newPage() to the start of the scripted scroll is
  * measured and trimmed off: the clip starts on the settled page and lasts durationS. The context
  * is closed once (the close flushes the .webm). The transcoded clip's length is then read with
- * ffprobe; one shorter than durationS minus one frame is dropped as 'too-short'.
+ * ffprobe, or ffmpeg's own output when no ffprobe is usable; one shorter than durationS minus one
+ * frame is dropped as 'too-short'.
  */
 async function recordClip({ browser, url, shot, timeout, outDir, outFile, run, probe = defaultFfprobe, now = monoNow }) {
   const viewport = shotViewport(shot);
@@ -188,7 +250,7 @@ async function recordClip({ browser, url, shot, timeout, outDir, outFile, run, p
     }
     const out = transcodeToBudget(run, webm, outFile, viewport.width, CLIP_BUDGET, { startS: leadInS, durationS });
     if (!out.buf) return out;
-    const len = probeDuration(probe, outFile);
+    const len = clipLength(probe, run, outFile);
     const minS = durationS - 1 / out.fps;
     if (len.reason || len.seconds < minS) {
       try { fs.rmSync(outFile, { force: true }); } catch { /* ignore */ }
@@ -285,4 +347,4 @@ async function capture({ url, outDir, shots, max = MAX_SHOTS, loadPlaywright, en
   return { items, dropped };
 }
 
-module.exports = { capture, IMAGE_BUDGET, CLIP_BUDGET, QUALITY_STEPS, CLIP_STEPS };
+module.exports = { capture, IMAGE_BUDGET, CLIP_BUDGET, QUALITY_STEPS, CLIP_STEPS, resolveFfprobeBin, parseFfmpegDuration };

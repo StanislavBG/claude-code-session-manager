@@ -49,6 +49,51 @@ function parentDirOf(p: string): string {
   return i === 0 ? t.slice(0, 1) : t.slice(0, i)
 }
 
+/** The App-level tab-switch effect: a pure switch between open tabs routes to the terminal,
+ *  unless a live Feedback-tab intent names the newly-active tab's project. Exported for tests. */
+export function useTabSwitchTerminalRouting(): void {
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const tabs = useSessions((s) => s.tabs)
+  // The intent as of THIS render: a mounted Project Home consumes it in a layout effect, which
+  // (as a child) runs before the effect below, so reading the store there would miss it.
+  const renderedIntent = useCustomerFeedback((s) => s.feedbackTabIntent)
+  // QoL: switching the active session tab lands you on THAT project's terminal —
+  // each tab is primarily a terminal, so a tab switch is a project switch. Fires
+  // ONLY on a pure switch between already-open tabs: the active tab changed, the
+  // tab SET did not (no open/close), the newly-active tab already existed, and
+  // the previously-active tab still exists. Opening/closing a tab also reassigns
+  // activeTabId, but their initiators set the nav themselves, so those must
+  // not be hijacked to terminal.
+  // Tracking the id SET — refreshed on every tab change, not a count sampled
+  // only when activeTabId moves — keeps the discriminator correct even when a
+  // background tab open/close doesn't move the active tab.
+  const prevActiveTabRef = useRef<string | null>(activeTabId)
+  const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)))
+  useEffect(() => {
+    const prevActive = prevActiveTabRef.current
+    const prevIds = prevTabIdsRef.current
+    const curIds = new Set(tabs.map((t) => t.id))
+    prevActiveTabRef.current = activeTabId
+    prevTabIdsRef.current = curIds
+    const isPureSwitch =
+      prevActive !== null && activeTabId !== null && activeTabId !== prevActive &&
+      curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
+    // A pending Project Home > Feedback intent for the newly-active tab's project means its
+    // initiator (CustomerFeedbackPanel) already set the nav — don't hijack it to the terminal.
+    // Only a still-fresh intent counts; a switch into any other project cancels it, so a
+    // stale one (its Project Home never mounted) can't hijack a later ordinary switch.
+    const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
+    const cf = useCustomerFeedback.getState()
+    // Any active-tab move into a different project cancels it — including a tab with no cwd,
+    // which would otherwise leave the intent pending for its whole TTL.
+    if (activeCwd || activeTabId !== prevActive) cf.cancelFeedbackTabIntentUnless(activeCwd ?? '')
+    if (isPureSwitch && !isLiveFeedbackTabIntent(renderedIntent, activeCwd)) {
+      useLayout.getState().openProjectPanel('terminal')
+    }
+    // renderedIntent is read, not a trigger: only a tab change re-runs the routing.
+  }, [activeTabId, tabs]) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 export function App() {
   // Subscribe to density at the app root so the body-class side effect wires
   // up and the `uiChromePrefs` store hydrates from disk on every boot.
@@ -126,38 +171,7 @@ export function App() {
   const tabs = useSessions((s) => s.tabs)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
 
-  // QoL: switching the active session tab lands you on THAT project's terminal —
-  // each tab is primarily a terminal, so a tab switch is a project switch. Fires
-  // ONLY on a pure switch between already-open tabs: the active tab changed, the
-  // tab SET did not (no open/close), the newly-active tab already existed, and
-  // the previously-active tab still exists. Opening/closing a tab also reassigns
-  // activeTabId, but their initiators set the nav themselves, so those must
-  // not be hijacked to terminal.
-  // Tracking the id SET — refreshed on every tab change, not a count sampled
-  // only when activeTabId moves — keeps the discriminator correct even when a
-  // background tab open/close doesn't move the active tab.
-  const prevActiveTabRef = useRef<string | null>(activeTabId)
-  const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)))
-  useEffect(() => {
-    const prevActive = prevActiveTabRef.current
-    const prevIds = prevTabIdsRef.current
-    const curIds = new Set(tabs.map((t) => t.id))
-    prevActiveTabRef.current = activeTabId
-    prevTabIdsRef.current = curIds
-    const isPureSwitch =
-      prevActive !== null && activeTabId !== null && activeTabId !== prevActive &&
-      curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
-    // A pending Project Home > Feedback intent for the newly-active tab's project means its
-    // initiator (CustomerFeedbackPanel) already set the nav — don't hijack it to the terminal.
-    // Only a still-fresh intent counts; a switch into any other project cancels it, so a
-    // stale one (its Project Home never mounted) can't hijack a later ordinary switch.
-    const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
-    const cf = useCustomerFeedback.getState()
-    if (activeCwd) cf.cancelFeedbackTabIntentUnless(activeCwd)
-    if (isPureSwitch && !isLiveFeedbackTabIntent(cf.feedbackTabIntent, activeCwd)) {
-      useLayout.getState().openProjectPanel('terminal')
-    }
-  }, [activeTabId, tabs])
+  useTabSwitchTerminalRouting()
 
   // 'projects' (File Explorer) on the Project face renders useSessions()
   // .activeTab and dead-ends on "No session selected." with no path back

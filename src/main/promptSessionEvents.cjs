@@ -76,7 +76,7 @@ function mintEventId() {
  * id, title }` of a macro build's saved entry), and `reply` (`{ fromCwd,
  * fromEpicId, outcome, referencePaths }` — a cross-project reply's origin, plus
  * a receipt's optional `hash`/`delivery`/`toEpicId`/`fallbackEpicId`/`reason`/
- * `reused`). All
+ * `reused`/`release`). All
  * keys are added to the event object only when present in `meta`, never as
  * `undefined`-valued keys, so events appended without them serialize
  * identically to before.
@@ -129,6 +129,12 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
           if (typeof meta.reply[k] === 'string' && meta.reply[k]) event.reply[k] = meta.reply[k];
         }
         if (meta.reply.reused === true) event.reply.reused = true;
+        // A verified release claim (crossProjectReply.cjs): { version, commits }.
+        const rel = meta.reply.release;
+        if (rel && typeof rel === 'object' && typeof rel.version === 'string'
+          && Array.isArray(rel.commits) && rel.commits.every((c) => typeof c === 'string')) {
+          event.reply.release = { version: rel.version, commits: rel.commits.slice() };
+        }
       }
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });

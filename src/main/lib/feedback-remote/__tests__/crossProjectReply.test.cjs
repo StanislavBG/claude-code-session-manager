@@ -1058,3 +1058,137 @@ test('replyPassLogMeta: a skipped pass is marked skipped: true; a run pass skipp
   });
   expect(replyPassLogMeta({ due: 0, delivered: 0, failed: 0, error: 'boom' }, '1.0.0')).toEqual({ appVersion: '1.0.0', due: 0, delivered: 0, failed: 0, skipped: false, error: 'boom' });
 });
+
+// ---------------------------------------------------------------------------
+// Release claims (replyClaims.cjs): placeholders, Session Manager versions
+// ---------------------------------------------------------------------------
+
+const SM_PKG = JSON.stringify({ name: 'claude-code-session-manager', version: '0.0.0' });
+
+/** A fake git: the tag exists and holds exactly `tagged` commits. */
+function fakeGit(tagged, { tag = 'v0.143.0' } = {}) {
+  const calls = [];
+  const runGit = async (cwd, args) => {
+    calls.push({ cwd, args });
+    if (args[0] === 'rev-parse') {
+      const ref = args[args.length - 1];
+      if (ref === `refs/tags/${tag}^{commit}`) return '';
+      if (ref.startsWith('refs/tags/')) throw new Error('no such tag');
+      return '';
+    }
+    if (args[0] === 'merge-base') {
+      if (args[3] === tag && tagged.includes(args[2])) return '';
+      throw new Error('not ancestor');
+    }
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  return { runGit, calls };
+}
+
+test('release: {version} with neither deliverWhen nor release is refused 400 naming the token', async () => {
+  const { b } = await setup();
+  const d = deps();
+  const r = await sendFeedbackReply(input(b, { message: 'Live in Session Manager {version}.' }), d);
+  expect(r).toMatchObject({ ok: false, status: 400 });
+  expect(r.error).toContain('{version}');
+  expect(d.calls).toHaveLength(0);
+});
+
+test('release: <version> is refused even on a held reply', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps();
+    const r = await sendFeedbackReply(input(b, {
+      message: 'Live in v<version>.', deliverWhen: { appVersionAbove: '0.141.0' },
+    }), d);
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect(r.error).toContain('<version>');
+    expect(readLedger(home)).toHaveLength(0);
+  });
+});
+
+test('release: a malformed release claim is refused 400', async () => {
+  const { b } = await setup();
+  fs.writeFileSync(path.join(b, 'package.json'), SM_PKG);
+  const r = await sendFeedbackReply(input(b, { release: { commits: ['not-a-hash'] } }), deps());
+  expect(r).toMatchObject({ ok: false, status: 400 });
+  expect(r.error).toContain('invalid commit hash');
+});
+
+test('release: a replier that is not the Session Manager repo cannot send release', async () => {
+  const { b } = await setup();
+  const git = fakeGit(['abc1234']);
+  const d = deps('sent', { appVersion: '0.143.0', runGit: git.runGit });
+  const r = await sendFeedbackReply(input(b, { release: { commits: ['abc1234'] } }), d);
+  expect(r).toMatchObject({ ok: false, status: 400 });
+  expect(r.error).toContain('Session Manager repository');
+  expect(d.calls).toHaveLength(0);
+  expect(git.calls).toHaveLength(0);
+});
+
+test('release: a Session Manager done reply naming a version without release is refused', async () => {
+  const { b } = await setup();
+  fs.writeFileSync(path.join(b, 'package.json'), SM_PKG);
+  const d = deps('sent', { appVersion: '0.143.0' });
+  const r = await sendFeedbackReply(input(b, { message: 'Live in Session Manager 0.143.0.' }), d);
+  expect(r).toMatchObject({ ok: false, status: 400 });
+  expect(r.error).toContain('0.143.0');
+  expect(r.error).toContain('release.commits');
+  // a held SM done reply holding {version} without release is refused too.
+  const held = await sendFeedbackReply(input(b, {
+    message: 'Live in Session Manager {version}.', deliverWhen: { appVersionAbove: '0.142.0' },
+  }), d);
+  expect(held).toMatchObject({ ok: false, status: 400 });
+  expect(d.calls).toHaveLength(0);
+});
+
+test('release: a tag that lacks a claimed commit is refused 409 and nothing is sent', async () => {
+  const { a, b } = await setup();
+  fs.writeFileSync(path.join(b, 'package.json'), SM_PKG);
+  const before = events(a, 'psess-x').length;
+  const git = fakeGit(['abc1234']);
+  const d = deps('sent', { appVersion: '0.143.0', runGit: git.runGit });
+  const r = await sendFeedbackReply(input(b, {
+    message: 'Live in Session Manager {version}.', release: { commits: ['abc1234', 'def5678'] },
+  }), d);
+  expect(r).toMatchObject({ ok: false, status: 409 });
+  expect(r.error).toContain('does not contain commit def5678');
+  expect(d.calls).toHaveLength(0);
+  expect(events(a, 'psess-x')).toHaveLength(before);
+  expect(events(b, 'psess-y').some((e) => e.notice === 'cross-project-reply-sent')).toBe(false);
+});
+
+test('release: a message naming a version other than the running one is refused 409', async () => {
+  const { b } = await setup();
+  fs.writeFileSync(path.join(b, 'package.json'), SM_PKG);
+  const git = fakeGit(['abc1234']);
+  const d = deps('sent', { appVersion: () => '0.143.0', runGit: git.runGit });
+  const r = await sendFeedbackReply(input(b, {
+    message: 'Live in Session Manager 0.144.0.', release: { commits: ['abc1234'] },
+  }), d);
+  expect(r).toMatchObject({ ok: false, status: 409 });
+  expect(r.error).toContain('0.144.0');
+  expect(d.calls).toHaveLength(0);
+});
+
+test('release: a verified release fills {version}, delivers, and records release on the receipt', async () => {
+  const { a, b } = await setup();
+  fs.writeFileSync(path.join(b, 'package.json'), SM_PKG);
+  const git = fakeGit(['abc1234']);
+  const d = deps('sent', { appVersion: () => '0.143.0', runGit: git.runGit });
+  const r = await sendFeedbackReply(input(b, {
+    message: 'Live in Session Manager {version} (v{version}).', release: { commits: ['ABC1234'] },
+  }), d);
+  expect(r).toMatchObject({ ok: true, delivery: 'delivered', toEpicId: 'psess-x' });
+  expect(git.calls.every((c) => c.cwd === b)).toBe(true);
+  expect(d.calls).toHaveLength(1);
+  expect(d.calls[0][1]).toContain('Live in Session Manager 0.143.0 (v0.143.0).');
+  expect(d.calls[0][1]).not.toContain('{version}');
+  expect(events(a, 'psess-x').at(-1).text).not.toContain('{version}');
+  const receipt = events(b, 'psess-y').at(-1);
+  expect(receipt.notice).toBe('cross-project-reply-sent');
+  expect(receipt.reply.release).toEqual({ version: '0.143.0', commits: ['abc1234'] });
+  const crypto = require('node:crypto');
+  expect(receipt.reply.hash).toBe(crypto.createHash('sha256')
+    .update('done\nLive in Session Manager 0.143.0 (v0.143.0).').digest('hex'));
+});

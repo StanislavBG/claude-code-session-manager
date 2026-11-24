@@ -43,6 +43,7 @@ const { readActiveIndex } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const pendingReplies = require('./pendingReplies.cjs');
+const replyClaims = require('./replyClaims.cjs');
 
 const { addPendingReply, countPendingForThread } = pendingReplies;
 
@@ -147,9 +148,24 @@ function validateReplyInput(input) {
     }
     deliverWhen = { appVersionAbove: dw.appVersionAbove };
   }
+  let release = null;
+  if (input.release !== undefined && input.release !== null) {
+    const claim = replyClaims.normalizeReleaseClaim(input.release);
+    if (!claim.ok) return bad(400, claim.error);
+    release = claim.value;
+  }
+  const unfilled = replyClaims.findUnfilledPlaceholders(message, { allowVersionToken: !!(deliverWhen || release) });
+  if (unfilled.length) {
+    return bad(400, `message still holds an unfilled placeholder: ${unfilled.join(', ')} — `
+      + '{version} is filled only for a reply held with deliverWhen or a live reply carrying release.commits');
+  }
   return {
     ok: true,
-    value: { message, outcome: input.outcome, referencePaths, ...(deliverWhen ? { deliverWhen } : {}) },
+    value: {
+      message, outcome: input.outcome, referencePaths,
+      ...(deliverWhen ? { deliverWhen } : {}),
+      ...(release ? { release } : {}),
+    },
   };
 }
 
@@ -238,7 +254,11 @@ function earlierDelivery(receipt, { targetCwd, rt, threadField, sent }) {
  *        deliverWhen { appVersionAbove: 'x.y.z' } holds the reply in the
  *        pending-reply ledger (pendingReplies.cjs) instead of sending it; its
  *        ledger entry holds a slot under MAX_REPLIES_PER_THREAD like a receipt.
- * deps:  { sendPrompt, appendEvent, resolveEpicId, appendAudit, openFallback }
+ *        release { commits: [...] } (Session Manager repo only) claims the
+ *        running release contains those commits; a live one is checked with
+ *        git (409 when false) and its '{version}' is filled with that version.
+ * deps:  { sendPrompt, appendEvent, resolveEpicId, appendAudit, openFallback,
+ *          appVersion (string | () => string), runGit }
  *        openFallback defaults to crossProjectFeedback.openReplyFallbackSession;
  *        pass null to get a 409 fallbackNeeded instead.
  */
@@ -249,7 +269,8 @@ async function sendFeedbackReply(input, deps = {}) {
   // 1. Validation.
   const valid = validateReplyInput(input);
   if (!valid.ok) return valid;
-  const { message, outcome, referencePaths, deliverWhen } = valid.value;
+  const { outcome, referencePaths, deliverWhen, release } = valid.value;
+  let { message } = valid.value;
 
   // 2. Identity — Y comes ONLY from the caller's chat session id.
   const originClaudeSessionId = typeof input.originClaudeSessionId === 'string' ? input.originClaudeSessionId : '';
@@ -268,6 +289,19 @@ async function sendFeedbackReply(input, deps = {}) {
   const yIndex = readActiveIndex(replierCwd);
   const y = yIndex.sessions[yId];
   if (!y) return bad(403, 'no Epic in the calling project owns this chat session — cannot reply');
+
+  // 2b. Release claims — only Session Manager's own repo can claim one of its releases.
+  const smRepo = replyClaims.isSessionManagerRepo(replierCwd);
+  if (release && !smRepo) {
+    return bad(400, 'release may only be sent from the Session Manager repository — it claims a Session Manager release');
+  }
+  if (smRepo && outcome === 'done' && !release) {
+    const named = replyClaims.findSessionManagerVersions(message);
+    if (named.length || message.includes('{version}')) {
+      return bad(400, `a done reply that names a Session Manager release (${named.length ? named.join(', ') : '{version}'}) `
+        + 'must carry release.commits so the release can be checked to contain them');
+    }
+  }
 
   // 3. Thread.
   const resolved = resolveThread(y.source || {});
@@ -290,6 +324,25 @@ async function sendFeedbackReply(input, deps = {}) {
   }
   if (realOr(targetCwd) === realOr(path.resolve(replierCwd))) {
     return bad(400, 'replyTo points at the replying project itself — use /develop inside this Epic');
+  }
+
+  // 3b. A live release claim must be true of the running release.
+  let releaseMeta = null;
+  if (release && !deliverWhen) {
+    const version = typeof deps.appVersion === 'function'
+      ? deps.appVersion()
+      : (deps.appVersion || require('../../../../package.json').version);
+    const others = replyClaims.findSessionManagerVersions(message).filter((v) => v !== version);
+    if (others.length) {
+      return bad(409, `message names Session Manager ${others.join(', ')} but the running release is ${version}`);
+    }
+    const checked = await replyClaims.checkReleaseContains(
+      { repoCwd: replierCwd, version, commits: release.commits },
+      deps.runGit ? { runGit: deps.runGit } : {},
+    );
+    if (!checked.ok) return bad(409, checked.error);
+    message = message.split('{version}').join(version);
+    releaseMeta = { version, commits: release.commits.slice() };
   }
 
   return withThreadLock(`${realOr(replierCwd)}\u0000${yId}`, async () => {
@@ -362,6 +415,7 @@ async function sendFeedbackReply(input, deps = {}) {
     return deliverAuthorizedReply({
       replierCwd, yId, y, rt, legacy, eventMode, threadField, targetCwd,
       message, outcome, referencePaths, hash, sent: used, originClaudeSessionId,
+      ...(releaseMeta ? { release: releaseMeta } : {}),
     }, deps);
   });
 }
@@ -380,8 +434,9 @@ async function sendFeedbackReply(input, deps = {}) {
 async function deliverAuthorizedReply(ctx, deps = {}) {
   const {
     replierCwd, yId, y, rt, legacy, eventMode, threadField = {}, targetCwd,
-    message, outcome, referencePaths = [], hash, sent, originClaudeSessionId,
+    message, outcome, referencePaths = [], hash, sent, originClaudeSessionId, release,
   } = ctx;
+  const releaseField = release ? { release } : {};
   const sendPrompt = deps.sendPrompt || defaultSendPrompt;
   const appendEvent = deps.appendEvent || defaultAppendEvent;
   const audit = deps.appendAudit || appendAuditEvent;
@@ -389,7 +444,7 @@ async function deliverAuthorizedReply(ctx, deps = {}) {
   if (eventMode) {
     return replyAsEvent({
       appendEvent, audit, sent, rt, targetCwd, replierCwd, yId, y,
-      message, outcome, referencePaths, hash,
+      message, outcome, referencePaths, hash, releaseField,
     });
   }
 
@@ -439,6 +494,7 @@ async function deliverAuthorizedReply(ctx, deps = {}) {
           fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths, hash,
           delivery: 'fallback', toEpicId: rt.epicId, fallbackEpicId: opened.epicId, reason,
           ...(reused ? { reused: true } : {}),
+          ...releaseField,
         },
       });
     // Best-effort receipt on X, only while X is still in A's active index.
@@ -511,6 +567,7 @@ async function deliverAuthorizedReply(ctx, deps = {}) {
         fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths, hash,
         delivery, toEpicId: x.id,
         ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),
+        ...releaseField,
       },
     });
 
@@ -547,6 +604,7 @@ async function deliverAuthorizedReply(ctx, deps = {}) {
  */
 async function replyAsEvent({
   appendEvent, audit, sent, rt, targetCwd, replierCwd, yId, y, message, outcome, referencePaths, hash,
+  releaseField = {},
 }) {
   const replyMeta = { fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths };
   let eventOnAskingEpic = false;
@@ -570,6 +628,7 @@ async function replyAsEvent({
       reply: {
         ...replyMeta, hash, delivery: 'event-only', reason: EVENT_MODE_REASON,
         ...(rt.epicId ? { toEpicId: rt.epicId } : {}),
+        ...releaseField,
       },
     });
 

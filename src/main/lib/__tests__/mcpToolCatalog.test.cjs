@@ -132,6 +132,25 @@ test('customer_feedback_submit text covers goal, description, images, consent an
   for (const x of MCP_TOOL_CATALOG) expect(composeDescription(x)).not.toContain('{F}');
 });
 
+test('feedback-widget group lists the five widget tools, each with a description and whenToUse', () => {
+  const names = ['feedback_widget_create', 'feedback_widget_list', 'feedback_widget_update', 'feedback_widget_delete', 'feedback_widget_snippet'];
+  expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'feedback-widget').map((e) => e.name)).toEqual(names);
+  for (const name of names) {
+    const e = MCP_TOOL_CATALOG.find((x) => x.name === name);
+    expect(e.purpose.length).toBeGreaterThan(20);
+    expect(e.whenToUse.length).toBeGreaterThan(20);
+    expect(TOOLS.find((t) => t.name === name).description).toBe(composeDescription(e));
+  }
+  const create = MCP_TOOL_CATALOG.find((x) => x.name === 'feedback_widget_create');
+  expect(create.purpose).toContain('one-line');
+  expect(create.purpose).toContain("site's HTML");
+  expect(create.whenToUse).toContain('snippet');
+  for (const name of ['feedback_widget_create', 'feedback_widget_update', 'feedback_widget_delete']) {
+    expect(MCP_TOOL_CATALOG.find((x) => x.name === name).notes).toContain('refused in headless jobs');
+  }
+  expect(MCP_TOOL_CATALOG.find((x) => x.name === 'feedback_widget_delete').whenNotToUse).toContain('cannot be undone');
+});
+
 test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-another-project', () => {
   const ids = MCP_RECIPES.map((r) => r.id);
   expect(ids).toContain('queue-work-via-develop');
@@ -335,8 +354,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 40 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(40);
+test('catalog has 45 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(45);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });

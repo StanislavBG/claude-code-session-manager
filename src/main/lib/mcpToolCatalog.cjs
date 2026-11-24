@@ -24,7 +24,7 @@ const { MISS_KINDS } = require('./scheduler/validatorVerdictSchema.cjs');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'epics', 'agents', 'tasks']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'feedback-widget', 'epics', 'agents', 'tasks']),
   purpose: z.string().min(1),
   summary: z.string().min(10).max(90).regex(/^[^|`\n]+$/),
   whenToUse: z.string().min(1),
@@ -626,6 +626,78 @@ const MCP_TOOL_CATALOG = [
       + 'warning? }; a warning means the text was sent but the feedback service did not accept every image — tell the '
       + 'human which images did not go. { ok:false, error } comes back as an error result. The home directory is '
       + 'redacted to ~ before sending.',
+  },
+  {
+    name: 'feedback_widget_create',
+    group: 'feedback-widget',
+    purpose: 'Create a website feedback widget for this project: registers a new widget box (a label plus the site origins '
+      + 'allowed to post to it) with the feedback relay and returns the one-line <script> snippet to paste into the '
+      + "site's HTML, via the session-manager app's admin API.",
+    summary: 'Make a feedback widget for a website and get its snippet.',
+    whenToUse: 'Use when the human asks to add a feedback widget to a website this project hosts. Give a short label '
+      + '(1-80 chars) and 1-10 allowedOrigins, each https://… or http://localhost / http://127.0.0.1. The result carries '
+      + "`snippet` — the one line to paste into the site's HTML — show it to the human.",
+    whenNotToUse: 'WHEN NOT TO USE IT: never create a second widget for a site that already has one — check feedback_widget_list '
+      + 'and use feedback_widget_update to change origins or the label. Not for feedback about Session Manager itself '
+      + '(customer_feedback_submit).',
+    exampleArgs: { label: 'Docs site', allowedOrigins: ['https://docs.example.com'] },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()). "
+      + 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). Returns '
+      + '{ ok, boxId, fingerprint, snippet }; { ok:false, error } comes back as an error result.',
+  },
+  {
+    name: 'feedback_widget_list',
+    group: 'feedback-widget',
+    purpose: "List this project's website feedback widgets — each widget's boxId, label, allowed origins and state "
+      + "(open | paused) — via the session-manager app's admin API.",
+    summary: "List this project's website feedback widgets.",
+    whenToUse: 'Use to see which widgets exist before creating, changing or removing one, or to find the boxId that '
+      + 'feedback_widget_update, feedback_widget_delete and feedback_widget_snippet need. Read-only; works in any session.',
+    whenNotToUse: 'WHEN NOT TO USE IT: this lists widgets, not the feedback they collected. It does not show customer feedback '
+      + 'about Session Manager itself (customer_feedback_list).',
+    exampleArgs: {},
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()). "
+      + 'Returns { ok, widgets, relayError? }; relayError means the relay could not be reached and the list is local only.',
+  },
+  {
+    name: 'feedback_widget_update',
+    group: 'feedback-widget',
+    purpose: "Change one website feedback widget: its label, its allowed origins, or its state (open | paused — a "
+      + "paused widget stops taking new feedback), via the session-manager app's admin API.",
+    summary: 'Change a feedback widget label, sites, or pause it.',
+    whenToUse: 'Use when the human asks to rename a widget, add or remove a site origin, or pause / resume a widget. '
+      + 'Give the boxId (from feedback_widget_list) and at least one of label, allowedOrigins, state. allowedOrigins '
+      + 'replaces the whole list.',
+    whenNotToUse: 'WHEN NOT TO USE IT: pausing is the reversible way to stop a widget — do not delete one just to stop it for now. '
+      + 'Never change a widget on your own initiative.',
+    exampleArgs: { boxId: 'box_abc123', state: 'paused' },
+    notes: 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). The snippet does not '
+      + 'change. Returns { ok, widget }; { ok:false, error } comes back as an error result.',
+  },
+  {
+    name: 'feedback_widget_delete',
+    group: 'feedback-widget',
+    purpose: "Delete one website feedback widget so its snippet stops working, via the session-manager app's admin API.",
+    summary: 'Delete a website feedback widget for good.',
+    whenToUse: 'Use only when the human asks to remove a widget for good. Give its boxId (from feedback_widget_list). '
+      + 'Tell the human to take the snippet line out of the site HTML too.',
+    whenNotToUse: 'WHEN NOT TO USE IT: this cannot be undone — to stop a widget for now, pause it with feedback_widget_update '
+      + "(state: 'paused'). Never delete a widget on your own initiative.",
+    exampleArgs: { boxId: 'box_abc123' },
+    notes: 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). Returns { ok, boxId }; '
+      + '{ ok:false, error } comes back as an error result.',
+  },
+  {
+    name: 'feedback_widget_snippet',
+    group: 'feedback-widget',
+    purpose: 'Fetch the one-line <script> snippet of an existing website feedback widget, to paste into the site '
+      + "HTML, via the session-manager app's admin API.",
+    summary: 'Get the one-line snippet for a feedback widget.',
+    whenToUse: 'Use when the human needs the embed line again for a widget that already exists. Give its boxId (from '
+      + 'feedback_widget_list). Read-only; works in any session.',
+    whenNotToUse: 'WHEN NOT TO USE IT: to make a new widget use feedback_widget_create, which returns the snippet itself.',
+    exampleArgs: { boxId: 'box_abc123' },
+    notes: 'Returns { ok, boxId, fingerprint, snippet }; { ok:false, error } comes back as an error result.',
   },
   {
     name: 'macro_list',

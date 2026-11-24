@@ -28,6 +28,11 @@
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
  *   customer_feedback_submit({ goal, description, tag, imagePaths? }) -> POST /admin/customer-feedback/submit
+ *   feedback_widget_create({ label, allowedOrigins, cwd? }) -> POST /admin/feedback-widget/create
+ *   feedback_widget_list({ cwd? }) -> GET  /admin/feedback-widget/list?cwd=<encoded>
+ *   feedback_widget_update({ boxId, label?, allowedOrigins?, state? }) -> POST /admin/feedback-widget/update
+ *   feedback_widget_delete({ boxId }) -> POST /admin/feedback-widget/delete
+ *   feedback_widget_snippet({ boxId }) -> GET  /admin/feedback-widget/snippet?boxId=<encoded>
  *
  *   epic_list({ cwd, state?, limit?, offset? }) -> GET /admin/epics?cwd=<encoded>&...
  *   epic_get({ cwd, id? | externalRef?, receipt? }) -> GET /admin/epic?cwd=<encoded>&(id|externalRef)=...[&receipt=1]
@@ -1155,6 +1160,77 @@ const TOOLS = [
     },
   },
   {
+    name: 'feedback_widget_create',
+    description: descriptionFor('feedback_widget_create'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Short name for the widget, 1-80 chars (e.g. the site name).' },
+        allowedOrigins: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 10,
+          description: 'Site origins allowed to post feedback, 1-10: each https://host[:port], or http://localhost / http://127.0.0.1.',
+        },
+        cwd: { type: 'string', description: "Optional absolute project root. Defaults to this session's project (SM_PROJECT_ROOT)." },
+      },
+      required: ['label', 'allowedOrigins'],
+    },
+  },
+  {
+    name: 'feedback_widget_list',
+    description: descriptionFor('feedback_widget_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional absolute project root. Defaults to this session's project (SM_PROJECT_ROOT)." },
+      },
+    },
+  },
+  {
+    name: 'feedback_widget_update',
+    description: descriptionFor('feedback_widget_update'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        boxId: { type: 'string', description: 'Widget box id, from feedback_widget_list.' },
+        label: { type: 'string', description: 'Optional new label, 1-80 chars.' },
+        allowedOrigins: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 10,
+          description: 'Optional: the full new list of allowed origins (replaces the old list).',
+        },
+        state: { type: 'string', enum: ['open', 'paused'], description: "Optional: 'paused' stops new feedback; 'open' resumes it." },
+      },
+      required: ['boxId'],
+    },
+  },
+  {
+    name: 'feedback_widget_delete',
+    description: descriptionFor('feedback_widget_delete'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        boxId: { type: 'string', description: 'Widget box id, from feedback_widget_list.' },
+      },
+      required: ['boxId'],
+    },
+  },
+  {
+    name: 'feedback_widget_snippet',
+    description: descriptionFor('feedback_widget_snippet'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        boxId: { type: 'string', description: 'Widget box id, from feedback_widget_list.' },
+      },
+      required: ['boxId'],
+    },
+  },
+  {
     name: 'session_manager_help',
     description: descriptionFor('session_manager_help'),
     inputSchema: {
@@ -1219,6 +1295,19 @@ function customerFeedbackSubmitRefusal() {
     'refused: customer_feedback_submit runs only in a Session Manager chat or terminal session, because feedback is sent only when a human asks. '
     + 'Say in your final result what the feedback is; the human can send it from the Feedback panel.',
   );
+}
+
+// A website widget is the human's: creating, changing or deleting one runs only
+// in a session a human is attached to (same guard as customer_feedback_submit).
+function feedbackWidgetWriteRefusal(toolName) {
+  return humanSessionRefusal(
+    `refused: ${toolName} runs only in a Session Manager chat or terminal session, because a website feedback widget changes only when a human asks. `
+    + 'Say in your final result what should change; the human can ask for it in a chat session.',
+  );
+}
+
+function isStringArray(v) {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
 }
 
 // The slots route answers { ok: false, error, reason } on a refusal and
@@ -1865,6 +1954,63 @@ async function handleCallTool(request) {
       if (imagePaths && imagePaths.length > 0) payload.imagePaths = imagePaths;
       const result = await adminRequest('POST', '/admin/customer-feedback/submit', payload);
       if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_submit failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'feedback_widget_create') {
+      const refusal = feedbackWidgetWriteRefusal(name);
+      if (refusal) return refusal;
+      if (!args || typeof args.label !== 'string' || !args.label || !isStringArray(args.allowedOrigins)) {
+        return errorResult('missing or invalid required argument(s): label (string), allowedOrigins (array of origin strings)');
+      }
+      const result = await adminRequest('POST', '/admin/feedback-widget/create', {
+        cwd: resolveCwdArg(args),
+        label: args.label,
+        allowedOrigins: args.allowedOrigins,
+      });
+      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_create failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'feedback_widget_list') {
+      const qs = new URLSearchParams({ cwd: resolveCwdArg(args) });
+      const result = await adminRequest('GET', `/admin/feedback-widget/list?${qs.toString()}`);
+      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_list failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'feedback_widget_update') {
+      const refusal = feedbackWidgetWriteRefusal(name);
+      if (refusal) return refusal;
+      if (!args || typeof args.boxId !== 'string' || !args.boxId) return errorResult('missing or invalid required argument: boxId');
+      const payload = { boxId: args.boxId };
+      if (args.label !== undefined) {
+        if (typeof args.label !== 'string') return errorResult('invalid argument: label must be a string');
+        payload.label = args.label;
+      }
+      if (args.allowedOrigins !== undefined) {
+        if (!isStringArray(args.allowedOrigins)) return errorResult('invalid argument: allowedOrigins must be an array of origin strings');
+        payload.allowedOrigins = args.allowedOrigins;
+      }
+      if (args.state !== undefined) {
+        if (args.state !== 'open' && args.state !== 'paused') return errorResult("invalid argument: state must be 'open' or 'paused'");
+        payload.state = args.state;
+      }
+      if (Object.keys(payload).length === 1) return errorResult('nothing to update: give label, allowedOrigins or state');
+      const result = await adminRequest('POST', '/admin/feedback-widget/update', payload);
+      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_update failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'feedback_widget_delete') {
+      const refusal = feedbackWidgetWriteRefusal(name);
+      if (refusal) return refusal;
+      if (!args || typeof args.boxId !== 'string' || !args.boxId) return errorResult('missing or invalid required argument: boxId');
+      const result = await adminRequest('POST', '/admin/feedback-widget/delete', { boxId: args.boxId });
+      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_delete failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'feedback_widget_snippet') {
+      if (!args || typeof args.boxId !== 'string' || !args.boxId) return errorResult('missing or invalid required argument: boxId');
+      const qs = new URLSearchParams({ boxId: args.boxId });
+      const result = await adminRequest('GET', `/admin/feedback-widget/snippet?${qs.toString()}`);
+      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_snippet failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {

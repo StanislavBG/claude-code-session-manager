@@ -39,12 +39,13 @@
  * Nested npm packages (e.g. web/remote-app) get the same treatment for their
  * node_modules: for each TRACKED package.json whose dir is at most
  * NESTED_MAX_DEPTH segments deep (never under node_modules), at most
- * NESTED_MAX_PACKAGES of them, `<dir>/node_modules` is linked from the main
- * checkout when main has it, it is gitignored there, and the worktree has none;
- * `/<dir>/node_modules` goes to info/exclude. pnpm projects skip this — their
+ * NESTED_MAX_PACKAGES of the eligible ones (main has `<dir>/node_modules`, it is
+ * gitignored there, the worktree has none — filtered before the cap), the dir is
+ * linked from the main checkout and `/<dir>/node_modules` goes to info/exclude
+ * after the link succeeds. Ineligible packages are not reported as skipped. pnpm projects skip this — their
  * offline install already builds every workspace node_modules per worktree.
  *
- * Never throws; failures land in `skipped`.
+ * Never throws; failures land in `skipped` (nested entries as `<rel> (<reason>)`).
  */
 'use strict';
 
@@ -220,28 +221,44 @@ async function nestedPackageDirs(worktreeCwd) {
   } catch { return []; }
 }
 
-/** Link `<dir>/node_modules` for nested npm packages; pushes into linked/skipped. Never throws. */
+/**
+ * Link `<dir>/node_modules` for nested npm packages; pushes into linked/skipped. Never throws.
+ * Filter first (main has it, it is gitignored, the worktree has none), then cap at
+ * NESTED_MAX_PACKAGES, so ineligible packages never take a slot and never appear in
+ * `skipped`. `skipped` gets only eligible packages left unlinked, as `<rel> (<reason>)`.
+ * The info/exclude line is written only after the symlink succeeds; if that write fails
+ * the link is removed again so status stays clean.
+ */
 async function linkNestedNodeModules(mainCwd, worktreeCwd, linked, skipped) {
   try {
     if (isPnpmProject(mainCwd)) return;
-    const dirs = await nestedPackageDirs(worktreeCwd);
-    dirs.forEach((dir, i) => {
-      if (i >= NESTED_MAX_PACKAGES) skipped.push(`${dir}/node_modules`);
-    });
-    for (const dir of dirs.slice(0, NESTED_MAX_PACKAGES)) {
+    const eligible = [];
+    for (const dir of await nestedPackageDirs(worktreeCwd)) {
       const rel = `${dir}/node_modules`;
       try {
-        const src = path.join(mainCwd, rel);
-        const dest = path.join(worktreeCwd, rel);
-        if (!isDir(src) || exists(dest) || !isDir(path.dirname(dest)) || !(await isIgnored(mainCwd, rel))) {
-          skipped.push(rel);
-          continue;
-        }
-        await addExcludes(mainCwd, [rel]);
+        if (!isDir(path.join(mainCwd, rel)) || exists(path.join(worktreeCwd, rel))) continue;
+        if (!(await isIgnored(mainCwd, rel))) continue;
+        eligible.push(rel);
+      } catch { /* ineligible */ }
+    }
+    for (const rel of eligible.slice(NESTED_MAX_PACKAGES)) {
+      skipped.push(`${rel} (over the ${NESTED_MAX_PACKAGES}-package cap)`);
+    }
+    for (const rel of eligible.slice(0, NESTED_MAX_PACKAGES)) {
+      const src = path.join(mainCwd, rel);
+      const dest = path.join(worktreeCwd, rel);
+      try {
         fs.symlinkSync(src, dest, 'dir');
+      } catch (err) {
+        skipped.push(`${rel} (symlink failed: ${(err && err.code) || (err && err.message) || err})`);
+        continue;
+      }
+      try {
+        await addExcludes(mainCwd, [rel]);
         linked.push(rel);
-      } catch {
-        skipped.push(rel);
+      } catch (err) {
+        try { fs.unlinkSync(dest); } catch { /* best-effort */ }
+        skipped.push(`${rel} (exclude write failed: ${(err && err.code) || (err && err.message) || err})`);
       }
     }
   } catch { /* best-effort */ }

@@ -299,15 +299,15 @@ test('skips nested packages deeper than 3 segments, under node_modules, or missi
   git(wt, 'reset', '-q', '--hard', 'main');
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
   expect(r.linked).toEqual(['node_modules', '.venv']);
-  expect(r.skipped).toContain('p/node_modules');
-  expect(r.skipped.some((s) => s.startsWith('a/b/c/d') || s.startsWith('vendor/'))).toBe(false);
+  // Ineligible packages are not failures: nothing nested lands in skipped.
+  expect(r.skipped.some((s) => s.includes('/') || s.startsWith('p/'))).toBe(false);
 });
 
 test('skips a nested node_modules that is not gitignored', async () => {
   fs.writeFileSync(path.join(main, '.gitignore'), '/node_modules/\n.venv/\n');
   addNestedPackages(['web/remote-app']);
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
-  expect(r.skipped).toContain('web/remote-app/node_modules');
+  expect(r.skipped.some((s) => s.startsWith('web/'))).toBe(false);
   expect(r.linked).not.toContain('web/remote-app/node_modules');
   expect(fs.existsSync(path.join(wt, 'web', 'remote-app', 'node_modules'))).toBe(false);
 });
@@ -316,7 +316,7 @@ test('leaves an existing worktree nested node_modules alone', async () => {
   addNestedPackages(['web/remote-app']);
   fs.mkdirSync(path.join(wt, 'web', 'remote-app', 'node_modules'));
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
-  expect(r.skipped).toContain('web/remote-app/node_modules');
+  expect(r.skipped.some((s) => s.startsWith('web/'))).toBe(false);
   expect(fs.lstatSync(path.join(wt, 'web', 'remote-app', 'node_modules')).isSymbolicLink()).toBe(false);
 });
 
@@ -336,7 +336,39 @@ test('links at most 20 nested packages', async () => {
   const nested = r.linked.filter((n) => n.startsWith('pkgs/'));
   expect(nested).toHaveLength(20);
   expect(nested).toEqual(dirs.slice(0, 20).map((d) => `${d}/node_modules`));
-  expect(r.skipped).toEqual(expect.arrayContaining(dirs.slice(20).map((d) => `${d}/node_modules`)));
+  for (const d of dirs.slice(20)) {
+    expect(r.skipped).toContainEqual(expect.stringMatching(new RegExp(`^${d}/node_modules \\(.+\\)$`)));
+  }
   expect(fs.existsSync(path.join(wt, 'pkgs', 'p22', 'node_modules'))).toBe(false);
   expect(git(wt, 'status', '--porcelain')).toBe('');
+});
+
+test('filters before capping: the last-sorting of 25 packages is linked when it alone is eligible', async () => {
+  const dirs = Array.from({ length: 25 }, (_, i) => `pkgs/p${String(i).padStart(2, '0')}`);
+  addNestedPackages(dirs, { withMainModules: false });
+  const last = dirs[dirs.length - 1];
+  fs.mkdirSync(path.join(main, last, 'node_modules'), { recursive: true });
+  const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  expect(r.linked.filter((n) => n.startsWith('pkgs/'))).toEqual([`${last}/node_modules`]);
+  expect(r.skipped.filter((n) => n.startsWith('pkgs/'))).toEqual([]);
+  expect(fs.lstatSync(path.join(wt, last, 'node_modules')).isSymbolicLink()).toBe(true);
+  expect(git(wt, 'status', '--porcelain')).toBe('');
+});
+
+const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+test.skipIf(isRoot)('a failed nested symlink is skipped with a reason and leaves no exclude line', async () => {
+  addNestedPackages(['web/remote-app']);
+  const parent = path.join(wt, 'web', 'remote-app');
+  fs.chmodSync(parent, 0o555);
+  let r;
+  try {
+    r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  } finally {
+    fs.chmodSync(parent, 0o755);
+  }
+  expect(r.linked).not.toContain('web/remote-app/node_modules');
+  expect(r.skipped).toContainEqual(expect.stringMatching(/^web\/remote-app\/node_modules \(.+\)$/));
+  expect(fs.existsSync(path.join(parent, 'node_modules'))).toBe(false);
+  const exclude = fs.readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8').split('\n');
+  expect(exclude).not.toContain('/web/remote-app/node_modules');
 });

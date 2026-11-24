@@ -1,9 +1,10 @@
 /**
  * epicStateFromLog.test.cjs — GET /admin/events kind epic_state_changed is
- * served from the per-Epic event log's epic.status_changed events (written by
- * epicTransitions.transitionEpic at the transition), with the outside shape
- * the deleted snapshot watcher used to write: { at, kind, cwd, epicId, from,
- * to, externalRef? } — only keys from CONTRACT.epicStateChangedFields.
+ * served from the per-Epic event log's epic.state_changed events (written by
+ * lib/epic/epicStateEmitter.cjs), in the outside shape of contract v1:
+ * { at, kind, cwd, epicId, from, to, blockedKind?, externalRef? } — only keys
+ * from CONTRACT.epicStateChangedFields. epic.status_changed (lifecycle-only)
+ * yields no row.
  *
  * Run: timeout 120 npx vitest run src/main/lib/telemetry/__tests__/epicStateFromLog.test.cjs
  */
@@ -21,9 +22,10 @@ let other;
 let prevSchedulerHome;
 let auditEvents;
 let log;
-let transitions;
 let auditLogPath;
 const roots = () => [cwd, other];
+const read = () => auditEvents.readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], projectRoots: roots });
+const noAt = (events) => events.map(({ at: _at, ...r }) => r);
 
 function writeIndex(dir, sessions) {
   const ps = path.join(dir, 'session-manager-operations', 'prompt-sessions');
@@ -39,7 +41,6 @@ beforeAll(() => {
   process.env.SM_SCHEDULER_HOME = tmpHome;
   auditEvents = require('../auditEvents.cjs');
   log = require('../../epic/epicEventLog.cjs');
-  transitions = require('../../epic/epicTransitions.cjs');
   ({ auditLogPath } = require('../../scheduler/schedulerPaths.cjs'));
   if (!auditLogPath().startsWith(tmpHome)) throw new Error(`refusing to run: audit log ${auditLogPath()} not under ${tmpHome}`);
 });
@@ -57,25 +58,16 @@ beforeEach(() => {
   auditEvents._resetEpicStateCacheForTests();
 });
 
-/** Wait until transitionEpic's fire-and-forget appends have landed: `n` status events across the roots. */
-async function settle(n) {
-  const count = () => auditEvents.readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], projectRoots: roots }).events.length;
-  for (let i = 0; i < 200 && count() < n; i++) await new Promise((r) => setTimeout(r, 10));
-}
-
-test('a real transitionEpic produces an epic_state_changed row with the outside shape', async () => {
+test('epic.state_changed events become epic_state_changed rows with the outside shape', async () => {
   const { CONTRACT } = require('../../externalContract.cjs');
   writeIndex(cwd, { 'e-1': { id: 'e-1', status: 'active', source: { externalRef: 'ref-1' } } });
-  const e1 = { id: 'e-1', cwd, status: 'proposed' };
-  transitions.transitionEpic(e1, 'active', { reason: 'approve', source: 'test' });
-  await settle(1);
-  transitions.transitionEpic(e1, 'completed', { reason: 'done', source: 'test' });
-  const e2 = { id: 'e-2', cwd: other, status: 'completed' };
-  transitions.transitionEpic(e2, 'active', { reason: 'reopen', source: 'test' });
-  await settle(3);
+  await log.appendEpicEvent(cwd, 'e-1', { kind: 'epic.state_changed', from: 'open', to: 'working' });
+  await log.appendEpicEvent(cwd, 'e-1', { kind: 'epic.state_changed', from: 'working', to: 'blocked', blockedKind: 'needs_input' });
+  await log.appendEpicEvent(cwd, 'e-1', { kind: 'epic.state_changed', from: 'blocked', to: 'verified' });
+  await log.appendEpicEvent(other, 'e-2', { kind: 'epic.state_changed', to: 'working', externalRef: 'ref-own' });
 
-  const { events } = auditEvents.readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], projectRoots: roots });
-  expect(events).toHaveLength(3);
+  const { events } = read();
+  expect(events).toHaveLength(4);
   const allowed = new Set(CONTRACT.epicStateChangedFields);
   for (const ev of events) {
     for (const k of Object.keys(ev)) expect(allowed.has(k), `unlisted key ${k}`).toBe(true);
@@ -83,19 +75,46 @@ test('a real transitionEpic produces an epic_state_changed row with the outside 
     expect(ev.kind).toBe('epic_state_changed');
     expect(typeof ev.at).toBe('string');
   }
-  const byEpic = events.map(({ at: _at, ...r }) => r);
-  expect(byEpic).toEqual(expect.arrayContaining([
-    { kind: 'epic_state_changed', cwd, epicId: 'e-1', from: 'awaiting_approval', to: 'open', externalRef: 'ref-1' },
-    { kind: 'epic_state_changed', cwd, epicId: 'e-1', from: 'open', to: 'closed', externalRef: 'ref-1' },
-    { kind: 'epic_state_changed', cwd: other, epicId: 'e-2', from: 'closed', to: 'open' },
+  expect(noAt(events)).toEqual(expect.arrayContaining([
+    { kind: 'epic_state_changed', cwd, epicId: 'e-1', from: 'open', to: 'working', externalRef: 'ref-1' },
+    { kind: 'epic_state_changed', cwd, epicId: 'e-1', from: 'working', to: 'blocked', blockedKind: 'needs_input', externalRef: 'ref-1' },
+    { kind: 'epic_state_changed', cwd, epicId: 'e-1', from: 'blocked', to: 'verified', externalRef: 'ref-1' },
+    { kind: 'epic_state_changed', cwd: other, epicId: 'e-2', from: null, to: 'working', externalRef: 'ref-own' },
   ]));
   // Oldest first.
   expect(events.map((e) => e.at)).toEqual([...events.map((e) => e.at)].sort());
 });
 
+test('blockedKind is carried only on a blocked row', async () => {
+  await log.appendEpicEvent(cwd, 'e-k', { kind: 'epic.state_changed', from: 'blocked', to: 'working', blockedKind: 'stale' });
+  await log.appendEpicEvent(cwd, 'e-k', { kind: 'epic.state_changed', from: 'working', to: 'blocked', blockedKind: '' });
+  expect(noAt(read().events)).toEqual([
+    { kind: 'epic_state_changed', cwd, epicId: 'e-k', from: 'blocked', to: 'working' },
+    { kind: 'epic_state_changed', cwd, epicId: 'e-k', from: 'working', to: 'blocked' },
+  ]);
+});
+
+test('an epic.status_changed event yields no row', async () => {
+  await log.appendEpicEvent(cwd, 'e-s', { kind: 'epic.status_changed', from: 'proposed', to: 'active' });
+  expect(read().events).toEqual([]);
+  expect(auditEvents.epicStateRowOf(cwd, { kind: 'epic.status_changed', time: '2026-11-01T00:00:00.000Z', epicId: 'e-s', from: 'proposed', to: 'active' })).toBeNull();
+  expect(auditEvents).not.toHaveProperty('STATUS_TO_OUTSIDE');
+});
+
+test('the incremental cache picks up appended lines', async () => {
+  await log.appendEpicEvent(cwd, 'e-i', { kind: 'epic.state_changed', from: 'open', to: 'working' });
+  expect(read().events).toHaveLength(1);
+  await log.appendEpicEvent(cwd, 'e-i', { kind: 'job.queued', prdId: 1 });
+  await log.appendEpicEvent(cwd, 'e-i', { kind: 'epic.state_changed', from: 'working', to: 'verified' });
+  expect(noAt(read().events)).toEqual([
+    { kind: 'epic_state_changed', cwd, epicId: 'e-i', from: 'open', to: 'working' },
+    { kind: 'epic_state_changed', cwd, epicId: 'e-i', from: 'working', to: 'verified' },
+  ]);
+});
+
 test('rows are merged with audit rows by at and one cursor pages through both', async () => {
-  await log.appendEpicEvent(cwd, 'e-a', { kind: 'epic.status_changed', from: 'proposed', to: 'active' });
-  await log.appendEpicEvent(cwd, 'e-a', { kind: 'job.queued', prdId: 1 }); // not a status change
+  await log.appendEpicEvent(cwd, 'e-a', { kind: 'epic.state_changed', from: 'open', to: 'working' });
+  await log.appendEpicEvent(cwd, 'e-a', { kind: 'job.queued', prdId: 1 }); // not a state change
   const [first] = (await log.readEpicEvents(cwd, 'e-a')).events;
   const before = new Date(Date.parse(first.time) - 1000).toISOString();
   const after = new Date(Date.parse(first.time) + 1000).toISOString();
@@ -113,19 +132,28 @@ test('rows are merged with audit rows by at and one cursor pages through both', 
   const p2 = auditEvents.readEventsAfter({ after: p1.next, kinds, limit: 2, projectRoots: roots });
   expect([...p1.events, ...p2.events]).toEqual(all.events);
 
-  // "from now" cursor covers the newest row; a later transition shows up after it.
+  // "from now" cursor covers the newest row; a later state change shows up after it.
   const now = auditEvents.readEventsAfter({ kinds, projectRoots: roots });
   expect(now.events).toEqual([]);
   await new Promise((r) => setTimeout(r, 1100)); // be newer than the audit row at `after`
-  await log.appendEpicEvent(cwd, 'e-a', { kind: 'epic.status_changed', from: 'active', to: 'completed' });
+  await log.appendEpicEvent(cwd, 'e-a', { kind: 'epic.state_changed', from: 'working', to: 'verified' });
   const fresh = auditEvents.readEventsAfter({ after: now.next, kinds, projectRoots: roots });
-  expect(fresh.events.map(({ at: _at, ...r }) => r)).toEqual([
-    { kind: 'epic_state_changed', cwd, epicId: 'e-a', from: 'open', to: 'closed' },
+  expect(noAt(fresh.events)).toEqual([
+    { kind: 'epic_state_changed', cwd, epicId: 'e-a', from: 'working', to: 'verified' },
   ]);
 });
 
+test('legacy epic_state_changed audit rows are returned unchanged', async () => {
+  const legacy = { at: '2026-11-01T00:00:00.000Z', kind: 'epic_state_changed', cwd, epicId: 'legacy', from: 'open', to: 'working' };
+  fs.writeFileSync(auditLogPath(), `${JSON.stringify(legacy)}\n`);
+  await log.appendEpicEvent(cwd, 'e-l', { kind: 'epic.state_changed', from: 'open', to: 'working' });
+  const { events } = read();
+  expect(events[0]).toEqual(legacy);
+  expect(events.map((e) => e.epicId)).toEqual(['legacy', 'e-l']);
+});
+
 test('an explicit target with no projectRoots reads the audit log only', async () => {
-  await log.appendEpicEvent(cwd, 'e-b', { kind: 'epic.status_changed', from: 'proposed', to: 'active' });
+  await log.appendEpicEvent(cwd, 'e-b', { kind: 'epic.state_changed', from: 'open', to: 'working' });
   const target = path.join(tmpHome, 'only.jsonl');
   fs.writeFileSync(target, `${JSON.stringify({ at: '2026-11-01T00:00:00.000Z', kind: 'epic_state_changed', epicId: 'legacy' })}\n`);
   const { events } = auditEvents.readEventsAfter({ after: 'start', target });
@@ -135,7 +163,7 @@ test('an explicit target with no projectRoots reads the audit log only', async (
 test('GET /admin/events serves epic_state_changed from the event log', async () => {
   const eventsAdminRoutes = require('../eventsAdminRoutes.cjs');
   const { createAdminHttp } = require('../../feedback-remote/localAdminHttp.cjs');
-  await log.appendEpicEvent(cwd, 'e-c', { kind: 'epic.status_changed', from: 'proposed', to: 'active' });
+  await log.appendEpicEvent(cwd, 'e-c', { kind: 'epic.state_changed', from: 'working', to: 'blocked', blockedKind: 'needs_input' });
   const prevE2e = process.env.SM_E2E;
   process.env.SM_E2E = '1';
   const admin = createAdminHttp();
@@ -153,8 +181,8 @@ test('GET /admin/events serves epic_state_changed from the event log', async () 
       req.end();
     });
     expect(r.status).toBe(200);
-    expect(r.json.events.map(({ at: _at, ...e }) => e)).toEqual([
-      { kind: 'epic_state_changed', cwd, epicId: 'e-c', from: 'awaiting_approval', to: 'open' },
+    expect(noAt(r.json.events)).toEqual([
+      { kind: 'epic_state_changed', cwd, epicId: 'e-c', from: 'working', to: 'blocked', blockedKind: 'needs_input' },
     ]);
   } finally {
     await admin.stop();

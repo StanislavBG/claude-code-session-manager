@@ -22,12 +22,13 @@
  * stamps `now` at append time). Rows that fail to parse or lack a string `at` are skipped.
  *
  * epic_state_changed is read from the per-Epic event logs, not from audit rows:
- * every `epic.status_changed` event (written by epicTransitions.transitionEpic at
- * the transition, lib/epic/epicEventLog.cjs) of every registered project becomes
- * one row { at, kind: 'epic_state_changed', cwd, epicId, from, to, externalRef? }
- * (epicStateRowOf), merged into the audit rows by `at` (ties: audit rows first,
- * then cwd, epicId, seq) so one cursor covers both. Status values map to the
- * outside-state words of lib/epic/epicOutsideState.cjs (STATUS_TO_OUTSIDE).
+ * every `epic.state_changed` event (written by lib/epic/epicStateEmitter.cjs with
+ * the fine-grained outside state, lib/epic/epicEventLog.cjs) of every registered
+ * project becomes one row
+ * { at, kind: 'epic_state_changed', cwd, epicId, from, to, blockedKind?, externalRef? }
+ * (epicStateRowOf; blockedKind only on a `to: 'blocked'` row), merged into the
+ * audit rows by `at` (ties: audit rows first, then cwd, epicId, seq) so one cursor
+ * covers both. Lifecycle-only `epic.status_changed` events yield no row.
  * Legacy epic_state_changed audit rows already in the log stay readable.
  * Projects come from the `projectRoots` option, else — only when `target` is not
  * given — promptSessionsIpc's registered projects (cached EPIC_ROOTS_TTL_MS).
@@ -136,9 +137,7 @@ const cursorOf = (at, n) => `${at}~${n}`;
 // ── epic_state_changed from the per-Epic event logs ──
 
 const EPIC_STATE_KIND = 'epic_state_changed';
-const EPIC_STATUS_EVENT = 'epic.status_changed';
-/** Lifecycle status → the outside-state word epicOutsideState.cjs gives an Epic in that status. */
-const STATUS_TO_OUTSIDE = Object.freeze({ proposed: 'awaiting_approval', active: 'open', completed: 'closed' });
+const EPIC_STATE_EVENT = 'epic.state_changed';
 const EPIC_ROOTS_TTL_MS = 10000;
 const EPIC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
@@ -146,26 +145,24 @@ const EPIC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const nonEmpty = (v) => (typeof v === 'string' && v !== '' ? v : null);
 /** @param {unknown} v @returns {v is Record<string, any>} */
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-/** @param {unknown} status */
-const outsideOf = (status) => {
-  const s = nonEmpty(status);
-  if (s === null) return null;
-  return Object.prototype.hasOwnProperty.call(STATUS_TO_OUTSIDE, s) ? STATUS_TO_OUTSIDE[/** @type {'proposed'} */ (s)] : s;
-};
 
 /**
- * One epic.status_changed event → its outside epic_state_changed row, or null.
+ * One epic.state_changed event → its outside epic_state_changed row, or null
+ * (any other kind, epic.status_changed included).
  * @param {string} cwd project root the event log belongs to
  * @param {Record<string, any>} ev a parsed event-log record
- * @param {string|null} [externalRef]
+ * @param {string|null} [externalRef] fallback ref (active index) when the event carries none
  */
 function epicStateRowOf(cwd, ev, externalRef = null) {
-  if (!isObj(ev) || ev.kind !== EPIC_STATUS_EVENT) return null;
+  if (!isObj(ev) || ev.kind !== EPIC_STATE_EVENT) return null;
   const at = nonEmpty(ev.time);
   const epicId = nonEmpty(ev.epicId);
-  if (!at || !epicId) return null;
+  const to = nonEmpty(ev.to);
+  if (!at || !epicId || !to) return null;
   /** @type {Record<string, any>} */
-  const row = { at, kind: EPIC_STATE_KIND, cwd, epicId, from: outsideOf(ev.from), to: outsideOf(ev.to) };
+  const row = { at, kind: EPIC_STATE_KIND, cwd, epicId, from: ev.from ?? null, to };
+  const blockedKind = to === 'blocked' ? nonEmpty(ev.blockedKind) : null;
+  if (blockedKind) row.blockedKind = blockedKind;
   const ref = nonEmpty(ev.externalRef) || nonEmpty(externalRef);
   if (ref) row.externalRef = ref;
   return row;
@@ -179,7 +176,7 @@ const indexCache = new Map();
 const knownRefs = new Map();
 let rootsCache = { at: 0, roots: /** @type {string[]} */ ([]) };
 
-/** Status-change events of one event-log file, re-reading only bytes appended since the last call. */
+/** epic.state_changed events of one event-log file, re-reading only bytes appended since the last call. */
 function statusEventsOf(file) {
   let size;
   try { size = fs.statSync(file).size; } catch { logCache.delete(file); return []; }
@@ -199,10 +196,10 @@ function statusEventsOf(file) {
     if (end >= 0) {
       const events = c.events.slice();
       for (const line of text.slice(0, end).split('\n')) {
-        if (!line.includes(EPIC_STATUS_EVENT)) continue;
+        if (!line.includes(EPIC_STATE_EVENT)) continue;
         try {
           const r = JSON.parse(line);
-          if (isObj(r) && r.kind === EPIC_STATUS_EVENT) events.push(r);
+          if (isObj(r) && r.kind === EPIC_STATE_EVENT) events.push(r);
         } catch { /* torn line */ }
       }
       c = { size, offset: c.offset + Buffer.byteLength(text.slice(0, end + 1), 'utf8'), events };
@@ -373,5 +370,5 @@ function readEventsAfter({ after, kinds, limit, target, initialWindow, maxArchiv
 
 module.exports = {
   OUTSIDE_EVENT_KINDS, readEventsAfter, CURSOR_FORM, INVALID_AUDIT_CURSOR, MAX_ARCHIVE_GZ_BYTES,
-  STATUS_TO_OUTSIDE, epicStateRowOf, _resetEpicStateCacheForTests,
+  epicStateRowOf, _resetEpicStateCacheForTests,
 };

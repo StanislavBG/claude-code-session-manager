@@ -30,7 +30,7 @@ describe('wrapInMemoryScope', () => {
     expect(out).toEqual({
       command: 'systemd-run',
       args: ['--user', '--scope', '--quiet', '--collect', '--unit=sm-job-1.scope',
-        '-p', 'MemoryHigh=85M', '-p', 'MemoryMax=100M', '-p', 'MemorySwapMax=4096M',
+        '-p', 'MemoryHigh=85M', '-p', 'MemoryMax=100M', '-p', 'MemorySwapMax=4G',
         '-p', 'OOMPolicy=continue', '--', '/bin/claude', '-p', 'x y'],
     });
   });
@@ -41,6 +41,33 @@ describe('wrapInMemoryScope', () => {
     });
     expect(out.command).toBe('/usr/bin/systemd-run');
     expect(out.args).toContain('--unit=a-b-c.scope');
+  });
+});
+
+describe('scheduler job caps', () => {
+  it('names a 6 GB soft and 10 GB hard cap', () => {
+    expect(ms.JOB_MEMORY_HIGH_MB).toBe(6144);
+    expect(ms.JOB_MEMORY_MAX_MB).toBe(10240);
+  });
+  it('schedulerJobMemoryLimits defaults to the named caps', () => {
+    expect(ms.schedulerJobMemoryLimits({ env: {} })).toEqual({
+      memoryMaxMb: 10240, memoryHighMb: 6144, swapMaxMb: 4096,
+    });
+  });
+  it('SM_JOB_MEMORY_MAX_MB still overrides and 0 disables', () => {
+    expect(ms.schedulerJobMemoryLimits({ env: { SM_JOB_MEMORY_MAX_MB: '2000' } })).toEqual({
+      memoryMaxMb: 2000, memoryHighMb: 1700, swapMaxMb: 4096,
+    });
+    expect(ms.schedulerJobMemoryLimits({ env: { SM_JOB_MEMORY_MAX_MB: '0' } })).toBeNull();
+  });
+  it('puts MemoryHigh=6G and MemoryMax=10G in the systemd-run argv', () => {
+    const out = ms.wrapInMemoryScope({
+      command: 'claude', args: ['-p'], unit: 'sm-job-x', limits: ms.schedulerJobMemoryLimits({ env: {} }),
+    });
+    expect(out.command).toBe('systemd-run');
+    expect(out.args).toEqual(expect.arrayContaining(['MemoryHigh=6G', 'MemoryMax=10G']));
+    expect(out.args[out.args.indexOf('MemoryHigh=6G') - 1]).toBe('-p');
+    expect(out.args[out.args.indexOf('MemoryMax=10G') - 1]).toBe('-p');
   });
 });
 

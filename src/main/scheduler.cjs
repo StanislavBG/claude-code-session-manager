@@ -689,14 +689,26 @@ const memoryScope = require('./lib/process/memoryScope.cjs');
  */
 function planJobScope({ jobSpawn, jobArgs, slug, startedAt, deps = {} }) {
   // Limits first: with the cap off, never probe systemd.
-  const limits = (deps.memoryLimitsFor || memoryScope.memoryLimitsFor)({ totalRamMb: Math.floor(os.totalmem() / 1048576) });
+  const limits = deps.memoryLimitsFor
+    ? deps.memoryLimitsFor({ totalRamMb: Math.floor(os.totalmem() / 1048576) })
+    : memoryScope.schedulerJobMemoryLimits();
   const supported = limits ? (deps.scopeSupported || memoryScope.scopeSupported)() : false;
-  if (!supported || !limits) return { spawn: jobSpawn, unit: null };
+  if (!supported || !limits) return { spawn: jobSpawn, unit: null, memoryMaxMb: null };
   const unit = `sm-job-${memoryScope.sanitizeUnit(slug)}-${startedAt}`;
   const wrapped = (deps.wrapInMemoryScope || memoryScope.wrapInMemoryScope)({
     command: jobSpawn.command, args: jobSpawn.args || jobArgs, unit, limits,
   });
-  return { spawn: { ...jobSpawn, command: wrapped.command, args: wrapped.args, argv0: undefined }, unit };
+  return { spawn: { ...jobSpawn, command: wrapped.command, args: wrapped.args, argv0: undefined }, unit, memoryMaxMb: limits.memoryMaxMb };
+}
+
+/**
+ * Failure reason for a job its own scope OOM-killed: the last sampled
+ * oom_kill > 0 on a non-zero (or signal) exit. Null otherwise.
+ */
+function memoryCapFailureReason(state, exitCode) {
+  if (!state || !(Number(state.oomKills) > 0) || exitCode === 0) return null;
+  const cap = Number(state.memoryMaxMb) > 0 ? `${Math.round(state.memoryMaxMb / 1024)} GB ` : '';
+  return `job hit its ${cap}memory cap (oom_kill=${state.oomKills})`;
 }
 
 /** Reads the job's cgroup dir from /proc/<pid>/cgroup (cgroup v2). Null when unavailable. */
@@ -6298,7 +6310,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     }
 
     const scopePlan = planJobScope({ jobSpawn, jobArgs, slug: job.slug, startedAt });
-    const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false };
+    const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false, memoryMaxMb: scopePlan.memoryMaxMb };
     const launchSpawn = scopePlan.spawn;
 
     const { child } = withChildAndLog({
@@ -6372,6 +6384,9 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         }
         sl(`\n[scheduler] exit code=${effectiveCode} (raw code=${exitCode} signal=${signal}) ` +
           `duration=${Math.round(durationMs / 1000)}s\n`);
+        // The scope's own OOM killer fired: name the cap instead of a generic exit.
+        const memoryCapReason = memoryCapFailureReason(scopeState, effectiveCode);
+        if (memoryCapReason) sl(`\n[scheduler] ${memoryCapReason}\n`);
         // Post any tool-risk 'confirm' requests the guard recorded (this job's, and
         // any a crashed run left behind) as Needs-you items. Fire-and-forget: never throws.
         needsYouStore.drainConfirmationRequests().then((r) => {
@@ -6413,6 +6428,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
+          ...(memoryCapReason ? { error: memoryCapReason, memoryCapKill: { oomKills: scopeState.oomKills, memoryMaxMb: scopeState.memoryMaxMb ?? null } } : {}),
           sandbox: sandboxMeta,
           ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
@@ -6422,6 +6438,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         resolve({
           exitCode: effectiveCode, durationMs, rateLimited, networkError, launchFailure: launchFailed, resultStats,
           leakedDescendants: leaked, sessionId, killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
+          ...(memoryCapReason ? { error: memoryCapReason, memoryCapReason } : {}),
         });
       },
     });
@@ -8807,6 +8824,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             // is ALSO set (e.g. a real exit failure whose branch also failed
             // to integrate must show both, not just the first one).
             : [res.error, worktreeIntegrationFailure ? verifyResult.reason : null].filter(Boolean).join('; ') || null;
+          // A scope OOM kill names the cap on every non-completed outcome
+          // (failed rows already carry it via res.error above).
+          if (res.memoryCapReason && effectiveStatus !== 'completed' && !String(s.jobs[i2].error || '').includes(res.memoryCapReason)) {
+            s.jobs[i2].error = [res.memoryCapReason, s.jobs[i2].error].filter(Boolean).join('; ');
+          }
           // Persist the commit THIS run landed (if HEAD advanced) so a later
           // re-fire of the same slug can prove its own no-op re-run is
           // truthful via the pass_no_commit_prior_run_verified exemption.
@@ -14344,6 +14366,7 @@ module.exports = {
   loadValidatorCriteriaContext,
   planJobScope,
   finalizeJobScope,
+  memoryCapFailureReason,
   sampleJobScope,
   readJobCgroupDir,
   normalizeConfig,

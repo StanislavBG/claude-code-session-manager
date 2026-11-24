@@ -55,6 +55,44 @@ test('missing cgroup files are ignored and unwrapped state never stops anything'
   expect(stopScope).toHaveBeenCalledTimes(1);
 });
 
+test('default plan uses the scheduler job caps (6G soft, 10G hard) and records the cap', () => {
+  // tests/setup/schedulerSandbox.cjs disables scopes with SM_JOB_MEMORY_MAX_MB=0.
+  const saved = process.env.SM_JOB_MEMORY_MAX_MB;
+  delete process.env.SM_JOB_MEMORY_MAX_MB;
+  try {
+    const plan = scheduler.planJobScope({ jobSpawn, slug: 's', startedAt: 1, deps: { scopeSupported: () => true } });
+    expect(plan.spawn.args).toContain('MemoryHigh=6G');
+    expect(plan.spawn.args).toContain('MemoryMax=10G');
+    expect(plan.memoryMaxMb).toBe(10240);
+  } finally {
+    process.env.SM_JOB_MEMORY_MAX_MB = saved;
+  }
+});
+
+test('unsupported systemd-run: the job starts unscoped with the default caps', () => {
+  const saved = process.env.SM_JOB_MEMORY_MAX_MB;
+  delete process.env.SM_JOB_MEMORY_MAX_MB;
+  try {
+    const plan = scheduler.planJobScope({ jobSpawn, slug: 's', startedAt: 1, deps: { scopeSupported: () => false } });
+    expect(plan.spawn).toBe(jobSpawn);
+    expect(plan.unit).toBeNull();
+    expect(plan.memoryMaxMb).toBeNull();
+  } finally {
+    process.env.SM_JOB_MEMORY_MAX_MB = saved;
+  }
+});
+
+test('memoryCapFailureReason names the cap only for an oom-killed failed run', () => {
+  const state = { unit: 'u', oomKills: 1, memoryMaxMb: 10240 };
+  expect(scheduler.memoryCapFailureReason(state, 137)).toBe('job hit its 10 GB memory cap (oom_kill=1)');
+  expect(scheduler.memoryCapFailureReason(state, null)).toBe('job hit its 10 GB memory cap (oom_kill=1)');
+  expect(scheduler.memoryCapFailureReason(state, 0)).toBeNull();
+  expect(scheduler.memoryCapFailureReason({ ...state, oomKills: 0 }, 137)).toBeNull();
+  expect(scheduler.memoryCapFailureReason({ unit: 'u' }, 137)).toBeNull();
+  expect(scheduler.memoryCapFailureReason(null, 137)).toBeNull();
+  expect(scheduler.memoryCapFailureReason({ unit: 'u', oomKills: 2 }, 1)).toBe('job hit its memory cap (oom_kill=2)');
+});
+
 test('null limits: scopeSupported is not called and the spawn is unwrapped', () => {
   const scopeSupported = vi.fn(() => true);
   const plan = scheduler.planJobScope({ jobSpawn, slug: 's', startedAt: 1, deps: { scopeSupported, memoryLimitsFor: () => null } });

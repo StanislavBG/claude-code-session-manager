@@ -19,6 +19,13 @@ const DEFAULT_MAX_FRACTION = 0.45;
 const HIGH_FRACTION = 0.85;
 const DEFAULT_SWAP_MAX_MB = 4096;
 
+// Fixed caps for every scheduler job's scope. MemoryHigh throttles (reclaim
+// pressure) above 6 GB; MemoryMax OOM-kills inside the scope at 10 GB. The
+// largest recorded job peak is 9,142 MB, so 10 GB kills only true runaways —
+// what makes the lower per-job reservations in the memory gate safe.
+const JOB_MEMORY_HIGH_MB = 6144;
+const JOB_MEMORY_MAX_MB = 10240;
+
 /**
  * @param {{ totalRamMb?: number, env?: Record<string, string | undefined> }} [opts]
  * @returns {{ memoryMaxMb: number, memoryHighMb: number, swapMaxMb: number } | null} null = disabled
@@ -40,6 +47,24 @@ function memoryLimitsFor(opts = {}) {
     memoryHighMb: Math.floor(HIGH_FRACTION * max),
     swapMaxMb: DEFAULT_SWAP_MAX_MB,
   };
+}
+
+/**
+ * Limits for a scheduler job's scope: JOB_MEMORY_HIGH_MB / JOB_MEMORY_MAX_MB.
+ * SM_JOB_MEMORY_MAX_MB still overrides (0 disables), via memoryLimitsFor.
+ * @param {{ env?: Record<string, string | undefined> }} [opts]
+ * @returns {{ memoryMaxMb: number, memoryHighMb: number, swapMaxMb: number } | null}
+ */
+function schedulerJobMemoryLimits(opts = {}) {
+  const env = opts.env || process.env;
+  const raw = env.SM_JOB_MEMORY_MAX_MB;
+  if (raw !== undefined && raw !== '') return memoryLimitsFor({ env });
+  return { memoryMaxMb: JOB_MEMORY_MAX_MB, memoryHighMb: JOB_MEMORY_HIGH_MB, swapMaxMb: DEFAULT_SWAP_MAX_MB };
+}
+
+/** systemd size: whole GiB as `<n>G`, otherwise `<n>M`. @param {number} mb */
+function sizeArg(mb) {
+  return mb > 0 && mb % 1024 === 0 ? `${mb / 1024}G` : `${mb}M`;
 }
 
 /** @type {boolean | null} */
@@ -100,9 +125,9 @@ function wrapInMemoryScope(o) {
       '--quiet',
       '--collect',
       `--unit=${sanitizeUnit(unit)}.scope`,
-      '-p', `MemoryHigh=${limits.memoryHighMb}M`,
-      '-p', `MemoryMax=${limits.memoryMaxMb}M`,
-      '-p', `MemorySwapMax=${limits.swapMaxMb}M`,
+      '-p', `MemoryHigh=${sizeArg(limits.memoryHighMb)}`,
+      '-p', `MemoryMax=${sizeArg(limits.memoryMaxMb)}`,
+      '-p', `MemorySwapMax=${sizeArg(limits.swapMaxMb)}`,
       '-p', 'OOMPolicy=continue',
       '--',
       command,
@@ -131,7 +156,10 @@ function stopScope(unit, deps = {}) {
 }
 
 module.exports = {
+  JOB_MEMORY_HIGH_MB,
+  JOB_MEMORY_MAX_MB,
   memoryLimitsFor,
+  schedulerJobMemoryLimits,
   scopeSupported,
   wrapInMemoryScope,
   stopScope,

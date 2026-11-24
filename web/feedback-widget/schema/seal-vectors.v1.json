@@ -1,0 +1,78 @@
+{
+  "$comment": "Sealed feedback envelope v1 test vectors. Produced once by src/main/lib/feedback-remote/feedbackSeal.cjs sealEnvelope with opts { ephemeralPrivateKeyJwk, iv }; every implementation (desktop + browser widget) must reproduce each envelope byte for byte and open it. Encodings: boxPublicKey/iv base64url (no padding); plaintext/envelope standard base64. Layout: \"SMF1\" | uint16 BE header length (<=1024) | UTF-8 header JSON {v:1,kid,epk,iv,ct} | AES-256-GCM ciphertext || 16-byte tag; key = HKDF-SHA256(ECDH, salt = epk raw || box public raw, info = \"sm-feedback/1|\" + boxId, 32); AAD = magic || length || header. Keys here are test-only.",
+  "version": 1,
+  "vectors": [
+    {
+      "name": "vector-1",
+      "boxId": "box_vector_1",
+      "contentType": "application/json",
+      "boxPublicKey": "BJ4SgI--gQ2iW9KGbgHpO27iwCwkpu-P_h92jHHrWYS6UzNlQsJ5wQk9m2nE41a2pcVLHqcMECG0iDEv9DNIW24",
+      "boxPrivateKeyJwk": {
+        "kty": "EC",
+        "x": "nhKAj76BDaJb0oZuAek7buLALCSm74_-H3aMcetZhLo",
+        "y": "UzNlQsJ5wQk9m2nE41a2pcVLHqcMECG0iDEv9DNIW24",
+        "crv": "P-256",
+        "d": "Wm8e8yVGN7eQc4ci-kOZ1ISdh3MdDuO8vwp51B50R_Q"
+      },
+      "boxKeyFingerprint": "pTlNIcwgfyw8DJGDhHkyOd",
+      "ephemeralPrivateKeyJwk": {
+        "kty": "EC",
+        "x": "gsWt--A4GYf2RnGE6SflqIN6P6s9QbVxguQ2vQOnK6Q",
+        "y": "a18D98EZp2v_wD4xmnM_K0eZ-Hrgkg-loFrDebGcMVc",
+        "crv": "P-256",
+        "d": "s7ZPqBU2vNzTZbgjxATez4bOrCfih8ysc03E54AVHBc"
+      },
+      "iv": "KcUIkwu0ue4OoH4r",
+      "plaintext": "eyJ2IjoxLCJraW5kIjoiYnVnIiwibWVzc2FnZSI6IlRoZSBzYXZlIGJ1dHRvbiBkb2VzIG5vdGhpbmcuIn0=",
+      "envelope": "U01GMQC2eyJ2IjoxLCJraWQiOiJwVGxOSWN3Z2Z5dzhESkdEaEhreU9kIiwiZXBrIjoiQklMRnJmdmdPQm1IOWtaeGhPa241YWlEZWotclBVRzFjWUxrTnIwRHB5dWthMThEOThFWnAydl93RDR4bW5NX0swZVotSHJna2ctbG9GckRlYkdjTVZjIiwiaXYiOiJLY1VJa3d1MHVlNE9vSDRyIiwiY3QiOiJhcHBsaWNhdGlvbi9qc29uIn2CSqTJZOBqiPD01jcxuvMhA2R5myy+R7KepxQV5MRXNoJSIbsOy7I0ufNVTZtpivszQmRMZ8fCJsLhCVFpuksXVy/3MRXoeHXfTNlXIj0="
+    },
+    {
+      "name": "vector-2",
+      "boxId": "box_vector_2",
+      "contentType": "application/octet-stream",
+      "boxPublicKey": "BLsh0rtu0waU04ndJAQ52CaazEciOVfgrTB7W-BxIoCCJOdFP7u7kpdwnlOWGNrJ_U9WnLyDzdB7NILnyIriInE",
+      "boxPrivateKeyJwk": {
+        "kty": "EC",
+        "x": "uyHSu27TBpTTid0kBDnYJprMRyI5V-CtMHtb4HEigII",
+        "y": "JOdFP7u7kpdwnlOWGNrJ_U9WnLyDzdB7NILnyIriInE",
+        "crv": "P-256",
+        "d": "jsAZrgkVE7-dTimOCOPMHQEJnBvzrNWnLf30H1JyRVI"
+      },
+      "boxKeyFingerprint": "o_EnaPh1aKN6tNqvbYrsVH",
+      "ephemeralPrivateKeyJwk": {
+        "kty": "EC",
+        "x": "beXuRIUNFO4bRaCWx3FpQGKee3pykNvDCBavaOP5KgU",
+        "y": "7JFACajFU-VD8oZO35WDL_M2aIKXgUs9EpOtSd0c8ME",
+        "crv": "P-256",
+        "d": "bgH3d2jTzer-mQ5TbDl8w0esBl_PfcSVF-CbStYnAww"
+      },
+      "iv": "AU-kRRfSk2vgGQDg",
+      "plaintext": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==",
+      "envelope": "U01GMQC+eyJ2IjoxLCJraWQiOiJvX0VuYVBoMWFLTjZ0TnF2Yllyc1ZIIiwiZXBrIjoiQkczbDdrU0ZEUlR1RzBXZ2xzZHhhVUJpbm50NmNwRGJ3d2dXcjJqai1Tb0Y3SkZBQ2FqRlUtVkQ4b1pPMzVXRExfTTJhSUtYZ1VzOUVwT3RTZDBjOE1FIiwiaXYiOiJBVS1rUlJmU2sydmdHUURnIiwiY3QiOiJhcHBsaWNhdGlvbi9vY3RldC1zdHJlYW0ifUUoRqC955PcNL7/0bDP2YLGADkWeTs7l00WIlZB7FcLPvIFJIcR62clHYFJ5nU1w70g+es4yfjC7NTKfOdtbRmI4QzsTy2OTpZm1KGEf5JI"
+    },
+    {
+      "name": "vector-3",
+      "boxId": "bx_ünïcode",
+      "contentType": "text/plain; charset=utf-8",
+      "boxPublicKey": "BMSOMqI2hIXNcL4XGsYiPknIPjypYtdullngrRee-z69-ccTwu9TGhrSkfeUzzvT7zfs5b9s2kDxfIvv9WxKoAM",
+      "boxPrivateKeyJwk": {
+        "kty": "EC",
+        "x": "xI4yojaEhc1wvhcaxiI-Scg-PKli126WWeCtF577Pr0",
+        "y": "-ccTwu9TGhrSkfeUzzvT7zfs5b9s2kDxfIvv9WxKoAM",
+        "crv": "P-256",
+        "d": "3te47ehFP0j7D5jdxM_a7G-HGqJcdyfZHyUH3p2Wpxg"
+      },
+      "boxKeyFingerprint": "ytOY1Zxesly0czMl4XjT3G",
+      "ephemeralPrivateKeyJwk": {
+        "kty": "EC",
+        "x": "asMmDX0_KvcCQas11PXbyHzu7UafstrVXK4qGJ2qX4g",
+        "y": "OgUY6aQyhT7DTyoi8wuNNQit9hIVRgYn1b12Q2ydqf0",
+        "crv": "P-256",
+        "d": "c0Kcf8j7h5tem3CtDC0Rr__SyM_saLUUAuABzTOKiFw"
+      },
+      "iv": "Vw5o6raBGK4NdpKQ",
+      "plaintext": "",
+      "envelope": "U01GMQC/eyJ2IjoxLCJraWQiOiJ5dE9ZMVp4ZXNseTBjek1sNFhqVDNHIiwiZXBrIjoiQkdyREpnMTlQeXIzQWtHck5kVDEyOGg4N3UxR243TGExVnl1S2hpZHFsLUlPZ1VZNmFReWhUN0RUeW9pOHd1Tk5RaXQ5aElWUmdZbjFiMTJRMnlkcWYwIiwiaXYiOiJWdzVvNnJhQkdLNE5kcEtRIiwiY3QiOiJ0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04In1z0s6eJV5fQg7ni/hNTeBx"
+    }
+  ]
+}

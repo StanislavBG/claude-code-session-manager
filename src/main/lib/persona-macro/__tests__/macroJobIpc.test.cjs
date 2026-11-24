@@ -301,6 +301,15 @@ describe('runToolJob — Demo Video review stage', () => {
     expect(dispatchMacroJob.mock.calls[0][0].reviewStage).toBe(true);
   });
 
+  it('forwards a press voiceId to dispatchMacroJob; omitted stays absent', async () => {
+    const dispatchMacroJob = vi.fn(async () => ({ ok: true, slug: 's' }));
+    const { handlers } = setup({ dispatchMacroJob });
+    await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1', voiceId: 'am_michael' });
+    expect(dispatchMacroJob.mock.calls[0][0].voiceId).toBe('am_michael');
+    await handlers['macros:dispatch-job']({}, { cwd: '/p', macroId: 'builtin-demo-video', epicId: 'e1' });
+    expect('voiceId' in dispatchMacroJob.mock.calls[1][0]).toBe(false);
+  });
+
   it('a plain Demo Video press (stage null) records nothing', async () => {
     const recordDispatch = vi.fn(async () => ({ ok: true }));
     const createPrd = vi.fn(async () => ({ ok: true }));

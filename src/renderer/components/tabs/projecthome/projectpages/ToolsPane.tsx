@@ -46,7 +46,13 @@ import { useScheduledPrds } from '../../../../lib/useScheduledPrds'
 import { reviewRuns, reviewRunStatus, type ReviewRunStatus } from '../../../../lib/mdReviewRuns'
 import type { ScheduleJob, Macro, MacroJobStatus, MdNetwork, MdNetworkResult, MdReviewResult } from '../../../../../preload/api'
 
-export type LaunchFn = (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
+/** `opts.voiceId`: a project Video job tool's picked library voice, sent as the dispatch's `voiceId`. */
+export type LaunchFn = (
+  macro: Macro,
+  extraInstructions?: string,
+  inputValues?: Record<string, string>,
+  opts?: { reviewStage?: boolean; voiceId?: string },
+) => void
 /** A finished scan's findings count for `cwd`; null when the scan failed. */
 export type FindingsCountFn = (cwd: string, count: number | null) => void
 

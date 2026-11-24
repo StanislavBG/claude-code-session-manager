@@ -220,6 +220,52 @@ describe('GenerateComposer — Generate mode', () => {
   })
 })
 
+describe('GenerateComposer — voice', () => {
+  const VOICES = [{ id: 'am_michael', label: 'Michael' }, { id: 'kit', label: 'kit' }]
+  const voice = () => $<HTMLSelectElement>('[data-testid="press-voice-select"]')
+  function pickVoice(value: string) {
+    act(() => {
+      voice().value = value
+      voice().dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+
+  it('lists the voices with labels after Default; Default sends no Voice line', () => {
+    const onGenerate = vi.fn<OnGenerate>()
+    mount(<GenerateComposer kind="video" voices={VOICES} onClose={vi.fn()} onGenerate={onGenerate} />)
+    expect(Array.from(voice().options).map((o) => [o.value, o.textContent])).toEqual([
+      ['', 'Default'],
+      ['am_michael', 'Michael · am_michael'],
+      ['kit', 'kit'],
+    ])
+    expect(voice().value).toBe('')
+    click(generate())
+    expect(onGenerate.mock.calls[0][0].some((l) => l.startsWith('Voice:'))).toBe(false)
+  })
+
+  it('a picked voice adds Voice: <id> right after Video style', () => {
+    const onGenerate = vi.fn<OnGenerate>()
+    mount(<GenerateComposer kind="video" voices={VOICES} onClose={vi.fn()} onGenerate={onGenerate} />)
+    pickVoice('am_michael')
+    expect(lines()).toBe('Video kind: Project demo · Video style: Auto · Voice: am_michael · Video length: 30 · Character: on')
+    click(generate())
+    expect(onGenerate.mock.calls[0][0]).toEqual([
+      'Video kind: Project demo',
+      'Video style: Auto',
+      'Voice: am_michael',
+      'Video length: 30',
+      'Character: on',
+    ])
+    pickVoice('')
+    expect(lines()).not.toContain('Voice:')
+  })
+
+  it('shows no Voice select on a page form', () => {
+    mount(<GenerateComposer kind="page" voices={VOICES} onClose={vi.fn()} onGenerate={vi.fn<OnGenerate>()} />)
+    expect(document.querySelector('[data-testid="press-voice-select"]')).toBeNull()
+  })
+})
+
 describe('GenerateComposer — video target', () => {
   it('keeps Generate disabled until a Blog post names its post; the target is required', () => {
     const onGenerate = vi.fn<OnGenerate>()

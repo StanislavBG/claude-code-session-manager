@@ -111,3 +111,19 @@ describe('macrosDispatchJob reviewStage', () => {
     expect('review' in parsed).toBe(false);
   });
 });
+
+describe('macrosDispatchJob voiceId', () => {
+  const good = { cwd: '/proj', macroId: 'tool-narrated', epicId: 'e1' };
+
+  test('a voice library id parses; omitted stays absent', () => {
+    expect(schemas.macrosDispatchJob.parse({ ...good, voiceId: 'am_michael' }).voiceId).toBe('am_michael');
+    expect(schemas.macrosDispatchJob.parse({ ...good, voiceId: 'narrator-2' }).voiceId).toBe('narrator-2');
+    expect('voiceId' in schemas.macrosDispatchJob.parse(good)).toBe(false);
+  });
+
+  test('a malformed voiceId fails', () => {
+    for (const voiceId of ['', 'Bad', '-x', 'a b', '../x', 'x'.repeat(65), 7, null]) {
+      expect(ok(schemas.macrosDispatchJob, { ...good, voiceId })).toBe(false);
+    }
+  });
+});

@@ -79,10 +79,10 @@ async function listLibraryMacros(deps) {
 }
 
 /**
- * runToolJob(deps, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review, reviewStage })
+ * runToolJob(deps, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review, reviewStage, voiceId })
  * `cwd` must already be validated. Returns dispatchMacroJob's result.
  */
-async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review, reviewStage } = {}) {
+async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, inputValues, effort, review, reviewStage, voiceId } = {}) {
   const dispatch = deps.dispatchMacroJob || realDispatch;
   const index = deps.readActiveIndex(cwd);
   const sessions = index && index.sessions ? index.sessions : {};
@@ -107,6 +107,7 @@ async function runToolJob(deps = {}, { cwd, macroId, epicId, extraInstructions, 
     if (inputValues !== undefined) args.inputValues = inputValues;
     if (review !== undefined) args.review = review;
     if (reviewStage !== undefined) args.reviewStage = reviewStage;
+    if (voiceId !== undefined) args.voiceId = voiceId;
     const dispatchDeps = {
       createPrd: deps.createPrd,
       listRows: async () => deps.loadJobs(),
@@ -178,6 +179,7 @@ function registerMacroJobIpc(ipcMain, deps = {}) {
       inputValues: payload.inputValues,
       effort: payload.effort,
       reviewStage: payload.reviewStage,
+      voiceId: payload.voiceId,
     });
   });
 

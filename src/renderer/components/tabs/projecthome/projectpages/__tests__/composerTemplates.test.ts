@@ -299,6 +299,20 @@ describe('videoPromptLines', () => {
     expect(videoPromptLines({ ...videoDefaults('blog'), target: '   ' })).toEqual(blog)
   })
 
+  it('adds a Voice line right after Video style when a voice is picked, and none for Default', () => {
+    expect(videoPromptLines({ ...videoDefaults('demo'), voice: 'am_michael' })).toEqual([
+      'Video kind: Project demo',
+      'Video style: Auto',
+      'Voice: am_michael',
+      'Video length: 30',
+      'Character: on',
+    ])
+    const plain = videoPromptLines(videoDefaults('demo'))
+    expect(videoPromptLines({ ...videoDefaults('demo'), voice: '' })).toEqual(plain)
+    expect(videoPromptLines({ ...videoDefaults('demo'), voice: '  ' })).toEqual(plain)
+    expect(plain.some((l) => l.startsWith('Voice:'))).toBe(false)
+  })
+
   it('appends the trimmed focus last, only when non-empty', () => {
     expect(videoPromptLines({ ...videoDefaults('whiteboard'), focus: ' Slow, calm pace ' })).toEqual([
       'Video kind: Project demo',

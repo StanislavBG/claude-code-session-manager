@@ -100,6 +100,11 @@ export interface VideoCfg {
   /** Review first — sent with the press as `reviewStage`, never as a prompt line. */
   review: boolean
   focus: string
+  /**
+   * A voice library id (`voices:list`) sent as a `Voice: <id>` line; absent or `''` = Default (the
+   * persona's voice, then the kit default), which sends no Voice line.
+   */
+  voice?: string
 }
 
 export const PAGE_TEMPLATES: readonly PageTemplate[] = [
@@ -340,6 +345,11 @@ export function pagePromptLines(tplId: string, cfg: PageCfg): string[] {
   return lines
 }
 
+/** The prompt line naming a picked library voice (agent tools; a job tool gets `voiceId` on its dispatch). */
+export function voiceLine(voiceId: string): string {
+  return `Voice: ${voiceId}`
+}
+
 /**
  * The video builder's prompt lines; a target is named only for a non-demo kind. Review first is never a
  * line (main strips every `Review:` line) — it travels only as the press's `reviewStage` field.
@@ -348,7 +358,10 @@ export function videoPromptLines(cfg: VideoCfg): string[] {
   const lines = [`Video kind: ${cfg.kind}`]
   const target = cfg.target.trim()
   if (cfg.kind !== 'Project demo' && target) lines.push(`Video target: ${target}`)
-  lines.push(`Video style: ${cfg.style}`, `Video length: ${cfg.length}`, `Character: ${cfg.mascot ? 'on' : 'off'}`)
+  lines.push(`Video style: ${cfg.style}`)
+  const voice = cfg.voice?.trim()
+  if (voice) lines.push(voiceLine(voice))
+  lines.push(`Video length: ${cfg.length}`, `Character: ${cfg.mascot ? 'on' : 'off'}`)
   const focus = cfg.focus.trim()
   if (focus) lines.push(focus)
   return lines

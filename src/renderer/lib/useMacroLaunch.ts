@@ -17,6 +17,7 @@
  *
  * A job press may ask for the review stage (`opts.reviewStage`, the Demo Video composer's Review first):
  * the dispatchJob payload then carries `reviewStage: true`; otherwise the field is omitted.
+ * A project Video job tool press may carry its picked voice (`opts.voiceId`), sent as dispatchJob `voiceId`.
  */
 import { useState } from 'react'
 import { usePromptSessions } from '../state/promptSessions'
@@ -39,9 +40,10 @@ export function useMacroLaunch(
     macro: Macro,
     extraInstructions?: string,
     inputValues?: Record<string, string>,
-    opts?: { reviewStage?: boolean },
+    opts?: { reviewStage?: boolean; voiceId?: string },
   ) => {
     const reviewStage = opts?.reviewStage === true
+    const voiceId = opts?.voiceId || undefined
     if (!activeTabCwd || launching) return
 
     // A project Video tool joins only its own Epic (stamped macroId); built-ins keep the tag + agent match.
@@ -125,6 +127,7 @@ export function useMacroLaunch(
             ...(effort ? { effort } : {}),
             inputValues: values,
             ...(reviewStage ? { reviewStage: true } : {}),
+            ...(voiceId ? { voiceId } : {}),
           })
           if (!res.ok) throw new Error(res.error)
         } else {
@@ -142,6 +145,7 @@ export function useMacroLaunch(
             ...(effort ? { effort } : {}),
             inputValues: values,
             ...(reviewStage ? { reviewStage: true } : {}),
+            ...(voiceId ? { voiceId } : {}),
           })
         }
         toast.success(`${macro.label} is building in the background`)

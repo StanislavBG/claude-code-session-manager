@@ -912,6 +912,112 @@ describe('VideosPane project Video tools', () => {
   })
 })
 
+describe('VideosPane Voice picker', () => {
+  const voicesList = vi.fn()
+  const VOICES = [
+    { id: 'am_michael', label: 'Michael' },
+    { id: 'narrator', label: 'Narrator' },
+  ]
+  const TOOL: Macro = {
+    ...DEMO,
+    id: 'burrow-blog',
+    label: 'Blog video',
+    agentName: 'burrow-video',
+    surface: 'project-video',
+    projects: ['/proj'],
+    prompt: 'Go.',
+    job: { estimateMinutes: 10 },
+  }
+  const VOICED: Macro = { ...TOOL, id: 'burrow-voiced', label: 'Voiced', voiceId: 'narrator' }
+  const AGENT_TOOL: Macro = { ...TOOL, id: 'burrow-chat', label: 'Chat video', job: undefined }
+
+  beforeEach(() => {
+    voicesList.mockReset().mockResolvedValue({ voices: VOICES, errors: [], lane: {} })
+    const api = (window as unknown as { api: Record<string, unknown> }).api
+    api.voices = { list: voicesList }
+  })
+
+  const voiceSelect = (macroId?: string) =>
+    document.querySelector<HTMLSelectElement>(
+      macroId ? `[data-testid="press-voice-select"][data-macro-id="${macroId}"]` : '[data-testid="press-voice-select"]:not([data-macro-id])',
+    )!
+  function pick(sel: HTMLSelectElement, value: string) {
+    act(() => {
+      sel.value = value
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+  async function mountVoices(over: Partial<VideosPaneProps>) {
+    mount(over)
+    await flush()
+    await flush()
+  }
+
+  it('lists voices:list ids with labels after Default, read once for the cwd', async () => {
+    await mountVoices({ tools: [TOOL] })
+    expect(voicesList).toHaveBeenCalledTimes(1)
+    expect(voicesList).toHaveBeenCalledWith({ cwd: '/proj' })
+    const sel = voiceSelect('burrow-blog')
+    expect(Array.from(sel.options).map((o) => [o.value, o.textContent])).toEqual([
+      ['', 'Default'],
+      ['am_michael', 'Michael · am_michael'],
+      ['narrator', 'Narrator · narrator'],
+    ])
+    expect(sel.value).toBe('')
+  })
+
+  it("preselects a tool's default voiceId and sends it as the job dispatch voiceId", async () => {
+    const onLaunch = vi.fn()
+    await mountVoices({ tools: [TOOL, VOICED], onLaunch })
+    expect(voiceSelect('burrow-voiced').value).toBe('narrator')
+    expect(voiceSelect('burrow-blog').value).toBe('')
+    click(tid('video-tool-burrow-voiced'))
+    expect(onLaunch).toHaveBeenCalledWith(VOICED, undefined, undefined, { voiceId: 'narrator' })
+  })
+
+  it('a picked voice on a job tool goes to the dispatch payload, never a prompt line; Default sends none', async () => {
+    const onLaunch = vi.fn()
+    await mountVoices({ tools: [TOOL, VOICED], onLaunch })
+    pick(voiceSelect('burrow-blog'), 'am_michael')
+    click(tid('video-tool-burrow-blog'))
+    expect(onLaunch).toHaveBeenLastCalledWith(TOOL, undefined, undefined, { voiceId: 'am_michael' })
+    pick(voiceSelect('burrow-voiced'), '')
+    click(tid('video-tool-burrow-voiced'))
+    expect(onLaunch).toHaveBeenLastCalledWith(VOICED, undefined, undefined)
+  })
+
+  it('a tool without a job gets a Voice line as its additional instructions', async () => {
+    const onLaunch = vi.fn()
+    await mountVoices({ tools: [AGENT_TOOL], onLaunch })
+    pick(voiceSelect('burrow-chat'), 'am_michael')
+    click(tid('video-tool-burrow-chat'))
+    expect(onLaunch).toHaveBeenCalledWith(AGENT_TOOL, 'Voice: am_michael', undefined)
+  })
+
+  it('the Demo Video composer adds a Voice line after Video style when picked, none for Default', async () => {
+    const onLaunch = vi.fn()
+    await mountVoices({ onLaunch })
+    click(tid('project-home-generate'))
+    pick(voiceSelect(), 'am_michael')
+    click(tid('composer-generate'))
+    expect(onLaunch).toHaveBeenLastCalledWith(
+      DEMO,
+      'Video kind: Project demo\nVideo style: Auto\nVoice: am_michael\nVideo length: 30\nCharacter: on',
+    )
+    click(tid('project-home-generate'))
+    expect(voiceSelect().value).toBe('')
+    click(tid('composer-generate'))
+    expect(onLaunch).toHaveBeenLastCalledWith(DEMO, DEMO_LINES)
+  })
+
+  it('a rejected voices:list toasts and leaves only Default', async () => {
+    voicesList.mockRejectedValue(new Error('boom'))
+    await mountVoices({ tools: [TOOL] })
+    expect(Array.from(voiceSelect('burrow-blog').options).map((o) => o.value)).toEqual([''])
+    expect(useToast.getState().toasts.some((t) => t.message.includes('Could not list voices: boom'))).toBe(true)
+  })
+})
+
 describe('VideosPane tool entries: review panel, badges and Regenerate', () => {
   const TOOL: Macro = {
     ...DEMO,

@@ -24,6 +24,7 @@ import {
   type VideoCfg,
   type VideoKind,
 } from './composerTemplates'
+import { VoiceSelect, type VoiceOption } from './VoiceSelect'
 
 /** What Regenerate rebuilds: the entry plus its pre-fill (`pageCfgFromEntry` / `videoCfgFromEntry`). */
 export interface ComposerRegen {
@@ -47,7 +48,15 @@ export interface GenerateComposerProps {
   onGenerate: (lines: string[], replaceEntryId?: string, opts?: { review: true }) => void
   /** The project persona's name: the Character toggle reads `Persona: <name>` and new forms start with it on. */
   personaName?: string
+  /**
+   * The voice library (`useVoiceOptions`) for the video form's Voice select (`press-voice-select`). A picked
+   * voice adds a `Voice: <id>` line after `Video style:`; Default (the persona's voice, then the kit
+   * default) adds none. Absent = only Default.
+   */
+  voices?: readonly VoiceOption[]
 }
+
+const NO_VOICES: readonly VoiceOption[] = []
 
 type Form = { kind: 'page'; tplId: string; cfg: PageCfg } | { kind: 'video'; tplId: string; cfg: VideoCfg }
 
@@ -149,7 +158,7 @@ function trapTab(e: KeyboardEvent, panel: HTMLElement | null) {
  * composer per open. A local overlay on `Z.dialog` rather than `ui/Modal`, which has no
  * 1040×710 panel; it keeps Modal's Escape, backdrop-click and focus behaviour.
  */
-export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerate, personaName }: GenerateComposerProps) {
+export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerate, personaName, voices = NO_VOICES }: GenerateComposerProps) {
   const persona = personaName?.trim() ?? ''
   const hasPersona = persona !== ''
   const [form, setForm] = useState<Form>(() => initialForm(kind, regen, initialTplId, hasPersona))
@@ -415,6 +424,10 @@ export function GenerateComposer({ kind, regen, initialTplId, onClose, onGenerat
                       })}
                     </div>
                   </div>
+                  <label className="flex flex-col gap-[7px] w-fit">
+                    <FieldLabel note="optional">Voice</FieldLabel>
+                    <VoiceSelect voices={voices} value={form.cfg.voice ?? ''} onChange={(voice) => setVideo({ voice })} />
+                  </label>
                   <div className="flex flex-wrap gap-7">
                     <Segmented
                       label="Length"

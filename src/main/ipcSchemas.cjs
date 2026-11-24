@@ -887,6 +887,8 @@ const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
 const macrosRemoveFromProject = MacroRemoveFromProjectSchema;
+// A voice library id: voiceLibrary's ID_RE (also macroJobDispatch's VOICE_ID_RE).
+const voiceLibraryId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
 // Background macro job (macroJobIpc.cjs): press a built-in macro or project Video tool as a scheduler PRD inside an existing Epic.
 const macrosDispatchJob = z.object({
   cwd: z.string().min(1).max(4096),
@@ -901,6 +903,9 @@ const macrosDispatchJob = z.object({
   effort: z.enum(/** @type {[string, ...string[]]} */ ([...PRD_EFFORT_LEVELS])).optional(),
   // A Demo Video press asking for the review stage before the final save.
   reviewStage: z.boolean().optional(),
+  // A project Video tool press's picked library voice; beats the tool's default voiceId.
+  // Omitted = the tool default, else the persona voice, else the kit default.
+  voiceId: voiceLibraryId.optional(),
 });
 const macrosJobStatus = z.object({ cwd: z.string().min(1).max(4096) });
 // Dashboard "Needs you" (lib/feedback-remote/needsYouIpc.cjs): list takes no payload; answer
@@ -1146,8 +1151,8 @@ const projectVideosReviewDecide = z.object({
 }).strict();
 const projectVideosReviewRetry = z.object({ cwd: z.string().min(1).max(4096), entryId }).strict();
 // Voices screen (project-pages/voicesIpc.cjs): renderer IPC only — the sole writer of
-// voice approvals and deletions. voiceId follows voiceLibrary's ID_RE; text is TEXT_MAX (300).
-const voiceLibraryId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+// voice approvals and deletions. voiceId follows voiceLibrary's ID_RE (voiceLibraryId, declared
+// above macrosDispatchJob); text is TEXT_MAX (300).
 const voicesList = z.object({ cwd: z.string().min(1).max(4096) }).strict();
 const voicesPreview = z.object({
   cwd: z.string().min(1).max(4096),

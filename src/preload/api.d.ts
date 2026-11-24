@@ -392,6 +392,9 @@ export interface MacroJobDispatchInput {
   /** A Demo Video press asking for the review stage: the job stops for a human review before the final save.
    *  Omitted or false = straight to the final save. */
   reviewStage?: boolean;
+  /** A project Video tool press's picked library voice (voiceLibrary id); beats the tool's default voiceId.
+   *  Omitted = the tool default, else the persona voice, else the kit default. */
+  voiceId?: string;
 }
 
 export type MacroJobDispatchResult =
@@ -454,6 +457,8 @@ export interface Macro {
   scriptStart?: boolean;
   /** Set on built-ins whose press builds in the background, and on every project Video tool. */
   job?: MacroJob;
+  /** A project Home / Video tool's default library voice (macroLibrary); its press preselects it. */
+  voiceId?: string;
 }
 
 /** Omit `id` to create; set it to update an existing macro. */

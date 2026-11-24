@@ -32,6 +32,12 @@
  * (`toolJobStatus`) queued / running disables it as `Building…`; a failed run shows its reason line
  * beside it until this window launches it again (`toolLaunches`).
  *
+ * Voice (`press-voice-select`, VoiceSelect, filled once per cwd from `voices:list`): each tool button has
+ * one, preselected with the tool's default `voiceId` (else Default); the Demo Video composer has one too.
+ * A job tool's press (and its Regenerate…) sends the pick as the dispatch's `voiceId`; Default sends none
+ * (main then uses the tool default, else the persona voice, else the kit default). A tool without a job
+ * gets a `Voice: <id>` line as its additional instructions instead, as Demo Video does.
+ *
  * Review step (VideoReviewPanel, above the library): every tool entry waiting on the human gets a
  * `Waiting for your OK` card; the panel reloads its list when any tool's job status changes and
  * reports it back here. Each tool entry — a review record whose dispatch names a macro — carries a
@@ -52,7 +58,7 @@
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { VideoPlayer } from './VideoPlayer'
 import { createdLabel, fitInstructions } from './PagesPane'
@@ -61,12 +67,14 @@ import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
 import { LibraryEmptyState } from './LibraryEmptyState'
 import { VideoReviewPanel } from './VideoReviewPanel'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
+import { VoiceSelect, useVoiceOptions } from './VoiceSelect'
 import {
   VIDEO_STYLES,
   VIDEO_TEMPLATES,
   videoCfgFromEntry,
   videoDefaults,
   videoPromptLines,
+  voiceLine,
   type VideoStyle,
 } from './composerTemplates'
 import {
@@ -83,6 +91,7 @@ import {
 } from './BuildingPanel'
 import type { ProjectVideoEntry } from '../../../../lib/projectPages/useProjectPagesOutput'
 import type { Macro, MacroJobStatus, ProjectVideoMeta, ProjectVideoOutcome, VideoReview } from '../../../../../preload/api'
+import type { LaunchFn } from './ToolsPane'
 
 const GENERATE_CLASS =
   'flex h-[38px] flex-none items-center justify-center gap-2 rounded-lg bg-accent text-[13px] font-semibold text-bg-hi cursor-pointer enabled:hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
@@ -444,7 +453,7 @@ export interface VideosPaneProps {
   /** `builtin-demo-video`; without it Generate video and Regenerate… stay disabled. */
   macro: Macro | undefined
   launching: string | null
-  onLaunch: (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => void
+  onLaunch: LaunchFn
   /** The video macro's job. Queued / running disables both buttons and shows the building row; failed shows its reason. */
   jobStatus?: MacroJobStatus
   onOpenSession?: (epicId: string) => void
@@ -480,6 +489,7 @@ function VideoToolButton({
   launch,
   onPress,
   onOpenSession,
+  voiceSelect,
 }: {
   tool: Macro
   launching: string | null
@@ -487,6 +497,8 @@ function VideoToolButton({
   launch: BuildLaunch | undefined
   onPress: (tool: Macro) => void
   onOpenSession?: (epicId: string) => void
+  /** The tool's Voice select (VoiceSelect). */
+  voiceSelect: ReactNode
 }) {
   const building = isBuilding(status)
   const failed = failureShown(status, launch) ? status : undefined
@@ -501,6 +513,7 @@ function VideoToolButton({
       >
         {building ? 'Building…' : launching === tool.id ? 'Starting…' : tool.label}
       </button>
+      {voiceSelect}
       {failed && (
         <span data-testid={`video-tool-status-${tool.id}`} className="min-w-0">
           <JobStatusLine status={failed} onOpenSession={onOpenSession} />
@@ -532,6 +545,10 @@ export function VideosPane({
   const [ownId, setOwnId] = useState<string | null>(null)
   // The tool whose inputs form is open.
   const [pendingTool, setPendingTool] = useState<Macro | null>(null)
+  // Each tool's Voice pick by macro id ('' = Default); unset = the tool's own default voiceId.
+  const [toolVoices, setToolVoices] = useState<Record<string, string>>({})
+  const voices = useVoiceOptions(cwd)
+  const toolVoice = (tool: Macro): string => toolVoices[tool.id] ?? tool.voiceId ?? ''
   // Open composer: `{}` = Generate video, `{ tplId }` = an empty-state card, `{ regen }` = Regenerate…
   // (mounted per open — it reads its props once).
   const [composer, setComposer] = useState<{ regen?: ComposerRegen; tplId?: string } | null>(null)
@@ -613,7 +630,7 @@ export function VideosPane({
         replaceEntryId: entry.id,
         at: Date.now(),
       })
-      onLaunch(named.tool, extra, inputValues)
+      pressTool(named.tool, extra, inputValues)
       return
     }
     const { tplId, cfg } = entry.meta
@@ -630,6 +647,7 @@ export function VideosPane({
       onClose={() => setComposer(null)}
       onGenerate={launch}
       personaName={personaName}
+      voices={voices}
     />
   )
   const generateButton = (
@@ -647,10 +665,17 @@ export function VideosPane({
     </button>
   )
 
+  /** A tool press with its Voice pick: a job tool's `voiceId`, else a `Voice: <id>` line before `extra`. */
+  function pressTool(tool: Macro, extra?: string, values?: Record<string, string>) {
+    const voiceId = toolVoice(tool)
+    if (!voiceId) onLaunch(tool, extra, values)
+    else if (tool.job) onLaunch(tool, extra, values, { voiceId })
+    else onLaunch(tool, [voiceLine(voiceId), extra].filter(Boolean).join('\n'), values)
+  }
   const launchTool = (tool: Macro, values?: Record<string, string>) => {
     setPendingTool(null)
     onLaunched?.(tool.id, { title: tool.label, lines: [], at: Date.now() })
-    onLaunch(tool, undefined, values)
+    pressTool(tool, undefined, values)
   }
   const toolsNode = tools && tools.length > 0 && (
     <div data-testid="video-tools" className="flex flex-none flex-col gap-1.5">
@@ -663,6 +688,15 @@ export function VideosPane({
           launch={toolLaunches?.[t.id]}
           onOpenSession={onOpenSession}
           onPress={(m) => (m.inputs && m.inputs.length > 0 ? setPendingTool(m) : launchTool(m))}
+          voiceSelect={
+            <VoiceSelect
+              voices={voices}
+              value={toolVoice(t)}
+              onChange={(voiceId) => setToolVoices((v) => ({ ...v, [t.id]: voiceId }))}
+              label={`Voice for ${t.label}`}
+              macroId={t.id}
+            />
+          }
         />
       ))}
       {pendingTool && (

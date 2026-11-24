@@ -15,7 +15,8 @@ function fakePw(log = {}) {
   return { chromium: { launch: async () => ({ newPage: async () => page, close: async () => { log.closed = true; } }) } };
 }
 // Playwright fake with a recordVideo-capable newContext; close() flushes a fake .webm into recordVideo.dir.
-function fakeRecPw(log = {}, { failContext = false } = {}) {
+// `clock.t` (ms) advances on goto by `clock.gotoMs` and on every waitForTimeout by its ms.
+function fakeRecPw(log = {}, { failContext = false, clock = { t: 0 } } = {}) {
   const base = fakePw(log);
   const launch = base.chromium.launch;
   base.chromium.launch = async () => {
@@ -26,13 +27,13 @@ function fakeRecPw(log = {}, { failContext = false } = {}) {
       const webm = path.join(opts.recordVideo.dir, 'rec.webm');
       const page = {
         setDefaultTimeout() {},
-        async goto(u) { (log.clipGotos ||= []).push(u); },
-        async waitForTimeout(ms) { (log.waits ||= []).push(ms); },
+        async goto(u) { (log.clipGotos ||= []).push(u); clock.t += clock.gotoMs || 0; },
+        async waitForTimeout(ms) { (log.waits ||= []).push(ms); clock.t += ms; },
         async evaluate(_fn, dy) { (log.scrolls ||= []).push(dy); },
         locator() { return { first: () => ({ boundingBox: async () => null, scrollIntoViewIfNeeded: async () => {} }) }; },
         video: () => ({ path: async () => webm }),
       };
-      return { newPage: async () => page, close: async () => { if (!fs.existsSync(webm)) fs.writeFileSync(webm, 'webm'); log.ctxClosed = true; } };
+      return { newPage: async () => page, close: async () => { if (!fs.existsSync(webm)) fs.writeFileSync(webm, 'webm'); log.ctxClosed = true; log.ctxCloses = (log.ctxCloses || 0) + 1; } };
     };
     return b;
   };
@@ -115,6 +116,37 @@ describe('capture', () => {
     const log = {};
     const r = await capture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 60 }], loadPlaywright: () => fakeRecPw(log), ffmpeg: fakeFfmpeg([], () => 10) });
     expect(r.items[0].durationS).toBe(6);
+  });
+  it('defaults a missing or non-number durationS to 4 s and clamps every value to 2-6 s', async () => {
+    const shots = [undefined, null, '3', NaN, 1, 60, 3.5].map((d) => ({ kind: 'clip', durationS: d }));
+    const calls = [];
+    const r = await capture({ url: 'http://x', outDir: tmp(), shots: shots.slice(0, 6), loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg(calls, () => 10) });
+    expect(r.items.map((i) => i.durationS)).toEqual([4, 4, 4, 4, 2, 6]);
+    const r2 = await capture({ url: 'http://x', outDir: tmp(), shots: [shots[6]], loadPlaywright: () => fakeRecPw(), ffmpeg: fakeFfmpeg(calls, () => 10) });
+    expect(r2.items[0].durationS).toBe(3.5);
+    const tx = calls.filter((a) => !a.includes('-version'));
+    expect(tx.map((a) => argOf(a, '-t'))).toEqual(['4.000', '4.000', '4.000', '4.000', '2.000', '6.000', '3.500']);
+  });
+  it('trims the measured load lead-in with an input seek and caps the output at durationS', async () => {
+    const log = {};
+    const clock = { t: 1000, gotoMs: 1200 };
+    const calls = [];
+    const r = await capture({
+      url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip', durationS: 3, scroll: 600 }],
+      loadPlaywright: () => fakeRecPw(log, { clock }), ffmpeg: fakeFfmpeg(calls, () => 10), now: () => clock.t,
+    });
+    expect(r.items[0].durationS).toBe(3);
+    const a = calls.filter((x) => !x.includes('-version'))[0];
+    // lead-in = goto (1200 ms) + default settle wait (500 ms), measured from context creation
+    expect(argOf(a, '-ss')).toBe('1.700');
+    expect(a.indexOf('-ss')).toBeLessThan(a.indexOf('-i')); // input seek, before -i
+    expect(argOf(a, '-t')).toBe('3.000');
+    expect(a.indexOf('-t')).toBeGreaterThan(a.indexOf('-i'));
+  });
+  it('closes the recording context exactly once', async () => {
+    const log = {};
+    await capture({ url: 'http://x', outDir: tmp(), shots: [{ kind: 'clip' }], loadPlaywright: () => fakeRecPw(log), ffmpeg: fakeFfmpeg([], () => 10) });
+    expect(log.ctxCloses).toBe(1);
   });
   it('steps width, fps and quality down until the clip fits the budget', async () => {
     const calls = [];

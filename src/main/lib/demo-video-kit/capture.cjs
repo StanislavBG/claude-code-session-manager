@@ -50,20 +50,35 @@ function ffmpegAvailable(run) {
   } catch { return false; }
 }
 
-function clipArgs(input, output, { width, fps, crf }) {
-  return ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', input, '-an',
+/** Monotonic milliseconds (unaffected by wall-clock changes). */
+function monoNow() {
+  return Number(process.hrtime.bigint()) / 1e6;
+}
+
+/** Seconds as an ffmpeg time string, millisecond precision. */
+function secs(s) {
+  return (Math.max(0, Number(s) || 0)).toFixed(3);
+}
+
+/**
+ * ffmpeg args for one ladder step. `startS` is an input seek (-ss before -i, accurate when
+ * transcoding) that skips the recording's load lead-in; `durationS` caps the output with -t.
+ */
+function clipArgs(input, output, { width, fps, crf, startS, durationS }) {
+  const trim = durationS ? ['-ss', secs(startS), '-i', input, '-t', secs(durationS)] : ['-i', input];
+  return ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', ...trim, '-an',
     '-vf', `fps=${fps},scale=${width}:-2:flags=lanczos`,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
     '-movflags', '+faststart', output];
 }
 
 /** Transcode a recorded clip, stepping width/fps/quality down until it fits; {buf} or {reason}. */
-function transcodeToBudget(run, input, outFile, maxWidth, budget) {
+function transcodeToBudget(run, input, outFile, maxWidth, budget, trim = {}) {
   let lastSize = null;
   for (const step of CLIP_STEPS) {
     const width = Math.max(2, Math.min(step.width, maxWidth) & ~1);
     let r;
-    try { r = run(clipArgs(input, outFile, { ...step, width })); } catch (e) { return { reason: `transcode-failed: ${e.message}` }; }
+    try { r = run(clipArgs(input, outFile, { ...step, width, ...trim })); } catch (e) { return { reason: `transcode-failed: ${e.message}` }; }
     const fail = ffmpegFailure(r);
     if (fail) return { reason: `transcode-failed: ${fail}` };
     let buf;
@@ -75,9 +90,10 @@ function transcodeToBudget(run, input, outFile, maxWidth, budget) {
   return { reason: `over-budget: smallest ${lastSize} bytes > ${budget}` };
 }
 
+/** A clip's length in seconds: 4 when durationS is missing or not a number, else clamped to 2-6. */
 function clipDuration(shot) {
-  const d = Number(shot.durationS);
-  if (!Number.isFinite(d)) return CLIP_DEFAULT_S;
+  const d = shot.durationS;
+  if (typeof d !== 'number' || !Number.isFinite(d)) return CLIP_DEFAULT_S;
   return Math.max(CLIP_MIN_S, Math.min(CLIP_MAX_S, d));
 }
 
@@ -107,16 +123,24 @@ function scrollPx(shot) {
   return 0;
 }
 
-/** Default clip path: fresh recordVideo context, then ffmpeg to a budgeted MP4. {buf, focus} or {reason}. */
-async function recordClip({ browser, url, shot, timeout, outDir, outFile, run }) {
+/**
+ * Default clip path: fresh recordVideo context, then ffmpeg to a budgeted MP4. {buf, focus} or {reason}.
+ * recordVideo starts at context creation, before navigation and the settle wait, so the time from
+ * then to the start of the scripted scroll is measured and trimmed off: the clip starts on the
+ * settled page and lasts exactly durationS. The context is closed once (the close flushes the .webm).
+ */
+async function recordClip({ browser, url, shot, timeout, outDir, outFile, run, now = monoNow }) {
   const viewport = shotViewport(shot);
   const durationS = clipDuration(shot);
   const tmpDir = fs.mkdtempSync(path.join(outDir, '.clip-'));
   try {
     let webm;
     let focus;
+    let leadInS = 0;
     try {
       const ctx = await browser.newContext({ viewport, recordVideo: { dir: tmpDir, size: viewport } });
+      const recStart = now();
+      let closed = false;
       try {
         const page = await ctx.newPage();
         page.setDefaultTimeout(timeout);
@@ -125,20 +149,22 @@ async function recordClip({ browser, url, shot, timeout, outDir, outFile, run })
         if (shot.selector) {
           try { await page.locator(shot.selector).first().scrollIntoViewIfNeeded({ timeout }); } catch { /* keep going */ }
         }
+        leadInS = Math.max(0, (now() - recStart) / 1000);
         await scrollOver(page, scrollPx(shot), durationS * 1000);
         focus = await focusFor(page, shot, viewport);
         const video = page.video && page.video();
         if (!video) throw new Error('recordVideo produced no video');
+        closed = true;
         await ctx.close(); // flushes the .webm
         webm = await video.path();
       } finally {
-        await ctx.close().catch(() => {});
+        if (!closed) await ctx.close().catch(() => {});
       }
       if (!webm || !fs.existsSync(webm)) throw new Error('recorded video file missing');
     } catch (e) {
       return { reason: `record-failed: ${e && e.message ? e.message : String(e)}` };
     }
-    const out = transcodeToBudget(run, webm, outFile, viewport.width, CLIP_BUDGET);
+    const out = transcodeToBudget(run, webm, outFile, viewport.width, CLIP_BUDGET, { startS: leadInS, durationS });
     return out.buf ? { buf: out.buf, focus, durationS } : out;
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -172,7 +198,13 @@ async function focusFor(page, shot, vp = VIEWPORT) {
   return { x: Math.round(vp.width * 0.25), y: Math.round(vp.height * 0.25), w: Math.round(vp.width * 0.5), h: Math.round(vp.height * 0.5) };
 }
 
-async function capture({ url, outDir, shots, max = MAX_SHOTS, loadPlaywright, encode, navTimeoutMs, ffmpeg } = {}) {
+/**
+ * Capture up to 6 shots of `url`. A shot is `{ kind: 'image' | 'clip', selector?, focusSelector?,
+ * scroll?, waitMs?, viewport?, durationS? }`. A clip's durationS defaults to 4 s when missing or not
+ * a number and is clamped to 2-6 s; the returned clip starts on the settled page and lasts durationS.
+ * `now` (monotonic ms) is injectable for tests. Returns { items, dropped } or { skipped }.
+ */
+async function capture({ url, outDir, shots, max = MAX_SHOTS, loadPlaywright, encode, navTimeoutMs, ffmpeg, now } = {}) {
   if (!url || typeof url !== 'string') return { skipped: 'no-url' };
   const pw = (loadPlaywright || (() => defaultLoader()))();
   const resolved = pw && typeof pw.then === 'function' ? await pw : pw;
@@ -202,7 +234,7 @@ async function capture({ url, outDir, shots, max = MAX_SHOTS, loadPlaywright, en
         if (hasFfmpeg === null) hasFfmpeg = ffmpegAvailable(run);
         if (!hasFfmpeg) { dropped.push({ index: i, kind, reason: 'no-ffmpeg' }); continue; }
         const file = path.join(outDir, `shot-${num}.mp4`);
-        const r = await recordClip({ browser, url, shot, timeout, outDir, outFile: file, run });
+        const r = await recordClip({ browser, url, shot, timeout, outDir, outFile: file, run, now });
         if (!r.buf) { dropped.push({ index: i, kind, reason: r.reason }); continue; }
         items.push({ file, kind, mime: 'video/mp4', bytes: r.buf.length, durationS: r.durationS, focus: r.focus });
         continue;

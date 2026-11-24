@@ -46,8 +46,10 @@ proof moments. Never pad with invented claims; use longer holds instead.
 - Show the product only through real captures of the live product, made with capture.cjs. Never
   a drawn fake screen, a mock-up, or a hand-built imitation of the interface.
 - Ask capture.cjs for real clips for the reveal and for each proof moment: shots of
-  `{ kind: 'clip', durationS: 4 }`, with `durationS` from 2 to 6 (capture.cjs clamps to that
-  range). Use image shots for the rest, within the 6-shot limit.
+  `{ kind: 'clip', durationS: 4 }`, with `durationS` from 2 to 6. Use image shots for the rest,
+  within the 6-shot limit.
+- A clip's `durationS` defaults to 4 s when missing or not a number, and capture.cjs clamps every
+  value to 2-6 s; the clip starts on the settled page (the load lead-in is trimmed off).
 - A clip comes back as an `items` entry with `kind: 'clip'`, `mime: 'video/mp4'`, `file`, `bytes`,
   `durationS` and `focus`. A clip capture.cjs could not make is listed in `dropped` with its
   `reason`. For every dropped clip, use a screenshot of that moment with camera moves instead: a

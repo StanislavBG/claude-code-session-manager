@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 27 (voiceLane.cjs reuses voiceLibrary voicesHome)', () => {
-  expect(KIT_VERSION).toBe('27');
+test('KIT_VERSION is bumped to 28 (capture.cjs trims the clip load lead-in)', () => {
+  expect(KIT_VERSION).toBe('28');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

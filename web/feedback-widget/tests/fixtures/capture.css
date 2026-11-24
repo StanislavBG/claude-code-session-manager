@@ -1,0 +1,12 @@
+html, body { margin: 0; padding: 0; background: #ffffff; }
+#spacer { height: 600px; background: #ffffff; }
+#content { padding: 20px; }
+#pw { display: block; width: 240px; height: 40px; margin: 10px 0; background: #ffffff; border: 0; }
+#masked { width: 300px; height: 60px; background: #ffffff; color: #000000; }
+#plain { width: 300px; height: 40px; background: #3366cc; }
+#fixedbar { position: fixed; left: 0; top: 0; width: 200px; height: 30px; background: #cc2200; }
+#tall { height: 2000px; }
+#feedback-widget-host {
+  position: fixed; right: 20px; bottom: 20px; width: 120px; height: 120px;
+  background: #00ff00; z-index: 2147483000;
+}

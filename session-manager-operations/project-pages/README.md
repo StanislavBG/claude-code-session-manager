@@ -251,13 +251,13 @@ the json or its sounds is `character.json invalid: <reason>`.
 
 Mixing (`mix` in `demo-video-kit/sound.cjs`, given `projectRoot`): a cue name is looked up in the
 built-in effects first, then the persona's `sounds.sfx`. `bed` names a built-in style or a persona
-bed (absent = the style's built-in bed). A file bed is looped to length with the built-in 1 s
-fades; a command bed runs its argv (placeholders `{name}`, `{lengthS}`, `{seed}`, `{out}`; no
-shell, cwd the project root, 300 s limit), must write at least `lengthS` - 0.05 s of WAV (a
-shorter tail inside that tolerance is padded with silence), and is used as rendered (cut to length, no fades added). Project sounds keep their own level and get the
-built-in gains — effects -10 dB, beds -16 dB ducked 4 dB under speech; the built-in effects and
-beds peak at 0.7 and 0.8 before those gains. Unknown names, missing or bad WAVs and failing
-commands fail the run; there is no fallback sound.
+bed (absent = the style's built-in bed). A file bed is looped to length with the built-in 1 s fades;
+a command bed runs its argv (placeholders `{name}`, `{lengthS}`, `{seed}`, `{out}`; no shell, cwd
+the project root, 300 s limit), must write at least `lengthS` - 0.05 s of WAV (a shorter tail inside
+that tolerance is padded with silence), and is used as rendered (cut to length, no fades added).
+Project sounds keep their own level and get the built-in gains — effects -10 dB, beds -16 dB ducked
+4 dB under speech; the built-in effects and beds peak at 0.7 and 0.8 before those gains. Unknown
+names, missing or bad WAVs and failing commands fail the run; there is no fallback sound.
 `listLibrary` returns `persona: {name} | null`. A saved persona hosts every Demo Video unless the
 press turns Character off. `speakLines` takes lines of `{text, out, speaker?}`: each line is spoken
 in its `speaker`'s voice (the host's when absent), a cast member without a voice never speaks,

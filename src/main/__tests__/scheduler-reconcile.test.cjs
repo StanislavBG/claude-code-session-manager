@@ -553,10 +553,20 @@ describe("quarantine", () => {
       fs.writeFileSync(path.join(a.prdsDir, '9111-fresh.md'), prd(a.cwd), 'utf8');
       fs.writeFileSync(path.join(b.prdsDir, '9112-nosrc.md'), prd(b.cwd), 'utf8');
       fs.writeFileSync(path.join(b.stateDir, 'queue.json'), JSON.stringify({ jobs: [] }), 'utf8');
+      // prdParser.listPrdFiles keeps ONE dir-mtime cache shared by every dir
+      // it scans, and both prds/ dirs above get the same coarse mtime tick.
+      // Under load the Promise.all scan order varied, so b's listing could be
+      // served a's cached files and 9112 never minted. Pin distinct mtimes
+      // (far from any real "now") so the cache can never alias them.
+      fs.utimesSync(a.prdsDir, 1_000_000_001, 1_000_000_001);
+      fs.utimesSync(b.prdsDir, 1_000_000_002, 1_000_000_002);
       queueStore.bustCwdCache();
       const s1 = { config: {}, jobs: [], invalidJobs: [], paused: null, sourceCwds: [] };
       await scheduler.reconcile(s1);
       expect(s1.jobs.find((j) => j.slug === '9111-fresh')?.status).toBe('pending');
+      // Worst-case ordering, every run: a's listing is the cached entry when
+      // the second pass scans b.
+      await require('../scheduler/prdParser.cjs').listPrdFiles(a.prdsDir);
       queueStore.bustCwdCache();
       const s2 = { config: {}, jobs: [], invalidJobs: [], paused: null };
       await scheduler.reconcile(s2);

@@ -25,6 +25,22 @@
  *   A req/res 'close' before the reply aborts the wait or the run
  *   ('caller_gone'); the route disables the socket timeout (runs are long).
  *
+ *   Stream mode (body stream: true): every refusal before the ledger start
+ *   line keeps its status + JSON body. After the start line the route answers
+ *   200 application/x-ndjson, one JSON object per line:
+ *     {type:'sm_task_started', taskId, model, effort, sessionId, startedAt}
+ *       — written before the slot wait;
+ *     {type:'sm_task_running', slotWaitMs} — once the slot is granted;
+ *     each child stdout line as it arrives: as-is when it parses as a JSON
+ *       object, else {type:'sm_task_stdout', text};
+ *     {type:'sm_task_result', ...} — last: the non-stream 200 reply plus
+ *       droppedLines, or the error object the JSON reply would carry
+ *       (e.g. ok:false, error:'slot_timeout', taskId, slotWaitMs).
+ *   A 'close' before the result line still aborts the wait or the run
+ *   (caller_gone). While res.writableLength exceeds 8 MiB, output lines are
+ *   skipped and counted in droppedLines, so a caller that stops reading
+ *   cannot grow memory. The stream never carries stderr, env or argv.
+ *
  *   GET /admin/tasks?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=
  *     → { ok, tasks, total, hasMore } from taskLedger.listTasks. Each task has
  *     exactly TASK_FIELDS (no prompt/output text). Works whatever the switch.
@@ -137,7 +153,12 @@ const bodySchema = z.object({
     attempt: z.number().int().min(0).optional(),
   }).strict().default({}),
   runtime: runtimeSchema.default({ outputFormat: 'json' }),
+  // true → 200 application/x-ndjson after the ledger start line (see the header).
+  stream: z.boolean().optional(),
 }).strict();
+
+/** Past this many unsent bytes in the response buffer, stream-mode output lines are dropped (and counted). */
+const MAX_STREAM_BUFFER_BYTES = 8 * 1024 * 1024;
 
 /** Outcome statuses an imported record may carry: the ledger's end statuses (taskRun + route). */
 const IMPORT_STATUSES = /** @type {const} */ ([
@@ -329,10 +350,19 @@ function registerAdminRoute(adminHttp, deps = {}) {
     try { if (typeof req.setTimeout === 'function') req.setTimeout(0); } catch { /* */ }
 
     let replied = false;
+    // Stream mode: set once the 200 NDJSON head is written (after the ledger start line).
+    let streaming = false;
+    const canWrite = () => !(res.writableEnded || res.destroyed);
+    const writeLine = (/** @type {any} */ obj) => { if (canWrite()) res.write(JSON.stringify(obj) + '\n'); };
     const reply = (/** @type {number} */ status, /** @type {any} */ obj) => {
       if (replied) return;
       replied = true;
-      if (res.writableEnded || res.destroyed) return;
+      if (!canWrite()) return;
+      if (streaming) {
+        writeLine({ type: 'sm_task_result', ...obj });
+        res.end();
+        return;
+      }
       sendJson(res, status, obj);
     };
 
@@ -456,7 +486,13 @@ function registerAdminRoute(adminHttp, deps = {}) {
         prompt: input.prompt,
       });
 
-      const end = (/** @type {Record<string, any>} */ row) => ledger().appendTaskEnd(cwd, {
+      if (input.stream === true && canWrite()) {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' });
+        streaming = true;
+        writeLine({ type: 'sm_task_started', taskId, model, effort, sessionId, startedAt });
+      }
+
+      const end =(/** @type {Record<string, any>} */ row) => ledger().appendTaskEnd(cwd, {
         taskId,
         startedAt,
         endedAt: new Date(now()).toISOString(),
@@ -473,8 +509,9 @@ function registerAdminRoute(adminHttp, deps = {}) {
         token = await slots().waitForSlot(`task:${taskId}`, { lane, timeoutMs: input.slotWaitSec * 1000, signal: ac.signal });
       } catch (e) {
         const code = (e && /** @type {any} */ (e).code) || 'slot_error';
-        await end({ status: code, slotWaitMs: now() - waitStart });
-        reply(code === 'too_many_waiting' ? 429 : 500, { ok: false, error: code, taskId });
+        const errWaitMs = now() - waitStart;
+        await end({ status: code, slotWaitMs: errWaitMs });
+        reply(code === 'too_many_waiting' ? 429 : 500, streaming ? { ok: false, error: code, taskId, slotWaitMs: errWaitMs } : { ok: false, error: code, taskId });
         return;
       }
       const slotWaitMs = now() - waitStart;
@@ -483,6 +520,24 @@ function registerAdminRoute(adminHttp, deps = {}) {
         await end({ status, slotWaitMs });
         reply(503, { ok: false, error: status, taskId, slotWaitMs });
         return;
+      }
+
+      let droppedLines = 0;
+      /** @type {((line: string) => void) | undefined} */
+      let onStdoutLine;
+      if (streaming) {
+        writeLine({ type: 'sm_task_running', slotWaitMs });
+        onStdoutLine = (line) => {
+          if (!canWrite()) return;
+          if ((res.writableLength || 0) > MAX_STREAM_BUFFER_BYTES) { droppedLines += 1; return; }
+          let isObject = false;
+          try {
+            const v = JSON.parse(line);
+            isObject = v !== null && typeof v === 'object' && !Array.isArray(v);
+          } catch { /* not JSON → wrapped */ }
+          if (isObject) res.write(line + '\n');
+          else writeLine({ type: 'sm_task_stdout', text: line });
+        };
       }
 
       let run;
@@ -495,6 +550,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
           timeoutMs: input.timeoutSec * 1000,
           signal: ac.signal,
           onSpawn: (/** @type {number} */ pid) => { try { slots().stampPid(token, pid); } catch { /* */ } },
+          ...(onStdoutLine ? { onStdoutLine } : {}),
         });
       } finally {
         try { slots().release(token); } catch { /* */ }
@@ -520,7 +576,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       });
 
       const { textStdoutFor } = taskRun();
-      reply(200, {
+      const result = {
         ok: true,
         taskId,
         status: run.status,
@@ -536,7 +592,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
         effort,
         sessionId: finalSessionId,
         quota: run.quota,
-      });
+      };
+      reply(200, streaming ? { ...result, droppedLines } : result);
     } finally {
       if (sessionId && busySessions.get(sessionId) === taskId) busySessions.delete(sessionId);
       req.removeListener('close', onClose);

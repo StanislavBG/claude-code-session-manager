@@ -36,8 +36,14 @@ function fakeRes() {
   res.writableEnded = false;
   res.destroyed = false;
   res.setTimeout = () => {};
-  res.writeHead = (s) => { res.status = s; };
-  res.end = (b) => { res.body = JSON.parse(b); res.writableEnded = true; };
+  res.headers = null;
+  res.writableLength = 0;
+  res.chunks = [];
+  res.writeHead = (s, h) => { res.status = s; res.headers = h || null; };
+  res.write = (chunk) => { res.chunks.push(String(chunk)); return true; };
+  res.end = (b) => { if (b !== undefined) res.body = JSON.parse(b); res.writableEnded = true; };
+  /** Every NDJSON line written with write(), parsed. */
+  res.lines = () => res.chunks.join('').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   return res;
 }
 
@@ -319,6 +325,161 @@ describe('POST /admin/tasks', () => {
     await p;
     expect(s.calls.runs).toHaveLength(0);
     expect(s.calls.ends[0].status).toBe('caller_gone');
+  });
+});
+
+describe('POST /admin/tasks stream:true', () => {
+  const sbase = (over = {}) => base({ stream: true, ...over });
+
+  test('without stream (or stream:false) the reply is plain JSON', async () => {
+    const s = setup();
+    const res = await s.call(base({ stream: false }));
+    expect(res.status).toBe(200);
+    expect(res.chunks).toHaveLength(0);
+    expect(res.body).toMatchObject({ ok: true, taskId: 'task-1' });
+    expect(res.body).not.toHaveProperty('droppedLines');
+  });
+
+  test('400 when stream is not a boolean', async () => {
+    const s = setup();
+    const res = await s.call(base({ stream: 'yes' }));
+    expect(res.status).toBe(400);
+  });
+
+  test('refusals before the start line keep their status and JSON body (403, 404)', async () => {
+    let s = setup({ taskSwitch: { isTaskSwitchOn: () => false } });
+    let res = await s.call(sbase());
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ ok: false, error: 'tasks_disabled' });
+    expect(res.chunks).toHaveLength(0);
+    s = setup({ resolveInfo: async () => ({ personaFound: false }) });
+    res = await s.call(sbase());
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ ok: false, error: 'unknown_agent' });
+    expect(res.chunks).toHaveLength(0);
+  });
+
+  test('started line is written before the slot is granted; then running, stdout lines in order, result', async () => {
+    let grant;
+    const s = setup({
+      sessionSlots: {
+        waitForSlot: () => new Promise((r) => { grant = r; }),
+        stampPid: () => {}, release: () => {},
+      },
+      runTask: async (o) => {
+        o.onStdoutLine('{"type":"system","subtype":"init"}');
+        o.onStdoutLine('plain text');
+        o.onStdoutLine('[1,2]');
+        o.onStdoutLine('{"type":"assistant","message":{}}');
+        return okRun();
+      },
+    });
+    const res = fakeRes();
+    const p = s.call(null, { req: fakeReq(sbase()), res });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(res.status).toBe(200);
+    expect(res.headers['Content-Type']).toBe('application/x-ndjson');
+    expect(res.writableEnded).toBe(false);
+    const first = res.lines();
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ type: 'sm_task_started', taskId: 'task-1', model: 'claude-haiku-4-5', effort: 'low', sessionId: null });
+    expect(typeof first[0].startedAt).toBe('string');
+    expect(Object.keys(first[0]).sort()).toEqual(['effort', 'model', 'sessionId', 'startedAt', 'taskId', 'type']);
+    grant('tok');
+    await p;
+    const lines = res.lines();
+    expect(lines.map((l) => l.type)).toEqual(['sm_task_started', 'sm_task_running', 'system', 'sm_task_stdout', 'sm_task_stdout', 'assistant', 'sm_task_result']);
+    expect(typeof lines[1].slotWaitMs).toBe('number');
+    expect(lines[2]).toEqual({ type: 'system', subtype: 'init' });
+    expect(lines[3]).toEqual({ type: 'sm_task_stdout', text: 'plain text' });
+    expect(lines[4]).toEqual({ type: 'sm_task_stdout', text: '[1,2]' });
+    expect(res.writableEnded).toBe(true);
+    expect(res.body).toBe(null);
+
+    // The result line = the non-stream 200 reply's keys + droppedLines.
+    const plain = await setup().call(base());
+    const result = lines[6];
+    const { type, droppedLines, ...rest } = result;
+    expect(droppedLines).toBe(0);
+    expect(Object.keys(rest).sort()).toEqual(Object.keys(plain.body).sort());
+    expect(rest).toMatchObject({ ok: true, taskId: 'task-1', status: 'ok', costUsd: 0.5 });
+    expect(s.calls.ends).toHaveLength(1);
+    const raw = res.chunks.join('');
+    expect(raw).not.toMatch(/stderrTail/);
+  });
+
+  test('onStdoutLine is passed only in stream mode', async () => {
+    const s = setup();
+    await s.call(base());
+    expect(s.calls.runs[0].onStdoutLine).toBeUndefined();
+  });
+
+  test('slot_timeout after the start line ends with an error result line and a ledger end line', async () => {
+    const s = setup({ sessionSlots: { waitForSlot: async () => null, stampPid: () => {}, release: () => {} } });
+    const res = await s.call(sbase());
+    expect(res.status).toBe(200);
+    const lines = res.lines();
+    expect(lines.map((l) => l.type)).toEqual(['sm_task_started', 'sm_task_result']);
+    expect(lines[1]).toMatchObject({ type: 'sm_task_result', ok: false, error: 'slot_timeout', taskId: 'task-1' });
+    expect(typeof lines[1].slotWaitMs).toBe('number');
+    expect(s.calls.ends[0].status).toBe('slot_timeout');
+    expect(s.calls.runs).toHaveLength(0);
+    expect(res.writableEnded).toBe(true);
+  });
+
+  test('a close during the run aborts it (caller_gone) even after the 200 head was written', async () => {
+    const s = setup({
+      runTask: (o) => new Promise((resolve) => {
+        o.signal.addEventListener('abort', () => resolve(okRun({ status: 'caller_gone', usage: null, envelope: null, stdout: '' })));
+      }),
+    });
+    const req = fakeReq(sbase());
+    const res = fakeRes();
+    const p = s.call(null, { req, res });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(res.status).toBe(200);
+    res.destroyed = true;
+    res.emit('close');
+    await p;
+    expect(s.calls.ends[0].status).toBe('caller_gone');
+    expect(res.lines().map((l) => l.type)).toEqual(['sm_task_started', 'sm_task_running']);
+  });
+
+  test('a close during the slot wait aborts it (caller_gone)', async () => {
+    const s = setup({
+      sessionSlots: {
+        waitForSlot: (owner, o) => new Promise((resolve) => { o.signal.addEventListener('abort', () => resolve(null)); }),
+        release: () => {}, stampPid: () => {},
+      },
+    });
+    const req = fakeReq(sbase());
+    const res = fakeRes();
+    const p = s.call(null, { req, res });
+    await new Promise((r) => setTimeout(r, 20));
+    req.emit('close');
+    await p;
+    expect(s.calls.runs).toHaveLength(0);
+    expect(s.calls.ends[0].status).toBe('caller_gone');
+  });
+
+  test('lines are skipped and counted while writableLength exceeds 8 MiB', async () => {
+    let res;
+    const s = setup({
+      runTask: async (o) => {
+        o.onStdoutLine('{"n":1}');
+        res.writableLength = 8 * 1024 * 1024 + 1;
+        o.onStdoutLine('{"n":2}');
+        o.onStdoutLine('text 3');
+        res.writableLength = 0;
+        o.onStdoutLine('{"n":4}');
+        return okRun();
+      },
+    });
+    res = fakeRes();
+    await s.call(null, { req: fakeReq(sbase()), res });
+    const lines = res.lines();
+    expect(lines.filter((l) => 'n' in l).map((l) => l.n)).toEqual([1, 4]);
+    expect(lines[lines.length - 1]).toMatchObject({ type: 'sm_task_result', droppedLines: 2 });
   });
 });
 

@@ -1,9 +1,11 @@
 // Design-vs-widget screenshot pairs at 1280x800 (tests/shots/README.md).
 //
 // design/<scene>.png — the Claude Design prototype ("Feedback Widget.dc.html") rendered through the
-//   same <dc-import> pattern "Feedback Widget States.dc.html" uses, default variant only
-//   (launcher corner · flow annotate · toolbar dock · success receipt).
-// widget/<scene>.png — the built widget (src/index.ts) mounted on a stand-in host page, for every
+//   same <dc-import> pattern "Feedback Widget States.dc.html" uses: every scene in the default variant
+//   (launcher corner · flow annotate · toolbar dock · success receipt), plus every non-default frame
+//   on the States board (VARIANT_SHOTS: launchers, flows, toolbars, success styles).
+// widget/<scene>.png — the built widget (src/index.ts) mounted on a stand-in host page configured
+//   with the shot's variant, for every
 //   scene the widget can reach today; the rest are skipped with a named reason.
 //
 // The design folder is copied to a temp dir and the scene wrappers are written there (never into
@@ -56,6 +58,53 @@ export const SCENES = [
 ] as const;
 type SceneId = (typeof SCENES)[number]['id'];
 
+type Variant = Partial<{ -readonly [K in keyof typeof DEFAULTS]: string }>;
+
+/** One design/widget pair: a scene id in one variant (all four axes; unset axes take DEFAULTS). */
+interface Shot {
+  /** File name of both PNGs. */
+  id: string;
+  scene: SceneId;
+  variant: Variant;
+  /** The States board option this frame belongs to (`1b`, `1f`, ...); null for the default set. */
+  board: string | null;
+  marker: string | null;
+  readme: string;
+}
+
+/**
+ * Every non-default frame on "Feedback Widget States.dc.html" (launchers, flows, toolbars, success
+ * styles). Frames whose attributes are all defaults are the SCENES set above. Shot ids are
+ * `<scene>--<axis>-<value>`.
+ */
+export const VARIANT_SHOTS: readonly Shot[] = [
+  { id: 'idle--launcher-edge', scene: 'idle', variant: { launcher: 'edge' }, board: '1b', marker: null, readme: '§5.1 Launcher (edge)' },
+  { id: 'launcher-hover--launcher-edge', scene: 'launcher-hover', variant: { launcher: 'edge' }, board: '1b', marker: null, readme: '§5.1 Launcher (edge)' },
+  { id: 'idle--launcher-mini', scene: 'idle', variant: { launcher: 'mini' }, board: '1c', marker: null, readme: '§5.1 Launcher (mini)' },
+  { id: 'launcher-hover--launcher-mini', scene: 'launcher-hover', variant: { launcher: 'mini' }, board: '1c', marker: null, readme: '§5.1 Launcher (mini)' },
+  { id: 'idle--launcher-hidden', scene: 'idle', variant: { launcher: 'hidden' }, board: '1d', marker: 'Got it', readme: '§5.1 Launcher (hidden, coach)' },
+  { id: 'annotate-empty--flow-docked', scene: 'annotate-empty', variant: { flow: 'docked' }, board: '1f', marker: null, readme: '§5.2 Capture feedback, §5.6 Panel (docked)' },
+  { id: 'annotate--flow-docked', scene: 'annotate', variant: { flow: 'docked' }, board: '1f', marker: null, readme: '§5.4 Marks, §5.6 Panel (docked)' },
+  { id: 'sent--flow-docked', scene: 'sent', variant: { flow: 'docked' }, board: '1f', marker: 'Send another', readme: '§5.6 Panel (docked), §5.7 Success variants (receipt)' },
+  { id: 'pick--flow-note', scene: 'pick', variant: { flow: 'note' }, board: '1g', marker: null, readme: '§5.2 Capture feedback (note hint), §5.4 Marks (element pick)' },
+  { id: 'annotate--flow-note', scene: 'annotate', variant: { flow: 'note' }, board: '1g', marker: null, readme: '§5.4 Marks, §5.6 Panel (note)' },
+  { id: 'sent--flow-note', scene: 'sent', variant: { flow: 'note' }, board: '1g', marker: 'Send another', readme: '§5.6 Panel (note), §5.7 Success variants (receipt)' },
+  { id: 'tools-pick--toolbar-rail', scene: 'tools-pick', variant: { toolbar: 'rail' }, board: '1i', marker: null, readme: '§5.3 Toolbar (rail), §5.4 Marks (element pick)' },
+  { id: 'tools--toolbar-corner', scene: 'tools', variant: { toolbar: 'corner' }, board: '1j', marker: null, readme: '§5.3 Toolbar (corner), §5.5 Mark comment popover' },
+  { id: 'sending--flow-docked', scene: 'sending', variant: { flow: 'docked' }, board: '1k', marker: null, readme: '§5.6 Panel (docked, sending)' },
+  { id: 'sent--success-toast', scene: 'sent', variant: { success: 'toast' }, board: '1m', marker: 'Undo', readme: '§5.7 Success variants (toast)' },
+  { id: 'sent--success-fold', scene: 'sent', variant: { success: 'fold' }, board: '1n', marker: null, readme: '§5.7 Success variants (fold)' },
+  { id: 'error--flow-docked', scene: 'error', variant: { flow: 'docked' }, board: '1o', marker: 'Retry now', readme: '§5.6 Panel (docked, error), §2 State machine' },
+];
+
+/** Every pair the spec writes: the default-variant scenes, then the board's variant frames. */
+export const SHOTS: readonly Shot[] = [
+  ...SCENES.map((s) => ({ id: s.id, scene: s.id, variant: {}, board: null, marker: s.marker, readme: s.readme })),
+  ...VARIANT_SHOTS,
+];
+
+const configOf = (shot: Shot) => ({ ...DEFAULTS, ...shot.variant });
+
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -73,8 +122,9 @@ const FONT_FACES = [
   ...[400, 600].map((w) => `${w} 16px "Source Serif 4"`),
 ];
 
-function sceneWrapper(scene: SceneId): string {
-  const attrs = Object.entries(DEFAULTS)
+function sceneWrapper(shot: Shot): string {
+  const scene = shot.scene;
+  const attrs = Object.entries(configOf(shot))
     .map(([k, v]) => `${k}="${v}"`)
     .join(' ');
   // Same head + helmet as the States board, one frame at 1:1.
@@ -113,13 +163,13 @@ Promise.all(${JSON.stringify(FONT_FACES)}.map(function (f) { return document.fon
 }
 
 // Stand-in host page: an ordinary site the widget is embedded on.
-const HOST_PAGE = `<!DOCTYPE html>
+const hostPage = (shot: Shot) => `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>Stand-in host</title>
 <link rel="stylesheet" href="./host.css">
-<script>window.FeedbackConfig = ${JSON.stringify({ ...DEFAULTS, endpoint: '/host/submit', user: { id: 'u_1', name: 'Ada Reporter' } })};</script>
+<script>window.FeedbackConfig = ${JSON.stringify({ ...configOf(shot), endpoint: '/host/submit', user: { id: 'u_1', name: 'Ada Reporter' } })};</script>
 </head>
 <body>
 <header><b>Lumen Stays</b><nav><a>Stays</a><a>Trips</a><a>Help</a></nav><button id="search">Search</button></header>
@@ -148,7 +198,7 @@ test.beforeAll(async () => {
   tmp = await mkdtemp(join(tmpdir(), 'fw-design-shots-'));
   if (DESIGN_RUN) {
     await cp(designSrc, join(tmp, 'design'), { recursive: true });
-    for (const s of SCENES) await writeFile(join(tmp, 'design', `scene-${s.id}.html`), sceneWrapper(s.id));
+    for (const s of SHOTS) await writeFile(join(tmp, 'design', `scene-${s.id}.html`), sceneWrapper(s));
   } else {
     await writeHost(tmp);
   }
@@ -191,7 +241,7 @@ async function writeHost(tmp: string): Promise<void> {
     const src = join(widgetRoot, 'node_modules', f.pkg, 'files', f.file);
     await writeFile(join(tmp, 'host', FONTS_DIR, f.file), readFileSync(src));
   }
-  await writeFile(join(tmp, 'host', 'index.html'), HOST_PAGE);
+  for (const s of SHOTS) await writeFile(join(tmp, 'host', `${s.id}.html`), hostPage(s));
   await writeFile(join(tmp, 'host', 'host.css'), HOST_CSS);
 }
 
@@ -230,8 +280,8 @@ async function waitForFonts(page: Page): Promise<void> {
   });
 }
 
-if (DESIGN_RUN) test.describe('design shots (prototype, default variant)', () => {
-  for (const scene of SCENES) {
+if (DESIGN_RUN) test.describe('design shots (prototype, every board variant)', () => {
+  for (const scene of SHOTS) {
     test(scene.id, async ({ page }) => {
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(String(e)));
@@ -285,53 +335,89 @@ async function armTool(page: Page, name: string): Promise<void> {
   await expect(b).toHaveAttribute('aria-pressed', 'true');
 }
 
-async function hoverCentre(page: Page, selector: string): Promise<void> {
+/** Hovers inside `selector` at fraction `fx` of its width (vertically centred). */
+async function hoverCentre(page: Page, selector: string, fx = 0.5): Promise<void> {
   const box = (await page.locator(selector).boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
+  await page.mouse.move(box.x + box.width * fx, box.y + box.height / 2, { steps: 3 });
 }
 
-/** One mark of every kind, with real mouse input; every popover closed again. */
-async function seedMarks(page: Page): Promise<void> {
-  const w = hostLocator(page);
-  const popover = w.locator('[data-part="popover"]');
-  await armTool(page, 'Pin');
-  await page.mouse.click(240, 330);
-  await expect(popover).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(popover).toHaveCount(0);
+/**
+ * Where the Element tool aims on the Book button: its right part, so the `rail` toolbar (x 20-72)
+ * never sits under the pointer. The pick outline is the button's box either way.
+ */
+const BOOK_FX = 0.85;
 
-  await armTool(page, 'Element');
-  await hoverCentre(page, '#book');
-  await expect(w.locator('[data-part="pick-outline"]')).toBeVisible();
-  const book = (await page.locator('#book').boundingBox())!;
-  await page.mouse.click(book.x + book.width / 2, book.y + book.height / 2);
+type Cfg = ReturnType<typeof configOf>;
+
+/**
+ * Page x for a mark, laid out so no mark lands on the panel: flow `docked` squeezes the default
+ * layout into the free area left of its side panel; flow `note` moves it right of the note, which
+ * opens beside the Book button (x 116-456 at 1280x800).
+ */
+const markX = (cfg: Cfg, x: number) =>
+  cfg.flow === 'docked' ? Math.round(x * 0.66) : cfg.flow === 'note' ? Math.round(480 + (x - 240) * 0.7) : x;
+
+/**
+ * A new pin, box or element opens its comment popover; close it again. In flow `note` the first
+ * mark opens the note (Title focused) instead, which stays open.
+ */
+async function settleNewMark(page: Page, cfg: Cfg, first: boolean): Promise<void> {
+  const popover = hostLocator(page).locator('[data-part="popover"]');
+  if (cfg.flow === 'note' && first) {
+    await expect(hostLocator(page).locator('#fw-pn-title')).toBeFocused();
+    await expect(popover).toHaveCount(0);
+    return;
+  }
   await expect(popover).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
+}
+
+async function pickBook(page: Page, cfg: Cfg, first: boolean): Promise<void> {
+  await armTool(page, 'Element');
+  await hoverCentre(page, '#book', BOOK_FX);
+  await expect(hostLocator(page).locator('[data-part="pick-outline"]')).toBeVisible();
+  const book = (await page.locator('#book').boundingBox())!;
+  await page.mouse.click(book.x + book.width * BOOK_FX, book.y + book.height / 2);
+  await settleNewMark(page, cfg, first);
+}
+
+/**
+ * One mark of every kind, with real mouse input; every popover closed again. Flow `note` starts
+ * with the element on the Book button, so the note anchors there (the board's "Note on mark 1").
+ */
+async function seedMarks(page: Page, cfg: Cfg): Promise<void> {
+  const w = hostLocator(page);
+  const note = cfg.flow === 'note';
+  if (note) await pickBook(page, cfg, true);
+
+  await armTool(page, 'Pin');
+  await page.mouse.click(markX(cfg, 240), 330);
+  await settleNewMark(page, cfg, false);
+
+  if (!note) await pickBook(page, cfg, false);
 
   await armTool(page, 'Box');
-  await page.mouse.move(420, 430);
+  await page.mouse.move(markX(cfg, 420), 430);
   await page.mouse.down();
-  await page.mouse.move(600, 560, { steps: 8 });
+  await page.mouse.move(markX(cfg, 600), 560, { steps: 8 });
   await page.mouse.up();
-  await expect(popover).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(popover).toHaveCount(0);
+  await settleNewMark(page, cfg, false);
 
   await armTool(page, 'Arrow');
-  await page.mouse.move(760, 380);
+  await page.mouse.move(markX(cfg, 760), 380);
   await page.mouse.down();
-  await page.mouse.move(900, 480, { steps: 8 });
+  await page.mouse.move(markX(cfg, 900), 480, { steps: 8 });
   await page.mouse.up();
 
   await armTool(page, 'Draw');
-  await page.mouse.move(980, 420);
+  await page.mouse.move(markX(cfg, 980), 420);
   await page.mouse.down();
-  for (let i = 1; i <= 12; i++) await page.mouse.move(980 + i * 10, 420 + Math.round(Math.sin(i / 2) * 30));
+  for (let i = 1; i <= 12; i++) await page.mouse.move(markX(cfg, 980 + i * 10), 420 + Math.round(Math.sin(i / 2) * 30));
   await page.mouse.up();
 
   await armTool(page, 'Text');
-  await page.mouse.click(820, 260);
+  await page.mouse.click(markX(cfg, 820), 260);
   const input = w.locator('[data-part="text-input"]');
   await expect(input).toBeFocused();
   await input.fill('Too slow');
@@ -339,22 +425,50 @@ async function seedMarks(page: Page): Promise<void> {
   await expect(input).toHaveCount(0);
 }
 
-async function openDescribe(page: Page): Promise<string | null> {
-  const r = await openAnnotate(page);
-  if (r) return r;
-  await seedMarks(page);
-  await toolbarOf(page).locator('[data-part="describe"]').click();
+const TITLE = 'Price overlaps the photo';
+
+async function fillTitle(page: Page): Promise<void> {
   const title = hostLocator(page).locator('#fw-pn-title');
-  await expect(title).toBeFocused();
-  await title.fill('Price overlaps the photo');
-  return null;
+  await expect(title).toBeVisible();
+  await title.fill(TITLE);
 }
 
 /**
- * How to reach each scene on the real widget. Returns null when reached, else the reason it is not reachable (a failure).
+ * The panel filled in and ready to send. Flow `annotate` reaches it through Describe; `docked` and
+ * `note` show it beside the marks already.
  */
-const DRIVERS: Record<SceneId, (page: Page) => Promise<string | null>> = {
-  idle: async (page) => ((await widgetPainted(page)) ? null : 'widget renders no launcher yet (no UI in shadow root)'),
+async function openDescribe(page: Page, cfg: Cfg): Promise<string | null> {
+  const r = await openAnnotate(page);
+  if (r) return r;
+  await seedMarks(page, cfg);
+  if (cfg.flow === 'annotate') {
+    await toolbarOf(page).locator('[data-part="describe"]').click();
+    await expect(hostLocator(page).locator('#fw-pn-title')).toBeFocused();
+  }
+  await fillTitle(page);
+  return null;
+}
+
+async function send(page: Page): Promise<void> {
+  await hostLocator(page).locator('[data-part="send"]').click();
+}
+
+const accept = (page: Page) =>
+  page.route('**/host/submit', (route) =>
+    route.fulfill({ status: 201, contentType: 'application/json', body: '{"id":"FB-1042"}' }),
+  );
+
+/**
+ * How to reach each scene on the real widget, in the shot's variant (the host page already carries
+ * its config). Returns null when reached, else the reason it is not reachable (a failure).
+ */
+const DRIVERS: Record<SceneId, (page: Page, cfg: Cfg) => Promise<string | null>> = {
+  idle: async (page, cfg) => {
+    if (!(await widgetPainted(page))) return 'widget renders no launcher yet (no UI in shadow root)';
+    // Hidden: no button, only the one-time coach toast.
+    if (cfg.launcher === 'hidden') await expect(hostLocator(page).locator('.fw-coach')).toBeVisible();
+    return null;
+  },
   'launcher-hover': async (page) => {
     if (!(await widgetPainted(page))) return 'widget renders no launcher yet (no UI in shadow root)';
     const launcher = page.locator('#feedback-widget-host').locator('button').first();
@@ -363,95 +477,97 @@ const DRIVERS: Record<SceneId, (page: Page) => Promise<string | null>> = {
     return null;
   },
   'annotate-empty': async (page) => openAnnotate(page),
-  annotate: async (page) => {
+  annotate: async (page, cfg) => {
     const r = await openAnnotate(page);
     if (r) return r;
-    await seedMarks(page);
+    await seedMarks(page, cfg);
+    // The board's side panel and note carry the filled-in title next to the marks.
+    if (cfg.flow !== 'annotate') await fillTitle(page);
     await armTool(page, 'Pin');
-    await page.mouse.move(640, 760);
+    await page.mouse.move(markX(cfg, 640), 760);
     return null;
   },
   pick: async (page) => {
     const r = await openAnnotate(page);
     if (r) return r;
     await armTool(page, 'Element');
-    await hoverCentre(page, '#book');
+    await hoverCentre(page, '#book', BOOK_FX);
     await expect(hostLocator(page).locator('[data-part="pick-outline"]')).toBeVisible();
     return null;
   },
-  tools: async (page) => {
+  tools: async (page, cfg) => {
     const r = await openAnnotate(page);
     if (r) return r;
-    await seedMarks(page);
+    await seedMarks(page, cfg);
     await hostLocator(page).getByRole('button', { name: 'Pin 1', exact: true }).click();
     await expect(hostLocator(page).locator('[data-part="popover"]')).toBeVisible();
     return null;
   },
-  'tools-pick': async (page) => {
+  'tools-pick': async (page, cfg) => {
     const r = await openAnnotate(page);
     if (r) return r;
-    await seedMarks(page);
+    await seedMarks(page, cfg);
     await armTool(page, 'Element');
     await hoverCentre(page, '#search');
     await expect(hostLocator(page).locator('[data-part="pick-outline"]')).toBeVisible();
     return null;
   },
-  describe: async (page) => {
-    const r = await openDescribe(page);
-    return r;
-  },
-  sending: async (page) => {
+  describe: async (page, cfg) => openDescribe(page, cfg),
+  sending: async (page, cfg) => {
     // Hold the submit request open: the panel stays in `sending`.
     await page.route('**/host/submit', () => new Promise<void>(() => undefined));
-    const r = await openDescribe(page);
+    const r = await openDescribe(page, cfg);
     if (r) return r;
-    await hostLocator(page).locator('[data-part="send"]').click();
+    await send(page);
+    await expect(hostLocator(page).locator('[data-part="progress"]')).toHaveCount(1);
     return null;
   },
-  error: async (page) => {
+  error: async (page, cfg) => {
     await page.route('**/host/submit', (route) =>
       route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }),
     );
-    const r = await openDescribe(page);
+    const r = await openDescribe(page, cfg);
     if (r) return r;
-    await hostLocator(page).locator('[data-part="send"]').click();
+    await send(page);
     return null;
   },
-  discard: async (page) => {
+  discard: async (page, cfg) => {
     const r = await openAnnotate(page);
     if (r) return r;
-    await seedMarks(page);
+    await seedMarks(page, cfg);
     await page.keyboard.press('Escape');
     return null;
   },
-  sent: async (page) => {
-    await page.route('**/host/submit', (route) =>
-      route.fulfill({ status: 201, contentType: 'application/json', body: '{"id":"FB-1042"}' }),
-    );
-    const r = await openDescribe(page);
+  sent: async (page, cfg) => {
+    await accept(page);
+    const r = await openDescribe(page, cfg);
     if (r) return r;
-    await hostLocator(page).locator('[data-part="send"]').click();
+    await send(page);
+    // Toast: shown at once (the POST waits 6 s for Undo). Fold: the panel shrinks into the launcher,
+    // which pings green with the ticket for 3.6 s; the shot is taken inside that window.
+    if (cfg.success === 'toast') await expect(hostLocator(page).locator('[data-part="toast"]')).toBeVisible();
+    if (cfg.success === 'fold') await expect(hostLocator(page).locator('[data-part="ping-bubble"]')).toBeVisible();
     return null;
   },
 };
 
 if (!DESIGN_RUN) test.describe('widget shots (built widget on the stand-in host)', () => {
-  for (const scene of SCENES) {
-    test(scene.id, async ({ page }) => {
-      await page.goto(`${base}/host/index.html`, { waitUntil: 'networkidle' });
+  for (const shot of SHOTS) {
+    test(shot.id, async ({ page }) => {
+      await page.goto(`${base}/host/${shot.id}.html`, { waitUntil: 'networkidle' });
       await expect(page.locator('#feedback-widget-host')).toHaveCount(1);
-      const reason = await DRIVERS[scene.id](page);
-      expect(reason, `${scene.id}: widget scene is not reachable`).toBeNull();
-      if (scene.marker) {
+      const reason = await DRIVERS[shot.scene](page, configOf(shot));
+      expect(reason, `${shot.id}: widget scene is not reachable`).toBeNull();
+      if (shot.marker) {
         await expect(
-          hostLocator(page).getByRole('button', { name: scene.marker, exact: true }).or(
+          hostLocator(page).getByRole('button', { name: shot.marker, exact: true }).or(
             // The send chip is "⌘↵" on macOS and "Ctrl↵" elsewhere; the label text is the same.
-            hostLocator(page).getByText(scene.marker.replace(/\s*⌘↵$/, ''), { exact: true }),
+            hostLocator(page).getByText(shot.marker.replace(/\s*⌘↵$/, ''), { exact: true }),
           ).first(),
         ).toBeVisible({ timeout: 10_000 });
       }
       await waitForFonts(page);
-      await settledShot(page, join(shotsDir, 'widget', `${scene.id}.png`));
+      await settledShot(page, join(shotsDir, 'widget', `${shot.id}.png`));
     });
   }
 });

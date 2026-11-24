@@ -53,6 +53,9 @@ function isResetFresh(iso, now) {
 /** Flat sibling window that mirrors a `limits[]` entry's `kind`, for resets_at backfill. */
 const FLAT_WINDOW_BY_KIND = { session: 'five_hour', weekly_all: 'seven_day' };
 
+/** Unscoped flat windows usageWindows falls back to, in order, when limits[] has no usable entry. */
+const FLAT_WINDOWS = ['five_hour', 'seven_day'];
+
 /** An entry's utilization: real `percent`, else the flat-shape `utilization`. */
 function entryPercent(l) {
   return Number.isFinite(l.percent) ? l.percent : l.utilization;
@@ -66,8 +69,11 @@ function entryPercent(l) {
  * Only UNSCOPED entries (`scope == null`) with a finite percent count — a
  * scoped entry (e.g. `weekly_scoped` for one model) does not bind dispatch
  * generally. A null `resets_at` backfills from the matching flat window. With
- * no such entry, the flat `five_hour` is the one window if its utilization is
- * finite; anything else is []. Pure, no I/O.
+ * no such entry, the flat windows are listed instead, in order `five_hour`
+ * (session) then `seven_day` (weekly, all models), each only when its
+ * utilization is finite — so a weekly 95 binds even when five_hour reads low.
+ * Model-scoped flat windows (`seven_day_opus`, `seven_day_sonnet`) are never
+ * listed. Nothing usable is []. Pure, no I/O.
  */
 function usageWindows(payload) {
   const out = [];
@@ -86,11 +92,14 @@ function usageWindows(payload) {
     }
   }
   if (out.length > 0) return out;
-  const fh = payload && payload.five_hour;
-  if (fh && Number.isFinite(fh.utilization)) {
-    return [{ name: 'five_hour', utilization: fh.utilization, resets_at: fh.resets_at ?? null, is_active: fh.is_active === true }];
+  if (!payload) return out;
+  for (const name of FLAT_WINDOWS) {
+    const w = payload[name];
+    if (w && Number.isFinite(w.utilization)) {
+      out.push({ name, utilization: w.utilization, resets_at: w.resets_at ?? null, is_active: w.is_active === true });
+    }
   }
-  return [];
+  return out;
 }
 
 /**

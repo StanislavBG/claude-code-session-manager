@@ -386,3 +386,28 @@ test('usageWindows: null and a payload with no usable window give []', () => {
     ],
   }), []);
 });
+
+test('usageWindows: flat fallback lists five_hour then seven_day, never model-scoped windows', () => {
+  assert.deepStrictEqual(usageWindows({
+    five_hour: { utilization: 40, resets_at: '2026-11-23T20:00:00Z' },
+    seven_day: { utilization: 95, is_active: true },
+    seven_day_opus: { utilization: 99, resets_at: null },
+    seven_day_sonnet: { utilization: 98, resets_at: null },
+  }), [
+    { name: 'five_hour', utilization: 40, resets_at: '2026-11-23T20:00:00Z', is_active: false },
+    { name: 'seven_day', utilization: 95, resets_at: null, is_active: true },
+  ]);
+});
+
+test('bindingWindow: limits[] absent picks the higher of five_hour and seven_day', () => {
+  const win = bindingWindow({ five_hour: { utilization: 40 }, seven_day: { utilization: 95 } });
+  assert.strictEqual(win.name, 'seven_day');
+  assert.strictEqual(win.utilization, 95);
+});
+
+test('bindingWindow: non-finite five_hour with seven_day 70 binds on seven_day', () => {
+  const win = bindingWindow({ five_hour: { resets_at: null }, seven_day: { utilization: 70, resets_at: '2026-11-26T17:00:00Z' } });
+  assert.strictEqual(win.name, 'seven_day');
+  assert.strictEqual(win.utilization, 70);
+  assert.strictEqual(win.resets_at, '2026-11-26T17:00:00Z');
+});

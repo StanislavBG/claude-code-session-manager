@@ -168,3 +168,27 @@ describe('Feedback.identify()', () => {
     expect(getReporter()).toBeNull();
   });
 });
+
+describe('window.Feedback when the widget does not render', () => {
+  it('exists on a touch-only page: identify stores the reporter, open/close never throw', () => {
+    setPointers({ coarse: true, fine: false });
+    window.FeedbackConfig = { user: { id: 'u_1' } };
+    expect(init()).toBe(false);
+    expect(document.getElementById(HOST_ID)).toBeNull();
+    const api = window.Feedback!;
+    expect(api).toBeDefined();
+    expect(api.version).toBeTruthy();
+    expect(getReporter()).toEqual({ id: 'u_1' });
+    api.identify({ id: 'u_2', name: 'Maya' });
+    expect(getReporter()).toEqual({ id: 'u_2', name: 'Maya' });
+    expect(() => api.open()).not.toThrow();
+    expect(() => api.close()).not.toThrow();
+  });
+
+  it('exists on a narrow page', () => {
+    setWidth(320);
+    expect(init()).toBe(false);
+    expect(() => window.Feedback!.identify({ email: 'a@b.c' })).not.toThrow();
+    expect(getReporter()).toEqual({ email: 'a@b.c' });
+  });
+});

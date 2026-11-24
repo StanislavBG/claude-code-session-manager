@@ -42,7 +42,7 @@ export type SendResult =
 
 const RETRYABLE: SendResult = { ok: false, kind: 'retryable' };
 
-/** 2xx ok; 5xx, 408, 429 retryable; any other 4xx (or odd status) rejected. */
+/** 2xx ok; 0 (network/CORS/timeout), 5xx, 408, 429 retryable; any other 4xx (or odd status) rejected. */
 export function classifyStatus(status: number, bodyText: string): SendResult {
   if (status >= 200 && status < 300) {
     let id: string | undefined;
@@ -170,13 +170,10 @@ async function sendSealed(box: BoxKey, o: SendOptions, timeoutMs: number): Promi
     timeoutMs,
     o.onProgress,
   );
-  if (r.status !== 0 || r.timedOut || r.uploaded) return classifyStatus(r.status, r.body);
-
-  // Status 0 before a single byte went up: offline, or the relay refused this page's Origin
-  // (403 origin_not_allowed carries no ACAO, so the browser hides it). The key route is public
-  // (ACAO *): if it answers right now, the relay is reachable and the POST was refused.
-  const probe = await fetchWithTimeout(keyUrl, { method: 'GET', credentials: 'omit', cache: 'no-store' }, timeoutMs);
-  return probe && probe.ok ? { ok: false, kind: 'rejected', status: 403 } : RETRYABLE;
+  // Status 0 (offline, timeout, a proxy or CORS failure) is always retryable, even when the
+  // public key route answered a moment ago: a transient failure must never delete a report.
+  // The outbox's 5-try limit bounds a POST that is refused for good.
+  return classifyStatus(r.status, r.body);
 }
 
 /** Send one report. Never throws. */

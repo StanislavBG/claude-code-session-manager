@@ -208,7 +208,7 @@ function keepLast(host: HTMLElement): MutationObserver {
 
 function installApi(): void {
   const api: FeedbackApi = {
-    // open/close are wired to the UI state machine by a later PRD.
+    // No-ops until index.ts wires them to the UI (or forever, when the widget did not render).
     open() {},
     close() {},
     identify(user) {
@@ -225,11 +225,17 @@ function installApi(): void {
  */
 export function init(): boolean {
   if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+  // window.Feedback always exists, so a host page calling Feedback.identify never throws —
+  // even when the widget declines to render. An existing API (another bundle copy, or the
+  // one index.ts wired) is left alone.
+  const stubbed = !window.Feedback;
+  if (stubbed) installApi();
   if (!isTopFrame()) return false;
   const w = window as FlagWindow;
   if (w[MOUNT_FLAG] || state || document.getElementById(HOST_ID)) return false;
 
   const config = resolveConfig();
+  if (stubbed) reporter = config.user;
   if (window.innerWidth < config.minViewportWidth || isTouchOnly()) return false;
   if (!document.body) return false;
 

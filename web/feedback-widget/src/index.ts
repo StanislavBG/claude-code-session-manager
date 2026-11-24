@@ -1,6 +1,7 @@
 // Entry of the one-file IIFE bundle (dist/feedback.js).
 import { installBuffers } from './buffers';
 import { getHost, getReporter, init, resolveConfig, type FeedbackApi } from './host';
+import { startOutbox } from './outbox';
 import { mountApp } from './ui/App';
 
 /** bilko.run relay — the widget's own traffic, never buffered (architecture/site-feedback.md). */
@@ -37,4 +38,6 @@ export function start(): boolean {
   return true;
 }
 
+// Script load: retry anything a previous page left in the outbox, whether or not the widget renders.
+startOutbox();
 start();

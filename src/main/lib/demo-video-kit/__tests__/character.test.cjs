@@ -145,8 +145,16 @@ test('speakLines stops at the first failing line', () => {
   expect(fs.existsSync(outs[2])).toBe(false);
 });
 
-test('speakLines refuses a non-command voice or a missing character', () => {
-  expect(speakLines(project(kokoro), [{ text: 'x', out: '/tmp/x.wav' }])).toMatchObject({ ok: false, error: expect.stringMatching(/command/) });
+test('speakLines refuses a missing character; a kokoro voice is no longer refused as non-command', () => {
+  const prev = process.env.KOKORO_MODEL_DIR;
+  process.env.KOKORO_MODEL_DIR = path.join(os.tmpdir(), `sm-char-no-model-${process.pid}`);
+  try {
+    const r = speakLines(project(kokoro), [{ text: 'x', out: '/tmp/x.wav' }]);
+    expect(r).toMatchObject({ ok: false, speaker: 'Bit', error: expect.stringMatching(/kokoro voice 'af_heart': Kokoro model file/) });
+    expect(r.error).not.toMatch(/not 'command'/);
+  } finally {
+    if (prev === undefined) delete process.env.KOKORO_MODEL_DIR; else process.env.KOKORO_MODEL_DIR = prev;
+  }
   expect(speakLines(project(undefined), [{ text: 'x', out: '/tmp/x.wav' }])).toMatchObject({ ok: false });
 });
 
@@ -340,13 +348,12 @@ test.skipIf(process.platform === 'win32')('CLI: a failing cast voice exits 1 wit
   expect(calls(root)).toEqual([{ speaker: 'host', text: 'one' }, { speaker: 'broken', text: 'two' }]);
 });
 
-test.skipIf(process.platform === 'win32')('CLI: unknown, voiceless and kokoro-voiced speakers run no command', () => {
+test.skipIf(process.platform === 'win32')('CLI: unknown and voiceless speakers run no command', () => {
   const root = castProject(CAST);
   const o = (n) => path.join(root, `${n}.wav`);
   const cases = [
     ['Nobody', /unknown speaker "Nobody" \(speakers: Bit, Gran Oak, Pip, Moss, Fern, Crack\)/],
     ['Moss', /"Moss" has no voice and never speaks lines/],
-    ['fern', /"Fern" has a 'kokoro' voice, not 'command'/],
   ];
   for (const [speaker, re] of cases) {
     const r = runCli(root, [{ text: 'first', out: o('a') }, { text: 'x', out: o('b'), speaker }]);
@@ -659,4 +666,136 @@ test('voiceId refs: extra keys and bad ids are refused by name', () => {
   expect(validateCharacterJson({ ...kokoro, voice: { voiceId: '' } })).toMatch(/^voice\.voiceId must match/);
   expect(validateCharacterJson({ ...kokoro, voice: { voiceId: 'x'.repeat(65) } })).toMatch(/^voice\.voiceId must match/);
   expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'Pip', voice: { voiceId: 7 } }] })).toMatch(/^cast\[0\]\.voice\.voiceId must match/);
+});
+
+// Library voices (PRD 3919): {voiceId} host/cast resolve through voiceLibrary; kokoro speaks via kokoroSay;
+// spec.voice replaces the host voice. SM_VOICES_HOME, KOKORO_MODEL_DIR and SM_KOKORO_PYTHON point at temp fakes.
+const FAKE_PY = [
+  '#!/usr/bin/env node',
+  "const fs = require('fs');",
+  "const req = JSON.parse(fs.readFileSync(0, 'utf8'));",
+  "fs.appendFileSync('kokoro-calls.jsonl', JSON.stringify(req.lines.map(({ text, out, voice, speed, lang }) => ({ text, out, voice, speed, lang }))) + '\\n');",
+  "if (req.lines.some((l) => l.text === 'bad')) { console.log(JSON.stringify({ ok: false, error: 'kokoro exploded' })); process.exit(1); }",
+  "for (const l of req.lines) fs.writeFileSync(l.out, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60), Buffer.from(l.text)]));",
+  "console.log(JSON.stringify({ ok: true, seconds: req.lines.map(() => 1) }));",
+].join('\n');
+const LIB_ENV = ['SM_VOICES_HOME', 'KOKORO_MODEL_DIR', 'SM_KOKORO_PYTHON'];
+let libEnvPrev = null;
+afterEach(() => {
+  if (!libEnvPrev) return;
+  for (const k of LIB_ENV) { if (libEnvPrev[k] === undefined) delete process.env[k]; else process.env[k] = libEnvPrev[k]; }
+  libEnvPrev = null;
+});
+function libEnv() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-char-lib-'));
+  tmp.push(d);
+  libEnvPrev = Object.fromEntries(LIB_ENV.map((k) => [k, process.env[k]]));
+  const model = path.join(d, 'model');
+  fs.mkdirSync(model);
+  fs.writeFileSync(path.join(model, 'kokoro-v1.0.onnx'), 'x');
+  fs.writeFileSync(path.join(model, 'voices-v1.0.bin'), 'not a zip');
+  const py = path.join(d, 'fake-python');
+  fs.writeFileSync(py, FAKE_PY);
+  fs.chmodSync(py, 0o755);
+  const env = { SM_VOICES_HOME: path.join(d, 'voices'), KOKORO_MODEL_DIR: model, SM_KOKORO_PYTHON: py };
+  Object.assign(process.env, env);
+  return env;
+}
+function libVoice(root, id, voice) {
+  const dir = path.join(root, '.claude', 'voices');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({ voice }));
+}
+const kokoroCalls = (root) => {
+  const f = path.join(root, 'kokoro-calls.jsonl');
+  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+};
+
+test.skipIf(process.platform === 'win32')('speakLines: a {voiceId} host resolves to a library command voice', () => {
+  libEnv();
+  const root = castProject([], { voiceId: 'narrator' });
+  libVoice(root, 'narrator', ttsVoice('lib-host'));
+  const r = charMod.speakLines(root, [{ text: 'hello', out: 'a.wav' }, { text: 'bye', out: 'b.wav', speaker: 'Bit' }]);
+  expect(r).toEqual({ ok: true, outs: ['a.wav', 'b.wav'] });
+  expect(calls(root)).toEqual([{ speaker: 'lib-host', text: 'hello' }, { speaker: 'lib-host', text: 'bye' }]);
+  expect(charMod.resolveSpeakerVoice(root, { voiceId: 'narrator' })).toMatchObject({ ok: true, voiceId: 'narrator', voice: ttsVoice('lib-host'), entry: { scope: 'project' } });
+});
+
+test.skipIf(process.platform === 'win32')('speakLines: an unknown {voiceId} fails the run naming speaker and voice, nothing speaks', () => {
+  libEnv();
+  const root = castProject([{ name: 'Pip', voice: { voiceId: 'no-such-voice' } }]);
+  const r = charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }, { text: 'two', out: 'b.wav', speaker: 'Pip' }]);
+  expect(r).toMatchObject({ ok: false, line: 1, speaker: 'Pip' });
+  expect(r.error).toBe("line 1: \"Pip\" voice 'no-such-voice': unknown voice 'no-such-voice'");
+  expect(calls(root)).toEqual([]);
+});
+
+test.skipIf(process.platform === 'win32')('speakLines: kokoro voices (inline and resolved) speak each speaker in ONE sayKokoro call', () => {
+  libEnv();
+  const root = castProject([
+    { name: 'Fern', voice: { engine: 'kokoro', id: 'bf_emma', speed: 1.2, lang: 'en-gb' } },
+    { name: 'Pip', voice: { voiceId: 'am_puck' } },
+  ]);
+  const r = charMod.speakLines(root, [
+    { text: 'hi', out: 'a.wav' },
+    { text: 'leaf', out: 'b.wav', speaker: 'Fern' },
+    { text: 'puck', out: 'c.wav', speaker: 'pip' },
+    { text: 'more leaf', out: 'd.wav', speaker: 'fern' },
+  ]);
+  expect(r).toEqual({ ok: true, outs: ['a.wav', 'b.wav', 'c.wav', 'd.wav'] });
+  expect(calls(root)).toEqual([{ speaker: 'host', text: 'hi' }]);
+  const o = (n) => path.join(root, `${n}.wav`);
+  expect(kokoroCalls(root)).toEqual([
+    [{ text: 'leaf', out: o('b'), voice: 'bf_emma', speed: 1.2, lang: 'en-gb' }, { text: 'more leaf', out: o('d'), voice: 'bf_emma', speed: 1.2, lang: 'en-gb' }],
+    [{ text: 'puck', out: o('c'), voice: 'am_puck', speed: 1, lang: 'en-us' }],
+  ]);
+  expect(fs.readFileSync(o('d')).subarray(64).toString()).toBe('more leaf');
+});
+
+test.skipIf(process.platform === 'win32')('speakLines: a failing kokoro speaker stops the run with no later call', () => {
+  libEnv();
+  const root = castProject([{ name: 'Fern', voice: { engine: 'kokoro', id: 'bf_emma' } }]);
+  const r = charMod.speakLines(root, [{ text: 'bad', out: 'a.wav', speaker: 'Fern' }, { text: 'after', out: 'b.wav' }]);
+  expect(r).toMatchObject({ ok: false, line: 0, lines: [0], speaker: 'Fern' });
+  expect(r.error).toMatch(/^"Fern" kokoro voice 'bf_emma': Kokoro failed \(exit 1\): kokoro exploded/);
+  expect(calls(root)).toEqual([]);
+  const notWav = charMod.speakLines(root, [{ text: 'x', out: 'a.mp3', speaker: 'Fern' }]);
+  expect(notWav).toMatchObject({ ok: false, line: 0, error: "line 0: a kokoro voice's out must end in .wav" });
+});
+
+test.skipIf(process.platform === 'win32')('CLI: spec.voice replaces the host voice for that run only; cast keeps its own voice', () => {
+  libEnv();
+  const root = castProject([{ name: 'Pip', voice: ttsVoice('pip') }]);
+  const spec = path.join(root, 'spec.json');
+  runDirs.push(`${spec}.run`);
+  fs.writeFileSync(spec, JSON.stringify({ projectRoot: root, voice: 'af_heart', lines: [{ text: 'hi', out: 'a.wav' }, { text: 'sq', out: 'b.wav', speaker: 'Pip' }] }));
+  const r = speak(spec, '--wait', '30');
+  expect(r.status).toBe(0);
+  expect(r.result).toEqual({ ok: true, outs: ['a.wav', 'b.wav'] });
+  expect(kokoroCalls(root)).toEqual([[{ text: 'hi', out: path.join(root, 'a.wav'), voice: 'af_heart', speed: 1, lang: 'en-us' }]]);
+  expect(calls(root)).toEqual([{ speaker: 'pip', text: 'sq' }]);
+  // the saved character is untouched: without spec.voice the host speaks its own voice
+  expect(charMod.speakLines(root, [{ text: 'own', out: 'c.wav' }])).toEqual({ ok: true, outs: ['c.wav'] });
+  expect(calls(root)).toEqual([{ speaker: 'pip', text: 'sq' }, { speaker: 'host', text: 'own' }]);
+  // an inline spec.voice object works too
+  expect(charMod.speakLines(root, [{ text: 'inl', out: 'd.wav' }], { voice: ttsVoice('inline') })).toEqual({ ok: true, outs: ['d.wav'] });
+  expect(calls(root).at(-1)).toEqual({ speaker: 'inline', text: 'inl' });
+});
+
+test.skipIf(process.platform === 'win32')('CLI: spec.voice with no saved character speaks every line; a named speaker is refused', () => {
+  libEnv();
+  const root = project(undefined);
+  const spec = path.join(root, 'spec.json');
+  runDirs.push(`${spec}.run`);
+  fs.writeFileSync(spec, JSON.stringify({ projectRoot: root, voice: { engine: 'kokoro', id: 'af_bella' }, lines: [{ text: 'one', out: 'a.wav' }, { text: 'two', out: 'b.wav', speaker: null }] }));
+  const ok = speak(spec, '--wait', '30');
+  expect(ok.status).toBe(0);
+  expect(ok.result).toEqual({ ok: true, outs: ['a.wav', 'b.wav'] });
+  expect(kokoroCalls(root)).toHaveLength(1);
+  expect(kokoroCalls(root)[0].map((l) => l.voice)).toEqual(['af_bella', 'af_bella']);
+  const cast = charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }, { text: 'x', out: 'c.wav', speaker: 'Pip' }], { voice: 'af_bella' });
+  expect(cast).toMatchObject({ ok: false, line: 1, error: expect.stringMatching(/speaker "Pip" is refused: no character is saved/) });
+  expect(charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }], { voice: 'no-such' })).toMatchObject({ ok: false, error: "line 0: \"spec.voice\" voice 'no-such': unknown voice 'no-such'" });
+  expect(charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }], { voice: { engine: 'nope' } })).toMatchObject({ ok: false, error: expect.stringMatching(/^spec\.voice\.engine/) });
+  expect(kokoroCalls(root)).toHaveLength(1);
 });

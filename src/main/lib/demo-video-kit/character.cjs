@@ -5,7 +5,9 @@
 // POST /admin/project-home/character/write route (writer 'project-home').
 // speakWithCommand spawns the user's TTS argv directly — never through a shell.
 // speakLines runs a {lines} (batch) voice once per speaker with a JSON manifest
-// of { text, out } and a time limit capped by SM_SCHEDULER_JOB_DEADLINE_MS.
+// of { text, out }, and a kokoro voice once per speaker through kokoroSay.cjs, each
+// with a time limit capped by SM_SCHEDULER_JOB_DEADLINE_MS. {voiceId} voices
+// resolve through voiceLibrary.cjs.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -390,19 +392,64 @@ function speakBatch(voice, items, root) {
 }
 
 /**
+ * Resolve one speaker's voice to an inline engine voice. A {voiceId} ref (or a bare
+ * id string) goes through voiceLibrary.resolveVoiceId; an inline voice is checked
+ * with validateVoice. -> {ok: true, voice, voiceId?, entry?} | {ok: false, voiceId?, error}
+ */
+function resolveSpeakerVoice(root, voice) {
+  const v = typeof voice === 'string' ? { voiceId: voice } : voice;
+  if (isVoiceIdRef(v)) {
+    const refErr = validateVoiceOrRef(v, 'voice');
+    if (refErr) return { ok: false, voiceId: String(v.voiceId), error: refErr };
+    // Lazy: voiceLibrary.cjs requires this file.
+    const r = require('./voiceLibrary.cjs').resolveVoiceId(root, v.voiceId);
+    if (!r.ok) return { ok: false, voiceId: v.voiceId, error: r.error };
+    return { ok: true, voice: r.voice, voiceId: v.voiceId, entry: r.entry };
+  }
+  const err = validateVoice(v, 'voice');
+  if (err) return { ok: false, error: err };
+  return { ok: true, voice: v };
+}
+
+/** 'af_heart' / 'kokoro af_heart' / 'command bin/tts' — names a voice in an error. */
+function voiceLabel(rv, voice) {
+  if (rv && rv.voiceId) return `voice '${rv.voiceId}'`;
+  const v = rv && rv.voice ? rv.voice : voice;
+  if (v && v.engine === 'kokoro') return `kokoro voice '${v.id}'`;
+  if (v && v.engine === 'command' && Array.isArray(v.command)) return `command voice '${v.command[0]}'`;
+  return 'voice';
+}
+
+/** One Kokoro group: every line of one speaker in ONE sayKokoro call, within batchTimeoutMs. */
+function speakKokoro(voice, items, root) {
+  const limit = batchTimeoutMs(items.length);
+  if (!limit.ok) return limit;
+  const { sayKokoro } = require('./kokoroSay.cjs');
+  const r = sayKokoro(kokoroItems(voice, items), { cwd: root, timeoutMs: limit.ms });
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+function kokoroItems(voice, items) {
+  return items.map((l) => ({ text: l.text, out: l.out, voice: voice.id, speed: voice.speed, lang: voice.lang }));
+}
+
+/**
  * Speak every narration line, in order, cwd = the project root. A line is
  * { text, out, speaker? }: an absent/null speaker (or the host's name) uses the
  * host's voice; a cast member's name (case-insensitive, trimmed) uses that
- * member's voice. Every line's speaker is resolved before any voice runs; only
- * 'command' voices speak here (Kokoro stays on the persona's recipe). A per-line
- * ({text}/{out}) voice runs once per line. A batch ({lines}) voice runs ONCE, at
- * its speaker's first line, over a JSON manifest [{ text, out }] of all its lines
- * (outs absolute, each ending in .wav and distinct), within batchTimeoutMs; it
- * succeeds only when every out is a WAV. No fallback voice: the first failure
- * stops the run.
+ * member's voice. opts.voice (a library voice id or an inline voice) replaces the
+ * host's voice for this run only, and needs no saved character (then a named
+ * speaker is refused). A {voiceId} voice resolves through voiceLibrary.resolveVoiceId.
+ * Every line's speaker and voice are resolved before any voice runs. A per-line
+ * ({text}/{out}) command voice runs once per line. A batch ({lines}) command voice
+ * runs ONCE, at its speaker's first line, over a JSON manifest [{ text, out }] of
+ * all its lines; a kokoro voice runs ONCE per speaker the same way through
+ * kokoroSay.sayKokoro (its id, speed, lang). Grouped outs must end in .wav and be
+ * distinct; groups run within batchTimeoutMs and succeed only when every out is a
+ * WAV. No fallback voice: the first failure stops the run.
  * -> {ok: true, outs} | {ok: false, line?, lines?, speaker?, error}
  */
-function speakLines(projectRoot, lines) {
+function speakLines(projectRoot, lines, opts = {}) {
   let root;
   try {
     root = projectRootOf(projectRoot, 'speakLines');
@@ -410,55 +457,82 @@ function speakLines(projectRoot, lines) {
     return { ok: false, error: e.message };
   }
   if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: 'lines must be a non-empty array of { text, out, speaker? }' };
+  const override = opts && opts.voice !== undefined && opts.voice !== null ? opts.voice : undefined;
+  if (override !== undefined) {
+    const ov = typeof override === 'string' ? { voiceId: override } : override;
+    const oErr = !ov || typeof ov !== 'object' || Array.isArray(ov)
+      ? 'spec.voice must be a voice id string or a voice object'
+      : validateVoiceOrRef(ov, 'spec.voice');
+    if (oErr) return { ok: false, error: oErr };
+  }
   const ch = inspectCharacter(root);
-  if (!ch.ok) return { ok: false, error: `no valid saved character in ${characterDir(root)}: ${ch.error}` };
-  const host = { name: ch.json.name, voice: ch.json.voice };
-  const cast = Array.isArray(ch.json.cast) ? ch.json.cast : [];
+  const noCharacter = !ch.ok && !ch.exists && override !== undefined;
+  if (!ch.ok && !noCharacter) return { ok: false, error: `no valid saved character in ${characterDir(root)}: ${ch.error}` };
+  const host = noCharacter
+    ? { name: 'spec.voice', voice: override }
+    : { name: ch.json.name, voice: override !== undefined ? override : ch.json.voice };
+  const cast = !noCharacter && Array.isArray(ch.json.cast) ? ch.json.cast : [];
   const speakers = [host, ...cast];
-  const byKey = new Map(speakers.map((m) => [String(m.name).trim().toLowerCase(), m]));
+  const byKey = noCharacter ? new Map() : new Map(speakers.map((m) => [String(m.name).trim().toLowerCase(), m]));
   const names = speakers.map((m) => String(m.name).trim());
   const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
+  const voices = new Map(); // speaker name -> resolveSpeakerVoice result
   const resolved = [];
-  const batches = new Map(); // speaker name -> { voice, indices, seen: Map<absOut, lineIndex> }
+  const groups = new Map(); // speaker name -> { kind: 'batch'|'kokoro', voice, indices, seen: Map<absOut, lineIndex> }
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const sp = l ? l.speaker : undefined;
     if (!l || !nonEmpty(l.text) || !nonEmpty(l.out) || !(sp === undefined || sp === null || (nonEmpty(sp) && sp.trim()))) {
       return { ok: false, line: i, error: `line ${i} must be { text, out, speaker? } with non-empty strings` };
     }
+    if (noCharacter && !(sp === undefined || sp === null)) {
+      return { ok: false, line: i, error: `line ${i}: speaker "${sp}" is refused: no character is saved, so only spec.voice speaks (omit speaker)` };
+    }
     const m = sp === undefined || sp === null ? host : byKey.get(sp.trim().toLowerCase());
     if (!m) return { ok: false, line: i, error: `line ${i}: unknown speaker "${sp}" (speakers: ${names.join(', ')})` };
     const name = String(m.name).trim();
     if (!m.voice) return { ok: false, line: i, error: `line ${i}: "${name}" has no voice and never speaks lines` };
-    if (m.voice.engine !== 'command') {
-      return { ok: false, line: i, error: `line ${i}: "${name}" has a '${m.voice.engine}' voice, not 'command'; speak it with the Kokoro recipe` };
-    }
-    if (isBatchVoice(m.voice)) {
-      if (!l.out.toLowerCase().endsWith('.wav')) return { ok: false, line: i, error: `line ${i}: a {lines} voice's out must end in .wav` };
+    let rv = voices.get(name);
+    if (!rv) { rv = resolveSpeakerVoice(root, m.voice); voices.set(name, rv); }
+    if (!rv.ok) return { ok: false, line: i, speaker: name, error: `line ${i}: "${name}" ${voiceLabel(rv, m.voice)}: ${rv.error}` };
+    const voice = rv.voice;
+    const kind = voice.engine === 'kokoro' ? 'kokoro' : isBatchVoice(voice) ? 'batch' : null;
+    if (kind) {
+      const what = kind === 'kokoro' ? 'a kokoro' : 'a {lines}';
+      if (!l.out.toLowerCase().endsWith('.wav')) return { ok: false, line: i, error: `line ${i}: ${what} voice's out must end in .wav` };
       const abs = path.resolve(root, l.out);
-      let b = batches.get(name);
-      if (!b) { b = { voice: m.voice, indices: [], seen: new Map() }; batches.set(name, b); }
+      let b = groups.get(name);
+      if (!b) { b = { kind, voice, label: voiceLabel(rv), indices: [], seen: new Map() }; groups.set(name, b); }
       if (b.seen.has(abs)) return { ok: false, line: i, error: `line ${i}: out ${abs} repeats line ${b.seen.get(abs)}'s out` };
       b.seen.set(abs, i);
       b.indices.push(i);
     }
-    resolved.push({ name, voice: m.voice, text: l.text, out: l.out });
+    resolved.push({ name, voice, label: voiceLabel(rv), text: l.text, out: l.out });
+  }
+  const itemsOf = (b) => b.indices.map((j) => ({ text: resolved[j].text, out: path.resolve(root, resolved[j].out) }));
+  for (const [name, b] of groups) {
+    if (b.kind !== 'kokoro') continue;
+    const v = require('./kokoroSay.cjs').validateLines(kokoroItems(b.voice, itemsOf(b)), root);
+    if (!v.ok) return { ok: false, line: b.indices[0], lines: b.indices.slice(), speaker: name, error: `"${name}" ${b.label}: ${v.error}` };
   }
   const outs = [];
   const spoken = new Set();
   for (let i = 0; i < resolved.length; i++) {
-    const { name, voice, text, out } = resolved[i];
-    const b = batches.get(name);
+    const { name, voice, label, text, out } = resolved[i];
+    const b = groups.get(name);
     if (b) {
       if (!spoken.has(name)) {
         spoken.add(name);
-        const items = b.indices.map((j) => ({ text: resolved[j].text, out: path.resolve(root, resolved[j].out) }));
-        const r = speakBatch(b.voice, items, root);
-        if (!r.ok) return { ok: false, line: b.indices[0], lines: b.indices.slice(), speaker: name, error: `"${name}": ${r.error}` };
+        const items = itemsOf(b);
+        const r = b.kind === 'kokoro' ? speakKokoro(b.voice, items, root) : speakBatch(b.voice, items, root);
+        if (!r.ok) {
+          const who = b.kind === 'kokoro' ? `"${name}" ${b.label}` : `"${name}"`;
+          return { ok: false, line: b.indices[0], lines: b.indices.slice(), speaker: name, error: `${who}: ${r.error}` };
+        }
       }
     } else {
       const r = speakWithCommand(voice, text, out, { cwd: root });
-      if (!r.ok) return { ok: false, line: i, speaker: name, error: `"${name}": ${r.error}` };
+      if (!r.ok) return { ok: false, line: i, speaker: name, error: `"${name}"${label.startsWith('voice ') ? ` ${label}` : ''}: ${r.error}` };
     }
     outs.push(out);
   }
@@ -469,6 +543,7 @@ module.exports = {
   readCharacter,
   speakWithCommand,
   speakLines,
+  resolveSpeakerVoice,
   buildCommandArgv,
   buildBatchArgv,
   isBatchVoice,
@@ -491,7 +566,8 @@ module.exports = {
 };
 
 // CLI: node character.cjs speak spec.json [--wait <seconds>]
-//   (spec { projectRoot, lines: [{ text, out, speaker? }] })
+//   (spec { projectRoot, lines: [{ text, out, speaker? }], voice? }; voice = a library
+//   voice id or an inline voice replacing the host's voice for this run)
 // speakLines runs in a detached runner (resumableRun.cjs) keyed by the sha256
 // of the spec bytes, state in <abs spec>.run/. Each call waits one slice: the
 // result (exit 0/1) or, while still speaking, a pending line with exit 75 —
@@ -575,7 +651,7 @@ function speakRunner(specPath, key) {
     const got = crypto.createHash('sha256').update(bytes).digest('hex');
     result = got !== key
       ? { ok: false, error: `spec ${specPath} changed since this run started` }
-      : speakLines(spec && spec.projectRoot, spec && spec.lines);
+      : speakLines(spec && spec.projectRoot, spec && spec.lines, { voice: spec ? spec.voice : undefined });
   } catch (e) {
     result = { ok: false, error: `cannot read spec ${specPath}: ${e.message}` };
   }

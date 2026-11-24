@@ -511,12 +511,18 @@ const MCP_TOOL_CATALOG = [
       + 'its approval, is refused by name) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
       + 'An optional `cast` lists up to 8 supporting characters, each {name, voice?, note?}: names are unique and different from the host\'s, a voice uses '
       + 'the same two engines or a {voiceId} reference, and a member without a voice never speaks. '
+      + 'An optional `sounds` block declares the persona\'s own sound effects (`sfx`: [{name, note?}], up to 16) and music beds (`beds`: [{name, note?, command?}], up to 8): '
+      + 'lowercase names, unique, never a built-in sound or style. Every effect, and every bed without a `command`, is a WAV you pass in `soundPaths` '
+      + '({name: absolute .wav path}; an effect <= 1 MiB, a bed <= 12 MiB, 32 MiB in all), saved as videos/_character/sounds/<name>.wav; a bed `command` '
+      + 'is an argv with {lengthS} and {out} placeholders (optional {name} and {seed}) that renders the bed at mix time, run with no shell in the project root. '
+      + 'A cast member\'s optional `sfx` lists its signature sounds (built-in or the persona\'s own); a member without a voice is heard only through them. '
       + 'A saved persona hosts every Demo Video unless a press turns Character off. Each narration line is spoken in its own speaker\'s voice (the host\'s '
       + 'when the line names no speaker) with no fallback voice: a failing command (non-zero exit or no WAV written) fails the run. '
       + 'The exact field rules are validateCharacterJson in demo-video-kit/character.cjs.',
     summary: "Save the reusable character used in this project's videos.",
     whenToUse: 'Use once per project, before building character videos, to save the mascot you designed. Pass `json` (the descriptor object or its JSON text) '
-      + 'and the module as `js` or — preferred for large modules — an absolute `jsPath` to a local .js file. Pass `replace: true` only to deliberately overwrite an existing character.',
+      + 'and the module as `js` or — preferred for large modules — an absolute `jsPath` to a local .js file. When the json declares file-backed sounds, pass their WAVs in `soundPaths`. '
+      + 'Pass `replace: true` only to deliberately overwrite an existing character.',
     whenNotToUse: 'Never fabricate content. Do not use to write a video — use project_video_write. The call is rejected (409) when a character already exists and `replace` is not set, '
       + 'and for invalid `json`, `js` over 300KB, or `js` with remote references or network-capable APIs.',
     exampleArgs: {
@@ -533,7 +539,8 @@ const MCP_TOOL_CATALOG = [
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
       + 'Give exactly one of `js` / `jsPath` (absolute .js file, <= 300KB). The saved character.json must fit in 16 KB. '
-      + 'An existing character — even an unusable one — is refused (409) unless `replace: true` is set.',
+      + 'An existing character — even an unusable one — is refused (409) unless `replace: true` is set. '
+      + 'Every call that declares file-backed sounds sends all their WAVs in `soundPaths`; a replace drops WAVs no longer declared.',
   },
   {
     name: 'project_video_review_write',

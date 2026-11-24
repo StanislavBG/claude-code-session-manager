@@ -596,7 +596,9 @@ test('video kinds, exports and persona: project_video_write, project_character_w
   const persona = textOf('project_character_write');
   for (const s of ['name', 'character.js', 'palette', 'voice', 'personality', 'who', 'speech', 'readingLevel', 'neverSay',
     'hosts every Demo Video unless a press turns Character off', 'no fallback', 'fails the run', '{lines}', 'manifest',
-    'cast', 'up to 8', 'never speaks', '16 KB', '{voiceId', "must exist in the project's voice library"]) expect(persona).toContain(s);
+    'cast', 'up to 8', 'never speaks', '16 KB', '{voiceId', "must exist in the project's voice library",
+    '`sounds`', '`sfx`', '`beds`', 'soundPaths', 'sounds/<name>.wav', '{lengthS}', '{out}', '1 MiB', '12 MiB', '32 MiB',
+    'never a built-in sound or style', "A cast member's optional `sfx` lists its signature sounds"]) expect(persona).toContain(s);
   const help = textOf('session_manager_help');
   for (const s of ['Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing', 'Review first', 'default on for TikTok',
     'series brief', 'cast']) expect(help).toContain(s);

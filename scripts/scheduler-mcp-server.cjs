@@ -78,6 +78,7 @@ const {
 } = require('../src/main/lib/feedback-remote/serviceMcpTools.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
 const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX, REVIEW_IMAGE_BYTES_MAX } = require('../src/main/lib/project-pages/videoReview.cjs');
+const { SOUND_NAME_RE, MAX_BED_WAV_BYTES, MAX_SOUNDS_TOTAL_BYTES } = require('../src/main/lib/demo-video-kit/projectSounds.cjs');
 
 const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
 
@@ -162,6 +163,44 @@ async function resolveVideoExports(args) {
   const poster = await readExportFile(args.posterPath, { argName: 'posterPath', ext: '.png', maxBytes: MAX_EXPORT_POSTER_BYTES });
   if (poster.error) return { error: poster.error };
   return { exports: { mp4Base64: mp4.base64, posterBase64: poster.base64 } };
+}
+
+/**
+ * Reads one project_character_write soundPaths file into { buf } or { error }.
+ * Errors name soundPaths.<name>, never file contents. The per-file cap is the
+ * bed cap; the route re-checks an effect against its smaller cap.
+ */
+async function readSoundFile(p, name) {
+  const argName = `soundPaths.${name}`;
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: `${argName} must be an absolute path` };
+  if (!p.toLowerCase().endsWith('.wav')) return { error: `${argName} must end in .wav` };
+  try {
+    const st = await fsp.stat(p);
+    if (!st.isFile()) return { error: `${argName} is not a regular file` };
+    if (st.size === 0) return { error: `${argName} file is empty` };
+    if (st.size > MAX_BED_WAV_BYTES) return { error: `${argName} file exceeds ${MAX_BED_WAV_BYTES} bytes` };
+    return { buf: await fsp.readFile(p) };
+  } catch (err) {
+    return { error: `cannot read ${argName}: ${err && err.code ? err.code : 'read failed'}` };
+  }
+}
+
+/** Resolves soundPaths into { sounds: { name: base64 } } or { error }. */
+async function resolveSoundPaths(soundPaths) {
+  if (!soundPaths || typeof soundPaths !== 'object' || Array.isArray(soundPaths)) {
+    return { error: 'soundPaths must be an object of { sound name: absolute .wav path }' };
+  }
+  const sounds = {};
+  let total = 0;
+  for (const [name, p] of Object.entries(soundPaths)) {
+    if (!SOUND_NAME_RE.test(name)) return { error: `soundPaths key "${name}" is not a sound name (${SOUND_NAME_RE})` };
+    const loaded = await readSoundFile(p, name);
+    if (loaded.error) return { error: loaded.error };
+    total += loaded.buf.length;
+    if (total > MAX_SOUNDS_TOTAL_BYTES) return { error: `soundPaths files exceed ${MAX_SOUNDS_TOTAL_BYTES} bytes in all` };
+    sounds[name] = loaded.buf.toString('base64');
+  }
+  return { sounds };
 }
 
 /** Reads a local .js file for project_character_write; errors carry only the reason, never file contents. */
@@ -897,6 +936,11 @@ const TOOLS = [
         js: { type: 'string', description: 'The character drawing module source (<= 300KB; no remote references or network-capable APIs). Give exactly one of js / jsPath.' },
         jsPath: { type: 'string', description: 'Absolute path to a local .js file holding the module (same rules as js; <= 300KB). Give exactly one of js / jsPath.' },
         replace: { type: 'boolean', description: 'Overwrite an existing character. Without it an existing character is refused with 409.' },
+        soundPaths: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Optional: one absolute local .wav path per file-backed sound the json declares (every sounds.sfx name, and every sounds.beds name without a command), keyed by sound name, e.g. {"bark": "/tmp/sounds/bark.wav"}. Read and sent by this server: a sound effect <= 1 MiB, a bed <= 12 MiB, 32 MiB in all.',
+        },
       },
       required: ['json'],
     },
@@ -1949,10 +1993,29 @@ async function handleCallTool(request) {
         if (typeof args.js !== 'string') return errorResult('missing required argument: js');
         js = args.js;
       }
+      let sounds;
+      if (args.soundPaths !== undefined && args.soundPaths !== null) {
+        const resolved = await resolveSoundPaths(args.soundPaths);
+        if (resolved.error) return errorResult(resolved.error);
+        sounds = resolved.sounds;
+      }
       const cwd = resolveCwdArg(args);
       const body = { cwd, json: args.json, js };
       if (args.replace === true) body.replace = true;
+      if (sounds) body.sounds = sounds;
       const result = await adminRequest('POST', '/admin/project-home/character/write', body);
+      // An app older than project sounds ignores body.sounds and still answers
+      // ok — without the sounds array. Report that instead of a false success.
+      if (sounds && result && result.ok === true && !Array.isArray(result.sounds)) {
+        let appVersion = null;
+        try {
+          const cfg = await readAdminConfig();
+          if (typeof cfg.appVersion === 'string' && cfg.appVersion) appVersion = cfg.appVersion;
+        } catch { /* version stays unreported */ }
+        return errorResult(`the running Session Manager app (${appVersion ? `v${appVersion}` : 'version not reported'}) saved character.json `
+          + 'but ignored its sounds because it predates project sounds, so no sound WAV was written. Call project_character_write again '
+          + 'with replace: true once the app runs a release with project sounds.');
+      }
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_demo_video_write') {

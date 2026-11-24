@@ -98,10 +98,11 @@ function requireServerWithHome(homeDir) {
   return mod;
 }
 
-async function writeAdminConfig(homeDir, { port, token }) {
+async function writeAdminConfig(homeDir, { port, token, appVersion }) {
   const tokenPath = path.join(homeDir, '.claude', 'session-manager', 'admin-api.json');
   await fsp.mkdir(path.dirname(tokenPath), { recursive: true });
-  await fsp.writeFile(tokenPath, JSON.stringify({ port, token }), 'utf8');
+  const cfg = appVersion === undefined ? { port, token } : { port, token, appVersion };
+  await fsp.writeFile(tokenPath, JSON.stringify(cfg), 'utf8');
 }
 
 function callTool(handleCallTool, name, args) {
@@ -466,6 +467,116 @@ test('project_character_write rejects bad argument combinations without calling 
   const relative = await callTool(handleCallTool, CHARACTER_TOOL, { json: {}, jsPath: 'a.js' });
   expect(relative.isError).toBe(true);
   expect(requests).toHaveLength(0);
+});
+
+const { SOUND_NAME_RE, MAX_BED_WAV_BYTES, MAX_SOUNDS_TOTAL_BYTES } = require('../demo-video-kit/projectSounds.cjs');
+
+test('project_character_write lists optional soundPaths (object of strings); json stays the only required arg', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const tool = TOOLS.find((t) => t.name === CHARACTER_TOOL);
+  expect(tool.inputSchema.required).toEqual(['json']);
+  expect(tool.inputSchema.properties.soundPaths).toMatchObject({ type: 'object', additionalProperties: { type: 'string' } });
+});
+
+test('project_character_write without soundPaths sends no sounds key', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const r = await callTool(handleCallTool, CHARACTER_TOOL, { cwd: '/p', json: { name: 'Bit' }, js: 'x' });
+  expect(r.isError).toBeFalsy();
+  expect(requests[0].body).toEqual({ cwd: '/p', json: { name: 'Bit' }, js: 'x' });
+  expect('sounds' in requests[0].body).toBe(false);
+});
+
+test('project_character_write reads soundPaths into body.sounds as base64', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true, sounds: ['bark', 'garden'] });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token, appVersion: '0.150.0' });
+  const bark = path.join(homeDir, 'bark.wav');
+  const garden = path.join(homeDir, 'garden.WAV');
+  await fsp.writeFile(bark, Buffer.from('RIFFbark'));
+  await fsp.writeFile(garden, Buffer.from('RIFFgarden'));
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const r = await callTool(handleCallTool, CHARACTER_TOOL, {
+    cwd: '/p', json: { name: 'Bit' }, js: 'x', replace: true, soundPaths: { bark, garden },
+  });
+  expect(r.isError).toBeFalsy();
+  expect(requests[0].body).toEqual({
+    cwd: '/p', json: { name: 'Bit' }, js: 'x', replace: true,
+    sounds: { bark: Buffer.from('RIFFbark').toString('base64'), garden: Buffer.from('RIFFgarden').toString('base64') },
+  });
+});
+
+test('project_character_write refuses bad soundPaths by name, without file contents or an admin call', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true, sounds: [] });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const good = path.join(homeDir, 'good.wav');
+  await fsp.writeFile(good, 'SECRETCONTENT');
+  const empty = path.join(homeDir, 'empty.wav');
+  await fsp.writeFile(empty, '');
+  const mp3 = path.join(homeDir, 'x.mp3');
+  await fsp.writeFile(mp3, 'SECRETCONTENT');
+  const dir = path.join(homeDir, 'dir.wav');
+  await fsp.mkdir(dir);
+  const big = path.join(homeDir, 'big.wav');
+  await fsp.writeFile(big, Buffer.alloc(MAX_BED_WAV_BYTES + 1));
+  const near = path.join(homeDir, 'near.wav');
+  await fsp.writeFile(near, Buffer.alloc(MAX_BED_WAV_BYTES));
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const base = { cwd: '/p', json: { name: 'Bit' }, js: 'x' };
+  const cases = [
+    [['a.wav'], /soundPaths must be an object/],
+    ['nope', /soundPaths must be an object/],
+    [{ Bark: good }, new RegExp(`soundPaths key "Bark" is not a sound name`)],
+    [{ bark: 'rel/bark.wav' }, /soundPaths\.bark must be an absolute path/],
+    [{ bark: 42 }, /soundPaths\.bark must be an absolute path/],
+    [{ bark: mp3 }, /soundPaths\.bark must end in \.wav/],
+    [{ bark: dir }, /soundPaths\.bark is not a regular file/],
+    [{ bark: empty }, /soundPaths\.bark file is empty/],
+    [{ bark: big }, new RegExp(`soundPaths\\.bark file exceeds ${MAX_BED_WAV_BYTES} bytes`)],
+    [{ bark: path.join(homeDir, 'missing.wav') }, /cannot read soundPaths\.bark: ENOENT/],
+    [{ a: near, b: near, c: near }, new RegExp(`soundPaths files exceed ${MAX_SOUNDS_TOTAL_BYTES} bytes in all`)],
+  ];
+  expect(SOUND_NAME_RE.test('Bark')).toBe(false);
+  for (const [soundPaths, re] of cases) {
+    const r = await callTool(handleCallTool, CHARACTER_TOOL, { ...base, soundPaths });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(re);
+    expect(r.content[0].text).not.toContain('SECRETCONTENT');
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('project_character_write reports an app too old to save sounds instead of a false success', async () => {
+  for (const appVersion of ['0.142.0', undefined]) {
+    const homeDir = await mkTmp();
+    const token = 'test-token';
+    const { server } = await startFakeAdminServer(token, { ok: true });
+    servers.push(server);
+    await writeAdminConfig(homeDir, { port: server.address().port, token, appVersion });
+    const bark = path.join(homeDir, 'bark.wav');
+    await fsp.writeFile(bark, 'RIFF');
+    const { handleCallTool } = requireServerWithHome(homeDir);
+    const r = await callTool(handleCallTool, CHARACTER_TOOL, { cwd: '/p', json: { name: 'Bit' }, js: 'x', soundPaths: { bark } });
+    expect(r.isError).toBe(true);
+    const text = r.content[0].text;
+    expect(text).toContain(appVersion ? 'v0.142.0' : 'version not reported');
+    expect(text).toMatch(/saved character\.json but ignored its sounds/);
+    expect(text).toMatch(/predates project sounds/);
+    expect(text).toMatch(/replace: true/);
+    delete require.cache[require.resolve(SERVER_PATH)];
+    process.env.HOME = originalHome;
+    originalHome = undefined;
+  }
 });
 
 // ── project_matrix_read / project_matrix_write ──────────────────────────────

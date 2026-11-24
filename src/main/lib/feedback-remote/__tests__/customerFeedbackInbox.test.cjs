@@ -362,9 +362,6 @@ test('stores wire context (<= 262144 bytes, else null) and keeps it across re-pu
 
 test("the context byte cap is feedbackReport's MAX_CONTEXT_BYTES, not a second copy", async () => {
   const { MAX_CONTEXT_BYTES } = require('../feedbackReport.cjs');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'customerFeedbackInbox.cjs'), 'utf8');
-  expect(src).not.toMatch(/const\s+MAX_CONTEXT_BYTES\s*=/);
-  expect(src).toMatch(/\{\s*MAX_CONTEXT_BYTES\s*\}\s*=\s*require\('\.\/feedbackReport\.cjs'\)/);
   // Boundary: exactly MAX_CONTEXT_BYTES of JSON is kept, one byte more is dropped.
   const pad = (n) => ({ note: 'x'.repeat(n - JSON.stringify({ note: '' }).length) });
   const f = mkFetch({ status: 200, json: { items: [

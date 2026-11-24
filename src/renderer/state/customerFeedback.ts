@@ -34,6 +34,18 @@ export function unseenStatusCount(items: CustomerFeedbackItem[]): number {
   return n
 }
 
+const trimSlash = (p: string): string => p.replace(/\/+$/, '') || '/'
+
+/** True when two project cwds name the same folder (trailing slashes ignored). */
+export function sameProjectCwd(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !!a && !!b && trimSlash(a) === trimSlash(b)
+}
+
+/** A one-shot request to open Project Home on its Feedback tab, for ONE project's cwd. */
+export interface FeedbackTabIntent {
+  cwd: string
+}
+
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 interface CustomerFeedbackState {
@@ -45,7 +57,12 @@ interface CustomerFeedbackState {
   ownerInfo: CustomerFeedbackOwnerInfo | null
   inbox: CustomerFeedbackInboxItem[]
   inboxLoading: boolean
+  feedbackTabIntent: FeedbackTabIntent | null
 
+  /** Ask the Project Home of `cwd` to open on its Feedback tab (consumed once). */
+  requestFeedbackTab: (cwd: string) => void
+  /** True (and clears the intent) only when a pending intent names `cwd`; another project's mount never consumes it. */
+  consumeFeedbackTabIntent: (cwd: string) => boolean
   openPanel: () => void
   closePanel: () => void
   togglePanel: () => void
@@ -96,6 +113,15 @@ export const useCustomerFeedback = create<CustomerFeedbackState>((set, get) => {
     ownerInfo: null,
     inbox: [],
     inboxLoading: false,
+    feedbackTabIntent: null,
+
+    requestFeedbackTab: (cwd) => set({ feedbackTabIntent: { cwd } }),
+    consumeFeedbackTabIntent: (cwd) => {
+      const intent = get().feedbackTabIntent
+      if (!intent || !sameProjectCwd(intent.cwd, cwd)) return false
+      set({ feedbackTabIntent: null })
+      return true
+    },
 
     openPanel: () => set({ panelOpen: true }),
     closePanel: () => set({ panelOpen: false }),

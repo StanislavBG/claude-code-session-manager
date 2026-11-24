@@ -17,7 +17,7 @@ import { useToast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { openFreeHour } from '../../lib/freeHour'
 import { useSessions } from '../../state/sessions'
-import { isOwnerProject, requestProjectHomeFeedback } from '../tabs/projecthome/ProjectFeedback'
+import { isOwnerProject } from '../tabs/projecthome/ProjectFeedback'
 import { useAttachments } from '../epics/attachments'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
@@ -50,10 +50,10 @@ function openOwnerFeedback(projectCwd: string): void {
   const existing = sessions.tabs.find((t) => isOwnerProject(t.cwd, projectCwd))
   if (existing) sessions.setActive(existing.id)
   else sessions.addSessionToProject(projectCwd)
-  requestProjectHomeFeedback()
-  // After the tab switch settles: App.tsx routes a pure tab switch to the terminal in an effect,
-  // so navigating in the same tick would be overridden.
-  setTimeout(() => window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'project-home' })), 0)
+  // The intent names the project, so only its Project Home consumes it, and App.tsx's
+  // tab-switch effect sees it and keeps this navigation instead of routing to the terminal.
+  useCustomerFeedback.getState().requestFeedbackTab(projectCwd)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'project-home' }))
 }
 
 function readDataUrl(file: File): Promise<string> {

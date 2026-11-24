@@ -15,7 +15,7 @@
 
 import { useEffect } from 'react'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
-import { useCustomerFeedback } from '../../../state/customerFeedback'
+import { sameProjectCwd, useCustomerFeedback } from '../../../state/customerFeedback'
 import { CustomerFeedbackInbox } from '../../customerFeedback/CustomerFeedbackInbox'
 import { toast } from '../../../state/toast'
 import { ProjectFeedbackWidgetCard } from './ProjectFeedbackWidgetCard'
@@ -26,27 +26,9 @@ function toastFailure<T>(r: SiteFeedbackResult<T>): void {
   if (!r.ok) toast.error(`Feedback: ${r.message || r.error}`)
 }
 
-const trimSlash = (p: string): string => p.replace(/\/+$/, '') || '/'
-
 /** True when `cwd` is the owner's project, so its Feedback tab also shows the app inbox. */
 export function isOwnerProject(cwd: string, projectCwd: string | null | undefined): boolean {
-  return !!projectCwd && trimSlash(cwd) === trimSlash(projectCwd)
-}
-
-// One-shot request for Project Home to open on its Feedback tab (CustomerFeedbackPanel's link).
-// The flag covers a Project Home that is not mounted yet; the event covers one that already is.
-export const PROJECT_HOME_FEEDBACK_EVENT = 'sm:project-home-feedback'
-let pendingFeedbackTab = false
-
-export function requestProjectHomeFeedback(): void {
-  pendingFeedbackTab = true
-  window.dispatchEvent(new CustomEvent(PROJECT_HOME_FEEDBACK_EVENT))
-}
-
-export function consumeProjectHomeFeedbackRequest(): boolean {
-  const was = pendingFeedbackTab
-  pendingFeedbackTab = false
-  return was
+  return sameProjectCwd(cwd, projectCwd)
 }
 
 export function ProjectFeedback({ cwd }: { cwd: string }) {

@@ -7,7 +7,6 @@ import { CustomerFeedbackPanel } from '../CustomerFeedbackPanel'
 import { useCustomerFeedback } from '../../../state/customerFeedback'
 import { useToast } from '../../../state/toast'
 import { useSessions } from '../../../state/sessions'
-import { consumeProjectHomeFeedbackRequest } from '../../tabs/projecthome/ProjectFeedback'
 import type { CustomerFeedbackItem, CustomerFeedbackStatus } from '../../../../preload/api'
 
 let container: HTMLDivElement | null = null
@@ -411,9 +410,9 @@ describe('CustomerFeedbackPanel', () => {
 
   describe('owner inbox link', () => {
     it('owner mode shows the moved notice instead of the Customer inbox, and Open goes to Project Home > Feedback', async () => {
-      vi.useFakeTimers()
+      const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
       try {
-        useCustomerFeedback.setState({ ownerInfo: { ownerMode: true, projectCwd: '/owner' } })
+        useCustomerFeedback.setState({ ownerInfo: { ownerMode: true, projectCwd: '/owner' }, feedbackTabIntent: null })
         const setActive = vi.fn()
         useSessions.setState({ tabs: [{ id: 't-owner', cwd: '/owner' } as never], activeTabId: null, setActive })
         const nav = vi.fn()
@@ -423,47 +422,44 @@ describe('CustomerFeedbackPanel', () => {
         expect(q('customer-feedback-inbox-refresh')).toBeNull()
         const moved = q('customer-feedback-inbox-moved')!
         expect(moved.textContent).toContain('Customer inbox moved to Project Home > Feedback')
+        setTimeoutSpy.mockClear()
         await act(async () => {
           q('customer-feedback-inbox-open-project-home')!.click()
         })
         expect(setActive).toHaveBeenCalledWith('t-owner')
         expect(spies.closePanel).toHaveBeenCalled()
-        expect(consumeProjectHomeFeedbackRequest()).toBe(true)
-        act(() => {
-          vi.runAllTimers()
-        })
+        // Navigation is synchronous — no setTimeout race with App.tsx's tab-switch effect.
         expect(nav).toHaveBeenCalledTimes(1)
         expect((nav.mock.calls[0][0] as CustomEvent).detail).toBe('project-home')
+        expect(setTimeoutSpy.mock.calls.some(([, ms]) => ms === 0)).toBe(false)
+        // The intent names the owner project: another project's mount cannot consume it.
+        expect(useCustomerFeedback.getState().feedbackTabIntent).toEqual({ cwd: '/owner' })
+        expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/elsewhere')).toBe(false)
+        expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/owner')).toBe(true)
+        expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/owner')).toBe(false)
         window.removeEventListener('sm:navigate', nav)
       } finally {
-        vi.useRealTimers()
+        setTimeoutSpy.mockRestore()
       }
     })
 
     it('a trailing-slash projectCwd reuses the existing tab instead of opening a second one', async () => {
-      vi.useFakeTimers()
-      try {
-        useCustomerFeedback.setState({ ownerInfo: { ownerMode: true, projectCwd: '/owner/' } })
-        const setActive = vi.fn()
-        const addSessionToProject = vi.fn()
-        useSessions.setState({
-          tabs: [{ id: 't-owner', cwd: '/owner' } as never],
-          activeTabId: null,
-          setActive,
-          addSessionToProject,
-        } as never)
-        await mount()
-        await act(async () => {
-          q('customer-feedback-inbox-open-project-home')!.click()
-        })
-        expect(setActive).toHaveBeenCalledWith('t-owner')
-        expect(addSessionToProject).not.toHaveBeenCalled()
-        act(() => {
-          vi.runAllTimers()
-        })
-      } finally {
-        vi.useRealTimers()
-      }
+      useCustomerFeedback.setState({ ownerInfo: { ownerMode: true, projectCwd: '/owner/' }, feedbackTabIntent: null })
+      const setActive = vi.fn()
+      const addSessionToProject = vi.fn()
+      useSessions.setState({
+        tabs: [{ id: 't-owner', cwd: '/owner' } as never],
+        activeTabId: null,
+        setActive,
+        addSessionToProject,
+      } as never)
+      await mount()
+      await act(async () => {
+        q('customer-feedback-inbox-open-project-home')!.click()
+      })
+      expect(setActive).toHaveBeenCalledWith('t-owner')
+      expect(addSessionToProject).not.toHaveBeenCalled()
+      expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/owner')).toBe(true)
     })
 
     it('shows neither the inbox nor the link outside owner mode', async () => {

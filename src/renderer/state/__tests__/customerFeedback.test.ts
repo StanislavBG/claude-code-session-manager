@@ -147,3 +147,31 @@ describe('customerFeedback store', () => {
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('offline'))
   })
 })
+
+describe('feedbackTabIntent', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('fires once for the matching cwd (trailing slash ignored), then is spent', async () => {
+    installApi()
+    const { useCustomerFeedback: s } = await load()
+    s.getState().requestFeedbackTab('/owner/')
+    expect(s.getState().feedbackTabIntent).toEqual({ cwd: '/owner/' })
+    expect(s.getState().consumeFeedbackTabIntent('/owner')).toBe(true)
+    expect(s.getState().feedbackTabIntent).toBeNull()
+    expect(s.getState().consumeFeedbackTabIntent('/owner')).toBe(false)
+  })
+
+  it('never fires for another project, and leaves the intent for the matching one', async () => {
+    installApi()
+    const { useCustomerFeedback: s } = await load()
+    expect(s.getState().consumeFeedbackTabIntent('/owner')).toBe(false)
+    s.getState().requestFeedbackTab('/owner')
+    expect(s.getState().consumeFeedbackTabIntent('/other')).toBe(false)
+    expect(s.getState().consumeFeedbackTabIntent('/owner-two')).toBe(false)
+    expect(s.getState().feedbackTabIntent).toEqual({ cwd: '/owner' })
+    expect(s.getState().consumeFeedbackTabIntent('/owner')).toBe(true)
+  })
+})

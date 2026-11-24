@@ -26,9 +26,10 @@
  * store — 0, so hidden, until the Feedback tab first loads them for the project.
  */
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useLayoutEffect, useMemo, useState } from 'react'
 import { useSessions } from '../../../state/sessions'
 import { toast } from '../../../state/toast'
+import { useCustomerFeedback } from '../../../state/customerFeedback'
 import { useProjectPagesOutput } from '../../../lib/projectPages/useProjectPagesOutput'
 import { useMacroJobStatus } from '../../../lib/projectPages/useMacroJobStatus'
 import { useMacros, macrosForProject } from '../../../lib/useMacros'
@@ -37,7 +38,7 @@ import { useMacroLaunch } from '../../../lib/useMacroLaunch'
 import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
 import { EmptyState } from '../../ui/EmptyState'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
-import { PROJECT_HOME_FEEDBACK_EVENT, ProjectFeedback, consumeProjectHomeFeedbackRequest } from './ProjectFeedback'
+import { ProjectFeedback } from './ProjectFeedback'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { ProjectHomeKeyButtons, libraryKeyStats, type ProjectHomeTab } from './projectpages/ProjectHomeKeyButtons'
 import { useJobSettled, type BuildLaunch } from './projectpages/BuildingPanel'
@@ -62,15 +63,14 @@ function ProjectHomeComponent() {
   const macros = useMemo(() => macrosForProject(library, cwd, 'project-home'), [library, cwd])
   const personas = useAgentPersonas()
   const { launch, launching } = useMacroLaunch(navigateToEpic, personas)
-  const [tab, setTab] = useState<ProjectHomeTab>(() => (consumeProjectHomeFeedbackRequest() ? 'feedback' : 'pages'))
-  // CustomerFeedbackPanel's "moved to Project Home > Feedback" link while Project Home is already mounted.
-  useEffect(() => {
-    const h = () => {
-      if (consumeProjectHomeFeedbackRequest()) setTab('feedback')
-    }
-    window.addEventListener(PROJECT_HOME_FEEDBACK_EVENT, h)
-    return () => window.removeEventListener(PROJECT_HOME_FEEDBACK_EVENT, h)
-  }, [])
+  const [tab, setTab] = useState<ProjectHomeTab>('pages')
+  // CustomerFeedbackPanel's "Open Project Home > Feedback" link: a one-shot intent for ONE cwd,
+  // consumed only by this project's Project Home (mounted now or later).
+  const feedbackIntentCwd = useCustomerFeedback((s) => s.feedbackTabIntent?.cwd ?? null)
+  const consumeFeedbackTabIntent = useCustomerFeedback((s) => s.consumeFeedbackTabIntent)
+  useLayoutEffect(() => {
+    if (cwd && feedbackIntentCwd && consumeFeedbackTabIntent(cwd)) setTab('feedback')
+  }, [cwd, feedbackIntentCwd, consumeFeedbackTabIntent])
   // cwd → macro id → this window's last launch: the building row's title and BuildingPanel's sent lines.
   const [launches, setLaunches] = useState<Record<string, Record<string, BuildLaunch>>>({})
   const cwdLaunches = cwd ? launches[cwd] : undefined

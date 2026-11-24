@@ -22,6 +22,7 @@ import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
 import { useLayout, needsProjectsPanelReconciliation } from './state/layout'
 import { useEditor } from './state/editor'
+import { sameProjectCwd, useCustomerFeedback } from './state/customerFeedback'
 import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startSchedulePolling } from './state/scheduleState'
@@ -146,7 +147,13 @@ export function App() {
     const isPureSwitch =
       prevActive !== null && activeTabId !== null && activeTabId !== prevActive &&
       curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
-    if (isPureSwitch) useLayout.getState().openProjectPanel('terminal')
+    // A pending Project Home > Feedback intent for the newly-active tab's project means its
+    // initiator (CustomerFeedbackPanel) already set the nav — don't hijack it to the terminal.
+    const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
+    const feedbackIntent = useCustomerFeedback.getState().feedbackTabIntent
+    if (isPureSwitch && !(feedbackIntent && sameProjectCwd(feedbackIntent.cwd, activeCwd))) {
+      useLayout.getState().openProjectPanel('terminal')
+    }
   }, [activeTabId, tabs])
 
   // 'projects' (File Explorer) on the Project face renders useSessions()

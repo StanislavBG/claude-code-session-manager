@@ -9,7 +9,7 @@ import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { pruneArtifacts, SIZE_CAP_BYTES } = require('../artifactRetention.cjs');
+const { pruneArtifacts, pruneArtifactStaging, SIZE_CAP_BYTES } = require('../artifactRetention.cjs');
 const opsOwnership = require('../../opsOwnership.cjs');
 
 const DAY = 86400000;
@@ -173,4 +173,123 @@ test('purge path: purgeEpic removes artifacts/<epic-id>/ as writer artifacts and
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(sched, { recursive: true, force: true });
   }
+});
+
+// ─── pruneArtifactStaging: <worktreeBase>/artifact-staging/<runId>/ ─────────
+
+function stageDir(base, name, { files = [], daysAgo = 0 } = {}) {
+  const d = path.join(base, name);
+  fs.mkdirSync(d, { recursive: true });
+  const t = (NOW - daysAgo * DAY) / 1000;
+  for (const f of files) {
+    const p = path.join(d, f);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, 'x');
+    fs.utimesSync(p, t, t);
+    if (path.dirname(p) !== d) fs.utimesSync(path.dirname(p), t, t);
+  }
+  fs.utimesSync(d, t, t);
+  return d;
+}
+
+function stagingSeed() {
+  const base = path.join(root, 'artifact-staging');
+  fs.mkdirSync(base, { recursive: true });
+  const outside = path.join(root, 'outside');
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, 'precious.txt'), 'keep');
+  const ot = (NOW - 90 * DAY) / 1000;
+  fs.utimesSync(path.join(outside, 'precious.txt'), ot, ot);
+  fs.utimesSync(outside, ot, ot);
+  const link = path.join(base, 'linked-run');
+  fs.symlinkSync(outside, link);
+  return {
+    base,
+    outside,
+    link,
+    emptyOld: stageDir(base, 'empty-old', { daysAgo: 2 }),
+    emptyNew: stageDir(base, 'empty-new', { daysAgo: 0.5 }),
+    fullOld: stageDir(base, 'full-old', { files: ['report.md', 'sub/clip.mp4'], daysAgo: 40 }),
+    fullNew: stageDir(base, 'full-new', { files: ['draft.md'], daysAgo: 2 }),
+  };
+}
+
+test('staging: empty folder older than 24 h removed, empty new kept, old non-empty removed recursively, fresh non-empty kept', () => {
+  const s = stagingSeed();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const r = pruneArtifactStaging({ base: s.base, now: NOW, days: 30 });
+  expect(fs.existsSync(s.emptyOld)).toBe(false);
+  expect(fs.existsSync(s.emptyNew)).toBe(true);
+  expect(fs.existsSync(s.fullOld)).toBe(false);
+  expect(fs.existsSync(path.join(s.fullNew, 'draft.md'))).toBe(true);
+  expect(r.removed.sort()).toEqual(['empty-old', 'full-old']);
+  expect(r.removedFiles.sort()).toEqual(['full-old/report.md', 'full-old/sub/clip.mp4']);
+  // The names of deleted files are logged.
+  const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
+  expect(logged).toContain('full-old/report.md');
+  expect(logged).toContain('full-old/sub/clip.mp4');
+});
+
+test('staging: symlinked child is skipped and its target outside the base is never touched', () => {
+  const s = stagingSeed();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const r = pruneArtifactStaging({ base: s.base, now: NOW, days: 30 });
+  expect(fs.lstatSync(s.link).isSymbolicLink()).toBe(true);
+  expect(fs.readFileSync(path.join(s.outside, 'precious.txt'), 'utf8')).toBe('keep');
+  expect(r.removed).not.toContain('linked-run');
+});
+
+test('staging: dryRun reports the same result and deletes nothing', () => {
+  const s = stagingSeed();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const list = () => fs.readdirSync(s.base).sort();
+  const before = list();
+  const dry = pruneArtifactStaging({ base: s.base, now: NOW, days: 30, dryRun: true });
+  expect(list()).toEqual(before);
+  expect(fs.existsSync(path.join(s.fullOld, 'report.md'))).toBe(true);
+  const real = pruneArtifactStaging({ base: s.base, now: NOW, days: 30 });
+  expect(dry.removed.sort()).toEqual(real.removed.sort());
+  expect(dry.removedFiles.sort()).toEqual(real.removedFiles.sort());
+});
+
+test('staging: missing base → empty result, never throws', () => {
+  expect(pruneArtifactStaging({ base: path.join(root, 'nope'), now: NOW, days: 30 })).toMatchObject({ removed: [], removedFiles: [] });
+  expect(pruneArtifactStaging({ base: 'relative/dir', now: NOW, days: 30 })).toMatchObject({ removed: [] });
+});
+
+test('staging: default base is <worktreeBase>/artifact-staging, and stagingDirFor re-creates a removed folder', () => {
+  const saved = process.env.SM_WORKTREE_ROOT;
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-artifact-staging-wt-'));
+  process.env.SM_WORKTREE_ROOT = wt;
+  try {
+    const { stagingDirFor } = require('../artifactStore.cjs');
+    const d = stagingDirFor({ runId: 'tab-1' });
+    expect(d).toBe(path.join(wt, 'artifact-staging', 'tab-1'));
+    const t = (NOW - 2 * DAY) / 1000;
+    fs.utimesSync(d, t, t);
+    const r = pruneArtifactStaging({ now: NOW, days: 30 });
+    expect(r.removed).toEqual(['tab-1']);
+    expect(fs.existsSync(d)).toBe(false);
+    // An open terminal / chat turn asks again → the folder is back.
+    expect(stagingDirFor({ runId: 'tab-1' })).toBe(d);
+    expect(fs.statSync(d).isDirectory()).toBe(true);
+  } finally {
+    if (saved === undefined) delete process.env.SM_WORKTREE_ROOT; else process.env.SM_WORKTREE_ROOT = saved;
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('staging: runArtifactSweep calls pruneArtifactStaging once with artifactsDays', () => {
+  const calls = [];
+  const { runArtifactSweep } = require('../../scheduler/runLogRetention.cjs');
+  const out = runArtifactSweep({
+    cwds: ['/a', '/b'],
+    now: NOW,
+    readSettings: () => ({ artifactsDays: 12, tasksDays: 3 }),
+    prune: () => ({ removed: [] }),
+    epicStatusFor: () => () => null,
+    pruneStaging: (o) => { calls.push(o); return { removed: ['x'], removedFiles: [] }; },
+  });
+  expect(calls).toEqual([{ now: NOW, days: 12 }]);
+  expect(out).toEqual({ projects: 2, removed: 0, errors: 0 });
 });

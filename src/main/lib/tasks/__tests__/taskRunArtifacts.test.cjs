@@ -67,8 +67,8 @@ process.exit(0);
     const ledger = JSON.parse(fs.readFileSync(path.join(storeDir, 'index.json'), 'utf8'));
     expect(ledger.entries).toHaveLength(1);
     expect(ledger.entries[0]).toMatchObject({ name: 'report.md', kind: 'doc', producer: { taskId } });
-    // Source removed after a successful copy.
-    expect(fs.readdirSync(staging)).toEqual([]);
+    // Source removed after a successful copy, and the emptied staging folder itself removed.
+    expect(fs.existsSync(staging)).toBe(false);
     expect(r.artifacts.published).toHaveLength(1);
     expect(r.artifacts.skipped).toEqual([]);
   });
@@ -89,5 +89,22 @@ process.exit(0);
     const r = await runTask({ deps: { ...deps, artifactStore: store }, args: ['-p'], env: env(), prompt: 'x', cwd: project, taskId: 't1', timeoutMs: 30_000 });
     expect(r.status).toBe('ok');
     expect(r.artifacts).toBe(null);
+  });
+
+  test('a staging folder left non-empty after ingest is kept and logged', async () => {
+    const stage = path.join(dir, 'stage-full');
+    const logs = [];
+    const orig = console.error;
+    console.error = (...a) => { logs.push(a.join(' ')); };
+    try {
+      const store = {
+        stagingDirFor: () => { fs.mkdirSync(stage, { recursive: true }); return stage; },
+        ingestDir: async () => ({ published: [], skipped: [] }), // copies nothing → report.md stays
+      };
+      const r = await runTask({ deps: { ...deps, artifactStore: store }, args: ['-p'], env: env(), prompt: 'x', cwd: project, taskId: 't2', timeoutMs: 30_000 });
+      expect(r.status).toBe('ok');
+    } finally { console.error = orig; }
+    expect(fs.readdirSync(stage)).toEqual(['report.md']);
+    expect(logs.some((l) => l.includes('staging folder kept') && l.includes(stage))).toBe(true);
   });
 });

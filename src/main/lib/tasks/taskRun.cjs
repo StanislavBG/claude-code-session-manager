@@ -19,6 +19,7 @@
  * claudeSpawnTarget, feedChildStdin) inside a memory scope like chatRunner.cjs.
  */
 
+const nodeFs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn: nodeSpawn } = require('node:child_process');
@@ -232,6 +233,8 @@ function textStdoutFor(envelope) {
  * `projectRoot` (default `cwd`) BEFORE the result resolves. Result gains
  * `artifacts: { published, skipped } | null`. Staging/ingest failures are
  * logged and never change the run's status.
+ * The emptied staging folder is then removed (rmdirSync, never recursive); a
+ * folder still holding files is kept and logged.
  *
  * @param {{ args: string[], env: Record<string, string|undefined>, prompt: string, cwd: string,
  *   timeoutMs?: number, signal?: AbortSignal, onSpawn?: (pid: number) => void,
@@ -257,6 +260,15 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
     for (const sk of (artifacts && artifacts.skipped) || []) console.error('[taskRun] artifact not ingested', sk.path, sk.reason);
   } catch (e) {
     console.error('[taskRun] artifact ingest failed', taskId, (e && e.message) || e);
+  }
+  // The folder is per-Task and single-use: drop it once ingest emptied it. Never recursive —
+  // anything left behind (skipped / failed ingest) stays for the daily staging sweep.
+  try {
+    nodeFs.rmdirSync(artifactsDir);
+  } catch (e) {
+    const code = e && e.code;
+    if (code === 'ENOTEMPTY' || code === 'EEXIST') console.error('[taskRun] artifact staging folder kept (not empty)', artifactsDir);
+    else if (code !== 'ENOENT') console.error('[taskRun] artifact staging folder not removed', artifactsDir, (e && e.message) || e);
   }
   return { ...result, artifacts };
 }

@@ -22,6 +22,17 @@
  * same result and touches nothing. Every delete/rewrite is asserted as writer 'artifacts'
  * (the namespace owner, opsOwnership.cjs). When the store left after the sweep exceeds
  * sizeCapBytes (default SIZE_CAP_BYTES, 5 GiB) ONE warning is logged per call.
+ *
+ * pruneArtifactStaging({ base, now, days, dryRun, fsImpl })
+ *   → { removed: string[] (child folder names), removedFiles: string[] ('<child>/<rel>'), kept }.
+ *   Sweeps the direct child folders of the staging base (default
+ *   <worktreeBase>/artifact-staging, artifactStore.stagingDirFor). A child is removed when
+ *   it is empty and its mtime is older than 24 h, or (whatever it holds, recursively) when
+ *   its newest mtime is older than `days` (default artifactsDays). Each deleted file name
+ *   is logged. Symlinked children, non-directories and unsafe names are skipped; nothing
+ *   outside the base is touched. The base is outside every ops root, so no assertOpsWrite.
+ *   Removing a folder an open terminal/chat still uses is safe: stagingDirFor re-creates it.
+ *   Never throws.
  */
 'use strict';
 
@@ -225,4 +236,75 @@ function pruneArtifacts(opts) {
   return result;
 }
 
-module.exports = { pruneArtifacts, SIZE_CAP_BYTES };
+const STAGING_EMPTY_MS = DAY_MS;
+
+function defaultStagingBase() {
+  const { worktreeBase } = require('../scheduler/schedulerPaths.cjs');
+  return path.join(worktreeBase(), 'artifact-staging');
+}
+
+/** { files: relative non-dir names, newest: newest mtime of dir + everything under it } — no symlink is followed. */
+function walkStaging(fsImpl, dir) {
+  const files = [];
+  let newest = fsImpl.lstatSync(dir).mtimeMs;
+  const walk = (d, rel) => {
+    for (const e of fsImpl.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      try { const st = fsImpl.lstatSync(p); if (st.mtimeMs > newest) newest = st.mtimeMs; } catch { /* vanished */ }
+      if (e.isDirectory() && !e.isSymbolicLink()) walk(p, r);
+      else files.push(r);
+    }
+  };
+  walk(dir, '');
+  return { files, newest };
+}
+
+function pruneArtifactStaging(opts) {
+  const result = { removed: [], removedFiles: [], kept: 0 };
+  try {
+    const o = opts || {};
+    const fsImpl = o.fsImpl || nodeFs;
+    const now = typeof o.now === 'number' && Number.isFinite(o.now) ? o.now : Date.now();
+    const base = typeof o.base === 'string' ? o.base : defaultStagingBase();
+    if (!path.isAbsolute(base)) return result;
+    let baseSt;
+    try { baseSt = fsImpl.lstatSync(base); } catch { return result; }
+    if (!baseSt.isDirectory()) return result;
+    const oldCutoff = now - resolveDays(o.days, 'artifactsDays', 30) * DAY_MS;
+    const emptyCutoff = now - STAGING_EMPTY_MS;
+    for (const name of safeDirs(fsImpl, base)) {
+      const dir = path.join(base, name);
+      try {
+        if (path.dirname(dir) !== base) { result.kept += 1; continue; }
+        const st = fsImpl.lstatSync(dir);
+        if (!st.isDirectory() || st.isSymbolicLink()) { result.kept += 1; continue; }
+        const isEmpty = fsImpl.readdirSync(dir).length === 0;
+        if (isEmpty) {
+          if (st.mtimeMs < emptyCutoff) {
+            if (!o.dryRun) fsImpl.rmdirSync(dir);
+            result.removed.push(name);
+          } else result.kept += 1;
+          continue;
+        }
+        const { files, newest } = walkStaging(fsImpl, dir);
+        if (newest >= oldCutoff) { result.kept += 1; continue; }
+        const names = files.map((f) => `${name}/${f}`);
+        if (names.length) console.warn(`[artifactRetention] staging ${dryTag(o)}deleting ${names.length} file(s) from ${dir}: ${names.join(', ')}`);
+        if (!o.dryRun) fsImpl.rmSync(dir, { recursive: true, force: true });
+        result.removed.push(name);
+        result.removedFiles.push(...names);
+      } catch (err) {
+        console.warn(`[artifactRetention] staging keep ${name}:`, err && err.message);
+        result.kept += 1;
+      }
+    }
+  } catch (err) {
+    console.warn('[artifactRetention] staging sweep skipped:', err && err.message);
+  }
+  return result;
+}
+
+const dryTag = (o) => (o.dryRun ? '(dry run) ' : '');
+
+module.exports = { pruneArtifacts, pruneArtifactStaging, SIZE_CAP_BYTES };

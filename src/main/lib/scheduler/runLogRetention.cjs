@@ -646,8 +646,10 @@ function runPlanRecordSweep(opts) {
 /**
  * Prune artifacts/<epic-id>/ + artifacts/_tasks/ in every given project root with
  * artifactsDays + tasksDays from opsRetentionSettings (lib/epic/artifactRetention.cjs).
- * Same per-project epicStatus as the plan-records sweep. Never throws.
- * deps: { prune, readSettings, epicStatusFor, now } for tests.
+ * Same per-project epicStatus as the plan-records sweep. Then, once per pass, prune the
+ * machine-wide staging base <worktreeBase>/artifact-staging (pruneArtifactStaging, with
+ * artifactsDays); its result is logged, not returned. Never throws.
+ * deps: { prune, pruneStaging, readSettings, epicStatusFor, now } for tests.
  */
 function runArtifactSweep(opts) {
   const o = opts || {};
@@ -668,6 +670,13 @@ function runArtifactSweep(opts) {
       out.errors += 1;
       console.warn(`[runLogRetention] artifacts sweep skipped ${cwd}:`, e && e.message);
     }
+  }
+  try {
+    const pruneStaging = o.pruneStaging || require('../epic/artifactRetention.cjs').pruneArtifactStaging;
+    pruneStaging({ now: o.now, days: s.artifactsDays }); // logs what it deletes
+  } catch (e) {
+    out.errors += 1;
+    console.warn('[runLogRetention] artifact staging sweep skipped:', e && e.message);
   }
   return out;
 }

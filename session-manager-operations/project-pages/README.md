@@ -327,6 +327,110 @@ kind folder (symlink escape).
 The sections before "Who triggers generation" describe the legacy single-file layout;
 where they differ, this section wins.
 
+## Voice library
+
+Voices are a Session Manager resource, like agents: one library, previewed and approved in
+Project Home ▸ Video ▸ Voices, bound to personas and tools by id. The one resolver is
+`demo-video-kit/voiceLibrary.cjs` (`listVoices`, `resolveVoiceId`).
+
+### Where voices live
+
+Three scopes, resolved project-first; a higher scope shadows a lower one with the same id:
+
+| Scope | Location |
+| --- | --- |
+| `project` | `<project>/.claude/voices/<id>.json` |
+| `machine` | `~/.claude/session-manager/voices/library/<id>.json` (voices home = `SM_VOICES_HOME`) |
+| `builtin` | every voice in the installed Kokoro model (`voices-v1.0.bin` under `KOKORO_MODEL_DIR`, default `~/.cache/kokoro-onnx`), else the `KOKORO_V1_VOICES` list marked not installed |
+
+`<id>` matches `/^[a-z0-9][a-z0-9_-]{0,63}$/` and is the file name; a file is at most 16 KB.
+An invalid file is reported in `errors` and never falls through to a lower scope.
+
+### Voice file format
+
+A command voice a project like Burrow can copy (`.claude/voices/narrator-1.json`):
+
+```json
+{
+  "id": "narrator-1",
+  "label": "Narrator (warm)",
+  "voice": { "engine": "command", "command": ["python3", "tools/tts.py", "--voice", "warm", "--text", "{text}", "--out", "{out}"] },
+  "sampleText": "Hello! This is how I sound when I tell your project story.",
+  "licence": "CC-BY-4.0",
+  "heavy": true,
+  "pinFiles": ["tools/tts.py", "tools/voices/warm.pt"]
+}
+```
+
+- `voice` is an inline voice checked by `validateCharacterJson`: `{engine: 'kokoro', id}` or
+  `{engine: 'command', command: string[]}`. A command uses `{text}` + `{out}` (run once per line)
+  or `{lines}` alone (run once per speaker with a JSON manifest path, e.g.
+  `["python3", "tools/tts.py", "--batch", "{lines}"]`); mixing them is refused. The argv is never
+  run through a shell. A library voice may not itself be a `{voiceId}` (no chains).
+- `id` must equal the file name; `label` 1-80 chars (default the id); `sampleText` <= 300 chars
+  (the preview line); `licence` <= 120 chars (default `unknown`); `heavy` boolean (see the lane);
+  `pinFiles` <= 8 project-relative paths, no `..`, whose bytes the approval pin covers.
+
+### Binding: {voiceId}
+
+A persona (`character.json` `voice`, or a cast member's `voice`) names a library voice with
+exactly one key:
+
+```json
+{ "voice": { "voiceId": "narrator-1" } }
+```
+
+`speakLines` resolves it through `resolveVoiceId` at speak time. A Project Home or Project Video
+tool (non-built-in macro) may carry a default `voiceId` (`macroLibrary.cjs`).
+
+### Precedence
+
+Which voice speaks a video's narration, first match wins:
+
+1. the press's Voice pick (`press-voice-select`, `VoiceSelect.tsx`; `Default` sends none);
+2. the tool's `voiceId`;
+3. the persona's `voice`;
+4. the kit default.
+
+A job tool gets 1 or 2 as `SM_VOICE_ID` in its job env (`macroJobDispatch.cjs`); a tool without a
+job, and Demo Video, get a `Voice: <id>` line instead.
+
+### The voice lane
+
+Every synthesis — video runs and previews alike — waits in the one machine-wide voice lane
+(`demo-video-kit/voiceLane.cjs`): a cross-process FIFO of tickets under
+`<voices home>/lane/<heavy|light>/` (or `SM_VOICE_LANE_DIR`). Two lanes, `heavy` and `light`,
+each run **one synthesis at a time**. `heavy` in the voice file wins; otherwise a Kokoro voice is
+light and every other engine heavy. Dead-pid or 6 h old tickets are swept; a waiting call prints
+its position; each finished call appends a line to `<voices home>/usage.jsonl`.
+
+### Preview cache
+
+`previewVoice` (`lib/project-pages/voicePreview.cjs`) is the one preview path. A clip is cached at
+`<voices home>/cache/<previewKey>.wav`, where `previewKey` is the sha256 of voice id + trimmed
+text + canonical resolved voice JSON + approval pin — editing a voice or a pin file changes the
+key, so a stale clip is never served. At most 200 clips are kept (oldest removed).
+
+### Approval lock
+
+Approve, unapprove and delete are **human clicks in Project Home ▸ Video ▸ Voices only**
+(renderer IPC `voices:approve` / `voices:unapprove` / `voices:delete`, `voicesIpc.cjs` — the one
+writer of `<voices home>/approvals.json`). An approval stores `pinOf`: the sha256 of the voice's
+`{id, voice, pinFiles}` plus each pin file's bytes. An approved voice whose pin no longer matches,
+or whose file was removed outside the Voices screen, is refused — never used, never replaced by
+a lower scope; re-approve it. Built-ins cannot be approved or deleted, and an approved voice must
+be unapproved before it can be deleted.
+
+### Read-only MCP tools
+
+| MCP tool | Route | Answer |
+| --- | --- | --- |
+| `voice_list` | `GET /admin/voices?cwd=<abs>` | `{ok, voices, errors}` |
+| `voice_preview` | `POST /admin/voices/preview {cwd, voiceId, text}` | `ready` (`wavPath`, `cached`, `wallMs`, `audioSeconds`) within 60 s, else `queued` (`lane`, `position`); repeat the call to join the run or read the cache |
+
+Both are read-only (`voiceAdminRoutes.cjs`): no route or MCP tool can add, approve, unapprove or
+delete a voice.
+
 ## Competitor matrix
 
 ```

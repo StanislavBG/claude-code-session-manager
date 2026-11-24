@@ -6,7 +6,7 @@
  * unmerged Epic worktrees, so the File Explorer can show work that has not landed yet.
  *
  *   artifacts:list       { cwd } → { ok, artifacts: [...listArtifacts entry, epicTitle] }
- *   artifacts:worktrees  { cwd } → { ok, worktrees: [{ epicId, title, path, branch, aheadOfBase }] }
+ *   artifacts:worktrees  { cwd } → { ok, worktrees: [{ epicId, title, path, branch, aheadOfBase, uncommitted }] }
  *
  * Both payloads are strict zod schemas (ipcSchemas.cjs); `cwd` additionally passes
  * config.cjs's validatePath, like every other renderer-supplied cwd. Epic records come
@@ -20,6 +20,9 @@ const path = require('node:path');
 
 /** Per-git-call bound — one slow repo must not hang the Explorer. */
 const GIT_TIMEOUT_MS = 10_000;
+
+/** Upper bound on a worktree's reported uncommitted-path count. */
+const UNCOMMITTED_CAP = 999;
 
 /** goalText's first paragraph (an Epic's title), or null. */
 /** @param {{ goalText?: unknown } | null | undefined} record */
@@ -105,13 +108,23 @@ function makeArtifactReaders(deps = {}) {
       rows.push({ epicId, title: titleOf(rec), path: wt.dir, branch, base: typeof wt.baseBranch === 'string' && wt.baseBranch ? wt.baseBranch : 'HEAD' });
     }
     const worktrees = await Promise.all(rows.map(async ({ base, ...row }) => {
-      let aheadOfBase = null;
-      try {
-        const out = await execGit(cwd, ['rev-list', '--count', `${base}..${row.branch}`, '--'], { timeout: GIT_TIMEOUT_MS });
-        const n = Number.parseInt(out.trim(), 10);
-        aheadOfBase = Number.isFinite(n) ? n : null;
-      } catch { aheadOfBase = null; }
-      return { ...row, aheadOfBase };
+      const ahead = (async () => {
+        try {
+          const out = await execGit(cwd, ['rev-list', '--count', `${base}..${row.branch}`, '--'], { timeout: GIT_TIMEOUT_MS });
+          const n = Number.parseInt(out.trim(), 10);
+          return Number.isFinite(n) ? n : null;
+        } catch { return null; }
+      })();
+      // Uncommitted = `git status --porcelain` lines (modified + staged + untracked) in the worktree itself.
+      const dirty = (async () => {
+        try {
+          const out = await execGit(row.path, ['status', '--porcelain'], { timeout: GIT_TIMEOUT_MS });
+          const n = String(out).split('\n').filter((l) => l.trim() !== '').length;
+          return Math.min(n, UNCOMMITTED_CAP);
+        } catch { return null; }
+      })();
+      const [aheadOfBase, uncommitted] = await Promise.all([ahead, dirty]);
+      return { ...row, aheadOfBase, uncommitted };
     }));
     return { ok: true, worktrees };
   }

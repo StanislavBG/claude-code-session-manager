@@ -38,6 +38,9 @@ beforeAll(() => {
     git(path.join(tmp, 'wt-a'), 'add', `f${n}.txt`);
     git(path.join(tmp, 'wt-a'), 'commit', '-q', '-m', `c${n}`);
   }
+  // Epic A is also dirty: one modified tracked file + one untracked file.
+  fs.writeFileSync(path.join(tmp, 'wt-a', 'a.txt'), 'changed');
+  fs.writeFileSync(path.join(tmp, 'wt-a', 'untracked.txt'), 'u');
   // Epic C: completed — has a worktree, but must not be listed.
   git(repo, 'worktree', 'add', '-q', '-b', 'sm-epic/epic-c', path.join(tmp, 'wt-c'));
 });
@@ -103,11 +106,15 @@ test('artifacts:worktrees lists only on-disk, registered worktrees of active Epi
   const res = await call('artifacts:worktrees', { cwd: repo });
   expect(res).toEqual({
     ok: true,
-    worktrees: [{ epicId: 'epic-a', title: 'Title A', path: path.join(tmp, 'wt-a'), branch: 'sm-epic/epic-a', aheadOfBase: 2 }],
+    worktrees: [{ epicId: 'epic-a', title: 'Title A', path: path.join(tmp, 'wt-a'), branch: 'sm-epic/epic-a', aheadOfBase: 2, uncommitted: 2 }],
   });
   const revList = deps.execGit.mock.calls.filter((c) => c[1][0] === 'rev-list');
   expect(revList).toHaveLength(1);
   expect(revList[0][1]).toEqual(['rev-list', '--count', 'HEAD..sm-epic/epic-a', '--']);
+  const status = deps.execGit.mock.calls.filter((c) => c[1][0] === 'status');
+  expect(status).toHaveLength(1);
+  expect(status[0][0]).toBe(path.join(tmp, 'wt-a'));
+  expect(status[0][1]).toEqual(['status', '--porcelain']);
   for (const c of deps.execGit.mock.calls) expect(c[2].timeout).toBe(GIT_TIMEOUT_MS);
   for (const c of deps.execGit.mock.calls) expect(String(c[0])).not.toContain(path.join('.claude', 'projects'));
 });
@@ -120,6 +127,18 @@ test('artifacts:worktrees reports aheadOfBase null when rev-list fails, [] outsi
   const notRepo = fs.mkdtempSync(path.join(tmp, 'plain-'));
   const r2 = await setup().call('artifacts:worktrees', { cwd: notRepo });
   expect(r2).toEqual({ ok: true, worktrees: [] });
+});
+
+test('artifacts:worktrees reports uncommitted null when git status fails, capped at 999', async () => {
+  const failing = vi.fn((cwd, args, opts) => (args[0] === 'status' ? Promise.reject(new Error('boom')) : execGit(cwd, args, opts)));
+  const r1 = await setup({ execGit: failing }).call('artifacts:worktrees', { cwd: repo });
+  expect(r1.worktrees).toHaveLength(1);
+  expect(r1.worktrees[0].uncommitted).toBeNull();
+  expect(r1.worktrees[0].aheadOfBase).toBe(2);
+  const many = Array.from({ length: 1500 }, (_, i) => `?? f${i}`).join('\n') + '\n';
+  const huge = vi.fn((cwd, args, opts) => (args[0] === 'status' ? Promise.resolve(many) : execGit(cwd, args, opts)));
+  const r2 = await setup({ execGit: huge }).call('artifacts:worktrees', { cwd: repo });
+  expect(r2.worktrees[0].uncommitted).toBe(999);
 });
 
 test('payloads are strict: missing/empty cwd or extra keys are rejected', async () => {

@@ -448,13 +448,14 @@ export type ArtifactsListResult =
   | { ok: true; artifacts: ArtifactEntry[] }
   | { ok: false; error: string };
 
-/** One artifacts:worktrees row. `aheadOfBase` = commits on `branch` not on the base, null when unknown. */
+/** One artifacts:worktrees row. `aheadOfBase` = commits on `branch` not on the base; `uncommitted` = `git status --porcelain` lines in the worktree (capped at 999); each null when unknown. */
 export interface ArtifactWorktree {
   epicId: string;
   title: string | null;
   path: string;
   branch: string;
   aheadOfBase: number | null;
+  uncommitted: number | null;
 }
 
 export type ArtifactsWorktreesResult =

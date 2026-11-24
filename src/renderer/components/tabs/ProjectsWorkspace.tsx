@@ -31,11 +31,13 @@ function clampSplit(v: number): number {
   return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v))
 }
 
-/** One root-switcher option: '<Epic title> — unmerged, N commits ahead'. */
+/** One root-switcher option: '<Epic title> — unmerged, N commits ahead, M uncommitted' (0/null parts omitted). */
 export function worktreeLabel(w: ArtifactWorktree): string {
   const title = w.title?.trim() || w.epicId
-  if (w.aheadOfBase === null) return `${title} — unmerged`
-  return `${title} — unmerged, ${w.aheadOfBase} commit${w.aheadOfBase === 1 ? '' : 's'} ahead`
+  const parts = ['unmerged']
+  if (w.aheadOfBase) parts.push(`${w.aheadOfBase} commit${w.aheadOfBase === 1 ? '' : 's'} ahead`)
+  if (w.uncommitted) parts.push(`${w.uncommitted} uncommitted`)
+  return `${title} — ${parts.join(', ')}`
 }
 
 const EMPTY_WORKTREES: ArtifactWorktree[] = []

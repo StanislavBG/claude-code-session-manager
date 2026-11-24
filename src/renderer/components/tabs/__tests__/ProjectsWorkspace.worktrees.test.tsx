@@ -85,7 +85,7 @@ beforeEach(() => {
   worktrees.mockReset()
   worktrees.mockResolvedValue({
     ok: true,
-    worktrees: [{ epicId: 'epic-1', title: 'Fix login', path: WT, branch: 'sm-epic/epic-1', aheadOfBase: 3 }],
+    worktrees: [{ epicId: 'epic-1', title: 'Fix login', path: WT, branch: 'sm-epic/epic-1', aheadOfBase: 3, uncommitted: 4 }],
   })
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
   useSessions.setState({ tabs: [projectTab], activeTabId: 't1' })
@@ -147,8 +147,29 @@ describe('ProjectsWorkspace worktree root switcher', () => {
     await until(() => expect(switcher(c)).not.toBeNull())
     expect(worktrees).toHaveBeenCalledWith({ cwd: PROJECT })
     const options = Array.from(switcher(c)!.options).map((o) => o.textContent)
-    expect(options).toEqual(['Project', 'Fix login — unmerged, 3 commits ahead'])
+    expect(options).toEqual(['Project', 'Fix login — unmerged, 3 commits ahead, 4 uncommitted'])
     expect(switcher(c)!.value).toBe('')
+  })
+
+  it('labels omit a 0 or null count', async () => {
+    worktrees.mockResolvedValue({
+      ok: true,
+      worktrees: [
+        { epicId: 'e1', title: 'A', path: `${WT}-a`, branch: 'b1', aheadOfBase: 0, uncommitted: 7 },
+        { epicId: 'e2', title: 'B', path: `${WT}-b`, branch: 'b2', aheadOfBase: 1, uncommitted: 0 },
+        { epicId: 'e3', title: null, path: `${WT}-c`, branch: 'b3', aheadOfBase: null, uncommitted: null },
+        { epicId: 'e4', title: 'D', path: `${WT}-d`, branch: 'b4', aheadOfBase: null, uncommitted: 1 },
+      ],
+    })
+    const c = await mount()
+    await until(() => expect(switcher(c)).not.toBeNull())
+    expect(Array.from(switcher(c)!.options).map((o) => o.textContent)).toEqual([
+      'Project',
+      'A — unmerged, 7 uncommitted',
+      'B — unmerged, 1 commit ahead',
+      'e3 — unmerged',
+      'D — unmerged, 1 uncommitted',
+    ])
   })
 
   it('shows no switcher when there are no worktrees', async () => {

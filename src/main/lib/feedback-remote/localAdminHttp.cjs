@@ -34,6 +34,8 @@
 const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { Readable } = require('node:stream');
+const { EventEmitter } = require('node:events');
 const fsp = require('node:fs/promises');
 const config = require('../../config.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
@@ -134,6 +136,14 @@ function createAdminHttp() {
       sendJson(res, 401, { ok: false, error: 'unauthorized' });
       return;
     }
+    await dispatch(req, res);
+  }
+
+  /**
+   * Route dispatch shared by the HTTP server (after auth) and invoke() (no
+   * auth — in-process callers are already inside the main process).
+   */
+  async function dispatch(req, res) {
     // Route lookup is keyed by pathname only — req.url carries the raw query
     // string too, which would otherwise never match a registered route (every
     // route before PRD 1024 was query-free, so this was a latent gap, not a
@@ -221,13 +231,109 @@ function createAdminHttp() {
     server = null;
   }
 
+  /**
+   * In-process call into a registered route — same handler, validation,
+   * idempotency and audit rows as the HTTP API, with no socket and no bearer
+   * token. `query` may be a plain object or URLSearchParams; it is merged
+   * onto any query already in `routePath`. `body` (any JSON value) is
+   * serialized and streamed to the handler like an HTTP request body.
+   * Resolves { status, json } (json null when the handler wrote non-JSON).
+   */
+  async function invoke(method, routePath, { body, query } = {}) {
+    const urlObj = new URL(routePath, 'http://127.0.0.1');
+    if (query) {
+      const params = query instanceof URLSearchParams ? query : new URLSearchParams(
+        Object.entries(query).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)]),
+      );
+      for (const [k, v] of params) urlObj.searchParams.append(k, v);
+    }
+    const payload = body === undefined ? '' : JSON.stringify(body);
+    const req = createInMemoryRequest(String(method).toUpperCase(), `${urlObj.pathname}${urlObj.search}`, payload);
+    const res = createResponseShim();
+    try {
+      await dispatch(req, res);
+    } catch (e) {
+      if (!res.writableEnded) sendJson(res, 500, { ok: false, error: e?.message ?? 'internal error' });
+    }
+    return res.result();
+  }
+
   return {
     start,
     stop,
     registerRoute,
+    invoke,
     get token() { return token; },
     get server() { return server; },
   };
+}
+
+/** In-memory IncomingMessage stand-in: a Readable carrying the JSON body. */
+function createInMemoryRequest(method, url, payload) {
+  const buf = Buffer.from(payload, 'utf8');
+  const req = new Readable({ read() {} });
+  if (buf.length) req.push(buf);
+  req.push(null);
+  req.method = method;
+  req.url = url;
+  req.headers = buf.length
+    ? { 'content-type': 'application/json', 'content-length': String(buf.length) }
+    : {};
+  req.socket = null;
+  req.setTimeout = () => req;
+  return req;
+}
+
+/** ServerResponse stand-in capturing status, headers and the written body. */
+function createResponseShim() {
+  const res = new EventEmitter();
+  const chunks = [];
+  const headers = {};
+  res.statusCode = 200;
+  res.headersSent = false;
+  res.writableEnded = false;
+  res.finished = false;
+  res.destroyed = false;
+  res.writableLength = 0;
+  res.setHeader = (name, value) => { headers[String(name).toLowerCase()] = value; return res; };
+  res.getHeader = (name) => headers[String(name).toLowerCase()];
+  res.removeHeader = (name) => { delete headers[String(name).toLowerCase()]; };
+  res.writeHead = (status, a, b) => {
+    res.statusCode = status;
+    const hdrs = typeof a === 'object' && a !== null ? a : b;
+    if (hdrs && typeof hdrs === 'object') for (const [k, v] of Object.entries(hdrs)) res.setHeader(k, v);
+    res.headersSent = true;
+    return res;
+  };
+  const toBuf = (chunk, enc) => (Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), typeof enc === 'string' ? enc : 'utf8'));
+  res.write = (chunk, enc, cb) => {
+    if (chunk !== undefined && chunk !== null) chunks.push(toBuf(chunk, enc));
+    res.headersSent = true;
+    const done = typeof enc === 'function' ? enc : cb;
+    if (typeof done === 'function') done();
+    return true;
+  };
+  res.end = (chunk, enc, cb) => {
+    if (res.writableEnded) return res;
+    if (typeof chunk === 'function') { cb = chunk; chunk = undefined; }
+    if (chunk !== undefined && chunk !== null) chunks.push(toBuf(chunk, enc));
+    res.headersSent = true;
+    res.writableEnded = true;
+    res.finished = true;
+    const done = typeof enc === 'function' ? enc : cb;
+    if (typeof done === 'function') done();
+    res.emit('finish');
+    res.emit('close');
+    return res;
+  };
+  res.destroy = () => { res.destroyed = true; res.emit('close'); return res; };
+  res.result = () => {
+    const text = Buffer.concat(chunks).toString('utf8');
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+    return { status: res.statusCode, json };
+  };
+  return res;
 }
 
 module.exports = {

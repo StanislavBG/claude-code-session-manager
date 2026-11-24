@@ -564,7 +564,10 @@ function isGitRepo(cwd) {
  * `cwd` may be a list of roots; a path is accepted if it verifies under any —
  * except a `session-manager-operations/plan-records/` path, which verifies only
  * under the first root (the main checkout).
- * Complexity O(paths).
+ * A path that resolves to a DIRECTORY (e.g. a trailing-`/` plan-records folder)
+ * verifies when at least one DIRECT child (not recursive) is a non-empty regular
+ * file inside the same run window; a trailing-slash path that is a file fails.
+ * Complexity O(paths × direct children).
  */
 function artifactsVerifiedOnDisk({ cwd, paths, startedAt, finishedAt, fsImpl = fs } = {}) {
   return artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl }).ok;
@@ -601,6 +604,29 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
         if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
         let st;
         try { st = fsImpl.statSync(abs); } catch { continue; }
+        if (st.isDirectory()) {
+          // Directory artifact: newest fresh, non-empty regular DIRECT child.
+          let best = null;
+          try {
+            for (const name of fsImpl.readdirSync(abs)) {
+              let cs;
+              try { cs = fsImpl.statSync(path.join(abs, name)); } catch { continue; }
+              if (!cs.isFile() || cs.size <= 0) continue;
+              if (cs.mtimeMs < lo || cs.mtimeMs > hi) continue;
+              if (!best || cs.mtimeMs > best.st.mtimeMs) best = { name, st: cs };
+            }
+          } catch { continue; }
+          if (!best) continue;
+          hit = {
+            path: p,
+            size: best.st.size,
+            mtime: new Date(best.st.mtimeMs).toISOString(),
+            file: path.posix.join(p.replace(/\\/g, '/').replace(/\/+$/, ''), best.name),
+          };
+          break;
+        }
+        // A trailing-slash declaration must name a directory.
+        if (/[\\/]$/.test(p)) continue;
         if (!st.isFile() || st.size <= 0) continue;
         if (st.mtimeMs < lo || st.mtimeMs > hi) continue;
         hit = { path: p, size: st.size, mtime: new Date(st.mtimeMs).toISOString() };

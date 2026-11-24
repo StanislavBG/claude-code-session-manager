@@ -126,6 +126,8 @@ require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminH
 require('./lib/feedback-remote/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Website-feedback widgets + their decrypted inbox, behind the Feedback MCP tools.
 require('./lib/feedback-remote/siteFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
+// Per-project Artifacts store (publish + list), behind the artifact MCP tool.
+require('./lib/epic/artifactAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Cursor read over the audit log for outside scripts (read-only).
 require('./lib/telemetry/eventsAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Outside-facing Epic records for scripts/other projects (read-only).

@@ -357,3 +357,11 @@ test('the Task routes are registered and a Task from GET /admin/tasks has exactl
     os.homedir = prevHomedir;
   }
 });
+
+test('the advertised Task request keys equal the Task schemas keys, in order', () => {
+  const { TASK_BODY_KEYS, TASK_RUNTIME_KEYS, TASK_GET_KEYS } = require('../lib/tasks/taskAdminRoutes.cjs');
+  for (const a of [TASK_BODY_KEYS, TASK_RUNTIME_KEYS, TASK_GET_KEYS]) expect(Object.isFrozen(a)).toBe(true);
+  expect([...CONTRACT.taskBodyKeys]).toEqual([...TASK_BODY_KEYS]);
+  expect([...CONTRACT.taskRuntimeKeys]).toEqual([...TASK_RUNTIME_KEYS]);
+  expect([...CONTRACT.taskGetKeys]).toEqual([...TASK_GET_KEYS]);
+});

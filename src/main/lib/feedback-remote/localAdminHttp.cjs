@@ -39,7 +39,7 @@ const config = require('../../config.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 // App + outside-contract version, reported on the health route, unknown-route
 // 404s and in the token file so outside callers never probe for a route.
-const { contractInfo } = require('../externalContract.cjs');
+const { contractInfo, healthInfo } = require('../externalContract.cjs');
 
 /**
  * Mode-aware token file path, resolved fresh on every call (never cached at
@@ -142,7 +142,7 @@ function createAdminHttp() {
     // /admin/scheduler/prds?cwd=&epicId=&status=).
     const urlObj = new URL(req.url, 'http://127.0.0.1');
     if (req.method === 'GET' && urlObj.pathname === HEALTH_PATH) {
-      sendJson(res, 200, { ok: true, ...contractInfo() });
+      sendJson(res, 200, { ok: true, ...healthInfo() });
       return;
     }
     try {

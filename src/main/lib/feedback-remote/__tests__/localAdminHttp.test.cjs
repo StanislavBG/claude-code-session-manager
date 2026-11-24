@@ -257,7 +257,18 @@ test('start()s self-check answers on the health path with the fresh bearer token
     const res = await request(port, { path: '/__admin/health', token });
     expect(res.status).toBe(200);
     const appVersion = require('../../../../../package.json').version;
-    expect(res.json).toEqual({ ok: true, appVersion, contractVersion: 1 });
+    const { CONTRACT } = require('../../externalContract.cjs');
+    expect(res.json).toEqual({
+      ok: true, appVersion, contractVersion: 1,
+      taskBodyKeys: [...CONTRACT.taskBodyKeys],
+      taskRuntimeKeys: [...CONTRACT.taskRuntimeKeys],
+      taskGetKeys: [...CONTRACT.taskGetKeys],
+    });
+    expect(Array.isArray(res.json.taskBodyKeys)).toBe(true);
+    expect(res.json.taskBodyKeys).toContain('stream');
+    expect(res.json.taskRuntimeKeys).toContain('disallowedTools');
+    expect(res.json.taskRuntimeKeys).toContain('appendSystemPrompt');
+    expect(res.json.taskGetKeys).toContain('after');
     const unauth = await request(port, { path: '/__admin/health' });
     expect(unauth.status).toBe(401);
   } finally {

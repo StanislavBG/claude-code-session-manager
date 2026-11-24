@@ -216,6 +216,11 @@ const getQuerySchema = z.object({
   after: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(0)).optional(),
 }).strict();
 
+/** Keys POST /admin/tasks accepts at the top level and under runtime, and GET /admin/task query keys (advertised on the health route via externalContract.cjs). */
+const TASK_BODY_KEYS = Object.freeze(Object.keys(bodySchema.shape));
+const TASK_RUNTIME_KEYS = Object.freeze(Object.keys(runtimeSchema.shape));
+const TASK_GET_KEYS = Object.freeze(Object.keys(getQuerySchema.shape));
+
 /** One GET /admin/task page of a live Task's captured output. */
 const LIVE_PAGE_BYTES = 1024 * 1024;
 
@@ -887,4 +892,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
   });
 }
 
-module.exports = { registerAdminRoute, MAX_BODY_BYTES, MAX_IMPORT_BODY_BYTES, TASK_FIELDS, IMPORT_STATUSES };
+module.exports = {
+  registerAdminRoute, MAX_BODY_BYTES, MAX_IMPORT_BODY_BYTES, TASK_FIELDS, IMPORT_STATUSES,
+  TASK_BODY_KEYS, TASK_RUNTIME_KEYS, TASK_GET_KEYS,
+};

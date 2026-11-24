@@ -33,6 +33,7 @@ const memoryScope = require('../process/memoryScope.cjs');
 const { writeToolRiskGuardSettingsFile } = require('../epic/guardSpawnSettings.cjs');
 const { buildJobSandboxSettings } = require('../claude/jobSandboxPolicy.cjs');
 const { personaToolScopeArgs } = require('../claude/personaToolScope.cjs');
+const artifactStore = require('../epic/artifactStore.cjs');
 
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 16 * 1024;
@@ -218,9 +219,43 @@ function textStdoutFor(envelope) {
  *
  * @param {{ args: string[], env: Record<string, string|undefined>, prompt: string, cwd: string,
  *   timeoutMs?: number, signal?: AbortSignal, onSpawn?: (pid: number) => void,
- *   onStdoutLine?: (line: string) => void }} o
+ * Artifacts: with a `taskId`, the child gets SM_ARTIFACTS_DIR =
+ * artifactStore.stagingDirFor({ runId: taskId }) (outside the repo), and when
+ * the run ends that folder is ingested into artifacts/_tasks/<taskId>/ under
+ * `projectRoot` (default `cwd`) BEFORE the result resolves. Result gains
+ * `artifacts: { published, skipped } | null`. Staging/ingest failures are
+ * logged and never change the run's status.
+ *
+ * @param {{ args: string[], env: Record<string, string|undefined>, prompt: string, cwd: string,
+ *   timeoutMs?: number, signal?: AbortSignal, onSpawn?: (pid: number) => void,
+ *   onStdoutLine?: (line: string) => void, taskId?: string, projectRoot?: string, deps?: Record<string, any> }} o
  */
-async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn, onStdoutLine, deps = {} } = /** @type {any} */ ({})) {
+async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn, onStdoutLine, taskId, projectRoot, deps = {} } = /** @type {any} */ ({})) {
+  const store = deps.artifactStore || artifactStore;
+  /** @type {string|null} */
+  let artifactsDir = null;
+  if (typeof taskId === 'string' && taskId) {
+    try { artifactsDir = store.stagingDirFor({ runId: taskId }); } catch (e) {
+      console.error('[taskRun] artifact staging dir unavailable', taskId, (e && e.message) || e);
+    }
+  }
+  const result = await spawnTask({ args, env: artifactsDir ? { ...(env || {}), SM_ARTIFACTS_DIR: artifactsDir } : env, prompt, cwd, timeoutMs, signal, onSpawn, onStdoutLine, deps });
+  if (!artifactsDir) return { ...result, artifacts: null };
+  /** @type {any} */
+  let artifacts = null;
+  try {
+    artifacts = await store.ingestDir({
+      projectRoot: projectRoot || cwd, taskId, srcDir: artifactsDir, producer: { taskId },
+    });
+    for (const sk of (artifacts && artifacts.skipped) || []) console.error('[taskRun] artifact not ingested', sk.path, sk.reason);
+  } catch (e) {
+    console.error('[taskRun] artifact ingest failed', taskId, (e && e.message) || e);
+  }
+  return { ...result, artifacts };
+}
+
+/** runTask without the artifacts step. Resolves — never throws. */
+async function spawnTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn, onStdoutLine, deps = {} } = /** @type {any} */ ({})) {
   const startedAt = Date.now();
   const base = () => ({
     status: /** @type {string} */ ('spawn_failed'),

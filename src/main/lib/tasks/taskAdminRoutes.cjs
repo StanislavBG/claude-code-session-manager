@@ -658,6 +658,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
           signal: ac.signal,
           onSpawn: (/** @type {number} */ pid) => { try { slots().stampPid(token, pid); } catch { /* */ } },
           onStdoutLine,
+          taskId,
+          projectRoot: cwd,
         });
       } finally {
         try { slots().release(token); } catch { /* */ }

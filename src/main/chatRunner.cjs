@@ -67,6 +67,7 @@ const { planAgentCliTurn } = require('./lib/agent-cli/agentCliTurn.cjs');
 const { writeNativeSession } = require('./lib/agent-cli/agentCliSessionStore.cjs');
 // Module object (not destructured) so tests can stub the append.
 const epicEventLog = require('./lib/epic/epicEventLog.cjs');
+const artifactStore = require('./lib/epic/artifactStore.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
 const STDERR_TAIL_MAX = 64 * 1024;
@@ -411,6 +412,36 @@ function appendChatEpicEvent(cwd, epicId, event) {
   });
 }
 
+/** Staging folder for a chat session's artifacts, or null (unsafe id / mkdir failure — logged). */
+function chatArtifactsDir(sessionId) {
+  try {
+    return artifactStore.stagingDirFor({ runId: sessionId });
+  } catch (err) {
+    console.error('[chatRunner] artifact staging dir unavailable', sessionId, err?.message ?? err);
+    return null;
+  }
+}
+
+/**
+ * Ingest a finished turn's staging folder into artifacts/<epic-id>/. An Epic chat's sessionId IS
+ * its Epic id. Fire-and-forget: errors and skipped files are logged, never thrown.
+ */
+function ingestChatArtifacts({ cwd, sessionId, srcDir }) {
+  let p;
+  try {
+    p = artifactStore.ingestDir({ projectRoot: cwd, epicId: sessionId, srcDir, producer: { epicId: sessionId, sessionId } });
+  } catch (err) {
+    p = Promise.reject(err);
+  }
+  return Promise.resolve(p).then((res) => {
+    for (const s of res?.skipped || []) console.error('[chatRunner] artifact not ingested', s.path, s.reason);
+    return res;
+  }).catch((err) => {
+    console.error('[chatRunner] artifact ingest failed', sessionId, err?.message ?? err);
+    return null;
+  });
+}
+
 /**
  * Append job.needs_input for an Epic chat turn that asked questions and
  * remember them so the next human prompt is recorded as the answer.
@@ -710,7 +741,13 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // originProjectRoot on create-prd/open-session/readiness calls so those
     // routes can resolve the right project even from a worktree pwd. See
     // projectRootResolve.cjs.
-    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd });
+    // SM_ARTIFACTS_DIR: a per-session staging folder OUTSIDE the repo (artifactStore.stagingDirFor);
+    // whatever the agent writes there is ingested into the Artifacts store when the turn closes
+    // (ingestChatArtifacts below), so it shows in the File Explorer with no merge. runId = sessionId,
+    // the same folder the Epic's Terminal view gets (pty.cjs) — EPIC : CLI session = 1:1.
+    const artifactsDir = chatArtifactsDir(sessionId);
+    const artifactsEnv = artifactsDir ? { SM_ARTIFACTS_DIR: artifactsDir } : {};
+    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd, ...artifactsEnv });
 
     // Prepend the stop-signal protocol instruction and the chat-mode truth
     // instruction to every prompt
@@ -789,7 +826,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       }
     }
     const agentEnv = agentPlan
-      ? cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd, ...agentPlan.envExtra })
+      ? cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd, ...artifactsEnv, ...agentPlan.envExtra })
       : null;
 
     const useResume = plan.useResume;
@@ -1209,6 +1246,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
           }, { code: 'exit-no-result' });
         }
       }
+      if (artifactsDir) ingestChatArtifacts({ cwd, sessionId, srcDir: artifactsDir });
       settle();
     });
     };

@@ -26,6 +26,8 @@ const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const { resolveEpicSpawnCwd } = require('./lib/epic/epicSpawnCwd.cjs');
 const telemetryCounters = require('./lib/telemetry/telemetryCounters.cjs');
+const artifactStore = require('./lib/epic/artifactStore.cjs');
+const { findEpicByClaudeSessionId } = require('./lib/claude/agentModelResolve.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
 // the remediation message so the user can cd there and rebuild.
@@ -230,6 +232,15 @@ class PtyManager {
       // from a worktree pwd. See projectRootResolve.cjs.
       SM_PROJECT_ROOT: cwd,
     });
+    // An Epic's Terminal gets the SAME artifact staging folder as its Chat view (runId = the
+    // session id; EPIC : CLI session = 1:1), so files written there are ingested at the next
+    // chat turn's close. Non-Epic terminals get none. Never fails the spawn.
+    delete env.SM_ARTIFACTS_DIR; // never inherit the app's own value
+    try {
+      if (findEpicByClaudeSessionId(cwd, tabId)) env.SM_ARTIFACTS_DIR = artifactStore.stagingDirFor({ runId: tabId });
+    } catch (err) {
+      console.error('[pty] artifact staging dir unavailable', tabId, err?.message ?? err);
+    }
 
     const shell = defaultShell({ platform: process.platform, env: process.env, exists: fs.existsSync });
     console.log('[pty] spawning shell', shell.file);

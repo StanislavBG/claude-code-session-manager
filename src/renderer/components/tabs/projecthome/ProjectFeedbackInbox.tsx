@@ -85,8 +85,11 @@ function signedPart(reporter: NonNullable<ReporterLike>): string {
  */
 export function reporterLabel(reporter: ReporterLike, verified?: boolean | null): string {
   if (!reporter) return 'Anonymous'
-  const base = `${signedPart(reporter)} · ${reporterBadge(verified)}`
-  return reporter.name ? `${base} · ${reporter.name} (${SITE_GIVEN_NAME})` : base
+  return [
+    signedPart(reporter),
+    reporterBadge(verified),
+    reporter.name ? `${reporter.name} (${SITE_GIVEN_NAME})` : '',
+  ].filter((part) => part.length > 0).join(' · ')
 }
 
 /** The reporter as text plus a badge span; textContent equals reporterLabel(). */
@@ -98,10 +101,15 @@ function Reporter({ reporter, verified }: { reporter: ReporterLike; verified: bo
     : verified === false
       ? 'border-accent text-accent-dark'
       : 'border-line text-fg-dim'
+  const signed = signedPart(reporter)
   return (
     <>
-      <span data-testid="site-feedback-reporter-signed">{signedPart(reporter)}</span>
-      {' · '}
+      {signed ? (
+        <>
+          <span data-testid="site-feedback-reporter-signed">{signed}</span>
+          {' · '}
+        </>
+      ) : null}
       <span
         data-testid="site-feedback-reporter-badge"
         data-verified={state}

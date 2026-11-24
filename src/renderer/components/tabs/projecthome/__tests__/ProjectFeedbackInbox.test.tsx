@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { ProjectFeedbackInbox } from '../ProjectFeedbackInbox'
+import { ProjectFeedbackInbox, reporterLabel } from '../ProjectFeedbackInbox'
 import { useSiteFeedback } from '../../../../state/siteFeedback'
 import { usePromptSessions } from '../../../../state/promptSessions'
 import { useToast } from '../../../../state/toast'
@@ -237,6 +237,30 @@ describe('ProjectFeedbackInbox reporter badge', () => {
     )
     expect(q(row('FB-S0002'), 'site-feedback-reporter-name')).toBeNull()
     expect(q(row('FB-S0002'), 'site-feedback-row-reporter')?.textContent).toBe('u8 · Verified')
+  })
+
+  it('joins only non-empty parts for name-only, email-only, id+email and anonymous reporters', async () => {
+    sf.inboxList.mockResolvedValueOnce({
+      ok: true,
+      items: [
+        item('FB-J0001', { reporter: { id: '', name: 'Ada', email: null }, reporterVerified: null }),
+        item('FB-J0002', { reporter: { id: '', name: null, email: 'ada@example.com' }, reporterVerified: null }),
+        item('FB-J0003', { reporter: { id: 'u9', name: null, email: 'ada@example.com' }, reporterVerified: true }),
+        item('FB-J0004', { reporter: null }),
+      ],
+    })
+    const el = await mount()
+    const row = (h: string) => el.querySelector(`[data-testid="site-feedback-row"][data-host-id="${h}"]`) as HTMLElement
+    const text = (h: string) => q(row(h), 'site-feedback-row-reporter')?.textContent
+    expect(text('FB-J0001')).toBe('claimed by site · Ada (name as given by the site)')
+    expect(q(row('FB-J0001'), 'site-feedback-reporter-signed')).toBeNull()
+    expect(text('FB-J0002')).toBe('ada@example.com · claimed by site')
+    expect(text('FB-J0003')).toBe('u9 · ada@example.com · Verified')
+    expect(text('FB-J0004')).toBe('Anonymous')
+    expect(reporterLabel({ id: '', name: 'Ada', email: null })).toBe('claimed by site · Ada (name as given by the site)')
+    expect(reporterLabel({ id: '', name: null, email: 'ada@example.com' })).toBe('ada@example.com · claimed by site')
+    expect(reporterLabel({ id: 'u9', name: null, email: 'ada@example.com' }, true)).toBe('u9 · ada@example.com · Verified')
+    expect(reporterLabel(null)).toBe('Anonymous')
   })
 
   it('an anonymous report shows no badge', async () => {

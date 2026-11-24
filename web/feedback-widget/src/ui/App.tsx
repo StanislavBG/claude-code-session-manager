@@ -34,7 +34,7 @@ import { Launcher } from './Launcher';
 import { initialState, isOpen, reduce, toolbarVisible, type Event, type State } from './machine';
 import { MarksLayer, useMarks } from './MarksLayer';
 import { DEFAULT_MARK_COLOR, type Mark, type MarkColor } from './marks';
-import { DEFAULT_TYPE, Panel } from './Panel';
+import { DEFAULT_TYPE, Panel, markOpensPopover } from './Panel';
 import { PanelContext } from './PanelContext';
 import { type PanelSide } from './shared';
 import { Toolbar } from './Toolbar';
@@ -445,7 +445,7 @@ export function App(props: AppProps) {
               marks.remove(id);
               apply({ type: 'popover', id: null });
             },
-            skipOpenOnCreate: state.config.flow === 'note' && marks.marks.length === 0,
+            skipOpenOnCreate: !markOpensPopover(state.config.flow, marks.marks.length),
             W: shot.width,
             H: shot.height,
           }}
@@ -458,7 +458,7 @@ export function App(props: AppProps) {
           onCreate={(mark) => {
             marks.add(mark);
             // §5.5: a picked element opens its comment popover like a pin or box does.
-            if (!(state.config.flow === 'note' && marks.marks.length === 0)) apply({ type: 'popover', id: mark.id });
+            if (markOpensPopover(state.config.flow, marks.marks.length)) apply({ type: 'popover', id: mark.id });
           }}
           onHover={(el) => apply({ type: 'hover', target: el })}
         />
@@ -492,6 +492,7 @@ export function App(props: AppProps) {
           side={panelSide}
           onSwap={setPanelSide}
           hostname={hostnameOf(session?.page.url)}
+          marks={marks.marks}
           attached={{
             width: shot.width,
             height: shot.height,
@@ -511,6 +512,7 @@ export function App(props: AppProps) {
             switches={switches}
             onSwitch={(name, on) => setSwitches((s) => ({ ...s, [name]: on }))}
             disabled={sending}
+            compact={state.config.flow === 'note'}
           />
         </Panel>
       )}

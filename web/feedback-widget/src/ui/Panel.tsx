@@ -1,5 +1,5 @@
-// Panel, flows `annotate` and `docked` — handoff README §5.6: Container, Geometry
-// "annotate — corner card" and "docked — side panel" (with Swap side), Header, Body (Type · Title · Details) and Footer (reporter + Send
+// Panel, flows `annotate`, `docked` and `note` — handoff README §5.6: Container, Geometry
+// "annotate — corner card", "docked — side panel" (with Swap side) and "note — anchored note", Header, Body (Type · Title · Details) and Footer (reporter + Send
 // with upload progress). Visibility from §2 (machine.panelVisible); the Send/Esc/⌘↵ semantics
 // stay in the machine — this component only dispatches.
 //
@@ -15,6 +15,8 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { FeedbackUser } from '../host';
 import type { ReportType } from '../report';
 import { panelVisible, type Event, type State } from './machine';
+import { isNumbered, type Mark } from './marks';
+import { isCommentMark, markBBox } from './Popover';
 import { Receipt, receiptCss } from './Receipt';
 import { adoptInto, type PanelSide } from './shared';
 import { colors, fonts, motion } from './tokens';
@@ -51,6 +53,87 @@ export function errorBody(kind: State['errorKind']): string {
 
 /** Describe → Title focus delay (§2). */
 export const FOCUS_TITLE_DELAY_MS = 420;
+
+// ── Flow `note` (§5.6 "note — anchored note", §4 focus) ────────────────────────
+
+export const NOTE_WIDTH = 340;
+/** Gap between the anchor and the note. */
+export const NOTE_GAP = 18;
+/** Minimum distance from every viewport edge. */
+export const NOTE_EDGE = 16;
+/** Half the note's nominal height — the note centres on the anchor (cy − 170). */
+export const NOTE_HALF = 170;
+export const NOTE_DETAILS_ROWS = 3;
+/** First mark → Title focus delay (§4). */
+export const NOTE_FOCUS_TITLE_DELAY_MS = 380;
+export const NOTE_EYEBROW_UNNUMBERED = 'Your note';
+
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** On-screen box of any mark (pin = its 28 px head, text = its chip, arrow/draw = their extent). */
+export function noteAnchorBox(m: Mark): Box {
+  if (isCommentMark(m)) return markBBox(m);
+  if (m.kind === 'text') return { x: m.x, y: m.y - 15, w: Math.min(300, 22 + m.text.length * 8.4), h: 30 };
+  if (m.kind === 'arrow') {
+    return { x: Math.min(m.x1, m.x2), y: Math.min(m.y1, m.y2), w: Math.abs(m.x2 - m.x1), h: Math.abs(m.y2 - m.y1) };
+  }
+  const xs = m.points.map((p) => p.x);
+  const ys = m.points.map((p) => p.y);
+  const x = xs.length ? Math.min(...xs) : 0;
+  const y = ys.length ? Math.min(...ys) : 0;
+  return { x, y, w: xs.length ? Math.max(...xs) - x : 0, h: ys.length ? Math.max(...ys) - y : 0 };
+}
+
+export interface NoteGeometry {
+  left: number;
+  /** Set when the anchor centre is in the top half (the note grows downward). */
+  top: number | null;
+  /** Set when the anchor centre is in the bottom half (the note grows upward). */
+  bottom: number | null;
+  maxHeight: number;
+  /** The note sits on the anchor's right (else its left). */
+  side: 'right' | 'left';
+}
+
+/**
+ * §5.6 note geometry: left = anchor.right + 18, or anchor.left − 358 if that overflows; clamp to
+ * [16, W − 356]. With cy = anchor centre: cy ≤ H/2 → top = max(16, cy − 170); otherwise
+ * bottom = max(16, H − cy − 170). Max-height H − 32. No anchor → a 40 px box at the centre.
+ */
+export function noteGeometry(anchor: Box | null, W: number, H: number): NoteGeometry {
+  const a = anchor ?? { x: W / 2 - 20, y: H / 2 - 20, w: 40, h: 40 };
+  let left = a.x + a.w + NOTE_GAP;
+  let side: NoteGeometry['side'] = 'right';
+  if (left + NOTE_WIDTH > W - NOTE_EDGE) {
+    left = a.x - NOTE_WIDTH - NOTE_GAP;
+    side = 'left';
+  }
+  left = Math.max(NOTE_EDGE, Math.min(left, W - NOTE_WIDTH - NOTE_EDGE));
+  const cy = a.y + a.h / 2;
+  const maxHeight = Math.max(0, H - 2 * NOTE_EDGE);
+  if (cy <= H / 2) return { left, top: Math.max(NOTE_EDGE, cy - NOTE_HALF), bottom: null, maxHeight, side };
+  return { left, top: null, bottom: Math.max(NOTE_EDGE, H - cy - NOTE_HALF), maxHeight, side };
+}
+
+/**
+ * §5.5: a new pin, box or element opens its comment popover — except the first mark in flow
+ * `note`, which opens the note instead (§5.6). `existing` = marks before this one.
+ */
+export function markOpensPopover(flow: State['config']['flow'], existing: number): boolean {
+  return !(flow === 'note' && existing === 0);
+}
+
+/** §5.6 note eyebrow: "Note on mark 1 · {selector}" (selector for an element), or "Your note". */
+export function noteEyebrow(first: Mark | undefined): string {
+  if (!first || !isNumbered(first)) return NOTE_EYEBROW_UNNUMBERED;
+  const base = `Note on mark ${first.n ?? 1}`;
+  return first.kind === 'element' && first.selector ? `${base} · ${first.selector}` : base;
+}
 
 export interface TypeSpec {
   id: ReportType;
@@ -138,6 +221,10 @@ export function panelCss(): string {
     `.fw-panel--docked.fw-panel--left{right:auto;left:16px;transform-origin:left center}`,
     `.fw-panel--docked.fw-panel--hidden{transform:translateX(24px)}`,
     `.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:translateX(-24px)}`,
+    // Flow note — anchored note: width 340; left/top/bottom/max-height are per-anchor (CSSOM);
+    // enters from translateY(8px) scale(.97).
+    `.fw-panel--note{right:auto;bottom:auto;width:${NOTE_WIDTH}px;max-height:calc(100vh - 32px);transform-origin:left top}`,
+    `.fw-panel--note.fw-panel--hidden{transform:translateY(8px) scale(.97)}`,
     `.fw-pn-progress{position:absolute;top:0;left:0;height:3px;width:0;background:${c.accent};z-index:1;transition:width 200ms ${ease}}`,
     // Header
     // Design review scene: one row — [eyebrow over headline] beside [← Marks][×], top-aligned. The
@@ -200,7 +287,7 @@ export function panelCss(): string {
     // §4 reduced motion: no translate/scale, fades capped at 150 ms.
     `@media (prefers-reduced-motion:reduce){` +
       `.fw-panel{transition:opacity 150ms, visibility 150ms}` +
-      `.fw-panel--hidden,.fw-panel--docked.fw-panel--hidden,.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:none}}`,
+      `.fw-panel--hidden,.fw-panel--note.fw-panel--hidden,.fw-panel--docked.fw-panel--hidden,.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:none}}`,
   ].join('\n');
 }
 
@@ -242,6 +329,10 @@ export interface PanelProps {
   hostname?: string;
   /** Override for the shortcut chip platform test (defaults to navigator.platform). */
   platform?: string;
+  /** Flow `note`: every mark (creation order); the first one anchors the note. */
+  marks?: readonly Mark[];
+  /** Flow `note`: viewport size for the note geometry (defaults to window.innerWidth/innerHeight). */
+  viewport?: { width: number; height: number };
   /** Receipt "Screenshot" / "Console" / "Network" rows (§5.7); defaults: viewport size, nothing captured. */
   attached?: PanelAttached;
   /** Marks / Attached sections (rendered below Details). */
@@ -274,11 +365,16 @@ export function Panel(props: PanelProps) {
   const flow = state.config.flow;
   const docked = flow === 'docked';
   const side = props.side ?? ownSide;
-  const visible = (flow === 'annotate' || docked) && panelVisible(state);
+  const note = flow === 'note';
+  const visible = panelVisible(state);
   const sending = state.mode === 'sending';
   const showBack = flow === 'annotate' && (state.mode === 'review' || state.mode === 'error');
-  const eyebrow = docked ? dockedEyebrow(props.hostname ?? currentHostname()) : EYEBROW;
-  const headline = docked ? DOCKED_HEADLINE : HEADLINE;
+  const firstMark = props.marks?.[0];
+  const eyebrow = docked ? dockedEyebrow(props.hostname ?? currentHostname()) : note ? noteEyebrow(firstMark) : EYEBROW;
+  const headline = docked ? DOCKED_HEADLINE : note ? '' : HEADLINE;
+  const vw = props.viewport?.width ?? (typeof window === 'undefined' ? 0 : window.innerWidth);
+  const vh = props.viewport?.height ?? (typeof window === 'undefined' ? 0 : window.innerHeight);
+  const geo = note ? noteGeometry(firstMark ? noteAnchorBox(firstMark) : null, vw, vh) : null;
   const invalid = !titleValid(state.draft.title);
   const reporter = reporterView(user);
   const showReceipt = state.mode === 'sent' && state.config.success === 'receipt';
@@ -292,6 +388,31 @@ export function Panel(props: PanelProps) {
   useLayoutEffect(() => {
     if (barRef.current) barRef.current.style.width = `${Math.max(0, Math.min(100, progress))}%`;
   }, [progress, sending]);
+
+  // Flow note geometry through the CSSOM (strict CSP); cleared for the other flows.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!geo) {
+      for (const p of ['left', 'top', 'bottom', 'max-height', 'transform-origin']) el.style.removeProperty(p);
+      return;
+    }
+    el.style.left = `${geo.left}px`;
+    el.style.top = geo.top === null ? 'auto' : `${geo.top}px`;
+    el.style.bottom = geo.bottom === null ? 'auto' : `${geo.bottom}px`;
+    el.style.maxHeight = `${geo.maxHeight}px`;
+    el.style.transformOrigin = `${geo.side === 'right' ? 'left' : 'right'} ${geo.top === null ? 'bottom' : 'top'}`;
+  }, [geo?.left, geo?.top, geo?.bottom, geo?.maxHeight, geo?.side, note]);
+
+  // Flow note, first mark: focus Title 380 ms later (§4).
+  const lastMarks = useRef(state.marks.length);
+  useLayoutEffect(() => {
+    const prev = lastMarks.current;
+    lastMarks.current = state.marks.length;
+    if (!note || prev !== 0 || state.marks.length === 0 || state.mode !== 'annotate') return;
+    const t = setTimeout(() => titleRef.current?.focus(), NOTE_FOCUS_TITLE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [state.marks.length, note, state.mode]);
 
   // Title focus: immediately on a title error, else 420 ms after Describe (§2).
   const lastSeq = useRef(state.focusTitleSeq);
@@ -324,8 +445,9 @@ export function Panel(props: PanelProps) {
   return (
     <div
       ref={ref}
-      class={`fw-panel${docked ? ` fw-panel--docked${side === 'left' ? ' fw-panel--left' : ''}` : mini ? ' fw-panel--mini' : ''}${visible ? '' : ' fw-panel--hidden'}`}
-      data-side={docked ? side : undefined}
+      class={`fw-panel${docked ? ` fw-panel--docked${side === 'left' ? ' fw-panel--left' : ''}` : note ? ' fw-panel--note' : mini ? ' fw-panel--mini' : ''}${visible ? '' : ' fw-panel--hidden'}`}
+      data-side={docked ? side : geo ? geo.side : undefined}
+      data-flow={flow}
       role="region"
       aria-label={showReceipt ? 'Feedback received' : 'Describe your feedback'}
       aria-hidden={visible ? undefined : 'true'}
@@ -349,8 +471,8 @@ export function Panel(props: PanelProps) {
       <>
       <div class="fw-pn-head">
         <div class="fw-pn-headtext">
-          <div class="fw-pn-eyebrow">{eyebrow}</div>
-          <h2 class="fw-pn-headline" data-part="headline">{headline}</h2>
+          <div class="fw-pn-eyebrow" data-part="eyebrow">{eyebrow}</div>
+          {headline && <h2 class="fw-pn-headline" data-part="headline">{headline}</h2>}
         </div>
         {showBack && (
           <button type="button" class="fw-pn-back" data-part="back" onClick={() => dispatch({ type: 'backToMarks' })}>
@@ -452,7 +574,7 @@ export function Panel(props: PanelProps) {
           <textarea
             id="fw-pn-details"
             class="fw-pn-textarea"
-            rows={DETAILS_ROWS}
+            rows={note ? NOTE_DETAILS_ROWS : DETAILS_ROWS}
             maxLength={DETAILS_MAX}
             placeholder={spec.detailsPlaceholder}
             value={state.draft.body}

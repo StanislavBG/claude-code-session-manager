@@ -27,7 +27,20 @@ import { initialState, reduce, toolbarVisible, type Event, type State } from '..
 import { CaptureChrome } from '../ui/CaptureChrome';
 import { PANEL_COLUMN, freeArea, type PanelSide } from '../ui/shared';
 import { Toolbar } from '../ui/Toolbar';
-import { DEFAULT_MARK_COLOR } from '../ui/marks';
+import { DEFAULT_MARK_COLOR, number, type Mark } from '../ui/marks';
+import { NOTE_FIRST_HINT, hintText } from '../ui/CaptureChrome';
+import {
+  NOTE_DETAILS_ROWS,
+  NOTE_FOCUS_TITLE_DELAY_MS,
+  NOTE_WIDTH,
+  markOpensPopover,
+  noteAnchorBox,
+  noteEyebrow,
+  noteGeometry,
+} from '../ui/Panel';
+import { PanelContext, SUMMARY_HIDE, SUMMARY_REVIEW, summaryLine, type PanelContextProps } from '../ui/PanelContext';
+import { MarksLayer } from '../ui/MarksLayer';
+import type { ConsoleEntry, NetworkEntry } from '../buffers';
 
 if (!('adoptedStyleSheets' in ShadowRoot.prototype)) {
   const sheets = new WeakMap<ShadowRoot, CSSStyleSheet[]>();
@@ -492,5 +505,285 @@ describe('flow docked — free area (§5.3)', () => {
     expect(tb().style.left).toBe(`${(PANEL_COLUMN + W) / 2}px`);
     expect(tb().style.top).toBe('16px');
     expect(hint().style.left).toBe(`${(PANEL_COLUMN + W) / 2}px`);
+  });
+});
+
+// ── Flow note (§5.6 "note — anchored note", "Compact summary"; §4 focus; §5.2 hint; §5.5) ──
+
+describe('flow note — geometry', () => {
+  const W = 1280;
+  const H = 800;
+  const box = (x: number, y: number, w = 40, h = 40) => ({ x, y, w, h });
+
+  it('sits right of the anchor (anchor.right + 18) when it fits', () => {
+    const g = noteGeometry(box(100, 100), W, H);
+    expect(g.left).toBe(158);
+    expect(g.side).toBe('right');
+  });
+
+  it('flips to anchor.left − 358 near the right edge', () => {
+    const g = noteGeometry(box(1000, 100), W, H);
+    expect(g.left).toBe(1000 - 358);
+    expect(g.side).toBe('left');
+  });
+
+  it('clamps to [16, W − 356] at both edges', () => {
+    // Flipped and still off the left edge (narrow viewport).
+    expect(noteGeometry(box(200, 100), 500, H).left).toBe(16);
+    // Right of anchor fits by the overflow test but is clamped to W − 356.
+    expect(noteGeometry(box(0, 100, 0, 0), 400, H).left).toBeLessThanOrEqual(400 - 356);
+    expect(noteGeometry(box(0, 100, 0, 0), 400, H).left).toBeGreaterThanOrEqual(16);
+    // Anchor at the very left: right side, untouched.
+    expect(noteGeometry(box(0, 100, 10, 10), W, H).left).toBe(28);
+    // Anchor at the very right edge: flipped, within the clamp.
+    const g = noteGeometry(box(W - 10, 100, 10, 10), W, H);
+    expect(g.left).toBe(W - 10 - 358);
+    expect(g.left).toBeLessThanOrEqual(W - 356);
+  });
+
+  it('top-half anchor → top = max(16, cy − 170), no bottom', () => {
+    expect(noteGeometry(box(100, 280), W, H)).toMatchObject({ top: 300 - 170, bottom: null });
+    // Near the top edge: clamped to 16.
+    expect(noteGeometry(box(100, 0, 20, 20), W, H)).toMatchObject({ top: 16, bottom: null });
+    // Exactly at H/2 stays top-anchored.
+    expect(noteGeometry(box(100, H / 2 - 20), W, H)).toMatchObject({ top: H / 2 - 170, bottom: null });
+  });
+
+  it('bottom-half anchor → bottom = max(16, H − cy − 170), grows upward', () => {
+    expect(noteGeometry(box(100, 480), W, H)).toMatchObject({ top: null, bottom: H - 500 - 170 });
+    // Near the bottom edge: clamped to 16.
+    expect(noteGeometry(box(100, H - 20, 20, 20), W, H)).toMatchObject({ top: null, bottom: 16 });
+  });
+
+  it('max-height is H − 32; no anchor → centred 40 px box', () => {
+    expect(noteGeometry(box(100, 100), W, H).maxHeight).toBe(H - 32);
+    expect(noteGeometry(null, W, H)).toMatchObject({ left: W / 2 + 20 + 18, top: H / 2 - 170 });
+  });
+
+  it('anchors on the pin head, element rect and drawn extent', () => {
+    expect(noteAnchorBox({ id: 'a', kind: 'pin', x: 50, y: 100, color: DEFAULT_MARK_COLOR })).toEqual({ x: 50, y: 72, w: 28, h: 28 });
+    expect(noteAnchorBox({ id: 'b', kind: 'element', x: 1, y: 2, w: 3, h: 4, selector: 'a', color: DEFAULT_MARK_COLOR })).toEqual({ x: 1, y: 2, w: 3, h: 4 });
+    expect(noteAnchorBox({ id: 'c', kind: 'draw', points: [{ x: 5, y: 9 }, { x: 15, y: 3 }], color: DEFAULT_MARK_COLOR })).toEqual({ x: 5, y: 3, w: 10, h: 6 });
+    expect(noteAnchorBox({ id: 'd', kind: 'arrow', x1: 30, y1: 10, x2: 10, y2: 40, color: DEFAULT_MARK_COLOR })).toEqual({ x: 10, y: 10, w: 20, h: 30 });
+  });
+
+  it('CSS: width 340, max-height H−32, enters from translateY(8px) scale(.97); reduced motion drops it', () => {
+    const css = panelCss();
+    expect(NOTE_WIDTH).toBe(340);
+    expect(css).toMatch(/\.fw-panel--note\{[^}]*width:340px;max-height:calc\(100vh - 32px\)/);
+    expect(css).toContain('.fw-panel--note.fw-panel--hidden{transform:translateY(8px) scale(.97)}');
+    expect(css).toMatch(/@media \(prefers-reduced-motion:reduce\)\{.*\.fw-panel--note\.fw-panel--hidden.*transform:none/s);
+  });
+});
+
+const PIN: Mark = { id: 'p1', kind: 'pin', x: 100, y: 128, color: DEFAULT_MARK_COLOR };
+const ELEMENT: Mark = { id: 'e1', kind: 'element', x: 900, y: 600, w: 80, h: 40, selector: 'button.book', color: DEFAULT_MARK_COLOR };
+const ARROW: Mark = { id: 'a1', kind: 'arrow', x1: 10, y1: 10, x2: 60, y2: 60, color: DEFAULT_MARK_COLOR };
+
+const noteRun = (...events: Event[]) => events.reduce(reduce, initialState({ flow: 'note' }));
+
+describe('flow note — panel', () => {
+  const VIEW = { width: 1280, height: 800 };
+
+  it('is hidden before any mark and shown once one exists', () => {
+    expect(mount({ state: noteRun(OPEN), viewport: VIEW }).className).toContain('fw-panel--hidden');
+    const el = mount({ state: noteRun(OPEN, { type: 'addMark', id: 'p1' }), marks: number([PIN]), viewport: VIEW });
+    expect(el.className).toContain('fw-panel--note');
+    expect(el.className).not.toContain('fw-panel--hidden');
+  });
+
+  it('positions beside the first mark through the CSSOM (top half → top; bottom half → bottom)', () => {
+    let el = mount({ state: noteRun(OPEN, { type: 'addMark', id: 'p1' }), marks: number([PIN]), viewport: VIEW });
+    // Pin head 100,100 28×28 → left 146, cy 114 → top 16.
+    expect(el.style.left).toBe('146px');
+    expect(el.style.top).toBe('16px');
+    expect(el.style.bottom).toBe('auto');
+    expect(el.style.maxHeight).toBe('768px');
+    expect(el.dataset.side).toBe('right');
+    el = mount({ state: noteRun(OPEN, { type: 'addMark', id: 'e1' }), marks: number([ELEMENT]), viewport: VIEW });
+    // Element right 980 + 18 + 340 > 1264 → flip to 900 − 358 = 542; cy 620 → bottom 800 − 620 − 170 = 16 (max).
+    expect(el.style.left).toBe('542px');
+    expect(el.style.top).toBe('auto');
+    expect(el.style.bottom).toBe('16px');
+    expect(el.dataset.side).toBe('left');
+    expect(el.getAttribute('style') ?? '').not.toMatch(/url|expression/);
+  });
+
+  it('eyebrow: "Note on mark 1 · {selector}", "Note on mark 1" for a pin, "Your note" if unnumbered; no headline', () => {
+    expect(noteEyebrow(number([ELEMENT])[0])).toBe('Note on mark 1 · button.book');
+    expect(noteEyebrow(number([PIN])[0])).toBe('Note on mark 1');
+    expect(noteEyebrow(ARROW)).toBe('Your note');
+    expect(noteEyebrow(undefined)).toBe('Your note');
+    mount({ state: noteRun(OPEN, { type: 'addMark', id: 'e1' }), marks: number([ELEMENT]), viewport: VIEW });
+    expect(q('[data-part="eyebrow"]')!.textContent).toBe('Note on mark 1 · button.book');
+    expect(q('[data-part="headline"]')).toBeNull();
+  });
+
+  it('details textarea has 3 rows (4 in the other flows)', () => {
+    expect(NOTE_DETAILS_ROWS).toBe(3);
+    mount({ state: noteRun(OPEN, { type: 'addMark', id: 'p1' }), marks: number([PIN]), viewport: VIEW });
+    expect(details().rows).toBe(3);
+    mount({ state: review() });
+    expect(details().rows).toBe(4);
+  });
+
+  it('focuses Title 380 ms after the first mark', () => {
+    vi.useFakeTimers();
+    let s = noteRun(OPEN);
+    mount({ state: s, viewport: VIEW });
+    s = reduce(s, { type: 'addMark', id: 'p1' });
+    mount({ state: s, marks: number([PIN]), viewport: VIEW });
+    expect(NOTE_FOCUS_TITLE_DELAY_MS).toBe(380);
+    act(() => { vi.advanceTimersByTime(379); });
+    expect(shadow.activeElement).not.toBe(title());
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(shadow.activeElement).toBe(title());
+  });
+
+  it('a second mark does not re-focus Title', () => {
+    vi.useFakeTimers();
+    let s = noteRun(OPEN, { type: 'addMark', id: 'p1' });
+    mount({ state: s, marks: number([PIN]), viewport: VIEW });
+    s = reduce(s, { type: 'addMark', id: 'e1' });
+    mount({ state: s, marks: number([PIN, ELEMENT]), viewport: VIEW });
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(shadow.activeElement).not.toBe(title());
+  });
+
+  it('flow annotate keeps the corner card (no inline geometry)', () => {
+    const el = mount({ state: review(), marks: number([PIN]), viewport: VIEW });
+    expect(el.className).not.toContain('fw-panel--note');
+    expect(el.style.left).toBe('');
+  });
+});
+
+describe('flow note — compact summary', () => {
+  const con: ConsoleEntry[] = [
+    { level: 'error', message: 'a', source: 'x.js:1:1', count: 1 } as ConsoleEntry,
+    { level: 'error', message: 'b', source: 'x.js:2:1', count: 1 } as ConsoleEntry,
+  ];
+  const net: NetworkEntry[] = [{ method: 'POST', url: '/api', status: 502, durationMs: 300 } as NetworkEntry];
+
+  function ctx(over: Partial<PanelContextProps> = {}) {
+    const onSwitch = vi.fn();
+    const props: PanelContextProps = {
+      marks: number([PIN, ELEMENT, ARROW]),
+      onNote: () => {},
+      onRemove: () => {},
+      screenshot: { width: 1280, height: 800 },
+      pageUrl: 'https://x.test/',
+      console: con,
+      network: net,
+      switches: { console: true, network: true },
+      onSwitch,
+      compact: true,
+      ...over,
+    };
+    act(() => render(<PanelContext {...props} />, shadow as unknown as Element));
+    return onSwitch;
+  }
+
+  it('summary line copy', () => {
+    expect(summaryLine(3, { count: 2, on: true }, { count: 1, on: true })).toBe(
+      'Screenshot + 3 marks · 2 console errors · 1 failed request',
+    );
+    expect(summaryLine(1, { count: 2, on: false }, { count: 0, on: false })).toBe('Screenshot + 1 mark · no console · no network');
+  });
+
+  it('replaces the Marks / Attached sections with one row + Review', () => {
+    ctx();
+    expect(q('[data-section="marks"]')).toBeNull();
+    expect(q('[data-section="attached"]')).toBeNull();
+    expect(q('[data-part="summary-line"]')!.textContent).toBe('Screenshot + 3 marks · 2 console errors · 1 failed request');
+    expect(q('[data-part="summary-label"]')!.textContent).toBe(SUMMARY_REVIEW);
+    expect(q('[data-part="summary-body"]')).toBeNull();
+  });
+
+  it('Review expands to the console and network switch rows; Hide collapses', () => {
+    const onSwitch = ctx();
+    const toggle = q<HTMLButtonElement>('[data-part="summary-toggle"]')!;
+    act(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(q('[data-part="summary-label"]')!.textContent).toBe(SUMMARY_HIDE);
+    const body = q('[data-part="summary-body"]')!;
+    expect(body.querySelector('[data-row="console"] [data-part="value"]')!.textContent).toBe('2 console errors');
+    expect(body.querySelector('[data-row="network"] [data-part="value"]')!.textContent).toBe('1 failed request');
+    const sw = body.querySelector<HTMLButtonElement>('[data-switch="console"]')!;
+    expect(sw.getAttribute('role')).toBe('switch');
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    act(() => sw.click());
+    expect(onSwitch).toHaveBeenCalledWith('console', false);
+    act(() => toggle.click());
+    expect(q('[data-part="summary-body"]')).toBeNull();
+  });
+
+  it('off switches show the not-sent copy in the rows and "no console" in the summary', () => {
+    ctx({ switches: { console: false, network: true } });
+    act(() => q<HTMLButtonElement>('[data-part="summary-toggle"]')!.click());
+    expect(q('[data-part="summary-line"]')!.textContent).toBe('Screenshot + 3 marks · no console · 1 failed request');
+    expect(q('[data-row="console"] [data-part="value"]')!.textContent).toBe('Console errors — not sent');
+    expect(q('[data-row="console"]')!.className).toContain('fw-pc-srow--off');
+  });
+
+  it('full sections stay for the other flows', () => {
+    ctx({ compact: false });
+    expect(q('[data-section="marks"]')).not.toBeNull();
+    expect(q('[data-part="summary"]')).toBeNull();
+  });
+});
+
+describe('flow note — first-mark rules', () => {
+  it('the hint before any mark reads the mark-first copy', () => {
+    const s = noteRun(OPEN);
+    expect(hintText(s)).toBe('Mark the spot first — your note opens beside it');
+    expect(NOTE_FIRST_HINT).toBe('Mark the spot first — your note opens beside it');
+    act(() =>
+      render(
+        <CaptureChrome state={s} dispatch={() => {}} capture={null} />,
+        shadow as unknown as Element,
+      ),
+    );
+    expect(q('.fw-hint-text')!.textContent).toBe(NOTE_FIRST_HINT);
+    // Once a mark exists the tool hint returns.
+    expect(hintText(reduce(s, { type: 'addMark', id: 'p1' }))).not.toBe(NOTE_FIRST_HINT);
+  });
+
+  it('the first mark in flow note opens no popover; later marks and other flows do', () => {
+    expect(markOpensPopover('note', 0)).toBe(false);
+    expect(markOpensPopover('note', 1)).toBe(true);
+    expect(markOpensPopover('annotate', 0)).toBe(true);
+    expect(markOpensPopover('docked', 0)).toBe(true);
+  });
+
+  it('MarksLayer with that rule: a first pin creates the mark without opening the popover', () => {
+    const onChange = vi.fn();
+    const created: Mark[] = [];
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    act(() =>
+      render(
+        <MarksLayer
+          marks={created}
+          tool="pin"
+          color={DEFAULT_MARK_COLOR}
+          onCreate={(m) => created.push(m)}
+          onOpen={() => {}}
+          onTextEdit={() => {}}
+          onDrawing={() => {}}
+          newId={() => 'n1'}
+          popover={{ onChange, onComment: () => {}, onDelete: () => {}, skipOpenOnCreate: !markOpensPopover('note', 0), W: 1280, H: 800 }}
+        />,
+        container,
+      ),
+    );
+    const hit = container.querySelector('[data-part="marks-hit"]')!;
+    act(() => {
+      hit.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 1, button: 0 }));
+      hit.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 1, button: 0 }));
+    });
+    expect(created.map((m) => m.kind)).toEqual(['pin']);
+    expect(onChange).not.toHaveBeenCalled();
+    act(() => render(null, container));
+    container.remove();
   });
 });

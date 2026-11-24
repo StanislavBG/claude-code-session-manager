@@ -1,5 +1,5 @@
 // Panel body sections "Marks on screenshot" and "Attached automatically" — handoff README §5.6
-// (flows annotate & docked), plus the §5.6 "Switch". Rendered by the caller as <Panel>'s
+// (flows annotate & docked), the "Compact summary" (flow note), plus the §5.6 "Switch". Rendered by the caller as <Panel>'s
 // children, below Details, so the reporter sees and controls exactly what a report carries.
 //
 // The component is controlled: marks, notes, the console/network buffers and the two switches
@@ -25,6 +25,11 @@ export const NOTE_PLACEHOLDER = 'Add a note (optional)';
 export const ALWAYS = 'ALWAYS';
 export const CONSOLE_OFF = 'Console errors — not sent';
 export const NETWORK_OFF = 'Failed requests — not sent';
+/** Compact summary (flow note) toggle labels and its off copy. */
+export const SUMMARY_REVIEW = 'Review';
+export const SUMMARY_HIDE = 'Hide';
+export const SUMMARY_NO_CONSOLE = 'no console';
+export const SUMMARY_NO_NETWORK = 'no network';
 
 /** "1 mark" / "3 marks" (singular only for exactly one). */
 export function plural(n: number, word: string): string {
@@ -71,6 +76,17 @@ export function consoleLabel(n: number, on: boolean): string {
 
 export function networkLabel(n: number, on: boolean): string {
   return on ? plural(n, 'failed request') : NETWORK_OFF;
+}
+
+/** Compact summary row: "Screenshot + {n} marks · {console} · {network}" (§5.6, flow note). */
+export function summaryLine(
+  marks: number,
+  console: { count: number; on: boolean },
+  network: { count: number; on: boolean },
+): string {
+  const c = console.on ? plural(console.count, 'console error') : SUMMARY_NO_CONSOLE;
+  const n = network.on ? plural(network.count, 'failed request') : SUMMARY_NO_NETWORK;
+  return `Screenshot + ${plural(marks, 'mark')} · ${c} · ${n}`;
 }
 
 export interface ListItem {
@@ -128,6 +144,15 @@ export function panelContextCss(): string {
     `.fw-pc-item{display:flex;flex-direction:column;gap:1px}`,
     `.fw-pc-msg{color:${c.amber};overflow-wrap:anywhere}`,
     `.fw-pc-src{color:${c['rule-strong']}}`,
+    // §5.6 Compact summary (flow note)
+    `.fw-pc-sum{display:flex;flex-direction:column;border:1px solid ${c.rule};border-radius:9px;background:${c['paper-2']};overflow:hidden}`,
+    `.fw-pc-sumrow{display:flex;align-items:center;gap:10px;padding:10px 12px;background:transparent;text-align:left;color:${c['ink-2']}}`,
+    `.fw-pc-sumline{flex:1;min-width:0;font-family:${fonts.mono};font-weight:400;font-size:11.5px;line-height:1.5}`,
+    `.fw-pc-sumtoggle{flex:none;font-weight:600;font-size:12px;color:${c.accent}}`,
+    `.fw-pc-sumbody{display:flex;flex-direction:column;padding:0 12px;background:${c.paper};border-top:1px solid ${c.rule}}`,
+    `.fw-pc-srow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;font-size:13px;color:${c.ink}}`,
+    `.fw-pc-srow + .fw-pc-srow{border-top:1px dashed ${c.rule}}`,
+    `.fw-pc-srow--off{color:${c['ink-4']}}`,
     // §5.6 Switch
     `.fw-pc-switch{position:relative;flex:none;width:30px;height:18px;border-radius:9px;background:${c['rule-strong']};transition:background-color 200ms ${ease}}`,
     `.fw-pc-switch[aria-checked="true"]{background:${c.green}}`,
@@ -176,6 +201,8 @@ export interface PanelContextProps {
   onSwitch(name: SwitchName, on: boolean): void;
   /** All inputs disabled (while sending). */
   disabled?: boolean;
+  /** Flow note: render only the compact summary instead of the Marks / Attached sections. */
+  compact?: boolean;
 }
 
 function Badge({ mark }: { mark: Mark }) {
@@ -258,6 +285,55 @@ function ListRow(props: {
   );
 }
 
+function CompactSummary(props: PanelContextProps) {
+  const [open, setOpen] = useState(false);
+  const bodyId = 'fw-pc-sumbody';
+  const { switches, disabled } = props;
+  const rows: { name: SwitchName; label: string; switchLabel: string; on: boolean }[] = [
+    { name: 'console', label: consoleLabel(props.console.length, switches.console), switchLabel: 'Send console errors', on: switches.console },
+    { name: 'network', label: networkLabel(props.network.length, switches.network), switchLabel: 'Send failed requests', on: switches.network },
+  ];
+  return (
+    <div class="fw-pc-sum" data-part="summary">
+      <button
+        type="button"
+        class="fw-pc-sumrow"
+        data-part="summary-toggle"
+        aria-expanded={open ? 'true' : 'false'}
+        aria-controls={bodyId}
+        onClick={() => setOpen(!open)}
+      >
+        <span class="fw-pc-sumline" data-part="summary-line">
+          {summaryLine(
+            props.marks.length,
+            { count: props.console.length, on: switches.console },
+            { count: props.network.length, on: switches.network },
+          )}
+        </span>
+        <span class="fw-pc-sumtoggle" data-part="summary-label">
+          {open ? SUMMARY_HIDE : SUMMARY_REVIEW}
+        </span>
+      </button>
+      {open && (
+        <div id={bodyId} class="fw-pc-sumbody" data-part="summary-body">
+          {rows.map((r) => (
+            <div key={r.name} class={`fw-pc-srow${r.on ? '' : ' fw-pc-srow--off'}`} data-row={r.name}>
+              <span data-part="value">{r.label}</span>
+              <Switch
+                name={r.name}
+                label={r.switchLabel}
+                on={r.on}
+                disabled={disabled}
+                onToggle={(on) => props.onSwitch(r.name, on)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PanelContext(props: PanelContextProps) {
   const { marks, disabled } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -268,6 +344,14 @@ export function PanelContext(props: PanelContextProps) {
   const numbered = marks.filter(isNumbered);
   const extra = unnumberedSummary(marks);
   const hover = (id: string | null) => props.onHover?.(id);
+
+  if (props.compact) {
+    return (
+      <div ref={ref} class="fw-pc" data-part="context">
+        <CompactSummary {...props} />
+      </div>
+    );
+  }
 
   return (
     <div ref={ref} class="fw-pc" data-part="context">

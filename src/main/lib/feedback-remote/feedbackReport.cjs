@@ -17,6 +17,7 @@ const REPORT_TYPES = /** @type {const} */ (['bug', 'feature', 'other']);
 const MARK_COLORS = /** @type {const} */ (['#a83818', '#f4b942', '#2e5a3e', '#1a1612']);
 const MARK_KINDS = /** @type {const} */ (['pin', 'box', 'element', 'arrow', 'draw', 'text']);
 const CONSOLE_LEVELS = /** @type {const} */ (['error']);
+const CLIENT_REPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NETWORK_STATUS_STRINGS = /** @type {const} */ (['network-error', 'timeout']);
 
 const MIN_TITLE = 3;
@@ -98,8 +99,9 @@ const mark = z.discriminatedUnion('kind', [pin, box, element, arrow, draw, text]
 
 const reportSchema = z.strictObject({
   schemaVersion: z.literal(SCHEMA_VERSION),
-  // RFC 9562 uuid (version + variant checked), the shape crypto.randomUUID() always produces.
-  clientReportId: z.uuid(),
+  // The host's rule (relay + relayBoxesMock UUID_RE): any 8-4-4-4-12 hex, case-insensitive, no
+  // version/variant check — so the desktop never rejects a report the host already accepted.
+  clientReportId: z.string().regex(CLIENT_REPORT_ID_RE),
   project: z.string(),
   type: z.enum(REPORT_TYPES),
   title: z.string().trim().min(MIN_TITLE).max(MAX_TITLE),

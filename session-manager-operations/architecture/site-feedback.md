@@ -124,8 +124,9 @@ The sealed `report.json` part. Schema: `web/feedback-widget/schema/report.v1.jso
 - **Trimming:** strings with length limits (`title`, `details`, mark `note`) are validated **after
   trimming**, so `'  ab  '` fails the 3-char title minimum. The widget (`src/report.ts`) always trims
   before sending.
-- **`clientReportId`:** an RFC 9562 uuid (version and variant checked, `z.uuid()`), as
-  `crypto.randomUUID()` produces; a bare 8-4-4-4-12 hex GUID is rejected by the desktop.
+- **`clientReportId`:** one rule, the host's — any 8-4-4-4-12 hex, case-insensitive, no
+  version/variant check; the desktop (`feedbackReport.cjs`) uses the same regex as the relay mock.
+  The widget always sends `crypto.randomUUID()`.
 
 ## Host contract v1
 

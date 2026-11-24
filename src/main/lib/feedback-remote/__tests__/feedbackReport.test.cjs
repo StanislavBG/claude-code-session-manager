@@ -42,6 +42,13 @@ describe('parseReport accepts', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.report.title).toBe('abc');
   });
+  test('any 8-4-4-4-12 hex clientReportId, matching the host (non-RFC GUID, upper case)', () => {
+    for (const id of ['01234567-89ab-0def-0123-456789abcdef', '01234567-89AB-0DEF-0123-456789ABCDEF']) {
+      const v = base();
+      v.clientReportId = id;
+      expect(fr.parseReport(v).ok).toBe(true);
+    }
+  });
   test('network status strings and user extra props', () => {
     const v = base();
     v.network = [{ ...netEntry(), status: 'network-error' }, { ...netEntry(), status: 'timeout' }, { ...netEntry(), status: 400 }];
@@ -54,7 +61,7 @@ describe('parseReport accepts', () => {
 const MUTATIONS = [
   ['schemaVersion 2', (v) => { v.schemaVersion = 2; }, 'schemaVersion'],
   ['clientReportId not uuid', (v) => { v.clientReportId = 'not-a-uuid'; }, 'clientReportId'],
-  ['clientReportId non-RFC GUID (version 0, variant 0)', (v) => { v.clientReportId = '01234567-89ab-0def-0123-456789abcdef'; }, 'clientReportId'],
+  ['clientReportId non-hex', (v) => { v.clientReportId = '0123456g-89ab-0def-0123-456789abcdef'; }, 'clientReportId'],
   ['type unknown', (v) => { v.type = 'praise'; }, 'type'],
   ['title too short after trim', (v) => { v.title = '  ab  '; }, 'title'],
   ['title too long', (v) => { v.title = 'x'.repeat(121); }, 'title'],

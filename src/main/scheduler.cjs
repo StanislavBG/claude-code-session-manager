@@ -9333,12 +9333,24 @@ async function reclaimTerminalJobOrphansThrottled(state) {
  * with the 'running' transition).
  */
 async function spawnResumeRecovery(job, resumeTarget) {
-  const { runId, dir: runDir } = pickRunDir();
   // No queue rows in scope here (unlike tickQueue's own dispatch loop) — read
   // once, before delegating to spawnJob, so hasDownstreamValidator still
-  // never runs inside executeJob itself.
-  const siblingJobs = (await readQueue().catch(() => ({ jobs: [] }))).jobs || [];
-  await spawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget, siblingJobs);
+  // never runs inside executeJob itself. Its config also feeds the hold below.
+  const state = await readQueue().catch(() => ({ jobs: [], config: undefined }));
+  // A `--resume` run is an automatic `claude -p` that never passes through
+  // tickBody, so it obeys the same auto-dispatch hold itself. A deferral
+  // stamps nothing (spawnJob stamps resumeRecoveryAttempted only when it
+  // runs): the row stays needs_review and the periodic reverifyNeedsReview
+  // pass (selectResumeRecoveryBatch) resumes it once the hold clears.
+  const hold = currentAutoDispatchHold(state.config);
+  if (hold) {
+    console.log(`[scheduler] resume-recovery held for ${job.slug}: ${hold.reason} — ${hold.detail ?? ''}`);
+    appendAuditEvent('resume_recovery_held', { slug: job.slug, reason: hold.reason });
+    return;
+  }
+  const { runId, dir: runDir } = pickRunDir();
+  const siblingJobs = state.jobs || [];
+  await dispatchSpawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget, siblingJobs);
 }
 
 const CONFIRM_APPROVE = 'Approve';

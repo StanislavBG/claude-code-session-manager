@@ -450,6 +450,10 @@ function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPl
 ${commitStepNum}. COMMIT — stage only the exact paths you created or changed for this PRD,
    then commit:
      \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`
+   If you found work worth doing outside this PRD's criteria, add one
+   \`Follow-up: <one line>\` trailer per item (a second -m), for example:
+     \`git commit -m "<type>(<scope>): <summary>" -m "Follow-up: <item>"\`
+   Do not do that work.
    Never stage the whole tree with a wildcard or blanket git add.
    Why: other jobs may be writing files in this same working tree right now.
    A blanket add puts their half-done work in your commit and breaks both

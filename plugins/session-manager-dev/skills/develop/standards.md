@@ -22,7 +22,7 @@
 
 - One concept = one implementation. Before writing code that computes, fetches, formats or displays a value, search for the existing implementation and reuse it; a datum shown in N places flows from one shared accessor, store, hook or endpoint.
 - Extend, don't fork: generalize a close-but-insufficient function (add a param, widen the contract) instead of cloning a variant. Why: copies drift, and divergence is how silent inconsistencies ship (one site reads a 0–100 percentage as a 0–1 fraction).
-- Duplication you touch is a bug in scope: route both copies through the shared unit when both are in the PRD's `# Files`; otherwise name the duplicate in your report.
+- Duplication you touch is a bug in scope: route both copies through the shared unit when both are in the PRD's `# Files`; otherwise name the duplicate in a `Follow-up:` commit trailer.
 
 ## Test-driven development
 

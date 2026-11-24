@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v27 -->
+<!-- PRD_AUTHORING.md v28 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -33,7 +33,7 @@ Recommended cap: 20 × 15s = 5 min for HTTP polls. Never use an uptime/restart s
 Rule: once every acceptance-criteria line is checked, follow the finish protocol (§11) and stop. Do not add polish, fixtures, or "while we're here" work that isn't an AC line.
 Why: `112-etch-engine` declared success at 17:44 UTC, then ran an unbounded fixture search until a user killed it at 20:28 — 2h44m of token burn on work no AC line asked for.
 
-Executor: if more work seems valuable, name it in your report as a follow-up. Do not do it, and do not queue it. Why: only the planner queues work.
+Executor: if more work seems valuable, add one `Follow-up: <one line>` trailer per item to the commit message. Do not do it, and do not queue it. Why: only the planner queues work.
 
 ---
 

@@ -39,3 +39,20 @@ describe('finish protocol: review report is not the final reply', () => {
     }
   });
 });
+
+// Follow-ups named only in a run report vanish; commits are what the validator
+// reads. The COMMIT step must ask for one `Follow-up:` trailer per item.
+describe('finish protocol: COMMIT step asks for Follow-up trailers', () => {
+  for (const reviewInRun of [true, false]) {
+    it(`reviewInRun=${reviewInRun}`, () => {
+      const text = buildFinishProtocol({ reviewInRun });
+      const commitAt = text.search(/\d\. COMMIT/);
+      const verdictAt = text.search(/\d\. VERDICT LINE/);
+      expect(commitAt).toBeGreaterThan(-1);
+      const step = text.slice(commitAt, verdictAt);
+      expect(step).toContain('`Follow-up: <one line>` trailer per item');
+      expect(step).toContain('-m "Follow-up: <item>"');
+      expect(step).toMatch(/Do not do that work/);
+    });
+  }
+});

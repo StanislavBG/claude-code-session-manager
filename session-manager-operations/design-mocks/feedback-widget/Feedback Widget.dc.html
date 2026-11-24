@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;display=swap">
+<style>html,body{margin:0;height:100%}a{color:#a83818;text-decoration:none}a:hover{color:#7c2810}</style>
+</helmet>
+<div ref="{{ rootRef }}" data-screen-label="Feedback widget over host site" style="position:fixed;inset:0;overflow:hidden;background:#ffffff;font-family:'Inter Tight',-apple-system,'Helvetica Neue',Arial,sans-serif;color:#1a1612;-webkit-font-smoothing:antialiased">
+
+  <div ref="{{ siteRef }}" style="position:absolute;inset:0;overflow-x:hidden;overflow-y:{{ siteOverflow }};background:#ffffff;color:#0f172a;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+    <header data-pick="header.site-nav" style="height:64px;box-sizing:border-box;display:flex;align-items:center;gap:36px;padding:0 40px;border-bottom:1px solid #e2e8f0;background:#ffffff">
+      <a data-pick="a.logo" style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:21px;letter-spacing:-0.03em;color:#0f172a"><span style="width:20px;height:20px;border-radius:50%;background:#2563eb;box-shadow:inset -5px -4px 0 #93c5fd"></span>lumen</a>
+      <nav data-pick="nav.primary" style="display:flex;gap:26px;font-size:14px">
+        <a data-pick="a.nav-link" style="color:#0f172a;font-weight:600">Stays</a>
+        <a data-pick="a.nav-link" style="color:#475569">Experiences</a>
+        <a data-pick="a.nav-link" style="color:#475569">Long stays</a>
+        <a data-pick="a.nav-link" style="color:#475569">Journal</a>
+      </nav>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:18px;font-size:14px">
+        <a data-pick="a.sign-in" style="color:#0f172a">Sign in</a>
+        <button type="button" data-pick="button.host-cta" style="font:600 14px 'Helvetica Neue',Arial,sans-serif;padding:9px 16px;border-radius:999px;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;cursor:pointer">List your place</button>
+      </div>
+    </header>
+    <section data-pick="section.hero" style="position:relative;height:384px;overflow:hidden;background:#1e293b">
+      <img data-pick="img.hero" src="https://picsum.photos/seed/lumen-lisbon/1600/800" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block">
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(15,23,42,.10) 0%, rgba(15,23,42,.64) 100%)"></div>
+      <div style="position:relative;max-width:1200px;margin:0 auto;padding:78px 40px 0;box-sizing:border-box;color:#ffffff">
+        <h1 data-pick="h1.hero-title" style="font-size:46px;line-height:1.08;margin:0 0 28px;max-width:640px;letter-spacing:-0.025em;font-weight:700">Stay somewhere that feels like yours.</h1>
+        <div role="search" data-pick="form.search" style="display:flex;align-items:center;background:#ffffff;border-radius:16px;padding:8px;max-width:880px;box-shadow:0 20px 40px -16px rgba(2,6,23,.5);color:#0f172a">
+          <div data-pick="div.field-where" style="flex:1.3;min-width:0;padding:6px 18px;border-right:1px solid #e2e8f0">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b">Where</div>
+            <input data-pick="input.where" placeholder="Lisbon, Portugal" style="display:block;width:100%;border:0;outline:none;padding:0;margin-top:3px;background:transparent;font:15px 'Helvetica Neue',Arial,sans-serif;color:#0f172a">
+          </div>
+          <div data-pick="div.field-dates" data-pid="dates" style="flex:1.5;min-width:0;display:flex;gap:28px;padding:6px 18px;border-right:1px solid #e2e8f0">
+            <div><div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b">Check in</div><div style="font-size:15px;margin-top:3px;white-space:nowrap">Fri, Mar 14</div></div>
+            <div><div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b">Check out</div><div style="font-size:15px;margin-top:3px;white-space:nowrap">Wed, Mar 19</div></div>
+          </div>
+          <div data-pick="div.field-guests" style="flex:1;min-width:0;padding:6px 18px">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b">Guests</div>
+            <div style="font-size:15px;margin-top:3px">2 adults</div>
+          </div>
+          <button type="button" data-pick="button.search-submit" data-pid="search-btn" style="font:600 15px 'Helvetica Neue',Arial,sans-serif;padding:15px 28px;border:0;border-radius:11px;background:#2563eb;color:#ffffff;cursor:pointer">Search</button>
+        </div>
+      </div>
+    </section>
+    <section style="max-width:1200px;margin:0 auto;padding:30px 40px 56px;box-sizing:border-box">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:18px">
+        <h2 data-pick="h2.section-title" style="font-size:22px;margin:0;letter-spacing:-0.015em">Popular in Lisbon this week</h2>
+        <a data-pick="a.see-all" style="font-size:14px;color:#2563eb">See all 214 stays →</a>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(230px, 1fr));gap:20px">
+        <article data-pick="article.stay-card" data-pid="card-1" style="display:flex;flex-direction:column;min-width:0">
+          <img data-pick="img.stay-photo" src="https://picsum.photos/seed/alfama-loft/640/400" alt="" style="width:100%;height:150px;object-fit:cover;border-radius:12px;display:block;background:#e2e8f0">
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px;font-size:15px"><span data-pick="h3.stay-title" data-pid="title-1" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Alfama loft, river view</span><span style="flex:none">★ 4.92</span></div>
+          <div style="font-size:13px;color:#64748b;margin-top:3px">Lisbon · 2 guests · 1 bedroom</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+            <span data-pick="span.price" data-pid="price-1" style="font-size:14px"><b>$148</b> night</span>
+            <button type="button" data-pick="button.book" data-pid="book-1" style="font:600 13px 'Helvetica Neue',Arial,sans-serif;padding:8px 18px;border-radius:8px;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;cursor:pointer">Book</button>
+          </div>
+        </article>
+        <article data-pick="article.stay-card" data-pid="card-2" style="display:flex;flex-direction:column;min-width:0">
+          <img data-pick="img.stay-photo" src="https://picsum.photos/seed/garden-flat/640/400" alt="" style="width:100%;height:150px;object-fit:cover;border-radius:12px;display:block;background:#e2e8f0">
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px;font-size:15px"><span data-pick="h3.stay-title" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Príncipe Real garden flat</span><span style="flex:none">★ 4.88</span></div>
+          <div style="font-size:13px;color:#64748b;margin-top:3px">Lisbon · 4 guests · 2 bedrooms</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+            <span data-pick="span.price" style="font-size:14px"><b>$172</b> night</span>
+            <button type="button" data-pick="button.book" data-pid="book-2" style="font:600 13px 'Helvetica Neue',Arial,sans-serif;padding:8px 18px;border-radius:8px;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;cursor:pointer">Book</button>
+          </div>
+        </article>
+        <article data-pick="article.stay-card" style="display:flex;flex-direction:column;min-width:0">
+          <img data-pick="img.stay-photo" src="https://picsum.photos/seed/cascais-house/640/400" alt="" style="width:100%;height:150px;object-fit:cover;border-radius:12px;display:block;background:#e2e8f0">
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px;font-size:15px"><span data-pick="h3.stay-title" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Cascais beach house</span><span style="flex:none">★ 4.95</span></div>
+          <div style="font-size:13px;color:#64748b;margin-top:3px">Cascais · 6 guests · 3 bedrooms</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+            <span data-pick="span.price" style="font-size:14px"><b>$236</b> night</span>
+            <button type="button" data-pick="button.book" style="font:600 13px 'Helvetica Neue',Arial,sans-serif;padding:8px 18px;border-radius:8px;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;cursor:pointer">Book</button>
+          </div>
+        </article>
+        <article data-pick="article.stay-card" style="display:flex;flex-direction:column;min-width:0">
+          <img data-pick="img.stay-photo" src="https://picsum.photos/seed/sintra-cottage/640/400" alt="" style="width:100%;height:150px;object-fit:cover;border-radius:12px;display:block;background:#e2e8f0">
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px;font-size:15px"><span data-pick="h3.stay-title" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Sintra hillside cottage</span><span style="flex:none">★ 4.81</span></div>
+          <div style="font-size:13px;color:#64748b;margin-top:3px">Sintra · 2 guests · 1 bedroom</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+            <span data-pick="span.price" style="font-size:14px"><b>$129</b> night</span>
+            <button type="button" data-pick="button.book" style="font:600 13px 'Helvetica Neue',Arial,sans-serif;padding:8px 18px;border-radius:8px;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;cursor:pointer">Book</button>
+          </div>
+        </article>
+      </div>
+    </section>
+    <footer data-pick="footer.site-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:36px 40px 64px;display:flex;flex-wrap:wrap;gap:28px;font-size:13px;color:#64748b">
+      <span>© 2026 Lumen Stays</span><a style="color:#64748b">Privacy</a><a style="color:#64748b">Terms</a><a style="color:#64748b">Help centre</a>
+    </footer>
+  </div>
+
+  <sc-if value="{{ ready }}" hint-placeholder-val="{{ false }}">
+    <sc-if value="{{ frameOn }}">
+      <div style="position:absolute;inset:0;z-index:5;pointer-events:none;box-shadow:inset 0 0 0 3px #a83818"></div>
+    </sc-if>
+    <sc-if value="{{ surfaceOn }}">
+      <div onPointerDown="{{ onDown }}" onPointerMove="{{ onMove }}" onPointerUp="{{ onUp }}" onPointerCancel="{{ onUp }}" onPointerLeave="{{ onLeave }}" style="position:absolute;inset:0;z-index:6;touch-action:none;cursor:{{ cursor }}"></div>
+    </sc-if>
+    <sc-if value="{{ marksOn }}">
+      <div style="position:absolute;inset:0;z-index:7;pointer-events:none">
+        <sc-for list="{{ marks }}" as="m" hint-placeholder-count="0">
+          <sc-if value="{{ m.isPen }}">
+            <svg width="1" height="1" style="position:absolute;left:0;top:0;overflow:visible"><path d="{{ m.d }}" style="fill:none;stroke:rgba(255,255,255,.85);stroke-width:8;stroke-linecap:round;stroke-linejoin:round"></path><path d="{{ m.d }}" style="fill:none;stroke:{{ m.hex }};stroke-width:4;stroke-linecap:round;stroke-linejoin:round"></path></svg>
+          </sc-if>
+          <sc-if value="{{ m.isArrow }}">
+            <svg width="1" height="1" style="position:absolute;left:0;top:0;overflow:visible"><path d="{{ m.d }}" style="fill:none;stroke:rgba(255,255,255,.85);stroke-width:8;stroke-linecap:round"></path><path d="{{ m.hd }}" style="fill:rgba(255,255,255,.85);stroke:rgba(255,255,255,.85);stroke-width:5;stroke-linejoin:round"></path><path d="{{ m.d }}" style="fill:none;stroke:{{ m.hex }};stroke-width:4;stroke-linecap:round"></path><path d="{{ m.hd }}" style="fill:{{ m.hex }};stroke:{{ m.hex }};stroke-width:1.5;stroke-linejoin:round"></path></svg>
+          </sc-if>
+          <sc-if value="{{ m.isBox }}">
+            <div style="position:absolute;box-sizing:border-box;border-radius:5px;box-shadow:0 0 0 1px rgba(255,255,255,.75);left:{{ m.l }};top:{{ m.t }};width:{{ m.w }};height:{{ m.h }};border:2.5px {{ m.bs }} {{ m.hex }};background:{{ m.tint }}"></div>
+            <sc-if value="{{ m.isEl }}">
+              <div style="position:absolute;transform:translateY(-100%);padding:3px 7px;border-radius:5px;font:500 11px/1.3 'JetBrains Mono',monospace;white-space:nowrap;left:{{ m.cl }};top:{{ m.ct }};background:{{ m.hex }};color:{{ m.fg }}">{{ m.selector }}</div>
+            </sc-if>
+            <sc-if value="{{ m.num }}">
+              <button type="button" onClick="{{ m.onOpen }}" style="position:absolute;box-sizing:border-box;width:24px;height:24px;padding:0;border:2px solid #ffffff;border-radius:50%;font:700 11px/20px 'JetBrains Mono',monospace;text-align:center;pointer-events:auto;cursor:pointer;left:{{ m.bl }};top:{{ m.bt }};background:{{ m.hex }};color:{{ m.fg }};box-shadow:{{ m.ring }}">{{ m.num }}</button>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ m.isPin }}">
+            <button type="button" onClick="{{ m.onOpen }}" style="position:absolute;box-sizing:border-box;width:28px;height:28px;padding:0;border:2px solid #ffffff;border-radius:14px 14px 14px 3px;font:700 12px/24px 'JetBrains Mono',monospace;text-align:center;pointer-events:auto;cursor:pointer;left:{{ m.l }};top:{{ m.t }};background:{{ m.hex }};color:{{ m.fg }};box-shadow:{{ m.ring }}">{{ m.num }}</button>
+          </sc-if>
+          <sc-if value="{{ m.isText }}">
+            <div style="position:absolute;max-width:300px;padding:4px 10px;border-radius:7px;font:600 15px/1.35 'Inter Tight',sans-serif;box-shadow:0 0 0 2px #ffffff, 0 3px 8px rgba(26,22,18,.3);left:{{ m.l }};top:{{ m.t }};background:{{ m.hex }};color:{{ m.fg }}">{{ m.text }}</div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{ hoverOn }}">
+      <div style="position:absolute;z-index:8;pointer-events:none;box-sizing:border-box;border:2px solid #a83818;background:rgba(168,56,24,.08);border-radius:3px;left:{{ hv.l }};top:{{ hv.t }};width:{{ hv.w }};height:{{ hv.h }}"></div>
+      <div style="position:absolute;z-index:8;pointer-events:none;display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:5px;background:#1a1612;color:#f5f0e6;font:500 11.5px 'JetBrains Mono',monospace;white-space:nowrap;left:{{ hv.l }};top:{{ hv.lt }};transform:{{ hv.ltf }}"><span style="color:#f4b942">{{ hv.sel }}</span><span style="color:#c9bfa9">{{ hv.dim }}</span><span>click to select</span></div>
+    </sc-if>
+    <sc-if value="{{ textOn }}">
+      <input ref="{{ textRef }}" value="{{ te.value }}" onChange="{{ onTextVal }}" onKeyDown="{{ onTextKey }}" onBlur="{{ commitText }}" placeholder="Type a label…" style="position:absolute;z-index:9;box-sizing:border-box;width:240px;padding:4px 10px;border-radius:7px;background:#ffffff;font:600 15px/1.35 'Inter Tight',sans-serif;outline:none;left:{{ te.l }};top:{{ te.t }};border:2px dashed {{ te.hex }};color:{{ te.hex }}">
+    </sc-if>
+
+    <sc-if value="{{ hintOn }}">
+      <div style="position:absolute;z-index:20;display:flex;align-items:center;gap:10px;padding:7px 8px 7px 12px;border-radius:999px;background:#1a1612;color:#f5f0e6;font:500 12.5px 'Inter Tight',sans-serif;white-space:nowrap;box-shadow:0 10px 24px -10px rgba(26,22,18,.6);pointer-events:none;transform:translateX(-50%);left:{{ tb.hintL }};top:{{ tb.hintT }}">
+        <span style="display:flex;align-items:center;gap:6px;font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#f4b942"><span style="width:7px;height:7px;border-radius:50%;background:#a83818;box-shadow:0 0 0 2px rgba(244,185,66,.55)"></span>Screenshot</span>
+        <span>{{ hint }}</span>
+        <span style="font:500 10.5px 'JetBrains Mono',monospace;padding:2px 6px;border-radius:5px;background:rgba(245,240,230,.12);color:#c9bfa9">Esc</span>
+      </div>
+    </sc-if>
+
+    <div style="position:absolute;z-index:25;display:flex;align-items:center;gap:3px;padding:6px;background:#1a1612;border-radius:14px;box-shadow:0 18px 40px -14px rgba(26,22,18,.7), inset 0 0 0 1px rgba(245,240,230,.07);flex-direction:{{ tb.dir }};left:{{ tb.l }};top:{{ tb.t }};transform:{{ tb.tf }};opacity:{{ tb.o }};visibility:{{ tb.v }};transition:{{ tb.tr }}">
+      <div onPointerDown="{{ gripDown }}" onPointerMove="{{ gripMove }}" onPointerUp="{{ gripUp }}" title="Drag to move" style="display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;color:#9c937f;width:{{ tb.gw }};height:{{ tb.gh }}"><svg width="10" height="16" viewBox="0 0 10 16" style="display:block;fill:currentColor;transform:{{ tb.gr }}"><circle cx="2.5" cy="3" r="1.4"></circle><circle cx="7.5" cy="3" r="1.4"></circle><circle cx="2.5" cy="8" r="1.4"></circle><circle cx="7.5" cy="8" r="1.4"></circle><circle cx="2.5" cy="13" r="1.4"></circle><circle cx="7.5" cy="13" r="1.4"></circle></svg></div>
+      <sc-for list="{{ tools }}" as="t" hint-placeholder-count="6">
+        <div style="position:relative;display:flex">
+          <button type="button" onClick="{{ t.onClick }}" onMouseEnter="{{ t.onEnter }}" onMouseLeave="{{ t.onLeave }}" aria-label="{{ t.label }}" style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:0;border-radius:9px;cursor:pointer;transition:background .15s, color .15s;background:{{ t.bg }};color:{{ t.fg }}">
+            <sc-if value="{{ t.isPin }}"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M12 21.5c-.7-2.6-6.5-6.2-6.5-11.2a6.5 6.5 0 0 1 13 0c0 5-5.8 8.6-6.5 11.2z"></path><circle cx="12" cy="10.2" r="2.3"></circle></svg></sc-if>
+            <sc-if value="{{ t.isPick }}"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4.5 9V5.5a1 1 0 0 1 1-1H9M15 4.5h3.5a1 1 0 0 1 1 1V9M4.5 15v3.5a1 1 0 0 0 1 1H9"></path><path d="M13.2 13.2l7.3 2.5-3.1 1.4-1.4 3.1z"></path></svg></sc-if>
+            <sc-if value="{{ t.isRect }}"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="4" y="5.5" width="16" height="13" rx="1.5"></rect></svg></sc-if>
+            <sc-if value="{{ t.isArrow }}"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M5 19L18.5 5.5M10.5 5h8.5v8.5"></path></svg></sc-if>
+            <sc-if value="{{ t.isPen }}"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M3.5 16.5c2.2-3.6 4.2-5.3 5.7-3.9 1.6 1.5-.4 4.3 1.6 4.8 2.2.5 3.6-6.2 6.4-7.2 1.9-.7 3 1 3.3 2.3"></path></svg></sc-if>
+            <sc-if value="{{ t.isText }}"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M5.5 7.5V5h13v2.5M12 5v14M9 19h6"></path></svg></sc-if>
+          </button>
+          <sc-if value="{{ t.tip }}">
+            <div style="position:absolute;z-index:2;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;background:#f5f0e6;color:#1a1612;font:600 12px 'Inter Tight',sans-serif;white-space:nowrap;box-shadow:0 6px 16px -6px rgba(26,22,18,.5);pointer-events:none;left:{{ tb.tipL }};top:{{ tb.tipT }};transform:{{ tb.tipTf }}">{{ t.label }}<span style="font:500 10.5px 'JetBrains Mono',monospace;padding:1px 5px;border-radius:4px;background:#e3dcc8;color:#5d5648">{{ t.key }}</span></div>
+          </sc-if>
+        </div>
+      </sc-for>
+      <span style="flex:none;background:rgba(245,240,230,.16);width:{{ tb.dw }};height:{{ tb.dh }};margin:{{ tb.dm }}"></span>
+      <sc-for list="{{ colors }}" as="c" hint-placeholder-count="4">
+        <button type="button" onClick="{{ c.onClick }}" aria-label="{{ c.id }}" style="display:flex;align-items:center;justify-content:center;border:0;background:transparent;padding:0;cursor:pointer;width:{{ tb.cw }};height:{{ tb.ch }}"><span style="width:16px;height:16px;border-radius:50%;background:{{ c.hex }};box-shadow:{{ c.ring }}"></span></button>
+      </sc-for>
+      <span style="flex:none;background:rgba(245,240,230,.16);width:{{ tb.dw }};height:{{ tb.dh }};margin:{{ tb.dm }}"></span>
+      <button type="button" onClick="{{ undo }}" aria-label="Undo" title="Undo (⌘Z)" style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:0;border-radius:9px;background:transparent;color:#e3dcc8;cursor:pointer" style-hover="background:rgba(245,240,230,.1)"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M9 14.5L4.5 10 9 5.5"></path><path d="M4.5 10h9.5a5.5 5.5 0 0 1 0 11H11"></path></svg></button>
+      <sc-if value="{{ nextWide }}">
+        <button type="button" onClick="{{ toReview }}" style="height:40px;margin-left:4px;display:flex;align-items:center;gap:8px;padding:0 10px 0 14px;border:0;border-radius:9px;background:#f4b942;color:#1a1612;font:700 13.5px 'Inter Tight',sans-serif;cursor:pointer;white-space:nowrap" style-hover="background:#f7c766">Describe<span style="font:500 11px 'JetBrains Mono',monospace;padding:2px 6px;border-radius:4px;background:rgba(26,22,18,.12)">↵</span></button>
+      </sc-if>
+      <sc-if value="{{ nextSquare }}">
+        <button type="button" onClick="{{ toReview }}" aria-label="Describe" title="Describe (Enter)" style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:0;border-radius:9px;background:#f4b942;color:#1a1612;cursor:pointer" style-hover="background:#f7c766"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+      </sc-if>
+      <button type="button" onClick="{{ requestClose }}" aria-label="Close" title="Close (Esc)" style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:0;border-radius:9px;background:transparent;color:#c9bfa9;cursor:pointer" style-hover="background:rgba(245,240,230,.1)"><svg width="18" height="18" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></button>
+    </div>
+
+    <div style="position:absolute;z-index:30;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;background:#f5f0e6;border:1px solid #d4ccb8;border-radius:14px;color:#1a1612;box-shadow:0 1px 0 rgba(42,36,28,.05), 0 24px 60px -18px rgba(26,22,18,.5);left:{{ fm.l }};right:{{ fm.r }};top:{{ fm.t }};bottom:{{ fm.b }};width:{{ fm.w }};max-height:{{ fm.mh }};transform-origin:{{ fm.org }};opacity:{{ fm.o }};transform:{{ fm.tf }};visibility:{{ fm.v }};pointer-events:{{ fm.pe }};transition:{{ fm.tr }}">
+      <div style="position:absolute;left:0;top:0;z-index:2;height:3px;background:#a83818;transition:width .15s linear, opacity .3s;width:{{ progW }};opacity:{{ progO }}"></div>
+      <sc-if value="{{ showForm }}">
+        <div style="flex:none;display:flex;align-items:flex-start;gap:6px;padding:16px 12px 14px 20px;border-bottom:1px solid #d4ccb8">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:5px">
+            <span style="font:500 10.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#a83818;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ fEyebrow }}</span>
+            <sc-if value="{{ fTitleOn }}"><span style="font:600 22px/1.2 'Source Serif 4',Georgia,serif;color:#1a1612">{{ fTitle }}</span></sc-if>
+          </div>
+          <sc-if value="{{ backOn }}">
+            <button type="button" onClick="{{ toAnnotate }}" style="flex:none;height:30px;padding:0 10px;border-radius:7px;border:1px solid #d4ccb8;background:transparent;color:#3a342b;font:600 12.5px 'Inter Tight',sans-serif;cursor:pointer;white-space:nowrap" style-hover="background:#ede6d6">← Marks</button>
+          </sc-if>
+          <sc-if value="{{ swapOn }}">
+            <button type="button" onClick="{{ swap }}" aria-label="Move panel to other side" title="Move panel to the other side" style="flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:7px;border:0;background:transparent;color:#5d5648;cursor:pointer" style-hover="background:#e3dcc8"><svg width="17" height="17" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4"></path></svg></button>
+          </sc-if>
+          <button type="button" onClick="{{ requestClose }}" aria-label="Close" style="flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:7px;border:0;background:transparent;color:#5d5648;cursor:pointer" style-hover="background:#e3dcc8"><svg width="16" height="16" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></button>
+        </div>
+        <div style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:16px 20px 18px;display:flex;flex-direction:column;gap:16px">
+          <sc-if value="{{ errOn }}">
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:9px;background:rgba(168,56,24,.08);border:1px solid rgba(168,56,24,.35)">
+              <span style="flex:none;width:22px;height:22px;border-radius:50%;background:#a83818;color:#fff8ef;font:700 13px/22px 'Inter Tight',sans-serif;text-align:center">!</span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                <span style="font:600 14px/1.35 'Inter Tight',sans-serif;color:#1a1612">Couldn't reach the feedback server</span>
+                <span style="font:400 13px/1.45 'Inter Tight',sans-serif;color:#3a342b">Nothing is lost — this report is saved in your browser and will retry on its own.</span>
+              </div>
+            </div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648">Type</span>
+            <div style="display:flex;gap:3px;padding:3px;background:#ede6d6;border:1px solid #d4ccb8;border-radius:10px">
+              <sc-for list="{{ types }}" as="t" hint-placeholder-count="3">
+                <button type="button" onClick="{{ t.onClick }}" style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:7px;padding:7px 6px;border:0;border-radius:7px;font:600 13px 'Inter Tight',sans-serif;cursor:pointer;white-space:nowrap;transition:background .15s, color .15s;background:{{ t.bg }};color:{{ t.fg }}"><span style="width:7px;height:7px;border-radius:50%;background:{{ t.dot }}"></span>{{ t.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:7px">
+            <span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648">Title</span>
+            <input ref="{{ titleRef }}" value="{{ draft.title }}" onChange="{{ onTitle }}" placeholder="{{ ph.t }}" disabled="{{ busy }}" style="box-sizing:border-box;width:100%;padding:10px 12px;border-radius:8px;border:1px solid #d4ccb8;background:#fcfaf5;color:#1a1612;font:500 15px 'Inter Tight',sans-serif;outline:none" style-focus="border-color:#1a1612;box-shadow:0 0 0 3px rgba(244,185,66,.45)">
+            <sc-if value="{{ titleErr }}"><span style="font:500 12.5px 'Inter Tight',sans-serif;color:#a83818">Add a short title so the team can find this.</span></sc-if>
+          </label>
+          <label style="display:flex;flex-direction:column;gap:7px">
+            <span style="display:flex;justify-content:space-between;align-items:baseline"><span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648">Details</span><span style="font:400 11px 'JetBrains Mono',monospace;color:#9c937f">optional</span></span>
+            <textarea value="{{ draft.details }}" onChange="{{ onDetails }}" placeholder="{{ ph.d }}" rows="{{ detailRows }}" disabled="{{ busy }}" style="box-sizing:border-box;width:100%;padding:10px 12px;border-radius:8px;border:1px solid #d4ccb8;background:#fcfaf5;color:#1a1612;font:400 14px/1.5 'Inter Tight',sans-serif;outline:none;resize:vertical" style-focus="border-color:#1a1612;box-shadow:0 0 0 3px rgba(244,185,66,.45)"></textarea>
+          </label>
+          <sc-if value="{{ fullOn }}">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648">Marks on screenshot</span><span style="font:400 11px 'JetBrains Mono',monospace;color:#9c937f">{{ marksSummary }}</span></div>
+              <sc-if value="{{ noMarks }}"><div style="margin-top:4px;padding:10px 12px;border:1px dashed #c9bfa9;border-radius:8px;font:400 13px/1.5 'Inter Tight',sans-serif;color:#5d5648">No marks yet. Point at what you mean with the toolbar — or skip it.</div></sc-if>
+              <sc-for list="{{ listed }}" as="m" hint-placeholder-count="0">
+                <div onMouseEnter="{{ m.onEnter }}" onMouseLeave="{{ m.onLeave }}" style="display:grid;grid-template-columns:24px minmax(0,1fr) 26px;gap:10px;align-items:start;padding:8px;margin:0 -8px;border-radius:9px;transition:background .15s;background:{{ m.rowBg }}">
+                  <span style="width:24px;height:24px;border-radius:50%;font:700 11px/24px 'JetBrains Mono',monospace;text-align:center;background:{{ m.hex }};color:{{ m.fg }}">{{ m.num }}</span>
+                  <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                    <span style="font:500 11px/1.3 'JetBrains Mono',monospace;color:#5d5648;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.kind }}</span>
+                    <input value="{{ m.comment }}" onChange="{{ m.onComment }}" placeholder="Add a note (optional)" disabled="{{ busy }}" style="box-sizing:border-box;width:100%;padding:0;border:0;background:transparent;color:#1a1612;font:400 14px/1.4 'Inter Tight',sans-serif;outline:none">
+                  </div>
+                  <button type="button" onClick="{{ m.onDel }}" aria-label="Remove mark" style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:#9c937f;cursor:pointer" style-hover="background:#e3dcc8"><svg width="14" height="14" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></button>
+                </div>
+              </sc-for>
+              <sc-if value="{{ extraOn }}"><span style="font:400 11.5px 'JetBrains Mono',monospace;color:#5d5648;padding:2px 0 0 34px">{{ extraLabel }}</span></sc-if>
+            </div>
+            <div style="display:flex;flex-direction:column">
+              <span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648;margin-bottom:4px">Attached automatically</span>
+              <div style="display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-top:1px dashed #d4ccb8">
+                <span style="font:500 12.5px 'Inter Tight',sans-serif;color:#5d5648">Screenshot</span>
+                <span style="font:400 13px 'Inter Tight',sans-serif;color:#1a1612;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ shotLabel }}</span>
+                <span style="font:500 10px 'JetBrains Mono',monospace;color:#9c937f;text-transform:uppercase;letter-spacing:.06em">always</span>
+              </div>
+              <div style="display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-top:1px dashed #d4ccb8">
+                <span style="font:500 12.5px 'Inter Tight',sans-serif;color:#5d5648">Page</span>
+                <span style="font:400 12px 'JetBrains Mono',monospace;color:#1a1612;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pageUrl }}</span>
+                <span style="font:500 10px 'JetBrains Mono',monospace;color:#9c937f;text-transform:uppercase;letter-spacing:.06em">always</span>
+              </div>
+              <div style="display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-top:1px dashed #d4ccb8">
+                <span style="font:500 12.5px 'Inter Tight',sans-serif;color:#5d5648">Console</span>
+                <button type="button" onClick="{{ toggleExpC }}" style="display:flex;align-items:center;gap:8px;min-width:0;padding:0;border:0;background:transparent;cursor:pointer;text-align:left;font:400 13px 'Inter Tight',sans-serif;color:{{ swC.txt }}">{{ consoleLabel }}<span style="font:600 12px 'Inter Tight',sans-serif;color:#a83818">{{ expCLabel }}</span></button>
+                <button type="button" role="switch" aria-checked="{{ swC.aria }}" aria-label="Include console errors" onClick="{{ toggleConsole }}" disabled="{{ busy }}" style="position:relative;width:30px;height:18px;padding:0;border:0;border-radius:9px;cursor:pointer;transition:background .2s;background:{{ swC.bg }}"><span style="position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fcfaf5;box-shadow:0 1px 2px rgba(26,22,18,.3);transition:transform .2s;transform:translateX({{ swC.x }})"></span></button>
+              </div>
+              <sc-if value="{{ expC }}">
+                <div style="display:flex;flex-direction:column;gap:8px;margin:0 0 10px;padding:10px 12px;border-radius:8px;background:#1a1612;font:400 11px/1.5 'JetBrains Mono',monospace">
+                  <sc-for list="{{ consoleErrs }}" as="c" hint-placeholder-count="2"><div style="display:flex;flex-direction:column;gap:1px"><span style="color:#f4b942;overflow-wrap:anywhere">{{ c.msg }}</span><span style="color:#c9bfa9">{{ c.src }}</span></div></sc-for>
+                </div>
+              </sc-if>
+              <div style="display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-top:1px dashed #d4ccb8">
+                <span style="font:500 12.5px 'Inter Tight',sans-serif;color:#5d5648">Network</span>
+                <button type="button" onClick="{{ toggleExpN }}" style="display:flex;align-items:center;gap:8px;min-width:0;padding:0;border:0;background:transparent;cursor:pointer;text-align:left;font:400 13px 'Inter Tight',sans-serif;color:{{ swN.txt }}">{{ networkLabel }}<span style="font:600 12px 'Inter Tight',sans-serif;color:#a83818">{{ expNLabel }}</span></button>
+                <button type="button" role="switch" aria-checked="{{ swN.aria }}" aria-label="Include failed requests" onClick="{{ toggleNetwork }}" disabled="{{ busy }}" style="position:relative;width:30px;height:18px;padding:0;border:0;border-radius:9px;cursor:pointer;transition:background .2s;background:{{ swN.bg }}"><span style="position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fcfaf5;box-shadow:0 1px 2px rgba(26,22,18,.3);transition:transform .2s;transform:translateX({{ swN.x }})"></span></button>
+              </div>
+              <sc-if value="{{ expN }}">
+                <div style="display:flex;flex-direction:column;gap:8px;margin:0 0 10px;padding:10px 12px;border-radius:8px;background:#1a1612;font:400 11px/1.5 'JetBrains Mono',monospace">
+                  <sc-for list="{{ netErrs }}" as="c" hint-placeholder-count="1"><div style="display:flex;flex-direction:column;gap:1px"><span style="color:#f4b942;overflow-wrap:anywhere">{{ c.msg }}</span><span style="color:#c9bfa9">{{ c.src }}</span></div></sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+          <sc-if value="{{ compactOn }}">
+            <div style="display:flex;flex-direction:column;border:1px solid #d4ccb8;border-radius:9px;background:#ede6d6;overflow:hidden">
+              <button type="button" onClick="{{ toggleSummary }}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:0;background:transparent;cursor:pointer;text-align:left;color:#3a342b">
+                <span style="flex:1;min-width:0;font:400 11.5px/1.5 'JetBrains Mono',monospace">{{ summaryLine }}</span>
+                <span style="flex:none;font:600 12px 'Inter Tight',sans-serif;color:#a83818">{{ sumLabel }}</span>
+              </button>
+              <sc-if value="{{ expS }}">
+                <div style="display:flex;flex-direction:column;padding:0 12px;background:#f5f0e6;border-top:1px solid #d4ccb8">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;font:400 13px 'Inter Tight',sans-serif;color:{{ swC.txt }}">{{ consoleLabel }}
+                    <button type="button" role="switch" aria-checked="{{ swC.aria }}" aria-label="Include console errors" onClick="{{ toggleConsole }}" style="position:relative;flex:none;width:30px;height:18px;padding:0;border:0;border-radius:9px;cursor:pointer;transition:background .2s;background:{{ swC.bg }}"><span style="position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fcfaf5;box-shadow:0 1px 2px rgba(26,22,18,.3);transition:transform .2s;transform:translateX({{ swC.x }})"></span></button>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed #d4ccb8;font:400 13px 'Inter Tight',sans-serif;color:{{ swN.txt }}">{{ networkLabel }}
+                    <button type="button" role="switch" aria-checked="{{ swN.aria }}" aria-label="Include failed requests" onClick="{{ toggleNetwork }}" style="position:relative;flex:none;width:30px;height:18px;padding:0;border:0;border-radius:9px;cursor:pointer;transition:background .2s;background:{{ swN.bg }}"><span style="position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fcfaf5;box-shadow:0 1px 2px rgba(26,22,18,.3);transition:transform .2s;transform:translateX({{ swN.x }})"></span></button>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+        </div>
+        <div style="flex:none;display:flex;align-items:center;gap:12px;padding:12px 14px 12px 20px;border-top:1px solid #d4ccb8;background:#ede6d6">
+          <span style="flex:none;width:30px;height:30px;border-radius:50%;background:#1a1612;color:#f5f0e6;display:flex;align-items:center;justify-content:center;font:600 12px 'Source Serif 4',Georgia,serif">MC</span>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+            <span style="font:600 13px/1.3 'Inter Tight',sans-serif;color:#1a1612;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Maya Chen</span>
+            <span style="font:400 10.5px/1.3 'JetBrains Mono',monospace;color:#5d5648;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">from site login</span>
+          </div>
+          <button type="button" onClick="{{ send }}" style="flex:none;display:flex;align-items:center;gap:10px;height:40px;padding:0 10px 0 16px;border:0;border-radius:9px;background:#a83818;color:#fff8ef;font:600 14px 'Inter Tight',sans-serif;cursor:pointer;white-space:nowrap;opacity:{{ sendO }}" style-hover="background:#8f2f14">{{ sendLabel }}<span style="font:500 11px 'JetBrains Mono',monospace;padding:2px 6px;border-radius:5px;background:rgba(255,248,239,.16)">⌘↵</span></button>
+        </div>
+      </sc-if>
+      <sc-if value="{{ showReceipt }}">
+        <div style="flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
+          <div style="padding:24px 22px 18px;display:flex;flex-direction:column;gap:12px;border-bottom:1px dashed #9c937f">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:28px;height:28px;border-radius:50%;background:#2e5a3e;color:#f5f0e6;display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              <span style="font:500 11px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#2e5a3e">Received · {{ ticket }}</span>
+            </div>
+            <span style="font:600 24px/1.2 'Source Serif 4',Georgia,serif;color:#1a1612">Thanks, Maya — it's with the team.</span>
+            <span style="font:400 14px/1.5 'Inter Tight',sans-serif;color:#5d5648">Quote {{ ticket }} if you follow up. Nothing else to do.</span>
+          </div>
+          <div style="padding:12px 22px 4px;display:flex;flex-direction:column">
+            <sc-for list="{{ receiptRows }}" as="r" hint-placeholder-count="6">
+              <div style="display:flex;align-items:baseline;gap:8px;padding:6px 0;font:400 12px/1.4 'JetBrains Mono',monospace">
+                <span style="flex:none;color:#5d5648">{{ r.k }}</span>
+                <span style="flex:1 1 auto;min-width:12px;border-bottom:1px dotted #9c937f;transform:translateY(-3px)"></span>
+                <span style="flex:0 1 auto;min-width:0;max-width:62%;color:#1a1612;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;display:flex;gap:8px;padding:16px 22px 20px">
+            <button type="button" onClick="{{ again }}" style="flex:1;height:40px;border-radius:9px;border:1px solid #d4ccb8;background:transparent;color:#1a1612;font:600 14px 'Inter Tight',sans-serif;cursor:pointer" style-hover="background:#ede6d6">Send another</button>
+            <button type="button" onClick="{{ close }}" style="flex:1;height:40px;border-radius:9px;border:0;background:#1a1612;color:#f5f0e6;font:600 14px 'Inter Tight',sans-serif;cursor:pointer" style-hover="background:#3a342b">Done</button>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ popOn }}">
+      <div style="position:absolute;z-index:35;width:272px;display:flex;flex-direction:column;background:#f5f0e6;border:1px solid #d4ccb8;border-radius:12px;box-shadow:0 18px 44px -14px rgba(26,22,18,.55);overflow:hidden;left:{{ pop.l }};top:{{ pop.t }}">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 8px 0 12px">
+          <span style="flex:none;width:22px;height:22px;border-radius:50%;font:700 11px/22px 'JetBrains Mono',monospace;text-align:center;background:{{ pop.hex }};color:{{ pop.fg }}">{{ pop.num }}</span>
+          <span style="flex:1;min-width:0;font:500 11px 'JetBrains Mono',monospace;color:#5d5648;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pop.label }}</span>
+          <button type="button" onClick="{{ pop.onDel }}" style="flex:none;height:24px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:#a83818;font:600 12px 'Inter Tight',sans-serif;cursor:pointer" style-hover="background:#ede6d6">Delete</button>
+        </div>
+        <textarea ref="{{ popRef }}" value="{{ pop.comment }}" onChange="{{ pop.onComment }}" onKeyDown="{{ popKey }}" placeholder="{{ pop.ph }}" rows="2" style="margin:8px 12px 0;box-sizing:border-box;padding:8px 10px;border:1px solid #d4ccb8;border-radius:8px;background:#fcfaf5;color:#1a1612;font:400 14px/1.45 'Inter Tight',sans-serif;outline:none;resize:none"></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px 10px 12px">
+          <span style="font:400 10.5px 'JetBrains Mono',monospace;color:#9c937f">↵ save · esc close</span>
+          <button type="button" onClick="{{ closePop }}" style="height:28px;padding:0 12px;border-radius:7px;border:0;background:#1a1612;color:#f5f0e6;font:600 12.5px 'Inter Tight',sans-serif;cursor:pointer">Save</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ lCornerOn }}">
+      <button type="button" onClick="{{ open }}" onMouseEnter="{{ lEnter }}" onMouseLeave="{{ lLeave }}" aria-label="Send feedback (Shift+F)" style="position:absolute;z-index:40;right:24px;bottom:24px;height:52px;min-width:52px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:0 15px;border:0;border-radius:26px;color:#f5f0e6;box-shadow:0 14px 34px -10px rgba(26,22,18,.65), inset 0 0 0 1px rgba(245,240,230,.08);cursor:pointer;transition:background .3s;background:{{ lBg }}">
+        <sc-if value="{{ pingOn }}"><svg width="22" height="22" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></sc-if>
+        <sc-if value="{{ pingOff }}"><svg width="22" height="22" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4.5 5.5h15a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H10l-4.5 3.5V17H4.5a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path><path d="M8 10h8M8 13.2h5"></path></svg></sc-if>
+        <span style="display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;transition:max-width .35s cubic-bezier(.2,.8,.2,1), opacity .2s;max-width:{{ lLabelW }};opacity:{{ lLabelO }}"><span style="padding-left:10px;font:600 14px 'Inter Tight',sans-serif">Feedback</span><span style="font:500 11px 'JetBrains Mono',monospace;padding:2px 6px;border-radius:5px;background:rgba(245,240,230,.12);color:#f4b942">⇧F</span></span>
+      </button>
+    </sc-if>
+    <sc-if value="{{ lEdgeOn }}">
+      <button type="button" onClick="{{ open }}" onMouseEnter="{{ lEnter }}" onMouseLeave="{{ lLeave }}" aria-label="Send feedback (Shift+F)" style="position:absolute;z-index:40;right:-6px;top:50%;width:46px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 6px 14px 0;border:0;border-radius:10px 0 0 10px;color:#f5f0e6;box-shadow:-10px 10px 30px -12px rgba(26,22,18,.6);cursor:pointer;transition:transform .25s cubic-bezier(.2,.8,.2,1), background .3s;background:{{ lBg }};transform:translateY(-50%) translateX({{ eX }})">
+        <sc-if value="{{ pingOn }}"><svg width="18" height="18" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></sc-if>
+        <sc-if value="{{ pingOff }}"><svg width="18" height="18" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4.5 5.5h15a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H10l-4.5 3.5V17H4.5a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path></svg></sc-if>
+        <span style="writing-mode:vertical-rl;transform:rotate(180deg);font:600 13px 'Inter Tight',sans-serif;letter-spacing:.02em">Feedback</span>
+        <span style="font:500 10px 'JetBrains Mono',monospace;color:#f4b942;transition:opacity .2s;opacity:{{ lLabelO }}">⇧F</span>
+      </button>
+    </sc-if>
+    <sc-if value="{{ lMiniOn }}">
+      <button type="button" onClick="{{ open }}" onMouseEnter="{{ lEnter }}" onMouseLeave="{{ lLeave }}" aria-label="Send feedback (Shift+F)" style="position:absolute;z-index:40;left:20px;bottom:20px;height:38px;min-width:38px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:0 9px;border:1px solid #d4ccb8;border-radius:19px;box-shadow:0 8px 22px -10px rgba(26,22,18,.45);cursor:pointer;transition:background .25s, color .25s;background:{{ miniBg }};color:{{ miniFg }}">
+        <sc-if value="{{ pingOn }}"><svg width="18" height="18" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></sc-if>
+        <sc-if value="{{ pingOff }}"><svg width="18" height="18" viewBox="0 0 24 24" style="display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4.5 5.5h15a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H10l-4.5 3.5V17H4.5a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path></svg></sc-if>
+        <span style="display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;transition:max-width .35s cubic-bezier(.2,.8,.2,1), opacity .2s;max-width:{{ lLabelW }};opacity:{{ lLabelO }}"><span style="padding-left:8px;font:600 13px 'Inter Tight',sans-serif">Feedback</span><span style="font:500 10.5px 'JetBrains Mono',monospace;padding:2px 5px;border-radius:4px;background:#e3dcc8;color:#5d5648">⇧F</span></span>
+      </button>
+    </sc-if>
+    <sc-if value="{{ coachOn }}">
+      <div style="position:absolute;z-index:40;right:20px;bottom:20px;display:flex;align-items:center;gap:14px;padding:10px 10px 10px 16px;background:#1a1612;color:#f5f0e6;border-radius:12px;box-shadow:0 14px 34px -12px rgba(26,22,18,.6);font:500 13.5px 'Inter Tight',sans-serif">
+        <span style="display:flex;align-items:center;gap:6px;white-space:nowrap">Spotted a problem? Press<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:5px;background:#f5f0e6;color:#1a1612;font:600 11px 'JetBrains Mono',monospace;box-shadow:inset 0 -2px 0 #c9bfa9">⇧</span><span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:5px;background:#f5f0e6;color:#1a1612;font:600 11px 'JetBrains Mono',monospace;box-shadow:inset 0 -2px 0 #c9bfa9">F</span>to send feedback</span>
+        <button type="button" onClick="{{ dismissCoach }}" style="height:30px;padding:0 12px;border:0;border-radius:8px;background:rgba(245,240,230,.12);color:#f5f0e6;font:600 12.5px 'Inter Tight',sans-serif;cursor:pointer;white-space:nowrap" style-hover="background:rgba(245,240,230,.2)">Got it</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ toastOn }}">
+      <div style="position:absolute;z-index:41;width:320px;background:#1a1612;color:#f5f0e6;border-radius:12px;box-shadow:0 16px 40px -12px rgba(26,22,18,.65);overflow:hidden;left:{{ toastPos.l }};top:{{ toastPos.t }}">
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 10px 12px 14px">
+          <span style="flex:none;width:26px;height:26px;border-radius:50%;background:#2e5a3e;display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" style="display:block;fill:none;stroke:#f5f0e6;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+            <span style="font:600 14px 'Inter Tight',sans-serif">Feedback sent</span>
+            <span style="font:400 11px 'JetBrains Mono',monospace;color:#c9bfa9">{{ ticket }} · thanks, Maya</span>
+          </div>
+          <button type="button" onClick="{{ undoSend }}" style="flex:none;height:30px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:#f4b942;font:600 13px 'Inter Tight',sans-serif;cursor:pointer" style-hover="background:rgba(245,240,230,.1)">Undo</button>
+        </div>
+        <div style="height:3px;background:rgba(245,240,230,.1)"><div style="height:100%;background:#f4b942;width:{{ toastBar }};transition:{{ toastTr }}"></div></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ pingBubbleOn }}">
+      <div style="position:absolute;z-index:41;display:flex;align-items:center;gap:8px;height:40px;box-sizing:border-box;padding:0 14px;background:#2e5a3e;color:#f5f0e6;border-radius:10px;font:600 13px 'Inter Tight',sans-serif;white-space:nowrap;box-shadow:0 12px 28px -10px rgba(26,22,18,.55);left:{{ pingPos.l }};top:{{ pingPos.t }}">Sent<span style="font:500 11.5px 'JetBrains Mono',monospace;color:#d6e3d9">{{ ticket }}</span>— thank you</div>
+    </sc-if>
+
+    <sc-if value="{{ confirmOn }}">
+      <div style="position:absolute;inset:0;z-index:60;background:rgba(26,22,18,.38);display:flex;align-items:center;justify-content:center">
+        <div style="width:360px;max-width:calc(100% - 32px);box-sizing:border-box;background:#f5f0e6;border:1px solid #d4ccb8;border-radius:14px;box-shadow:0 24px 60px -18px rgba(26,22,18,.6);padding:22px 22px 18px;display:flex;flex-direction:column;gap:8px">
+          <span style="font:600 20px/1.25 'Source Serif 4',Georgia,serif;color:#1a1612">Discard this feedback?</span>
+          <span style="font:400 14px/1.5 'Inter Tight',sans-serif;color:#5d5648">{{ discardBody }}</span>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+            <button type="button" onClick="{{ keepEditing }}" style="height:38px;padding:0 14px;border-radius:9px;border:1px solid #d4ccb8;background:transparent;color:#1a1612;font:600 13.5px 'Inter Tight',sans-serif;cursor:pointer" style-hover="background:#ede6d6">Keep editing</button>
+            <button type="button" onClick="{{ discard }}" style="height:38px;padding:0 14px;border-radius:9px;border:0;background:#a83818;color:#fff8ef;font:600 13.5px 'Inter Tight',sans-serif;cursor:pointer" style-hover="background:#8f2f14">Discard</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="position:absolute;inset:0;z-index:70;background:#ffffff;pointer-events:none;opacity:{{ flashO }};transition:{{ flashTr }}"></div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;scene&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;launcher-hover&quot;,&quot;annotate-empty&quot;,&quot;pick&quot;,&quot;annotate&quot;,&quot;tools&quot;,&quot;tools-pick&quot;,&quot;describe&quot;,&quot;sending&quot;,&quot;sent&quot;,&quot;error&quot;,&quot;discard&quot;],&quot;default&quot;:&quot;idle&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Start state&quot;},&quot;flow&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;annotate&quot;,&quot;docked&quot;,&quot;note&quot;],&quot;default&quot;:&quot;annotate&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Variations&quot;},&quot;launcher&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;corner&quot;,&quot;edge&quot;,&quot;mini&quot;,&quot;hidden&quot;],&quot;default&quot;:&quot;corner&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Variations&quot;},&quot;toolbar&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dock&quot;,&quot;rail&quot;,&quot;corner&quot;],&quot;default&quot;:&quot;dock&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Variations&quot;},&quot;success&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;receipt&quot;,&quot;toast&quot;,&quot;fold&quot;],&quot;default&quot;:&quot;receipt&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Variations&quot;},&quot;serverResponse&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;success&quot;,&quot;error&quot;],&quot;default&quot;:&quot;success&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;embedded&quot;:{&quot;editor&quot;:null,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const COLORS = [
+  { id: 'rust', hex: '#a83818', rgb: '168,56,24', fg: '#fff8ef' },
+  { id: 'amber', hex: '#f4b942', rgb: '244,185,66', fg: '#1a1612' },
+  { id: 'green', hex: '#2e5a3e', rgb: '46,90,62', fg: '#f5f0e6' },
+  { id: 'ink', hex: '#1a1612', rgb: '26,22,18', fg: '#f5f0e6' }
+];
+const TOOLS = [
+  { id: 'pin', label: 'Pin', key: 'P', hint: 'Click anywhere to drop a numbered pin' },
+  { id: 'pick', label: 'Element', key: 'E', hint: 'Hover an element, click to select it' },
+  { id: 'rect', label: 'Box', key: 'R', hint: 'Drag to box an area' },
+  { id: 'arrow', label: 'Arrow', key: 'A', hint: 'Drag to point at something' },
+  { id: 'pen', label: 'Draw', key: 'D', hint: 'Draw freely' },
+  { id: 'text', label: 'Text', key: 'T', hint: 'Click to place a text label' }
+];
+const KEYS = { p: 'pin', e: 'pick', r: 'rect', a: 'arrow', d: 'pen', t: 'text' };
+const NUMBERED = { pin: 1, rect: 1, element: 1 };
+const CONSOLE_ERRS = [
+  { msg: "TypeError: Cannot read properties of undefined (reading 'nightlyRate')", src: 'listing-card.js:88' },
+  { msg: 'Uncaught (in promise) HoldError: hold_failed', src: 'checkout.js:214' }
+];
+const NET_ERRS = [{ msg: 'POST /api/bookings/hold → 502 Bad Gateway', src: '1.24s' }];
+const PAGE = 'lumenstays.com/stays/lisbon';
+const TICKET = 'FB-2048';
+const PW = 380;
+const FILLED = { type: 'bug', title: '“Book” does nothing on the Alfama loft', details: 'Clicked Book twice — the button flashes but the booking sheet never opens. The other stays work fine.' };
+const PH = {
+  bug: { t: 'e.g. Book button does nothing', d: 'What did you do, what happened, and what did you expect?' },
+  feature: { t: 'e.g. Let me save a stay for later', d: 'What are you trying to do, and what would make it easier?' },
+  other: { t: 'One-line summary', d: 'Anything else we should know?' }
+};
+const EASE = 'cubic-bezier(.2,.8,.2,1)';
+const px = v => (Math.round(v * 10) / 10) + 'px';
+
+class Component extends DCLogic {
+  rootRef = React.createRef();
+  siteRef = React.createRef();
+  titleRef = React.createRef();
+  textRef = React.createRef();
+  popRef = React.createRef();
+  _id = 1;
+  _timers = [];
+  state = Object.assign(this.base(), this.sceneState(this.props.scene));
+
+  base() {
+    return { W: 1280, H: 800, anim: false, mode: 'idle', tool: 'pin', color: 'rust', marks: [], drawing: null, hover: null,
+      popover: null, textEdit: null, draft: { type: 'bug', title: '', details: '' }, ctx: { console: true, network: true },
+      exp: { console: false, network: false, summary: false }, lHover: false, tip: null, coach: false, flash: false,
+      toast: null, ping: null, confirm: false, progress: 0, titleErr: false, hoverMark: null, retried: false, folding: false,
+      side: 'right', tbOff: { x: 0, y: 0 } };
+  }
+  flow() { return this.props.flow || 'annotate'; }
+  sceneState(sc) {
+    const d = FILLED;
+    switch (sc) {
+      case 'launcher-hover': return { lHover: true, coach: true };
+      case 'annotate-empty': return { mode: 'annotate' };
+      case 'pick': return { mode: 'annotate', tool: 'pick' };
+      case 'annotate': return { mode: 'annotate', draft: { ...d, details: '' } };
+      case 'tools': return { mode: 'annotate', tool: 'pin' };
+      case 'tools-pick': return { mode: 'annotate', tool: 'pick' };
+      case 'describe': return { mode: 'review', draft: { ...d } };
+      case 'sending': return { mode: 'sending', draft: { ...d }, progress: 64 };
+      case 'error': return { mode: 'error', draft: { ...d }, retried: true };
+      case 'discard': return { mode: 'annotate', confirm: true, draft: { ...d } };
+      case 'sent': {
+        const v = this.props.success || 'receipt';
+        if (v === 'toast') return { toast: { id: TICKET, go: false } };
+        if (v === 'fold') return { ping: { id: TICKET } };
+        return { mode: 'sent', draft: { ...d } };
+      }
+      default: return { coach: true };
+    }
+  }
+
+  componentDidMount() {
+    this.fit();
+    this._rs = () => this.fit();
+    window.addEventListener('resize', this._rs);
+    if (!this.props.embedded) {
+      this._kd = e => this.onKey(e);
+      window.addEventListener('keydown', this._kd);
+      this.later(() => this.setState({ coach: false }), 9000);
+    }
+    this.boot();
+  }
+  boot() { requestAnimationFrame(() => requestAnimationFrame(() => { this.seed(); this.later(() => this.setState({ anim: true }), 80); })); }
+  componentWillUnmount() {
+    window.removeEventListener('resize', this._rs);
+    if (this._kd) window.removeEventListener('keydown', this._kd);
+    this._timers.forEach(clearTimeout);
+    clearInterval(this._iv);
+  }
+  componentDidUpdate(pp) {
+    const P = this.props;
+    if (pp.scene !== P.scene || (P.scene === 'sent' && pp.success !== P.success)) {
+      this._id = 1;
+      this.setState(Object.assign(this.base(), { W: this.state.W, H: this.state.H }, this.sceneState(P.scene)), () => this.boot());
+    }
+  }
+  later(fn, ms) { const t = setTimeout(fn, ms); this._timers.push(t); return t; }
+  fit() { const r = this.rootRef.current; if (r && (r.offsetWidth !== this.state.W || r.offsetHeight !== this.state.H)) this.setState({ W: r.offsetWidth, H: r.offsetHeight }); }
+
+  scale() { const r = this.rootRef.current; if (!r) return 1; const b = r.getBoundingClientRect(); return r.offsetWidth / (b.width || 1); }
+  rectOf(el) { const r = this.rootRef.current.getBoundingClientRect(), b = el.getBoundingClientRect(), k = this.scale(); return { x: (b.left - r.left) * k, y: (b.top - r.top) * k, w: b.width * k, h: b.height * k }; }
+  toLocal(e) { const r = this.rootRef.current.getBoundingClientRect(), k = this.scale(); return { x: (e.clientX - r.left) * k, y: (e.clientY - r.top) * k }; }
+  measure(pid) { const site = this.siteRef.current, el = site && site.querySelector('[data-pid="' + pid + '"]'); return el ? { ...this.rectOf(el), sel: el.getAttribute('data-pick'), el } : null; }
+
+  seed() {
+    const sc = this.props.scene || 'idle', ups = {};
+    const story = ['annotate', 'describe', 'sending', 'error', 'discard'].includes(sc) || (sc === 'sent' && (this.props.success || 'receipt') === 'receipt');
+    const all = sc === 'tools' || sc === 'tools-pick';
+    if (story || all) { const ms = this.seedMarks(all); if (ms) { ups.marks = ms; if (sc === 'tools') ups.popover = ms[1].id; } }
+    if (sc === 'pick' || sc === 'tools-pick') { const r = this.measure(sc === 'pick' ? 'book-1' : 'search-btn'); if (r) ups.hover = r; }
+    if (Object.keys(ups).length) this.setState(ups);
+  }
+  seedMarks(all) {
+    const b = this.measure('book-1'), p = this.measure('price-1'), t = this.measure('title-1'), c2 = this.measure('card-2'), b2 = this.measure('book-2'), dt = this.measure('dates');
+    if (!b || !p || !t || !c2 || !b2) return null;
+    const id = () => this._id++, ms = [];
+    ms.push({ id: id(), type: 'element', x: b.x, y: b.y, w: b.w, h: b.h, selector: b.sel, color: 'rust', comment: 'Click does nothing — no sheet, no error' });
+    ms.push({ id: id(), type: 'pin', x: p.x + p.w + 8, y: p.y + p.h / 2 + 4, color: 'rust', comment: 'Price flickers to $0 right after the click' });
+    if (all && dt) ms.push({ id: id(), type: 'rect', x: dt.x - 4, y: dt.y - 4, w: dt.w + 8, h: dt.h + 8, color: 'amber', comment: 'Dates reset to today after Book' });
+    ms.push({ id: id(), type: 'pen', color: 'amber', pts: this.ellipse(t.x - 6, t.y - 6, t.w + 12, t.h + 12) });
+    ms.push({ id: id(), type: 'text', x: c2.x + 18, y: c2.y + 40, text: 'This one works', color: 'green' });
+    ms.push({ id: id(), type: 'arrow', x1: c2.x + 90, y1: c2.y + 62, x2: b2.x + b2.w * 0.4, y2: b2.y - 6, color: 'green' });
+    return ms;
+  }
+  ellipse(x, y, w, h) {
+    const cx = x + w / 2, cy = y + h / 2, rx = w / 2 + 4, ry = h / 2 + 5, pts = [];
+    for (let i = 0; i <= 46; i++) { const a = -2.5 + (i / 46) * Math.PI * 2.12, j = 1 + Math.sin(i * 1.9) * 0.022; pts.push([cx + Math.cos(a) * rx * j, cy + Math.sin(a) * ry * j]); }
+    return pts;
+  }
+
+  onKey(e) {
+    const s = this.state, tg = e.target || {}, tag = (tg.tagName || '').toLowerCase();
+    const typing = tag === 'input' || tag === 'textarea' || tg.isContentEditable;
+    if (e.code === 'KeyF' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !typing && s.mode === 'idle') { e.preventDefault(); this.open(); return; }
+    if (e.key === 'Escape') {
+      if (s.confirm) return this.setState({ confirm: false });
+      if (s.textEdit) return this.setState({ textEdit: null });
+      if (s.popover != null) return this.setState({ popover: null });
+      if (s.mode === 'review' && this.flow() === 'annotate') return this.setState({ mode: 'annotate' });
+      if (s.mode === 'annotate' || s.mode === 'review' || s.mode === 'error') return this.requestClose();
+      if (s.mode === 'sent') return this.close();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && this.formShown()) { e.preventDefault(); this.send(); return; }
+    if (typing || s.mode !== 'annotate' || s.confirm) return;
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); this.undo(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = KEYS[(e.key || '').toLowerCase()];
+    if (t) { this.setState({ tool: t, hover: null, popover: null }); return; }
+    if (e.key === 'Enter' && this.flow() === 'annotate') this.toReview();
+  }
+  formShown() {
+    const s = this.state, f = this.flow(), m = s.mode;
+    if (m === 'idle') return false;
+    if (m === 'sending' || m === 'error' || m === 'sent') return true;
+    if (f === 'docked') return true;
+    if (f === 'note') return s.marks.length > 0;
+    return m === 'review';
+  }
+
+  open() {
+    if (this.state.mode !== 'idle') return;
+    this._id = 1;
+    this.setState({ mode: 'annotate', marks: [], draft: { type: 'bug', title: '', details: '' }, tool: 'pin', popover: null, hover: null, textEdit: null, drawing: null, coach: false, flash: true, toast: null, ping: null, titleErr: false, retried: false, exp: { console: false, network: false, summary: false }, ctx: { console: true, network: true }, lHover: false, tbOff: { x: 0, y: 0 } },
+      () => requestAnimationFrame(() => requestAnimationFrame(() => this.setState({ flash: false }))));
+  }
+  hasContent() { const s = this.state; return s.marks.length > 0 || !!s.draft.title.trim() || !!s.draft.details.trim(); }
+  requestClose() { const m = this.state.mode; if (m === 'sending') return; if (m !== 'sent' && this.hasContent()) this.setState({ confirm: true, popover: null }); else this.close(); }
+  close() { this.setState({ mode: 'idle', confirm: false, popover: null, hover: null, textEdit: null, drawing: null, folding: false }); }
+  toReview() { this.setState({ mode: 'review', popover: null, hover: null, textEdit: null }); this.later(() => this.titleRef.current && this.titleRef.current.focus({ preventScroll: true }), 420); }
+  undo() { this.setState(s => ({ marks: s.marks.slice(0, -1), popover: null })); }
+  setDraft(p) { this.setState(s => ({ draft: { ...s.draft, ...p }, titleErr: p.title != null && p.title.trim().length >= 3 ? false : s.titleErr })); }
+  setComment(id, v) { this.setState(s => ({ marks: s.marks.map(m => m.id === id ? { ...m, comment: v } : m) })); }
+  delMark(id) { this.setState(s => ({ marks: s.marks.filter(m => m.id !== id), popover: s.popover === id ? null : s.popover, hoverMark: null })); }
+  send() {
+    const s = this.state;
+    if (s.mode === 'sending' || s.mode === 'sent') return;
+    if (s.draft.title.trim().length < 3) { this.setState({ titleErr: true }); if (this.titleRef.current) this.titleRef.current.focus(); return; }
+    console.info('[feedback prototype] report.json that would be POSTed:', this.buildReport());
+    this.setState({ mode: 'sending', progress: 6, popover: null, titleErr: false, textEdit: null });
+    clearInterval(this._iv);
+    this._iv = setInterval(() => {
+      const p = Math.min(100, this.state.progress + 8 + Math.random() * 10);
+      this.setState({ progress: p });
+      if (p >= 100) { clearInterval(this._iv); this.later(() => this.finish(), 240); }
+    }, 110);
+  }
+  finish() {
+    if ((this.props.serverResponse || 'success') === 'error' && !this.state.retried) { this.setState({ mode: 'error', retried: true }); return; }
+    const v = this.props.success || 'receipt';
+    if (v === 'receipt') { this.setState({ mode: 'sent' }); return; }
+    if (v === 'toast') {
+      this.setState({ mode: 'idle', toast: { id: TICKET, go: false } }, () => requestAnimationFrame(() => requestAnimationFrame(() => this.setState(s => s.toast ? { toast: { ...s.toast, go: true } } : null))));
+      this.later(() => this.setState({ toast: null }), 6200);
+      return;
+    }
+    this.setState({ folding: true });
+    this.later(() => { this.setState({ mode: 'idle', folding: false, ping: { id: TICKET } }); this.later(() => this.setState({ ping: null }), 3600); }, 480);
+  }
+  again() { this.setState({ mode: 'idle' }, () => this.later(() => this.open(), 60)); }
+  buildReport() {
+    const s = this.state, r = v => Math.round(v), hex = id => (COLORS.find(x => x.id === id) || COLORS[0]).hex;
+    let n = 0;
+    const marks = s.marks.map(m => {
+      if (m.type === 'pin') return { kind: 'pin', n: ++n, x: r(m.x), y: r(m.y), color: hex(m.color), note: (m.comment || '').trim() };
+      if (m.type === 'rect') return { kind: 'box', n: ++n, x: r(m.x), y: r(m.y), w: r(m.w), h: r(m.h), color: hex(m.color), note: (m.comment || '').trim() };
+      if (m.type === 'element') return { kind: 'element', n: ++n, x: r(m.x), y: r(m.y), w: r(m.w), h: r(m.h), color: hex(m.color), note: (m.comment || '').trim(), element: { selector: m.selector } };
+      if (m.type === 'arrow') return { kind: 'arrow', x1: r(m.x1), y1: r(m.y1), x2: r(m.x2), y2: r(m.y2), color: hex(m.color) };
+      if (m.type === 'pen') return { kind: 'draw', points: m.pts.map(p => [r(p[0]), r(p[1])]), color: hex(m.color) };
+      return { kind: 'text', x: r(m.x), y: r(m.y), text: m.text, color: hex(m.color) };
+    });
+    return { schemaVersion: 1, project: 'lumen', type: s.draft.type, title: s.draft.title.trim(), details: s.draft.details.trim(), createdAt: new Date().toISOString(),
+      page: { url: 'https://' + PAGE, title: 'Lisbon stays · Lumen', viewport: { width: s.W, height: s.H, devicePixelRatio: window.devicePixelRatio || 1, scrollX: 0, scrollY: 0 } },
+      screenshot: { part: 'screenshot', annotatedPart: 'annotated', width: s.W, height: s.H }, marks,
+      console: s.ctx.console ? CONSOLE_ERRS.map(c => ({ level: 'error', message: c.msg, source: c.src, count: 1 })) : null,
+      network: s.ctx.network ? [{ method: 'POST', url: '/api/bookings/hold', status: 502, durationMs: 1240 }] : null,
+      user: { id: 'u_8841', name: 'Maya Chen', email: 'maya@lumenstays.com' }, client: { widgetVersion: '0.1.0' } };
+  }
+
+  addMark(mk) {
+    const s = this.state, first = this.flow() === 'note' && s.marks.length === 0, num = !!NUMBERED[mk.type];
+    this.setState({ marks: [...s.marks, mk], popover: num && !first ? mk.id : null, hover: null }, () => {
+      if (first) this.later(() => this.titleRef.current && this.titleRef.current.focus({ preventScroll: true }), 380);
+      else if (num) this.later(() => this.popRef.current && this.popRef.current.focus({ preventScroll: true }), 40);
+    });
+  }
+  onDown = e => {
+    if (e.button !== 0) return;
+    const s = this.state;
+    if (s.popover != null) { this.setState({ popover: null }); return; }
+    if (s.textEdit) { this.commitText(); return; }
+    const p = this.toLocal(e), col = s.color;
+    if (s.tool === 'pin') { this.addMark({ id: this._id++, type: 'pin', x: p.x, y: p.y, color: col, comment: '' }); return; }
+    if (s.tool === 'text') { this.setState({ textEdit: { x: p.x, y: p.y, value: '' } }); this.later(() => this.textRef.current && this.textRef.current.focus(), 30); return; }
+    if (s.tool === 'pick') { const el = this.pickAt(e); if (!el) return; this.addMark({ id: this._id++, type: 'element', ...this.rectOf(el), selector: el.getAttribute('data-pick'), color: col, comment: '' }); return; }
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    this.setState({ drawing: { type: s.tool, color: col, x0: p.x, y0: p.y, x1: p.x, y1: p.y, pts: [[p.x, p.y]] } });
+  };
+  onMove = e => {
+    const s = this.state;
+    if (s.drawing) {
+      const p = this.toLocal(e), d = s.drawing, nd = { ...d, x1: p.x, y1: p.y };
+      if (d.type === 'pen') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) > 2.5) nd.pts = [...d.pts, [p.x, p.y]]; }
+      this.setState({ drawing: nd });
+      return;
+    }
+    if (s.tool === 'pick' && s.popover == null) {
+      const el = this.pickAt(e);
+      if (!el) { if (s.hover) this.setState({ hover: null }); return; }
+      if (s.hover && s.hover.el === el) return;
+      this.setState({ hover: { ...this.rectOf(el), sel: el.getAttribute('data-pick'), el } });
+    }
+  };
+  onUp = () => {
+    const d = this.state.drawing; if (!d) return;
+    let mk = null; const id = this._id;
+    if (d.type === 'rect') { const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1), w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0); if (w > 8 && h > 8) mk = { id, type: 'rect', x, y, w, h, color: d.color, comment: '' }; }
+    else if (d.type === 'arrow') { if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) > 14) mk = { id, type: 'arrow', x1: d.x0, y1: d.y0, x2: d.x1, y2: d.y1, color: d.color }; }
+    else if (d.pts.length > 2) mk = { id, type: 'pen', pts: d.pts, color: d.color };
+    this.setState({ drawing: null });
+    if (mk) { this._id++; this.addMark(mk); }
+  };
+  onLeave = () => { if (this.state.hover) this.setState({ hover: null }); };
+  commitText = () => { this.setState(s => { const t = s.textEdit; if (!t) return null; const v = t.value.trim(); return { textEdit: null, marks: v ? [...s.marks, { id: this._id++, type: 'text', x: t.x, y: t.y, text: v, color: s.color }] : s.marks }; }); };
+  pickAt(e) {
+    const site = this.siteRef.current; if (!site || !document.elementsFromPoint) return null;
+    const els = document.elementsFromPoint(e.clientX, e.clientY);
+    for (let i = 0; i < els.length; i++) { const el = els[i]; if (el !== site && site.contains(el)) { const t = el.closest('[data-pick]'); return t && site.contains(t) ? t : null; } }
+    return null;
+  }
+  gripDown = e => { e.stopPropagation(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} this._drag = { x: e.clientX, y: e.clientY, ox: this.state.tbOff.x, oy: this.state.tbOff.y, k: this.scale() }; };
+  gripMove = e => { const d = this._drag; if (!d) return; this.setState({ tbOff: { x: d.ox + (e.clientX - d.x) * d.k, y: d.oy + (e.clientY - d.y) * d.k } }); };
+  gripUp = () => { this._drag = null; };
+
+  lBox() {
+    const { W, H } = this.state, v = this.props.launcher || 'corner';
+    if (v === 'edge') return { x: W - 40, y: H / 2 - 70, w: 40, h: 140 };
+    if (v === 'mini') return { x: 20, y: H - 58, w: 38, h: 38 };
+    if (v === 'hidden') return { x: W - 44, y: H - 44, w: 20, h: 20 };
+    return { x: W - 76, y: H - 76, w: 52, h: 52 };
+  }
+  area() { const s = this.state; if (this.flow() === 'docked' && s.mode !== 'idle') return s.side === 'right' ? { x0: 0, x1: s.W - PW - 32 } : { x0: PW + 32, x1: s.W }; return { x0: 0, x1: s.W }; }
+  bbox(m) {
+    if (m.type === 'pin') return { x: m.x, y: m.y - 28, w: 28, h: 28 };
+    if (m.type === 'text') return { x: m.x, y: m.y - 15, w: Math.min(300, 22 + m.text.length * 8.4), h: 30 };
+    if (m.type === 'arrow') return { x: Math.min(m.x1, m.x2), y: Math.min(m.y1, m.y2), w: Math.abs(m.x2 - m.x1), h: Math.abs(m.y2 - m.y1) };
+    if (m.type === 'pen') { const xs = m.pts.map(p => p[0]), ys = m.pts.map(p => p[1]), x = Math.min(...xs), y = Math.min(...ys); return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }; }
+    return { x: m.x, y: m.y, w: m.w, h: m.h };
+  }
+  formGeo() {
+    const s = this.state, { W, H } = s, f = this.flow(), lv = this.props.launcher || 'corner', lb = this.lBox();
+    if (f === 'docked') return s.side === 'right' ? { r: 16, t: 16, b: 16, w: PW, org: 'right bottom', hide: 'translateX(24px)' } : { l: 16, t: 16, b: 16, w: PW, org: 'left bottom', hide: 'translateX(-24px)' };
+    if (f === 'annotate') return lv === 'mini' ? { l: 20, b: 20, w: PW, mh: H - 40, org: 'left bottom', hide: 'translateY(16px) scale(.98)' } : { r: 20, b: 20, w: PW, mh: H - 40, org: 'right bottom', hide: 'translateY(16px) scale(.98)' };
+    const a = s.marks[0] ? this.bbox(s.marks[0]) : { x: W / 2 - 20, y: H / 2 - 20, w: 40, h: 40 }, w = 340, cy = a.y + a.h / 2;
+    let l = a.x + a.w + 18; if (l + w > W - 16) l = a.x - w - 18; l = Math.max(16, Math.min(l, W - w - 16));
+    const ox = px(lb.x + lb.w / 2 - l), hide = 'translateY(8px) scale(.97)';
+    if (cy > H / 2) { const b = Math.max(16, H - cy - 170); return { l, b, w, mh: H - 32, org: ox + ' calc(100% + ' + px(lb.y + lb.h / 2 - (H - b)) + ')', hide }; }
+    const t = Math.max(16, cy - 170);
+    return { l, t, w, mh: H - 32, org: ox + ' ' + px(lb.y + lb.h / 2 - t), hide };
+  }
+  tbGeo() {
+    const s = this.state, { H } = s, v = this.props.toolbar || 'dock', a = this.area(), cx = (a.x0 + a.x1) / 2, show = s.mode === 'annotate' && !s.folding;
+    let g;
+    if (v === 'rail') g = { l: a.x0 + 20, t: H / 2, base: 'translate(0,-50%)', off: 'translateX(-12px)', dir: 'column', tipL: '50px', tipT: '50%', tipTf: 'translateY(-50%)', hintT: 16 };
+    else if (v === 'corner') g = { l: a.x1 - 20, t: H - 20, base: 'translate(-100%,-100%)', off: 'translateY(12px)', dir: 'row', tipL: '50%', tipT: '-8px', tipTf: 'translate(-50%,-100%)', hintT: 16 };
+    else g = { l: cx, t: 16, base: 'translate(-50%,0)', off: 'translateY(-12px)', dir: 'row', tipL: '50%', tipT: '50px', tipTf: 'translateX(-50%)', hintT: 80 };
+    const col = g.dir === 'column';
+    return { dir: g.dir, l: px(g.l + s.tbOff.x), t: px(g.t + s.tbOff.y), tf: g.base + (show ? '' : ' ' + g.off), o: show ? '1' : '0', v: show ? 'visible' : 'hidden',
+      tr: s.anim ? 'opacity .25s, transform .35s ' + EASE + ', visibility .35s' : 'none', tipL: g.tipL, tipT: g.tipT, tipTf: g.tipTf,
+      dw: col ? '24px' : '1px', dh: col ? '1px' : '24px', dm: col ? '5px 0' : '0 5px', cw: col ? '40px' : '24px', ch: col ? '24px' : '40px',
+      gw: col ? '40px' : '18px', gh: col ? '18px' : '40px', gr: col ? 'rotate(90deg)' : 'none', hintL: px(cx), hintT: px(g.hintT), col };
+  }
+  ghost(d) {
+    if (d.type === 'rect') return { id: 'ghost', ghost: true, type: 'rect', x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0), color: d.color };
+    if (d.type === 'arrow') return { id: 'ghost', ghost: true, type: 'arrow', x1: d.x0, y1: d.y0, x2: d.x1, y2: d.y1, color: d.color };
+    return { id: 'ghost', ghost: true, type: 'pen', pts: d.pts, color: d.color };
+  }
+  penPath(p) {
+    if (!p || !p.length) return '';
+    const f = v => v.toFixed(1);
+    let d = 'M' + f(p[0][0]) + ' ' + f(p[0][1]);
+    for (let i = 1; i < p.length - 1; i++) { const mx = (p[i][0] + p[i + 1][0]) / 2, my = (p[i][1] + p[i + 1][1]) / 2; d += ' Q' + f(p[i][0]) + ' ' + f(p[i][1]) + ' ' + f(mx) + ' ' + f(my); }
+    const l = p[p.length - 1]; return d + ' L' + f(l[0]) + ' ' + f(l[1]);
+  }
+  arrowPaths(m) {
+    const dx = m.x2 - m.x1, dy = m.y2 - m.y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, hl = Math.min(18, L * 0.45), hw = hl * 0.62;
+    const bx = m.x2 - ux * hl, by = m.y2 - uy * hl;
+    return { shaft: 'M' + m.x1 + ' ' + m.y1 + ' L' + (bx + ux * 2) + ' ' + (by + uy * 2), head: 'M' + m.x2 + ' ' + m.y2 + ' L' + (bx - uy * hw) + ' ' + (by + ux * hw) + ' L' + (bx + uy * hw) + ' ' + (by - ux * hw) + ' Z' };
+  }
+  markVals(mk, num) {
+    const s = this.state, c = COLORS.find(x => x.id === mk.color) || COLORS[0], hot = s.hoverMark === mk.id || s.popover === mk.id;
+    const o = { id: mk.id, num, hex: c.hex, fg: c.fg, tint: 'rgba(' + c.rgb + ',.10)',
+      isPin: mk.type === 'pin', isBox: mk.type === 'rect' || mk.type === 'element', isEl: mk.type === 'element', isPen: mk.type === 'pen', isArrow: mk.type === 'arrow', isText: mk.type === 'text',
+      selector: mk.selector || '', text: mk.text || '', comment: mk.comment || '',
+      ring: hot ? '0 0 0 4px rgba(244,185,66,.75), 0 2px 6px rgba(26,22,18,.35)' : '0 2px 6px rgba(26,22,18,.35)',
+      onOpen: e => { e.stopPropagation(); if (this.state.mode !== 'annotate') return; this.setState({ popover: mk.id }); this.later(() => this.popRef.current && this.popRef.current.focus({ preventScroll: true }), 40); } };
+    if (o.isPin) { o.l = px(mk.x); o.t = px(mk.y - 28); }
+    if (o.isBox) { o.l = px(mk.x); o.t = px(mk.y); o.w = px(mk.w); o.h = px(mk.h); o.bs = o.isEl ? 'dashed' : 'solid'; o.bl = px(mk.x - 12); o.bt = px(mk.y - 12); o.cl = px(mk.x + 16); o.ct = px(mk.y - 5); }
+    if (o.isText) { o.l = px(mk.x); o.t = px(mk.y - 15); }
+    if (o.isPen) o.d = this.penPath(mk.pts);
+    if (o.isArrow) { const a = this.arrowPaths(mk); o.d = a.shaft; o.hd = a.head; }
+    return o;
+  }
+
+  renderVals() {
+    const s = this.state, P = this.props, { W, H } = s, f = this.flow(), m = s.mode, lv = P.launcher || 'corner';
+    const open = m !== 'idle', annot = m === 'annotate' && !s.folding, busy = m === 'sending', fShown = this.formShown() && !s.folding;
+    let n = 0;
+    const src = s.marks.slice(); if (s.drawing) src.push(this.ghost(s.drawing));
+    const marks = src.map(mk => this.markVals(mk, mk.ghost ? null : (NUMBERED[mk.type] ? ++n : null)));
+    const listed = marks.filter(x => x.num).map(x => ({ ...x,
+      kind: x.isPin ? 'Pin' : x.isEl ? 'Element · ' + x.selector : 'Box',
+      rowBg: s.hoverMark === x.id ? '#e3dcc8' : 'transparent',
+      onComment: e => this.setComment(x.id, e.target.value), onDel: () => this.delMark(x.id),
+      onEnter: () => this.setState({ hoverMark: x.id }), onLeave: () => this.setState({ hoverMark: null }) }));
+    const k = { pen: 0, arrow: 0, text: 0 }; s.marks.forEach(x => { if (k[x.type] != null) k[x.type]++; });
+    const pl = (c, w) => c + ' ' + w + (c > 1 ? 's' : '');
+    const extra = [k.pen && pl(k.pen, 'drawing'), k.arrow && pl(k.arrow, 'arrow'), k.text && pl(k.text, 'label')].filter(Boolean);
+    const total = s.marks.length, marksSummary = total ? pl(total, 'mark') : 'none yet';
+
+    let pop = null;
+    if (s.popover != null && annot) {
+      const raw = s.marks.find(x => x.id === s.popover), pm = marks.find(x => x.id === s.popover);
+      if (raw && pm) {
+        const bb = this.bbox(raw), w = 272;
+        let l = bb.x + bb.w + 12; if (l + w > W - 12) l = bb.x - w - 12; l = Math.max(12, l);
+        const t = Math.max(12, Math.min(bb.y - 4, H - 180));
+        pop = { l: px(l), t: px(t), hex: pm.hex, fg: pm.fg, num: pm.num || '', comment: raw.comment || '',
+          label: raw.type === 'pin' ? 'Pin ' + pm.num : raw.type === 'element' ? raw.selector : 'Box ' + pm.num,
+          ph: raw.type === 'pin' ? "What's wrong here?" : raw.type === 'element' ? 'What about this element?' : "What's going on in this area?",
+          onComment: e => this.setComment(raw.id, e.target.value), onDel: () => this.delMark(raw.id) };
+      }
+    }
+
+    const g = this.formGeo(), fold = s.folding;
+    const fm = { l: g.l != null ? px(g.l) : 'auto', r: g.r != null ? px(g.r) : 'auto', t: g.t != null ? px(g.t) : 'auto', b: g.b != null ? px(g.b) : 'auto',
+      w: px(g.w), mh: g.mh ? px(g.mh) : 'none', org: g.org,
+      o: fShown ? '1' : '0', tf: fShown ? 'none' : (fold ? 'scale(.06)' : g.hide), v: fShown ? 'visible' : 'hidden', pe: fShown ? 'auto' : 'none',
+      tr: !s.anim ? 'none' : fold ? 'transform .45s cubic-bezier(.5,0,.75,0), opacity .45s ease-in, visibility .45s' : 'opacity .28s, transform .4s ' + EASE + ', visibility .4s, left .4s ' + EASE + ', top .4s ' + EASE };
+
+    const anchor = s.marks[0];
+    const eyebrow = f === 'docked' ? 'Feedback · lumenstays.com' : f === 'note' ? (anchor && NUMBERED[anchor.type] ? 'Note on mark 1' + (anchor.selector ? ' · ' + anchor.selector : '') : 'Your note') : 'Step 2 of 2 · Describe';
+    const ftitle = f === 'docked' ? "What's going on?" : f === 'note' ? '' : 'Describe what you marked';
+    const types = [{ id: 'bug', label: 'Bug', dot: '#a83818' }, { id: 'feature', label: 'Feature request', dot: '#f4b942' }, { id: 'other', label: 'Other', dot: '#9c937f' }].map(t => { const on = s.draft.type === t.id; return { ...t, bg: on ? '#1a1612' : 'transparent', fg: on ? '#f5f0e6' : '#3a342b', onClick: () => this.setDraft({ type: t.id }) }; });
+    const sw = on => ({ bg: on ? '#2e5a3e' : '#c9bfa9', x: on ? '12px' : '0px', txt: on ? '#1a1612' : '#9c937f', aria: on ? 'true' : 'false' });
+    const titleOk = s.draft.title.trim().length >= 3;
+    const tools = TOOLS.map(t => { const on = s.tool === t.id; return { ...t, isPin: t.id === 'pin', isPick: t.id === 'pick', isRect: t.id === 'rect', isArrow: t.id === 'arrow', isPen: t.id === 'pen', isText: t.id === 'text', bg: on ? '#f4b942' : 'transparent', fg: on ? '#1a1612' : '#e3dcc8', tip: s.tip === t.id, onClick: () => this.setState({ tool: t.id, hover: null, popover: null }), onEnter: () => this.setState({ tip: t.id }), onLeave: () => this.setState({ tip: null }) }; });
+    const colors = COLORS.map(c => ({ ...c, ring: s.color === c.id ? '0 0 0 2px #1a1612, 0 0 0 4px #f4b942' : '0 0 0 1.5px rgba(245,240,230,.4)', onClick: () => this.setState({ color: c.id }) }));
+    const cur = TOOLS.find(t => t.id === s.tool) || TOOLS[0];
+    const hint = f === 'note' && s.marks.length === 0 ? 'Mark the spot first — your note opens beside it' : cur.hint;
+    const hvr = s.hover && annot && s.tool === 'pick' ? s.hover : null;
+    const hv = hvr ? { l: px(hvr.x), t: px(hvr.y), w: px(hvr.w), h: px(hvr.h), sel: hvr.sel, dim: Math.round(hvr.w) + '×' + Math.round(hvr.h), lt: hvr.y < 34 ? px(hvr.y + hvr.h + 6) : px(hvr.y - 6), ltf: hvr.y < 34 ? 'none' : 'translateY(-100%)' } : {};
+    const te = s.textEdit ? { l: px(s.textEdit.x), t: px(s.textEdit.y - 17), value: s.textEdit.value, hex: (COLORS.find(c => c.id === s.color) || COLORS[0]).hex } : {};
+    const tb = this.tbGeo(), lb = this.lBox(), launcherOn = m === 'idle' || fold, ping = !!s.ping;
+    const near = (w, h) => lv === 'edge' ? { l: px(lb.x - w - 14), t: px(lb.y + lb.h / 2 - h / 2) } : lv === 'mini' ? { l: px(20), t: px(lb.y - h - 12) } : lv === 'hidden' ? { l: px(W - w - 20), t: px(H - h - 20) } : { l: px(lb.x + lb.w - w), t: px(lb.y - h - 14) };
+    const typeLabel = (types.find(t => t.id === s.draft.type) || types[0]).label;
+
+    return {
+      ready: true, rootRef: this.rootRef, siteRef: this.siteRef, titleRef: this.titleRef, textRef: this.textRef, popRef: this.popRef,
+      siteOverflow: open ? 'hidden' : 'auto', frameOn: open && m !== 'sent' && !fold,
+      surfaceOn: annot && !s.confirm, cursor: s.tool === 'pick' ? 'default' : s.tool === 'text' ? 'text' : 'crosshair',
+      onDown: this.onDown, onMove: this.onMove, onUp: this.onUp, onLeave: this.onLeave,
+      marksOn: open, marks, hoverOn: !!hvr, hv, textOn: !!s.textEdit, te,
+      onTextVal: e => { const v = e.target.value; this.setState(st => st.textEdit ? { textEdit: { ...st.textEdit, value: v } } : null); },
+      onTextKey: e => { if (e.key === 'Enter') { e.preventDefault(); this.commitText(); } },
+      commitText: this.commitText,
+      hintOn: annot && !s.confirm, hint, tb, gripDown: this.gripDown, gripMove: this.gripMove, gripUp: this.gripUp,
+      tools, colors, undo: () => this.undo(), nextWide: f === 'annotate' && !tb.col, nextSquare: f === 'annotate' && tb.col,
+      toReview: () => this.toReview(), requestClose: () => this.requestClose(),
+      fm, progW: busy ? s.progress + '%' : '0%', progO: busy ? '1' : '0',
+      showForm: m !== 'sent', showReceipt: m === 'sent', fEyebrow: eyebrow, fTitleOn: !!ftitle, fTitle: ftitle,
+      backOn: f === 'annotate' && (m === 'review' || m === 'error'), toAnnotate: () => this.setState({ mode: 'annotate' }),
+      swapOn: f === 'docked' && m !== 'sending', swap: () => this.setState(st => ({ side: st.side === 'right' ? 'left' : 'right', tbOff: { x: 0, y: 0 } })),
+      errOn: m === 'error', types, draft: s.draft, ph: PH[s.draft.type] || PH.bug, busy, titleErr: s.titleErr, detailRows: f === 'note' ? 3 : 4,
+      onTitle: e => this.setDraft({ title: e.target.value }), onDetails: e => this.setDraft({ details: e.target.value }),
+      fullOn: f !== 'note', compactOn: f === 'note', noMarks: listed.length === 0, listed, marksSummary,
+      extraOn: extra.length > 0, extraLabel: '+ ' + extra.join(' · '),
+      shotLabel: W + ' × ' + H + ' · ' + (total ? marksSummary : 'no marks'), pageUrl: PAGE,
+      swC: sw(s.ctx.console), swN: sw(s.ctx.network),
+      toggleConsole: () => this.setState(st => ({ ctx: { ...st.ctx, console: !st.ctx.console } })),
+      toggleNetwork: () => this.setState(st => ({ ctx: { ...st.ctx, network: !st.ctx.network } })),
+      expC: s.exp.console, expN: s.exp.network, expCLabel: s.exp.console ? 'hide' : 'view', expNLabel: s.exp.network ? 'hide' : 'view',
+      toggleExpC: () => this.setState(st => ({ exp: { ...st.exp, console: !st.exp.console } })),
+      toggleExpN: () => this.setState(st => ({ exp: { ...st.exp, network: !st.exp.network } })),
+      consoleErrs: CONSOLE_ERRS, netErrs: NET_ERRS,
+      consoleLabel: s.ctx.console ? '2 console errors' : 'Console errors — not sent', networkLabel: s.ctx.network ? '1 failed request' : 'Failed requests — not sent',
+      summaryLine: 'Screenshot + ' + marksSummary + ' · ' + (s.ctx.console ? '2 console errors' : 'no console') + ' · ' + (s.ctx.network ? '1 failed request' : 'no network'),
+      expS: s.exp.summary, sumLabel: s.exp.summary ? 'Hide' : 'Review', toggleSummary: () => this.setState(st => ({ exp: { ...st.exp, summary: !st.exp.summary } })),
+      send: () => this.send(), sendLabel: busy ? 'Sending… ' + Math.round(s.progress) + '%' : m === 'error' ? 'Retry now' : 'Send feedback', sendO: titleOk || busy ? '1' : '.55',
+      ticket: TICKET, receiptRows: [
+        { k: 'Type', v: typeLabel }, { k: 'Title', v: s.draft.title || '—' }, { k: 'Screenshot', v: W + '×' + H + ' · ' + marksSummary },
+        { k: 'Console', v: s.ctx.console ? '2 errors' : 'not sent' }, { k: 'Network', v: s.ctx.network ? '1 failed request' : 'not sent' }, { k: 'From', v: 'Maya Chen' }],
+      again: () => this.again(), close: () => this.close(),
+      popOn: !!pop, pop: pop || {}, closePop: () => this.setState({ popover: null }),
+      popKey: e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.setState({ popover: null }); } },
+      lCornerOn: launcherOn && lv === 'corner', lEdgeOn: launcherOn && lv === 'edge', lMiniOn: launcherOn && lv === 'mini',
+      lEnter: () => this.setState({ lHover: true }), lLeave: () => { if (!P.embedded) this.setState({ lHover: false }); }, open: () => this.open(),
+      lBg: ping ? '#2e5a3e' : '#1a1612', lLabelW: s.lHover && !ping ? '150px' : '0px', lLabelO: s.lHover && !ping ? '1' : '0', eX: s.lHover ? '-6px' : '0px',
+      miniBg: ping ? '#2e5a3e' : '#f5f0e6', miniFg: ping ? '#f5f0e6' : '#1a1612', pingOn: ping, pingOff: !ping,
+      coachOn: lv === 'hidden' && s.coach && m === 'idle' && !s.toast && !ping, dismissCoach: () => this.setState({ coach: false }),
+      toastOn: !!s.toast && m === 'idle', toastPos: near(320, 64), toastBar: P.embedded ? '58%' : (s.toast && s.toast.go ? '0%' : '100%'), toastTr: s.toast && s.toast.go && !P.embedded ? 'width 6s linear' : 'none',
+      undoSend: () => this.setState({ toast: null, mode: f === 'annotate' ? 'review' : 'annotate' }),
+      pingBubbleOn: ping && m === 'idle', pingPos: near(236, 40),
+      confirmOn: s.confirm, discardBody: 'You will lose ' + pl(total, 'mark') + (s.draft.title.trim() || s.draft.details.trim() ? ' and what you have written.' : '.'),
+      keepEditing: () => this.setState({ confirm: false }), discard: () => this.close(),
+      flashO: s.flash ? '.9' : '0', flashTr: s.flash ? 'none' : 'opacity .5s ease-out'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;display=swap">
+<style>body{margin:0;background:#ede6d6;font-family:'Inter Tight',system-ui,sans-serif;color:#1a1612}a{color:#a83818;text-decoration:none}a:hover{color:#7c2810}.dv-turn{padding:44px 48px 40px;border-bottom:1px solid #d4ccb8;scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px 'JetBrains Mono',monospace;padding:3px 7px;background:#1a1612;color:#f5f0e6;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 'Inter Tight',sans-serif;color:#1a1612}.dv-opts{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px}.dv-oid{font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(26,22,18,.08);color:#1a1612;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 12.5px/1.4 'Inter Tight',sans-serif;color:#5d5648;max-width:640px}.dv-olabel b{color:#1a1612;font-weight:600}.dv-card{max-width:100%;background:#fff;border:1px solid #d4ccb8;border-radius:8px;box-shadow:0 1px 3px rgba(26,22,18,.08);overflow:hidden}.dv-opt:target .dv-oid{background:#a83818;color:#fff8ef}.dv-next{margin:28px 0 0;font:12.5px/1.5 'Inter Tight',sans-serif;color:#5d5648}</style>
+</helmet>
+<section class="dv-turn" id="t1" data-screen-label="State board">
+  <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Floating feedback widget — key states and variations</span></div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:40px;max-width:1240px;margin:0 0 44px">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <span style="font:500 11px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#a83818">Feedback widget · state board</span>
+      <h1 style="margin:0;font:600 36px/1.12 'Source Serif 4',Georgia,serif;color:#1a1612;text-wrap:pretty">One small launcher, then everything floats over the page.</h1>
+      <p style="margin:0;font:400 15.5px/1.6 'Inter Tight',sans-serif;color:#3a342b;max-width:560px;text-wrap:pretty">At rest it's a single launcher. Click it or press ⇧F and the visible page is captured: a thin rust frame shows you're marking up a screenshot, and the tools and panel float on top. The host page never moves, shrinks or reflows.</p>
+      <a href="Feedback Widget.dc.html" style="align-self:flex-start;display:flex;align-items:center;gap:8px;margin-top:4px;padding:10px 16px;border-radius:8px;background:#a83818;color:#fff8ef;font:600 14px 'Inter Tight',sans-serif">Open the clickable prototype →</a>
+      <span style="font:400 12.5px/1.5 'Inter Tight',sans-serif;color:#5d5648">Use Tweaks to switch flow, launcher, toolbar, success style, and to make the server fail.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648">The one line the site adds</span>
+        <div style="padding:12px 14px;border-radius:8px;background:#1a1612;color:#ede6d6;font:400 12px/1.6 'JetBrains Mono',monospace;white-space:pre-wrap">&lt;script src="https://cdn.yourapp.com/feedback.js" data-project="lumen" async&gt;&lt;/script&gt;
+<span style="color:#9c937f">// optional, before the tag: who's reporting</span>
+window.FeedbackConfig = { user: { id, name, email } }</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#5d5648">What your server receives</span>
+        <div style="padding:12px 14px;border-radius:8px;background:#f5f0e6;border:1px solid #d4ccb8;color:#3a342b;font:400 12px/1.6 'JetBrains Mono',monospace;white-space:pre-wrap">POST {your endpoint}   multipart
+  screenshot.png   <span style="color:#9c937f">viewport, marks drawn in</span>
+  report.json      { type, title, details,
+    marks: [{ n, kind, x, y, w, h, selector?, note? }],
+    page: { url, viewport }, console: [...], network: [...],
+    user: { id, name, email } }</div>
+      </div>
+      <span style="font:400 12.5px/1.5 'Inter Tight',sans-serif;color:#5d5648">Assumed: widget renders in a Shadow DOM root (no CSS leaks either way) and hides itself from the screenshot.</span>
+    </div>
+  </div>
+
+  <h2 style="margin:0 0 6px;font:600 22px/1.2 'Source Serif 4',Georgia,serif">Launcher</h2>
+  <p style="margin:0 0 20px;font:400 13.5px/1.5 'Inter Tight',sans-serif;color:#5d5648">What sits on the site all day. Shown 1:1, at rest and on hover.</p>
+  <div class="dv-opts" style="margin-bottom:52px">
+    <div class="dv-opt" id="1a">
+      <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span><b>Corner bubble.</b> Familiar. Expands to show the ⇧F shortcut on hover.</span></div>
+      <div style="display:flex;gap:12px">
+        <div class="dv-card" style="width:300px;height:200px;position:relative"><div style="position:absolute;left:-980px;top:-600px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="idle" launcher="corner" hint-size="1280px,800px"></dc-import></div></div>
+        <div class="dv-card" style="width:300px;height:200px;position:relative"><div style="position:absolute;left:-980px;top:-600px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="launcher-hover" launcher="corner" hint-size="1280px,800px"></dc-import></div></div>
+      </div>
+    </div>
+    <div class="dv-opt" id="1b">
+      <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><span><b>Edge tab.</b> Never covers content; slides out on hover.</span></div>
+      <div style="display:flex;gap:12px">
+        <div class="dv-card" style="width:200px;height:260px;position:relative"><div style="position:absolute;left:-1080px;top:-270px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="idle" launcher="edge" hint-size="1280px,800px"></dc-import></div></div>
+        <div class="dv-card" style="width:200px;height:260px;position:relative"><div style="position:absolute;left:-1080px;top:-270px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="launcher-hover" launcher="edge" hint-size="1280px,800px"></dc-import></div></div>
+      </div>
+    </div>
+    <div class="dv-opt" id="1c">
+      <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><span><b>Mini pill.</b> Smallest footprint, paper-toned so it fades into the page.</span></div>
+      <div style="display:flex;gap:12px">
+        <div class="dv-card" style="width:300px;height:200px;position:relative"><div style="position:absolute;left:0;top:-600px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="idle" launcher="mini" hint-size="1280px,800px"></dc-import></div></div>
+        <div class="dv-card" style="width:300px;height:200px;position:relative"><div style="position:absolute;left:0;top:-600px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="launcher-hover" launcher="mini" hint-size="1280px,800px"></dc-import></div></div>
+      </div>
+    </div>
+    <div class="dv-opt" id="1d">
+      <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a><span><b>Shortcut only.</b> No visible button. A one-time hint teaches ⇧F, then nothing is on the page.</span></div>
+      <div class="dv-card" style="width:520px;height:200px;position:relative"><div style="position:absolute;left:-760px;top:-600px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="idle" launcher="hidden" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+  </div>
+
+  <h2 style="margin:0 0 6px;font:600 22px/1.2 'Source Serif 4',Georgia,serif">Flow and panel layout</h2>
+  <p style="margin:0 0 20px;font:400 13.5px/1.5 'Inter Tight',sans-serif;color:#5d5648">Three ways to combine marking and describing. Every panel floats with margins and a shadow.</p>
+  <div class="dv-opts" style="flex-direction:column;gap:36px;margin-bottom:52px">
+    <div class="dv-opt" id="1e">
+      <div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a><span><b>Mark up, then describe.</b> Mark up the whole page first, then a floating card collects the words. Marks stay visible behind it.</span></div>
+      <div style="display:flex;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" scene="annotate" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">1 · mark up on the page</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" scene="describe" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">2 · describe in a corner card</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" scene="sent" success="receipt" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">3 · receipt in place</span></div>
+      </div>
+    </div>
+    <div class="dv-opt" id="1f">
+      <div class="dv-olabel"><a class="dv-oid" href="#1f">1f</a><span><b>Side panel.</b> Mark up and write at the same time. The panel floats along one edge and can swap sides if it covers what you need.</span></div>
+      <div style="display:flex;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="docked" scene="annotate-empty" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">1 · opens with tools + panel</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="docked" scene="annotate" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">2 · marks list fills as you go</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="docked" scene="sent" success="receipt" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">3 · receipt in the panel</span></div>
+      </div>
+    </div>
+    <div class="dv-opt" id="1g">
+      <div class="dv-olabel"><a class="dv-oid" href="#1g">1g</a><span><b>Anchored note.</b> Click the problem first; the note opens right beside it. Extra marks get their own small comments.</span></div>
+      <div style="display:flex;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="note" scene="pick" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">1 · point at the spot</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="note" scene="annotate" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">2 · the note opens beside it</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div class="dv-card" style="width:448px;height:280px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.35);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="note" scene="sent" success="receipt" hint-size="1280px,800px"></dc-import></div></div><span style="font:500 11px 'JetBrains Mono',monospace;color:#5d5648">3 · receipt where the note was</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2 style="margin:0 0 6px;font:600 22px/1.2 'Source Serif 4',Georgia,serif">Markup toolbar</h2>
+  <p style="margin:0 0 20px;font:400 13.5px/1.5 'Inter Tight',sans-serif;color:#5d5648">All six tools: pin, element, box, arrow, draw, text. Every toolbar has a drag handle so it can be moved off whatever it covers.</p>
+  <div class="dv-opts" style="margin-bottom:52px">
+    <div class="dv-opt" id="1h">
+      <div class="dv-olabel"><a class="dv-oid" href="#1h">1h</a><span><b>Floating dock, top center.</b> Shown with a pin's comment open.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" toolbar="dock" scene="tools" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1i">
+      <div class="dv-olabel"><a class="dv-oid" href="#1i">1i</a><span><b>Vertical rail, left.</b> Shown with the element picker hovering the Search button.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" toolbar="rail" scene="tools-pick" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1j">
+      <div class="dv-olabel"><a class="dv-oid" href="#1j">1j</a><span><b>Corner toolbar.</b> Opens where the launcher was, so the click feels like the button unfolding.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" toolbar="corner" scene="tools" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+  </div>
+
+  <h2 style="margin:0 0 6px;font:600 22px/1.2 'Source Serif 4',Georgia,serif">Submit and after</h2>
+  <p style="margin:0 0 20px;font:400 13.5px/1.5 'Inter Tight',sans-serif;color:#5d5648">Sending, three success styles, failure, and the guard against losing work.</p>
+  <div class="dv-opts">
+    <div class="dv-opt" id="1k">
+      <div class="dv-olabel"><a class="dv-oid" href="#1k">1k</a><span><b>Sending.</b> Progress bar in the panel; fields lock.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="docked" scene="sending" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1l">
+      <div class="dv-olabel"><a class="dv-oid" href="#1l">1l</a><span><b>Receipt.</b> Ticket ID plus exactly what was sent.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" scene="sent" success="receipt" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1m">
+      <div class="dv-olabel"><a class="dv-oid" href="#1m">1m</a><span><b>Toast.</b> Closes right away; Undo for 6 seconds.</span></div>
+      <div class="dv-card" style="width:520px;height:260px;position:relative"><div style="position:absolute;left:-760px;top:-540px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="sent" success="toast" launcher="corner" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1n">
+      <div class="dv-olabel"><a class="dv-oid" href="#1n">1n</a><span><b>Fold into launcher.</b> The panel shrinks into the button, which turns green for a moment.</span></div>
+      <div class="dv-card" style="width:520px;height:260px;position:relative"><div style="position:absolute;left:-760px;top:-540px;width:1280px;height:800px;transform:translateZ(0)"><dc-import name="Feedback Widget" embedded="{{ true }}" scene="sent" success="fold" launcher="corner" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1o">
+      <div class="dv-olabel"><a class="dv-oid" href="#1o">1o</a><span><b>Server error.</b> Draft kept in the browser; Retry.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="docked" scene="error" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+    <div class="dv-opt" id="1p">
+      <div class="dv-olabel"><a class="dv-oid" href="#1p">1p</a><span><b>Discard guard.</b> Esc or close with marks or text asks first.</span></div>
+      <div class="dv-card" style="width:640px;height:400px;position:relative"><div style="position:absolute;left:0;top:0;width:1280px;height:800px;transform:scale(.5);transform-origin:0 0"><dc-import name="Feedback Widget" embedded="{{ true }}" flow="annotate" scene="discard" hint-size="1280px,800px"></dc-import></div></div>
+    </div>
+  </div>
+
+  <p class="dv-next">Try next: "go with <a class="dv-oid" href="#1b">1b</a> + <a class="dv-oid" href="#1f">1f</a>, toolbar <a class="dv-oid" href="#1i">1i</a>" · "make the <a class="dv-oid" href="#1g">1g</a> note smaller" · "add blur/redact for sensitive data"</p>
+</section>
+</x-dc>
+</body>
+</html>

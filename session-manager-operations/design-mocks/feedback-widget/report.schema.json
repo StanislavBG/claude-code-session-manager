@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yourapp.com/schemas/feedback-report.v1.json",
+  "title": "Feedback report (report.json part of the multipart POST)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "clientReportId", "project", "type", "title", "details", "createdAt", "page", "screenshot", "marks", "console", "network", "user", "client"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "clientReportId": { "type": "string", "format": "uuid", "description": "crypto.randomUUID() generated once per report. Re-sent unchanged on every retry so the server can de-duplicate." },
+    "project": { "type": "string", "description": "From data-project on the script tag / FeedbackConfig.project." },
+    "type": { "enum": ["bug", "feature", "other"] },
+    "title": { "type": "string", "minLength": 3, "maxLength": 120, "description": "Trimmed." },
+    "details": { "type": "string", "maxLength": 5000, "description": "Trimmed. Empty string when left blank." },
+    "createdAt": { "type": "string", "format": "date-time", "description": "ISO 8601, moment the screenshot was captured." },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "title", "viewport"],
+      "properties": {
+        "url": { "type": "string", "description": "location.href at capture time (full URL incl. query and hash)." },
+        "title": { "type": "string", "description": "document.title" },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "devicePixelRatio", "scrollX", "scrollY"],
+          "properties": {
+            "width": { "type": "integer", "description": "window.innerWidth (CSS px)" },
+            "height": { "type": "integer", "description": "window.innerHeight (CSS px)" },
+            "devicePixelRatio": { "type": "number" },
+            "scrollX": { "type": "integer" },
+            "scrollY": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "screenshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["part", "annotatedPart", "width", "height", "scale"],
+      "properties": {
+        "part": { "const": "screenshot", "description": "Multipart field name of the raw PNG (no marks)." },
+        "annotatedPart": { "const": "annotated", "description": "Multipart field name of the PNG with marks flattened in." },
+        "width": { "type": "integer", "description": "Image width in device px = viewport.width * scale" },
+        "height": { "type": "integer" },
+        "scale": { "type": "number", "description": "min(devicePixelRatio, 2)" }
+      }
+    },
+    "marks": {
+      "type": "array",
+      "description": "In creation order. All coordinates are CSS px relative to the top-left of the captured viewport (multiply by screenshot.scale for image px).",
+      "items": { "oneOf": [
+        { "$ref": "#/$defs/pin" }, { "$ref": "#/$defs/box" }, { "$ref": "#/$defs/element" },
+        { "$ref": "#/$defs/arrow" }, { "$ref": "#/$defs/draw" }, { "$ref": "#/$defs/text" }
+      ] }
+    },
+    "console": { "oneOf": [ { "type": "null", "description": "User switched console errors off." }, { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/consoleEntry" } } ] },
+    "network": { "oneOf": [ { "type": "null", "description": "User switched failed requests off." }, { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/networkEntry" } } ] },
+    "user": {
+      "oneOf": [
+        { "type": "null", "description": "Host did not provide FeedbackConfig.user." },
+        { "type": "object", "additionalProperties": true, "required": ["id"], "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "email": { "type": "string" } } }
+      ]
+    },
+    "client": { "type": "object", "additionalProperties": false, "required": ["widgetVersion"], "properties": { "widgetVersion": { "type": "string" } } }
+  },
+  "$defs": {
+    "color": { "enum": ["#a83818", "#f4b942", "#2e5a3e", "#1a1612"], "description": "rust | amber | green | ink" },
+    "note": { "type": "string", "maxLength": 1000, "description": "Optional per-mark comment, trimmed; empty string if none." },
+    "pin": { "type": "object", "additionalProperties": false, "required": ["kind", "n", "x", "y", "color", "note"],
+      "properties": { "kind": { "const": "pin" }, "n": { "type": "integer", "minimum": 1 }, "x": { "type": "number" }, "y": { "type": "number", "description": "x,y = the exact click point (pin tip)" }, "color": { "$ref": "#/$defs/color" }, "note": { "$ref": "#/$defs/note" } } },
+    "box": { "type": "object", "additionalProperties": false, "required": ["kind", "n", "x", "y", "w", "h", "color", "note"],
+      "properties": { "kind": { "const": "box" }, "n": { "type": "integer", "minimum": 1 }, "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number", "minimum": 8 }, "h": { "type": "number", "minimum": 8 }, "color": { "$ref": "#/$defs/color" }, "note": { "$ref": "#/$defs/note" } } },
+    "element": { "type": "object", "additionalProperties": false, "required": ["kind", "n", "x", "y", "w", "h", "color", "note", "element"],
+      "properties": { "kind": { "const": "element" }, "n": { "type": "integer", "minimum": 1 }, "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" }, "color": { "$ref": "#/$defs/color" }, "note": { "$ref": "#/$defs/note" },
+        "element": { "type": "object", "additionalProperties": false, "required": ["selector", "tag"],
+          "properties": {
+            "selector": { "type": "string", "description": "Unique CSS selector (see README › Element selector)." },
+            "label": { "type": "string", "description": "Short display label shown in the UI, e.g. button.book" },
+            "tag": { "type": "string" }, "id": { "type": "string" }, "classes": { "type": "array", "items": { "type": "string" } },
+            "text": { "type": "string", "maxLength": 80 }, "role": { "type": "string" }, "ariaLabel": { "type": "string" }, "xpath": { "type": "string" }
+          } } } },
+    "arrow": { "type": "object", "additionalProperties": false, "required": ["kind", "x1", "y1", "x2", "y2", "color"],
+      "properties": { "kind": { "const": "arrow" }, "x1": { "type": "number" }, "y1": { "type": "number" }, "x2": { "type": "number", "description": "x2,y2 = arrow head tip" }, "y2": { "type": "number" }, "color": { "$ref": "#/$defs/color" } } },
+    "draw": { "type": "object", "additionalProperties": false, "required": ["kind", "points", "color"],
+      "properties": { "kind": { "const": "draw" }, "points": { "type": "array", "minItems": 3, "items": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "minItems": 2, "maxItems": 2 } }, "color": { "$ref": "#/$defs/color" } } },
+    "text": { "type": "object", "additionalProperties": false, "required": ["kind", "x", "y", "text", "color"],
+      "properties": { "kind": { "const": "text" }, "x": { "type": "number", "description": "left edge of the label chip" }, "y": { "type": "number", "description": "vertical centre of the label chip" }, "text": { "type": "string", "minLength": 1, "maxLength": 140 }, "color": { "$ref": "#/$defs/color" } } },
+    "consoleEntry": { "type": "object", "additionalProperties": false, "required": ["level", "message", "timestamp", "count"],
+      "properties": { "level": { "enum": ["error"] }, "message": { "type": "string", "maxLength": 500 }, "stack": { "type": "string", "maxLength": 2000 }, "source": { "type": "string", "description": "file:line[:col] when known" }, "timestamp": { "type": "string", "format": "date-time" }, "count": { "type": "integer", "minimum": 1, "description": "Consecutive identical messages are collapsed." } } },
+    "networkEntry": { "type": "object", "additionalProperties": false, "required": ["method", "url", "status", "durationMs", "timestamp"],
+      "properties": { "method": { "type": "string" }, "url": { "type": "string", "description": "Origin + path. Query parameter VALUES replaced with '…' (keys kept)." }, "status": { "oneOf": [ { "type": "integer", "minimum": 400 }, { "const": "network-error" }, { "const": "timeout" } ] }, "durationMs": { "type": "integer" }, "timestamp": { "type": "string", "format": "date-time" } } }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "clientReportId": "6f1c2a9e-3b7d-4c55-9a0e-2f8d41b7c613",
+  "project": "lumen",
+  "type": "bug",
+  "title": "“Book” does nothing on the Alfama loft",
+  "details": "Clicked Book twice — the button flashes but the booking sheet never opens. The other stays work fine.",
+  "createdAt": "2026-11-23T10:42:17.204Z",
+  "page": {
+    "url": "https://lumenstays.com/stays/lisbon?in=03-14&out=03-19",
+    "title": "Lisbon stays · Lumen",
+    "viewport": { "width": 1280, "height": 800, "devicePixelRatio": 2, "scrollX": 0, "scrollY": 0 }
+  },
+  "screenshot": { "part": "screenshot", "annotatedPart": "annotated", "width": 2560, "height": 1600, "scale": 2 },
+  "marks": [
+    { "kind": "element", "n": 1, "x": 268, "y": 735, "w": 77, "h": 34, "color": "#a83818", "note": "Click does nothing — no sheet, no error",
+      "element": { "selector": "article.stay-card:nth-of-type(1) button.book", "label": "button.book", "tag": "button", "classes": ["book"], "text": "Book", "xpath": "/html/body/main/section[2]/div[2]/article[1]/div[3]/button" } },
+    { "kind": "pin", "n": 2, "x": 160, "y": 756, "color": "#a83818", "note": "Price flickers to $0 right after the click" },
+    { "kind": "draw", "points": [[121, 690], [150, 683], [190, 681], [230, 684], [262, 692], [258, 704], [220, 710], [170, 711], [126, 706], [104, 697], [118, 688]], "color": "#f4b942" },
+    { "kind": "text", "x": 383, "y": 564, "text": "This one works", "color": "#2e5a3e" },
+    { "kind": "arrow", "x1": 455, "y1": 586, "x2": 589, "y2": 729, "color": "#2e5a3e" }
+  ],
+  "console": [
+    { "level": "error", "message": "TypeError: Cannot read properties of undefined (reading 'nightlyRate')", "stack": "TypeError: Cannot read properties of undefined (reading 'nightlyRate')\n    at priceFor (listing-card.js:88:21)\n    at onBook (listing-card.js:141:9)", "source": "listing-card.js:88:21", "timestamp": "2026-11-23T10:41:58.010Z", "count": 2 },
+    { "level": "error", "message": "Uncaught (in promise) HoldError: hold_failed", "source": "checkout.js:214:7", "timestamp": "2026-11-23T10:41:59.377Z", "count": 1 }
+  ],
+  "network": [
+    { "method": "POST", "url": "https://lumenstays.com/api/bookings/hold", "status": 502, "durationMs": 1240, "timestamp": "2026-11-23T10:41:59.371Z" }
+  ],
+  "user": { "id": "u_8841", "name": "Maya Chen", "email": "maya@lumenstays.com" },
+  "client": { "widgetVersion": "0.1.0" }
+}

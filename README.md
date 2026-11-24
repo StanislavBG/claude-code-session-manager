@@ -359,7 +359,7 @@ Your prompts go only to the agent CLI you chose. The app never sends them anywhe
 | `api.anthropic.com` | Reads your usage, for the meters and the scheduler. |
 | `registry.npmjs.org` | Checks for a new app version. |
 | `json.schemastore.org`, `www.schemastore.org` | Checks JSON files as you edit them. |
-| bilko.run | Telemetry and the phone remote relay. |
+| bilko.run | Telemetry and the Web remote relay (phone and paired services). |
 
 ### Keyboard
 

@@ -37,7 +37,7 @@ export type NavKey =
   | 'agent-library'
   // Skills / MCP Servers / Plugins as tabs of one page (Home face only).
   | 'extensions'
-  // Voice, appearance, telemetry, phone remote, updates, startup, storage map (Home face only).
+  // Voice, appearance, telemetry, web remote, updates, startup, storage map (Home face only).
   | 'app-settings'
   // Read-only directory of the Epic intent-tag taxonomy (Home face only).
   // Static ERD of the app's OWN persisted data model — entities, storage

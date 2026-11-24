@@ -14,6 +14,7 @@ import {
   radii,
   resetTokensForTests,
   type,
+  widgetFontSheet,
 } from '../ui/tokens';
 
 const root = resolve(__dirname, '../..') + '/';
@@ -139,6 +140,14 @@ describe('fonts', () => {
     loadFonts();
     expect(document.adoptedStyleSheets).toHaveLength(1);
     expect(document.querySelectorAll('link, style')).toHaveLength(0);
+  });
+
+  it('widgetFontSheet is null before loadFonts, then the adopted sheet', () => {
+    expect(widgetFontSheet()).toBeNull();
+    loadFonts('https://cdn.example.com/w/feedback.js');
+    const sheet = widgetFontSheet();
+    expect(sheet).not.toBeNull();
+    expect(document.adoptedStyleSheets).toEqual([sheet]);
   });
 
   it('no Google Fonts URL anywhere in the widget source', () => {

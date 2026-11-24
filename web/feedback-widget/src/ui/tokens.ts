@@ -204,6 +204,11 @@ export function loadFonts(scriptSrc: string = ownScriptSrc()): void {
   }
 }
 
+/** The sheet loadFonts() adopted, or null before loadFonts has built one. */
+export function widgetFontSheet(): CSSStyleSheet | null {
+  return fontSheet;
+}
+
 /** Test hook: forget the cached sheets. */
 export function resetTokensForTests(): void {
   fontSheet = null;

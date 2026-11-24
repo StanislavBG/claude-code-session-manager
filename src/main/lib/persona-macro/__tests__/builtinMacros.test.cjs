@@ -442,6 +442,17 @@ test('persona v19: a saved cast points the builder at cast.md and each line name
   for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
 });
 
+test('persona v20: a {lines} voice is one batch call per speaker, and speak exit 75 is run again, not a failure', () => {
+  const raw = fs.readFileSync(personaPath, 'utf8');
+  expect(Number(frontmatter(raw).seedVersion) >= 20).toBe(true);
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(27000);
+  const kit = personaSection('kit');
+  for (const needle of ['{lines}', '75', 'run the same command again']) expect(kit).toContain(needle);
+  expect(personaSection('audio_policy')).toContain('not a failure');
+  expect(personaSection('when_things_fail')).toContain('not a failure');
+  for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
+});
+
 test('persona v15: TikTok and Marketing follow the kit playbooks and export MP4 + poster', () => {
   const kt = personaSection('kind_and_target');
   for (const needle of ['TikTok', 'Marketing', 'kind-tiktok.md', 'kind-marketing.md', '`tiktok`', '`marketing`', 'never fall back to a Project demo']) {

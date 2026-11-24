@@ -1176,10 +1176,12 @@ test('character/write: a replace dropping a sound removes its WAV; dropping all 
   expect(r.status).toBe(200);
   expect(r.body.sounds).toEqual(['bark', 'garden']);
   expect(fs.readdirSync(path.join(dir, 'sounds')).sort()).toEqual(['bark.wav', 'garden.wav']);
+  expect('pruneError' in r.body).toBe(false);
   const none = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, replace: true } });
   expect(none.status).toBe(200);
   expect(none.body.sounds).toEqual([]);
   expect(fs.existsSync(path.join(dir, 'sounds'))).toBe(false);
+  expect('pruneError' in none.body).toBe(false);
 });
 
 test('character/write: a failed prune of a stale WAV still answers 200 with pruneError; the new persona is saved', async () => {

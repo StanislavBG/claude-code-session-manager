@@ -168,6 +168,9 @@ customer: panel open / 30 s after boot ──► status-lookup ──► custome
 2. **Pull** — panel inbox (`customerFeedback:inbox-pull`) or the MCP tool `customer_feedback_list`, which
    goes through the loopback admin route `GET /admin/customer-feedback/inbox?pull=1&includeHidden=1`
    (`customerFeedbackAdminRoutes.cjs`).
+   The MCP `customer_feedback_*` tools also take a `source` parameter (default `'app'`, this inbox);
+   `source: 'site'` reads website-widget feedback instead — see
+   [site-feedback.md § MCP surface](site-feedback.md#mcp-surface).
 3. **Open as Epic** — human-only, in `CustomerFeedbackInbox.tsx`; calls `createPromptSession` (the human
    New Epic path) so the Epic is born `proposed`. **No MCP tool and no admin route mints an Epic**
    (SINGLE-CREATOR LAW, `epicMint.cjs`). Disabled if already linked (`epicId`) or no `projectCwd`.

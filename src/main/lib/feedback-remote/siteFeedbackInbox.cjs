@@ -8,6 +8,9 @@
  *                                                     statusNote, epicId, statusChangedAt }
  *   feedback-inbox/items/<hostId>/screenshot.png
  *   feedback-inbox/items/<hostId>/annotated.png
+ *   feedback-inbox/index.json                      { version: 1, byClientReportId: { [clientReportId]: hostId } }
+ *                                                     — the dedupe index; rebuilt from items/ when
+ *                                                     missing or corrupt, so it is a cache, not truth
  *   feedback-inbox/rejected.jsonl                  one { at, boxId, hostId, code, bytes } line per
  *                                                     envelope the drain could not open (no content)
  *
@@ -16,7 +19,11 @@
  * deletes pass assertOpsWrite first. The namespace is runtime (personal data), so its self-ignore
  * `.gitignore` is ensured after every write. hostId must match ^FB-[0-9A-Z]{5}$ and every resolved
  * path is checked to stay inside the namespace. Writes are serialized in-process so dedupe on
- * report.clientReportId cannot race.
+ * report.clientReportId cannot race. Dedupe is one index lookup: the index entry is written BEFORE
+ * the item files (meta.json last), so a crash mid-write leaves an entry whose item has no meta.json;
+ * the next write of that clientReportId under the same hostId resumes it, and a lookup whose item
+ * is gone drops the entry. A hostId already stored for a different clientReportId is refused with
+ * an error whose `code` is 'host_id_clash' (the drain records and acks such an envelope).
  *
  * Every write path first registers cwd (absolute, existing) with config.addAllowedRoot, so a
  * project root nothing else registered this session is still writable.
@@ -72,6 +79,11 @@ function assertHostId(hostId) {
 /** @param {string} cwd */
 function nsRoot(cwd) {
   return opsPath(cwd, NAMESPACE);
+}
+
+/** @param {string} cwd */
+function indexPath(cwd) {
+  return path.join(nsRoot(cwd), 'index.json');
 }
 
 /** @param {string} cwd */
@@ -140,6 +152,53 @@ function registerRoot(cwd) {
   return cwd;
 }
 
+/** @typedef {Record<string, string>} ClientIdIndex clientReportId -> hostId */
+
+/** @param {unknown} raw @returns {ClientIdIndex | null} */
+function parseIndex(raw) {
+  const r = /** @type {any} */ (raw);
+  if (!r || typeof r !== 'object' || r.version !== 1) return null;
+  const by = r.byClientReportId;
+  if (!by || typeof by !== 'object' || Array.isArray(by)) return null;
+  /** @type {ClientIdIndex} */
+  const out = Object.create(null);
+  for (const [k, v] of Object.entries(by)) {
+    if (typeof v !== 'string' || !HOST_ID_RE.test(v)) return null;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * The dedupe index, rebuilt from items/<hostId>/report.json when missing or corrupt.
+ * Call only inside serialize().
+ * @param {string} cwd
+ * @returns {Promise<ClientIdIndex>}
+ */
+async function loadIndex(cwd) {
+  const parsed = parseIndex(await readJsonFile(indexPath(cwd)));
+  if (parsed) return parsed;
+  /** @type {ClientIdIndex} */
+  const rebuilt = Object.create(null);
+  for (const id of await listHostIds(cwd)) {
+    const report = await readJsonFile(itemPath(cwd, id, 'report.json'));
+    const crid = report && typeof report === 'object' ? report.clientReportId : undefined;
+    if (typeof crid === 'string' && crid && !(crid in rebuilt)) rebuilt[crid] = id;
+  }
+  return rebuilt;
+}
+
+/** @param {string} cwd @param {ClientIdIndex} index */
+async function saveIndex(cwd, index) {
+  registerRoot(cwd);
+  await writeJson(indexPath(cwd), { version: 1, byClientReportId: { ...index } });
+}
+
+/** @param {string} abs */
+async function exists(abs) {
+  try { await fsp.access(abs); return true; } catch { return false; }
+}
+
 /** @param {unknown} v @param {string} name */
 function requireString(v, name) {
   if (typeof v !== 'string' || !v) throw new Error(`siteFeedbackInbox: ${name} must be a non-empty string`);
@@ -170,16 +229,22 @@ async function writeItem(args) {
   requireBuffer(annotated, 'annotated');
   registerRoot(cwd);
   return serialize(async () => {
-    for (const id of await listHostIds(cwd)) {
-      const existing = await readJsonFile(itemPath(cwd, id, 'report.json'));
-      if (existing && existing.clientReportId === clientReportId) return { duplicate: true, hostId: id };
+    const index = await loadIndex(cwd);
+    const known = index[clientReportId];
+    let resume = false;
+    if (known) {
+      if (await exists(itemPath(cwd, known, 'meta.json'))) return { duplicate: true, hostId: known };
+      // Entry without a complete item: a crashed write (resume it if same hostId) or a stale entry.
+      if (known === hostId) resume = true;
+      else delete index[clientReportId];
     }
-    try {
-      await fsp.access(itemPath(cwd, hostId));
-      throw new Error(`siteFeedbackInbox: hostId ${hostId} is already stored`);
-    } catch (e) {
-      if (/** @type {any} */ (e).code !== 'ENOENT') throw e;
+    if (!resume && await exists(itemPath(cwd, hostId))) {
+      const err = new Error(`siteFeedbackInbox: hostId ${hostId} is already stored for another report`);
+      /** @type {any} */ (err).code = 'host_id_clash';
+      throw err;
     }
+    index[clientReportId] = hostId;
+    await saveIndex(cwd, index);
     registerRoot(cwd);
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'screenshot.png'), screenshot, { writer: WRITER });
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'annotated.png'), annotated, { writer: WRITER });
@@ -347,6 +412,20 @@ async function removeNow(cwd, hostId) {
 }
 
 /**
+ * Remove index entries pointing at removed hostIds. Call only inside serialize().
+ * @param {string} cwd
+ * @param {Set<string>} hostIds
+ */
+async function dropFromIndex(cwd, hostIds) {
+  const index = await loadIndex(cwd);
+  let changed = false;
+  for (const [crid, id] of Object.entries(index)) {
+    if (hostIds.has(id)) { delete index[crid]; changed = true; }
+  }
+  if (changed) await saveIndex(cwd, index);
+}
+
+/**
  * Delete one item. Returns whether it existed.
  * @param {string} cwd
  * @param {string} hostId
@@ -358,6 +437,7 @@ async function remove(cwd, hostId) {
     let existed = true;
     try { await fsp.access(itemPath(cwd, hostId)); } catch { existed = false; }
     await removeNow(cwd, hostId);
+    await dropFromIndex(cwd, new Set([hostId]));
     return { removed: existed };
   });
 }
@@ -386,6 +466,7 @@ async function prune(cwd, days, opts = {}) {
       await removeNow(cwd, id);
       pruned.push(id);
     }
+    if (pruned.length) await dropFromIndex(cwd, new Set(pruned));
     return pruned;
   });
 }
@@ -402,4 +483,5 @@ module.exports = {
   STATUSES,
   HOST_ID_RE,
   MAX_STATUS_NOTE,
+  HOST_ID_CLASH: 'host_id_clash',
 };

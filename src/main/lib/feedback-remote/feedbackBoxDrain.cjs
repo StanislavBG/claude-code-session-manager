@@ -7,6 +7,9 @@
  * Per local box (feedbackBoxKeys): list envelopes (limit 20, repeat until empty), download, open
  * (feedbackEnvelope.openReportEnvelope), write (siteFeedbackInbox.writeItem), ack.
  *   - open failure (any ok:false code) -> one rejected.jsonl line (no content), then ack.
+ *   - writeItem refuses the hostId as stored for another report (code host_id_clash) -> one
+ *     rejected.jsonl line with code host_id_clash, then ack (it would never succeed: a poison
+ *     envelope must not stall its box).
  *   - network error / 5xx / 429 / any other relay failure -> stop that box for this pass, no ack;
  *     429 also defers the box by Retry-After.
  *   - 404 box_not_found -> box is gone (deleted, or re-paired under another account): reported in
@@ -15,6 +18,9 @@
  *
  *   - any throw -> box stopped for this pass, logged with a fixed code from classifyError
  *     (write_denied, io_error, relay_error, open_failed, keystore_error).
+ *
+ * Retention: once per project per 24 h (per drain instance) the drain calls
+ * inbox.prune(cwd, feedbackInboxDays) with the days from opsRetentionSettings.read().
  *
  * Nothing logged ever carries report text, image bytes, a private key or the device token: log
  * lines name only box ids and fixed codes.
@@ -29,6 +35,8 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_RETRY_AFTER_SEC = 60;
 const MAX_PAGES_PER_BOX = 100;
 const HOST_ID_RE = /^FB-[0-9A-Z]{5}$/;
+const HOST_ID_CLASH = 'host_id_clash';
+const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * @typedef {{ ok: false, status: number, error: string, retryAfterSec?: number }} RelayFailure
@@ -47,9 +55,11 @@ const HOST_ID_RE = /^FB-[0-9A-Z]{5}$/;
  * @typedef {{
  *   writeItem: (args: any) => Promise<{ duplicate: boolean, hostId: string }>,
  *   appendRejected: (args: { cwd: string, at: string, boxId: string, hostId: string, code: string, bytes: number }) => Promise<void>,
+ *   prune: (cwd: string, days: number) => Promise<string[]>,
  * }} DrainInbox
  * @typedef {{ relay?: DrainRelay, keystore?: DrainKeystore, inbox?: DrainInbox,
  *   now?: () => number, cwdExists?: (cwd: string) => boolean,
+ *   feedbackInboxDays?: () => number,
  *   log?: (msg: string) => void }} DrainDeps
  * @typedef {{ stored: number, duplicates: number, rejected: number,
  *   goneBoxes: string[], heldBoxes: string[] }} DrainResult
@@ -75,6 +85,16 @@ function defaultRelay() {
   return createRelayClient({
     getDeviceToken: () => require('../../webRemote.cjs').getLinkedDeviceToken(),
   });
+}
+
+/** @returns {number} */
+function defaultFeedbackInboxDays() {
+  return require('../opsRetentionSettings.cjs').read().feedbackInboxDays;
+}
+
+/** @param {unknown} e */
+function isHostIdClash(e) {
+  return !!e && typeof e === 'object' && /** @type {any} */ (e).code === HOST_ID_CLASH;
 }
 
 /** @param {unknown} code */
@@ -118,6 +138,8 @@ function createDrain(defaults = {}) {
   const deferredUntil = new Map();
   /** @type {DrainRelay | null} */
   let lazyRelay = null;
+  /** @type {Map<string, number>} projectCwd -> epoch ms of the last prune attempt */
+  const lastPruneAt = new Map();
 
   /** @param {DrainDeps} deps */
   function resolveDeps(deps) {
@@ -129,6 +151,7 @@ function createDrain(defaults = {}) {
       inbox: d.inbox || /** @type {DrainInbox} */ (require('./siteFeedbackInbox.cjs')),
       now: d.now || Date.now,
       cwdExists: d.cwdExists || defaultCwdExists,
+      feedbackInboxDays: d.feedbackInboxDays || defaultFeedbackInboxDays,
       log: d.log || defaultLog,
     };
   }
@@ -201,11 +224,21 @@ function createDrain(defaults = {}) {
           result.rejected += 1;
           d.log(`box ${boxId} rejected ${hostId || '(no host id)'} (${opened.code})`);
         } else {
-          const w = await d.inbox.writeItem({
-            cwd, hostId, boxId, receivedAt: env.receivedAt, origin: env.origin,
-            report: opened.report, screenshot: opened.screenshot, annotated: opened.annotated,
-          });
-          if (w.duplicate) result.duplicates += 1;
+          /** @type {{ duplicate: boolean, hostId: string } | null} */
+          let w = null;
+          try {
+            w = await d.inbox.writeItem({
+              cwd, hostId, boxId, receivedAt: env.receivedAt, origin: env.origin,
+              report: opened.report, screenshot: opened.screenshot, annotated: opened.annotated,
+            });
+          } catch (e) {
+            if (!isHostIdClash(e)) throw e;
+          }
+          if (!w) {
+            await d.inbox.appendRejected({ cwd, at: new Date(d.now()).toISOString(), boxId, hostId, code: HOST_ID_CLASH, bytes });
+            result.rejected += 1;
+            d.log(`box ${boxId} rejected ${hostId} (${HOST_ID_CLASH})`);
+          } else if (w.duplicate) result.duplicates += 1;
           else result.stored += 1;
         }
         ctx.stage = 'relay';
@@ -216,6 +249,24 @@ function createDrain(defaults = {}) {
           return;
         }
       }
+    }
+  }
+
+  /**
+   * Prune the project's feedback-inbox at most once per PRUNE_EVERY_MS. A failure is logged with
+   * a fixed code and not retried until the next window.
+   * @param {string} cwd
+   * @param {ReturnType<typeof resolveDeps>} d
+   */
+  async function maybePrune(cwd, d) {
+    const now = d.now();
+    const last = lastPruneAt.get(cwd);
+    if (last !== undefined && now - last < PRUNE_EVERY_MS) return;
+    lastPruneAt.set(cwd, now);
+    try {
+      await d.inbox.prune(cwd, d.feedbackInboxDays());
+    } catch {
+      d.log('feedback-inbox prune failed (prune_failed)');
     }
   }
 
@@ -262,6 +313,7 @@ function createDrain(defaults = {}) {
       } catch (e) {
         d.log(`box ${box.boxId} stopped for this pass (${classifyError(ctx.stage, e)})`);
       }
+      await maybePrune(box.projectCwd, d);
     }
     return result;
   }
@@ -308,4 +360,5 @@ module.exports = {
   startDrainLoop: defaultDrain.startDrainLoop,
   PAGE_LIMIT,
   DEFAULT_INTERVAL_MS,
+  PRUNE_EVERY_MS,
 };

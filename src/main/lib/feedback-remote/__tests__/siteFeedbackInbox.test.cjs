@@ -186,3 +186,72 @@ test('write paths refuse a relative or missing cwd', async () => {
   }
   expect(fs.existsSync(missing)).toBe(false);
 });
+
+test('writeItem refuses a hostId stored for another clientReportId with code host_id_clash', async () => {
+  const cwd = await mkTmpCwd();
+  await inbox.writeItem(item(cwd, 'FB-CLSH1', '2026-11-20T10:00:00.000Z'));
+  const err = await inbox.writeItem(item(cwd, 'FB-CLSH1', '2026-11-20T11:00:00.000Z')).catch((e) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err.code).toBe('host_id_clash');
+  expect(inbox.HOST_ID_CLASH).toBe('host_id_clash');
+  expect(await inbox.list(cwd)).toHaveLength(1);
+});
+
+test('index.json maps clientReportId to hostId and dedupe uses it without reading reports', async () => {
+  const cwd = await mkTmpCwd();
+  const a = item(cwd, 'FB-IDX01', '2026-11-20T10:00:00.000Z');
+  const b = item(cwd, 'FB-IDX02', '2026-11-20T11:00:00.000Z');
+  await inbox.writeItem(a);
+  await inbox.writeItem(b);
+  const idx = JSON.parse(fs.readFileSync(path.join(ns(cwd), 'index.json'), 'utf8'));
+  expect(idx).toEqual({ version: 1, byClientReportId: {
+    [a.report.clientReportId]: 'FB-IDX01', [b.report.clientReportId]: 'FB-IDX02',
+  } });
+  // Dedupe is one lookup: a corrupt report.json elsewhere does not matter while the index is intact.
+  fs.writeFileSync(path.join(ns(cwd), 'items', 'FB-IDX01', 'report.json'), '{not json');
+  expect(await inbox.writeItem({ ...b, hostId: 'FB-IDX03' })).toEqual({ duplicate: true, hostId: 'FB-IDX02' });
+});
+
+test('index.json is rebuilt from items/ when missing or corrupt', async () => {
+  const cwd = await mkTmpCwd();
+  const a = item(cwd, 'FB-RBD01', '2026-11-20T10:00:00.000Z');
+  await inbox.writeItem(a);
+  const idxFile = path.join(ns(cwd), 'index.json');
+  for (const broken of [null, '{garbage', JSON.stringify({ version: 1, byClientReportId: { x: '../evil' } })]) {
+    if (broken === null) fs.rmSync(idxFile);
+    else fs.writeFileSync(idxFile, broken);
+    expect(await inbox.writeItem({ ...a, hostId: 'FB-RBD02' })).toEqual({ duplicate: true, hostId: 'FB-RBD01' });
+  }
+  const c = item(cwd, 'FB-RBD03', '2026-11-20T12:00:00.000Z');
+  await inbox.writeItem(c);
+  expect(JSON.parse(fs.readFileSync(idxFile, 'utf8')).byClientReportId).toEqual({
+    [a.report.clientReportId]: 'FB-RBD01', [c.report.clientReportId]: 'FB-RBD03',
+  });
+});
+
+test('remove and prune drop index entries; a stale entry does not block a rewrite', async () => {
+  const cwd = await mkTmpCwd();
+  const a = item(cwd, 'FB-DRP01', '2026-11-20T10:00:00.000Z');
+  const b = item(cwd, 'FB-DRP02', '2026-11-20T10:00:00.000Z');
+  await inbox.writeItem(a);
+  await inbox.writeItem(b);
+  await inbox.remove(cwd, 'FB-DRP01');
+  const now = Date.parse('2026-11-23T00:00:00.000Z');
+  await inbox.setStatus(cwd, 'FB-DRP02', 'resolved', null, { now: now - 40 * 24 * 60 * 60 * 1000 });
+  expect(await inbox.prune(cwd, 30, { now })).toEqual(['FB-DRP02']);
+  const idxFile = path.join(ns(cwd), 'index.json');
+  expect(JSON.parse(fs.readFileSync(idxFile, 'utf8')).byClientReportId).toEqual({});
+  // Stale entry (item deleted behind the module's back) is dropped, not reported as a duplicate.
+  fs.writeFileSync(idxFile, JSON.stringify({ version: 1, byClientReportId: { [a.report.clientReportId]: 'FB-GONE1' } }));
+  expect(await inbox.writeItem({ ...a, hostId: 'FB-DRP03' })).toEqual({ duplicate: false, hostId: 'FB-DRP03' });
+});
+
+test('a write that crashed after its index entry resumes under the same hostId', async () => {
+  const cwd = await mkTmpCwd();
+  const a = item(cwd, 'FB-RSM01', '2026-11-20T10:00:00.000Z');
+  fs.mkdirSync(path.join(ns(cwd), 'items', 'FB-RSM01'), { recursive: true });
+  fs.writeFileSync(path.join(ns(cwd), 'items', 'FB-RSM01', 'screenshot.png'), PNG_A);
+  fs.writeFileSync(path.join(ns(cwd), 'index.json'), JSON.stringify({ version: 1, byClientReportId: { [a.report.clientReportId]: 'FB-RSM01' } }));
+  expect(await inbox.writeItem(a)).toEqual({ duplicate: false, hostId: 'FB-RSM01' });
+  expect((await inbox.get(cwd, 'FB-RSM01')).meta.status).toBe('open');
+});

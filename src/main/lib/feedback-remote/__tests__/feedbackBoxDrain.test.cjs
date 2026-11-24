@@ -360,3 +360,61 @@ test('a write failure logs a classified safe code, not the bare error name', asy
   expect(logs).toEqual([`box ${box.boxId} stopped for this pass (io_error)`]);
   expectCleanLogs(box);
 });
+
+test('an envelope whose hostId is stored for another report is rejected (host_id_clash) and acked; later ones drain', async () => {
+  const box = await newBox();
+  const idA = crypto.randomUUID();
+  await submit(mock.baseUrl, box.boxId, await sealedReport(idA, box.publicKey, box.boxId), idA);
+  const d = drainMod.createDrain();
+  expect((await d.drainOnce(deps())).stored).toBe(1);
+  const [stored] = await inbox.list(cwd);
+
+  // A different report re-using the stored hostId, followed by a normal envelope.
+  const idB = crypto.randomUUID();
+  const envB = await sealedReport(idB, box.publicKey, box.boxId);
+  const envs = mock.state.envelopes.get(box.boxId);
+  envs.push({ envelopeId: crypto.randomUUID(), hostId: stored.hostId, clientReportId: idB,
+    receivedAt: new Date().toISOString(), origin: ORIGIN, bytes: envB.length, body: envB });
+  const idC = crypto.randomUUID();
+  await submit(mock.baseUrl, box.boxId, await sealedReport(idC, box.publicKey, box.boxId), idC);
+
+  const r = await d.drainOnce(deps());
+  expect(r).toEqual({ stored: 1, duplicates: 0, rejected: 1, goneBoxes: [], heldBoxes: [] });
+  expect(mock.state.envelopes.get(box.boxId)).toHaveLength(0);
+  expect(await inbox.list(cwd)).toHaveLength(2);
+  const lines = fs.readFileSync(rejectedFile(), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toMatchObject({ boxId: box.boxId, hostId: stored.hostId, code: 'host_id_clash', bytes: envB.length });
+  expect(logs.some((l) => l.includes('stopped'))).toBe(false);
+  expectCleanLogs(box);
+});
+
+test('prune runs at most once per project per 24 h with feedbackInboxDays', async () => {
+  await newBox();
+  await newBox(); // same project: still one prune per window
+  /** @type {Array<[string, number]>} */
+  const calls = [];
+  const counting = { ...inbox, prune: async (/** @type {string} */ c, /** @type {number} */ days) => { calls.push([c, days]); return []; } };
+  let t = Date.parse('2026-11-24T00:00:00.000Z');
+  const d = drainMod.createDrain({ now: () => t });
+  const run = () => d.drainOnce({ ...deps(), inbox: counting, feedbackInboxDays: () => 45 });
+  await run();
+  expect(calls).toEqual([[cwd, 45]]);
+  t += 23 * 60 * 60 * 1000;
+  await run();
+  expect(calls).toHaveLength(1);
+  t += 60 * 60 * 1000;
+  await run();
+  expect(calls).toEqual([[cwd, 45], [cwd, 45]]);
+});
+
+test('prune defaults to opsRetentionSettings feedbackInboxDays and a failure is logged safely', async () => {
+  await newBox();
+  const settings = require('../../opsRetentionSettings.cjs');
+  /** @type {number[]} */
+  const days = [];
+  const failing = { ...inbox, prune: async (/** @type {string} */ _c, /** @type {number} */ n) => { days.push(n); throw new Error(SECRET_TITLE); } };
+  await drainMod.createDrain().drainOnce({ ...deps(), inbox: failing });
+  expect(days).toEqual([settings.read().feedbackInboxDays]);
+  expect(logs).toEqual(['feedback-inbox prune failed (prune_failed)']);
+});

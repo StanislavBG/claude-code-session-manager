@@ -1122,6 +1122,9 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
       commands: gateCommands || [],
     },
     files: filesList || [],
+    // The preflight actually written (null = no key) — the MCP server checks
+    // it against what the caller sent, so a dropped key is never silent.
+    preflight: input.preflight || null,
     // Advisory only (PRD 1403 sizing warnings + gate-and-files-in-PRD-body
     // absent/none-gate warnings) — never blocks the write. See prdSizing.cjs
     // and prdGateFiles.cjs.
@@ -1236,10 +1239,13 @@ async function createPrdBatch(inputs, remote, opts = {}) {
       nn = nns[i];
       filenameSlug = `${nn}-${p.slug}`;
       const body = buildPrdBody({ ...p.input, dependsOn: fullDeps(p.input.dependsOn), planId, gate: p.gateCommands, files: p.filesList });
+      // A validated preflight must reach the file (PRD 3805 ran unheld when one
+      // was lost); a body without the line rolls the whole batch back.
+      if (p.input.preflight && !/^preflight: /m.test(body)) throw new Error('preflight was not written to the PRD frontmatter');
       const w = await remote.writePrd(filenameSlug, body, p.input.cwd);
       if (!w?.ok) throw new Error(w?.error ?? 'write failed');
       written.push({ filenameSlug, path: w.path ?? null, cwd: p.input.cwd });
-      results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, warnings: p.warnings });
+      results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, preflight: p.input.preflight || null, warnings: p.warnings });
     } catch (e) {
       await rollback();
       return fail([{ index: i, slug: p.slug, error: `write failed (batch rolled back): ${e?.message ?? e}` }]);
@@ -1322,6 +1328,7 @@ function registerAdminRoute(adminHttp, remote) {
       note: result.note,
       gate: result.gate,
       files: result.files,
+      preflight: result.preflight ?? null,
       warnings: result.warnings,
     });
   });

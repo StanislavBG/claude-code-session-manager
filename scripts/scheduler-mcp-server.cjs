@@ -81,6 +81,7 @@ function descriptionFor(toolName) {
 }
 
 const { adminTokenPath } = require('../src/main/lib/scheduler/schedulerPaths.cjs');
+const { normalizePreflight } = require('../src/main/lib/scheduler/preflightCheck.cjs');
 
 // Defined once so every failure path points to the same next call, verbatim
 // — never paste this sentence at each return site (PRD: session_manager_help).
@@ -1407,6 +1408,47 @@ function headlessQueueRefusal(toolName) {
   return null;
 }
 
+// First app release whose create routes know `preflight`. An older app's zod
+// schema strips the unknown key and writes the PRD without it — no hold, no
+// error (PRD 3805, 2026-11-23: this server ran from main, the app was 0.140.0).
+const PREFLIGHT_MIN_APP_VERSION = '0.141.0';
+
+// Checks every entry's preflight BEFORE any request, so a refusal writes
+// nothing. Returns { errors: [{ index, slug, error }], expected: Map<index, cmd> }.
+// The app re-runs the same check; this is what lets the server refuse an app
+// that would drop the key (see preflightAppRefusal).
+function checkEntryPreflights(entries) {
+  const errors = [];
+  const expected = new Map();
+  entries.forEach((e, index) => {
+    if (!e || e.preflight === undefined) return;
+    const slug = typeof e.slug === 'string' && e.slug ? e.slug : null;
+    try {
+      const cmd = normalizePreflight(e.preflight);
+      if (cmd) expected.set(index, cmd);
+    } catch (err) {
+      errors.push({ index, slug, error: err?.message ?? String(err) });
+    }
+  });
+  return { errors, expected };
+}
+
+// Refuses (returns an error line) when entries carry a preflight but the
+// running app is older than PREFLIGHT_MIN_APP_VERSION or reports no version:
+// it would accept the call and silently write the PRD without its preflight.
+// A missing admin-api.json returns null so adminRequest reports "not running".
+async function preflightAppRefusal(expected) {
+  if (expected.size === 0) return null;
+  let cfg;
+  try { cfg = await readAdminConfig(); } catch { return null; }
+  const appVersion = typeof cfg.appVersion === 'string' && cfg.appVersion ? cfg.appVersion : null;
+  const cmp = appVersion ? compareVersions(appVersion, PREFLIGHT_MIN_APP_VERSION) : NaN;
+  if (cmp >= 0) return null;
+  return `the running Session Manager app (${appVersion ? `v${appVersion}` : 'version not reported'}) predates preflight `
+    + `(needs v${PREFLIGHT_MIN_APP_VERSION} or later) and would write the PRD without it, so the PRD would run unheld. `
+    + "Restart Session Manager into a newer build (Command Palette: 'Reboot app (drain first)') and call again.";
+}
+
 // Adds originClaudeSessionId (SM_CHAT_SESSION_ID fallback when sourcePromptId
 // is absent) and originProjectRoot (SM_PROJECT_ROOT hint) to a create payload.
 function withCreateOrigin(payload) {
@@ -1640,10 +1682,20 @@ async function handleCallTool(request) {
           + 'Add both and call again.',
         );
       }
+      // preflight: refused here when invalid, or when the running app would drop it.
+      const single = checkEntryPreflights([args]);
+      if (single.errors.length) return errorResult(`scheduler_create_prd refused: ${single.errors[0].error}`);
+      const singleAppRefusal = await preflightAppRefusal(single.expected);
+      if (singleAppRefusal) return errorResult(`scheduler_create_prd refused — nothing was written: ${singleAppRefusal}`);
       // Forwards SM_CHAT_SESSION_ID / SM_PROJECT_ROOT so the admin route resolves the
       // calling Epic and real project (prdCreate.cjs, projectRootResolve.cjs).
       const payload = withCreateOrigin({ ...args });
       const result = await adminRequest('POST', '/admin/scheduler/create-prd', payload);
+      if (result?.ok !== false && single.expected.size && Object.prototype.hasOwnProperty.call(result ?? {}, 'preflight')
+        && result.preflight !== single.expected.get(0)) {
+        return errorResult(`scheduler_create_prd: the app wrote ${result.filename ?? 'the PRD'} WITHOUT its preflight, so it will run unheld. `
+          + 'Set it now with scheduler_update_prd (preflight), or cancel that PRD.');
+      }
       // Never say "queued" — this tool only writes the PRD file; the queue
       // row is derived by the scheduler's next reconcile pass, not by this
       // call. Say so plainly alongside the raw JSON.
@@ -1675,6 +1727,17 @@ async function handleCallTool(request) {
       if (!prds || prds.length === 0 || prds.length > PRD_BATCH_MAX) {
         return errorResult(`scheduler_create_prds needs "prds": an array of 1 to ${PRD_BATCH_MAX} scheduler_create_prd inputs.`);
       }
+      // preflight: all-or-nothing, checked before any request (PRD 3805 lost one).
+      const pf = checkEntryPreflights(prds);
+      if (pf.errors.length) {
+        const lines = pf.errors.map((e) => `- [${e.index}] ${e.slug ?? '(no slug)'}: ${e.error}`);
+        return errorResult(`scheduler_create_prds refused the batch — nothing was written (all-or-nothing). Fix every entry below and call again:\n${lines.join('\n')}`);
+      }
+      const appRefusal = await preflightAppRefusal(pf.expected);
+      if (appRefusal) {
+        const lines = [...pf.expected.keys()].map((i) => `- [${i}] ${prds[i]?.slug ?? '(no slug)'}: ${appRefusal}`);
+        return errorResult(`scheduler_create_prds refused the batch — nothing was written (all-or-nothing). Fix every entry below and call again:\n${lines.join('\n')}`);
+      }
       const payload = withCreateOrigin({ ...args });
       const result = await adminRequest('POST', '/admin/scheduler/create-prds', payload);
       if (result?.ok === false) {
@@ -1683,6 +1746,15 @@ async function handleCallTool(request) {
         return errorResult(`scheduler_create_prds refused the batch — nothing was written (all-or-nothing). Fix every entry below and call again:\n${lines.join('\n')}`);
       }
       const written = Array.isArray(result?.prds) ? result.prds : [];
+      // The app echoes each written PRD's preflight (results are in input
+      // order); a mismatch means the file lacks the hold the caller asked for.
+      const dropped = [...pf.expected.entries()]
+        .filter(([i, cmd]) => written[i] && Object.prototype.hasOwnProperty.call(written[i], 'preflight') && written[i].preflight !== cmd)
+        .map(([i]) => `- [${i}] ${written[i].nn}-${written[i].slug}`);
+      if (dropped.length) {
+        return errorResult('scheduler_create_prds: the batch was written, but these PRDs were written WITHOUT their preflight and will run unheld. '
+          + `Set it now with scheduler_update_prd (preflight) on each, or cancel them:\n${dropped.join('\n')}`);
+      }
       let text = `${written.length} PRD file(s) written (the queue rows are derived on the next scheduler reconcile pass, not by this call):\n`
         + written.map((p) => `${p.slug} -> ${p.nn}`).join('\n');
       const warned = written.filter((p) => Array.isArray(p.warnings) && p.warnings.length > 0);

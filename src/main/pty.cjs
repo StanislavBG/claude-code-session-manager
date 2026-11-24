@@ -47,6 +47,53 @@ const PTY_FLUSH_MS = 8;
 // grow the buffer unbounded while waiting for the timer.
 const PTY_FLUSH_MAX_BYTES = 64 * 1024;
 
+// An Epic Terminal's artifact staging folder is swept on this cadence (a
+// Terminal-only Epic never ends a chat turn, which is the other ingest point),
+// taking only files untouched for ARTIFACT_MIN_AGE_MS so a file still being
+// written is never moved. One last sweep with no age floor runs on exit.
+const ARTIFACT_INGEST_MS = 15_000;
+const ARTIFACT_MIN_AGE_MS = 10_000;
+
+/**
+ * Sweep an Epic Terminal's artifact staging folder (runId = tabId) into the
+ * Artifacts store every ARTIFACT_INGEST_MS. Returns stop(), which clears the
+ * interval and runs one final sweep with no age floor (after any in-flight
+ * sweep). Notices are not posted here — artifact-ready-notice owns them.
+ * Errors are logged, never thrown.
+ */
+function startArtifactIngest({ cwd, epicId, tabId }) {
+  let running = Promise.resolve();
+  let busy = false;
+  const sweep = (minAgeMs) => {
+    busy = true;
+    running = running.then(async () => {
+      try {
+        const srcDir = artifactStore.stagingDirFor({ runId: tabId }); // re-creates it if missing
+        const res = await artifactStore.ingestDir({
+          projectRoot: cwd, epicId, srcDir, minAgeMs, producer: { epicId, sessionId: tabId },
+        });
+        for (const s of res?.skipped || []) {
+          if (s.reason !== 'still being written') console.error('[pty] artifact not ingested', s.path, s.reason);
+        }
+      } catch (err) {
+        console.error('[pty] artifact ingest failed', tabId, err?.message ?? err);
+      }
+    }).finally(() => { busy = false; });
+    return running;
+  };
+  const timer = setInterval(() => {
+    if (!busy) sweep(ARTIFACT_MIN_AGE_MS);
+  }, ARTIFACT_INGEST_MS);
+  if (typeof timer?.unref === 'function') timer.unref();
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    sweep(0);
+  };
+}
+
 /**
  * ANSI-formatted terminal text explaining a native-module / immediate-exit
  * failure and exactly how to fix it. Written straight into the tab's output so
@@ -236,8 +283,13 @@ class PtyManager {
     // session id; EPIC : CLI session = 1:1), so files written there are ingested at the next
     // chat turn's close. Non-Epic terminals get none. Never fails the spawn.
     delete env.SM_ARTIFACTS_DIR; // never inherit the app's own value
+    let artifactEpicId = null;
     try {
-      if (findEpicByClaudeSessionId(cwd, tabId)) env.SM_ARTIFACTS_DIR = artifactStore.stagingDirFor({ runId: tabId });
+      const epic = findEpicByClaudeSessionId(cwd, tabId);
+      if (epic) {
+        artifactEpicId = typeof epic.id === 'string' && epic.id ? epic.id : tabId;
+        env.SM_ARTIFACTS_DIR = artifactStore.stagingDirFor({ runId: tabId });
+      }
     } catch (err) {
       console.error('[pty] artifact staging dir unavailable', tabId, err?.message ?? err);
     }
@@ -331,8 +383,13 @@ class PtyManager {
       }
     });
 
+    const stopArtifactIngest = artifactEpicId
+      ? startArtifactIngest({ cwd, epicId: artifactEpicId, tabId })
+      : () => {};
+
     proc.onExit(({ exitCode, signal }) => {
       console.log('[pty] exit tabId=', tabId, 'code=', exitCode, 'signal=', signal);
+      stopArtifactIngest();
       // Suppress exit broadcast for explicitly killed sessions — a new PTY
       // may already be listening on the same channel after a restart.
       if (this.killed.delete(tabId)) {

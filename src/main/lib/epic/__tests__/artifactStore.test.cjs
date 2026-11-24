@@ -176,6 +176,24 @@ test('ingestDir publishes regular files directly in srcDir and deletes each sour
   expect(missing).toEqual({ published: [], skipped: [] });
 });
 
+test('ingestDir minAgeMs skips files modified too recently as still being written', async () => {
+  const old = mk('old.txt', 'o');
+  const fresh = mk('fresh.txt', 'f');
+  const past = (Date.now() - 60_000) / 1000;
+  fs.utimesSync(old, past, past);
+
+  const res = await store.ingestDir({ projectRoot: root, epicId: EPIC, srcDir: src, minAgeMs: 10_000 });
+  expect(res.published.map((p) => p.entry.name)).toEqual(['old.txt']);
+  expect(res.skipped).toEqual([{ path: fresh, reason: 'still being written' }]);
+  expect(fs.existsSync(old)).toBe(false);
+  expect(fs.existsSync(fresh)).toBe(true);
+
+  // Default minAgeMs 0 = today's behavior: the fresh file is taken too.
+  const again = await store.ingestDir({ projectRoot: root, epicId: EPIC, srcDir: src });
+  expect(again.published.map((p) => p.entry.name)).toEqual(['fresh.txt']);
+  expect(again.skipped).toEqual([]);
+});
+
 test('ingestDir keeps the source when its copy fails', async () => {
   const p = mk('keep.txt');
   const res = await store.ingestDir({ projectRoot: root, epicId: 'BAD ID', srcDir: src });

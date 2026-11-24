@@ -265,13 +265,15 @@ async function publishArtifact({
 }
 
 /**
- * ingestDir({ projectRoot, epicId, taskId, srcDir, producer, allowedRoots, fsImpl, appendEvent })
+ * ingestDir({ projectRoot, epicId, taskId, srcDir, producer, allowedRoots, minAgeMs, fsImpl, appendEvent })
  *   → Promise<{ published: { srcPath, storedPath, entry }[], skipped: { path, reason }[] }>
  * Publishes every regular file directly in srcDir (non-recursive, max 200),
  * deleting each source only after its copy succeeded. Never rejects.
+ * minAgeMs (default 0) skips any file modified within the last minAgeMs as
+ * 'still being written', so a periodic sweep never moves a half-written file.
  */
 async function ingestDir({
-  projectRoot, epicId, taskId, srcDir, producer, allowedRoots, fsImpl = fs, appendEvent = null,
+  projectRoot, epicId, taskId, srcDir, producer, allowedRoots, minAgeMs = 0, fsImpl = fs, appendEvent = null,
 } = {}) {
   /** @type {{ srcPath: string, storedPath: string, entry: object }[]} */
   const published = [];
@@ -296,6 +298,8 @@ async function ingestDir({
       return { published, skipped };
     }
     const roots = Array.isArray(allowedRoots) && allowedRoots.length ? allowedRoots : [srcDir];
+    const minAge = Number.isFinite(minAgeMs) && minAgeMs > 0 ? minAgeMs : 0;
+    const cutoff = Date.now() - minAge;
     let count = 0;
     for (const name of names) {
       const src = path.join(srcDir, name);
@@ -304,6 +308,7 @@ async function ingestDir({
         if (st.isSymbolicLink()) { skipped.push({ path: src, reason: 'symlink' }); continue; }
         if (st.isDirectory()) { skipped.push({ path: src, reason: 'directory' }); continue; }
         if (!st.isFile()) { skipped.push({ path: src, reason: 'not a regular file' }); continue; }
+        if (minAge > 0 && st.mtimeMs > cutoff) { skipped.push({ path: src, reason: 'still being written' }); continue; }
         if (count >= MAX_INGEST_FILES) { skipped.push({ path: src, reason: `over the ${MAX_INGEST_FILES}-file limit` }); continue; }
         count += 1;
         const res = await publishArtifact({

@@ -32,7 +32,7 @@
  *   customer_feedback_get({ id, source: 'site', cwd? }) -> GET  /admin/site-feedback/item?cwd=&id=
  *   customer_feedback_set_status({ id, status, note?, source?, cwd? }) -> POST /admin/customer-feedback/status
  *       (source 'site': POST /admin/site-feedback/status {cwd, id, status, note?})
- *   customer_feedback_submit({ goal, description, tag, imagePaths? }) -> POST /admin/customer-feedback/submit
+ *   customer_feedback_submit({ goal, description, tag, imagePaths?, context? }) -> POST /admin/customer-feedback/submit
  *   feedback_widget_create({ label, allowedOrigins, cwd? }) -> POST /admin/feedback-widget/create
  *   feedback_widget_list({ cwd? }) -> GET  /admin/feedback-widget/list?cwd=<encoded>
  *   feedback_widget_update({ boxId, label?, allowedOrigins?, state? }) -> POST /admin/feedback-widget/update
@@ -1155,13 +1155,24 @@ const TOOLS = [
       type: 'object',
       properties: {
         goal: { type: 'string', description: 'One line, max 120 chars: what the human wants or what went wrong. Show it to the human before calling.' },
-        description: { type: 'string', description: 'Details, max 4000 chars: what happened, what was expected, steps. No secrets, tokens, customer data or private file contents.' },
+        description: { type: 'string', maxLength: 5000, description: 'Details, max 5000 chars: what happened, what was expected, steps. No secrets, tokens, customer data or private file contents.' },
         tag: { type: 'string', enum: ['bug', 'feature', 'discussion'], description: 'Kind of feedback.' },
         imagePaths: {
           type: 'array',
           items: { type: 'string' },
           maxItems: 5,
           description: 'Optional: absolute paths of up to 5 PNG, JPEG, WebP or GIF images the human asked to include — for example the Attached: <path> lines of images pasted into this chat. Images are sent as-is; large PNG/JPEG are downscaled; anything that is not an image is refused.',
+        },
+        context: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Optional: what a feedback widget captured, each part following Report v1 (web/feedback-widget/schema/report.v1.json); at most 262144 bytes of JSON. Sent as given; an invalid part refuses the whole call.',
+          properties: {
+            page: { type: 'object', description: 'Report v1 page: { url, title, viewport: { width, height, devicePixelRatio, scrollX, scrollY } }.' },
+            marks: { type: 'array', items: { type: 'object' }, description: 'Report v1 marks: pin | box | element | arrow | draw | text, each with n, color and note.' },
+            console: { type: ['array', 'null'], items: { type: 'object' }, maxItems: 20, description: 'Report v1 console errors, at most 20: { level, message, stack?, count, at }.' },
+            network: { type: ['array', 'null'], items: { type: 'object' }, maxItems: 20, description: 'Report v1 failed requests, at most 20: { method, url, status, durationMs, at }.' },
+          },
         },
       },
       required: ['goal', 'description', 'tag'],
@@ -1303,6 +1314,24 @@ function customerFeedbackSubmitRefusal() {
     'refused: customer_feedback_submit runs only in a Session Manager chat or terminal session, because feedback is sent only when a human asks. '
     + 'Say in your final result what the feedback is; the human can send it from the Feedback panel.',
   );
+}
+
+const FEEDBACK_DESCRIPTION_MAX = 5000;
+const FEEDBACK_CONTEXT_KEYS = ['page', 'marks', 'console', 'network'];
+
+/**
+ * customer_feedback_submit's context check: a plain object of only page/marks/console/network,
+ * each obeying Report v1 (feedbackReport.parseContext, the admin route's own validator). Returns
+ * an error string or null. The value is forwarded unchanged; the route re-validates it.
+ */
+function feedbackContextRefusal(context) {
+  if (typeof context !== 'object' || Array.isArray(context)) {
+    return 'invalid argument: context must be an object with page, marks, console and/or network';
+  }
+  const extra = Object.keys(context).filter((k) => !FEEDBACK_CONTEXT_KEYS.includes(k));
+  if (extra.length) return `invalid argument: context has unknown key(s): ${extra.join(', ')}`;
+  const r = require('../src/main/lib/feedback-remote/feedbackReport.cjs').parseContext(context);
+  return r.ok ? null : `invalid argument: ${r.error} (context follows Report v1)`;
 }
 
 // A website widget is the human's: creating, changing or deleting one runs only
@@ -2111,8 +2140,17 @@ async function handleCallTool(request) {
         && (!Array.isArray(imagePaths) || imagePaths.length > 5 || !imagePaths.every((p) => typeof p === 'string'))) {
         return errorResult('invalid argument: imagePaths must be an array of at most 5 absolute file path strings');
       }
+      if (args.description.length > FEEDBACK_DESCRIPTION_MAX) {
+        return errorResult(`invalid argument: description is over ${FEEDBACK_DESCRIPTION_MAX} chars`);
+      }
+      const context = args.context;
+      if (context !== undefined && context !== null) {
+        const refusal = feedbackContextRefusal(context);
+        if (refusal) return errorResult(refusal);
+      }
       const payload = { title: args.goal, body: args.description, tag: args.tag };
       if (imagePaths && imagePaths.length > 0) payload.imagePaths = imagePaths;
+      if (context !== undefined && context !== null) payload.context = context;
       const result = await adminRequest('POST', '/admin/customer-feedback/submit', payload);
       if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_submit failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };

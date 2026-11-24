@@ -331,7 +331,11 @@ test('submit is listed with its catalog description and a required goal/descript
   expect(entry.group).toBe('customer-feedback');
   expect(tool.description).toBe(composeDescription(entry));
   expect(tool.inputSchema.required).toEqual(['goal', 'description', 'tag']);
-  expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['description', 'goal', 'imagePaths', 'tag']);
+  expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['context', 'description', 'goal', 'imagePaths', 'tag']);
+  expect(tool.inputSchema.properties.description.maxLength).toBe(5000);
+  expect(tool.inputSchema.properties.context.type).toBe('object');
+  expect(tool.inputSchema.properties.context.additionalProperties).toBe(false);
+  expect(Object.keys(tool.inputSchema.properties.context.properties).sort()).toEqual(['console', 'marks', 'network', 'page']);
   expect(tool.inputSchema.properties.goal.type).toBe('string');
   expect(tool.inputSchema.properties.description.type).toBe('string');
   expect(tool.inputSchema.properties.tag.enum).toEqual(['bug', 'feature', 'discussion']);
@@ -378,6 +382,70 @@ test('submit refuses a non-array or 6-entry imagePaths without a request', async
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('imagePaths');
   }
+  expect(requests).toHaveLength(0);
+});
+
+const CONTEXT = {
+  page: {
+    url: 'https://example.com/pricing',
+    title: 'Pricing',
+    viewport: { width: 1280, height: 800, devicePixelRatio: 2, scrollX: 0, scrollY: 120 },
+  },
+  marks: [{ kind: 'pin', n: 1, x: 10, y: 20, color: '#a83818', note: 'Button overlaps the footer' }],
+  console: [],
+  network: null,
+};
+
+test('submit forwards a widget context to the admin route unchanged', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_4' } });
+  const context = JSON.parse(JSON.stringify(CONTEXT));
+  const result = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', context }));
+  expect(result.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].url).toBe('/admin/customer-feedback/submit');
+  expect(requests[0].body).toEqual({ title: 'g', body: 'd', tag: 'bug', context: CONTEXT });
+});
+
+test('submit accepts a 5000-char description and refuses 5001 without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_5' } });
+  const ok = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'x'.repeat(5000), tag: 'bug' }));
+  expect(ok.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  const bad = await withEnv(HUMAN, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'x'.repeat(5001), tag: 'bug' }));
+  expect(bad.isError).toBe(true);
+  expect(bad.content[0].text).toContain('description');
+  expect(requests).toHaveLength(1);
+});
+
+test('submit refuses an invalid context without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: null });
+  const invalid = [
+    'not an object',
+    ['page'],
+    { page: { url: 'https://x', title: 't' } },
+    { marks: [{ kind: 'pin', n: 1, x: 1, y: 1, color: 'red', note: '' }] },
+    { console: 'oops' },
+    { cookies: 'a=b' },
+    { client: { widgetVersion: '1' } },
+  ];
+  for (const context of invalid) {
+    const result = await withEnv(HUMAN, () =>
+      callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', context }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('context');
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('submit with a context is still refused in a headless job without a request', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: null });
+  const result = await withEnv({ SM_CHAT_SESSION_ID: 'sess-1', SM_SCHEDULER_JOB_SLUG: 'some-job' }, () =>
+    callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 't', description: 'b', tag: 'bug', context: CONTEXT }));
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('Feedback panel');
   expect(requests).toHaveLength(0);
 });
 

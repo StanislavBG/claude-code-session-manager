@@ -668,12 +668,17 @@ const MCP_TOOL_CATALOG = [
     name: 'customer_feedback_submit',
     group: 'customer-feedback',
     purpose: 'Send one piece of feedback about Session Manager itself (bug | feature | discussion) to its maintainers — '
-      + 'a one-line goal, a description, and up to 5 PNG/JPEG/WebP/GIF images given by absolute path — the same '
-      + 'submission the Feedback panel makes, via the session-manager app\'s admin API.',
+      + 'a one-line goal, a description, up to 5 PNG/JPEG/WebP/GIF images given by absolute path, and optionally the '
+      + '`context` a feedback widget captured — the same submission the Feedback panel makes, via the session-manager '
+      + 'app\'s admin API.',
     summary: 'Send feedback about Session Manager to its maintainers.',
     whenToUse: 'Use only when the human asks to send feedback about Session Manager itself. Draft a goal (one line, max '
-      + '120 chars) and a description (max 4000 chars) from the conversation. For images, use the `Attached: <path>` '
+      + '120 chars) and a description (max 5000 chars) from the conversation. For images, use the `Attached: <path>` '
       + 'lines of images the human pasted into this chat, or files the human named — absolute paths only, at most 5. '
+      + 'To pass on what a feedback widget captured, add `context` with any of: page ({ url, title, viewport }), marks '
+      + '(pin | box | element | arrow | draw | text, each with n, color and note), console (at most 20 errors, or '
+      + 'null) and network (at most 20 failed requests, or null). Each part follows Report v1 '
+      + '(web/feedback-widget/schema/report.v1.json); the whole context is at most 262144 bytes of JSON. '
       + 'Show the human the exact goal, description, tag and image list, and call only after they agree.',
     whenNotToUse: 'WHEN NOT TO USE IT: a bug in the project being worked on is /develop; a finding for another local '
       + 'project is feedback_open_session. Never call it on your own initiative. Never attach an image the human did '
@@ -687,8 +692,9 @@ const MCP_TOOL_CATALOG = [
     },
     notes: 'Runs only in a Session Manager chat or terminal session (refused in headless jobs). Returns { ok, item, '
       + 'warning? }; a warning means the text was sent but the feedback service did not accept every image — tell the '
-      + 'human which images did not go. { ok:false, error } comes back as an error result. The home directory is '
-      + 'redacted to ~ before sending.',
+      + 'human which images did not go. { ok:false, error } comes back as an error result. An invalid or unknown '
+      + 'context part refuses the whole call before anything is sent; a valid context is sent unchanged. The home '
+      + 'directory is redacted to ~ in the goal and description before sending.',
   },
   {
     name: 'feedback_widget_create',

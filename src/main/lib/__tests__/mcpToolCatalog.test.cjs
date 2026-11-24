@@ -125,9 +125,10 @@ test('customer_feedback_submit text covers goal, description, images, consent an
   const text = composeDescription(e);
   for (const s of ['goal', 'description', 'up to 5', 'PNG/JPEG/WebP/GIF', 'absolute path', 'Attached: <path>',
     'exact goal, description, tag and image list', 'only after they agree', 'Never attach an image the human did not ask to send',
-    'warning']) {
+    'warning', 'max 5000 chars', '`context`', 'page', 'marks', 'console', 'network', 'Report v1']) {
     expect(text).toContain(s);
   }
+  expect(text).not.toContain('max 4000 chars');
   expect(Object.keys(e.exampleArgs).sort()).toEqual(['description', 'goal', 'imagePaths', 'tag']);
   for (const x of MCP_TOOL_CATALOG) expect(composeDescription(x)).not.toContain('{F}');
 });

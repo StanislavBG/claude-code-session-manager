@@ -2,6 +2,7 @@
 name: builder
 description: Watch session-manager's git history against the published npm package and drive the next npm publish.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 Project overlay for the generic `builder` agent (`~/.claude/agents/builder.md`) — that file has the

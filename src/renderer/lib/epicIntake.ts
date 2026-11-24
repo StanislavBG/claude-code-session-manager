@@ -79,13 +79,6 @@ export interface EpicIntakeFields {
    * macro launches (SessionActionsBar).
    */
   contextInjections?: Partial<Record<keyof typeof CONTEXT_INJECTIONS, boolean>>
-  /**
-   * A short account of where an earlier Epic stopped, for a session that
-   * continues it. Becomes one Input entry (part 'handoff', source =
-   * `fromEpicId`) after the Context Injections and before the references.
-   * Omitted entirely when absent or when `text` is blank.
-   */
-  handoff?: { fromEpicId: string; text: string }
 }
 
 /**
@@ -98,7 +91,8 @@ export interface EpicIntakeFields {
  */
 export type AimSlot = 'actor' | 'input' | 'mission'
 export const AIM_SLOT_ORDER: readonly AimSlot[] = ['actor', 'input', 'mission']
-export type AimPart = 'persona' | 'grounding' | 'injection' | 'handoff' | 'reference' | 'job-type' | 'goal'
+export const AIM_PARTS = ['persona', 'grounding', 'injection', 'reference', 'job-type', 'goal'] as const
+export type AimPart = typeof AIM_PARTS[number]
 
 export interface EpicIntakeSection {
   /** New Epics emit kind = AIM slot plus `part`. 'persona-body' | 'injection' |
@@ -129,7 +123,6 @@ const PART_SLOT: Record<AimPart, AimSlot> = {
   persona: 'actor',
   grounding: 'input',
   injection: 'input',
-  handoff: 'input',
   reference: 'input',
   'job-type': 'mission',
   goal: 'mission',
@@ -238,7 +231,6 @@ export function composeEpicIntake({
   agentPath,
   inputSummary,
   contextInjections,
-  handoff,
 }: EpicIntakeFields): EpicIntake {
   const trimmedTitle = singleLine(title.trim())
   const trimmedGoal = goal.trim()
@@ -249,7 +241,7 @@ export function composeEpicIntake({
   const promptBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
 
   // AIM slots, in order: Actor (the persona), Input (grounding, Context
-  // Injections, handoff, references), Mission (the job type, then the human's goal).
+  // Injections, references), Mission (the job type, then the human's goal).
   const actor: AimSection[] = []
   const input: AimSection[] = []
   const mission: AimSection[] = []
@@ -285,11 +277,6 @@ export function composeEpicIntake({
     if (!contextInjections?.[key]) continue
     const def = CONTEXT_INJECTIONS[key]
     input.push({ kind: 'input', part: 'injection', label: def.label, text: def.text, source: key })
-  }
-
-  const handoffText = handoff?.text.trim()
-  if (handoff && handoffText) {
-    input.push({ kind: 'input', part: 'handoff', label: 'Handoff', text: handoffText, source: handoff.fromEpicId })
   }
 
   for (const p of referencePaths) {

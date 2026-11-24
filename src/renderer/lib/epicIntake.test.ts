@@ -302,56 +302,6 @@ describe('composeEpicIntake plain composition', () => {
   })
 })
 
-describe('composeEpicIntake handoff', () => {
-  const base = {
-    title: 'T',
-    goal: 'G',
-    tag: 'bug' as const,
-    inputSummary: 'Grounding: System',
-    contextInjections: { 'general-behavior': true },
-    referencePaths: ['/tmp/a.png'],
-  }
-  const handoff = { fromEpicId: 'epic-prev-1', text: 'Stopped after step 2; step 3 pending.' }
-
-  it('adds one Input section labelled Handoff with the source set to fromEpicId', () => {
-    const { sections } = composeEpicIntake({ ...base, handoff })
-    const h = sections.filter((s) => s.part === 'handoff')
-    expect(h).toEqual([{ kind: 'input', part: 'handoff', label: 'Handoff', text: handoff.text, source: 'epic-prev-1' }])
-  })
-
-  it('places the handoff after the context injections and before the references', () => {
-    const { sections, openingPrompt } = composeEpicIntake({ ...base, handoff })
-    expect(sections.map((s) => s.part)).toEqual(['grounding', 'injection', 'handoff', 'reference', 'job-type', 'goal'])
-    const injIdx = openingPrompt.indexOf(CONTEXT_INJECTIONS['general-behavior'].text)
-    const hIdx = openingPrompt.indexOf(handoff.text)
-    const refIdx = openingPrompt.indexOf('Reference: /tmp/a.png')
-    expect(injIdx).toBeGreaterThanOrEqual(0)
-    expect(hIdx).toBeGreaterThan(injIdx)
-    expect(refIdx).toBeGreaterThan(hIdx)
-    expect(openingPrompt).toContain(`${CONTEXT_INJECTIONS['general-behavior'].text}\n\n${handoff.text}\n\nReference: /tmp/a.png`)
-  })
-
-  it('maps the handoff part to the Input slot in toAimSections', () => {
-    const { sections } = composeEpicIntake({ ...base, handoff })
-    expect(toAimSections(sections).find((s) => s.part === 'handoff')?.kind).toBe('input')
-  })
-
-  it('leaves the opening prompt and sections unchanged without a handoff', () => {
-    const without = composeEpicIntake(base)
-    expect(without.sections.some((s) => s.part === 'handoff')).toBe(false)
-    expect(composeEpicIntake({ ...base, handoff: undefined })).toEqual(without)
-    expect(without.openingPrompt).toBe(
-      [
-        'Grounding: System',
-        CONTEXT_INJECTIONS['general-behavior'].text,
-        'Reference: /tmp/a.png',
-        agentTagDef('bug').initialPromptTemplate,
-        'Goal: T\n\nG',
-      ].join('\n\n'),
-    )
-  })
-})
-
 describe('toAimSections', () => {
   const e = (kind: string, text = kind): EpicIntakeSection => ({ kind, label: kind, text }) as EpicIntakeSection
   it('normalizes the 8-entry legacy shape into AIM slots and parts', () => {

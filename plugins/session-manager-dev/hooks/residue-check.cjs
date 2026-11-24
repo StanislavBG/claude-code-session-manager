@@ -32,11 +32,23 @@ const NEEDS_YOU_LABEL_RE = /^needs you\b/i;
 const QUOTED_SPAN_RES = [/"[^"\n]*"/g, /“[^”\n]*”/g, /‘[^’\n]*’/g, /`[^`\n]*`/g, /(^|[^\w'])'[^'\n]*'(?![\w])/g];
 const RESIDUE_PHRASES = ['needs a new epic', 'say the word', "haven't queued", "didn't look into", 'follow-up for later',
   'one gap', 'left those to', 'i will add that', "i'll add that"];
+// Each phrase as a whole-word, case-insensitive regex: 'one gap' must not fire on 'phone gap' / 'none gap'.
+// An apostrophe counts as a word char at the bounds so "haven't" never matches inside a longer contraction.
+const RESIDUE_PHRASE_RES = RESIDUE_PHRASES.map(
+  (p) => new RegExp(`(?<![\\w'])${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w'])`, 'i'));
+// A line that names its own outcome (a four-digit PRD number + an outcome verb) is not residue (rule 6).
+const PRD_NUMBER_RE = /(?<![\w.,])\d{4}(?![\w.,]*\d)/;
+const OUTCOME_VERB_RE = /\b(queued|closed|fixed|decided|scheduled)\b/i;
 const EMPTY_ENTRY_RE = /^(?:[-*+]\s*)?(?:none|nothing|n\/a)\.?$/i;
 
 /** Lower-case and straighten curly apostrophes for phrase matching. */
 function normalize(s) {
   return s.replace(/[‘’ʼ]/g, "'").toLowerCase();
+}
+
+/** True when a line carries its own outcome: a four-digit PRD number and an outcome verb. */
+function namesOwnOutcome(s) {
+  return PRD_NUMBER_RE.test(s) && OUTCOME_VERB_RE.test(s);
 }
 
 /** Remove quoted spans (double, curly, single, backtick) from a line before the phrase match. */
@@ -114,8 +126,9 @@ function findResidue(text) {
     if (!lineCounts && !trimmed.startsWith('|')) {
       // Markdown table rows and quoted spans are analysis, not hand-backs: skip them for the phrase match.
       const norm = normalize(stripQuoted(trimmed));
-      if (RESIDUE_PHRASES.some((p) => norm.includes(p))) lineCounts = true;
+      if (RESIDUE_PHRASE_RES.some((re) => re.test(norm))) lineCounts = true;
     }
+    if (lineCounts && namesOwnOutcome(trimmed)) lineCounts = false;
     if (lineCounts) out.push(trimmed);
   }
   return out;

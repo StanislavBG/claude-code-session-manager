@@ -145,6 +145,37 @@ describe('findResidue — gap and hand-off wording (real 2026-11-23 endings)', (
   });
 });
 
+describe('findResidue — word bounds and outcome-carrying lines (4248)', () => {
+  test('a phrase inside a longer word does not count', () => {
+    expect(findResidue('The phone gap is closed.\n')).toEqual([]);
+    expect(findResidue('There is none gap here.\n')).toEqual([]);
+    expect(findResidue('Saying the wordsmith fix shipped.\n')).toEqual([]);
+  });
+  test('a whole-word phrase still counts', () => {
+    const line = 'One gap: no chapter covers preflight holds';
+    expect(findResidue(`${line}\n`)).toEqual([line]);
+  });
+  test('a line naming its own outcome (PRD number + outcome verb) does not count', () => {
+    expect(findResidue('There was one gap and PRD 4300 closed it.\n')).toEqual([]);
+    expect(findResidue('## Follow-ups\n- the doc chapter: queued 4301-doc-chapter\n')).toEqual([]);
+    expect(findResidue('**Gap:** the event writer — fixed by 4302.\n')).toEqual([]);
+  });
+  test('a PRD number alone, or an outcome verb alone, is not an outcome', () => {
+    expect(findResidue('There was one gap near PRD 4300.\n')).toEqual(['There was one gap near PRD 4300.']);
+    expect(findResidue('## Still open\n- the doc fix is not queued yet\n')).toEqual(['- the doc fix is not queued yet']);
+  });
+  test("4227's four real hand-back endings are still flagged", () => {
+    const s02 = "**Gap:** two of the event kinds, `job.tool_use` and `human.message`, have no PRD that writes them. I'll add that PRD alongside the wave 1 fixes.";
+    const s07 = '- **Manual:** I only set `documentsAppVersion` to 0.141.0 (`565456c7`, pushed). No chapter was revised: none describes the changed behaviour, the renderer is unchanged, and "Needs review" still means "being fixed". The manual stays at 2.6.0 with no new manual release. One gap: no chapter covers preflight holds; it would fit in `plans-and-scheduler.html`.';
+    const s16 = '- **You:** publish a release that carries this work. I didn\'t, because main also holds other plans that are still in progress.';
+    const s17 = "For you: restart Session Manager so it runs 0.140.0 — Burrow can't register its tools until then. Several other Epics also owe their own post-release replies (to Self, and the Task-primitive reply to Burrow); I left those to them. Both memory notes now record 0.140.0 as live and Burrow's thread as closed.";
+    expect(findResidue(`Plan settled.\n\n${s02}\n`)).toEqual([s02]);
+    expect(findResidue(`Released.\n\n${s07}\n`)).toEqual([s07]);
+    expect(findResidue(`**What happens next:**\n${s16}\n`)).toEqual([s16]);
+    expect(findResidue(`Done.\n\n${s17}\n`)).toEqual([s17]);
+  });
+});
+
 describe('findResidue — ignored regions', () => {
   test('code fences', () => {
     const text = '```\n## Still open\n- x\nsay the word\n```\nDone.\n';

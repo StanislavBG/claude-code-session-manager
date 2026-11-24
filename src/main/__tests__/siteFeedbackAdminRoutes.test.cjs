@@ -46,7 +46,7 @@ function makeService(over = {}) {
   const service = {
     calls,
     createWidget: rec('createWidget', { ok: true, boxId: 'box1', fingerprint: 'abc', snippet: SNIP, privateKeyJwk: { d: 'SECRET' } }),
-    listWidgets: rec('listWidgets', { ok: true, widgets: [{ boxId: 'box1', snippet: SNIP, deviceToken: 'TOKEN' }] }),
+    listWidgets: rec('listWidgets', { ok: true, widgets: [{ boxId: 'box1', snippet: SNIP, deviceToken: 'TOKEN', identitySecret: 'IDSECRET' }] }),
     updateWidget: rec('updateWidget', (p) => ({ ok: true, widget: { boxId: p.boxId, label: p.label } })),
     deleteWidget: rec('deleteWidget', (p) => ({ ok: true, boxId: p.boxId })),
     getSnippet: rec('getSnippet', (p) => ({ ok: true, boxId: p.boxId, fingerprint: 'abc', snippet: SNIP })),
@@ -183,7 +183,7 @@ test('a throwing service becomes a 500 ok:false', async () => {
 });
 
 // ── list
-test('list passes cwd and strips the device token', async () => {
+test('list passes cwd and strips the device token and identity secret', async () => {
   const { adminHttp, service } = setup();
   const r = await adminHttp.call('GET', '/admin/feedback-widget/list', { query: { cwd: CWD } });
   expect(r.body).toEqual({ ok: true, widgets: [{ boxId: 'box1', snippet: SNIP }] });
@@ -286,7 +286,7 @@ test('item returns the stored report unmodified, including a field named token o
   const { adminHttp } = setup({
     getItem: async (p) => ({
       ok: true,
-      item: { meta: { hostId: p.hostId, status: 'open', deviceToken: 'OURS' }, report, imagePaths: { screenshot: '/p/s.png' } },
+      item: { meta: { hostId: p.hostId, status: 'open', deviceToken: 'OURS', identitySecret: 'IDSECRET' }, report, imagePaths: { screenshot: '/p/s.png' } },
     }),
   });
   const r = await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'FB-AB123' } });

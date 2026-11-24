@@ -122,6 +122,20 @@ test('identitySecret: created on first request, stable, 32 random bytes base64ur
   expect((await store.getPrivateKey('b1'))?.d).toBe('secret-b1');
 });
 
+test('peekIdentitySecret returns the secret or null and never writes', async () => {
+  await store.addBox(rec('b1'));
+  const file = store.storeFile();
+  const before = await fs.promises.readFile(file, 'utf8');
+  const mtimeBefore = (await fs.promises.stat(file)).mtimeMs;
+  expect(await store.peekIdentitySecret('b1')).toBeNull();
+  expect(await store.peekIdentitySecret('nope')).toBeNull();
+  expect(await store.peekIdentitySecret('')).toBeNull();
+  expect(await fs.promises.readFile(file, 'utf8')).toBe(before);
+  expect((await fs.promises.stat(file)).mtimeMs).toBe(mtimeBefore);
+  const minted = await store.getIdentitySecret('b1');
+  expect(await store.peekIdentitySecret('b1')).toBe(minted);
+});
+
 test('rotateIdentitySecret replaces the secret; unknown box is null', async () => {
   await store.addBox(rec('b1'));
   const before = await store.getIdentitySecret('b1');

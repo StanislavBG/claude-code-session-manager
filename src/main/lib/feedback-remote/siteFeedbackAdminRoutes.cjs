@@ -38,7 +38,7 @@ const WIDGET_STATES = /** @type {const} */ (['open', 'paused']);
 const MAX_LABEL = 80;
 const MAX_NOTE = 500;
 /** Session Manager's own secrets (never a visitor's report field). Matched case-insensitively. */
-const OWN_SECRET_KEYS = new Set(['privatekeyjwk', 'privatekey', 'devicetoken']);
+const OWN_SECRET_KEYS = new Set(['privatekeyjwk', 'privatekey', 'devicetoken', 'identitysecret']);
 /** Keys that carry image bytes; stripped from every response outside the stored report. */
 const BYTE_KEYS = new Set(['dataurl', 'bytes', 'buffer', 'screenshotbytes', 'annotatedbytes']);
 /** Service failure codes that are the caller's bad input. */

@@ -20,7 +20,7 @@
  *     (write_denied, io_error, relay_error, open_failed, keystore_error).
  *
  * Verified reporter (site-feedback.md#verified-reporter): before the write, a report whose user
- * carries a string `sig` is checked against the box's identity secret (keystore.getIdentitySecret):
+ * carries a string `sig` is checked against the box's identity secret (keystore.peekIdentitySecret — read-only, never mints):
  * HMAC-SHA256(secret, 'v1|id|email|exp') as base64url, compared with crypto.timingSafeEqual, and
  * exp (epoch seconds) not earlier than createdAt minus 5 minutes. The result is stored as
  * meta.reporterVerified: true (valid), false (sig present but invalid, expired, or no secret) or
@@ -61,7 +61,7 @@ const REPORTER_EXP_SKEW_MS = 5 * 60 * 1000;
  * @typedef {{
  *   listBoxes: () => Promise<DrainBox[]>,
  *   getPrivateKey: (boxId: string) => Promise<Record<string, unknown> | null>,
- *   getIdentitySecret?: (boxId: string) => Promise<string | null>,
+ *   peekIdentitySecret?: (boxId: string) => Promise<string | null>,
  * }} DrainKeystore
  * @typedef {{
  *   writeItem: (args: any) => Promise<{ duplicate: boolean, hostId: string }>,
@@ -265,7 +265,7 @@ function createDrain(defaults = {}) {
           let reporterVerified = verifyReporter(opened.report, null);
           if (reporterVerified !== null) {
             ctx.stage = 'keystore';
-            const secret = d.keystore.getIdentitySecret ? await d.keystore.getIdentitySecret(boxId) : null;
+            const secret = d.keystore.peekIdentitySecret ? await d.keystore.peekIdentitySecret(boxId) : null;
             reporterVerified = verifyReporter(opened.report, secret);
             ctx.stage = 'write';
           }

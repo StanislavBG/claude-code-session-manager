@@ -494,6 +494,19 @@ test('an expired reporter (exp more than 5 minutes before createdAt) is false', 
   expect(meta.reporterVerified).toBe(false);
 });
 
+test('a signed report for a box without a secret is false and never writes the keystore', async () => {
+  const box = await newBox();
+  const file = keystore.storeFile();
+  const before = await fsp.readFile(file, 'utf8');
+  const mtimeBefore = (await fsp.stat(file)).mtimeMs;
+  const exp = CREATED_SEC + 3600;
+  const meta = await drainWithUser(box, { id: 'u_42', exp, sig: signReporter('guessed-secret', 'u_42', '', exp) });
+  expect(meta.reporterVerified).toBe(false);
+  expect(await fsp.readFile(file, 'utf8')).toBe(before);
+  expect((await fsp.stat(file)).mtimeMs).toBe(mtimeBefore);
+  expect(await keystore.peekIdentitySecret(box.boxId)).toBeNull();
+});
+
 test('an unsigned reporter, and an anonymous report, are stored reporterVerified: null', async () => {
   const box = await newBox();
   expect((await drainWithUser(box, { id: 'u_42', name: 'Ada' })).reporterVerified).toBeNull();

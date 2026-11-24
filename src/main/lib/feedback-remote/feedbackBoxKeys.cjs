@@ -181,6 +181,18 @@ async function getIdentitySecret(boxId) {
 }
 
 /**
+ * The box's identity signing secret if one was already minted. Read-only: never mints or writes,
+ * so verifying a signed report can never change the keystore.
+ * @param {string} boxId
+ * @returns {Promise<string|null>} null when no such box exists or it has no secret yet
+ */
+async function peekIdentitySecret(boxId) {
+  if (!nonEmptyString(boxId)) return null;
+  const hit = (await readBoxes(storeFile())).find((b) => b.boxId === boxId);
+  return hit && nonEmptyString(hit.identitySecret) ? hit.identitySecret : null;
+}
+
+/**
  * Replaces the box's identity signing secret; signatures made with the old one stop verifying.
  * @param {string} boxId
  * @returns {Promise<string|null>} the new secret, or null when no such box exists
@@ -201,5 +213,6 @@ function removeBox(boxId) {
 }
 
 module.exports = {
-  storeFile, addBox, listBoxes, getPrivateKey, getIdentitySecret, rotateIdentitySecret, removeBox,
+  storeFile, addBox, listBoxes, getPrivateKey, getIdentitySecret, peekIdentitySecret,
+  rotateIdentitySecret, removeBox,
 };

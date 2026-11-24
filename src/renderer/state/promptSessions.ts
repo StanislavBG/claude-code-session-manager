@@ -266,9 +266,14 @@ export interface PromptSessionEvent {
    *  distinct amber "build not queued" notice. Absent on every other event.
    *  PRD 3116 — 'build-done' / 'build-failed' = a macro's background-build PRD
    *  finished (scheduler.cjs notifyOriginatingTab). */
-  notice?: 'job-not-queued' | 'build-done' | 'build-failed' | 'cross-project-reply' | 'cross-project-reply-sent'
+  notice?: 'job-not-queued' | 'build-done' | 'build-failed' | 'cross-project-reply' | 'cross-project-reply-sent' | 'artifact-ready'
   /** PRD 3116 — the saved Project Home entry a 'build-done' notice names. */
   buildOutput?: { kind: 'video' | 'knowledge'; id: string; title: string }
+  /** The files an 'artifact-ready' notice lists (lib/epic/artifactNotice.cjs) — `path` is
+   *  relative to the project cwd; at most 20 rows, the rest counted in `moreCount`. */
+  artifacts?: Array<{ title: string; kind: string; path: string; size: number }>
+  /** 'artifact-ready' only — how many artifacts beyond `artifacts` landed in the same batch. */
+  moreCount?: number
   /** The cross-project reply a 'cross-project-reply' / 'cross-project-reply-sent' notice carries. */
   reply?: { fromCwd: string; fromEpicId: string; outcome: 'done' | 'blocked' | 'question'; referencePaths: string[] }
 }

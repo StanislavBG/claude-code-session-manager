@@ -19,6 +19,7 @@ import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTur
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { BackgroundBuildStatus } from './BackgroundBuildStatus'
 import { BuildResultCard } from './BuildResultCard'
+import { ArtifactReadyCard } from './ArtifactReadyCard'
 import { CrossProjectReplyCard, CrossProjectReplyReceipt } from './CrossProjectReplyCard'
 import { useMacros } from '../../lib/useMacros'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
@@ -287,6 +288,10 @@ function ResponseEvent({
   // after every hook above so the branch never changes hook order.
   if (event.notice === 'build-done' || event.notice === 'build-failed') {
     return <BuildResultCard event={event} cwd={cwd} epicId={epicId} onOpenProjectHome={openProjectHome} />
+  }
+  // An 'artifact-ready' notice (lib/epic/artifactNotice.cjs) — after every hook above too.
+  if (event.notice === 'artifact-ready') {
+    return <ArtifactReadyCard event={event} cwd={cwd} />
   }
   // A reply from another project (feedback_reply) and the sender's receipt —
   // also after every hook above, so hook order never changes.

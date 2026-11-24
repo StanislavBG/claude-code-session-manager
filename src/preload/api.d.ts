@@ -4006,9 +4006,13 @@ export interface PromptSessionEventAppendedPayload {
     text?: string;
     /** 'job-not-queued' = a macro's background build could not be queued for this Epic (macroJobIpc.cjs);
      *  'build-done' / 'build-failed' = a macro's background-build PRD finished (scheduler.cjs notifyOriginatingTab). */
-    notice?: 'job-not-queued' | 'build-done' | 'build-failed';
+    notice?: 'job-not-queued' | 'build-done' | 'build-failed' | 'artifact-ready';
     /** The saved Project Home entry a 'build-done' notice names, when its meta.json was readable. */
     buildOutput?: { kind: 'video' | 'knowledge'; id: string; title: string };
+    /** 'artifact-ready' rows (lib/epic/artifactNotice.cjs); `path` is relative to the project cwd. */
+    artifacts?: Array<{ title: string; kind: string; path: string; size: number }>;
+    /** 'artifact-ready' only — artifacts beyond the listed rows. */
+    moreCount?: number;
   };
 }
 

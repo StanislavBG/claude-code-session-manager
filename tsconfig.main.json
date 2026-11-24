@@ -31,6 +31,7 @@
     "src/main/lib/feedback-remote/needsYouIpc.cjs",
     "src/main/lib/feedback-remote/siteFeedbackInbox.cjs",
     "src/main/lib/feedback-remote/siteFeedbackService.cjs",
+    "src/main/lib/feedback-remote/siteFeedbackAdminRoutes.cjs",
     "src/main/lib/claudeConfig.cjs",
     "src/main/lib/effectiveSettings.cjs",
     "src/main/lib/mdNetworkScan.cjs",

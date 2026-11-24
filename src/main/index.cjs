@@ -122,6 +122,8 @@ crossProjectFeedback.registerAdminRoute(adminHttp);
 // (lib/feedback-remote/crossProjectReply.cjs).
 require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminHttp);
 require('./lib/feedback-remote/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
+// Website-feedback widgets + their decrypted inbox, behind the Feedback MCP tools.
+require('./lib/feedback-remote/siteFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Cursor read over the audit log for outside scripts (read-only).
 require('./lib/telemetry/eventsAdminRoutes.cjs').registerAdminRoute(adminHttp);
 // Outside-facing Epic records for scripts/other projects (read-only).

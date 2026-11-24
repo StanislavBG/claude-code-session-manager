@@ -51,6 +51,7 @@
   "siteFeedbackInbox": "feedback-remote",
   "feedbackBoxDrain": "feedback-remote",
   "siteFeedbackService": "feedback-remote",
+  "siteFeedbackAdminRoutes": "feedback-remote",
   "cpuSample": "scheduler",
   "defaultShell": "process",
   "definitionOfDone": "scheduler",

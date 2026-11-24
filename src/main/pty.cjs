@@ -27,6 +27,7 @@ const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const { resolveEpicSpawnCwd } = require('./lib/epic/epicSpawnCwd.cjs');
 const telemetryCounters = require('./lib/telemetry/telemetryCounters.cjs');
 const artifactStore = require('./lib/epic/artifactStore.cjs');
+const artifactNotice = require('./lib/epic/artifactNotice.cjs');
 const { findEpicByClaudeSessionId } = require('./lib/claude/agentModelResolve.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
@@ -58,8 +59,9 @@ const ARTIFACT_MIN_AGE_MS = 10_000;
  * Sweep an Epic Terminal's artifact staging folder (runId = tabId) into the
  * Artifacts store every ARTIFACT_INGEST_MS. Returns stop(), which clears the
  * interval and runs one final sweep with no age floor (after any in-flight
- * sweep). Notices are not posted here — artifact-ready-notice owns them.
- * Errors are logged, never thrown.
+ * sweep). Each sweep (interval or exit) that published one or more files posts
+ * ONE 'artifact-ready' notice to the Epic chat, as the chat turn-end ingest
+ * does; an empty sweep posts nothing. Errors are logged, never thrown.
  */
 function startArtifactIngest({ cwd, epicId, tabId }) {
   let running = Promise.resolve();
@@ -74,6 +76,13 @@ function startArtifactIngest({ cwd, epicId, tabId }) {
         });
         for (const s of res?.skipped || []) {
           if (s.reason !== 'still being written') console.error('[pty] artifact not ingested', s.path, s.reason);
+        }
+        if (res && Array.isArray(res.published) && res.published.length > 0) {
+          try {
+            await artifactNotice.postArtifactReadyNotice({ cwd, epicId, entries: res.published });
+          } catch (err) {
+            console.error('[pty] artifact-ready notice failed', tabId, err?.message ?? err);
+          }
         }
       } catch (err) {
         console.error('[pty] artifact ingest failed', tabId, err?.message ?? err);

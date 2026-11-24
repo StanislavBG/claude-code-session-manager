@@ -168,3 +168,63 @@ test('a non-Epic terminal never starts a sweep', async () => {
   await flush();
   expect(ingest).not.toHaveBeenCalled();
 });
+
+test('an interval sweep that publishes posts one artifact-ready notice; an empty sweep posts none', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const artifactNotice = require('../lib/epic/artifactNotice.cjs');
+  const cwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-epic-notice-'));
+  const tabId = 'epic-terminal-session-4';
+  writeEpic(cwd, { epicId: 'epic-t4', claudeSessionId: tabId });
+  const published = [{ storedPath: path.join(cwd, 'a.png'), entry: { title: 'a.png', kind: 'image', size: 3 } }];
+  const ingest = vi.spyOn(artifactStore, 'ingestDir')
+    .mockResolvedValueOnce({ published, skipped: [] })
+    .mockResolvedValue({ published: [], skipped: [] });
+  const notice = vi.spyOn(artifactNotice, 'postArtifactReadyNotice').mockResolvedValue({ ok: true });
+  const holder = {};
+  nodePty.spawn = () => fakeProc(holder);
+
+  manager.spawn({ tabId, cwd, cols: 80, rows: 24 });
+  await vi.advanceTimersByTimeAsync(15_000);
+  await flush();
+  expect(ingest).toHaveBeenCalledTimes(1);
+  expect(notice).toHaveBeenCalledTimes(1);
+  expect(notice).toHaveBeenLastCalledWith({ cwd, epicId: 'epic-t4', entries: published });
+
+  // Empty sweep: no notice.
+  await vi.advanceTimersByTimeAsync(15_000);
+  await flush();
+  expect(ingest).toHaveBeenCalledTimes(2);
+  expect(notice).toHaveBeenCalledTimes(1);
+
+  // Empty exit sweep: no notice.
+  holder.exit({ exitCode: 0, signal: undefined });
+  await flush();
+  expect(ingest).toHaveBeenCalledTimes(3);
+  expect(notice).toHaveBeenCalledTimes(1);
+});
+
+test('the exit sweep posts one notice when it publishes; a notice failure is logged, never thrown', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const artifactNotice = require('../lib/epic/artifactNotice.cjs');
+  const cwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-epic-notice-exit-'));
+  const tabId = 'epic-terminal-session-5';
+  writeEpic(cwd, { epicId: 'epic-t5', claudeSessionId: tabId });
+  const published = [
+    { storedPath: path.join(cwd, 'b.txt'), entry: { title: 'b.txt', kind: 'text', size: 1 } },
+    { storedPath: path.join(cwd, 'c.txt'), entry: { title: 'c.txt', kind: 'text', size: 2 } },
+  ];
+  vi.spyOn(artifactStore, 'ingestDir').mockResolvedValue({ published, skipped: [] });
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const notice = vi.spyOn(artifactNotice, 'postArtifactReadyNotice').mockRejectedValue(new Error('notice boom'));
+  const holder = {};
+  nodePty.spawn = () => fakeProc(holder);
+
+  manager.spawn({ tabId, cwd, cols: 80, rows: 24 });
+  expect(() => holder.exit({ exitCode: 0, signal: undefined })).not.toThrow();
+  await flush();
+  await flush();
+  expect(notice).toHaveBeenCalledTimes(1);
+  expect(notice).toHaveBeenLastCalledWith({ cwd, epicId: 'epic-t5', entries: published });
+  expect(err.mock.calls.some((c) => String(c[0]).includes('[pty] artifact-ready notice failed'))).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+});

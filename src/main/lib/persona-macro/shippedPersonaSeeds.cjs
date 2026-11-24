@@ -219,6 +219,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         "tools": "Read, Grep, Glob, Bash, Edit, Write"
       }
     },
+    {
+      commit: "followup-commit-trailers",
+      bodySha256: "ca65b05026e3d9f603c5a6efeb0d456686d4413089080ad7596cb9f051162646",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        effort: "medium",
+        executorOnly: "true",
+        model: "sonnet",
+        title: "Engineering — Software Engineer",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
   ],
   "project-home-builder": [
     // Not from src/seed git history: this body was written to ~/.claude/agents by this repo's own
@@ -449,6 +461,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
     {
       commit: "validator-self-review-only",
       bodySha256: "8177df9ecd027d28ad91f353fd1786076515fcc187d6ce98178af3b5047835c4",
+      fm: {
+        description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD as checked JSON (the CLI enforces the schema). Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
+        executorOnly: "true",
+        model: "sonnet",
+        title: "Engineering — Plan Validator",
+        tools: "Read, Grep, Glob, Bash",
+      },
+    },
+    {
+      commit: "validator-reads-followup-trailers",
+      bodySha256: "55c48dee7ee34391b369abb2998c4be5008738f9df5e803623e38ade0de03977",
       fm: {
         description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD as checked JSON (the CLI enforces the schema). Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
         executorOnly: "true",

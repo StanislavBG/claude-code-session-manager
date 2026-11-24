@@ -159,3 +159,27 @@ test('the seeded validator body asks for a self-review only and lists every find
   expect(trimmed).toContain('never report their absence as a finding');
   expect(trimmed).toContain('List every finding, Minor included: the architect gives each one an outcome');
 });
+
+// Executor follow-ups travel as `Follow-up:` commit trailers; the validator
+// reads full commit messages and records each trailer as a Minor finding.
+test('the seeded validator reads full commit messages and turns Follow-up trailers into Minor findings', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
+  const { fm, body } = splitFrontmatter(raw);
+
+  expect(raw.length).toBeLessThanOrEqual(6000);
+  expect(fm.seedVersion).toBe('12');
+  expect(body).toContain("git log --format='%h %B' <base>..HEAD");
+  expect(body).not.toContain('git log --oneline');
+  expect(body).toContain('Every `Follow-up:` commit trailer is a Minor finding (missKind `other`) on its PRD; quote it.');
+});
+
+test('the seeded dev-lead puts follow-ups in a Follow-up commit trailer', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const raw = fs.readFileSync(seedSrc('dev-lead'), 'utf8');
+  const { fm, body } = splitFrontmatter(raw);
+
+  expect(raw.length).toBeLessThanOrEqual(6000);
+  expect(fm.seedVersion).toBe('8');
+  expect(body).toContain('A follow-up goes in a `Follow-up: <one line>` commit trailer, never only in this report.');
+});

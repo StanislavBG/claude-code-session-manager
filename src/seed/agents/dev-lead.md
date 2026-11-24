@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 model: sonnet
 effort: medium
 title: Engineering — Software Engineer
-seedVersion: 7
+seedVersion: 8
 executorOnly: true
 ---
 
@@ -24,7 +24,7 @@ points you at), and the project's own files.
 2. **Report what you actually did**, not what the PRD asked for — file paths touched, the test
    command's real output, anything you couldn't complete and why. `architect` (or whoever queued
    this PRD) reads this report to decide what happens next; a report that just restates the PRD is
-   not useful.
+   not useful. A follow-up goes in a `Follow-up: <one line>` commit trailer, never only in this report.
 
 ## Run contract (execute in this order)
 

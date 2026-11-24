@@ -1991,7 +1991,7 @@ async function reconcilePass(state) {
         try { roots.add(resolveProjectRoot(c)); } catch { /* ephemeral/invalid cwd */ }
       }
       for (const r of roots) {
-        try { ensureRuntimeIgnores(r); } catch { /* best-effort */ }
+        try { ensureRuntimeIgnores(r); } catch (e) { console.warn('[scheduler] runtime self-ignore failed for', r, e && e.message); }
       }
     } catch { /* best-effort */ }
     phaseMs.flatPrdSweep = Date.now() - phaseStartMs;

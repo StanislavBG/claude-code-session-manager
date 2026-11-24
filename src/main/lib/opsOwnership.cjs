@@ -211,6 +211,9 @@ function checkOpsWrite(absPath, writer) {
 
   const owner = OWNERS[namespace];
   if (!owner) {
+    // An owner-less namespace (e.g. feedback/) accepts only its declared
+    // DELEGATIONS entries — the runtime self-ignore among them.
+    if (writer && isDelegated(namespace, relative, writer)) return { ok: true, error: null };
     return {
       ok: false,
       error:
@@ -371,34 +374,82 @@ function opsPath(cwd, ...segments) {
 }
 
 /**
- * ensureRuntimeIgnores(projectRoot) → string[] of `.gitignore` paths written.
- * For each runtime namespace dir that already exists under the project's ops
- * root and has no `.gitignore`, write one containing `*` (which also ignores
- * itself). Never creates a namespace dir, never runs git. Idempotent.
+ * ensureRuntimeIgnore(projectRoot, ns) → the `.gitignore` path written, or null.
+ * When `<projectRoot>/session-manager-operations/<ns>/` is a directory with no
+ * `.gitignore` file, write one containing `*` (which also ignores itself).
+ * Null when the file already exists or the namespace dir is absent. Throws on
+ * a non-runtime `ns`, an ownership refusal, or an IO error (including a
+ * non-file sitting at the `.gitignore` path). Never creates the namespace dir.
  * `projectRoot` must already be resolved (resolveProjectRoot/projectRootOf).
  */
-function ensureRuntimeIgnores(projectRoot) {
-  const { writeTextAtomicSync } = require('./util/atomicFs.cjs');
-  const opsRoot = path.join(projectRoot, OPS_ROOT_DIR);
-  const written = [];
-  for (const ns of RUNTIME_NAMESPACES) {
-    const dir = path.join(opsRoot, ns);
-    let isDir = false;
-    try { isDir = fs.statSync(dir).isDirectory(); } catch { /* absent */ }
-    if (!isDir) continue;
-    const file = path.join(dir, '.gitignore');
-    if (fs.existsSync(file)) continue;
-    const verdict = checkOpsWrite(file, RUNTIME_IGNORE_WRITER);
-    if (!verdict.ok) throw new Error(verdict.error);
-    writeTextAtomicSync(file, '*\n');
-    written.push(file);
+function ensureRuntimeIgnore(projectRoot, ns) {
+  if (!RUNTIME_NAMESPACES.includes(ns)) {
+    throw new Error(`'${ns}' is not a runtime namespace (RUNTIME_NAMESPACES in lib/opsOwnership.cjs)`);
   }
+  const dir = path.join(projectRoot, OPS_ROOT_DIR, ns);
+  let isDir = false;
+  try { isDir = fs.statSync(dir).isDirectory(); } catch { /* absent */ }
+  if (!isDir) return null;
+  const file = path.join(dir, '.gitignore');
+  let st = null;
+  try { st = fs.statSync(file); } catch { /* absent */ }
+  if (st && st.isFile()) return null;
+  const verdict = checkOpsWrite(file, RUNTIME_IGNORE_WRITER);
+  if (!verdict.ok) throw new Error(verdict.error);
+  const { writeTextAtomicSync } = require('./util/atomicFs.cjs');
+  writeTextAtomicSync(file, '*\n');
+  return file;
+}
+
+/**
+ * ensureRuntimeIgnoreForPath(absPath) → the `.gitignore` path written, or null.
+ * For a path inside a RUNTIME namespace of an ops root (innermost
+ * session-manager-operations segment, same rule as parseOpsPath), create the
+ * namespace dir if missing and self-ignore it. Null for a path outside any ops
+ * root, in an authored namespace, or that IS the namespace `.gitignore`.
+ * Throws on refusal or IO error.
+ */
+function ensureRuntimeIgnoreForPath(absPath) {
+  if (!absPath || typeof absPath !== 'string') return null;
+  const resolved = path.resolve(absPath);
+  const segs = resolved.split(path.sep);
+  const idx = segs.lastIndexOf(OPS_ROOT_DIR);
+  if (idx === -1) return null;
+  const ns = segs[idx + 1];
+  if (!ns || !RUNTIME_NAMESPACES.includes(ns)) return null;
+  const rest = segs.slice(idx + 2).filter(Boolean);
+  if (rest.length === 1 && rest[0] === '.gitignore') return null;
+  const projectRoot = segs.slice(0, idx).join(path.sep) || path.sep;
+  fs.mkdirSync(path.join(projectRoot, OPS_ROOT_DIR, ns), { recursive: true });
+  return ensureRuntimeIgnore(projectRoot, ns);
+}
+
+/**
+ * ensureRuntimeIgnores(projectRoot) → string[] of `.gitignore` paths written.
+ * ensureRuntimeIgnore for every runtime namespace, each isolated: one
+ * namespace's failure never stops the others. After the loop, throws one
+ * Error naming every failed namespace and its reason. Idempotent.
+ */
+function ensureRuntimeIgnores(projectRoot) {
+  const written = [];
+  const failures = [];
+  for (const ns of RUNTIME_NAMESPACES) {
+    try {
+      const file = ensureRuntimeIgnore(projectRoot, ns);
+      if (file) written.push(file);
+    } catch (e) {
+      failures.push(`${ns}: ${(e && e.message) || String(e)}`);
+    }
+  }
+  if (failures.length) throw new Error(`runtime self-ignore failed: ${failures.join('; ')}`);
   return written;
 }
 
 module.exports = {
   RUNTIME_NAMESPACES,
   RUNTIME_IGNORE_WRITER,
+  ensureRuntimeIgnore,
+  ensureRuntimeIgnoreForPath,
   ensureRuntimeIgnores,
   OPS_ROOT_DIR,
   OWNERS,

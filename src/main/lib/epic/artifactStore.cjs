@@ -3,7 +3,10 @@
 /**
  * artifactStore.cjs — the per-project Artifacts store. THE ONLY WRITER of a
  * project's `session-manager-operations/artifacts/` namespace (writer id
- * 'artifacts' in lib/opsOwnership.cjs; runtime, self-ignored).
+ * 'artifacts' in lib/opsOwnership.cjs; runtime). The store writes its own
+ * artifacts/.gitignore ('*') on every write, inside the owner lock and before
+ * any byte is copied (publishArtifact fails closed if it cannot) — it never
+ * relies on the scheduler's periodic ensureRuntimeIgnores sweep.
  *
  * Files an agent makes for human review (videos, images, docs, data) are
  * copied out of the job/Epic worktree into the MAIN project's ops root so they
@@ -31,7 +34,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { opsPath, checkOpsWrite, assertOpsWrite } = require('../opsOwnership.cjs');
+const { opsPath, checkOpsWrite, assertOpsWrite, ensureRuntimeIgnore } = require('../opsOwnership.cjs');
 const { writeJsonAtomic, readJsonOrSync } = require('../util/atomicFs.cjs');
 
 const NAMESPACE = 'artifacts';
@@ -204,6 +207,12 @@ async function publishArtifact({
 
     return await withLock(destDir, async () => {
       fs.mkdirSync(destDir, { recursive: true });
+      // Self-ignore BEFORE any byte lands: never rely on a later sweep. Fail closed.
+      try {
+        ensureRuntimeIgnore(resolvedRoot, NAMESPACE);
+      } catch (e) {
+        return { ok: false, error: `could not write artifacts/.gitignore: ${errMsg(e)}` };
+      }
       const name = freeName(destDir, safeName(path.basename(srcPath)));
       const dest = path.join(destDir, name);
       const verdict = checkOpsWrite(dest, WRITER);

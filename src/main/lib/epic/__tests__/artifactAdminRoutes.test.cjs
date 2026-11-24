@@ -244,3 +244,16 @@ test('a successful Epic publish posts one artifact-ready notice with that entry;
   expect(refused.json.error).toBe('outside_root');
   expect(noticeCalls).toHaveLength(0);
 });
+
+test('publish into a fresh git repo project returns ok and its storedPath is git-ignored', async () => {
+  const { execFileSync } = require('node:child_process');
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  const src = path.join(allowedTmp, 'demo.mp4');
+  fs.writeFileSync(src, 'video-bytes');
+  const r = await publish({ path: src, originClaudeSessionId: SESSION });
+  expect(r.status).toBe(200);
+  expect(r.json.ok).toBe(true);
+  let ignored = true;
+  try { execFileSync('git', ['check-ignore', '-q', r.json.storedPath], { cwd: root }); } catch { ignored = false; }
+  expect(ignored).toBe(true);
+});

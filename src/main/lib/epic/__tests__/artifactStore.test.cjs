@@ -385,3 +385,63 @@ test('publishArtifact and ingestDir ignore an fsImpl option: writes land on the 
   expect(ledger.entries.map((e) => e.name).sort()).toEqual(['seam-ingest.txt', 'seam-pub.txt']);
   expect(accesses).toEqual([]);
 });
+
+// ── Self-ignore: the store writes its own artifacts/.gitignore on every write ──
+const { execFileSync } = require('node:child_process');
+const gitInit = () => execFileSync('git', ['init', '-q'], { cwd: root });
+const gitIgnored = (p) => {
+  try { execFileSync('git', ['check-ignore', '-q', p], { cwd: root }); return true; } catch { return false; }
+};
+const porcelainUnderArtifacts = () => execFileSync('git', ['status', '--porcelain', '-uall'], { cwd: root, encoding: 'utf8' })
+  .split('\n').filter((l) => l.includes('session-manager-operations/artifacts/'));
+
+test('publish into a fresh git repo writes artifacts/.gitignore and the stored file is git-ignored', async () => {
+  gitInit();
+  expect(fs.existsSync(ns())).toBe(false);
+  const res = await pub({ srcPath: mk('demo.mp4', 'video-bytes') });
+  expect(res.ok).toBe(true);
+  expect(fs.readFileSync(path.join(ns(), '.gitignore'), 'utf8')).toContain('*');
+  expect(porcelainUnderArtifacts()).toEqual([]);
+  expect(gitIgnored(res.storedPath)).toBe(true);
+});
+
+test('a deleted artifacts/.gitignore comes back on the next publish', async () => {
+  gitInit();
+  expect((await pub({ srcPath: mk('one.txt', '1') })).ok).toBe(true);
+  fs.rmSync(path.join(ns(), '.gitignore'));
+  const res = await pub({ srcPath: mk('two.txt', '2') });
+  expect(res.ok).toBe(true);
+  expect(fs.readFileSync(path.join(ns(), '.gitignore'), 'utf8')).toContain('*');
+  expect(gitIgnored(res.storedPath)).toBe(true);
+  expect(porcelainUnderArtifacts()).toEqual([]);
+});
+
+test('an existing artifacts/.gitignore with other content is left byte-for-byte unchanged', async () => {
+  fs.mkdirSync(ns(), { recursive: true });
+  const custom = '# custom\n*.mp4\n!keep.txt\n';
+  fs.writeFileSync(path.join(ns(), '.gitignore'), custom);
+  const res = await pub({ srcPath: mk('demo.mp4', 'v') });
+  expect(res.ok).toBe(true);
+  expect(fs.readFileSync(path.join(ns(), '.gitignore'), 'utf8')).toBe(custom);
+});
+
+test('publish fails closed when artifacts/.gitignore cannot be written: no file, no ledger entry', async () => {
+  fs.mkdirSync(path.join(ns(), '.gitignore'), { recursive: true }); // a directory blocks the write
+  const res = await pub({ srcPath: mk('demo.mp4', 'v') });
+  expect(res.ok).toBe(false);
+  expect(res.error.startsWith('could not write artifacts/.gitignore:')).toBe(true);
+  const owner = path.join(ns(), EPIC);
+  const left = fs.existsSync(owner) ? fs.readdirSync(owner) : [];
+  expect(left).toEqual([]);
+  expect(fs.existsSync(path.join(owner, 'index.json'))).toBe(false);
+});
+
+test('ingestDir into a fresh git repo stores files git check-ignore matches', async () => {
+  gitInit();
+  const staging = store.stagingDirFor({ runId: 'run-ign' });
+  fs.writeFileSync(path.join(staging, 'clip.mp4'), 'c');
+  const res = await store.ingestDir({ projectRoot: root, epicId: EPIC, srcDir: staging });
+  expect(res.published).toHaveLength(1);
+  expect(gitIgnored(res.published[0].storedPath)).toBe(true);
+  expect(porcelainUnderArtifacts()).toEqual([]);
+});

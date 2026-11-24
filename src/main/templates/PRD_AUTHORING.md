@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v25 -->
+<!-- PRD_AUTHORING.md v26 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -252,4 +252,5 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§6 Preflight:** a PRD whose work needs an external state a person controls declares a read-only `preflight` (exit 0 = precondition holds); every other PRD omits it.
 - [ ] **No interactive AC:** no criterion asks to launch the app, click through, capture a screenshot, run under xvfb or open a browser. Why: a headless run stalls on a rendered frame and is SIGTERM'd uncommitted; recommend manual visual confirmation in the report instead.
 - [ ] **Contract consumers gated:** a PRD that changes a return shape, IPC payload or remote contract greps `tests/` (and `src/**/__tests__`) for every spec using it and puts each in its gate and files. Why: scoped gates let other specs go red unseen until the release gate.
+- [ ] **Doc links gated:** a PRD that adds, moves or renames a markdown file runs the project's doc-link check in its gate when the project has one (in session-manager: `timeout 120 npm run lint:docs`). Why: PRD kit-cast-playbook added `src/main/lib/demo-video-kit/cast.md` with only the kit tests in its gate, so the orphan doc landed on 2026-11-23 and turned lint:docs red for the next PRD.
 - [ ] **Gate purity:** a gate command must not create or modify tracked files; outputs go to the per-gate TMPDIR or a gitignored path. Why: a dirtied tree fails the clean-tree check.

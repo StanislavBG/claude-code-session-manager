@@ -38,18 +38,16 @@ const OUTPUT_TAIL = 4000;
 /** @type {Map<string, Promise<any>>} key -> in-flight preview */
 const inFlight = new Map();
 
-function canonical(v) {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
-  if (v && typeof v === 'object') {
-    return `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(v === undefined ? null : v);
-}
-
-/** sha256 hex of voiceId, text, canonical resolved voice JSON and the approval pin. */
-function previewKey({ voiceId, text, voice, pin }) {
+/**
+ * sha256 hex of voiceId, text, canonical resolved voice JSON, the approval pin
+ * and — for a project-scope voice only — the resolved projectRoot: two projects
+ * may define the same project voice id + JSON over different scripts, so their
+ * clips must not share a key; machine and built-in voices stay shared.
+ */
+function previewKey({ voiceId, text, voice, pin, scope, projectRoot }) {
+  const root = scope === 'project' && projectRoot ? path.resolve(String(projectRoot)) : undefined;
   return crypto.createHash('sha256')
-    .update(canonical({ voiceId: String(voiceId), text: String(text), voice: voice ?? null, pin: String(pin ?? '') }))
+    .update(voiceLibrary.canonical({ voiceId: String(voiceId), text: String(text), voice: voice ?? null, pin: String(pin ?? ''), projectRoot: root }))
     .digest('hex');
 }
 
@@ -180,7 +178,7 @@ async function previewVoice({ projectRoot, voiceId, text, timeoutMs } = /** @typ
   if (t.length < 1 || t.length > TEXT_MAX) return { ok: false, error: `text must be 1-${TEXT_MAX} chars after trimming` };
   const rv = voiceLibrary.resolveVoiceId(root, voiceId);
   if (!rv.ok) return { ok: false, error: rv.error };
-  const key = previewKey({ voiceId, text: t, voice: rv.voice, pin: voiceLibrary.pinOf(rv.entry, root) });
+  const key = previewKey({ voiceId, text: t, voice: rv.voice, pin: voiceLibrary.pinOf(rv.entry, root), scope: rv.scope, projectRoot: root });
   const wavPath = path.join(cacheDir(), `${key}.wav`);
   try {
     const bytes = fs.readFileSync(wavPath);

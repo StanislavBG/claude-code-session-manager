@@ -103,7 +103,7 @@ test('changing the voice params changes the key and never serves the stale clip'
   const resolved = () => {
     const vl = require('../../demo-video-kit/voiceLibrary.cjs');
     const rv = vl.resolveVoiceId(project, 'pip');
-    return vp.previewKey({ voiceId: 'pip', text: 'hi', voice: rv.voice, pin: vl.pinOf(rv.entry, project) });
+    return vp.previewKey({ voiceId: 'pip', text: 'hi', voice: rv.voice, pin: vl.pinOf(rv.entry, project), scope: rv.scope, projectRoot: project });
   };
   const k1 = resolved();
   const a = await vp.previewVoice({ projectRoot: project, voiceId: 'pip', text: 'hi' });
@@ -121,6 +121,42 @@ test('changing the voice params changes the key and never serves the stale clip'
     .not.toBe(vp.previewKey({ voiceId: 'pip', text: 'ho', voice: {}, pin: 'p' }));
   expect(vp.previewKey({ voiceId: 'pip', text: 'hi', voice: { a: 1, b: 2 }, pin: 'p' }))
     .toBe(vp.previewKey({ voiceId: 'pip', text: 'hi', voice: { b: 2, a: 1 }, pin: 'p' }));
+});
+
+test('a project voice key includes projectRoot; a built-in voice key is shared across roots', () => {
+  const vl = require('../../demo-video-kit/voiceLibrary.cjs');
+  const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-voicepreview-other-'));
+  tmp.push(otherRoot);
+  // the same project voice id + voice JSON in two project roots
+  const dir = path.join(otherRoot, '.claude', 'voices');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(path.join(project, '.claude', 'voices', 'pip.json'), path.join(dir, 'pip.json'));
+  const keyIn = (root, id) => {
+    const rv = vl.resolveVoiceId(root, id);
+    expect(rv.ok, rv.error).toBe(true);
+    return { rv, key: vp.previewKey({ voiceId: id, text: 'hi', voice: rv.voice, pin: vl.pinOf(rv.entry, root), scope: rv.scope, projectRoot: root }) };
+  };
+  const a = keyIn(project, 'pip');
+  const b = keyIn(otherRoot, 'pip');
+  expect(a.rv.scope).toBe('project');
+  expect(a.rv.voice).toEqual(b.rv.voice);
+  expect(a.key).not.toBe(b.key);
+  // a built-in voice keeps one key across project roots
+  const builtin = vl.listVoices(project).voices.find((v) => v.scope === 'builtin');
+  expect(builtin).toBeTruthy();
+  const c = keyIn(project, builtin.id);
+  const d = keyIn(otherRoot, builtin.id);
+  expect(c.rv.scope).toBe('builtin');
+  expect(c.key).toBe(d.key);
+  // machine scope is shared too
+  expect(vp.previewKey({ voiceId: 'm', text: 'hi', voice: {}, pin: 'p', scope: 'machine', projectRoot: project }))
+    .toBe(vp.previewKey({ voiceId: 'm', text: 'hi', voice: {}, pin: 'p', scope: 'machine', projectRoot: otherRoot }));
+});
+
+test('voicePreview uses voiceLibrary.canonical, not a copy of its own', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'voicePreview.cjs'), 'utf8');
+  expect(src).not.toMatch(/function canonical\(/);
+  expect(src).toMatch(/voiceLibrary\.canonical\(/);
 });
 
 test('concurrent calls with the same key share one in-flight run', async () => {

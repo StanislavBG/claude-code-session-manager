@@ -8,12 +8,17 @@
 
 'use strict';
 
-import { test, expect, beforeEach } from 'vitest';
+import { test, expect, beforeEach, afterAll } from 'vitest';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { Readable } = require('node:stream');
 
-const { registerAdminRoute, wavSeconds, _resetPending } = require('../voiceAdminRoutes.cjs');
+const { registerAdminRoute, _resetPending } = require('../voiceAdminRoutes.cjs');
 
 const ROOT = '/tmp/proj';
+const CLIPS = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-voiceadmin-'));
+afterAll(() => fs.rmSync(CLIPS, { recursive: true, force: true }));
 
 function wav(seconds, rate = 8000) {
   const dataBytes = Math.round(seconds * rate * 2);
@@ -25,6 +30,13 @@ function wav(seconds, rate = 8000) {
   return b;
 }
 
+/** Write a real WAV of `seconds` and return its path (audioSeconds is read from the clip path). */
+function clip(name, seconds) {
+  const p = path.join(CLIPS, `${name}.wav`);
+  fs.writeFileSync(p, wav(seconds));
+  return p;
+}
+
 function makeDeps(over = {}) {
   const calls = { preview: [], list: [] };
   const deps = {
@@ -34,7 +46,7 @@ function makeDeps(over = {}) {
       resolveVoiceId: (_root, id) => (id === 'narrator' ? { ok: true } : { ok: false, error: `unknown voice '${id}'` }),
     },
     voiceLane: { laneSnapshot: () => ({ heavy: [{ voiceId: 'other', projectRoot: ROOT, position: 0 }, { voiceId: 'narrator', projectRoot: ROOT, position: 1 }], light: [] }) },
-    previewVoice: async (args) => { calls.preview.push(args); return { ok: true, cached: false, wavPath: '/cache/k.wav', bytes: wav(1.5) }; },
+    previewVoice: async (args) => { calls.preview.push(args); return { ok: true, cached: false, wavPath: clip('k15', 1.5) }; },
     waitMs: 1000,
     ...over,
   };
@@ -88,7 +100,8 @@ test('POST preview answers ready when previewVoice finishes within the wait', as
   const { routes, calls } = makeDeps();
   const res = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: '  Hello there.  ' });
   expect(res.status).toBe(200);
-  expect(res.body).toMatchObject({ ok: true, status: 'ready', cached: false, wavPath: '/cache/k.wav', audioSeconds: 1.5 });
+  expect(res.body).toMatchObject({ ok: true, status: 'ready', cached: false, audioSeconds: 1.5 });
+  expect(res.body.wavPath).toBe(path.join(CLIPS, 'k15.wav'));
   expect(Number.isFinite(res.body.wallMs)).toBe(true);
   expect(calls.preview).toEqual([{ projectRoot: ROOT, voiceId: 'narrator', text: 'Hello there.' }]);
 });
@@ -98,7 +111,7 @@ test('POST preview answers queued with the lane position, and a repeat call join
   const gate = new Promise((r) => { finish = r; });
   const { routes, calls } = makeDeps({
     waitMs: 40,
-    previewVoice: async (args) => { calls.preview.push(args); await gate; return { ok: true, cached: false, wavPath: '/cache/k.wav', bytes: wav(2) }; },
+    previewVoice: async (args) => { calls.preview.push(args); await gate; return { ok: true, cached: false, wavPath: clip('k2', 2) }; },
   });
   const first = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
   expect(first.status).toBe(200);
@@ -113,19 +126,19 @@ test('POST preview answers queued with the lane position, and a repeat call join
   await new Promise((r) => setTimeout(r, 5)); // let the third call reach the wait before the run ends
   finish();
   const third = await pendingThird;
-  expect(third.body).toMatchObject({ ok: true, status: 'ready', wavPath: '/cache/k.wav', audioSeconds: 2 });
+  expect(third.body).toMatchObject({ ok: true, status: 'ready', wavPath: path.join(CLIPS, 'k2.wav'), audioSeconds: 2 });
   expect(calls.preview).toHaveLength(1);
 });
 
 test('a repeat call after the run finished reads the cache through previewVoice', async () => {
   let n = 0;
   const { routes, calls } = makeDeps({
-    previewVoice: async (args) => { calls.preview.push(args); n += 1; return { ok: true, cached: n > 1, wavPath: '/cache/k.wav', bytes: wav(1) }; },
+    previewVoice: async (args) => { calls.preview.push(args); n += 1; return { ok: true, cached: n > 1, wavPath: clip('k1', 1) }; },
   });
   const a = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
   const b = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
   expect(a.body).toMatchObject({ status: 'ready', cached: false });
-  expect(b.body).toMatchObject({ status: 'ready', cached: true, wavPath: '/cache/k.wav', audioSeconds: 1 });
+  expect(b.body).toMatchObject({ status: 'ready', cached: true, wavPath: path.join(CLIPS, 'k1.wav'), audioSeconds: 1 });
 });
 
 test('queued position is null when the run has no lane ticket yet', async () => {
@@ -164,7 +177,7 @@ test('bad input answers 400 before any preview runs', async () => {
 
 test('a failed preview answers 500 with its error and the next call starts a new run', async () => {
   let n = 0;
-  const { routes } = makeDeps({ previewVoice: async () => { n += 1; return n === 1 ? { ok: false, error: 'speak CLI failed' } : { ok: true, cached: false, wavPath: '/c.wav', bytes: wav(1) }; } });
+  const { routes } = makeDeps({ previewVoice: async () => { n += 1; return n === 1 ? { ok: false, error: 'speak CLI failed' } : { ok: true, cached: false, wavPath: clip('c', 1) }; } });
   const a = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
   expect(a.status).toBe(500);
   expect(a.body).toEqual({ ok: false, error: 'speak CLI failed' });
@@ -172,7 +185,13 @@ test('a failed preview answers 500 with its error and the next call starts a new
   expect(b.body.status).toBe('ready');
 });
 
-test('wavSeconds reads PCM duration and rejects non-WAV bytes', () => {
-  expect(wavSeconds(wav(0.5))).toBe(0.5);
-  expect(wavSeconds(Buffer.from('nope'))).toBeNull();
+test('audioSeconds comes from character.cjs wavSeconds on the clip path; a non-WAV clip answers null', async () => {
+  const bad = path.join(CLIPS, 'bad.wav');
+  fs.writeFileSync(bad, 'nope');
+  const { routes } = makeDeps({ previewVoice: async () => ({ ok: true, cached: true, wavPath: bad, bytes: wav(3) }) });
+  const res = await post(routes, { cwd: ROOT, voiceId: 'narrator', text: 'Hi.' });
+  expect(res.body).toMatchObject({ status: 'ready', wavPath: bad, audioSeconds: null });
+  const src = fs.readFileSync(path.join(__dirname, '..', 'voiceAdminRoutes.cjs'), 'utf8');
+  expect(src).not.toMatch(/function wavSeconds\(/);
+  expect(src).toMatch(/require\('\.\.\/demo-video-kit\/character\.cjs'\)/);
 });

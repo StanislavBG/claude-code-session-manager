@@ -21,8 +21,8 @@
  * deps (tests): { resolveCwd, voiceLibrary, voiceLane, previewVoice, waitMs, now }.
  */
 
-const fs = require('node:fs');
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
+const { wavSeconds } = require('../demo-video-kit/character.cjs');
 
 const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const TEXT_MAX = 300;
@@ -43,26 +43,11 @@ function depsOf(deps) {
   };
 }
 
-/** Seconds of audio in a PCM WAV buffer (fmt byteRate + data size), else null. */
-function wavSeconds(bytes) {
-  try {
-    const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
-    if (b.length < 12 || b.toString('ascii', 0, 4) !== 'RIFF' || b.toString('ascii', 8, 12) !== 'WAVE') return null;
-    let off = 12;
-    let byteRate = 0;
-    while (off + 8 <= b.length) {
-      const id = b.toString('ascii', off, off + 4);
-      const size = b.readUInt32LE(off + 4);
-      if (id === 'fmt ' && off + 16 <= b.length) byteRate = b.readUInt32LE(off + 16);
-      if (id === 'data') {
-        if (!byteRate) return null;
-        const dataBytes = Math.min(size, b.length - off - 8);
-        return Math.round((dataBytes / byteRate) * 1000) / 1000;
-      }
-      off += 8 + size + (size % 2);
-    }
-  } catch { /* not a WAV */ }
-  return null;
+/** Seconds of audio in the clip at wavPath (character.cjs wavSeconds, 3 dp), else null. */
+function clipSeconds(wavPath) {
+  if (!wavPath) return null;
+  const s = wavSeconds(wavPath);
+  return s > 0 ? Math.round(s * 1000) / 1000 : null;
 }
 
 /** -> null when the preview body is acceptable, else the 400 reason. */
@@ -166,17 +151,13 @@ function previewHandler(deps) {
       sendJson(res, 500, { ok: false, error: (r && r.error) || 'voice preview failed' });
       return;
     }
-    let bytes = r.bytes;
-    if (!bytes && r.wavPath) {
-      try { bytes = fs.readFileSync(r.wavPath); } catch { bytes = null; }
-    }
     sendJson(res, 200, {
       ok: true,
       status: 'ready',
       cached: !!r.cached,
       wavPath: r.wavPath,
       wallMs: Math.max(0, endedAt - run.startedAt),
-      audioSeconds: bytes ? wavSeconds(bytes) : null,
+      audioSeconds: clipSeconds(r.wavPath),
     });
   };
 }
@@ -191,4 +172,4 @@ function _resetPending() {
   pending.clear();
 }
 
-module.exports = { registerAdminRoute, validatePreviewBody, wavSeconds, VOICE_ID_RE, TEXT_MAX, WAIT_MS, _resetPending };
+module.exports = { registerAdminRoute, validatePreviewBody, VOICE_ID_RE, TEXT_MAX, WAIT_MS, _resetPending };

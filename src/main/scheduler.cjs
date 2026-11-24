@@ -107,6 +107,8 @@ const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers, formatLoadGateDetail, measuredMemoryGate, formatMemoryGateDetail } = require('./lib/scheduler/loadGate.cjs');
 const jobMemoryStats = require('./lib/scheduler/jobMemoryStats.cjs');
 const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
+const epicEventLog = require('./lib/epic/epicEventLog.cjs');
+const { createJobToolUseEmitter } = require('./lib/toolUseClassify.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const { reniceLeftovers } = require('./lib/process/leftoverRenice.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -6338,6 +6340,19 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false, memoryMaxMb: scopePlan.memoryMaxMb, agentType: job.agentType || 'dev-lead' };
     const launchSpawn = scopePlan.spawn;
 
+    // Epic event log: job.tool_use per tool_use block in the job's stream-json
+    // log (summary only, ≤200 chars, secrets redacted). Polled alongside the
+    // other watchdogs (never fires), flushed once more on exit.
+    const toolUseEmitter = createJobToolUseEmitter({
+      job, logPath, appendEvent: epicEventLog.appendEpicEvent, logError: (msg) => console.error(msg),
+    });
+    const toolUseWatchdog = toolUseEmitter ? {
+      label: 'tool-use-events',
+      intervalMs: RESULT_TAIL_POLL_MS,
+      shouldFire() { try { toolUseEmitter.poll(); } catch { /* never throws */ } return false; },
+      action() {},
+    } : null;
+
     const { child } = withChildAndLog({
       fd,
       logPath,
@@ -6363,8 +6378,9 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           ...detachedSpawnOpts(),
         },
       },
-      watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog, budgetWatchdog],
+      watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog, budgetWatchdog, ...(toolUseWatchdog ? [toolUseWatchdog] : [])],
       onExit({ exitCode, signal, killedByWatchdog, error, spawnFailed, pid, safeLog: sl }) {
+        if (toolUseEmitter) { try { toolUseEmitter.flush(); } catch { /* never breaks the exit path */ } }
         const leaked = jobLeftovers.listJobSurvivors(job.slug, pid);
         const durationMs = Date.now() - startedAt;
         finalizeJobScope(scopeState, sl);

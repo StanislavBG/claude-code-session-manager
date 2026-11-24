@@ -43,7 +43,7 @@ const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins, assertNoCredentials } = require('./lib/process/cleanEnv.cjs');
 const { recordExchange, formatAskedResult } = require('./exchanges.cjs');
-const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
+const { classifyToolUse, humanMessageSummary } = require('./lib/toolUseClassify.cjs');
 const { extractJson } = require('./lib/util/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/scheduler/sessionSlots.cjs');
@@ -447,6 +447,20 @@ function recordAnswerIfOpen({ cwd, sessionId, prompt, origin }) {
   });
 }
 
+/**
+ * Append human.message { chars, excerpt } for a human-sent prompt on an Epic
+ * chat (sessionId = Epic id). Scheduler-originated and inbound-proposal
+ * prompts are automation, not human messages. Fire-and-forget; a failure is
+ * logged by appendChatEpicEvent, never thrown.
+ * @param {{ cwd?: string, sessionId: string, prompt: string, origin?: string }} args
+ */
+function recordHumanMessage({ cwd, sessionId, prompt, origin }) {
+  if (origin === 'scheduler' || origin === 'inbound-proposal') return null;
+  let summary;
+  try { summary = humanMessageSummary(prompt); } catch { return null; }
+  return appendChatEpicEvent(cwd, sessionId, { kind: 'human.message', source: 'chat', sessionId, ...summary });
+}
+
 // Indirection so tests can stub the spawn without launching claude.
 let executor = executeRun;
 function __setExecutor(fn) { executor = fn || executeRun; }
@@ -521,6 +535,11 @@ function run(opts) {
   }
   // A human prompt sent after a needs-input turn is that question's answer.
   if (!opts.silent) recordAnswerIfOpen(opts);
+  // Once per prompt: the held-for-worktree re-entry below carries the mark.
+  if (!opts.silent && !opts.humanMessageRecorded) {
+    recordHumanMessage(opts);
+    opts = { ...opts, humanMessageRecorded: true };
+  }
 
   // A New Epic's turn 1 races the fire-and-forget worktree mint: only when a mint is
   // actually in flight for this Epic, hold the submission (<=90s, never rejects) so the

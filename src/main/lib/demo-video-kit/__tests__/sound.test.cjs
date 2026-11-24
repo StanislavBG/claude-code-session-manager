@@ -300,7 +300,7 @@ fs.writeFileSync(out, buf);
           fs.writeFileSync(soundFile(root, 'hum'), 'not a wav');
           expect(go('hum')).toThrow(/^project bed 'hum' .* is not a RIFF WAV/);
           expect(go('loop', { projectRoot: root }, 'fail')).toThrow("project bed 'loop' command failed (exit 3): boom");
-          expect(go('loop', { projectRoot: root }, 'short')).toThrow("project bed 'loop' command wrote 2.000 s of audio; the mix needs 4.000 s");
+          expect(go('loop', { projectRoot: root }, 'short')).toThrow("project bed 'loop' command wrote 2.000 s of audio; the mix needs at least 3.950 s (4.000 s less the 0.05 s tolerance)");
           expect(go('loop', { projectRoot: root }, 'junk')).toThrow(/^project bed 'loop' command output .* is not a RIFF WAV/);
           expect(go('loop', { projectRoot: root }, 'none')).toThrow(/^project bed 'loop' command wrote no WAV to \/.*bed-loop\.wav$/);
           const prev = s.BED_COMMAND_LIMITS.timeoutMs;

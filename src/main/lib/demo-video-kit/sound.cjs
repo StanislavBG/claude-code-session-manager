@@ -396,7 +396,7 @@ function renderCommandBed({ name, command }, { dir, n, seed, projectRoot }) {
   if (reason) throw new Error(reason);
   const s = decodeMono(outWav, dir, 'bed');
   if (s.length < Math.round((n / SR - 0.05) * SR)) {
-    throw new Error(`${label} wrote ${(s.length / SR).toFixed(3)} s of audio; the mix needs ${lengthS} s`);
+    throw new Error(`${label} wrote ${(s.length / SR).toFixed(3)} s of audio; the mix needs at least ${(n / SR - 0.05).toFixed(3)} s (${lengthS} s less the 0.05 s tolerance)`);
   }
   if (s.length >= n) return s.subarray(0, n);
   const out = new Float32Array(n);

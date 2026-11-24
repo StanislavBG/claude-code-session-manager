@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 40 (cast.md and kind-tiktok.md: project sounds)', () => {
-  expect(KIT_VERSION).toBe('40');
+test('KIT_VERSION is bumped to 41 (sound.cjs short-bed error names its floor)', () => {
+  expect(KIT_VERSION).toBe('41');
 });
 
 test('the playbook path both personas name is where the kit installs it by default', () => {

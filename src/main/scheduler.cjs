@@ -100,6 +100,9 @@ const mainDepsRepairAt = new Map();
 const MAIN_DEPS_REPAIR_COOLDOWN_MS = 10 * 60_000;
 const { resolveBindingRateLimitReset } = require('./lib/claude/rateLimitWindow.cjs');
 const { isResetFresh, bindingWindow, usageWindows, degradedBudget, meterFailureBudget } = require('./lib/claude/usageCircuit.cjs');
+// The one rule for whether an automatic tick may dispatch (named apart from the
+// `utilizationHold` snapshot variable below).
+const autoDispatchHold = require('./scheduler/utilizationHold.cjs');
 const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/scheduler/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
@@ -2442,9 +2445,12 @@ let cachedUtilizationKnown = false;
 // Window list restored from scheduler-state.json — read by utilizationReading()
 // only while no payload is held (after a restart). Never updated per poll.
 let restoredUsageWindows = null;
-// Non-null while maybeLaunchWhenAvailable is holding the queue on the
-// utilization gate: { window, percent, threshold, resetsAt }. Snapshot-level.
+// Non-null while tickBody is holding automatic dispatch on the utilization
+// rule (autoDispatchHold): { window, percent, threshold, resetsAt }. Snapshot-level.
 let utilizationHold = null;
+// `${reason}|${window}|${percent}` of the hold last logged — the hold line is
+// written when the hold starts or changes, not on every 30 s tick.
+let lastAutoDispatchHoldKey = null;
 // ms timestamp of the last FRESH reset observation (see recordObservedReset)
 // — distinct from Date.now(), so persistSchedulerState never re-stamps a
 // stale cachedNextReset as "just observed" on every poll cycle.
@@ -2523,6 +2529,21 @@ function applyDegradedBudget() {
  * each call: every unscoped window of the held payload, else the list
  * restored from scheduler-state.json, else null.
  */
+/**
+ * The auto-dispatch hold in force right now for `config` (or DEFAULT_CONFIG's
+ * values where config omits them), read over every window of the last real
+ * reading. null = automatic ticks may dispatch.
+ */
+function currentAutoDispatchHold(config) {
+  const cfg = config || {};
+  return autoDispatchHold.evaluateAutoDispatchHold({
+    firePolicy: cfg.firePolicy ?? DEFAULT_CONFIG.firePolicy,
+    threshold: cfg.utilizationThreshold ?? DEFAULT_CONFIG.utilizationThreshold,
+    reading: utilizationReading(),
+    now: Date.now(),
+  });
+}
+
 function utilizationReading() {
   const windows = lastGoodUsagePayload
     ? usageWindows(lastGoodUsagePayload).map((w) => ({ window: w.name, percent: w.utilization, resetsAt: w.resets_at }))
@@ -9444,11 +9465,14 @@ function runReservationExpiryPass(jobs, now = Date.now()) {
   }
 }
 
-function tickQueue({ bypassLoadGate = false, lastResort = false } = {}) {
+// `human` is set only by the 'schedule:force-tick' and 'schedule:run-now' IPC
+// handlers (via runDueJobs): those ticks bypass the auto-dispatch hold. Every
+// automatic tick — the starvation watchdog included — honors it.
+function tickQueue({ bypassLoadGate = false, lastResort = false, human = false } = {}) {
   const budgetMs = tickWatchdogMs();
   const next = tickTail.then(() => {
     const gen = tickGeneration;
-    return withTimeout(() => tickBody(gen, { bypassLoadGate, lastResort }), budgetMs, () => {
+    return withTimeout(() => tickBody(gen, { bypassLoadGate, lastResort, human }), budgetMs, () => {
       tickGeneration++; // fence the abandoned body
       console.warn(`[scheduler] TICK WEDGED: tick body exceeded ${budgetMs}ms — resetting tick chain`);
       if (!tickWedgeLatched) {
@@ -9471,7 +9495,7 @@ function tickQueue({ bypassLoadGate = false, lastResort = false } = {}) {
 // The stale sentinel a fenced body returns: never recorded, never acted on.
 const STALE_TICK = Object.freeze({ fired: false, reason: 'stale-generation' });
 
-async function tickBody(gen, { bypassLoadGate, lastResort }) {
+async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
   const tickStartedAt = Date.now();
   // evaluate() only runs once slots and memory admit a batch, so the CPU sampler
   // needs every tick to keep a reference reading about a minute old.
@@ -9549,6 +9573,38 @@ async function tickBody(gen, { bypassLoadGate, lastResort }) {
     // second pool: the row count admitted this tick simply can't exceed the
     // degraded cap minus what's already running.
     runReservationExpiryPass(state.jobs, tickStartedAt);
+    // Auto-dispatch hold (scheduler/utilizationHold.cjs): every automatic
+    // tick — job finish, 30 s loop, freed slot, reaper, billing poll,
+    // watchdog, boot/resume runDueJobs — holds at or above the threshold on
+    // ANY live window of the last real reading, and under firePolicy
+    // 'manual'. Only a human Run now / Fire next batch now passes through.
+    {
+      const hold = currentAutoDispatchHold(state.config);
+      const nextHold = hold && hold.reason === 'utilization-held'
+        ? { window: hold.window, percent: hold.percent, threshold: hold.threshold, resetsAt: hold.resetsAt }
+        : null;
+      const holdKey = hold ? `${hold.reason}|${hold.window ?? ''}|${String(hold.percent)}` : null;
+      const holdChanged = holdKey !== lastAutoDispatchHoldKey;
+      utilizationHold = nextHold;
+      lastAutoDispatchHoldKey = holdKey;
+      if (hold) {
+        const pendingCount = state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug)).length;
+        if (human) {
+          console.log(`[scheduler] ${hold.reason}: ${hold.detail} — human run bypassed the hold`);
+        } else {
+          if (holdChanged) {
+            console.log(`[scheduler] ${hold.reason}: ${hold.detail} — holding ${pendingCount} pending job(s)`);
+            await broadcast();
+            if (stale()) return STALE_TICK;
+          }
+          loadGate.endHold();
+          return recordTick({ fired: false, reason: hold.reason, deferredCount: pendingCount }, { detail: hold.detail });
+        }
+      } else if (holdChanged) {
+        await broadcast();
+        if (stale()) return STALE_TICK;
+      }
+    }
     const freeSlots = degradedConcurrencyCapValue != null
       ? Math.max(0, Math.min(sessionSlots.availableFor('job'), degradedConcurrencyCapValue - runningSet.size))
       : sessionSlots.availableFor('job');
@@ -9805,7 +9861,7 @@ function forceTickOutcome(result) {
   }
 }
 
-async function runDueJobs({ bypassLoadGate = false } = {}) {
+async function runDueJobs({ bypassLoadGate = false, human = false } = {}) {
   const state = await readQueue();
   if (state.unreadable) {
     console.error('[scheduler] runDueJobs skipped: queue.json unreadable');
@@ -9816,31 +9872,21 @@ async function runDueJobs({ bypassLoadGate = false } = {}) {
     return { fired: false, reason: 'paused' };
   }
   cancelToken = { cancelled: false };
-  const result = await tickQueue({ bypassLoadGate });
+  const result = await tickQueue({ bypassLoadGate, human });
   await broadcast();
   return result;
 }
 
 // ---------- when-available launch logic ----------
 
+// The utilization hold lives in tickBody (autoDispatchHold), so this ticks
+// and the tick itself holds — the same rule for every automatic caller.
 async function maybeLaunchWhenAvailable(state) {
-  utilizationHold = null;
   if (state.config.firePolicy !== 'when-available') return;
   if (state.paused) return;
   const pending = state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug));
   if (pending.length === 0) return;
   if (cachedUtilization === null || cachedUtilization === undefined) return;
-  if (cachedUtilization >= state.config.utilizationThreshold) {
-    utilizationHold = {
-      window: cachedBindingWindowName,
-      percent: cachedUtilization,
-      threshold: state.config.utilizationThreshold,
-      resetsAt: cachedNextReset,
-    };
-    console.log(`[scheduler] when-available: utilization-held — ${cachedBindingWindowName ?? 'unknown'} window at ${cachedUtilization}% ≥ ${state.config.utilizationThreshold}%, resets ${cachedNextReset ?? 'unknown'}, ${pending.length} pending — holding, not ticking`);
-    await broadcast();
-    return;
-  }
   console.log(`[scheduler] when-available: util=${cachedUtilization}%, ${pending.length} pending, ${runningSet.size} running — ticking`);
   tickQueue().catch((e) => console.error('[scheduler] tickQueue error', e));
 }
@@ -9864,6 +9910,9 @@ async function runQueueStarvationWatchdog(state, {
   now = Date.now(), thresholdMs = starvation.QUEUE_STARVATION_MS,
   bootedAtMs = Date.parse(SCHEDULER_BOOTED_AT), pauseClearedAtMs = lastPauseClearedAt,
 } = {}) {
+  // Under the auto-dispatch hold an idle queue is the intended outcome, not
+  // starvation: no warning, no audit, no forced tick.
+  if (currentAutoDispatchHold(state?.config)) return null;
   // The idle clock is launch-keyed (dispatchIdleMs): NOT lastDispatchAttemptAt,
   // which tickQueue stamps before every gate — a queue whose 30 s loop ticks
   // and launches nothing would refresh it forever and the watchdog would
@@ -10028,7 +10077,7 @@ function rootBlockerPhrase(root) {
  * project_starved WARN + audit (each naming the root blocker), then the
  * bounded escalation. A known wait (starveRootFor) is skipped by both.
  */
-function reportStarvedProjects(starvedProjects, jobs = [], launchBlocks = {}) {
+function reportStarvedProjects(starvedProjects, jobs = [], launchBlocks = {}, config = undefined) {
   for (const sp of starvedProjects) {
     const { root, knownWait } = starveRootFor(projectRowsFor(jobs, sp.cwd), sp.oldestPendingSlug);
     if (knownWait) continue;
@@ -10047,10 +10096,12 @@ function reportStarvedProjects(starvedProjects, jobs = [], launchBlocks = {}) {
   // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
   // a subset of the rows already reported above — same verdict, no
   // re-derivation.
-  runStarveEscalationSweep(starvedProjects, jobs, launchBlocks);
+  runStarveEscalationSweep(starvedProjects, jobs, launchBlocks, config);
 }
 
-function runStarveEscalationSweep(starvedProjects, jobs = [], launchBlocks = {}) {
+function runStarveEscalationSweep(starvedProjects, jobs = [], launchBlocks = {}, config = undefined) {
+  // The auto-dispatch hold is why nothing dispatches — not a starve to escalate.
+  if (currentAutoDispatchHold(config)) return;
   const rootByCwd = new Map();
   const reportable = starvedProjects.filter((sp) => {
     const r = starveRootFor(projectRowsFor(jobs, sp.cwd), sp.oldestPendingSlug);
@@ -12454,7 +12505,7 @@ function registerScheduleHandlers() {
     // Clears any existing pause first (same semantics as run-now).
     await clearPause('run-now');
     try {
-      const result = await runDueJobs({ bypassLoadGate: true });
+      const result = await runDueJobs({ bypassLoadGate: true, human: true });
       return forceTickOutcome(result);
     } catch (e) {
       logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (force-tick)', meta: { error: e?.message } });
@@ -12548,7 +12599,7 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
-    runDueJobs({ bypassLoadGate: true }).catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (run-now)', meta: { error: e?.message } }));
+    runDueJobs({ bypassLoadGate: true, human: true }).catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (run-now)', meta: { error: e?.message } }));
     return { ok: true };
   });
 
@@ -12824,7 +12875,7 @@ function rescheduleIntervalTick() {
   // Escalation only, same shape as the quarantine/overrun warnings above.
   const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS, s.lastDispatchAtByCwd);
   // Each event names the root blocker; a known preflight wait is skipped.
-  reportStarvedProjects(starvedProjects, s.jobs, s.launchBlocks);
+  reportStarvedProjects(starvedProjects, s.jobs, s.launchBlocks, s.config);
 
   // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
   // escalation now narrowed to only the rows that auto-reset gave up on.

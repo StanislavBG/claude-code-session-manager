@@ -286,3 +286,56 @@ test('the watchdog latches: one forced tick / audit per starve episode, re-armed
     warn.mockRestore();
   }
 });
+
+test('under the auto-dispatch hold (tickBody owns it) the watchdog forces nothing and the escalation sweep stays quiet', async () => {
+  // A real reading at 96% weekly, reset 3 days out — the hold the tick applies.
+  const billing = require('../usage.cjs');
+  const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
+  const auditKinds = () => {
+    try {
+      return fs.readFileSync(auditLogPath(), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).kind);
+    } catch { return []; }
+  };
+  const originalFetchUsage = billing.fetchUsage;
+  const reading = (pct) => async () => ({
+    kind: 'ok',
+    data: { usage: { limits: [{ kind: 'weekly_all', percent: pct, scope: null, resets_at: new Date(Date.now() + 3 * 86_400_000).toISOString() }] } },
+  });
+  billing.fetchUsage = reading(96);
+  await scheduler.refreshNextReset();
+  const cwd = '/tmp/sm-starve-held-project';
+  const now = Date.now();
+  const state = {
+    config: { firePolicy: 'when-available', utilizationThreshold: 90 },
+    jobs: [{ slug: 'held-a', cwd, status: 'pending', dependsOn: [] }],
+    paused: null,
+    lastRunAt: new Date(now - 40 * 60_000).toISOString(),
+  };
+  const tickSpy = vi.spyOn(scheduler, 'tickQueue').mockResolvedValue({ fired: false, reason: 'drained' });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const sent = [];
+  scheduler.attachWindow({ isDestroyed: () => false, webContents: { isDestroyed: () => false, isCrashed: () => false, send: (ch) => sent.push(ch) } });
+  const before = auditKinds();
+  try {
+    expect(await scheduler.runQueueStarvationWatchdog(state, { now, bootedAtMs: now - 3 * 60 * 60_000 })).toBeNull();
+    expect(tickSpy).not.toHaveBeenCalled();
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('QUEUE STARVED'))).toBe(false);
+    scheduler.runStarveEscalationSweep(
+      [{ cwd, pendingCount: 1, oldestPendingSlug: 'held-a', ageMs: starvation.STARVE_ESCALATION_MS + 60_000 }],
+      state.jobs, {}, state.config,
+    );
+    expect(sent).not.toContain('schedule:stall');
+    const after = auditKinds().slice(before.length);
+    expect(after).not.toContain('queue_starvation_forced_tick');
+    expect(after).not.toContain('project_starve_escalated');
+  } finally {
+    scheduler.attachWindow(null);
+    tickSpy.mockRestore();
+    warn.mockRestore();
+    err.mockRestore();
+    billing.fetchUsage = reading(5);
+    await scheduler.refreshNextReset();
+    billing.fetchUsage = originalFetchUsage;
+  }
+});

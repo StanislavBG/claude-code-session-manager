@@ -78,14 +78,12 @@ test('(a) 429 with a 5-minute-old cache at 9% → not held, full pool (cap null)
   expect(scheduler.buildScheduleStatePayload(state()).utilizationHold).toBeNull();
 });
 
-test('(c) 429 with cache at 95% → held on the cached utilization', async () => {
+test('(c) 429 with cache at 95% → the tick holds on the cached utilization', async () => {
   const logs = await pollWith429({ cached: payload(95), staleSince: Date.now() - 60_000 });
   expect(logs.some((l) => l.includes('cached budget') && l.includes('cap=null'))).toBe(true);
-  const held = [];
-  const orig = console.log;
-  console.log = (...a) => { held.push(a.join(' ')); };
-  try { await scheduler.maybeLaunchWhenAvailable(state()); } finally { console.log = orig; }
-  expect(held.some((l) => l.includes('utilization-held') && l.includes('weekly_all'))).toBe(true);
+  // pollWith429's tickQueue() is the hold's owner (tickBody).
+  expect(logs.some((l) => l.includes('utilization-held') && l.includes('weekly_all'))).toBe(true);
+  expect((await scheduler.tickQueue()).reason).toBe('utilization-held');
   expect(scheduler.buildScheduleStatePayload(state()).utilizationHold).toMatchObject({ window: 'weekly_all', percent: 95 });
 });
 

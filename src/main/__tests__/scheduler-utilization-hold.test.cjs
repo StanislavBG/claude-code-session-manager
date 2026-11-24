@@ -1,7 +1,8 @@
 /**
- * scheduler-utilization-hold.test.cjs — the when-available gate holds on the
- * BINDING window and records a machine-readable hold (window/percent/
- * threshold/reset) on the snapshot; under threshold it dispatches.
+ * scheduler-utilization-hold.test.cjs — the tick (tickBody, the hold's owner)
+ * holds on a window over threshold and records a machine-readable hold
+ * (window/percent/threshold/reset) on the snapshot; under threshold it
+ * dispatches. maybeLaunchWhenAvailable only ticks.
  * Run: timeout 180 npx vitest run src/main/__tests__/scheduler-utilization-hold.test.cjs
  */
 'use strict';
@@ -36,15 +37,17 @@ afterAll(() => {
 
 afterEach(() => { billing.fetchUsage = originalFetchUsage; });
 
-const RESET = '2026-09-24T17:00:00Z';
+// Relative to now: a reset in the past no longer holds.
+const RESET = new Date(Date.now() + 3 * 86_400_000).toISOString();
+const SESSION_RESET = new Date(Date.now() + 2 * 3_600_000).toISOString();
 function usageWith(weeklyPct) {
   return {
     kind: 'ok',
     data: {
       usage: {
-        five_hour: { utilization: 10, resets_at: '2026-09-21T20:00:00Z' },
+        five_hour: { utilization: 10, resets_at: SESSION_RESET },
         limits: [
-          { kind: 'session', percent: 10, scope: null, resets_at: '2026-09-21T20:00:00Z' },
+          { kind: 'session', percent: 10, scope: null, resets_at: SESSION_RESET },
           { kind: 'weekly_all', percent: weeklyPct, scope: null, resets_at: RESET },
         ],
       },
@@ -62,18 +65,39 @@ function state() {
   };
 }
 
-test('holds (no tick) and records the hold when the binding weekly window is over threshold', async () => {
+test('the tick holds and records the hold when the weekly window is over threshold; the line logs once', async () => {
   billing.fetchUsage = async () => usageWith(91);
   await scheduler.refreshNextReset();
   const logs = [];
   const orig = console.log;
   console.log = (...a) => { logs.push(a.join(' ')); };
-  try { await scheduler.maybeLaunchWhenAvailable(state()); } finally { console.log = orig; }
+  let r1;
+  let r2;
+  try {
+    r1 = await scheduler.tickQueue();
+    r2 = await scheduler.tickQueue();
+  } finally { console.log = orig; }
+  expect(r1).toMatchObject({ fired: false, reason: 'utilization-held' });
+  expect(r2).toMatchObject({ fired: false, reason: 'utilization-held' });
   const payload = scheduler.buildScheduleStatePayload(state());
   expect(payload.utilizationHold).toEqual({ window: 'weekly_all', percent: 91, threshold: 90, resetsAt: RESET });
   expect(payload.utilizationWindow).toBe('weekly_all');
-  expect(logs.some((l) => l.includes('utilization-held') && l.includes('weekly_all'))).toBe(true);
-  expect(logs.some((l) => l.includes('— ticking'))).toBe(false);
+  // Written when the hold starts, not on every tick.
+  expect(logs.filter((l) => l.includes('utilization-held') && l.includes('weekly_all')).length).toBe(1);
+});
+
+test('maybeLaunchWhenAvailable no longer holds itself: it ticks and the tick holds', async () => {
+  billing.fetchUsage = async () => usageWith(91);
+  await scheduler.refreshNextReset();
+  const logs = [];
+  const orig = console.log;
+  console.log = (...a) => { logs.push(a.join(' ')); };
+  try {
+    await scheduler.maybeLaunchWhenAvailable(state());
+    await scheduler.tickQueue();
+  } finally { console.log = orig; }
+  expect(logs.some((l) => l.includes('— ticking'))).toBe(true);
+  expect(scheduler.buildScheduleStatePayload(state()).utilizationHold).toMatchObject({ window: 'weekly_all', percent: 91 });
 });
 
 test('ticks and clears the hold when the binding window is under threshold (weekly_all 64)', async () => {

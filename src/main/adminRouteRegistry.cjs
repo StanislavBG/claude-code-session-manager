@@ -19,6 +19,8 @@ function registerAppAdminRoutes(adminHttp, deps = {}) {
   require('./lib/feedback-remote/projectHomeAdminRoutes.cjs').registerAdminRoute(adminHttp);
   // GET /admin/voices + POST /admin/voices/preview — voice library reads for agents; no route changes a voice.
   require('./lib/project-pages/voiceAdminRoutes.cjs').registerAdminRoute(adminHttp);
+  // POST /admin/project-home/videos/script-switch — 'Scripts may run Demo Video', only on the human's verified words.
+  require('./lib/project-pages/videoScriptSwitchRoute.cjs').registerVideoScriptSwitchRoute(adminHttp);
   require('./lib/feedback-remote/macroAdminRoutes.cjs').registerAdminRoute(adminHttp, {
     onChanged: deps.onMacrosChanged,
     startExternalNewSession: chatRunner.startExternalNewSession,

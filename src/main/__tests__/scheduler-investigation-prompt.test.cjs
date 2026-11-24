@@ -23,7 +23,6 @@ function makeArgs(overrides = {}) {
     originalBody: 'Original PRD body.',
     logTail: 'some log tail output',
     fixPath: '/tmp/05-fix-my-feature.md',
-    group: 5,
     ...overrides,
   };
 }
@@ -117,7 +116,7 @@ test('prompt instructs that cwd must be the git repo root where the fix will lan
   assert.match(prompt, /needs_review/);
 });
 
-test('prompt frontmatter block still declares exactly the five expected keys', () => {
+test('prompt frontmatter block still declares exactly the four expected keys', () => {
   const prompt = buildInvestigationPrompt(makeArgs());
   const fenceMatch = prompt.match(/```\s*\n\s*---\n([\s\S]*?)\n\s*---\n\s*```/);
   assert.ok(fenceMatch, 'expected a fenced frontmatter block in the prompt');
@@ -125,7 +124,7 @@ test('prompt frontmatter block still declares exactly the five expected keys', (
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .map((line) => line.split(':')[0].trim());
-  assert.deepEqual(keys, ['title', 'cwd', 'parallelGroup', 'estimateMinutes', 'isFixPlan']);
+  assert.deepEqual(keys, ['title', 'cwd', 'estimateMinutes', 'isFixPlan']);
 });
 
 // ─── isGitRepoSync (scheduler.cjs) ─────────────────────────────────────────────
@@ -218,4 +217,18 @@ test('apart from fixPath and the ban line, no variant points a write at session-
       .split('\n').filter((l) => !l.includes(RECORD_BAN_MARKER)).join('\n');
     assert.doesNotMatch(rest, /session-manager-operations\/scheduler\//);
   }
+});
+
+test('fix-plan frontmatter template carries no retired parallelGroup key', () => {
+  const prompt = buildInvestigationPrompt(makeArgs());
+  assert.doesNotMatch(prompt, /parallelGroup/);
+  assert.match(prompt, /title: Fix: /);
+  assert.match(prompt, /cwd: \/home\/bilko\/Projects\/session-manager/);
+  assert.match(prompt, /estimateMinutes: /);
+  assert.match(prompt, /isFixPlan: true/);
+});
+
+test('prompt states the # Files format: one bare repo-relative path per line, notes go in Implementation notes', () => {
+  const prompt = buildInvestigationPrompt(makeArgs());
+  assert.ok(prompt.includes("List each file under `# Files` as `- <repo-relative path>` with nothing else on the line; put any note about a file in the Implementation notes, never on its path line."));
 });

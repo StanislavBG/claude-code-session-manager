@@ -6717,7 +6717,7 @@ function healTargetForFix(fixSlug, jobs) {
  * unit-tested (no spawn, no fs). Inputs are the already-resolved values that
  * spawnInvestigation computes.
  */
-function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild = null, recordPath = null, recordIgnored = true }) {
+function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, deadChild = null, recordPath = null, recordIgnored = true }) {
   const runtimePaths = RUNTIME_NAMESPACES.map((ns) => `session-manager-operations/${ns}/`).join(', ');
   const recordRule = (recordPath && !recordIgnored)
     ? `- The only allowed record location is ${recordPath}. If the fix plan asks for a record file, it must be exactly this path.
@@ -6833,7 +6833,6 @@ ${logTail}
    ---
    title: Fix: <short summary of the fix>
    cwd: ${cwd}
-   parallelGroup: ${group}
    estimateMinutes: <your time estimate>
    isFixPlan: true
    ---
@@ -6846,6 +6845,7 @@ ${logTail}
    not that repo (e.g. a scratch dir like \`/tmp\`), set \`cwd:\` to the correct repo root instead —
    the scheduler's commit guard and post-run verifier read git state from this path, and a
    non-repo cwd parks even a fully green, committed run in \`needs_review\`.
+   List each file under \`# Files\` as \`- <repo-relative path>\` with nothing else on the line; put any note about a file in the Implementation notes, never on its path line.
 6. The PRD body MUST be self-contained — \`claude -p\` runs it on a fresh Sonnet session with NO conversation context. Include:
    - Root-cause analysis (what went wrong and why)
    - Concrete fix steps (specific files / commands / edits)
@@ -7030,7 +7030,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // archived twin (archivedPrdPathForJob) is deliberately NOT used for the
   // write dir, only for reading originalBody below.
   let originalBody = '';
-  const { fixPath, fixSlug, group, livePrdDir } = await resolveFixPlanPath(failedJob);
+  const { fixPath, fixSlug, livePrdDir } = await resolveFixPlanPath(failedJob);
   try {
     const originalPath = livePrdDir ? path.join(livePrdDir, `${failedJob.slug}.md`) : prdPaths.archivedPrdPathForJob(failedJob);
     originalBody = (await parsePrd(originalPath)).body;
@@ -7084,7 +7084,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   } catch (err) {
     recordIgnored = !(err && err.code === 1);
   }
-  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild, recordPath, recordIgnored });
+  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, deadChild, recordPath, recordIgnored });
 
   // Phase 1: open log fd for pre-spawn diagnostics.
   const { fd, safeLog, closeFd } = openLog(investigationLogPath);

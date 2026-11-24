@@ -93,6 +93,8 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const crossProjectFeedback = require('./lib/feedback-remote/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
+// GET/POST /admin/scheduler/slots — read the slot cap; change it only on the human's verified words.
+require('./lib/scheduler/slotsRoute.cjs').registerSlotsRoute(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
 prdAdminRoutes.registerAdminRoute(adminHttp, scheduler.remote);
 projectHomeAdminRoutes.registerAdminRoute(adminHttp);

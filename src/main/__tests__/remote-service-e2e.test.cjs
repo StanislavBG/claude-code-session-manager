@@ -530,6 +530,14 @@ describe('paired service over the relay, end to end', () => {
     expect(got.ok).toBe(true)
     expect(got.epic.epicId).toBe(epicId)
 
+    // ── The ledger holds project + id: the same id asked under another project is refused, no route call. ──
+    const svcId = store.list()[0].serviceId
+    expect(store.hasOpened(svcId, toCwd, epicId)).toBe(true)
+    expect(store.hasOpened(svcId, homeCwd, epicId)).toBe(false)
+    const elsewhere = await sc.callTool('epic_get', { cwd: homeCwd, id: epicId }, { timeoutMs: 15000 })
+    expect(elsewhere.isError).toBe(true)
+    expect(parse(elsewhere)).toEqual({ ok: false, error: 'not found' })
+
     // ── macro_run is outside this service's scope: refused, audited, never invoked. ──
     const invokesBefore = invokeCalls.length
     const refused = await sc.callTool('macro_run', { cwd: toCwd, id: 'anything' }, { timeoutMs: 15000 }).then(

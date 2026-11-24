@@ -7,8 +7,9 @@
  * - service: a servicePairings public record ({ serviceId, homeCwd, scope, ... }).
  * - invoke(method, path, { body, query }) -> Promise<{ status, json }> — the
  *   localAdminHttp in-process route call. The only way this module acts.
- * - store: { recordOpened(serviceId, epicId), hasOpened(serviceId, epicId) } —
- *   the servicePairings ledger of Epics the service opened.
+ * - store: { recordOpened(serviceId, { cwd, epicId, externalRef? }),
+ *   hasOpened(serviceId, cwd, epicId) } — the servicePairings ledger of Epics
+ *   the service opened, keyed by project + id.
  *
  * Rules:
  * - tools/list and tools/call see only SERVICE_TOOLS named in service.scope;
@@ -16,11 +17,14 @@
  *   invoke is never called.
  * - feedback_open_session is pinned to the service's project: fromCwd missing
  *   -> service.homeCwd, a different fromCwd is refused; replyMode defaults to
- *   'event' (a service has no chat to wake). An ok answer's epicId — and
- *   macro_run's — goes into the ledger.
- * - epic_get answers the route's own 404 shape for any Epic not in the ledger,
- *   so a service cannot probe other Epics; events_read drops rows of Epics not
- *   in the ledger.
+ *   'event' (a service has no chat to wake). An ok answer's epicId goes into
+ *   the ledger under toCwd — and macro_run's under its cwd.
+ * - epic_get answers the route's own 404 shape for any (project, Epic) not in
+ *   the ledger — checked with the call's cwd, or the returned epic's cwd for
+ *   an id-only call — so a service cannot probe other Epics, nor the same id
+ *   in another project; events_read keeps epic_state_changed rows only for a
+ *   ledger (cwd, epicId) and epic_cross_project_reply rows only for a ledger
+ *   (fromCwd, fromEpicId).
  *
  * response is null for a notification (no id). audit is null for anything but
  * tools/call, else { tool, result } (result: 'ok' | 'error:<status>' |
@@ -84,27 +88,31 @@ async function callInvoke(invoke, req) {
   return { status: Number(answer?.status) || 500, json: answer?.json ?? null };
 }
 
-async function recordEpic(store, service, answer) {
+async function recordEpic(store, service, answer, cwd, externalRef) {
   const epicId = answer.json?.epicId;
   if (!isOk(answer) || typeof epicId !== 'string' || epicId === '') return null;
+  const ref = typeof answer.json?.externalRef === 'string' && answer.json.externalRef !== '' ? answer.json.externalRef : externalRef;
   try {
-    await store.recordOpened(service.serviceId, epicId);
+    await store.recordOpened(service.serviceId, { cwd, epicId, externalRef: typeof ref === 'string' && ref !== '' ? ref : undefined });
     return null;
   } catch (e) {
     return e?.message ?? String(e);
   }
 }
 
-function eventEpicId(row) {
+/** The (cwd, epicId) a kept event row must be in the ledger under, or null. */
+function eventEpicKey(row) {
   if (!isPlainObject(row)) return null;
-  if (row.kind === 'epic_state_changed') return typeof row.epicId === 'string' ? row.epicId : null;
-  if (row.kind === 'epic_cross_project_reply') return typeof row.fromEpicId === 'string' ? row.fromEpicId : null;
+  if (row.kind === 'epic_state_changed') return { cwd: row.cwd, epicId: row.epicId };
+  if (row.kind === 'epic_cross_project_reply') return { cwd: row.fromCwd, epicId: row.fromEpicId };
   return null;
 }
 
 /** Runs one granted tool. Returns { answer, result } (answer = { status, json }). */
 async function runTool(tool, args, { service, invoke, store }) {
-  const owns = (epicId) => typeof epicId === 'string' && epicId !== '' && store.hasOpened(service.serviceId, epicId) === true;
+  const owns = (cwd, epicId) => typeof cwd === 'string' && cwd !== ''
+    && typeof epicId === 'string' && epicId !== ''
+    && store.hasOpened(service.serviceId, cwd, epicId) === true;
 
   switch (tool.name) {
     case 'feedback_open_session': {
@@ -118,26 +126,36 @@ async function runTool(tool, args, { service, invoke, store }) {
       }
       if (pinned.replyMode === undefined || pinned.replyMode === null) pinned.replyMode = 'event';
       const answer = await callInvoke(invoke, tool.toRequest(pinned));
-      const ledgerError = await recordEpic(store, service, answer);
+      const ledgerError = await recordEpic(store, service, answer, pinned.toCwd, pinned.externalRef);
       return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}`, ledgerError };
     }
     case 'macro_run': {
       const answer = await callInvoke(invoke, tool.toRequest(args));
-      const ledgerError = await recordEpic(store, service, answer);
+      const ledgerError = await recordEpic(store, service, answer, args.cwd, args.externalRef);
       return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}`, ledgerError };
     }
     case 'epic_get': {
       const byId = typeof args.id === 'string' && args.id !== '';
-      // By id the ledger is checked first: no route call for someone else's Epic.
-      if (byId && !owns(args.id)) return { answer: NOT_FOUND, result: 'refused:ledger' };
+      const hasCwd = typeof args.cwd === 'string' && args.cwd !== '';
+      // By id + cwd the ledger is checked first: no route call for someone else's Epic.
+      if (byId && hasCwd && !owns(args.cwd, args.id)) return { answer: NOT_FOUND, result: 'refused:ledger' };
       const answer = await callInvoke(invoke, tool.toRequest(args));
-      if (isOk(answer) && !owns(answer.json?.epic?.epicId)) return { answer: NOT_FOUND, result: 'refused:ledger' };
+      if (isOk(answer)) {
+        const epic = answer.json?.epic;
+        const epicCwd = typeof epic?.cwd === 'string' && epic.cwd !== '' ? epic.cwd : null;
+        // The returned record must be owned under the call's cwd, and under its
+        // own cwd when it names one (an id-only call has only the latter).
+        const ownedHere = owns(hasCwd ? args.cwd : epicCwd, epic?.epicId);
+        const ownedThere = epicCwd === null || owns(epicCwd, epic?.epicId);
+        if (!ownedHere || !ownedThere) return { answer: NOT_FOUND, result: 'refused:ledger' };
+      }
       return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}` };
     }
     case 'events_read': {
+      const ownsEvent = (row) => { const k = eventEpicKey(row); return k !== null && owns(k.cwd, k.epicId); };
       const answer = await callInvoke(invoke, tool.toRequest(args));
       if (isOk(answer) && Array.isArray(answer.json.events)) {
-        const events = answer.json.events.filter((row) => EVENTS_READ_KINDS.includes(row?.kind) && owns(eventEpicId(row)));
+        const events = answer.json.events.filter((row) => EVENTS_READ_KINDS.includes(row?.kind) && ownsEvent(row));
         return { answer: { status: answer.status, json: { ...answer.json, events } }, result: 'ok' };
       }
       return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}` };

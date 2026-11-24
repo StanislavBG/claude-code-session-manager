@@ -10,8 +10,10 @@
  * - pending: { pairingId, name, homeCwd, scope, createdAt, expiresAt } — a
  *   pairing the owner started; lives 10 minutes (the relay code itself lasts 5).
  * - services: { serviceId, name, homeCwd, scope, pubKey, relayClientId,
- *   pairedAt, lastSeenAt, opened: [{ epicId, at }] } — a confirmed service with
- *   its pinned P-256 public key and the ledger of Epics it opened (newest 1000).
+ *   pairedAt, lastSeenAt, opened: [{ cwd, epicId, externalRef?, at }] } — a
+ *   confirmed service with its pinned P-256 public key and the ledger of Epics
+ *   it opened (newest 1000), each keyed by project + id: an Epic id matches
+ *   only in the project the service opened it in.
  *
  * State is read once from disk (missing/corrupt = empty) and kept in memory;
  * every mutation is written atomically, serialized through one queue. Reads
@@ -30,6 +32,7 @@ const MAX_OPENED = 1000;
 const MAX_NAME_LEN = 64;
 const MAX_PUBKEY_LEN = 1024;
 const MAX_EPIC_ID_LEN = 128;
+const MAX_EXTERNAL_REF_LEN = 200;
 const SERVICE_TOOL_NAMES = Object.freeze([
   'feedback_list_projects',
   'feedback_open_session',
@@ -87,6 +90,21 @@ function validateEpicId(epicId) {
     throw new Error('epicId must be a non-empty string');
   }
   return epicId;
+}
+
+function validateLedgerCwd(cwd) {
+  if (typeof cwd !== 'string' || cwd.length === 0 || !path.isAbsolute(cwd) || cwd.includes('\0')) {
+    throw new Error('cwd must be an absolute path');
+  }
+  return path.resolve(cwd);
+}
+
+function validateExternalRef(externalRef) {
+  if (externalRef === undefined || externalRef === null || externalRef === '') return null;
+  if (typeof externalRef !== 'string' || externalRef.length > MAX_EXTERNAL_REF_LEN) {
+    throw new Error('externalRef must be a string');
+  }
+  return externalRef;
 }
 
 function publicService(s) {
@@ -237,22 +255,31 @@ function createServicePairings({ filePath, now } = {}) {
       });
     },
 
-    recordOpened(serviceId, epicId) {
-      let id;
-      try { id = validateEpicId(epicId); } catch (e) { return Promise.reject(e); }
+    recordOpened(serviceId, entry) {
+      let cwd, id, externalRef;
+      try {
+        if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('entry must be { cwd, epicId, externalRef? }');
+        cwd = validateLedgerCwd(entry.cwd);
+        id = validateEpicId(entry.epicId);
+        externalRef = validateExternalRef(entry.externalRef);
+      } catch (e) { return Promise.reject(e); }
       return mutate((s) => {
         const svc = s.services.find((x) => x.serviceId === serviceId);
         if (!svc) throw new Error('no paired service with that id');
-        svc.opened = svc.opened.filter((o) => o && o.epicId !== id);
-        svc.opened.push({ epicId: id, at: clock() });
+        svc.opened = svc.opened.filter((o) => o && !(o.epicId === id && o.cwd === cwd));
+        const rec = { cwd, epicId: id, at: clock() };
+        if (externalRef !== null) rec.externalRef = externalRef;
+        svc.opened.push(rec);
         if (svc.opened.length > MAX_OPENED) svc.opened = svc.opened.slice(-MAX_OPENED);
         return true;
       });
     },
 
-    hasOpened(serviceId, epicId) {
+    hasOpened(serviceId, cwd, epicId) {
+      if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || typeof epicId !== 'string' || epicId === '') return false;
+      const want = path.resolve(cwd);
       const svc = findService(serviceId);
-      return !!svc && svc.opened.some((o) => o && o.epicId === epicId);
+      return !!svc && svc.opened.some((o) => o && o.epicId === epicId && o.cwd === want);
     },
 
     touchLastSeen(serviceId) {

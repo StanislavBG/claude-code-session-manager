@@ -23,13 +23,15 @@ function makeService(scope = [...SERVICE_TOOL_NAMES]) {
   return { serviceId: 'svc-1', name: 'Kiln Service', homeCwd: HOME, scope };
 }
 
+/** opened: [[cwd, epicId], ...] — the ledger is keyed by project + id. */
 function makeStore(opened = []) {
-  const set = new Set(opened);
+  const key = (cwd, epicId) => `${cwd}\0${epicId}`;
+  const set = new Set(opened.map(([cwd, epicId]) => key(cwd, epicId)));
   const recorded = [];
   return {
     recorded,
-    recordOpened: async (serviceId, epicId) => { recorded.push({ serviceId, epicId }); set.add(epicId); return true; },
-    hasOpened: (serviceId, epicId) => serviceId === 'svc-1' && set.has(epicId),
+    recordOpened: async (serviceId, entry) => { recorded.push({ serviceId, ...entry }); set.add(key(entry.cwd, entry.epicId)); return true; },
+    hasOpened: (serviceId, cwd, epicId) => serviceId === 'svc-1' && set.has(key(cwd, epicId)),
   };
 }
 
@@ -124,7 +126,7 @@ test('bad params answer -32602', async () => {
     call('events_read', { kinds: ['job_transition'] }),
   ];
   for (const msg of cases) {
-    const { response, calls } = await run(msg, { opened: ['ps-1'] });
+    const { response, calls } = await run(msg, { opened: [[HOME, 'ps-1']] });
     expect(response.error.code).toBe(-32602);
     expect(calls).toHaveLength(0);
   }
@@ -148,10 +150,16 @@ test('feedback_open_session: missing fromCwd -> homeCwd, replyMode defaults to e
   expect(calls[0].path).toBe('/admin/feedback/open-session');
   expect(calls[0].body.fromCwd).toBe(HOME);
   expect(calls[0].body.replyMode).toBe('event');
-  expect(store.recorded).toEqual([{ serviceId: 'svc-1', epicId: 'ps-new' }]);
+  expect(store.recorded).toEqual([{ serviceId: 'svc-1', cwd: OPEN_ARGS.toCwd, epicId: 'ps-new', externalRef: undefined }]);
   expect(audit).toEqual({ tool: 'feedback_open_session', result: 'ok' });
   expect(response.result.isError).toBeUndefined();
   expect(parsed(response)).toEqual({ ok: true, epicId: 'ps-new', status: 'proposed' });
+});
+
+test('feedback_open_session records toCwd + the answer externalRef, not homeCwd', async () => {
+  const handler = () => ({ status: 201, json: { ok: true, epicId: 'ps-new', status: 'proposed', externalRef: 'kiln:7' } });
+  const { store } = await run(call('feedback_open_session', { ...OPEN_ARGS, externalRef: ' kiln:7 ' }), { handler });
+  expect(store.recorded).toEqual([{ serviceId: 'svc-1', cwd: '/home/me/Projects/site', epicId: 'ps-new', externalRef: 'kiln:7' }]);
 });
 
 test('feedback_open_session: an explicit replyMode and matching fromCwd pass through', async () => {
@@ -184,7 +192,7 @@ test('macro_run records its epicId on ok', async () => {
   const handler = () => ({ status: 200, json: { ok: true, epicId: 'ps-mac', alreadyRunning: false } });
   const { audit, calls, store } = await run(call('macro_run', { cwd: HOME, id: 'm1' }), { handler });
   expect(calls[0]).toMatchObject({ method: 'POST', path: '/admin/macros/run', body: { cwd: HOME, id: 'm1' } });
-  expect(store.recorded).toEqual([{ serviceId: 'svc-1', epicId: 'ps-mac' }]);
+  expect(store.recorded).toEqual([{ serviceId: 'svc-1', cwd: HOME, epicId: 'ps-mac', externalRef: undefined }]);
   expect(audit.result).toBe('ok');
 });
 
@@ -200,7 +208,7 @@ test('macro_run records nothing when the route refuses', async () => {
 const epicHandler = (epicId) => () => ({ status: 200, json: { ok: true, epic: { epicId, cwd: HOME, state: 'working' } } });
 
 test('epic_get by id of a ledger Epic answers the record', async () => {
-  const { response, calls, audit } = await run(call('epic_get', { cwd: HOME, id: 'ps-1' }), { opened: ['ps-1'], handler: epicHandler('ps-1') });
+  const { response, calls, audit } = await run(call('epic_get', { cwd: HOME, id: 'ps-1' }), { opened: [[HOME, 'ps-1']], handler: epicHandler('ps-1') });
   expect(calls[0]).toMatchObject({ method: 'GET', path: '/admin/epic', query: { cwd: HOME, id: 'ps-1' } });
   expect(parsed(response).epic.epicId).toBe('ps-1');
   expect(response.result.isError).toBeUndefined();
@@ -208,19 +216,45 @@ test('epic_get by id of a ledger Epic answers the record', async () => {
 });
 
 test('epic_get by id of a non-ledger Epic answers the route not-found shape without calling invoke', async () => {
-  const { response, calls, audit } = await run(call('epic_get', { cwd: HOME, id: 'ps-other' }), { opened: ['ps-1'], handler: epicHandler('ps-other') });
+  const { response, calls, audit } = await run(call('epic_get', { cwd: HOME, id: 'ps-other' }), { opened: [[HOME, 'ps-1']], handler: epicHandler('ps-other') });
   expect(calls).toHaveLength(0);
   expect(response.result.isError).toBe(true);
   expect(parsed(response)).toEqual({ ok: false, error: 'not found' });
   expect(audit.result).toBe('refused:ledger');
 });
 
+test('epic_get by id of a ledger id in a DIFFERENT project is refused without calling invoke', async () => {
+  const { response, calls, audit } = await run(call('epic_get', { cwd: '/home/me/Projects/other', id: 'ps-1' }), { opened: [[HOME, 'ps-1']], handler: epicHandler('ps-1') });
+  expect(calls).toHaveLength(0);
+  expect(parsed(response)).toEqual({ ok: false, error: 'not found' });
+  expect(audit.result).toBe('refused:ledger');
+});
+
+test('epic_get id-only checks the ledger under the returned epic.cwd', async () => {
+  const own = await run(call('epic_get', { id: 'ps-1' }), { opened: [[HOME, 'ps-1']], handler: epicHandler('ps-1') });
+  expect(own.calls).toHaveLength(1);
+  expect(parsed(own.response).epic.epicId).toBe('ps-1');
+  expect(own.audit.result).toBe('ok');
+
+  const elsewhere = () => ({ status: 200, json: { ok: true, epic: { epicId: 'ps-1', cwd: '/home/me/Projects/other', state: 'working' } } });
+  const other = await run(call('epic_get', { id: 'ps-1' }), { opened: [[HOME, 'ps-1']], handler: elsewhere });
+  expect(parsed(other.response)).toEqual({ ok: false, error: 'not found' });
+  expect(other.audit.result).toBe('refused:ledger');
+});
+
+test('epic_get by externalRef refuses a returned epic whose cwd differs from the ledger entry', async () => {
+  const elsewhere = () => ({ status: 200, json: { ok: true, epic: { epicId: 'ps-1', cwd: '/home/me/Projects/other', state: 'working' } } });
+  const { response, audit } = await run(call('epic_get', { cwd: HOME, externalRef: 'kiln:1' }), { opened: [[HOME, 'ps-1']], handler: elsewhere });
+  expect(parsed(response)).toEqual({ ok: false, error: 'not found' });
+  expect(audit.result).toBe('refused:ledger');
+});
+
 test('epic_get by externalRef checks the ledger on the returned epic.epicId', async () => {
-  const own = await run(call('epic_get', { cwd: HOME, externalRef: 'kiln:1' }), { opened: ['ps-1'], handler: epicHandler('ps-1') });
+  const own = await run(call('epic_get', { cwd: HOME, externalRef: 'kiln:1' }), { opened: [[HOME, 'ps-1']], handler: epicHandler('ps-1') });
   expect(own.calls[0].query).toMatchObject({ cwd: HOME, externalRef: 'kiln:1' });
   expect(parsed(own.response).epic.epicId).toBe('ps-1');
 
-  const other = await run(call('epic_get', { cwd: HOME, externalRef: 'kiln:2' }), { opened: ['ps-1'], handler: epicHandler('ps-other') });
+  const other = await run(call('epic_get', { cwd: HOME, externalRef: 'kiln:2' }), { opened: [[HOME, 'ps-1']], handler: epicHandler('ps-other') });
   expect(other.calls).toHaveLength(1);
   expect(other.response.result.isError).toBe(true);
   expect(parsed(other.response)).toEqual({ ok: false, error: 'not found' });
@@ -246,13 +280,27 @@ test('events_read drops rows whose Epic is not in the ledger', async () => {
   const handler = () => ({ status: 200, json: { ok: true, events, next: 'c~1', more: false, gap: false } });
   const { response, calls, audit } = await run(
     call('events_read', { after: 'start', kinds: ['epic_state_changed', 'epic_cross_project_reply'], limit: 50 }),
-    { opened: ['ps-1'], handler },
+    { opened: [['/p/site', 'ps-1']], handler },
   );
   expect(calls[0]).toMatchObject({ method: 'GET', path: '/admin/events', query: { after: 'start', kinds: 'epic_state_changed,epic_cross_project_reply', limit: '50' } });
   const body = parsed(response);
   expect(body.events.map((e) => e.at)).toEqual(['1', '3']);
   expect(body).toMatchObject({ ok: true, next: 'c~1', more: false, gap: false });
   expect(audit.result).toBe('ok');
+});
+
+test('events_read drops rows whose Epic id is in the ledger but under a different project', async () => {
+  const events = [
+    { at: '1', kind: 'epic_state_changed', cwd: '/p/site', epicId: 'ps-1', from: 'open', to: 'closed' },
+    { at: '2', kind: 'epic_state_changed', cwd: '/p/other', epicId: 'ps-1', from: 'open', to: 'closed' },
+    { at: '3', kind: 'epic_cross_project_reply', cwd: HOME, fromCwd: '/p/site', fromEpicId: 'ps-1' },
+    { at: '4', kind: 'epic_cross_project_reply', cwd: HOME, fromCwd: '/p/other', fromEpicId: 'ps-1' },
+    { at: '5', kind: 'epic_cross_project_reply', cwd: '/p/site', fromCwd: HOME, fromEpicId: 'ps-1' },
+    { at: '6', kind: 'epic_state_changed', epicId: 'ps-1', from: 'open', to: 'closed' },
+  ];
+  const handler = () => ({ status: 200, json: { ok: true, events, next: 'c~1', more: false, gap: false } });
+  const { response } = await run(call('events_read', { after: 'start' }), { opened: [['/p/site', 'ps-1']], handler });
+  expect(parsed(response).events.map((e) => e.at)).toEqual(['1', '3']);
 });
 
 test('events_read passes a route error through as isError', async () => {

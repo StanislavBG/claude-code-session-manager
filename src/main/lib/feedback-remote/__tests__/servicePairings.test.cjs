@@ -35,6 +35,8 @@ function readFile() {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+const SITE = '/home/u/Projects/site';
+const OTHER = '/home/u/Projects/other';
 const GOOD = { name: 'Kiln Service', homeCwd: '/home/u/Projects/Kiln', scope: ['feedback_open_session', 'epic_get'] };
 
 test('SERVICE_TOOL_NAMES is exactly the six service tools', () => {
@@ -108,12 +110,12 @@ test('createPending refuses bad scope, name and homeCwd', async () => {
 test('revoke removes the service and its ledger', async () => {
   const p = await store.createPending(GOOD);
   const svc = await store.confirmPending(p.pairingId, PUBKEY, { relayClientId: RELAY_ID });
-  await store.recordOpened(svc.serviceId, 'epic-1');
-  expect(store.hasOpened(svc.serviceId, 'epic-1')).toBe(true);
+  await store.recordOpened(svc.serviceId, { cwd: SITE, epicId: 'epic-1' });
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-1')).toBe(true);
   expect(await store.revoke(svc.serviceId)).toBe(true);
   expect(store.list()).toEqual([]);
   expect(store.findByPubKey(PUBKEY)).toBeNull();
-  expect(store.hasOpened(svc.serviceId, 'epic-1')).toBe(false);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-1')).toBe(false);
   expect(readFile().services).toEqual([]);
   expect(JSON.stringify(readFile())).not.toContain('epic-1');
   expect(await store.revoke(svc.serviceId)).toBe(false);
@@ -125,15 +127,46 @@ test('recordOpened keeps the newest 1000 entries per service', async () => {
   const svc = await store.confirmPending(p.pairingId, PUBKEY, { relayClientId: null });
   for (let i = 0; i < 1005; i++) {
     clock += 1;
-    await store.recordOpened(svc.serviceId, `epic-${i}`);
+    await store.recordOpened(svc.serviceId, { cwd: SITE, epicId: `epic-${i}` });
   }
-  expect(store.hasOpened(svc.serviceId, 'epic-0')).toBe(false);
-  expect(store.hasOpened(svc.serviceId, 'epic-4')).toBe(false);
-  expect(store.hasOpened(svc.serviceId, 'epic-5')).toBe(true);
-  expect(store.hasOpened(svc.serviceId, 'epic-1004')).toBe(true);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-0')).toBe(false);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-4')).toBe(false);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-5')).toBe(true);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-1004')).toBe(true);
   const rec = readFile().services[0];
   expect(rec.opened).toHaveLength(1000);
-  await expect(store.recordOpened('missing', 'epic-x')).rejects.toThrow(/service/);
+  await expect(store.recordOpened('missing', { cwd: SITE, epicId: 'epic-x' })).rejects.toThrow(/service/);
+});
+
+test('recordOpened stores cwd + epicId + optional externalRef; hasOpened matches both', async () => {
+  const p = await store.createPending(GOOD);
+  const svc = await store.confirmPending(p.pairingId, PUBKEY, { relayClientId: null });
+  await store.recordOpened(svc.serviceId, { cwd: SITE, epicId: 'epic-1', externalRef: 'kiln:1' });
+  await store.recordOpened(svc.serviceId, { cwd: `${OTHER}/`, epicId: 'epic-2' });
+  expect(readFile().services[0].opened).toEqual([
+    { cwd: SITE, epicId: 'epic-1', externalRef: 'kiln:1', at: clock },
+    { cwd: OTHER, epicId: 'epic-2', at: clock },
+  ]);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-1')).toBe(true);
+  expect(store.hasOpened(svc.serviceId, `${SITE}/`, 'epic-1')).toBe(true);
+  // Same id, different project: refused.
+  expect(store.hasOpened(svc.serviceId, OTHER, 'epic-1')).toBe(false);
+  expect(store.hasOpened(svc.serviceId, SITE, 'epic-2')).toBe(false);
+  expect(store.hasOpened(svc.serviceId, OTHER, 'epic-2')).toBe(true);
+  // An id alone (no cwd) never matches.
+  expect(store.hasOpened(svc.serviceId, 'epic-1')).toBe(false);
+  expect(store.hasOpened(svc.serviceId, undefined, 'epic-1')).toBe(false);
+  // Re-recording the same pair replaces, it does not duplicate.
+  await store.recordOpened(svc.serviceId, { cwd: SITE, epicId: 'epic-1' });
+  expect(readFile().services[0].opened.filter((o) => o.epicId === 'epic-1')).toHaveLength(1);
+  // The same id in another project is its own entry.
+  await store.recordOpened(svc.serviceId, { cwd: OTHER, epicId: 'epic-1' });
+  expect(readFile().services[0].opened.filter((o) => o.epicId === 'epic-1')).toHaveLength(2);
+  await expect(store.recordOpened(svc.serviceId, 'epic-x')).rejects.toThrow(/entry/);
+  await expect(store.recordOpened(svc.serviceId, { cwd: 'relative', epicId: 'epic-x' })).rejects.toThrow(/cwd/);
+  await expect(store.recordOpened(svc.serviceId, { epicId: 'epic-x' })).rejects.toThrow(/cwd/);
+  await expect(store.recordOpened(svc.serviceId, { cwd: SITE, epicId: '' })).rejects.toThrow(/epicId/);
+  await expect(store.recordOpened(svc.serviceId, { cwd: SITE, epicId: 'e', externalRef: 5 })).rejects.toThrow(/externalRef/);
 });
 
 test('touchLastSeen updates lastSeenAt', async () => {

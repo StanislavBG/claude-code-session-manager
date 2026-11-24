@@ -8,6 +8,8 @@
  *                                                     statusNote, epicId, statusChangedAt }
  *   feedback-inbox/items/<hostId>/screenshot.png
  *   feedback-inbox/items/<hostId>/annotated.png
+ *   feedback-inbox/rejected.jsonl                  one { at, boxId, hostId, code, bytes } line per
+ *                                                     envelope the drain could not open (no content)
  *
  * The inbox UI, Open as Epic and the Feedback MCP all read through this module. Every write goes
  * through config.cjs writers as writer 'feedback-inbox' (single-writer law, opsOwnership.cjs);
@@ -168,6 +170,33 @@ async function writeItem(args) {
     await writeJson(itemPath(cwd, hostId, 'meta.json'), meta);
     ensureIgnore(cwd);
     return { duplicate: false, hostId };
+  });
+}
+
+const REJECT_CODE_RE = /^[a-z0-9_]{1,64}$/;
+
+/**
+ * Append one line to feedback-inbox/rejected.jsonl for an envelope the drain could not open.
+ * Only the fixed fields are written — never report text, image bytes or key material.
+ * @param {{ cwd: string, at: string, boxId: string, hostId: string, code: string, bytes: number }} args
+ * @returns {Promise<void>}
+ */
+async function appendRejected(args) {
+  const { cwd, at, boxId, hostId, code, bytes } = args || /** @type {any} */ ({});
+  requireString(at, 'at');
+  requireString(boxId, 'boxId');
+  if (typeof hostId !== 'string') throw new Error('siteFeedbackInbox: hostId must be a string');
+  if (typeof code !== 'string' || !REJECT_CODE_RE.test(code)) throw new Error('siteFeedbackInbox: code must be a short snake_case code');
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) throw new Error('siteFeedbackInbox: bytes must be a non-negative number');
+  const line = JSON.stringify({ at, boxId, hostId: hostId.slice(0, 64), code, bytes }) + '\n';
+  const file = path.join(nsRoot(cwd), 'rejected.jsonl');
+  return serialize(async () => {
+    /** @type {string} */
+    let prev = '';
+    try { prev = await fsp.readFile(file, 'utf8'); } catch { /* first line */ }
+    if (prev && !prev.endsWith('\n')) prev += '\n';
+    await config.writeTextAtomic(file, prev + line, { writer: WRITER });
+    ensureIgnore(cwd);
   });
 }
 
@@ -332,6 +361,7 @@ async function prune(cwd, days, opts = {}) {
 
 module.exports = {
   writeItem,
+  appendRejected,
   list,
   get,
   setStatus,

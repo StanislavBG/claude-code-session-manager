@@ -48,6 +48,7 @@
   "customerFeedbackIpc": "feedback-remote",
   "humanPromptLedger": "feedback-remote",
   "siteFeedbackInbox": "feedback-remote",
+  "feedbackBoxDrain": "feedback-remote",
   "cpuSample": "scheduler",
   "defaultShell": "process",
   "definitionOfDone": "scheduler",

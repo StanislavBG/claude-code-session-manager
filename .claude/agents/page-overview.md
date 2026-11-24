@@ -18,23 +18,18 @@ First read session-manager-operations/architecture/page-stewards.md, then run `n
 - Faces: Home only
 - Entry: `src/renderer/components/tabs/Home.tsx`
 
+The Dashboard is view-only: it shows the situation and answers questions (tool confirmations, outside apps' questions); every other action lives on its own page, reached by an Open or View link.
+
 Reads:
 - `~/.claude/session-manager/billing-cache.json` and the `/api/oauth/usage` response behind it, via `billing.fetch` (`src/main/usage.cjs`); OAuth token from `~/.claude/.credentials.json`
-- `~/.claude/projects/*/*.jsonl` session transcripts, via `config.listDir` (Recent sessions); re-scanned only through `refreshKnownProjects` in `src/renderer/lib/useKnownProjects.ts`
-- `~/.claude/settings.json`, `<cwd>/.claude/settings.json`, `<cwd>/.claude/settings.local.json`, via `useEffectiveSettings` (effective model and effort)
-- `~/.claude/agents/*.md` persona frontmatter, via `agents.resolveModelInfo`
-- `~/.claude/session-manager/ui-settings-prefs.json` (terminal theme and font)
-- `~/.claude/session-manager/session-slots-config.json` (session-slot cap)
-- `<cwd>/session-manager-operations/scheduler/queue.json` and the Epic files under `<cwd>/session-manager-operations/`, through the shared `scheduleState` and `promptSessions` stores
-- The MCP tool catalog, via `mcp.catalog` (`src/main/index.cjs`)
+- `~/.claude/projects/*/*.jsonl` session transcripts, via `config.listDir` (Projects and Recent sessions); re-scanned only through `refreshKnownProjects` in `src/renderer/lib/useKnownProjects.ts`
+- The machine session-slot pool, via `schedule.sessionSlots` (`src/renderer/lib/useSessionSlots.ts`; Hero greeting and Active sessions), read-only
+- `<cwd>/session-manager-operations/scheduler/queue.json` and the Epic files under `<cwd>/session-manager-operations/`, through the shared `scheduleState` and `promptSessions` stores (Queued card and its `home/QueuedJobPopover.tsx`, Needs you)
 - `~/.claude/session-manager/needs-you.json` (the Session Manager state folder; `SM_SCHEDULER_HOME` overrides it), via `needsYou.list` through `src/renderer/lib/useOutsideNeedsYou.ts` (outside-app Needs you items)
 
-Writes:
-- `~/.claude/session-manager/ui-settings-prefs.json` (terminal appearance, via `terminalSettings.ts`)
-- `~/.claude/session-manager/session-slots-config.json` (via `schedule.setSessionSlots`)
-- `<cwd>/session-manager-operations/scheduler/queue.json` (via `schedule.runNow`, which dispatches the next pending job)
-- Epic approve/discard and New Epic mint through the shared `promptSessions` API; those files belong to their single-writer namespaces
+Writes (answers only):
 - `~/.claude/session-manager/needs-you.json` (an outside item's chosen option, via `needsYou.answer`; main's `src/main/lib/feedback-remote/needsYouStore.cjs` is the writer)
+- A tool-risk confirmation's Approve / Deny, via `needsYou.confirmTool` (IPC `scheduler:confirm-tool`, `src/main/lib/feedback-remote/needsYouIpc.cjs` → `toolClearance.answerConfirmation`)
 
 ## Page invariants
 
@@ -42,8 +37,8 @@ Writes:
 - Project lists come only from `useKnownProjects().projects`, via `src/renderer/lib/homeProjectRows.ts` and `src/renderer/lib/knownProjectAggregate.ts`. A project is a cwd; a folder whose cwd never resolved is dropped, never guessed.
 - Enumerating `~/.claude/projects` is an expensive synchronous scan. Never run it uncached on a hot path; the cache in `src/renderer/lib/useKnownProjects.ts` exists for this.
 - The Dashboard stays mounted, so every re-read goes through `src/renderer/lib/useDashboardRefresh.ts`; its visit, gap and re-list rules live in [code-map.md's `lib/useDashboardRefresh.ts` entry](../../session-manager-operations/architecture/code-map.md). A new Dashboard data source joins that hook rather than adding its own reload.
-- Terminal theme and font are one app-wide preference, edited only in `src/renderer/components/tabs/home/TerminalAppearanceCard.tsx` (`src/renderer/lib/terminalSettings.ts`). There is no per-pane copy.
-- "Needs you" rows are real signals only, built by `src/renderer/lib/homeNeedsYou.ts` (`buildNeedsYouRows`). Outside-app items are real signals too: an app posts them through the admin API, and the page only lists and answers them. Nothing on the page is mocked.
+- No control that belongs to another page lands here: a proposed Epic opens its session (approved in that session's action bar), a failed or quarantined job links to the Scheduler, a queued job's popover offers only Open in Scheduler. New Epic, the session-slot cap and terminal appearance each live on their own page.
+- "Needs you" rows are real signals only, built by `src/renderer/lib/homeNeedsYou.ts` (`buildNeedsYouRows`). Outside-app items are real signals too: an app posts them through the admin API, and the page only lists them, answers them, or opens their link. Nothing on the page is mocked.
 - Dashboard appears on the Home face only and is labelled "Dashboard" to stay distinct from Project Home (header comment in `src/renderer/lib/navGroups.ts`, `NAV_ITEMS`).
 
 ## Boundaries

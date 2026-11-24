@@ -501,7 +501,8 @@ const MCP_TOOL_CATALOG = [
     purpose: "Write this project's persona — its reusable video character: a `character.json` descriptor plus a `character.js` drawing module — to "
       + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same host. "
       + 'The descriptor holds `name`, `palette` (a non-empty list of colors), `voice` ({engine: \'kokoro\', id} or {engine: \'command\', command: [...] '
-      + 'with {text} and {out} placeholders}) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
+      + 'with either {text} and {out} placeholders, run once per line, or a {lines} placeholder alone, run once per speaker and given the path of a JSON '
+      + 'manifest [{text, out}] with absolute outs, every out a WAV}) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
       + 'An optional `cast` lists up to 8 supporting characters, each {name, voice?, note?}: names are unique and different from the host\'s, a voice uses '
       + 'the same two engines, and a member without a voice never speaks. '
       + 'A saved persona hosts every Demo Video unless a press turns Character off. Each narration line is spoken in its own speaker\'s voice (the host\'s '

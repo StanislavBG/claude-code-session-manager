@@ -239,6 +239,17 @@ refused with 409 unless `replace` is set.
 press turns Character off. `speakLines` takes lines of `{text, out, speaker?}`: each line is spoken
 in its `speaker`'s voice (the host's when absent), a cast member without a voice never speaks,
 and there is no fallback voice, so a failing command fails the run.
+A command voice uses either `{text}` + `{out}` (run once per line) or `{lines}` alone: a
+`{lines}` voice runs once per speaker, at that speaker's first line, given the path of a JSON
+manifest `[{text, out}]` of all its lines (absolute outs, each ending in `.wav`). Its outs are
+cleared first, and it succeeds only when every out is a RIFF WAV. Its time limit
+(`batchTimeoutMs`) is 15 minutes per line, at most 180 minutes, and never past the job deadline
+(`SM_SCHEDULER_JOB_DEADLINE_MS`) minus 45 minutes; under 1 minute left fails the run.
+`node character.cjs speak spec.json [--wait seconds]` (spec `{projectRoot, lines}`) runs
+`speakLines` in a detached runner (`resumableRun.cjs`) with its state in `<spec>.run/`. Each call
+waits one slice: it exits 0 or 1 with the result, or exits 75 with a pending line while the voice
+still speaks — run the same command again to attach to the same run. A run with no call for
+20 minutes is abandoned and stopped.
 
 ### Review step: videos/<id>/review/
 

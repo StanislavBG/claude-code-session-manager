@@ -28,7 +28,10 @@
  * scheduler/scheduleJobTransitions.cjs. An illegal edge throws under vitest
  * and, in prod, is refused (no line written, the call resolves null) with a
  * `task_transition_refused` audit record. The read-side timeout derivation
- * (running → interrupted) goes through the same table.
+ * (running → interrupted) goes through the same table: a Task with no end
+ * reads 'interrupted' only once now > startedAt + (slotWaitSec + timeoutSec)
+ * * 1000 + INTERRUPT_GRACE_MS — startedAt is stamped before the slot wait, so
+ * the window counts it (a missing/non-numeric slotWaitSec counts as 0).
  *
  * Retention: opsRetentionSettings.read().tasksDays (default 30). pruneOld runs
  * once per local day per project, on the first append of that day.
@@ -393,14 +396,17 @@ async function readRows(cwd, range) {
 
 /**
  * A Task's status: its end/imported status, else 'running' — or, once
- * startedAt + timeoutSec + grace has passed, the timeout-derived
- * 'interrupted', taken only when TASK_LEGAL_TRANSITIONS allows running → it.
+ * now > startedAt + (slotWaitSec + timeoutSec) * 1000 + INTERRUPT_GRACE_MS,
+ * the timeout-derived 'interrupted', taken only when TASK_LEGAL_TRANSITIONS
+ * allows running → it. startedAt is stamped before the slot wait, so the
+ * window includes it; a missing/non-numeric slotWaitSec counts as 0.
  */
 function foldedStatus(t, now) {
   if (t.status) return t.status;
   const startedMs = toMs(t.startedAt);
+  const slotWaitMs = (Number(t.slotWaitSec) || 0) * 1000;
   const timeoutMs = (Number(t.timeoutSec) || 0) * 1000;
-  if (startedMs != null && now > startedMs + timeoutMs + INTERRUPT_GRACE_MS
+  if (startedMs != null && now > startedMs + slotWaitMs + timeoutMs + INTERRUPT_GRACE_MS
     && transitionTask('running', 'interrupted', { taskId: t.taskId, source: 'foldedStatus:timeout' })) {
     return 'interrupted';
   }

@@ -152,6 +152,23 @@ test('a start with no end reads running until timeout + 120s, then interrupted',
   expect((await ledger.listTasks(cwd, { status: 'interrupted' })).tasks.map((t) => t.taskId)).toEqual(['dead']);
 });
 
+test('the interrupted window counts slotWaitSec: start + (slotWait + timeout) + 120s', async () => {
+  const started = Date.parse('2026-11-23T12:00:00.000Z');
+  await ledger.appendTaskStart(cwd, startRow('waited', { startedAt: new Date(started).toISOString(), timeoutSec: 60, slotWaitSec: 600 }));
+  const at = async (sec) => (await ledger.listTasks(cwd, { now: started + sec * 1000 })).tasks[0].status;
+  expect(await at(300)).toBe('running');
+  expect(await at(779)).toBe('running');
+  expect(await at(781)).toBe('interrupted');
+});
+
+test('a missing or non-numeric slotWaitSec counts as 0', async () => {
+  const started = Date.parse('2026-11-23T12:00:00.000Z');
+  await ledger.appendTaskStart(cwd, startRow('nowait', { startedAt: new Date(started).toISOString(), timeoutSec: 60, slotWaitSec: 'x' }));
+  const at = async (sec) => (await ledger.listTasks(cwd, { now: started + sec * 1000 })).tasks[0].status;
+  expect(await at(179)).toBe('running');
+  expect(await at(181)).toBe('interrupted');
+});
+
 test('malformed lines are skipped and counted, never thrown', async () => {
   const s = startRow('ok1');
   await ledger.appendTaskStart(cwd, s);

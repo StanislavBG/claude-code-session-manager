@@ -74,8 +74,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 - **SINGLE-WRITER LAW over the operations root** (`src/main/lib/opsOwnership.cjs`). Each ops
   `<namespace>/` has ONE owning writer; others read; an undeclared writer throws. New namespace/writer =
   deliberate edit there; build paths only via `opsPath()`. Owners + retention: [ops AGENTS.md](session-manager-operations/AGENTS.md).
-- **Open-core: the APP and the Field Manual are both free, and stay free.** No license check,
-  entitlement gate, trial limit, nag, "pro" tier, or paywalled feature/chapter.
+- **Open-core: the APP and the Field Manual are both free, and stay free.** Nothing is gated, nagged or paywalled.
 - **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. Never
   remove the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 
@@ -107,9 +106,9 @@ Runs PRDs from ops-root `scheduler/epics/<epic-id>/prds/` as `claude -p` jobs. D
 
 Each one's incident: [`conventions.md`](session-manager-operations/architecture/conventions.md).
 
-- **Tab ID = claudeSessionId** (`--session-id` pass-through + JSONL lookup).
+- **Tab ID = claudeSessionId.**
 - **No CommonJS in renderer, no ES modules in main** — `.cjs` for main/preload bypasses `type: module`.
-- **No backwards-compat shims** — single-author project; just rename/refactor.
+- **No backwards-compat shims** — just rename/refactor.
 - **Privacy invariant**: `RecordingStatus` MUST be mounted on the TOP z-ladder rung whenever `isRecording === true`.
 - **One global z-ladder, `lib/zLayers.ts`** — class-name literals only, never interpolated (Tailwind JIT).
 - **Telemetry is anonymous, on by default, opt-out** (`SM_TELEMETRY=0`) — [why](session-manager-operations/architecture/telemetry.md).
@@ -117,7 +116,7 @@ Each one's incident: [`conventions.md`](session-manager-operations/architecture/
 - **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
 - **Needs you = an open question** (a chat ended needs-input). A parked PRD shows as being fixed, never needs review — `lib/needsHuman.ts`.
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
-- **`--model` must be pinned explicitly** on every `claude -p` / `--print` call site — unpinned drift costs.
+- **`--model` must be pinned explicitly** on every `claude -p` / `--print` call site.
 - **The owner's real name and personal email never enter a tracked file or commit** — [why](session-manager-operations/architecture/identity-boundary.md).
 - **Five doc kinds; one topic, one topic doc** ([kinds](plugins/session-manager-dev/skills/maintaining-md-network/placement.md#doc-kinds)); **AGENTS.md is the map, CLAUDE.md its `@AGENTS.md` stub** — [pair rule](plugins/session-manager-dev/skills/maintaining-md-network/placement.md#agentsmd-and-claudemd).
 
@@ -125,17 +124,14 @@ Each one's incident: [`conventions.md`](session-manager-operations/architecture/
 
 Each is a real incident (post-mortem: `conventions.md`) — read it before working around one.
 
-- Launching `claude -p` **without a slot from `lib/scheduler/sessionSlots.cjs`** (the sole
-  machine-wide cap) — never reintroduce a private cap.
+- Launching `claude -p` **without a slot from `lib/scheduler/sessionSlots.cjs`** — never reintroduce a private cap.
 - Gating scheduler batches on **`parallelGroup`** — a per-PRD display hint, never a barrier.
   `dependsOn` is the sole ordering primitive.
-- **Returning a freshly-built value from a zustand selector** (`?? []`, `.map(...)`, `Object.values(...)`) —
-  infinite re-render → React #185 → **whole app renders blank**. `npm run lint:selectors`.
-- **Declaring a hook below a top-level early return** — React #300/#310 → pane dies into its error boundary.
-  `npm run lint:hooks`.
+- **Returning a freshly-built value from a zustand selector** (`?? []`, `.map(...)`, `Object.values(...)`) — `npm run lint:selectors`.
+- **Declaring a hook below a top-level early return** — `npm run lint:hooks`.
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
 - Re-implementing tmp+rename atomic writes — use `lib/util/atomicFs.cjs`.
-- Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
+- Reading remote URLs in prod.
 - Adding a LeftNav tab before checking if an existing surface owns that data.
 - Adding pane state to parent tabs, or importing design primitives via wildcard.
 - `scrollIntoView` / nested page scrollers — use `PageShell` + `lib/scrollWithin` (`lint:scroll`).

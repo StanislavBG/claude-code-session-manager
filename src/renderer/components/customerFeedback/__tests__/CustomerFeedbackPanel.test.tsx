@@ -6,6 +6,8 @@ import { act } from 'react-dom/test-utils'
 import { CustomerFeedbackPanel } from '../CustomerFeedbackPanel'
 import { useCustomerFeedback } from '../../../state/customerFeedback'
 import { useToast } from '../../../state/toast'
+import { useSessions } from '../../../state/sessions'
+import { consumeProjectHomeFeedbackRequest } from '../../tabs/projecthome/ProjectFeedback'
 import type { CustomerFeedbackItem, CustomerFeedbackStatus } from '../../../../preload/api'
 
 let container: HTMLDivElement | null = null
@@ -54,6 +56,8 @@ beforeEach(() => {
     submitting: false,
     ...spies,
     setDraft: (p) => useCustomerFeedback.setState((s) => ({ draft: { ...s.draft, ...p } })),
+    ownerInfo: null,
+    inbox: [],
   })
 })
 
@@ -402,6 +406,45 @@ describe('CustomerFeedbackPanel', () => {
       })
       await flush()
       expect(show).toHaveBeenCalledWith('error', expect.any(String))
+    })
+  })
+
+  describe('owner inbox link', () => {
+    it('owner mode shows the moved notice instead of the Customer inbox, and Open goes to Project Home > Feedback', async () => {
+      vi.useFakeTimers()
+      try {
+        useCustomerFeedback.setState({ ownerInfo: { ownerMode: true, projectCwd: '/owner' } })
+        const setActive = vi.fn()
+        useSessions.setState({ tabs: [{ id: 't-owner', cwd: '/owner' } as never], activeTabId: null, setActive })
+        const nav = vi.fn()
+        window.addEventListener('sm:navigate', nav)
+        await mount()
+        expect(q('customer-feedback-inbox')).toBeNull()
+        expect(q('customer-feedback-inbox-refresh')).toBeNull()
+        const moved = q('customer-feedback-inbox-moved')!
+        expect(moved.textContent).toContain('Customer inbox moved to Project Home > Feedback')
+        await act(async () => {
+          q('customer-feedback-inbox-open-project-home')!.click()
+        })
+        expect(setActive).toHaveBeenCalledWith('t-owner')
+        expect(spies.closePanel).toHaveBeenCalled()
+        expect(consumeProjectHomeFeedbackRequest()).toBe(true)
+        act(() => {
+          vi.runAllTimers()
+        })
+        expect(nav).toHaveBeenCalledTimes(1)
+        expect((nav.mock.calls[0][0] as CustomEvent).detail).toBe('project-home')
+        window.removeEventListener('sm:navigate', nav)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('shows neither the inbox nor the link outside owner mode', async () => {
+      useCustomerFeedback.setState({ ownerInfo: { ownerMode: false, projectCwd: null } })
+      await mount()
+      expect(q('customer-feedback-inbox')).toBeNull()
+      expect(q('customer-feedback-inbox-moved')).toBeNull()
     })
   })
 })

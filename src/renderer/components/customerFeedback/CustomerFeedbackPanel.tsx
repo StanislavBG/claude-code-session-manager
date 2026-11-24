@@ -5,6 +5,9 @@
  * resolution status. Images go to main as raw data URLs; main validates and
  * downscales them. Driven entirely by useCustomerFeedback; mirrors
  * HomeSessionDrawer's portal/ESC/backdrop/slide pattern, mirrored to the left.
+ *
+ * The owner's Customer inbox lives in Project Home > Feedback of `ownerInfo.projectCwd`
+ * (ProjectFeedback); in owner mode this panel only links there, so there is one inbox screen.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -13,7 +16,8 @@ import { useCustomerFeedback } from '../../state/customerFeedback'
 import { useToast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { openFreeHour } from '../../lib/freeHour'
-import { CustomerFeedbackInbox } from './CustomerFeedbackInbox'
+import { useSessions } from '../../state/sessions'
+import { requestProjectHomeFeedback } from '../tabs/projecthome/ProjectFeedback'
 import { useAttachments } from '../epics/attachments'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
@@ -40,6 +44,18 @@ const IMAGE_MAX = 5
 const IMAGE_MAX_BYTES = 25 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
+/** Switch to (or open) the owner project's tab, then show its Project Home > Feedback. */
+function openOwnerFeedback(projectCwd: string): void {
+  const sessions = useSessions.getState()
+  const existing = sessions.tabs.find((t) => t.cwd === projectCwd)
+  if (existing) sessions.setActive(existing.id)
+  else sessions.addSessionToProject(projectCwd)
+  requestProjectHomeFeedback()
+  // After the tab switch settles: App.tsx routes a pure tab switch to the terminal in an effect,
+  // so navigating in the same tick would be overridden.
+  setTimeout(() => window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'project-home' })), 0)
+}
+
 function readDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
@@ -62,6 +78,7 @@ export function CustomerFeedbackPanel() {
   const refreshStatus = useCustomerFeedback((s) => s.refreshStatus)
   const markSeen = useCustomerFeedback((s) => s.markSeen)
   const ownerMode = useCustomerFeedback((s) => s.ownerInfo?.ownerMode === true)
+  const ownerProjectCwd = useCustomerFeedback((s) => s.ownerInfo?.projectCwd ?? null)
   const showToast = useToast((s) => s.show)
   const [entered, setEntered] = useState(false)
   const [mcpReady, setMcpReady] = useState(false)
@@ -382,7 +399,28 @@ export function CustomerFeedbackPanel() {
             )}
           </section>
         </div>
-        {ownerMode && <CustomerFeedbackInbox />}
+        {ownerMode && (
+          <div
+            className="shrink-0 border-t border-line px-5 py-3 flex items-center justify-between gap-3"
+            data-testid="customer-feedback-inbox-moved"
+          >
+            <p className="m-0 text-[12.5px] text-fg-dim">Customer inbox moved to Project Home &gt; Feedback</p>
+            <button
+              type="button"
+              disabled={!ownerProjectCwd}
+              title={ownerProjectCwd ? `Open Project Home > Feedback for ${ownerProjectCwd}` : 'No owner project is configured'}
+              onClick={() => {
+                if (!ownerProjectCwd) return
+                openOwnerFeedback(ownerProjectCwd)
+                closePanel()
+              }}
+              className="shrink-0 rounded-md border border-line bg-bg px-2.5 py-1 text-[12px] font-semibold text-accent hover:bg-bg-elev disabled:opacity-50"
+              data-testid="customer-feedback-inbox-open-project-home"
+            >
+              Open
+            </button>
+          </div>
+        )}
       </aside>
     </div>
   )

@@ -26,7 +26,7 @@
  * store — 0, so hidden, until the Feedback tab first loads them for the project.
  */
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSessions } from '../../../state/sessions'
 import { toast } from '../../../state/toast'
 import { useProjectPagesOutput } from '../../../lib/projectPages/useProjectPagesOutput'
@@ -37,7 +37,7 @@ import { useMacroLaunch } from '../../../lib/useMacroLaunch'
 import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
 import { EmptyState } from '../../ui/EmptyState'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
-import { ProjectFeedback } from './ProjectFeedback'
+import { PROJECT_HOME_FEEDBACK_EVENT, ProjectFeedback, consumeProjectHomeFeedbackRequest } from './ProjectFeedback'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { ProjectHomeKeyButtons, libraryKeyStats, type ProjectHomeTab } from './projectpages/ProjectHomeKeyButtons'
 import { useJobSettled, type BuildLaunch } from './projectpages/BuildingPanel'
@@ -62,7 +62,15 @@ function ProjectHomeComponent() {
   const macros = useMemo(() => macrosForProject(library, cwd, 'project-home'), [library, cwd])
   const personas = useAgentPersonas()
   const { launch, launching } = useMacroLaunch(navigateToEpic, personas)
-  const [tab, setTab] = useState<ProjectHomeTab>('pages')
+  const [tab, setTab] = useState<ProjectHomeTab>(() => (consumeProjectHomeFeedbackRequest() ? 'feedback' : 'pages'))
+  // CustomerFeedbackPanel's "moved to Project Home > Feedback" link while Project Home is already mounted.
+  useEffect(() => {
+    const h = () => {
+      if (consumeProjectHomeFeedbackRequest()) setTab('feedback')
+    }
+    window.addEventListener(PROJECT_HOME_FEEDBACK_EVENT, h)
+    return () => window.removeEventListener(PROJECT_HOME_FEEDBACK_EVENT, h)
+  }, [])
   // cwd → macro id → this window's last launch: the building row's title and BuildingPanel's sent lines.
   const [launches, setLaunches] = useState<Record<string, Record<string, BuildLaunch>>>({})
   const cwdLaunches = cwd ? launches[cwd] : undefined

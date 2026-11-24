@@ -14,6 +14,7 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Flow, Tool } from './machine';
 import { DEFAULT_MARK_COLOR, MARK_COLORS, type MarkColor } from './marks';
+import { type PanelSide, adoptInto, freeArea } from './shared';
 import { colors, fonts, motion } from './tokens';
 
 // ── Data ────────────────────────────────────────────────────────────────────
@@ -66,22 +67,7 @@ const GRIP_DOTS: readonly [number, number][] = [
   [2.5, 3], [7.5, 3], [2.5, 8], [7.5, 8], [2.5, 13], [7.5, 13],
 ];
 
-/** Width the docked panel column takes out of the free area (panel 380 + 32 gutter). */
-export const DOCKED_PANEL_COLUMN = 412;
 const DOCK_TOP = 16;
-
-export interface FreeArea {
-  x0: number;
-  x1: number;
-}
-
-/** §5.3 free area: the whole viewport, except flow `docked` excludes the panel column. */
-export function freeArea(W: number, flow: Flow, panelSide: 'left' | 'right' = 'right'): FreeArea {
-  if (flow !== 'docked') return { x0: 0, x1: W };
-  return panelSide === 'right'
-    ? { x0: 0, x1: W - DOCKED_PANEL_COLUMN }
-    : { x0: DOCKED_PANEL_COLUMN, x1: W };
-}
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
@@ -162,18 +148,6 @@ export function toolbarSheet(): CSSStyleSheet | null {
   return sheetCache;
 }
 
-function adoptInto(node: Node): void {
-  const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
-  if (!root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  const sheet = toolbarSheet();
-  if (!sheet || root.adoptedStyleSheets.includes(sheet)) return;
-  try {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  } catch {
-    // Sheet from another document/realm — the host mounts it instead.
-  }
-}
-
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
 function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
@@ -198,7 +172,7 @@ export interface ToolbarProps {
   /** Drag offset from the dock position (machine `toolbarPos`); null = at rest. */
   offset: { x: number; y: number } | null;
   flow?: Flow;
-  panelSide?: 'left' | 'right';
+  panelSide?: PanelSide;
   /** Viewport width; defaults to window.innerWidth, tracked on resize. */
   viewportWidth?: number;
   onTool(tool: Tool): void;
@@ -236,7 +210,7 @@ export function Toolbar(props: ToolbarProps) {
   const drag = useRef<DragStart | null>(null);
 
   useLayoutEffect(() => {
-    if (ref.current) adoptInto(ref.current);
+    adoptInto(ref.current, toolbarSheet());
   }, []);
 
   const area = freeArea(W, flow, panelSide);

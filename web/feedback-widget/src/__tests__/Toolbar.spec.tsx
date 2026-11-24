@@ -9,10 +9,10 @@ import {
   SWATCHES,
   TOOLS,
   Toolbar,
-  freeArea,
   toolbarCss,
   type ToolbarProps,
 } from '../ui/Toolbar';
+import { freeArea } from '../ui/shared';
 
 let host: HTMLDivElement;
 

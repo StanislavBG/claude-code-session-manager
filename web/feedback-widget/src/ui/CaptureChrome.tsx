@@ -11,13 +11,12 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { CaptureResult } from '../capture';
-import { type Event, type Flow, type State, type Tool, frameVisible, hintVisible, isOpen } from './machine';
+import { type Event, type State, type Tool, frameVisible, hintVisible, isOpen } from './machine';
+import { type PanelSide, adoptInto, freeArea } from './shared';
 import { colors, fonts } from './tokens';
 
 /** Flash duration (§5.2: opacity .9 → 0 over 500 ms ease-out). */
 export const FLASH_MS = 500;
-/** Width of the docked panel column the free area excludes (§5.3 Placement). */
-export const PANEL_COLUMN = 412;
 /** Mark-comment popovers carry this attribute; clicks inside one are never intercepted. */
 export const POPOVER_ATTR = 'data-fw-popover';
 
@@ -34,15 +33,6 @@ export const HINT_COPY: Readonly<Record<Tool, string>> = {
 export const NOTE_FIRST_HINT = 'Mark the spot first — your note opens beside it';
 
 export type ToolbarPlacement = 'dock' | 'rail' | 'corner';
-export type PanelSide = 'left' | 'right';
-
-/** §5.3 free area: the whole viewport, minus the panel column in flow `docked`. */
-export function freeArea(flow: Flow, panelSide: PanelSide, viewportWidth: number): { x0: number; x1: number } {
-  if (flow !== 'docked') return { x0: 0, x1: viewportWidth };
-  return panelSide === 'right'
-    ? { x0: 0, x1: viewportWidth - PANEL_COLUMN }
-    : { x0: PANEL_COLUMN, x1: viewportWidth };
-}
 
 export function hintText(s: State): string {
   if (s.config.flow === 'note' && s.marks.length === 0) return NOTE_FIRST_HINT;
@@ -79,15 +69,6 @@ function captureChromeSheet(): CSSStyleSheet | null {
     return null;
   }
   return sheetCache;
-}
-
-function adoptInto(el: Element | null): void {
-  const root = el?.getRootNode();
-  if (!(root instanceof ShadowRoot) || !('adoptedStyleSheets' in root)) return;
-  const sheet = captureChromeSheet();
-  if (sheet && !root.adoptedStyleSheets.includes(sheet)) {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  }
 }
 
 function prefersReducedMotion(): boolean {
@@ -167,7 +148,7 @@ export function CaptureChrome(props: CaptureChromeProps) {
   }, [open]);
 
   useLayoutEffect(() => {
-    if (open) adoptInto(surfaceRef.current);
+    if (open) adoptInto(surfaceRef.current, captureChromeSheet());
   }, [open]);
 
   // Block the page: swallow pointer events, stop scrolling; close an open popover on a
@@ -221,7 +202,7 @@ export function CaptureChrome(props: CaptureChromeProps) {
 
   if (!open) return null;
 
-  const area = freeArea(state.config.flow, panelSide, vw);
+  const area = freeArea(vw, state.config.flow, panelSide);
   const hintLeft = (area.x0 + area.x1) / 2;
   const hintTop = toolbar === 'dock' ? 80 : 16;
 

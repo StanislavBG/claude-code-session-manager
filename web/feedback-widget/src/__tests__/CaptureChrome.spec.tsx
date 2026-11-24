@@ -12,8 +12,8 @@ import {
   NOTE_FIRST_HINT,
   POPOVER_ATTR,
   captureChromeCss,
-  freeArea,
 } from '../ui/CaptureChrome';
+import { freeArea } from '../ui/shared';
 import { type Event, type State, initialState, reduce } from '../ui/machine';
 
 let container: HTMLElement;
@@ -298,9 +298,9 @@ describe('hint chip', () => {
   });
 
   it('excludes the docked panel column from the free area', () => {
-    expect(freeArea('docked', 'right', 1024)).toEqual({ x0: 0, x1: 612 });
-    expect(freeArea('docked', 'left', 1024)).toEqual({ x0: 412, x1: 1024 });
-    expect(freeArea('annotate', 'right', 1024)).toEqual({ x0: 0, x1: 1024 });
+    expect(freeArea(1024, 'docked', 'right')).toEqual({ x0: 0, x1: 612 });
+    expect(freeArea(1024, 'docked', 'left')).toEqual({ x0: 412, x1: 1024 });
+    expect(freeArea(1024, 'annotate', 'right')).toEqual({ x0: 0, x1: 1024 });
     mount({ state: state([{ type: 'open' }], { flow: 'docked' }), panelSide: 'left' });
     expect(q('.fw-hint')!.style.left).toBe('718px');
   });

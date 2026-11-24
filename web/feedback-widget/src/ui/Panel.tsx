@@ -16,6 +16,7 @@ import type { FeedbackUser } from '../host';
 import type { ReportType } from '../report';
 import { panelVisible, type Event, type State } from './machine';
 import { Receipt, receiptCss } from './Receipt';
+import { adoptInto } from './shared';
 import { colors, fonts, motion } from './tokens';
 
 // ── Copy & rules (§5.6) ───────────────────────────────────────────────────────
@@ -199,17 +200,8 @@ export function panelSheet(): CSSStyleSheet | null {
   return sheetCache;
 }
 
-/** Adopts `sheet` (default: the panel's) on the node's root, once. Shared with PanelContext. */
-export function adoptInto(node: Node, sheet: CSSStyleSheet | null = panelSheet()): void {
-  const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
-  if (!root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  if (!sheet || root.adoptedStyleSheets.includes(sheet)) return;
-  try {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  } catch {
-    // Sheet from another document/realm — the host mounts it instead.
-  }
-}
+/** Re-exported for PanelContext until it imports './shared' directly (widget-shared-adopt). */
+export { adoptInto };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -264,7 +256,7 @@ export function Panel(props: PanelProps) {
   const attached = props.attached ?? defaultAttached();
 
   useLayoutEffect(() => {
-    if (ref.current) adoptInto(ref.current);
+    adoptInto(ref.current, panelSheet());
   }, []);
 
   // Progress bar width through the CSSOM (strict CSP).

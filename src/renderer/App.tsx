@@ -22,7 +22,7 @@ import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
 import { useLayout, needsProjectsPanelReconciliation } from './state/layout'
 import { useEditor } from './state/editor'
-import { sameProjectCwd, useCustomerFeedback } from './state/customerFeedback'
+import { isLiveFeedbackTabIntent, useCustomerFeedback } from './state/customerFeedback'
 import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startSchedulePolling } from './state/scheduleState'
@@ -149,9 +149,12 @@ export function App() {
       curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
     // A pending Project Home > Feedback intent for the newly-active tab's project means its
     // initiator (CustomerFeedbackPanel) already set the nav — don't hijack it to the terminal.
+    // Only a still-fresh intent counts; a switch into any other project cancels it, so a
+    // stale one (its Project Home never mounted) can't hijack a later ordinary switch.
     const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
-    const feedbackIntent = useCustomerFeedback.getState().feedbackTabIntent
-    if (isPureSwitch && !(feedbackIntent && sameProjectCwd(feedbackIntent.cwd, activeCwd))) {
+    const cf = useCustomerFeedback.getState()
+    if (activeCwd) cf.cancelFeedbackTabIntentUnless(activeCwd)
+    if (isPureSwitch && !isLiveFeedbackTabIntent(cf.feedbackTabIntent, activeCwd)) {
       useLayout.getState().openProjectPanel('terminal')
     }
   }, [activeTabId, tabs])

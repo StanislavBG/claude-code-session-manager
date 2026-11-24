@@ -44,6 +44,20 @@ export function sameProjectCwd(a: string | null | undefined, b: string | null | 
 /** A one-shot request to open Project Home on its Feedback tab, for ONE project's cwd. */
 export interface FeedbackTabIntent {
   cwd: string
+  /** Date.now() when it was requested; past FEEDBACK_TAB_INTENT_TTL_MS it is stale and ignored. */
+  requestedAt: number
+}
+
+/** How long a Feedback-tab intent stays honourable — long enough for its Project Home to mount. */
+export const FEEDBACK_TAB_INTENT_TTL_MS = 10_000
+
+/** True when `intent` names `cwd` and is still within its TTL at `now`. */
+export function isLiveFeedbackTabIntent(
+  intent: FeedbackTabIntent | null | undefined,
+  cwd: string | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  return !!intent && sameProjectCwd(intent.cwd, cwd) && now - intent.requestedAt <= FEEDBACK_TAB_INTENT_TTL_MS
 }
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -61,8 +75,10 @@ interface CustomerFeedbackState {
 
   /** Ask the Project Home of `cwd` to open on its Feedback tab (consumed once). */
   requestFeedbackTab: (cwd: string) => void
-  /** True (and clears the intent) only when a pending intent names `cwd`; another project's mount never consumes it. */
+  /** When the pending intent names `cwd` it is cleared either way, and true only if still within its TTL; another project's mount never consumes it. */
   consumeFeedbackTabIntent: (cwd: string) => boolean
+  /** A switch to a tab of `cwd`: drops a pending intent that names a different project. */
+  cancelFeedbackTabIntentUnless: (cwd: string) => void
   openPanel: () => void
   closePanel: () => void
   togglePanel: () => void
@@ -115,12 +131,16 @@ export const useCustomerFeedback = create<CustomerFeedbackState>((set, get) => {
     inboxLoading: false,
     feedbackTabIntent: null,
 
-    requestFeedbackTab: (cwd) => set({ feedbackTabIntent: { cwd } }),
+    requestFeedbackTab: (cwd) => set({ feedbackTabIntent: { cwd, requestedAt: Date.now() } }),
     consumeFeedbackTabIntent: (cwd) => {
       const intent = get().feedbackTabIntent
       if (!intent || !sameProjectCwd(intent.cwd, cwd)) return false
       set({ feedbackTabIntent: null })
-      return true
+      return isLiveFeedbackTabIntent(intent, cwd)
+    },
+    cancelFeedbackTabIntentUnless: (cwd) => {
+      const intent = get().feedbackTabIntent
+      if (intent && !sameProjectCwd(intent.cwd, cwd)) set({ feedbackTabIntent: null })
     },
 
     openPanel: () => set({ panelOpen: true }),

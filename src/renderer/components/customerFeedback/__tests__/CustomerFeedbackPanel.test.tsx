@@ -433,7 +433,7 @@ describe('CustomerFeedbackPanel', () => {
         expect((nav.mock.calls[0][0] as CustomEvent).detail).toBe('project-home')
         expect(setTimeoutSpy.mock.calls.some(([, ms]) => ms === 0)).toBe(false)
         // The intent names the owner project: another project's mount cannot consume it.
-        expect(useCustomerFeedback.getState().feedbackTabIntent).toEqual({ cwd: '/owner' })
+        expect(useCustomerFeedback.getState().feedbackTabIntent).toMatchObject({ cwd: '/owner' })
         expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/elsewhere')).toBe(false)
         expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/owner')).toBe(true)
         expect(useCustomerFeedback.getState().consumeFeedbackTabIntent('/owner')).toBe(false)

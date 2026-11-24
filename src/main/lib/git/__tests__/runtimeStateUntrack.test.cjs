@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { findTrackedRuntimeState, untrackRuntimeState, listRuntimeFilesOnDisk } = require('../runtimeStateUntrack.cjs');
+const { findTrackedRuntimeState, findVisibleRuntimeState, untrackRuntimeState, listRuntimeFilesOnDisk } = require('../runtimeStateUntrack.cjs');
 
 let root;
 const OPS = 'session-manager-operations';
@@ -152,4 +152,27 @@ test('nothing tracked is a no-op success', async () => {
   const r = await untrackRuntimeState(root, idle);
   expect(r).toMatchObject({ ok: true, removed: 0, committed: false });
   expect(headSha()).toBe(sha);
+});
+
+test('findVisibleRuntimeState lists untracked, unignored runtime files only', async () => {
+  write(`${OPS}/events/e.jsonl`, '{}');
+  write(`${OPS}/reviews/new.md`, 'review');
+  expect(await findVisibleRuntimeState(root)).toEqual([`${OPS}/events/e.jsonl`]);
+  write(`${OPS}/events/.gitignore`, '*\n');
+  const after = await findVisibleRuntimeState(root);
+  expect(after).not.toContain(`${OPS}/events/e.jsonl`);
+  expect(after).toEqual([]);
+  // Tracked runtime files (scheduler/queue.json, prompt-sessions/s.json) never appear.
+  expect(after.some((p) => p.includes('/scheduler/') || p.includes('/prompt-sessions/'))).toBe(false);
+});
+
+test('findVisibleRuntimeState returns [] outside a git repo', async () => {
+  const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rsu-nogit-')));
+  try {
+    fs.mkdirSync(path.join(bare, OPS, 'events'), { recursive: true });
+    fs.writeFileSync(path.join(bare, OPS, 'events', 'e.jsonl'), '{}');
+    expect(await findVisibleRuntimeState(bare)).toEqual([]);
+  } finally {
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
 });

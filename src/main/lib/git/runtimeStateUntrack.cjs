@@ -34,6 +34,20 @@ async function findTrackedRuntimeState(projectRoot) {
   return out.split('\0').filter((p) => p && path.posix.basename(p) !== 'README.md');
 }
 
+/**
+ * Untracked runtime paths (repo-relative, posix) that git can see — i.e. not
+ * ignored by any .gitignore. Each one is a namespace missing its self-ignore.
+ */
+async function findVisibleRuntimeState(projectRoot) {
+  let out;
+  try {
+    out = await execGit(projectRoot, ['ls-files', '-z', '--others', '--exclude-standard', '--', ...nsPathspecs()], { maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return [];
+  }
+  return out.split('\0').filter(Boolean);
+}
+
 /** Sorted list of every file on disk under the runtime namespaces. */
 function listRuntimeFilesOnDisk(projectRoot) {
   const found = [];
@@ -121,4 +135,4 @@ async function untrackRuntimeState(projectRoot, opts = {}) {
   }
 }
 
-module.exports = { findTrackedRuntimeState, untrackRuntimeState, listRuntimeFilesOnDisk };
+module.exports = { findTrackedRuntimeState, findVisibleRuntimeState, untrackRuntimeState, listRuntimeFilesOnDisk };

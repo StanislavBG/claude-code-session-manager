@@ -818,9 +818,13 @@ function heartbeatMemGate(g) {
 /**
  * Seeds the job-memory store from the scheduler runs folder itself
  * (schedulerPaths.runsDir(): <runId>/<slug>.log). jobMemoryStats.backfillFromRunLogs
- * walks the newest MEMORY_BACKFILL_MAX_FILES logs with async reads in bounded
- * batches, runs only while the store holds fewer than 30 samples, dedupes by run
- * folder + unit, and never rejects. Resolves to the number of samples added.
+ * lists at most 2 × MEMORY_BACKFILL_MAX_FILES run folders, reads the newest
+ * MEMORY_BACKFILL_MAX_FILES logs in bounded batches, runs only while the store holds
+ * fewer than 30 samples, dedupes by run folder + unit, and never rejects. Its store
+ * reads, run-log I/O and final store write (atomicFs.writeTextAtomic) are all async;
+ * the one synchronous step is re-appending a live recordPeak that landed during that
+ * write (see backfillFromRunLogs). `deps.runsDir` defaults to schedulerPaths.runsDir().
+ * Resolves to the number of samples added.
  */
 async function backfillMemoryStats(deps = {}) {
   const runsDir = deps.runsDir || schedulerPaths.runsDir();
@@ -833,28 +837,44 @@ async function backfillMemoryStats(deps = {}) {
 const MEMORY_BACKFILL_DELAY_MS = 60_000;
 let memoryBackfillTimer = null;
 let memoryBackfillPending = null;
+let memoryBackfillSettle = null; // resolves memoryBackfillPending early (cancel)
 
 /**
  * Schedules ONE backfillMemoryStats pass MEMORY_BACKFILL_DELAY_MS from now on an
  * unref'd timer, so boot itself never reads run logs. A second call while a pass
- * is pending returns the same promise. Resolves to the samples added (0 on error).
+ * is pending returns the same promise. Resolves to the samples added (0 on error,
+ * 0 when cancelMemoryBackfill() runs first). Scheduling itself does no fs work.
  */
 function scheduleMemoryBackfill(deps = {}) {
   if (memoryBackfillPending) return memoryBackfillPending;
   const delayMs = deps.delayMs ?? MEMORY_BACKFILL_DELAY_MS;
   memoryBackfillPending = new Promise((resolve) => {
+    memoryBackfillSettle = resolve;
     memoryBackfillTimer = setTimeout(() => {
       memoryBackfillTimer = null;
       backfillMemoryStats(deps).catch(() => 0).then(resolve);
     }, delayMs);
     if (memoryBackfillTimer.unref) memoryBackfillTimer.unref();
-  }).finally(() => { memoryBackfillPending = null; });
-  return memoryBackfillPending;
+  });
+  const pending = memoryBackfillPending.finally(() => {
+    if (memoryBackfillPending === pending) { memoryBackfillPending = null; memoryBackfillSettle = null; }
+  });
+  memoryBackfillPending = pending;
+  return pending;
 }
 
+/**
+ * stop() path: clears a not-yet-fired backfill timer and settles the pending
+ * scheduleMemoryBackfill() promise with 0, so no awaiter hangs after stop(). A pass
+ * already reading logs is not interrupted (it never rejects and ends on its own);
+ * its awaiters still see 0.
+ */
 function cancelMemoryBackfill() {
   if (memoryBackfillTimer) { clearTimeout(memoryBackfillTimer); memoryBackfillTimer = null; }
+  const settle = memoryBackfillSettle;
+  memoryBackfillSettle = null;
   memoryBackfillPending = null;
+  if (settle) settle(0);
 }
 
 /** Starts the unref'd 30 s sampler once cgroupDir is known; finalizeJobScope clears it. */
@@ -867,7 +887,7 @@ function startJobScopeSampling(state, fsImpl = fs) {
 
 /**
  * Logs the last sampled memory.peak + oom_kill to the run log, records the peak with
- * the job's agentType ('dev-lead' when absent) through jobMemoryStats.recordPeak (the
+ * the job's agentType ('dev-lead' when absent) and run folder (state.runId) through jobMemoryStats.recordPeak (the
  * memory gate's measured reservations), then stops the scope exactly once.
  */
 function finalizeJobScope(state, safeLog, deps = {}) {
@@ -886,7 +906,10 @@ function finalizeJobScope(state, safeLog, deps = {}) {
     }
     if (hasPeak) {
       const agentType = typeof state.agentType === 'string' && state.agentType ? state.agentType : 'dev-lead';
-      (deps.recordPeak || jobMemoryStats.recordPeak)({ agentType, peakMb: Math.round(state.peak / 1048576), unit: state.unit });
+      (deps.recordPeak || jobMemoryStats.recordPeak)({
+        agentType, peakMb: Math.round(state.peak / 1048576), unit: state.unit,
+        ...(state.runId ? { runId: state.runId } : {}),
+      });
     }
   } catch { /* stats are best-effort */ }
   (deps.stopScope || memoryScope.stopScope)(state.unit);
@@ -6450,7 +6473,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     }
 
     const scopePlan = planJobScope({ jobSpawn, jobArgs, slug: job.slug, startedAt });
-    const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false, memoryMaxMb: scopePlan.memoryMaxMb, agentType: job.agentType || 'dev-lead' };
+    const scopeState = { unit: scopePlan.unit, runId: path.basename(runDir), pid: null, cgroupDir: null, finalized: false, memoryMaxMb: scopePlan.memoryMaxMb, agentType: job.agentType || 'dev-lead' };
     const launchSpawn = scopePlan.spawn;
 
     // Epic event log: job.tool_use per tool_use block in the job's stream-json

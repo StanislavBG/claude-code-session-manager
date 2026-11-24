@@ -226,6 +226,84 @@ describe('backfillFromRunLogs', () => {
     assert.deepEqual(storeLines().map((l) => [l.agentType, l.peakMb]), [['dev-lead', 101], ['unknown', 100]]);
   });
 
+  it('on a sparse runs folder lists at most maxFiles x 2 run folders, newest first, logs or not', async () => {
+    // 40 run folders, only the oldest 2 hold a log; the newest 38 hold only sidecars.
+    for (let i = 0; i < 40; i++) {
+      const runId = `2026-10-${String(i).padStart(2, '0')}T00-00-00-000Z`;
+      if (i < 2) writeLog(`${runId}/job-${i}.log`, peakLine(`sm-job-old-${i}`, 100 + i), 1000 + i);
+      else writeLog(`${runId}/job-${i}.meta.json`, '{}', 1000 + i);
+    }
+    const listed = [];
+    const counted = {
+      ...fs,
+      promises: { ...fs.promises, readdir: (d, ...a) => { listed.push(path.basename(String(d))); return fs.promises.readdir(d, ...a); } },
+    };
+    const s = createJobMemoryStats({ storePath: path.join(tmp, STORE_FILE), now: () => clock, fs: counted });
+    assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 5 }), 0);
+    // 1 runs-folder listing + the newest 10 run folders, never the 30 older ones (nor the 2 logs).
+    assert.equal(listed[0], 'runs');
+    const runListings = listed.slice(1);
+    assert.equal(runListings.length, 10);
+    assert.deepEqual(runListings, seq(10, (k) => `2026-10-${String(39 - k).padStart(2, '0')}T00-00-00-000Z`));
+    assert.equal(fs.existsSync(path.join(tmp, STORE_FILE)), false);
+    // A budget wide enough to reach the old logs finds them.
+    assert.equal(await s.backfillFromRunLogs(RUNS(), { maxFiles: 20 }), 2);
+  });
+
+  it('dedupes by run folder + unit: the same unit in another run folder is a new peak', async () => {
+    writeLog('run-1/a.log', peakLine('sm-job-x', 100), 1000);
+    writeLog('run-2/a.log', peakLine('sm-job-x', 200), 2000);
+    writeStore([{ agentType: 'dev-lead', peakMb: 100, at: 1, runId: 'run-1', unit: 'sm-job-x' }]);
+    const s = make();
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 1);
+    assert.deepEqual(storeLines().map((l) => [l.runId, l.unit, l.peakMb]), [['run-1', 'sm-job-x', 100], ['run-2', 'sm-job-x', 200]]);
+    // Both folder + unit pairs are stored now: a rerun adds nothing.
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 0);
+    assert.equal(storeLines().length, 2);
+  });
+
+  it('a live peak recorded with its run folder is not re-added, its unit elsewhere is', async () => {
+    writeLog('run-1/a.log', peakLine('sm-job-y', 300), 1000);
+    writeLog('run-2/a.log', peakLine('sm-job-y', 400), 2000);
+    const s = make();
+    s.recordPeak({ agentType: 'dev-lead', peakMb: 301, at: 5, runId: 'run-1', unit: 'sm-job-y' });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 1);
+    assert.deepEqual(storeLines().map((l) => [l.agentType, l.runId, l.peakMb]), [['dev-lead', 'run-1', 301], ['unknown', 'run-2', 400]]);
+  });
+
+  it('writes the store through the async atomic writer, never the sync one', async () => {
+    seedRuns(3);
+    const asyncWrites = [];
+    const s = createJobMemoryStats({
+      storePath: path.join(tmp, STORE_FILE),
+      now: () => clock,
+      writeTextAtomicSync: () => { throw new Error('sync write used'); },
+      writeTextAtomic: async (f, text) => { asyncWrites.push(f); fs.writeFileSync(f, text); },
+    });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 3);
+    assert.deepEqual(asyncWrites, [path.join(tmp, STORE_FILE)]);
+    assert.equal(storeLines().length, 3);
+  });
+
+  it('a live peak landing during the async write is kept', async () => {
+    seedRuns(2);
+    let s;
+    s = createJobMemoryStats({
+      storePath: path.join(tmp, STORE_FILE),
+      now: () => clock,
+      writeTextAtomic: async (f, text) => {
+        // The live peak's sync write lands first, then our rename replaces the file.
+        s.recordPeak({ agentType: 'validator', peakMb: 777, at: 9, runId: 'live-run', unit: 'sm-job-live' });
+        await new Promise((r) => setImmediate(r));
+        fs.writeFileSync(f, text);
+      },
+    });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 2);
+    const lines = storeLines();
+    assert.equal(lines.length, 3);
+    assert.ok(lines.some((l) => l.unit === 'sm-job-live' && l.peakMb === 777), JSON.stringify(lines));
+  });
+
   it('a store holding 30 samples is left alone', async () => {
     seedRuns(5);
     writeStore(seq(30, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));

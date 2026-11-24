@@ -221,3 +221,70 @@ test('memory backfill end to end: seeds the store from a run log peak line', asy
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('finalize records the run folder with the peak when the scope state carries one', () => {
+  const fsImpl = { readFileSync: (p) => { if (p === '/cg/memory.peak') return String(900 * 1048576); throw new Error('ENOENT'); } };
+  const recordPeak = vi.fn();
+  scheduler.finalizeJobScope({ unit: 'u10', runId: '2026-11-24T08-00-00-000Z', pid: null, cgroupDir: '/cg', finalized: false, agentType: 'dev-lead' }, vi.fn(), { fs: fsImpl, stopScope: vi.fn(), recordPeak });
+  expect(recordPeak).toHaveBeenCalledWith({ agentType: 'dev-lead', peakMb: 900, unit: 'u10', runId: '2026-11-24T08-00-00-000Z' });
+});
+
+test('memory backfill defaults to schedulerPaths.runsDir() when no runsDir is injected', async () => {
+  const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
+  const backfillFromRunLogs = vi.fn(async () => 0);
+  expect(await scheduler.backfillMemoryStats({ backfillFromRunLogs })).toBe(0);
+  expect(backfillFromRunLogs).toHaveBeenCalledTimes(1);
+  expect(backfillFromRunLogs.mock.calls[0][0]).toBe(schedulerPaths.runsDir());
+  expect(typeof backfillFromRunLogs.mock.calls[0][0]).toBe('string');
+});
+
+test('cancelMemoryBackfill settles the pending scheduled pass with 0 and the pass never runs', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const backfillFromRunLogs = vi.fn(async () => 7);
+    const done = scheduler.scheduleMemoryBackfill({ runsDir: '/runs', backfillFromRunLogs });
+    scheduler.cancelMemoryBackfill();
+    // Settles without advancing any timer (would hang forever before the fix).
+    expect(await done).toBe(0);
+    vi.advanceTimersByTime(scheduler.MEMORY_BACKFILL_DELAY_MS * 2);
+    expect(backfillFromRunLogs).not.toHaveBeenCalled();
+    // A fresh schedule after cancel is a new pass, not the settled one.
+    const next = scheduler.scheduleMemoryBackfill({ runsDir: '/runs', backfillFromRunLogs });
+    expect(next).not.toBe(done);
+    vi.advanceTimersByTime(scheduler.MEMORY_BACKFILL_DELAY_MS);
+    expect(await next).toBe(7);
+    // stop() cancels too: a pending pass settles with 0.
+    const viaStop = scheduler.scheduleMemoryBackfill({ runsDir: '/runs', backfillFromRunLogs });
+    scheduler.stop();
+    expect(await viaStop).toBe(0);
+    expect(backfillFromRunLogs).toHaveBeenCalledTimes(1);
+  } finally {
+    scheduler.cancelMemoryBackfill();
+    vi.useRealTimers();
+  }
+});
+
+test('init() schedules the memory backfill (deferred) and never runs it on the boot path', () => {
+  // init() boots the whole scheduler (intervals, supervisor, reconciliation), so this reads
+  // its source: the boot path must call scheduleMemoryBackfill() and never the pass itself.
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require.resolve('../scheduler.cjs'), 'utf8');
+  const start = src.indexOf('\nasync function init() {');
+  expect(start).toBeGreaterThan(-1);
+  const end = src.indexOf('\n}\n', start);
+  const body = src.slice(start, end);
+  expect(body).toMatch(/\bscheduleMemoryBackfill\(\)/);
+  expect(body).not.toMatch(/\bbackfillMemoryStats\(/);
+  expect(body).not.toMatch(/\bbackfillFromRunLogs\(/);
+  // And scheduling itself does no work: nothing runs before the delay elapses.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const backfillFromRunLogs = vi.fn(async () => 0);
+    scheduler.scheduleMemoryBackfill({ backfillFromRunLogs });
+    vi.advanceTimersByTime(scheduler.MEMORY_BACKFILL_DELAY_MS - 1);
+    expect(backfillFromRunLogs).not.toHaveBeenCalled();
+  } finally {
+    scheduler.cancelMemoryBackfill();
+    vi.useRealTimers();
+  }
+});

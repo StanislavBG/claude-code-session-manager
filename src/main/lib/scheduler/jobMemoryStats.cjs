@@ -11,7 +11,8 @@
  * Reads are cached CACHE_MS. Quantiles are nearest-rank. Pure Node, no Electron.
  *
  * The default instance's functions are the module exports; createJobMemoryStats()
- * builds one with injected { fs, now, storePath, writeTextAtomicSync } for tests.
+ * builds one with injected { fs, now, storePath, writeTextAtomicSync, writeTextAtomic } for tests
+ * (writeTextAtomicSync: recordPeak's write; writeTextAtomic: the backfill's async write).
  */
 
 const nodeFs = require('node:fs');
@@ -64,12 +65,12 @@ function createJobMemoryStats(deps = {}) {
   const fs = deps.fs || nodeFs;
   const now = deps.now || Date.now;
   const writeText = deps.writeTextAtomicSync || atomicFs.writeTextAtomicSync;
+  const writeTextAsync = deps.writeTextAtomic || atomicFs.writeTextAtomic;
   const resolveStorePath = () => (typeof deps.storePath === 'function' ? deps.storePath() : deps.storePath) || defaultStorePath();
   let cache = null; // { at, file, samples }
+  let liveDuringWrite = null; // live recordPeak samples landing while the backfill's async write is in flight
 
-  function readSamplesUncached(file) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  function parseSamples(text) {
     const out = [];
     for (const line of String(text).split('\n')) {
       if (!line.trim()) continue;
@@ -80,6 +81,20 @@ function createJobMemoryStats(deps = {}) {
     }
     return out;
   }
+
+  function readSamplesUncached(file) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
+    return parseSamples(text);
+  }
+
+  async function readSamplesAsync(file) {
+    let text;
+    try { text = await fs.promises.readFile(file, 'utf8'); } catch { return []; }
+    return parseSamples(text);
+  }
+
+  const serialize = (kept) => kept.map((x) => JSON.stringify(x)).join('\n') + (kept.length ? '\n' : '');
 
   /** All stored samples, oldest first (file order). Cached CACHE_MS per store path. */
   function loadSamples() {
@@ -93,7 +108,14 @@ function createJobMemoryStats(deps = {}) {
 
   function writeSamples(file, samples) {
     const kept = samples.slice(-MAX_SAMPLES);
-    writeText(file, kept.map((s) => JSON.stringify(s)).join('\n') + (kept.length ? '\n' : ''));
+    writeText(file, serialize(kept));
+    cache = { at: now(), file, samples: kept };
+    return kept;
+  }
+
+  async function writeSamplesAsync(file, samples) {
+    const kept = samples.slice(-MAX_SAMPLES);
+    await writeTextAsync(file, serialize(kept));
     cache = { at: now(), file, samples: kept };
     return kept;
   }
@@ -109,6 +131,7 @@ function createJobMemoryStats(deps = {}) {
     const s = normalizeSample({ agentType, peakMb, at: at === undefined ? now() : at, runId, unit });
     if (!s) return null;
     appendSamples([s]);
+    if (liveDuringWrite) liveDuringWrite.push(s);
     return s;
   }
 
@@ -158,29 +181,44 @@ function createJobMemoryStats(deps = {}) {
   /**
    * Seeds the store from run logs' 'memory scope <unit>: peak=<N>MB' lines
    * (agentType 'unknown', at = log mtime) while it holds fewer than MIN_SAMPLES.
-   * `runsDir` is the scheduler runs folder (<runId>/<slug>.log); run folders are
-   * walked by name, newest first (names are timestamps), and the walk stops once
-   * maxFiles logs are picked — only picked logs are read and stat'd. All run-log
-   * I/O is fs.promises, in batches of at most BACKFILL_BATCH files with an event
-   * loop yield between batches, so it never blocks the Electron main thread.
-   * A sample whose run folder + unit (or, for a live-recorded peak, unit) is
-   * already stored is skipped. Never rejects. Resolves to the number added.
+   * `runsDir` is the scheduler runs folder (<runId>/<slug>.log). Only the newest
+   * maxFiles × 2 run folders (by name — names are timestamps) are listed, whether
+   * or not they hold logs, so a sparse runs folder never costs a listing per run;
+   * among them the walk stops once maxFiles logs are picked, and only picked logs
+   * are read and stat'd. A peak is deduped by run folder + scope unit (a stored
+   * sample without a runId — a peak recorded before live peaks carried one — can
+   * only match by unit).
+   *
+   * I/O: the store reads, run-log listings/reads/stats and the final store write
+   * (util/atomicFs writeTextAtomic) are all fs.promises, run-log reads in batches
+   * of at most BACKFILL_BATCH with an event-loop yield between batches. Nothing
+   * runs synchronously except one case: when a live recordPeak lands while that
+   * async write is in flight (our rename may have replaced its line), the store
+   * is re-read and the missing live peak re-appended with the same synchronous
+   * writer recordPeak itself uses. Never rejects. Resolves to the number added.
    */
   async function backfillFromRunLogs(runsDir, { maxFiles = DEFAULT_MAX_FILES } = {}) {
     try {
       if (typeof runsDir !== 'string' || !runsDir) return 0;
       const file = resolveStorePath();
-      const existing = readSamplesUncached(file);
+      const existing = await readSamplesAsync(file);
       if (existing.length >= MIN_SAMPLES) return 0;
-      const seen = new Set();
-      for (const s of existing) {
-        if (!s.unit) continue;
-        seen.add(`unit\0${s.unit}`);
-        if (s.runId) seen.add(`${s.runId}\0${s.unit}`);
-      }
       const budget = Math.max(0, Math.floor(Number(maxFiles) || 0));
       if (!budget) return 0;
-      const runIds = (await listDir(runsDir)).filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse();
+      const keyOf = (runId, unit) => `${runId}\0${unit}`;
+      const seen = new Set();
+      const legacyUnits = new Set(); // stored peaks with no run folder
+      const noteStored = (samples) => {
+        for (const x of samples) {
+          if (!x.unit) continue;
+          if (x.runId) seen.add(keyOf(x.runId, x.unit));
+          else legacyUnits.add(x.unit);
+        }
+      };
+      noteStored(existing);
+      const isStored = (runId, unit) => seen.has(keyOf(runId, unit)) || legacyUnits.has(unit);
+      const runIds = (await listDir(runsDir)).filter((e) => e.isDirectory()).map((e) => e.name)
+        .sort().reverse().slice(0, budget * 2);
       // Pick the newest `budget` logs: [{ runId, p }], newest run first.
       const picked = [];
       for (const runId of runIds) {
@@ -209,19 +247,33 @@ function createJobMemoryStats(deps = {}) {
           const found = perRun.get(r.runId);
           for (const m of r.text.matchAll(PEAK_LINE_RE)) {
             const unit = m[1];
-            if (seen.has(`${r.runId}\0${unit}`) || seen.has(`unit\0${unit}`)) continue;
-            seen.add(`${r.runId}\0${unit}`);
+            if (isStored(r.runId, unit)) continue;
+            seen.add(keyOf(r.runId, unit));
             found.push({ agentType: 'unknown', peakMb: Number(m[2]), at: Math.round(r.mtimeMs), runId: r.runId, unit });
           }
         }
       }
       // Re-read the store: a live recordPeak may have landed while the logs were read.
-      const current = readSamplesUncached(file);
-      const liveUnits = new Set(current.map((s) => s.unit).filter(Boolean));
-      const samples = [...perRun.values()].reverse().flat() // oldest first, like the live store
-        .filter((s) => !liveUnits.has(s.unit));
-      if (!samples.length) return 0;
-      writeSamples(file, [...current, ...samples]);
+      liveDuringWrite = [];
+      let samples;
+      try {
+        const current = await readSamplesAsync(file);
+        seen.clear();
+        noteStored(current);
+        samples = [...perRun.values()].reverse().flat() // oldest first, like the live store
+          .filter((x) => !isStored(x.runId, x.unit));
+        if (!samples.length) return 0;
+        await writeSamplesAsync(file, [...current, ...samples]);
+      } finally {
+        const landed = liveDuringWrite;
+        liveDuringWrite = null;
+        if (landed.length && samples && samples.length) {
+          const stored = readSamplesUncached(file);
+          const have = new Set(stored.map((x) => JSON.stringify(x)));
+          const missing = landed.filter((x) => !have.has(JSON.stringify(x)));
+          if (missing.length) writeSamples(file, [...stored, ...missing]);
+        }
+      }
       return Math.min(samples.length, MAX_SAMPLES);
     } catch {
       return 0;

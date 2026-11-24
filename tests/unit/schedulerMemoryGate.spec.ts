@@ -11,8 +11,6 @@
  */
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
-import os from 'node:os'
-import path from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { availableForJobs } = require('../../src/main/scheduler.cjs') as {
@@ -27,21 +25,25 @@ const { measuredMemoryGate } = require('../../src/main/lib/scheduler/loadGate.cj
   }) => { allowed: number; measured: boolean }
 }
 const { createJobMemoryStats } = require('../../src/main/lib/scheduler/jobMemoryStats.cjs') as {
-  createJobMemoryStats: (deps: { storePath: string; now: () => number }) => unknown
+  createJobMemoryStats: (deps: { storePath: string; now: () => number; fs: unknown }) => unknown
 }
 
-// A store path that never exists → zero samples → fallback reservations.
-const emptyStats = createJobMemoryStats({
-  storePath: path.join(os.tmpdir(), `sm-empty-mem-store-${process.pid}-${Date.now()}`, 'none.jsonl'),
-  now: () => 1,
-})
+// An injected fake fs whose store read always misses → zero samples → fallback reservations.
+const FAKE_STORE = '/fake-scheduler-home/job-memory-peaks.jsonl'
+const storeReads: string[] = []
+const emptyFs = {
+  readFileSync: (file: string) => {
+    storeReads.push(file)
+    throw Object.assign(new Error(`ENOENT: ${file}`), { code: 'ENOENT' })
+  },
+}
+const emptyStats = createJobMemoryStats({ storePath: FAKE_STORE, now: () => 1, fs: emptyFs })
 
-/** Jobs admitted from a batch of `batchLen`, with `runningCount` jobs whose RSS sums to `consumedMb`. */
-function gate(availableMb: number, runningCount: number, batchLen: number, consumedMb = 0): number {
-  const perJobRss = runningCount > 0 ? Math.max(0, consumedMb) / runningCount : 0
+/** Jobs admitted from a batch of `batchLen`, with `runningCount` jobs each credited `rssMb` of measured RSS. */
+function gate(availableMb: number, runningCount: number, batchLen: number, rssMb = 0): number {
   const result = measuredMemoryGate({
     jobBudgetMb: availableMb,
-    running: Array.from({ length: runningCount }, () => ({ agentType: 'dev-lead', rssMb: perJobRss })),
+    running: Array.from({ length: runningCount }, () => ({ agentType: 'dev-lead', rssMb })),
     batch: Array.from({ length: batchLen }, () => ({ agentType: 'dev-lead' })),
     stats: emptyStats,
   })
@@ -50,6 +52,13 @@ function gate(availableMb: number, runningCount: number, batchLen: number, consu
 }
 
 describe('measuredMemoryGate fallback (empty store = flat 2,500 MB/job)', () => {
+  it('reads the empty store through the injected fake fs only', () => {
+    storeReads.length = 0
+    expect(gate(20_000, 0, 1)).toBe(1)
+    expect(storeReads.length).toBeGreaterThan(0)
+    expect(new Set(storeReads)).toEqual(new Set([FAKE_STORE]))
+  })
+
   it('passes full batch when memory is ample', () => {
     // 0 running, 3 in batch, 20 GB free → allow all 3
     expect(gate(20_000, 0, 3)).toBe(3)
@@ -94,25 +103,25 @@ describe('measuredMemoryGate fallback (empty store = flat 2,500 MB/job)', () => 
 })
 
 describe('measuredMemoryGate fallback running-RSS credit', () => {
-  it('(a) 2 running with consumedMb 0 needs the full 2500 per running job', () => {
+  it('(a) 2 running jobs credited 0 MB RSS each still reserve the full 2500 per running job', () => {
     for (const [avail, want] of [[4000, 0], [7500, 1], [9999, 1], [10_000, 2], [12_500, 3]]) {
       expect(gate(avail, 2, 3, 0)).toBe(want)
     }
   })
 
-  it('(b) 1 running with consumedMb 2500 behaves like 0 running', () => {
+  it('(b) 1 running job credited 2500 MB RSS (its full reservation) behaves like 0 running', () => {
     for (const avail of [1000, 2500, 4999, 5000, 7500]) {
       expect(gate(avail, 1, 3, 2500)).toBe(gate(avail, 0, 3))
     }
   })
 
-  it('(c) oversized consumedMb never admits more than 0-running would', () => {
+  it('(c) a running job whose RSS credit exceeds its reservation never admits more than 0-running would', () => {
     for (const avail of [0, 2499, 2500, 5000, 7500]) {
       expect(gate(avail, 1, 4, 99_999)).toBeLessThanOrEqual(gate(avail, 0, 4))
     }
   })
 
-  it('ignores negative consumedMb', () => {
+  it('a negative per-job RSS credit counts as 0', () => {
     expect(gate(2500, 1, 2, -5000)).toBe(gate(2500, 1, 2))
   })
 })

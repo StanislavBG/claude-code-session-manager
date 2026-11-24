@@ -712,7 +712,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         cap: { type: 'integer', description: 'The new machine-wide limit on parallel claude sessions (an integer between the min and max scheduler_slots_get reports)' },
-        quote: { type: 'string', description: "The human's own words from this session naming the limit and this number, quoted verbatim" },
+        quote: { type: 'string', description: "The human's own words from this session, quoted verbatim; one sentence must be exactly the accepted form, e.g. 'raise the limit to 14'" },
       },
       required: ['cap', 'quote'],
     },

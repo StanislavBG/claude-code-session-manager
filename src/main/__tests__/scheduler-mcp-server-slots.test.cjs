@@ -72,7 +72,7 @@ async function setup(env, { status = 200, body = { ok: true } } = {}) {
   return { ...require(SERVER_PATH), requests };
 }
 
-const QUOTE = 'raise the limit to 14 parallel sessions';
+const QUOTE = 'raise the limit to 14';
 const call = (h, name, args) => h({ params: { name, arguments: args } });
 
 test('both tools are live MCP tools with the slots schemas', async () => {
@@ -88,6 +88,8 @@ test('both tools are live MCP tools with the slots schemas', async () => {
   expect(set.inputSchema.properties.quote.type).toBe('string');
   expect(set.description).toMatch(/human's own words/);
   expect(set.description).toMatch(/verbatim from this session/);
+  expect(set.description).toContain('"raise the limit to 14"');
+  expect(set.inputSchema.properties.quote.description).toContain("'raise the limit to 14'");
 });
 
 test('scheduler_slots_get sends GET /admin/scheduler/slots with no body and returns the answer', async () => {

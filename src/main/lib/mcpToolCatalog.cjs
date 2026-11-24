@@ -983,12 +983,15 @@ const MCP_TOOL_CATALOG = [
       + 'is taken from this session, never from arguments, and a scheduled job is refused.',
     summary: 'Raise or lower the session limit when the human asks.',
     whenToUse: "Use only when the human asked in this session for a new limit. It needs the human's own words "
-      + 'naming the limit and the number, quoted verbatim from this session, as `quote` — e.g. "raise the limit to '
-      + '14 parallel sessions" — and `cap` set to that number. The route checks the quote against what the human '
-      + 'typed in this session.',
+      + 'naming the limit and the number, quoted verbatim from this session, as `quote`, and `cap` set to that '
+      + 'number. One sentence of the quote must be exactly this form: [please|ok|okay|so|now|then] '
+      + 'set|raise|increase|bump|lower|reduce|change [the|our] [session|slot|parallel] limit|cap|slots to '
+      + '<number in digits> [sessions|slots] — nothing after it, no question mark; e.g. "raise the limit to 14". '
+      + 'Anything else is refused. The route checks the quote against what the human typed in this session; '
+      + 'if the human said it another way, ask them to say it in that form.',
     whenNotToUse: 'Never on your own initiative, never from a job or script, and never with words you wrote or '
       + 'paraphrased. Do not use it just to read the limit — use scheduler_slots_get.',
-    exampleArgs: { cap: 14, quote: 'raise the limit to 14 parallel sessions' },
+    exampleArgs: { cap: 14, quote: 'raise the limit to 14' },
     notes: 'One instruction allows one change. Returns { ok: true, from, to }. A refusal (400 invalid_request — '
       + 'cap outside [min, max]; 403 called_from_headless_job / human_request_unverified / '
       + 'quote_does_not_name_slots) carries error and reason; show the reason to the human.',

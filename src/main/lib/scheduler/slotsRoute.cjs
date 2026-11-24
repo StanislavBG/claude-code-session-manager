@@ -18,12 +18,9 @@
  *          taskSwitchRoute.cjs (humanPromptLedger.findHumanPromptContaining);
  *          headless jobs and Tasks never record prompts there, so they fail here
  *          too;
- *       4. 403 quote_does_not_name_slots — the quote is not a change request:
- *          a change verb (set / raise / bump / lower / make …), a limit word
- *          (limit / cap / slots / sessions / parallel / concurrent) AND the new
- *          number given as the target ("to 14", "= 14", "at 14", "14 parallel
- *          sessions"). Naming a limit and a number in passing is not enough;
- *          a question or a percentage target is refused too.
+ *       4. 403 quote_does_not_name_slots — no sentence of the quote is the
+ *          one accepted form (see SLOT_COMMAND); the reason gives that form,
+ *          e.g. say 'raise the limit to 14'.
  *     Success: sessionSlots.setCap(cap) (persists + wakes waiters), one
  *     slot_cap_changed audit event { from, to, epicId, quote, promptAt },
  *     200 { ok, from, to }.
@@ -45,99 +42,51 @@ const slotsBodySchema = z.object({
   callerJobSlug: z.string().max(256).optional(),
 }).strict();
 
-const LIMIT_WORDS = '(?:limit|limits|cap|caps|slot|slots|session|sessions|parallel|parallelism|concurrent|concurrency)';
-const CHANGE_VERBS = '(?:set|raise|increase|bump|lift|lower|reduce|drop|change|move|make)';
-const NEGATION = '(?:not|never|no|dont|don t|won t|wont|can t|cant|shouldn t|shouldnt)';
-const TARGET = '(?:to|=|at)';
-const QUESTION_WORDS = '(?:will|would|do|does|did|may|might|are|is|can|could|should|shall|whether|want to)';
-// A question word (or a '?') before the change verb, in the same clause, makes
-// the quote a question ("will you raise the limit to 14"), never a request.
-// A clause ends at , ; . ! or a line break (all normalized to ' . ').
-const QUESTION_BEFORE_VERB = new RegExp(`(?:^| )(?:${QUESTION_WORDS}|\\?)(?: [^.]*)? ${CHANGE_VERBS}(?= |$)`);
-// Any '?' after a change verb, anywhere later in the quote, makes it a question.
-const QUESTION_AFTER_VERB = new RegExp(`(?:^| )${CHANGE_VERBS} (?:.* )?\\?`);
-const PERCENT_WORDS = '(?:percent|per cent|pct|percentage)';
-// Closing quotes and brackets a human (or a copy-paste) leaves after a '?'.
-const TRAILING_CLOSERS = /[\s"'`\u201d\u2019\u00bb)\]}>]+$/;
+// The one accepted sentence form, matched against a whole sentence after
+// lowercasing and collapsing spaces:
+//   [please|ok|okay|so|now|then[,]] set|raise|increase|bump|lower|reduce|change
+//   [the|our] [session|slot|parallel] limit|cap|slots to <digits> [sessions|slots]
+// Nothing else may come before or after it in that sentence. Anything else —
+// questions, negations, percentages, number words, extra words — is refused.
+const SLOT_COMMAND = new RegExp(
+  '^(?:(?:please|ok|okay|so|now|then),? )?'
+  + '(?:set|raise|increase|bump|lower|reduce|change) '
+  + '(?:(?:the|our) )?'
+  + '(?:(?:session|slot|parallel) )?'
+  + '(?:limit|cap|slots) to (\\d+)'
+  + '(?: (?:sessions|slots))?$',
+);
 
-const NUMBER_WORDS = [
-  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
-  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen',
-  'nineteen', 'twenty',
-];
-const TENS = { 20: 'twenty', 30: 'thirty' };
-const ANY_NUMBER = `(?:\\d+|${[...NUMBER_WORDS, 'thirty', 'forty', 'fifty'].join('|')})`;
-// One filler word: letters only, never a number word, so a gap can never
-// swallow half of "thirty two" or step over a different number.
-const WORD = `(?!${ANY_NUMBER}(?: |$))[a-z]+`;
-const gap = (/** @type {number} */ n) => `(?: ${WORD}){0,${n}}`;
-
-/** @param {number} n */
-function wordsFor(n) {
-  if (n < 0) return [];
-  if (n <= 20) return [NUMBER_WORDS[n]];
-  const tens = Math.floor(n / 10) * 10;
-  const unit = n % 10;
-  const t = TENS[/** @type {20|30} */ (tens)];
-  if (!t) return [];
-  return unit === 0 ? [t] : [`${t} ${NUMBER_WORDS[unit]}`];
-}
-
-/** @param {unknown} quote */
-function normalizeQuote(quote) {
-  return String(quote)
-    .toLowerCase()
-    .replace(/\d+[.,]\d+/g, ' # ') // a decimal is never a cap; never let "14.5" read as 14
-    .replace(/%/g, ' percent ') // "14%" reads as "14 percent": a percentage, never a cap
-    .replace(/=/g, ' = ')
-    .replace(/[.!;,\r\n]/g, ' . ') // a clause boundary: no gap word or question scan crosses it
-    .replace(/\?/g, ' ? ') // a question mark: no gap word crosses it
-    .replace(/[:()[\]{}]/g, ' | ') // a phrase break: no gap word crosses it, the question scan does
-    .replace(/[^a-z0-9=.#?| ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+/** The accepted form, as the refusal states it. @param {number} cap */
+function acceptedFormHint(cap) {
+  return `say 'raise the limit to ${cap}' (one sentence: [please|ok|so|now|then] `
+    + 'set|raise|increase|bump|lower|reduce|change [the|our] [session|slot|parallel] limit|cap|slots '
+    + 'to <number in digits> [sessions|slots], with nothing after it and no question mark)';
 }
 
 /**
- * The anchored change-request patterns for `cap`:
- *   A. verb … limit word … to|=|at <cap>   ("raise the limit to 14")
- *   B. verb … [to|=|at] <cap> … limit word  ("make it 16 parallel sessions")
- * The verb must be the base form and not negated; the number must stand alone.
- * @param {number} cap
- */
-function changeRequestPatterns(cap) {
-  const num = `(?:${[String(cap), ...wordsFor(cap)].join('|')})`;
-  // The number must stand alone and not be a percentage ("14 percent", "14%").
-  const numEnd = `(?= |$)(?! ${ANY_NUMBER}(?: |$))(?! ${PERCENT_WORDS}(?: |$))`;
-  const verb = `(?<!${NEGATION}${gap(2)} )(?<=^| )${CHANGE_VERBS}`;
-  const verbAtStart = `(?:^| )${verb}`;
-  return [
-    new RegExp(`${verbAtStart}${gap(4)} ${LIMIT_WORDS}${gap(3)} ${TARGET} ${num}${numEnd}`),
-    new RegExp(`${verbAtStart}${gap(4)}(?: ${TARGET})? ${num}${numEnd}${gap(2)} ${LIMIT_WORDS}(?= |$)`),
-  ];
-}
-
-/**
- * True only when the quote is a request to CHANGE the session limit to `cap`:
- * a change verb, a limit word, and `cap` (digits, or English words up to
- * thirty-nine) given as the new target. Mentioning a limit and a number is not
- * enough — "lets see first 10 sessions chugging and then we will move the
- * limit via the mcp" authorizes nothing. A question (ends with '?', or a
- * '?' anywhere after the change verb, or a question word — will, would, do,
- * does, did, may, might, are, is, can, could, should, shall, whether, want to —
- * before the verb in its clause) and a percentage target ("14%", "14 percent",
- * "14 per cent", "14 pct", "14 percentage") authorize nothing either.
- * Refuses on doubt.
+ * True only when one sentence of the quote is exactly the SLOT_COMMAND form
+ * naming `cap` in digits. Sentences split on . ! ? ; and line breaks; a
+ * sentence ended by '?' never authorizes; a decimal ("14.5") is not split, so
+ * it never reads as 14. Refuses on doubt.
  * @param {unknown} quote
  * @param {number} cap
  */
 function quoteNamesSlots(quote, cap) {
   if (typeof quote !== 'string' || !Number.isInteger(cap) || cap < 0) return false;
-  if (/\?$/.test(quote.replace(TRAILING_CLOSERS, ''))) return false; // a question is not a request
-  const q = normalizeQuote(quote);
-  if (QUESTION_AFTER_VERB.test(q)) return false;
-  if (QUESTION_BEFORE_VERB.test(q)) return false;
-  return changeRequestPatterns(cap).some((re) => re.test(q));
+  // Keep a decimal point inside its sentence so "14.5" fails the form.
+  const text = quote.toLowerCase().replace(/(\d)[.,](?=\d)/g, '$1#');
+  const sentence = /([^.!?;\r\n]*)([.!?;\r\n]|$)/g;
+  let m;
+  while ((m = sentence.exec(text)) !== null) {
+    const body = m[1].replace(/\s+/g, ' ').trim();
+    if (m[2] !== '?' && body) {
+      const hit = SLOT_COMMAND.exec(body);
+      if (hit && hit[1] === String(cap)) return true;
+    }
+    if (m[2] === '') break; // end of the quote
+  }
+  return false;
 }
 
 /**
@@ -206,7 +155,7 @@ function registerSlotsRoute(adminHttp, deps = {}) {
       return;
     }
     if (!quoteNamesSlots(quote, cap)) {
-      refuse(403, 'quote_does_not_name_slots', `the human's quote does not ask to change the session limit to ${cap}`);
+      refuse(403, 'quote_does_not_name_slots', `the human's quote does not ask to change the session limit to ${cap} in the accepted form; ${acceptedFormHint(cap)}`);
       return;
     }
 

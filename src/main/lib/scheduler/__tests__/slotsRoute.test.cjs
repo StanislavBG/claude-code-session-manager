@@ -20,7 +20,7 @@ const SID = 'chat-session-slots';
 // The owner's own sentence: it mentions sessions, the limit and 10, but asks
 // for no change — it must authorize no cap.
 const OWNER_SENTENCE = 'lets see first 10 sessions chugging and then we will move the limit via the mcp';
-const QUOTE = 'ok now raise the session limit to 10';
+const QUOTE = 'ok, raise the session limit to 10';
 
 function fakeReq(body) {
   const req = new EventEmitter();
@@ -94,77 +94,45 @@ describe('quoteNamesSlots', () => {
     expect(quoteNamesSlots(OWNER_SENTENCE, n)).toBe(false);
   });
 
-  // [quote, cap, accepted]
+  // [quote, cap, accepted] — only the strict sentence form authorizes.
   test.each([
-    // accepted change requests
+    // accepted: the strict sentence form
     ['raise the limit to 14', 14, true],
-    ['set the slots to 12', 12, true],
-    ['make it 16 parallel sessions', 16, true],
+    ['Please set the session limit to 12.', 12, true],
+    ['ok, lower the cap to 6 slots', 6, true],
     [QUOTE, 10, true],
-    ['raise the parallel limit to twelve', 12, true],
-    ['set concurrent jobs to 8', 8, true],
-    ['make it thirty-two slots', 32, true],
-    ['Set the cap = 6', 6, true],
-    ['set the limit=6', 6, true],
-    ['lower the concurrency at 4 please', 4, true],
-    ['bump it to 20 parallel sessions', 20, true],
-    ["Let's change the session cap to 0.", 0, true],
-    ['drop the limit to three', 3, true],
-    ['raise the limit to 14 parallel sessions', 14, true],
-    ['I cant wait, set the slots to 12', 12, true],
+    ['set the slots to 12', 12, true],
+    ['bump our parallel limit to 20 sessions', 20, true],
+    ['Now   INCREASE the slot cap to 8!', 8, true],
+    ['change the cap to 0', 0, true],
+    ['thanks. reduce the limit to 4', 4, true],
     ['I cant wait\nset the slots to 12', 12, true],
-    // refused: no change request
+    // refused: anything after the number, or a question
+    ['raise the limit to 14 (pct)', 14, false],
+    ['raise the limit to 14?', 14, false],
+    ['raise the limit to 14 percent', 14, false],
+    ['raise the limit to 14%', 14, false],
+    ['raise the limit to 14 parallel sessions', 14, false],
+    ['raise the limit to 14 please', 14, false],
+    ['raise the limit to 14?"', 14, false],
+    // refused: anything before the verb that is not a lead-in
+    ['will you raise the limit to 14', 14, false],
+    ['I want to raise the limit to 14', 14, false],
+    ["don't raise the limit to 14", 14, false],
+    ['I cant wait, set the slots to 12', 12, false],
+    ['ok now raise the session limit to 10', 10, false],
+    // refused: not the form at all
+    ['make it 16 parallel sessions', 16, false],
     [OWNER_SENTENCE, 10, false],
-    ['10 sessions is the limit', 10, false],
-    ['we have 14 parallel sessions right now', 14, false],
     ['the limit was set to 10 yesterday', 10, false],
-    ['move the limit later, maybe 10', 10, false],
-    // refused: no limit word
     ['set it to 10 please', 10, false],
-    ['please bump it up to 10 right now, thanks', 10, false],
+    ['raise the limit to fourteen', 14, false],
+    ['raise the limit. to 14', 14, false],
     // refused: wrong / ambiguous number
     ['raise the session limit to 10', 12, false],
     ['raise the session limit to 100', 10, false],
     ['raise the limit to 14.5', 14, false],
-    ['make it thirty two slots', 30, false],
-    ['make it thirty two slots', 2, false],
-    ['set the limit to 1 0', 1, false],
-    // refused: negated or past tense
-    ["don't raise the limit to 14", 14, false],
-    ['do not set the slots to 12', 12, false],
-    ['never make it 16 parallel sessions', 16, false],
-    ['we raised the limit to 14', 14, false],
-    // refused: a question is not a request
-    ['I asked whether to raise the limit to 14?', 14, false],
-    ['should we raise the limit to 14', 14, false],
-    ['could you set the slots to 12', 12, false],
-    ['raise the limit to 14?', 14, false],
-    ['raise the limit to 14?"', 14, false],
-    ['raise the limit to 14?)', 14, false],
-    ['raise the limit to 14? thanks', 14, false],
-    ['will you raise the limit to 14', 14, false],
-    ['would you set the slots to 12', 12, false],
-    ['do you want to raise the limit to 14', 14, false],
-    ['does it make sense to set the slots to 12', 12, false],
-    ['did you set the slots to 12', 12, false],
-    ['may I set the slots to 12', 12, false],
-    ['might we raise the limit to 14', 14, false],
-    ['are we going to set the slots to 12', 12, false],
-    ['is it ok to set the slots to 12', 12, false],
-    ['can you set the slots to 12', 12, false],
-    ['shall we raise the limit to 14', 14, false],
-    ['I want to raise the limit to 14', 14, false],
-    // refused: a percentage is not a slot count
-    ['raise the limit to 14 percent', 14, false],
-    ['raise the limit to 14%', 14, false],
-    ['make it 16% parallel sessions', 16, false],
-    ['raise the limit to 14 pct', 14, false],
-    ['raise the limit to 14 per cent', 14, false],
-    ['raise the limit to 14 per-cent', 14, false],
-    ['raise the limit to 14 percentage', 14, false],
-    ['make it 16 pct parallel sessions', 16, false],
-    // refused: the target crosses a sentence boundary
-    ['raise the limit. to 14 we go', 14, false],
+    ['raise the limit to 014', 14, false],
     // refused: not a string / not an integer
     [42, 42, false],
     ['raise the limit to 14', 14.5, false],
@@ -227,6 +195,7 @@ describe('POST /admin/scheduler/slots', () => {
     const res = await call('POST', { cap: 10, quote: q, originClaudeSessionId: SID });
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('quote_does_not_name_slots');
+    expect(res.body.reason).toContain("say 'raise the limit to 10'");
     expectNoWrite();
   });
 

@@ -161,9 +161,33 @@ test('from a checkout: says the version does not identify the code; no plain res
   expect(msg).toContain('runs from a source checkout');
   expect(msg).toContain('does not say which code it has');
   expect(msg).toContain('may not be in any published release yet');
-  expect(msg).toContain('only once a release containing this route is installed');
+  expect(msg).toContain('Needs Session Manager newer than v0.137.0.');
+  expect(msg).toContain('Restarting the app helps only once a release newer than v0.137.0 is installed.');
+  expect(msg).not.toContain('only once a release containing this route is installed');
   expect(msg).not.toContain('Restart Session Manager');
   expect(msg).not.toContain('is older than');
+});
+
+test('from a checkout: exact text for the 2026-11-24 site inbox case', () => {
+  const { unknownRouteMessage } = pureMod();
+  const msg = unknownRouteMessage({
+    method: 'GET', pathname: '/admin/site-feedback/inbox', appVersion: '0.141.0', serverVersion: '0.141.0', fromCheckout: true,
+  });
+  expect(msg).toBe('the running Session Manager app (v0.141.0) has no route GET /admin/site-feedback/inbox. '
+    + 'This MCP server is v0.141.0. Needs Session Manager newer than v0.141.0. '
+    + 'This MCP server runs from a source checkout that is ahead of the running app, so its version number does not say which code it has. '
+    + 'The route may not be in any published release yet. '
+    + 'Restarting the app helps only once a release newer than v0.141.0 is installed.');
+});
+
+test('from a checkout, app reported no version: generic needs + restart sentences', () => {
+  const { unknownRouteMessage } = pureMod();
+  const msg = unknownRouteMessage({
+    method: 'GET', pathname: '/admin/x', appVersion: null, serverVersion: '0.141.0', fromCheckout: true,
+  });
+  expect(msg).toContain('Needs a newer Session Manager than the running app.');
+  expect(msg.endsWith('Restarting the app helps only once a newer release is installed.')).toBe(true);
+  expect(msg).not.toContain('Restart Session Manager');
 });
 
 test('not from a checkout, app 0.9.0 < server 0.10.0 (numeric compare): older app, restart advice', () => {
@@ -174,7 +198,7 @@ test('not from a checkout, app 0.9.0 < server 0.10.0 (numeric compare): older ap
   expect(msg).toContain('POST /admin/x');
   expect(msg).toContain('v0.9.0');
   expect(msg).toContain('v0.10.0');
-  expect(msg).toContain('is older than this MCP server');
+  expect(msg).toContain('Needs Session Manager v0.10.0 or newer. The app is older than this MCP server.');
   expect(msg).toContain("Restart Session Manager (Command Palette: 'Reboot app (drain first)')");
 });
 
@@ -184,6 +208,7 @@ test('not from a checkout, app reported no version: older app, restart advice', 
     method: 'GET', pathname: '/admin/x', appVersion: null, serverVersion: '0.10.0', fromCheckout: false,
   });
   expect(msg).toContain('version not reported');
+  expect(msg).toContain('Needs Session Manager v0.10.0 or newer. The app is older than this MCP server.');
   expect(msg).toContain('Reboot app (drain first)');
 });
 
@@ -197,6 +222,7 @@ test('not from a checkout, equal versions: restart alone will not help', () => {
   expect(msg).toContain('must be updated to a build that has this route');
   expect(msg).not.toContain('Restart Session Manager');
   expect(msg).not.toContain('is older than');
+  expect(msg).not.toContain('Needs');
 });
 
 test('compareVersions compares dotted numbers and ignores a pre-release suffix', () => {
@@ -233,4 +259,31 @@ test('feedback_reply on unknown-route 404 -> missing-route message, then a hint 
   expect(hint).toContain('Until the running app has this route, send your answer with feedback_open_session to the asking project');
   expect(hint).toContain('it opens there as a new proposed session.');
   expect(hint).not.toMatch(/restart/i);
+});
+
+// ---- site-source customer_feedback_* calls: the app inbox is not affected ----
+
+const SITE_HINT = " The app inbox (customer_feedback_list without source, or source 'app') uses another route and is not affected.";
+
+test('site calls on unknown-route 404 -> missing-route message plus app-inbox sentence; app call has none', async () => {
+  const port = await listen(jsonServer(404, {
+    ok: false, error: 'not found', unknownRoute: 'GET /admin/site-feedback/inbox', appVersion: '0.141.0', contractVersion: 1,
+  }));
+  const mod = await setup(port);
+  const serverVersion = require('../../../../package.json').version;
+  const cases = [
+    ['customer_feedback_list', { source: 'site' }, 'GET', '/admin/site-feedback/inbox'],
+    ['customer_feedback_get', { id: 'FB-ABCDE', source: 'site' }, 'GET', '/admin/site-feedback/item'],
+    ['customer_feedback_set_status', { id: 'FB-ABCDE', status: 'open', source: 'site' }, 'POST', '/admin/site-feedback/status'],
+  ];
+  for (const [name, args, method, pathname] of cases) {
+    const result = await mod.handleCallTool({ params: { name, arguments: args } });
+    expect(result.isError).toBe(true);
+    const routeMsg = mod.unknownRouteMessage({ method, pathname, appVersion: '0.141.0', serverVersion, fromCheckout: true });
+    expect(result.content[0].text.startsWith(routeMsg + SITE_HINT)).toBe(true);
+  }
+  const app = await mod.handleCallTool({ params: { name: 'customer_feedback_list', arguments: {} } });
+  expect(app.isError).toBe(true);
+  expect(app.content[0].text).toContain('has no route');
+  expect(app.content[0].text).not.toContain('app inbox');
 });

@@ -352,13 +352,20 @@ function unknownRouteMessage({ method, pathname, appVersion, serverVersion, from
   const head = `the running Session Manager app (${appLabel}) has no route ${method} ${pathname}. `
     + `This MCP server is v${serverVersion}.`;
   if (fromCheckout) {
-    return `${head} This MCP server runs from a source checkout, so its version number does not say which code it has. `
+    const needs = appVersion
+      ? `Needs Session Manager newer than v${appVersion}.`
+      : 'Needs a newer Session Manager than the running app.';
+    const restart = appVersion
+      ? `Restarting the app helps only once a release newer than v${appVersion} is installed.`
+      : 'Restarting the app helps only once a newer release is installed.';
+    return `${head} ${needs} This MCP server runs from a source checkout that is ahead of the running app, `
+      + 'so its version number does not say which code it has. '
       + 'The route may not be in any published release yet. '
-      + 'Restarting the app helps only once a release containing this route is installed.';
+      + restart;
   }
   const cmp = appVersion ? compareVersions(appVersion, serverVersion) : -1;
   if (!appVersion || cmp < 0) {
-    return `${head} The app is older than this MCP server. `
+    return `${head} Needs Session Manager v${serverVersion} or newer. The app is older than this MCP server. `
       + "Restart Session Manager (Command Palette: 'Reboot app (drain first)') and call again.";
   }
   return `${head} A restart alone will not help. `
@@ -373,6 +380,15 @@ function unknownRouteError(method, urlPath, body) {
   }));
   // Tagged so callers can add a tool-specific hint (feedback_reply does).
   err.code = 'SM_UNKNOWN_ROUTE';
+  return err;
+}
+
+// Appended to an unknown-route error from a /admin/site-feedback/* call, so the
+// agent knows the app inbox (a different route) still works.
+const SITE_ROUTE_HINT = " The app inbox (customer_feedback_list without source, or source 'app') uses another route and is not affected.";
+
+function withSiteRouteHint(err) {
+  if (err && err.code === 'SM_UNKNOWN_ROUTE') err.message += SITE_ROUTE_HINT;
   return err;
 }
 
@@ -2093,7 +2109,10 @@ async function handleCallTool(request) {
       if (source === null) return errorResult(FEEDBACK_SOURCE_ERROR);
       if (source === 'site') {
         const siteQs = new URLSearchParams({ cwd: resolveCwdArg(args) });
-        const siteResult = await adminRequest('GET', `/admin/site-feedback/inbox?${siteQs.toString()}`);
+        let siteResult;
+        try {
+          siteResult = await adminRequest('GET', `/admin/site-feedback/inbox?${siteQs.toString()}`);
+        } catch (err) { throw withSiteRouteHint(err); }
         if (siteResult?.ok === false) return errorResult(siteResult.error ?? 'customer_feedback_list failed');
         const siteItems = Array.isArray(siteResult?.items)
           ? siteResult.items.map((item) => (item && typeof item === 'object' ? { id: item.hostId, ...item } : item))
@@ -2116,7 +2135,10 @@ async function handleCallTool(request) {
       const payload = { id: args.id, status: args.status };
       if (typeof args.note === 'string' && args.note) payload.note = args.note;
       if (source === 'site') {
-        const siteResult = await adminRequest('POST', '/admin/site-feedback/status', { cwd: resolveCwdArg(args), ...payload });
+        let siteResult;
+        try {
+          siteResult = await adminRequest('POST', '/admin/site-feedback/status', { cwd: resolveCwdArg(args), ...payload });
+        } catch (err) { throw withSiteRouteHint(err); }
         if (siteResult?.ok === false) return errorResult(siteResult.error ?? 'customer_feedback_set_status failed');
         return { content: [{ type: 'text', text: JSON.stringify(siteResult) }] };
       }
@@ -2132,7 +2154,10 @@ async function handleCallTool(request) {
         return errorResult("customer_feedback_get needs source: 'site' — only website-widget items have a full report. App items are complete in customer_feedback_list.");
       }
       const qs = new URLSearchParams({ cwd: resolveCwdArg(args), id: args.id });
-      const result = await adminRequest('GET', `/admin/site-feedback/item?${qs.toString()}`);
+      let result;
+      try {
+        result = await adminRequest('GET', `/admin/site-feedback/item?${qs.toString()}`);
+      } catch (err) { throw withSiteRouteHint(err); }
       if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_get failed');
       const item = result?.item || {};
       const imagePaths = item.imagePaths || {};

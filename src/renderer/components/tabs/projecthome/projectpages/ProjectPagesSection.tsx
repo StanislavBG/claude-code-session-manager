@@ -18,6 +18,9 @@
  * shows (title, sent lines). Purely presentational — no store access here; the
  * page and video selections live here so they survive key-button switches.
  *
+ * The Videos tab carries a Videos | Voices view switch: Voices renders VoicesPanel (the voice
+ * library, previews and the voice lane) in the section's place.
+ *
  * `library` is ProjectHome's whole macro library: the Videos tab's tools are its `surface:
  * 'project-video'` macros with a job whose `projects` names this cwd (never `'*'`, never another
  * project's), each with its job status and last launch by macro id — memoized here, never built
@@ -27,6 +30,8 @@ import { useMemo, useState } from 'react'
 import { normalizeCwd } from '../../../../lib/knownProjectAggregate'
 import { PagesPane } from './PagesPane'
 import { VideosPane } from './VideosPane'
+import { VoicesPanel } from './VoicesPanel'
+import { ViewTabs } from '../../../ui/ViewTabs'
 import { ToolsPane, type FindingsCountFn, type LaunchFn } from './ToolsPane'
 import type { ProjectHomeTab } from './ProjectHomeKeyButtons'
 import type { BuildLaunch } from './BuildingPanel'
@@ -34,6 +39,12 @@ import type { ProjectKnowledgeEntry, ProjectVideoEntry } from '../../../../lib/p
 import type { Macro, MacroJobStatus, ProjectVideoOutcome } from '../../../../../preload/api'
 
 const NO_MACROS: Macro[] = []
+
+type VideoView = 'videos' | 'voices'
+const VIDEO_VIEWS: ReadonlyArray<{ key: VideoView; label: string }> = [
+  { key: 'videos', label: 'Videos' },
+  { key: 'voices', label: 'Voices' },
+]
 
 /** `cwd`'s project Video tools: surface 'project-video', a job, and `projects` naming this cwd. */
 export function videoToolsFor(library: readonly Macro[], cwd: string | null | undefined): Macro[] {
@@ -93,6 +104,7 @@ export function ProjectPagesSection({
 }) {
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
+  const [videoView, setVideoView] = useState<VideoView>('videos')
   const videoTools = useMemo(() => videoToolsFor(library ?? NO_MACROS, cwd), [library, cwd])
   const toolJobStatus = useMemo(() => {
     const out: Record<string, MacroJobStatus | undefined> = {}
@@ -123,8 +135,24 @@ export function ProjectPagesSection({
 
   const failed = typeof error === 'string' && error !== ''
 
+  const videoViewTabs = tab === 'videos' && (
+    <div data-testid="project-home-video-view" data-view={videoView} className="flex flex-none pb-3">
+      <ViewTabs options={VIDEO_VIEWS} active={videoView} onChange={setVideoView} />
+    </div>
+  )
+
+  if (tab === 'videos' && videoView === 'voices') {
+    return (
+      <div data-testid="project-home-section" data-tab={tab} className="flex min-h-0 flex-1 flex-col">
+        {videoViewTabs}
+        <VoicesPanel cwd={cwd} />
+      </div>
+    )
+  }
+
   return (
     <div data-testid="project-home-section" data-tab={tab} className="flex min-h-0 flex-1 flex-col">
+      {videoViewTabs}
       {failed ? (
         <div data-testid="project-home-load-error" className="flex min-h-0 flex-1 justify-center overflow-auto py-16">
           <div className="flex flex-col items-center gap-2.5">

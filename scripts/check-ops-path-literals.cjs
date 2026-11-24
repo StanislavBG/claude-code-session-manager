@@ -67,6 +67,7 @@ const LIVE_ROOT_ALLOWLIST = new Map([
   ['src/main/sessionsStore.cjs', 'tabs.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/otelSettings.cjs', 'otel.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/voiceSettings.cjs', 'voice.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/demo-video-kit/voiceLane.cjs', 'voice lane tickets + usage log under ~/.claude/session-manager/voices (SM_VOICES_HOME override); app data, not a scheduler root; kit stays free of main-process requires'],
   ['src/main/lib/demo-video-kit/voiceLibrary.cjs', 'machine voice library under ~/.claude/session-manager/voices (SM_VOICES_HOME override); app data, not a scheduler root; kit stays free of main-process requires'],
   ['src/main/lib/telemetry/telemetrySettings.cjs', 'telemetry.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/lib/telemetry/telemetryBoot.cjs', 'one-shot removal of the retired backlog\'s telemetry-watermarks.json under ~/.claude/session-manager; not a scheduler root'],

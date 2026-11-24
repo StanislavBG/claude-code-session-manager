@@ -178,6 +178,22 @@ describe('ProjectPagesSection', () => {
     expect(visible()).toEqual({ knowledge: 0, videos: 0, tools: 1 })
   })
 
+  it('the Videos tab switches to the Voices view, which renders VoicesPanel', async () => {
+    const list = vi.fn(async () => ({ voices: [], errors: [], lane: {} }))
+    ;(window as unknown as { api: { voices?: unknown } }).api.voices = { list, preview: vi.fn() }
+    const el = mount(<ProjectPagesSection {...props({ tab: 'pages', cwd: '/proj' })} />)
+    await flush()
+    expect(el.querySelector('[data-testid="project-home-video-view"]')).toBeNull()
+    await show({ tab: 'videos', cwd: '/proj', videos: [NEW_V] })
+    expect(el.querySelector('[data-testid="voices-panel"]')).toBeNull()
+    const voicesBtn = [...el.querySelectorAll('[data-testid="project-home-video-view"] button')].find((b) => b.textContent === 'Voices') as HTMLButtonElement
+    act(() => voicesBtn.click())
+    await flush()
+    expect(el.querySelector('[data-testid="voices-panel"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="video-item"]')).toBeNull()
+    expect(list).toHaveBeenCalledWith({ cwd: '/proj' })
+  })
+
   it('lays pages and videos out as a 252px list column beside a content pane that fills the height', async () => {
     for (const tab of ['pages', 'videos']) {
       const el = mount(<ProjectPagesSection {...props({ knowledge: [NEW_K], videos: [NEW_V], tab })} />)

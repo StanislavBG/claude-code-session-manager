@@ -174,6 +174,7 @@
   "remoteE2eCrypto": "feedback-remote",
   "remoteFrameAssembler": "feedback-remote",
   "servicePairings": "feedback-remote",
+  "serviceMcpTools": "feedback-remote",
   "reservationExpiry": "scheduler",
   "reviewNotice": "scheduler",
   "runClaudeP": "claude",

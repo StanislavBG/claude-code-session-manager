@@ -69,6 +69,11 @@ const fsp = require('node:fs/promises');
 const { createStdioServer } = require('../src/main/lib/mcpStdioServer.cjs');
 const { PRD_WORK_TYPES } = require('../src/main/lib/prd/workTypeLibrary.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription, FIXES_INPUT_SCHEMA } = require('../src/main/lib/mcpToolCatalog.cjs');
+// Shared with paired services (serviceMcpTools.cjs) so both see the same
+// schemas. Its service-only tools (macro_run, events_read) are never listed here.
+const {
+  FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA, FEEDBACK_OPEN_SESSION_INPUT_SCHEMA, MACRO_LIST_INPUT_SCHEMA, EPIC_GET_INPUT_SCHEMA,
+} = require('../src/main/lib/feedback-remote/serviceMcpTools.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
 const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX, REVIEW_IMAGE_BYTES_MAX } = require('../src/main/lib/project-pages/videoReview.cjs');
 
@@ -697,16 +702,7 @@ const TOOLS = [
   {
     name: 'epic_get',
     description: descriptionFor('epic_get'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        cwd: { type: 'string', description: 'Absolute path of the project the Epic belongs to' },
-        id: { type: 'string', description: 'The Epic id. Give exactly one of id / externalRef.' },
-        externalRef: { type: 'string', description: 'The external reference the Epic was opened with. Give exactly one of id / externalRef.' },
-        receipt: { type: 'boolean', description: 'Optional: when true, the answer also carries epic.receipt, what the Epic cost in jobs and chat.' },
-      },
-      required: ['cwd'],
-    },
+    inputSchema: EPIC_GET_INPUT_SCHEMA,
   },
   {
     name: 'scheduler_get_prd',
@@ -826,88 +822,12 @@ const TOOLS = [
   {
     name: 'feedback_list_projects',
     description: descriptionFor('feedback_list_projects'),
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA,
   },
   {
     name: 'feedback_open_session',
     description: descriptionFor('feedback_open_session'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        toCwd: {
-          type: 'string',
-          description: 'Absolute cwd of the RECEIVING project. Must already be a Session Manager project — use feedback_list_projects if unsure.',
-        },
-        fromCwd: {
-          type: 'string',
-          description: 'Absolute cwd of YOUR project (the sender). Must differ from toCwd.',
-        },
-        title: { type: 'string', description: 'One line naming the finding — becomes the receiving queue row' },
-        motivation: {
-          type: 'string',
-          description: 'WHY this is needed, in the originating human\'s terms (max 2000 chars). Lead with this — the approving human reads it first. When a request is split into a series, summarise the overall plan here.',
-        },
-        plan: {
-          type: 'array', items: { type: 'string' },
-          description: "Ordered proposed steps (max 20). REQUIRED when tag is 'feature'.",
-        },
-        acceptanceCriteria: {
-          type: 'array', items: { type: 'string' },
-          description: 'How the receiving human will know this is done (1-20 items).',
-        },
-        outOfScope: {
-          type: 'array', items: { type: 'string' },
-          description: 'Optional: what this proposal deliberately does not cover (max 20).',
-        },
-        series: {
-          type: 'object',
-          description: 'Optional: set on EVERY proposal when one request is split into several. Share the same key/title/total across them; index is this proposal\'s position.',
-          properties: {
-            key: { type: 'string', description: 'Shared kebab-case series id (max 60 chars)' },
-            title: { type: 'string', description: 'Shared series title (max 120 chars)' },
-            index: { type: 'integer', description: 'This proposal\'s 1-based position in the series' },
-            total: { type: 'integer', description: 'Number of proposals in the series (2-50)' },
-          },
-          required: ['key', 'title', 'index', 'total'],
-        },
-        body: {
-          type: 'string',
-          description: 'Supporting detail: evidence, symptom, where observed, references. Self-contained — the reader cannot see your project — but no longer the whole report; motivation/plan/acceptanceCriteria carry the proposal.',
-        },
-        tag: {
-          type: 'string',
-          enum: ['bug', 'feature', 'discussion'],
-          description: "Mission tag for the receiving session. Defaults to 'discussion' — the tag that keeps /develop available but never assumed, correct for a finding the receiving project has not yet agreed with.",
-        },
-        fromEpicId: {
-          type: 'string',
-          description: 'Optional: your own Epic/session id, so a receipt is chained onto your session and the receiving human can see which session is asking. Auto-filled from this process when omitted.',
-        },
-        agentType: { type: 'string', description: "Optional persona for the receiving session. Defaults to 'architect'." },
-        referencePaths: {
-          type: 'array', items: { type: 'string' },
-          description: 'Optional absolute paths worth reading, appended as Reference lines',
-        },
-        autoStart: {
-          type: 'boolean',
-          description: 'Set true ONLY when the human in THIS conversation explicitly asked for this work in the other project. Requires humanRequestQuote. Never set it for work you decided on your own initiative. An unverified request silently falls back to a plain PROPOSED session.',
-        },
-        humanRequestQuote: {
-          type: 'string',
-          description: "Required with autoStart. Copy VERBATIM from the human's own message in this conversation; the quoted words themselves must name the target project. Do not paraphrase or write it yourself.",
-        },
-        externalRef: {
-          type: 'string',
-          description: 'Optional: your own id for this handoff, 1 to 200 characters of letters, digits or . _ : / @ - (trimmed). It is stored on the new session and returned. Repeating a call with the same toCwd, fromCwd and externalRef opens nothing new and returns the session that already exists (status "existing", existing: true); the same externalRef already used by a different sender is refused with 409.',
-        },
-        replyMode: {
-          type: 'string',
-          enum: ['prompt', 'event'],
-          description: "Optional: how a reply comes back — 'prompt' (default) wakes your chat session, 'event' records it as data in the audit log for a caller with no chat.",
-        },
-      },
-      required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'],
-    },
+    inputSchema: FEEDBACK_OPEN_SESSION_INPUT_SCHEMA,
   },
   {
     name: 'feedback_reply',
@@ -1072,12 +992,7 @@ const TOOLS = [
   {
     name: 'macro_list',
     description: descriptionFor('macro_list'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
-      },
-    },
+    inputSchema: MACRO_LIST_INPUT_SCHEMA,
   },
   {
     name: 'macro_save',

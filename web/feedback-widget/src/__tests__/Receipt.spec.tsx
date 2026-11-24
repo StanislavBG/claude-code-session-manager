@@ -1,9 +1,14 @@
-// Receipt (handoff README §5.7) and the panel's error banner (§5.6), driven by the §2 machine.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+// Receipt (handoff README §5.7) and the panel's error banner (§5.6), driven by the §2 machine;
+// plus the toast (delayed POST + Undo) and fold (shrink → ping) success variants through App.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
+import type { CaptureResult } from '../capture';
+import { resolveConfig, type FeedbackConfigInput } from '../host';
+import type { SendOptions, SendResult } from '../transport';
+import { mountApp, type AppServices, type MountedApp } from '../ui/App';
 import { ERROR_BODY_REJECTED, ERROR_BODY_RETRY, ERROR_TITLE, Panel, panelCss, type PanelProps } from '../ui/Panel';
-import { Receipt, receiptCss, type ReceiptProps } from '../ui/Receipt';
+import { Receipt, receiptCss, successCss, toastLine, type ReceiptProps } from '../ui/Receipt';
 import { initialState, reduce, type Event, type State } from '../ui/machine';
 
 if (!('adoptedStyleSheets' in ShadowRoot.prototype)) {
@@ -247,5 +252,216 @@ describe('Error banner (§5.6)', () => {
     expect(css).toMatch(/\.fw-pn-bang\{[^}]*width:22px;height:22px;[^}]*background:#a83818/);
     expect(css).toMatch(/\.fw-pn-bantitle\{font-weight:600;font-size:14px/);
     expect(css).toMatch(/\.fw-pn-banbody\{font-weight:400;font-size:13px;line-height:1\.45;color:#3a342b/);
+  });
+});
+
+// ── Success variants through the real App (fake timers) ─────────────────────
+
+describe('success variants (§5.7 toast / fold, receipt default)', () => {
+  const KEY = 'fbk1_ABCDEFGH.AAAAAAAAAAAAAAAAAAAAAA';
+  let app: MountedApp | null = null;
+  let sent: SendOptions[];
+  let sendResults: SendResult[];
+  let animations: { el: Element; keyframes: Keyframe[]; options: KeyframeAnimationOptions }[];
+  const realRect = Element.prototype.getBoundingClientRect;
+
+  function services(): Partial<AppServices> {
+    let ids = 0;
+    return {
+      capture: async () => {
+        const r: CaptureResult = { png: new Blob([new Uint8Array([1])], { type: 'image/png' }), width: 800, height: 600, scale: 1 };
+        return r;
+      },
+      flatten: async (png) => png,
+      multipart: async (report) => ({
+        body: new TextEncoder().encode(JSON.stringify(report)) as Uint8Array<ArrayBuffer>,
+        contentType: 'multipart/form-data; boundary=test',
+      }),
+      send: async (o) => {
+        sent.push(o);
+        return sendResults.shift() ?? { ok: true, id: 'FB-2048' };
+      },
+      enqueue: async () => true,
+      newId: () => `cid-${++ids}`,
+    };
+  }
+
+  const tick = async (ms = 0) => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  };
+
+  async function mountWith(cfg: Partial<FeedbackConfigInput>) {
+    window.FeedbackConfig = { key: KEY, project: 'demo', ...cfg };
+    const config = resolveConfig(null);
+    await act(async () => {
+      app = mountApp({ config, hostEl: host, shadow, buffers: null, user: { name: 'Maya Chen' }, services: services() });
+    });
+    await tick();
+  }
+
+  const click = async (sel: string) => {
+    await act(async () => {
+      q(sel)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await tick();
+  };
+
+  async function openAndSend(flow: 'annotate' | 'docked' = 'annotate', title = 'Button broken') {
+    await act(async () => app!.open());
+    await tick(10);
+    if (flow === 'annotate') await click('[data-part="describe"]');
+    const input = q<HTMLInputElement>('#fw-pn-title')!;
+    await act(async () => {
+      input.value = title;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('[data-part="send"]');
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sent = [];
+    sendResults = [];
+    animations = [];
+    (HTMLElement.prototype as { animate?: unknown }).animate = function (
+      this: Element,
+      keyframes: Keyframe[],
+      options: KeyframeAnimationOptions,
+    ) {
+      animations.push({ el: this, keyframes, options });
+      return { cancel() {} } as unknown as Animation;
+    };
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('fw-launcher')) return new DOMRect(1000, 700, 52, 52);
+      if (this.classList.contains('fw-panel')) return new DOMRect(600, 100, 380, 560);
+      return realRect.call(this);
+    };
+  });
+
+  afterEach(async () => {
+    await act(async () => app?.unmount());
+    app = null;
+    vi.useRealTimers();
+    delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    Element.prototype.getBoundingClientRect = realRect;
+    delete window.FeedbackConfig;
+  });
+
+  it('receipt stays the default: POST at once, receipt in the panel, no toast', async () => {
+    await mountWith({});
+    await openAndSend();
+    expect(sent).toHaveLength(1);
+    expect(q('[data-part="receipt"]')).not.toBeNull();
+    expect(q('[data-part="toast"]')).toBeNull();
+    expect(q('[data-part="ping-bubble"]')).toBeNull();
+  });
+
+  it('toast: shows at once, POST waits 6 s, the id fills in, auto-dismiss at 6.2 s', async () => {
+    await mountWith({ success: 'toast' });
+    await openAndSend();
+    expect(q('[data-part="toast"]')).not.toBeNull();
+    expect(q('.fw-panel')).toBeNull();
+    expect(q('[data-part="toast-check"] svg')).not.toBeNull();
+    expect(text('[data-part="toast-title"]')).toBe('Feedback sent');
+    expect(text('[data-part="toast-line"]')).toBe('thanks, Maya');
+    expect(text('[data-part="undo"]')).toBe('Undo');
+    expect(q('[data-part="countdown"]')).not.toBeNull();
+    expect(q('[data-part="toast"]')!.className).toContain('fw-anchor--corner');
+
+    await tick(5990);
+    expect(sent).toHaveLength(0);
+    await tick(10);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].clientReportId).toBe('cid-1');
+    expect(text('[data-part="toast-line"]')).toBe('FB-2048 · thanks, Maya');
+
+    await tick(190);
+    expect(q('[data-part="toast"]')).not.toBeNull();
+    await tick(10);
+    expect(q('[data-part="toast"]')).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('toast Undo (flow annotate): no request is sent, back to review with the draft intact', async () => {
+    await mountWith({ success: 'toast' });
+    await openAndSend('annotate', 'Book button does nothing');
+    await tick(3000);
+    await click('[data-part="undo"]');
+    expect(q('[data-part="toast"]')).toBeNull();
+    expect(q<HTMLInputElement>('#fw-pn-title')!.value).toBe('Book button does nothing');
+    expect(q('.fw-tb')!.className).toContain('fw-tb-hidden'); // review: toolbar hidden
+    expect(q('.fw-panel')!.className).not.toContain('fw-panel--hidden');
+    await tick(20000);
+    expect(sent).toHaveLength(0);
+
+    // Sending again starts a fresh 6 s window with the same report id.
+    await click('[data-part="send"]');
+    await tick(6000);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].clientReportId).toBe('cid-1');
+  });
+
+  it('toast Undo (other flows): back to annotate with the draft intact', async () => {
+    await mountWith({ success: 'toast', flow: 'docked' });
+    await openAndSend('docked', 'Docked title');
+    await click('[data-part="undo"]');
+    expect(q('.fw-tb')!.className).not.toContain('fw-tb-hidden'); // annotate: toolbar is back
+    expect(q<HTMLInputElement>('#fw-pn-title')!.value).toBe('Docked title');
+    await tick(20000);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('toast styles: 320 px ink card, 26 px green check, amber Undo, 6 s linear countdown', () => {
+    const css = successCss();
+    expect(css).toMatch(/\.fw-toast\{[^}]*width:320px;border-radius:12px;[^}]*background:#1a1612;[^}]*box-shadow:0 16px 40px -12px rgba\(26,22,18,\.65\)/);
+    expect(css).toMatch(/\.fw-toast-row\{[^}]*gap:12px;padding:12px 10px 12px 14px/);
+    expect(css).toMatch(/\.fw-toast-check\{[^}]*width:26px;height:26px;[^}]*background:#2e5a3e/);
+    expect(css).toMatch(/\.fw-toast-title\{font-weight:600;font-size:14px/);
+    expect(css).toMatch(/\.fw-toast-line\{[^}]*font-size:11px;[^}]*color:#c9bfa9/);
+    expect(css).toMatch(/\.fw-toast-undo\{[^}]*color:#f4b942;[^}]*font-weight:600;font-size:13px/);
+    expect(css).toMatch(/\.fw-toast-undo:hover\{background:rgba\(245,240,230,\.1\)\}/);
+    expect(css).toMatch(/\.fw-toast-track\{height:3px;background:rgba\(245,240,230,\.1\)\}/);
+    expect(css).toMatch(/\.fw-toast-fill\{[^}]*background:#f4b942;[^}]*animation:fw-toast-count 6000ms linear forwards/);
+    expect(css).toMatch(/\.fw-ping-bubble\{[^}]*height:40px;padding:0 14px;[^}]*border-radius:10px;background:#2e5a3e;color:#f5f0e6;[^}]*font-weight:600;font-size:13px/);
+    expect(css).toMatch(/\.fw-ping-id\{[^}]*font-size:11\.5px;color:#d6e3d9/);
+    expect(toastLine(null, null)).toBe('thanks');
+    expect(toastLine('FB-1', { name: 'Maya Chen' })).toBe('FB-1 · thanks, Maya');
+  });
+
+  it('fold: panel shrinks into the launcher centre over 450 ms, then a 3.6 s green ping + bubble', async () => {
+    await mountWith({ success: 'fold' });
+    await openAndSend();
+    expect(sent).toHaveLength(1); // fold POSTs immediately
+
+    // Folding: the panel is still mounted and animating; the launcher is up as the target.
+    const panel = q('.fw-panel');
+    expect(panel).not.toBeNull();
+    expect(q('.fw-launcher')).not.toBeNull();
+    expect(animations).toHaveLength(1);
+    const a = animations[0];
+    expect(a.el).toBe(panel);
+    expect(a.options).toMatchObject({ duration: 450, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' });
+    // Launcher centre (1026, 726) relative to the panel's box (600, 100).
+    expect(a.keyframes[0]).toMatchObject({ transformOrigin: '426px 626px', transform: 'scale(1)', opacity: 1 });
+    expect(a.keyframes[1]).toMatchObject({ transformOrigin: '426px 626px', transform: 'scale(.06)', opacity: 0 });
+    expect(q('.fw-launcher--ping')).toBeNull();
+
+    await tick(470);
+    expect(q('.fw-panel')).not.toBeNull();
+    await tick(10);
+    expect(q('.fw-panel')).toBeNull();
+    expect(q('.fw-launcher--ping')).not.toBeNull();
+    expect(q('.fw-launcher path')!.getAttribute('d')).toBe('M5 12.5l4.5 4.5L19 7.5');
+    expect(text('[data-part="ping-bubble"]')).toBe('Sent FB-2048 — thank you');
+    expect(text('.fw-ping-id')).toBe('FB-2048');
+    expect(q('[data-part="ping-bubble"]')!.className).toContain('fw-anchor--corner');
+
+    await tick(3590);
+    expect(q('.fw-launcher--ping')).not.toBeNull();
+    await tick(10);
+    expect(q('.fw-launcher--ping')).toBeNull();
+    expect(q('[data-part="ping-bubble"]')).toBeNull();
   });
 });

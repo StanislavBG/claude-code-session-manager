@@ -37,13 +37,15 @@ import { DEFAULT_MARK_COLOR, type Mark, type MarkColor } from './marks';
 import { DEFAULT_TYPE, Panel, markOpensPopover } from './Panel';
 import { PanelContext } from './PanelContext';
 import { type PanelSide } from './shared';
+import { foldInto, foldTarget, PingBubble, Toast, TOAST_DISMISS_MS, TOAST_SEND_DELAY_MS } from './Receipt';
 import { Toolbar } from './Toolbar';
 import { baseSheet, loadFonts } from './tokens';
 
 // ── Timings owned by the app (machine.ts: components own every delay) ─────────
 
 export const FOLD_MS = 480;
-export const TOAST_MS = 6000;
+/** §5.7 Toast auto-dismiss (6.2 s); the delayed POST fires at TOAST_SEND_DELAY_MS (6 s). */
+export const TOAST_MS = TOAST_DISMISS_MS;
 export const PING_MS = 3600;
 
 // ── Services (injectable for tests) ─────────────────────────────────────────
@@ -207,6 +209,9 @@ export function App(props: AppProps) {
   const [panelSide, setPanelSide] = useState<PanelSide>('right');
   /** One clientReportId per report: kept across Retry now, dropped on a new session. */
   const reportIdRef = useRef<string | null>(null);
+  /** Toast variant: the pending delayed POST (cleared by Undo) and the id it came back with. */
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toastId, setToastId] = useState<string | null>(null);
 
   // Raw machine dispatch: reduce, store, and clear the marks when a session ends or restarts.
   const marksRef = useRef<ReturnType<typeof useMarks> | null>(null);
@@ -229,7 +234,11 @@ export function App(props: AppProps) {
       setColor(DEFAULT_MARK_COLOR);
       setProgress(0);
     }
-    if (next.mode === 'sending' && prev.mode !== 'sending') void runSend();
+    if (next.mode === 'sending' && prev.mode !== 'sending') {
+      if (next.config.success === 'toast') startToastSend();
+      else void runSend();
+    }
+    if (e.type === 'undoSend' && next !== prev) cancelToastSend();
   }, []);
 
   const marks = useMarks(apply);
@@ -283,68 +292,75 @@ export function App(props: AppProps) {
     }
   }, []);
 
-  async function runSend(): Promise<void> {
+  /** Everything one POST needs, snapshotted at Send (the toast's POST runs 6 s later). */
+  interface Prepared {
+    clientReportId: string;
+    report: ReturnType<typeof buildReport>;
+    png: Blob;
+    uiMarks: readonly Mark[];
+    scale: number;
+  }
+
+  function prepareSend(): Prepared | null {
     const { props: p, services: s } = live.current;
     const sess = sessionRef.current;
     const st = stateRef.current;
     const cfg = p.config;
-    setProgress(0);
-    if (!sess) {
-      apply({ type: 'sendFail', rejected: true });
-      return;
-    }
+    if (!sess) return null;
     const clientReportId = (reportIdRef.current ??= s.newId());
-    const uiMarks = marksRef.current?.marks ?? [];
+    const uiMarks = [...(marksRef.current?.marks ?? [])];
+    const report = buildReport({
+      clientReportId,
+      config: { project: cfg.project, boxId: cfg.box?.boxId ?? '' },
+      draft: { type: reportTypeRef.current, title: st.draft.title, details: st.draft.body },
+      marks: toDraftMarks(uiMarks),
+      page: sess.page,
+      capture: {
+        capturedAt: sess.capturedAt,
+        width: sess.capture.width,
+        height: sess.capture.height,
+        scale: sess.capture.scale,
+        error: sess.capture.error,
+      },
+      buffers: { console: sess.console, network: sess.network },
+      switches: switchesRef.current,
+      reporter: userRef.current,
+      widgetVersion: WIDGET_VERSION,
+    });
+    return { clientReportId, report, png: sess.capture.png, uiMarks, scale: sess.capture.scale };
+  }
+
+  /** Flatten + multipart + POST; a retryable failure goes to the outbox (same clientReportId). */
+  async function deliver(prep: Prepared, onProgress?: (pct: number) => void): Promise<SendResult> {
+    const { props: p, services: s } = live.current;
+    const cfg = p.config;
     let result: SendResult;
     let multipart: Awaited<ReturnType<typeof buildMultipart>> | null = null;
     try {
-      const report = buildReport({
-        clientReportId,
-        config: { project: cfg.project, boxId: cfg.box?.boxId ?? '' },
-        draft: { type: reportTypeRef.current, title: st.draft.title, details: st.draft.body },
-        marks: toDraftMarks(uiMarks),
-        page: sess.page,
-        capture: {
-          capturedAt: sess.capturedAt,
-          width: sess.capture.width,
-          height: sess.capture.height,
-          scale: sess.capture.scale,
-          error: sess.capture.error,
-        },
-        buffers: { console: sess.console, network: sess.network },
-        switches: switchesRef.current,
-        reporter: userRef.current,
-        widgetVersion: WIDGET_VERSION,
-      });
       let annotated: Blob;
       try {
-        annotated = await s.flatten(sess.capture.png, uiMarks, sess.capture.scale);
+        annotated = await s.flatten(prep.png, prep.uiMarks, prep.scale);
       } catch {
-        annotated = sess.capture.png; // marks are still in report.json
+        annotated = prep.png; // marks are still in report.json
       }
-      multipart = await s.multipart(report, sess.capture.png, annotated);
+      multipart = await s.multipart(prep.report, prep.png, annotated);
       result = await s.send({
         key: cfg.box,
         endpoint: cfg.endpoint,
         project: cfg.project,
         multipart,
-        clientReportId,
+        clientReportId: prep.clientReportId,
         onProgress: ({ loaded, total }) => {
-          if (total > 0) setProgress(Math.round((loaded / total) * 100));
+          if (total > 0) onProgress?.(Math.round((loaded / total) * 100));
         },
       });
     } catch {
       result = { ok: false, kind: 'retryable' };
     }
-    if (result.ok) {
-      setProgress(100);
-      apply({ type: 'sendOk', id: result.id ?? null });
-      return;
-    }
-    if (result.kind === 'retryable' && multipart) {
+    if (!result.ok && result.kind === 'retryable' && multipart) {
       // The outbox keeps retrying with the SAME clientReportId; the relay de-duplicates.
       await s.enqueue({
-        clientReportId,
+        clientReportId: prep.clientReportId,
         key: cfg.key ?? cfg.box,
         endpoint: cfg.endpoint,
         project: cfg.project,
@@ -352,7 +368,62 @@ export function App(props: AppProps) {
         body: multipart.body,
       });
     }
+    return result;
+  }
+
+  async function runSend(): Promise<void> {
+    setProgress(0);
+    let prep: Prepared | null;
+    try {
+      prep = prepareSend();
+    } catch {
+      prep = null;
+    }
+    if (!prep) {
+      apply({ type: 'sendFail', rejected: true });
+      return;
+    }
+    const result = await deliver(prep, setProgress);
+    if (result.ok) {
+      setProgress(100);
+      apply({ type: 'sendOk', id: result.id ?? null });
+      return;
+    }
     apply({ type: 'sendFail', rejected: result.kind !== 'retryable' });
+  }
+
+  /**
+   * Toast variant (§1 Submission): show the toast at once and hold the POST for 6 s so Undo can
+   * cancel it locally. The report is snapshotted now, so what lands is what the user sent.
+   * Once the toast has closed nothing can show a failure, so a retryable one just goes to the
+   * outbox (as every variant's does) and a rejected one is dropped.
+   */
+  function startToastSend(): void {
+    cancelToastSend();
+    let prep: Prepared | null;
+    try {
+      prep = prepareSend();
+    } catch {
+      prep = null;
+    }
+    if (!prep) {
+      apply({ type: 'sendFail', rejected: true });
+      return;
+    }
+    setToastId(null);
+    apply({ type: 'sendOk', id: null });
+    const ready = prep;
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      void deliver(ready).then((r) => {
+        if (r.ok && r.id && stateRef.current.toast) setToastId(r.id);
+      });
+    }, TOAST_SEND_DELAY_MS);
+  }
+
+  function cancelToastSend(): void {
+    if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
   }
 
   // Controller for window.Feedback.
@@ -363,7 +434,10 @@ export function App(props: AppProps) {
       identify: (u) => setUser(u),
     };
     live.current.props.onController?.(c);
-    return () => live.current.props.onController?.(null);
+    return () => {
+      cancelToastSend();
+      live.current.props.onController?.(null);
+    };
   }, []);
 
   // Styles + fonts.
@@ -387,6 +461,15 @@ export function App(props: AppProps) {
   useEffect(() => {
     focusRef.current?.update(state);
   }, [state]);
+
+  // Fold (§5.7): shrink the panel into the launcher's centre while the machine is `folding`.
+  useLayoutEffect(() => {
+    if (!state.folding || !shadow) return undefined;
+    const panel = shadow.querySelector('.fw-panel');
+    if (!panel) return undefined;
+    const anim = foldInto(panel, foldTarget(shadow.querySelector('.fw-launcher')));
+    return () => anim?.cancel();
+  }, [state.folding, shadow]);
 
   // Follow-up events the machine expects from its owner.
   useEffect(() => {
@@ -518,6 +601,10 @@ export function App(props: AppProps) {
       )}
       <DiscardDialog state={state} dispatch={dispatch} />
       </div>
+      {state.toast && state.mode === 'idle' && (
+        <Toast id={toastId} user={user} variant={config.launcher} onUndo={() => apply({ type: 'undoSend' })} />
+      )}
+      {state.ping && <PingBubble id={state.reportId} variant={config.launcher} />}
     </>
   );
 }

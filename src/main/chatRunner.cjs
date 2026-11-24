@@ -326,12 +326,17 @@ function consumeSchedulerPrompt(tabId, prompt) {
 }
 
 // tab+prompt keys of relayed external sends (Web Remote phone / admin API) awaiting
-// their run(): each entry is a FIFO of relay names, consumed once per run.
+// their run(): each entry is a FIFO of relay names, consumed once per EXTERNAL run.
+// A note only lives as long as its send can still produce a run: the ack window,
+// plus the time a 'queued' send waits for the in-flight turn ahead of it (bounded by
+// the kill ceiling). A send that resolves without a run drops its note at once.
 const EXTERNAL_RELAYS = new Set(['web-remote', 'admin-api']);
 const relayPrompts = new Map();
-const RELAY_PROMPT_TTL_MS = 6 * 60 * 60 * 1000;
+const EXTERNAL_SEND_ACK_TIMEOUT_MS = 8000;
+const RELAY_RUN_START_WINDOW_MS = 30 * 60 * 1000; // = KILL_CEILING_MS (defined below)
+const RELAY_PROMPT_TTL_MS = EXTERNAL_SEND_ACK_TIMEOUT_MS + RELAY_RUN_START_WINDOW_MS;
 function noteRelayPrompt(tabId, prompt, relay) {
-  if (!EXTERNAL_RELAYS.has(relay)) return;
+  if (!EXTERNAL_RELAYS.has(relay)) return null;
   const now = Date.now();
   for (const [k, v] of relayPrompts) {
     const live = v.filter((e) => e.expires >= now);
@@ -339,8 +344,23 @@ function noteRelayPrompt(tabId, prompt, relay) {
   }
   const key = `${tabId}\n${prompt}`;
   const list = relayPrompts.get(key) || [];
-  list.push({ relay, expires: now + RELAY_PROMPT_TTL_MS });
+  const entry = { relay, expires: now + RELAY_PROMPT_TTL_MS };
+  list.push(entry);
   relayPrompts.set(key, list);
+  return entry;
+}
+// Removes exactly one send's note (by identity) — a same-text note of another send stays.
+function dropRelayPrompt(tabId, prompt, entry) {
+  const key = `${tabId}\n${prompt}`;
+  const list = relayPrompts.get(key);
+  if (!list) return;
+  const i = list.indexOf(entry);
+  if (i >= 0) list.splice(i, 1);
+  if (!list.length) relayPrompts.delete(key);
+}
+function relayNoteCount(tabId, prompt) {
+  const now = Date.now();
+  return (relayPrompts.get(`${tabId}\n${prompt}`) || []).filter((e) => e.expires >= now).length;
 }
 function consumeRelayPrompt(tabId, prompt) {
   const key = `${tabId}\n${prompt}`;
@@ -590,8 +610,9 @@ function run(opts) {
   // here by tab + exact text, since it travels through the renderer's chat:run.
   if (!opts.silent && consumeSchedulerPrompt(opts.tabId, opts.prompt)) opts = { ...opts, origin: 'scheduler' };
   // A relayed external send (Web Remote / admin API) is re-identified the same way;
-  // the relay only picks the event-log kind, never the origin.
-  if (!opts.silent && opts.relay === undefined) opts = { ...opts, relay: consumeRelayPrompt(opts.tabId, opts.prompt) };
+  // the relay only picks the event-log kind, never the origin. Only an external run
+  // takes a note: a same-text desktop prompt must not steal a queued phone send's tag.
+  if (!opts.silent && opts.origin === 'external' && opts.relay === undefined) opts = { ...opts, relay: consumeRelayPrompt(opts.tabId, opts.prompt) };
   // Per-tab exclusivity still holds — two `claude -p --resume` against ONE
   // sessionId must never overlap — but it is now enforced in pump() (which
   // refuses to start a run for a tab that already has one live) rather than by
@@ -1351,7 +1372,6 @@ function cancel(tabId) {
 // directly, reusing send()'s existing queued-vs-immediate branching rather
 // than duplicating it here.
 
-const EXTERNAL_SEND_ACK_TIMEOUT_MS = 8000;
 const pendingExternalSends = new Map(); // requestId -> { resolve, timer }
 
 function hasLiveWindow() {
@@ -1368,9 +1388,16 @@ function enqueueExternalPrompt(tabId, prompt, extra = {}) {
   const { sessionId, cwd, origin, relay } = extra ?? {};
   if (!hasLiveWindow()) return Promise.resolve({ disposition: 'unconfirmed', reason: 'no-window' });
   if (origin === 'scheduler') noteSchedulerPrompt(tabId, prompt);
-  else if (relay !== undefined) noteRelayPrompt(tabId, prompt, relay);
+  const note = origin !== 'scheduler' && relay !== undefined ? noteRelayPrompt(tabId, prompt, relay) : null;
   const requestId = require('node:crypto').randomUUID();
-  return new Promise((resolve) => {
+  return new Promise((done) => {
+    // A send that produced no run (refused / unconfirmed) never leaves its note behind.
+    const resolve = (result) => {
+      if (note && (result.disposition === 'refused' || result.disposition === 'unconfirmed')) {
+        dropRelayPrompt(tabId, prompt, note);
+      }
+      done(result);
+    };
     const timer = setTimeout(() => {
       pendingExternalSends.delete(requestId);
       resolve({ disposition: 'unconfirmed', reason: 'timeout' });
@@ -1562,6 +1589,9 @@ module.exports = {
   enqueueExternalPrompt,
   settleExternalSend,
   EXTERNAL_SEND_ACK_TIMEOUT_MS,
+  RELAY_RUN_START_WINDOW_MS,
+  RELAY_PROMPT_TTL_MS,
+  __relayNoteCount: relayNoteCount,
   requestExternalNewSession,
   startExternalNewSession,
   settleExternalNewSession,

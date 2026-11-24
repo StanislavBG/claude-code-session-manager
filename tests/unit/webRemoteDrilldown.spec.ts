@@ -121,13 +121,13 @@ describe('drill-down commands', () => {
     it('open tab id', async () => {
       const spy = stub('active')
       await expect(dispatch()['cmd:chat:send']({ tabId: 'main-1', prompt: 'hi' })).resolves.toEqual({ ok: true, disposition: 'sent' })
-      expect(spy).toHaveBeenCalledWith('main-1', 'hi')
+      expect(spy).toHaveBeenCalledWith('main-1', 'hi', { relay: 'web-remote' })
     })
     it('active Epic by epicId and claudeSessionId', async () => {
       const spy = stub('active')
       for (const tabId of ['e1', 'cs-1']) {
         await expect(dispatch()['cmd:chat:send']({ tabId, prompt: 'hi' })).resolves.toEqual({ ok: true, disposition: 'sent' })
-        expect(spy).toHaveBeenLastCalledWith('e1', 'hi', { sessionId: 'cs-1', cwd })
+        expect(spy).toHaveBeenLastCalledWith('e1', 'hi', { sessionId: 'cs-1', cwd, relay: 'web-remote' })
       }
     })
     it('proposed, completed and unknown targets are refused without sending', async () => {

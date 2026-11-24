@@ -292,7 +292,7 @@ test('a relay tag is keyed by tab + prompt and expires after its TTL', async () 
     // An expired tag is dropped.
     const t0 = Date.now();
     void cr.enqueueExternalPrompt(EPIC, 'late', { relay: 'web-remote' });
-    const now = vi.spyOn(Date, 'now').mockReturnValue(t0 + 7 * 60 * 60 * 1000);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0 + cr.RELAY_PROMPT_TTL_MS + 1);
     cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'late', cwd, resume: true, origin: 'external' });
     now.mockRestore();
     // An unknown relay name is never noted.
@@ -301,6 +301,113 @@ test('a relay tag is keyed by tab + prompt and expires after its TTL', async () 
 
     await waitFor(() => ran.length === 4);
     expect(await msgEvents()).toHaveLength(0);
+  } finally {
+    done();
+  }
+});
+
+test('the relay note TTL is the ack timeout plus a bounded run-start window', () => {
+  const cr = require('../../../chatRunner.cjs');
+  expect(cr.RELAY_PROMPT_TTL_MS).toBe(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS + cr.RELAY_RUN_START_WINDOW_MS);
+  // A queued send starts once the in-flight turn ends, which the kill ceiling bounds.
+  expect(cr.RELAY_RUN_START_WINDOW_MS).toBeGreaterThan(0);
+  expect(cr.RELAY_RUN_START_WINDOW_MS).toBeLessThanOrEqual(cr.KILL_CEILING_MS);
+  expect(cr.RELAY_PROMPT_TTL_MS).toBeLessThan(6 * 60 * 60 * 1000);
+});
+
+// A window that records chat:external-send payloads so a test can settle them.
+function capturingWindow(sent) {
+  return {
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: (ch, p) => { if (ch === 'chat:external-send') sent.push(p); } },
+  };
+}
+
+test('a same-text desktop prompt during a queued relayed send neither takes nor removes its tag', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  const sent = [];
+  cr.attachWindow(capturingWindow(sent));
+  try {
+    const p = cr.enqueueExternalPrompt(EPIC, 'same text', { relay: 'web-remote' });
+    cr.settleExternalSend({ requestId: sent[0].requestId, disposition: 'queued' });
+    await expect(p).resolves.toEqual({ disposition: 'queued' });
+    expect(cr.__relayNoteCount(EPIC, 'same text')).toBe(1);
+    // The desktop composer submits the same text first.
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'same text', cwd, resume: true, origin: 'human' });
+    expect(cr.__relayNoteCount(EPIC, 'same text')).toBe(1);
+    // Then the queued phone send runs.
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'same text', cwd, resume: true, origin: 'external' });
+    expect(cr.__relayNoteCount(EPIC, 'same text')).toBe(0);
+    await waitFor(() => ran.length === 2);
+    const evs = await msgEvents();
+    expect(evs.map((e) => [e.kind, e.via, e.excerpt])).toEqual([
+      ['human.message', 'desktop', 'same text'],
+      ['human.message', 'web-remote', 'same text'],
+    ]);
+  } finally {
+    done();
+  }
+});
+
+test('a timed-out relayed send leaves no note; a later untagged external send logs nothing', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const p = cr.enqueueExternalPrompt(EPIC, 'lost', { relay: 'web-remote' });
+    expect(cr.__relayNoteCount(EPIC, 'lost')).toBe(1);
+    vi.advanceTimersByTime(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS);
+    await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout' });
+    expect(cr.__relayNoteCount(EPIC, 'lost')).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+  try {
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'lost', cwd, resume: true, origin: 'external' });
+    await waitFor(() => ran.length === 1);
+    expect(await msgEvents()).toHaveLength(0);
+  } finally {
+    done();
+  }
+});
+
+test('refused, unconfirmed and no-window sends leave no note; a later untagged external send logs nothing', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  const sent = [];
+  cr.attachWindow(capturingWindow(sent));
+  try {
+    const refused = cr.enqueueExternalPrompt(EPIC, 'refused text', { relay: 'admin-api' });
+    cr.settleExternalSend({ requestId: sent[0].requestId, disposition: 'refused', reason: 'terminal-attached' });
+    await expect(refused).resolves.toEqual({ disposition: 'refused', reason: 'terminal-attached' });
+    expect(cr.__relayNoteCount(EPIC, 'refused text')).toBe(0);
+
+    const unconfirmed = cr.enqueueExternalPrompt(EPIC, 'unconfirmed text', { relay: 'web-remote' });
+    cr.settleExternalSend({ requestId: sent[1].requestId, disposition: 'unconfirmed', reason: 'timeout' });
+    await unconfirmed;
+    expect(cr.__relayNoteCount(EPIC, 'unconfirmed text')).toBe(0);
+
+    cr.attachWindow(null);
+    await expect(cr.enqueueExternalPrompt(EPIC, 'no window', { relay: 'web-remote' }))
+      .resolves.toEqual({ disposition: 'unconfirmed', reason: 'no-window' });
+    expect(cr.__relayNoteCount(EPIC, 'no window')).toBe(0);
+
+    // Only the failed send's own entry goes: an earlier live tag for the same text stays.
+    cr.attachWindow(capturingWindow(sent));
+    void cr.enqueueExternalPrompt(EPIC, 'twice', { relay: 'web-remote' });
+    const second = cr.enqueueExternalPrompt(EPIC, 'twice', { relay: 'admin-api' });
+    expect(cr.__relayNoteCount(EPIC, 'twice')).toBe(2);
+    cr.settleExternalSend({ requestId: sent[3].requestId, disposition: 'refused', reason: 'empty-prompt' });
+    await second;
+    expect(cr.__relayNoteCount(EPIC, 'twice')).toBe(1);
+
+    for (const prompt of ['refused text', 'unconfirmed text', 'no window']) {
+      cr.run({ tabId: EPIC, sessionId: EPIC, prompt, cwd, resume: true, origin: 'external' });
+    }
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'twice', cwd, resume: true, origin: 'external' });
+    await waitFor(() => ran.length === 4);
+    const evs = await msgEvents();
+    expect(evs.map((e) => [e.kind, e.via, e.excerpt])).toEqual([
+      ['human.message', 'web-remote', 'twice'],
+    ]);
   } finally {
     done();
   }

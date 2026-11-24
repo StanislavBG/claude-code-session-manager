@@ -94,54 +94,16 @@ const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const crossProjectFeedback = require('./lib/feedback-remote/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
-scheduler.registerAdminRoutes(adminHttp);
-// GET/POST /admin/scheduler/slots — read the slot cap; change it only on the human's verified words.
-require('./lib/scheduler/slotsRoute.cjs').registerSlotsRoute(adminHttp);
-prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
-prdAdminRoutes.registerAdminRoute(adminHttp, scheduler.remote);
-projectHomeAdminRoutes.registerAdminRoute(adminHttp);
-// GET /admin/voices + POST /admin/voices/preview — voice library reads for agents; no route changes a voice.
-require('./lib/project-pages/voiceAdminRoutes.cjs').registerAdminRoute(adminHttp);
-macroAdminRoutes.registerAdminRoute(adminHttp, {
-  onChanged: () => broadcastMacrosChanged(),
-  startExternalNewSession: chatRunner.startExternalNewSession,
-  isTabBusy: chatRunner.isTabBusy,
+require('./adminRouteRegistry.cjs').registerAppAdminRoutes(adminHttp, {
+  onMacrosChanged: () => broadcastMacrosChanged(),
+  onNeedsYouChanged: broadcastNeedsYouChanged,
 });
-chatRunner.registerAdminRoute(adminHttp);
 // Outside apps' "Needs you" items (lib/feedback-remote/needsYouStore.cjs); changes broadcast `needsYou:changed`.
 function broadcastNeedsYouChanged() {
   sendIfAlive(mainWindow, 'needsYou:changed', {});
 }
-require('./lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(adminHttp, {
-  onChanged: broadcastNeedsYouChanged,
-});
 // The Dashboard's side: list open items + record the owner's answer (same broadcast).
 require('./lib/feedback-remote/needsYouIpc.cjs').registerNeedsYouIpc({ ipcMain, onChanged: broadcastNeedsYouChanged });
-// Project-to-project feedback conduit — the app is the only process holding
-// several projects' operations roots open, so it performs the cross-folder
-// write (lib/feedback-remote/crossProjectFeedback.cjs).
-crossProjectFeedback.registerAdminRoute(adminHttp);
-// Its return leg: the receiving session answers INTO the Epic that asked
-// (lib/feedback-remote/crossProjectReply.cjs).
-require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminHttp);
-require('./lib/feedback-remote/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
-// Website-feedback widgets + their decrypted inbox, behind the Feedback MCP tools.
-require('./lib/feedback-remote/siteFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
-// Per-project Artifacts store (publish + list), behind the artifact MCP tool.
-require('./lib/epic/artifactAdminRoutes.cjs').registerAdminRoute(adminHttp);
-// Cursor read over the audit log for outside scripts (read-only).
-require('./lib/telemetry/eventsAdminRoutes.cjs').registerAdminRoute(adminHttp);
-// Outside-facing Epic records for scripts/other projects (read-only).
-require('./lib/epic/epicAdminRoutes.cjs').registerAdminRoute(adminHttp, {
-  isTabBusy: chatRunner.isTabBusy,
-  listJobs: () => scheduler.remote.listJobRows(),
-});
-// Validator quality numbers per project for outside callers (read-only).
-require('./validationQualityHandlers.cjs').registerAdminRoute(adminHttp);
-// Persona roster + per-project effective model/effort for outside apps (read-only).
-require('./lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(adminHttp);
-// Task primitive: one headless claude -p run for a project, under the slot cap (POST /admin/tasks).
-require('./lib/tasks/taskAdminRoutes.cjs').registerAdminRoute(adminHttp);
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const queueOps = require('./queueOps.cjs');
@@ -1263,7 +1225,7 @@ try {
 
 // Direct in-process PRD authoring for a queued PromptTicket classified
 // 'develop' (PRD 749 follow-up) — calls the same createPrd() the admin HTTP
-// route (prdCreate.registerAdminRoute above) and the MCP tool use, just
+// route (prdCreate.registerAdminRoute, via adminRouteRegistry.cjs) and the MCP tool use, just
 // in-process instead of over localAdminHttp.cjs.
 ipcMain.handle('chat:create-prd', validated(schemas.schedulerCreatePrd, async (input) => {
   return prdCreate.createPrd(input, scheduler.remote);

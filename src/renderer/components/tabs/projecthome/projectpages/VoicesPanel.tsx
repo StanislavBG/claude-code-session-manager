@@ -9,7 +9,13 @@
  *
  * The voice lane (`lane` of the list result) shows as `idle` or its holder plus waiting count; the
  * list re-reads every 2 seconds only while this panel is mounted. Errors go to the toast; a
- * repeating poll error toasts once until it changes. Approve / unapprove / delete live elsewhere.
+ * repeating poll error toasts once until it changes.
+ *
+ * Human-only controls (project and machine voices; built-ins get none): Approve pins the voice's
+ * params (`voices:approve`), Unapprove drops that pin, and Delete — only on an unapproved voice —
+ * asks inline (the Confirm / Cancel step ProjectLibraryList uses) before `voices:delete`. An
+ * approved voice whose pin no longer matches says `changed since approved` with Re-approve. Each
+ * action reloads the list; a refusal or a thrown IPC error goes to the error toast.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '../../../ui/Badge'
@@ -48,6 +54,14 @@ function lastPreviewText(v: VoiceLibraryEntry): string {
   return `last ${when}${wall}`
 }
 
+type VoiceAction = 'approve' | 'unapprove' | 'delete'
+
+const ACTION_LABEL: Record<VoiceAction, string> = {
+  approve: 'Approve',
+  unapprove: 'Unapprove',
+  delete: 'Delete',
+}
+
 const PLAY_CLASS =
   'inline-flex h-7 items-center justify-center rounded-lg border border-rule-structural bg-bg-hi px-3 text-[12px] font-semibold text-fg cursor-pointer enabled:hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed'
 
@@ -59,6 +73,8 @@ export function VoicesPanel({ cwd }: { cwd?: string | null }) {
   const [text, setText] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [cached, setCached] = useState<Record<string, boolean>>({})
+  const [actingId, setActingId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const audioRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null)
   const lastListError = useRef<string | null>(null)
 
@@ -141,6 +157,27 @@ export function VoicesPanel({ cwd }: { cwd?: string | null }) {
     }
   }
 
+  const runAction = async (v: VoiceLibraryEntry, action: VoiceAction) => {
+    if (!cwd || actingId !== null) return
+    setActingId(v.id)
+    try {
+      const payload = { cwd, voiceId: v.id }
+      const res =
+        action === 'approve'
+          ? await window.api.voices.approve(payload)
+          : action === 'unapprove'
+            ? await window.api.voices.unapprove(payload)
+            : await window.api.voices.delete(payload)
+      if (!res.ok) show('error', `${ACTION_LABEL[action]} failed: ${res.error}`)
+    } catch (e) {
+      show('error', `${ACTION_LABEL[action]} failed: ${errMsg(e)}`)
+    } finally {
+      setActingId(null)
+      setConfirmDeleteId(null)
+      void load()
+    }
+  }
+
   return (
     <div data-testid="voices-panel" className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-none flex-wrap items-center gap-3">
@@ -186,10 +223,85 @@ export function VoicesPanel({ cwd }: { cwd?: string | null }) {
                   <span data-testid={`voice-last-preview-${v.id}`} className="font-mono text-[10.5px] text-fg-faint">
                     {lastPreviewText(v)}
                   </span>
+                  {v.approved && !v.pinOk && (
+                    <span data-testid={`voice-pin-mismatch-${v.id}`} className="text-[11px] font-semibold text-amber-400">
+                      changed since approved
+                    </span>
+                  )}
                 </div>
                 {cached[v.id] && (
                   <span data-testid={`voice-cached-${v.id}`} className="font-mono text-[10.5px] text-fg-faint">
                     cached
+                  </span>
+                )}
+                {v.scope !== 'builtin' && (
+                  <span className="flex items-center gap-2">
+                    {confirmDeleteId === v.id ? (
+                      <>
+                        <span className="text-[11.5px] text-fg-faint">Delete this voice?</span>
+                        <button
+                          type="button"
+                          data-testid={`voice-delete-confirm-${v.id}`}
+                          disabled={actingId !== null}
+                          onClick={() => void runAction(v, 'delete')}
+                          className={PLAY_CLASS}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`voice-delete-cancel-${v.id}`}
+                          onClick={() => setConfirmDeleteId(null)}
+                          className={PLAY_CLASS}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : v.approved ? (
+                      <>
+                        {!v.pinOk && (
+                          <button
+                            type="button"
+                            data-testid={`voice-reapprove-${v.id}`}
+                            disabled={!cwd || actingId !== null}
+                            onClick={() => void runAction(v, 'approve')}
+                            className={PLAY_CLASS}
+                          >
+                            Re-approve
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          data-testid={`voice-unapprove-${v.id}`}
+                          disabled={!cwd || actingId !== null}
+                          onClick={() => void runAction(v, 'unapprove')}
+                          className={PLAY_CLASS}
+                        >
+                          Unapprove
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          data-testid={`voice-approve-${v.id}`}
+                          disabled={!cwd || actingId !== null}
+                          onClick={() => void runAction(v, 'approve')}
+                          className={PLAY_CLASS}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`voice-delete-${v.id}`}
+                          disabled={!cwd || actingId !== null}
+                          onClick={() => setConfirmDeleteId(v.id)}
+                          className={PLAY_CLASS}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </span>
                 )}
                 <button

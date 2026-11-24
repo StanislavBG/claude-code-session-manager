@@ -26,6 +26,9 @@ function voice(id: string, over: Partial<VoiceLibraryEntry> = {}): VoiceLibraryE
 
 const list = vi.fn()
 const preview = vi.fn()
+const approve = vi.fn()
+const unapprove = vi.fn()
+const del = vi.fn()
 const play = vi.fn()
 const pause = vi.fn()
 const createObjectURL = vi.fn()
@@ -54,7 +57,10 @@ beforeEach(() => {
   createObjectURL.mockReset().mockReturnValue('blob:voice-1')
   revokeObjectURL.mockReset()
   audios = []
-  ;(window as unknown as { api: unknown }).api = { voices: { list, preview } }
+  approve.mockReset().mockResolvedValue({ ok: true, voiceId: 'x', scope: 'project', pin: 'p', at: '' })
+  unapprove.mockReset().mockResolvedValue({ ok: true, voiceId: 'x' })
+  del.mockReset().mockResolvedValue({ ok: true, voiceId: 'x', scope: 'project', file: '/f' })
+  ;(window as unknown as { api: unknown }).api = { voices: { list, preview, approve, unapprove, delete: del } }
   ;(URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL
   ;(URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectURL
   ;(window as unknown as { Audio: unknown }).Audio = class {
@@ -209,6 +215,85 @@ describe('VoicesPanel', () => {
       vi.advanceTimersByTime(6000)
     })
     expect(list.mock.calls.length).toBe(after)
+  })
+})
+
+describe('VoicesPanel approval controls', () => {
+  const click = async (sel: string) => {
+    await act(async () => {
+      ;(q(sel) as HTMLButtonElement).click()
+    })
+    await flush()
+  }
+
+  beforeEach(() => {
+    list.mockResolvedValue(
+      listResult([
+        voice('af_heart', { approved: true }),
+        voice('mine', { scope: 'project' }),
+        voice('mach', { scope: 'machine', approved: true }),
+        voice('drift', { scope: 'project', approved: true, pinOk: false }),
+      ]),
+    )
+  })
+
+  it('built-in rows show no approve, unapprove or delete', async () => {
+    await mount()
+    expect(q('[data-testid="voice-approve-af_heart"]')).toBeNull()
+    expect(q('[data-testid="voice-unapprove-af_heart"]')).toBeNull()
+    expect(q('[data-testid="voice-delete-af_heart"]')).toBeNull()
+  })
+
+  it('approves an unapproved project voice and reloads the list', async () => {
+    await mount()
+    expect(q('[data-testid="voice-unapprove-mine"]')).toBeNull()
+    const before = list.mock.calls.length
+    await click('[data-testid="voice-approve-mine"]')
+    expect(approve).toHaveBeenCalledWith({ cwd: '/proj', voiceId: 'mine' })
+    expect(list.mock.calls.length).toBeGreaterThan(before)
+  })
+
+  it('unapproves an approved machine voice and reloads; no delete on approved voices', async () => {
+    await mount()
+    expect(q('[data-testid="voice-approve-mach"]')).toBeNull()
+    expect(q('[data-testid="voice-delete-mach"]')).toBeNull()
+    const before = list.mock.calls.length
+    await click('[data-testid="voice-unapprove-mach"]')
+    expect(unapprove).toHaveBeenCalledWith({ cwd: '/proj', voiceId: 'mach' })
+    expect(list.mock.calls.length).toBeGreaterThan(before)
+  })
+
+  it('delete asks for confirmation; cancel does nothing, confirm calls voices:delete', async () => {
+    await mount()
+    await click('[data-testid="voice-delete-mine"]')
+    expect(del).not.toHaveBeenCalled()
+    expect(q('[data-testid="voice-delete-confirm-mine"]')).not.toBeNull()
+    await click('[data-testid="voice-delete-cancel-mine"]')
+    expect(q('[data-testid="voice-delete-confirm-mine"]')).toBeNull()
+    expect(del).not.toHaveBeenCalled()
+    await click('[data-testid="voice-delete-mine"]')
+    await click('[data-testid="voice-delete-confirm-mine"]')
+    expect(del).toHaveBeenCalledWith({ cwd: '/proj', voiceId: 'mine' })
+  })
+
+  it('an approved voice whose pin no longer matches shows changed since approved and Re-approve', async () => {
+    await mount()
+    expect(q('[data-testid="voice-pin-mismatch-drift"]')!.textContent).toContain('changed since approved')
+    expect(q('[data-testid="voice-pin-mismatch-mach"]')).toBeNull()
+    await click('[data-testid="voice-reapprove-drift"]')
+    expect(approve).toHaveBeenCalledWith({ cwd: '/proj', voiceId: 'drift' })
+  })
+
+  it('sends an approve refusal and a thrown delete to the error toast', async () => {
+    approve.mockResolvedValue({ ok: false, error: 'pin unreadable' })
+    del.mockRejectedValue(new Error('disk gone'))
+    await mount()
+    await click('[data-testid="voice-approve-mine"]')
+    await click('[data-testid="voice-delete-mine"]')
+    await click('[data-testid="voice-delete-confirm-mine"]')
+    const toasts = useToast.getState().toasts
+    expect(toasts.some((t) => t.kind === 'error' && t.message.includes('pin unreadable'))).toBe(true)
+    expect(toasts.some((t) => t.kind === 'error' && t.message.includes('disk gone'))).toBe(true)
   })
 })
 

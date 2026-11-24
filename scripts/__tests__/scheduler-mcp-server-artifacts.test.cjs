@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const SERVER_PATH = path.join(__dirname, '../scheduler-mcp-server.cjs');
 const { MCP_TOOL_CATALOG, composeDescription } = require('../../src/main/lib/mcpToolCatalog.cjs');
+const { KINDS } = require('../../src/main/lib/epic/artifactStore.cjs');
 
 const ENV_KEYS = ['HOME', 'SM_PROJECT_ROOT', 'SM_CHAT_SESSION_ID'];
 const savedEnv = {};
@@ -110,6 +111,23 @@ test('artifact_publish and artifact_list are registered with their input schemas
   for (const s of ['every file a human should review', 'renders', 'audio takes', 'reports', 'contact sheets']) {
     expect(publish.description).toContain(s);
   }
+});
+
+test('artifact_publish kind declares the store KINDS enum and never offers report', async () => {
+  const { mod: { TOOLS } } = await loadServer();
+  const kind = TOOLS.find((t) => t.name === 'artifact_publish').inputSchema.properties.kind;
+  expect(kind.enum).toEqual([...KINDS]);
+  expect(kind.enum).not.toContain('report');
+  expect(kind.description).toMatch(/optional/i);
+  expect(kind.description).toMatch(/file extension/);
+  expect(kind.description).toContain(KINDS.join(', '));
+  expect(kind.description).toMatch(/report is doc/i);
+  expect(kind.description).not.toMatch(/\breport\b,/);
+  expect(kind.description).not.toMatch(/,\s*report\b/);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'artifact_publish');
+  expect(entry.whenToUse).not.toContain('an optional file kind hint');
+  for (const k of ['video', 'audio', 'image', 'doc', 'data', 'other']) expect(entry.whenToUse).toContain(k);
+  expect(entry.whenToUse).toContain(KINDS.join(', '));
 });
 
 test('artifact_publish forwards path/title/kind plus SM_CHAT_SESSION_ID and SM_PROJECT_ROOT', async () => {

@@ -21,6 +21,7 @@
 
 const { z } = require('zod');
 const { MISS_KINDS } = require('./scheduler/validatorVerdictSchema.cjs');
+const { KINDS: ARTIFACT_KINDS } = require('./epic/artifactStore.cjs');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
@@ -1047,7 +1048,8 @@ const MCP_TOOL_CATALOG = [
     summary: 'Publish a file for review.',
     whenToUse: 'Call it for every file a human should review: renders, audio takes, reports, contact sheets, screenshots, exports. '
       + 'Publish each file the moment it is done, then name the returned storedPath in your reply. `path` is absolute, or relative '
-      + 'to your Epic worktree; `title` is the human label; `kind` is an optional file kind hint.',
+      + 'to your Epic worktree; `title` is the human label; `kind` is optional, one of ' + ARTIFACT_KINDS.join(', ')
+      + ' (a report is doc), and is inferred from the file extension when omitted.',
     whenNotToUse: 'Do not use for scratch or intermediate files nobody needs to see, for Project Home pages or videos (use '
       + 'project_page_write / project_video_write), or to move source code — commit that instead. Refused inside a scheduled job '
       + 'with no Epic session: a job writes to SM_ARTIFACTS_DIR and is harvested for you.',

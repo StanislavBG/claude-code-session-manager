@@ -77,6 +77,7 @@ const {
   FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA, FEEDBACK_OPEN_SESSION_INPUT_SCHEMA, MACRO_LIST_INPUT_SCHEMA, EPIC_GET_INPUT_SCHEMA,
 } = require('../src/main/lib/feedback-remote/serviceMcpTools.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
+const { KINDS: ARTIFACT_KINDS } = require('../src/main/lib/epic/artifactStore.cjs');
 const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX, REVIEW_IMAGE_BYTES_MAX } = require('../src/main/lib/project-pages/videoReview.cjs');
 const { SOUND_NAME_RE, MAX_BED_WAV_BYTES, MAX_SOUNDS_TOTAL_BYTES } = require('../src/main/lib/demo-video-kit/projectSounds.cjs');
 
@@ -1039,7 +1040,12 @@ const TOOLS = [
       properties: {
         path: { type: 'string', description: 'Path of the file to publish: absolute (worktree, project or /tmp), or relative to your Epic worktree.' },
         title: { type: 'string', description: 'Optional: human label shown in File Explorer > Artifacts.' },
-        kind: { type: 'string', description: 'Optional: file kind hint (e.g. image, audio, video, report).' },
+        // Derived from the store so the schema cannot drift from what it accepts.
+        kind: {
+          type: 'string',
+          enum: [...ARTIFACT_KINDS],
+          description: `Optional: one of ${ARTIFACT_KINDS.join(', ')}; omit to infer it from the file extension. A report is doc.`,
+        },
       },
       required: ['path'],
     },

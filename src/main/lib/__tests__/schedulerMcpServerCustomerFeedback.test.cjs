@@ -345,7 +345,10 @@ test('submit is listed with its catalog description and a required goal/descript
   expect(tool.inputSchema.properties.description.maxLength).toBe(5000);
   expect(tool.inputSchema.properties.context.type).toBe('object');
   expect(tool.inputSchema.properties.context.additionalProperties).toBe(false);
-  expect(Object.keys(tool.inputSchema.properties.context.properties).sort()).toEqual(['console', 'marks', 'network', 'page']);
+  expect(Object.keys(tool.inputSchema.properties.context.properties).sort()).toEqual(['client', 'console', 'marks', 'network', 'page']);
+  expect(tool.inputSchema.properties.context.properties.client).toMatchObject({
+    type: 'object', additionalProperties: false, properties: { captureError: { type: 'string', maxLength: 200 } },
+  });
   expect(tool.inputSchema.properties.goal.type).toBe('string');
   expect(tool.inputSchema.properties.description.type).toBe('string');
   expect(tool.inputSchema.properties.tag.enum).toEqual(['bug', 'feature', 'discussion']);
@@ -417,6 +420,19 @@ test('submit forwards a widget context to the admin route unchanged', async () =
   expect(requests[0].body).toEqual({ title: 'g', body: 'd', tag: 'bug', context: CONTEXT });
 });
 
+test('submit forwards context.client.captureError (<= 200 chars) to the admin route', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_6' } });
+  for (const captureError of ['screenshot failed: tainted canvas', 'e'.repeat(200)]) {
+    const context = { ...JSON.parse(JSON.stringify(CONTEXT)), client: { captureError } };
+    const result = await withEnv(HUMAN, () =>
+      callTool(handleCallTool, SUBMIT_TOOL_NAME, { goal: 'g', description: 'd', tag: 'bug', context }));
+    expect(result.isError).toBeFalsy();
+  }
+  expect(requests).toHaveLength(2);
+  expect(requests[0].body.context).toEqual({ ...CONTEXT, client: { captureError: 'screenshot failed: tainted canvas' } });
+  expect(requests[1].body.context.client).toEqual({ captureError: 'e'.repeat(200) });
+});
+
 test('submit accepts a 5000-char description and refuses 5001 without a request', async () => {
   const { handleCallTool, requests } = await setup({ ok: true, item: { id: 'fb_5' } });
   const ok = await withEnv(HUMAN, () =>
@@ -440,6 +456,11 @@ test('submit refuses an invalid context without a request', async () => {
     { console: 'oops' },
     { cookies: 'a=b' },
     { client: { widgetVersion: '1' } },
+    { client: { captureError: 'x', cookies: 'a=b' } },
+    { client: { captureError: 'x'.repeat(201) } },
+    { client: { captureError: 7 } },
+    { client: 'oops' },
+    { client: null },
   ];
   for (const context of invalid) {
     const result = await withEnv(HUMAN, () =>

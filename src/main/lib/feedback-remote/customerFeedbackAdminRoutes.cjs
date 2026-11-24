@@ -23,6 +23,7 @@
 
 const path = require('path');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
+const feedbackReport = require('./feedbackReport.cjs');
 
 /** @param {any} dep */
 function getInbox(dep) {
@@ -135,7 +136,7 @@ function submitHandler(submitDep) {
       /** @type {import('./feedbackReport.cjs').FeedbackContext | undefined} */
       let context;
       if (body.context !== undefined && body.context !== null) {
-        const c = require('./feedbackReport.cjs').parseContext(body.context);
+        const c = feedbackReport.parseContext(body.context);
         if (!c.ok) {
           sendJson(res, 400, { ok: false, error: `invalid submission: ${c.error}` });
           return;

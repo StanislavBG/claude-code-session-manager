@@ -7,7 +7,7 @@
  */
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 const { registerAdminRoute } = require('../lib/feedback-remote/customerFeedbackAdminRoutes.cjs');
 
 function makeFakeAdminHttp() {
@@ -226,6 +226,27 @@ test('submit forwards a validated context round trip', async () => {
   const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body: 'b', tag: 'bug', context: CONTEXT } });
   expect(r.status).toBe(200);
   expect(calls).toEqual([{ title: 't', body: 'b', tag: 'bug', context: CONTEXT }]);
+});
+
+test('submit parses the context once and passes the parsed value on', async () => {
+  const feedbackReport = require('../lib/feedback-remote/feedbackReport.cjs');
+  const spy = vi.spyOn(feedbackReport, 'parseContext');
+  try {
+    const { adminHttp, calls } = setupSubmit();
+    const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body: 'b', tag: 'bug', context: CONTEXT } });
+    expect(r.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].context).toBe(spy.mock.results[0].value.context);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('the route requires feedbackReport at the top, not inside the handler', () => {
+  const src = require('node:fs').readFileSync(require.resolve('../lib/feedback-remote/customerFeedbackAdminRoutes.cjs'), 'utf8');
+  expect(src).toMatch(/^const feedbackReport = require\('\.\/feedbackReport\.cjs'\);$/m);
+  expect(src).not.toMatch(/require\('\.\/feedbackReport\.cjs'\)\.parseContext/);
 });
 
 test('submit refuses an oversize or invalid context with 400 before any submit', async () => {

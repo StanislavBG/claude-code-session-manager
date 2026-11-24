@@ -359,3 +359,19 @@ test('stores wire context (<= 262144 bytes, else null) and keeps it across re-pu
   expect(c1.context).toEqual(context);
   expect(JSON.parse(fs.readFileSync(storeFile, 'utf8')).items.find((i) => i.id === 'c1').context).toEqual(context);
 });
+
+test("the context byte cap is feedbackReport's MAX_CONTEXT_BYTES, not a second copy", async () => {
+  const { MAX_CONTEXT_BYTES } = require('../feedbackReport.cjs');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'customerFeedbackInbox.cjs'), 'utf8');
+  expect(src).not.toMatch(/const\s+MAX_CONTEXT_BYTES\s*=/);
+  expect(src).toMatch(/\{\s*MAX_CONTEXT_BYTES\s*\}\s*=\s*require\('\.\/feedbackReport\.cjs'\)/);
+  // Boundary: exactly MAX_CONTEXT_BYTES of JSON is kept, one byte more is dropped.
+  const pad = (n) => ({ note: 'x'.repeat(n - JSON.stringify({ note: '' }).length) });
+  const f = mkFetch({ status: 200, json: { items: [
+    wire('b1', { context: pad(MAX_CONTEXT_BYTES) }), wire('b2', { context: pad(MAX_CONTEXT_BYTES + 1) }),
+  ], nextSince: 's1', nextModeratedSince: null } });
+  expect((await inbox.pull(deps(f))).ok).toBe(true);
+  const items = (await inbox.list({}, deps(f))).items;
+  expect(items.find((i) => i.id === 'b1').context).toEqual(pad(MAX_CONTEXT_BYTES));
+  expect(items.find((i) => i.id === 'b2').context).toBeNull();
+});

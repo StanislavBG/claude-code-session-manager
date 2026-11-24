@@ -1172,6 +1172,14 @@ const TOOLS = [
             marks: { type: 'array', items: { type: 'object' }, description: 'Report v1 marks: pin | box | element | arrow | draw | text, each with n, color and note.' },
             console: { type: ['array', 'null'], items: { type: 'object' }, maxItems: 20, description: 'Report v1 console errors, at most 20: { level, message, stack?, count, at }.' },
             network: { type: ['array', 'null'], items: { type: 'object' }, maxItems: 20, description: 'Report v1 failed requests, at most 20: { method, url, status, durationMs, at }.' },
+            client: {
+              type: 'object',
+              additionalProperties: false,
+              description: 'Optional: what the widget reported about its own capture.',
+              properties: {
+                captureError: { type: 'string', maxLength: 200, description: 'Why the widget could not capture part of the page (Report v1 client.captureError), max 200 chars.' },
+              },
+            },
           },
         },
       },
@@ -1317,19 +1325,30 @@ function customerFeedbackSubmitRefusal() {
 }
 
 const FEEDBACK_DESCRIPTION_MAX = 5000;
-const FEEDBACK_CONTEXT_KEYS = ['page', 'marks', 'console', 'network'];
+const FEEDBACK_CONTEXT_KEYS = ['page', 'marks', 'console', 'network', 'client'];
+// An agent forwards only the widget's captureError; widgetVersion names the widget build, which an agent is not.
+const FEEDBACK_CONTEXT_CLIENT_KEYS = ['captureError'];
 
 /**
- * customer_feedback_submit's context check: a plain object of only page/marks/console/network,
- * each obeying Report v1 (feedbackReport.parseContext, the admin route's own validator). Returns
- * an error string or null. The value is forwarded unchanged; the route re-validates it.
+ * customer_feedback_submit's context check: a plain object of only page/marks/console/network/client
+ * (client carrying only captureError), each obeying Report v1 (feedbackReport.parseContext, the admin
+ * route's own validator). Returns an error string or null. The value is forwarded unchanged; the
+ * route re-validates it.
  */
 function feedbackContextRefusal(context) {
   if (typeof context !== 'object' || Array.isArray(context)) {
-    return 'invalid argument: context must be an object with page, marks, console and/or network';
+    return 'invalid argument: context must be an object with page, marks, console, network and/or client';
   }
   const extra = Object.keys(context).filter((k) => !FEEDBACK_CONTEXT_KEYS.includes(k));
   if (extra.length) return `invalid argument: context has unknown key(s): ${extra.join(', ')}`;
+  const client = context.client;
+  if (client !== undefined) {
+    if (client === null || typeof client !== 'object' || Array.isArray(client)) {
+      return 'invalid argument: context.client must be an object with captureError';
+    }
+    const extraClient = Object.keys(client).filter((k) => !FEEDBACK_CONTEXT_CLIENT_KEYS.includes(k));
+    if (extraClient.length) return `invalid argument: context.client has unknown key(s): ${extraClient.join(', ')}`;
+  }
   const r = require('../src/main/lib/feedback-remote/feedbackReport.cjs').parseContext(context);
   return r.ok ? null : `invalid argument: ${r.error} (context follows Report v1)`;
 }

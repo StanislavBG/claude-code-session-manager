@@ -16,6 +16,8 @@ const atomicFs = require('../util/atomicFs.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 const { resolveFeedbackBase, fromWireType, FEEDBACK_SLUG } = require('./customerFeedbackClient.cjs');
 const { ATTACHMENT_MIMES, sniffImageMime } = require('../epic/epicAttachments.cjs');
+/** Host stores the widget context opaquely up to MAX_CONTEXT_BYTES of JSON (Bilko 76e88612). */
+const { MAX_CONTEXT_BYTES } = require('./feedbackReport.cjs');
 
 const STATUSES = /** @type {const} */ (['open', 'in_progress', 'resolved', 'wontfix']);
 const MAX_NOTE = 500;
@@ -33,8 +35,6 @@ const MAX_DATA_URL_CHARS = 2000000;
 const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,/;
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
-/** Host stores the widget context opaquely up to this many bytes of JSON (Bilko 76e88612). */
-const MAX_CONTEXT_BYTES = 262144;
 
 /**
  * @typedef {{ mime: string, bytes: number, path: string|null }} InboxImage

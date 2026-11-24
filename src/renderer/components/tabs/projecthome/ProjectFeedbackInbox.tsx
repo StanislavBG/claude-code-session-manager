@@ -11,7 +11,7 @@
  * can be set and the report removed after a confirm. "Open as Epic" is a human press through the
  * New Epic mint path (createPromptSession — born proposed), built by lib/siteFeedbackIntake.ts with
  * every visitor-supplied part fenced as data; it then links the Epic and sets in_progress. The
- * created Epic id is kept once the mint succeeds: a failed link offers 'Retry link' for that same
+ * created Epic id is kept in the site feedback store (pendingEpicByItem) once the mint succeeds, so it survives close/reopen: a failed link offers 'Retry link' for that same
  * Epic and the press never mints a second one.
  *
  * Every report field is visitor-supplied: it renders only as React text children — no
@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
+import { selectPendingEpic, selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { toast, useToast } from '../../../state/toast'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { buildSiteIntake } from '../../../lib/siteFeedbackIntake'
@@ -265,9 +265,10 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
     }
   }
   const linked = meta.epicId != null
-  // The Epic minted for THIS report, kept so a failed link is retried, never re-minted.
-  const [minted, setMinted] = useState<{ hostId: string; epicId: string } | null>(null)
-  const mintedEpicId = minted && minted.hostId === meta.hostId ? minted.epicId : null
+  // The Epic minted for THIS report, kept in the store (survives close/reopen) so a failed
+  // link is retried, never re-minted.
+  const mintedEpicId = useSiteFeedback(selectPendingEpic(cwd, meta.hostId))
+  const setPendingEpic = useSiteFeedback((s) => s.setPendingEpic)
   const inFlight = useRef(false)
   const showToast = (msg: string) => useToast.getState().show('error', msg)
 
@@ -297,7 +298,7 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
       if (linked || mintedEpicId) return
       const { goalText, openingPrompt, sections, tag } = await buildSiteIntake(detail, cwd)
       const session = await createPromptSession(cwd, goalText, tag, undefined, 'architect', openingPrompt, sections)
-      setMinted({ hostId: meta.hostId, epicId: session.id })
+      setPendingEpic(cwd, meta.hostId, session.id)
       await linkAndStart(session.id)
     })
   const onRetryLink = () =>

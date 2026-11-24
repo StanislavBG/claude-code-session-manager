@@ -456,4 +456,32 @@ describe('ProjectFeedbackInbox Open as Epic', () => {
     expect(q(el, 'site-feedback-retry-link')).toBeNull()
     expect(openBtn(el).disabled).toBe(true)
   })
+
+  it('fail-link, close, reopen, retry: the minted Epic survives the close and is linked, minting exactly one', async () => {
+    sf.inboxLinkEpic.mockResolvedValueOnce({ ok: false, error: 'io', message: 'disk full' })
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    expect(q(el, 'site-feedback-retry-link')).not.toBeNull()
+
+    act(() => q(el, 'site-feedback-detail-close')!.click())
+    await flush()
+    expect(q(el, 'site-feedback-detail')).toBeNull()
+    await openRow(el, 'FB-NEW01')
+
+    expect(openBtn(el).disabled).toBe(true)
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    const retry = q(el, 'site-feedback-retry-link') as HTMLButtonElement
+    expect(retry.textContent).toBe('Retry link')
+    act(() => retry.click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    expect(sf.inboxLinkEpic).toHaveBeenCalledTimes(2)
+    expect(sf.inboxLinkEpic).toHaveBeenLastCalledWith({ cwd: CWD, hostId: 'FB-NEW01', epicId: 'epic-1' })
+    expect(q(el, 'site-feedback-retry-link')).toBeNull()
+  })
 })

@@ -42,6 +42,13 @@ export interface SiteFeedbackProjectState {
   draining: boolean
   lastDrain: SiteFeedbackDrainResult | null
   error: string | null
+  /**
+   * Item hostId -> Epic id minted for it whose link has not landed yet. Set by setPendingEpic
+   * once createPromptSession succeeds; cleared when linkEpic succeeds. Lives here (not in the
+   * detail component) so closing and reopening the item keeps it — the next press retries the
+   * link for this Epic instead of minting a second one.
+   */
+  pendingEpicByItem: Record<string, string>
 }
 
 /** Stable fallback for a cwd with no state yet — safe to return from a selector. */
@@ -58,6 +65,7 @@ export const EMPTY_SITE_FEEDBACK: SiteFeedbackProjectState = Object.freeze({
   draining: false,
   lastDrain: null,
   error: null,
+  pendingEpicByItem: Object.freeze({}) as Record<string, string>,
 }) as SiteFeedbackProjectState
 
 export type WidgetPatch = Omit<SiteFeedbackWidgetUpdateInput, 'boxId'>
@@ -82,7 +90,10 @@ interface SiteFeedbackState {
     status: SiteFeedbackStatus,
     note?: string | null,
   ) => Promise<SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>>
+  /** Clears `pendingEpicByItem[hostId]` on success. */
   linkEpic: (cwd: string, hostId: string, epicId: string) => Promise<SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>>
+  /** Record the Epic minted for an item (call right after createPromptSession succeeds). */
+  setPendingEpic: (cwd: string, hostId: string, epicId: string) => void
   /** Deletes one item; drops it from `items` and clears the selection when it was open. */
   removeItem: (cwd: string, hostId: string) => Promise<SiteFeedbackResult<{ hostId: string }>>
   /** Drains every box on the relay; reloads this cwd's widgets and items afterwards. */
@@ -95,6 +106,12 @@ export const selectSiteFeedback =
   (cwd: string) =>
   (s: SiteFeedbackState): SiteFeedbackProjectState =>
     s.byCwd[cwd] ?? EMPTY_SITE_FEEDBACK
+
+/** Selector factory: the pending (minted, not yet linked) Epic id for one item, or null. Primitive only. */
+export const selectPendingEpic =
+  (cwd: string, hostId: string) =>
+  (s: SiteFeedbackState): string | null =>
+    s.byCwd[cwd]?.pendingEpicByItem[hostId] ?? null
 
 const failureText = (f: SiteFeedbackFailure): string => f.message || f.error
 
@@ -215,10 +232,18 @@ export const useSiteFeedback = create<SiteFeedbackState>((set, get) => {
       ),
 
     linkEpic: (cwd, hostId, epicId) =>
-      call(cwd, () => api().inboxLinkEpic({ cwd, hostId, epicId }), (r, cur) => ({
-        items: cur.items.map((it) => applyMeta(it, r.meta)),
-        selected: cur.selected && cur.selected.meta.hostId === hostId ? { ...cur.selected, meta: r.meta } : cur.selected,
-      })),
+      call(cwd, () => api().inboxLinkEpic({ cwd, hostId, epicId }), (r, cur) => {
+        const pendingEpicByItem = { ...cur.pendingEpicByItem }
+        delete pendingEpicByItem[hostId]
+        return {
+          items: cur.items.map((it) => applyMeta(it, r.meta)),
+          selected: cur.selected && cur.selected.meta.hostId === hostId ? { ...cur.selected, meta: r.meta } : cur.selected,
+          pendingEpicByItem,
+        }
+      }),
+
+    setPendingEpic: (cwd, hostId, epicId) =>
+      patch(cwd, (cur) => ({ pendingEpicByItem: { ...cur.pendingEpicByItem, [hostId]: epicId } })),
 
     removeItem: (cwd, hostId) =>
       call(cwd, () => api().inboxRemove({ cwd, hostId }), (_r, cur) => ({

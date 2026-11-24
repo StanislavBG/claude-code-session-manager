@@ -230,6 +230,26 @@ describe('siteFeedback store', () => {
     expect(slice().error).toBeNull()
   })
 
+  it('pendingEpicByItem: setPendingEpic records the minted id; a failed link keeps it, a successful link clears it', async () => {
+    const sf = installApi()
+    const { s, slice, selectPendingEpic, EMPTY_SITE_FEEDBACK } = await load()
+    expect(EMPTY_SITE_FEEDBACK.pendingEpicByItem).toEqual({})
+    expect(selectPendingEpic(CWD, 'FB-AAAAA')(s.getState())).toBeNull()
+    await s.getState().loadItems(CWD)
+    s.getState().setPendingEpic(CWD, 'FB-AAAAA', 'e1')
+    expect(slice().pendingEpicByItem).toEqual({ 'FB-AAAAA': 'e1' })
+    expect(selectPendingEpic(CWD, 'FB-AAAAA')(s.getState())).toBe('e1')
+    s.getState().closeItem(CWD)
+    expect(selectPendingEpic(CWD, 'FB-AAAAA')(s.getState())).toBe('e1')
+    sf.inboxLinkEpic.mockResolvedValueOnce(fail('disk full'))
+    await s.getState().linkEpic(CWD, 'FB-AAAAA', 'e1')
+    expect(selectPendingEpic(CWD, 'FB-AAAAA')(s.getState())).toBe('e1')
+    sf.inboxLinkEpic.mockResolvedValueOnce({ ok: true, meta: meta({ epicId: 'e1' }) })
+    await s.getState().linkEpic(CWD, 'FB-AAAAA', 'e1')
+    expect(selectPendingEpic(CWD, 'FB-AAAAA')(s.getState())).toBeNull()
+    expect(slice().pendingEpicByItem).toEqual({})
+  })
+
   it('removeItem drops the item and its selection; failure keeps it', async () => {
     const sf = installApi()
     const { s, slice } = await load()

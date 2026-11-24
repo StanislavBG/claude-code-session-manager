@@ -303,7 +303,9 @@ Rules:
    checkout's `session-manager-operations/plan-records/<epic-id>/`).
 2. **Decided:** each choice you made instead of asking, with a one-line revert.
 3. **Queued:** side plans and later waves still to run, by slug. They finish without the human.
-4. **Scheduled:** what fires on its own later, and its trigger.
+4. **Scheduled:** what fires on its own later, and its trigger. A reply owed to another project after a release is sent at once,
+   as `feedback_reply` with `deliverWhen.appVersionAbove` set to the version running now
+   (`admin-api.json` `appVersion`), so it sends itself after the release even if this Epic is closed.
 5. **Needs you:** only steps rule 6 allows, including a PRD refuted twice, one exact action each. Omit it when empty.
 
 Expected API warnings and skipped optional steps are not reported.

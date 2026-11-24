@@ -284,6 +284,10 @@ under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
     threads (no `replyTo`, no `replyOf`) threads to `source.fromEpicId` in `source.fromCwd`, without the
     Claude-session check.
   - Cap: 3 replies per thread (receipts on the replying Epic, serialized per thread).
+  - Scheduled replies (`deliverWhen { appVersionAbove }`): a closed Epic cannot be woken, so a reply owed after a
+    release ("it's live in vX") was lost whenever its Epic closed first. The reply is now sent at once, held until
+    Session Manager runs a version above `appVersionAbove`, and sends itself then; it counts toward the 3-reply cap
+    at once.
   - Fallback: if the asking Epic is missing, not `active`, or its Claude session changed, the reply mints a NEW
     `proposed` Epic in the asking project carrying `source.replyOf = { cwd, epicId }`, through the same
     `MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK` (`openReplyFallbackSession`), never auto-approved. `MINT_AUTHORITIES`

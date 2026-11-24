@@ -24,7 +24,27 @@ describe('webRemote wiring', () => {
   it('every channel invoked by the preload namespace has an ipcMain.handle', () => {
     const ns = webRemoteNamespace(preload)
     const invoked = [...ns.matchAll(/invoke\('(webRemote:[^']+)'/g)].map((m) => m[1])
-    expect(invoked.length).toBe(10)
+    // Exact set, by name: a new preload channel must be added here AND get a handler.
+    expect([...invoked].sort()).toEqual(
+      [
+        'webRemote:audit-tail',
+        'webRemote:confirm-sas',
+        'webRemote:disable',
+        'webRemote:disable-control',
+        'webRemote:enable',
+        'webRemote:enable-control',
+        'webRemote:get-status',
+        'webRemote:pair',
+        'webRemote:relay-client-revoke',
+        'webRemote:revoke-all',
+        'webRemote:revoke-device',
+        'webRemote:service-confirm-sas',
+        'webRemote:service-pair-cancel',
+        'webRemote:service-pair-start',
+        'webRemote:service-revoke',
+        'webRemote:services-list',
+      ].sort(),
+    )
     for (const ch of invoked) {
       expect(bridge).toContain(`ipcMain.handle('${ch}'`)
     }

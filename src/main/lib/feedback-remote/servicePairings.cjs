@@ -239,6 +239,7 @@ function createServicePairings({ filePath, now } = {}) {
 
     /** Drop a pending pairing so it can no longer be confirmed or listed. Resolves true if it existed. */
     cancelPending(pairingId) {
+      if (typeof pairingId !== 'string' || pairingId.length === 0) return Promise.resolve(false);
       return mutate((s) => {
         const before = s.pending.length;
         s.pending = s.pending.filter((p) => p.pairingId !== pairingId);

@@ -246,6 +246,18 @@ describe('paired service clients', () => {
     expect(await cancel({}, { pairingId })).toEqual({ ok: true, cancelled: false, dropped: 0 })
   })
 
+  it('service-pair-cancel with no paired device audits deviceId=-, never undefined', async () => {
+    await setup()
+    await writeConfig({ remoteEnabled: true, remoteControlEnabled: false, devices: [] })
+    webRemote.__test.invalidateConfigCache()
+    const cancel = handlers.get('webRemote:service-pair-cancel')
+    const pairingId = crypto.randomUUID()
+    expect(await cancel({}, { pairingId })).toEqual({ ok: true, cancelled: false, dropped: 0 })
+    const audit = await readAudit()
+    expect(audit).toMatch(/service:pair-cancelled\s+deviceId=-\s+client=-\s+msgId=-\s+result=noop:dropped=0/)
+    expect(audit).not.toMatch(/deviceId=undefined/)
+  })
+
   it('drops a non-UUID clientId', async () => {
     await setup()
     await store.createPending({ name: 'Kiln', homeCwd: HOME_CWD, scope: ['macro_list'] })

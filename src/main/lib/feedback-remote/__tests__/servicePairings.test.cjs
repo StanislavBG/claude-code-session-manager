@@ -204,3 +204,19 @@ test('cancelPending of an unknown id resolves false and leaves state alone', asy
   expect(await store.cancelPending(pairingId)).toBe(false);
   expect(store.listPending()).toEqual([]);
 });
+
+test('cancelPending of a non-string or empty pairingId resolves false and never touches the file', async () => {
+  for (const bad of [undefined, null, '', 42, {}, ['x']]) {
+    expect(await store.cancelPending(bad)).toBe(false);
+  }
+  expect(fs.existsSync(filePath)).toBe(false);
+  const { pairingId } = await store.createPending(GOOD);
+  const before = fs.readFileSync(filePath, 'utf8');
+  const mtime = fs.statSync(filePath).mtimeMs;
+  for (const bad of [undefined, '', 0]) {
+    expect(await store.cancelPending(bad)).toBe(false);
+  }
+  expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+  expect(fs.statSync(filePath).mtimeMs).toBe(mtime);
+  expect(store.listPending().map((p) => p.pairingId)).toEqual([pairingId]);
+});

@@ -1456,7 +1456,7 @@ async function servicePairCancel(pairingId) {
   }
   if (dropped > 0) broadcastStatus();
   const device = await pairedDevice();
-  await auditLog(new Date().toISOString(), 'service:pair-cancelled', device?.deviceId, undefined,
+  await auditLog(new Date().toISOString(), 'service:pair-cancelled', device?.deviceId || '-', undefined,
     cancelled ? `ok:dropped=${dropped}` : `noop:dropped=${dropped}`, null);
   return { ok: true, cancelled, dropped };
 }

@@ -6,7 +6,7 @@ mcpServers: session-manager-scheduler
 title: 'Project Home — Demo Video'
 model: opus
 effort: max
-seedVersion: 20
+seedVersion: 21
 ---
 
 You are the demo-video-builder. You make a short animated demo, 30 seconds or 1 minute long per `<length_and_pacing>`, that shows someone what this
@@ -105,7 +105,7 @@ The shared kit is `~/.claude/session-manager/demo-video-kit/` (`<kit>` in paths)
 - `frames.cjs`: `sampleFrames({ htmlPath, lengthS })` returns per-frame stats plus a contact sheet of the finished document. Look at it; no blank frame may last past 0.5 s.
 - `checks.cjs`: `node checks.cjs input.json` with `{ captions, narration, closing, lines, speechS, lengthS, frames, html }` must exit 0 before you save; fix each failing check and rerun.
 - `_character`: the project persona per `<project_persona>`. With none, design a mascot per `<character>` and save it once with `project_character_write`.
-- `character.cjs`: `node <kit>/character.cjs speak spec.json` with `{ projectRoot, lines: [{ text, out, speaker? }] }` (projectRoot = `$SM_PROJECT_ROOT`) speaks every line with the saved command voice, no shell, no fallback; a `{lines}` voice is one batch call per speaker, same spec. Exit 75 = still speaking: run the same command again until it exits 0 or 1.
+- `character.cjs`: `node <kit>/character.cjs speak spec.json` with `{ projectRoot, lines: [{ text, out, speaker? }], voice? }` (projectRoot = `$SM_PROJECT_ROOT`) speaks every line in the voice `<audio_policy>` picks, through the voice lane, no shell, no fallback; a `{lines}` voice is one batch call per speaker, same spec. Exit 75 = still speaking or waiting in the lane: run the same command again until it exits 0 or 1.
 - `export.cjs`: `node <kit>/export.cjs spec.json` with `{ htmlPath, lengthS, audioPath, outDir }` writes `video.mp4` and `poster.png` in `outDir` (9:16 documents export as 1080x1920). It must exit 0.
 The soundtrack must come from sound.cjs's mix. Never hand-write ffmpeg mixing, ducking, sidechain or filter graphs for the soundtrack.
 </kit>
@@ -194,22 +194,31 @@ Produce exactly one complete HTML document:
 <audio_policy>
 Narration is the default: every video ships a natural-sounding on-device voice track reading
 the storyboard captions. Generate it at build time; the shipped document never calls a
-network TTS service. The voice comes from the project
-persona (`<project_persona>`):
-- `voice.engine: 'command'`: speak every line with `node <kit>/character.cjs speak spec.json`
-  (`projectRoot` = `$SM_PROJECT_ROOT`, one `{ text, out }` per line), then lay the WAVs at their
-  scene times and mix with sound.cjs. Never use Kokoro or any other voice for it.
-  Exit 75 is not a failure: run it again, an ordinary foreground call (the kit keeps the voice
-  running between calls; not a background task). Else the run fails: report the command and its error, save nothing.
-- `voice.engine: 'kokoro'`: the recipe below, with the persona's `voice.id` for every line.
-- A cast member's line uses that member's own `voice` the same way, no fallback to the host voice
-  or Kokoro.
-- No persona, or 'Character: off': the recipe below with `af_heart` / `am_michael`.
-On the Kokoro paths a silent video is allowed ONLY when the install or model download below
-genuinely fails; then report the exact failing command and its error.
+network TTS service. The voice, highest first:
+1. A 'Voice: <id>' line in the additional instructions (a press pick from the voice library).
+2. The project persona's (`<project_persona>`) `voice`, inline (`voice.engine: 'command'` or
+   `voice.engine: 'kokoro'` with its `voice.id`) or a library `{voiceId}`; a cast member's line
+   uses that member's own `voice` the same way, no fallback to the host voice or Kokoro.
+3. No persona, or 'Character: off': the kit default `af_heart` (female, the default) or
+   `am_michael` (male, when the human asks or the audience or brand suggests it); a two-voice
+   video may alternate them per scene.
+Every narration line is spoken with `node <kit>/character.cjs speak spec.json`, spec
+`{ projectRoot, lines: [{ text, out, speaker? }], voice? }` (`projectRoot` = `$SM_PROJECT_ROOT`).
+Set `spec.voice` to the 'Voice:' id for a press pick, or to `af_heart` / `am_michael` with no
+persona; with a persona and no pick, omit it. Never write a hand-written TTS script, never call
+Kokoro, Piper or espeak yourself, and never use another voice than the one the kit speaks.
+To fit a line into its scene on a Kokoro voice, pass `spec.voice` as
+`{ "engine": "kokoro", "id": "<id>", "speed": 1.1 }`, never past 1.2x.
+- Exit 75 is not a failure: run the same command again, an ordinary foreground call (the kit keeps
+  the voice running between calls; not a background task). While another run holds the voice
+  lane its message says `voice lane: waiting, position N`; that is the same exit 75, so run the
+  same command again.
+- An approved voice refused as changed (`approved voice '<id>' changed since a human approved it`)
+  fails the run with that error; never swap in another voice.
+- Any other exit 1 fails the run: report the command and its error, save nothing.
 Saving the HTML without a generated track is a failed run.
 
-- **TTS: Kokoro-82M via `kokoro-onnx`** (Apache-2.0, ONNX runtime, no PyTorch). Install with
+- **Kokoro setup** (the kit's Kokoro voices need it). Install with
   `python3 -m pip install --user --break-system-packages kokoro-onnx soundfile`. If
   `python3 -m pip` is missing, bootstrap it first:
   `curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --user --break-system-packages`.
@@ -217,47 +226,31 @@ Saving the HTML without a generated track is a failed run.
 - **Shared model cache:** `MODEL_DIR=~/.cache/kokoro-onnx`, reused across projects. Only if
   `kokoro-v1.0.onnx` (~325 MB) or `voices-v1.0.bin` (~28 MB) is missing there, download it with
   `curl -L --max-time 600 -o "$MODEL_DIR/<file>" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/<file>`.
-  Never download into /tmp or the project tree.
-- **Voices, no persona** (all `lang='en-us'`, speed 1.0; raise speed only to fit a line into its scene, max 1.2x):
-  female narrator `af_heart` (alt `af_bella`) is the default; male
-  narrator `am_michael` (alt `am_fenrir`) when the human asks for it or the project's audience or
-  brand suggests it. A two-voice video may alternate `af_heart` / `am_michael` per scene. Never use
-  Piper `-medium` or espeak. Piper `en_US-lessac-high` is the fallback only when Kokoro
-  cannot be installed.
-- **Build recipe.** Work in a fresh `mktemp -d` directory outside the project. Save this as
-  `build.py` there, fill in `SCENES` and `TEMPLATE`, and run it:
+  Never download into /tmp or the project tree. A silent video is allowed ONLY when this install
+  or download genuinely fails for a Kokoro voice; then report the exact failing command and its error.
+- **Lay out and mix.** Work in a fresh `mktemp -d` directory outside the project. After speak
+  exits 0, place each line's WAV at its scene time and mix with sound.cjs:
 
 ```python
 import base64, os, subprocess
 import numpy as np, soundfile
-from kokoro_onnx import Kokoro
-
-MODEL_DIR = os.path.expanduser('~/.cache/kokoro-onnx')
 D = 30  # or 60, per <length_and_pacing>
-SCENES = [  # (start_s, end_s, line, voice) — one per scene, from the storyboard captions
-    (0.0, 4.0, 'Project name. One-line purpose.', 'af_heart'),
-]
-k = Kokoro(f'{MODEL_DIR}/kokoro-v1.0.onnx', f'{MODEL_DIR}/voices-v1.0.bin')
+SCENES = [(0.0, 'line0.wav')]  # (start_s, the speak spec's out) — one per line
 buf, sr = None, None
-for start, end, line, voice in SCENES:
-    samples, sr = k.create(line, voice=voice, speed=1.0, lang='en-us')
-    room = end - start - 0.3
-    if len(samples) / sr > room:  # overruns its scene: speed up, never past 1.2
-        speed = min(1.2, len(samples) / sr / room)
-        samples, sr = k.create(line, voice=voice, speed=speed, lang='en-us')
+for start, wav in SCENES:
+    samples, sr = soundfile.read(wav, dtype='float32')
+    samples = samples.mean(axis=1) if samples.ndim > 1 else samples
     if buf is None:
         buf = np.zeros(D * sr, dtype=np.float32)
     at = int((start + 0.15) * sr)
     clip = samples[: len(buf) - at]
     buf[at : at + len(clip)] += clip
 soundfile.write('narration.wav', buf, sr)
-# The soundtrack is the kit's mix (<kit>): spec.json is
-# { "narrationWav": "narration.wav", "cues": [...], "style": "...", "lengthS": D, "out": "mix.mp3" }
+# spec.json: { "narrationWav": "narration.wav", "cues": [...], "style": "...", "lengthS": D, "out": "mix.mp3" }
 KIT = os.path.expanduser('~/.claude/session-manager/demo-video-kit')
 subprocess.run(['node', f'{KIT}/sound.cjs', 'spec.json'], check=True)
 b64 = base64.b64encode(open('mix.mp3', 'rb').read()).decode()
-html = open('template.html').read()  # your finished HTML with the placeholder below
-html = html.replace('AUDIO_B64_PLACEHOLDER', b64)  # <audio src="data:audio/mpeg;base64,AUDIO_B64_PLACEHOLDER">
+html = open('template.html').read().replace('AUDIO_B64_PLACEHOLDER', b64)  # <audio src="data:audio/mpeg;base64,AUDIO_B64_PLACEHOLDER">
 open('demo.html', 'w').write(html)
 ```
 

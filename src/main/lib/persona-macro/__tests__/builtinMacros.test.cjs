@@ -23,10 +23,10 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v11 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v12 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(11);
-  expect(macro.priorPrompts).toHaveLength(10);
+  expect(macro.builtinVersion).toBe(12);
+  expect(macro.priorPrompts).toHaveLength(11);
   expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
   for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
@@ -157,8 +157,8 @@ test('built-in macros declare a frozen background job', () => {
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(11);
-  expect(demo.priorPrompts).toHaveLength(10);
+  expect(demo.builtinVersion).toBe(12);
+  expect(demo.priorPrompts).toHaveLength(11);
 });
 
 // The Project Home Generate composer always sends these lines (design-mocks/project-home-v2/DESIGN_SPEC.md
@@ -184,11 +184,15 @@ test('Project Home v3 honours the Audience, Length and Read from lines and keeps
 
 test('Demo Video v7+ honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(demo.builtinVersion).toBe(11);
-  expect(demo.priorPrompts).toHaveLength(10);
+  expect(demo.builtinVersion).toBe(12);
+  expect(demo.priorPrompts).toHaveLength(11);
   // priorPrompts[5] is the shipped v6 prompt, byte for byte; v7 kept every v6 clause
   expect(sha256(demo.priorPrompts[5])).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
-  for (const clause of priorClauses(demo.priorPrompts[5]).slice(1)) expect(demo.prompt).toContain(clause);
+  // v12 replaced only the Kokoro narration sentence with the kit speak path (see the v12 test)
+  for (const clause of priorClauses(demo.priorPrompts[5]).slice(1)) {
+    if (clause.startsWith('Narrate with Kokoro (kokoro-onnx)')) continue;
+    expect(demo.prompt).toContain(clause);
+  }
   for (const t of ['Character: off', 'Video style: Auto', "'Video kind: Project demo'", "'Video length: 30'", "'Character: on'", 'type-led', 'meta.character', 'additional instructions', "'Entry id'"]) {
     expect(demo.prompt).toContain(t);
   }
@@ -246,12 +250,29 @@ test('Demo Video v11 speaks every line in its own speaker\'s voice when the pers
   const v10 = demo.priorPrompts[9];
   // priorPrompts[9] is the shipped v10 prompt, byte for byte
   expect(sha256(v10)).toBe('e144c7cc0cce7a719c0b6c0a9356b711e96c0455e5d19dcb2543ea61d66d9fa2');
-  expect(demo.priorPrompts.at(-1)).toBe(v10);
-  for (const clause of priorClauses(v10)) expect(demo.prompt).toContain(clause);
+  const v11 = demo.priorPrompts[10];
+  for (const clause of priorClauses(v10)) expect(v11).toContain(clause);
   // v11 is v10 with exactly the inserted sentence after the Kokoro persona voice clause
   const anchor = 'a Kokoro persona voice uses its own voice id.';
   expect(v10.split(anchor)).toHaveLength(2);
-  expect(demo.prompt).toBe(v10.replace(anchor, `${anchor} ${V11_INSERT}`));
+  expect(v11).toBe(v10.replace(anchor, `${anchor} ${V11_INSERT}`));
+});
+
+const V11_KOKORO = 'Narrate with Kokoro (kokoro-onnx) using a natural female (af_heart) or male (am_michael) voice per the audio policy in the persona only when there is no saved persona.';
+const V12_SPEAK = "Speak every narration line through the kit with node <kit>/character.cjs speak spec.json, never a hand-written TTS script: a 'Voice: <id>' line in the additional instructions picks the voice first (as spec.voice), then the saved persona's voice, then, only when there is no saved persona, the kit default natural female (af_heart) or male (am_michael) voice per the audio policy in the persona.";
+
+test('Demo Video v12 narrates through the kit speak path with the Voice line, replacing only the Kokoro sentence of v11', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const v11 = demo.priorPrompts[10];
+  // priorPrompts[10] is the shipped v11 prompt, byte for byte
+  expect(sha256(v11)).toBe('790cb095c2a2e14fbc6752c53088f9f2a9dbaa6a069233ef4e415c6e8df5370c');
+  expect(demo.priorPrompts.at(-1)).toBe(v11);
+  expect(v11.split(V11_KOKORO)).toHaveLength(2);
+  expect(demo.prompt).toBe(v11.replace(V11_KOKORO, V12_SPEAK));
+  expect(demo.prompt).not.toContain('Narrate with Kokoro (kokoro-onnx)');
+  for (const t of ['node <kit>/character.cjs speak spec.json', "'Voice: <id>'", 'spec.voice', 'af_heart', 'am_michael', 'never a hand-written TTS script']) {
+    expect(demo.prompt).toContain(t);
+  }
 });
 
 test('every built-in macro keeps builtinVersion === priorPrompts.length + 1', () => {
@@ -263,7 +284,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
-  expect(sha('builtin-demo-video')).toBe('42211c0577a0024f94fdb95cccb6f0f5f065f4e4f3608e3e836fc61cffa63b9b');
+  expect(sha('builtin-demo-video')).toBe('320452c89bad47dab159680a4d3c877018cbe26c6de64ecaab891d3a945e46d3');
   expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');
@@ -423,7 +444,7 @@ test('persona v15: the project persona hosts the video and its command voice has
     expect(pp).toContain(needle);
   }
   const audio = personaSection('audio_policy');
-  for (const needle of ["`voice.engine: 'command'`", 'character.cjs speak', '$SM_PROJECT_ROOT', 'Never use Kokoro', 'the run fails', "`voice.engine: 'kokoro'`", '`voice.id`', 'af_heart']) {
+  for (const needle of ["`voice.engine: 'command'`", 'character.cjs speak', '$SM_PROJECT_ROOT', 'Never write a hand-written TTS script', 'fails the run', "`voice.engine: 'kokoro'`", '`voice.id`', 'af_heart']) {
     expect(audio).toContain(needle);
   }
   for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
@@ -450,6 +471,23 @@ test('persona v20: a {lines} voice is one batch call per speaker, and speak exit
   for (const needle of ['{lines}', '75', 'run the same command again']) expect(kit).toContain(needle);
   expect(personaSection('audio_policy')).toContain('not a failure');
   expect(personaSection('when_things_fail')).toContain('not a failure');
+  for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
+});
+
+test('persona v21: narration always goes through kit speak with the Voice > persona > kit default precedence', () => {
+  const raw = fs.readFileSync(personaPath, 'utf8');
+  expect(Number(frontmatter(raw).seedVersion) >= 21).toBe(true);
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(27000);
+  const audio = personaSection('audio_policy');
+  for (const needle of ["'Voice: <id>'", '{voiceId}', '`af_heart`', '`am_michael`', 'node <kit>/character.cjs speak spec.json', '`spec.voice`',
+    'Never write a hand-written TTS script', 'voice lane: waiting, position N', 'Exit 75', 'run the same command again',
+    "changed since a human approved it", 'fails the run with that error', 'kokoro-onnx soundfile', 'voices-v1.0.bin', 'sound.cjs']) {
+    expect(audio).toContain(needle);
+  }
+  const order = ["'Voice: <id>'", '{voiceId}', 'the kit default `af_heart`'].map((n) => audio.indexOf(n));
+  expect(order[0]).toBeLessThan(order[1]);
+  expect(order[1]).toBeLessThan(order[2]);
+  for (const gone of ['build.py', 'from kokoro_onnx import Kokoro', 'k.create(']) expect(audio).not.toContain(gone);
   for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
 });
 

@@ -305,8 +305,9 @@ function anyAuthenticated() {
 }
 
 // Every client currently awaiting SAS confirmation.
+// Service clients confirm through confirmServiceSas only (their key never becomes a device pin).
 function pendingClients() {
-  return _clients.values().filter((r) => r.e2e.state === 'pending_sas');
+  return _clients.values().filter((r) => r.e2e.state === 'pending_sas' && r.role !== 'service');
 }
 
 const MAX_PINNED_PEER_KEYS = 20;
@@ -334,7 +335,8 @@ function addPinnedPeerKey(device, pubKey) {
 function computeStatus(cfg) {
   const connected = _ws !== null && _ws.readyState === WebSocket.OPEN;
   const authed = _clients.authenticated()[0] || null;
-  const pending = _clients.values().find((r) => r.e2e.state === 'pending_sas') || null;
+  // The phone SAS prompt never shows a paired service's code (confirmServiceSas owns that).
+  const pending = _clients.values().find((r) => r.e2e.state === 'pending_sas' && r.role !== 'service') || null;
   const shown = authed || pending || _clients.values()[0] || null;
   const e2eState = shown ? shown.e2e.state : 'idle';
   return {
@@ -350,6 +352,7 @@ function computeStatus(cfg) {
       key: r.key,
       state: r.e2e.state,
       pendingSas: r.e2e.state === 'pending_sas' ? r.e2e.pendingSas : null,
+      ...(r.role === 'service' ? { role: 'service', pairingId: r.pendingPairingId ?? null } : {}),
     })),
     devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
       deviceId, deviceName, issuedAt, lastConnectedAt,
@@ -867,6 +870,12 @@ async function handleMessage(raw, device) {
       broadcastStatus();
       return;
     }
+    // Paired service (e.g. Kiln): handled before the phone TOFU branch so a
+    // service key never lands in a device's verifiedPeerPubKeys.
+    if (payload?.role === 'service') {
+      await handleServiceHello(envelope, device, client, browserPubKey);
+      return;
+    }
     try {
       const sessionKey = deriveSessionKey(device.e2ePrivateKey, browserPubKey, device.deviceId);
       let pendingSas;
@@ -882,6 +891,9 @@ async function handleMessage(raw, device) {
       }
       client.peerPubKey = browserPubKey;
       client.deviceId = device.deviceId;
+      client.role = null; // a phone hello on this connection drops any service identity
+      client.service = null;
+      client.pendingPairingId = null;
       // TOFU pinning: if this exact (deviceId, browserPubKey) pair was already
       // manually SAS-confirmed once, skip pending_sas and auto-authenticate — the
       // user already verified this browser. A different/first-seen pubKey always
@@ -1130,8 +1142,212 @@ function fanoutIpcEvent(channel, payload) {
   }
 }
 
+// ─── Paired services (servicePairings.cjs + serviceMcpSession.cjs) ───────────
+// A service connects through the relay like the phone, says role:'service' in
+// its e2e:hello, and may only send boxed cmd:mcp (MCP JSON-RPC 2.0), answered
+// over adminHttp.invoke. It never gets phone commands, ipc:*, asset:* or pins.
+
+let _serviceInvoker = null;
+let _serviceStore = null;
+
+/** Install the in-process admin route caller (localAdminHttp invoke), bound in index.cjs. */
+function setServiceInvoker(fn) {
+  _serviceInvoker = typeof fn === 'function' ? fn : null;
+}
+
+/** The paired-services store (one per process; remote-services.json under claudeHome). */
+function getServiceStore() {
+  if (!_serviceStore) {
+    const { createServicePairings } = require('./lib/feedback-remote/servicePairings.cjs');
+    _serviceStore = createServicePairings();
+  }
+  return _serviceStore;
+}
+
+/** Relay client ids are UUIDs only; anything else is dropped. */
+function relayClientIdOf(v) {
+  return typeof v === 'string' && UUID_RE.test(v) ? v.toLowerCase() : null;
+}
+
+/** Audit-safe token (tool or method names come from the caller). */
+function auditToken(v) {
+  return String(v ?? '-').replace(/[^\w:.-]/g, '_').slice(0, 64) || '-';
+}
+
+/** Drop a client's service identity + key and mark it failed. */
+function failServiceClient(client) {
+  failClient(client);
+  client.role = null;
+  client.service = null;
+  client.pendingPairingId = null;
+  client.relayClientId = null;
+}
+
+async function handleServiceHello(envelope, device, client, peerPubKey) {
+  const { id, payload } = envelope;
+  const ts = new Date().toISOString();
+  if (client.key === LEGACY_CLIENT_KEY) {
+    // A service must be relay-stamped: replies are unicast to its connection.
+    await auditLog(ts, 'service:unpaired', device.deviceId, id, 'refused:no_conn', client);
+    failServiceClient(client);
+    broadcastStatus();
+    return;
+  }
+  const store = getServiceStore();
+  let sessionKey;
+  let sas;
+  try {
+    sessionKey = deriveSessionKey(device.e2ePrivateKey, peerPubKey, device.deviceId);
+    sas = deriveSas(device.e2ePrivateKey, peerPubKey, device.deviceId);
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'service E2E key derivation failed', meta: { error: e?.message } });
+    await auditLog(ts, 'service:hello', device.deviceId, id, 'error:key_derivation', client);
+    failServiceClient(client);
+    broadcastStatus();
+    return;
+  }
+  const relayClientId = relayClientIdOf(payload?.clientId);
+
+  const pinned = store.findByPubKey(peerPubKey);
+  if (pinned) {
+    client.role = 'service';
+    client.service = pinned;
+    client.pendingPairingId = null;
+    client.relayClientId = relayClientId;
+    client.peerPubKey = peerPubKey;
+    client.deviceId = device.deviceId;
+    client.e2e = makeState('authenticated', sessionKey, null);
+    store.touchLastSeen(pinned.serviceId).catch(() => {});
+    await auditLog(ts, 'service:hello', device.deviceId, id, `ok:service=${auditToken(pinned.serviceId)}`, client);
+    finalizeE2eAuthenticated('paired service authenticated — pinned key matched', client);
+    respond(id, undefined, 'e2e:ready', client);
+    return;
+  }
+
+  const pending = store.listPending();
+  const wanted = typeof payload?.pairingId === 'string' ? payload.pairingId : null;
+  const pairing = wanted
+    ? pending.find((p) => p.pairingId === wanted) || null
+    : pending.slice().sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+  if (!pairing) {
+    await auditLog(ts, 'service:unpaired', device.deviceId, id, 'refused', client);
+    failServiceClient(client);
+    broadcastStatus();
+    return;
+  }
+  client.role = 'service';
+  client.service = null;
+  client.pendingPairingId = pairing.pairingId;
+  client.relayClientId = relayClientId;
+  client.peerPubKey = peerPubKey;
+  client.deviceId = device.deviceId;
+  client.e2e = makeState('pending_sas', sessionKey, sas);
+  await auditLog(ts, 'service:hello', device.deviceId, id, 'pending_sas', client);
+  logs.writeLine({ scope: 'webRemote', level: 'info', message: 'paired service key established — SAS pending confirmation' });
+  broadcastStatus();
+  respond(id, undefined, 'e2e:ready', client);
+}
+
+/**
+ * Owner confirmed a pending service's SAS: check it against that client's own
+ * SAS, then pin the key via store.confirmPending. Returns { ok, service } or { ok:false, error }.
+ */
+async function confirmServiceSas(pairingId, sas) {
+  const target = _clients.values().find((c) => c.role === 'service' && c.pendingPairingId === pairingId) || null;
+  if (!target) return { ok: false, error: 'no_pending_service' };
+  if (target.e2e.state !== 'pending_sas' || typeof target.e2e.pendingSas !== 'string') return { ok: false, error: 'wrong_state' };
+  const expected = Buffer.from(target.e2e.pendingSas, 'utf8');
+  const given = Buffer.from(String(sas ?? ''), 'utf8');
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
+    await auditLog(new Date().toISOString(), 'service:confirm-sas', target.deviceId, undefined, 'refused:sas_mismatch', target);
+    return { ok: false, error: 'sas_mismatch' };
+  }
+  let service;
+  try {
+    service = await getServiceStore().confirmPending(pairingId, target.peerPubKey, { relayClientId: target.relayClientId });
+  } catch (e) {
+    await auditLog(new Date().toISOString(), 'service:confirm-sas', target.deviceId, undefined, 'error:confirm_failed', target);
+    return { ok: false, error: e?.message ?? 'confirm_failed' };
+  }
+  // The client may have disconnected while the store write ran.
+  if (_clients.get(target.key) !== target || target.e2e.state !== 'pending_sas') return { ok: false, error: 'client_gone' };
+  target.e2e = confirmSasLogic(target.e2e).next;
+  target.service = service;
+  target.pendingPairingId = null;
+  await auditLog(new Date().toISOString(), 'service:confirm-sas', target.deviceId, undefined, `ok:service=${auditToken(service.serviceId)}`, target);
+  finalizeE2eAuthenticated('paired service authenticated — SAS confirmed by owner', target);
+  return { ok: true, service };
+}
+
+/** Encrypt + unicast one boxed mcp:result to a service client (never plaintext). */
+function sendMcpResult(client, msgId, response) {
+  if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
+  if (!client.e2e.sessionKey) return;
+  try {
+    const inner = { type: 'mcp:result', id: msgId, payload: response, ts: Date.now() };
+    const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), client.e2e.sessionKey);
+    const out = { type: 'e2e:box', id: crypto.randomUUID(), payload: { nonce, ciphertext }, ts: Date.now() };
+    if (client.key !== LEGACY_CLIENT_KEY) out.toConn = client.key;
+    _ws.send(JSON.stringify(out));
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'mcp:result send failed', meta: { error: e?.message } });
+  }
+}
+
+// Leave room for the box envelope (base64 + nonce) under the relay's message cap.
+const MCP_RESULT_MAX_BYTES = Math.floor(MSG_MAX_BYTES * 0.7);
+
+async function dispatchServiceEnvelope(envelope, device, client) {
+  const { type, id, payload } = envelope;
+  const ts = new Date().toISOString();
+  const auditType = typeof type === 'string' ? type : 'service:unknown';
+  const reject = async (result) => {
+    await auditLog(ts, auditType, device.deviceId, id, result, client);
+    respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
+  };
+  if (client.role !== 'service') return reject('error:not_service');
+  if (type !== 'cmd:mcp') return reject('refused:service_not_allowed');
+  if (!(await loadConfig()).remoteEnabled) return reject('error:disabled');
+  if (client.e2e.state !== 'authenticated' || !client.e2e.sessionKey) return reject('error:e2e_not_authenticated');
+  // Re-read the pin each call so a revoke takes effect at once.
+  const store = getServiceStore();
+  const service = client.peerPubKey ? store.findByPubKey(client.peerPubKey) : null;
+  if (!service) {
+    await reject('refused:service_revoked');
+    teardownClient(client.key);
+    broadcastStatus();
+    return;
+  }
+  client.service = service;
+  const invoke = _serviceInvoker || (async () => { throw new Error('service invoker not installed'); });
+  let outcome;
+  try {
+    outcome = await handleServiceMcp(payload, { service, invoke, store });
+  } catch (e) {
+    return reject('error:dispatch_error');
+  }
+  let response = outcome.response;
+  let audit = outcome.audit;
+  if (response && Buffer.byteLength(JSON.stringify(response), 'utf8') > MCP_RESULT_MAX_BYTES) {
+    response = { jsonrpc: '2.0', id: response.id ?? null, error: { code: -32603, message: 'response too large for the relay' } };
+    if (audit) audit = { ...audit, result: 'error:too_large' };
+  }
+  // One audit line per tool call: tool + result, never argument values.
+  if (audit) await auditLog(ts, `mcp:${auditToken(audit.tool)}`, device.deviceId, id, auditToken(audit.result), client);
+  if (response) sendMcpResult(client, id, response);
+}
+
+function handleServiceMcp(msg, deps) {
+  return require('./lib/feedback-remote/serviceMcpSession.cjs').handleServiceMcp(msg, deps);
+}
+
 async function dispatchEnvelope(envelope, device, client) {
   const { type, id, payload } = envelope;
+  // A paired service may send only cmd:mcp; a non-service client may never send it.
+  if (client.role === 'service' || type === 'cmd:mcp') {
+    await dispatchServiceEnvelope(envelope, device, client);
+    return;
+  }
   if (type === 'ipc:subscribe' || type === 'ipc:unsubscribe') {
     if (client.e2e.state === 'authenticated') handleIpcSubscribe(envelope, client, type === 'ipc:subscribe');
     return;
@@ -1603,7 +1819,8 @@ function registerRemoteHandlers() {
     const clientKey = arg?.clientKey;
     let target;
     if (clientKey !== undefined) {
-      target = _clients.get(clientKey) || makeClientlessState();
+      const found = _clients.get(clientKey);
+      target = found && found.role !== 'service' ? found : makeClientlessState();
     } else {
       const pending = pendingClients();
       if (pending.length > 1) {
@@ -1729,6 +1946,9 @@ module.exports = {
   loadConfig,
   getLinkedDeviceToken,
   setIpcDispatcher,
+  setServiceInvoker,
+  getServiceStore,
+  confirmServiceSas,
   attachWindow,
   registerRemoteHandlers,
   init,
@@ -1763,5 +1983,6 @@ module.exports = {
     getClient: (clientKey = LEGACY_CLIENT_KEY) => _clients.getOrCreate(clientKey),
     revokeAllDevices,
     pair,
+    setServiceStore: (store) => { _serviceStore = store; },
   },
 };

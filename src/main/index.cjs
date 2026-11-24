@@ -187,6 +187,8 @@ const webRemote = require('./webRemote.cjs');
       },
     },
   }));
+  // Paired services (cmd:mcp over the relay) act only through the admin routes, in process.
+  webRemote.setServiceInvoker((method, routePath, opts) => adminHttp.invoke(method, routePath, opts));
 }
 const { registerAgentsHandlers } = require('./agentsIpc.cjs');
 const { registerTelemetryHandlers } = require('./telemetryIpc.cjs');

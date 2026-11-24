@@ -1504,6 +1504,25 @@ const webRemoteConfirmSas = z.object({
   clientKey: z.string().max(64).optional(),
 }).strict().optional();
 
+// Paired services (servicePairings.cjs). scope names the service MCP tools the
+// store validates against its own SERVICE_TOOL_NAMES; these bounds refuse junk early.
+const WEB_REMOTE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const webRemoteServicePairStart = z.object({
+  name: z.string().min(1).max(64).regex(/^[^\r\n]+$/),
+  homeCwd: z.string().min(1).max(4096),
+  scope: z.array(z.string().min(1).max(64)).min(1).max(16),
+}).strict();
+const webRemoteServiceConfirmSas = z.object({
+  pairingId: z.string().regex(WEB_REMOTE_UUID_RE),
+  sas: z.string().regex(/^[0-9]{6}$/),
+}).strict();
+const webRemoteServiceRevoke = z.object({
+  serviceId: z.string().regex(WEB_REMOTE_UUID_RE),
+}).strict();
+const webRemoteRelayClientRevoke = z.object({
+  clientId: z.string().uuid(),
+}).strict();
+
 const webRemoteAuditTail = z.object({
   lines: z.number().int().min(1).max(500).optional(),
 }).strict();
@@ -1822,6 +1841,10 @@ module.exports = {
     webRemoteRevokeDevice,
     webRemoteAuditTail,
     webRemoteConfirmSas,
+    webRemoteServicePairStart,
+    webRemoteServiceConfirmSas,
+    webRemoteServiceRevoke,
+    webRemoteRelayClientRevoke,
     sessionSubscribe,
     ptySpawn,
     ptyTabId,

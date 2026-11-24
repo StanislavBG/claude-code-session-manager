@@ -34,7 +34,7 @@ test('EVENT_KINDS is the closed {domain}.{action} set', () => {
     'epic.minted', 'epic.status_changed', 'job.queued', 'job.status_changed', 'job.tool_use',
     'job.needs_input', 'job.confirmation_requested', 'human.message', 'human.answer',
     'human.interrupt', 'human.tool_confirmation', 'external.message', 'validator.verdict', 'outcome.recorded',
-    'artifact.published',
+    'artifact.published', 'epic.state_changed',
   ].sort());
   expect(Object.isFrozen(log.EVENT_KINDS)).toBe(true);
 });
@@ -145,4 +145,29 @@ test('missing log reads empty', async () => {
 test("events/ is owned by 'event-log' alone", () => {
   expect(checkOpsWrite(file(), 'event-log').ok).toBe(true);
   expect(checkOpsWrite(file(), 'scheduler').ok).toBe(false);
+});
+
+test('onEpicEventAppended calls every listener after the write; a throwing listener never fails the append', async () => {
+  const seen = [];
+  const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const offBad = log.onEpicEventAppended(() => { throw new Error('bad listener'); });
+  const off = log.onEpicEventAppended((c, rec) => {
+    seen.push([c, rec.seq, rec.kind, fs.readFileSync(file(), 'utf8').includes(`"seq":${rec.seq}`)]);
+  });
+  const a = await log.appendEpicEvent(cwd, EPIC, { kind: 'epic.minted' });
+  expect(a.seq).toBe(1);
+  expect(seen).toEqual([[cwd, 1, 'epic.minted', true]]);
+  expect(errSpy).toHaveBeenCalledWith('[epicEventLog] listener failed', 'bad listener');
+  off();
+  offBad();
+  await log.appendEpicEvent(cwd, EPIC, { kind: 'job.queued' });
+  expect(seen).toHaveLength(1);
+});
+
+test('_resetForTests clears listeners', async () => {
+  const fn = vi.fn();
+  log.onEpicEventAppended(fn);
+  log._resetForTests();
+  await log.appendEpicEvent(cwd, EPIC, { kind: 'epic.minted' });
+  expect(fn).not.toHaveBeenCalled();
 });

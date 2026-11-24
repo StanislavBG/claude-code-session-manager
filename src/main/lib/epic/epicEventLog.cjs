@@ -53,6 +53,7 @@ const EVENT_KINDS = Object.freeze([
   'validator.verdict',
   'outcome.recorded',
   'artifact.published',
+  'epic.state_changed',
 ]);
 const KIND_SET = new Set(EVENT_KINDS);
 
@@ -60,6 +61,19 @@ const KIND_SET = new Set(EVENT_KINDS);
 const chains = new Map();
 /** file path → last seq written. */
 const lastSeq = new Map();
+/** Called with (cwd, record) after every successful append. */
+const listeners = new Set();
+
+/**
+ * onEpicEventAppended(fn) → unsubscribe. fn(cwd, record) runs after each
+ * record is on disk; a throwing listener is logged and never fails the append.
+ * @param {(cwd: string, record: Record<string, unknown>) => void} fn
+ */
+function onEpicEventAppended(fn) {
+  if (typeof fn !== 'function') throw new Error('epicEventLog: listener must be a function');
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
 
 function assertEpicId(epicId) {
   if (typeof epicId !== 'string' || !EPIC_ID_RE.test(epicId)) {
@@ -164,6 +178,13 @@ function appendEpicEvent(cwd, epicId, event) {
     const record = { seq, time: new Date().toISOString(), epicId, kind: event.kind, ...capped };
     await fsp.appendFile(file, `${prefix}${JSON.stringify(record)}\n`, 'utf8');
     lastSeq.set(file, seq);
+    for (const fn of [...listeners]) {
+      try {
+        fn(cwd, record);
+      } catch (err) {
+        console.error('[epicEventLog] listener failed', err && err.message ? err.message : String(err));
+      }
+    }
     return record;
   });
   chains.set(file, next);
@@ -202,6 +223,7 @@ async function readEpicEvents(cwd, epicId, opts = {}) {
 function _resetForTests() {
   chains.clear();
   lastSeq.clear();
+  listeners.clear();
 }
 
 module.exports = {
@@ -210,5 +232,6 @@ module.exports = {
   WRITER,
   appendEpicEvent,
   readEpicEvents,
+  onEpicEventAppended,
   _resetForTests,
 };

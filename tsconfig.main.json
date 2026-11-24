@@ -21,6 +21,7 @@
     "src/main/lib/feedback-remote/customerFeedbackClient.cjs",
     "src/main/lib/feedback-remote/customerFeedbackInbox.cjs",
     "src/main/lib/feedback-remote/customerFeedbackIpc.cjs",
+    "src/main/lib/feedback-remote/feedbackEnvelope.cjs",
     "src/main/lib/feedback-remote/feedbackImages.cjs",
     "src/main/lib/feedback-remote/feedbackReport.cjs",
     "src/main/lib/feedback-remote/feedbackSeal.cjs",

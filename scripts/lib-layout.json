@@ -36,6 +36,7 @@
   "crossProjectReply": "feedback-remote",
   "customerFeedbackAdminRoutes": "feedback-remote",
   "customerFeedbackClient": "feedback-remote",
+  "feedbackEnvelope": "feedback-remote",
   "feedbackReport": "feedback-remote",
   "feedbackSeal": "feedback-remote",
   "needsYouStore": "feedback-remote",

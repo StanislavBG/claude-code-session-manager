@@ -807,6 +807,186 @@ export interface CustomerFeedbackOwnerInfo {
   projectCwd: string | null;
 }
 
+// Website-feedback widgets + their decrypted inbox. Results mirror
+// src/main/lib/feedback-remote/siteFeedbackService.cjs (via siteFeedbackIpc.cjs, which strips
+// secret-named fields); each `*Input` mirrors the same-named zod schema in src/main/ipcSchemas.cjs
+// (SiteFeedbackWidgetCreateInput ↔ siteFeedbackWidgetCreate, …).
+export type SiteFeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'wontfix';
+/** Relay box state; 'unknown' = relay unreadable, 'gone' = relay no longer lists the box. */
+export type SiteFeedbackWidgetState = 'open' | 'paused' | 'unknown' | 'gone' | (string & {});
+export type SiteFeedbackImageKind = 'screenshot' | 'annotated';
+
+/** Every siteFeedback call resolves this on failure; relay error codes pass through verbatim. */
+export interface SiteFeedbackFailure {
+  ok: false;
+  error: string;
+  message: string;
+  status?: number;
+  retryAfterSec?: number;
+}
+export type SiteFeedbackResult<T> = ({ ok: true } & T) | SiteFeedbackFailure;
+
+export interface SiteFeedbackWidget {
+  boxId: string;
+  projectCwd: string;
+  fingerprint: string;
+  createdAt: string;
+  /** The one-line `<script>` embed. */
+  snippet: string;
+  label: string;
+  allowedOrigins: string[];
+  state: SiteFeedbackWidgetState;
+  /** Envelopes waiting on the relay; null when the relay could not be read. */
+  pending: number | null;
+  hint: string | null;
+}
+
+/** updateWidget echoes the relay's view of the box. */
+export interface SiteFeedbackWidgetPatched {
+  boxId: string;
+  label?: string;
+  allowedOrigins?: string[];
+  state?: string;
+  pending?: number;
+}
+
+export interface SiteFeedbackSnippet {
+  boxId: string;
+  fingerprint: string;
+  snippet: string;
+}
+
+/** meta.json of one stored item (siteFeedbackInbox.cjs InboxMeta). */
+export interface SiteFeedbackItemMeta {
+  hostId: string;
+  boxId: string;
+  receivedAt: string;
+  origin: string;
+  status: SiteFeedbackStatus;
+  statusNote: string | null;
+  epicId: string | null;
+  statusChangedAt: string;
+}
+
+/** One inbox row (siteFeedbackInbox.cjs InboxSummary). */
+export interface SiteFeedbackInboxItem extends SiteFeedbackItemMeta {
+  title: string;
+  type: SiteFeedbackReportType | (string & {});
+  reporter: { id: string; name: string | null; email: string | null } | null;
+}
+
+export type SiteFeedbackReportType = 'bug' | 'feature' | 'other';
+export type SiteFeedbackMarkColor = '#a83818' | '#f4b942' | '#2e5a3e' | '#1a1612';
+
+export interface SiteFeedbackElementInfo {
+  selector: string;
+  label?: string;
+  tag: string;
+  id?: string;
+  classes?: string[];
+  text?: string;
+  role?: string;
+  ariaLabel?: string;
+  xpath?: string;
+}
+
+export type SiteFeedbackMark =
+  | { kind: 'pin'; n: number; x: number; y: number; color: SiteFeedbackMarkColor; note: string }
+  | { kind: 'box'; n: number; x: number; y: number; w: number; h: number; color: SiteFeedbackMarkColor; note: string }
+  | {
+      kind: 'element'; n: number; x: number; y: number; w: number; h: number;
+      color: SiteFeedbackMarkColor; note: string; element: SiteFeedbackElementInfo;
+    }
+  | { kind: 'arrow'; x1: number; y1: number; x2: number; y2: number; color: SiteFeedbackMarkColor }
+  | { kind: 'draw'; points: [number, number][]; color: SiteFeedbackMarkColor }
+  | { kind: 'text'; x: number; y: number; text: string; color: SiteFeedbackMarkColor };
+
+/** Report v1 as stored (feedbackReport.cjs reportSchema / web/feedback-widget/schema/report.v1.json). */
+export interface SiteFeedbackReport {
+  schemaVersion: 1;
+  clientReportId: string;
+  project: string;
+  type: SiteFeedbackReportType;
+  title: string;
+  details: string;
+  createdAt: string;
+  page: {
+    url: string;
+    title: string;
+    viewport: { width: number; height: number; devicePixelRatio: number; scrollX: number; scrollY: number };
+  };
+  screenshot: { part: 'screenshot'; annotatedPart: 'annotated'; width: number; height: number; scale: number };
+  marks: SiteFeedbackMark[];
+  console:
+    | { level: 'error'; message: string; stack?: string; source?: string; timestamp: string; count: number }[]
+    | null;
+  network:
+    | { method: string; url: string; status: number | 'network-error' | 'timeout'; durationMs: number; timestamp: string }[]
+    | null;
+  user: { id: string; name?: string; email?: string; [k: string]: unknown } | null;
+  client: { widgetVersion: string; captureError?: string };
+}
+
+/** One item in full (siteFeedbackInbox.cjs get()). `report` is null when report.json is unreadable. */
+export interface SiteFeedbackItemDetail {
+  meta: SiteFeedbackItemMeta;
+  report: SiteFeedbackReport | null;
+  /** Local file paths; null when that image is absent. Use inboxImage to display one. */
+  imagePaths: { screenshot: string | null; annotated: string | null };
+}
+
+export interface SiteFeedbackDrainResult {
+  stored: number;
+  duplicates: number;
+  rejected: number;
+  goneBoxes: string[];
+  heldBoxes: string[];
+}
+
+export interface SiteFeedbackWidgetCreateInput {
+  cwd: string;
+  label: string;
+  allowedOrigins: string[];
+}
+export interface SiteFeedbackWidgetListInput {
+  cwd?: string;
+}
+export interface SiteFeedbackWidgetUpdateInput {
+  boxId: string;
+  label?: string;
+  allowedOrigins?: string[];
+  state?: 'open' | 'paused';
+}
+export interface SiteFeedbackWidgetBoxInput {
+  boxId: string;
+}
+export interface SiteFeedbackInboxListInput {
+  cwd: string;
+  status?: SiteFeedbackStatus;
+}
+export interface SiteFeedbackInboxGetInput {
+  cwd: string;
+  /** `FB-` + 5 of [0-9A-Z]. */
+  hostId: string;
+}
+export interface SiteFeedbackInboxImageInput {
+  cwd: string;
+  hostId: string;
+  /** Default 'annotated'. */
+  which?: SiteFeedbackImageKind;
+}
+export interface SiteFeedbackInboxSetStatusInput {
+  cwd: string;
+  hostId: string;
+  status: SiteFeedbackStatus;
+  note?: string | null;
+}
+export interface SiteFeedbackInboxLinkEpicInput {
+  cwd: string;
+  hostId: string;
+  epicId: string;
+}
+
 // Product telemetry (bilko.run) — anonymous, on-by-default, opt-out. See
 // session-manager-operations/architecture/telemetry.md for the data model.
 export interface TelemetryConfig {
@@ -2928,6 +3108,36 @@ export interface SessionManagerAPI {
     inboxImage(p: { id: string; index: number }): Promise<
       { ok: true; dataUrl: string } | { ok: false; error: string }
     >;
+  };
+  /** Website-feedback widgets + inbox (siteFeedbackIpc.cjs), one method per channel. */
+  siteFeedback: {
+    widgetCreate: (p: SiteFeedbackWidgetCreateInput) => Promise<
+      SiteFeedbackResult<{ boxId: string; fingerprint: string; snippet: string }>
+    >;
+    /** Relay unreadable → ok with `relayError` and widgets in state 'unknown'. */
+    widgetList: (p?: SiteFeedbackWidgetListInput) => Promise<
+      SiteFeedbackResult<{ widgets: SiteFeedbackWidget[]; relayError?: SiteFeedbackFailure }>
+    >;
+    widgetUpdate: (p: SiteFeedbackWidgetUpdateInput) => Promise<
+      SiteFeedbackResult<{ widget: SiteFeedbackWidgetPatched }>
+    >;
+    widgetDelete: (p: SiteFeedbackWidgetBoxInput) => Promise<SiteFeedbackResult<{ boxId: string }>>;
+    widgetSnippet: (p: SiteFeedbackWidgetBoxInput) => Promise<SiteFeedbackResult<SiteFeedbackSnippet>>;
+    inboxList: (p: SiteFeedbackInboxListInput) => Promise<
+      SiteFeedbackResult<{ items: SiteFeedbackInboxItem[] }>
+    >;
+    inboxGet: (p: SiteFeedbackInboxGetInput) => Promise<SiteFeedbackResult<{ item: SiteFeedbackItemDetail }>>;
+    /** A PNG data URL — never log it. */
+    inboxImage: (p: SiteFeedbackInboxImageInput) => Promise<
+      SiteFeedbackResult<{ hostId: string; which: SiteFeedbackImageKind; dataUrl: string }>
+    >;
+    inboxSetStatus: (p: SiteFeedbackInboxSetStatusInput) => Promise<
+      SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>
+    >;
+    inboxLinkEpic: (p: SiteFeedbackInboxLinkEpicInput) => Promise<
+      SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>
+    >;
+    drainNow: () => Promise<SiteFeedbackResult<SiteFeedbackDrainResult>>;
   };
   telemetry: {
     getConfig: () => Promise<TelemetryConfig>;

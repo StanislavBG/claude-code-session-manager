@@ -1665,27 +1665,41 @@ const customerFeedbackInboxImage = z.object({ id: z.string().min(1).max(200), in
 // ──────────────────────────────────────────── Website-feedback widgets (siteFeedbackIpc.cjs)
 // Every object is .strict() so a renderer can never smuggle key material or paths through.
 // siteFeedbackService re-normalises label/origins; these bounds only refuse junk early.
+// Each schema mirrors the api.d.ts interface of the same name + `Input`, field for field:
+// siteFeedbackWidgetCreate = SiteFeedbackWidgetCreateInput, siteFeedbackWidgetList =
+// SiteFeedbackWidgetListInput, … siteFeedbackInboxLinkEpic = SiteFeedbackInboxLinkEpicInput;
+// sfInboxStatus = SiteFeedbackStatus. Results (SiteFeedbackWidget, SiteFeedbackInboxItem,
+// SiteFeedbackItemDetail) are typed in api.d.ts only — main builds them, nothing parses them.
 const sfCwd = z.string().min(1).max(4096);
 const sfBoxId = z.string().min(1).max(200);
 const sfHostId = z.string().regex(/^FB-[0-9A-Z]{5}$/);
 const sfLabel = z.string().min(1).max(80);
 const sfOrigins = z.array(z.string().min(1).max(2048)).min(1).max(10);
 const sfInboxStatus = z.enum(['open', 'in_progress', 'resolved', 'wontfix']);
+/** Mirrors SiteFeedbackWidgetCreateInput (src/preload/api.d.ts). */
 const siteFeedbackWidgetCreate = z.object({ cwd: sfCwd, label: sfLabel, allowedOrigins: sfOrigins }).strict();
+/** Mirrors SiteFeedbackWidgetListInput (src/preload/api.d.ts). */
 const siteFeedbackWidgetList = z.object({ cwd: sfCwd.optional() }).strict().default({});
+/** Mirrors SiteFeedbackWidgetUpdateInput (src/preload/api.d.ts). */
 const siteFeedbackWidgetUpdate = z.object({
   boxId: sfBoxId,
   label: sfLabel.optional(),
   allowedOrigins: sfOrigins.optional(),
   state: z.enum(['open', 'paused']).optional(),
 }).strict();
+/** Mirrors SiteFeedbackWidgetBoxInput (src/preload/api.d.ts). */
 const siteFeedbackWidgetBox = z.object({ boxId: sfBoxId }).strict();
+/** Mirrors SiteFeedbackInboxListInput (src/preload/api.d.ts). */
 const siteFeedbackInboxList = z.object({ cwd: sfCwd, status: sfInboxStatus.optional() }).strict();
+/** Mirrors SiteFeedbackInboxGetInput (src/preload/api.d.ts). */
 const siteFeedbackInboxGet = z.object({ cwd: sfCwd, hostId: sfHostId }).strict();
+/** Mirrors SiteFeedbackInboxImageInput (src/preload/api.d.ts). */
 const siteFeedbackInboxImage = z.object({ cwd: sfCwd, hostId: sfHostId, which: z.enum(['screenshot', 'annotated']).optional() }).strict();
+/** Mirrors SiteFeedbackInboxSetStatusInput (src/preload/api.d.ts). */
 const siteFeedbackInboxSetStatus = z.object({
   cwd: sfCwd, hostId: sfHostId, status: sfInboxStatus, note: z.string().max(500).nullable().optional(),
 }).strict();
+/** Mirrors SiteFeedbackInboxLinkEpicInput (src/preload/api.d.ts). */
 const siteFeedbackInboxLinkEpic = z.object({
   cwd: sfCwd, hostId: sfHostId, epicId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
 }).strict();

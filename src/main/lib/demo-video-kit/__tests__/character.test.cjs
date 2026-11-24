@@ -639,3 +639,24 @@ test('CLI speak: a bad --wait or command is a usage error', () => {
   }
   expect(calls(root)).toEqual([]);
 });
+
+const { isVoiceIdRef } = require('../character.cjs');
+
+test('voiceId refs: host and cast accept exactly {voiceId}', () => {
+  expect(isVoiceIdRef({ voiceId: 'af_heart' })).toBe(true);
+  expect(isVoiceIdRef({ engine: 'kokoro', id: 'af_heart' })).toBe(false);
+  expect(validateCharacterJson({ ...kokoro, voice: { voiceId: 'narrator-1' } })).toBeNull();
+  expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'Pip', voice: { voiceId: 'pip_voice' } }] })).toBeNull();
+  expect(validateCharacterJson({ ...kokoro, voice: { voiceId: 'x'.repeat(64) } })).toBeNull();
+});
+
+test('voiceId refs: extra keys and bad ids are refused by name', () => {
+  expect(validateCharacterJson({ ...kokoro, voice: { voiceId: 'narrator', engine: 'kokoro' } }))
+    .toBe('voice.engine is not allowed beside voiceId; a {voiceId} voice has exactly one key');
+  expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'Pip', voice: { voiceId: 'pip', id: 'af_heart' } }] }))
+    .toBe('cast[0].voice.id is not allowed beside voiceId; a {voiceId} voice has exactly one key');
+  expect(validateCharacterJson({ ...kokoro, voice: { voiceId: 'Bad Id' } })).toMatch(/^voice\.voiceId must match/);
+  expect(validateCharacterJson({ ...kokoro, voice: { voiceId: '' } })).toMatch(/^voice\.voiceId must match/);
+  expect(validateCharacterJson({ ...kokoro, voice: { voiceId: 'x'.repeat(65) } })).toMatch(/^voice\.voiceId must match/);
+  expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'Pip', voice: { voiceId: 7 } }] })).toMatch(/^cast\[0\]\.voice\.voiceId must match/);
+});

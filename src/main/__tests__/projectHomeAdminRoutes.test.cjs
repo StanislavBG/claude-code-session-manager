@@ -997,3 +997,63 @@ test('videos/outcome/write: refuses a missing cwd and invalid JSON', async () =>
   const badJson = await adminHttp.call('POST', OUTCOME_URL, { rawBody: '{nope' });
   expect(badJson.status).toBe(400);
 });
+
+async function withVoicesHome(fn) {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-voices-home-'));
+  tmpDirs.push(home);
+  const prev = process.env.SM_VOICES_HOME;
+  process.env.SM_VOICES_HOME = home;
+  try { return await fn(home); } finally {
+    if (prev === undefined) delete process.env.SM_VOICES_HOME; else process.env.SM_VOICES_HOME = prev;
+  }
+}
+
+function writeProjectVoice(cwd, id, voice) {
+  const dir = path.join(cwd, '.claude', 'voices');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({ id, label: 'Test voice', voice }));
+}
+
+test('character/write: a known project {voiceId} for host and cast is saved as the ref', async () => {
+  await withVoicesHome(async () => {
+    const { cwd, adminHttp, dir } = await characterSetup();
+    writeProjectVoice(cwd, 'proj-narrator', { engine: 'command', command: CAST_COMMAND });
+    const json = { ...GOOD_CHARACTER.json, voice: { voiceId: 'proj-narrator' }, cast: [{ name: 'Guide', voice: { voiceId: 'proj-narrator' } }] };
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json } });
+    expect(r.status).toBe(200);
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8'));
+    expect(saved.voice).toEqual({ voiceId: 'proj-narrator' });
+    expect(saved.cast[0].voice).toEqual({ voiceId: 'proj-narrator' });
+  });
+});
+
+test('character/write: an unknown {voiceId} (host or cast) is refused by name and nothing is written', async () => {
+  await withVoicesHome(async () => {
+    const { cwd, adminHttp, dir } = await characterSetup();
+    writeProjectVoice(cwd, 'proj-narrator', { engine: 'command', command: CAST_COMMAND });
+    const host = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, voice: { voiceId: 'no-such-voice-zz' } } } });
+    expect(host.status).toBe(400);
+    expect(host.body).toEqual({ ok: false, error: "unknown voice 'no-such-voice-zz'" });
+    const cast = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, voice: { voiceId: 'proj-narrator' }, cast: [{ name: 'Guide', voice: { voiceId: 'missing-cast-zz' } }] } } });
+    expect(cast.status).toBe(400);
+    expect(cast.body.error).toBe("unknown voice 'missing-cast-zz'");
+    const extra = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, voice: { voiceId: 'proj-narrator', engine: 'kokoro' } } } });
+    expect(extra.status).toBe(400);
+    expect(extra.body.error).toContain('voice.engine is not allowed beside voiceId');
+    expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'character.js'))).toBe(false);
+  });
+});
+
+test('character/write: an approved {voiceId} changed since approval is refused by name', async () => {
+  await withVoicesHome(async (home) => {
+    const { cwd, adminHttp, dir } = await characterSetup();
+    writeProjectVoice(cwd, 'proj-narrator', { engine: 'command', command: CAST_COMMAND });
+    const key = `project|${path.resolve(cwd)}|proj-narrator`;
+    fs.writeFileSync(path.join(home, 'approvals.json'), JSON.stringify({ version: 1, approvals: { [key]: { pin: 'stale-pin' } } }));
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, voice: { voiceId: 'proj-narrator' } } } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/^approved voice 'proj-narrator' changed since a human approved it/);
+    expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+  });
+});

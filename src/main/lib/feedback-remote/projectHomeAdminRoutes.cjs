@@ -37,7 +37,8 @@ const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
 const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
-const { validateCharacterJson, validateCharacterJs, inspectCharacter, characterDir, MAX_JSON_BYTES: MAX_CHARACTER_JSON_BYTES, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
+const { validateCharacterJson, validateCharacterJs, voiceIdRefsOf, inspectCharacter, characterDir, MAX_JSON_BYTES: MAX_CHARACTER_JSON_BYTES, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
+const voiceLibrary = require('../demo-video-kit/voiceLibrary.cjs');
 const { checkHtmlLimits, checkPostCaption, TIKTOK_CHECK_IDS } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 const { readMatrix, matrixJsonSchema, MAX_MATRIX_BYTES } = require('../project-pages/competitiveMatrix.cjs');
@@ -670,6 +671,15 @@ async function characterWriteHandler(req, res) {
   if (jsonErr) {
     sendJson(res, 400, { ok: false, error: `character.json invalid: ${jsonErr}` });
     return;
+  }
+  // A {voiceId} voice must name a library voice this project can use (unknown or
+  // tampered-approved ids are refused by voiceLibrary's own reason) before anything is written.
+  for (const ref of voiceIdRefsOf(jsonObj)) {
+    const r = voiceLibrary.resolveVoiceId(resolved.cwd, ref.voiceId);
+    if (!r.ok) {
+      sendJson(res, 400, { ok: false, error: r.error });
+      return;
+    }
   }
   const jsonText = JSON.stringify(jsonObj, null, 2) + '\n';
   const jsonBytes = Buffer.byteLength(jsonText, 'utf8');

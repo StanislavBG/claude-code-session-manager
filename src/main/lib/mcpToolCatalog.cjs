@@ -502,9 +502,11 @@ const MCP_TOOL_CATALOG = [
       + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same host. "
       + 'The descriptor holds `name`, `palette` (a non-empty list of colors), `voice` ({engine: \'kokoro\', id} or {engine: \'command\', command: [...] '
       + 'with either {text} and {out} placeholders, run once per line, or a {lines} placeholder alone, run once per speaker and given the path of a JSON '
-      + 'manifest [{text, out}] with absolute outs, every out a WAV}) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
+      + 'manifest [{text, out}] with absolute outs, every out a WAV}, or a voice-library reference {voiceId: \'<id>\'} with no other key, whose id must exist '
+      + 'in the project\'s voice library (Project Home > Video > Voices: project, machine or built-in Kokoro voices) — an unknown id, or an approved voice changed since '
+      + 'its approval, is refused by name) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
       + 'An optional `cast` lists up to 8 supporting characters, each {name, voice?, note?}: names are unique and different from the host\'s, a voice uses '
-      + 'the same two engines, and a member without a voice never speaks. '
+      + 'the same two engines or a {voiceId} reference, and a member without a voice never speaks. '
       + 'A saved persona hosts every Demo Video unless a press turns Character off. Each narration line is spoken in its own speaker\'s voice (the host\'s '
       + 'when the line names no speaker) with no fallback voice: a failing command (non-zero exit or no WAV written) fails the run. '
       + 'The exact field rules are validateCharacterJson in demo-video-kit/character.cjs.',

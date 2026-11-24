@@ -67,7 +67,7 @@ function validateCharacterJson(c) {
   }
   const v = c.voice;
   if (!v || typeof v !== 'object') return 'voice is required';
-  const vErr = validateVoice(v, 'voice');
+  const vErr = validateVoiceOrRef(v, 'voice');
   if (vErr) return vErr;
   if ('cast' in c) return validateCast(c.cast, c.name);
   return null;
@@ -101,6 +101,34 @@ function validateVoice(v, label) {
   return `${label}.engine must be 'kokoro' or 'command'`;
 }
 
+const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/** True when `v` is a voice-library reference ({voiceId, ...}) rather than an inline engine voice. */
+function isVoiceIdRef(v) {
+  return !!v && typeof v === 'object' && !Array.isArray(v) && 'voiceId' in v;
+}
+
+/** A {voiceId} ref (exactly that one key, a library id) or an inline voice. The ref is
+ * only checked for shape here; the write route resolves it in the voice library. */
+function validateVoiceOrRef(v, label) {
+  if (!isVoiceIdRef(v)) return validateVoice(v, label);
+  for (const k of Object.keys(v)) {
+    if (k !== 'voiceId') return `${label}.${k} is not allowed beside voiceId; a {voiceId} voice has exactly one key`;
+  }
+  if (typeof v.voiceId !== 'string' || !VOICE_ID_RE.test(v.voiceId)) return `${label}.voiceId must match ${VOICE_ID_RE}`;
+  return null;
+}
+
+/** Every {voiceId} the host and cast name, in order: [{ label, voiceId }]. Assumes a valid character.json. */
+function voiceIdRefsOf(c) {
+  const refs = [];
+  if (c && isVoiceIdRef(c.voice)) refs.push({ label: 'voice', voiceId: c.voice.voiceId });
+  if (c && Array.isArray(c.cast)) {
+    c.cast.forEach((m, i) => { if (m && isVoiceIdRef(m.voice)) refs.push({ label: `cast[${i}].voice`, voiceId: m.voice.voiceId }); });
+  }
+  return refs;
+}
+
 const CAST_KEYS = Object.freeze(['name', 'voice', 'note']);
 
 /** -> null when `cast` is a valid supporting cast for host `hostName`, else a reason.
@@ -125,7 +153,7 @@ function validateCast(cast, hostName) {
     if (seen.has(key)) return `${at}.name "${name}" duplicates cast[${seen.get(key)}].name`;
     seen.set(key, i);
     if ('voice' in m) {
-      const vErr = validateVoice(m.voice, `${at}.voice`);
+      const vErr = validateVoiceOrRef(m.voice, `${at}.voice`);
       if (vErr) return vErr;
     }
     if ('note' in m && (typeof m.note !== 'string' || m.note.length < 1 || m.note.length > CAST_NOTE_MAX)) {
@@ -448,6 +476,8 @@ module.exports = {
   validateCharacterJs,
   validatePersonality,
   validateVoice,
+  isVoiceIdRef,
+  voiceIdRefsOf,
   inspectCharacter,
   characterDir,
   MAX_JS_BYTES,

@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { assertOpsWrite, opsPath, OWNERS, OPS_ROOT_DIR } = require('./lib/opsOwnership.cjs');
+const { assertOpsWrite, ensureRuntimeIgnoreForPath, opsPath, OWNERS, OPS_ROOT_DIR } = require('./lib/opsOwnership.cjs');
 const { walkImports } = require('./lib/persona-macro/personaImportHealth.cjs');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
@@ -293,6 +293,7 @@ async function writeRendererText(abs, text, { writer, importedBy } = {}) {
     throw new Error(`Write outside allowed write boundaries: ${real}`);
   }
   assertOpsWrite(real, writer);
+  ensureRuntimeIgnoreForPath(real);
   await atomicFs.writeTextAtomic(real, text, {});
   const stat = await fsp.stat(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
@@ -368,6 +369,7 @@ async function writeTextAtomic(abs, text, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
+  ensureRuntimeIgnoreForPath(real);
   await atomicFs.writeTextAtomic(real, text, opts);
   const stat = await fsp.stat(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
@@ -381,6 +383,7 @@ async function writeBinaryAtomic(abs, buffer, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
+  ensureRuntimeIgnoreForPath(real);
   const dir = path.dirname(real);
   await fsp.mkdir(dir, { recursive: true });
   const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -409,6 +412,7 @@ function writeJsonSync(abs, data, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
+  ensureRuntimeIgnoreForPath(real);
   atomicFs.writeJsonAtomicSync(real, data, opts);
   const stat = fs.statSync(real);
   return { ok: true, mtimeMs: stat.mtimeMs };

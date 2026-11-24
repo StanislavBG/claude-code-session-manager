@@ -1919,6 +1919,41 @@
   "remote": "read"
  },
  {
+  "ns": "voices",
+  "method": "list",
+  "channel": "voices:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "voices",
+  "method": "preview",
+  "channel": "voices:preview",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "voices",
+  "method": "approve",
+  "channel": "voices:approve",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "voices",
+  "method": "unapprove",
+  "channel": "voices:unapprove",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "voices",
+  "method": "delete",
+  "channel": "voices:delete",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
   "ns": "promptSessionTranscript",
   "method": "append",
   "channel": "promptSessionTranscript:append",

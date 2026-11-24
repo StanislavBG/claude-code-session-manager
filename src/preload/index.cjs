@@ -479,6 +479,13 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('project-pages:changed', listener);
     },
   },
+  voices: {
+    list: (payload) => ipcRenderer.invoke('voices:list', payload),
+    preview: (payload) => ipcRenderer.invoke('voices:preview', payload),
+    approve: (payload) => ipcRenderer.invoke('voices:approve', payload),
+    unapprove: (payload) => ipcRenderer.invoke('voices:unapprove', payload),
+    delete: (payload) => ipcRenderer.invoke('voices:delete', payload),
+  },
   promptSessionTranscript: {
     append: (cwd, epicId, turn) =>
       ipcRenderer.invoke('promptSessionTranscript:append', { cwd, epicId, ...turn }),

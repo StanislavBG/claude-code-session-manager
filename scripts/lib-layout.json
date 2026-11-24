@@ -215,6 +215,7 @@
   "videoReview": "project-pages",
   "videoReviewIpc": "project-pages",
   "voicePreview": "project-pages",
+  "voicesIpc": "project-pages",
   "withTimeout": "util",
   "workTypeLibrary": "prd",
   "worktreeDeps": "git",

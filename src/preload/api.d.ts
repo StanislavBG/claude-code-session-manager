@@ -2227,6 +2227,88 @@ export type VideoReviewRetryResult =
   | { ok: true; slug: string; epicId: string; entryId?: string | null; stage?: string }
   | { ok: false; error: string; activeSlug?: string };
 
+// ────────────────────────────────────────────── Voices screen
+// Mirrors src/main/lib/demo-video-kit/voiceLibrary.cjs (listVoices) and
+// src/main/lib/project-pages/voicesIpc.cjs (voices:list / preview / approve / unapprove / delete).
+// voicesIpc is the ONLY writer of voice approvals and deletions; renderer IPC only.
+
+export type VoiceScope = 'project' | 'machine' | 'builtin';
+
+export interface VoiceLastPreview {
+  /** ISO time the newest preview of this voice in this project left the voice lane. */
+  at: string | null;
+  wallMs: number | null;
+  audioSeconds: number | null;
+}
+
+export interface VoiceLaneTicket {
+  voiceId: string | null;
+  label: string | null;
+  projectRoot: string | null;
+  pid: number;
+  since: string;
+  /** 0 = currently speaking. */
+  position: number;
+}
+
+export interface VoiceLibraryEntry {
+  id: string;
+  label: string;
+  voice: Record<string, unknown>;
+  engine: string;
+  sampleText: string;
+  licence: string;
+  heavy: boolean;
+  pinFiles?: string[];
+  scope: VoiceScope;
+  /** Absent on built-ins. */
+  file?: string;
+  /** Built-ins only: whether the Kokoro model is installed. */
+  installed?: boolean;
+  approved: boolean;
+  /** False when approved but the voice changed since approval (the voice is refused until re-approved). */
+  pinOk: boolean;
+  lastPreview: VoiceLastPreview | null;
+  inLane: { lane: string; position: number } | null;
+}
+
+export interface VoicesListResult {
+  voices: VoiceLibraryEntry[];
+  errors: Array<{ file: string; error: string }>;
+  /** voiceLane.laneSnapshot(): live tickets per lane ('heavy' | 'light'). */
+  lane: Record<string, VoiceLaneTicket[]>;
+}
+
+export interface VoicesListPayload {
+  cwd: string;
+}
+
+export interface VoicesPreviewPayload {
+  cwd: string;
+  voiceId: string;
+  /** 1-300 chars after trimming. */
+  text: string;
+}
+
+export type VoicesPreviewResult =
+  | { ok: true; cached: boolean; wavPath: string; bytes: Uint8Array }
+  | { ok: false; error: string };
+
+export interface VoicesVoicePayload {
+  cwd: string;
+  voiceId: string;
+}
+
+export type VoicesApproveResult =
+  | { ok: true; voiceId: string; scope: 'project' | 'machine'; pin: string; at: string }
+  | { ok: false; error: string };
+
+export type VoicesUnapproveResult = { ok: true; voiceId: string } | { ok: false; error: string };
+
+export type VoicesDeleteResult =
+  | { ok: true; voiceId: string; scope: 'project' | 'machine'; file: string }
+  | { ok: false; error: string };
+
 // ────────────────────────────────────────────── Project Pages: markdown link network
 // Mirrors the JSDoc typedefs of the same names in src/main/lib/mdNetworkScan.cjs.
 // Every path is repo-relative POSIX.
@@ -3375,6 +3457,18 @@ export interface SessionManagerAPI {
     reviewRetry: (payload: VideoReviewRetryPayload) => Promise<VideoReviewRetryResult>;
     /** Fires whenever a watched cwd's knowledge/videos library is added/changed/removed, carrying the freshly read library result. */
     onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
+  };
+  voices: {
+    /** Every library voice the project can use (project, machine, built-in) with approval state, last-preview stats and the live voice lane. Read-only. */
+    list: (payload: VoicesListPayload) => Promise<VoicesListResult>;
+    /** Speak `text` in one voice (cached clip, else waits in the voice lane). Desktop only. */
+    preview: (payload: VoicesPreviewPayload) => Promise<VoicesPreviewResult>;
+    /** Approve a project or machine voice at its current pin; refuses built-ins. Desktop only — the only approval writer. */
+    approve: (payload: VoicesVoicePayload) => Promise<VoicesApproveResult>;
+    /** Remove a voice's approval. Desktop only. */
+    unapprove: (payload: VoicesVoicePayload) => Promise<VoicesUnapproveResult>;
+    /** Delete the effective project or machine voice file; refuses an approved voice and a built-in. Desktop only. */
+    delete: (payload: VoicesVoicePayload) => Promise<VoicesDeleteResult>;
   };
   promptSessionTranscript: {
     /** Append one full-text turn to an Epic's durable JSONL transcript. Best-effort — resolves `{ok:false}` rather than throwing on failure. */

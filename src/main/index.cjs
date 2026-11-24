@@ -665,6 +665,12 @@ require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, macr
 // Project Video review step: list + human decide (approve / ask for changes). Same deps
 // as macroJobIpc — a decision dispatches through runToolJob. Renderer IPC only.
 require('./lib/project-pages/videoReviewIpc.cjs').registerVideoReviewIpc(ipcMain, macroJobIpcDeps);
+// Voices screen: list/preview + the ONLY writer of voice approvals and deletions.
+// Renderer IPC only — no admin route or MCP tool approves, changes or deletes a voice.
+require('./lib/project-pages/voicesIpc.cjs').registerVoicesIpc(ipcMain, {
+  schemas,
+  validatePath: require('./config.cjs').validatePath,
+});
 // claudeConfig (lib/claudeConfig.cjs): key-scoped read/patch of Claude's JSON config files.
 // A successful patch broadcasts `config:changed` so renderer state refreshes.
 ipcMain.handle('claudeConfig:read', validated(schemas.claudeConfigRead, async (p) => {

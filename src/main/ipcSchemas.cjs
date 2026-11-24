@@ -1145,6 +1145,18 @@ const projectVideosReviewDecide = z.object({
   note: z.string().max(2000).optional(),
 }).strict();
 const projectVideosReviewRetry = z.object({ cwd: z.string().min(1).max(4096), entryId }).strict();
+// Voices screen (project-pages/voicesIpc.cjs): renderer IPC only — the sole writer of
+// voice approvals and deletions. voiceId follows voiceLibrary's ID_RE; text is TEXT_MAX (300).
+const voiceLibraryId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+const voicesList = z.object({ cwd: z.string().min(1).max(4096) }).strict();
+const voicesPreview = z.object({
+  cwd: z.string().min(1).max(4096),
+  voiceId: voiceLibraryId,
+  text: z.string().min(1).max(300),
+}).strict();
+const voicesApprove = z.object({ cwd: z.string().min(1).max(4096), voiceId: voiceLibraryId }).strict();
+const voicesUnapprove = z.object({ cwd: z.string().min(1).max(4096), voiceId: voiceLibraryId }).strict();
+const voicesDelete = z.object({ cwd: z.string().min(1).max(4096), voiceId: voiceLibraryId }).strict();
 const projectVideoReportFields = {
   lufs: z.number().nullable(),
   truePeakDb: z.number().nullable(),
@@ -1954,6 +1966,11 @@ module.exports = {
     projectVideosReviewList,
     projectVideosReviewDecide,
     projectVideosReviewRetry,
+    voicesList,
+    voicesPreview,
+    voicesApprove,
+    voicesUnapprove,
+    voicesDelete,
     needsYouList,
     needsYouAnswer,
     schedulerConfirmTool,

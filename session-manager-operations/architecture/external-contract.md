@@ -712,10 +712,12 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
 - `runtime.appendSystemPrompt` is at most 100 KiB (UTF-8). It becomes `--append-system-prompt <text>`: it is
   appended after Claude Code's default system prompt, or after `systemPrompt` when both are given.
 - `runtime.disallowedTools` is a list of at most 50 permission deny rules, for example
-  `"WebFetch(domain:localhost)"`. Each rule must be non-empty after trimming, at most 500 chars, with no control
-  characters; a rule with `(` needs a tool name before it, a trailing `)` and balanced parentheses. A rule that
-  fails gives `400 invalid_request` (`invalid tool rule`). Each rule reaches the CLI as its **own** argv
-  element after `--disallowedTools`, so one rule can never swallow the next. An empty array sends nothing.
+  `"WebFetch(domain:localhost)"`. Each rule must start with an ASCII letter, be non-empty after trimming, at
+  most 500 chars, with no control characters; a rule with `(` needs a tool name before it, a trailing `)` and
+  balanced parentheses. A rule that fails gives `400 invalid_request` (`invalid tool rule`). Each rule reaches
+  the CLI as its **own** `--disallowedTools=<rule>` argv element, in order, so one rule can never swallow the
+  next. The `=` form and the leading-letter check mean a rule can never become a CLI flag: after a bare
+  `--disallowedTools` the CLI reads a later `-`-leading value as a new flag. An empty array sends nothing.
 - Errors: `400 invalid_request` (with `details`; also `sessionId` with `resume`, or `resume` with
   `persistSession: false`), `400 mcp_config_missing`, `403 tasks_disabled` (with `hint`), `404 unknown_agent`,
   `409 session_busy`, `422 model_unresolved` / `effort_unresolved`, `429 too_many_waiting`, `503 slot_timeout`.
@@ -766,7 +768,8 @@ With `stream: true`, every refusal before the ledger start line keeps its normal
   `live` is `{ slotAcquired, outputEnd, outputCapped }`. Pass `outputEnd` as the next `after` to get only newer
   lines. `outputCapped` is `true` once the 8 MiB capture cap is reached. For any other Task `live` is `null`,
   and `after` slices the stored output by bytes, rounded forward to the next line boundary. `GET /admin/tasks`
-  also reports a Task this app is still running as `running`, never `interrupted`.
+  also reports a Task this app is still running as `running`, never `interrupted`. That status is applied
+  before the list filters by `status` and pages, so `total` and `hasMore` count it as `running` too.
 - Import hands over the `claude -p` calls a caller made itself while Session Manager was down. A record is
   `{ importId, agent?, model, effort?, missionId, caller?, startedAt (ISO), durationMs, status, exitCode?,
   usage?, costUsd?, sessionId? (uuid), persisted?, prompt?, output?, envelope? }`; `status` is one of `ok`,

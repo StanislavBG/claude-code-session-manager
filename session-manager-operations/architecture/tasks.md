@@ -146,7 +146,7 @@ The body is JSON, at most **4 MiB**. The schema is strict: an unknown key at any
 | `maxTurns` | int | 1–200 → `--max-turns`. |
 | `systemPrompt` | string | ≤ 100 KiB (UTF-8) → `--system-prompt`, which **replaces** the system prompt. |
 | `appendSystemPrompt` | string | ≤ 100 KiB (UTF-8) → `--append-system-prompt`. It is appended after Claude Code's default system prompt, or after `systemPrompt` when both are given. |
-| `disallowedTools` | string[] | ≤ 50 permission deny rules, e.g. `"WebFetch(domain:localhost)"` → `--disallowedTools` then each rule as its **own** argv element. An empty array sends nothing. Each rule is checked (see [argv](#the-argv-a-task-runs-with)); a bad one gives `400 invalid_request` (`invalid tool rule`). |
+| `disallowedTools` | string[] | ≤ 50 permission deny rules, e.g. `"WebFetch(domain:localhost)"` → one `--disallowedTools=<rule>` argv element per rule, in order. An empty array sends nothing. A rule must start with a letter. Each rule is checked (see [argv](#the-argv-a-task-runs-with)); a bad one gives `400 invalid_request` (`invalid tool rule`). |
 | `skipPermissions` | boolean | `true` → `--dangerously-skip-permissions` plus whatever headless permission args the CLI-caps probe adds. |
 | `disableAutoMemory` | boolean | `true` → the child gets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (see [environment](#environment)). |
 | `sessionId` | uuid | `--session-id <uuid>`. You cannot send it together with `resume`. |
@@ -286,7 +286,7 @@ argv.
 [--mcp-config <abs path>...]                # each path.resolve(projectCwd, p)
 [--allowedTools <a,b>]                      # present whenever the array is given
 [--tools <a,b>]
-[--disallowedTools <rule> <rule>...]        # one argv element per rule; absent for an empty array
+[--disallowedTools=<rule>...]               # one '=' element per rule; absent for an empty array
 --output-format json | --output-format stream-json --verbose
 ```
 
@@ -299,11 +299,15 @@ argv.
   it is an **empty array**, the flag is sent with an empty value (`--allowedTools ""`), which denies all tools.
   These variadic flags come after `--mcp-config` and before `--output-format`, so the next flag always ends
   their list.
-- **Deny rules.** `disallowedTools` is sent only when the array is non-empty: `--disallowedTools`, then each
-  rule as its own argv element. The CLI splits one element on commas and spaces outside parentheses, so
-  joined rules would let one bad rule swallow the rest. The route checks each rule first: non-empty after
-  trimming, at most 500 chars, no control characters, and when it has `(`, a tool name before it, a trailing
-  `)` and balanced parentheses. An unbalanced rule would become a deny that silently never applies, so it is
+- **Deny rules.** `disallowedTools` is sent only when the array is non-empty: one `--disallowedTools=<rule>`
+  element per rule, in order. Repeated `=` elements add up. The `=` form is required: after a bare
+  `--disallowedTools` the CLI takes only the first value as is and reads any later value starting with `-` as
+  a new flag, so `["X", "--mcp-config", "/x.json"]` would inject a flag and drop the deny. Rules are never
+  joined: the CLI splits one element on commas and spaces outside parentheses, so joined rules would let one
+  bad rule swallow the rest. The route checks each rule first: it starts with an ASCII letter (tool names and
+  `mcp__` rules all do, so a rule can never be read as a flag), is non-empty after trimming, at most 500
+  chars, has no control characters, and when it has `(`, a tool name before it, a trailing `)` and balanced
+  parentheses. An unbalanced rule would become a deny that silently never applies, so it is
   refused, never passed on.
 - **MCP config.** Relative `mcpConfig` paths are resolved against the **project cwd**, even when `runtime.cwd`
   points somewhere else.
@@ -450,7 +454,8 @@ While this app is still running the Task, `GET /admin/task` answers with:
 `slotAcquired` is `false` during the slot wait. `outputEnd` is the byte offset just past this page; pass it as
 the next `after` to get only newer lines (it equals `after` when nothing is new). `outputCapped` is `true` once
 the 8 MiB capture cap is reached; later lines are not captured. A live Task also reads `running`, never
-`interrupted`, in `GET /admin/tasks`.
+`interrupted`, in `GET /admin/tasks`. That status is applied before the list filters by `status` and pages,
+so `status=running` finds it, `status=interrupted` skips it, and `total` and `hasMore` count it as `running`.
 
 ## `POST /admin/tasks/import` — record direct runs
 

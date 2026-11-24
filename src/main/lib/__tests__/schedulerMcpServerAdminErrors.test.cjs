@@ -287,3 +287,38 @@ test('site calls on unknown-route 404 -> missing-route message plus app-inbox se
   expect(app.content[0].text).toContain('has no route');
   expect(app.content[0].text).not.toContain('app inbox');
 });
+
+// ---- site-source unknown_project arrives as HTTP 404 (siteFeedbackAdminRoutes httpStatusFor) ----
+// It is a real answer from a known route, never a missing route (version skew).
+
+const UNKNOWN_PROJECT_TEXT = 'unknown_project: no feedback widget is set up for this project (cwd /no/widget). '
+  + 'Call feedback_widget_list with no cwd to see the projects that have one.';
+
+test.each([
+  ['customer_feedback_list', { source: 'site', cwd: '/no/widget' }],
+  ['customer_feedback_get', { id: 'FB-ABCDE', source: 'site', cwd: '/no/widget' }],
+  ['customer_feedback_set_status', { id: 'FB-ABCDE', status: 'open', source: 'site', cwd: '/no/widget' }],
+])('%s: HTTP 404 unknown_project -> unknown_project text, not missing-route text', async (name, args) => {
+  const port = await listen(jsonServer(404, {
+    ok: false, error: 'unknown_project', message: 'no feedback widget is set up for this project',
+  }));
+  const mod = await setup(port);
+  const result = await mod.handleCallTool({ params: { name, arguments: args } });
+  expect(result.isError).toBe(true);
+  const text = result.content[0].text;
+  expect(text.startsWith(UNKNOWN_PROJECT_TEXT)).toBe(true);
+  expect(text).not.toContain('has no route');
+  expect(text).not.toContain('Needs Session Manager');
+});
+
+test('HTTP 404 unknown_project without message -> bare code plus cwd hint, not missing-route text', async () => {
+  const port = await listen(jsonServer(404, { ok: false, error: 'unknown_project' }));
+  const mod = await setup(port);
+  const result = await mod.handleCallTool({
+    params: { name: 'customer_feedback_list', arguments: { source: 'site', cwd: '/no/widget' } },
+  });
+  expect(result.isError).toBe(true);
+  const text = result.content[0].text;
+  expect(text.startsWith('unknown_project (cwd /no/widget). Call feedback_widget_list with no cwd')).toBe(true);
+  expect(text).not.toContain('has no route');
+});

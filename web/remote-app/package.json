@@ -6,7 +6,7 @@
   "description": "Mobile-first web remote control for Claude Code Session Manager",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/emit-manifest.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/copy-widget.mjs && node scripts/emit-manifest.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",

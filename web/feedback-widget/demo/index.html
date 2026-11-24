@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feedback widget — live check</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; color: #222; }
+    code { background: #f2f2f2; padding: 0 .25em; border-radius: 3px; }
+    #status { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Feedback widget — live check</h1>
+  <p>Open this page as <code>?key=&lt;your box key&gt;</code>. It loads <code>../feedback.js</code> with that key as <code>data-key</code>.</p>
+  <p id="status">No <code>?key=</code> given — the widget is not loaded.</p>
+  <script>
+    (function () {
+      var key = new URLSearchParams(location.search).get('key');
+      if (!key) return;
+      var s = document.createElement('script');
+      s.src = '../feedback.js';
+      s.async = true;
+      s.setAttribute('data-key', key);
+      s.onload = function () { document.getElementById('status').textContent = 'Widget loaded. Press Shift+F or use the launcher.'; };
+      s.onerror = function () { document.getElementById('status').textContent = 'Could not load ../feedback.js.'; };
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>

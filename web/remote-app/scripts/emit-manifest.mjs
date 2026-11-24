@@ -4,9 +4,11 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { execSync } from 'node:child_process';
+import { widgetManifestEntries, WIDGET_DIR } from './copy-widget.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const dist = join(root, 'dist');
+// Optional argv[2] overrides the dist dir (used by copy-widget.spec.ts against a fixture).
+const dist = process.argv[2] || join(root, 'dist');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 function walk(dir) {
@@ -29,6 +31,8 @@ const files = walk(dist);
 let sizeBytesGz = 0;
 for (const f of files) sizeBytesGz += gzipSync(readFileSync(f)).length;
 
+const widgetFiles = widgetManifestEntries(dist);
+
 const manifest = {
   schemaVersion: 1,
   slug: 'session-manager',
@@ -40,6 +44,9 @@ const manifest = {
   golden: { path: '/projects/session-manager/', expect: 'Session Manager' },
   health: {},
   bundle: { sizeBytesGz, fileCount: files.length },
+  ...(widgetFiles.length
+    ? { widget: { path: `/projects/session-manager/${WIDGET_DIR}/`, files: widgetFiles } }
+    : {}),
 };
 
 writeFileSync(join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2));

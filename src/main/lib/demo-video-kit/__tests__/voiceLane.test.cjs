@@ -72,11 +72,11 @@ test('exports the lane API', () => {
   }
 });
 
-test('requires only node built-ins', () => {
+test('requires only node built-ins and the sibling voiceLibrary (both ship in the kit)', () => {
   const src = fs.readFileSync(LANE_MODULE, 'utf8');
   const reqs = [...src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
   expect(reqs.length).toBeGreaterThan(0);
-  for (const r of reqs) expect(r.startsWith('node:')).toBe(true);
+  for (const r of reqs) expect(r.startsWith('node:') || r === './voiceLibrary.cjs').toBe(true);
 });
 
 test('laneFor: entry.heavy wins, else kokoro is light and everything else heavy', () => {

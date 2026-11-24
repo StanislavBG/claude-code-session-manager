@@ -15,9 +15,9 @@
 // load standalone: node built-ins only (no ../util/atomicFs.cjs, no
 // ../process/pidAlive.cjs), hence the local exclusive-create + pid check.
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { voicesHome } = require('./voiceLibrary.cjs');
 
 const LANES = Object.freeze(['heavy', 'light']);
 const STALE_MS = 6 * 60 * 60 * 1000;
@@ -25,10 +25,6 @@ const USAGE_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_POLL_MS = 500;
 let lastTs = 0;
 const TICKET_RE = /^(\d{15})-(\d+)-([0-9a-f]{6})\.json$/;
-
-function voicesHome() {
-  return process.env.SM_VOICES_HOME || path.join(os.homedir(), '.claude', 'session-manager', 'voices');
-}
 
 function laneDir() {
   return process.env.SM_VOICE_LANE_DIR || path.join(voicesHome(), 'lane');

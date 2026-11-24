@@ -1,0 +1,14 @@
+/* Stand-in host page for tests/golden.e2e.ts — an ordinary site the widget is embedded on. */
+html, body { margin: 0; background: #ffffff; color: #1a1612; font: 15px/1.5 system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 24px; padding: 18px 32px; border-bottom: 1px solid #d4ccb8; }
+nav { display: flex; gap: 16px; flex: 1; }
+nav a { color: #2a5d8f; }
+#search-input { font: inherit; padding: 6px 10px; border: 1px solid #1a1612; border-radius: 6px; width: 200px; }
+main { padding: 32px; }
+h1 { margin: 0 0 8px; font-size: 32px; }
+.book { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #1a1612; background: #1a1612; color: #ffffff; }
+.pw { display: block; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 32px; }
+.tile { height: 220px; background: #ede6d6; border-radius: 8px; }
+.tile:nth-child(2) { background: #3366cc; }
+.tile:nth-child(3) { background: #e0b04a; }

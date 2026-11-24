@@ -181,6 +181,11 @@ async function mergeActiveIndex(cwd, { sessions: rawMemorySessions = {}, events:
       Promise.resolve()
         .then(() => stopPreview(id))
         .catch((e) => console.warn(`[activeIndexMerge] app preview stop failed for ${id}`, e));
+      // Outside-state poke: a deleted open Epic leaves the index here and
+      // writes no event-log kind the emitter listens for, so it yields 'gone'.
+      Promise.resolve()
+        .then(() => require('./epicStateEmitter.cjs').pokeEpicState(cwd, id))
+        .catch((e) => console.warn(`[activeIndexMerge] epic state poke failed for ${id}`, e));
     }
     // Status mirror (epicStatusMirror.cjs) — this IPC handler is the
     // renderer-driven persist path (persistActiveIndex), the write site for

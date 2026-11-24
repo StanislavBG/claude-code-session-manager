@@ -133,6 +133,15 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });
+      // Outside-state poke (lib/epic/epicStateEmitter.cjs): a verdict or PRD
+      // check-in on this chain writes no event-log kind the emitter listens
+      // for, so poke it here. Only after a successful write; never changes
+      // the result.
+      try {
+        require('./lib/epic/epicStateEmitter.cjs').pokeEpicState(cwd, sourcePromptId);
+      } catch (e) {
+        console.error('[promptSessionEvents] pokeEpicState failed', cwd, sourcePromptId, e);
+      }
       return { ok: true };
     });
   } catch (e) {

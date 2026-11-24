@@ -100,6 +100,8 @@ const ScheduleJobSchema = z
     artifactPaths: z.array(z.string()).nullable().optional(),
     // PRD frontmatter `effort` — a per-run level from a macro press (outranks the persona's).
     effort: z.string().nullable().optional(),
+    // PRD frontmatter `voiceId` — a per-run library voice; executeJob sets SM_VOICE_ID from it.
+    voiceId: z.string().nullable().optional(),
     statusHistory: z.array(ScheduleJobStatusHistoryEntrySchema).optional(),
     // PRD frontmatter `fixes` — the earlier PRDs this one repairs, copied onto
     // the row at discovery by reconcile() (validationQuality.cjs reads it).

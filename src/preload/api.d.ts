@@ -1137,6 +1137,8 @@ export interface ScheduleJob {
   /** PRD frontmatter artifact-only declaration (PRD 3114). */
   deliverable?: 'artifact' | null;
   artifactPaths?: string[] | null;
+  /** PRD frontmatter library voice (in-process only); handed to the job as SM_VOICE_ID. */
+  voiceId?: string | null;
   slug: string;
   title: string;
   cwd: string | null;

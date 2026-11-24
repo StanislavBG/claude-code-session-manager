@@ -2086,6 +2086,7 @@ async function reconcilePass(state) {
       deliverable: p.deliverable ?? job.deliverable ?? null,
       artifactPaths: p.artifactPaths ?? job.artifactPaths ?? null,
       effort: p.effort ?? job.effort ?? null,
+      voiceId: p.voiceId ?? job.voiceId ?? null,
       preflight: p.preflight ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
@@ -2214,6 +2215,7 @@ async function reconcilePass(state) {
       deliverable: p.deliverable ?? inv.row?.deliverable ?? null,
       artifactPaths: p.artifactPaths ?? inv.row?.artifactPaths ?? null,
       effort: p.effort ?? inv.row?.effort ?? null,
+      voiceId: p.voiceId ?? inv.row?.voiceId ?? null,
       preflight: p.preflight ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
@@ -2370,6 +2372,7 @@ async function reconcilePass(state) {
       deliverable: p.deliverable ?? null,
       artifactPaths: p.artifactPaths ?? null,
       effort: p.effort ?? null,
+      voiceId: p.voiceId ?? null,
       preflight: p.preflight ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
@@ -6105,6 +6108,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     });
     const jobBudgetMs = budget.computeJobBudgetMs(budgetEstimate);
     const budgetExempt = budget.isJobBudgetExempt(job);
+    const jobVoiceId = (typeof job.voiceId === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(job.voiceId)) ? job.voiceId : null;
     const childEnv = cleanChildEnv({
       PATH: withTimeoutShimOnPath(pathWithUserBins()),
       SM_PROJECT_ROOT: cwd,
@@ -6117,8 +6121,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
       ...(budgetExempt ? {} : { SM_SCHEDULER_JOB_DEADLINE_MS: String(Date.now() + jobBudgetMs) }),
+      // The PRD's library voice (frontmatter voiceId) for a voiced tool the job runs; only a valid id, never otherwise.
+      ...(jobVoiceId ? { SM_VOICE_ID: jobVoiceId } : {}),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
     });
+    // cleanChildEnv inherits process.env; a job without a valid voiceId must never carry one.
+    if (!jobVoiceId) delete childEnv.SM_VOICE_ID;
     // Set AFTER cleanChildEnv returns, never inside the object passed to it:
     // cleanChildEnv strips every CLAUDE_CODE_*-prefixed key from its own
     // merged result (see cleanEnv.cjs), so setting it there would delete its
@@ -13576,6 +13584,7 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
           deliverable: parsed.deliverable ?? null,
           artifactPaths: parsed.artifactPaths ?? null,
           effort: parsed.effort ?? null,
+          voiceId: parsed.voiceId ?? null,
           disposition: parsed.disposition ?? null,
           planId: parsed.planId ?? null,
           mtimeMs: stat.mtimeMs,

@@ -229,12 +229,16 @@ names `video.mp4` and `poster.png` in the entry folder. `listLibrary` reports ea
 
 The project persona is `character.json` + `character.js`, written only by
 `project_character_write` (`POST /admin/project-home/character/write`; 409 unless `replace`).
-`character.json` holds `name`, `palette`, `voice` and an optional `personality`
-(`who`, `speech`, `readingLevel`, `neverSay[]`); the look is drawn by `character.js`. The field
-rules are `validateCharacterJson` in `demo-video-kit/character.cjs` — read them there.
+`character.json` holds `name`, `palette`, `voice`, an optional `personality`
+(`who`, `speech`, `readingLevel`, `neverSay[]`) and an optional `cast` of supporting characters
+(each `name`, `voice?`, `note?`); the look is drawn by `character.js`. The field rules are
+`validateCharacterJson` in `demo-video-kit/character.cjs` — read them there. The saved
+`character.json` must fit in 16 KB, and an existing character — even an unusable one — is
+refused with 409 unless `replace` is set.
 `listLibrary` returns `persona: {name} | null`. A saved persona hosts every Demo Video unless the
-press turns Character off; a `command` voice speaks every line through `speakLines` with no
-fallback voice, so a failing command fails the run.
+press turns Character off. `speakLines` takes lines of `{text, out, speaker?}`: each line is spoken
+in its `speaker`'s voice (the host's when absent), a cast member without a voice never speaks,
+and there is no fallback voice, so a failing command fails the run.
 
 ### Review step: videos/<id>/review/
 

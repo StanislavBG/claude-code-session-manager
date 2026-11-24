@@ -551,8 +551,9 @@ test('video kinds, exports and persona: project_video_write, project_character_w
     'entry folder', 'meta.post']) expect(video).toContain(s);
   const persona = textOf('project_character_write');
   for (const s of ['name', 'character.js', 'palette', 'voice', 'personality', 'who', 'speech', 'readingLevel', 'neverSay',
-    'hosts every Demo Video unless a press turns Character off', 'no fallback', 'fails the run']) expect(persona).toContain(s);
+    'hosts every Demo Video unless a press turns Character off', 'no fallback', 'fails the run',
+    'cast', 'up to 8', 'never speaks', '16 KB']) expect(persona).toContain(s);
   const help = textOf('session_manager_help');
   for (const s of ['Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing', 'Review first', 'default on for TikTok',
-    'series brief']) expect(help).toContain(s);
+    'series brief', 'cast']) expect(help).toContain(s);
 });

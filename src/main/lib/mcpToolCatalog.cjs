@@ -502,8 +502,11 @@ const MCP_TOOL_CATALOG = [
       + "the project's videos/_character/ folder via the session-manager app's admin API, so every later video can reuse the same host. "
       + 'The descriptor holds `name`, `palette` (a non-empty list of colors), `voice` ({engine: \'kokoro\', id} or {engine: \'command\', command: [...] '
       + 'with {text} and {out} placeholders}) and an optional `personality` {who, speech, readingLevel, neverSay[]}; the look lives in character.js. '
-      + 'A saved persona hosts every Demo Video unless a press turns Character off. A command voice speaks every narration line with no fallback voice: '
-      + 'a failing command (non-zero exit or no WAV written) fails the run.',
+      + 'An optional `cast` lists up to 8 supporting characters, each {name, voice?, note?}: names are unique and different from the host\'s, a voice uses '
+      + 'the same two engines, and a member without a voice never speaks. '
+      + 'A saved persona hosts every Demo Video unless a press turns Character off. Each narration line is spoken in its own speaker\'s voice (the host\'s '
+      + 'when the line names no speaker) with no fallback voice: a failing command (non-zero exit or no WAV written) fails the run. '
+      + 'The exact field rules are validateCharacterJson in demo-video-kit/character.cjs.',
     summary: "Save the reusable character used in this project's videos.",
     whenToUse: 'Use once per project, before building character videos, to save the mascot you designed. Pass `json` (the descriptor object or its JSON text) '
       + 'and the module as `js` or — preferred for large modules — an absolute `jsPath` to a local .js file. Pass `replace: true` only to deliberately overwrite an existing character.',
@@ -516,12 +519,14 @@ const MCP_TOOL_CATALOG = [
         palette: ['#ffcc00', '#222222'],
         voice: { engine: 'kokoro', id: 'af_heart' },
         personality: { who: 'A curious robot guide', speech: 'Short, warm sentences', readingLevel: 'grade 6', neverSay: ['synergy'] },
+        cast: [{ name: 'Pip', voice: { engine: 'kokoro', id: 'am_adam' }, note: "Bit's skeptical sidekick" }],
       },
       js: 'export function draw(ctx, t) {}',
       replace: false,
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
-      + 'Give exactly one of `js` / `jsPath` (absolute .js file, <= 300KB).',
+      + 'Give exactly one of `js` / `jsPath` (absolute .js file, <= 300KB). The saved character.json must fit in 16 KB. '
+      + 'An existing character — even an unusable one — is refused (409) unless `replace: true` is set.',
   },
   {
     name: 'project_video_review_write',
@@ -824,7 +829,8 @@ const MCP_TOOL_CATALOG = [
       + 'Demo Video (Project Home ▸ Videos ▸ Generate video) makes five kinds: Project demo, Blog post, Feature, TikTok (9:16) and Marketing (16:9). '
       + 'Its Review first option (default on for TikTok, off for the others) stops the job for a human review before the final save. '
       + 'A TikTok takes an optional series brief path as its target, a Marketing an optional landing page URL. '
-      + 'TikTok and Marketing save an MP4 and poster with project_video_write; a persona saved with project_character_write hosts every Demo Video unless Character is off.',
+      + 'TikTok and Marketing save an MP4 and poster with project_video_write; a persona saved with project_character_write hosts every Demo Video unless Character is off, '
+      + 'and its cast members speak their own lines in their own voices.',
   },
 ];
 

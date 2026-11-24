@@ -720,3 +720,13 @@ describe('voice tools dispatch to the voice admin routes', () => {
     expect(requests).toEqual([]);
   });
 });
+
+test('feedback_reply notes describe release.commits claims and the placeholder refusal', () => {
+  const notes = MCP_TOOL_CATALOG.find((x) => x.name === 'feedback_reply').notes;
+  expect(notes).toContain('release { commits }');
+  expect(notes).toContain('tag v<running version>');
+  expect(notes).toContain('newer than v0.142.0');
+  expect(notes).toMatch(/unfilled placeholder/);
+  expect(notes).toMatch(/done reply that names a Session Manager version must carry release\.commits/);
+  expect(notes).toMatch(/never hand-type/i);
+});

@@ -372,7 +372,17 @@ const MCP_TOOL_CATALOG = [
       + 'appVersionAbove (give the version running now); it then sends itself, even after this Epic closes; '
       + '`{version}` in the message becomes that version. A held reply returns delivery "scheduled" and '
       + 'counts toward the 3-reply cap at once. deliverWhen needs Session Manager v0.142.0 or later running; '
-      + 'an older app is refused before the call.',
+      + 'an older app is refused before the call. '
+      + 'release { commits } (Session Manager repo only; 7-40 hex hashes of the work that shipped) makes a '
+      + 'Session Manager release claim checkable. Live (no deliverWhen): the running app must report a version, '
+      + 'tag v<running version> must contain every commit, and the message may name no other Session Manager '
+      + 'version, else it is refused; `{version}` is then filled with the running version. Held (with deliverWhen): '
+      + 'it is sent only once the running release tag contains every commit (it waits, no attempt spent), and it '
+      + 'needs an app newer than v0.142.0 running — 0.142.0 or older holds by version only, so the call is refused; '
+      + 'send it live with release.commits once that release runs. A message with an unfilled placeholder '
+      + '(`{{appVersion}}`, `<semver>`, `${release}`, ...) is refused; `{version}` is allowed only with deliverWhen '
+      + 'or release. A done reply that names a Session Manager version must carry release.commits (or it is '
+      + 'refused): write `{version}`, never hand-type a version.',
   },
   {
     name: 'project_home_write',

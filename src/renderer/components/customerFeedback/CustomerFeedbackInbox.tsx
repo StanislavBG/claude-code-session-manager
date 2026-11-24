@@ -297,7 +297,11 @@ function InboxRow({ it, projectCwd }: { it: CustomerFeedbackInboxItem; projectCw
   )
 }
 
-export function CustomerFeedbackInbox() {
+/**
+ * `embedded` (Project Home > Feedback): no max-height/overflow of its own, so it scrolls with the
+ * page instead of nesting a second scroller.
+ */
+export function CustomerFeedbackInbox({ embedded = false }: { embedded?: boolean } = {}) {
   const ownerMode = useCustomerFeedback((s) => s.ownerInfo?.ownerMode ?? false)
   const projectCwd = useCustomerFeedback((s) => s.ownerInfo?.projectCwd ?? null)
   const inbox = useCustomerFeedback((s) => s.inbox)
@@ -314,7 +318,11 @@ export function CustomerFeedbackInbox() {
 
   return (
     <section
-      className="shrink-0 max-h-[50%] overflow-auto border-t border-line px-5 py-4 grid gap-2 content-start"
+      className={
+        embedded
+          ? 'grid gap-2 content-start'
+          : 'shrink-0 max-h-[50%] overflow-auto border-t border-line px-5 py-4 grid gap-2 content-start'
+      }
       data-testid="customer-feedback-inbox"
     >
       <div className="flex items-center justify-between gap-2">

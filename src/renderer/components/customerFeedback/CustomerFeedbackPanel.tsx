@@ -17,7 +17,7 @@ import { useToast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { openFreeHour } from '../../lib/freeHour'
 import { useSessions } from '../../state/sessions'
-import { requestProjectHomeFeedback } from '../tabs/projecthome/ProjectFeedback'
+import { isOwnerProject, requestProjectHomeFeedback } from '../tabs/projecthome/ProjectFeedback'
 import { useAttachments } from '../epics/attachments'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
@@ -47,7 +47,7 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 /** Switch to (or open) the owner project's tab, then show its Project Home > Feedback. */
 function openOwnerFeedback(projectCwd: string): void {
   const sessions = useSessions.getState()
-  const existing = sessions.tabs.find((t) => t.cwd === projectCwd)
+  const existing = sessions.tabs.find((t) => isOwnerProject(t.cwd, projectCwd))
   if (existing) sessions.setActive(existing.id)
   else sessions.addSessionToProject(projectCwd)
   requestProjectHomeFeedback()

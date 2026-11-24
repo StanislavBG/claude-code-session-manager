@@ -41,12 +41,12 @@ const spies = {
   linkEpic: vi.fn(async () => {}),
 }
 
-async function mount() {
+async function mount(props: { embedded?: boolean } = {}) {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(createElement(CustomerFeedbackInbox))
+    root!.render(<CustomerFeedbackInbox {...props} />)
     await Promise.resolve()
   })
 }
@@ -83,6 +83,22 @@ afterEach(() => {
 })
 
 describe('CustomerFeedbackInbox', () => {
+  it('drawer mode keeps its own bounded scroller', async () => {
+    setup()
+    await mount()
+    const cls = q('customer-feedback-inbox')!.className
+    expect(cls).toContain('max-h-[50%]')
+    expect(cls).toContain('overflow-auto')
+  })
+
+  it('embedded mode has no max-height or overflow of its own, so it scrolls with the page', async () => {
+    setup()
+    await mount({ embedded: true })
+    const cls = q('customer-feedback-inbox')!.className
+    expect(cls).not.toMatch(/max-h-/)
+    expect(cls).not.toMatch(/overflow-/)
+  })
+
   it('renders nothing for a non-owner', async () => {
     setup({ ownerMode: false })
     await mount()

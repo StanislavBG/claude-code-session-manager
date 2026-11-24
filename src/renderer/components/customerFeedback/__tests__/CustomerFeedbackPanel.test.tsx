@@ -440,6 +440,32 @@ describe('CustomerFeedbackPanel', () => {
       }
     })
 
+    it('a trailing-slash projectCwd reuses the existing tab instead of opening a second one', async () => {
+      vi.useFakeTimers()
+      try {
+        useCustomerFeedback.setState({ ownerInfo: { ownerMode: true, projectCwd: '/owner/' } })
+        const setActive = vi.fn()
+        const addSessionToProject = vi.fn()
+        useSessions.setState({
+          tabs: [{ id: 't-owner', cwd: '/owner' } as never],
+          activeTabId: null,
+          setActive,
+          addSessionToProject,
+        } as never)
+        await mount()
+        await act(async () => {
+          q('customer-feedback-inbox-open-project-home')!.click()
+        })
+        expect(setActive).toHaveBeenCalledWith('t-owner')
+        expect(addSessionToProject).not.toHaveBeenCalled()
+        act(() => {
+          vi.runAllTimers()
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('shows neither the inbox nor the link outside owner mode', async () => {
       useCustomerFeedback.setState({ ownerInfo: { ownerMode: false, projectCwd: null } })
       await mount()

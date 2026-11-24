@@ -112,7 +112,7 @@ export function ProjectFeedback({ cwd }: { cwd: string }) {
           <p data-testid="project-feedback-app-inbox-meta" className="text-[12.5px] text-fg-faint">
             Sent from Session Manager&apos;s Feedback panel · {appCount} item{appCount === 1 ? '' : 's'}
           </p>
-          <CustomerFeedbackInbox />
+          <CustomerFeedbackInbox embedded />
         </section>
       )}
     </div>

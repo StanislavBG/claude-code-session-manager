@@ -164,3 +164,104 @@ test('CLI: speak spec.json prints the JSON result; exit 1 with the error on stde
   expect(JSON.parse(bad.stdout)).toMatchObject({ ok: false, line: 0 });
   expect(bad.stderr).toMatch(/voice exploded/);
 });
+
+const { validateVoice, inspectCharacter, MAX_JSON_BYTES, MAX_CAST_MEMBERS } = require('../character.cjs');
+const castCmdVoice = { engine: 'command', command: ['say', '-o', '{out}', '{text}'] };
+
+test('validateVoice: host reasons unchanged; cast reasons carry their path', () => {
+  expect(validateCharacterJson({ ...kokoro, voice: undefined })).toBe('voice is required');
+  expect(validateCharacterJson({ ...kokoro, voice: { engine: 'kokoro' } })).toBe('voice.id must be a non-empty string for engine kokoro');
+  expect(validateCharacterJson({ ...cmd, voice: { engine: 'command', command: ['say', '{out}'] } })).toBe('voice.command must contain a {text} placeholder');
+  expect(validateCharacterJson({ ...cmd, voice: { engine: 'command', command: ['say', '{text}'] } })).toBe('voice.command must contain an {out} placeholder');
+  expect(validateCharacterJson({ ...kokoro, voice: { engine: 'x' } })).toBe("voice.engine must be 'kokoro' or 'command'");
+  expect(validateVoice(kokoro.voice, 'voice')).toBeNull();
+  expect(validateVoice(castCmdVoice, 'voice')).toBeNull();
+  expect(validateVoice('x', 'cast[0].voice')).toBe('cast[0].voice must be an object');
+  expect(validateVoice({ engine: 'command', command: ['say', '{text}'] }, 'cast[1].voice')).toBe('cast[1].voice.command must contain an {out} placeholder');
+  expect(validateVoice({ engine: 'kokoro', id: '' }, 'cast[2].voice')).toBe('cast[2].voice.id must be a non-empty string for engine kokoro');
+});
+
+test('cast: absent, empty and valid casts are accepted', () => {
+  expect(MAX_CAST_MEMBERS).toBe(8);
+  expect(validateCharacterJson({ ...kokoro, cast: [] })).toBeNull();
+  expect(validateCharacterJson({
+    ...kokoro,
+    cast: [
+      { name: 'Gran Oak', voice: { engine: 'kokoro', id: 'bm_george' }, note: 'An old tree' },
+      { name: 'Pip', voice: castCmdVoice },
+      { name: 'Moss' },
+    ],
+  })).toBeNull();
+  expect(validateCharacterJson({ ...kokoro, cast: Array.from({ length: 8 }, (_, i) => ({ name: `M${i}` })) })).toBeNull();
+  expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'x'.repeat(40), note: 'n'.repeat(400) }] })).toBeNull();
+});
+
+test('cast: every refusal names its reason', () => {
+  const v = (cast) => validateCharacterJson({ ...kokoro, cast });
+  expect(v({})).toBe('cast must be an array of at most 8 members');
+  expect(v(null)).toBe('cast must be an array of at most 8 members');
+  expect(v(Array.from({ length: 9 }, (_, i) => ({ name: `M${i}` })))).toBe('cast must be an array of at most 8 members');
+  expect(v(['Pip'])).toBe('cast[0] must be an object');
+  expect(v([{ name: 'Pip' }, null])).toBe('cast[1] must be an object');
+  expect(v([[]])).toBe('cast[0] must be an object');
+  expect(v([{ name: 'Pip', mood: 'x' }])).toBe('cast[0].mood is not a known key (name, voice, note)');
+  expect(v([{}])).toBe('cast[0].name must be a 1-40 char string');
+  expect(v([{ name: '   ' }])).toBe('cast[0].name must be a 1-40 char string');
+  expect(v([{ name: 'x'.repeat(41) }])).toBe('cast[0].name must be a 1-40 char string');
+  expect(v([{ name: 5 }])).toBe('cast[0].name must be a 1-40 char string');
+  expect(v([{ name: ' bit ' }])).toBe('cast[0].name "bit" is the host\'s name');
+  expect(v([{ name: 'Pip' }, { name: 'Moss' }, { name: ' PIP' }])).toBe('cast[2].name "PIP" duplicates cast[0].name');
+  expect(v([{ name: 'Pip', voice: { engine: 'command', command: ['say', '{text}'] } }])).toBe('cast[0].voice.command must contain an {out} placeholder');
+  expect(v([{ name: 'Pip', voice: null }])).toBe('cast[0].voice must be an object');
+  expect(v([{ name: 'Pip', voice: { engine: 'nope' } }])).toBe("cast[0].voice.engine must be 'kokoro' or 'command'");
+  expect(v([{ name: 'Pip', note: '' }])).toBe('cast[0].note must be a 1-400 char string');
+  expect(v([{ name: 'Pip', note: 'n'.repeat(401) }])).toBe('cast[0].note must be a 1-400 char string');
+  expect(v([{ name: 'Pip', note: 3 }])).toBe('cast[0].note must be a 1-400 char string');
+  // host voice is checked before the cast
+  expect(validateCharacterJson({ ...kokoro, voice: undefined, cast: 'x' })).toBe('voice is required');
+});
+
+test('inspectCharacter tells none-saved from saved-but-unusable, and why', () => {
+  expect(MAX_JSON_BYTES).toBe(16 * 1024);
+  const ok = inspectCharacter(project(kokoro));
+  expect(ok).toMatchObject({ ok: true, json: kokoro });
+  expect(typeof ok.js).toBe('string');
+
+  const none = inspectCharacter(project(undefined));
+  expect(none).toMatchObject({ ok: false, exists: false });
+  expect(none.error).toMatch(/no character saved/);
+
+  const big = inspectCharacter(project(JSON.stringify({ ...kokoro, pad: 'x'.repeat(MAX_JSON_BYTES) })));
+  expect(big).toMatchObject({ ok: false, exists: true });
+  expect(big.error).toMatch(new RegExp(String(MAX_JSON_BYTES)));
+
+  const bad = inspectCharacter(project('{nope'));
+  expect(bad).toMatchObject({ ok: false, exists: true });
+  expect(bad.error).toMatch(/not valid JSON/);
+
+  const invalid = inspectCharacter(project({ ...kokoro, cast: [{ name: 'Bit' }] }));
+  expect(invalid).toEqual({ ok: false, exists: true, error: 'character.json invalid: cast[0].name "Bit" is the host\'s name' });
+
+  const noJs = inspectCharacter(project(kokoro, null));
+  expect(noJs).toMatchObject({ ok: false, exists: true });
+  expect(noJs.error).toMatch(/character\.js is missing/);
+
+  const emptyJs = inspectCharacter(project(kokoro, '  \n'));
+  expect(emptyJs).toMatchObject({ ok: false, exists: true });
+  expect(emptyJs.error).toMatch(/character\.js is empty/);
+
+  // only character.js on disk: exists, but no character.json
+  const jsOnly = project(undefined);
+  fs.mkdirSync(characterDir(jsOnly), { recursive: true });
+  fs.writeFileSync(path.join(characterDir(jsOnly), 'character.js'), 'x');
+  const r = inspectCharacter(jsOnly);
+  expect(r).toMatchObject({ ok: false, exists: true });
+  expect(r.error).toMatch(/character\.json is missing/);
+
+  const rel = inspectCharacter('relative/dir');
+  expect(rel).toMatchObject({ ok: false, exists: false });
+  expect(rel.error).toMatch(/absolute/);
+
+  expect(readCharacter(project({ ...kokoro, cast: [{ name: 'Bit' }] }))).toBeNull();
+  expect(readCharacter(project({ ...kokoro, cast: [{ name: 'Pip' }] })).json.cast).toEqual([{ name: 'Pip' }]);
+});

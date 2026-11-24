@@ -22,6 +22,9 @@ const WAV_HEADER_BYTES = 44;
 const PERSONALITY_TEXT = Object.freeze({ who: 400, speech: 400, readingLevel: 40 });
 const NEVER_SAY_MAX_ITEMS = 40;
 const NEVER_SAY_MAX_CHARS = 40;
+const MAX_CAST_MEMBERS = 8;
+const CAST_NAME_MAX = 40;
+const CAST_NOTE_MAX = 400;
 
 /** -> null when `p` is a valid personality object, else a reason string. */
 function validatePersonality(p) {
@@ -58,21 +61,65 @@ function validateCharacterJson(c) {
   }
   const v = c.voice;
   if (!v || typeof v !== 'object') return 'voice is required';
+  const vErr = validateVoice(v, 'voice');
+  if (vErr) return vErr;
+  if ('cast' in c) return validateCast(c.cast, c.name);
+  return null;
+}
+
+/** -> null when `v` is a valid voice ({engine:'kokoro',id} | {engine:'command',command}),
+ * else a reason string prefixed with `label` (e.g. 'voice', 'cast[1].voice'). */
+function validateVoice(v, label) {
+  if (!v || typeof v !== 'object') return `${label} must be an object`;
   if (v.engine === 'kokoro') {
-    if (typeof v.id !== 'string' || !v.id) return 'voice.id must be a non-empty string for engine kokoro';
+    if (typeof v.id !== 'string' || !v.id) return `${label}.id must be a non-empty string for engine kokoro`;
     return null;
   }
   if (v.engine === 'command') {
     const cmd = v.command;
     if (!Array.isArray(cmd) || cmd.length === 0 || !cmd.every((a) => typeof a === 'string')) {
-      return 'voice.command must be a non-empty string[]';
+      return `${label}.command must be a non-empty string[]`;
     }
-    if (!cmd[0]) return 'voice.command[0] must be a program name';
-    if (!cmd.some((a) => a.includes('{text}'))) return 'voice.command must contain a {text} placeholder';
-    if (!cmd.some((a) => a.includes('{out}'))) return 'voice.command must contain an {out} placeholder';
+    if (!cmd[0]) return `${label}.command[0] must be a program name`;
+    if (!cmd.some((a) => a.includes('{text}'))) return `${label}.command must contain a {text} placeholder`;
+    if (!cmd.some((a) => a.includes('{out}'))) return `${label}.command must contain an {out} placeholder`;
     return null;
   }
-  return "voice.engine must be 'kokoro' or 'command'";
+  return `${label}.engine must be 'kokoro' or 'command'`;
+}
+
+const CAST_KEYS = Object.freeze(['name', 'voice', 'note']);
+
+/** -> null when `cast` is a valid supporting cast for host `hostName`, else a reason.
+ * A member without `voice` is valid: it never speaks. */
+function validateCast(cast, hostName) {
+  if (!Array.isArray(cast) || cast.length > MAX_CAST_MEMBERS) {
+    return `cast must be an array of at most ${MAX_CAST_MEMBERS} members`;
+  }
+  const host = String(hostName).trim().toLowerCase();
+  const seen = new Map();
+  for (let i = 0; i < cast.length; i++) {
+    const m = cast[i];
+    const at = `cast[${i}]`;
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return `${at} must be an object`;
+    for (const k of Object.keys(m)) {
+      if (!CAST_KEYS.includes(k)) return `${at}.${k} is not a known key (${CAST_KEYS.join(', ')})`;
+    }
+    const name = typeof m.name === 'string' ? m.name.trim() : '';
+    if (name.length < 1 || name.length > CAST_NAME_MAX) return `${at}.name must be a 1-${CAST_NAME_MAX} char string`;
+    const key = name.toLowerCase();
+    if (key === host) return `${at}.name "${name}" is the host's name`;
+    if (seen.has(key)) return `${at}.name "${name}" duplicates cast[${seen.get(key)}].name`;
+    seen.set(key, i);
+    if ('voice' in m) {
+      const vErr = validateVoice(m.voice, `${at}.voice`);
+      if (vErr) return vErr;
+    }
+    if ('note' in m && (typeof m.note !== 'string' || m.note.length < 1 || m.note.length > CAST_NOTE_MAX)) {
+      return `${at}.note must be a 1-${CAST_NOTE_MAX} char string`;
+    }
+  }
+  return null;
 }
 
 /** -> null when `js` is acceptable character.js source, else a reason. Needs the
@@ -109,20 +156,53 @@ function projectRootOf(projectRoot, who = 'projectRootOf') {
   return idx === -1 ? segs.join(path.sep) : (segs.slice(0, idx).join(path.sep) || path.sep);
 }
 
+/**
+ * -> { ok: true, json, js } | { ok: false, exists, error }.
+ * `exists` is true when character.json or character.js is on disk, so callers
+ * can tell 'no persona saved' from 'a persona is saved but unusable'.
+ */
+function inspectCharacter(projectRoot) {
+  let dir;
+  try {
+    dir = characterDir(projectRoot);
+  } catch (e) {
+    return { ok: false, exists: false, error: e.message };
+  }
+  const jsonPath = path.join(dir, 'character.json');
+  const jsPath = path.join(dir, 'character.js');
+  const hasJson = fs.existsSync(jsonPath);
+  const hasJs = fs.existsSync(jsPath);
+  const exists = hasJson || hasJs;
+  const fail = (error) => ({ ok: false, exists, error });
+  if (!exists) return fail(`no character saved in ${dir}`);
+  if (!hasJson) return fail(`character.json is missing in ${dir}`);
+  let json;
+  try {
+    const jsonRaw = fs.readFileSync(jsonPath, 'utf8');
+    if (Buffer.byteLength(jsonRaw, 'utf8') > MAX_JSON_BYTES) {
+      return fail(`character.json exceeds the ${MAX_JSON_BYTES}-byte limit`);
+    }
+    json = JSON.parse(jsonRaw);
+  } catch (e) {
+    return fail(`character.json is not valid JSON: ${e.message}`);
+  }
+  const reason = validateCharacterJson(json);
+  if (reason) return fail(`character.json invalid: ${reason}`);
+  if (!hasJs) return fail(`character.js is missing in ${dir}`);
+  let js;
+  try {
+    js = fs.readFileSync(jsPath, 'utf8');
+  } catch (e) {
+    return fail(`character.js cannot be read: ${e.message}`);
+  }
+  if (!js.trim()) return fail('character.js is empty');
+  return { ok: true, json, js };
+}
+
 /** -> {json, js} | null (absent or invalid). */
 function readCharacter(projectRoot) {
-  try {
-    const dir = characterDir(projectRoot);
-    const jsonRaw = fs.readFileSync(path.join(dir, 'character.json'), 'utf8');
-    if (Buffer.byteLength(jsonRaw, 'utf8') > MAX_JSON_BYTES) return null;
-    const json = JSON.parse(jsonRaw);
-    if (validateCharacterJson(json)) return null;
-    const js = fs.readFileSync(path.join(dir, 'character.js'), 'utf8');
-    if (!js.trim()) return null;
-    return { json, js };
-  } catch {
-    return null;
-  }
+  const r = inspectCharacter(projectRoot);
+  return r.ok ? { json: r.json, js: r.js } : null;
 }
 
 /** Substitute {text}/{out} into each argv element; the argv is never joined. */
@@ -152,7 +232,7 @@ function isWav(file) {
  * the last STDERR_TAIL chars of the command's stderr.
  */
 function speakWithCommand(voice, text, out, { cwd } = {}) {
-  if (!voice || voice.engine !== 'command' || validateCharacterJson({ name: 'x', palette: ['x'], voice })) {
+  if (!voice || voice.engine !== 'command' || validateVoice(voice, 'voice')) {
     return { ok: false, status: null, error: 'not a valid command voice' };
   }
   const outStr = String(out);
@@ -218,8 +298,12 @@ module.exports = {
   validateCharacterJson,
   validateCharacterJs,
   validatePersonality,
+  validateVoice,
+  inspectCharacter,
   characterDir,
   MAX_JS_BYTES,
+  MAX_JSON_BYTES,
+  MAX_CAST_MEMBERS,
   COMMAND_TIMEOUT_MS,
 };
 

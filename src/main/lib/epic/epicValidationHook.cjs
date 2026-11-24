@@ -76,6 +76,11 @@ function severityRank(sev) {
   return i === -1 ? SEVERITY_ORDER.length : i;
 }
 
+/** Collapse every whitespace run (newlines, tabs) to one space and trim. */
+function oneLine(x) {
+  return String(x ?? '').replace(/\s+/g, ' ').trim();
+}
+
 /**
  * Findings section lines: every finding gets an outcome in the same turn —
  * Minor ones are the ones that get dropped when only verdict slugs are listed.
@@ -91,7 +96,11 @@ function findingLines(findings) {
   const shown = sorted.slice(0, MAX_FINDING_LINES);
   const out = [
     '', `Findings (${list.length}) — give each one an outcome in this turn: a fix PRD or a one-line close reason:`,
-    ...shown.map((f) => `- [${f.severity}] ${f.prd}: ${f.text}${f.file ? ` (${f.file})` : ''}`),
+    ...shown.map((f) => {
+      const text = oneLine(f.text);
+      const file = oneLine(f.file);
+      return `- [${oneLine(f.severity)}] ${oneLine(f.prd)}:${text ? ` ${text}` : ''}${file ? ` (${file})` : ''}`;
+    }),
   ];
   if (sorted.length > shown.length) out.push(`- …and ${sorted.length - shown.length} more in the records`);
   return out;

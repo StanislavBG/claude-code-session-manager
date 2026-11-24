@@ -62,6 +62,21 @@ describe('buildSettledDigest findings section', () => {
     expect(buildSettledDigest(settle, { epicId: 'epic-1', findings: [] })).toBe(base);
   });
 
+  it('collapses newlines and tabs so each finding stays on one line', () => {
+    const digest = buildSettledDigest({ verified: ['0001-a'] }, {
+      epicId: 'epic-1',
+      findings: [
+        { prd: '0001-a', severity: 'Important', text: '  first line\n\nsecond\tline \r\n third  ', file: ' src/\na.cjs\t' },
+        { prd: '0002-b', severity: 'Minor', text: ' \n\t ', file: '' },
+      ],
+    });
+    const lines = digest.split('\n');
+    expect(lines).toContain('- [Important] 0001-a: first line second line third (src/ a.cjs)');
+    expect(lines).toContain('- [Minor] 0002-b:');
+    expect(lines.filter((l) => l.startsWith('- ['))).toHaveLength(2);
+    expect(digest).not.toContain('second\tline');
+  });
+
   it('caps the list at 50 lines with a pointer to the records', () => {
     const findings = Array.from({ length: 53 }, (_, i) => ({ prd: `p${i}`, severity: 'Minor', text: 't', file: 'f' }));
     const digest = buildSettledDigest({ verified: ['x'] }, { epicId: 'e', findings });

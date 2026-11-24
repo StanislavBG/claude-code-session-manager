@@ -217,3 +217,13 @@ test('parseFilesSection keeps a whole spaced path whose earlier segment has a do
   assert.deepEqual(parseFilesSection(filesBody(['- docs/v1.2 - notes.md'])), ['docs/v1.2 - notes.md']);
   assert.deepEqual(parseFilesSection(filesBody(['- docs/a.md - b.md'])), ['docs/a.md - b.md']);
 });
+
+test('parseFilesSection keeps a whole entry only when one token follows its earliest separator (4213)', () => {
+  assert.deepEqual(parseFilesSection(filesBody(['- docs/v1.2 - notes.md'])), ['docs/v1.2 - notes.md']);
+  assert.deepEqual(parseFilesSection(filesBody(['- docs/a.md - b.md'])), ['docs/a.md - b.md']);
+  assert.deepEqual(parseFilesSection(filesBody(['- docs/My (copy).md'])), ['docs/My (copy).md']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs - renamed from old.cjs'])), ['src/a.cjs']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs: mirrors src/b.cjs'])), ['src/a.cjs']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs (JSDoc types only)'])), ['src/a.cjs']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs — copied from old.cjs'])), ['src/a.cjs']);
+});

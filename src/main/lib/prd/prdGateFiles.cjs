@@ -285,10 +285,27 @@ function pathLikePrefix(s) {
   return /\.[A-Za-z0-9]+$/.test(checked.path) || checked.path.endsWith('/') ? checked.path : null;
 }
 
+// Note separators (", " excluded — it lists paths, never a note).
+const FILES_WHOLE_TIEBREAK_SEPARATORS = FILES_NOTE_SEPARATORS.filter((sep) => sep !== ', ');
+
+/** True when `text` has no note separator, or the text after its earliest one is a single whitespace-free token. */
+function isSingleTokenRemainder(text) {
+  let earliest = null;
+  for (const sep of FILES_WHOLE_TIEBREAK_SEPARATORS) {
+    const at = text.indexOf(sep);
+    if (at > 0 && (earliest === null || at < earliest.at)) earliest = { at, sep };
+  }
+  if (earliest === null) return true;
+  const rest = text.slice(earliest.at + earliest.sep.length);
+  return rest.length > 0 && !/\s/.test(rest);
+}
+
 /**
  * One `# Files` bullet's text -> the paths it names ([] when none). An
  * entry with no ", " that is itself a path (valid, ending in a file
- * extension or "/") is kept whole first. Otherwise walks
+ * extension or "/") is kept whole first, but only when the text after its
+ * earliest note separator (" (", " - ", " — ", ": ") is one whitespace-free
+ * token — more than one word there is a note. Otherwise walks
  * every separator occurrence (" (", " - ", " — ", ": ", ", ") left to right
  * and splits at the first whose prefix is a path (valid entry ending in a
  * file extension or "/"): after ", " the rest is parsed again as more
@@ -305,12 +322,14 @@ function pathLikePrefix(s) {
 function parseFilesEntry(raw) {
   const text = unwrapTicks(String(raw).trim());
   if (!text) return [];
-  // A whole entry that is itself a path wins over any note split, so
-  // "docs/v1.2 - notes.md" is not cut to "docs/v1.2". A ", " list still
-  // splits: "src/a.cjs, src/b.cjs" is two paths, not one spaced name.
+  // A whole entry that is itself a path wins over a note split only when the
+  // text after its earliest note separator is one whitespace-free token, so
+  // "docs/v1.2 - notes.md" is not cut to "docs/v1.2" but "src/a.cjs -
+  // renamed from old.cjs" is a note. A ", " list still splits:
+  // "src/a.cjs, src/b.cjs" is two paths, not one spaced name.
   if (!text.includes(', ')) {
     const whole = pathLikePrefix(text);
-    if (whole) return [whole];
+    if (whole && isSingleTokenRemainder(text)) return [whole];
   }
   /** @type {{at:number, sep:string}[]} */
   const hits = [];

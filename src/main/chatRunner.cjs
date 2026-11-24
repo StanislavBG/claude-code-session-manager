@@ -1616,4 +1616,6 @@ module.exports = {
   isTabBusy,
   EXTERNAL_NEW_SESSION_TIMEOUT_MS,
   registerAdminRoute,
+  // test-only: the chat turn-end artifact ingest (chatRunnerArtifactNotice.test.cjs)
+  __ingestChatArtifacts: ingestChatArtifacts,
 };

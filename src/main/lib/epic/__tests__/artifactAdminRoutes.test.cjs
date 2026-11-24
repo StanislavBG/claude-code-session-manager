@@ -36,6 +36,8 @@ let outside;
 let resolveCalls;
 /** @type {any} */
 let ctxResult;
+/** @type {any[]} */
+let noticeCalls = [];
 
 const mk = (prefix) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 
@@ -48,6 +50,7 @@ beforeAll(async () => {
       : { sessions: {} }),
     stagingBase: () => null,
     tmpdir: () => allowedTmp,
+    postArtifactReadyNotice: async (args) => { noticeCalls.push(args); return { ok: true }; },
   });
   ({ port, token } = await admin.start());
 });
@@ -66,6 +69,7 @@ beforeEach(() => {
   allowedTmp = mk('sm-art-tmp-');
   outside = mk('sm-art-outside-');
   resolveCalls = [];
+  noticeCalls = [];
   ctxResult = { cwd: root, epicId: EPIC, epicCwd: root, source: 'epic-index' };
 });
 
@@ -218,4 +222,25 @@ test('GET /admin/artifacts without cwd is 400', async () => {
   const r = await request({ reqPath: '/admin/artifacts' });
   expect(r.status).toBe(400);
   expect(r.json.error).toBe('bad_request');
+});
+
+test('a successful Epic publish posts one artifact-ready notice with that entry; a refused one posts none', async () => {
+  const src = path.join(root, 'demo.mp4');
+  fs.writeFileSync(src, 'video-bytes');
+  const r = await publish({ path: src, originClaudeSessionId: SESSION });
+  expect(r.status).toBe(200);
+  expect(noticeCalls).toHaveLength(1);
+  expect(noticeCalls[0]).toEqual({
+    cwd: root,
+    epicId: EPIC,
+    entries: [{ storedPath: r.json.storedPath, entry: r.json.entry }],
+  });
+
+  noticeCalls = [];
+  const bad = path.join(outside, 'secret.txt');
+  fs.writeFileSync(bad, 'nope');
+  const refused = await publish({ path: bad, originClaudeSessionId: SESSION });
+  expect(refused.status).toBe(400);
+  expect(refused.json.error).toBe('outside_root');
+  expect(noticeCalls).toHaveLength(0);
 });

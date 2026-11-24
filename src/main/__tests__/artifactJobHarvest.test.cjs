@@ -104,3 +104,28 @@ test('jobArtifactRunId is per job and always a safe staging id', () => {
   const long = scheduler.jobArtifactRunId({ slug: 'x'.repeat(300) }, RUN);
   expect(artifactStore.RUN_ID_RE.test(long)).toBe(true);
 });
+
+test('a harvest posts ONE artifact-ready notice with every published entry, and none when nothing landed', { timeout: 30_000 }, async () => {
+  const events = require('../promptSessionEvents.cjs');
+  const append = vi.spyOn(events, 'appendResponseEventWithReason').mockResolvedValue({ ok: true });
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const job = { slug: '4401-notice', epicId: EPIC, runId: RUN, artifactPaths: ['out/report.md'] };
+  write(worktreeDir, 'out/report.md', '# report\n');
+  const staging = artifactStore.stagingDirFor({ runId: scheduler.jobArtifactRunId(job, RUN) });
+  write(staging, 'clip.mp4', 'video-bytes');
+
+  await scheduler.harvestJobArtifacts(job, worktreeDir, projectRoot);
+
+  expect(append).toHaveBeenCalledTimes(1);
+  const [cwd, epicId, text, meta] = append.mock.calls[0];
+  expect(cwd).toBe(projectRoot);
+  expect(epicId).toBe(EPIC);
+  expect(text).toBe('2 artifacts ready');
+  expect(meta.notice).toBe('artifact-ready');
+  expect(meta.artifacts.map((a) => a.title).sort()).toEqual(['clip.mp4', 'report.md']);
+
+  append.mockClear();
+  const empty = { slug: '4401-empty', epicId: EPIC, runId: RUN, artifactPaths: ['out/missing.png'] };
+  await scheduler.harvestJobArtifacts(empty, worktreeDir, projectRoot);
+  expect(append).not.toHaveBeenCalled();
+});

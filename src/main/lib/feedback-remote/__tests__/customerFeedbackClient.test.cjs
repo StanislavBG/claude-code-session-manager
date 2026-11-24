@@ -37,7 +37,7 @@ test('constants and base resolution', () => {
   expect(cf.FEEDBACK_SLUG).toBe('session-manager');
   expect(cf.TAGS).toEqual(['bug', 'feature', 'discussion']);
   expect(cf.MAX_TITLE).toBe(120);
-  expect(cf.MAX_BODY).toBe(4000);
+  expect(cf.MAX_BODY).toBe(5000);
   const prev = process.env.SM_FEEDBACK_ENDPOINT;
   process.env.SM_FEEDBACK_ENDPOINT = 'http://x.test/';
   expect(cf.resolveFeedbackBase()).toBe('http://x.test');
@@ -53,7 +53,7 @@ test('validateSubmission trims and rejects bad input', () => {
   expect(cf.validateSubmission({ title: ' ', body: 'x', tag: 'bug' }).ok).toBe(false);
   expect(cf.validateSubmission({ title: 'x', body: '', tag: 'bug' }).ok).toBe(false);
   expect(cf.validateSubmission({ title: 'x'.repeat(121), body: 'x', tag: 'bug' }).ok).toBe(false);
-  expect(cf.validateSubmission({ title: 'x', body: 'x'.repeat(4001), tag: 'bug' }).ok).toBe(false);
+  expect(cf.validateSubmission({ title: 'x', body: 'x'.repeat(5001), tag: 'bug' }).ok).toBe(false);
   const r = cf.validateSubmission({ title: 'x', body: 'x', tag: 'nope' });
   expect(r.ok).toBe(false);
   expect(typeof r.error).toBe('string');
@@ -216,4 +216,42 @@ test('invalid image entries are rejected without fetching', async () => {
     expect(f.calls).toHaveLength(0);
   }
   expect(cf.validateSubmission({ title: 'T', body: 'B', tag: 'bug', images: IMGS }).ok).toBe(true);
+});
+
+const CONTEXT = {
+  page: { url: 'https://x.test/a', title: 'A', viewport: { width: 800, height: 600, devicePixelRatio: 2, scrollX: 0, scrollY: 10 } },
+  marks: [{ kind: 'pin', n: 1, x: 1, y: 2, color: '#a83818', note: 'here' }],
+  console: [{ level: 'error', message: 'boom', timestamp: '2026-11-23T10:41:58.010Z', count: 2 }],
+  network: [{ method: 'GET', url: 'https://x.test/api', status: 500, durationMs: 12, timestamp: '2026-11-23T10:41:58.010Z' }],
+  client: { captureError: 'canvas tainted' },
+};
+
+test('submit sends a valid context unchanged in the POST body', async () => {
+  const f = mkFetch(201, { id: 'fbc' });
+  const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', context: CONTEXT }, deps(f));
+  expect(r.ok).toBe(true);
+  expect(JSON.parse(f.calls[0].init.body).context).toEqual(CONTEXT);
+  const f2 = mkFetch(201, { id: 'fbn' });
+  await cf.submit({ title: 'T', body: 'B', tag: 'bug' }, deps(f2));
+  expect('context' in JSON.parse(f2.calls[0].init.body)).toBe(false);
+});
+
+test('an oversize or invalid context is refused before any request', async () => {
+  const big = { ...CONTEXT, marks: [{ kind: 'pin', n: 1, x: 1, y: 2, color: '#a83818', note: 'x'.repeat(900) }] };
+  big.marks = Array.from({ length: 300 }, () => big.marks[0]);
+  for (const context of [big, { ...CONTEXT, extra: 1 }, { console: [{ level: 'warn' }] }, 'str']) {
+    const f = mkFetch(201, { id: 'x' });
+    const r = await cf.submit({ title: 'T', body: 'B', tag: 'bug', context }, deps(f));
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe('string');
+    expect(f.calls).toHaveLength(0);
+  }
+});
+
+test('a 5000-char body is sent', async () => {
+  const f = mkFetch(201, { id: 'fb5' });
+  const body = 'b'.repeat(5000);
+  const r = await cf.submit({ title: 'T', body, tag: 'bug' }, deps(f));
+  expect(r.ok).toBe(true);
+  expect(JSON.parse(f.calls[0].init.body).description).toBe(body);
 });

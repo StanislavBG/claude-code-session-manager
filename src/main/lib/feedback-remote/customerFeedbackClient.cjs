@@ -15,12 +15,13 @@
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const atomicFs = require('../util/atomicFs.cjs');
+const { parseContext } = require('./feedbackReport.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 
 const FEEDBACK_SLUG = 'session-manager';
 const TAGS = /** @type {const} */ (['bug', 'feature', 'discussion']);
 const MAX_TITLE = 120;
-const MAX_BODY = 4000;
+const MAX_BODY = 5000;
 const MAX_ITEMS = 500;
 const MAX_LOOKUP = 100;
 const TIMEOUT_MS = 15000;
@@ -75,8 +76,8 @@ function validateImages(raw) {
 }
 
 /**
- * @param {{ title?: unknown, body?: unknown, tag?: unknown, images?: unknown }} input
- * @returns {{ ok: true, value: { title: string, body: string, tag: string, images: FeedbackImage[] } } | { ok: false, error: string }}
+ * @param {{ title?: unknown, body?: unknown, tag?: unknown, images?: unknown, context?: unknown }} input
+ * @returns {{ ok: true, value: { title: string, body: string, tag: string, images: FeedbackImage[], context?: import('./feedbackReport.cjs').FeedbackContext } } | { ok: false, error: string }}
  */
 function validateSubmission(input) {
   const src = input || {};
@@ -92,7 +93,10 @@ function validateSubmission(input) {
   }
   const imgs = validateImages(src.images);
   if (!imgs.ok) return imgs;
-  return { ok: true, value: { title, body, tag, images: imgs.images } };
+  if (src.context === undefined || src.context === null) return { ok: true, value: { title, body, tag, images: imgs.images } };
+  const c = parseContext(src.context);
+  if (!c.ok) return { ok: false, error: `Invalid feedback context — ${c.error}` };
+  return { ok: true, value: { title, body, tag, images: imgs.images, context: c.context } };
 }
 
 function defaultStoreFile() {
@@ -174,7 +178,7 @@ function imageWarning(acked, sent) {
 }
 
 /**
- * @param {{ title?: unknown, body?: unknown, tag?: unknown, images?: unknown }} input
+ * @param {{ title?: unknown, body?: unknown, tag?: unknown, images?: unknown, context?: unknown }} input
  * @param {Deps} [deps]
  * @returns {Promise<{ ok: true, item: FeedbackItem, warning?: string } | { ok: false, error: string }>}
  */
@@ -182,7 +186,7 @@ async function submit(input, deps) {
   const v = validateSubmission(input);
   if (!v.ok) return v;
   const c = ctx(deps);
-  const { title, body, tag, images } = v.value;
+  const { title, body, tag, images, context } = v.value;
   try {
     const res = await c.fetchImpl(`${resolveFeedbackBase()}/api/projects/${FEEDBACK_SLUG}/feedback`, {
       method: 'POST',
@@ -194,6 +198,7 @@ async function submit(input, deps) {
         description: body,
         client: { app: 'session-manager', version: c.appVersion, platform: process.platform },
         ...(images.length > 0 ? { images } : {}),
+        ...(context ? { context } : {}),
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

@@ -19,7 +19,7 @@ function getClient() {
  * feedbackImages.prepareFeedbackImages, then calls client.submit. A prepare
  * error resolves { ok: false, error } without submitting; otherwise the
  * client's result (including any `warning`) is returned unchanged.
- * @param {{ title: string, body: string, tag: string, images?: { dataUrl: string }[], imagePaths?: string[] }} p
+ * @param {{ title: string, body: string, tag: string, images?: { dataUrl: string }[], imagePaths?: string[], context?: unknown }} p
  * @param {any} [client]
  * @param {(inputs: { dataUrl?: string, path?: string }[]) => Promise<any>} [prepare]
  */
@@ -32,7 +32,10 @@ async function submitFeedback(p, client = getClient(), prepare = require('./feed
   if (!prepared || !prepared.ok) {
     return { ok: false, error: prepared && typeof prepared.error === 'string' ? prepared.error : 'Images could not be prepared.' };
   }
-  return client.submit({ title: p.title, body: p.body, tag: p.tag, images: prepared.images });
+  return client.submit({
+    title: p.title, body: p.body, tag: p.tag, images: prepared.images,
+    ...(p.context !== undefined && p.context !== null ? { context: p.context } : {}),
+  });
 }
 
 /**

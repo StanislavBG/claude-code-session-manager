@@ -172,3 +172,49 @@ describe('parity with report.v1.json', () => {
     expect(P.user.oneOf[1].additionalProperties).toBe(true);
   });
 });
+
+describe('parseContext', () => {
+  test('accepts an empty object, each part alone and the example parts together', () => {
+    const ex = base();
+    const full = { page: ex.page, marks: ex.marks, console: ex.console, network: ex.network, client: { captureError: 'e' } };
+    for (const v of [{}, { page: ex.page }, { marks: [pin(), box(), text(), draw()] }, { console: [consoleEntry()] },
+      { network: [netEntry()] }, { console: null, network: null }, { client: { captureError: 'x'.repeat(200) } }, full]) {
+      const r = fr.parseContext(v);
+      expect(r).toMatchObject({ ok: true });
+    }
+    const r = fr.parseContext(full);
+    if (r.ok) expect(r.context).toEqual(full);
+  });
+  test('rejects parts that break Report v1 rules, unknown keys and non-objects', () => {
+    const bad = [
+      { marks: [{ ...pin(), color: '#000000' }] },
+      { console: Array.from({ length: 21 }, consoleEntry) },
+      { network: [{ ...netEntry(), status: 200 }] },
+      { client: { captureError: 'x'.repeat(201) } },
+      { page: { url: 'u' } },
+      { extra: 1 },
+      'nope', null, [],
+    ];
+    for (const v of bad) {
+      const r = fr.parseContext(v);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/^context/);
+    }
+  });
+  test('refuses JSON over 262144 bytes and accepts exactly at the limit', () => {
+    expect(fr.MAX_CONTEXT_BYTES).toBe(262144);
+    const ex = base();
+    const make = (n) => ({ page: { ...ex.page, url: 'u'.repeat(n) } });
+    const overhead = Buffer.byteLength(JSON.stringify(make(0)));
+    expect(fr.parseContext(make(262144 - overhead)).ok).toBe(true);
+    const r = fr.parseContext(make(262144 - overhead + 1));
+    expect(r).toEqual({ ok: false, error: 'context: too_big (over 262144 bytes)' });
+  });
+  test('never echoes contents and never throws on a cycle', () => {
+    const v = { page: { url: 'SECRET' } };
+    const r = fr.parseContext(v);
+    expect(JSON.stringify(r)).not.toContain('SECRET');
+    const cyc = {}; cyc.self = cyc;
+    expect(fr.parseContext(cyc).ok).toBe(false);
+  });
+});

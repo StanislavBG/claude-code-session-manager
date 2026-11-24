@@ -1685,10 +1685,12 @@ const telemetrySetConfig = z.object({
 
 const customerFeedbackSubmit = z.object({
   title: z.string().max(120),
-  body: z.string().max(4000),
+  body: z.string().max(5000),
   tag: z.enum(['bug', 'feature', 'discussion']),
   images: z.array(z.object({ dataUrl: z.string().max(35_000_000) })).max(5).optional(),
   imagePaths: z.array(z.string().max(4096)).max(5).optional(),
+  // Validated by feedbackReport.parseContext downstream (Report v1 rules, <= 262144 bytes).
+  context: z.unknown().optional(),
 });
 const customerFeedbackMarkSeen = z.object({ ids: z.array(z.string().max(200)).max(500).optional() });
 const customerFeedbackInboxList = z.object({ includeHidden: z.boolean().optional() });

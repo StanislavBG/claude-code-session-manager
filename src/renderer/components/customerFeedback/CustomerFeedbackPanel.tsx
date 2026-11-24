@@ -35,7 +35,7 @@ const TAG_LABEL: Record<CustomerFeedbackTag, string> = { bug: 'Bug', feature: 'F
 const SESSION_PHRASE = 'Send this to Session Manager as feedback, with any screenshots I attached.'
 
 const TITLE_MAX = 120
-const BODY_MAX = 4000
+const BODY_MAX = 5000
 const IMAGE_MAX = 5
 const IMAGE_MAX_BYTES = 25 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']

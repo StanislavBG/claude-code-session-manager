@@ -5,7 +5,7 @@
  * through customerFeedbackInbox.cjs:
  *   GET  /admin/customer-feedback/inbox?pull=1&includeHidden=1 -> { ok, items, pulled? }
  *   POST /admin/customer-feedback/status {id, status, note?}   -> { ok, item }
- *   POST /admin/customer-feedback/submit {title, body, tag, imagePaths?} -> { ok, item, warning? } | { ok:false, error }
+ *   POST /admin/customer-feedback/submit {title, body, tag, imagePaths?, context?} -> { ok, item, warning? } | { ok:false, error }
  *
  * submit is the customer path (no owner token needed): it runs the exact
  * submit the Feedback panel's customerFeedback:submit IPC uses
@@ -13,7 +13,8 @@
  * item + receipt land in the same local mirror. os.homedir() is replaced with
  * `~` in title and body first; the body text is never echoed or logged.
  * imagePaths (absolute only) are prepared by submitFeedback; image bytes are
- * never logged or echoed.
+ * never logged or echoed. context (the widget's page/marks/console/network) is validated by
+ * feedbackReport.parseContext (Report v1 rules, <= 262144 bytes) and forwarded unchanged.
  *
  * Deliberately NO route that mints an Epic (SINGLE-CREATOR LAW, epicMint.cjs).
  * Responses never carry the owner token — the inbox lib redacts it from errors.
@@ -131,9 +132,20 @@ function submitHandler(submitDep) {
         sendJson(res, 400, { ok: false, error: 'imagePaths must be absolute paths' });
         return;
       }
+      /** @type {import('./feedbackReport.cjs').FeedbackContext | undefined} */
+      let context;
+      if (body.context !== undefined && body.context !== null) {
+        const c = require('./feedbackReport.cjs').parseContext(body.context);
+        if (!c.ok) {
+          sendJson(res, 400, { ok: false, error: `invalid submission: ${c.error}` });
+          return;
+        }
+        context = c.context;
+      }
       const result = await submit({
         title: redactHome(title), body: redactHome(text), tag,
         ...(imagePaths && imagePaths.length ? { imagePaths } : {}),
+        ...(context ? { context } : {}),
       });
       if (!result || !result.ok) {
         sendJson(res, 502, { ok: false, error: result && typeof result.error === 'string' ? result.error : 'submit failed' });
@@ -148,7 +160,7 @@ function submitHandler(submitDep) {
 
 /**
  * @param {any} adminHttp
- * @param {{ inbox?: any, submit?: (p: { title: string, body: string, tag: string, imagePaths?: string[] }) => Promise<any> }} [opts] test seams
+ * @param {{ inbox?: any, submit?: (p: { title: string, body: string, tag: string, imagePaths?: string[], context?: import('./feedbackReport.cjs').FeedbackContext }) => Promise<any> }} [opts] test seams
  */
 function registerAdminRoute(adminHttp, opts = {}) {
   adminHttp.registerRoute('GET', '/admin/customer-feedback/inbox', inboxHandler(opts.inbox));

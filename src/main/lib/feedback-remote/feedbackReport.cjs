@@ -147,6 +147,49 @@ function parseReport(value) {
   return { ok: false, error: `${where}: ${issue ? issue.code : 'invalid'}` };
 }
 
+const MAX_CONTEXT_BYTES = 262144;
+
+/**
+ * The structured widget context the host stores opaquely (Bilko 76e88612: <= 262144 bytes of
+ * JSON, 413 above). Every part is optional; each part that is present obeys the Report v1 rules.
+ */
+const contextSchema = z.strictObject({
+  page: reportSchema.shape.page.optional(),
+  marks: reportSchema.shape.marks.optional(),
+  console: reportSchema.shape.console.optional(),
+  network: reportSchema.shape.network.optional(),
+  client: z.strictObject({
+    widgetVersion: z.string().optional(),
+    captureError: z.string().max(MAX_CAPTURE_ERROR).optional(),
+  }).optional(),
+});
+
+/**
+ * @typedef {z.infer<typeof contextSchema>} FeedbackContext
+ * @typedef {{ ok: true, context: FeedbackContext } | { ok: false, error: string }} ContextResult
+ */
+
+/**
+ * Validate an untrusted feedback context. Never throws; errors name only the path and issue code.
+ * @param {unknown} value
+ * @returns {ContextResult}
+ */
+function parseContext(value) {
+  let bytes;
+  try {
+    const json = JSON.stringify(value);
+    bytes = typeof json === 'string' ? Buffer.byteLength(json, 'utf8') : 0;
+  } catch {
+    return { ok: false, error: 'context: not serializable' };
+  }
+  if (bytes > MAX_CONTEXT_BYTES) return { ok: false, error: `context: too_big (over ${MAX_CONTEXT_BYTES} bytes)` };
+  const r = contextSchema.safeParse(value);
+  if (r.success) return { ok: true, context: r.data };
+  const issue = r.error.issues[0];
+  const where = issue && issue.path.length ? `context.${issue.path.map(String).join('.')}` : 'context';
+  return { ok: false, error: `${where}: ${issue ? issue.code : 'invalid'}` };
+}
+
 /**
  * Map a report type to the customer feedback inbox tag.
  * @param {(typeof REPORT_TYPES)[number]} type
@@ -158,8 +201,11 @@ function toInboxTag(type) {
 
 module.exports = {
   parseReport,
+  parseContext,
   toInboxTag,
   reportSchema,
+  contextSchema,
+  MAX_CONTEXT_BYTES,
   SCHEMA_VERSION,
   REPORT_TYPES,
   MARK_COLORS,

@@ -158,7 +158,7 @@ test('submit validation: invalid tag, over-length title, bad JSON give 400 with 
   for (const call of [
     { body: { title: 't', body: 'b', tag: 'praise' } },
     { body: { title: 'x'.repeat(121), body: 'b', tag: 'bug' } },
-    { body: { title: 't', body: 'x'.repeat(4001), tag: 'feature' } },
+    { body: { title: 't', body: 'x'.repeat(5001), tag: 'feature' } },
     { rawBody: '{nope' },
   ]) {
     const r = await adminHttp.call('POST', url, call);
@@ -211,4 +211,39 @@ test('submit success passes the submit warning through', async () => {
   });
   expect(r.status).toBe(200);
   expect(r.body).toEqual({ ok: true, item: { id: 'f1' }, warning });
+});
+
+const CONTEXT = {
+  page: { url: 'https://x.test/a', title: 'A', viewport: { width: 800, height: 600, devicePixelRatio: 1, scrollX: 0, scrollY: 0 } },
+  marks: [{ kind: 'box', n: 1, x: 1, y: 2, w: 10, h: 10, color: '#f4b942', note: '' }],
+  console: null,
+  network: [{ method: 'POST', url: 'https://x.test/api', status: 'timeout', durationMs: 30000, timestamp: '2026-11-23T10:41:58.010Z' }],
+  client: { captureError: 'x' },
+};
+
+test('submit forwards a validated context round trip', async () => {
+  const { adminHttp, calls } = setupSubmit();
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body: 'b', tag: 'bug', context: CONTEXT } });
+  expect(r.status).toBe(200);
+  expect(calls).toEqual([{ title: 't', body: 'b', tag: 'bug', context: CONTEXT }]);
+});
+
+test('submit refuses an oversize or invalid context with 400 before any submit', async () => {
+  const { adminHttp, calls } = setupSubmit();
+  const oversize = { ...CONTEXT, page: { ...CONTEXT.page, url: 'u'.repeat(262144) } };
+  for (const context of [oversize, { ...CONTEXT, marks: [{ kind: 'nope' }] }, { bogus: true }]) {
+    const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body: 'b', tag: 'bug', context } });
+    expect(r.status).toBe(400);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.error).toMatch(/^invalid submission: context/);
+  }
+  expect(calls).toEqual([]);
+});
+
+test('submit accepts a 5000-char body', async () => {
+  const { adminHttp, calls } = setupSubmit();
+  const body = 'b'.repeat(5000);
+  const r = await adminHttp.call('POST', '/admin/customer-feedback/submit', { body: { title: 't', body, tag: 'feature' } });
+  expect(r.status).toBe(200);
+  expect(calls[0].body).toBe(body);
 });

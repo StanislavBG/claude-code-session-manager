@@ -14303,7 +14303,12 @@ const remote = {
   // Continue an interrupted job: dispatch the SAME session via
   // `--resume <interrupted.sessionId>` (spawnJob with a resumeTarget, like
   // resume recovery and tool-confirmation resumes). Refused while the old
-  // process is still exiting, or when no session slot is free.
+  // process is still exiting, when no session slot is free, or while the
+  // auto-dispatch hold (usage threshold / firePolicy 'manual') is in force.
+  // No human bypass: the only caller is the loopback admin route, which any
+  // local process holding the admin token can hit, so it cannot prove a
+  // human pressed anything. A refusal leaves the row interrupted, so the same
+  // call succeeds once the hold clears.
   async continueJob(slug, opts = {}) {
     if (!SCHEDULE_SLUG_RE.test(slug)) return { ok: false, error: 'invalid slug' };
     const state = await readQueue();
@@ -14316,6 +14321,15 @@ const remote = {
     if (!sessionId) return { ok: false, error: 'interrupted job has no session id to resume' };
     if (runningSet.has(slug)) return { ok: false, error: 'the interrupted run is still shutting down — try again in a moment' };
     if (sessionSlots.availableFor('job') < 1) return { ok: false, error: 'no session slot free right now — try again when a job finishes' };
+    const hold = currentAutoDispatchHold(state.config);
+    if (hold) {
+      appendAuditEvent('job_continue_held', { slug, reason: hold.reason });
+      return {
+        ok: false,
+        error: `usage hold in force: ${hold.detail} - continue again once it clears`,
+        hold: { reason: hold.reason, window: hold.window, percent: hold.percent, threshold: hold.threshold, resetsAt: hold.resetsAt },
+      };
+    }
     const target = {
       sessionId,
       interrupt: true,

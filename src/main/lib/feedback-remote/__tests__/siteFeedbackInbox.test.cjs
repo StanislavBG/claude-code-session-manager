@@ -158,3 +158,31 @@ test('bad hostIds are rejected everywhere and nothing is written', async () => {
   }
   expect(fs.existsSync(ns(cwd))).toBe(false);
 });
+
+test('writeItem registers an unregistered project root itself (real config.cjs boundary)', async () => {
+  // validatePath only admits paths under the home directory, so the fresh root lives there.
+  const base = path.join(os.homedir(), '.cache');
+  fs.mkdirSync(base, { recursive: true });
+  const cwd = fs.realpathSync(await fsp.mkdtemp(path.join(base, 'sm-site-inbox-unreg-')));
+  tmpDirs.push(cwd);
+  expect(config.getAllowedRoots()).not.toContain(cwd);
+  expect(await inbox.writeItem(item(cwd, 'FB-UNRG1', '2026-11-24T10:00:00.000Z')))
+    .toEqual({ duplicate: false, hostId: 'FB-UNRG1' });
+  expect(fs.existsSync(path.join(ns(cwd), 'items', 'FB-UNRG1', 'meta.json'))).toBe(true);
+  await inbox.setStatus(cwd, 'FB-UNRG1', 'resolved');
+  await inbox.appendRejected({ cwd, at: '2026-11-24T10:00:00.000Z', boxId: 'box_1', hostId: 'FB-X', code: 'bad_envelope', bytes: 3 });
+  expect(fs.existsSync(path.join(ns(cwd), 'rejected.jsonl'))).toBe(true);
+});
+
+test('write paths refuse a relative or missing cwd', async () => {
+  const missing = path.join(os.homedir(), '.cache', `sm-site-inbox-missing-${process.pid}-${Date.now()}`);
+  for (const cwd of ['relative/project', missing]) {
+    await expect(inbox.writeItem(item(cwd, 'FB-MISS1', '2026-11-24T10:00:00.000Z'))).rejects.toThrow(/cwd/);
+    await expect(inbox.setStatus(cwd, 'FB-MISS1', 'open')).rejects.toThrow(/cwd/);
+    await expect(inbox.linkEpic(cwd, 'FB-MISS1', 'e1')).rejects.toThrow(/cwd/);
+    await expect(inbox.remove(cwd, 'FB-MISS1')).rejects.toThrow(/cwd/);
+    await expect(inbox.prune(cwd, 30)).rejects.toThrow(/cwd/);
+    await expect(inbox.appendRejected({ cwd, at: 'x', boxId: 'b', hostId: '', code: 'bad_envelope', bytes: 0 })).rejects.toThrow(/cwd/);
+  }
+  expect(fs.existsSync(missing)).toBe(false);
+});

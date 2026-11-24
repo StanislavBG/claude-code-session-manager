@@ -13,6 +13,9 @@
  *     goneBoxes and skipped until its keystore record is removed.
  *   - projectCwd missing -> box held (not drained, nothing acked), reported in heldBoxes.
  *
+ *   - any throw -> box stopped for this pass, logged with a fixed code from classifyError
+ *     (write_denied, io_error, relay_error, open_failed, keystore_error).
+ *
  * Nothing logged ever carries report text, image bytes, a private key or the device token: log
  * lines name only box ids and fixed codes.
  */
@@ -79,6 +82,29 @@ function safeCode(code) {
   return typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code) ? code : 'unknown';
 }
 
+/** @typedef {'keystore' | 'relay' | 'open' | 'write'} DrainStage */
+
+const DENIED_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
+
+/**
+ * Map an error thrown mid-box to a fixed, content-free code for the log line. A write-stage
+ * error without a system errno is a boundary/ownership refusal (config.cjs validateWrite,
+ * opsOwnership assertOpsWrite, siteFeedbackInbox's own cwd checks): write_denied.
+ * @param {DrainStage} stage
+ * @param {unknown} e
+ * @returns {string}
+ */
+function classifyError(stage, e) {
+  const code = e && typeof e === 'object' ? /** @type {any} */ (e).code : undefined;
+  if (stage === 'write') {
+    if (typeof code !== 'string' || DENIED_CODES.has(code)) return 'write_denied';
+    return 'io_error';
+  }
+  if (stage === 'relay') return 'relay_error';
+  if (stage === 'open') return 'open_failed';
+  return 'keystore_error';
+}
+
 /**
  * A drain instance: its own single-flight promise, gone set and 429 deferrals.
  * @param {DrainDeps} [defaults]
@@ -136,12 +162,14 @@ function createDrain(defaults = {}) {
    * @param {Record<string, unknown>} privateKeyJwk
    * @param {ReturnType<typeof resolveDeps>} d
    * @param {DrainResult} result
+   * @param {{ stage: DrainStage }} ctx  updated before each step so a throw can be classified
    */
-  async function drainBox(box, privateKeyJwk, d, result) {
+  async function drainBox(box, privateKeyJwk, d, result, ctx) {
     const { boxId, projectCwd: cwd } = box;
     /** @type {Set<string>} */
     const handled = new Set();
     for (let page = 0; page < MAX_PAGES_PER_BOX; page++) {
+      ctx.stage = 'relay';
       const listed = await d.relay.listEnvelopes(boxId, PAGE_LIMIT);
       if (!listed.ok) {
         if (onRelayFailure(boxId, listed, d) === 'gone') result.goneBoxes.push(boxId);
@@ -151,6 +179,7 @@ function createDrain(defaults = {}) {
       if (fresh.length === 0) return;
       for (const env of fresh) {
         handled.add(env.envelopeId);
+        ctx.stage = 'relay';
         const got = await d.relay.getEnvelope(boxId, env.envelopeId);
         if (!got.ok) {
           if (got.status === 404 && got.error === 'envelope_not_found') continue;
@@ -162,9 +191,11 @@ function createDrain(defaults = {}) {
         const metaOk = HOST_ID_RE.test(hostId)
           && typeof env.receivedAt === 'string' && env.receivedAt.length > 0
           && typeof env.origin === 'string' && env.origin.length > 0;
+        ctx.stage = 'open';
         const opened = metaOk
           ? await openReportEnvelope(got.body, { privateKeyJwk, boxId })
           : /** @type {const} */ ({ ok: false, code: 'bad_metadata' });
+        ctx.stage = 'write';
         if (!opened.ok) {
           await d.inbox.appendRejected({ cwd, at: new Date(d.now()).toISOString(), boxId, hostId, code: opened.code, bytes });
           result.rejected += 1;
@@ -177,6 +208,7 @@ function createDrain(defaults = {}) {
           if (w.duplicate) result.duplicates += 1;
           else result.stored += 1;
         }
+        ctx.stage = 'relay';
         const acked = await d.relay.ackEnvelope(boxId, env.envelopeId);
         if (!acked.ok) {
           if (acked.status === 404 && acked.error === 'envelope_not_found') continue;
@@ -221,13 +253,14 @@ function createDrain(defaults = {}) {
         result.heldBoxes.push(box.boxId);
         continue;
       }
+      /** @type {{ stage: DrainStage }} */
+      const ctx = { stage: 'keystore' };
       try {
         const key = await d.keystore.getPrivateKey(box.boxId);
         if (!key) continue;
-        await drainBox(box, key, d, result);
+        await drainBox(box, key, d, result, ctx);
       } catch (e) {
-        const name = e instanceof Error ? e.name : 'Error';
-        d.log(`box ${box.boxId} stopped for this pass (${name})`);
+        d.log(`box ${box.boxId} stopped for this pass (${classifyError(ctx.stage, e)})`);
       }
     }
     return result;

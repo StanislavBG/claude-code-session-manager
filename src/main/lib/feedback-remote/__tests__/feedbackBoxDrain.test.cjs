@@ -324,3 +324,39 @@ test('startDrainLoop exposes drainNow and runs on an unref\'d timer', async () =
   expect(typeof drainMod.drainOnce).toBe('function');
   expect(typeof drainMod.startDrainLoop).toBe('function');
 });
+
+test('a box whose project root nothing registered is stored and acked', async () => {
+  const base = path.join(os.homedir(), '.cache');
+  fs.mkdirSync(base, { recursive: true });
+  const fresh = fs.realpathSync(fs.mkdtempSync(path.join(base, 'fb-drain-unreg-')));
+  try {
+    expect(config.getAllowedRoots()).not.toContain(fresh);
+    const box = await newBox(fresh);
+    const id = crypto.randomUUID();
+    await submit(mock.baseUrl, box.boxId, await sealedReport(id, box.publicKey, box.boxId), id);
+    const r = await drainMod.createDrain().drainOnce(deps());
+    expect(logs).toEqual([]);
+    expect(r).toEqual({ stored: 1, duplicates: 0, rejected: 0, goneBoxes: [], heldBoxes: [] });
+    expect(mock.state.envelopes.get(box.boxId)).toHaveLength(0);
+    expect(await inbox.list(fresh)).toHaveLength(1);
+    expectCleanLogs(box);
+  } finally {
+    await fsp.rm(fresh, { recursive: true, force: true });
+  }
+});
+
+test('a write failure logs a classified safe code, not the bare error name', async () => {
+  const box = await newBox();
+  const id = crypto.randomUUID();
+  await submit(mock.baseUrl, box.boxId, await sealedReport(id, box.publicKey, box.boxId), id);
+  const denying = { ...inbox, writeItem: async () => { throw new Error(`Write outside allowed write boundaries: ${SECRET_TITLE}`); } };
+  const r = await drainMod.createDrain().drainOnce({ ...deps(), inbox: denying });
+  expect(r.stored).toBe(0);
+  expect(mock.state.envelopes.get(box.boxId)).toHaveLength(1);
+  expect(logs).toEqual([`box ${box.boxId} stopped for this pass (write_denied)`]);
+  const ioErr = Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+  logs = [];
+  await drainMod.createDrain().drainOnce({ ...deps(), inbox: { ...inbox, writeItem: async () => { throw ioErr; } } });
+  expect(logs).toEqual([`box ${box.boxId} stopped for this pass (io_error)`]);
+  expectCleanLogs(box);
+});

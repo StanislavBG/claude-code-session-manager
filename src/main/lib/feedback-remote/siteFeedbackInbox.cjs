@@ -18,10 +18,14 @@
  * path is checked to stay inside the namespace. Writes are serialized in-process so dedupe on
  * report.clientReportId cannot race.
  *
+ * Every write path first registers cwd (absolute, existing) with config.addAllowedRoot, so a
+ * project root nothing else registered this session is still writable.
+ *
  * `statusChangedAt` (receivedAt at write, then the time of each setStatus) is what prune() ages.
  */
 'use strict';
 
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const config = require('../../config.cjs');
@@ -118,6 +122,24 @@ function ensureIgnore(cwd) {
   ensureRuntimeIgnores(resolveProjectRoot(cwd));
 }
 
+/**
+ * Widen config.cjs's write boundary to this project root right before a write, as
+ * projectHomeAdminRoutes.cjs does: the drain reaches projects no pty/route registered this
+ * session. Refuses a relative or missing cwd so the boundary is never widened to a guess.
+ * @param {unknown} cwd
+ * @returns {string}
+ */
+function registerRoot(cwd) {
+  if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) {
+    throw new Error('siteFeedbackInbox: cwd must be an absolute path');
+  }
+  let isDir = false;
+  try { isDir = fs.statSync(cwd).isDirectory(); } catch { /* missing */ }
+  if (!isDir) throw new Error('siteFeedbackInbox: cwd does not exist or is not a directory');
+  config.addAllowedRoot(cwd);
+  return cwd;
+}
+
 /** @param {unknown} v @param {string} name */
 function requireString(v, name) {
   if (typeof v !== 'string' || !v) throw new Error(`siteFeedbackInbox: ${name} must be a non-empty string`);
@@ -146,6 +168,7 @@ async function writeItem(args) {
   const clientReportId = requireString(report.clientReportId, 'report.clientReportId');
   requireBuffer(screenshot, 'screenshot');
   requireBuffer(annotated, 'annotated');
+  registerRoot(cwd);
   return serialize(async () => {
     for (const id of await listHostIds(cwd)) {
       const existing = await readJsonFile(itemPath(cwd, id, 'report.json'));
@@ -157,6 +180,7 @@ async function writeItem(args) {
     } catch (e) {
       if (/** @type {any} */ (e).code !== 'ENOENT') throw e;
     }
+    registerRoot(cwd);
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'screenshot.png'), screenshot, { writer: WRITER });
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'annotated.png'), annotated, { writer: WRITER });
     await writeJson(itemPath(cwd, hostId, 'report.json'), report);
@@ -188,6 +212,7 @@ async function appendRejected(args) {
   if (typeof hostId !== 'string') throw new Error('siteFeedbackInbox: hostId must be a string');
   if (typeof code !== 'string' || !REJECT_CODE_RE.test(code)) throw new Error('siteFeedbackInbox: code must be a short snake_case code');
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) throw new Error('siteFeedbackInbox: bytes must be a non-negative number');
+  registerRoot(cwd);
   const line = JSON.stringify({ at, boxId, hostId: hostId.slice(0, 64), code, bytes }) + '\n';
   const file = path.join(nsRoot(cwd), 'rejected.jsonl');
   return serialize(async () => {
@@ -195,6 +220,7 @@ async function appendRejected(args) {
     let prev = '';
     try { prev = await fsp.readFile(file, 'utf8'); } catch { /* first line */ }
     if (prev && !prev.endsWith('\n')) prev += '\n';
+    registerRoot(cwd);
     await config.writeTextAtomic(file, prev + line, { writer: WRITER });
     ensureIgnore(cwd);
   });
@@ -270,10 +296,12 @@ async function get(cwd, hostId) {
  */
 async function updateMeta(cwd, hostId, patch) {
   assertHostId(hostId);
+  registerRoot(cwd);
   return serialize(async () => {
     const meta = await readMeta(cwd, hostId);
     if (!meta) throw new Error(`siteFeedbackInbox: no item ${hostId}`);
     const next = patch(meta);
+    registerRoot(cwd);
     await writeJson(itemPath(cwd, hostId, 'meta.json'), next);
     ensureIgnore(cwd);
     return next;
@@ -313,6 +341,7 @@ async function linkEpic(cwd, hostId, epicId) {
 /** @param {string} cwd @param {string} hostId */
 async function removeNow(cwd, hostId) {
   const dir = itemPath(cwd, hostId);
+  registerRoot(cwd);
   assertOpsWrite(dir, WRITER);
   await fsp.rm(dir, { recursive: true, force: true });
 }
@@ -324,6 +353,7 @@ async function removeNow(cwd, hostId) {
  */
 async function remove(cwd, hostId) {
   assertHostId(hostId);
+  registerRoot(cwd);
   return serialize(async () => {
     let existed = true;
     try { await fsp.access(itemPath(cwd, hostId)); } catch { existed = false; }
@@ -343,6 +373,7 @@ async function prune(cwd, days, opts = {}) {
   if (typeof days !== 'number' || !Number.isFinite(days) || days < 0) {
     throw new Error('siteFeedbackInbox: days must be a non-negative number');
   }
+  registerRoot(cwd);
   const cutoff = (opts.now ?? Date.now()) - days * DAY_MS;
   return serialize(async () => {
     /** @type {string[]} */

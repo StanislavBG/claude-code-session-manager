@@ -9,7 +9,7 @@ import { registerRemoteNewSession } from '../remoteNewSession'
 
 const payload: {
   cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string; externalRef?: string
-  requestId?: string; via?: 'script'; effort?: string
+  requestId?: string; via?: 'script'; effort?: string; reviewStage?: boolean
 } = {
   cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', prompt: 'do it',
 }
@@ -142,5 +142,33 @@ describe('registerRemoteNewSession', () => {
     expect(toastError).toHaveBeenCalledWith(`Script session start failed: ${long}`)
     expect(toastError.mock.calls[0][0]).toMatch(/^Script session start failed/)
     expect(logWrite).toHaveBeenCalledWith('webRemote', 'warn', `script session start failed for dev-lead in /p: ${long}`)
+  })
+
+  it('a scripted job press with reviewStage forwards it and reports entryId/slug/stage', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e9', claudeSessionId: 's', entryId: 'v1', slug: 'demo-1', stage: 'review' })
+    macrosList.mockResolvedValue([{ id: 'm1', job: { estimateMinutes: 5, artifactPaths: [] } }])
+    registerRemoteNewSession()
+    await fire({ ...payload, via: 'script', macroId: 'm1', requestId: 'r9', reviewStage: true })
+    expect(launchSession).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'job', reviewStage: true }))
+    expect(reportResult).toHaveBeenCalledWith({ requestId: 'r9', ok: true, epicId: 'e9', entryId: 'v1', slug: 'demo-1', stage: 'review' })
+  })
+
+  it('a phone (non-script) job payload with reviewStage does not forward it', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e', claudeSessionId: 's' })
+    macrosList.mockResolvedValue([{ id: 'm1', job: { estimateMinutes: 5, artifactPaths: [] } }])
+    registerRemoteNewSession()
+    await fire({ ...payload, macroId: 'm1', reviewStage: true })
+    const arg = launchSession.mock.calls[0][0]
+    expect(arg.run).toBe('job')
+    expect(arg).not.toHaveProperty('reviewStage')
+  })
+
+  it('a scripted chat macro with reviewStage does not forward it and reports only epicId', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e3', claudeSessionId: 's' })
+    macrosList.mockResolvedValue([{ id: 'm1' }])
+    registerRemoteNewSession()
+    await fire({ ...payload, via: 'script', macroId: 'm1', requestId: 'r4', reviewStage: true })
+    expect(launchSession.mock.calls[0][0]).not.toHaveProperty('reviewStage')
+    expect(reportResult).toHaveBeenCalledWith({ requestId: 'r4', ok: true, epicId: 'e3' })
   })
 })

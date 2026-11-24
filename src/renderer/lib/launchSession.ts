@@ -57,7 +57,18 @@ export async function resolvePersonaBody(
   }
 }
 
-export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
+export interface LaunchSessionResult {
+  epicId: string
+  claudeSessionId: string
+  /** run 'job' only: the Project Home entry the queued build feeds, when dispatchJob named one. */
+  entryId?: string
+  /** run 'job' only: the queued build's slug. */
+  slug?: string
+  /** run 'job' only: the queued build's stage; null when it has none. */
+  stage?: 'review' | 'final' | null
+}
+
+export async function launchSession(input: LaunchSessionInput): Promise<LaunchSessionResult> {
   const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, inputValues, reviewStage, voiceId, effort, approve = true, origin } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
@@ -96,7 +107,16 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     }
     const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions, ...(effort ? { effort } : {}), ...(inputValues ? { inputValues } : {}), ...(reviewStage ? { reviewStage: true } : {}), ...(voiceId ? { voiceId } : {}) })
     if (!res.ok) throw new Error(`"${title}" session was created but its build was not queued: ${res.error} — press it again to retry.`)
-    return { epicId: session.id, claudeSessionId: session.claudeSessionId }
+    // main's dispatch-job also returns entryId + stage for a Video tool / Demo Video build.
+    const extra = res as { entryId?: unknown; stage?: unknown }
+    const stage = extra.stage === 'review' || extra.stage === 'final' || extra.stage === null ? extra.stage : undefined
+    return {
+      epicId: session.id,
+      claudeSessionId: session.claudeSessionId,
+      ...(typeof res.slug === 'string' && res.slug ? { slug: res.slug } : {}),
+      ...(typeof extra.entryId === 'string' && extra.entryId ? { entryId: extra.entryId } : {}),
+      ...(stage !== undefined ? { stage } : {}),
+    }
   }
   useChat.getState().send({
     tabId: session.id,

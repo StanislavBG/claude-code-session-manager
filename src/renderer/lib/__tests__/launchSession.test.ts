@@ -170,7 +170,20 @@ describe('launchSession', () => {
     expect(calls).toEqual(['compose', 'create', 'approve'])
     expect(dispatchJob).toHaveBeenCalledWith({ cwd: '/p', macroId: 'm9', epicId: 'e1', extraInstructions: 'x' })
     expect(send).not.toHaveBeenCalled()
-    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1', slug: 's' })
+  })
+
+  it("run 'job': returns the dispatched entryId, slug and stage", async () => {
+    dispatchJob.mockResolvedValue({ ok: true, slug: 'demo-1', epicId: 'e1', entryId: 'v1', stage: 'review' })
+    const out = await launchSession({ ...input, macroId: 'm9', run: 'job', reviewStage: true })
+    expect(dispatchJob.mock.calls[0][0]).toMatchObject({ reviewStage: true })
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1', entryId: 'v1', slug: 'demo-1', stage: 'review' })
+  })
+
+  it("run 'job': a stage null result reports stage null with no entryId", async () => {
+    dispatchJob.mockResolvedValue({ ok: true, slug: 's', epicId: 'e1', stage: null })
+    const out = await launchSession({ ...input, macroId: 'm9', run: 'job' })
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1', slug: 's', stage: null })
   })
 
   it("run 'job': an { ok: false } result throws its error text", async () => {

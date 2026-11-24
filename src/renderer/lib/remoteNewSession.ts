@@ -19,7 +19,7 @@ function report(result: ChatExternalNewSessionResult): void {
 }
 
 export function registerRemoteNewSession(): () => void {
-  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, externalRef, requestId, via, effort }) => {
+  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, externalRef, requestId, via, effort, reviewStage }) => {
     const isScript = via === 'script'
     try {
       let agentDescription: string | undefined
@@ -40,7 +40,9 @@ export function registerRemoteNewSession(): () => void {
       const marker = '\n\nAdditional instructions: '
       const at = prompt.indexOf(marker)
       const extra = isJob && at >= 0 ? prompt.slice(at + marker.length) : ''
-      const { epicId } = await launchSession({
+      // Only a scripted job press may ask for a review cut; the phone path never forwards it.
+      const forwardReview = reviewStage === true && isScript && isJob
+      const { epicId, entryId, slug, stage } = await launchSession({
         cwd, agentName, tag, title, goal: prompt, agentDescription,
         source: isScript ? `Script ${agentName}` : 'WebRemote ' + agentName,
         // A script-typed prompt must never enter humanPromptLedger as a verified human quote.
@@ -50,8 +52,16 @@ export function registerRemoteNewSession(): () => void {
         ...(isJob ? { run: 'job' as const } : {}),
         ...(extra ? { extraInstructions: extra } : {}),
         ...(typeof effort === 'string' && effort ? { effort } : {}),
+        ...(forwardReview ? { reviewStage: true } : {}),
       })
-      if (requestId) report({ requestId, ok: true, epicId })
+      if (requestId) {
+        report({
+          requestId, ok: true, epicId,
+          ...(entryId ? { entryId } : {}),
+          ...(slug ? { slug } : {}),
+          ...(stage !== undefined ? { stage } : {}),
+        })
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       // main's chatExternalNewSessionResult caps error at 500; an over-long report is rejected and the caller times out.

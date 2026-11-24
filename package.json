@@ -112,7 +112,7 @@
   ],
   "author": "bilkobibitkov",
   "license": "MIT",
-  "homepage": "https://bilko.run/projects/session-manager/",
+  "homepage": "https://bilko.run/products/session-manager",
   "repository": {
     "type": "git",
     "url": "https://github.com/StanislavBG/claude-code-session-manager.git"
@@ -127,7 +127,7 @@
     },
     {
       "type": "individual",
-      "url": "https://bilko.run/projects/session-manager/"
+      "url": "https://bilko.run/products/session-manager"
     }
   ],
   "publishConfig": {

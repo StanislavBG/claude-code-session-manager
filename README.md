@@ -397,7 +397,7 @@ Run `npm run readme:build` after you change MCP tools, skills, packs, personas o
 | Link | URL |
 | --- | --- |
 | Field Manual | https://bilko.run/manual |
-| Product page | https://bilko.run/projects/session-manager/ |
+| Product page | https://bilko.run/products/session-manager |
 | Source | https://github.com/StanislavBG/claude-code-session-manager |
 | Releases | https://github.com/StanislavBG/claude-code-session-manager/releases |
 | Issues | https://github.com/StanislavBG/claude-code-session-manager/issues |

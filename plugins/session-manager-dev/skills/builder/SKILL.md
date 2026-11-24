@@ -125,6 +125,10 @@ have no `release.yml`) always use steps 5-11:
     ```
     Report the installer assets found (here: `.dmg`, `.exe`, `.AppImage`) and any missing. If
     no run is listed yet, say so instead of polling.
+12. Post-publish steps. If the project's distribution doc (its conventions or release doc)
+    lists steps to run after the npm publish, run each one in order and record its result —
+    done, failed with its output, or skipped and why. A failed post-publish step never undoes the
+    npm publish; report it and carry on with the rest.
 
 On any failing step: stop there and report the step and its output. Once the worktree exists,
 leave it only when its state is evidence for the failure; otherwise remove it (step 9) so a
@@ -146,6 +150,7 @@ One plain-text report, whether the pipeline finished or stopped:
 - **Registry**: packument `dist-tags` / version and tarball status.
 - **Git**: both pushes confirmed, worktree removed.
 - **Installer release**: assets found and missing, or "no release workflow".
+- **Post-publish steps**: each listed step and its result, or "none listed".
 - **Manual**: `manual.md`'s report, "no content change", or "no manual".
 - **Stopped early?** Which step, why, its output, and anything a retry must account for
   (a leftover worktree or local tag).

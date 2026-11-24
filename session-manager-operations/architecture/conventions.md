@@ -117,3 +117,17 @@ prebuilds, with no postinstall step. Linux+darwin only.
 
 **Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
 `SimpleShell.tsx`, `DEFAULT_PRESETS[0]`; no persisted-tab hydration).
+
+**Phone bundle ships with every release** (post-publish step). Releases 0.138–0.142 reached npm
+while bilko.run/projects/session-manager kept serving the 2026-11-15 phone build (gitSha
+`66eee675`), so its copy and features drifted from the desktop. After `npm publish`:
+
+1. Build `web/remote-app` from the release tag in a detached worktree
+   (`git worktree add --detach <path> v<version>`, then `npm ci && npm run build` in
+   `web/remote-app`). That build also copies `widget/v1` from `web/feedback-widget`
+   (`copy-widget.mjs`) and writes `manifest.json` (`emit-manifest.mjs`).
+2. Publish the built folder with bilko-host `publish_static_project` for slug `session-manager`.
+3. Confirm the live `manifest.json` `gitSha` is the tag's commit (`git rev-list -n1 v<version>`).
+
+One standing gate bypass: **golden** — the gate looks for `<repo root>/tests/golden.spec.ts`, but the
+phone's golden spec is `web/remote-app/tests/golden.spec.ts`. Every other gate must pass.

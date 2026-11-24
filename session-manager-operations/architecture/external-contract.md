@@ -432,6 +432,12 @@ watcher stay readable.
 | `blockedKind` | Present only when `to` is `"blocked"`: the `blocked.kind` of `GET /admin/epic`. |
 | `externalRef` | Present only when the Epic has one. |
 
+Version note: 0.142.0 served `epic_state_changed` rows derived at read time from lifecycle transitions
+only (`to` one of `awaiting_approval`, `open`, `closed`; no `blockedKind`). Those rows were never stored,
+so they do not appear after upgrading. Versions after 0.142.0 serve the fine-grained rows again, and rows
+written by 0.141.0's watcher stay readable. A reader that followed Epics on 0.142.0 should, after
+upgrading, **re-read the states** it cares about with `GET /admin/epic`, as for `gap: true`.
+
 ### `GET /admin/events`
 
 Query: `after?` (a cursor or `start`), `kinds?` (comma list; default `epic_state_changed`; also

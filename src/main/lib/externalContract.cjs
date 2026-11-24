@@ -160,7 +160,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
   // then POST /admin/tasks/switch (tasks/taskSwitchRoute.cjs),
   // then taskBodyKeys + taskRuntimeKeys + taskGetKeys (advertised on GET /__admin/health via healthInfo()),
   // then epicStateChangedTo: the pinned `to` set of epic_state_changed rows (the 8 outside states + 'gone',
-  // restoring the released v1 shape after C6 909f6e47 narrowed it).
+  // back to the v1 shape 0.141.0 served; 0.142.0 served lifecycle words only, after C6 909f6e47 narrowed it).
   1: Object.freeze([
     '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
     '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',

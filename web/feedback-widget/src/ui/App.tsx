@@ -147,6 +147,8 @@ export function toDraftMarks(marks: readonly Mark[]): DraftMark[] {
 export function appCss(): string {
   return [
     `.fw-launcher,.fw-tb,.fw-pop,.fw-panel:not(.fw-panel--hidden){pointer-events:auto}`,
+    // The open-state landmark (role=dialog) is a semantic wrapper only: no box, no layout.
+    `.fw-app{display:contents}`,
     reducedMotionCss(),
   ].join('\n');
 }
@@ -417,6 +419,15 @@ export function App(props: AppProps) {
   return (
     <>
       <Launcher state={state} variant={config.launcher} capturing={capturing} onOpen={requestOpen} />
+      {/* While open, every open-state part sits in one labelled modal landmark (axe 'region'),
+          matching the focus trap. display:contents keeps it out of layout; the :host>* text rule
+          still reaches every child through inheritance. */}
+      <div
+        class="fw-app"
+        role={open ? 'dialog' : undefined}
+        aria-modal={open ? 'true' : undefined}
+        aria-label={open ? 'Send feedback' : undefined}
+      >
       <CaptureChrome state={state} dispatch={dispatch} capture={capture} toolbar={config.toolbar} panelSide={panelSide}>
         <MarksLayer
           marks={marks.marks}
@@ -504,6 +515,7 @@ export function App(props: AppProps) {
         </Panel>
       )}
       <DiscardDialog state={state} dispatch={dispatch} />
+      </div>
     </>
   );
 }

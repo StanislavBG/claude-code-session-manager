@@ -102,7 +102,7 @@ export function panelContextCss(): string {
     `.fw-pc-section{display:flex;flex-direction:column;gap:6px}`,
     `.fw-pc-labelrow{display:flex;align-items:baseline;justify-content:space-between}`,
     `.fw-pc-label{font-family:${fonts.mono};font-weight:500;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:${c['ink-3']}}`,
-    `.fw-pc-count{font-family:${fonts.mono};font-size:11px;color:${c['ink-4']}}`,
+    `.fw-pc-count{font-family:${fonts.mono};font-size:11px;color:${c['ink-3']}}`,
     `.fw-pc-empty{border:1px dashed ${c['rule-strong']};border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5;color:${c['ink-3']}}`,
     `.fw-pc-row{display:grid;grid-template-columns:24px 1fr 26px;gap:10px;align-items:center;padding:8px;margin:0 -8px;border-radius:9px}`,
     `.fw-pc-row:hover{background:${c['paper-3']}}`,
@@ -121,7 +121,7 @@ export function panelContextCss(): string {
     `.fw-pc-val{min-width:0;display:flex;align-items:center;gap:8px;font-size:13px;color:${c.ink}}`,
     `.fw-pc-val--off{color:${c['ink-4']}}`,
     `.fw-pc-url{font-family:${fonts.mono};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
-    `.fw-pc-always{font-family:${fonts.mono};font-size:10px;color:${c['ink-4']}}`,
+    `.fw-pc-always{font-family:${fonts.mono};font-size:10px;color:${c['ink-3']}}`,
     `.fw-pc-view{font-weight:600;font-size:12px;color:${c.accent}}`,
     `.fw-pc-list{display:flex;flex-direction:column;gap:8px;margin:0 0 10px;padding:10px 12px;border-radius:8px;background:${c.ink};` +
       `font-family:${fonts.mono};font-weight:400;font-size:11px;line-height:1.5}`,

@@ -160,7 +160,7 @@ export function panelCss(): string {
     `.fw-pn-field{display:flex;flex-direction:column;gap:6px}`,
     `.fw-pn-labelrow{display:flex;align-items:baseline;justify-content:space-between}`,
     `.fw-pn-label{font-family:${fonts.mono};font-weight:500;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:${c['ink-3']}}`,
-    `.fw-pn-opt{font-family:${fonts.mono};font-size:11px;color:${c['ink-4']}}`,
+    `.fw-pn-opt{font-family:${fonts.mono};font-size:11px;color:${c['ink-3']}}`,
     `.fw-pn-seg{display:flex;gap:3px;padding:3px;background:${c['paper-2']};border:1px solid ${c.rule};border-radius:10px}`,
     `.fw-pn-segbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:7px 6px;border-radius:7px;` +
       `font-weight:600;font-size:13px;background:transparent;color:${c['ink-2']};white-space:nowrap}`,

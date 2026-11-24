@@ -2229,6 +2229,51 @@
  },
  {
   "ns": "webRemote",
+  "method": "servicesList",
+  "channel": "webRemote:services-list",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "servicePairStart",
+  "channel": "webRemote:service-pair-start",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "serviceConfirmSas",
+  "channel": "webRemote:service-confirm-sas",
+  "kind": "invoke",
+  "remote": "deny",
+  "pack": [
+   "pairingId",
+   "sas"
+  ]
+ },
+ {
+  "ns": "webRemote",
+  "method": "serviceRevoke",
+  "channel": "webRemote:service-revoke",
+  "kind": "invoke",
+  "remote": "deny",
+  "pack": [
+   "serviceId"
+  ]
+ },
+ {
+  "ns": "webRemote",
+  "method": "relayClientRevoke",
+  "channel": "webRemote:relay-client-revoke",
+  "kind": "invoke",
+  "remote": "deny",
+  "pack": [
+   "clientId"
+  ]
+ },
+ {
+  "ns": "webRemote",
   "method": "onRevokedAll",
   "channel": "webRemote:revoked-all",
   "kind": "on",

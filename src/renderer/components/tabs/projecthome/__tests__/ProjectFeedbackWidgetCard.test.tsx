@@ -85,12 +85,13 @@ afterEach(() => {
 })
 
 describe('ProjectFeedbackWidgetCard', () => {
-  it('not linked: shows the link prompt and opens App Settings at Phone remote', () => {
+  it('not linked: shows the link prompt and opens App Settings at Web remote', () => {
     seed({ relayError: { ok: false, error: 'not_linked', message: 'not paired' } })
     const openPanel = vi.spyOn(useLayout.getState(), 'openPanel').mockImplementation(() => {})
     const el = mount(<ProjectFeedbackWidgetCard cwd={CWD} />)
     expect(q(el, 'feedback-widget-not-linked')?.textContent).toBe('Link this desktop to your bilko.run account first')
     expect(q(el, 'feedback-widget-create')).toBeNull()
+    expect(q(el, 'feedback-widget-open-pairing')?.textContent?.trim()).toBe('Open Web remote pairing')
     act(() => q(el, 'feedback-widget-open-pairing')!.click())
     expect(openPanel).toHaveBeenCalledWith('app-settings', 'remote')
   })

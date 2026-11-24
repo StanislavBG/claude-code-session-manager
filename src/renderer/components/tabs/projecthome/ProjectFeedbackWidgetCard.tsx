@@ -7,7 +7,7 @@
  * Data: the `siteFeedback` store slice for `cwd` (ProjectFeedback loads it). Host failures are
  * shown through `useToast().show('error', …)` with the service's one-line explanation; a
  * `not_linked` failure (from the list's relayError or from create) swaps the card for a prompt
- * that opens App Settings ▸ Phone remote.
+ * that opens App Settings ▸ Web remote.
  */
 
 import { useState } from 'react'
@@ -150,7 +150,7 @@ export function ProjectFeedbackWidgetCard({ cwd }: { cwd: string }) {
           onClick={openPairing}
           className="rounded border border-line px-2.5 py-1 text-[12.5px] hover:bg-bg-hover"
         >
-          Open Phone remote pairing
+          Open Web remote pairing
         </button>
       </div>
     )

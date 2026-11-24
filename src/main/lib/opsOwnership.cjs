@@ -103,6 +103,12 @@ const OWNERS = Object.freeze({
   // 'feedback-inbox' writer. Runtime (personal data — never committed);
   // resolved/wontfix items pruned after feedbackInboxDays (opsRetentionSettings).
   'feedback-inbox': 'feedback-inbox',
+  // Per-project Artifacts store: files agents made for human review, copied
+  // out of job/Epic worktrees as artifacts/<epic-id>/<name> (or
+  // artifacts/_tasks/<task-id>/<name>) plus each owner's index.json ledger.
+  // lib/epic/artifactStore.cjs is the ONLY writer. Runtime (self-ignored);
+  // pruned artifactsDays after the Epic completes.
+  'artifacts': 'artifacts',
 });
 
 /**
@@ -114,7 +120,7 @@ const OWNERS = Object.freeze({
  */
 const RUNTIME_NAMESPACES = Object.freeze([
   'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
-  'plan-records', 'events', 'agents', 'webhooks', 'feedback-inbox',
+  'plan-records', 'events', 'agents', 'webhooks', 'feedback-inbox', 'artifacts',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

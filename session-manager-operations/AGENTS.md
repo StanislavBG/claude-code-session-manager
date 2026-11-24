@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-19 namespaces, no top-level files. Ownership + ops-path rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+20 namespaces, no top-level files. Ownership + ops-path rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
 - **Owned** (in `OWNERS`, app-owned state): each `OWNERS →` row below;
   `project-pages` covers the admin render route only (a Builder Epic's own
@@ -24,6 +24,7 @@ Epic lifecycle: only at [`prompt-sessions/README.md#lifecycle`](prompt-sessions/
 | --- | --- | --- | --- | --- |
 | `agents` | OWNERS → agents | write-once AgentSnapshots `snapshots/<id>.json`; runtime, self-ignored | keep forever | none |
 | `architecture` | not owned | reference docs | keep | none |
+| `artifacts` | OWNERS → artifacts | review files `<epic-id>/` + `index.json`; runtime, self-ignored | `artifactsDays` after Epic completes | none |
 | `design-mocks` | not owned | design mock artifacts | keep | [link](design-mocks/README.md) |
 | `events` | OWNERS → event-log | per-Epic event log `<epic-id>/events.jsonl`; runtime, self-ignored | keep forever | none |
 | `feedback` | retired 2026-08-02 | former intake | n/a | none |
@@ -31,16 +32,16 @@ Epic lifecycle: only at [`prompt-sessions/README.md#lifecycle`](prompt-sessions/
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the free Field Manual | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
-| `memory-clusters` | OWNERS → memory-clusters | per-project memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
+| `memory-clusters` | OWNERS → memory-clusters | memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
 | `plan-records` | OWNERS → scheduler | validator + ship/deploy records, `<epic-id>/<slug>.md` | `planRecordsDays` after Epic completes (default 14d) | [link](plan-records/README.md) |
 | `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep | [link](project-brief/README.md) |
 | `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |
 | `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep | [link](prompt-sessions/README.md) |
 | `reviews` | not owned | frozen review docs; `validation/<epic-id>/` = legacy plan records | keep | [link](reviews/README.md) |
 | `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep | [link](scheduler/README.md) |
-| `tasks` | OWNERS → tasks | runtime Task ledger (headless `claude -p` runs) | `tasksDays`, opsRetentionSettings (default 30d) | [link](tasks/README.md) |
+| `tasks` | OWNERS → tasks | runtime Task ledger | `tasksDays`, opsRetentionSettings (default 30d) | [link](tasks/README.md) |
 | `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep | [link](ui-prefs/README.md) |
-| `webhooks` | OWNERS → webhooks | loopback-only webhook subscriptions `subscriptions.json` (0600, holds HMAC secrets); runtime, self-ignored | until removed | none |
+| `webhooks` | OWNERS → webhooks | loopback webhook subscriptions (0600, HMAC secrets); runtime, self-ignored | until removed | none |
 
 ## Who consumes this
 

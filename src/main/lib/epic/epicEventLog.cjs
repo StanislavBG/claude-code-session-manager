@@ -51,6 +51,7 @@ const EVENT_KINDS = Object.freeze([
   'human.tool_confirmation',
   'validator.verdict',
   'outcome.recorded',
+  'artifact.published',
 ]);
 const KIND_SET = new Set(EVENT_KINDS);
 

@@ -150,6 +150,25 @@ test("feedback-inbox/ is owned by 'feedback-inbox' and is a self-ignored runtime
   }
 });
 
+test("artifacts/ is owned by 'artifacts' (artifactStore.cjs) and is a self-ignored runtime namespace", () => {
+  const { RUNTIME_NAMESPACES, ensureRuntimeIgnores } = require('../opsOwnership.cjs');
+  assert.equal(OWNERS.artifacts, 'artifacts');
+  assert.ok(RUNTIME_NAMESPACES.includes('artifacts'));
+  assert.equal(checkOpsWrite(`${P}/artifacts/epic-1/clip.mp4`, 'artifacts').ok, true);
+  assert.equal(checkOpsWrite(`${P}/artifacts/_tasks/t1/index.json`, 'artifacts').ok, true);
+  assert.equal(checkOpsWrite(`${P}/artifacts/epic-1/clip.mp4`, 'scheduler').ok, false);
+  assert.equal(checkOpsWrite(`${P}/artifacts/.gitignore`, 'runtime-ignore').ok, true);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-artifacts-'));
+  try {
+    fs.mkdirSync(path.join(root, 'session-manager-operations', 'artifacts'), { recursive: true });
+    ensureRuntimeIgnores(root);
+    const gi = path.join(root, 'session-manager-operations', 'artifacts', '.gitignore');
+    assert.equal(fs.readFileSync(gi, 'utf8').trim(), '*');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // The root .gitignore mirrors RUNTIME_NAMESPACES: each namespace's contents are
 // ignored with its README kept tracked (feedback/ is retired: whole dir ignored).
 test('root .gitignore mirrors every runtime namespace', () => {

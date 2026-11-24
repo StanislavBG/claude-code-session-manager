@@ -19,7 +19,7 @@ export interface FeedbackUser {
   id?: string;
   name?: string;
   email?: string;
-  /** Signature expiry from the site's backend; passed through unchanged for the desktop to verify. */
+  /** Signature expiry (integer epoch seconds) from the site's backend; a non-integer exp is dropped with its sig. */
   exp?: number;
   /** Signature from the site's backend (the widget never holds the secret). */
   sig?: string;
@@ -27,9 +27,15 @@ export interface FeedbackUser {
 
 export const SIG_MAX = 100;
 
-/** Copies exp/sig onto `out` only when well-formed; malformed values are dropped. */
+/**
+ * Copies exp/sig onto `out` only when well-formed; malformed values are dropped. The drain
+ * verifies only a safe-integer exp, so an exp that is present but not one (a float, NaN, a
+ * string) drops its sig too: the report then carries an unsigned reporter ('claimed by site')
+ * instead of a signature that can never match.
+ */
 export function copySigned(from: { exp?: unknown; sig?: unknown }, out: { exp?: number; sig?: string }): void {
-  if (typeof from.exp === 'number' && Number.isFinite(from.exp)) out.exp = from.exp;
+  if (from.exp !== undefined && from.exp !== null && !Number.isSafeInteger(from.exp)) return;
+  if (Number.isSafeInteger(from.exp)) out.exp = from.exp as number;
   if (typeof from.sig === 'string' && from.sig.length > 0 && from.sig.length <= SIG_MAX) out.sig = from.sig;
 }
 

@@ -185,6 +185,17 @@ describe('Feedback.identify() signed fields (exp, sig)', () => {
     expect('sig' in r).toBe(false);
   });
 
+  it('drops a non-integer exp and its sig, leaving an unsigned reporter', () => {
+    init();
+    for (const exp of [1795000000.5, 0.1, Number.MAX_SAFE_INTEGER + 2]) {
+      window.Feedback!.identify({ id: 'u_1', email: 'maya@lumenstays.com', exp, sig: 'a'.repeat(64) });
+      const r = getReporter()!;
+      expect(r).toEqual({ id: 'u_1', email: 'maya@lumenstays.com' });
+      expect('exp' in r).toBe(false);
+      expect('sig' in r).toBe(false);
+    }
+  });
+
   it('drops malformed exp and sig, keeping the rest', () => {
     init();
     const bad = [

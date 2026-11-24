@@ -2,8 +2,9 @@
  * ProjectFeedbackInbox — Project Home ▸ Feedback ▸ Inbox: every website report this project's
  * widgets delivered, read in full.
  *
- * List: type dot, title, reporter (a 'Verified' / 'claimed by site' / 'signature did not match'
- * badge from meta.reporterVerified, or 'Anonymous'), page host, age, status —
+ * List: type dot, title, reporter (signed id + email with a 'Verified' / 'claimed by site' /
+ * 'signature did not match' badge from meta.reporterVerified, then the name labelled 'name as
+ * given by the site' — the signature never covers it — or 'Anonymous'), page host, age, status —
  * newest first, with a status filter (reloads through the store's loadItems). Detail: the
  * annotated screenshot (toggle to the raw one) loaded through window.api.siteFeedback.inboxImage,
  * a marks table, details, page URL + viewport, and collapsible console / network lists; status
@@ -71,17 +72,26 @@ export function reporterBadge(verified: boolean | null | undefined): string {
   return 'claimed by site'
 }
 
-/** 'Name · <badge>' for a reporter, else 'Anonymous'. */
+export const SITE_GIVEN_NAME = 'name as given by the site'
+
+/** The signed part of a reporter (id and email — the signature covers these, never the name). */
+function signedPart(reporter: NonNullable<ReporterLike>): string {
+  return [reporter.id, reporter.email].filter((v): v is string => typeof v === 'string' && v.length > 0).join(' · ')
+}
+
+/**
+ * '<id> · <email> · <badge> · <name> (name as given by the site)' for a reporter, else
+ * 'Anonymous'. The badge sits next to the signed id/email only; the name is never verified.
+ */
 export function reporterLabel(reporter: ReporterLike, verified?: boolean | null): string {
   if (!reporter) return 'Anonymous'
-  const who = reporter.name || reporter.email || reporter.id
-  return `${who} · ${reporterBadge(verified)}`
+  const base = `${signedPart(reporter)} · ${reporterBadge(verified)}`
+  return reporter.name ? `${base} · ${reporter.name} (${SITE_GIVEN_NAME})` : base
 }
 
 /** The reporter as text plus a badge span; textContent equals reporterLabel(). */
 function Reporter({ reporter, verified }: { reporter: ReporterLike; verified: boolean | null | undefined }) {
   if (!reporter) return <>Anonymous</>
-  const who = reporter.name || reporter.email || reporter.id
   const state = verified === true ? 'verified' : verified === false ? 'mismatch' : 'claimed'
   const tone = verified === true
     ? 'border-sage text-sage-dark'
@@ -90,7 +100,8 @@ function Reporter({ reporter, verified }: { reporter: ReporterLike; verified: bo
       : 'border-line text-fg-dim'
   return (
     <>
-      {who} ·{' '}
+      <span data-testid="site-feedback-reporter-signed">{signedPart(reporter)}</span>
+      {' · '}
       <span
         data-testid="site-feedback-reporter-badge"
         data-verified={state}
@@ -98,6 +109,14 @@ function Reporter({ reporter, verified }: { reporter: ReporterLike; verified: bo
       >
         {reporterBadge(verified)}
       </span>
+      {reporter.name ? (
+        <>
+          {' · '}
+          <span data-testid="site-feedback-reporter-name" title={`Not covered by the signature — ${SITE_GIVEN_NAME}`}>
+            {reporter.name} ({SITE_GIVEN_NAME})
+          </span>
+        </>
+      ) : null}
     </>
   )
 }

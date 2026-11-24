@@ -162,7 +162,7 @@ describe('ProjectFeedbackInbox list', () => {
     expect(q(first, 'site-feedback-type-dot')?.getAttribute('data-type')).toBe('bug')
     expect(q(second, 'site-feedback-type-dot')?.getAttribute('data-type')).toBe('feature')
     expect(q(first, 'site-feedback-row-title')?.textContent).toBe('New one')
-    expect(q(first, 'site-feedback-row-reporter')?.textContent).toBe('Ada · claimed by site')
+    expect(q(first, 'site-feedback-row-reporter')?.textContent).toBe('u42 · claimed by site · Ada (name as given by the site)')
     expect(q(second, 'site-feedback-row-reporter')?.textContent).toBe('Anonymous')
     expect(q(first, 'site-feedback-row-host')?.textContent).toBe('shop.example.com')
     expect(q(first, 'site-feedback-row-age')?.textContent).toMatch(/ago|just now/)
@@ -212,7 +212,31 @@ describe('ProjectFeedbackInbox reporter badge', () => {
     expect(badge('FB-V0002').textContent).toBe('signature did not match')
     expect(badge('FB-V0002').getAttribute('data-verified')).toBe('mismatch')
     expect(badge('FB-V0003').textContent).toBe('claimed by site')
-    expect(q(byHost('FB-V0000'), 'site-feedback-row-reporter')?.textContent).toBe('R0 · Verified')
+    expect(q(byHost('FB-V0000'), 'site-feedback-row-reporter')?.textContent).toBe('u0 · Verified · R0 (name as given by the site)')
+  })
+
+  it('puts Verified next to the signed id and email only, never next to the name', async () => {
+    sf.inboxList.mockResolvedValueOnce({
+      ok: true,
+      items: [
+        item('FB-S0001', { reporter: { id: 'u7', name: 'Maya Chen', email: 'maya@lumenstays.com' }, reporterVerified: true }),
+        item('FB-S0002', { reporter: { id: 'u8', name: null, email: null }, reporterVerified: true }),
+      ],
+    })
+    const el = await mount()
+    const row = (h: string) => el.querySelector(`[data-testid="site-feedback-row"][data-host-id="${h}"]`) as HTMLElement
+    const signed = q(row('FB-S0001'), 'site-feedback-reporter-signed')!
+    expect(signed.textContent).toBe('u7 · maya@lumenstays.com')
+    expect(signed.nextSibling?.textContent).toBe(' · ')
+    expect(q(row('FB-S0001'), 'site-feedback-reporter-badge')?.previousSibling?.previousSibling).toBe(signed)
+    const name = q(row('FB-S0001'), 'site-feedback-reporter-name')!
+    expect(name.textContent).toBe('Maya Chen (name as given by the site)')
+    expect(name.contains(q(row('FB-S0001'), 'site-feedback-reporter-badge'))).toBe(false)
+    expect(q(row('FB-S0001'), 'site-feedback-row-reporter')?.textContent).toBe(
+      'u7 · maya@lumenstays.com · Verified · Maya Chen (name as given by the site)',
+    )
+    expect(q(row('FB-S0002'), 'site-feedback-reporter-name')).toBeNull()
+    expect(q(row('FB-S0002'), 'site-feedback-row-reporter')?.textContent).toBe('u8 · Verified')
   })
 
   it('an anonymous report shows no badge', async () => {
@@ -227,7 +251,7 @@ describe('ProjectFeedbackInbox reporter badge', () => {
     await openRow(el, 'FB-NEW01')
     const d = q(el, 'site-feedback-detail')!
     expect(q(d, 'site-feedback-reporter-badge')?.textContent).toBe('Verified')
-    expect(d.textContent).toContain('Ada · Verified')
+    expect(d.textContent).toContain('u42 · Verified · Ada (name as given by the site)')
   })
 
   it('the detail shows signature did not match for false', async () => {

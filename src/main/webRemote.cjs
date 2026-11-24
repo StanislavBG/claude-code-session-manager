@@ -1440,6 +1440,27 @@ async function serviceRevoke(serviceId) {
   return { ok: true, relayRevoked };
 }
 
+/**
+ * Owner denied a pending pairing: drop it from the store and fail + tear down
+ * any service client waiting on it, so a later hello for it is refused.
+ */
+async function servicePairCancel(pairingId) {
+  const cancelled = await getServiceStore().cancelPending(pairingId);
+  let dropped = 0;
+  for (const c of _clients.values()) {
+    if (c.role === 'service' && c.pendingPairingId === pairingId) {
+      failServiceClient(c);
+      teardownClient(c.key);
+      dropped += 1;
+    }
+  }
+  if (dropped > 0) broadcastStatus();
+  const device = await pairedDevice();
+  await auditLog(new Date().toISOString(), 'service:pair-cancelled', device?.deviceId, undefined,
+    cancelled ? `ok:dropped=${dropped}` : `noop:dropped=${dropped}`, null);
+  return { ok: true, cancelled, dropped };
+}
+
 async function relayClientRevoke(clientId) {
   const device = await pairedDevice();
   if (!device) return { ok: false, error: 'no_paired_device' };
@@ -2088,6 +2109,10 @@ function registerRemoteHandlers() {
     return r.ok ? { ok: true, service: redactService(r.service) } : r;
   }));
 
+  ipcMain.handle('webRemote:service-pair-cancel', validated(schemas.webRemoteServicePairCancel, async ({ pairingId }) => {
+    return servicePairCancel(pairingId);
+  }));
+
   ipcMain.handle('webRemote:service-revoke', validated(schemas.webRemoteServiceRevoke, async ({ serviceId }) => {
     return serviceRevoke(serviceId);
   }));
@@ -2147,6 +2172,7 @@ module.exports = {
   setServiceInvoker,
   getServiceStore,
   confirmServiceSas,
+  servicePairCancel,
   attachWindow,
   registerRemoteHandlers,
   init,

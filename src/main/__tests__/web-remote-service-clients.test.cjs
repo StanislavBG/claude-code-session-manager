@@ -219,6 +219,33 @@ describe('paired service clients', () => {
     expect(JSON.stringify((await readConfig()).devices)).not.toContain(kp.e2ePublicKey)
   })
 
+  it('service-pair-cancel drops the pending pairing and its waiting client; a re-hello is refused', async () => {
+    await setup()
+    const { pairingId } = await store.createPending({ name: 'Kiln', homeCwd: HOME_CWD, scope: ['macro_list'] })
+    const kp = generateE2EKeyPair()
+    await hello('svcC', kp.e2ePublicKey, { role: 'service', clientId: RELAY_ID, pairingId })
+    expect(webRemote._internal.getE2eState('svcC').state).toBe('pending_sas')
+
+    const cancel = handlers.get('webRemote:service-pair-cancel')
+    await expect(async () => cancel({}, { pairingId: 'not-a-uuid' })).rejects.toThrow()
+    expect(await cancel({}, { pairingId })).toEqual({ ok: true, cancelled: true, dropped: 1 })
+    expect(store.listPending()).toEqual([])
+    // The waiting client is gone: no session left, SAS can't be confirmed.
+    expect(webRemote._internal.getE2eState('svcC').state).toBe('idle')
+    const sas = deriveSas(kp.e2ePrivateKey, deviceKeys.pub, deviceId)
+    expect(await webRemote.confirmServiceSas(pairingId, sas)).toEqual({ ok: false, error: 'no_pending_service' })
+    expect(store.findByPubKey(kp.e2ePublicKey)).toBe(null)
+    expect(await readAudit()).toMatch(/service:pair-cancelled\s+deviceId=device-svc.*result=ok:dropped=1/)
+
+    // A later hello for the cancelled pairing is refused.
+    await hello('svcC2', kp.e2ePublicKey, { role: 'service', clientId: RELAY_ID, pairingId })
+    expect(webRemote._internal.getE2eState('svcC2').state).toBe('failed')
+    expect(await readAudit()).toMatch(/service:unpaired\s+deviceId=device-svc\s+client=svcC2\s+msgId=h-svcC2\s+result=refused/)
+
+    // Cancelling again is a no-op.
+    expect(await cancel({}, { pairingId })).toEqual({ ok: true, cancelled: false, dropped: 0 })
+  })
+
   it('drops a non-UUID clientId', async () => {
     await setup()
     await store.createPending({ name: 'Kiln', homeCwd: HOME_CWD, scope: ['macro_list'] })

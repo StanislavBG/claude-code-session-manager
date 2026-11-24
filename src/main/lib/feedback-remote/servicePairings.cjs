@@ -237,6 +237,17 @@ function createServicePairings({ filePath, now } = {}) {
       });
     },
 
+    /** Drop a pending pairing so it can no longer be confirmed or listed. Resolves true if it existed. */
+    cancelPending(pairingId) {
+      return mutate((s) => {
+        const before = s.pending.length;
+        s.pending = s.pending.filter((p) => p.pairingId !== pairingId);
+        const removed = s.pending.length !== before;
+        prunePending(s);
+        return removed;
+      });
+    },
+
     findByPubKey(pubKey) {
       if (typeof pubKey !== 'string' || pubKey.length === 0) return null;
       const s = load().services.find((x) => x.pubKey === pubKey);

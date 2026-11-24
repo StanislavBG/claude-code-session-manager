@@ -1513,6 +1513,9 @@ const webRemoteServiceConfirmSas = z.object({
   pairingId: z.string().regex(WEB_REMOTE_UUID_RE),
   sas: z.string().regex(/^[0-9]{6}$/),
 }).strict();
+const webRemoteServicePairCancel = z.object({
+  pairingId: z.string().regex(WEB_REMOTE_UUID_RE),
+}).strict();
 const webRemoteServiceRevoke = z.object({
   serviceId: z.string().regex(WEB_REMOTE_UUID_RE),
 }).strict();
@@ -1845,6 +1848,7 @@ module.exports = {
     webRemoteConfirmSas,
     webRemoteServicePairStart,
     webRemoteServiceConfirmSas,
+    webRemoteServicePairCancel,
     webRemoteServiceRevoke,
     webRemoteRelayClientRevoke,
     sessionSubscribe,

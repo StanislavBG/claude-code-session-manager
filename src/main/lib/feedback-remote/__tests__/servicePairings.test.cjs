@@ -183,3 +183,24 @@ test('the file is written at mode 0600', async () => {
     expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
   }
 });
+
+test('cancelPending removes a pending pairing: no longer listed, confirmable, or on disk', async () => {
+  const { pairingId } = await store.createPending(GOOD);
+  const other = await store.createPending({ ...GOOD, name: 'Other' });
+  expect(await store.cancelPending(pairingId)).toBe(true);
+  expect(store.listPending().map((p) => p.pairingId)).toEqual([other.pairingId]);
+  expect(readFile().pending.map((p) => p.pairingId)).toEqual([other.pairingId]);
+  await expect(store.confirmPending(pairingId, PUBKEY, { relayClientId: RELAY_ID })).rejects.toThrow(/no pending pairing/);
+  expect(store.list()).toEqual([]);
+  // A fresh store reads the cancel back from disk.
+  const reread = createServicePairings({ filePath, now: () => clock });
+  expect(reread.listPending().map((p) => p.pairingId)).toEqual([other.pairingId]);
+});
+
+test('cancelPending of an unknown id resolves false and leaves state alone', async () => {
+  const { pairingId } = await store.createPending(GOOD);
+  expect(await store.cancelPending('8d1c2b3a-0000-4000-8000-000000000000')).toBe(false);
+  expect(await store.cancelPending(pairingId)).toBe(true);
+  expect(await store.cancelPending(pairingId)).toBe(false);
+  expect(store.listPending()).toEqual([]);
+});

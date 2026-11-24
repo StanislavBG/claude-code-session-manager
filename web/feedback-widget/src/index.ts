@@ -1,6 +1,7 @@
 // Entry of the one-file IIFE bundle (dist/feedback.js).
 import { installBuffers } from './buffers';
-import { init, resolveConfig } from './host';
+import { getHost, getReporter, init, resolveConfig, type FeedbackApi } from './host';
+import { mountApp } from './ui/App';
 
 /** bilko.run relay — the widget's own traffic, never buffered (architecture/site-feedback.md). */
 export const RELAY_BASE = 'https://bilko.run/api/sm-relay';
@@ -10,4 +11,30 @@ export const buffers = installBuffers({
   ownUrlPrefixes: [RELAY_BASE, resolveConfig().endpoint],
 });
 
-init();
+/** Mounts App inside host.ts's shadow root and wires window.Feedback to it. */
+export function start(): boolean {
+  if (!init()) return false;
+  const host = getHost();
+  const api = window.Feedback;
+  if (!host || !api) return false;
+  const app = mountApp({
+    config: host.config,
+    hostEl: host.host,
+    shadow: host.shadow,
+    buffers,
+    user: getReporter(),
+  });
+  const wired: FeedbackApi = {
+    open: () => app.open(),
+    close: () => app.close(),
+    identify(user) {
+      api.identify(user); // host.ts normalises and stores the reporter
+      app.identify(getReporter());
+    },
+    version: api.version,
+  };
+  window.Feedback = wired;
+  return true;
+}
+
+start();

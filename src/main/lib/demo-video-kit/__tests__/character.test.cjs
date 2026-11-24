@@ -926,6 +926,23 @@ test('laneWaitMs: time left minus the speak reserve when a deadline is set, else
   expect(charMod.laneWaitMs({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: '' } })).toBe(6 * 60 * 60 * 1000);
 });
 
+test('deadlineContext: names the minutes left and the reserve when a deadline is set, else nothing', () => {
+  const now = 1_000_000_000;
+  const env = (leftMs) => ({ SM_SCHEDULER_JOB_DEADLINE_MS: String(now + leftMs) });
+  // 50 s left: the lane may wait 37.5 s, 12.5 s kept back — the same numbers the batch error names
+  expect(charMod.deadlineContext({ now, env: env(50000) })).toBe(' (0.8 min left before the job deadline, 0.2 min kept in reserve)');
+  expect(charMod.batchTimeoutMs(3, { now, env: env(50000) }).error).toContain(charMod.deadlineContext({ now, env: env(50000) }));
+  // deadline already passed: the wait budget is gone before the wait starts
+  expect(charMod.laneWaitMs({ now, env: env(-1000) })).toBeLessThanOrEqual(0);
+  expect(charMod.deadlineContext({ now, env: env(-1000) })).toBe(' (0 min left before the job deadline, 0 min kept in reserve)');
+  // long job: the full 45 min reserve
+  expect(charMod.deadlineContext({ now, env: env(180 * 60000) })).toBe(' (180 min left before the job deadline, 45 min kept in reserve)');
+  // no deadline (unset, empty, not a number): no suffix, the lane error is unchanged
+  expect(charMod.deadlineContext({ now, env: {} })).toBe('');
+  expect(charMod.deadlineContext({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: '' } })).toBe('');
+  expect(charMod.deadlineContext({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: 'soon' } })).toBe('');
+});
+
 test.skipIf(process.platform === 'win32')('voice lane: a failing voice still leaves the lane and logs ok:false', () => {
   const log = path.join(LANE_HOME, `fail-${Date.now()}.jsonl`);
   const { root } = heavyProject(log, 'failproj');
@@ -948,7 +965,7 @@ test.skipIf(process.platform === 'win32')('voice lane: a wait past the job deadl
     const r = charMod.speakLines(root, [{ text: 'hi', out: 'a.wav' }]);
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/timed out after \d+ ms at position 1 of 2/);
-    expect(r.error).toMatch(/no time left before the job deadline/);
+    expect(r.error).toMatch(/ \(0 min left before the job deadline, 0 min kept in reserve\)$/);
     expect(readJsonl(log)).toEqual([]);
   } finally {
     if (prev === undefined) delete process.env.SM_SCHEDULER_JOB_DEADLINE_MS; else process.env.SM_SCHEDULER_JOB_DEADLINE_MS = prev;

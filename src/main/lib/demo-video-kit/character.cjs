@@ -347,6 +347,18 @@ function fmtMin(ms) {
 }
 
 /**
+ * ' (<N> min left before the job deadline, <M> min kept in reserve)' when
+ * env.SM_SCHEDULER_JOB_DEADLINE_MS is set, else ''. The one suffix both the batch time-limit
+ * error and the voice-lane timeout use, so the two messages say the same thing.
+ */
+function deadlineContext({ now = Date.now(), env = process.env } = {}) {
+  const deadline = jobDeadline(env);
+  if (deadline === null) return '';
+  const leftMs = deadline - now;
+  return ` (${fmtMin(leftMs)} min left before the job deadline, ${fmtMin(speakReserveMs(leftMs))} min kept in reserve)`;
+}
+
+/**
  * How long one synthesis call may wait for its voice lane: the time left before
  * env.SM_SCHEDULER_JOB_DEADLINE_MS minus speakReserveMs(time left) when that is set
  * (may be <= 0: no time left), else LANE_WAIT_DEFAULT_MS (6 h).
@@ -376,7 +388,9 @@ function inLane(ctx, rv, outs, fn) {
   let granted = false;
   let ok = false;
   try {
-    const left = laneWaitMs();
+    const now = Date.now();
+    const env = process.env;
+    const left = laneWaitMs({ now, env });
     const w = lane.waitTurn(ticket, {
       timeoutMs: Math.max(1, left),
       onPosition: (pos) => {
@@ -385,8 +399,7 @@ function inLane(ctx, rv, outs, fn) {
       },
     });
     if (!w.ok) {
-      const why = left <= 0 ? ' (no time left before the job deadline)' : '';
-      return { ok: false, error: `${w.error}${why}` };
+      return { ok: false, error: `${w.error}${deadlineContext({ now, env })}` };
     }
     granted = true;
     const r = fn();
@@ -450,7 +463,7 @@ function batchTimeoutMs(lineCount, { now = Date.now(), env = process.env } = {})
   if (leftMs !== null) ms = Math.min(ms, leftMs - speakReserveMs(leftMs));
   if (ms < MIN_BATCH_TIMEOUT_MS) {
     const left = Math.max(0, Math.floor(ms / 1000));
-    const ctx = leftMs === null ? '' : ` (${fmtMin(leftMs)} min left before the job deadline, ${fmtMin(speakReserveMs(leftMs))} min kept in reserve)`;
+    const ctx = deadlineContext({ now, env });
     return {
       ok: false,
       error: `only ${left}s left to speak for ${lineCount} lines${ctx}; need at least ${MIN_BATCH_TIMEOUT_MS / 1000}s`,
@@ -680,6 +693,7 @@ module.exports = {
   isBatchVoice,
   wavSeconds,
   laneWaitMs,
+  deadlineContext,
   speakReserveMs,
   lanePositionLine,
   LANE_WAIT_DEFAULT_MS,

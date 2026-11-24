@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 42 (character.cjs speak reserve scales with the time left)', () => {
-  expect(KIT_VERSION).toBe('42');
+test('KIT_VERSION is bumped to 43 (character.cjs lane timeout names the minutes left and the reserve)', () => {
+  expect(KIT_VERSION).toBe('43');
 });
 
 test('the playbook path both personas name is where the kit installs it by default', () => {

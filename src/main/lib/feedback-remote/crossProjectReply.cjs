@@ -42,7 +42,9 @@ const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { readActiveIndex } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
-const { addPendingReply, countPendingForThread } = require('./pendingReplies.cjs');
+const pendingReplies = require('./pendingReplies.cjs');
+
+const { addPendingReply, countPendingForThread } = pendingReplies;
 
 /** crossProjectFeedback.cjs is required lazily: its fallback path may require
  *  this module, and a top-level require both ways would hand one side a
@@ -62,6 +64,7 @@ const EVENT_MODE_REASON = 'asker-requested-event';
 const AUDIT_MESSAGE_CHARS = 2000;
 const AUDIT_MAX_REFERENCES = 10;
 const SCHEDULED_AUDIT = 'cross-project-reply-scheduled';
+const DELIVERED_SCHEDULED_AUDIT = 'cross-project-reply-delivered-scheduled';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 /** Per-Y promise chain: cap check → deliver → receipt run one at a time. */
@@ -665,6 +668,113 @@ function resolveThread(src) {
   };
 }
 
+/**
+ * deliverDueReplies({ appVersion }, deps) → Promise<{ due, delivered, failed, results }>.
+ * Sends every pending-reply ledger entry whose appVersionAbove is now below
+ * appVersion: `{version}` in its message becomes appVersion, then it goes
+ * through deliverAuthorizedReply (same path + fallback as a live reply) under
+ * the same per-Y thread lock. The thread rule was checked when the reply was
+ * scheduled; the stored thread is the only target. The scheduling Epic Y may
+ * have closed since — the reply still goes, and the receipt on Y is written
+ * only while Y is still in its project's active index. A delivery that throws
+ * or returns not-ok stays pending with lastError; the pass never throws.
+ *
+ * deps: deliverAuthorizedReply's deps plus { listDueReplies, markReplyDelivered }
+ *       (default: pendingReplies.cjs).
+ */
+async function deliverDueReplies({ appVersion } = {}, deps = {}) {
+  const summary = { due: 0, delivered: 0, failed: 0, results: [] };
+  const listDue = deps.listDueReplies || pendingReplies.listDueReplies;
+  const markDelivered = deps.markReplyDelivered || pendingReplies.markReplyDelivered;
+  const audit = deps.appendAudit || appendAuditEvent;
+  let due;
+  try {
+    due = listDue(appVersion);
+  } catch (e) {
+    summary.error = e && e.message ? e.message : String(e);
+    return summary;
+  }
+  if (!Array.isArray(due)) return summary;
+  summary.due = due.length;
+  const version = String(appVersion);
+
+  for (const entry of due) {
+    let result;
+    try {
+      result = await deliverOneDueReply(entry, version, deps);
+    } catch (e) {
+      result = { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+    const ok = !!(result && result.ok);
+    if (ok) {
+      summary.delivered += 1;
+      try {
+        audit(DELIVERED_SCHEDULED_AUDIT, {
+          cwd: entry.targetCwd || null,
+          epicId: (entry.thread && entry.thread.epicId) || null,
+          fromCwd: entry.replierCwd || null,
+          fromEpicId: entry.yId || null,
+          outcome: entry.outcome || null,
+          appVersionAbove: entry.appVersionAbove || null,
+          appVersion: version,
+          delivery: result.delivery || null,
+          ...(entry.thread && entry.thread.legacy ? { thread: 'legacy' } : {}),
+        });
+      } catch { /* audit is best-effort */ }
+    } else {
+      summary.failed += 1;
+    }
+    try {
+      markDelivered(entry.id, {
+        version,
+        result: ok ? result : { ...(result || {}), ok: false, error: (result && (result.error || result.reason)) || 'delivery failed' },
+      });
+    } catch (e) {
+      // A failed ledger write leaves the entry due; a delivered one may resend next pass.
+      summary.markError = e && e.message ? e.message : String(e);
+    }
+    summary.results.push({ id: entry.id, ok, ...(result && result.delivery ? { delivery: result.delivery } : {}), ...(ok ? {} : { error: (result && (result.error || result.reason)) || 'delivery failed' }) });
+  }
+  return summary;
+}
+
+async function deliverOneDueReply(entry, version, deps) {
+  if (!entry || typeof entry !== 'object') return { ok: false, error: 'ill-shaped ledger entry' };
+  const { replierCwd, yId, targetCwd } = entry;
+  const thread = entry.thread && typeof entry.thread === 'object' ? entry.thread : {};
+  if (!nonEmpty(replierCwd) || !nonEmpty(yId) || !nonEmpty(targetCwd) || !nonEmpty(thread.cwd)) {
+    return { ok: false, error: 'ledger entry is missing its thread context' };
+  }
+  const eventMode = thread.mode === 'event';
+  if (!eventMode && !nonEmpty(thread.epicId)) return { ok: false, error: 'ledger entry has no asking Epic' };
+  const message = String(entry.message ?? '').split('{version}').join(version);
+  const outcome = entry.outcome;
+  const referencePaths = Array.isArray(entry.referencePaths) ? entry.referencePaths : [];
+  const legacy = thread.legacy === true;
+  const rt = { cwd: thread.cwd, epicId: thread.epicId || null, claudeSessionId: thread.claudeSessionId || null };
+
+  return withThreadLock(`${realOr(replierCwd)}\u0000${yId}`, async () => {
+    let yLive = null;
+    try { yLive = readActiveIndex(replierCwd).sessions[yId] || null; } catch { yLive = null; }
+    const y = yLive || { id: yId, goalText: entry.goalText || '' };
+    const sent = yLive ? readReceipts(replierCwd, yId).length : 0;
+    const baseAppend = deps.appendEvent || defaultAppendEvent;
+    // Receipt on Y only while Y is still in its project's active index.
+    const appendEvent = (cwd, epicId, text, meta) => {
+      if (!yLive && epicId === yId && cwd === replierCwd) {
+        return Promise.resolve({ ok: false, reason: 'replier-closed' });
+      }
+      return baseAppend(cwd, epicId, text, meta);
+    };
+    return deliverAuthorizedReply({
+      replierCwd, yId, y, rt, legacy, eventMode,
+      threadField: legacy ? { thread: 'legacy' } : {},
+      targetCwd, message, outcome, referencePaths,
+      hash: replyHash(outcome, message), sent,
+    }, { ...deps, appendEvent });
+  });
+}
+
 /** Registers POST /admin/feedback/reply on the loopback admin transport —
  *  mirrors crossProjectFeedback.registerAdminRoute; auth is the transport's. */
 function registerAdminRoute(adminHttp, deps) {
@@ -694,5 +804,6 @@ module.exports = {
   validateReplyInput,
   sendFeedbackReply,
   deliverAuthorizedReply,
+  deliverDueReplies,
   registerAdminRoute,
 };

@@ -803,3 +803,121 @@ test('deliverWhen: any shape but { appVersionAbove: "x.y.z" } is refused with 40
     expect(readLedger(home)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// deliverDueReplies — the hourly pass that sends held replies once due
+// ---------------------------------------------------------------------------
+
+const { deliverDueReplies } = require('../crossProjectReply.cjs');
+
+test('deliverDueReplies: a due entry is delivered with {version} filled in, audited and marked', async () => {
+  await withSchedulerHome(async (home) => {
+    const { a, b } = await setup();
+    const d = deps('sent');
+    await sendFeedbackReply(input(b, { message: 'Live in v{version} ({version}).', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    d.audits.length = 0;
+    const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+    expect(r).toMatchObject({ due: 1, delivered: 1, failed: 0 });
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0][1]).toContain('Live in v0.142.0 (0.142.0).');
+    expect(d.calls[0][1]).not.toContain('{version}');
+    expect(events(a, 'psess-x').at(-1)).toMatchObject({ notice: 'cross-project-reply' });
+    expect(events(b, 'psess-y').at(-1)).toMatchObject({ notice: 'cross-project-reply-sent' });
+    expect(d.audits.map((x) => x.kind)).toContain('cross-project-reply-delivered-scheduled');
+    const [entry] = readLedger(home);
+    expect(entry).toMatchObject({ deliveredVersion: '0.142.0', lastError: null });
+    expect(entry.deliveredAt).toEqual(expect.any(String));
+    // A second pass finds nothing due.
+    expect(await deliverDueReplies({ appVersion: '0.142.0' }, d)).toMatchObject({ due: 0, delivered: 0 });
+    expect(d.calls).toHaveLength(1);
+  });
+});
+
+test('deliverDueReplies: a not-due entry (equal version) is skipped and stays pending', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps('sent');
+    await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    const r = await deliverDueReplies({ appVersion: '0.141.0' }, d);
+    expect(r).toMatchObject({ due: 0, delivered: 0, failed: 0 });
+    expect(d.calls).toHaveLength(0);
+    expect(readLedger(home)[0].deliveredAt).toBeNull();
+  });
+});
+
+test('deliverDueReplies: a closed scheduling Epic still delivers; no receipt is written on it', async () => {
+  await withSchedulerHome(async (home) => {
+    const { a, b } = await setup();
+    const d = deps('sent');
+    await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    // Y closes: it leaves B's active index.
+    writeIndex(b, {});
+    const appended = [];
+    const realAppend = require('../../../promptSessionEvents.cjs').appendResponseEventWithReason;
+    d.appendEvent = async (cwd, epicId, text, meta) => {
+      appended.push({ cwd, epicId, notice: meta && meta.notice });
+      return realAppend(cwd, epicId, text, meta);
+    };
+    const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+    expect(r).toMatchObject({ due: 1, delivered: 1, failed: 0 });
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0][1]).toContain('Live in v0.142.0.');
+    expect(events(a, 'psess-x').at(-1)).toMatchObject({ notice: 'cross-project-reply' });
+    expect(appended.some((x) => x.epicId === 'psess-y')).toBe(false);
+    expect(readLedger(home)[0].deliveredVersion).toBe('0.142.0');
+  });
+});
+
+test('deliverDueReplies: a failing delivery stays pending with lastError while the next one goes', async () => {
+  const { a, b } = await setup();
+  const entry = (id, message) => ({
+    id, replierCwd: b, yId: 'psess-y', goalText: 'Relay drops a frame',
+    thread: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x', legacy: false, mode: null },
+    targetCwd: a, outcome: 'done', message, referencePaths: [], appVersionAbove: '0.141.0',
+    deliveredAt: null, deliveredVersion: null, lastError: null,
+  });
+  const marks = [];
+  let sends = 0;
+  const d = deps('sent', {
+    listDueReplies: () => [entry('e1', 'first {version}'), entry('e2', 'second {version}'), entry('e3', 'third {version}')],
+    markReplyDelivered: (id, arg) => { marks.push({ id, ...arg }); return {}; },
+  });
+  d.sendPrompt = async (...args) => {
+    sends += 1;
+    if (sends === 1) throw new Error('boom');
+    d.calls.push(args);
+    return { disposition: 'sent' };
+  };
+  // e1: send throws → event-only (still ok). Force a real failure on e2 instead:
+  const realAppend = require('../../../promptSessionEvents.cjs').appendResponseEventWithReason;
+  d.appendEvent = async (cwd, epicId, text, meta) => {
+    if (text.includes('second 0.142.0')) throw new Error('disk full');
+    return realAppend(cwd, epicId, text, meta);
+  };
+  const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+  expect(r).toMatchObject({ due: 3, delivered: 2, failed: 1 });
+  const byId = Object.fromEntries(marks.map((m) => [m.id, m]));
+  expect(byId.e2.result.ok).toBe(false);
+  expect(byId.e2.result.error).toContain('disk full');
+  expect(byId.e1.result.ok).not.toBe(false);
+  expect(byId.e3.result.ok).not.toBe(false);
+  expect(byId.e3.version).toBe('0.142.0');
+  expect(d.calls.some((c) => c[1].includes('third 0.142.0'))).toBe(true);
+});
+
+test('deliverDueReplies: a not-ok result is recorded as lastError, never thrown', async () => {
+  const { a, b } = await setup({ xOverrides: { status: 'closed' } });
+  const marks = [];
+  const d = deps('sent', {
+    openFallback: null,
+    listDueReplies: () => [{
+      id: 'n1', replierCwd: b, yId: 'psess-y', goalText: 'g',
+      thread: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x', legacy: false, mode: null },
+      targetCwd: a, outcome: 'done', message: 'm', referencePaths: [], appVersionAbove: '0.1.0',
+    }],
+    markReplyDelivered: (id, arg) => { marks.push({ id, ...arg }); return {}; },
+  });
+  const r = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+  expect(r).toMatchObject({ due: 1, delivered: 0, failed: 1 });
+  expect(marks[0].result).toMatchObject({ ok: false, fallbackNeeded: true });
+});

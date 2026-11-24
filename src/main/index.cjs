@@ -1789,6 +1789,26 @@ app.whenReady().then(async () => {
       }
     })();
   }, 30_000);
+  // Scheduled cross-project replies (pending-replies.json): send every held
+  // reply whose "deliver when app version > x" now holds, filling {version}
+  // with this app's version. Once ~120s past boot, then hourly; unref'd and
+  // off the startup path. deliverDueReplies never throws.
+  const runDueRepliesPass = () => {
+    const appVersion = app.getVersion();
+    require('./lib/feedback-remote/crossProjectReply.cjs').deliverDueReplies({ appVersion })
+      .then((r) => {
+        logs.writeLine({ scope: 'feedback-reply', level: r.failed || r.error ? 'warn' : 'info', message: 'scheduled replies pass', meta: { appVersion, due: r.due, delivered: r.delivered, failed: r.failed, ...(r.error ? { error: r.error } : {}) } });
+      })
+      .catch((e) => {
+        logs.writeLine({ scope: 'feedback-reply', level: 'error', message: 'scheduled replies pass failed', meta: { error: e?.message } });
+      });
+  };
+  const dueRepliesBootTimer = setTimeout(() => {
+    runDueRepliesPass();
+    const dueRepliesTimer = setInterval(runDueRepliesPass, 60 * 60 * 1000);
+    if (dueRepliesTimer.unref) dueRepliesTimer.unref();
+  }, 120_000);
+  if (dueRepliesBootTimer.unref) dueRepliesBootTimer.unref();
   // Keep TODAY's rollup line current so the History dashboard never needs to
   // fall back to a live transcript scan. Shares the same O_EXCL lock file as
   // the external watchdog's finalize pass (src/main/lib/scheduler/watchdogHelpers.cjs)

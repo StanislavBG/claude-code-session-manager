@@ -40,20 +40,44 @@ function deadPid() {
 
 function sleepSync(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 
-function runChild(voiceId) {
+// A heavy child: enters the lane, waits its turn, then holds it. With a release
+// file it holds until that file exists (bounded 20 s, polled every 50 ms; exits 3
+// naming the file if the bound expires); without one it holds a fixed 300 ms (only
+// the hold length, never the ordering, rides on that). When it first sees a
+// position > 0 it writes the report file, so the test knows it is queued behind.
+function runChild(voiceId, { releaseFile = '', reportFile = '' } = {}) {
   const src = `
+    const fs = require('node:fs');
     const lane = require(${JSON.stringify(LANE_MODULE)});
-    const t = lane.enterLane({ lane: 'heavy', voiceId: ${JSON.stringify(voiceId)}, label: ${JSON.stringify(voiceId)}, projectRoot: '/proj/x', kind: 'line' });
+    const [voiceId, releaseFile, reportFile] = process.argv.slice(1);
+    const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    const t = lane.enterLane({ lane: 'heavy', voiceId, label: voiceId, projectRoot: '/proj/x', kind: 'line' });
     const positions = [];
-    const r = lane.waitTurn(t, { timeoutMs: 20000, pollMs: 25, onPosition: (p) => positions.push(p.position) });
+    let reported = false;
+    const r = lane.waitTurn(t, { timeoutMs: 20000, pollMs: 25, onPosition: (p) => {
+      positions.push(p.position);
+      if (reportFile && !reported && p.position > 0) { fs.writeFileSync(reportFile, String(p.position)); reported = true; }
+    } });
     const start = Date.now();
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    if (releaseFile) {
+      const deadline = Date.now() + 20000;
+      while (!fs.existsSync(releaseFile)) {
+        if (Date.now() >= deadline) {
+          lane.leaveLane(t, { ok: false, record: false });
+          process.stderr.write('release file never appeared within 20 s: ' + releaseFile);
+          process.exit(3);
+        }
+        nap(50);
+      }
+    } else {
+      nap(300);
+    }
     const end = Date.now();
     lane.leaveLane(t, { ok: true, audioSeconds: 1.5 });
     process.stdout.write(JSON.stringify({ ok: r.ok, positions, start, end }));
   `;
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', src], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, ['-e', src, voiceId, releaseFile, reportFile], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`child ${voiceId} timed out: ${err}`)); }, 20000);
     child.stdout.on('data', (d) => { out += d; });
@@ -103,12 +127,21 @@ test('enterLane writes one well-named ticket; lane dir falls back to <voices hom
 });
 
 test('two child processes: the second heavy holder starts only after the first leaves and saw position 1', async () => {
-  const first = runChild('first');
+  const releaseFile = path.join(root, 'release-first');
+  const reportFile = path.join(root, 'second-queued');
+  const first = runChild('first', { releaseFile });
   // Wait (bounded) until the first child's ticket exists, so order is fixed.
-  const deadline = Date.now() + 20000;
+  let deadline = Date.now() + 20000;
   while (laneFiles('heavy').length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
   expect(laneFiles('heavy').length).toBe(1);
-  const second = runChild('second');
+  const second = runChild('second', { reportFile });
+  // The first holds the lane until the release file exists; create it only once the
+  // second's ticket is in the lane and it has reported position 1 — no timer decides order.
+  deadline = Date.now() + 20000;
+  while (!(laneFiles('heavy').length === 2 && fs.existsSync(reportFile)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+  expect(laneFiles('heavy').length).toBe(2);
+  expect(fs.readFileSync(reportFile, 'utf8')).toBe('1');
+  fs.writeFileSync(releaseFile, '');
   const [a, b] = await Promise.all([first, second]);
   expect(a.ok).toBe(true);
   expect(b.ok).toBe(true);

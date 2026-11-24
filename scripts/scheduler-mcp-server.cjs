@@ -1382,13 +1382,31 @@ function isStringArray(v) {
   return Array.isArray(v) && v.every((x) => typeof x === 'string');
 }
 
-// The slots route answers { ok: false, error, reason } on a refusal and
-// { ok: false, error, details } on a bad body; both reach the agent verbatim.
-function slotsErrorText(result, fallback) {
-  const error = result.error ?? fallback;
-  const extra = result.reason ?? (result.details === undefined ? undefined
-    : (typeof result.details === 'string' ? result.details : JSON.stringify(result.details)));
-  return extra ? `${error}: ${extra}` : error;
+// One helper for every admin failure reply. Admin routes answer
+// { ok: false, error, message? | reason? | details? }; the agent gets
+// '<error>: <extras>' so the route's explanation is never dropped. error falls
+// back to the tool's own text; each extra is kept only when present, non-empty
+// and not a repeat of error (details may be any JSON value).
+function adminErrorText(result, fallback) {
+  const r = result && typeof result === 'object' ? result : {};
+  const error = typeof r.error === 'string' && r.error !== '' ? r.error : fallback;
+  const extras = [];
+  for (const key of ['message', 'reason', 'details']) {
+    const v = r[key];
+    if (v === undefined || v === null) continue;
+    const text = typeof v === 'string' ? v : JSON.stringify(v);
+    if (typeof text !== 'string' || text === '' || text === error) continue;
+    extras.push(text);
+  }
+  return extras.length ? `${error}: ${extras.join('; ')}` : error;
+}
+
+// A site-source customer_feedback_* failure. unknown_project means the cwd sent
+// owns no widget box, so name it and point at the tool that lists the ones that do.
+function siteErrorText(result, fallback, cwd) {
+  const text = adminErrorText(result, fallback);
+  if (result?.error !== 'unknown_project') return text;
+  return `${text} (cwd ${cwd}). Call feedback_widget_list with no cwd to see the projects that have one.`;
 }
 
 // A switch only the human flips (the Tasks switch, the session slot limit): a
@@ -1601,15 +1619,12 @@ async function handleCallTool(request) {
       if (process.env.SM_PROJECT_ROOT) payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
       if (typeof args.cwd === 'string') payload.cwd = args.cwd;
       const result = await adminRequest('POST', '/admin/tasks/switch', payload);
-      if (result?.ok === false) {
-        const error = result.error ?? 'task_switch_set failed';
-        return errorResult(result.reason ? `${error}: ${result.reason}` : error);
-      }
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'task_switch_set failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_slots_get') {
       const result = await adminRequest('GET', '/admin/scheduler/slots');
-      if (result?.ok === false) return errorResult(slotsErrorText(result, 'scheduler_slots_get failed'));
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'scheduler_slots_get failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_slots_set') {
@@ -1626,7 +1641,7 @@ async function handleCallTool(request) {
       const payload = { cap: args.cap, quote: args.quote, originClaudeSessionId: process.env.SM_CHAT_SESSION_ID };
       if (process.env.SM_PROJECT_ROOT) payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
       const result = await adminRequest('POST', '/admin/scheduler/slots', payload);
-      if (result?.ok === false) return errorResult(slotsErrorText(result, 'scheduler_slots_set failed'));
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'scheduler_slots_set failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'epic_get') {
@@ -2030,7 +2045,7 @@ async function handleCallTool(request) {
       const result = await adminRequest('POST', '/admin/project-home/videos/review/write', {
         cwd, videoId: args.videoId, text: args.text, images: loaded.images,
       });
-      if (result?.ok === false) return errorResult(result.error ?? 'project_video_review_write failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'project_video_review_write failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_video_outcome_write') {
@@ -2043,7 +2058,7 @@ async function handleCallTool(request) {
       const result = await adminRequest('POST', '/admin/project-home/videos/outcome/write', {
         cwd, videoId: args.videoId, outcome: args.outcome, text: args.text,
       });
-      if (result?.ok === false) return errorResult(result.error ?? 'project_video_outcome_write failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'project_video_outcome_write failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_list') {
@@ -2090,7 +2105,7 @@ async function handleCallTool(request) {
       if (typeof args.humanRequestQuote === 'string') payload.humanRequestQuote = args.humanRequestQuote;
       payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
       const result = await adminRequest('POST', '/admin/macros/save', payload);
-      if (result?.ok === false) return errorResult(result.error ?? 'macro_save failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'macro_save failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_delete') {
@@ -2103,7 +2118,7 @@ async function handleCallTool(request) {
         id: args.id,
         originClaudeSessionId: process.env.SM_CHAT_SESSION_ID,
       });
-      if (result?.ok === false) return errorResult(result.error ?? 'macro_delete failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'macro_delete failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'customer_feedback_list') {
@@ -2115,7 +2130,7 @@ async function handleCallTool(request) {
         try {
           siteResult = await adminRequest('GET', `/admin/site-feedback/inbox?${siteQs.toString()}`);
         } catch (err) { throw withSiteRouteHint(err); }
-        if (siteResult?.ok === false) return errorResult(siteResult.error ?? 'customer_feedback_list failed');
+        if (siteResult?.ok === false) return errorResult(siteErrorText(siteResult, 'customer_feedback_list failed', siteQs.get('cwd')));
         const siteItems = Array.isArray(siteResult?.items)
           ? siteResult.items.map((item) => (item && typeof item === 'object' ? { id: item.hostId, ...item } : item))
           : siteResult?.items;
@@ -2125,7 +2140,7 @@ async function handleCallTool(request) {
       if (!args || args.pull !== false) qs.set('pull', '1');
       if (args && args.includeHidden === true) qs.set('includeHidden', '1');
       const result = await adminRequest('GET', `/admin/customer-feedback/inbox?${qs.toString()}`);
-      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_list failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'customer_feedback_list failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'customer_feedback_set_status') {
@@ -2137,15 +2152,16 @@ async function handleCallTool(request) {
       const payload = { id: args.id, status: args.status };
       if (typeof args.note === 'string' && args.note) payload.note = args.note;
       if (source === 'site') {
+        const siteCwd = resolveCwdArg(args);
         let siteResult;
         try {
-          siteResult = await adminRequest('POST', '/admin/site-feedback/status', { cwd: resolveCwdArg(args), ...payload });
+          siteResult = await adminRequest('POST', '/admin/site-feedback/status', { cwd: siteCwd, ...payload });
         } catch (err) { throw withSiteRouteHint(err); }
-        if (siteResult?.ok === false) return errorResult(siteResult.error ?? 'customer_feedback_set_status failed');
+        if (siteResult?.ok === false) return errorResult(siteErrorText(siteResult, 'customer_feedback_set_status failed', siteCwd));
         return { content: [{ type: 'text', text: JSON.stringify(siteResult) }] };
       }
       const result = await adminRequest('POST', '/admin/customer-feedback/status', payload);
-      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_set_status failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'customer_feedback_set_status failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'customer_feedback_get') {
@@ -2160,7 +2176,7 @@ async function handleCallTool(request) {
       try {
         result = await adminRequest('GET', `/admin/site-feedback/item?${qs.toString()}`);
       } catch (err) { throw withSiteRouteHint(err); }
-      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_get failed');
+      if (result?.ok === false) return errorResult(siteErrorText(result, 'customer_feedback_get failed', qs.get('cwd')));
       const item = result?.item || {};
       const imagePaths = item.imagePaths || {};
       const out = {
@@ -2200,7 +2216,7 @@ async function handleCallTool(request) {
       if (imagePaths && imagePaths.length > 0) payload.imagePaths = imagePaths;
       if (context !== undefined && context !== null) payload.context = context;
       const result = await adminRequest('POST', '/admin/customer-feedback/submit', payload);
-      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_submit failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'customer_feedback_submit failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_widget_create') {
@@ -2214,13 +2230,13 @@ async function handleCallTool(request) {
         label: args.label,
         allowedOrigins: args.allowedOrigins,
       });
-      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_create failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'feedback_widget_create failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_widget_list') {
       const qs = new URLSearchParams({ cwd: resolveCwdArg(args) });
       const result = await adminRequest('GET', `/admin/feedback-widget/list?${qs.toString()}`);
-      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_list failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'feedback_widget_list failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_widget_update') {
@@ -2242,7 +2258,7 @@ async function handleCallTool(request) {
       }
       if (Object.keys(payload).length === 1) return errorResult('nothing to update: give label, allowedOrigins or state');
       const result = await adminRequest('POST', '/admin/feedback-widget/update', payload);
-      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_update failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'feedback_widget_update failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_widget_delete') {
@@ -2250,14 +2266,14 @@ async function handleCallTool(request) {
       if (refusal) return refusal;
       if (!args || typeof args.boxId !== 'string' || !args.boxId) return errorResult('missing or invalid required argument: boxId');
       const result = await adminRequest('POST', '/admin/feedback-widget/delete', { boxId: args.boxId });
-      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_delete failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'feedback_widget_delete failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_widget_snippet') {
       if (!args || typeof args.boxId !== 'string' || !args.boxId) return errorResult('missing or invalid required argument: boxId');
       const qs = new URLSearchParams({ boxId: args.boxId });
       const result = await adminRequest('GET', `/admin/feedback-widget/snippet?${qs.toString()}`);
-      if (result?.ok === false) return errorResult(result.error ?? 'feedback_widget_snippet failed');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'feedback_widget_snippet failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {
@@ -2323,5 +2339,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  TOOLS, handleCallTool, HELP_POINTER, maxVideoBytesFor, resolveHtmlArg, maxExportMp4BytesFor, MAX_EXPORT_POSTER_BYTES, resolveVideoExports, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions,
+  TOOLS, handleCallTool, HELP_POINTER, maxVideoBytesFor, resolveHtmlArg, maxExportMp4BytesFor, MAX_EXPORT_POSTER_BYTES, resolveVideoExports, NOT_RUNNING_ERROR, busyError, unknownRouteMessage, compareVersions, adminErrorText,
 };

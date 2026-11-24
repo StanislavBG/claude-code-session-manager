@@ -312,6 +312,49 @@ test("set_status source:'site' returns an error result on {ok:false}", async () 
   expect(result.content[0].text).toContain('FB-XXXXX');
 });
 
+// ── site failure text: '<error>: <message>', unknown_project names the cwd ──
+const SITE_CALLS = [
+  ['customer_feedback_list', { source: 'site', cwd: '/no/widget' }],
+  ['customer_feedback_get', { id: 'FB-7K2QX', source: 'site', cwd: '/no/widget' }],
+  ['customer_feedback_set_status', { id: 'FB-7K2QX', status: 'open', source: 'site', cwd: '/no/widget' }],
+];
+
+test.each(SITE_CALLS)('%s: unknown_project names the cwd and points to feedback_widget_list', async (tool, args) => {
+  const { handleCallTool } = await setup({ ok: false, error: 'unknown_project', message: 'no feedback widget is set up for this project' });
+  const result = await callTool(handleCallTool, tool, args);
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text.startsWith(
+    'unknown_project: no feedback widget is set up for this project (cwd /no/widget). '
+    + 'Call feedback_widget_list with no cwd to see the projects that have one.',
+  )).toBe(true);
+});
+
+test.each(SITE_CALLS)('%s: other failures carry the message, a bare error stays bare', async (tool, args) => {
+  const { handleCallTool } = await setup({ ok: false, error: 'internal', message: 'disk full' });
+  const a = await callTool(handleCallTool, tool, args);
+  expect(a.isError).toBe(true);
+  expect(a.content[0].text.startsWith('internal: disk full')).toBe(true);
+  expect(a.content[0].text).not.toContain('feedback_widget_list');
+  delete require.cache[require.resolve(SERVER_PATH)];
+  const { handleCallTool: h2 } = await setup({ ok: false, error: 'x' });
+  const b = await callTool(h2, tool, args);
+  expect(b.isError).toBe(true);
+  expect(b.content[0].text).toBe('x — call session_manager_help for the correct usage');
+});
+
+test('adminErrorText joins message, reason and details, falls back, and drops a repeat of error', async () => {
+  const { adminErrorText } = requireServerWithHome(await mkTmp());
+  expect(adminErrorText({ ok: false, error: 'e', message: 'm' }, 'fb')).toBe('e: m');
+  expect(adminErrorText({ ok: false, error: 'e', reason: 'r' }, 'fb')).toBe('e: r');
+  expect(adminErrorText({ ok: false, error: 'e', details: 'd' }, 'fb')).toBe('e: d');
+  expect(adminErrorText({ ok: false, error: 'e', details: { cap: [1] } }, 'fb')).toBe('e: {"cap":[1]}');
+  expect(adminErrorText({ ok: false, error: 'e', message: 'm', reason: 'r', details: 'd' }, 'fb')).toBe('e: m; r; d');
+  expect(adminErrorText({ ok: false }, 'fb')).toBe('fb');
+  expect(adminErrorText({ ok: false, error: '', message: 'm' }, 'fb')).toBe('fb: m');
+  expect(adminErrorText({ ok: false, error: 'e', message: 'e', reason: '' }, 'fb')).toBe('e');
+  expect(adminErrorText({ ok: false, error: 'e' }, 'fb')).toBe('e');
+});
+
 // ── customer_feedback_submit ─────────────────────────────────────────────────
 const SUBMIT_TOOL_NAME = 'customer_feedback_submit';
 

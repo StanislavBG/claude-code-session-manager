@@ -33,7 +33,7 @@ test('EVENT_KINDS is the closed {domain}.{action} set', () => {
   expect([...log.EVENT_KINDS].sort()).toEqual([
     'epic.minted', 'epic.status_changed', 'job.queued', 'job.status_changed', 'job.tool_use',
     'job.needs_input', 'job.confirmation_requested', 'human.message', 'human.answer',
-    'human.interrupt', 'human.tool_confirmation', 'validator.verdict', 'outcome.recorded',
+    'human.interrupt', 'human.tool_confirmation', 'external.message', 'validator.verdict', 'outcome.recorded',
     'artifact.published',
   ].sort());
   expect(Object.isFrozen(log.EVENT_KINDS)).toBe(true);

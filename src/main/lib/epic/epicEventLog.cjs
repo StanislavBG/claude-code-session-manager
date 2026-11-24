@@ -49,6 +49,7 @@ const EVENT_KINDS = Object.freeze([
   'human.answer',
   'human.interrupt',
   'human.tool_confirmation',
+  'external.message',
   'validator.verdict',
   'outcome.recorded',
   'artifact.published',

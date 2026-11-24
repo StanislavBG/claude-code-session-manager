@@ -325,6 +325,37 @@ function consumeSchedulerPrompt(tabId, prompt) {
   return true;
 }
 
+// tab+prompt keys of relayed external sends (Web Remote phone / admin API) awaiting
+// their run(): each entry is a FIFO of relay names, consumed once per run.
+const EXTERNAL_RELAYS = new Set(['web-remote', 'admin-api']);
+const relayPrompts = new Map();
+const RELAY_PROMPT_TTL_MS = 6 * 60 * 60 * 1000;
+function noteRelayPrompt(tabId, prompt, relay) {
+  if (!EXTERNAL_RELAYS.has(relay)) return;
+  const now = Date.now();
+  for (const [k, v] of relayPrompts) {
+    const live = v.filter((e) => e.expires >= now);
+    if (live.length) relayPrompts.set(k, live); else relayPrompts.delete(k);
+  }
+  const key = `${tabId}\n${prompt}`;
+  const list = relayPrompts.get(key) || [];
+  list.push({ relay, expires: now + RELAY_PROMPT_TTL_MS });
+  relayPrompts.set(key, list);
+}
+function consumeRelayPrompt(tabId, prompt) {
+  const key = `${tabId}\n${prompt}`;
+  const list = relayPrompts.get(key);
+  if (!list) return null;
+  const now = Date.now();
+  let hit = null;
+  while (list.length && !hit) {
+    const e = list.shift();
+    if (e.expires >= now) hit = e.relay;
+  }
+  if (!list.length) relayPrompts.delete(key);
+  return hit;
+}
+
 // ─── Hard wall-clock kill ceiling ────────────────────────────────────────
 // Defined here (ahead of CHAT_MODE_TRUTH_INSTRUCTION) so the prompt's stated
 // budget is always derived from this single constant — never a hand-written
@@ -484,21 +515,29 @@ function recordAnswerIfOpen({ cwd, sessionId, prompt, origin }) {
 }
 
 /**
- * Append human.message { chars, excerpt } for a human-sent prompt on an Epic
- * chat (sessionId = Epic id). Fail-closed, the same rule as noteChatRunOrigin:
- * only an explicitly declared origin === 'human' counts (the renderer's
- * chat.ts send() resolves a composer submit to 'human'); absent, 'scheduler',
- * 'external', 'inbound-proposal' and a boot-recovery re-send
- * (chatBootRecovery.cjs stamps bootRecovery: true on its CONTINUE_PROMPT,
- * which carries the interrupted turn's origin) are not human messages.
- * Fire-and-forget; a failure is logged by appendChatEpicEvent, never thrown.
- * @param {{ cwd?: string, sessionId: string, prompt: string, origin?: string, bootRecovery?: boolean }} args
+ * Append the message event for a prompt on an Epic chat (sessionId = Epic id):
+ * - origin 'human' (a desktop composer submit) → human.message { via: 'desktop' };
+ * - origin 'external' tagged relay 'web-remote' (the paired phone) → human.message { via: 'web-remote' };
+ * - origin 'external' tagged relay 'admin-api' (POST /admin/chat/send-prompt, which
+ *   agents also call) → external.message { via: 'admin-api' }.
+ * The relay tag is noted by enqueueExternalPrompt and consumed once by run().
+ * Untagged external, 'scheduler', 'inbound-proposal', no origin and a boot-recovery
+ * re-send (chatBootRecovery.cjs stamps bootRecovery: true) log nothing. This is the
+ * event log only — the auto-approval human-prompt ledger (noteChatRunOrigin) still
+ * counts origin 'human' alone. Fire-and-forget; a failure is logged by
+ * appendChatEpicEvent, never thrown.
+ * @param {{ cwd?: string, sessionId: string, prompt: string, origin?: string, bootRecovery?: boolean, relay?: string | null }} args
  */
-function recordHumanMessage({ cwd, sessionId, prompt, origin, bootRecovery }) {
-  if (origin !== 'human' || bootRecovery === true) return null;
+function recordHumanMessage({ cwd, sessionId, prompt, origin, bootRecovery, relay }) {
+  if (bootRecovery === true) return null;
+  let kind; let via;
+  if (origin === 'human') { kind = 'human.message'; via = 'desktop'; }
+  else if (origin === 'external' && relay === 'web-remote') { kind = 'human.message'; via = 'web-remote'; }
+  else if (origin === 'external' && relay === 'admin-api') { kind = 'external.message'; via = 'admin-api'; }
+  else return null;
   let summary;
   try { summary = humanMessageSummary(prompt); } catch { return null; }
-  return appendChatEpicEvent(cwd, sessionId, { kind: 'human.message', source: 'chat', sessionId, ...summary });
+  return appendChatEpicEvent(cwd, sessionId, { kind, source: 'chat', sessionId, via, ...summary });
 }
 
 // Indirection so tests can stub the spawn without launching claude.
@@ -519,6 +558,7 @@ function __resetQueueForTests() {
   waiting.length = 0;
   pendingStart.clear();
   openQuestions.clear();
+  relayPrompts.clear();
   sessionSlots.__resetForTests();
 }
 
@@ -549,6 +589,9 @@ function run(opts) {
   // A scheduler-originated prompt (tagged by enqueueExternalPrompt) is re-identified
   // here by tab + exact text, since it travels through the renderer's chat:run.
   if (!opts.silent && consumeSchedulerPrompt(opts.tabId, opts.prompt)) opts = { ...opts, origin: 'scheduler' };
+  // A relayed external send (Web Remote / admin API) is re-identified the same way;
+  // the relay only picks the event-log kind, never the origin.
+  if (!opts.silent && opts.relay === undefined) opts = { ...opts, relay: consumeRelayPrompt(opts.tabId, opts.prompt) };
   // Per-tab exclusivity still holds — two `claude -p --resume` against ONE
   // sessionId must never overlap — but it is now enforced in pump() (which
   // refuses to start a run for a tab that already has one live) rather than by
@@ -1322,9 +1365,10 @@ function hasLiveWindow() {
  * { disposition: 'unconfirmed', reason: 'timeout' | 'no-window' }. Never rejects.
  */
 function enqueueExternalPrompt(tabId, prompt, extra = {}) {
-  const { sessionId, cwd, origin } = extra ?? {};
+  const { sessionId, cwd, origin, relay } = extra ?? {};
   if (!hasLiveWindow()) return Promise.resolve({ disposition: 'unconfirmed', reason: 'no-window' });
   if (origin === 'scheduler') noteSchedulerPrompt(tabId, prompt);
+  else if (relay !== undefined) noteRelayPrompt(tabId, prompt, relay);
   const requestId = require('node:crypto').randomUUID();
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -1425,7 +1469,7 @@ function registerAdminRoute(adminHttp) {
       sendJson(res, 400, { ok: false, error: e?.message ?? 'invalid body' });
       return;
     }
-    const outcome = await enqueueExternalPrompt(body.tabId, body.prompt);
+    const outcome = await enqueueExternalPrompt(body.tabId, body.prompt, { relay: 'admin-api' });
     sendJson(res, 200, {
       ok: outcome.disposition !== 'refused',
       disposition: outcome.disposition,

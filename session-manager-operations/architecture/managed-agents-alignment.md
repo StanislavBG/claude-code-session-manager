@@ -67,6 +67,10 @@ exceptions are named in `CREDENTIAL_EXCEPTIONS`.
   closed `{domain}.{action}` kind set, summaries only (string fields capped). Writer `event-log` in
   `opsOwnership.cjs`; `npm run lint:event-log` fails any other writer. Outside readers replay via
   `GET /admin/events?epicId=` ([external-contract.md](external-contract.md)).
+- Message kinds: `human.message` (`via: 'desktop'` composer, `via: 'web-remote'` phone) and
+  `external.message` (`via: 'admin-api'`, `POST /admin/chat/send-prompt`, which agents also call). The
+  relay is noted at the source and consumed once by `chatRunner.run()`; untagged external, scheduler,
+  inbound-proposal and boot-recovery prompts log nothing. Auto-approval's human-prompt ledger is separate.
 - Why: state-snapshot watchers raced and lost transitions; an ordered log with a replay cursor cannot.
 
 ## Legality

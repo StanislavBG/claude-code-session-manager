@@ -72,14 +72,14 @@ describe('cmd:chat:send', () => {
   ])('open tab: %s', async (_n, r, expected) => {
     enqueue.mockResolvedValue(r)
     expect(await send({ tabId: 'sess-1', prompt: 'hi' })).toEqual(expected)
-    expect(enqueue).toHaveBeenCalledWith('sess-1', 'hi')
+    expect(enqueue).toHaveBeenCalledWith('sess-1', 'hi', { relay: 'web-remote' })
   })
 
   it('active Epic passes sessionId + cwd', async () => {
     await writeIndex({ e1: { id: 'e1', status: 'active', claudeSessionId: 'cs-1', cwd } })
     enqueue.mockResolvedValue({ disposition: 'sent' })
     expect(await send({ tabId: 'e1', prompt: 'yo' })).toEqual({ ok: true, disposition: 'sent' })
-    expect(enqueue).toHaveBeenCalledWith('e1', 'yo', { sessionId: 'cs-1', cwd })
+    expect(enqueue).toHaveBeenCalledWith('e1', 'yo', { sessionId: 'cs-1', cwd, relay: 'web-remote' })
   })
 
   it('proposed Epic → refused:proposed without enqueue', async () => {
@@ -126,7 +126,7 @@ describe('cmd:chat:send with images', () => {
     expect(id).toBe('e1')
     expect(prompt).toBe(`look\n\nAttached: ${abs}`)
     expect(prompt.endsWith(`Attached: ${abs}`)).toBe(true)
-    expect(extra).toEqual({ sessionId: 'cs-1', cwd })
+    expect(extra).toEqual({ sessionId: 'cs-1', cwd, relay: 'web-remote' })
   })
 
   it('image-only send to an open tab', async () => {
@@ -135,7 +135,7 @@ describe('cmd:chat:send with images', () => {
     const files = await listAttach()
     expect(files).toHaveLength(1)
     expect(res).toEqual({ ok: true, disposition: 'queued', attachments: files })
-    expect(enqueue).toHaveBeenCalledWith('sess-1', `Attached: ${path.join(attachDir(), files[0])}`)
+    expect(enqueue).toHaveBeenCalledWith('sess-1', `Attached: ${path.join(attachDir(), files[0])}`, { relay: 'web-remote' })
   })
 
   it('empty prompt without images still throws', async () => {

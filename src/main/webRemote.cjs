@@ -1803,8 +1803,8 @@ function getDispatchMap() {
       if (!target) return { ok: false, disposition: 'refused', reason: 'unknown-target' };
 
       const enqueue = (prompt) => (target.extra
-        ? chatRunner.enqueueExternalPrompt(target.id, prompt, target.extra)
-        : chatRunner.enqueueExternalPrompt(target.id, prompt));
+        ? chatRunner.enqueueExternalPrompt(target.id, prompt, { ...target.extra, relay: 'web-remote' })
+        : chatRunner.enqueueExternalPrompt(target.id, prompt, { relay: 'web-remote' }));
 
       const images = parsed.images ?? [];
       if (images.length === 0) return outcome(await enqueue(parsed.prompt));

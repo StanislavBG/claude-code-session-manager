@@ -1,10 +1,14 @@
 /**
  * toolUseHumanMessageEvents.test.cjs — the job.tool_use emitter (scheduler job
- * stream-json log → createJobToolUseEmitter) and the human.message emitter
- * (chatRunner.run, the path chat_send_prompt also reaches through chat:run).
- * Covers the 200-char cap, secret redaction, byte offsets, once-per-prompt, the
- * origin rule (only origin "human"; never a boot-recovery re-send) and
- * a failing append that is logged, never thrown.
+ * stream-json log → createJobToolUseEmitter) and the message emitters in
+ * chatRunner.run. The rule: a desktop composer prompt (origin "human") logs
+ * human.message { via: 'desktop' }; an external send tagged at its source by
+ * enqueueExternalPrompt's relay marker (noted per tab + prompt, TTL, consumed
+ * once by run()) logs human.message { via: 'web-remote' } for the phone and
+ * external.message { via: 'admin-api' } for POST /admin/chat/send-prompt.
+ * Untagged external, scheduler, inbound-proposal, no-origin and boot-recovery
+ * runs log nothing. Also covers the 200-char cap, secret redaction, byte
+ * offsets, once-per-prompt and a failing append that is logged, never thrown.
  *
  * Run: timeout 120 npx vitest run src/main/lib/epic/__tests__/toolUseHumanMessageEvents.test.cjs
  */
@@ -216,5 +220,145 @@ test('human.message is logged only for origin "human": none for no origin, sched
   } finally {
     cr.__setExecutor(null);
     cr.__resetQueueForTests();
+  }
+});
+
+// ── relay-tagged external sends ─────────────────────────────────────────
+
+const fakeWindow = () => ({
+  isDestroyed: () => false,
+  webContents: { isDestroyed: () => false, send: () => {} },
+});
+
+function withRunner() {
+  const cr = require('../../../chatRunner.cjs');
+  cr.__resetQueueForTests();
+  const ran = [];
+  cr.__setExecutor((job) => { ran.push(job.prompt); return Promise.resolve(); });
+  cr.attachWindow(fakeWindow());
+  const appends = [];
+  const real = epicEventLog.appendEpicEvent;
+  vi.spyOn(epicEventLog, 'appendEpicEvent').mockImplementation((...args) => {
+    const p = real(...args);
+    appends.push(p);
+    return p;
+  });
+  const msgEvents = async () => { await Promise.all(appends); return events(['human.message', 'external.message']); };
+  const done = () => { cr.attachWindow(null); cr.__setExecutor(null); cr.__resetQueueForTests(); };
+  return { cr, ran, msgEvents, done };
+}
+
+test('EVENT_KINDS includes external.message', () => {
+  expect(epicEventLog.EVENT_KINDS).toContain('external.message');
+  expect(epicEventLog.EVENT_KINDS).toContain('human.message');
+});
+
+test('desktop, phone and admin-API prompts log their kind + via; each relay tag is consumed once', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  try {
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'typed', cwd, resume: false, origin: 'human' });
+
+    void cr.enqueueExternalPrompt(EPIC, 'from phone', { relay: 'web-remote' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'from phone', cwd, resume: true, origin: 'external' });
+
+    void cr.enqueueExternalPrompt(EPIC, 'from agent', { relay: 'admin-api' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'from agent', cwd, resume: true, origin: 'external' });
+
+    // Consumed once: the same text again, untagged, logs nothing.
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'from phone', cwd, resume: true, origin: 'external' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'from agent', cwd, resume: true, origin: 'external' });
+
+    await waitFor(() => ran.length === 5);
+    const evs = await msgEvents();
+    expect(evs.map((e) => [e.kind, e.via, e.excerpt])).toEqual([
+      ['human.message', 'desktop', 'typed'],
+      ['human.message', 'web-remote', 'from phone'],
+      ['external.message', 'admin-api', 'from agent'],
+    ]);
+  } finally {
+    done();
+  }
+});
+
+test('a relay tag is keyed by tab + prompt and expires after its TTL', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  try {
+    // Another tab's tag never matches this tab.
+    void cr.enqueueExternalPrompt('other-tab', 'hello', { relay: 'web-remote' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'hello', cwd, resume: false, origin: 'external' });
+    // A different prompt never matches.
+    void cr.enqueueExternalPrompt(EPIC, 'one text', { relay: 'admin-api' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'another text', cwd, resume: true, origin: 'external' });
+    // An expired tag is dropped.
+    const t0 = Date.now();
+    void cr.enqueueExternalPrompt(EPIC, 'late', { relay: 'web-remote' });
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0 + 7 * 60 * 60 * 1000);
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'late', cwd, resume: true, origin: 'external' });
+    now.mockRestore();
+    // An unknown relay name is never noted.
+    void cr.enqueueExternalPrompt(EPIC, 'bogus', { relay: 'nope' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'bogus', cwd, resume: true, origin: 'external' });
+
+    await waitFor(() => ran.length === 4);
+    expect(await msgEvents()).toHaveLength(0);
+  } finally {
+    done();
+  }
+});
+
+test('untagged external, scheduler, inbound-proposal, no-origin and boot-recovery runs log nothing', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  const { recoverInflightTurns } = require('../../chatBootRecovery.cjs');
+  try {
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'untagged external', cwd, resume: false, origin: 'external' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'auto', cwd, resume: true, origin: 'scheduler' });
+    // A scheduler send through enqueueExternalPrompt is re-identified as scheduler, even with a relay.
+    void cr.enqueueExternalPrompt(EPIC, 'sched via enqueue', { origin: 'scheduler', relay: 'admin-api' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'sched via enqueue', cwd, resume: true, origin: 'external' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'proposal', cwd, resume: true, origin: 'inbound-proposal' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'no origin', cwd, resume: true });
+    // A tagged prompt on a boot-recovery re-send is still not logged.
+    void cr.enqueueExternalPrompt(EPIC, 'recovered', { relay: 'web-remote' });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'recovered', cwd, resume: true, origin: 'external', bootRecovery: true });
+    // Real boot recovery of an interrupted phone turn.
+    const ledger = {
+      list: async () => [{ sessionId: EPIC, tabId: EPIC, cwd, pid: 999999, origin: 'external' }],
+      end: async () => {},
+      recoveredMap: async () => ({}),
+      markRecovered: async () => {},
+    };
+    await recoverInflightTurns({
+      ledger, run: cr.run, pidAlive: () => false, sessionTurnState: async () => 'unfinished',
+      agentCliOf: () => null, log: () => {},
+    });
+    await waitFor(() => ran.length === 7);
+    expect(ran).toHaveLength(7);
+    expect(await msgEvents()).toHaveLength(0);
+  } finally {
+    done();
+  }
+});
+
+test('POST /admin/chat/send-prompt tags its send admin-api and never stamps origin human', async () => {
+  const { Readable } = require('node:stream');
+  const { cr, ran, msgEvents, done } = withRunner();
+  const routes = new Map();
+  cr.registerAdminRoute({ registerRoute: (m, u, h) => routes.set(`${m} ${u}`, h) });
+  const sent = [];
+  cr.attachWindow({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (c, p) => sent.push({ c, p }) } });
+  try {
+    const req = Readable.from([Buffer.from(JSON.stringify({ tabId: EPIC, prompt: 'agent says hi' }))]);
+    const res = { writeHead: () => {}, end: () => {} };
+    const handled = routes.get('POST /admin/chat/send-prompt')(req, res);
+    await waitFor(() => sent.length === 1);
+    expect(sent[0].p).not.toHaveProperty('origin');
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'agent says hi', cwd, resume: false, origin: 'external' });
+    await waitFor(() => ran.length === 1);
+    const evs = await msgEvents();
+    expect(evs.map((e) => [e.kind, e.via])).toEqual([['external.message', 'admin-api']]);
+    cr.settleExternalSend?.({ requestId: sent[0].p.requestId, disposition: 'sent' });
+    void handled;
+  } finally {
+    done();
   }
 });

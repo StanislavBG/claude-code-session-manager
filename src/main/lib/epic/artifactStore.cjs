@@ -29,7 +29,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { opsPath, checkOpsWrite, assertOpsWrite } = require('../opsOwnership.cjs');
-const { writeJsonAtomic } = require('../util/atomicFs.cjs');
+const { writeJsonAtomic, readJsonOrSync } = require('../util/atomicFs.cjs');
 
 const NAMESPACE = 'artifacts';
 const WRITER = 'artifacts';
@@ -126,16 +126,15 @@ function ownerOf(epicId, taskId) {
   return { ownerId: `${TASKS_DIR}/${taskId}`, segs: [TASKS_DIR, taskId] };
 }
 
-/** Read a ledger's entries; missing or corrupt → []. */
-function readLedger(file, fsImpl = fs) {
-  try {
-    const parsed = JSON.parse(fsImpl.readFileSync(file, 'utf8'));
-    const entries = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.entries) ? parsed.entries : null;
-    if (!entries) return [];
-    return entries.filter((e) => e && typeof e === 'object' && typeof e.name === 'string');
-  } catch {
-    return [];
-  }
+/**
+ * Read a ledger's entries; missing, empty, corrupt or entries-not-an-array → [].
+ * Reads through readJsonOrSync (real fs), so it takes no fsImpl.
+ */
+function readLedger(file) {
+  const parsed = readJsonOrSync(file, null);
+  const entries = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.entries) ? parsed.entries : null;
+  if (!entries) return [];
+  return entries.filter((e) => e && typeof e === 'object' && typeof e.name === 'string');
 }
 
 function cleanProducer(producer, epicId, taskId) {
@@ -234,7 +233,7 @@ async function publishArtifact({
         producer: cleanProducer(producer, epicId, taskId),
       };
       try {
-        const entries = readLedger(ledgerFile, fsImpl);
+        const entries = readLedger(ledgerFile);
         entries.push(entry);
         await writeJsonAtomic(ledgerFile, { version: 1, entries });
       } catch (e) {
@@ -356,7 +355,7 @@ function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
     }
   }
   for (const { ownerId, dir } of owners) {
-    for (const e of readLedger(path.join(dir, LEDGER), fsImpl)) out.push({ ...e, ownerId });
+    for (const e of readLedger(path.join(dir, LEDGER))) out.push({ ...e, ownerId });
   }
   const t = (e) => { const v = Date.parse(e.createdAt); return Number.isFinite(v) ? v : 0; };
   out.sort((a, b) => t(b) - t(a));

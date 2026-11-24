@@ -223,6 +223,18 @@ test('a corrupt ledger yields [] for that owner and is replaced on the next publ
   expect(ledger.entries.map((e) => e.name)).toEqual(['three.txt']);
 });
 
+test('a missing ledger or one whose entries is not an array yields [] for that owner', async () => {
+  await pub({ srcPath: mk('one.txt') });
+  await store.publishArtifact({ projectRoot: root, epicId: 'epic-two', srcPath: mk('two.txt'), allowedRoots: [src] });
+  const ledgerFile = path.join(ns(), EPIC, 'index.json');
+  fs.writeFileSync(ledgerFile, JSON.stringify({ version: 1, entries: { name: 'one.txt' } }));
+  expect(store.listArtifacts(root).map((e) => [e.ownerId, e.name])).toEqual([['epic-two', 'two.txt']]);
+  fs.writeFileSync(ledgerFile, '');
+  expect(store.listArtifacts(root).map((e) => [e.ownerId, e.name])).toEqual([['epic-two', 'two.txt']]);
+  fs.unlinkSync(ledgerFile);
+  expect(store.listArtifacts(root).map((e) => [e.ownerId, e.name])).toEqual([['epic-two', 'two.txt']]);
+});
+
 test('listArtifacts returns every owner\'s entries newest first; empty store → []', async () => {
   expect(store.listArtifacts(root)).toEqual([]);
   expect(store.listArtifacts('relative')).toEqual([]);

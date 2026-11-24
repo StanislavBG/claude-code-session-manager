@@ -208,7 +208,7 @@ written here. A term that couldn't be verified against real source was dropped, 
 | File Explorer | The built-in file browser and editor. | File Explorer |
 | History | A record of past Sessions, with cost and usage over time. | History |
 | Voice | Talk to your agents with your microphone instead of typing. | Voice |
-| App Settings | Session Manager's own preferences: voice, appearance, telemetry, phone remote, updates. | App Settings |
+| App Settings | Session Manager's own preferences: voice, appearance, telemetry, web remote, updates. | App Settings |
 
 ## Honesty rules
 

@@ -240,6 +240,10 @@ test('debounce: many pokes inside the window run one recompute', async () => {
     }
     expect(spy).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1000);
+    // The recompute's first step reads the Epic log from disk (real I/O, not a
+    // timer), so finish it on real timers before counting recomputes.
+    vi.useRealTimers();
+    await settle();
     expect(spy).toHaveBeenCalledTimes(1);
   } finally {
     vi.useRealTimers();

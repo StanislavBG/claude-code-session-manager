@@ -14056,6 +14056,14 @@ const remote = {
     return JSON.parse(JSON.stringify(Array.isArray(state?.jobs) ? state.jobs : []));
   },
 
+  // listJobRows after any in-flight mutate() has written queue.json. A mutate
+  // body appends job.status_changed BEFORE writeQueue, so the epic-state
+  // emitter's recompute must wait for the write. Never calls mutate().
+  async listJobRowsSettled() {
+    try { await mutateTail; } catch { /* chain errors are not ours */ }
+    return remote.listJobRows();
+  },
+
   // Single queue row lookup, used by cancelJob/updatePrd's status guards and
   // the admin GET /admin/scheduler/prds?slug= route (PRD 1024).
   async getJob(slug) {

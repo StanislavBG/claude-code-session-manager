@@ -98,6 +98,13 @@ require('./adminRouteRegistry.cjs').registerAppAdminRoutes(adminHttp, {
   onMacrosChanged: () => broadcastMacrosChanged(),
   onNeedsYouChanged: broadcastNeedsYouChanged,
 });
+// Event-driven epic_state_changed (lib/epic/epicStateEmitter.cjs): chat turns poke it,
+// and its job rows wait for any in-flight queue write before a recompute reads them.
+{
+  const epicStateEmitter = require('./lib/epic/epicStateEmitter.cjs');
+  epicStateEmitter.configureEpicStateEmitter({ isTabBusy: chatRunner.isTabBusy, listJobs: () => scheduler.remote.listJobRowsSettled() });
+  epicStateEmitter.startEpicStateEmitter();
+}
 // Outside apps' "Needs you" items (lib/feedback-remote/needsYouStore.cjs); changes broadcast `needsYou:changed`.
 function broadcastNeedsYouChanged() {
   sendIfAlive(mainWindow, 'needsYou:changed', {});

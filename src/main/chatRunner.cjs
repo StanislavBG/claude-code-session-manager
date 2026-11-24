@@ -465,6 +465,20 @@ function appendChatEpicEvent(cwd, epicId, event) {
   });
 }
 
+/**
+ * Poke the Epic outside-state emitter (lib/epic/epicStateEmitter.cjs) at a
+ * turn's acceptance and settle — the only moments that time the 'working' and
+ * 'needs_input' outside states. Lazy require; never throws, never alters a turn.
+ */
+function pokeState(cwd, sessionId) {
+  if (typeof cwd !== 'string' || !cwd || typeof sessionId !== 'string' || !sessionId) return;
+  try {
+    require('./lib/epic/epicStateEmitter.cjs').pokeEpicState(cwd, sessionId);
+  } catch (err) {
+    console.error('[chatRunner] epic state poke failed', sessionId, err?.message ?? err);
+  }
+}
+
 /** Staging folder for a chat session's artifacts, or null (unsafe id / mkdir failure — logged). */
 function chatArtifactsDir(sessionId) {
   try {
@@ -658,11 +672,13 @@ function run(opts) {
         pendingStart.delete(opts.tabId);
         run({ ...opts, worktreeDirHint: wt && wt.dir ? wt.dir : undefined });
       });
+    if (!opts.silent) pokeState(opts.cwd, opts.sessionId);
     return { accepted: true, queued: tabBusy };
   }
 
   waiting.push(opts);
   pump();
+  if (!opts.silent) pokeState(opts.cwd, opts.sessionId);
   return { accepted: true, queued: tabBusy };
 }
 
@@ -702,6 +718,7 @@ function pump() {
         liveSessions.delete(job.sessionId);
         sessionSlots.release(slotToken);
         pump();
+        if (!job.silent) pokeState(job.cwd, job.sessionId);
       });
   }
   // Anyone still waiting gets a 1-based position update. Silent (automated

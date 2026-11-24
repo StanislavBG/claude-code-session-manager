@@ -460,23 +460,122 @@ module.exports = {
   MIN_BATCH_TIMEOUT_MS,
 };
 
-// CLI: node character.cjs speak spec.json   (spec { projectRoot, lines: [{ text, out, speaker? }] })
-if (require.main === module) {
-  const [cmdName, specPath] = process.argv.slice(2);
-  let result;
-  if (cmdName !== 'speak' || !specPath) {
-    result = { ok: false, error: 'usage: node character.cjs speak spec.json' };
-  } else {
-    try {
-      const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
-      result = speakLines(spec && spec.projectRoot, spec && spec.lines);
-    } catch (e) {
-      result = { ok: false, error: `cannot read spec ${specPath}: ${e.message}` };
-    }
+// CLI: node character.cjs speak spec.json [--wait <seconds>]
+//   (spec { projectRoot, lines: [{ text, out, speaker? }] })
+// speakLines runs in a detached runner (resumableRun.cjs) keyed by the sha256
+// of the spec bytes, state in <abs spec>.run/. Each call waits one slice: the
+// result (exit 0/1) or, while still speaking, a pending line with exit 75 —
+// run the same command again to attach to the same run.
+const SPEAK_USAGE = 'usage: node character.cjs speak spec.json [--wait seconds]';
+const EXIT_PENDING = 75;
+const MAX_WAIT_S = 840;
+
+/** Slice length in ms from --wait, else BASH_DEFAULT_TIMEOUT_MS - 30 s clamped to 10-840 s, else 90 s. */
+function speakWaitMs(flags, env = process.env) {
+  if (flags.length) {
+    if (flags.length !== 2 || flags[0] !== '--wait' || !/^\d+$/.test(flags[1])) return null;
+    const n = Number(flags[1]);
+    return n >= 1 && n <= MAX_WAIT_S ? n * 1000 : null;
   }
+  const bash = Number(env.BASH_DEFAULT_TIMEOUT_MS);
+  if (!(bash > 0)) return 90 * 1000;
+  return Math.min(MAX_WAIT_S * 1000, Math.max(10 * 1000, bash - 30 * 1000));
+}
+
+function specOuts(spec) {
+  const lines = spec && Array.isArray(spec.lines) ? spec.lines : [];
+  const root = spec && typeof spec.projectRoot === 'string' ? spec.projectRoot : '';
+  return lines.map((l) => (l && typeof l.out === 'string' && l.out ? path.resolve(root, l.out) : null));
+}
+
+function readSpec(specPath) {
+  const bytes = fs.readFileSync(specPath);
+  return { bytes, spec: JSON.parse(bytes.toString('utf8')) };
+}
+
+async function speakCli(specPath, flags) {
+  const waitMs = speakWaitMs(flags);
+  if (waitMs === null) return { result: { ok: false, error: SPEAK_USAGE } };
+  let bytes;
+  let spec;
+  try {
+    ({ bytes, spec } = readSpec(specPath));
+  } catch (e) {
+    return { result: { ok: false, error: `cannot read spec ${specPath}: ${e.message}` } };
+  }
+  const rr = require('./resumableRun.cjs');
+  const crypto = require('node:crypto');
+  const key = crypto.createHash('sha256').update(bytes).digest('hex');
+  const absSpec = path.resolve(specPath);
+  const stateDir = `${absSpec}.run`;
+  const outs = specOuts(spec);
+  const allWavs = () => outs.length > 0 && outs.every((o) => o && isWav(o));
+  let prior = null;
+  try { prior = JSON.parse(fs.readFileSync(path.join(stateDir, 'result.json'), 'utf8')); } catch { /* none yet */ }
+  if (prior && prior.key === key && prior.result && prior.result.ok === true) {
+    if (allWavs()) return { result: prior.result };
+    rr.stopRun(stateDir);
+  }
+  rr.startOrAttach({ stateDir, key, argv: [__filename, '__speak-run', absSpec, key], cwd: path.dirname(absSpec) });
+  const w = await rr.waitForResult({ stateDir, key, waitMs });
+  if (w.status === 'done') return { result: w.result };
+  if (w.status === 'lost') return { result: { ok: false, error: `speak runner (node character.cjs __speak-run ${absSpec}): ${w.error}` } };
+  const wavs = outs.filter((o) => o && isWav(o)).length;
+  return {
+    pending: true,
+    result: {
+      ok: false,
+      pending: true,
+      pid: w.pid,
+      elapsedS: Math.round(w.elapsedMs / 1000),
+      wavs,
+      lines: outs.length,
+      message: `still speaking (${wavs}/${outs.length} WAVs so far); run the same command again`,
+    },
+  };
+}
+
+function speakRunner(specPath, key) {
+  const rr = require('./resumableRun.cjs');
+  const crypto = require('node:crypto');
+  const stateDir = `${path.resolve(specPath)}.run`;
+  let result;
+  try {
+    const { bytes, spec } = readSpec(specPath);
+    const got = crypto.createHash('sha256').update(bytes).digest('hex');
+    result = got !== key
+      ? { ok: false, error: `spec ${specPath} changed since this run started` }
+      : speakLines(spec && spec.projectRoot, spec && spec.lines);
+  } catch (e) {
+    result = { ok: false, error: `cannot read spec ${specPath}: ${e.message}` };
+  }
+  rr.writeResult(stateDir, key, result);
+}
+
+async function main(argv) {
+  const [cmdName, specPath, ...rest] = argv;
+  if (cmdName === '__speak-run' && specPath && rest.length === 1 && rest[0]) {
+    speakRunner(specPath, rest[0]);
+    process.exitCode = 0; // the waiting call reports failures
+    return;
+  }
+  const out = cmdName === 'speak' && specPath
+    ? await speakCli(specPath, rest)
+    : { result: { ok: false, error: SPEAK_USAGE } };
+  const { result } = out;
   process.stdout.write(`${JSON.stringify(result)}\n`);
-  if (!result.ok) {
+  if (out.pending) {
+    process.exitCode = EXIT_PENDING;
+  } else if (!result.ok) {
     process.stderr.write(`${result.error}\n`);
     process.exitCode = 1;
   }
+}
+
+if (require.main === module) {
+  main(process.argv.slice(2)).catch((e) => {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: e && e.message ? e.message : String(e) })}\n`);
+    process.stderr.write(`${e && e.stack ? e.stack : e}\n`);
+    process.exitCode = 1;
+  });
 }

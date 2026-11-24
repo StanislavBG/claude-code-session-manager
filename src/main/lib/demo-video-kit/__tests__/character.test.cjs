@@ -529,3 +529,113 @@ test.skipIf(process.platform === 'win32')('speakLines: too little time before th
   }
   expect(calls(root)).toEqual([]);
 });
+
+// Resumable speak CLI: slow stub voices (2 s per call) at <root>/bin/<name>, each call logged to calls.jsonl.
+const { stopRun } = require('../resumableRun.cjs');
+const SLOW_SRC = [
+  '#!/usr/bin/env node',
+  "const fs = require('fs');",
+  "const a = process.argv.slice(2);",
+  "const get = (k) => a[a.indexOf(k) + 1];",
+  "const items = a.includes('--lines') ? JSON.parse(fs.readFileSync(get('--lines'), 'utf8')) : [{ text: get('--text'), out: get('--out') }];",
+  "fs.appendFileSync('calls.jsonl', JSON.stringify({ texts: items.map((i) => i.text) }) + '\\n');",
+  "if (items.some((i) => i.text === 'die')) process.kill(process.ppid, 'SIGKILL');",
+  "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);",
+  "for (const i of items) fs.writeFileSync(i.out, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60), Buffer.from(i.text)]));",
+].join('\n');
+const slowVoices = {
+  batch: { engine: 'command', command: ['bin/slow', '--lines', '{lines}'] },
+  perLine: { engine: 'command', command: ['bin/slow', '--text', '{text}', '--out', '{out}'] },
+};
+const runDirs = [];
+afterEach(() => { while (runDirs.length) stopRun(runDirs.pop()); });
+
+function slowProject(voice) {
+  const root = project({ name: 'Bit', palette: ['#fff'], voice });
+  fs.mkdirSync(path.join(root, 'bin'));
+  fs.writeFileSync(path.join(root, 'bin', 'slow'), SLOW_SRC);
+  fs.chmodSync(path.join(root, 'bin', 'slow'), 0o755);
+  const spec = path.join(root, 'spec.json');
+  runDirs.push(`${spec}.run`);
+  return { root, spec };
+}
+function writeSpec(root, spec, lines) {
+  fs.writeFileSync(spec, JSON.stringify({ projectRoot: root, lines }));
+}
+function speak(spec, ...flags) {
+  const { spawnSync } = require('node:child_process');
+  const env = { ...process.env };
+  delete env.BASH_DEFAULT_TIMEOUT_MS;
+  const r = spawnSync(process.execPath, [CHAR_CJS, 'speak', spec, ...flags], { encoding: 'utf8', timeout: 60000, env });
+  return { status: r.status, stderr: r.stderr, result: JSON.parse(r.stdout) };
+}
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+for (const [kind, lines] of [['batch', ['one', 'two']], ['perLine', ['one']]]) {
+  test.skipIf(process.platform === 'win32')(`CLI speak (${kind}): pending with exit 75, then the same command attaches to the same run`, () => {
+    const { root, spec } = slowProject(slowVoices[kind]);
+    const outs = lines.map((t) => path.join(root, `${t}.wav`));
+    writeSpec(root, spec, lines.map((text, i) => ({ text, out: outs[i] })));
+    const first = speak(spec, '--wait', '1');
+    expect(first.status).toBe(75);
+    expect(first.result).toMatchObject({ ok: false, pending: true, wavs: 0, lines: lines.length });
+    expect(first.result.pid).toBeGreaterThan(0);
+    expect(first.result.message).toBe(`still speaking (0/${lines.length} WAVs so far); run the same command again`);
+    const second = speak(spec, '--wait', '30');
+    expect(second.status).toBe(0);
+    expect(second.result).toEqual({ ok: true, outs });
+    expect(calls(root)).toEqual([{ texts: lines }]);
+  });
+}
+
+test.skipIf(process.platform === 'win32')('CLI speak: an edited spec mid-run stops the old run and starts a new one', () => {
+  const { root, spec } = slowProject(slowVoices.batch);
+  writeSpec(root, spec, [{ text: 'old', out: 'old.wav' }]);
+  const first = speak(spec, '--wait', '1');
+  expect(first.status).toBe(75);
+  writeSpec(root, spec, [{ text: 'new', out: 'new.wav' }]);
+  const second = speak(spec, '--wait', '30');
+  expect(second.status).toBe(0);
+  expect(second.result).toEqual({ ok: true, outs: ['new.wav'] });
+  expect(pidAlive(first.result.pid)).toBe(false);
+  expect(calls(root)).toEqual([{ texts: ['old'] }, { texts: ['new'] }]);
+  expect(fs.existsSync(path.join(root, 'old.wav'))).toBe(false);
+});
+
+test.skipIf(process.platform === 'win32')('CLI speak: a killed runner exits 1 naming it with its log tail', () => {
+  const { root, spec } = slowProject(slowVoices.perLine);
+  writeSpec(root, spec, [{ text: 'die', out: 'a.wav' }]);
+  const r = speak(spec, '--wait', '30');
+  expect(r.status).toBe(1);
+  expect(r.result.ok).toBe(false);
+  expect(r.result.error).toMatch(/__speak-run/);
+  expect(r.result.error).toMatch(/ended without a result; log tail/);
+  expect(r.stderr).toMatch(/__speak-run/);
+});
+
+test.skipIf(process.platform === 'win32')('CLI speak: a finished spec is printed again without voice; a missing out reruns', () => {
+  const { root, spec } = slowProject(slowVoices.batch);
+  writeSpec(root, spec, [{ text: 'one', out: 'a.wav' }]);
+  const first = speak(spec, '--wait', '30');
+  expect(first.status).toBe(0);
+  const again = speak(spec, '--wait', '30');
+  expect(again.status).toBe(0);
+  expect(again.result).toEqual(first.result);
+  expect(calls(root)).toHaveLength(1);
+  fs.rmSync(path.join(root, 'a.wav'));
+  const rerun = speak(spec, '--wait', '30');
+  expect(rerun.status).toBe(0);
+  expect(calls(root)).toHaveLength(2);
+});
+
+test('CLI speak: a bad --wait or command is a usage error', () => {
+  const { spawnSync } = require('node:child_process');
+  const { root, spec } = slowProject(slowVoices.batch);
+  writeSpec(root, spec, [{ text: 'one', out: 'a.wav' }]);
+  for (const args of [['speak', spec, '--wait', '0'], ['speak', spec, '--wait', '841'], ['speak', spec, '--wait', '1.5'], ['speak', spec, '--wat', '5'], ['nope', spec]]) {
+    const r = spawnSync(process.execPath, [CHAR_CJS, ...args], { encoding: 'utf8', timeout: 60000 });
+    expect(r.status).toBe(1);
+    expect(JSON.parse(r.stdout)).toEqual({ ok: false, error: 'usage: node character.cjs speak spec.json [--wait seconds]' });
+  }
+  expect(calls(root)).toEqual([]);
+});

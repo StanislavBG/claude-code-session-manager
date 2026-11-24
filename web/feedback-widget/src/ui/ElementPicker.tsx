@@ -16,6 +16,7 @@ import { HOST_ID } from '../host';
 import { type ElementDescription, MIN_SIZE, describeElement } from '../selector';
 import type { ElementMark, MarkColor } from './marks';
 import { colors, fonts } from './tokens';
+import { adoptInto } from './shared';
 
 // ── Constants (§5.4 "Element-pick hover") ──────────────────────────────────
 
@@ -82,18 +83,6 @@ export function pickerSheet(): CSSStyleSheet | null {
     return null;
   }
   return sheetCache;
-}
-
-function adoptInto(node: Node): void {
-  const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
-  if (!root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  const sheet = pickerSheet();
-  if (!sheet || root.adoptedStyleSheets.includes(sheet)) return;
-  try {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  } catch {
-    // Sheet from another realm — the host adopts it instead.
-  }
 }
 
 // ── Hit-testing ─────────────────────────────────────────────────────────────
@@ -178,7 +167,7 @@ export function ElementPicker(props: ElementPickerProps) {
   };
 
   useLayoutEffect(() => {
-    if (active && rootRef.current) adoptInto(rootRef.current);
+    if (active && rootRef.current) adoptInto(rootRef.current, pickerSheet());
   }, [active]);
 
   useEffect(() => {

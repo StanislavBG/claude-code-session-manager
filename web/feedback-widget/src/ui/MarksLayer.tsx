@@ -41,6 +41,7 @@ import {
 } from './marks';
 import { colors, fonts } from './tokens';
 import { Popover, isCommentMark } from './Popover';
+import { adoptInto } from './shared';
 
 // ── Constants (§5.4) ────────────────────────────────────────────────────────
 
@@ -114,18 +115,6 @@ export function marksSheet(): CSSStyleSheet | null {
     return null;
   }
   return sheetCache;
-}
-
-function adoptInto(node: Node): void {
-  const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
-  if (!root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  const sheet = marksSheet();
-  if (!sheet || root.adoptedStyleSheets.includes(sheet)) return;
-  try {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  } catch {
-    // Sheet from another realm — the host adopts it instead.
-  }
 }
 
 const px = (v: number) => `${v}px`;
@@ -399,7 +388,7 @@ export function MarksLayer(props: MarksLayerProps) {
   };
 
   useLayoutEffect(() => {
-    if (rootRef.current) adoptInto(rootRef.current);
+    if (rootRef.current) adoptInto(rootRef.current, marksSheet());
   }, []);
 
   const textOpen = text !== null;

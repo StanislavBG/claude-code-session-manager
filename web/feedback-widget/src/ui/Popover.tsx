@@ -10,6 +10,7 @@
 import { useLayoutEffect, useEffect, useRef } from 'preact/hooks';
 import { type BoxMark, type ElementMark, type PinMark, pinBox, textColorOn } from './marks';
 import { colors, fonts } from './tokens';
+import { adoptInto } from './shared';
 
 // ── Constants (§5.5) ────────────────────────────────────────────────────────
 
@@ -114,18 +115,6 @@ export function popoverSheet(): CSSStyleSheet | null {
   return sheetCache;
 }
 
-function adoptInto(node: Node): void {
-  const root = node.getRootNode() as (ShadowRoot | Document) & { adoptedStyleSheets?: CSSStyleSheet[] };
-  if (!root || !('adoptedStyleSheets' in root) || !Array.isArray(root.adoptedStyleSheets)) return;
-  const sheet = popoverSheet();
-  if (!sheet || root.adoptedStyleSheets.includes(sheet)) return;
-  try {
-    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-  } catch {
-    // Sheet from another realm — the host adopts it instead.
-  }
-}
-
 // ── Component ───────────────────────────────────────────────────────────────
 
 export interface PopoverProps {
@@ -145,7 +134,7 @@ export function Popover({ mark, W, H, onComment, onDelete, onClose }: PopoverPro
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   useLayoutEffect(() => {
-    if (rootRef.current) adoptInto(rootRef.current);
+    if (rootRef.current) adoptInto(rootRef.current, popoverSheet());
   }, []);
 
   useEffect(() => {

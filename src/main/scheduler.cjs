@@ -5999,6 +5999,17 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
     // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
     // being rejected — lib/scheduler/launchFailure.cjs); applied last so it wins.
+    // Wall-clock budget, computed once: the budget watchdog below reads these
+    // same values, and SM_SCHEDULER_JOB_DEADLINE_MS hands the child the epoch
+    // ms at which that watchdog stops the job, so a tool it runs (e.g. a
+    // batch voice render) can stop cleanly first. budgetExempt → no deadline.
+    const budgetEstimate = budget.resolveBudgetEstimate({
+      estimateMinutes: job.estimateMinutes,
+      validatorEstimate,
+      personaEstimate: job.estimateMinutes != null ? null : resolvePersonaDefaultEstimate(job.cwd, job.agentType || DEFAULT_PRD_AGENT_TYPE),
+    });
+    const jobBudgetMs = budget.computeJobBudgetMs(budgetEstimate);
+    const budgetExempt = budget.isJobBudgetExempt(job);
     const childEnv = cleanChildEnv({
       PATH: withTimeoutShimOnPath(pathWithUserBins()),
       SM_PROJECT_ROOT: cwd,
@@ -6010,6 +6021,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       ...((job.epicId || job.sourcePromptId) ? { SM_SCHEDULER_JOB_EPIC_ID: job.epicId || job.sourcePromptId } : {}),
       BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
+      ...(budgetExempt ? {} : { SM_SCHEDULER_JOB_DEADLINE_MS: String(Date.now() + jobBudgetMs) }),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
     });
     // Set AFTER cleanChildEnv returns, never inside the object passed to it:
@@ -6127,13 +6139,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // is calibrated against). Only a PRD with an
     // explicit `budgetExempt: true` opts out entirely — logged once here so
     // an unbounded job is never silently unbounded.
-    const budgetEstimate = budget.resolveBudgetEstimate({
-      estimateMinutes: job.estimateMinutes,
-      validatorEstimate,
-      personaEstimate: job.estimateMinutes != null ? null : resolvePersonaDefaultEstimate(job.cwd, job.agentType || DEFAULT_PRD_AGENT_TYPE),
-    });
-    const jobBudgetMs = budget.computeJobBudgetMs(budgetEstimate);
-    const budgetExempt = budget.isJobBudgetExempt(job);
+    // budgetEstimate / jobBudgetMs / budgetExempt are computed once above,
+    // before childEnv, so SM_SCHEDULER_JOB_DEADLINE_MS matches this watchdog.
     if (budgetExempt) {
       safeLog(`[scheduler] wall-clock budget watchdog EXEMPT for ${job.slug} ` +
         `(budgetExempt) — no wall-clock kill ceiling this run\n`);

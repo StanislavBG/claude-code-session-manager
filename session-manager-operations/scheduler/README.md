@@ -185,6 +185,8 @@ investigation probe that died identically.
   without opening a transcript.
 - Headless jobs launch with `SM_SCHEDULER_JOB_SLUG` set; `scheduler_create_prd` refuses
   calls from inside one unless `SM_SCHEDULER_JOB_MAY_QUEUE=1` (architect persona only).
+  They also get `SM_SCHEDULER_JOB_DEADLINE_MS`: epoch ms when the wall-clock budget watchdog
+  stops the job, absent for a `budgetExempt` job.
 
 - A PRD persona's `tools:` list is enforced on its headless run via `--agents`/`--agent`
   (`lib/claude/personaToolScope.cjs`, wired in `buildClaudeSpawnArgs`'s `toolScope`). The headless

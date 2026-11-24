@@ -6,7 +6,9 @@ import { useLayout, usePanelTabHint } from '../../state/layout'
 import { useProjectsPrefs } from '../../state/projectsPrefs'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { FileTree, type FileTreeReveal } from '../layout/FileTree'
-import { EditorView } from './EditorView'
+import { EditorView, READ_ONLY_WORKTREE_BANNER } from './EditorView'
+import type { ArtifactWorktree } from '../../../preload/api'
+import { isUnder } from '../../lib/pathSep'
 import { ArtifactsSection } from './ArtifactsSection'
 import { Tooltip } from '../ui/Tooltip'
 import { compactPath } from '../../lib/compactPath'
@@ -29,6 +31,35 @@ function clampSplit(v: number): number {
   return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v))
 }
 
+/** One root-switcher option: '<Epic title> — unmerged, N commits ahead'. */
+export function worktreeLabel(w: ArtifactWorktree): string {
+  const title = w.title?.trim() || w.epicId
+  if (w.aheadOfBase === null) return `${title} — unmerged`
+  return `${title} — unmerged, ${w.aheadOfBase} commit${w.aheadOfBase === 1 ? '' : 's'} ahead`
+}
+
+const EMPTY_WORKTREES: ArtifactWorktree[] = []
+
+/**
+ * The project's active Epic worktrees (artifacts:worktrees), Project face only.
+ * Read-only IPC; a failure or a missing bridge reads as "none" — the switcher
+ * is an extra, never a reason the File Explorer fails to open.
+ */
+function useProjectWorktrees(cwd: string | null): ArtifactWorktree[] {
+  const [state, setState] = useState<{ cwd: string; worktrees: ArtifactWorktree[] } | null>(null)
+  useEffect(() => {
+    const api = window.api?.artifacts
+    if (!cwd || !api?.worktrees) return
+    let cancelled = false
+    api.worktrees({ cwd }).then(
+      (r) => { if (!cancelled) setState({ cwd, worktrees: r.ok ? r.worktrees : EMPTY_WORKTREES }) },
+      () => { if (!cancelled) setState({ cwd, worktrees: EMPTY_WORKTREES }) },
+    )
+    return () => { cancelled = true }
+  }, [cwd])
+  return state && state.cwd === cwd ? state.worktrees : EMPTY_WORKTREES
+}
+
 function ProjectsWorkspaceComponent() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
@@ -43,7 +74,24 @@ function ProjectsWorkspaceComponent() {
   // selected project.
   const navFace = useLayout((s) => s.navFace)
   const homeDir = useHomeDir()
-  const rootCwd = navFace === 'home' ? homeDir : (activeTab?.cwd ?? null)
+  const projectCwd = activeTab?.cwd ?? null
+
+  // Project face: a root switcher over the project's unmerged Epic worktrees,
+  // so tracked-but-unmerged files can be reviewed before merge. A worktree
+  // root is browse-only (FileTree + EditorView readOnly). The choice is
+  // transient — it is dropped when the project changes or the worktree is gone.
+  const worktrees = useProjectWorktrees(navFace === 'project' ? projectCwd : null)
+  const [worktreeChoice, setWorktreeChoice] = useState<{ cwd: string; path: string } | null>(null)
+  const worktreeRoot = navFace === 'project' && worktreeChoice && worktreeChoice.cwd === projectCwd
+    && worktrees.some((w) => w.path === worktreeChoice.path)
+    ? worktreeChoice.path
+    : null
+  const rootCwd = navFace === 'home' ? homeDir : (worktreeRoot ?? projectCwd)
+  // A file under any listed worktree stays read-only in the editor, even after
+  // the tree went back to the project root.
+  const activeFilePath = useEditor((s) => s.activeFilePath)
+  const editorReadOnly = !!activeFilePath && worktrees.some(
+    (w) => activeFilePath === w.path || isUnder(activeFilePath, w.path))
 
   // Layout prefs live on disk (ui-settings-prefs.json). First paint uses the
   // defaults; the saved values apply once the read resolves, unless the user
@@ -99,7 +147,6 @@ function ProjectsWorkspaceComponent() {
     const path = parseRevealHint(hint)
     if (path) setPendingReveal({ path, token: ++revealTokenRef.current })
   })
-  const projectCwd = activeTab?.cwd ?? null
   useEffect(() => {
     if (!pendingReveal) return
     const { path } = pendingReveal
@@ -121,6 +168,8 @@ function ProjectsWorkspaceComponent() {
       return
     }
     if (target.face !== navFace) useLayout.getState().setNavFace(target.face)
+    // A project-root reveal lands in the project tree, not a worktree being browsed.
+    if (target.face === 'project') setWorktreeChoice(null)
     // The tree must be visible to show the row. Not saved as the layout.
     revealOpenedTreeRef.current = true
     setCollapsed(false)
@@ -208,7 +257,7 @@ function ProjectsWorkspaceComponent() {
           <span className="text-[10px] tracking-wide [writing-mode:vertical-rl]">Files</span>
         </button>
         <div className="flex-1 min-w-0" data-testid="projects-editor-pane">
-          <EditorView />
+          <EditorView readOnly={editorReadOnly} />
         </div>
       </div>
     )
@@ -293,11 +342,39 @@ function ProjectsWorkspaceComponent() {
             <div className="px-3 py-2 border-b border-line text-[11.5px] text-fg-faint font-mono truncate shrink-0" title={rootCwd}>
               {compactPath(rootCwd, homeDir)}
             </div>
+            {navFace === 'project' && projectCwd && worktrees.length > 0 && (
+              <div className="px-3 py-1.5 border-b border-line shrink-0">
+                <select
+                  data-testid="explorer-root-switcher"
+                  aria-label="File Explorer root"
+                  value={worktreeRoot ?? ''}
+                  onChange={(e) => {
+                    const path = e.target.value
+                    setWorktreeChoice(path ? { cwd: projectCwd, path } : null)
+                  }}
+                  className="w-full px-2 py-1 text-[11.5px] bg-bg-hi border border-line rounded text-fg-dim focus:outline-none focus:border-accent/40"
+                >
+                  <option value="">Project</option>
+                  {worktrees.map((w) => (
+                    <option key={w.path} value={w.path}>{worktreeLabel(w)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {worktreeRoot && (
+              <div
+                data-testid="explorer-readonly-banner"
+                className="px-3 py-1 border-b border-line shrink-0 text-[11px] text-yellow-400"
+              >
+                {READ_ONLY_WORKTREE_BANNER}
+              </div>
+            )}
             <div className="flex-1 min-h-0 overflow-auto">
               {/* Project face only: the project's Artifacts store, above the tree (hidden when empty). */}
-              {navFace === 'project' && <ArtifactsSection cwd={rootCwd} onOpenFile={openInline} />}
+              {navFace === 'project' && !worktreeRoot && <ArtifactsSection cwd={rootCwd} onOpenFile={openInline} />}
               <FileTree
                 cwd={rootCwd}
+                readOnly={!!worktreeRoot}
                 activeTabId={activeTab?.id ?? null}
                 onPreviewFile={openInline}
                 reveal={reveal && reveal.root === rootCwd ? reveal : null}
@@ -325,7 +402,7 @@ function ProjectsWorkspaceComponent() {
 
       {/* Right pane — editor */}
       <div className="flex-1 min-w-0" data-testid="projects-editor-pane">
-        <EditorView />
+        <EditorView readOnly={editorReadOnly} />
       </div>
     </div>
   )

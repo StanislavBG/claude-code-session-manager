@@ -89,6 +89,11 @@ interface FileTreeProps {
   reveal?: FileTreeReveal | null
   /** Called with the reveal's token once it was handled — shown, or toasted as not found. */
   onRevealDone?: (token: number) => void
+  /**
+   * Browse only: no create / rename / delete (toolbar, context menu, inline
+   * rename). Set for an unmerged Epic worktree root (ProjectsWorkspace).
+   */
+  readOnly?: boolean
 }
 
 export interface FileTreeReveal {
@@ -174,7 +179,7 @@ interface ContextMenuState {
   node: TreeNode
 }
 
-export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal, onRevealDone }: FileTreeProps) {
+export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal, onRevealDone, readOnly = false }: FileTreeProps) {
   const focusedRef = usePanelFocusRef()
   const focused = usePanelFocus()
   const [root, setRoot] = useState<TreeNode[]>([])
@@ -476,6 +481,8 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
     expandedUserSetRef.current = true
     expandedRef.current = next
     setExpanded(next)
+    // A read-only root (an unmerged worktree) is never written to — not even its ui-prefs.
+    if (readOnly) return
     saveExpanded(cwd, next).catch(() => {
       // Only revert if nothing else has moved the set on since this call
       // (writeUiPrefsPatch serializes per-cwd, so a later toggle's write can
@@ -487,7 +494,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
       setExpanded(prev)
       toast.error("Couldn't save folder expansion — reverted.")
     })
-  }, [cwd])
+  }, [cwd, readOnly])
 
   const toggleDir = useCallback(async (node: TreeNode) => {
     if (expanded.has(node.path)) {
@@ -626,12 +633,13 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
   }, [])
 
   const startRename = (node: TreeNode) => {
+    if (readOnly) return
     setRenaming(node.path)
     setRenameValue(node.name)
   }
 
   const commitRename = async () => {
-    if (!renaming) return
+    if (readOnly || !renaming) return
     const name = renameValue.trim()
     if (!name) { setRenaming(null); return }
     const result = await window.api.files.rename(renaming, name)
@@ -649,7 +657,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
   }
 
   const commitCreate = async () => {
-    if (!createPrompt) return
+    if (readOnly || !createPrompt) return
     const name = createName.trim()
     if (!name) { setCreatePrompt(null); setCreateName(''); return }
     const result = await window.api.files.create(createPrompt.parent, name, createPrompt.kind)
@@ -668,7 +676,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
   }
 
   const confirmDelete = async () => {
-    if (!deleteConfirm) return
+    if (readOnly || !deleteConfirm) return
     const result = await window.api.files.delete(deleteConfirm.path)
     const parent = dirname(deleteConfirm.path)
     setDeleteConfirm(null)
@@ -724,6 +732,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
 
       {/* Toolbar */}
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-line shrink-0">
+        {!readOnly && (<>
         <button
           onClick={() => setCreatePrompt({ parent: cwd, kind: 'file' })}
           className="p-1.5 rounded text-fg-faint hover:text-fg hover:bg-bg-hi transition-colors"
@@ -738,6 +747,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
         >
           <FolderPlusIcon size={12} />
         </button>
+        </>)}
         <div className="flex-1" />
         <button
           onClick={() => setShowHidden((v) => !v)}
@@ -792,6 +802,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
           x={menu.x}
           y={menu.y}
           node={menu.node}
+          readOnly={readOnly}
           onClose={() => setMenu(null)}
           onRename={() => { startRename(menu.node); setMenu(null) }}
           onDelete={() => { setDeleteConfirm(menu.node); setMenu(null) }}
@@ -809,7 +820,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
       )}
 
       {/* Create prompt */}
-      {createPrompt && (
+      {createPrompt && !readOnly && (
         <Modal
           title={`New ${createPrompt.kind}`}
           subtitle={`in ${displayName(createPrompt.parent)}`}
@@ -833,7 +844,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
       )}
 
       {/* Delete confirm */}
-      {deleteConfirm && (
+      {deleteConfirm && !readOnly && (
         <Modal
           title={`Delete ${deleteConfirm.isDirectory ? 'folder' : 'file'}`}
           subtitle={null}
@@ -979,6 +990,8 @@ interface ContextMenuProps {
   x: number
   y: number
   node: TreeNode
+  /** Hide every mutating action (rename / new / delete). */
+  readOnly?: boolean
   onClose: () => void
   onRename: () => void
   onDelete: () => void
@@ -1005,16 +1018,20 @@ function ContextMenu(props: ContextMenuProps) {
       <MenuItem label="Reveal in OS" onClick={props.onShowInFinder} />
       <Divider />
       <MenuItem label="Copy path" onClick={props.onCopyPath} />
-      <MenuItem label="Rename" onClick={props.onRename} />
-      {node.isDirectory && (
+      {!props.readOnly && (
         <>
+          <MenuItem label="Rename" onClick={props.onRename} />
+          {node.isDirectory && (
+            <>
+              <Divider />
+              <MenuItem label="New file" onClick={props.onNewFile} />
+              <MenuItem label="New folder" onClick={props.onNewFolder} />
+            </>
+          )}
           <Divider />
-          <MenuItem label="New file" onClick={props.onNewFile} />
-          <MenuItem label="New folder" onClick={props.onNewFolder} />
+          <MenuItem label="Delete" onClick={props.onDelete} danger />
         </>
       )}
-      <Divider />
-      <MenuItem label="Delete" onClick={props.onDelete} danger />
     </div>
   )
 }

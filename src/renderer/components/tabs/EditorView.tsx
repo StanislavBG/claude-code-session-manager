@@ -99,7 +99,19 @@ function isMediaPath(p: string): boolean {
   return isImage(p) || isPdf(p)
 }
 
-function EditorViewComponent() {
+export interface EditorViewProps {
+  /**
+   * The active file is browse-only (opened from an unmerged Epic worktree root
+   * in the File Explorer): edits are dropped, nothing saves (button, Cmd/Ctrl-S,
+   * autosave), the Document menu's rename/delete is hidden, and a banner says so.
+   */
+  readOnly?: boolean
+}
+
+/** Shown over the editor and the File Explorer tree while a worktree root is read-only. */
+export const READ_ONLY_WORKTREE_BANNER = 'Unmerged worktree (read-only)'
+
+function EditorViewComponent({ readOnly = false }: EditorViewProps) {
   const focusedRef = usePanelFocusRef()
   const openFiles = useEditor((s) => s.openFiles)
   const activeFilePath = useEditor((s) => s.activeFilePath)
@@ -138,8 +150,14 @@ function EditorViewComponent() {
   // selection at a time.
   const docEdit = useDocEdit(activeFilePath ?? '', buffers[activeFilePath ?? ''] ?? '')
 
+  // Live mirror of `readOnly` for the save path, whose callers (autosave timer,
+  // Cmd/Ctrl-S listener) may hold an older closure.
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
+
   // Buffer edits mirror into the config store for Claude config files so pages share one draft.
   const editBuffer = useCallback((p: string, text: string) => {
+    if (readOnlyRef.current) return
     setBuffer(p, text)
     if (isClaudeConfigPath(p)) useConfig.getState().setDraft(p, text)
   }, [setBuffer])
@@ -201,6 +219,7 @@ function EditorViewComponent() {
   useEffect(() => { setCursor(null) }, [activeFilePath])
 
   const save = useCallback(async (path: string, silent = false) => {
+    if (readOnlyRef.current) return
     const text = useEditor.getState().buffers[path]
     if (text == null) return
     if (silent) setSaving(true)
@@ -231,14 +250,14 @@ function EditorViewComponent() {
   // Autosave — debounced ~1.2 s after the last keystroke. Re-runs on every
   // buffer change (debounce reset); silent so it doesn't spam the save toast.
   useEffect(() => {
-    if (!prefs.autosave) return
+    if (!prefs.autosave || readOnly) return
     const path = activeFilePath
     // Config files save explicitly (mtime-checked) — never autosave them.
     if (!path || isMediaPath(path) || isClaudeConfigPath(path) || !dirty[path]) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => { void save(path, true) }, 1200)
     return () => window.clearTimeout(saveTimer.current)
-  }, [prefs.autosave, activeFilePath, dirty, buffers, save])
+  }, [prefs.autosave, readOnly, activeFilePath, dirty, buffers, save])
 
   // Drop per-file UI state (load status, HtmlPreview reload token) for closed
   // paths — otherwise these two maps grow for every file ever opened in the
@@ -392,10 +411,11 @@ function EditorViewComponent() {
       onSave={() => void save(path)}
       onReady={registerEditor}
       onCursor={setCursor}
+      readOnly={readOnly}
     />
   )
 
-  const savedLabel = saving ? 'Saving…' : path && dirty[path] ? (prefs.autosave && !isClaudeConfigPath(path) ? 'Editing…' : 'Unsaved') : 'All changes saved'
+  const savedLabel = readOnly ? 'Read-only' : saving ? 'Saving…' : path && dirty[path] ? (prefs.autosave && !isClaudeConfigPath(path) ? 'Editing…' : 'Unsaved') : 'All changes saved'
 
   return (
     <div className="relative flex flex-col h-full bg-bg">
@@ -462,9 +482,18 @@ function EditorViewComponent() {
 
           <div className="flex-1" />
 
-          <DocumentMenu path={path} onRenamed={renameLoadState} onDeleted={(p) => pruneClosed([p])} />
+          {!readOnly && <DocumentMenu path={path} onRenamed={renameLoadState} onDeleted={(p) => pruneClosed([p])} />}
           {isTextFile && <DisplayPopover />}
           <button onClick={() => setFocusMode(true)} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded" title="Focus mode (Cmd/Ctrl-Shift-F)">Focus</button>
+        </div>
+      )}
+
+      {readOnly && path && (
+        <div
+          data-testid="editor-readonly-banner"
+          className="px-3 py-1 border-b border-line shrink-0 text-[11px] text-yellow-400 bg-bg-elev"
+        >
+          {READ_ONLY_WORKTREE_BANNER}
         </div>
       )}
 

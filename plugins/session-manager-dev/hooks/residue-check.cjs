@@ -23,14 +23,26 @@ const TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024;
 // Mirrors chatRunner.cjs's STOP_SENTINEL (kept literal: no src/main dependency).
 const NEEDS_INPUT_SENTINEL = '<<<SM_NEEDS_INPUT>>>';
 
-const RESIDUE_LABEL_RE = /^(still open|open items|remaining|not covered|deferred|follow[- ]?ups?|left for later)\b/i;
+// A label counts only when it is the WHOLE heading / bold label (optional trailing colon):
+// '## Remaining budget' or '**Deferred to PRD 4100 (queued)**' are not residue labels.
+const RESIDUE_LABEL_RE = /^(still open|open items|remaining|not covered|deferred|follow[- ]?ups?|left for later)\s*:?$/i;
 const NEEDS_YOU_LABEL_RE = /^needs you\b/i;
+// Quoted spans skipped by the phrase match: a report quoting a phrase is analysing it, not handing work back.
+// A straight single quote opens only after a non-word char, so apostrophes (it's, haven't) never open one.
+const QUOTED_SPAN_RES = [/"[^"\n]*"/g, /“[^”\n]*”/g, /‘[^’\n]*’/g, /`[^`\n]*`/g, /(^|[^\w'])'[^'\n]*'(?![\w])/g];
 const RESIDUE_PHRASES = ['needs a new epic', 'say the word', "haven't queued", "didn't look into", 'follow-up for later'];
 const EMPTY_ENTRY_RE = /^(?:[-*+]\s*)?(?:none|nothing|n\/a)\.?$/i;
 
 /** Lower-case and straighten curly apostrophes for phrase matching. */
 function normalize(s) {
   return s.replace(/[‘’ʼ]/g, "'").toLowerCase();
+}
+
+/** Remove quoted spans (double, curly, single, backtick) from a line before the phrase match. */
+function stripQuoted(s) {
+  let out = s;
+  for (const re of QUOTED_SPAN_RES) out = out.replace(re, (m, lead) => (typeof lead === 'string' ? `${lead} ` : ' '));
+  return out;
 }
 
 /** Strip markdown emphasis + trailing punctuation from a label. */
@@ -98,8 +110,9 @@ function findResidue(text) {
 
     if (section === 'needs-you') continue;
     if (!isLabelLine && section === 'residue' && !EMPTY_ENTRY_RE.test(trimmed)) lineCounts = true;
-    if (!lineCounts) {
-      const norm = normalize(trimmed);
+    if (!lineCounts && !trimmed.startsWith('|')) {
+      // Markdown table rows and quoted spans are analysis, not hand-backs: skip them for the phrase match.
+      const norm = normalize(stripQuoted(trimmed));
       if (RESIDUE_PHRASES.some((p) => norm.includes(p))) lineCounts = true;
     }
     if (lineCounts) out.push(trimmed);

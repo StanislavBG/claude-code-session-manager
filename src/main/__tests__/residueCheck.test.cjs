@@ -109,6 +109,35 @@ describe('findResidue — ignored regions', () => {
     const text = '## Needs you\n- one action\n\n## Follow-ups\n- leftover\n';
     expect(findResidue(text)).toEqual(['- leftover']);
   });
+  test('quoted phrases (straight, curly, single, backtick) do not count', () => {
+    expect(findResidue('One report said "Not queued, needs a new Epic from you" twice.\n')).toEqual([]);
+    expect(findResidue('Another ended “Say the word and I’ll push it.” again.\n')).toEqual([]);
+    expect(findResidue("The phrase 'say the word' showed up 5 times.\n")).toEqual([]);
+    expect(findResidue('The checker matches `needs a new epic` and `say the word`.\n')).toEqual([]);
+  });
+  test('an apostrophe inside a word does not open a quote', () => {
+    const line = "It's a bug that needs a new Epic from you, I'm afraid.";
+    expect(findResidue(`${line}\n`)).toEqual([line]);
+  });
+  test('markdown table rows', () => {
+    const text = '| Kind | Quote |\n| --- | --- |\n| outside goal | needs a new Epic from you; say the word |\n';
+    expect(findResidue(text)).toEqual([]);
+  });
+  test('a heading that only starts with a label word is not a label', () => {
+    expect(findResidue('## Remaining budget\n- 4 PRDs of 30 used\n')).toEqual([]);
+    expect(findResidue('**Deferred to PRD 4100 (queued)**\n- the doc fix\n')).toEqual([]);
+    expect(findResidue('**Deferred to PRD 4100 (queued):** the doc fix.\n')).toEqual([]);
+  });
+  test('a label with a trailing colon still counts', () => {
+    expect(findResidue('## Still open:\n- wire the toggle\n')).toEqual(['- wire the toggle']);
+    expect(findResidue('**Remaining:**\n- wire the toggle\n')).toEqual(['- wire the toggle']);
+    expect(findResidue('**Remaining**:\n- wire the toggle\n')).toEqual(['- wire the toggle']);
+  });
+  test('still flags a real unquoted Still open list and plain-prose phrase', () => {
+    expect(findResidue('Done.\n\n**Still open:**\n- no reply sent yet\n')).toEqual(['- no reply sent yet']);
+    const line = 'The cache bug needs a new Epic from you.';
+    expect(findResidue(`All green.\n${line}\n`)).toEqual([line]);
+  });
   test('non-string input', () => {
     expect(findResidue(undefined)).toEqual([]);
     expect(findResidue(42)).toEqual([]);

@@ -22,6 +22,7 @@ Classes: **LAW-RATIONALE** (the why behind a root `CLAUDE.md` law) · **REFERENC
 | [identity-boundary.md](identity-boundary.md) | public-repo persona rule, identity guard, machine setup | LAW-RATIONALE |
 | [page-stewards.md](page-stewards.md) | per-page steward subagents and the six page principles | REFERENCE |
 | [customer-feedback.md](customer-feedback.md) | Feedback button customer feedback: three stores, bilko.run wire contract, lifecycle | REFERENCE |
+| [site-feedback.md](site-feedback.md) | website feedback widget: identity, Envelope v1, Bilko host contract v1, desktop stores, MCP, threat model | REFERENCE |
 | [tool-risk.md](tool-risk.md) | tool risk marks: files, lookup order, refusal text, `riskTools`, why a hook beats native rules | REFERENCE |
 | [managed-agents-alignment.md](managed-agents-alignment.md) | Managed Agents laws (local-only): snapshots, capabilities, environments, credentials, event log, legality, confirm, webhooks, outcomes, memory, mitigations, purge | LAW-RATIONALE |
 | [model-mitigations.md](model-mitigations.md) | registry of model-behavior workarounds: behavior, model, date, location + needle (lint:docs-checked) | REFERENCE |

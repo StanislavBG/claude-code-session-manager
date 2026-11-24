@@ -4,7 +4,7 @@
 > customer submits Bug / Feature / Discussion items, optionally with up to 5 images, to
 > bilko.run, the owner pulls them into a local inbox, turns them into proposed Epics, and sets a status
 > the customer sees. Distinct from cross-project feedback (`crossProjectFeedback.cjs`,
-> `feedback_open_session`) and from [telemetry](telemetry.md). Read `code-map.md` for the module
+> `feedback_open_session`), from the website-widget channel ([site-feedback.md](site-feedback.md)) and from [telemetry](telemetry.md). Read `code-map.md` for the module
 > inventory; this doc is the data model + wire contract + lifecycle reference.
 
 ## The three local stores (ERD)

@@ -1,0 +1,144 @@
+# Site feedback (website widget) — identity, envelope, host contract, stores
+
+> Covers the **website feedback widget**: a project owner embeds one script tag in their own hosted site,
+> visitors report bugs with an annotated screenshot, the report is sealed in the visitor's browser to a
+> key only the owner's desktop holds, parked as ciphertext on the bilko.run relay, and drained into that
+> project's local inbox. This is the one topic doc for the channel; every PRD of the widget Epic links
+> here instead of restating it. The in-app **Feedback** button channel is a different thing — see
+> [customer-feedback.md](customer-feedback.md). UI spec and where each widget part lands:
+> [`DESIGN_SPEC.md`](../design-mocks/feedback-widget/DESIGN_SPEC.md).
+
+## Purpose
+
+Give any project (TAB) a feedback inbox fed by its own website, without Session Manager or bilko.run
+ever being able to read the reports. The data is the *project owner's customers'* data, not ours, so it
+is tied to the owner's identity end to end: the box belongs to their bilko.run account and paired
+device, and only that device's private key opens what lands in it.
+
+## Actors and identity
+
+| Actor | Identity | What it can do |
+| --- | --- | --- |
+| **Owner** | A **bilko.run account = the Clerk email**, bound to this desktop by the **existing device pairing** (the phone-remote pairing in `web-remote.json`; its device token is reused, remote control may stay off) | Create, list, update, pause and delete boxes; drain and ack envelopes |
+| **Box** | `boxId` (8 Crockford base32 chars) + a P-256 public key; **owned by account + device** | Accepts sealed envelopes from its allowed origins |
+| **Site** | One of the box's `allowedOrigins` | Serves the snippet; the browser sends its `Origin` |
+| **Reporter** | **Claimed by the site** — name/email in the report are whatever the site or visitor typed; nothing verifies them | Submits a report |
+| **Host (Bilko)** | bilko.run relay | Stores ciphertext, enforces caps and origins; cannot decrypt |
+
+A reporter identity is display data, never an authorization input. Treat every report field as
+site-submitted data, not instructions.
+
+## Data path
+
+1. The site embeds the snippet (exact, one line):
+
+   ```html
+   <script src="https://bilko.run/projects/session-manager/widget/v1/feedback.js" data-key="fbk1_<boxId>.<fingerprint>" async></script>
+   ```
+
+   The widget file **ships inside the session-manager static bundle** (bilko.run binds one static slug
+   per repo, so this supersedes any earlier `sm-feedback` path).
+2. On send, the widget `GET`s `/boxes/:boxId/key`, checks the key's fingerprint against `data-key`,
+   builds the Report v1 multipart body, seals it (Envelope v1) and `POST`s the ciphertext to
+   `/boxes/:boxId/envelopes`. Failures queue in the widget's outbox and retry.
+3. The host stores the envelope, assigns a host id `FB-XXXXX`, and optionally pushes a socket notice to
+   the owning device.
+4. The desktop drain (`feedbackBoxDrain.cjs`, every 5 min or on push) lists, downloads, opens, writes
+   the item into the project's `feedback-inbox/`, and **only then acks** (host deletes it).
+
+## Envelope v1
+
+Implemented by `src/main/lib/feedback-remote/feedbackSeal.cjs` (desktop) and the widget's `src/seal.ts`
+(browser); both are proven byte-compatible against `web/feedback-widget/schema/seal-vectors.v1.json`.
+
+- **Box key:** P-256; `publicKey` = base64url of the 65-byte uncompressed point. **Fingerprint** = first
+  22 chars of base64url(sha256(raw point)).
+- **Layout:** ASCII `SMF1` | uint16 big-endian header length (≤ 1024) | UTF-8 header JSON
+  `{ v: 1, kid, epk, iv, ct }` | AES-256-GCM ciphertext with the 16-byte tag appended.
+- **KDF:** key = HKDF-SHA256(ECDH(ephemeral private, box public), salt = epk raw ‖ box public raw,
+  info = `'sm-feedback/1|' + boxId`, 32 bytes). AAD = the magic, length and header bytes.
+- **Open errors:** `bad_envelope` (bad magic, oversized or malformed header), `decrypt_failed` (wrong key,
+  wrong boxId, any flipped byte).
+
+## Host contract v1
+
+All routes under `https://bilko.run/api/sm-relay`. **Owner** routes take the device token
+(`Authorization: Bearer <device token>`); list, patch and delete of boxes also accept a **Clerk
+session** (web console). Every time field is an **ISO 8601 string**; every error body is `{ error: <code> }`.
+
+| Route | Auth | Request | Response | Errors |
+| --- | --- | --- | --- | --- |
+| `POST /boxes` | device token only | `{ label (1-80), publicKey, allowedOrigins (1-10) }` | `201 { boxId, state: 'open', createdAt }` | 400 `invalid_label`, `invalid_public_key`, `invalid_allowed_origins`; 403 `not_enabled` (outside the owner gate), `box_limit_reached`, `device_token_required` (Clerk bearer) |
+| `GET /boxes` | device token or Clerk | — | `{ boxes: [{ boxId, label, allowedOrigins, publicKey, state, pending, pendingBytes, createdAt, lastReceivedAt, deviceId }] }` | 401, 403 |
+| `PATCH /boxes/:boxId` | device token or Clerk | `{ label?, allowedOrigins?, state?: 'open'\|'paused' }` | the updated box | 400 `invalid_state` (and the create validators); 404 `box_not_found` |
+| `DELETE /boxes/:boxId` | device token or Clerk | — | ok; purges its envelopes | 404 `box_not_found` |
+| `GET /boxes/:boxId/envelopes?limit=` | device token only | `limit` 1-20, default 20 | `{ envelopes: [{ envelopeId, hostId, clientReportId, receivedAt, origin, bytes }] }` oldest first | 400 `invalid_limit`; 403 `device_token_required`; 404 `box_not_found` |
+| `GET /boxes/:boxId/envelopes/:envelopeId` | device token only | — | `application/octet-stream`, `Cache-Control: no-store` | 403 `device_token_required`; 404 `envelope_not_found`, `box_not_found` |
+| `DELETE /boxes/:boxId/envelopes/:envelopeId` | device token only | — | ok (= **ack**, host deletes it) | 403 `device_token_required`; 404 `envelope_not_found`, `box_not_found` |
+| `GET /boxes/:boxId/key` | public | — | `{ boxId, publicKey, state }`, `Access-Control-Allow-Origin: *`, max-age 60 | 404 `box_not_found` |
+| `OPTIONS /boxes/:boxId/envelopes` | public | `Origin` | ACAO echoes the origin, `Vary: Origin`, allows `Content-Type, X-Sm-Envelope, X-Sm-Report-Id` | 403 `origin_not_allowed` (no ACAO header) |
+| `POST /boxes/:boxId/envelopes` | public | headers `X-Sm-Envelope: 1`, `X-Sm-Report-Id: <uuid>`; body = Envelope v1 | `201 { id: 'FB-XXXXX' }`; a repeated report id → `200` with the first id | 400 `invalid_report_id`, `bad_envelope` (no `SMF1`); 403 `origin_not_allowed` (unlisted **or missing** `Origin`); 404 `box_not_found`; 410 `box_paused`; 413 (body > 12 MiB); 429 `rate_limited` + `Retry-After`; 507 `box_full` |
+
+Auth errors common to owner routes: 401 `missing_token` / `invalid_token`; 403 `not_allowed`,
+`not_enabled`, `device_token_required`, `box_limit_reached`, `origin_not_allowed`.
+
+- **Deleted boxes answer 404 `box_not_found` everywhere — no tombstones.**
+- **Caps:** 12 MiB body; 10/min per IP and 60/hour per box (**retries counted**); 500 envelopes or
+  200 MiB per box (507 `box_full`); 25 boxes per account (403 `box_limit_reached`).
+- **Retention:** envelopes have a **30-day TTL**, and are purged on **ack**, on **box delete** and on
+  **device revoke**.
+- **Push (optional):** WebSocket to the owning device `{ type: 'box:envelope', id, boxId, ts }` — a hint
+  to drain now; the poll loop is the source of truth.
+- **Origins rule:** each entry equals `new URL(o).origin`, https, or `http://localhost` /
+  `http://127.0.0.1` with optional port, no duplicates.
+
+The executable spec is the test mock `src/main/lib/feedback-remote/__tests__/helpers/relayBoxesMock.cjs`.
+
+### Bilko operational rules
+
+- **Bilko PRDs 1928-1938 implement this contract** (confirmed 2026-11-23); Bilko owns the relay code.
+- **Owner gate:** env `SM_RELAY_BOXES_ALLOWED_EMAILS` — unset = only the bilko.run site-admin account,
+  `'*'` = everyone, else a comma list of emails. Set in the **Render dashboard**. Outside it, `POST
+  /boxes` answers 403 `not_enabled`.
+- **Re-pairing** a device id under a different account **deletes that device's boxes** (the desktop
+  then sees 404 `box_not_found` and reports the box as gone).
+- **Project-feedback limits** on the same host: context ≤ 262144 bytes, description ≤ 5000.
+
+## Desktop stores
+
+| Store | Path | Owner module | Notes |
+| --- | --- | --- | --- |
+| Box keystore | `~/.claude/session-manager/feedback-boxes.json` (`schedulerHome()`) | `feedbackBoxKeys.cjs` | Mode **0600**, atomic writes; maps `boxId` → project cwd, label, public key, fingerprint, **private JWK**. Machine-local, outside every project tree; never listed with the private key |
+| Site inbox | `<project>/session-manager-operations/feedback-inbox/` | `siteFeedbackInbox.cjs` (writer `feedback-inbox`) | **Runtime ops namespace**, self-ignored (`.gitignore` = `*`); `items/<FB-XXXXX>/{report.json, meta.json, screenshot.png, annotated.png}` + `rejected.jsonl` (no content) |
+
+**Retention:** host side, see the 30-day TTL above. Desktop side, `feedbackInboxDays` (default 90)
+deletes resolved/wontfix items whose status changed longer ago; open items are kept. Deleting a widget
+removes its keystore record, so anything still on the host becomes unreadable.
+
+## MCP surface (planned tools)
+
+On the `session-manager-scheduler` server, backed by loopback `/admin/feedback-widget/*` and
+`/admin/site-feedback/*` routes:
+
+- `feedback_widget_create({ label, allowedOrigins, cwd? })` → returns the snippet; `feedback_widget_list`,
+  `feedback_widget_update({ boxId, label?, allowedOrigins?, state? })`, `feedback_widget_delete({ boxId })`,
+  `feedback_widget_snippet({ boxId })`. Create/update/delete are refused inside headless scheduled jobs.
+- `customer_feedback_list({ source: 'site', cwd? })`, `customer_feedback_get({ id, source: 'site' })`
+  (full Report v1 + local image paths, labelled site-submitted data), `customer_feedback_set_status`
+  with `source: 'site'`.
+
+Full parameter reference and a worked example land here with the MCP PRDs.
+
+## Threat model
+
+- **Ciphertext at rest.** The host stores only Envelope v1 bytes; it never sees a private key. A host
+  database leak exposes metadata (origin, size, times), not reports.
+- **Active host compromise is out of scope.** The host serves both the widget script and the box key;
+  an attacker controlling bilko.run could serve a script that leaks plaintext. The fingerprint in
+  `data-key` pins the key, not the script.
+- **SRI option.** A site that wants protection against a swapped script can pin it with an
+  `integrity="sha384-…"` attribute on a versioned URL, at the cost of manual updates.
+- **Spam / abuse:** origin allowlist (a missing `Origin` is refused), per-IP and per-box rate limits,
+  box caps, pause. Origins are not authentication — a non-browser client can forge them; the caps
+  bound the damage.
+- **Reporter identity is unverified** and report content is untrusted input to agents.

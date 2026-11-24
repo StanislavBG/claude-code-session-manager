@@ -553,11 +553,8 @@ describe("quarantine", () => {
       fs.writeFileSync(path.join(a.prdsDir, '9111-fresh.md'), prd(a.cwd), 'utf8');
       fs.writeFileSync(path.join(b.prdsDir, '9112-nosrc.md'), prd(b.cwd), 'utf8');
       fs.writeFileSync(path.join(b.stateDir, 'queue.json'), JSON.stringify({ jobs: [] }), 'utf8');
-      // prdParser.listPrdFiles keeps ONE dir-mtime cache shared by every dir
-      // it scans, and both prds/ dirs above get the same coarse mtime tick.
-      // Under load the Promise.all scan order varied, so b's listing could be
-      // served a's cached files and 9112 never minted. Pin distinct mtimes
-      // (far from any real "now") so the cache can never alias them.
+      // Distinct pinned mtimes (far from any real "now"); the equal-mtime
+      // case is covered by the two-Epic-folders test below.
       fs.utimesSync(a.prdsDir, 1_000_000_001, 1_000_000_001);
       fs.utimesSync(b.prdsDir, 1_000_000_002, 1_000_000_002);
       queueStore.bustCwdCache();
@@ -574,6 +571,34 @@ describe("quarantine", () => {
     } finally {
       fs.rmSync(a.cwd, { recursive: true, force: true });
       fs.rmSync(b.cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('reconcile() mints both Epic prds/ folders\' PRDs when the folders share one mtime', async () => {
+    const { cwd, prdsDir: dirA, stateDir } = makeFixtureProject('sm-equal-mtime-');
+    const dirB = path.join(path.dirname(path.dirname(dirA)), 'test-epic-2', 'prds');
+    fs.mkdirSync(dirB, { recursive: true });
+    try {
+      const prd = `---\ntitle: T\ncwd: ${cwd}\nestimateMinutes: 15\ncreatedVia: scheduler-api\nissuedAt: 2026-08-07T00:00:00.000Z\n---\n\n# Goal\nx\n`;
+      fs.writeFileSync(path.join(dirA, '9121-epic-one.md'), prd, 'utf8');
+      fs.writeFileSync(path.join(dirB, '9122-epic-two.md'), prd, 'utf8');
+      fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs: [] }), 'utf8');
+      fs.utimesSync(dirA, 1_000_000_010, 1_000_000_010);
+      fs.utimesSync(dirB, 1_000_000_010, 1_000_000_010);
+      expect(fs.statSync(dirA).mtimeMs).toBe(fs.statSync(dirB).mtimeMs);
+      // Warm the cache with each folder in turn so whichever is scanned
+      // second would have been served the other's listing by a shared cache.
+      const prdParser = require('../scheduler/prdParser.cjs');
+      for (const warm of [dirA, dirB]) {
+        await prdParser.listPrdFiles(warm);
+        queueStore.bustCwdCache();
+        const st = { config: {}, jobs: [], invalidJobs: [], paused: null };
+        await scheduler.reconcile(st);
+        expect(st.jobs.find((j) => j.slug === '9121-epic-one')?.status).toBe('pending');
+        expect(st.jobs.find((j) => j.slug === '9122-epic-two')?.status).toBe('pending');
+      }
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
     }
   });
 

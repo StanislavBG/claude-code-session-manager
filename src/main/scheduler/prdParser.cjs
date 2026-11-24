@@ -6,7 +6,9 @@
  * cache is module-private and keyed by absolute file path.
  *
  * Two-level cache for reconcile():
- *   - dirCache: keyed by PRDS_DIR mtimeMs — invalidated when files added/removed.
+ *   - dirCache: per prds/ dir path → { mtimeMs, files } — invalidated when that
+ *     dir's files are added/removed. Keyed by path because scheduler.cjs scans
+ *     every Epic prds/ dir in parallel and dirs often share one mtime tick.
  *   - fileCache: per-PRD parse keyed by individual file mtimeMs — survives across
  *     dir-cache invalidations so adding ONE new PRD doesn't re-parse the other 197.
  * Both layers also bound by ino so a rename + re-create can't alias.
@@ -42,8 +44,7 @@ function expandCwd(cwd) {
 // already ~25k lines and well beyond any legitimate authored doc.
 const PRD_READ_MAX_BYTES = 1024 * 1024;
 
-let prdDirMtime = -1;
-let prdDirFiles = null; // sorted absolute paths
+const prdDirCache = new Map(); // prdsDir -> { mtimeMs, files } (files = sorted absolute paths)
 const prdFileCache = new Map(); // path -> { mtimeMs, ino, parsed }
 
 /**
@@ -195,8 +196,9 @@ function parseDependsOn(raw) {
 }
 
 /**
- * List `.md` PRD files under the given dir. Caches the result keyed by the
- * directory mtime so repeated reconcile() calls don't re-stat every entry.
+ * List `.md` PRD files under the given dir. Caches the result per dir path,
+ * validated by that dir's mtime, so repeated reconcile() calls don't re-read
+ * every dir.
  * Pass `prdsDir` so the scheduler can keep ownership of its PRDS_DIR path
  * without this module needing to know it.
  */
@@ -207,7 +209,8 @@ async function listPrdFiles(prdsDir) {
   } catch {
     dirMtime = -1;
   }
-  if (dirMtime === prdDirMtime && prdDirFiles) return prdDirFiles;
+  const hit = prdDirCache.get(prdsDir);
+  if (hit && hit.mtimeMs === dirMtime) return hit.files;
   let entries;
   try {
     entries = await fsp.readdir(prdsDir);
@@ -218,16 +221,17 @@ async function listPrdFiles(prdsDir) {
     .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
     .map((f) => path.join(prdsDir, f))
     .sort();
-  // Drop file-cache entries whose path is no longer on disk so the map
-  // doesn't accumulate ghosts after archives/deletes.
+  // Drop this dir's file-cache entries whose path is no longer on disk so the
+  // map doesn't accumulate ghosts after archives/deletes. Other dirs' entries
+  // are theirs to prune.
   if (prdFileCache.size > 0) {
     const live = new Set(files);
+    const dirKey = path.dirname(path.join(prdsDir, 'x')); // normalized, no trailing sep
     for (const k of prdFileCache.keys()) {
-      if (!live.has(k)) prdFileCache.delete(k);
+      if (path.dirname(k) === dirKey && !live.has(k)) prdFileCache.delete(k);
     }
   }
-  prdDirMtime = dirMtime;
-  prdDirFiles = files;
+  prdDirCache.set(prdsDir, { mtimeMs: dirMtime, files });
   return files;
 }
 
@@ -262,8 +266,7 @@ async function parsePrd(filePath) {
 
 /** Test-only: drop both cache layers so successive runs see fresh disk state. */
 function _resetCache() {
-  prdDirMtime = -1;
-  prdDirFiles = null;
+  prdDirCache.clear();
   prdFileCache.clear();
 }
 

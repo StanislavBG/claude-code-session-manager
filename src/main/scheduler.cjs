@@ -1716,11 +1716,9 @@ async function mutateBody(fn) {
 const parsePrdRaw = prdParser.parsePrdRaw;
 const parsePrd = prdParser.parsePrd;
 // Aggregates every candidate PRD dir's files into one flat, sorted list.
-// prdParser's dir-mtime cache is keyed per-dir internally by its own single
-// mtime var, so scanning N dirs here costs N stat+readdir passes rather than
-// one — acceptable: PRD counts per project are bounded (hundreds, not
-// millions), and correctness across multiple project dirs matters more than
-// preserving the single-dir cache's steady-state zero-read fast path.
+// prdParser caches each dir's listing by its path (validated by that dir's
+// mtime), so a steady-state pass over N unchanged dirs costs N stats and no
+// readdir, and two dirs sharing an mtime never see each other's files.
 async function listPrdFiles(skipCwds) {
   ensureDirs();
   const dirs = prdPaths.candidatePrdsDirs();

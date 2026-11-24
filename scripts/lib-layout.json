@@ -2,6 +2,7 @@
   "demoVideoKitChecks": "demo-video-kit",
   "voiceLibrary": "demo-video-kit",
   "voiceLane": "demo-video-kit",
+  "kokoroSay": "demo-video-kit",
   "activeIndexMerge": "epic",
   "activeIndexRebuild": "epic",
   "epicEventLog": "epic",

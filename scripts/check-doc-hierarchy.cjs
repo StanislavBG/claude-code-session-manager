@@ -128,8 +128,9 @@ function pairSibling(f) {
 }
 
 // (1) manifest
-// A runtime namespace (agents/, events/) is gitignored, holds no tracked file and
-// exists only in the main checkout; by design it has no README, so it is a note.
+// A gitignored namespace folder with no tracked file exists only in the main checkout:
+// it holds machine-local runtime state (agents/, events/) or a retired namespace's
+// leftovers (feedback/). By design it has no README, so it is a note, not a failure.
 // "Gitignored" covers both `ns/` (the folder) and `ns/*` (self-ignored contents:
 // something on disk is ignored and nothing is untracked-but-unignored).
 const gitLines = (args) => {
@@ -149,7 +150,7 @@ function isIgnoredNamespace(relDir) {
 const manifest = [...JUNCTIONS]
 for (const ns of listDirs(path.join(ROOT, OPS)).sort()) {
   if (isIgnoredNamespace(`${OPS}/${ns}`) && !hasTrackedFiles(`${OPS}/${ns}`)) {
-    console.log(`doc-hierarchy: note: ${OPS}/${ns}/: runtime namespace is gitignored with no tracked files (excluded)`)
+    console.log(`doc-hierarchy: note: ${OPS}/${ns}/: namespace folder is gitignored with no tracked files (excluded)`)
     continue
   }
   manifest.push(`${OPS}/${ns}/README.md`)

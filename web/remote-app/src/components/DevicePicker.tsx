@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { deviceLabel, platformLabel } from '../devices';
 import { revokeDevice } from '../api';
 import PairCode from './PairCode';
+import WebsitesList from './WebsitesList';
 
 interface Props {
   onClose: () => void;
@@ -99,6 +100,7 @@ export default function DevicePicker({ onClose, onRefreshDevices }: Props) {
             );
           })}
         </ul>
+        <WebsitesList />
         {err && (
           <p role="alert" className="mb-3 text-sm text-red-600">{err}</p>
         )}

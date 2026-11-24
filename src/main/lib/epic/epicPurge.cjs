@@ -15,6 +15,8 @@
  *      global history file (queueHistory.cjs).                    writer 'scheduler'
  *   4. PRD sources + outcome records: scheduler/epics/<epicId>/ (prdOutcomeRecord.cjs
  *      layout), and plan-records/<epicId>/.                       writer 'scheduler'
+ *      Published artifacts: artifacts/<epicId>/ (artifactStore.cjs), pinned
+ *      entries included — a purge removes everything.            writer 'artifacts'
  *   5. Event log: events/<epicId>/ (epicEventLog.cjs).           writer 'event-log'
  *   6. Agent-snapshot refs: the Epic's pinned agents/snapshots/<id>.json when no
  *      other Epic or queue row still references it (agentSnapshot.cjs). writer 'agents'
@@ -51,7 +53,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { assertOpsWrite, opsPath, parseOpsPath } = require('../opsOwnership.cjs');
+const opsOwnership = require('../opsOwnership.cjs');
+const { opsPath, parseOpsPath } = opsOwnership;
 const atomicFs = require('../util/atomicFs.cjs');
 
 /** The purge IPC handler's authority token — the only accepted `authority`. */
@@ -59,7 +62,7 @@ const PURGE_AUTHORITY_IPC = 'ipc:promptSessions:purge-epic';
 
 /** Every artifact kind a purge can remove, in purge order. */
 const PURGE_ARTIFACT_KINDS = Object.freeze([
-  'cli-transcript', 'run-log', 'history-rows', 'prd-sources', 'plan-records',
+  'cli-transcript', 'run-log', 'history-rows', 'prd-sources', 'plan-records', 'artifacts',
   'event-log', 'agent-snapshot', 'archived-transcript', 'epic-json', 'index-row',
 ]);
 
@@ -98,7 +101,7 @@ function makeLedger(dryRun) {
  */
 function removeOwned(p, writer, kind, ledger) {
   if (!exists(p)) return false;
-  if (parseOpsPath(p).inOps) assertOpsWrite(p, writer);
+  if (parseOpsPath(p).inOps) opsOwnership.assertOpsWrite(p, writer);
   if (!ledger.dryRun) fs.rmSync(p, { recursive: true, force: true });
   ledger.add(kind, p);
   return true;
@@ -169,7 +172,7 @@ function purgeHistoryRows(cwd, epicId, slugs, ledger) {
       keep.push(line);
     }
     if (!dropped) continue;
-    if (parseOpsPath(file).inOps) assertOpsWrite(file, 'scheduler');
+    if (parseOpsPath(file).inOps) opsOwnership.assertOpsWrite(file, 'scheduler');
     if (!ledger.dryRun) atomicFs.writeTextAtomicSync(file, keep.length ? `${keep.join('\n')}\n` : '');
     ledger.add('history-rows', file);
   }
@@ -256,7 +259,7 @@ async function purgeIndexRow(cwd, epicId, ledger) {
     delete index.sessions[epicId];
     delete index.events[epicId];
     index.tombstones[epicId] = new Date().toISOString();
-    assertOpsWrite(file, 'epics');
+    opsOwnership.assertOpsWrite(file, 'epics');
     atomicFs.writeJsonAtomicSync(file, index, { newline: false });
     ledger.add('index-row', file);
   });
@@ -314,6 +317,8 @@ async function purgeEpic({ cwd, epicId, authority, dryRun = false } = /** @type 
   // 4. PRD sources + outcome records, plan records (scheduler).
   removeOwned(opsPath(cwd, 'scheduler', 'epics', epicId), 'scheduler', 'prd-sources', ledger);
   removeOwned(opsPath(cwd, 'plan-records', epicId), 'scheduler', 'plan-records', ledger);
+  // 4b. Published artifacts (artifacts), pinned entries too.
+  removeOwned(opsPath(cwd, 'artifacts', epicId), 'artifacts', 'artifacts', ledger);
 
   // 5. Event log (event-log).
   removeOwned(opsPath(cwd, 'events', epicId), 'event-log', 'event-log', ledger);

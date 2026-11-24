@@ -100,6 +100,9 @@ async function seed(m) {
   writeFile(ops.opsPath(cwd, 'scheduler', 'epics', EPIC, 'prds', `${SLUG}.md`), '# t\n');
   writeFile(ops.opsPath(cwd, 'scheduler', 'epics', OTHER, 'prds', `${OTHER_SLUG}.md`), '# x\n');
   writeFile(ops.opsPath(cwd, 'plan-records', EPIC, 'validate.md'), 'v\n');
+  writeFile(ops.opsPath(cwd, 'artifacts', EPIC, 'clip.mp4'), 'clip\n');
+  writeFile(ops.opsPath(cwd, 'artifacts', EPIC, 'index.json'), JSON.stringify({ version: 1, entries: [{ name: 'clip.mp4', pinned: true }] }));
+  writeFile(ops.opsPath(cwd, 'artifacts', OTHER, 'keep.png'), 'other\n');
 
   const runs = m.schedulerPaths.runsDir();
   writeFile(path.join(runs, 'run-a', `${SLUG}.log`), 'log\n');

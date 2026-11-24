@@ -3,10 +3,13 @@
  *
  * Storage: ~/.claude/session-manager/ops-retention.json
  * Shape (DEFAULTS): { runLogs:{maxAgeDays,keepPerSlug}, runsArchiveDays, auditLogMonths,
- *   reservedMarkersKeep, tasksDays, planRecordsDays, feedbackInboxDays }
+ *   reservedMarkersKeep, tasksDays, planRecordsDays, artifactsDays, feedbackInboxDays }
  * tasksDays: Task ledger day files + bodies (lib/tasks/taskLedger.cjs pruneOld).
  * planRecordsDays: plan-records/<epic-id>/ folders of completed/orphan Epics
  *   (lib/scheduler/planRecordRetention.cjs prunePlanRecords).
+ * artifactsDays: artifacts/<epic-id>/ folders of completed/archived/orphan Epics, pinned
+ *   ledger entries kept; artifacts/_tasks/ follows tasksDays
+ *   (lib/epic/artifactRetention.cjs pruneArtifacts).
  * feedbackInboxDays: delete resolved or wontfix feedback-inbox/ items older than this.
  * Archived transcripts are kept forever (fixed policy, not a setting).
  *
@@ -28,6 +31,7 @@ const DEFAULTS = Object.freeze({
   reservedMarkersKeep: 100,
   tasksDays: 30,
   planRecordsDays: 14,
+  artifactsDays: 30,
   feedbackInboxDays: 90,
 });
 
@@ -40,6 +44,7 @@ const BOUNDS = Object.freeze({
   reservedMarkersKeep: [1, 100000],
   tasksDays: [1, 3650],
   planRecordsDays: [1, 3650],
+  artifactsDays: [1, 3650],
   feedbackInboxDays: [1, 3650],
 });
 
@@ -74,7 +79,7 @@ function validatePatch(patch) {
         if (rk !== 'maxAgeDays' && rk !== 'keepPerSlug') throw new Error(`Invalid ops retention config: runLogs.${rk}`);
         out.runLogs[rk] = num(`runLogs.${rk}`, rv);
       }
-    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays' || k === 'planRecordsDays' || k === 'feedbackInboxDays') {
+    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays' || k === 'planRecordsDays' || k === 'artifactsDays' || k === 'feedbackInboxDays') {
       out[k] = num(k, v);
     } else {
       throw new Error(`Invalid ops retention config: unknown key ${k}`);
@@ -98,7 +103,7 @@ function sanitizeStored(data) {
       };
     }
   }
-  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays', 'planRecordsDays', 'feedbackInboxDays']) {
+  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays', 'planRecordsDays', 'artifactsDays', 'feedbackInboxDays']) {
     const v = int(key, data[key]);
     if (v !== undefined) out[key] = v;
   }
@@ -125,6 +130,7 @@ function withDefaults(stored) {
     reservedMarkersKeep: s.reservedMarkersKeep ?? DEFAULTS.reservedMarkersKeep,
     tasksDays: s.tasksDays ?? DEFAULTS.tasksDays,
     planRecordsDays: s.planRecordsDays ?? DEFAULTS.planRecordsDays,
+    artifactsDays: s.artifactsDays ?? DEFAULTS.artifactsDays,
     feedbackInboxDays: s.feedbackInboxDays ?? DEFAULTS.feedbackInboxDays,
   };
 }
@@ -150,7 +156,7 @@ function write(patch) {
 /**
  * Dry-run report of what each policy would free, via the sweeps' own
  * eligibility code. Read-only. opts: { now, runsDir, plansRoot, jobs, liveKeys,
- *   projectRoot, epicStatus }. planRecords is reported only when projectRoot is given;
+ *   projectRoot, epicStatus }. planRecords + artifacts are reported only when projectRoot is given;
  *   epicStatus defaults to reading that project's prompt-sessions/<id>.json.
  */
 function preview(opts) {
@@ -183,22 +189,34 @@ function preview(opts) {
   });
   const tmp = staleTmpSweep.sweepStaleTmp(plansRoot, { now, dryRun: true });
   let planRecords = null;
+  let artifacts = null;
   if (o.projectRoot) {
     const planRecordRetention = require('./scheduler/planRecordRetention.cjs');
+    const epicStatus = typeof o.epicStatus === 'function' ? o.epicStatus : planRecordRetention.defaultEpicStatus(o.projectRoot);
     const pr = planRecordRetention.prunePlanRecords({
       projectRoot: o.projectRoot,
-      epicStatus: typeof o.epicStatus === 'function' ? o.epicStatus : planRecordRetention.defaultEpicStatus(o.projectRoot),
+      epicStatus,
       now,
       days: s.planRecordsDays,
       dryRun: true,
     });
     planRecords = { folders: pr.removed.length };
+    const ar = require('./epic/artifactRetention.cjs').pruneArtifacts({
+      projectRoot: o.projectRoot,
+      epicStatus,
+      now,
+      days: s.artifactsDays,
+      tasksDays: s.tasksDays,
+      dryRun: true,
+    });
+    artifacts = { folders: ar.removed.length, files: ar.removedFiles };
   }
   return {
     runLogs: { files: report.eligible.reduce((n, e) => n + e.removeFiles.length, 0) + report.dodFiles.length, bytes: report.eligibleSummary.bytes },
     runsArchive: { entries: archive.removedFiles, bytes: archive.freedBytes },
     tmp: { files: tmp.removedFiles, bytes: tmp.freedBytes },
     ...(planRecords ? { planRecords } : {}),
+    ...(artifacts ? { artifacts } : {}),
   };
 }
 

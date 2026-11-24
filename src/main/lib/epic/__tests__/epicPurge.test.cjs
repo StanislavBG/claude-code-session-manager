@@ -117,6 +117,9 @@ async function seed(m, { jobStatus = 'completed' } = {}) {
   writeFile(ops.opsPath(cwd, 'scheduler', 'epics', EPIC, 'prds', `${SLUG}.md`), `# ${TITLE}\n${OBJECTIVE}\n`);
   writeFile(ops.opsPath(cwd, 'scheduler', 'epics', OTHER, 'prds', `${OTHER_SLUG}.md`), '# other\n');
   writeFile(ops.opsPath(cwd, 'plan-records', EPIC, 'validate.md'), `${TITLE}\n`);
+  writeFile(ops.opsPath(cwd, 'artifacts', EPIC, 'clip.mp4'), 'clip\n');
+  writeFile(ops.opsPath(cwd, 'artifacts', EPIC, 'index.json'), JSON.stringify({ version: 1, entries: [{ name: 'clip.mp4', pinned: true }] }));
+  writeFile(ops.opsPath(cwd, 'artifacts', OTHER, 'keep.png'), 'other\n');
 
   const runs = m.schedulerPaths.runsDir();
   writeFile(path.join(runs, 'run-a', `${SLUG}.log`), `${TRANSCRIPT}\n`);
@@ -189,6 +192,8 @@ test('purge removes every artifact and leaves only a content-free audit tombston
   expect(fs.existsSync(m.ops.opsPath(cwd, 'events', EPIC))).toBe(false);
   expect(fs.existsSync(m.ops.opsPath(cwd, 'scheduler', 'epics', EPIC))).toBe(false);
   expect(fs.existsSync(m.ops.opsPath(cwd, 'plan-records', EPIC))).toBe(false);
+  expect(fs.existsSync(m.ops.opsPath(cwd, 'artifacts', EPIC))).toBe(false);
+  expect(fs.existsSync(m.ops.opsPath(cwd, 'artifacts', OTHER, 'keep.png'))).toBe(true);
   expect(fs.existsSync(path.join(s.runs, 'run-a', `${SLUG}.log`))).toBe(false);
   expect(fs.existsSync(path.join(s.runs, 'run-a', `${SLUG}.meta.json`))).toBe(false);
   expect(fs.existsSync(m.ops.opsPath(cwd, 'agents', 'snapshots', `${s.mine.id}.json`))).toBe(false);

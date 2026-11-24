@@ -542,7 +542,9 @@ function runBootSweep(opts) {
   const result = applyRetention(runsDir, state.config || {}, { jobs: state.jobs || [] });
   // Same pass, same project list: the cwds readMergedSync just swept (state.sourceCwds,
   // from queueStore's cached stateCwds) — never a fresh allProjectCwds() scan.
-  result.planRecords = runPlanRecordSweep({ cwds: Array.isArray(state.sourceCwds) ? state.sourceCwds : [] });
+  const cwds = Array.isArray(state.sourceCwds) ? state.sourceCwds : [];
+  result.planRecords = runPlanRecordSweep({ cwds });
+  result.artifacts = runArtifactSweep({ cwds });
   return result;
 }
 
@@ -641,6 +643,35 @@ function runPlanRecordSweep(opts) {
   return out;
 }
 
+/**
+ * Prune artifacts/<epic-id>/ + artifacts/_tasks/ in every given project root with
+ * artifactsDays + tasksDays from opsRetentionSettings (lib/epic/artifactRetention.cjs).
+ * Same per-project epicStatus as the plan-records sweep. Never throws.
+ * deps: { prune, readSettings, epicStatusFor, now } for tests.
+ */
+function runArtifactSweep(opts) {
+  const o = opts || {};
+  const out = { projects: 0, removed: 0, errors: 0 };
+  let s = {};
+  try { s = (o.readSettings || require('../opsRetentionSettings.cjs').read)() || {}; } catch { /* module defaults */ }
+  const prune = o.prune || require('../epic/artifactRetention.cjs').pruneArtifacts;
+  const statusFor = o.epicStatusFor || epicStatusFor;
+  const seen = new Set();
+  for (const cwd of o.cwds || []) {
+    if (typeof cwd !== 'string' || !cwd || seen.has(cwd)) continue;
+    seen.add(cwd);
+    try {
+      const r = prune({ projectRoot: cwd, epicStatus: statusFor(cwd), days: s.artifactsDays, tasksDays: s.tasksDays, now: o.now });
+      out.projects += 1;
+      out.removed += (r && Array.isArray(r.removed)) ? r.removed.length : 0;
+    } catch (e) {
+      out.errors += 1;
+      console.warn(`[runLogRetention] artifacts sweep skipped ${cwd}:`, e && e.message);
+    }
+  }
+  return out;
+}
+
 module.exports = {
   DEFAULT_RUN_LOG_RETENTION,
   resolveRetentionConfig,
@@ -656,5 +687,6 @@ module.exports = {
   applyRetention,
   runBootSweep,
   runPlanRecordSweep,
+  runArtifactSweep,
   epicStatusFor,
 };

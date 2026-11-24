@@ -38,6 +38,7 @@ test('read returns DEFAULTS when the file is missing', () => {
     reservedMarkersKeep: 100,
     tasksDays: 30,
     planRecordsDays: 14,
+    artifactsDays: 30,
     feedbackInboxDays: 90,
   });
   expect(settings.DEFAULTS).not.toHaveProperty('archivedTranscripts');
@@ -206,6 +207,47 @@ test('preview reports plan-record folders it would prune for a project root, del
       .toEqual({ folders: 0 });
     settings.write({ planRecordsDays: 60 });
     expect(settings.preview({ ...base, projectRoot: project }).planRecords).toEqual({ folders: 0 });
+    expect(snapshot(project)).toEqual(before);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('artifactsDays: default 30, clamps to [1, 3650], validates, sanitizes stored', () => {
+  expect(settings.DEFAULTS.artifactsDays).toBe(30);
+  expect(settings.BOUNDS.artifactsDays).toEqual([1, 3650]);
+  expect(settings.validatePatch({ artifactsDays: 0 })).toEqual({ artifactsDays: 1 });
+  expect(settings.validatePatch({ artifactsDays: 99999 })).toEqual({ artifactsDays: 3650 });
+  expect(() => settings.validatePatch({ artifactsDays: 'x' })).toThrow(/artifactsDays/);
+  expect(settings.write({ artifactsDays: 7.4 }).artifactsDays).toBe(7);
+  expect(settings.read().artifactsDays).toBe(7);
+  writeRaw(JSON.stringify({ artifactsDays: 'bad' }));
+  expect(settings.read().artifactsDays).toBe(30);
+});
+
+test('preview reports artifact folders it would prune beside plan records, deleting nothing', () => {
+  const plansRoot = path.join(home, 'plans');
+  fs.mkdirSync(path.join(plansRoot, 'runs'), { recursive: true });
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-ops-retention-art-'));
+  try {
+    const art = path.join(project, 'session-manager-operations', 'artifacts');
+    for (const id of ['done-epic', 'live-epic']) {
+      fs.mkdirSync(path.join(art, id), { recursive: true });
+      fs.writeFileSync(path.join(art, id, 'a.png'), 'x');
+      fs.writeFileSync(path.join(art, id, 'index.json'), JSON.stringify({ version: 1, entries: [{ name: 'a.png' }] }));
+    }
+    const now = Date.now();
+    const epicStatus = (id) => (id === 'done-epic'
+      ? { status: 'completed', completedAt: new Date(now - 40 * DAY).toISOString() }
+      : { status: 'active' });
+    const base = { runsDir: path.join(plansRoot, 'runs'), plansRoot, jobs: [], now };
+    expect(settings.preview(base)).not.toHaveProperty('artifacts');
+    const before = snapshot(project);
+    const p = settings.preview({ ...base, projectRoot: project, epicStatus });
+    expect(p.artifacts).toEqual({ folders: 1, files: 1 });
+    expect(p).toHaveProperty('planRecords');
+    settings.write({ artifactsDays: 60 });
+    expect(settings.preview({ ...base, projectRoot: project, epicStatus }).artifacts).toEqual({ folders: 0, files: 0 });
     expect(snapshot(project)).toEqual(before);
   } finally {
     fs.rmSync(project, { recursive: true, force: true });

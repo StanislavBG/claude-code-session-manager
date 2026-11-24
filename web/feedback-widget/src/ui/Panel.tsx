@@ -122,14 +122,16 @@ export function panelCss(): string {
     `.fw-panel--hidden{opacity:0;visibility:hidden;transform:translateY(16px) scale(.98);pointer-events:none}`,
     `.fw-pn-progress{position:absolute;top:0;left:0;height:3px;width:0;background:${c.accent};z-index:1;transition:width 200ms ${ease}}`,
     // Header
-    `.fw-pn-head{flex:none;display:flex;flex-direction:column;gap:6px;padding:16px 12px 14px 20px;border-bottom:1px solid ${c.rule}}`,
-    `.fw-pn-headrow{display:flex;align-items:center;gap:6px}`,
-    `.fw-pn-eyebrow{flex:1;min-width:0;font-family:${fonts.mono};font-weight:500;font-size:10.5px;line-height:1.3;letter-spacing:.1em;` +
+    // Design review scene: one row — [eyebrow over headline] beside [← Marks][×], top-aligned. The
+    // headline wraps against the buttons' column width (no max-width), exactly as the design.
+    `.fw-pn-head{flex:none;display:flex;align-items:flex-start;gap:6px;padding:16px 12px 14px 20px;border-bottom:1px solid ${c.rule}}`,
+    `.fw-pn-headtext{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}`,
+    `.fw-pn-eyebrow{min-width:0;font-family:${fonts.mono};font-weight:500;font-size:10.5px;line-height:1.3;letter-spacing:.1em;` +
       `text-transform:uppercase;color:${c.accent};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
-    `.fw-pn-headline{font-family:${fonts.serif};font-weight:600;font-size:22px;line-height:1.2;max-width:10em;color:${c.ink}}`,
-    `.fw-pn-back{height:30px;padding:0 10px;border-radius:7px;border:1px solid ${c.rule};font-weight:600;font-size:12.5px;color:${c['ink-2']}}`,
+    `.fw-pn-headline{font-family:${fonts.serif};font-weight:600;font-size:22px;line-height:1.2;color:${c.ink}}`,
+    `.fw-pn-back{flex:none;white-space:nowrap;height:30px;padding:0 10px;border-radius:7px;border:1px solid ${c.rule};font-weight:600;font-size:12.5px;color:${c['ink-2']}}`,
     `.fw-pn-back:hover{background:${c['paper-2']}}`,
-    `.fw-pn-close{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;color:${c['ink-3']}}`,
+    `.fw-pn-close{flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;color:${c['ink-3']}}`,
     `.fw-pn-close:hover{background:${c['paper-3']}}`,
     `.fw-pn-close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}`,
     // Body
@@ -315,27 +317,27 @@ export function Panel(props: PanelProps) {
       ) : (
       <>
       <div class="fw-pn-head">
-        <div class="fw-pn-headrow">
+        <div class="fw-pn-headtext">
           <div class="fw-pn-eyebrow">{EYEBROW}</div>
-          {showBack && (
-            <button type="button" class="fw-pn-back" data-part="back" onClick={() => dispatch({ type: 'backToMarks' })}>
-              {BACK_LABEL}
-            </button>
-          )}
-          <button
-            type="button"
-            class="fw-pn-close"
-            data-part="close"
-            aria-label="Close"
-            disabled={sending}
-            onClick={() => dispatch({ type: 'closeRequest' })}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
+          <h2 class="fw-pn-headline" data-part="headline">{HEADLINE}</h2>
         </div>
-        <h2 class="fw-pn-headline">{HEADLINE}</h2>
+        {showBack && (
+          <button type="button" class="fw-pn-back" data-part="back" onClick={() => dispatch({ type: 'backToMarks' })}>
+            {BACK_LABEL}
+          </button>
+        )}
+        <button
+          type="button"
+          class="fw-pn-close"
+          data-part="close"
+          aria-label="Close"
+          disabled={sending}
+          onClick={() => dispatch({ type: 'closeRequest' })}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
       </div>
 
       <div class="fw-pn-body">

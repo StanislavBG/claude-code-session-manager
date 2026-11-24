@@ -450,9 +450,8 @@ test('the script tag renders only the launcher and leaves every host pixel and s
 
 test("a host '* { color: red !important }' rule does not change the widget", async ({ page }) => {
   // Compared as rendered pixels of the widget alone (backdrop swapped for flat grey, so the host
-  // page's own red text in the screenshot is not counted). Computed styles are NOT identical: the
-  // host rule matches the host element and beats `:host{all:initial}`, so `color` inherits into
-  // shadow elements that set none of their own — reported as a finding; nothing visible changes.
+  // page's own red text in the screenshot is not counted). The host rule matches the host element;
+  // tokens.ts's base sheet keeps it from inheriting inward (see the next test for computed colours).
   const box = await createBox();
   await routeRelay(page);
   const shots: Buffer[][] = [];
@@ -480,6 +479,199 @@ test("a host '* { color: red !important }' rule does not change the widget", asy
     const d = await pixelDiff(page, shots[0][i], shots[1][i]);
     expect(d.off, `${names[i]}: ${d.off}/${d.total} widget px changed by the host rule`).toBe(0);
   }
+});
+
+/** Design colours (tokens.ts), as computed-style strings. */
+const RGB = {
+  ink: 'rgb(26, 22, 18)',
+  ink3: 'rgb(93, 86, 72)',
+  accent: 'rgb(168, 56, 24)',
+  green: 'rgb(46, 90, 62)',
+  paper: 'rgb(245, 240, 230)',
+} as const;
+
+const color = (l: Locator): Promise<string> => l.evaluate((el) => getComputedStyle(el).color);
+
+/** Every element in the widget's shadow root (and the host itself) whose computed color is red. */
+async function redInsideWidget(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const host = document.getElementById('feedback-widget-host')!;
+    const els = [host, ...Array.from(host.shadowRoot!.querySelectorAll('*'))];
+    return els
+      .filter((el) => getComputedStyle(el).color === 'rgb(255, 0, 0)')
+      .map((el) => `${el.tagName.toLowerCase()}.${(el.getAttribute('class') ?? '').replace(/\s+/g, '.')}`);
+  });
+}
+
+test("with a host '* { color: red !important }' rule, panel title, toolbar tooltip and receipt keep their design colours", async ({ page }) => {
+  // Inheritance, not pixels: the host rule matches the host element, so before the root-container
+  // rule any shadow element without its own color inherited red. Now nothing inside is red.
+  const box = await createBox();
+  await routeRelay(page);
+  await gotoHost(page, box.key, { red: true });
+  expect(await page.locator('#headline').evaluate((el) => getComputedStyle(el).color)).toBe('rgb(255, 0, 0)');
+  expect(await color(widget(page))).toBe(RGB.ink);
+  expect(await redInsideWidget(page)).toEqual([]);
+
+  await openWithLauncher(page);
+  // Toolbar tooltip (hover a tool).
+  await toolbar(page).getByRole('button', { name: 'Box', exact: true }).hover();
+  const tip = toolbar(page).getByRole('tooltip');
+  await expect(tip).toBeVisible();
+  expect(await color(tip)).toBe(RGB.ink);
+  expect(await color(tip.locator('.fw-tb-key'))).toBe(RGB.ink3);
+  expect(await redInsideWidget(page)).toEqual([]);
+
+  await tool(page, 'Pin');
+  await page.mouse.click(240, 330);
+  await openPopover(page, 'Pin 1');
+  await page.keyboard.press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+
+  // Panel title: the headline and the Title field.
+  await describeAndTitle(page, 'Red host isolation');
+  await widgetSettled(page);
+  expect(await color(panel(page).locator('.fw-pn-headline'))).toBe(RGB.ink);
+  expect(await color(panel(page).locator('.fw-pn-eyebrow'))).toBe(RGB.accent);
+  expect(await color(widget(page).locator('#fw-pn-title'))).toBe(RGB.ink);
+  expect(await redInsideWidget(page)).toEqual([]);
+
+  // Receipt text.
+  await sendButton(page).click();
+  const receipt = widget(page).locator('[data-part="receipt"]');
+  await expect(receipt).toBeVisible({ timeout: 20_000 });
+  await widgetSettled(page);
+  expect(await color(receipt.locator('[data-part="received"]'))).toBe(RGB.green);
+  expect(await color(receipt.locator('[data-part="headline"]'))).toBe(RGB.ink);
+  expect(await color(receipt.locator('[data-part="body"]'))).toBe(RGB.ink3);
+  expect(await color(receipt.locator('.fw-rc-k').first())).toBe(RGB.ink3);
+  expect(await color(receipt.locator('.fw-rc-v').first())).toBe(RGB.ink);
+  expect(await color(receipt.locator('[data-part="done"]'))).toBe(RGB.paper);
+  expect(await redInsideWidget(page)).toEqual([]);
+});
+
+interface InkLine {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/**
+ * Text lines of the dark (ink) glyphs inside `rect` of a PNG: row bands holding ink pixels, each with
+ * its horizontal ink extent. Coordinates are relative to `rect`.
+ */
+async function inkLines(page: Page, png: Buffer, rect: { x: number; y: number; w: number; h: number }): Promise<InkLine[]> {
+  return page.evaluate(
+    async ({ b64, rect }) => {
+      const bin = atob(b64);
+      const u = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      const bmp = await createImageBitmap(new Blob([u], { type: 'image/png' }));
+      const c = new OffscreenCanvas(bmp.width, bmp.height);
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(bmp, 0, 0);
+      const img = ctx.getImageData(rect.x, rect.y, rect.w, rect.h);
+      const ink = (x: number, y: number) => {
+        const i = (y * rect.w + x) * 4;
+        return img.data[i] + img.data[i + 1] + img.data[i + 2] < 300;
+      };
+      const lines: { top: number; bottom: number; left: number; right: number }[] = [];
+      let cur: (typeof lines)[number] | null = null;
+      let gap = 0;
+      for (let y = 0; y < rect.h; y++) {
+        let left = -1;
+        let right = -1;
+        for (let x = 0; x < rect.w; x++) {
+          if (!ink(x, y)) continue;
+          if (left < 0) left = x;
+          right = x;
+        }
+        if (left < 0) {
+          if (cur && ++gap > 2) {
+            lines.push(cur);
+            cur = null;
+          }
+          continue;
+        }
+        gap = 0;
+        if (!cur) cur = { top: y, bottom: y, left, right };
+        else {
+          cur.bottom = y;
+          cur.left = Math.min(cur.left, left);
+          cur.right = Math.max(cur.right, right);
+        }
+      }
+      if (cur) lines.push(cur);
+      return lines;
+    },
+    { b64: png.toString('base64'), rect },
+  );
+}
+
+test("the review panel headline breaks lines where the design's review PNG does", async ({ page }) => {
+  // Design: tests/shots/design/describe.png (the review scene) — 'Describe what you' / 'marked' in
+  // Source Serif 4 600 22/1.2, beside the ← Marks and close buttons in a 380 px card, 20 px padding.
+  const box = await createBox();
+  await routeRelay(page);
+  await gotoHost(page, box.key);
+  await openWithLauncher(page);
+  await tool(page, 'Pin');
+  await page.mouse.click(240, 330);
+  await openPopover(page, 'Pin 1');
+  await page.keyboard.press('Escape');
+  await describeAndTitle(page, 'Line break check');
+  await widgetSettled(page);
+
+  const headline = panel(page).locator('.fw-pn-headline');
+  await expect(headline).toHaveText('Describe what you marked');
+  const hb = (await headline.boundingBox())!;
+  const fontSize = await headline.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(fontSize).toBe(22);
+  expect(Math.round(hb.height / (22 * 1.2)), `headline height ${hb.height}`).toBe(2);
+
+  // Same rect (the widget headline's box, plus a margin) in both PNGs.
+  const m = 6;
+  const rect = {
+    x: Math.max(0, Math.floor(hb.x) - m),
+    y: Math.max(0, Math.floor(hb.y) - m),
+    w: Math.ceil(hb.width) + 2 * m,
+    h: Math.ceil(hb.height) + 2 * m,
+  };
+  const shot = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  const design = readFileSync(join(here, 'shots', 'design', 'describe.png'));
+  const got = await inkLines(page, shot, rect);
+  const want = await inkLines(page, design, rect);
+  const msg = `widget ${JSON.stringify(got)} vs design ${JSON.stringify(want)}`;
+  expect(want, `design PNG: ${msg}`).toHaveLength(2);
+  expect(got, msg).toHaveLength(want.length);
+  // Same rows and left edge; same words per line. Glyph widths differ a few per cent (self-hosted
+  // static Source Serif 4 600 vs the design's Google variable face), while a word moving across the
+  // break changes a line's ink width by 20 % or more — so line widths are compared within 10 %.
+  for (let i = 0; i < want.length; i++) {
+    expect(Math.abs(got[i].top - want[i].top), `line ${i + 1} top: ${msg}`).toBeLessThanOrEqual(3);
+    expect(Math.abs(got[i].left - want[i].left), `line ${i + 1} left: ${msg}`).toBeLessThanOrEqual(3);
+    const gw = got[i].right - got[i].left;
+    const ww = want[i].right - want[i].left;
+    expect(Math.abs(gw - ww) / ww, `line ${i + 1} width: ${msg}`).toBeLessThanOrEqual(0.1);
+  }
+  // The widget's own lines, read from the DOM: the design breaks after "you".
+  const domLines = await headline.evaluate((el) => {
+    const text = el.firstChild as Text;
+    const out: { top: number; s: string }[] = [];
+    for (let i = 0; i < text.data.length; i++) {
+      const r = document.createRange();
+      r.setStart(text, i);
+      r.setEnd(text, i + 1);
+      const rect = r.getClientRects()[0];
+      if (!rect) continue;
+      const last = out[out.length - 1];
+      if (last && Math.abs(last.top - rect.top) < 4) last.s += text.data[i];
+      else out.push({ top: rect.top, s: text.data[i] });
+    }
+    return out.map((l) => l.s.trim());
+  });
+  expect(domLines).toEqual(['Describe what you', 'marked']);
 });
 
 // ── 2. Keyboard, tools, numbering, undo, discard guard ──────────────────────

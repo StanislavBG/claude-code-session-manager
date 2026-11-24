@@ -77,10 +77,32 @@ export function tokenCustomProperties(): string {
   return decls.join(';');
 }
 
-/** Text of the base sheet: :host{all:initial} (+ token properties) and a local reset. */
+/** The widget's own text defaults — what every widget element inherits, never the host page's. */
+export const ROOT_TEXT = {
+  color: colors.ink,
+  font: `400 14px/1.4 ${fonts.sans}`,
+} as const;
+
+/**
+ * Text of the base sheet: :host{all:initial} (+ token properties), the root-container text rule,
+ * and a local reset.
+ *
+ * Inheritance isolation: a host rule such as `* { color: red !important }` matches the host
+ * element and beats `:host{all:initial}` (outer context wins for normal declarations), so its
+ * value would inherit into every shadow element that sets none of its own. Two guards:
+ *  - `:host{… !important}` — for important declarations the INNER (shadow) context wins, so the
+ *    host element's own color/font/line-height stay the widget's.
+ *  - `:host>*` — every root container directly inside the shadow root sets explicit color, font
+ *    and line-height, so nothing below it inherits from the host element at all. It sits in a
+ *    cascade layer so any component rule (unlayered) still overrides it, whatever order the
+ *    component sheets were adopted in.
+ */
 export function baseCss(): string {
+  const root = `color:${ROOT_TEXT.color};font:${ROOT_TEXT.font}`;
   return [
     `:host{all:initial;${tokenCustomProperties()}}`,
+    `:host{color:${ROOT_TEXT.color}!important;font:${ROOT_TEXT.font}!important}`,
+    `@layer fw-root{:host>*{${root};-webkit-font-smoothing:antialiased}}`,
     `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;border:0 solid}`,
     `:host,button,input,textarea,select{font-family:${fonts.sans};font-size:14px;line-height:1.4;color:${colors.ink};-webkit-font-smoothing:antialiased}`,
     `button,input,textarea,select{font:inherit;color:inherit;background:none;appearance:none}`,

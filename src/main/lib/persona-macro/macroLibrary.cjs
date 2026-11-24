@@ -82,7 +82,7 @@ const JOB_SURFACE_ONLY = 'job is allowed only on a Project Video tool';
 const JOB_NOT_ON_BUILTIN = 'a built-in macro job cannot be set';
 const VOICE_SURFACE_ONLY = 'voiceId is allowed only on a Project Home or Project Video tool';
 const VOICE_NOT_ON_BUILTIN = 'a built-in macro voiceId cannot be set';
-const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const { VOICE_ID_RE } = require('../demo-video-kit/voiceLibrary.cjs');
 const MacroVoiceIdSchema = z.string().regex(VOICE_ID_RE, 'invalid voiceId');
 const VOICE_SURFACES = new Set(['project-home', 'project-video']);
 

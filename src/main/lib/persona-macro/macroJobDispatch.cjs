@@ -23,7 +23,8 @@ const path = require('node:path');
 const { BUILTIN_MACROS } = require('./builtinMacros.cjs');
 const { kebabCase } = require('../util/kebabCase.cjs');
 const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
-const { renderMacroPrompt, VOICE_ID_RE } = require('./macroLibrary.cjs');
+const { renderMacroPrompt } = require('./macroLibrary.cjs');
+const { VOICE_ID_RE } = require('../demo-video-kit/voiceLibrary.cjs');
 
 const ACTIVE = new Set(['pending', 'held', 'running']);
 const RETRYABLE = new Set(['needs_review', 'failed']);
@@ -130,7 +131,7 @@ async function dispatchMacroJob(
   if (typeof epicId !== 'string' || !epicId.trim()) return { ok: false, error: 'epicId is required — a background build joins an existing Epic' };
   if (typeof cwd !== 'string' || !cwd) return { ok: false, error: 'cwd is required' };
   if (voiceId != null && (typeof voiceId !== 'string' || !VOICE_ID_RE.test(voiceId))) {
-    return { ok: false, error: 'voiceId must match /^[a-z0-9][a-z0-9_-]{0,63}$/ when given' };
+    return { ok: false, error: `voiceId must match /${VOICE_ID_RE.source}/ when given` };
   }
   if (typeof createPrd !== 'function') return { ok: false, error: 'createPrd is not available' };
 

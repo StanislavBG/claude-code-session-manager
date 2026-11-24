@@ -50,6 +50,7 @@ const os = require('node:os');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { startDispatchLoop } = require('./lib/scheduler/dispatchLoop.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
+const { VOICE_ID_RE } = require('./lib/demo-video-kit/voiceLibrary.cjs');
 const { randomUUID } = require('node:crypto');
 const { execFile, execFileSync, spawnSync } = require('node:child_process');
 const { buildJobSandboxSettings, sandboxDependencies, sandboxChildEnv, jobEnvironmentName, environmentHookEnv, wouldBlockRecord } = require('./lib/claude/jobSandboxPolicy.cjs');
@@ -6149,7 +6150,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     });
     const jobBudgetMs = budget.computeJobBudgetMs(budgetEstimate);
     const budgetExempt = budget.isJobBudgetExempt(job);
-    const jobVoiceId = (typeof job.voiceId === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(job.voiceId)) ? job.voiceId : null;
+    const jobVoiceId = (typeof job.voiceId === 'string' && VOICE_ID_RE.test(job.voiceId)) ? job.voiceId : null;
     const childEnv = cleanChildEnv({
       PATH: withTimeoutShimOnPath(pathWithUserBins()),
       SM_PROJECT_ROOT: cwd,

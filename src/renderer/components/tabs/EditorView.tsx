@@ -7,7 +7,7 @@
  * focus mode, scene-level Cmd/Ctrl-S, and the unsaved-changes close guard.
  * Panes are dumb renderers of the active file's buffer (held in the editor store).
  *
- * File dispatch: images → ImagePane, PDFs → PdfPane, binary/oversize → BinaryPane
+ * File dispatch: images → ImagePane, PDFs → PdfPane, video/audio → MediaPane, binary/oversize → BinaryPane
  * (files.cjs flags these), CSV/TSV → TablePane, JSONL → JsonlPane (record CRUD),
  * markdown/html → preview, markdown Wysiwyg → TiptapBody (rich-text editing,
  * lazy-loaded), else Monaco. Wide-file support rides the smfile:// scheme +
@@ -48,6 +48,7 @@ import { PdfPane } from './editor/PdfPane'
 import { TablePane } from './editor/TablePane'
 import { JsonlPane } from './editor/JsonlPane'
 import { BinaryPane } from './editor/BinaryPane'
+import { MediaPane, isPlayableMedia } from './editor/MediaPane'
 import { useDocEdit } from './editor/useDocEdit'
 import { SelectionPopover } from './editor/SelectionPopover'
 import { AssistantRail } from './editor/AssistantRail'
@@ -478,6 +479,8 @@ function EditorViewComponent() {
             <ImagePane path={path} name={name} />
           ) : isPdf(path) ? (
             <PdfPane path={path} />
+          ) : isPlayableMedia(path) ? (
+            <MediaPane path={path} name={name} size={ls && typeof ls === 'object' && 'size' in ls ? ls.size : undefined} />
           ) : ls && typeof ls === 'object' && 'binary' in ls ? (
             <BinaryPane path={path} name={name} size={ls.size} mime={ls.mime} reason={ls.reason} />
           ) : ls && typeof ls === 'object' && 'error' in ls ? (

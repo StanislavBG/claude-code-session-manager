@@ -1787,29 +1787,18 @@ app.whenReady().then(async () => {
   // reply whose "deliver when app version > x" now holds, filling {version}
   // with this app's version. Once ~120s past boot, then hourly; unref'd and
   // off the startup path. deliverDueReplies never throws.
-  // A pass still running when the next tick fires (one slower than an hour)
-  // is never overlapped: the tick is skipped and logged.
-  let dueRepliesPassRunning = false;
+  // Overlap is guarded once, inside deliverDueReplies (a pass still running
+  // returns { skipped: true } and sends nothing).
   const runDueRepliesPass = () => {
     const appVersion = app.getVersion();
-    if (dueRepliesPassRunning) {
-      logs.writeLine({ scope: 'feedback-reply', level: 'info', message: 'scheduled replies pass skipped: previous pass still running', meta: { appVersion } });
-      return;
-    }
-    dueRepliesPassRunning = true;
     Promise.resolve()
       .then(() => require('./lib/feedback-remote/crossProjectReply.cjs').deliverDueReplies({ appVersion }))
       .then((r) => {
-        if (r.skipped) {
-          logs.writeLine({ scope: 'feedback-reply', level: 'info', message: 'scheduled replies pass skipped: previous pass still running', meta: { appVersion } });
-          return;
-        }
         logs.writeLine({ scope: 'feedback-reply', level: r.failed || r.error ? 'warn' : 'info', message: 'scheduled replies pass', meta: { appVersion, due: r.due, delivered: r.delivered, failed: r.failed, ...(r.error ? { error: r.error } : {}) } });
       })
       .catch((e) => {
         logs.writeLine({ scope: 'feedback-reply', level: 'error', message: 'scheduled replies pass failed', meta: { error: e?.message } });
-      })
-      .finally(() => { dueRepliesPassRunning = false; });
+      });
   };
   const dueRepliesBootTimer = setTimeout(() => {
     runDueRepliesPass();

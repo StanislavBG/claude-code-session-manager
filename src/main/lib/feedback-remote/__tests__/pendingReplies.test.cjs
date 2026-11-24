@@ -170,3 +170,15 @@ test('listPendingForThread returns undelivered, not-given-up entries of that thr
   ledger.markReplyDelivered(b.id, { version: '0.142.0', result: { ok: true } });
   expect(ledger.listPendingForThread('/p/b', 'epic-y').map((x) => x.id)).toEqual([a.id]);
 });
+
+test('a given-up entry no longer counts toward the thread pending count (frees its slot)', () => {
+  const a = ledger.addPendingReply(entry({ hash: 'ha' }));
+  const b = ledger.addPendingReply(entry({ hash: 'hb' }));
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(2);
+  for (let i = 1; i <= ledger.MAX_DELIVERY_ATTEMPTS; i++) {
+    ledger.markReplyDelivered(a.id, { version: '0.142.0', result: { ok: false, error: `fail ${i}` } });
+  }
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(1);
+  expect(ledger.countPendingForThread('/p/b', 'epic-y')).toBe(ledger.listPendingForThread('/p/b', 'epic-y').length);
+  expect(ledger.listPendingForThread('/p/b', 'epic-y').map((x) => x.id)).toEqual([b.id]);
+});

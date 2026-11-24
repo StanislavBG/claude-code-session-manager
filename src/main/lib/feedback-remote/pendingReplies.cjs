@@ -130,13 +130,19 @@ function listDueReplies(appVersion) {
   return selectDue(readEntries(), appVersion);
 }
 
+/** Pure: true for an undelivered, not-given-up entry of the thread (replierCwd + yId). */
+function isPendingForThread(e, replierCwd, yId) {
+  return !e.deliveredAt && !e.gaveUpAt && e.replierCwd === replierCwd && e.yId === yId;
+}
+
+/** How many of the thread's reply slots are held — a given-up entry frees its slot. */
 function countPendingForThread(replierCwd, yId) {
-  return readEntries().filter((e) => !e.deliveredAt && e.replierCwd === replierCwd && e.yId === yId).length;
+  return listPendingForThread(replierCwd, yId).length;
 }
 
 /** Undelivered, not-given-up entries one thread (replierCwd + yId) still holds. */
 function listPendingForThread(replierCwd, yId) {
-  return readEntries().filter((e) => !e.deliveredAt && !e.gaveUpAt && e.replierCwd === replierCwd && e.yId === yId);
+  return readEntries().filter((e) => isPendingForThread(e, replierCwd, yId));
 }
 
 /**

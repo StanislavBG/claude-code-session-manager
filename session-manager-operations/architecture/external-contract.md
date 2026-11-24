@@ -407,26 +407,29 @@ Errors: a missing or relative `cwd`, or one with no `session-manager-operations/
 
 ## 4. Events — following state changes
 
-Code: `src/main/lib/epic/epicTransitions.cjs` (writes `epic.status_changed` to the Epic's event log at
-the transition), `src/main/lib/telemetry/auditEvents.cjs` (cursor reader; turns each `epic.status_changed`
-into an `epic_state_changed` row), `src/main/lib/telemetry/eventsAdminRoutes.cjs` (route).
+Code: `src/main/lib/epic/epicStateEmitter.cjs` (recomputes an Epic's outside state when its event log or
+chain changes and writes `epic.state_changed` to the Epic's event log at the change),
+`src/main/lib/telemetry/auditEvents.cjs` (cursor reader; turns each `epic.state_changed` into an
+`epic_state_changed` row), `src/main/lib/telemetry/eventsAdminRoutes.cjs` (route).
 
 ### The `epic_state_changed` row
 
-One row per lifecycle transition (`proposed`→`active`, →`completed`, `completed`→`active`), read from the
-per-Epic event logs of every registered project and merged into the audit-log cursor by `at`. Rows are
-written at the transition itself, so nothing depends on the app ticking. Legacy rows written by the old
-snapshot watcher stay readable.
+One row per change of an Epic's outside state (the `state` of `GET /admin/epic`) or of its `blockedKind`,
+recorded at the change as an `epic.state_changed` event in the Epic's event log, read from the per-Epic
+event logs of every registered project and merged into the audit-log cursor by `at`. Rows are written when
+the change happens, so nothing depends on the app ticking. The set of `to` values is pinned as
+`CONTRACT.epicStateChangedTo` in `src/main/lib/externalContract.cjs`. Rows written by 0.141.0's snapshot
+watcher stay readable.
 
 | Field | Meaning |
 | --- | --- |
-| `at` | ISO time of the transition. |
+| `at` | ISO time of the change. |
 | `kind` | `"epic_state_changed"`. |
 | `cwd` | The project. |
 | `epicId` | The Epic. |
-| `from` | The old state: `"awaiting_approval"` (proposed), `"open"` (active), `"closed"` (completed), or `null`. |
-| `to` | The new state, same words. Fine-grained states (`working`, `blocked`, …) come from `GET /admin/epic`. |
-| `blockedKind` | Legacy watcher rows only. |
+| `from` | The previous recorded state (same words as `to`), or `null` for an Epic's first recorded state. |
+| `to` | The new state: one of the eight states (`closed`, `awaiting_approval`, `needs_input`, `blocked`, `working`, `in_review`, `verified`, `open`), or `"gone"` when the Epic no longer exists. |
+| `blockedKind` | Present only when `to` is `"blocked"`: the `blocked.kind` of `GET /admin/epic`. |
 | `externalRef` | Present only when the Epic has one. |
 
 ### `GET /admin/events`

@@ -92,6 +92,8 @@ const CONTRACT = deepFreeze({
   ],
   receiptFields: ['jobs', 'chat'],
   epicStateChangedFields: ['at', 'kind', 'cwd', 'epicId', 'from', 'to', 'blockedKind', 'externalRef'],
+  // Every `to` an epic_state_changed row can carry: the outside states plus 'gone' (epicStateEmitter.cjs EPIC_STATE_CHANGED_TO).
+  epicStateChangedTo: ['closed', 'awaiting_approval', 'needs_input', 'blocked', 'working', 'in_review', 'verified', 'open', 'gone'],
   // Keys of an event-mode epic_cross_project_reply row (crossProjectReply.cjs replyAsEvent) as readEventsAfter returns it.
   replyEventFields: [
     'at', 'kind', 'cwd', 'epicId', 'fromCwd', 'fromEpicId', 'outcome', 'delivery', 'mode', 'externalRef',
@@ -156,7 +158,9 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
   // then GET /admin/validation-quality (validationQualityHandlers.cjs),
   // then 'phase' on epicRecordFields + taskFields (phaseProjection.cjs),
   // then POST /admin/tasks/switch (tasks/taskSwitchRoute.cjs),
-  // then taskBodyKeys + taskRuntimeKeys + taskGetKeys (advertised on GET /__admin/health via healthInfo()).
+  // then taskBodyKeys + taskRuntimeKeys + taskGetKeys (advertised on GET /__admin/health via healthInfo()),
+  // then epicStateChangedTo: the pinned `to` set of epic_state_changed rows (the 8 outside states + 'gone',
+  // restoring the released v1 shape after C6 909f6e47 narrowed it).
   1: Object.freeze([
     '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
     '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',
@@ -164,6 +168,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
     '2ddfa9e96382e6d2d8db6849361aeb89a62d86c237ad99d149ccb01c6b57db6a',
     'a5be9b9b073639b4622574c842ed9a41ebb39c24c0919d699b18d2e197a8eb67',
     'ffb97327f0bd2da7d3f29693171ee7ee53982d8347d20d009e5aa5baf2bc15d1',
+    '4f4ee647977bb670c71db57c6fdfa8dc5db89ce789a1f05dbf23f9468dcff30b',
   ]),
 });
 

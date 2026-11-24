@@ -187,33 +187,86 @@ test('record and receipt field names equal the keys getEpicRecord builds with re
   expect(Object.keys(rec.receipt)).toEqual([...CONTRACT.receiptFields]);
 });
 
-// ── epic_state_changed keys from a real epic.status_changed event read back by readEventsAfter ──
+// ── epic_state_changed rows from the real emitter, read back by readEventsAfter ──
 
-test('an epic_state_changed event from the event log carries only listed keys and always the core ones', async () => {
-  const { transitionEpic } = require('../lib/epic/epicTransitions.cjs');
+test('CONTRACT.epicStateChangedTo equals the emitter\'s producible set: the outside states plus gone', () => {
+  const { EPIC_STATE_CHANGED_TO } = require('../lib/epic/epicStateEmitter.cjs');
+  const { EPIC_OUTSIDE_STATES } = require('../lib/epic/epicOutsideState.cjs');
+  expect(CONTRACT.epicStateChangedTo).toEqual([...EPIC_STATE_CHANGED_TO]);
+  expect(CONTRACT.epicStateChangedTo).toEqual([...EPIC_OUTSIDE_STATES, 'gone']);
+});
+
+test('epic_state_changed rows from the real emitter carry only listed keys and listed to values', async () => {
+  const epicEventLog = require('../lib/epic/epicEventLog.cjs');
+  const emitter = require('../lib/epic/epicStateEmitter.cjs');
   const { readEventsAfter } = require('../lib/telemetry/auditEvents.cjs');
   const cwd = fs.realpathSync(await mkTmp('sm-contract-epicstate-cwd-'));
   const ps = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
   fs.mkdirSync(ps, { recursive: true });
-  fs.writeFileSync(path.join(ps, 'active-index.json'), JSON.stringify({
-    sessions: { 'e-1': { id: 'e-1', cwd, status: 'active', source: { externalRef: 'ref-1' } } }, events: {},
-  }));
-  transitionEpic({ id: 'e-1', cwd, status: 'proposed' }, 'active', { reason: 'approve', source: 'test' });
-  transitionEpic({ id: 'e-2', cwd, status: 'proposed' }, 'active', { reason: 'approve', source: 'test' });
-  // transitionEpic appends fire-and-forget; wait for both rows to land.
-  const read = () => readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], projectRoots: () => [cwd] });
-  for (let i = 0; i < 200 && read().events.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
-  const { events } = read();
-  expect(events).toHaveLength(2);
+  const index = { sessions: {}, events: {} };
+  const writeIndex = () => fs.writeFileSync(path.join(ps, 'active-index.json'), JSON.stringify(index));
+  const session = (status) => ({
+    id: 'e-1', cwd, goalText: 'Title\n\nGoal.', claudeSessionId: 'sess-e-1', status, tag: 'feature',
+    agentType: 'architect', createdAt: '2026-11-01T00:00:00.000Z', source: { externalRef: 'ref-1' },
+  });
+  const addResponse = (validation, extra = {}) => {
+    const ev = { id: `pevt-${validation}`, promptSessionId: 'e-1', kind: 'response', prdSlug: '0001-x', validation, at: new Date().toISOString(), ...extra };
+    (index.events['e-1'] = index.events['e-1'] || []).push(ev);
+    writeIndex();
+    return ev;
+  };
+  let jobs = [];
+  let busy = false;
+  epicEventLog._resetForTests();
+  emitter._resetForTests();
+  emitter.configureEpicStateEmitter({ debounceMs: 0, listJobs: () => jobs, isTabBusy: () => busy, projectRoots: () => [cwd] });
+  const poke = async () => { emitter.pokeEpicState(cwd, 'e-1'); await emitter._settleForTests(); };
+  try {
+    index.sessions['e-1'] = session('proposed');
+    writeIndex();
+    await epicEventLog.appendEpicEvent(cwd, 'e-1', { kind: 'epic.minted' }); // no row of its own
+    await poke(); // → awaiting_approval
+    index.sessions['e-1'] = session('active');
+    writeIndex();
+    busy = true;
+    await poke(); // → working
+    busy = false;
+    jobs = [{ epicId: 'e-1', slug: '0001-x', status: 'completed', finishedAt: new Date().toISOString() }];
+    await poke(); // → in_review
+    addResponse('verified');
+    await poke(); // → verified
+    addResponse('refuted', { id: 'pevt-refuted', reason: 'nope' });
+    await poke(); // → blocked (refuted)
+  } finally {
+    emitter._resetForTests();
+  }
+
+  const { events } = readEventsAfter({ after: 'start', kinds: ['epic_state_changed'], projectRoots: () => [cwd] });
+  const tos = events.map((ev) => ev.to);
+  expect(tos).toEqual(['awaiting_approval', 'working', 'in_review', 'verified', 'blocked']);
+  expect(tos).toContain('verified');
+  expect(tos).toContain('blocked');
+  const allowedTo = new Set(CONTRACT.epicStateChangedTo);
   const allowed = new Set(CONTRACT.epicStateChangedFields);
   const seen = new Set();
   for (const ev of events) {
+    expect(allowedTo.has(ev.to), `unlisted to ${ev.to}`).toBe(true);
     for (const k of Object.keys(ev)) { expect(allowed.has(k), `unlisted key ${k}`).toBe(true); seen.add(k); }
-    for (const k of ['at', 'kind', 'cwd', 'epicId', 'to']) expect(ev, `required key ${k}`).toHaveProperty(k);
+    for (const k of ['at', 'kind', 'cwd', 'epicId', 'from', 'to']) expect(ev, `required key ${k}`).toHaveProperty(k);
     expect(ev.kind).toBe('epic_state_changed');
+    expect(ev.cwd).toBe(cwd);
+    expect(ev.epicId).toBe('e-1');
+    expect(ev.externalRef).toBe('ref-1');
+    if (ev.to === 'blocked') expect(ev.blockedKind).toBe('refuted');
+    else expect(ev).not.toHaveProperty('blockedKind');
   }
-  // Every listed key but blockedKind (legacy watcher rows only) is exercised.
-  expect([...seen].sort()).toEqual(CONTRACT.epicStateChangedFields.filter((k) => k !== 'blockedKind').sort());
+  expect(events[0].from).toBeNull();
+  // Every listed key, blockedKind included, is exercised.
+  expect([...seen].sort()).toEqual([...CONTRACT.epicStateChangedFields].sort());
+  // The verified row is recorded at the verdict, not at some later tick.
+  const verifiedRow = events.find((ev) => ev.to === 'verified');
+  const verdictAt = index.events['e-1'].find((e) => e.validation === 'verified').at;
+  expect(Math.abs(Date.parse(verifiedRow.at) - Date.parse(verdictAt))).toBeLessThanOrEqual(60_000);
 });
 
 // ── epic_cross_project_reply keys from a real event-mode reply read back by readEventsAfter ──

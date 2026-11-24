@@ -57,9 +57,12 @@ timer that calls it directly on a fixed cadence** — every call is a reaction t
   does **not** need to succeed to trigger a tick.
 - **The starvation watchdog**, forced from the 60s heartbeat timer, independent of the poll loop
   — see §3.
-- **A human** — `runDueJobs()` (Run now / resume-timer) sets `bypassLoadGate: true`. The only
-  other bypass is the starvation watchdog's last-resort forced tick (§3) — automated, but the
-  same rationale: dispatch when nothing else will.
+- **A human** — only **Run now** and **Fire next batch now** (the `schedule:run-now` and
+  `schedule:force-tick` IPC handlers) call `runDueJobs({ bypassLoadGate: true, human: true })`,
+  bypassing the load gate and the usage hold. The resume timer (`clearPause('resume-timer')`),
+  boot-elapsed and drain-abort `runDueJobs()` calls are automatic: defaults, no load-gate bypass,
+  and the usage hold applies (§7). The only other load-gate bypass is the starvation watchdog's
+  last-resort forced tick (§3) — automated, but the same rationale: dispatch when nothing else will.
 - **A slot freeing up** — `sessionSlots.subscribe(() => tickQueue())` (registered in `init()`)
   fires on every `release()` and on `setCap()` raising the pool.
 - **`reapDeadRunningJobs()` finishing its sweep** — ticks once more after finalizing dead rows.

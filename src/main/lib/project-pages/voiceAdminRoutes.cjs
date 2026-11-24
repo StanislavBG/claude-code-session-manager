@@ -24,7 +24,7 @@
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { wavSeconds } = require('../demo-video-kit/character.cjs');
 
-const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const { VOICE_ID_RE } = require('../demo-video-kit/voiceLibrary.cjs');
 const TEXT_MAX = 300;
 const WAIT_MS = 60 * 1000;
 const BODY_MAX = 64 * 1024;
@@ -54,7 +54,7 @@ function clipSeconds(wavPath) {
 function validatePreviewBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'invalid payload';
   if (typeof body.voiceId !== 'string' || !VOICE_ID_RE.test(body.voiceId)) {
-    return 'voiceId must match /^[a-z0-9][a-z0-9_-]{0,63}$/';
+    return `voiceId must match /${VOICE_ID_RE.source}/`;
   }
   const t = typeof body.text === 'string' ? body.text.trim() : '';
   if (t.length < 1 || t.length > TEXT_MAX) return `text must be 1-${TEXT_MAX} chars`;

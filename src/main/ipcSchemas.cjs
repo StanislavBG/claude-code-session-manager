@@ -19,6 +19,7 @@ const { PRD_EFFORT_LEVELS } = require('./lib/prd/prdFrontmatter.cjs');
 const { MISS_KINDS } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 // Aliased: this file already has a looser, exchanges-only SESSION_ID_RE (Exchanges section).
 const { SESSION_ID_RE: RESTORABLE_SESSION_ID_RE } = require('./lib/epic/restorableSessions.cjs');
+const { VOICE_ID_RE } = require('./lib/demo-video-kit/voiceLibrary.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -888,8 +889,8 @@ const macrosSave = MacroSaveSchema;
 const macrosDelete = MacroDeleteSchema;
 const macrosSetProject = MacroSetProjectSchema;
 const macrosRemoveFromProject = MacroRemoveFromProjectSchema;
-// A voice library id: voiceLibrary's ID_RE (also macroJobDispatch's VOICE_ID_RE).
-const voiceLibraryId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+// A voice library id: the one shared pattern, voiceLibrary.VOICE_ID_RE.
+const voiceLibraryId = z.string().regex(VOICE_ID_RE);
 // Background macro job (macroJobIpc.cjs): press a built-in macro or project Video tool as a scheduler PRD inside an existing Epic.
 const macrosDispatchJob = z.object({
   cwd: z.string().min(1).max(4096),
@@ -1152,7 +1153,7 @@ const projectVideosReviewDecide = z.object({
 }).strict();
 const projectVideosReviewRetry = z.object({ cwd: z.string().min(1).max(4096), entryId }).strict();
 // Voices screen (project-pages/voicesIpc.cjs): renderer IPC only — the sole writer of
-// voice approvals and deletions. voiceId follows voiceLibrary's ID_RE (voiceLibraryId, declared
+// voice approvals and deletions. voiceId follows voiceLibrary.VOICE_ID_RE (voiceLibraryId, declared
 // above macrosDispatchJob); text is TEXT_MAX (300).
 const voicesList = z.object({ cwd: z.string().min(1).max(4096) }).strict();
 const voicesPreview = z.object({

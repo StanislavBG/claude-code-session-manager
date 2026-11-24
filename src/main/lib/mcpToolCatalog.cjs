@@ -886,11 +886,17 @@ const MCP_TOOL_CATALOG = [
       + '(GET /admin/task): every task_list field plus prompt, output, stderrTail and envelope (each text capped '
       + 'at 1 MiB, with promptTruncated / outputTruncated flags).',
     summary: 'Read one Task in full, with its prompt and output.',
-    whenToUse: 'Use after task_list to see exactly what one Task was asked and what it answered, by its taskId.',
+    whenToUse: 'Use after task_list to see exactly what one Task was asked and what it answered, by its taskId. '
+      + 'To follow a Task that is still running, call it again with `after` set to the previous answer\'s '
+      + '`live.outputEnd` to get only the stdout lines captured since.',
     whenNotToUse: 'Do not use this to run, retry or import a Task — it is read-only. An unknown id answers '
       + '404 unknown_task; a `cwd` that is not an absolute project root is refused.',
     exampleArgs: { cwd: '/home/bilko/Projects/session-manager', id: 'task-abc123' },
-    notes: 'Returns { ok: true, task }.',
+    notes: 'Returns { ok: true, task }. A Task the app is still running answers status "running" with output = '
+      + 'the complete stdout lines captured so far from byte offset `after` (default 0, at most 1 MiB per page, '
+      + 'outputTruncated when more remain) and live = { slotAcquired, outputEnd, outputCapped }; any other Task '
+      + 'has live: null, and `after` (integer >= 0) skips that many bytes of its stored output, rounded forward '
+      + 'to a line start.',
   },
   {
     name: 'task_switch_set',

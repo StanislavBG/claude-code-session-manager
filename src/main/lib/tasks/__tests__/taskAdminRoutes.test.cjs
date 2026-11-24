@@ -408,10 +408,15 @@ describe('POST /admin/tasks stream:true', () => {
     expect(raw).not.toMatch(/stderrTail/);
   });
 
-  test('onStdoutLine is passed only in stream mode', async () => {
-    const s = setup();
-    await s.call(base());
-    expect(s.calls.runs[0].onStdoutLine).toBeUndefined();
+  test('onStdoutLine is passed in every mode (live registry); a non-stream run writes no NDJSON', async () => {
+    let seen;
+    const s = setup({
+      runTask: async (o) => { seen = o; o.onStdoutLine('{"n":1}'); o.onStdoutLine('text'); return okRun(); },
+    });
+    const res = await s.call(base());
+    expect(typeof seen.onStdoutLine).toBe('function');
+    expect(res.chunks).toEqual([]);
+    expect(res.body).toMatchObject({ ok: true, status: 'ok' });
   });
 
   test('slot_timeout after the start line ends with an error result line and a ledger end line', async () => {

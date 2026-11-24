@@ -43,7 +43,7 @@
  *   agent_list({ cwd? }) -> GET /admin/agents[?cwd=<encoded>]
  *
  *   task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? }) -> GET /admin/tasks?cwd=<encoded>&...
- *   task_get({ cwd, id }) -> GET /admin/task?cwd=<encoded>&id=<encoded>
+ *   task_get({ cwd, id, after? }) -> GET /admin/task?cwd=<encoded>&id=<encoded>[&after=<n>]
  *   task_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/tasks/switch
  *   scheduler_slots_get() -> GET /admin/scheduler/slots
  *   scheduler_slots_set({ cap, quote }) -> POST /admin/scheduler/slots
@@ -656,6 +656,7 @@ const TOOLS = [
       properties: {
         cwd: { type: 'string', description: 'Absolute path of the project root the Task belongs to' },
         id: { type: 'string', description: 'The taskId, from task_list' },
+        after: { type: 'integer', minimum: 0, description: "Optional: stdout byte offset to read from — pass a running Task's live.outputEnd to get only newer lines" },
       },
       required: ['cwd', 'id'],
     },
@@ -1483,6 +1484,10 @@ async function handleCallTool(request) {
       const qs = new URLSearchParams();
       if (args?.cwd) qs.set('cwd', args.cwd);
       qs.set('id', args.id);
+      if (args?.after !== undefined) {
+        if (!Number.isInteger(args.after) || args.after < 0) return errorResult('invalid argument: after must be an integer >= 0');
+        qs.set('after', String(args.after));
+      }
       const result = await adminRequest('GET', `/admin/task?${qs.toString()}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }

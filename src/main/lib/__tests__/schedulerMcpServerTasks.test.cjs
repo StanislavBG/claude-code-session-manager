@@ -99,7 +99,9 @@ test('task_list and task_get are listed with their required args and catalog des
   );
   const get = TOOLS.find((t) => t.name === 'task_get');
   expect(get.inputSchema.required).toEqual(['cwd', 'id']);
-  expect(Object.keys(get.inputSchema.properties).sort()).toEqual(['cwd', 'id']);
+  expect(Object.keys(get.inputSchema.properties).sort()).toEqual(['after', 'cwd', 'id']);
+  expect(get.inputSchema.properties.after).toMatchObject({ type: 'integer', minimum: 0 });
+  expect(MCP_TOOL_CATALOG.find((e) => e.name === 'task_get').whenToUse).toContain('`after`');
   for (const tool of [list, get]) {
     const entry = MCP_TOOL_CATALOG.find((e) => e.name === tool.name);
     expect(entry.group).toBe('tasks');
@@ -156,6 +158,20 @@ test('task_get GETs /admin/task?cwd=&id= URL-encoded and returns the route JSON'
   const url = new URL(requests[0].url, 'http://x');
   expect(url.pathname).toBe('/admin/task');
   expect(Object.fromEntries(url.searchParams)).toEqual({ cwd: CWD, id: 'a b&c' });
+});
+
+test('task_get forwards after as the after query parameter; omitted → absent; invalid → refused', async () => {
+  const { handleCallTool, requests } = await harness({ ok: true, task: {} });
+  await callTool(handleCallTool, 'task_get', { cwd: '/p', id: 't1', after: 1234 });
+  expect(Object.fromEntries(new URL(requests[0].url, 'http://x').searchParams)).toEqual({ cwd: '/p', id: 't1', after: '1234' });
+  await callTool(handleCallTool, 'task_get', { cwd: '/p', id: 't1', after: 0 });
+  expect(new URL(requests[1].url, 'http://x').searchParams.get('after')).toBe('0');
+  await callTool(handleCallTool, 'task_get', { cwd: '/p', id: 't1' });
+  expect(new URL(requests[2].url, 'http://x').searchParams.has('after')).toBe(false);
+  for (const after of [-1, 1.5, '12']) {
+    expect((await callTool(handleCallTool, 'task_get', { cwd: '/p', id: 't1', after })).isError).toBe(true);
+  }
+  expect(requests).toHaveLength(3);
 });
 
 test('task_get without an id is refused before any admin call', async () => {

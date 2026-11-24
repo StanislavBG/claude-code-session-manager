@@ -44,9 +44,17 @@
  *   GET /admin/tasks?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=
  *     → { ok, tasks, total, hasMore } from taskLedger.listTasks. Each task has
  *     exactly TASK_FIELDS (no prompt/output text). Works whatever the switch.
- *   GET /admin/task?cwd=&id=
+ *   GET /admin/task?cwd=&id=&after=
  *     → { ok, task } — TASK_FIELDS plus prompt, output, stderrTail, envelope
- *     (and the truncation flags) from the body file; 404 unknown_task.
+ *     (and the truncation flags) from the body file, plus live; 404 unknown_task.
+ *     A Task this process is still running (the in-process live registry,
+ *     filled from every POST run's stdout lines) answers status 'running',
+ *     output = the captured lines from byte offset `after` (default 0), up to
+ *     1 MiB cut at a line boundary, outputTruncated when more remain, and
+ *     live = { slotAcquired, outputEnd, outputCapped } (pass outputEnd as the
+ *     next `after`). Any other Task: live null; `after` slices the stored
+ *     output by bytes, rounded forward to a line boundary. GET /admin/tasks
+ *     also reports a live Task as 'running', never 'interrupted'.
  *   POST /admin/tasks/import  (body ≤ 8 MiB)
  *     { cwd, records: 1-100 } — direct `claude -p` calls a caller made while
  *     Session Manager was down. Re-syncs the held interactive slot from the
@@ -204,7 +212,84 @@ const listQuerySchema = z.object({
 const getQuerySchema = z.object({
   cwd: z.string().min(1),
   id: z.string().min(1).max(200),
+  // Byte offset into the Task's stdout to read from (a live Task's live.outputEnd).
+  after: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(0)).optional(),
 }).strict();
+
+/** One GET /admin/task page of a live Task's captured output. */
+const LIVE_PAGE_BYTES = 1024 * 1024;
+
+/**
+ * A live Task's captured stdout: lines plus cumulative end byte offsets
+ * (ends[i] = bytes of lines[0..i] each counted with its '\n').
+ * @typedef {{ cwd: string, lines: string[], ends: number[], bytes: number,
+ *   slotAcquired: boolean, outputCapped: boolean }} LiveTask
+ */
+
+/** @param {number} cap @param {string} cwd @returns {LiveTask & { append: (line: string) => void }} */
+function newLiveTask(cwd, cap) {
+  /** @type {any} */
+  const lt = { cwd, lines: [], ends: [], bytes: 0, slotAcquired: false, outputCapped: false };
+  lt.append = (/** @type {string} */ line) => {
+    if (lt.outputCapped) return;
+    const b = Buffer.byteLength(line + '\n', 'utf8');
+    if (lt.bytes + b > cap) { lt.outputCapped = true; return; }
+    lt.lines.push(line);
+    lt.bytes += b;
+    lt.ends.push(lt.bytes);
+    if (lt.bytes >= cap) lt.outputCapped = true;
+  };
+  return lt;
+}
+
+/**
+ * The page of a live Task's lines starting at byte offset `after`.
+ * Binary search for the first line whose START offset (ends[i-1], or 0) is
+ * >= after: O(log n) over n captured lines, then O(k) over the k lines taken
+ * (at most LIVE_PAGE_BYTES of them).
+ * @param {LiveTask} lt @param {number} after
+ * @returns {{ output: string, outputTruncated: boolean, outputEnd: number }}
+ */
+function livePage(lt, after) {
+  const { lines, ends } = lt;
+  let lo = 0;
+  let hi = lines.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    const start = mid === 0 ? 0 : ends[mid - 1];
+    if (start >= after) hi = mid; else lo = mid + 1;
+  }
+  const first = lo;
+  const pageStart = first === 0 ? 0 : ends[first - 1];
+  let i = first;
+  while (i < lines.length && ends[i] - pageStart <= LIVE_PAGE_BYTES) i += 1;
+  // A single line longer than a page is still delivered alone, so a reader always advances.
+  if (i === first && i < lines.length) i += 1;
+  const taken = lines.slice(first, i);
+  return {
+    output: taken.length ? taken.join('\n') + '\n' : '',
+    outputTruncated: i < lines.length,
+    outputEnd: i > first ? ends[i - 1] : after,
+  };
+}
+
+/**
+ * A finished Task's stored output from byte offset `after`, rounded forward to
+ * the next line boundary; an offset at or past the end gives ''. O(output bytes).
+ * @param {string} text @param {number} after
+ */
+function sliceFromByte(text, after) {
+  if (!after) return text;
+  const buf = Buffer.from(text, 'utf8');
+  if (after >= buf.length) return '';
+  let start = after;
+  if (buf[start - 1] !== 0x0a) {
+    const nl = buf.indexOf(0x0a, start);
+    if (nl === -1) return '';
+    start = nl + 1;
+  }
+  return buf.subarray(start).toString('utf8');
+}
 
 const callerSchema = z.object({
   pipeline: z.string().max(200).optional(),
@@ -344,6 +429,19 @@ function registerAdminRoute(adminHttp, deps = {}) {
 
   /** sessionId → taskId for every Task currently between its start line and its end line. */
   const busySessions = new Map();
+  /**
+   * taskId → its live output for every POST /admin/tasks run between its
+   * ledger start line and the end of the handler (removed in finally, after
+   * the end line). In-process only: never persisted.
+   * @type {Map<string, LiveTask & { append: (line: string) => void }>}
+   */
+  const liveTasks = new Map();
+  const liveCap = () => Number(taskRun().MAX_STDOUT_BYTES) || 8 * 1024 * 1024;
+  /** @param {string} id @param {string} root */
+  const liveFor = (id, root) => {
+    const lt = liveTasks.get(id);
+    return lt && path.resolve(lt.cwd) === path.resolve(root) ? lt : null;
+  };
 
   adminHttp.registerRoute('POST', '/admin/tasks', async (/** @type {any} */ req, /** @type {any} */ res) => {
     try { if (typeof res.setTimeout === 'function') res.setTimeout(0); } catch { /* */ }
@@ -485,6 +583,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
         persisted,
         prompt: input.prompt,
       });
+      const live = newLiveTask(cwd, liveCap());
+      liveTasks.set(taskId, live);
 
       if (input.stream === true && canWrite()) {
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' });
@@ -522,12 +622,14 @@ function registerAdminRoute(adminHttp, deps = {}) {
         return;
       }
 
+      live.slotAcquired = true;
+
       let droppedLines = 0;
-      /** @type {((line: string) => void) | undefined} */
-      let onStdoutLine;
-      if (streaming) {
-        writeLine({ type: 'sm_task_running', slotWaitMs });
-        onStdoutLine = (line) => {
+      if (streaming) writeLine({ type: 'sm_task_running', slotWaitMs });
+      // One callback for every run: the live registry, and in stream mode the NDJSON line too.
+      const onStdoutLine = (/** @type {string} */ line) => {
+        live.append(line);
+        if (streaming) {
           if (!canWrite()) return;
           if ((res.writableLength || 0) > MAX_STREAM_BUFFER_BYTES) { droppedLines += 1; return; }
           let isObject = false;
@@ -537,8 +639,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
           } catch { /* not JSON → wrapped */ }
           if (isObject) res.write(line + '\n');
           else writeLine({ type: 'sm_task_stdout', text: line });
-        };
-      }
+        }
+      };
 
       let run;
       try {
@@ -550,7 +652,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
           timeoutMs: input.timeoutSec * 1000,
           signal: ac.signal,
           onSpawn: (/** @type {number} */ pid) => { try { slots().stampPid(token, pid); } catch { /* */ } },
-          ...(onStdoutLine ? { onStdoutLine } : {}),
+          onStdoutLine,
         });
       } finally {
         try { slots().release(token); } catch { /* */ }
@@ -596,6 +698,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       reply(200, streaming ? { ...result, droppedLines } : result);
     } finally {
       if (sessionId && busySessions.get(sessionId) === taskId) busySessions.delete(sessionId);
+      liveTasks.delete(taskId);
       req.removeListener('close', onClose);
       res.removeListener('close', onClose);
     }
@@ -622,7 +725,9 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     try {
       const r = await ledger().listTasks(cwd, { ...filters, now: now() });
-      sendJson(res, 200, { ok: true, tasks: r.tasks.map(publicTask), total: r.total, hasMore: r.hasMore });
+      // A Task this app is still running reads 'running', never the ledger's timeout-derived 'interrupted'.
+      const tasks = r.tasks.map((/** @type {any} */ t) => publicTask(liveFor(t.taskId, cwd) ? { ...t, status: 'running' } : t));
+      sendJson(res, 200, { ok: true, tasks, total: r.total, hasMore: r.hasMore });
     } catch (e) {
       sendJson(res, 500, { ok: false, error: 'ledger_read_failed', details: e instanceof Error ? e.message : String(e) });
     }
@@ -651,16 +756,37 @@ function registerAdminRoute(adminHttp, deps = {}) {
       return;
     }
     const body = t.body || {};
+    const after = parsed.data.after || 0;
+    const live = liveFor(parsed.data.id, cwd);
+    if (live) {
+      const page = livePage(live, after);
+      sendJson(res, 200, {
+        ok: true,
+        task: {
+          ...publicTask({ ...t, status: 'running' }),
+          prompt: typeof body.prompt === 'string' ? body.prompt : null,
+          promptTruncated: body.promptTruncated === true,
+          output: page.output,
+          outputTruncated: page.outputTruncated,
+          stderrTail: null,
+          envelope: null,
+          live: { slotAcquired: live.slotAcquired, outputEnd: page.outputEnd, outputCapped: live.outputCapped },
+        },
+      });
+      return;
+    }
+    const storedOutput = typeof body.output === 'string' ? body.output : null;
     sendJson(res, 200, {
       ok: true,
       task: {
         ...publicTask(t),
         prompt: typeof body.prompt === 'string' ? body.prompt : null,
         promptTruncated: body.promptTruncated === true,
-        output: typeof body.output === 'string' ? body.output : null,
+        output: storedOutput !== null && after > 0 ? sliceFromByte(storedOutput, after) : storedOutput,
         outputTruncated: body.outputTruncated === true,
         stderrTail: typeof body.stderrTail === 'string' ? body.stderrTail : null,
         envelope: body.envelope === undefined ? null : body.envelope,
+        live: null,
       },
     });
   });

@@ -32,8 +32,14 @@ function fakeRes() {
   const res = new EventEmitter();
   res.status = null;
   res.body = null;
+  res.writableEnded = false;
+  res.destroyed = false;
+  res.writableLength = 0;
+  res.chunks = [];
+  res.setTimeout = () => {};
   res.writeHead = (s) => { res.status = s; };
-  res.end = (b) => { res.body = JSON.parse(b); };
+  res.write = (c) => { res.chunks.push(String(c)); return true; };
+  res.end = (b) => { if (b !== undefined) res.body = JSON.parse(b); res.writableEnded = true; };
   return res;
 }
 
@@ -42,6 +48,9 @@ let home;
 let switchOn;
 let handlers;
 let n;
+/** Test-controlled slot grant + run (POST /admin/tasks harness for the live registry). */
+let slotGate;
+let runImpl;
 
 beforeEach(() => {
   cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskread-'));
@@ -51,13 +60,55 @@ beforeEach(() => {
   switchOn = true;
   n = 0;
   handlers = new Map();
-  registerAdminRoute({ registerRoute: (m, u, h) => { handlers.set(`${m} ${u}`, h); } }, {
+  slotGate = Promise.resolve('tok');
+  runImpl = async () => okRun();
+  registerAdminRoute({ registerRoute: (m, u, h) => { handlers.set(`${m} ${u}`, h); } }, liveDeps({
     resolveProjectRoot: (c) => (c.startsWith(cwd) ? cwd : c),
     taskSwitch: { isTaskSwitchOn: () => switchOn },
     costOfUsage: (model, b) => ({ costUsd: (b.inputTokens + b.outputTokens) / 1000 }),
     randomUUID: () => `t-${++n}`,
-  });
+  }));
 });
+
+function okRun(over = {}) {
+  return {
+    status: 'ok', exitCode: 0, signal: null, stdout: 'final\n', stderrTail: '', envelope: null, usage: null,
+    modelUsage: null, cliCostUsd: null, numTurns: 1, sessionId: null, durationMs: 5, quota: null, ...over,
+  };
+}
+
+/** Deps that let POST /admin/tasks run without a spawn or real slots. */
+function liveDeps(over) {
+  return {
+    resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'claude-haiku-4-5', personaEffort: 'low' }),
+    sessionSlots: { waitForSlot: () => slotGate, stampPid: () => {}, release: () => {} },
+    runTask: (o) => runImpl(o),
+    buildTaskArgs: () => ['-p'],
+    buildTaskEnv: () => ({}),
+    ...over,
+  };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+/**
+ * Start a POST /admin/tasks run that stays live until finish() is called.
+ * `running` resolves with runTask's options once the run has started.
+ */
+function startLive(h = handlers, body = {}) {
+  const started = deferred();
+  const gate = deferred();
+  runImpl = async (o) => { started.resolve(o); await gate.promise; return okRun(); };
+  const res = fakeRes();
+  const done = h.get('POST /admin/tasks')(
+    fakeReq({ cwd, agent: 'dev-lead', missionId: 'm', prompt: 'p', ...body }), res,
+  );
+  return { running: started.promise, finish: () => { gate.resolve(); return done; }, res };
+}
 afterEach(() => {
   vi.restoreAllMocks();
   fs.rmSync(cwd, { recursive: true, force: true });
@@ -208,5 +259,172 @@ describe('POST /admin/tasks/import', () => {
     const [t] = (await get('/admin/tasks', { cwd })).body.tasks;
     expect(t).toMatchObject({ source: 'direct', sessionId: SID, persisted: true });
     expect([...(await ledger.listPersistedSessionIds(cwd))]).toEqual([SID]);
+  });
+});
+
+describe('GET /admin/task — live output of a Task this app is running', () => {
+  test('during the slot wait: running, slotAcquired false, output empty', async () => {
+    const slot = deferred();
+    slotGate = slot.promise;
+    const run = startLive();
+    await new Promise((r) => setTimeout(r, 20));
+    const res = await get('/admin/task', { cwd, id: 't-1' });
+    expect(res.status).toBe(200);
+    expect(res.body.task).toMatchObject({
+      taskId: 't-1', status: 'running', phase: 'running', output: '', outputTruncated: false,
+      live: { slotAcquired: false, outputEnd: 0, outputCapped: false },
+    });
+    slot.resolve('tok');
+    await run.running;
+    await run.finish();
+  });
+
+  test('complete lines with a cursor; after pages from it; finished Task reads live null', async () => {
+    const run = startLive();
+    const o = await run.running;
+    o.onStdoutLine('{"type":"system"}');
+    o.onStdoutLine('héllo');
+    let res = await get('/admin/task', { cwd, id: 't-1' });
+    const first = '{"type":"system"}\nhéllo\n';
+    expect(res.body.task).toMatchObject({
+      status: 'running', output: first, outputTruncated: false,
+      live: { slotAcquired: true, outputEnd: Buffer.byteLength(first), outputCapped: false },
+    });
+    const cursor = res.body.task.live.outputEnd;
+    res = await get('/admin/task', { cwd, id: 't-1', after: String(cursor) });
+    expect(res.body.task.output).toBe('');
+    expect(res.body.task.live.outputEnd).toBe(cursor);
+    o.onStdoutLine('third');
+    res = await get('/admin/task', { cwd, id: 't-1', after: String(cursor) });
+    expect(res.body.task).toMatchObject({ output: 'third\n', live: { outputEnd: cursor + 6 } });
+    // An offset inside a line rounds forward to the next line start.
+    res = await get('/admin/task', { cwd, id: 't-1', after: '3' });
+    expect(res.body.task.output).toBe('héllo\nthird\n');
+    // The list reads it as running too.
+    const list = await get('/admin/tasks', { cwd });
+    expect(list.body.tasks.find((t) => t.taskId === 't-1')).toMatchObject({ status: 'running', phase: 'running' });
+
+    await run.finish();
+    res = await get('/admin/task', { cwd, id: 't-1' });
+    expect(res.body.task).toMatchObject({ status: 'ok', output: 'final\n', live: null });
+  });
+
+  test('a page is at most 1 MiB cut at a line boundary; outputTruncated while more remain', async () => {
+    const run = startLive();
+    const o = await run.running;
+    const big = 'a'.repeat(600 * 1024);
+    o.onStdoutLine(big);
+    o.onStdoutLine(big);
+    o.onStdoutLine(big);
+    o.onStdoutLine('tail');
+    let res = await get('/admin/task', { cwd, id: 't-1' });
+    expect(res.body.task.output).toBe(`${big}\n`);
+    expect(res.body.task.outputTruncated).toBe(true);
+    expect(res.body.task.live.outputEnd).toBe(big.length + 1);
+    res = await get('/admin/task', { cwd, id: 't-1', after: String(res.body.task.live.outputEnd) });
+    expect(res.body.task.output).toBe(`${big}\n`);
+    expect(res.body.task.outputTruncated).toBe(true);
+    res = await get('/admin/task', { cwd, id: 't-1', after: String(res.body.task.live.outputEnd) });
+    expect(res.body.task.output).toBe(`${big}\ntail\n`);
+    expect(res.body.task).toMatchObject({ outputTruncated: false, live: { outputEnd: 3 * (big.length + 1) + 5 } });
+    await run.finish();
+  });
+
+  test('capture stops at MAX_STDOUT_BYTES and sets outputCapped', async () => {
+    const { MAX_STDOUT_BYTES } = require('../taskRun.cjs');
+    const run = startLive();
+    const o = await run.running;
+    const line = 'x'.repeat(1024 * 1024 - 1);
+    const count = MAX_STDOUT_BYTES / (1024 * 1024);
+    for (let i = 0; i < count + 2; i += 1) o.onStdoutLine(line);
+    const res = await get('/admin/task', { cwd, id: 't-1', after: String(MAX_STDOUT_BYTES - 1024 * 1024) });
+    expect(res.body.task).toMatchObject({
+      outputTruncated: false, live: { outputEnd: MAX_STDOUT_BYTES, outputCapped: true },
+    });
+    expect(res.body.task.output).toBe(`${line}\n`);
+    await run.finish();
+  });
+
+  test('a stream-mode run fills the same registry and still writes its NDJSON lines', async () => {
+    const run = startLive(handlers, { stream: true });
+    const o = await run.running;
+    o.onStdoutLine('plain');
+    const res = await get('/admin/task', { cwd, id: 't-1' });
+    expect(res.body.task.output).toBe('plain\n');
+    await run.finish();
+    const lines = run.res.chunks.join('').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.type)).toEqual(['sm_task_started', 'sm_task_running', 'sm_task_stdout', 'sm_task_result']);
+  });
+
+  test('a live Task under another project root is not read from the registry', async () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskread-other-'));
+    try {
+      const run = startLive();
+      const o = await run.running;
+      o.onStdoutLine('x');
+      const res = await get('/admin/task', { cwd: other, id: 't-1' });
+      expect(res.status).toBe(404);
+      await run.finish();
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  test('a registry Task reads running even when the ledger fold says interrupted', async () => {
+    const stubRow = { taskId: 't-1', status: 'interrupted', startedAt: '2026-11-20T10:00:00.000Z', body: { prompt: 'p' } };
+    const stub = {
+      appendTaskStart: async () => {},
+      appendTaskEnd: async () => {},
+      getTask: async () => ({ ...stubRow }),
+      listTasks: async () => ({ tasks: [{ ...stubRow }, { ...stubRow, taskId: 'gone' }], total: 2, hasMore: false }),
+    };
+    const h = new Map();
+    registerAdminRoute({ registerRoute: (m, u, fn) => { h.set(`${m} ${u}`, fn); } }, liveDeps({
+      resolveProjectRoot: (c) => c,
+      taskSwitch: { isTaskSwitchOn: () => true },
+      ledger: stub,
+      randomUUID: () => 't-1',
+    }));
+    const getH = async (route, params) => {
+      const res = fakeRes();
+      await h.get(`GET ${route}`)({}, res, new URLSearchParams(params));
+      return res;
+    };
+    const run = startLive(h);
+    await run.running;
+    const one = await getH('/admin/task', { cwd, id: 't-1' });
+    expect(one.body.task).toMatchObject({ status: 'running', phase: 'running' });
+    expect(one.body.task.live).not.toBeNull();
+    const list = await getH('/admin/tasks', { cwd });
+    expect(list.body.tasks.map((t) => [t.taskId, t.status])).toEqual([['t-1', 'running'], ['gone', 'interrupted']]);
+    await run.finish();
+    const after = await getH('/admin/task', { cwd, id: 't-1' });
+    expect(after.body.task).toMatchObject({ status: 'interrupted', live: null });
+  });
+});
+
+describe('GET /admin/task ?after= on a finished Task', () => {
+  test('slices the stored output by bytes, rounded forward to a line boundary; past the end gives ""', async () => {
+    await ledger.appendTaskStart(cwd, {
+      taskId: 'fin', startedAt: new Date().toISOString(), agent: 'a', missionId: 'm', model: 'claude-haiku-4-5',
+      effort: 'low', timeoutSec: 600, caller: {}, prompt: 'p',
+    });
+    await ledger.appendTaskEnd(cwd, { taskId: 'fin', status: 'ok', output: 'line1\nline2\nline3\n' });
+    const out = async (after) => (await get('/admin/task', { cwd, id: 'fin', ...(after === undefined ? {} : { after }) })).body.task;
+    expect(await out()).toMatchObject({ output: 'line1\nline2\nline3\n', live: null });
+    expect((await out('0')).output).toBe('line1\nline2\nline3\n');
+    expect((await out('6')).output).toBe('line2\nline3\n');
+    expect((await out('3')).output).toBe('line2\nline3\n');
+    expect((await out('17')).output).toBe('');
+    expect((await out('18')).output).toBe('');
+    expect((await out('1000')).output).toBe('');
+  });
+
+  test('a non-integer or negative after is 400 invalid_request', async () => {
+    for (const after of ['x', '-1', '1.5', '']) {
+      const res = await get('/admin/task', { cwd, id: 'sm-0', after });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('invalid_request');
+    }
   });
 });

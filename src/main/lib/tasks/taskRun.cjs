@@ -22,6 +22,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const { spawn: nodeSpawn } = require('node:child_process');
+const { StringDecoder } = require('node:string_decoder');
 const { resolveClaudeBin, claudeSpawnTarget } = require('../claude/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('../claude/claudeCliCaps.cjs');
 const { detectRateLimitInText } = require('../claude/rateLimitDetect.cjs');
@@ -190,6 +191,12 @@ function parseResetsAt(stdout) {
   return out;
 }
 
+/** ISO resetsAt of one rejected rate_limit_event object, else null (same conversion as parseResetsAt). */
+function resetsAtOf(ev) {
+  const r = Number(ev && ev.rate_limit_info && ev.rate_limit_info.resetsAt);
+  return Number.isFinite(r) && r > 0 ? new Date(r < 1e12 ? r * 1000 : r).toISOString() : null;
+}
+
 /** Text form of an envelope for callers that want `--output-format text` stdout. */
 function textStdoutFor(envelope) {
   const r = envelope && typeof envelope.result === 'string' ? envelope.result : '';
@@ -199,10 +206,21 @@ function textStdoutFor(envelope) {
 /**
  * Spawn claude, feed the prompt on stdin, capture. Resolves — never throws.
  *
+ * onStdoutLine(line): called once per complete stdout line, in order ('\n' and a
+ * trailing '\r' removed), and once at close for a final unterminated line. It sees
+ * every line, including those after the MAX_STDOUT_BYTES capture cap; a single
+ * line longer than the cap is delivered truncated to MAX_STDOUT_BYTES. A throwing
+ * callback never changes the run's result.
+ *
+ * Result gains stdoutCapped: true when the cap cut stdout. When capped, the last
+ * `type: 'result'` line seen line by line becomes the envelope, and a rejected
+ * rate_limit_event seen after the cap still sets quota.rateLimited / resetsAt.
+ *
  * @param {{ args: string[], env: Record<string, string|undefined>, prompt: string, cwd: string,
- *   timeoutMs?: number, signal?: AbortSignal, onSpawn?: (pid: number) => void }} o
+ *   timeoutMs?: number, signal?: AbortSignal, onSpawn?: (pid: number) => void,
+ *   onStdoutLine?: (line: string) => void }} o
  */
-async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn, deps = {} } = /** @type {any} */ ({})) {
+async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, onSpawn, onStdoutLine, deps = {} } = /** @type {any} */ ({})) {
   const startedAt = Date.now();
   const base = () => ({
     status: /** @type {string} */ ('spawn_failed'),
@@ -218,6 +236,7 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
     sessionId: null,
     durationMs: 0,
     quota: { rateLimited: false, resetsAt: null },
+    stdoutCapped: false,
   });
   try { await ensureCliCapsProbed(); } catch { /* probe is best effort */ }
   if (signal && signal.aborted) return { ...base(), status: 'caller_gone', durationMs: Date.now() - startedAt };
@@ -239,6 +258,64 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
     let stdout = '';
     let stdoutBytes = 0;
     let stderrTail = '';
+    let stdoutCapped = false;
+
+    // Line splitter over EVERY stdout byte (not just the captured ones).
+    // O(bytes) total: each chunk is decoded once and scanned once for '\n';
+    // only one partial line is held, never more than MAX_STDOUT_BYTES of it.
+    const decoder = new StringDecoder('utf8');
+    let partial = '';
+    let partialBytes = 0;
+    let droppingLine = false; // the current line already overflowed and was delivered truncated
+    /** @type {any} */
+    let lastResult = null;
+    let sawRejectedRateLimit = false;
+    /** @type {string|null} */
+    let lastRejectedResetsAt = null;
+    const deliver = (line) => {
+      if (typeof onStdoutLine === 'function') {
+        try { onStdoutLine(line); } catch { /* caller hook must not break the run */ }
+      }
+      if (line[0] !== '{' || !(line.includes('"result"') || line.includes('rate_limit_event'))) return;
+      let ev;
+      try { ev = JSON.parse(line); } catch { return; }
+      if (!ev || typeof ev !== 'object') return;
+      if (ev.type === 'result') lastResult = ev;
+      else if (ev.type === 'rate_limit_event' && ev.rate_limit_info && ev.rate_limit_info.status === 'rejected') {
+        sawRejectedRateLimit = true;
+        const r = resetsAtOf(ev);
+        if (r) lastRejectedResetsAt = r;
+      }
+    };
+    const feedLines = (str) => {
+      let start = 0;
+      for (;;) {
+        const nl = str.indexOf('\n', start);
+        const piece = nl === -1 ? str.slice(start) : str.slice(start, nl);
+        if (!droppingLine && piece) {
+          partial += piece;
+          partialBytes += Buffer.byteLength(piece, 'utf8');
+          if (partialBytes > MAX_STDOUT_BYTES) {
+            deliver(Buffer.from(partial, 'utf8').subarray(0, MAX_STDOUT_BYTES).toString('utf8'));
+            partial = '';
+            partialBytes = 0;
+            droppingLine = true;
+          }
+        }
+        if (nl === -1) return;
+        if (!droppingLine) deliver(partial.endsWith('\r') ? partial.slice(0, -1) : partial);
+        partial = '';
+        partialBytes = 0;
+        droppingLine = false;
+        start = nl + 1;
+      }
+    };
+    const flushLines = () => {
+      feedLines(decoder.end());
+      if (!droppingLine && partial) deliver(partial.endsWith('\r') ? partial.slice(0, -1) : partial);
+      partial = '';
+      partialBytes = 0;
+    };
 
     const finish = (r) => {
       if (settled) return;
@@ -291,9 +368,11 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
     }
 
     child.stdout.on('data', (d) => {
-      if (stdoutBytes >= MAX_STDOUT_BYTES) return;
-      const room = MAX_STDOUT_BYTES - stdoutBytes;
       const buf = Buffer.isBuffer(d) ? d : Buffer.from(String(d));
+      try { feedLines(decoder.write(buf)); } catch { /* line tracking must not break capture */ }
+      if (stdoutBytes >= MAX_STDOUT_BYTES) { if (buf.length) stdoutCapped = true; return; }
+      const room = MAX_STDOUT_BYTES - stdoutBytes;
+      if (buf.length > room) stdoutCapped = true;
       const take = buf.length > room ? buf.subarray(0, room) : buf;
       stdout += take.toString('utf8');
       stdoutBytes += take.length;
@@ -314,9 +393,13 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
     }
 
     child.on('close', (code, sig) => {
-      const envelope = parseEnvelope(stdout);
+      try { flushLines(); } catch { /* line tracking must not break the result */ }
+      // Under the cap the captured stdout is authoritative (unchanged behavior);
+      // once capped, the line-tracked state is what survived past the cut.
+      const envelope = stdoutCapped ? (lastResult || parseEnvelope(stdout)) : (parseEnvelope(stdout) || lastResult);
       const rateLimited = detectRateLimitInText(stdout)
-        || (envelope ? detectRateLimitInText(JSON.stringify(envelope)) : false);
+        || (envelope ? detectRateLimitInText(JSON.stringify(envelope)) : false)
+        || (stdoutCapped && sawRejectedRateLimit);
       let status;
       if (killedFor) status = killedFor;
       else if (rateLimited) status = 'rate_limited';
@@ -335,7 +418,8 @@ async function runTask({ args, env, prompt, cwd, timeoutMs = 600_000, signal, on
         numTurns: envelope && typeof envelope.num_turns === 'number' ? envelope.num_turns : null,
         sessionId: (envelope && typeof envelope.session_id === 'string' && envelope.session_id) || null,
         durationMs: 0,
-        quota: { rateLimited, resetsAt: rateLimited ? parseResetsAt(stdout) : null },
+        quota: { rateLimited, resetsAt: rateLimited ? (parseResetsAt(stdout) || lastRejectedResetsAt) : null },
+        stdoutCapped,
       });
     });
   });

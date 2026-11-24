@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { writeClaudeStub, reapClaudeStubs } = require('../../../../../tests/helpers/claudeStub.cjs');
-const { buildTaskArgs, buildTaskEnv, withToolRiskGuard, runTask, textStdoutFor } = require('../taskRun.cjs');
+const { buildTaskArgs, buildTaskEnv, withToolRiskGuard, runTask, textStdoutFor, MAX_STDOUT_BYTES } = require('../taskRun.cjs');
 const { writeToolRiskGuardSettingsFile } = require('../../epic/guardSpawnSettings.cjs');
 
 const PROJ = path.resolve(os.tmpdir(), 'sm-taskrun-proj');
@@ -240,6 +240,35 @@ if (mode === 'ratelimit') {
   process.exit(1);
 }
 if (mode === 'hang') { setInterval(() => {}, 1000); }
+if (mode === 'split') {
+  const fs = require('node:fs');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  (async () => {
+    const all = Buffer.from('alpha\\r\\nbé€ta\\n{"type":"result","is_error":false,"result":"split"}\\ntail-no-newline', 'utf8');
+    // cut inside 'é' (2 bytes) and inside '€' (3 bytes)
+    const cuts = [3, 9, 12, all.length];
+    let at = 0;
+    for (const c of cuts) { fs.writeSync(1, all.subarray(at, c)); at = c; await sleep(30); }
+    process.exit(0);
+  })();
+}
+if (mode === 'capped') {
+  const fs = require('node:fs');
+  const filler = JSON.stringify({ type: 'assistant', text: 'x'.repeat(1000) }) + '\\n';
+  const chunk = filler.repeat(1024);
+  let written = 0;
+  while (written <= 9 * 1024 * 1024) { fs.writeSync(1, chunk); written += chunk.length; }
+  fs.writeSync(1, JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1900000000 } }) + '\\n');
+  fs.writeSync(1, JSON.stringify({ type: 'result', is_error: false, result: 'late', ...env }) + '\\n');
+  process.exit(0);
+}
+if (mode === 'longline') {
+  const fs = require('node:fs');
+  const piece = 'a'.repeat(1024 * 1024);
+  for (let i = 0; i < 9; i++) fs.writeSync(1, piece);
+  fs.writeSync(1, '\\nlast\\n');
+  process.exit(0);
+}
 if (mode === 'argv') {
   process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: JSON.stringify({ argv: process.argv.slice(2), headless: process.env.SM_TOOL_RISK_HEADLESS || null }), ...env }));
   process.exit(0);
@@ -332,6 +361,57 @@ if (mode === 'argv') {
     expect(r.quota.rateLimited).toBe(true);
     expect(r.quota.resetsAt).toBe(new Date(1900000000 * 1000).toISOString());
   });
+
+  test('onStdoutLine: one call per line, in order, CR stripped, multi-byte chars intact, final unterminated line flushed', async () => {
+    const lines = [];
+    const r = await runTask({ deps, args: ['-p'], env: envFor('split'), prompt: 'x', cwd: dir, timeoutMs: 30_000, onStdoutLine: (l) => lines.push(l) });
+    expect(lines).toEqual(['alpha', 'bé€ta', '{"type":"result","is_error":false,"result":"split"}', 'tail-no-newline']);
+    expect(r.status).toBe('ok');
+    expect(r.stdoutCapped).toBe(false);
+  });
+
+  test('a throwing onStdoutLine never changes the run result', async () => {
+    const plain = await runTask({ deps, args: ['-p'], env: envFor('stream'), prompt: 'x', cwd: dir, timeoutMs: 30_000 });
+    let calls = 0;
+    const r = await runTask({ deps, args: ['-p'], env: envFor('stream'), prompt: 'x', cwd: dir, timeoutMs: 30_000, onStdoutLine: () => { calls++; throw new Error('hook boom'); } });
+    expect(calls).toBe(2);
+    const strip = (x) => ({ ...x, durationMs: 0 });
+    expect(strip(r)).toEqual(strip(plain));
+    expect(r.status).toBe('ok');
+    expect(r.envelope.result).toBe('streamed');
+  });
+
+  test('stdout over the cap: later lines still delivered, result + rate limit survive the cap', async () => {
+    let count = 0;
+    let last = null;
+    const r = await runTask({ deps, args: ['-p'], env: envFor('capped'), prompt: 'x', cwd: dir, timeoutMs: 60_000, onStdoutLine: (l) => { count++; last = l; } });
+    expect(r.stdoutCapped).toBe(true);
+    expect(Buffer.byteLength(r.stdout)).toBeLessThanOrEqual(MAX_STDOUT_BYTES);
+    expect(count).toBeGreaterThan(9 * 1024);
+    expect(JSON.parse(last).result).toBe('late');
+    expect(r.envelope.result).toBe('late');
+    expect(r.usage).toEqual({ input_tokens: 3 });
+    expect(r.modelUsage).toEqual({ m: {} });
+    expect(r.cliCostUsd).toBe(0.01);
+    expect(r.numTurns).toBe(2);
+    expect(r.sessionId).toBe('sess-9');
+    expect(r.quota.rateLimited).toBe(true);
+    expect(r.quota.resetsAt).toBe(new Date(1900000000 * 1000).toISOString());
+  }, 60_000);
+
+  test('stdout over the cap without onStdoutLine: envelope still from the late result line', async () => {
+    const r = await runTask({ deps, args: ['-p'], env: envFor('capped'), prompt: 'x', cwd: dir, timeoutMs: 60_000 });
+    expect(r.stdoutCapped).toBe(true);
+    expect(r.envelope.result).toBe('late');
+    expect(r.sessionId).toBe('sess-9');
+  }, 60_000);
+
+  test('a single line longer than the cap is delivered truncated to MAX_STDOUT_BYTES', async () => {
+    const lines = [];
+    const r = await runTask({ deps, args: ['-p'], env: envFor('longline'), prompt: 'x', cwd: dir, timeoutMs: 60_000, onStdoutLine: (l) => lines.push(l.length) });
+    expect(lines).toEqual([MAX_STDOUT_BYTES, 4]);
+    expect(r.stdoutCapped).toBe(true);
+  }, 60_000);
 
   test('spawn failure never throws', async () => {
     process.env.SM_CLAUDE_BIN = path.join(dir, 'does-not-exist');
